@@ -193,6 +193,76 @@ Rigor may infer types that RBS cannot spell directly. These types must always er
 
 Rigor extensions must not leak into generated RBS syntax.
 
+## Imported Built-In Types
+
+Rigor imports type ideas from PHPStan and TypeScript only when they have a clear Ruby meaning. It should not preserve foreign syntax for compatibility by default.
+
+Naming rules:
+
+- Reserved built-in refinement names use `kebab-case`, such as `non-empty-string`, `positive-int`, and `non-empty-array[T]`.
+- Refinement names describe a refined Ruby value domain and are parsed as Rigor-reserved type names, not as Ruby constants or RBS aliases.
+- The `-` character is intentional: it is not valid in Ruby constants or RBS alias names, so names such as `non-empty-string` are visually and syntactically marked as Rigor built-ins.
+- Rigor should not add lower_snake aliases for refinement names, such as `non_empty_string`, because those names remain available for ordinary RBS type aliases.
+- Parameterized type functions and type-level operations use lower_snake names with square bracket arguments, such as `key_of[T]`.
+- Type functions compute, project, or transform another type or literal set rather than naming a refined value domain directly.
+- Type functions avoid `-` because `-` is also the difference operator in Rigor's type syntax; `int_mask[1, 2, 4]` is less ambiguous than `int-mask[1, 2, 4]`.
+- Compatibility aliases should not be accepted unless they solve a concrete migration or readability problem.
+- RBS names remain canonical when they already express the concept. For example, `bot` is the bottom type; `never`, `noreturn`, `never-return`, `never-returns`, and `no-return` should not be added as aliases initially.
+- Integer ranges should use Rigor's range notation, such as `Integer[1..10]`; PHPStan-style `int<1, 10>` should not be added as an alias initially.
+
+Initial scalar refinements:
+
+| Rigor type | Meaning | RBS erasure |
+| --- | --- | --- |
+| `non-empty-string` | `String` except `""` | `String` |
+| `literal-string` | String known to come from source literals and literal-only composition | `String` |
+| `numeric-string` | String accepted by Rigor's Ruby numeric-string predicate | `String` |
+| `decimal-int-string` | String accepted by Rigor's Ruby decimal-integer-string predicate | `String` |
+| `lowercase-string` | String equal to its lowercase normalization | `String` |
+| `uppercase-string` | String equal to its uppercase normalization | `String` |
+| `non-empty-lowercase-string` | `non-empty-string & lowercase-string` | `String` |
+| `non-empty-uppercase-string` | `non-empty-string & uppercase-string` | `String` |
+| `non-empty-literal-string` | `non-empty-string & literal-string` | `String` |
+| `positive-int` | `Integer` greater than `0` | `Integer` |
+| `negative-int` | `Integer` less than `0` | `Integer` |
+| `non-positive-int` | `Integer` less than or equal to `0` | `Integer` |
+| `non-negative-int` | `Integer` greater than or equal to `0` | `Integer` |
+| `non-zero-int` | `Integer` except `0` | `Integer` |
+
+The canonical lowercase string name is `lowercase-string`; `lower-string` should not be accepted as a separate alias unless a concrete usability problem appears.
+
+Initial collection and shape refinements:
+
+| Rigor type | Meaning | RBS erasure |
+| --- | --- | --- |
+| `non-empty-array[T]` | `Array[T]` with at least one element | `Array[T]` |
+| hash shape with optional keys | Hash with known required and optional keys | RBS record when exact, otherwise `Hash[K, V]` |
+| tuple refinements | Fixed or bounded array positions | RBS tuple when exact, otherwise `Array[T]` |
+| object shape | Object with known public methods or singleton capabilities | Named interface when available, otherwise `top` or nominal base |
+
+Rigor should not initially import PHPStan's `list<T>` and `non-empty-list<T>` as separate surface types. Ruby `Array[T]` already has list-like indexing semantics; `non-empty-array[T]` covers the useful refinement without adding another spelling.
+
+Initial type functions and operators inspired by PHPStan or TypeScript:
+
+| Rigor form | Meaning |
+| --- | --- |
+| `key_of[T]` | Known keys of a record, hash shape, tuple, or shape-like type |
+| `value_of[T]` | Union of known values of a record, hash shape, tuple, or shape-like type |
+| `T[K]` | Indexed access into tuple, record, object shape, or generic container metadata |
+| `int_mask[1, 2, 4]` | Integers representable by bitwise-or over the listed flags, including `0` |
+| `int_mask_of[T]` | Bit mask derived from a finite integer literal union or constant-derived set |
+
+`key_of[T]` is the canonical spelling. Rigor should not accept both PHPStan-style `key-of<T>` and TypeScript-style `keyof T` unless there is a concrete benefit that outweighs the extra notation.
+
+Deferred or rejected imports:
+
+- `class-string`, `interface-string`, `trait-string`, and `enum-string` are deferred. Ruby can pass class and module objects directly, and RBS already has `singleton(C)` for class objects.
+- A PHPStan `new`-like type operation remains a future candidate, but it should be designed around Ruby class objects rather than class-name strings. For example, a future `instance_type[T]` could project the instance type created by a class object when factory APIs need that precision.
+- `non-falsy-string` and `truthy-string` are not useful in Ruby because every `String` value is truthy.
+- `non-decimal-int-string` should not be a named built-in initially; use `String - decimal-int-string`.
+- PHP truthiness-oriented types such as `empty`, `empty-scalar`, `non-empty-scalar`, and `non-empty-mixed` should not be imported directly. Rigor should model Ruby truthiness with `false | nil` flow facts and explicit collection/string refinements.
+- `Exclude`, `Extract`, and `NonNullable` should not be imported as surface aliases initially. Rigor can express them as `T - U`, `T & U`, and `T - nil`.
+
 ## Type Operators
 
 The final surface syntax for Rigor-only type operators is not settled. This section records the intended semantics so implementation and documentation can converge later.
@@ -205,9 +275,9 @@ Candidate operators:
 | `T - U` | Difference: values in `T` excluding values in `U` |
 | `T & U` | Intersection, already RBS-compatible |
 | `T | U` | Union, already RBS-compatible |
-| `keyof T` | Known keys or method names of a shape-like type |
+| `key_of[T]` | Known keys of a shape-like type |
 | `T[K]` | Indexed access into tuple, record, object shape, or generic container metadata |
-| `T extends U ? X : Y` | Conditional type, if needed for advanced library modeling |
+| `if T <: U then X else Y` | Conditional type, if needed for advanced library modeling |
 
 Rigor should treat `~T` as the preferred display notation for negative facts produced by control-flow analysis. It should not be interpreted as "all possible Ruby objects except T" unless the current domain is `top`. In flow analysis, it usually means "the previous type after excluding T".
 

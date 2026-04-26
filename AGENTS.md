@@ -54,22 +54,37 @@ nix --extra-experimental-features 'nix-command flakes' develop --command bundle 
 - `sig`: public RBS signatures for Rigor itself
 - `spec`: RSpec test suite
 - `docs/adr`: architecture decision records
-- `docs/rbs`: upstream RBS submodule for specification and implementation reference
-- `references/python-typing`: upstream Python typing specifications and related PEPs (submodule)
+- `references/`: long-lived **external** specification and upstream submodules (not Rigor product code; see below)
 
-## Purpose of the docs/rbs Submodule
+## External reference trees and ripgrep
 
-`docs/rbs` is a Git submodule that points to `https://github.com/ruby/rbs.git`. It exists as reference material so Rigor can stay compatible with the RBS ecosystem. Use it to inspect RBS syntax, standard library signatures, test cases, and implementation behavior.
+The `references/` directory groups Git submodules used only as read-only, written specifications or upstream codebases. They can be very large, and matching them from the repository root is often noise when you mean to search Rigor’s own `lib/`, `spec/`, and `docs/adr`.
 
-This submodule is not Rigor runtime code. In normal implementation work, do not require/import files from `docs/rbs`, and do not copy upstream implementation into Rigor product code. Read the relevant specification or behavior there, then implement the smallest appropriate Rigor-side behavior.
+A root [`.ignore`](.ignore) file lists `/references/` so that [`ripgrep` (`rg`)](https://github.com/BurntSushi/ripgrep) does not traverse those checkouts in the default case. (Git is unaffected: submodule paths stay tracked the same as before.)
+
+To search a reference tree on purpose, disable ignore files for that run and **scope the path** to the tree you need, for example:
+
+```sh
+rg PATTERN --no-ignore references/
+rg PATTERN --no-ignore references/rbs
+rg PATTERN --no-ignore references/python-typing
+```
+
+`--no-ignore` turns off all ignore files for that `rg` invocation, so you should pass a `references/…` path to avoid pulling in other normally ignored areas (for example `vendor/`) in the same run. The short flag `-u` (unrestricted) has a similar effect; the same scoping advice applies if you use it to search `references/`.
+
+## Purpose of the references/rbs Submodule
+
+`references/rbs` is a Git submodule that points to `https://github.com/ruby/rbs.git`. It exists as reference material so Rigor can stay compatible with the RBS ecosystem. Use it to inspect RBS syntax, standard library signatures, test cases, and implementation behavior.
+
+This submodule is not Rigor runtime code. In normal implementation work, do not require or import files from `references/rbs`, and do not copy upstream implementation into Rigor product code. Read the relevant specification or behavior there, then implement the smallest appropriate Rigor-side behavior.
 
 If the submodule is empty after cloning:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command git submodule update --init --recursive docs/rbs
+nix --extra-experimental-features 'nix-command flakes' develop --command git submodule update --init --recursive references/rbs
 ```
 
-Update the submodule only when intentionally changing the referenced RBS version. During ordinary Rigor work, treat `docs/rbs` as read-only reference material.
+Update the submodule only when intentionally changing the referenced RBS version. During ordinary Rigor work, treat `references/rbs` as read-only reference material.
 
 ## Purpose of the references/python-typing Submodule
 

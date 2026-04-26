@@ -2,7 +2,7 @@ AllCops:
   TargetRubyVersion: 4.0
   NewCops: enable
   Exclude:
-    - "docs/rbs/**/*"
+    - "references/rbs/**/*"
     - "vendor/**/*"
 
 plugins:

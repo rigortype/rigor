@@ -1,0 +1,8 @@
+/.bundle/
+/.direnv/
+/.rigor/cache/
+/coverage/
+/pkg/
+/tmp/
+/vendor/bundle/
+/result

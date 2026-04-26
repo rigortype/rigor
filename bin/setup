@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+ROOT = File.expand_path("..", __dir__)
+Dir.chdir(ROOT)
+
+system("bundle", "config", "set", "path", "vendor/bundle") || abort("failed to configure Bundler path")
+system("bundle", "install") || abort("failed to install gems")

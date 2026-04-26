@@ -1,0 +1,31 @@
+AllCops:
+  TargetRubyVersion: 4.0
+  NewCops: enable
+  Exclude:
+    - "docs/rbs/**/*"
+    - "vendor/**/*"
+
+plugins:
+  - rubocop-rake
+  - rubocop-rspec
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/Documentation:
+  Enabled: false
+
+Metrics/AbcSize:
+  Max: 25
+
+Metrics/MethodLength:
+  Max: 25
+
+Gemspec/DevelopmentDependencies:
+  Enabled: false
+
+RSpec/ExampleLength:
+  Max: 15
+
+RSpec/MultipleExpectations:
+  Enabled: false

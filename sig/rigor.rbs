@@ -1,0 +1,49 @@
+module Rigor
+  VERSION: String
+
+  class Configuration
+    DEFAULT_PATH: String
+
+    attr_reader target_ruby: String
+    attr_reader paths: Array[String]
+    attr_reader plugins: Array[String]
+    attr_reader cache_path: String
+
+    def self.load: (?String path) -> Configuration
+    def initialize: (?Hash[String, untyped] data) -> void
+    def to_h: () -> Hash[String, untyped]
+  end
+
+  class CLI
+    def self.start: (?Array[String] argv, ?out: untyped, ?err: untyped) -> Integer
+  end
+
+  module Analysis
+    class Diagnostic
+      attr_reader path: String
+      attr_reader line: Integer
+      attr_reader column: Integer
+      attr_reader message: String
+      attr_reader severity: Symbol
+
+      def initialize: (path: String, line: Integer, column: Integer, message: String, ?severity: Symbol) -> void
+      def error?: () -> bool
+      def to_h: () -> Hash[String, untyped]
+      def to_s: () -> String
+    end
+
+    class Result
+      attr_reader diagnostics: Array[Diagnostic]
+
+      def initialize: (?diagnostics: Array[Diagnostic]) -> void
+      def success?: () -> bool
+      def error_count: () -> Integer
+      def to_h: () -> Hash[String, untyped]
+    end
+
+    class Runner
+      def initialize: (configuration: Configuration) -> void
+      def run: (?Array[String] paths) -> Result
+    end
+  end
+end

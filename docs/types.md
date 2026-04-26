@@ -81,7 +81,7 @@ Supported narrowing sources should include:
 - `respond_to?` checks when the method name is statically known.
 - Pattern matching and case analysis.
 - Predicate methods registered by Rigor plugins.
-- Assertions and guards described in `RBS::Extended` comments.
+- Assertions and guards described in `RBS::Extended` annotations.
 
 Negative facts are first-class. Rigor should preserve facts such as "not nil", "not false", "not this literal", and "does not have this nominal class" when they improve later diagnostics.
 
@@ -211,7 +211,7 @@ Candidate operators:
 
 Rigor should treat `~T` as the preferred display notation for negative facts produced by control-flow analysis. It should not be interpreted as "all possible Ruby objects except T" unless the current domain is `top`. In flow analysis, it usually means "the previous type after excluding T".
 
-Rigor should treat `T - U` as the preferred explicit authoring form for difference types in `RBS::Extended` comments. It is often easier to read in library signatures than a bare complement, especially for scalar refinements such as `String - ""`.
+Rigor should treat `T - U` as the preferred explicit authoring form for difference types in `RBS::Extended` annotations. It is often easier to read in library signatures than a bare complement, especially for scalar refinements such as `String - ""`.
 
 Internally, Rigor may normalize difference to intersection with a negative type:
 
@@ -236,35 +236,93 @@ String - "foo"      # Any String except the literal "foo"
 
 When the domain is finite, difference and complement should normalize precisely. When the domain is large or unknown, they should become refinements rather than expanding to enormous unions.
 
-## RBS::Extended Comments
+## RBS::Extended Annotations
 
-Rigor may read Rigor-specific metadata from comments in `*.rbs` files under the provisional name `RBS::Extended`.
+Rigor may read Rigor-specific metadata from RBS annotations in `*.rbs` files under the provisional name `RBS::Extended`.
 
-These comments let users and plugin authors describe types that exceed standard RBS without changing Ruby application code and without breaking ordinary RBS parsers. Standard RBS tools should be able to ignore these comments.
+RBS already supports `%a{...}` annotations on declarations, members, and method overloads. `RBS::Extended` should use that mechanism as the canonical attachment point because annotations are parsed into the RBS AST and remain associated with the signature node they describe.
+
+These annotations let users and plugin authors describe types that exceed standard RBS without changing Ruby application code and without breaking ordinary RBS parsers. Standard RBS tools should be able to preserve or ignore these annotations.
 
 Example:
 
 ```rbs
-# @rigor return: String where non_empty
+%a{rigor:return String where non_empty}
 def read_name: () -> String
 
-# @rigor param value: String - ""
+%a{rigor:param value: String - ""}
 def normalize: (String value) -> String
 
-# @rigor assert: value == "foo" => value: "foo"
-# @rigor assert: value != "foo" => value: ~"foo"
+%a{rigor:assert-if-true value is "foo"}
+%a{rigor:assert-if-false value is ~"foo"}
 def check: (untyped value) -> bool
 ```
 
 Rules:
 
 - The ordinary RBS signature remains the compatibility contract.
-- `RBS::Extended` comments refine or explain that contract for Rigor.
+- `RBS::Extended` annotations refine or explain that contract for Rigor.
+- Annotation keys use a `rigor:` namespace, for example `rigor:return` or `rigor:predicate-if-true`.
+- The annotation key comes first; the remaining text is a Rigor-specific payload.
 - Prefer `T - U` for explicit user-authored difference types.
 - Use `~T` primarily for negative facts and compact diagnostic display.
-- If a comment conflicts with the RBS signature, Rigor must report a diagnostic.
-- Exported plain RBS must drop or erase Rigor-only comments unless the user asks to preserve them.
-- The comment grammar is provisional and should remain small until implementation experience proves it out.
+- If an annotation conflicts with the RBS signature, Rigor must report a diagnostic.
+- Exported plain RBS must drop or erase Rigor-only annotations unless the user asks to preserve them.
+- The annotation grammar is provisional and should remain small until implementation experience proves it out.
+
+### Type Predicates and Assertions
+
+Rigor models TypeScript-style type guards and PHPStan-style assertions as flow effects attached to RBS method signatures.
+
+Predicate examples:
+
+```rbs
+%a{rigor:predicate-if-true value is String}
+%a{rigor:predicate-if-false value is ~String}
+def string?: (untyped value) -> bool
+
+%a{rigor:predicate-if-true self is LoggedInUser}
+def logged_in?: () -> bool
+```
+
+Assertion examples:
+
+```rbs
+%a{rigor:assert value is String}
+def assert_string!: (untyped value) -> void
+
+%a{rigor:assert-if-true value is String}
+def valid_string?: (untyped value) -> bool
+```
+
+Meanings:
+
+- `rigor:predicate-if-true target is T` refines `target` to `T` on the true branch of a call used as a condition.
+- `rigor:predicate-if-false target is T` refines `target` to `T` on the false branch.
+- `rigor:assert target is T` refines `target` after the method returns normally.
+- `rigor:assert-if-true target is T` refines `target` when the method returns a truthy value.
+- `rigor:assert-if-false target is T` refines `target` when the method returns `false` or `nil`.
+
+The initial target grammar should be intentionally small:
+
+```text
+target ::= parameter-name | self
+```
+
+`parameter-name` refers to an RBS method parameter name, not an arbitrary Ruby Symbol. RBS parameter names follow `_var-name_ ::= /[a-z]\w*/`, so predicate targets should follow that existing identifier style. The hyphenated words in directives such as `predicate-if-true` live inside the annotation payload and are parsed by Rigor, not as Ruby Symbols.
+
+If a predicate needs to refer to an argument, the RBS method type must name that argument:
+
+```rbs
+# Good: `value` can be referenced.
+%a{rigor:predicate-if-true value is String}
+def string?: (untyped value) -> bool
+
+# Not enough information for a predicate target.
+def string?: (untyped) -> bool
+```
+
+Future versions may extend targets to instance variables, record keys, shape paths, and block parameters, but those should use explicit path syntax rather than overloading the annotation directive name.
 
 ## Normalization
 
@@ -307,7 +365,7 @@ Rigor should prefer precise diagnostics over silent widening.
 - Calling a method on `top` without proof is a diagnostic.
 - Calling a method on `untyped` is allowed but should be traceable to an unchecked boundary.
 - A branch narrowed by a negative fact should display that fact when it is useful, for example `String - ""` or `~"foo"`.
-- Invalid or contradictory `RBS::Extended` comments are diagnostics.
+- Invalid or contradictory `RBS::Extended` annotations are diagnostics.
 - Losing precision during RBS export should be reportable when users request explanation or strict export mode.
 
 ## Implementation Expectations

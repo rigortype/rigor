@@ -18,7 +18,7 @@ The initial design requirement is:
 - Rigor may infer richer types than RBS.
 - Every Rigor-inferred type can be conservatively erased to valid RBS.
 - Special RBS types such as `untyped`, `top`, `bot`, and `void` must be handled with type-theoretic clarity rather than as ad hoc aliases.
-- Types that exceed RBS may be recorded in `*.rbs` comments under a provisional `RBS::Extended` convention.
+- Types that exceed RBS may be recorded in RBS annotations under a provisional `RBS::Extended` convention.
 
 ## Goals
 
@@ -75,20 +75,20 @@ Drawbacks:
 - Users may need explanations when exported RBS is less precise than Rigor's internal type.
 - The syntax for Rigor-only type operators must be designed carefully.
 
-### Option C: Use RBS Plus `RBS::Extended` Comments Only
+### Option C: Use RBS Plus `RBS::Extended` Annotations Only
 
-Rigor could avoid an independent internal type model and represent every extension as comments in RBS files.
+Rigor could avoid an independent internal type model and represent every extension as RBS annotations.
 
 Benefits:
 
-- Keeps all explicit type metadata near RBS.
+- Keeps all explicit type metadata attached to RBS declarations, members, or overloads.
 - Remains invisible to standard RBS parsers.
 - Provides a migration path for advanced library signatures.
 
 Drawbacks:
 
-- Comments are not enough for inferred facts produced by CFA.
-- It risks turning comments into an unstructured second language.
+- Annotations are not enough for inferred facts produced by CFA.
+- It risks turning annotations into an unstructured second language.
 - It does not solve internal normalization, subtyping, or erasure.
 
 ### Option D: Create a Separate Rigor Signature Language
@@ -109,11 +109,11 @@ Drawbacks:
 
 ## Working Decision
 
-Adopt Option B, with a constrained part of Option C: Rigor's type language is a strict superset of RBS with conservative RBS erasure, and `RBS::Extended` comments may describe Rigor-only facts in `*.rbs` files.
+Adopt Option B, with a constrained part of Option C: Rigor's type language is a strict superset of RBS with conservative RBS erasure, and `RBS::Extended` annotations may describe Rigor-only facts in `*.rbs` files.
 
 RBS remains the boundary format. Rigor's internal type representation may include refinements that RBS cannot express, but those refinements must always have a valid RBS erasure.
 
-`RBS::Extended` comments are metadata layered on top of ordinary RBS. They are not a replacement for internal inference and should not require annotations in Ruby application code.
+`RBS::Extended` annotations are metadata layered on top of ordinary RBS. They are not a replacement for internal inference and should not require annotations in Ruby application code.
 
 ## Key Design Points
 
@@ -156,14 +156,25 @@ The candidate `~T` operator means the complement of `T` within the current known
 The working notation policy is:
 
 - Use `~T` as the concise display form for CFA-produced negative facts.
-- Use `T - U` as the preferred explicit authoring form for difference types in `RBS::Extended` comments.
+- Use `T - U` as the preferred explicit authoring form for difference types in `RBS::Extended` annotations.
 - Allow the implementation to normalize `T - U` to `T & ~U`.
 
-### `RBS::Extended` Is a Comment-Based Metadata Layer
+### `RBS::Extended` Is an Annotation-Based Metadata Layer
 
-Advanced types may be attached to ordinary RBS declarations using comments in `*.rbs` files. This preserves compatibility with standard RBS tooling while giving Rigor a place to read refinements such as `String - ""`, `~"foo"`, or `String where non_empty`.
+Advanced types may be attached to ordinary RBS declarations, members, and overloads using RBS `%a{...}` annotations. This preserves compatibility with standard RBS tooling while giving Rigor a place to read refinements such as `String - ""`, `~"foo"`, or `String where non_empty`.
+
+The canonical form should use a `rigor:` annotation key followed by a payload, for example:
+
+```rbs
+%a{rigor:predicate-if-true value is String}
+def string?: (untyped value) -> bool
+```
+
+Predicate targets should initially be limited to RBS parameter names and `self`. RBS parameter names use the `_var-name_ ::= /[a-z]\w*/` grammar, so Rigor does not need to encode arbitrary Ruby Symbol names in directive identifiers. Hyphenated directive names such as `predicate-if-true` are safe because they are parsed from the annotation payload by Rigor.
 
 If `RBS::Extended` metadata conflicts with the ordinary RBS signature, Rigor should report a diagnostic.
+
+Type guard and assertion effects should be modeled as flow effects, not as ordinary return types. This keeps signatures RBS-compatible while still allowing TypeScript-style narrowing and PHPStan-style assertion behavior.
 
 ### Erasure Must Be Conservative
 
@@ -179,7 +190,7 @@ Positive:
 - Generated RBS can be consumed by existing RBS-aware tools.
 - `untyped`, `top`, `bot`, and `void` retain distinct meanings internally.
 - PHPStan- and TypeScript-style flow analysis becomes part of the core design.
-- Advanced library facts can be added in `.rbs` comments without modifying Ruby application code.
+- Advanced library facts can be added in `.rbs` annotations without modifying Ruby application code.
 - Future plugins can contribute precise facts without requiring new user-facing syntax.
 
 Negative:
@@ -187,16 +198,17 @@ Negative:
 - The type engine needs more than a direct wrapper around RBS ASTs.
 - RBS export requires loss-of-precision handling.
 - Documentation must clearly explain why Rigor may infer more than it can export.
-- `RBS::Extended` needs a careful grammar and conflict rules.
+- `RBS::Extended` needs a careful annotation payload grammar and conflict rules.
 - Negative and complement types require domain-aware normalization.
 
 ## Open Questions
 
 - Which Rigor-only refinements should be implemented first after the MVP union/no-method diagnostic?
-- How much of the `~T` and `T - U` notation should be accepted in user-authored `RBS::Extended` comments in the first implementation?
+- How much of the `~T` and `T - U` notation should be accepted in user-authored `RBS::Extended` annotations in the first implementation?
+- How quickly should predicate targets grow beyond `parameter-name` and `self`?
 - How should Rigor display dynamic-origin narrowed types such as `untyped & ~"foo"`?
 - How aggressively should literal unions widen for performance and diagnostic readability?
-- Should generated RBS include comments that explain erased refinements?
+- Should generated RBS preserve `RBS::Extended` annotations that explain erased refinements when users request an annotated export?
 - Should `untyped` operations produce optional informational diagnostics in strict mode?
 - What plugin API is needed for framework-specific object shapes and dynamic method resolution?
 

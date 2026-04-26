@@ -1,3 +1,6 @@
 [submodule "docs/rbs"]
 	path = docs/rbs
 	url = https://github.com/ruby/rbs.git
+[submodule "references/python-typing"]
+	path = references/python-typing
+	url = git@github.com:python/typing.git

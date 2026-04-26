@@ -55,6 +55,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command bundle 
 - `spec`: RSpec test suite
 - `docs/adr`: architecture decision records
 - `docs/rbs`: upstream RBS submodule for specification and implementation reference
+- `references/python-typing`: upstream Python typing specifications and related PEPs (submodule)
 
 ## Purpose of the docs/rbs Submodule
 
@@ -69,6 +70,20 @@ nix --extra-experimental-features 'nix-command flakes' develop --command git sub
 ```
 
 Update the submodule only when intentionally changing the referenced RBS version. During ordinary Rigor work, treat `docs/rbs` as read-only reference material.
+
+## Purpose of the references/python-typing Submodule
+
+`references/python-typing` is a Git submodule that points to `https://github.com/python/typing.git`. It holds the **explicit** Python type system as documented specifications and PEPs (for example the `typing` standard library and typing-spec prose). Rigor is Ruby- and RBS-oriented, but this tree is useful reference material when comparing or borrowing **written-down** typing concepts (gradual typing, generics, protocols, variance) that are spelled out in normative or semi-normative documents, without treating Python syntax as a compatibility target.
+
+This submodule is not Rigor runtime code. In normal implementation work, do not require or import files from `references/python-typing`, and do not copy CPython- or stubs-specific logic into the analyzer. Read the relevant specification, then port only the ideas that fit Ruby semantics and the RBS ecosystem.
+
+If the submodule is empty after cloning:
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' develop --command git submodule update --init --recursive references/python-typing
+```
+
+Update the submodule only when intentionally changing the referenced typing-spec revision. During ordinary Rigor work, treat `references/python-typing` as read-only reference material.
 
 ## Implementation Guidelines
 

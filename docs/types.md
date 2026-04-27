@@ -628,13 +628,24 @@ This gives the notations a division of responsibility:
 - `T - U` is explicit and useful for user-authored extended signatures, for example `String - ""`.
 - `T & ~U` is a convenient normalized form for implementation and reasoning.
 
+Diagnostics should use a domain-aware display contract:
+
+- If a finite domain normalizes to a small union, display the positive union. For example, `"foo" | "bar" - "foo"` displays as `"bar"`.
+- If the positive domain is known and still broad, display `D - U`, such as `String - "foo"` or `Integer - 0`, rather than a bare complement.
+- If multiple exclusions are retained, display a flattened difference such as `String - ("" | "foo")` instead of nested differences.
+- If the current domain is `top`, prefer `top - U` or explanatory prose over bare `~U` unless the diagnostic is explicitly about a branch-local complement.
+- Bare `~U` may be used only when the surrounding diagnostic already states the domain, for example "within `String`, value is `~\"foo\"`".
+- If dynamic-origin provenance matters, display it separately from the domain expression when possible, for example `String - "foo"` with a dynamic-origin note, or `Dynamic[String - "foo"]` in technical traces.
+- If the retained-exclusion budget is exceeded, display the positive domain plus an omission note rather than an unstable long chain, such as `Integer with 12 excluded literals omitted`.
+
 Examples:
 
 ```text
 String - "foo"      # Any String except the literal "foo"
 1 | 2 | 3 - 2       # Equivalent to 1 | 3 after normalization
-~nil               # Non-nil value within the current domain
-~"foo"             # Not the literal "foo" within the current domain
+String - ("" | "x") # Any String except the listed literals
+top - nil           # Any Ruby value except nil
+~"foo"              # Only when the surrounding diagnostic states the domain
 ```
 
 When the domain is finite, difference and complement should normalize precisely. When the domain is large or unknown, they should become refinements rather than expanding to enormous unions. Implementations should keep a configurable budget for retained negative literals or exclusions. Over budget, diagnostics should prefer the positive domain plus an indication that some exclusions were omitted over rendering a long unstable type.

@@ -528,6 +528,18 @@ This gives Rigor a deterministic default: preserve exact records when possible; 
 - Nested differences (`(String - "") - "foo"`) and intersections with negative members (`A & ~B & ~C`) need a normalized form so equivalent diagnostics render identically across code paths.
 - The rule for when `~T` should be rendered as `T - U` and vice versa is implicit. A single canonical rendering keeps user mental models stable.
 
+Working response:
+
+- Internal normalization may continue to use `T & ~U`, but diagnostics should render with the current positive domain visible.
+- Small finite domains display as their normalized positive union. For example, `"foo" | "bar" - "foo"` displays as `"bar"`.
+- Broad known domains display as `D - U`, such as `String - "foo"` or `Integer - 0`.
+- Multiple retained exclusions display as a flattened difference, such as `String - ("" | "foo")`, rather than nested differences or repeated intersections.
+- Bare `~U` is allowed only for compact branch-local display when the surrounding diagnostic already states the domain. Otherwise Rigor should prefer `D - U`, `top - U`, or prose that names the domain.
+- Dynamic-origin provenance should not replace the domain display. A diagnostic may show `String - "foo"` with a dynamic-origin note, while technical traces may show `Dynamic[String - "foo"]`.
+- When the exclusion budget is exceeded, Rigor displays the positive domain plus an omission note instead of a long unstable chain.
+
+This resolves the display contract. The remaining open question is the concrete budget and wording for omitted exclusions.
+
 ### Visibility, Accessor Inference, and Method-Shape Capture Are Under-Specified
 
 The shape model relies on visibility and reader/writer roles, but Ruby's surface is more flexible than the current text:

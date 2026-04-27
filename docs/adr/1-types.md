@@ -470,6 +470,18 @@ This keeps useful literal narrowing while avoiding a TypeScript-style assumption
 - Closures can mutate locals from another scope (`-> { x = 1 }.call`). The fact-stability rule for closure-captured locals must mention this case explicitly.
 - "Frozen, literal, freshly allocated, or otherwise proven-stable" is a category, not a list. A practical first cut needs concrete proof obligations.
 
+Working response:
+
+- Facts should be targeted, not global. Rigor distinguishes local binding facts, captured-local facts, object-content facts, global-storage facts, dynamic-origin facts, and relational facts.
+- Unknown calls may invalidate heap facts for escaped targets, such as object shapes, hash entries, instance variables, constants, globals, and class variables. They should not invalidate every local binding fact in scope.
+- Local binding facts survive ordinary method calls until assignment to that local. A call can mutate the object referenced by `x`, but it cannot rebind `x` unless `x` is captured by a closure that writes it.
+- Closure writes are explicit effects. If a block, proc, or lambda writes an outer local, Rigor records a captured-local write. Immediate known invocation applies that write at the call edge; escaping or deferred closures make writable captured-local facts unstable after the escape point.
+- Higher-order calls need call-timing effects rather than a blanket "yield invalidates everything" rule. Initial categories are no block invocation, immediate non-escaping invocation with known count, immediate non-escaping invocation with unknown count, deferred or escaping block storage, and unknown block behavior.
+- Core methods such as `tap`, `then`, `yield_self`, and `each_with_object` should eventually have summaries for block timing, return behavior, and receiver or argument mutation. Before those summaries exist, Rigor may weaken object-content facts touched by the call but should preserve unrelated local binding facts.
+- The first proof obligations for stable facts are concrete: a non-reassigned local not writable by an escaping closure; immutable singleton or immediate values; values proven frozen for the relevant operation; fresh non-escaping allocations; and RBS, `RBS::Extended`, or plugin effects that declare read-only, pure, or targeted mutation behavior.
+
+This makes invalidation precise enough for idiomatic blocks without pretending arbitrary Ruby code is pure. Remaining design work is the exact effect payload syntax and the standard-library summary set.
+
 ### Capability-Role Inference Has No Tractability Story
 
 Inferring "the minimum structural requirement of a method body" is a centerpiece of the design, but the cost and matching strategy are open:
@@ -621,7 +633,8 @@ Negative:
 - Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
 - Which generic variance cases require special handling for `Dynamic[T]` slots in the first implementation?
 - Should `Float` equality narrowing ever be opt-in, and what proof should be required to exclude `NaN` and signed-zero pitfalls?
-- What purity model determines which method calls preserve object-shape, hash-key, and instance-variable facts across higher-order calls?
+- What exact effect payload should encode block call timing, closure escape, receiver or argument mutation, and read-only/pure behavior?
+- Which Ruby core and stdlib methods should receive built-in call-timing and mutation summaries first?
 - What is the canonical algorithm for erasing arbitrary hash shapes to `Hash[K, V]`, including the choice between literal-union and nominal keys?
 - Which existing suppression or ignore-marker conventions, if any, should Rigor support beyond ordinary RBS/rbs-inline/Steep type annotations?
 - What is the minimum useful narrowing surface in heavily `Dynamic[top]` code before plugins ship?

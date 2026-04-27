@@ -179,14 +179,45 @@ This rule keeps TypeScript- and PHPStan-style equality narrowing useful without 
 
 ### Fact Stability and Mutation
 
-Flow facts are valid only while the analyzer can trust the path they describe. Rigor should invalidate or weaken facts when Ruby behavior can mutate or replace the observed value.
+Flow facts are valid only while the analyzer can trust the path they describe. Rigor should invalidate or weaken facts when Ruby behavior can mutate, replace, or escape the observed target.
 
-The first implementation can be conservative:
+Facts should carry a target and a stability reason. The first implementation should distinguish at least:
 
-- Local variable facts are stable until assignment to that local.
-- Instance-variable, class-variable, global, constant, hash-entry, and object-shape facts may be invalidated by writes, unknown method calls, yielded blocks, and plugin-declared side effects.
-- A frozen, literal, freshly allocated, or otherwise proven-stable value may keep stronger facts for longer.
-- A plugin may return an explicit mutation or invalidation effect rather than mutating `Scope` directly.
+- local binding facts, such as "local `x` currently refers to a non-nil value";
+- captured local facts, where a block, proc, or lambda may write the local from another lexical scope;
+- object-content facts, such as hash keys, instance variables, singleton methods, and object-shape members;
+- global storage facts, such as constants, class variables, and globals;
+- dynamic-origin and relational facts, which may survive local calls but still need target invalidation.
+
+Local binding facts are stable across ordinary method calls until assignment to that local. A call can mutate the object referenced by the local, but it cannot rebind the local variable itself unless the local is captured by a closure that writes it. Therefore:
+
+- `x.is_a?(String)` remains a local binding fact after an unknown call that cannot write `x`;
+- `x[:key]` or `x.foo` shape facts may be weakened by a call that can mutate `x` or escape it;
+- facts about instance variables, class variables, globals, and constants are heap or global-storage facts and are invalidated more aggressively.
+
+Closure-captured locals need explicit handling. When a block, proc, or lambda writes an outer local, Rigor should record a captured-local write effect. If the closure is invoked immediately and its body is available, Rigor applies the write at the call edge. If the closure escapes or may be invoked later, facts about locals it can write become unstable after the escape point and before any unknown invocation of that closure.
+
+Block and higher-order method calls should be modeled through call-timing and mutation effects instead of a blanket "yield invalidates everything" rule. Useful first categories are:
+
+- no block invocation;
+- immediate non-escaping invocation, once or a known bounded number of times;
+- immediate non-escaping invocation, unknown number of times;
+- deferred or escaping block storage;
+- unknown block behavior.
+
+Known Ruby methods such as `tap`, `then`, `yield_self`, and `each_with_object` should eventually receive summaries for block timing, return behavior, and receiver or argument mutation. Without such a summary, Rigor may be conservative for object-content facts, but it should still preserve unrelated local binding facts.
+
+The first implementation can use these proof obligations for stronger fact retention:
+
+- a local binding has not been assigned and is not writable by an escaping closure;
+- the value is an immutable singleton or immediate value, such as `nil`, `true`, `false`, a symbol, or an integer;
+- the value is proven frozen for the relevant operation;
+- the value is freshly allocated, has not escaped, and has not been passed to a call that may mutate or store it;
+- a RBS, `RBS::Extended`, or plugin effect declares that the call is read-only, pure for the relevant target, or mutates only specific receivers or arguments.
+
+Unknown calls are still conservative for heap facts. They may invalidate object-shape, hash-entry, instance-variable, constant-object, and global-storage facts for any target that may have escaped to the call. They should not invalidate every local binding fact in the current scope.
+
+A plugin may return explicit mutation, escape, call-timing, purity, or invalidation effects rather than mutating `Scope` directly.
 
 This is especially important for structural object shapes and hash shapes. A guard can prove that a key or method is present at one program point, but ordinary Ruby mutation can remove or redefine it later unless Rigor has a stability fact.
 
@@ -691,6 +722,8 @@ The type specification depends on the extension API exposing facts, not direct s
 - falsey-edge facts;
 - post-return assertion facts;
 - exceptional or non-returning effects;
+- block call-timing effects;
+- escape effects for receivers, arguments, blocks, and captured locals;
 - receiver and argument mutation effects;
 - fact invalidation effects;
 - dynamic reflection members introduced by the call.
@@ -775,7 +808,8 @@ The core type engine should expose:
 
 - immutable `Scope` snapshots;
 - edge-aware condition analysis for truthy, falsey, normal, exceptional, and unreachable exits;
-- a fact store that can represent value facts, negative facts, relational facts, member-existence facts, shape facts, dynamic-origin provenance, and stability facts;
+- a fact store that can represent value facts, negative facts, relational facts, member-existence facts, shape facts, dynamic-origin provenance, stability facts, escape facts, and captured-local write facts;
+- an effect model for receiver and argument mutation, block call timing, closure escape, purity, and fact invalidation;
 - capability-role inference that can extract the minimum structural requirement of a method body and match it against named interfaces when available;
 - normalization for unions, intersections, complements, differences, and impossible refinements;
 - semantic type queries for extensions so plugin authors ask capability questions rather than inspecting concrete type classes;

@@ -144,6 +144,22 @@ The `references/python-typing` tree is useful reference material, but Python typ
 | Callable precision | Python specifies overload matching, positional and keyword parameter kinds, `ParamSpec`, `TypeVarTuple`, and `Unpack[TypedDict]`. | RBS already has method and proc signatures, overloads, optional and keyword parameters, and block types. Rigor should borrow checking principles and keyword-shape ideas, not Python syntax. |
 | Mutability and finality | Python has `Final`, `ClassVar`, `ReadOnly`, and `@final` qualifiers. | Rigor should model these, if needed, as symbol, member, or shape-write facts rather than ordinary value types. |
 
+### Structural Interfaces Are the Protocol Bridge
+
+Python `Protocol` is valuable because it gives static duck typing a named contract: an object is acceptable when it has the required members with compatible types, even without inheriting from the protocol.
+
+Rigor should get the same benefit through RBS interfaces and inferred object shapes, not by importing Python syntax. An RBS interface such as `_Closable` can be treated as a named structural contract. A nominal class, singleton object, module object, or anonymous object shape can satisfy that interface if Rigor can prove that it has every required member with compatible method or attribute behavior.
+
+This is a pseudo-protocol model:
+
+- RBS interface declarations provide stable names for structural contracts.
+- Rigor object shapes provide anonymous, inference-produced structural types.
+- Assignability to an interface may be proven structurally; no Ruby inheritance, `include`, or runtime marker is required.
+- Explicit RBS declarations or future `RBS::Extended` metadata may ask Rigor to verify conformance early, but structural assignability should not require explicit opt-in.
+- Runtime checks such as `respond_to?` can provide member-existence facts, but they should not prove full signature compatibility by themselves.
+
+Python's rule that mutable protocol attributes are invariant maps cleanly to Ruby method capabilities. A read-only attribute is a reader method and can be covariant in its result. A write-only attribute is a writer method and is checked contravariantly in its accepted value. A read-write accessor combines both constraints and is effectively invariant.
+
 ### Control-Flow Narrowing Is Central
 
 Rigor should run appropriate CFA and data-flow analysis, similar in spirit to PHPStan, TypeScript, and Python type checkers.
@@ -230,6 +246,7 @@ This ADR keeps explicit notes for candidate ideas that were discussed but not ac
 | Adding Python `Never` and `NoReturn` as aliases for `bot` | Rejected for now | They map conceptually to `bot`, but Rigor should keep RBS spelling canonical at the boundary. |
 | Importing Python `Any` and `object` spellings | Rejected | RBS already provides `untyped` for the dynamic type and `top` for the greatest static type. |
 | Importing Python `Protocol`, `TypedDict`, `Annotated`, `TypeGuard`, `TypeIs`, `Final`, or `ClassVar` syntax directly | Rejected | Their useful ideas map to RBS interfaces, records, `%a{...}` annotations, flow effects, and separate symbol or member facts. |
+| Requiring explicit protocol inheritance or registration for structural interface assignability | Rejected for now | Ruby duck typing works best when structural compatibility can be inferred from members. Explicit declarations may still be useful as verification requests. |
 | Accepting both `key-of<T>` and `keyof T` | Rejected for now | Rigor should use one canonical type-function spelling, currently `key_of[T]`, unless compatibility aliases show concrete value. |
 | Importing PHPStan-style integer ranges such as `int<1, 10>` | Rejected for now | Rigor should use its own range notation, such as `Integer[1..10]`, to stay closer to Ruby and RBS naming. |
 | Adding lower_snake aliases for built-in refinement names, such as `non_empty_string` | Rejected for now | Hyphenated refinement names are intentionally reserved for Rigor built-ins. Lower_snake names should remain available for ordinary RBS type aliases. |
@@ -270,6 +287,8 @@ Negative:
 - How aggressively should literal unions widen for performance and diagnostic readability?
 - Which Python `TypedDict`-inspired shape facts, such as read-only keys and open or closed extra-key policies, should ship first?
 - Should Rigor model finality and read-only member facts separately from value types in the first signature metadata grammar?
+- What minimal method-shape representation is needed for structural interface assignability in the first implementation?
+- Should Rigor add an explicit `RBS::Extended` conformance annotation, or rely on ordinary assignments and calls to trigger interface conformance checks?
 - Should generated RBS preserve `RBS::Extended` annotations that explain erased refinements when users request an annotated export?
 - Should `untyped` operations produce optional informational diagnostics in strict mode?
 - What plugin API is needed for framework-specific object shapes and dynamic method resolution?

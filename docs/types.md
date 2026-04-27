@@ -117,6 +117,58 @@ Rigor supports every type form documented by RBS syntax.
 
 Rigor preserves RBS contextual limitations for export. For example, `self`, `instance`, `class`, and `void` must only be emitted where RBS accepts them. If an internal type contains one of these markers in an invalid RBS context, the erasure pass must rewrite it to the nearest valid conservative type and report the loss of precision.
 
+## Structural Interfaces and Object Shapes
+
+Rigor models Python `Protocol`-style structural subtyping through RBS interfaces and internal object shapes.
+
+An RBS interface type, such as `_Closable`, is a named structural contract. An internal object shape is an anonymous structural type inferred from local definitions, singleton methods, module members, plugin facts, or control-flow guards. A nominal type or object shape is assignable to an interface when Rigor can prove that it provides all required members with compatible types.
+
+This gives Rigor a pseudo-protocol model without adding Python syntax:
+
+```rbs
+interface _Closable
+  def close: () -> void
+end
+```
+
+```ruby
+class Resource
+  def close
+    @handle.close
+  end
+end
+
+def close_all(items)
+  items.each(&:close)
+end
+# If Rigor knows `items` is `Array[_Closable]`, `Resource` can satisfy `_Closable`
+# structurally. No Ruby inheritance or runtime marker is required.
+```
+
+Structural assignability rules:
+
+- A concrete nominal type is assignable to an interface if its instance method shape satisfies every interface member.
+- An object shape is assignable to an interface if the shape contains every required member with an assignable signature.
+- One interface is assignable to another when the source interface provides all members required by the target interface.
+- Interface unions behave like ordinary unions.
+- Interface intersections require all members from all intersected interfaces.
+- Callable object shapes may satisfy proc-like or interface-like call contracts through a known `call` method when the signature is compatible.
+- Singleton class and module object shapes may satisfy interfaces through singleton methods and module-level members, but this should be implemented after instance-side structural checks.
+
+Member compatibility follows method type compatibility, not just name existence. Overloaded members must be compared through the ordinary overload assignability rules once those exist.
+
+Reader and writer capabilities matter:
+
+- A read-only member is represented by a reader method and is covariant in its return type.
+- A write-only member is represented by a writer method and is contravariant in its accepted value type.
+- A read-write member, such as an `attr_accessor` pair, combines reader and writer requirements and is effectively invariant in the value type.
+
+This mirrors Python's protocol-attribute lesson without importing Python attributes directly. In Ruby, attributes are methods, so Rigor should reason about the reader and writer methods that actually exist.
+
+`respond_to?` checks can refine an object to an existence-only shape, for example "has method `close`". That fact is useful for diagnostics and guarded sends, but it does not prove full signature compatibility with an interface unless Rigor also knows the method type.
+
+RBS erasure should prefer a matching named interface when one exists. Anonymous object shapes that do not match a known interface erase to a conservative nominal base or `top`.
+
 ## Special Types
 
 ### `top`

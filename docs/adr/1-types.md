@@ -311,6 +311,24 @@ end
 
 **Imported RBS slots.** Existing RBS can place `void` in generic or callback slots, such as `Enumerator[Elem, void]` or a block parameter whose value is intentionally ignored. Rigor preserves these signatures for compatibility. If substitution makes such a slot appear in a value-producing position, the result is handled as a `void` result marker rather than as an ordinary value-set type.
 
+**Interactive inference cutoffs.** Some methods are not worth inferring from implementation alone. Recursive code with unconstrained operators is the clearest case:
+
+```ruby
+def tarai(x, y, z)
+  if x <= y
+    y
+  else
+    tarai(
+      tarai(x - 1, y, z),
+      tarai(y - 1, z, x),
+      tarai(z - 1, x, y)
+    )
+  end
+end
+```
+
+Many Ruby classes implement `<=` and `-`, so without a parameter or return contract this method does not have a unique useful inferred domain. The recursive calls also make return inference fan out. Rigor should stop early when operator ambiguity and recursion exceed a budget. In non-interactive mode it reports an incomplete-inference diagnostic and suggests adding a boundary contract. In interactive CLI mode it may ask the user for a compatible type source, such as `#: Integer` for a return-only cutoff, a full `# @rbs` method type, or an external `.rbs` declaration. The chosen contract is trusted by callers and checked against the implementation like any other accepted signature source.
+
 ### RBS Context Rules Are Preserved
 
 `self`, `instance`, `class`, and `void` have context restrictions in RBS. Rigor may carry richer contextual information internally, but exported RBS must obey those restrictions.
@@ -503,6 +521,25 @@ Working response:
 
 This makes capability roles a bounded summary-and-index feature rather than a global structural search. Remaining design work is choosing the cache keys, budgets, and first standard role bundle.
 
+### Hard Recursive Inference Needs a User Boundary Workflow
+
+Inference-first analysis still needs an escape hatch for code where Ruby's dynamic dispatch makes the search space unhelpfully large:
+
+- Operators such as `<=` and `-` are ordinary methods implemented by many classes. Without a known receiver domain, enumerating every compatible class is the wrong problem.
+- Recursive methods can cause return inference to repeatedly re-enter the same body before a useful type boundary exists.
+- If Rigor widens silently, users lose trust in the result; if it keeps searching, CLI latency becomes unpredictable.
+
+Working response:
+
+- Rigor should have explicit inference budgets for recursion depth, call-graph expansion, overload candidates, operator ambiguity, union size, and structural requirement growth.
+- When a budget is exceeded, Rigor produces an incomplete-inference result with a reason. It should not fabricate a precise type.
+- Accepted signature contracts are inference cutoffs. Inline `#: Integer`, full `# @rbs` method types, generated stubs, and external `.rbs` declarations all let callers stop at the boundary while the implementation remains checked against the contract.
+- Non-interactive CLI output should explain the cutoff and suggest compatible boundary locations.
+- Interactive CLI mode may ask the user to provide a simple boundary type and, with confirmation, insert or generate the chosen type source. Return-only cutoffs should prefer short rbs-inline forms when they are enough; parameter-heavy operator ambiguity may require a full method signature or `.rbs` entry.
+- This workflow is compatible with the "no Rigor-specific inline type syntax" goal because it uses existing RBS, rbs-inline, and Steep-compatible annotations rather than a new Rigor DSL.
+
+The remaining design work is the exact prompt UX, the persistence target selection, and how much candidate type information Rigor should propose automatically.
+
 ### `RBS::Extended` Annotation Grammar Lacks Versioning and Conflict Semantics
 
 Two aspects of the grammar are user-facing on disk and need an early decision:
@@ -646,6 +683,8 @@ Negative:
 - Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
 - What cache keys and invalidation rules should capability requirement summaries use across edits and dependency signature changes?
 - What candidate and intersection budgets should named-interface matching use before falling back to anonymous shapes?
+- What inference budgets should trigger incomplete-inference diagnostics, and which of them should be configurable?
+- How should interactive CLI prompts choose between inline `#:`, full `# @rbs`, generated stubs, and external `.rbs` persistence targets?
 - Which generic variance cases require special handling for `Dynamic[T]` slots in the first implementation?
 - Should `Float` equality narrowing ever be opt-in, and what proof should be required to exclude `NaN` and signed-zero pitfalls?
 - What exact effect payload should encode block call timing, closure escape, receiver or argument mutation, and read-only/pure behavior?

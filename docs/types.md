@@ -804,6 +804,39 @@ Erasure rules:
 
 Erasure is conservative: if `erase(T) = R`, then every value accepted by `T` must be accepted by `R`.
 
+## Inference Budgets and User-Supplied Boundaries
+
+Rigor should stop inference before hard cases become global searches. Recursive methods, mutually recursive call graphs, overloaded operators, dynamic dispatch, large unions, and unconstrained structural inference all need explicit budgets. When a budget is exceeded, Rigor should produce an incomplete-inference result with a reason instead of silently inventing precision.
+
+Operator-heavy recursive code is a motivating case:
+
+```ruby
+def tarai(x, y, z)
+  if x <= y
+    y
+  else
+    tarai(
+      tarai(x - 1, y, z),
+      tarai(y - 1, z, x),
+      tarai(z - 1, x, y)
+    )
+  end
+end
+```
+
+Without a parameter or return contract, `<=` and `-` are too polymorphic to infer a unique domain by enumerating every Ruby class that implements them. The recursive calls also make return inference fan out. Rigor should detect this shape early and ask for a boundary rather than expanding the search.
+
+Accepted signature contracts are inference cutoffs. A simple return annotation such as `#: Integer`, a full inline `# @rbs` method type, a generated stub, or an external `.rbs` declaration all let callers use the declared return and stop recursive return inference at the method boundary. The implementation body is still checked against the contract.
+
+CLI behavior should have two modes:
+
+- Non-interactive mode reports an incomplete-inference diagnostic, the reason for stopping, and one or more compatible ways to add a boundary contract.
+- Interactive mode may prompt the user for a boundary type, such as an rbs-inline return `#: Integer`, a full method signature, or an external RBS entry. Rigor should only write or modify files after explicit user confirmation.
+
+The prompt should prefer small, ecosystem-compatible annotations. For return-only recursive cutoffs, `#: Integer` can be enough. When receiver or operator parameter domains are also unconstrained, Rigor may ask for a full method type such as `(Integer x, Integer y, Integer z) -> Integer` or suggest adding the contract in `.rbs`.
+
+If no boundary is supplied, callers should not receive a fabricated precise type. Rigor may use `Dynamic[top]`, `top`, or another conservative incomplete-inference marker internally, but diagnostics and exports must preserve the fact that inference stopped.
+
 ## Diagnostic Policy
 
 Rigor should prefer precise diagnostics over silent widening.
@@ -820,6 +853,7 @@ Rigor should prefer precise diagnostics over silent widening.
 - Passing unexpected keys to a closed keyword or options-hash shape is a diagnostic.
 - Invalid or contradictory `RBS::Extended` annotations are diagnostics.
 - Method implementations are checked against accepted signature contracts regardless of source: inline `#:`, `# @rbs`, rbs-inline parameter annotations, generated stubs, and external `.rbs` declarations all have the same implementation-side force.
+- When inference stops because of recursion, operator ambiguity, dynamic dispatch, or budget exhaustion, Rigor should report the cutoff and suggest a boundary contract rather than pretending the inferred type is precise.
 - When an explicit nominal parameter type rejects a call but the method body only requires a smaller inferred capability role, Rigor may suggest generalizing the public signature to an interface rather than adding an ad hoc union.
 - Losing precision during RBS export should be reportable when users request explanation or strict export mode.
 
@@ -831,6 +865,7 @@ The core type engine should expose:
 
 - immutable `Scope` snapshots;
 - edge-aware condition analysis for truthy, falsey, normal, exceptional, and unreachable exits;
+- inference budgets and incomplete-inference results that preserve the reason inference stopped;
 - a fact store that can represent value facts, negative facts, relational facts, member-existence facts, shape facts, dynamic-origin provenance, stability facts, escape facts, and captured-local write facts;
 - an effect model for receiver and argument mutation, block call timing, closure escape, purity, and fact invalidation;
 - capability-role inference that can cache per-method requirement summaries, match them against indexed named interfaces when available, and keep anonymous shapes when matching is ambiguous or too expensive;

@@ -548,6 +548,20 @@ The shape model relies on visibility and reader/writer roles, but Ruby's surface
 - `private` and `protected` boundaries change the set of "visible" members for `respond_to?` and external sends. Shape entries should distinguish all three visibilities, not collapse into public/non-public.
 - `respond_to?(:foo, true)` and `respond_to?(:foo)` produce different facts; the difference must propagate into shape entries to avoid silently widening visibility.
 
+Working response:
+
+- Reader and writer capabilities are method capabilities, not field declarations. `attr_reader`, `attr_writer`, and `attr_accessor` are sources of method facts, but Rigor models the resulting `x` and `x=` methods separately.
+- `attr_writer :x` contributes write-only capability unless a reader method is also present. `attr_accessor :x` contributes both reader and writer capability, but it is still two method entries.
+- Overridden or manually defined accessors are ordinary methods. They may mutate state or return unexpected values unless a signature, implementation analysis, or plugin effect proves otherwise.
+- Visibility is a first-class facet on shape entries. Rigor tracks at least `public`, `protected`, and `private`, plus the call context in which a member may be used.
+- External explicit receiver sends require public methods. Protected methods follow Ruby's protected receiver restriction, and private methods do not satisfy ordinary explicit receiver calls.
+- Public structural interfaces require public members unless an internal check or future interface form explicitly requests another visibility.
+- `respond_to?(:foo)` and `respond_to?(:foo, false)` create public existence facts. `respond_to?(:foo, true)` creates an existence fact that may be public, protected, or private; it does not prove that `obj.foo` is legal as an external explicit receiver call.
+- If the `include_private` argument is not statically known, Rigor records a weaker maybe-private visibility fact.
+- `respond_to_missing?` and `method_missing` facts carry dynamic provenance and an unknown or plugin-provided signature. They can justify guarded dynamic calls but do not prove full interface compatibility by themselves.
+
+This resolves method-shape capture at the type-model level. Remaining work is exact Ruby protected-call context modeling and the initial representation of per-overload visibility in method summaries.
+
 ### Numeric Refinements Stop at `Integer`
 
 The scalar refinement table lists positive/negative/non-zero integer refinements but does not address adjacent cases:
@@ -643,7 +657,8 @@ Negative:
 - What diagnostic identifiers should distinguish unsupported `RBS::Extended` versions, invalid payloads, and semantic conflicts?
 - What exact display budget and wording should diagnostics use when negative-fact exclusions are omitted?
 - How should `Float`, `Rational`, `Complex`, and `coerce`-mediated promotions participate in scalar refinements?
-- Should visibility (`public`, `protected`, `private`) be a first-class facet of shape entries, or modeled separately as a side fact?
+- How exactly should Rigor model Ruby protected-call receiver restrictions in structural interface and object-shape checks?
+- Should method summaries store visibility per overload, per method entry, or both when reopened classes change visibility around definitions?
 
 ## Resulting Specification
 

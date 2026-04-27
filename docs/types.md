@@ -306,13 +306,35 @@ Reader and writer capabilities matter:
 
 This mirrors Python's protocol-attribute lesson without importing Python attributes directly. In Ruby, attributes are methods, so Rigor should reason about the reader and writer methods that actually exist.
 
-`respond_to?` checks can refine an object to an existence-only shape, for example "has method `close`". That fact is useful for diagnostics and guarded sends, but it does not prove full signature compatibility with an interface unless Rigor also knows the method type. The optional `include_private` argument must affect the visibility fact. If the method exists only through `method_missing`, the fact should be recorded with dynamic provenance so diagnostics can explain why the call was accepted.
+Accessor syntax is only one source of those method facts:
+
+- `attr_reader :x` contributes a public reader method `x` unless the surrounding Ruby visibility state changes it.
+- `attr_writer :x` contributes a writer method `x=` without implying a reader.
+- `attr_accessor :x` contributes both methods, but Rigor should still model them as two method entries.
+- A manually defined or overridden `x` or `x=` method replaces or refines the method fact according to ordinary Ruby method lookup and source order.
+- Reader and writer capability does not imply purity. A reader can mutate state, and a writer can return any Ruby value unless a signature or implementation proves otherwise.
+
+Visibility is a first-class facet of every method-shape entry. Rigor should track at least `public`, `protected`, and `private`, plus the call context in which a member can be used:
+
+- external explicit receiver sends require a public method;
+- private methods may be called only in private-call contexts, not as ordinary explicit receiver sends;
+- protected methods have Ruby's protected receiver restriction and should not satisfy public structural interface requirements by default;
+- public structural interfaces require public members unless the interface or internal check explicitly asks for another visibility.
+
+`respond_to?` checks can refine an object to an existence-only shape, for example "has public method `close`". That fact is useful for diagnostics and guarded sends, but it does not prove full signature compatibility with an interface unless Rigor also knows the method type. The optional `include_private` argument must affect the visibility fact:
+
+- `obj.respond_to?(:foo)` records a public existence fact for `foo` on the true branch.
+- `obj.respond_to?(:foo, false)` is the same as the default when the second argument is statically false.
+- `obj.respond_to?(:foo, true)` records an existence fact whose visibility may be public, protected, or private. It does not by itself prove that `obj.foo` is legal with an explicit receiver.
+- If the second argument is not statically known, Rigor should record a weaker maybe-private visibility fact.
+
+If the method exists only through `respond_to_missing?` or `method_missing`, the fact should be recorded with dynamic provenance and an unknown or plugin-provided signature so diagnostics can explain why the call was accepted.
 
 Object-shape entries should carry enough metadata to avoid confusing Ruby's dynamic surface with a static protocol proof:
 
 - member kind, such as method, reader, writer, constant, or index operation;
 - call signature or readable/writable value type;
-- visibility;
+- visibility and valid call context;
 - source and provenance, such as source definition, RBS, plugin, `respond_to?`, or `method_missing`;
 - stability and mutation information;
 - certainty, such as yes, maybe, or no.

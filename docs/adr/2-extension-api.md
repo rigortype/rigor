@@ -285,7 +285,7 @@ The draft accepts broad expression and operator hooks "behind a higher bar" with
 | One generic plugin hook that can inspect and override everything | Rejected | PHPStan's narrow extension types are easier to reason about, cache, test, and document. Broad expression hooks should be exceptional. |
 | Letting plugins mutate the current scope directly | Rejected | Scope mutation would make CFA order-dependent. Plugins should return facts and effects for the analyzer to apply. |
 | Executing application code to discover framework behavior | Rejected | Rigor remains a static analyzer with zero runtime dependency. Plugins may read source, signatures, generated metadata, and configuration. |
-| Making PHPDoc or inline Ruby comments the main extension interface | Rejected | Rigor keeps application Ruby annotation-free. RBS, `RBS::Extended`, generated signatures, and plugins are the extension surfaces. |
+| Making PHPDoc or Rigor-specific inline Ruby comments the main extension interface | Rejected | Rigor should not invent a new application-code annotation DSL. Existing RBS-, rbs-inline-, and Steep-compatible annotations are accepted as type sources; RBS, `RBS::Extended`, generated signatures, and plugins remain the extension surfaces. |
 | Shipping all PHPStan-style extension points in the MVP | Deferred | Dynamic return types, type-specifying extensions, and dynamic reflection provide the most immediate value. Output, dead-code, and broad infrastructure hooks can follow later. |
 
 ## Open Questions

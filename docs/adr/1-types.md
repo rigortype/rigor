@@ -20,10 +20,16 @@ The initial design requirement is:
 - Special RBS types such as `untyped`, `top`, `bot`, and `void` must be handled with type-theoretic clarity rather than as ad hoc aliases.
 - Types that exceed RBS may be recorded in RBS annotations under a provisional `RBS::Extended` convention.
 
+The compatibility hierarchy is:
+
+- RBS and rbs-inline are first-order norms for type syntax and inline annotation compatibility.
+- Steep 2.0 behavior is the second-order norm for how existing annotations are interpreted when prose specifications leave behavior open.
+- TypeScript, PHPStan, and Python typing are design references used to find missing concepts and practical analyzer features; they are not syntax compatibility targets.
+
 ## Goals
 
 - Preserve RBS compatibility for input and output.
-- Keep application code free of Rigor-specific inline type syntax.
+- Keep application code free of Rigor-specific inline type syntax. Rigor may still consume existing RBS-, rbs-inline-, and Steep-compatible annotation comments as type sources.
 - Support precise control-flow and data-flow inference.
 - Support PHPStan-, TypeScript-, and Python-style narrowing where it fits Ruby semantics.
 - Make gradual typing boundaries explicit.
@@ -133,7 +139,7 @@ The PHPStan documentation in `references/phpstan/website/src/writing-php-code/` 
 
 | Area | PHPStan | RBS and Rigor implication |
 | --- | --- | --- |
-| Annotation boundary | PHPStan combines PHP native typehints with PHPDoc tags on functions, methods, properties, classes, local variables, and vendor stub files. PHPDocs augment native hints when PHP syntax is too weak. | Rigor keeps Ruby application code annotation-free. RBS is the boundary format, and `RBS::Extended` annotations or external signatures are the place for extra facts. Inline Ruby comments should not become the main correction mechanism. |
+| Annotation boundary | PHPStan combines PHP native typehints with PHPDoc tags on functions, methods, properties, classes, local variables, and vendor stub files. PHPDocs augment native hints when PHP syntax is too weak. | Rigor keeps Ruby application code free of Rigor-specific annotation DSLs. RBS, rbs-inline, and Steep-compatible annotations are accepted type sources, while `RBS::Extended` annotations or external signatures are the place for Rigor-only extra facts. Inline Ruby comments should not become the main correction mechanism for Rigor-specific refinements. |
 | Trust and source of truth | PHPStan trusts inline `@var` assertions and recommends fixing types at the source with better PHPDocs, stubs, generics, assertions, or extensions. | Rigor should prefer RBS signatures, generated facts, and checked assertions over local override comments. Any future local override should be visibly unsafe and should not silently replace inferred facts without diagnostics. |
 | Dynamic type | PHPStan `mixed` permits unchecked operations. It distinguishes implicit `mixed`, caused by missing types, from explicit `mixed`, and stricter rule levels limit what can be done with it. | RBS `untyped` is the dynamic type. Rigor should preserve dynamic-origin provenance so strict modes can distinguish deliberate `untyped` from missing or inferred-unknown information. |
 | Basic scalar and object types | PHPStan has PHP-shaped scalar, object, resource, callable, iterable, and class/interface names, plus aliases such as `int` and `integer`. | Rigor should use RBS and Ruby names as canonical. PHP aliases are reference material only; Ruby core classes, singleton class types, interfaces, and RBS built-ins define the surface. |
@@ -165,7 +171,7 @@ The TypeScript handbook and reference materials in `references/TypeScript-Websit
 
 | Area | TypeScript | RBS and Rigor implication |
 | --- | --- | --- |
-| Signature boundary | TypeScript normally mixes implementation code and type annotations in `.ts` files, and also supports declaration-only `.d.ts` files for JavaScript libraries. Type annotations are erased from emitted JavaScript. | Rigor keeps Ruby application code annotation-free. RBS, not `.d.ts`, is the boundary format, and Rigor-only internal precision must erase conservatively to ordinary RBS. |
+| Signature boundary | TypeScript normally mixes implementation code and type annotations in `.ts` files, and also supports declaration-only `.d.ts` files for JavaScript libraries. Type annotations are erased from emitted JavaScript. | Rigor does not introduce TypeScript-like inline syntax for Ruby. RBS, rbs-inline, and Steep-compatible annotations are the accepted Ruby ecosystem inputs, and Rigor-only internal precision must erase conservatively to ordinary RBS. |
 | External type ecosystem | TypeScript uses built-in `lib.*.d.ts`, bundled package declarations, and DefinitelyTyped `@types` packages. | Rigor should rely on RBS for Ruby core, stdlib, gems, and dependency signatures. TypeScript declarations are reference material only. |
 | Compatibility model | TypeScript compatibility is primarily structural. Object, interface, class instance, and generic compatibility are based on available members, with private and protected class members adding nominal-like constraints. | RBS classes and modules remain nominal. RBS interfaces and Rigor object shapes provide the structural bridge. Rigor should not make all class assignability TypeScript-style structural by default. |
 | Soundness model | TypeScript intentionally accepts some unsound behavior for JavaScript ergonomics, including `any`, assignment compatibility, function parameter bivariance in some modes, optional/rest parameter rules, and local excess-property heuristics. | Rigor should make unsoundness visible through `untyped`, gradual consistency, plugin facts, and diagnostics. It should not copy TypeScript assignment compatibility wholesale. |
@@ -198,7 +204,7 @@ The `references/python-typing` tree is useful reference material, but Python typ
 
 | Area | Python typing | RBS and Rigor implication |
 | --- | --- | --- |
-| Signature boundary | Python allows inline annotations and separate stubs. | Rigor keeps Ruby application code annotation-free and uses RBS as the external signature format. |
+| Signature boundary | Python allows inline annotations and separate stubs. | Rigor avoids a Python-like Rigor-specific inline annotation system and uses RBS, rbs-inline, and Steep-compatible annotations as Ruby ecosystem signature inputs. |
 | Dynamic and top types | `Any` is an unknown gradual type, while `object` is the greatest fully static object type. | RBS already gives Rigor `untyped` and `top`; Python's materialization and assignability model reinforces keeping them separate. |
 | Structural types | `Protocol` and `TypedDict` are structural type forms with explicit typing rules. | RBS interfaces and records cover part of this space; Rigor can infer richer object and hash shapes internally, then erase them to RBS interfaces, records, `Hash[K, V]`, or `top`. |
 | Hash shape detail | `TypedDict` distinguishes required, non-required, read-only, open, closed, and extra items. | Rigor should reuse this vocabulary for Ruby hash, options-hash, and keyword-argument shapes, while remembering that ordinary Ruby hashes are mutable unless a separate fact proves otherwise. |
@@ -257,29 +263,29 @@ RBS treats `void` as top-like but context-limited. Rigor should model `void` int
 
 This enables diagnostics such as assigning the result of a `void` method call. In statement context, `void` is fine. In value context, Rigor reports a diagnostic and recovers with `top`.
 
-### Provisional: minimalist inline `#:` annotations and inference boundaries (not finalized)
+### Inline RBS Annotations and Inference Boundaries
 
-This subsection records in-flight design ideas. It is **not** a committed specification. Items may be adopted, revised, or dropped.
+Rigor's "no Rigor-specific inline type syntax" goal is about keeping Ruby code readable for humans and low-noise for AI-assisted editing. It does not mean Rigor ignores existing Ruby ecosystem annotation conventions.
 
-**Motivation (performance and stability).** For large bodies of code, exhaustively re-analyzing every method on every run is expensive. A short `#:` return hint on a small set of *critical* or *deep* methods can act as an **inference boundary**: the checker treats the header as the contract for the return, optionally **skips** deep, recursive re-inference of the method body, and still stays compatible with RBS comment conventions understood by Steep, `rbs-inline`, and similar tools. That can reduce work and memory for methods whose bodies are expensive to walk but whose author is willing to name the return in one token.
+Rigor should be 100% compatible with RBS and rbs-inline annotation syntax, and should follow Steep 2.0 behavior for inline annotation interpretation and precedence. RBS and rbs-inline are the primary norms for inline type syntax; Steep's implementation is the secondary norm where behavior is not fully specified in prose. TypeScript, PHPStan, and Python typing remain reference material for missing concepts, not compatibility targets.
 
-**Policy.** Standalone `.rbs` files (or generated stubs) remain the **primary** home for type definitions. Within Ruby sources, Rigor’s narrow exception is to **encourage** only **minimal** `#: …` return annotations, used on purpose to mark **inference boundaries**—not to duplicate full RBS in comments.
+Rigor should read existing rbs-inline and Steep-compatible annotations as official type sources. It should not rewrite them, warn only because they are complex, or require `# rbs_inline: enabled`. The `rbs_inline` magic comments are ignored for Rigor analysis; compatible annotations are read whenever present.
 
-**Purpose.** When the return is given explicitly in this form, the analyzer can **stop** propagating a freshly inferred return from the last expression, avoid re-entering the body for a precise return, and still align with the author’s contract. The annotation is a **hint** to Rigor, not a replacement for full signatures elsewhere.
+Standalone `.rbs` files and generated stubs remain the preferred place for complete type definitions. Inline annotations are nevertheless real contracts when present. They are not merely hints.
 
-**Allowed spellings (keep them tiny).** To limit noise in application code and keep headers easy for both humans and LLMs, inline return hints on a single line should be limited to **simple identifier forms**:
+Contract checking is independent of where the contract came from. A return type written as inline `#: void`, a method type written with `# @rbs`, parameter types written in rbs-inline style, a generated stub, and an external `.rbs` declaration all constrain the implementation in the same way. Rigor should report implementation-side diagnostics when the method body contradicts any accepted signature source.
 
-- `void` — the method is intended to be used for **side effects only**; the return is a no-use marker in the RBS sense.
-- `bot` — the **bottom** type: the call does not return normally (for example, always raises, or is intended as non-terminating). This supports **unreachable / dead-code** analysis after the call, comparable to `never` in other languages.
-- **Simple nominal names** — a single constant path segment such as `String`, `User`, or RBS-idiomatic `bool` for booleans. **No** inline unions, generics, records, or nested type expressions.
+**Recommendation level.** Rigor's style guidance is only about whether authors should write a type in `.rb` source:
 
-**Guideline.** Anything richer (generics, unions, optional shapes, or nested types) **belongs in** `.rbs` (or in `RBS::Extended` metadata where that exists). A one-line `#:` in Ruby should read as a **short boundary marker**, not a second copy of the full type language.
+- `#: void` and `#: bot` are strongly recommended when they express intent and create useful inference boundaries.
+- Short returns such as `#: bool`, `#: String`, or `#: User` are neutral; authors may write them when they make intent clearer.
+- Complex inline types, such as unions, generics, records, and nested method types, are valid RBS/rbs-inline input and must be accepted. Rigor's style guidance prefers moving them to `.rbs` or generated stubs, but Rigor should not report diagnostics merely for using them.
 
-**Recursive inference and boundaries.** The intended operational rule is: do **not** always walk every nested call for a refined return. Where `#: void` (or another allowed token) is present, inference can **stop at that header** and treat the declared return as fixed for boundary purposes, so work does not fan out into the body without need.
+**Inference boundary contract.** When a return contract is available from any accepted signature source, callers use that declared return and Rigor can stop recursive return inference at the method boundary. The implementation body is still checked against the contract. If the body can return a value outside the declared return, Rigor reports a diagnostic on the implementation side.
 
-**Bottom type in inline form.** Supporting `#: bot` in the same family gives a stable way to mark never-returning or always-exception paths; downstream control flow and dead-code diagnostics can use that without inferring the body.
+This boundary is especially valuable for deep, recursive, or expensive methods. It prevents analysis from fanning out into the method body when the author has already supplied the return contract.
 
-**Compatibility and Rigor’s stance on noise.** The **syntax** follows existing RBS-in-comment practice so other tools can ignore or share it. The **operational** rule is Rigor’s: *complex types stay in `.rbs` files;* Ruby line tails stay one-token hints so application code stays readable and low-noise for humans and for AI-assisted editing.
+**Bottom type in signatures.** A `bot` return contract means the call never returns normally. Callers treat it as `bot` for reachability and dead-code analysis. If implementation analysis finds a normal return path, Rigor reports a diagnostic against the method body, regardless of whether the `bot` came from inline `#: bot`, `# @rbs`, generated RBS, or external `.rbs`.
 
 **Example.**
 
@@ -291,18 +297,11 @@ def print(foo) #: void
 end
 ```
 
-**Why a `void` hint can matter for Ruby.** A `#: void` return hint tells the analyzer to treat the return as `void` and not to **propagate** a more precise inferred return from the last expression. The last line is still a Ruby value (implicit return), but the **type contract** is “no meaningful return for typing,” matching RBS’s `void` meaning.
+**Why a `void` contract can matter for Ruby.** A `void` return contract tells the analyzer to treat the return as `void` and not to **propagate** a more precise inferred return from the last expression. The last line is still a Ruby value (implicit return), but the **type contract** is “no meaningful return for typing,” matching RBS’s `void` meaning. Writing `#: void` in `.rb` is strongly recommended when that inline marker makes the author's side-effect-only intent clearer, but the static meaning is the same as `void` from any other accepted signature source.
 
 **Interaction with implicit return at runtime.** Ruby’s last-expression return means a value almost always **exists** in the VM. Rigor’s obligation remains **static** (value context, assignment, chains, boundary behavior), not a proof that the runtime value is never observed.
 
-**Proposed (optional) flow rule: `void` that never narrows.** A candidate rule, still under debate, is that bindings or expressions fixed as **explicit** inline `void` in this family carry no refinable return type: **control-flow facts would not narrow** that result to a smaller type, and it would **stay** `void` in all branches. That would:
-
-- Keep `void` aligned with the author’s refusal to let the checker treat the result as a concrete type.
-- Distinguish `void` from `untyped` (where narrowing may help) and from ordinary inferred returns.
-- Avoid diagnostics that first sound like `String` and only secondarily about `void` misuse.
-- Apply only to **explicit** return hints in allowed form; it would not apply to other locals or parameters unless separately annotated.
-
-**Open questions if this path is taken.** How `#: …` lines compose with separate-file RBS for the same method, whether block and proc return positions get the same treatment, and how diagnostic precedence between “use of `void` in value context” and “operation on a recovered `top`” should be recorded remain to be decided; see the critical-review concern in [Identified Concerns from Critical Review](#void-interacts-with-the-lattice-but-is-described-only-in-return-position).
+Further rules for `void` narrowing, value-context recovery, block/proc return positions, and diagnostic precedence remain a separate design task; see the critical-review concern in [Identified Concerns from Critical Review](#void-interacts-with-the-lattice-but-is-described-only-in-return-position).
 
 ### RBS Context Rules Are Preserved
 
@@ -457,13 +456,21 @@ The shape model relies on visibility and reader/writer roles, but Ruby's surface
 - `private` and `protected` boundaries change the set of "visible" members for `respond_to?` and external sends. Shape entries should distinguish all three visibilities, not collapse into public/non-public.
 - `respond_to?(:foo, true)` and `respond_to?(:foo)` produce different facts; the difference must propagate into shape entries to avoid silently widening visibility.
 
-### Positioning Relative to Existing Ruby Type Tooling Is Missing
+### Positioning Relative to Existing Ruby Type Tooling Needed Clarification
 
 Sorbet, Steep, RBS-based linters, and `rbs-inline` occupy adjacent design space. ADR-0 mentions them, but ADR-1 does not articulate Rigor's compatibility and competition story:
 
 - How Rigor consumes the same RBS that Steep consumes, and where divergence is acceptable.
 - Whether Rigor intends to read Steep- or Sorbet-style ignore markers, or to define its own.
 - How `RBS::Extended` annotations are expected to interact with existing tools that may also place `%a{...}` annotations on the same nodes.
+
+Working response:
+
+- RBS and rbs-inline are first-order compatibility targets for type syntax. Rigor aims to accept them as type sources without warning or rewriting.
+- Steep 2.0 behavior is the secondary norm for inline annotation interpretation and for precedence between separate-file RBS and inline annotations.
+- `# rbs_inline: enabled` and `# rbs_inline: disabled` do not gate Rigor analysis. Rigor reads compatible annotations whenever present.
+- TypeScript, PHPStan, and Python typing remain comparison material for missing concepts and analyzer features, not compatibility targets.
+- Ignore-marker compatibility remains open. Rigor should decide separately whether it reads Steep or Sorbet suppression comments, defines its own configuration-only suppression, or supports more than one form.
 
 ### Behavior on Annotation-Poor Code Bases Is Not Described
 
@@ -556,7 +563,7 @@ Negative:
 - Should equality narrowing for `Float` be opt-in, restricted, or refused outright to avoid `NaN` pitfalls?
 - What purity model determines which method calls preserve object-shape, hash-key, and instance-variable facts across higher-order calls?
 - What is the canonical algorithm for erasing arbitrary hash shapes to `Hash[K, V]`, including the choice between literal-union and nominal keys?
-- How should Rigor relate to existing Ruby type tools such as Sorbet, Steep, and `rbs-inline`, both for input compatibility and for ignore-marker conventions?
+- Which existing suppression or ignore-marker conventions, if any, should Rigor support beyond ordinary RBS/rbs-inline/Steep type annotations?
 - What is the minimum useful narrowing surface in heavily `untyped` code before plugins ship?
 - Should `RBS::Extended` annotation directives carry an explicit version prefix (`rigor:v1:...`) or be governed by a project-level version declaration?
 - What is the deterministic precedence rule when multiple `RBS::Extended` annotations on the same node disagree (first wins, last wins, severity-based, always-error)?

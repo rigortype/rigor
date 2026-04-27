@@ -16,7 +16,7 @@ We will build a new static analysis tool named **Rigor** ("Rigorous Inference fo
 
 ### 1. AI-Native Purity & Zero Runtime Dependency
 
-* **No Explicit Types in App Code:** Rigor will not require explicit type signatures (like inline annotations or custom DSLs) in application code. This keeps the codebase 100% pure Ruby, reducing noise for LLMs and maintaining idiomatic readability.
+* **No Rigor-Specific Inline Type DSL:** Rigor will not require a custom inline annotation DSL in application code. Existing RBS-, rbs-inline-, and Steep-compatible annotations may be consumed as standard Ruby ecosystem type sources, but Rigor should keep its own extra syntax out of Ruby application bodies.
 * **Zero Runtime Overhead:** Rigor functions strictly as a development dependency. It will not hook into the application at runtime.
 
 ### 2. Hybrid Type Resolution & Advanced Type System
@@ -24,7 +24,7 @@ We will build a new static analysis tool named **Rigor** ("Rigorous Inference fo
 * **Powerful Inference First:** The core engine relies on deep Control Flow Analysis (CFA) and Data Flow Analysis to deduce types.
 * **Advanced Types:** Rigor will support Union Types, Literal Types (e.g., `1`, `"str"`), and Virtual/Refined Types (e.g., `non-empty-string`, `positive-int`).
 * **External Dependencies via RBS:** Standard gem types will be resolved using the existing RBS ecosystem.
-* **`RBS::Extended`:** To express advanced types not yet supported by standard RBS, we will introduce an extended syntax using comments (e.g., `# @rigor return: non-empty-string` or local type assertions like `#: @rigor var config: { mode: :fast | :safe }`).
+* **`RBS::Extended`:** To express advanced types not yet supported by standard RBS, Rigor-specific metadata should attach to RBS declarations through RBS annotations or external/generated signatures rather than through a new Ruby comment DSL.
 
 ### 3. PHPStan-like Plugin Architecture
 

@@ -12,7 +12,7 @@ Every RBS type must have a lossless representation in Rigor. Every Rigor-inferre
 
 Rigor uses RBS as the interoperability surface and a richer internal type model for inference, control-flow analysis, and diagnostics.
 
-Rigor should aggressively learn from PHPStan, TypeScript, and Python's typing specification. In particular, it should support precise literal types, finite unions, flow-sensitive narrowing, negative facts, refined scalar domains, object and hash shapes, gradual typing discipline, and type operators that make practical static analysis expressive without requiring inline annotations in Ruby application code.
+Rigor should aggressively learn from PHPStan, TypeScript, and Python's typing specification. In particular, it should support precise literal types, finite unions, flow-sensitive narrowing, negative facts, refined scalar domains, object and hash shapes, gradual typing discipline, and type operators that make practical static analysis expressive without requiring Rigor-specific inline annotations in Ruby application code.
 
 The borrowed ideas must remain Ruby-shaped:
 
@@ -20,7 +20,7 @@ The borrowed ideas must remain Ruby-shaped:
 - RBS interfaces and Rigor object shapes provide structural duck typing.
 - Ruby truthiness means only `false` and `nil` are falsey.
 - Ruby equality, case equality, `respond_to?`, `method_missing`, singleton methods, and module inclusion are runtime behaviors that must be modeled through Ruby semantics, RBS signatures, or plugin facts rather than copied from another language.
-- Application Ruby code stays free of Rigor-only annotation syntax.
+- Application Ruby code stays free of Rigor-only annotation syntax. Existing RBS-, rbs-inline-, and Steep-compatible annotations are accepted as type sources, not treated as Rigor-specific syntax.
 
 ## Design Priorities
 
@@ -672,6 +672,7 @@ Rigor should prefer precise diagnostics over silent widening.
 - Writing through a read-only shape entry is a diagnostic when Rigor has that fact.
 - Passing unexpected keys to a closed keyword or options-hash shape is a diagnostic.
 - Invalid or contradictory `RBS::Extended` annotations are diagnostics.
+- Method implementations are checked against accepted signature contracts regardless of source: inline `#:`, `# @rbs`, rbs-inline parameter annotations, generated stubs, and external `.rbs` declarations all have the same implementation-side force.
 - When an explicit nominal parameter type rejects a call but the method body only requires a smaller inferred capability role, Rigor may suggest generalizing the public signature to an interface rather than adding an ad hoc union.
 - Losing precision during RBS export should be reportable when users request explanation or strict export mode.
 

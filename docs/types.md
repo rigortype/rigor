@@ -131,7 +131,27 @@ Supported narrowing sources should include:
 - Predicate methods registered by Rigor plugins.
 - Assertions and guards described in `RBS::Extended` annotations.
 
-Negative facts are first-class. Rigor should preserve facts such as "not nil", "not false", "not this literal", and "does not have this nominal class" when they improve later diagnostics.
+Negative facts are first-class scope facts. Rigor should preserve facts such as "not nil", "not false", "not this literal", and "does not have this nominal class" when they improve later diagnostics.
+
+A negative fact is domain-relative: it removes values from the value's already-known positive domain. It must not introduce a new positive domain from the right-hand side of a comparison. For example:
+
+```text
+v: String
+v != "foo" => v: String - "foo"
+
+v: "foo" | "bar"
+v != "foo" => v: "bar"
+
+v: String | Symbol
+v != "foo" => v: (String - "foo") | Symbol
+
+v: untyped
+v != "foo" => v: Dynamic[top] with a dynamic-origin relational fact `v != "foo"`
+```
+
+The final case is intentionally not `Dynamic[String - "foo"]`. A comparison with a string literal does not prove that an unchecked Ruby value is a `String`, and Ruby equality is method dispatch. Rigor may keep the negative relation for later diagnostics or contradictions, but it should not turn a dynamic or unknown value into a narrower positive type unless an independent guard proves that domain.
+
+When the current domain is finite, negative facts should normalize precisely. When the current domain is large or unknown, negative facts should be retained with a budget rather than expanded into unbounded difference chains. If the budget is exceeded, Rigor should widen the display and retain provenance that additional negative facts were omitted.
 
 Python's `TypeGuard` and `TypeIs` are useful reference points for predicate effects. A predicate that refines only the true branch is `TypeGuard`-like. A predicate that refines both true and false branches is `TypeIs`-like; internally, the false branch should be modeled as intersection with a complement, such as `A & ~R`, or as an equivalent difference type.
 
@@ -528,7 +548,9 @@ Candidate operators:
 | `T[K]` | Indexed access into tuple, record, object shape, or generic container metadata |
 | `if T <: U then X else Y` | Conditional type, if needed for advanced library modeling |
 
-Rigor should treat `~T` as the preferred display notation for negative facts produced by control-flow analysis. It should not be interpreted as "all possible Ruby objects except T" unless the current domain is `top`. In flow analysis, it usually means "the previous type after excluding T".
+Rigor should treat `~T` as the compact display notation for negative facts produced by control-flow analysis. It should not be interpreted as "all possible Ruby objects except T" unless the value already has `top` as its positive domain. In flow analysis, it usually means "the previous type after excluding T".
+
+Negative facts never infer the positive domain from the excluded type. `v != "foo"` can refine `String` to `String - "foo"` or `"foo" | "bar"` to `"bar"`, but it leaves raw `untyped` as `Dynamic[top]` with a relational negative fact.
 
 Rigor should treat `T - U` as the preferred explicit authoring form for difference types in `RBS::Extended` annotations. It is often easier to read in library signatures than a bare complement, especially for scalar refinements such as `String - ""`.
 
@@ -553,7 +575,7 @@ String - "foo"      # Any String except the literal "foo"
 ~"foo"             # Not the literal "foo" within the current domain
 ```
 
-When the domain is finite, difference and complement should normalize precisely. When the domain is large or unknown, they should become refinements rather than expanding to enormous unions.
+When the domain is finite, difference and complement should normalize precisely. When the domain is large or unknown, they should become refinements rather than expanding to enormous unions. Implementations should keep a configurable budget for retained negative literals or exclusions. Over budget, diagnostics should prefer the positive domain plus an indication that some exclusions were omitted over rendering a long unstable type.
 
 ## RBS::Extended Annotations
 
@@ -690,6 +712,8 @@ Rigor normalizes types before comparison and reporting.
 - Drop `top` from intersections.
 - Expand `T?` to `T | nil` internally.
 - Normalize finite set difference and complement when the domain is known.
+- Preserve negative facts as scope facts over a positive domain; do not introduce a positive domain from the excluded value alone.
+- Budget retained negative facts for large domains and widen display when the budget is exceeded.
 - Preserve hash shape openness and read-only markers until RBS erasure.
 - Collapse `true | false` to `bool` for display when that is clearer.
 - Preserve literal precision until it becomes too large or expensive; then widen to the nominal base.
@@ -727,6 +751,7 @@ Rigor should prefer precise diagnostics over silent widening.
 - Strict dynamic modes may report dynamic-to-precise assignments, arguments, returns, and generic-slot leaks such as `Array[Dynamic[top]]`.
 - Strict static modes may additionally report method calls or branch proofs whose safety depends on dynamic-origin facts rather than checked static facts.
 - A branch narrowed by a negative fact should display that fact when it is useful, for example `String - ""` or `~"foo"`.
+- Diagnostics should prefer explicit domain-bearing displays such as `String - "foo"` when a bare `~"foo"` would be ambiguous.
 - Writing through a read-only shape entry is a diagnostic when Rigor has that fact.
 - Passing unexpected keys to a closed keyword or options-hash shape is a diagnostic.
 - Invalid or contradictory `RBS::Extended` annotations are diagnostics.

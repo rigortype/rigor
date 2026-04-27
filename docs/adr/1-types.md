@@ -335,6 +335,8 @@ Rigor should support the semantics of complement, difference, indexed access, sh
 
 The candidate `~T` operator means the complement of `T` within the current known domain, not necessarily every Ruby object except `T`.
 
+The current known domain is the left-hand side's already-established positive domain, not a domain inferred from the excluded value. For example, `v != "foo"` narrows `v: String` to `String - "foo"`, but it does not narrow `v: untyped` to `String - "foo"`. With raw `untyped`, Rigor keeps `Dynamic[top]` plus a dynamic-origin relational fact.
+
 The working notation policy is:
 
 - Use `~T` as the concise display form for CFA-produced negative facts.
@@ -425,6 +427,17 @@ This resolves the core `void` lattice concern. Remaining design work is mostly a
 - Sequences such as `Integer - 0 - 1 - 2 - ...` are naturally expressible but can blow up in memory, normalization, and rendered diagnostics.
 - The interaction between accumulated negative facts and other narrowing operations such as `is_a?(Integer)`, `respond_to?`, and pattern matching is not described.
 - Diagnostic display of large negative-fact sets needs a simplification rule (analogous to TypeScript's literal-set widening) so error output stays usable at scale.
+
+Working response:
+
+- Negative facts are stored as scope facts over an existing positive domain. They remove from what is already known; they do not introduce a positive domain from the excluded expression.
+- `v: untyped` followed by `v != "foo"` remains `Dynamic[top]` with a dynamic-origin relational fact. It does not become `Dynamic[String - "foo"]`.
+- Finite domains normalize exactly. `"foo" | "bar"` minus `"foo"` becomes `"bar"`, and removing every finite alternative becomes `bot`.
+- Large or unknown domains retain negative facts under a budget. Once the budget is exceeded, Rigor should keep provenance that exclusions were omitted and display the positive domain rather than rendering unstable chains like `Integer - 0 - 1 - 2 - ...`.
+- Display should prefer domain-bearing forms such as `String - "foo"` when a bare `~"foo"` would be ambiguous. Bare `~T` remains useful for compact branch-local display when the surrounding domain is already visible.
+- Negative facts have the same stability rules as other flow facts: assignment, mutation, unknown calls, yielded blocks, and plugin-declared invalidation may weaken or remove them.
+
+This resolves retention at the type-model level. The exact numeric budget and diagnostic wording remain implementation policy.
 
 ### Equality Narrowing Trusts a Not-Yet-Enumerated Set of Methods
 
@@ -600,7 +613,7 @@ Negative:
 - What is the minimum useful narrowing surface in heavily `Dynamic[top]` code before plugins ship?
 - Should `RBS::Extended` annotation directives carry an explicit version prefix (`rigor:v1:...`) or be governed by a project-level version declaration?
 - What is the deterministic precedence rule when multiple `RBS::Extended` annotations on the same node disagree (first wins, last wins, severity-based, always-error)?
-- How should diagnostics display difference and complement types so that domain context (`~"foo"` inside `String`) is unambiguous?
+- What exact display budget and wording should diagnostics use when negative-fact exclusions are omitted?
 - How should `Float`, `Rational`, `Complex`, and `coerce`-mediated promotions participate in scalar refinements?
 - Should visibility (`public`, `protected`, `private`) be a first-class facet of shape entries, or modeled separately as a side fact?
 

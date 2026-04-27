@@ -366,6 +366,29 @@ Unions remain useful when the implementation genuinely has class-specific behavi
 
 RBS erasure should prefer a matching named interface when one exists. Anonymous object shapes that do not match a known interface erase to a conservative nominal base or `top`.
 
+Capability-role inference must be bounded. Rigor should infer a per-method requirement summary for each parameter and receiver rather than repeatedly reanalyzing every call site. A summary contains the members that the method body actually requires, including method names, visibility, arity, keyword and block requirements, return-use constraints, mutation requirements, and provenance. It is an anonymous object-shape requirement until Rigor proves that a named interface or small intersection of named interfaces is a good representation.
+
+The first implementation should keep the inference local and monotone:
+
+- Analyze the method body once per relevant method version and cache the requirement summary.
+- Use existing signatures or cached summaries for direct calls; do not recursively inline callees by default.
+- For recursive methods or mutually recursive summaries, start with an unknown or widening placeholder and iterate only to a small fixed-point budget.
+- Treat `send`, `public_send`, unknown `method_missing`, and dynamic delegation as dynamic requirements unless a plugin or signature provides a precise target.
+- Widen large requirement shapes by keeping the member set needed for diagnostics and dropping low-value details such as long overload expansions when they exceed a budget.
+
+Named-interface matching should be indexed, not a scan of every interface. Rigor can maintain an index from required member names and visibility to candidate interfaces. A candidate interface is compared only when it shares at least one required member and passes cheap arity or visibility filters. If the candidate set is too large, Rigor should keep the anonymous shape and avoid a generalization hint instead of performing an expensive global search.
+
+When multiple named interfaces match, selection must be deterministic and conservative:
+
+- Prefer an exact member-signature match.
+- Prefer a configured standard-library role over an unrelated coincidental interface.
+- Prefer fewer extra required members, then a stable lexical name order.
+- If several candidates remain meaningfully ambiguous, keep the anonymous shape internally and do not emit a named-interface suggestion.
+
+Intersections of named roles are useful, but Rigor should not solve an unbounded set-cover problem to find the mathematically smallest role expression. The first implementation may use only exact single-interface matches, explicit standard role bundles, or a small greedy intersection under a strict candidate limit. Otherwise it keeps the anonymous shape.
+
+Generic preservation is a separate rule from role extraction. If a method returns the same parameter object it received, Rigor should prefer a type variable such as `[S < _RewindableStream] (S stream) -> S` when the body preserves object identity. It should not widen the return to `_RewindableStream` merely because the parameter requirement is structural. If the body may replace the value, branch between unrelated objects, or return a delegated object, Rigor should fall back to the ordinary inferred return type.
+
 ## Special Types
 
 ### `top`
@@ -810,7 +833,7 @@ The core type engine should expose:
 - edge-aware condition analysis for truthy, falsey, normal, exceptional, and unreachable exits;
 - a fact store that can represent value facts, negative facts, relational facts, member-existence facts, shape facts, dynamic-origin provenance, stability facts, escape facts, and captured-local write facts;
 - an effect model for receiver and argument mutation, block call timing, closure escape, purity, and fact invalidation;
-- capability-role inference that can extract the minimum structural requirement of a method body and match it against named interfaces when available;
+- capability-role inference that can cache per-method requirement summaries, match them against indexed named interfaces when available, and keep anonymous shapes when matching is ambiguous or too expensive;
 - normalization for unions, intersections, complements, differences, and impossible refinements;
 - semantic type queries for extensions so plugin authors ask capability questions rather than inspecting concrete type classes;
 - conservative RBS erasure with optional loss-of-precision explanations.

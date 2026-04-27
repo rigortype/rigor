@@ -490,6 +490,19 @@ Inferring "the minimum structural requirement of a method body" is a centerpiece
 - Matching an inferred shape against named interfaces is at least quadratic and can be expensive when many candidates exist. The selection rule (most-specific wins, first-match, user-configurable) is undefined.
 - Combining capability-role inference with generics (`def reset: [S < _RewindableStream] (S stream) -> S`) requires bound checking against an inferred shape, but the algorithm choice is open.
 
+Working response:
+
+- Rigor should infer cached per-method requirement summaries, not recompute a "minimum" role expression at every call site. A summary records required member names, visibility, arity, keyword and block requirements, return-use constraints, mutation requirements, and provenance for each parameter and receiver.
+- The summary is an anonymous object-shape requirement by default. Naming it as an interface is an export and diagnostic convenience, not the core inference result.
+- Requirement inference is local and monotone. Direct calls use existing signatures or cached summaries. Recursive or mutually recursive summaries use an unknown or widening placeholder and iterate only to a small fixed-point budget.
+- Dynamic dispatch through `send`, `public_send`, unknown `method_missing`, or unconstrained delegation stops precise role extraction unless a signature or plugin supplies the target. Rigor should record a dynamic requirement instead of trying to infer every possible method.
+- Named-interface matching should use an index keyed by member name and visibility. Rigor compares only cheap-filtered candidates. If the candidate set is too large, it keeps the anonymous shape and suppresses the generalization hint rather than scanning the world.
+- Candidate selection is deterministic: exact member-signature match first, configured standard-library roles before coincidental user interfaces, fewer extra required members next, then stable lexical name order. Meaningful ambiguity means no named suggestion.
+- Intersections of roles are allowed but bounded. The first implementation can use exact single-interface matches, explicit standard role bundles, or a small greedy intersection under a strict candidate limit. It should not solve an unbounded set-cover problem.
+- Generic preservation is handled by identity tracking, not by the role matcher. If a method returns the same parameter object it received, Rigor may infer `[S < _Role] (S value) -> S`. If the body may replace the value or return a delegated object, Rigor uses the ordinary inferred return type.
+
+This makes capability roles a bounded summary-and-index feature rather than a global structural search. Remaining design work is choosing the cache keys, budgets, and first standard role bundle.
+
 ### `RBS::Extended` Annotation Grammar Lacks Versioning and Conflict Semantics
 
 Two aspects of the grammar are user-facing on disk and need an early decision:
@@ -631,6 +644,8 @@ Negative:
 - How should diagnostics distinguish a proven type fact from a relational or dynamic-origin fact?
 - Which standard Ruby capability roles, such as readable stream, writable stream, rewindable stream, closable, enumerable, callable, and file-descriptor-backed, should Rigor ship as named interfaces?
 - Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
+- What cache keys and invalidation rules should capability requirement summaries use across edits and dependency signature changes?
+- What candidate and intersection budgets should named-interface matching use before falling back to anonymous shapes?
 - Which generic variance cases require special handling for `Dynamic[T]` slots in the first implementation?
 - Should `Float` equality narrowing ever be opt-in, and what proof should be required to exclude `NaN` and signed-zero pitfalls?
 - What exact effect payload should encode block call timing, closure escape, receiver or argument mutation, and read-only/pure behavior?

@@ -131,6 +131,8 @@ Rigor should distinguish ordinary subtyping from gradual consistency.
 
 This separation lets Rigor keep track of unchecked boundaries while still allowing gradual code to type-check.
 
+Internally, dynamic-origin values should be represented as `Dynamic[T]`, where `T` is the currently known static facet. Raw `untyped` is `Dynamic[top]`. This is not user-facing RBS syntax; it is the implementation device that lets Rigor narrow an unchecked value without losing the fact that the value came from a gradual boundary.
+
 The documentation should write the gradual-consistency relation as `consistent(A, B)`, not `A ~ B`, because `~T` is reserved for negative or complement types.
 
 ### PHPStan Compared with RBS
@@ -368,7 +370,7 @@ Reconstructing `docs/types.md` as the ideal type model adds several requirements
 - The type engine needs expression-edge scopes. Each expression should be able to produce normal, truthy, falsey, exceptional, and unreachable output scopes so short-circuiting conditions can update facts between operands.
 - Negative and difference types need a current-domain model. `~"foo"` inside `String | Symbol` is not the same as global `top - "foo"` unless the current domain is `top`.
 - Equality narrowing must respect Ruby dispatch. Rigor needs trusted equality facts for built-ins, RBS effects, or plugins; otherwise it should keep relational facts instead of silently pretending `==` is identity.
-- Gradual facts need provenance. Narrowing an `untyped` value can be useful inside a branch, but diagnostics and joins should still know that the value crossed an unchecked boundary.
+- Gradual facts need provenance. Narrowing an `untyped` value can be useful inside a branch, but diagnostics, generic slots, and joins should still know that the value crossed an unchecked boundary. The working internal form is `Dynamic[T]`, with raw `untyped` represented as `Dynamic[top]`.
 - Shape, member, and hash-key facts need invalidation rules. Assignments, mutation, unknown calls, yielded blocks, and plugin-declared effects may weaken or remove facts.
 - RBS erasure is part of the type design, not a presentation layer. Every internal refinement, relation, and provenance marker needs a conservative erasure rule.
 
@@ -378,11 +380,21 @@ A critical review of the type specification and the decisions above surfaced the
 
 ### Gradual Typing Rules around `untyped` Need More Than Joins
 
-The spec covers `T | untyped = untyped` and `consistent(untyped, T)`, but several supporting rules are missing:
+The earlier spec covered `T | untyped = untyped` and `consistent(untyped, T)`, but several supporting rules were missing:
 
 - The result of `untyped & T` is not stated. Treating it as `T` discards dynamic-origin provenance; treating it as `untyped` discards information already carried by `T`.
 - `untyped` in generic positions (`Array[untyped]`, `Hash[Symbol, untyped]`, proc parameters) interacts with variance and member-access narrowing. Top-level join rules do not extrapolate to those positions.
 - Rigor's strict-mode story for `untyped` propagation is unspecified. Without one, every union with `untyped` collapses, and the dynamic-origin marker offers little leverage to users actively shrinking their gradual surface.
+
+Working response:
+
+- Rigor should use an internal `Dynamic[T]` wrapper. Raw RBS `untyped` is `Dynamic[top]`.
+- Joins, intersections, and differences transform the static facet while preserving dynamic provenance: `Dynamic[A] | Dynamic[B] = Dynamic[A | B]`, `T | Dynamic[U] = Dynamic[T | U]`, `Dynamic[T] & U = Dynamic[T & U]`, and `Dynamic[T] - U = Dynamic[T - U]`.
+- Generic positions preserve dynamic-origin slots. `Array[untyped]` becomes `Array[Dynamic[top]]`, so element reads, writes, and leaks can be explained precisely.
+- Gradual consistency allows `Dynamic[T]` to cross typed boundaries, but subtyping and member lookup still use the static facet when one is available.
+- Strict modes should use the provenance rather than changing the core relation: one level can report dynamic-to-precise boundary crossings and unchecked generic leaks; a stricter level can report operations whose proof depends on dynamic-origin facts.
+
+This resolves the shape of `untyped` propagation while leaving user-facing diagnostic policy, displayed type notation, and strict-mode names as implementation design tasks.
 
 ### `void` Interacts with the Lattice but Is Described Only in Return Position
 
@@ -480,6 +492,12 @@ Rails-shaped applications are dominated by `untyped` until plugins fill in shape
 - What is the diagnostic policy for "method on `untyped`": always allowed, allowed but reportable in strict mode, or progressively configurable?
 - How are common dynamic patterns (ActiveRecord finder chains, Sidekiq workers, RSpec doubles) handled before plugins ship?
 
+Working response:
+
+- Even without plugins, stable Ruby guards should narrow `Dynamic[top]` into `Dynamic[T]` where the static facet is justified by Ruby semantics or existing signatures. Useful first checks include nilability, truthiness, `is_a?`, `kind_of?`, `instance_of?`, literal equality for trusted built-in domains, and `respond_to?` member-existence facts.
+- Method calls on raw `Dynamic[top]` remain allowed by default so gradual code can be analyzed incrementally, but they are traceable and reportable in strict modes.
+- Plugin-specific framework behavior is still deferred, but the pre-plugin analyzer should explain whether a result came from a missing signature, an explicit `untyped`, or an analyzer/plugin limit.
+
 ### Numeric Refinements Stop at `Integer`
 
 The scalar refinement table lists positive/negative/non-zero integer refinements but does not address adjacent cases:
@@ -545,26 +563,27 @@ Negative:
 - How much of the `~T` and `T - U` notation should be accepted in user-authored `RBS::Extended` annotations in the first implementation?
 - Which imported built-in refinements should be accepted in the first parser milestone beyond `non-empty-string` and integer ranges?
 - How quickly should predicate targets grow beyond `parameter-name` and `self`?
-- How should Rigor display dynamic-origin narrowed types such as `untyped & ~"foo"`?
+- When should diagnostics display internal `Dynamic[...]` provenance versus only the narrowed static facet?
 - How aggressively should literal unions widen for performance and diagnostic readability?
 - Which Python `TypedDict`-inspired shape facts, such as read-only keys and open or closed extra-key policies, should ship first?
 - Should Rigor model finality and read-only member facts separately from value types in the first signature metadata grammar?
 - What minimal method-shape representation is needed for structural interface assignability in the first implementation?
 - Should Rigor add an explicit `RBS::Extended` conformance annotation, or rely on ordinary assignments and calls to trigger interface conformance checks?
 - Should generated RBS preserve `RBS::Extended` annotations that explain erased refinements when users request an annotated export?
-- Should `untyped` operations produce optional informational diagnostics in strict mode?
+- Which strict-dynamic and strict-static diagnostic identifiers should be attached to dynamic-to-precise crossings, unchecked generic leaks, and method calls whose proof depends on `Dynamic[T]`?
+- Which dynamic-origin sources should be classified as explicit user intent, missing signatures, analyzer limits, or plugin-declared dynamic behavior?
 - What plugin API is needed for framework-specific object shapes and dynamic method resolution?
 - What is the smallest fact-stability model that makes shape and hash-key narrowing useful without becoming unsound around mutation?
 - Which equality methods are trusted by default for literal narrowing, and how should custom equality effects be declared?
 - How should diagnostics distinguish a proven type fact from a relational or dynamic-origin fact?
 - Which standard Ruby capability roles, such as readable stream, writable stream, rewindable stream, closable, enumerable, callable, and file-descriptor-backed, should Rigor ship as named interfaces?
 - Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
-- How should `untyped` interact with intersection (`untyped & T`) and with generic argument positions, beyond the documented join rule?
+- Which generic variance cases require special handling for `Dynamic[T]` slots in the first implementation?
 - Should equality narrowing for `Float` be opt-in, restricted, or refused outright to avoid `NaN` pitfalls?
 - What purity model determines which method calls preserve object-shape, hash-key, and instance-variable facts across higher-order calls?
 - What is the canonical algorithm for erasing arbitrary hash shapes to `Hash[K, V]`, including the choice between literal-union and nominal keys?
 - Which existing suppression or ignore-marker conventions, if any, should Rigor support beyond ordinary RBS/rbs-inline/Steep type annotations?
-- What is the minimum useful narrowing surface in heavily `untyped` code before plugins ship?
+- What is the minimum useful narrowing surface in heavily `Dynamic[top]` code before plugins ship?
 - Should `RBS::Extended` annotation directives carry an explicit version prefix (`rigor:v1:...`) or be governed by a project-level version declaration?
 - What is the deterministic precedence rule when multiple `RBS::Extended` annotations on the same node disagree (first wins, last wins, severity-based, always-error)?
 - How should diagnostics display difference and complement types so that domain context (`~"foo"` inside `String`) is unambiguous?

@@ -63,7 +63,16 @@ T | top = top
 T & bot = bot
 ```
 
-`untyped` is deliberately outside this pure lattice. In joins, `T | untyped` becomes `untyped` because branch precision has been lost. In flow refinements, a guard may refine an `untyped` value inside the guarded region, but the value keeps a dynamic-origin marker for diagnostics and later joins.
+`untyped` is deliberately outside this pure lattice. Internally, Rigor represents values that crossed a dynamic boundary as `Dynamic[T]`, where `T` is the currently known static facet. Raw RBS `untyped` is `Dynamic[top]`.
+
+Dynamic-origin joins preserve the marker instead of pretending the value is purely static:
+
+```text
+Dynamic[A] | Dynamic[B] = Dynamic[A | B]
+T | Dynamic[U] = Dynamic[T | U]
+```
+
+When `U` is `top`, the result may be displayed as `untyped`, but the internal form still records dynamic-origin provenance. In flow refinements, a guard may refine an `untyped` value inside the guarded region, but the value keeps the `Dynamic[...]` marker for diagnostics and later joins.
 
 ## Control-Flow Analysis
 
@@ -136,7 +145,7 @@ Ruby equality is method dispatch. A syntactic comparison such as `foo == "foo"` 
 - comparison facts contributed by RBS or plugins for trusted predicate and equality methods;
 - unknown equality methods, which should produce at most a relational fact unless the analyzer has enough method information to refine the value type.
 
-When a value starts as `untyped`, Rigor may display a narrowed fact inside a guard, but the value keeps dynamic-origin provenance. For example, a trusted guard may display `Dynamic<"foo">` or simply `"foo"` in a short diagnostic, while the internal type still records that the fact crossed an unchecked boundary.
+When a value starts as `untyped`, Rigor may display a narrowed fact inside a guard, but the value keeps dynamic-origin provenance. For example, a trusted guard may display `Dynamic["foo"]` or simply `"foo"` in a short diagnostic, while the internal type still records that the fact crossed an unchecked boundary.
 
 This rule keeps TypeScript- and PHPStan-style equality narrowing useful without pretending that Ruby `==` is a built-in identity operator.
 
@@ -312,7 +321,7 @@ Using a value of type `top` is still checked. A method call on `top` is accepted
 
 `bot` is useful for control-flow analysis because joining `bot` with a real branch leaves the real branch unchanged.
 
-### `untyped`
+### `untyped` and `Dynamic[T]`
 
 `untyped` is the dynamic type. It is consistent with every type:
 
@@ -321,7 +330,46 @@ consistent(untyped, T)
 consistent(T, untyped)
 ```
 
-Operations on `untyped` should not create false precision. A method call on `untyped` returns `untyped` unless Rigor has an explicit refinement or plugin-provided rule. Assigning `untyped` to a precise type is allowed at a gradual boundary, but Rigor should retain enough provenance to explain that the value passed through unchecked code.
+Rigor's internal representation is more precise:
+
+```text
+untyped = Dynamic[top]
+```
+
+`Dynamic[T]` is not surface RBS syntax and should not be accepted as an ordinary user-authored type. It is an implementation form that combines two facts:
+
+- the value crossed a gradual boundary or otherwise came from unchecked information;
+- current control-flow analysis can still prove the static facet `T`.
+
+Gradual consistency treats the dynamic-origin wrapper as compatible with every target while preserving its provenance:
+
+```text
+consistent(Dynamic[T], U)
+consistent(U, Dynamic[T])
+```
+
+This is not ordinary subtyping. Subtyping and method availability are checked against the static facet `T` when Rigor has one, while consistency explains why a dynamic value may cross a typed boundary.
+
+Dynamic-origin intersection and difference preserve both precision and provenance:
+
+```text
+Dynamic[T] & U = Dynamic[T & U]
+Dynamic[T] - U = Dynamic[T - U]
+```
+
+Thus `untyped & String` becomes `Dynamic[String]`, not plain `String` and not raw `untyped`. A trusted guard may narrow `Dynamic[top]` to `Dynamic[String]`; a method call such as `upcase` may then use `String` method facts. The receiver remains traceable to the unchecked source, and diagnostics can record that the call was enabled by a dynamic-origin fact.
+
+Operations on raw `Dynamic[top]` should not create false precision. A method call on raw `untyped` returns `Dynamic[top]` unless Rigor has an explicit refinement, signature, or plugin-provided rule. Assigning a dynamic-origin value to a precise type is allowed at a gradual boundary, but Rigor must retain enough provenance to explain that the value passed through unchecked code.
+
+Generic positions preserve dynamic-origin slots. For example, `Array[untyped]` is internally `Array[Dynamic[top]]`, not `Array[top]`. Reading an element returns `Dynamic[top]`. Writing an element follows gradual consistency, and stricter modes may report that the collection stores unchecked values. The same rule applies to hashes, tuples, records, proc parameters and returns, and shape members.
+
+Rigor should distinguish dynamic-origin sources:
+
+- explicit `untyped` in RBS, rbs-inline, or Steep-compatible annotations;
+- missing external signatures or implicit unknown library facts;
+- analyzer limits, failed inference, or plugin-declared dynamic behavior.
+
+The type relation is the same for all of them, but diagnostics can distinguish deliberate gradual boundaries from places where users may want better signatures.
 
 ### `void`
 
@@ -371,7 +419,7 @@ Rigor may infer types that RBS cannot spell directly. These types must always er
 | Inferred capability role | Minimum structural interface required by a method body, such as readable and rewindable stream behavior | Named interface when available, otherwise object shape erasure |
 | Hash shape refinements beyond RBS records | Required keys, optional keys, read-only entries, open or closed extra-key policy, and key presence after guards | RBS record when exact, otherwise `Hash[K, V]` |
 | Fact stability marker | Records whether a local, member, shape entry, or hash key fact survives assignment, calls, or mutation | Erased marker |
-| Dynamic-origin marker | Tracks precision lost through `untyped` | Erased marker |
+| Dynamic-origin wrapper, such as `Dynamic[T]` | Tracks precision lost through `untyped` while preserving the current static facet | `untyped` at unchecked boundaries; marker erased only after a checked non-dynamic contract |
 | Negation or complement type, such as `~"foo"` | Represents values in the current domain except a type | Erased domain type |
 | Conditional type | Models type-level branching when needed for library signatures | Conservative union or bound |
 | Indexed access type | Projects member, tuple, record, or shape component types | Projected RBS type when expressible, otherwise conservative base |
@@ -639,7 +687,8 @@ Rigor normalizes types before comparison and reporting.
 - Preserve hash shape openness and read-only markers until RBS erasure.
 - Collapse `true | false` to `bool` for display when that is clearer.
 - Preserve literal precision until it becomes too large or expensive; then widen to the nominal base.
-- Preserve `untyped` explicitly rather than normalizing it to `top`.
+- Preserve dynamic-origin wrappers explicitly rather than normalizing `untyped` to `top`.
+- Normalize dynamic-origin unions, intersections, and differences by transforming the static facet and keeping the wrapper.
 
 Normalization must be deterministic so diagnostics, caches, and exported signatures are stable.
 
@@ -656,7 +705,7 @@ Erasure rules:
 - Complement and difference refinements erase to their current domain type.
 - Hash shape openness, extra-key, and read-only markers are erased. Exact closed shapes erase to RBS records when possible; otherwise they erase to `Hash[K, V]`.
 - Object shapes erase to a matching named interface when one exists, otherwise a conservative nominal or `top`.
-- Dynamic-origin markers are removed.
+- Dynamic-origin wrappers erase to `untyped` when exported as unchecked boundary types. When a value has already been checked against a non-dynamic contract, the contract type is exported and the dynamic marker is not represented in RBS.
 - Invalid-context `void`, `self`, `instance`, or `class` forms are rewritten to valid conservative RBS and reported as precision loss.
 
 Erasure is conservative: if `erase(T) = R`, then every value accepted by `T` must be accepted by `R`.
@@ -667,7 +716,10 @@ Rigor should prefer precise diagnostics over silent widening.
 
 - Using `void` as a value is a diagnostic.
 - Calling a method on `top` without proof is a diagnostic.
-- Calling a method on `untyped` is allowed but should be traceable to an unchecked boundary.
+- Calling a method on raw `untyped` is allowed but should be traceable to an unchecked boundary.
+- Calling a method on `Dynamic[T]` may use the static facet `T`, but diagnostics should be able to explain that the proof depended on a dynamic-origin value.
+- Strict dynamic modes may report dynamic-to-precise assignments, arguments, returns, and generic-slot leaks such as `Array[Dynamic[top]]`.
+- Strict static modes may additionally report method calls or branch proofs whose safety depends on dynamic-origin facts rather than checked static facts.
 - A branch narrowed by a negative fact should display that fact when it is useful, for example `String - ""` or `~"foo"`.
 - Writing through a read-only shape entry is a diagnostic when Rigor has that fact.
 - Passing unexpected keys to a closed keyword or options-hash shape is a diagnostic.

@@ -12,7 +12,7 @@ Every RBS type must have a lossless representation in Rigor. Every Rigor-inferre
 
 Rigor uses RBS as the interoperability surface and a richer internal type model for inference, control-flow analysis, and diagnostics.
 
-Rigor should aggressively learn from PHPStan and TypeScript. In particular, it should support precise literal types, finite unions, flow-sensitive narrowing, negative facts, refined scalar domains, object and hash shapes, and type operators that make practical static analysis expressive without requiring inline annotations in Ruby application code.
+Rigor should aggressively learn from PHPStan, TypeScript, and Python's typing specification. In particular, it should support precise literal types, finite unions, flow-sensitive narrowing, negative facts, refined scalar domains, object and hash shapes, gradual typing discipline, and type operators that make practical static analysis expressive without requiring inline annotations in Ruby application code.
 
 ## Relations
 
@@ -48,7 +48,7 @@ T & bot = bot
 
 ## Control-Flow Analysis
 
-Rigor performs flow-sensitive type analysis in the style of PHPStan and TypeScript.
+Rigor performs flow-sensitive type analysis in the style of PHPStan, TypeScript, and Python type checkers.
 
 The type environment is refined by guards, returns, raises, loop exits, pattern matches, equality comparisons, predicate methods, and plugin-provided facts. Each control-flow edge carries both positive facts and negative facts. Joins merge those facts conservatively.
 
@@ -84,6 +84,8 @@ Supported narrowing sources should include:
 - Assertions and guards described in `RBS::Extended` annotations.
 
 Negative facts are first-class. Rigor should preserve facts such as "not nil", "not false", "not this literal", and "does not have this nominal class" when they improve later diagnostics.
+
+Python's `TypeGuard` and `TypeIs` are useful reference points for predicate effects. A predicate that refines only the true branch is `TypeGuard`-like. A predicate that refines both true and false branches is `TypeIs`-like; internally, the false branch should be modeled as intersection with a complement, such as `A & ~R`, or as an equivalent difference type.
 
 ## RBS-Compatible Types
 
@@ -184,7 +186,7 @@ Rigor may infer types that RBS cannot spell directly. These types must always er
 | Finite set of literals | Precise branch and enum tracking | RBS literal union when possible, otherwise nominal base |
 | Truthiness refinement | Branch-sensitive nil/false elimination | Erased underlying type |
 | Object shape | Known methods or singleton-object capabilities inferred locally | Named interface if available, otherwise `top` or nominal base |
-| Hash shape refinements beyond RBS records | Optional keys, required keys, key presence after guards | RBS record when exact, otherwise `Hash[K, V]` |
+| Hash shape refinements beyond RBS records | Required keys, optional keys, read-only entries, open or closed extra-key policy, and key presence after guards | RBS record when exact, otherwise `Hash[K, V]` |
 | Dynamic-origin marker | Tracks precision lost through `untyped` | Erased marker |
 | Negation or complement type, such as `~"foo"` | Represents values in the current domain except a type | Erased domain type |
 | Conditional type | Models type-level branching when needed for library signatures | Conservative union or bound |
@@ -195,7 +197,7 @@ Rigor extensions must not leak into generated RBS syntax.
 
 ## Imported Built-In Types
 
-Rigor imports type ideas from PHPStan and TypeScript only when they have a clear Ruby meaning. It should not preserve foreign syntax for compatibility by default.
+Rigor imports type ideas from PHPStan, TypeScript, and Python typing only when they have a clear Ruby meaning. It should not preserve foreign syntax for compatibility by default.
 
 Naming rules:
 
@@ -207,7 +209,7 @@ Naming rules:
 - Type functions compute, project, or transform another type or literal set rather than naming a refined value domain directly.
 - Type functions avoid `-` because `-` is also the difference operator in Rigor's type syntax; `int_mask[1, 2, 4]` is less ambiguous than `int-mask[1, 2, 4]`.
 - Compatibility aliases should not be accepted unless they solve a concrete migration or readability problem.
-- RBS names remain canonical when they already express the concept. For example, `bot` is the bottom type; `never`, `noreturn`, `never-return`, `never-returns`, and `no-return` should not be added as aliases initially.
+- RBS names remain canonical when they already express the concept. For example, `bot` is the bottom type; `never`, `noreturn`, `never-return`, `never-returns`, `no-return`, `Never`, and `NoReturn` should not be added as aliases initially.
 - Integer ranges should use Rigor's range notation, such as `Integer[1..10]`; PHPStan-style `int<1, 10>` should not be added as an alias initially.
 
 Initial scalar refinements:
@@ -237,12 +239,16 @@ Initial collection and shape refinements:
 | --- | --- | --- |
 | `non-empty-array[T]` | `Array[T]` with at least one element | `Array[T]` |
 | hash shape with optional keys | Hash with known required and optional keys | RBS record when exact, otherwise `Hash[K, V]` |
+| hash shape with extra-key policy | Hash shape that is open, closed, or open only for extra keys of a known value type | RBS record when exact and closed, otherwise `Hash[K, V]` |
+| read-only hash shape entry | Key whose value may be read but should not be written through the current reference | Entry mutability marker erased |
 | tuple refinements | Fixed or bounded array positions | RBS tuple when exact, otherwise `Array[T]` |
 | object shape | Object with known public methods or singleton capabilities | Named interface when available, otherwise `top` or nominal base |
 
+Python `TypedDict` contributes the vocabulary for shape exactness: required and non-required keys, read-only entries, and open, closed, or typed-extra-key policies. Rigor should adapt those ideas to Ruby hashes, options hashes, and keyword arguments. A read-only entry is a static write restriction on the current view of the value; it does not prove that the underlying Ruby object is frozen.
+
 Rigor should not initially import PHPStan's `list<T>` and `non-empty-list<T>` as separate surface types. Ruby `Array[T]` already has list-like indexing semantics; `non-empty-array[T]` covers the useful refinement without adding another spelling.
 
-Initial type functions and operators inspired by PHPStan or TypeScript:
+Initial type functions and operators inspired by PHPStan, TypeScript, or Python typing:
 
 | Rigor form | Meaning |
 | --- | --- |
@@ -256,6 +262,11 @@ Initial type functions and operators inspired by PHPStan or TypeScript:
 
 Deferred or rejected imports:
 
+- Python `Any` and `object` should not become Rigor spellings. Rigor uses RBS `untyped` for dynamic boundaries and `top` for the greatest static value type.
+- Python `Never` and `NoReturn` should not become aliases for `bot`; RBS already provides the canonical bottom type.
+- Python `Protocol`, `TypedDict`, `Annotated`, `TypeGuard`, `TypeIs`, `Final`, and `ClassVar` should not become Rigor surface syntax. Their useful ideas map to RBS interfaces, Rigor shape refinements, `%a{...}` annotations, flow effects, and separate symbol or member facts.
+- Python `type[C]` should not be imported as syntax. RBS already uses `singleton(C)` for class objects; a future `instance_type[T]` projection should be designed around Ruby factory APIs.
+- Python numeric promotions such as `int` assignable to `float` or `complex` should not be imported directly. Ruby numeric behavior should be modeled from Ruby classes and RBS signatures.
 - `class-string`, `interface-string`, `trait-string`, and `enum-string` are deferred. Ruby can pass class and module objects directly, and RBS already has `singleton(C)` for class objects.
 - A PHPStan `new`-like type operation remains a future candidate, but it should be designed around Ruby class objects rather than class-name strings. For example, a future `instance_type[T]` could project the instance type created by a class object when factory APIs need that precision.
 - `non-falsy-string` and `truthy-string` are not useful in Ruby because every `String` value is truthy.
@@ -312,7 +323,7 @@ Rigor may read Rigor-specific metadata from RBS annotations in `*.rbs` files und
 
 RBS already supports `%a{...}` annotations on declarations, members, and method overloads. `RBS::Extended` should use that mechanism as the canonical attachment point because annotations are parsed into the RBS AST and remain associated with the signature node they describe.
 
-These annotations let users and plugin authors describe types that exceed standard RBS without changing Ruby application code and without breaking ordinary RBS parsers. Standard RBS tools should be able to preserve or ignore these annotations.
+These annotations let users and plugin authors describe types that exceed standard RBS without changing Ruby application code and without breaking ordinary RBS parsers. Standard RBS tools should be able to preserve or ignore these annotations. This follows the same compatibility principle as Python's `Annotated[T, metadata]`: the base type remains meaningful to tools that do not understand the metadata.
 
 Example:
 
@@ -334,6 +345,7 @@ Rules:
 - `RBS::Extended` annotations refine or explain that contract for Rigor.
 - Annotation keys use a `rigor:` namespace, for example `rigor:return` or `rigor:predicate-if-true`.
 - The annotation key comes first; the remaining text is a Rigor-specific payload.
+- Multiple annotations on the same RBS node must be interpreted deterministically; if their effects conflict, Rigor must report a diagnostic.
 - Prefer `T - U` for explicit user-authored difference types.
 - Use `~T` primarily for negative facts and compact diagnostic display.
 - If an annotation conflicts with the RBS signature, Rigor must report a diagnostic.
@@ -342,7 +354,7 @@ Rules:
 
 ### Type Predicates and Assertions
 
-Rigor models TypeScript-style type guards and PHPStan-style assertions as flow effects attached to RBS method signatures.
+Rigor models Python `TypeGuard`/`TypeIs`-style predicates, TypeScript-style type guards, and PHPStan-style assertions as flow effects attached to RBS method signatures.
 
 Predicate examples:
 
@@ -372,6 +384,14 @@ Meanings:
 - `rigor:assert target is T` refines `target` after the method returns normally.
 - `rigor:assert-if-true target is T` refines `target` when the method returns a truthy value.
 - `rigor:assert-if-false target is T` refines `target` when the method returns `false` or `nil`.
+
+A true-branch-only predicate is sufficient for Python `TypeGuard`-like behavior. A predicate pair that describes both branches is sufficient for Python `TypeIs`-like behavior. The false branch may be written as an explicit negative type when that is clearer:
+
+```rbs
+%a{rigor:predicate-if-true value is String}
+%a{rigor:predicate-if-false value is ~String}
+def string?: (untyped value) -> bool
+```
 
 The initial target grammar should be intentionally small:
 
@@ -404,6 +424,7 @@ Rigor normalizes types before comparison and reporting.
 - Drop `top` from intersections.
 - Expand `T?` to `T | nil` internally.
 - Normalize finite set difference and complement when the domain is known.
+- Preserve hash shape openness and read-only markers until RBS erasure.
 - Collapse `true | false` to `bool` for display when that is clearer.
 - Preserve literal precision until it becomes too large or expensive; then widen to the nominal base.
 - Preserve `untyped` explicitly rather than normalizing it to `top`.
@@ -421,6 +442,7 @@ Erasure rules:
 - Unsupported literal kinds erase to their nominal class.
 - Integer ranges erase to `Integer`.
 - Complement and difference refinements erase to their current domain type.
+- Hash shape openness, extra-key, and read-only markers are erased. Exact closed shapes erase to RBS records when possible; otherwise they erase to `Hash[K, V]`.
 - Object shapes erase to a matching named interface when one exists, otherwise a conservative nominal or `top`.
 - Dynamic-origin markers are removed.
 - Invalid-context `void`, `self`, `instance`, or `class` forms are rewritten to valid conservative RBS and reported as precision loss.
@@ -435,6 +457,8 @@ Rigor should prefer precise diagnostics over silent widening.
 - Calling a method on `top` without proof is a diagnostic.
 - Calling a method on `untyped` is allowed but should be traceable to an unchecked boundary.
 - A branch narrowed by a negative fact should display that fact when it is useful, for example `String - ""` or `~"foo"`.
+- Writing through a read-only shape entry is a diagnostic when Rigor has that fact.
+- Passing unexpected keys to a closed keyword or options-hash shape is a diagnostic.
 - Invalid or contradictory `RBS::Extended` annotations are diagnostics.
 - Losing precision during RBS export should be reportable when users request explanation or strict export mode.
 

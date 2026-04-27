@@ -321,6 +321,8 @@ Using a value of type `top` is still checked. A method call on `top` is accepted
 
 `bot` is useful for control-flow analysis because joining `bot` with a real branch leaves the real branch unchanged.
 
+For return contracts, `bot` satisfies every result contract because no normal value is produced. A method body that always raises, exits, or loops forever is therefore compatible with a `void` return contract. The reverse is not true: a `void` result is not a proof of non-returning control flow and does not satisfy a `bot` return contract.
+
 ### `untyped` and `Dynamic[T]`
 
 `untyped` is the dynamic type. It is consistent with every type:
@@ -385,10 +387,14 @@ result = puts("hello")
 Rules:
 
 - `void` is valid in method and proc return positions.
-- `void` is valid as a generic argument only when preserving an RBS signature.
-- `void` must not appear inside ordinary unions, optionals, records, tuples, or parameter types.
+- A `bot` implementation path is compatible with `void`; a `void` implementation path is not compatible with `bot`.
+- `void | bot` normalizes to `void` in result summaries because the `bot` path contributes no normal value.
+- `void` is valid as a generic argument, block parameter, or callback return only when preserving an existing RBS signature.
+- Rigor should not infer or author new `void` slots inside ordinary unions, optionals, records, tuples, or parameter types.
+- When imported RBS places `void` in a generic slot, Rigor preserves the slot. Reading from that slot produces a `void` result marker, and using that result follows the ordinary `void` value-context rule.
 - In statement context, a `void` result is accepted.
-- In value context, a `void` result produces a diagnostic and is materialized as `top` for downstream recovery.
+- In value context, a `void` result produces a primary "use of void value" diagnostic and is materialized as `top` for downstream recovery.
+- Recovery from a `void` value should suppress immediate cascading diagnostics such as "method on `top`" for the same expression unless the user has requested cascading output.
 
 ### `nil`, `NilClass`, and Optional Types
 
@@ -714,7 +720,7 @@ Erasure is conservative: if `erase(T) = R`, then every value accepted by `T` mus
 
 Rigor should prefer precise diagnostics over silent widening.
 
-- Using `void` as a value is a diagnostic.
+- Using `void` as a value is a primary diagnostic; downstream recovery uses `top` and should avoid duplicate cascade reports for the same expression.
 - Calling a method on `top` without proof is a diagnostic.
 - Calling a method on raw `untyped` is allowed but should be traceable to an unchecked boundary.
 - Calling a method on `Dynamic[T]` may use the static facet `T`, but diagnostics should be able to explain that the proof depended on a dynamic-origin value.

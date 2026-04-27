@@ -303,7 +303,11 @@ end
 
 **Interaction with implicit return at runtime.** Ruby’s last-expression return means a value almost always **exists** in the VM. Rigor’s obligation remains **static** (value context, assignment, chains, boundary behavior), not a proof that the runtime value is never observed.
 
-Further rules for `void` narrowing, value-context recovery, block/proc return positions, and diagnostic precedence remain a separate design task; see the critical-review concern in [Identified Concerns from Critical Review](#void-interacts-with-the-lattice-but-is-described-only-in-return-position).
+**Relation to `bot`.** A `bot` implementation satisfies a `void` return contract because no normal value is produced. A `void` result does not satisfy a `bot` return contract because the call may still return normally at runtime.
+
+**Value-context recovery.** If a `void` result is assigned, chained, interpolated, passed as an argument, or otherwise used as a value, Rigor reports a primary "use of void value" diagnostic and then recovers with `top`. Immediate follow-on diagnostics caused only by that recovery, such as "method on `top`", should be suppressed for the same expression unless cascading diagnostics are explicitly requested.
+
+**Imported RBS slots.** Existing RBS can place `void` in generic or callback slots, such as `Enumerator[Elem, void]` or a block parameter whose value is intentionally ignored. Rigor preserves these signatures for compatibility. If substitution makes such a slot appear in a value-producing position, the result is handled as a `void` result marker rather than as an ordinary value-set type.
 
 ### RBS Context Rules Are Preserved
 
@@ -398,11 +402,21 @@ This resolves the shape of `untyped` propagation while leaving user-facing diagn
 
 ### `void` Interacts with the Lattice but Is Described Only in Return Position
 
-`void` is placed outside the value lattice, but several follow-up rules are needed:
+`void` is placed outside the value lattice, but the critical review identified several follow-up rules:
 
 - The relation between `void` and `bot` is not stated. A method that always raises has return type `bot`; whether such a value is acceptable in a `void` context should be explicit.
 - RBS allows `void` as a generic argument in some library signatures. Internal queries on shapes such as `Array[void]` and `Hash[K, void]` need defined behavior even if user-authored Rigor types forbid them.
 - Because a `void` value materializes to `top` in value context, the diagnostic precedence between "use of `void` value" and "method on `top` without proof" must be picked.
+
+Working response:
+
+- `void` remains a no-use result marker, not an ordinary value-set type.
+- `bot` satisfies `void` because a non-returning path produces no usable value. `void` does not satisfy `bot` because a `void` call may return normally.
+- In result summaries, `void | bot` normalizes to `void`.
+- Imported RBS signatures may contain `void` in generic, block, or callback slots. Rigor preserves those slots for compatibility. If substitution exposes such a slot in an ordinary value-producing position, the expression has a `void` result marker and follows the normal value-context rule.
+- A value-context use of `void` is the primary diagnostic. Recovery uses `top`, but immediate diagnostics caused only by recovery should be suppressed to avoid noisy cascades.
+
+This resolves the core `void` lattice concern. Remaining design work is mostly about diagnostic identifiers and UX wording, not the type relation itself.
 
 ### Negative Facts Have No Retention or Display Policy
 

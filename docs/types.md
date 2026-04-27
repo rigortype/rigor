@@ -122,7 +122,7 @@ end
 
 Supported narrowing sources should include:
 
-- Equality and inequality checks against literals and singleton values.
+- Trusted equality and inequality checks against literals and singleton values.
 - `nil?` checks and nil comparisons.
 - Truthiness checks, where `nil` and `false` narrow the false branch.
 - `is_a?`, `kind_of?`, `instance_of?`, and class/module comparisons.
@@ -161,11 +161,19 @@ Ruby equality is method dispatch. A syntactic comparison such as `foo == "foo"` 
 
 - identity facts, such as `x.equal?(obj)`, which can prove singleton identity;
 - nil and boolean checks, which are stable Ruby value tests;
-- equality facts for known built-in immutable domains, such as finite `String`, `Symbol`, `Integer`, `true`, `false`, and `nil` alternatives;
+- equality facts for known built-in domains whose dispatch target is stable, such as finite `String`, `Symbol`, `Integer`, `true`, `false`, and `nil` alternatives already present in the receiver domain;
 - comparison facts contributed by RBS or plugins for trusted predicate and equality methods;
-- unknown equality methods, which should produce at most a relational fact unless the analyzer has enough method information to refine the value type.
+- unknown equality methods, which should produce at most a relational fact unless the analyzer has enough method information to refine the value type;
+- floating-point comparisons, which should not produce literal narrowing by default because `NaN`, signed zero, infinities, and coercion make exhaustiveness and equality reasoning easy to misstate.
 
-When a value starts as `untyped`, Rigor may display a narrowed fact inside a guard, but the value keeps dynamic-origin provenance. For example, a trusted guard may display `Dynamic["foo"]` or simply `"foo"` in a short diagnostic, while the internal type still records that the fact crossed an unchecked boundary.
+Equality narrowing must not introduce a positive domain from the compared value alone. If `foo` is raw `untyped`, `foo == "foo"` keeps `foo` as `Dynamic[top]` with a dynamic-origin relational fact unless Rigor also knows that the dispatched equality method has a trusted narrowing effect. If `foo` is already known to be `"foo" | "bar"`, the same comparison may narrow the true branch to `"foo"` and the false branch to `"bar"`.
+
+Rigor should classify equality facts by trust level:
+
+- identity facts from `equal?` are value facts as long as the observed reference itself remains stable;
+- built-in literal-domain equality can narrow only inside an already-compatible receiver domain with a known core dispatch target;
+- `Module`, `Class`, `Range`, `Regexp`, and `===`-based case behavior need explicit per-kind rules or plugin facts rather than being treated as general equality;
+- user-defined `==`, `eql?`, `===`, and coercion-sensitive comparisons remain relational facts until RBS metadata or a plugin declares true-edge and false-edge effects.
 
 This rule keeps TypeScript- and PHPStan-style equality narrowing useful without pretending that Ruby `==` is a built-in identity operator.
 

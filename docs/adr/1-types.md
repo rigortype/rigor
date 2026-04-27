@@ -251,13 +251,15 @@ Explicit RBS declarations still define public contracts. If a signature says `IO
 
 Rigor should run appropriate CFA and data-flow analysis, similar in spirit to PHPStan, TypeScript, and Python type checkers.
 
-For example, after `value == "foo"`, the true branch can narrow `value` to `"foo"` and the false branch can carry the negative fact displayed as `~"foo"`. The exact operator syntax is provisional, but the semantic capability is required.
+For example, after `value == "foo"`, the true branch can narrow `value` to `"foo"` and the false branch can carry the negative fact displayed as `~"foo"` when `value` already has a compatible trusted domain. The comparison does not create that positive domain by itself. The exact operator syntax is provisional, but the semantic capability is required.
 
 Python's `TypeGuard` and `TypeIs` distinction supports the same design direction: predicate behavior is a flow effect. A true-only predicate is enough for `TypeGuard`-like behavior; paired true and false facts, or a false fact expressed as `T & ~U`, provide `TypeIs`-like behavior.
 
 CFA must be fine-grained enough to update scope inside a condition expression, not only after the whole condition has been evaluated. For `if foo == "foo" && foo == "bar"`, the right side of `&&` is analyzed in the scope produced by the left side's true edge. If the current domain makes `"foo" & "bar"` impossible, the whole true branch becomes `bot`. The same principle applies to `||`, `!`, `unless`, `elsif`, `case`, and pattern matching.
 
 Ruby equality is method dispatch, so equality narrowing cannot be a purely syntactic rule. `equal?`, `nil?`, boolean checks, trusted built-in literal domains, and predicate effects declared by RBS or plugins can produce type facts. Unknown `==` implementations should produce a weaker relational fact unless Rigor has method information that justifies a value-type refinement.
+
+Raw `untyped` equality remains dynamic-origin relational information. `v: untyped` followed by `v == "foo"` does not become `Dynamic["foo"]` unless an independent guard or trusted equality effect proves that narrowing.
 
 ### `void` Is a Return-Position Marker
 
@@ -448,6 +450,18 @@ The spec invokes "trusted built-in immutable domains" and "trusted predicate and
 - `equal?` is the closest thing to identity in Ruby, but identity facts can degrade after `dup`, `freeze`, marshalling, or singleton-class reopen. Pairing identity narrowing with explicit invalidation rules is left implicit.
 - The conditions under which a user-defined `==` is promoted from a relational fact to a value-narrowing fact are not defined.
 
+Working response:
+
+- Equality narrowing is trusted only when Rigor knows the dispatched comparison behavior and the narrowed value already has a compatible positive domain. Syntax such as `value == "foo"` is not enough by itself.
+- Raw `untyped` equality remains relational. `v: untyped` with `v == "foo"` or `v != "foo"` keeps `Dynamic[top]` plus a dynamic-origin relational fact unless another guard or declared effect proves a positive domain.
+- `equal?` produces identity facts, but those facts are tied to the observed reference and follow ordinary stability rules. Reassignment, alias-escaping mutation, unknown calls, or plugin-declared invalidation may weaken them.
+- Built-in literal-domain equality is initially trusted for finite domains of `String`, `Symbol`, `Integer`, booleans, and `nil` when the receiver dispatch target is known and the receiver domain is already compatible.
+- `Float` literal narrowing is refused by default. Rigor may keep relational facts for diagnostics, but `NaN`, signed zero, infinities, and numeric coercion make default exhaustiveness over float literals too easy to get wrong.
+- `Range`, `Regexp`, `Module`, `Class`, and `===`-based case behavior are not general equality facts. They need specific narrowing rules or plugin/RBS effects before they can refine value domains.
+- User-defined `==`, `eql?`, and `===` can be promoted from relational facts to value facts only through explicit RBS metadata, `RBS::Extended` flow effects, or plugins that declare true-edge and false-edge facts plus any required stability or purity assumptions.
+
+This keeps useful literal narrowing while avoiding a TypeScript-style assumption that equality syntax is intrinsically value-set comparison.
+
 ### Mutation Invalidation Rules Are Too Coarse for Idiomatic Ruby
 
 "Unknown method calls invalidate facts" and "block-yielded code may invalidate facts" cover the worst case, but they are too aggressive for typical Ruby code:
@@ -601,12 +615,12 @@ Negative:
 - Which dynamic-origin sources should be classified as explicit user intent, missing signatures, analyzer limits, or plugin-declared dynamic behavior?
 - What plugin API is needed for framework-specific object shapes and dynamic method resolution?
 - What is the smallest fact-stability model that makes shape and hash-key narrowing useful without becoming unsound around mutation?
-- Which equality methods are trusted by default for literal narrowing, and how should custom equality effects be declared?
+- What exact `RBS::Extended` or plugin payload should declare custom equality effects?
 - How should diagnostics distinguish a proven type fact from a relational or dynamic-origin fact?
 - Which standard Ruby capability roles, such as readable stream, writable stream, rewindable stream, closable, enumerable, callable, and file-descriptor-backed, should Rigor ship as named interfaces?
 - Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
 - Which generic variance cases require special handling for `Dynamic[T]` slots in the first implementation?
-- Should equality narrowing for `Float` be opt-in, restricted, or refused outright to avoid `NaN` pitfalls?
+- Should `Float` equality narrowing ever be opt-in, and what proof should be required to exclude `NaN` and signed-zero pitfalls?
 - What purity model determines which method calls preserve object-shape, hash-key, and instance-variable facts across higher-order calls?
 - What is the canonical algorithm for erasing arbitrary hash shapes to `Hash[K, V]`, including the choice between literal-union and nominal keys?
 - Which existing suppression or ignore-marker conventions, if any, should Rigor support beyond ordinary RBS/rbs-inline/Steep type annotations?

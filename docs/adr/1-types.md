@@ -326,6 +326,114 @@ Reconstructing `docs/types.md` as the ideal type model adds several requirements
 - Shape, member, and hash-key facts need invalidation rules. Assignments, mutation, unknown calls, yielded blocks, and plugin-declared effects may weaken or remove facts.
 - RBS erasure is part of the type design, not a presentation layer. Every internal refinement, relation, and provenance marker needs a conservative erasure rule.
 
+## Identified Concerns from Critical Review
+
+A critical review of the type specification and the decisions above surfaced the following risks. They are not blockers for the current draft, but each will need either a working decision or an explicit deferral before the type engine can be implemented end to end.
+
+### Gradual Typing Rules around `untyped` Need More Than Joins
+
+The spec covers `T | untyped = untyped` and `consistent(untyped, T)`, but several supporting rules are missing:
+
+- The result of `untyped & T` is not stated. Treating it as `T` discards dynamic-origin provenance; treating it as `untyped` discards information already carried by `T`.
+- `untyped` in generic positions (`Array[untyped]`, `Hash[Symbol, untyped]`, proc parameters) interacts with variance and member-access narrowing. Top-level join rules do not extrapolate to those positions.
+- Rigor's strict-mode story for `untyped` propagation is unspecified. Without one, every union with `untyped` collapses, and the dynamic-origin marker offers little leverage to users actively shrinking their gradual surface.
+
+### `void` Interacts with the Lattice but Is Described Only in Return Position
+
+`void` is placed outside the value lattice, but several follow-up rules are needed:
+
+- The relation between `void` and `bot` is not stated. A method that always raises has return type `bot`; whether such a value is acceptable in a `void` context should be explicit.
+- RBS allows `void` as a generic argument in some library signatures. Internal queries on shapes such as `Array[void]` and `Hash[K, void]` need defined behavior even if user-authored Rigor types forbid them.
+- Because a `void` value materializes to `top` in value context, the diagnostic precedence between "use of `void` value" and "method on `top` without proof" must be picked.
+
+### Negative Facts Have No Retention or Display Policy
+
+"Negative facts are first-class" gives a direction without bounding cost or readability:
+
+- Sequences such as `Integer - 0 - 1 - 2 - ...` are naturally expressible but can blow up in memory, normalization, and rendered diagnostics.
+- The interaction between accumulated negative facts and other narrowing operations such as `is_a?(Integer)`, `respond_to?`, and pattern matching is not described.
+- Diagnostic display of large negative-fact sets needs a simplification rule (analogous to TypeScript's literal-set widening) so error output stays usable at scale.
+
+### Equality Narrowing Trusts a Not-Yet-Enumerated Set of Methods
+
+The spec invokes "trusted built-in immutable domains" and "trusted predicate and equality methods" without naming them:
+
+- `Float` equality is unsound for `NaN`. If literal narrowing is allowed for `Float`, `NaN` becomes a soundness pitfall; if forbidden, the rule should say so.
+- `Range`, `Regexp`, `Symbol`, and `Module` have well-defined equality, but their `==` and `===` are not classified as trusted or untrusted.
+- `equal?` is the closest thing to identity in Ruby, but identity facts can degrade after `dup`, `freeze`, marshalling, or singleton-class reopen. Pairing identity narrowing with explicit invalidation rules is left implicit.
+- The conditions under which a user-defined `==` is promoted from a relational fact to a value-narrowing fact are not defined.
+
+### Mutation Invalidation Rules Are Too Coarse for Idiomatic Ruby
+
+"Unknown method calls invalidate facts" and "block-yielded code may invalidate facts" cover the worst case, but they are too aggressive for typical Ruby code:
+
+- `each_with_object`, `tap`, `then`, `yield_self`, and similar higher-order patterns run user code in a closure. Without a purity oracle, all member and shape facts collapse on every block.
+- Closures can mutate locals from another scope (`-> { x = 1 }.call`). The fact-stability rule for closure-captured locals must mention this case explicitly.
+- "Frozen, literal, freshly allocated, or otherwise proven-stable" is a category, not a list. A practical first cut needs concrete proof obligations.
+
+### Capability-Role Inference Has No Tractability Story
+
+Inferring "the minimum structural requirement of a method body" is a centerpiece of the design, but the cost and matching strategy are open:
+
+- The cost of computing capability requirements per method, especially for recursive methods or methods that delegate via `send`, is not analyzed.
+- Matching an inferred shape against named interfaces is at least quadratic and can be expensive when many candidates exist. The selection rule (most-specific wins, first-match, user-configurable) is undefined.
+- Combining capability-role inference with generics (`def reset: [S < _RewindableStream] (S stream) -> S`) requires bound checking against an inferred shape, but the algorithm choice is open.
+
+### `RBS::Extended` Annotation Grammar Lacks Versioning and Conflict Semantics
+
+Two aspects of the grammar are user-facing on disk and need an early decision:
+
+- Versioning: a future incompatible directive change cannot reuse the `rigor:` prefix without breaking existing files. A version-prefix scheme such as `rigor:v1:...`, or an out-of-band version declaration in `.rigor.yml`, must be picked.
+- Conflict resolution: the spec says conflicts must be reported, but the precedence model (first wins, last wins, severity-based, always error) is not pinned down. Without a single rule, plugin authors cannot predict outcomes.
+
+### Hash Erasure Does Not Specify How `Hash[K, V]` Is Reconstructed
+
+`{ a: 1, b: "str" }` could erase to `Hash[Symbol, Integer | String]`, `Hash[:a | :b, Integer | String]`, or some intersection of those. The choice changes downstream precision and RBS readability:
+
+- Should keys widen to their nominal class or stay as a literal union when finite?
+- Should values be unioned, widened to a least common nominal supertype, or both forms be available behind a flag?
+- For open shapes, what is the value type when extra keys are accepted but unknown? `untyped`, the current shape's value union, or the user-declared extra-key bound?
+
+### Difference and Complement Notation Needs a Domain-Aware Display Contract
+
+`~T` is "complement of `T` within the current known domain", but display is the only place users see it:
+
+- Diagnostics that print `~"foo"` without the surrounding domain are easy to misread as global complements. A combined display such as `String - "foo"` or `~"foo" : String` would be clearer.
+- Nested differences (`(String - "") - "foo"`) and intersections with negative members (`A & ~B & ~C`) need a normalized form so equivalent diagnostics render identically across code paths.
+- The rule for when `~T` should be rendered as `T - U` and vice versa is implicit. A single canonical rendering keeps user mental models stable.
+
+### Visibility, Accessor Inference, and Method-Shape Capture Are Under-Specified
+
+The shape model relies on visibility and reader/writer roles, but Ruby's surface is more flexible than the current text:
+
+- `attr_writer :x` without a matching reader, or an overridden accessor that mutates additional state, is not covered by the read-only/read-write/write-only categorization.
+- `private` and `protected` boundaries change the set of "visible" members for `respond_to?` and external sends. Shape entries should distinguish all three visibilities, not collapse into public/non-public.
+- `respond_to?(:foo, true)` and `respond_to?(:foo)` produce different facts; the difference must propagate into shape entries to avoid silently widening visibility.
+
+### Positioning Relative to Existing Ruby Type Tooling Is Missing
+
+Sorbet, Steep, RBS-based linters, and `rbs-inline` occupy adjacent design space. ADR-0 mentions them, but ADR-1 does not articulate Rigor's compatibility and competition story:
+
+- How Rigor consumes the same RBS that Steep consumes, and where divergence is acceptable.
+- Whether Rigor intends to read Steep- or Sorbet-style ignore markers, or to define its own.
+- How `RBS::Extended` annotations are expected to interact with existing tools that may also place `%a{...}` annotations on the same nodes.
+
+### Behavior on Annotation-Poor Code Bases Is Not Described
+
+Rails-shaped applications are dominated by `untyped` until plugins fill in shapes. The value of the spec depends heavily on plugins, but ADR-1 does not state the minimum useful behavior when plugins are absent:
+
+- Which narrowing operations remain useful with widespread `untyped` (likely `nil?`, truthiness, `is_a?`, equality against literals)?
+- What is the diagnostic policy for "method on `untyped`": always allowed, allowed but reportable in strict mode, or progressively configurable?
+- How are common dynamic patterns (ActiveRecord finder chains, Sidekiq workers, RSpec doubles) handled before plugins ship?
+
+### Numeric Refinements Stop at `Integer`
+
+The scalar refinement table lists positive/negative/non-zero integer refinements but does not address adjacent cases:
+
+- `Float` (with `NaN`, `+0.0`/`-0.0`, infinities), where ordinary equality and ordering are partial.
+- `Rational` and `Complex`, which RBS recognizes as core numeric classes.
+- Promotion rules across `Integer | Float`, `Integer | Rational`, and similar unions, which Ruby resolves at runtime through `coerce`. Rigor must decide whether refinements transit `coerce` boundaries or stop at the nominal level.
+
 ## Rejected and Deferred Candidate Decisions
 
 This ADR keeps explicit notes for candidate ideas that were discussed but not accepted as the current direction.
@@ -397,6 +505,17 @@ Negative:
 - How should diagnostics distinguish a proven type fact from a relational or dynamic-origin fact?
 - Which standard Ruby capability roles, such as readable stream, writable stream, rewindable stream, closable, enumerable, callable, and file-descriptor-backed, should Rigor ship as named interfaces?
 - Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
+- How should `untyped` interact with intersection (`untyped & T`) and with generic argument positions, beyond the documented join rule?
+- Should equality narrowing for `Float` be opt-in, restricted, or refused outright to avoid `NaN` pitfalls?
+- What purity model determines which method calls preserve object-shape, hash-key, and instance-variable facts across higher-order calls?
+- What is the canonical algorithm for erasing arbitrary hash shapes to `Hash[K, V]`, including the choice between literal-union and nominal keys?
+- How should Rigor relate to existing Ruby type tools such as Sorbet, Steep, and `rbs-inline`, both for input compatibility and for ignore-marker conventions?
+- What is the minimum useful narrowing surface in heavily `untyped` code before plugins ship?
+- Should `RBS::Extended` annotation directives carry an explicit version prefix (`rigor:v1:...`) or be governed by a project-level version declaration?
+- What is the deterministic precedence rule when multiple `RBS::Extended` annotations on the same node disagree (first wins, last wins, severity-based, always-error)?
+- How should diagnostics display difference and complement types so that domain context (`~"foo"` inside `String`) is unambiguous?
+- How should `Float`, `Rational`, `Complex`, and `coerce`-mediated promotions participate in scalar refinements?
+- Should visibility (`public`, `protected`, `private`) be a first-class facet of shape entries, or modeled separately as a side fact?
 
 ## Resulting Specification
 

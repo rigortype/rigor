@@ -133,6 +133,17 @@ This separation lets Rigor keep track of unchecked boundaries while still allowi
 
 Internally, dynamic-origin values should be represented as `Dynamic[T]`, where `T` is the currently known static facet. Raw `untyped` is `Dynamic[top]`. This is not user-facing RBS syntax; it is the implementation device that lets Rigor narrow an unchecked value without losing the fact that the value came from a gradual boundary.
 
+The dynamic algebra preserves the static facet through the ordinary type operators while keeping the dynamic-origin marker:
+
+- `Dynamic[A] | Dynamic[B] = Dynamic[A | B]`
+- `T | Dynamic[U] = Dynamic[T | U]`
+- `Dynamic[T] & U = Dynamic[T & U]`
+- `Dynamic[T] - U = Dynamic[T - U]`
+
+Generic positions preserve dynamic-origin slots. `Array[untyped]` becomes `Array[Dynamic[top]]`, so element reads, writes, and leaks can be explained precisely. Subtyping and member lookup still use the static facet when one is available; gradual consistency only applies at the dynamic boundary.
+
+Strict modes use this provenance rather than changing the core relation. One level may report dynamic-to-precise boundary crossings and unchecked generic leaks; a stricter level may also report operations whose proof depends on dynamic-origin facts.
+
 The documentation should write the gradual-consistency relation as `consistent(A, B)`, not `A ~ B`, because `~T` is reserved for negative or complement types.
 
 ### PHPStan Compared with RBS
@@ -247,6 +258,19 @@ This keeps three facts separate:
 
 Explicit RBS declarations still define public contracts. If a signature says `IO`, passing `StringIO` should not be silently accepted as a subtype. Rigor may instead report that the implementation appears to require only a smaller capability role and suggest generalizing the signature to an interface. Unions remain appropriate when the implementation genuinely branches on or uses class-specific behavior from both `IO` and `StringIO`.
 
+### Capability-Role Inference Discipline
+
+Capability roles are summaries, not searches. The inference must stay bounded and predictable:
+
+- Each method has a cached requirement summary recording required member names, visibility, arity, keyword and block requirements, return-use constraints, mutation requirements, and provenance for each parameter and receiver.
+- The summary is an anonymous object-shape requirement by default. Naming it as a known interface is an export and diagnostic convenience, not the core inference result.
+- Requirement inference is local and monotone. Direct calls reuse existing signatures or cached summaries. Recursive or mutually recursive summaries use a widening placeholder and iterate only to a small fixed-point budget.
+- Dynamic dispatch through `send`, `public_send`, unconstrained `method_missing`, or untyped delegation records a dynamic requirement instead of attempting to enumerate every possible target.
+- Named-interface matching uses an index keyed by member name and visibility. Rigor compares only cheap-filtered candidates; if the candidate set is too large, the anonymous shape is kept and the generalization hint is suppressed.
+- Candidate selection is deterministic: exact member-signature match first, configured standard-library roles before coincidental user interfaces, fewer extra required members next, then stable lexical name order. Ambiguity at the top of that ordering means no named suggestion is reported.
+- Intersections of roles are allowed but bounded. The first implementation may use exact single-interface matches, explicit standard role bundles, or a small greedy intersection under a strict candidate limit. It does not solve an unbounded set-cover problem.
+- Generic preservation is handled by identity tracking, not the role matcher. If a method returns the same parameter object it received, Rigor may infer `[S < _Role] (S value) -> S`. If the body may replace the value or return a delegated object, Rigor uses the ordinary inferred return type.
+
 ### Control-Flow Narrowing Is Central
 
 Rigor should run appropriate CFA and data-flow analysis, similar in spirit to PHPStan, TypeScript, and Python type checkers.
@@ -261,11 +285,48 @@ Ruby equality is method dispatch, so equality narrowing cannot be a purely synta
 
 Raw `untyped` equality remains dynamic-origin relational information. `v: untyped` followed by `v == "foo"` does not become `Dynamic["foo"]` unless an independent guard or trusted equality effect proves that narrowing.
 
+The initial trusted equality surface is intentionally narrow:
+
+- `equal?` produces an identity fact bound to the observed reference. The fact is invalidated by reassignment, alias-escaping mutation, unknown calls, or plugin-declared effects.
+- Built-in literal-domain equality is trusted only for finite literal sets of `String`, `Symbol`, `Integer`, booleans, and `nil`, and only when the receiver dispatch target is known and the receiver domain is already compatible.
+- `Float` literal narrowing is refused by default. `NaN`, signed zero, infinities, and numeric coercion make exhaustiveness over float literals unsafe; relational facts may still be kept for diagnostics.
+- `Range`, `Regexp`, `Module`, `Class`, and `===`-based case behavior do not produce general value-narrowing facts on their own. They require specific narrowing rules or RBS/plugin effects before they can refine value domains.
+- User-defined `==`, `eql?`, and `===` are promoted from relational facts to value facts only through explicit RBS metadata, `RBS::Extended` flow effects, or plugin-declared true-edge and false-edge facts together with any required stability or purity assumptions.
+
+### Fact Stability and Mutation Effects
+
+Flow facts are not all of the same kind, and they invalidate at different rates:
+
+- Local binding facts are about which value a name refers to in this scope.
+- Captured-local facts are about locals that may be written by an outer or inner closure.
+- Object-content facts cover hash entries, instance variables, object-shape members, and other heap state.
+- Global-storage facts cover constants, globals, class variables, and similar shared state.
+- Dynamic-origin facts retain a `Dynamic[T]` marker even after narrowing.
+- Relational facts record comparisons that have not yet been reduced to a value type.
+
+Invalidation is targeted rather than scope-wide:
+
+- Unknown method calls may invalidate heap facts for targets that could have escaped, such as object shapes, hash entries, instance variables, constants, globals, and class variables. They do not invalidate every local binding fact in scope.
+- Local binding facts survive ordinary method calls until assignment to that local. A call may mutate the object referenced by `x`, but it cannot rebind `x` unless `x` is captured by a closure that writes it.
+- Closure writes are explicit effects. When a block, proc, or lambda writes an outer local, Rigor records a captured-local write. Immediate known invocation applies that write at the call edge; escaping or deferred closures make writable captured-local facts unstable after the escape point.
+- Higher-order calls need call-timing effects rather than a blanket "yield invalidates everything" rule. The initial categories are no block invocation, immediate non-escaping invocation with known count, immediate non-escaping invocation with unknown count, deferred or escaping block storage, and unknown block behavior.
+- Core methods such as `tap`, `then`, `yield_self`, and `each_with_object` should eventually have summaries for block timing, return behavior, and receiver or argument mutation. Until those summaries exist, Rigor may weaken object-content facts touched by such calls but should preserve unrelated local binding facts.
+
+The first proof obligations for stable facts are concrete:
+
+- A non-reassigned local that is not writable by any escaping closure.
+- Immutable singleton or immediate values.
+- Values proven frozen for the relevant operation.
+- Fresh allocations that have not escaped.
+- RBS, `RBS::Extended`, or plugin effects that declare read-only, pure, or targeted mutation behavior.
+
 ### `void` Is a Return-Position Marker
 
 RBS treats `void` as top-like but context-limited. Rigor should model `void` internally as a result marker that says the return value should not be used.
 
 This enables diagnostics such as assigning the result of a `void` method call. In statement context, `void` is fine. In value context, Rigor reports a diagnostic and recovers with `top`.
+
+In normalized result summaries, `void | bot` collapses to `void`. A path that always raises is acceptable in a `void` context, so the union does not weaken the marker.
 
 ### Inline RBS Annotations and Inference Boundaries
 
@@ -329,6 +390,19 @@ end
 
 Many Ruby classes implement `<=` and `-`, so without a parameter or return contract this method does not have a unique useful inferred domain. The recursive calls also make return inference fan out. Rigor should stop early when operator ambiguity and recursion exceed a budget. In non-interactive mode it reports an incomplete-inference diagnostic and suggests adding a boundary contract. In interactive CLI mode it may ask the user for a compatible type source, such as `#: Integer` for a return-only cutoff, a full `# @rbs` method type, or an external `.rbs` declaration. The chosen contract is trusted by callers and checked against the implementation like any other accepted signature source.
 
+The initial budget categories are explicit so cutoffs are predictable:
+
+- Recursion depth on the same method or mutually recursive cluster.
+- Call-graph expansion width when a body fans out into many callees without contracts.
+- Overload candidate count for argument-sensitive dispatch.
+- Operator ambiguity per call when an operator like `<=` or `-` accepts many receiver types.
+- Union size for joined inferred returns.
+- Structural requirement growth when a capability summary keeps acquiring new members.
+
+Each budget produces an incomplete-inference result with a reason rather than a fabricated precise type. This keeps the inference compatible with the "no Rigor-specific inline type syntax in Ruby code" goal: the user resolves the cutoff with an accepted RBS-shaped contract, not with a Rigor-only DSL.
+
+**Ignore-marker compatibility is open.** Rigor has not committed to reading Steep- or Sorbet-style suppression comments, defining its own configuration-only suppression form, or supporting more than one mechanism. The decision is tracked in Open Questions and is independent of accepted signature sources.
+
 ### RBS Context Rules Are Preserved
 
 `self`, `instance`, `class`, and `void` have context restrictions in RBS. Rigor may carry richer contextual information internally, but exported RBS must obey those restrictions.
@@ -336,6 +410,16 @@ Many Ruby classes implement `<=` and `-`, so without a parameter or return contr
 ### Refinements Are Internal
 
 Rigor can infer refined types such as non-empty strings, positive integers, literal sets, truthiness-narrowed types, and hash/object shapes. These refinements improve diagnostics and flow analysis, but they erase to ordinary RBS.
+
+### Pre-Plugin Inference Surface
+
+Many Ruby code bases are dominated by `Dynamic[top]` until plugins, generated stubs, or RBS files fill in shapes. The pre-plugin surface should still produce useful facts:
+
+- Stable Ruby guards narrow `Dynamic[top]` to `Dynamic[T]` whenever Ruby semantics or existing signatures justify the static facet. The initial useful checks include nilability, truthiness, `is_a?`, `kind_of?`, `instance_of?`, literal equality for trusted built-in domains, and `respond_to?` member-existence facts.
+- Method calls on raw `Dynamic[top]` remain allowed by default so gradual code can be analyzed incrementally. They are traceable, and strict modes may report them as dynamic-to-precise crossings without changing the core relation.
+- Diagnostics should explain whether a `Dynamic[T]` came from a missing signature, an explicit `untyped`, or an analyzer or plugin limit, even when no plugin is loaded.
+
+This is the analyzer's baseline before framework- or library-specific plugins ship. Plugin-specific behavior remains deferred to ADR-2.
 
 ### Imported Built-Ins Follow Ruby Semantics
 
@@ -363,6 +447,13 @@ The working notation policy is:
 - Use `T - U` as the preferred explicit authoring form for difference types in `RBS::Extended` annotations.
 - Allow the implementation to normalize `T - U` to `T & ~U`.
 
+Retention follows finite-domain precision and a budget for open domains:
+
+- Finite domains normalize exactly. `"foo" | "bar"` minus `"foo"` becomes `"bar"`; removing every alternative becomes `bot`.
+- Large or unknown domains keep negative facts under a budget. When the budget is exceeded, Rigor records that exclusions were omitted and falls back to the positive domain rather than rendering unstable chains such as `Integer - 0 - 1 - 2 - ...`.
+- Display should prefer domain-bearing forms such as `String - "foo"` when bare `~"foo"` would be ambiguous; `~T` is reserved for compact branch-local display when the surrounding domain is already visible.
+- Negative facts follow the same stability rules as other flow facts: assignment, mutation, unknown calls, yielded blocks, and plugin-declared invalidation may weaken or remove them.
+
 ### `RBS::Extended` Is an Annotation-Based Metadata Layer
 
 Advanced types may be attached to ordinary RBS declarations, members, and overloads using RBS `%a{...}` annotations. This preserves compatibility with standard RBS tooling while giving Rigor a place to read refinements such as `String - ""`, `~"foo"`, or `String where non_empty`.
@@ -380,7 +471,7 @@ The version prefix is part of the compatibility contract. Rigor-generated annota
 
 If `RBS::Extended` metadata conflicts with the ordinary RBS signature, Rigor should report a diagnostic.
 
-Multiple annotations on the same node are combined by directive kind, target, and flow edge. Exact duplicates are idempotent. Compatible effects compose; for example, true-edge and false-edge predicate annotations occupy different effect slots. Conflicts are always diagnostics, never first-wins or last-wins. This includes incompatible payload syntax, incompatible versions on the same node, two non-identical singleton directives for the same effect slot, contradictory refinements whose intersection is `bot`, and refinements that exceed the ordinary RBS signature.
+Multiple annotations on the same node are combined by directive kind, target, and flow edge. Exact duplicates are idempotent. Compatible effects compose; for example, true-edge and false-edge predicate annotations occupy different effect slots. Conflicts are always diagnostics, never first-wins or last-wins. This includes incompatible payload syntax, incompatible versions on the same node, two non-identical singleton directives for the same effect slot, contradictory refinements whose intersection is `bot`, refinements that exceed the ordinary RBS signature, and effect declarations that cannot both be true such as a "pure" effect combined with a receiver-mutation effect.
 
 Type guard and assertion effects should be modeled as flow effects, not as ordinary return types. This keeps signatures RBS-compatible while still allowing TypeScript-style narrowing, PHPStan-style assertion behavior, and Python `TypeGuard`/`TypeIs`-style predicates.
 
@@ -406,162 +497,7 @@ Reconstructing `docs/types.md` as the ideal type model adds several requirements
 
 ## Identified Concerns from Critical Review
 
-A critical review of the type specification and the decisions above surfaced the following risks. They are not blockers for the current draft, but each will need either a working decision or an explicit deferral before the type engine can be implemented end to end.
-
-### Gradual Typing Rules around `untyped` Need More Than Joins
-
-The earlier spec covered `T | untyped = untyped` and `consistent(untyped, T)`, but several supporting rules were missing:
-
-- The result of `untyped & T` is not stated. Treating it as `T` discards dynamic-origin provenance; treating it as `untyped` discards information already carried by `T`.
-- `untyped` in generic positions (`Array[untyped]`, `Hash[Symbol, untyped]`, proc parameters) interacts with variance and member-access narrowing. Top-level join rules do not extrapolate to those positions.
-- Rigor's strict-mode story for `untyped` propagation is unspecified. Without one, every union with `untyped` collapses, and the dynamic-origin marker offers little leverage to users actively shrinking their gradual surface.
-
-Working response:
-
-- Rigor should use an internal `Dynamic[T]` wrapper. Raw RBS `untyped` is `Dynamic[top]`.
-- Joins, intersections, and differences transform the static facet while preserving dynamic provenance: `Dynamic[A] | Dynamic[B] = Dynamic[A | B]`, `T | Dynamic[U] = Dynamic[T | U]`, `Dynamic[T] & U = Dynamic[T & U]`, and `Dynamic[T] - U = Dynamic[T - U]`.
-- Generic positions preserve dynamic-origin slots. `Array[untyped]` becomes `Array[Dynamic[top]]`, so element reads, writes, and leaks can be explained precisely.
-- Gradual consistency allows `Dynamic[T]` to cross typed boundaries, but subtyping and member lookup still use the static facet when one is available.
-- Strict modes should use the provenance rather than changing the core relation: one level can report dynamic-to-precise boundary crossings and unchecked generic leaks; a stricter level can report operations whose proof depends on dynamic-origin facts.
-
-This resolves the shape of `untyped` propagation while leaving user-facing diagnostic policy, displayed type notation, and strict-mode names as implementation design tasks.
-
-### `void` Interacts with the Lattice but Is Described Only in Return Position
-
-`void` is placed outside the value lattice, but the critical review identified several follow-up rules:
-
-- The relation between `void` and `bot` is not stated. A method that always raises has return type `bot`; whether such a value is acceptable in a `void` context should be explicit.
-- RBS allows `void` as a generic argument in some library signatures. Internal queries on shapes such as `Array[void]` and `Hash[K, void]` need defined behavior even if user-authored Rigor types forbid them.
-- Because a `void` value materializes to `top` in value context, the diagnostic precedence between "use of `void` value" and "method on `top` without proof" must be picked.
-
-Working response:
-
-- `void` remains a no-use result marker, not an ordinary value-set type.
-- `bot` satisfies `void` because a non-returning path produces no usable value. `void` does not satisfy `bot` because a `void` call may return normally.
-- In result summaries, `void | bot` normalizes to `void`.
-- Imported RBS signatures may contain `void` in generic, block, or callback slots. Rigor preserves those slots for compatibility. If substitution exposes such a slot in an ordinary value-producing position, the expression has a `void` result marker and follows the normal value-context rule.
-- A value-context use of `void` is the primary diagnostic. Recovery uses `top`, but immediate diagnostics caused only by recovery should be suppressed to avoid noisy cascades.
-
-This resolves the core `void` lattice concern. Remaining design work is mostly about diagnostic identifiers and UX wording, not the type relation itself.
-
-### Negative Facts Have No Retention or Display Policy
-
-"Negative facts are first-class" gives a direction without bounding cost or readability:
-
-- Sequences such as `Integer - 0 - 1 - 2 - ...` are naturally expressible but can blow up in memory, normalization, and rendered diagnostics.
-- The interaction between accumulated negative facts and other narrowing operations such as `is_a?(Integer)`, `respond_to?`, and pattern matching is not described.
-- Diagnostic display of large negative-fact sets needs a simplification rule (analogous to TypeScript's literal-set widening) so error output stays usable at scale.
-
-Working response:
-
-- Negative facts are stored as scope facts over an existing positive domain. They remove from what is already known; they do not introduce a positive domain from the excluded expression.
-- `v: untyped` followed by `v != "foo"` remains `Dynamic[top]` with a dynamic-origin relational fact. It does not become `Dynamic[String - "foo"]`.
-- Finite domains normalize exactly. `"foo" | "bar"` minus `"foo"` becomes `"bar"`, and removing every finite alternative becomes `bot`.
-- Large or unknown domains retain negative facts under a budget. Once the budget is exceeded, Rigor should keep provenance that exclusions were omitted and display the positive domain rather than rendering unstable chains like `Integer - 0 - 1 - 2 - ...`.
-- Display should prefer domain-bearing forms such as `String - "foo"` when a bare `~"foo"` would be ambiguous. Bare `~T` remains useful for compact branch-local display when the surrounding domain is already visible.
-- Negative facts have the same stability rules as other flow facts: assignment, mutation, unknown calls, yielded blocks, and plugin-declared invalidation may weaken or remove them.
-
-This resolves retention at the type-model level. The exact numeric budget and diagnostic wording remain implementation policy.
-
-### Equality Narrowing Trusts a Not-Yet-Enumerated Set of Methods
-
-The spec invokes "trusted built-in immutable domains" and "trusted predicate and equality methods" without naming them:
-
-- `Float` equality is unsound for `NaN`. If literal narrowing is allowed for `Float`, `NaN` becomes a soundness pitfall; if forbidden, the rule should say so.
-- `Range`, `Regexp`, `Symbol`, and `Module` have well-defined equality, but their `==` and `===` are not classified as trusted or untrusted.
-- `equal?` is the closest thing to identity in Ruby, but identity facts can degrade after `dup`, `freeze`, marshalling, or singleton-class reopen. Pairing identity narrowing with explicit invalidation rules is left implicit.
-- The conditions under which a user-defined `==` is promoted from a relational fact to a value-narrowing fact are not defined.
-
-Working response:
-
-- Equality narrowing is trusted only when Rigor knows the dispatched comparison behavior and the narrowed value already has a compatible positive domain. Syntax such as `value == "foo"` is not enough by itself.
-- Raw `untyped` equality remains relational. `v: untyped` with `v == "foo"` or `v != "foo"` keeps `Dynamic[top]` plus a dynamic-origin relational fact unless another guard or declared effect proves a positive domain.
-- `equal?` produces identity facts, but those facts are tied to the observed reference and follow ordinary stability rules. Reassignment, alias-escaping mutation, unknown calls, or plugin-declared invalidation may weaken them.
-- Built-in literal-domain equality is initially trusted for finite domains of `String`, `Symbol`, `Integer`, booleans, and `nil` when the receiver dispatch target is known and the receiver domain is already compatible.
-- `Float` literal narrowing is refused by default. Rigor may keep relational facts for diagnostics, but `NaN`, signed zero, infinities, and numeric coercion make default exhaustiveness over float literals too easy to get wrong.
-- `Range`, `Regexp`, `Module`, `Class`, and `===`-based case behavior are not general equality facts. They need specific narrowing rules or plugin/RBS effects before they can refine value domains.
-- User-defined `==`, `eql?`, and `===` can be promoted from relational facts to value facts only through explicit RBS metadata, `RBS::Extended` flow effects, or plugins that declare true-edge and false-edge facts plus any required stability or purity assumptions.
-
-This keeps useful literal narrowing while avoiding a TypeScript-style assumption that equality syntax is intrinsically value-set comparison.
-
-### Mutation Invalidation Rules Are Too Coarse for Idiomatic Ruby
-
-"Unknown method calls invalidate facts" and "block-yielded code may invalidate facts" cover the worst case, but they are too aggressive for typical Ruby code:
-
-- `each_with_object`, `tap`, `then`, `yield_self`, and similar higher-order patterns run user code in a closure. Without a purity oracle, all member and shape facts collapse on every block.
-- Closures can mutate locals from another scope (`-> { x = 1 }.call`). The fact-stability rule for closure-captured locals must mention this case explicitly.
-- "Frozen, literal, freshly allocated, or otherwise proven-stable" is a category, not a list. A practical first cut needs concrete proof obligations.
-
-Working response:
-
-- Facts should be targeted, not global. Rigor distinguishes local binding facts, captured-local facts, object-content facts, global-storage facts, dynamic-origin facts, and relational facts.
-- Unknown calls may invalidate heap facts for escaped targets, such as object shapes, hash entries, instance variables, constants, globals, and class variables. They should not invalidate every local binding fact in scope.
-- Local binding facts survive ordinary method calls until assignment to that local. A call can mutate the object referenced by `x`, but it cannot rebind `x` unless `x` is captured by a closure that writes it.
-- Closure writes are explicit effects. If a block, proc, or lambda writes an outer local, Rigor records a captured-local write. Immediate known invocation applies that write at the call edge; escaping or deferred closures make writable captured-local facts unstable after the escape point.
-- Higher-order calls need call-timing effects rather than a blanket "yield invalidates everything" rule. Initial categories are no block invocation, immediate non-escaping invocation with known count, immediate non-escaping invocation with unknown count, deferred or escaping block storage, and unknown block behavior.
-- Core methods such as `tap`, `then`, `yield_self`, and `each_with_object` should eventually have summaries for block timing, return behavior, and receiver or argument mutation. Before those summaries exist, Rigor may weaken object-content facts touched by the call but should preserve unrelated local binding facts.
-- The first proof obligations for stable facts are concrete: a non-reassigned local not writable by an escaping closure; immutable singleton or immediate values; values proven frozen for the relevant operation; fresh non-escaping allocations; and RBS, `RBS::Extended`, or plugin effects that declare read-only, pure, or targeted mutation behavior.
-
-This makes invalidation precise enough for idiomatic blocks without pretending arbitrary Ruby code is pure. Remaining design work is the exact effect payload syntax and the standard-library summary set.
-
-### Capability-Role Inference Has No Tractability Story
-
-Inferring "the minimum structural requirement of a method body" is a centerpiece of the design, but the cost and matching strategy are open:
-
-- The cost of computing capability requirements per method, especially for recursive methods or methods that delegate via `send`, is not analyzed.
-- Matching an inferred shape against named interfaces is at least quadratic and can be expensive when many candidates exist. The selection rule (most-specific wins, first-match, user-configurable) is undefined.
-- Combining capability-role inference with generics (`def reset: [S < _RewindableStream] (S stream) -> S`) requires bound checking against an inferred shape, but the algorithm choice is open.
-
-Working response:
-
-- Rigor should infer cached per-method requirement summaries, not recompute a "minimum" role expression at every call site. A summary records required member names, visibility, arity, keyword and block requirements, return-use constraints, mutation requirements, and provenance for each parameter and receiver.
-- The summary is an anonymous object-shape requirement by default. Naming it as an interface is an export and diagnostic convenience, not the core inference result.
-- Requirement inference is local and monotone. Direct calls use existing signatures or cached summaries. Recursive or mutually recursive summaries use an unknown or widening placeholder and iterate only to a small fixed-point budget.
-- Dynamic dispatch through `send`, `public_send`, unknown `method_missing`, or unconstrained delegation stops precise role extraction unless a signature or plugin supplies the target. Rigor should record a dynamic requirement instead of trying to infer every possible method.
-- Named-interface matching should use an index keyed by member name and visibility. Rigor compares only cheap-filtered candidates. If the candidate set is too large, it keeps the anonymous shape and suppresses the generalization hint rather than scanning the world.
-- Candidate selection is deterministic: exact member-signature match first, configured standard-library roles before coincidental user interfaces, fewer extra required members next, then stable lexical name order. Meaningful ambiguity means no named suggestion.
-- Intersections of roles are allowed but bounded. The first implementation can use exact single-interface matches, explicit standard role bundles, or a small greedy intersection under a strict candidate limit. It should not solve an unbounded set-cover problem.
-- Generic preservation is handled by identity tracking, not by the role matcher. If a method returns the same parameter object it received, Rigor may infer `[S < _Role] (S value) -> S`. If the body may replace the value or return a delegated object, Rigor uses the ordinary inferred return type.
-
-This makes capability roles a bounded summary-and-index feature rather than a global structural search. Remaining design work is choosing the cache keys, budgets, and first standard role bundle.
-
-### Hard Recursive Inference Needs a User Boundary Workflow
-
-Inference-first analysis still needs an escape hatch for code where Ruby's dynamic dispatch makes the search space unhelpfully large:
-
-- Operators such as `<=` and `-` are ordinary methods implemented by many classes. Without a known receiver domain, enumerating every compatible class is the wrong problem.
-- Recursive methods can cause return inference to repeatedly re-enter the same body before a useful type boundary exists.
-- If Rigor widens silently, users lose trust in the result; if it keeps searching, CLI latency becomes unpredictable.
-
-Working response:
-
-- Rigor should have explicit inference budgets for recursion depth, call-graph expansion, overload candidates, operator ambiguity, union size, and structural requirement growth.
-- When a budget is exceeded, Rigor produces an incomplete-inference result with a reason. It should not fabricate a precise type.
-- Accepted signature contracts are inference cutoffs. Inline `#: Integer`, full `# @rbs` method types, generated stubs, and external `.rbs` declarations all let callers stop at the boundary while the implementation remains checked against the contract.
-- Non-interactive CLI output should explain the cutoff and suggest compatible boundary locations.
-- Interactive CLI mode may ask the user to provide a simple boundary type and, with confirmation, insert or generate the chosen type source. Return-only cutoffs should prefer short rbs-inline forms when they are enough; parameter-heavy operator ambiguity may require a full method signature or `.rbs` entry.
-- This workflow is compatible with the "no Rigor-specific inline type syntax" goal because it uses existing RBS, rbs-inline, and Steep-compatible annotations rather than a new Rigor DSL.
-
-The remaining design work is the exact prompt UX, the persistence target selection, and how much candidate type information Rigor should propose automatically.
-
-### `RBS::Extended` Annotation Grammar Lacks Versioning and Conflict Semantics
-
-Two aspects of the grammar are user-facing on disk and need an early decision:
-
-- Versioning: a future incompatible directive change cannot reuse the `rigor:` prefix without breaking existing files. A version-prefix scheme such as `rigor:v1:...`, or an out-of-band version declaration in `.rigor.yml`, must be picked.
-- Conflict resolution: the spec says conflicts must be reported, but the precedence model (first wins, last wins, severity-based, always error) is not pinned down. Without a single rule, plugin authors cannot predict outcomes.
-
-Working response:
-
-- Versioning is directive-local and explicit. The canonical v1 key shape is `rigor:v1:<directive>`, not unversioned `rigor:<directive>`.
-- Rigor-generated annotations must emit `rigor:v1:`. Unversioned `rigor:` directives are invalid for now; they should not be silently interpreted as v1 unless a concrete migration need appears.
-- Unsupported future versions are preserved by ordinary RBS tooling, but Rigor reports them as unsupported metadata when the annotated node is analyzed.
-- A single RBS node should not mix incompatible `RBS::Extended` versions. Mixed supported and unsupported versions on the same node are a diagnostic because Rigor cannot compose their semantics deterministically.
-- Conflict resolution is always diagnostic. Rigor must not implement first-wins or last-wins semantics for conflicting metadata.
-- Exact duplicate annotations are idempotent. Compatible annotations compose by directive kind, target, and flow edge. For example, `predicate-if-true value` and `predicate-if-false value` are distinct effect slots and may coexist.
-- Conflicts include invalid payload syntax, two non-identical singleton directives for the same effect slot, contradictory refinements whose intersection is `bot`, refinements that exceed the ordinary RBS signature, and effect declarations that cannot both be true such as "pure" plus a receiver mutation effect.
-
-This gives plugin authors and generated-signature tools a deterministic merge model. Remaining design work is the exact v1 directive grammar for effects beyond predicates and assertions.
+A critical review of the type specification and the decisions above surfaced the following risks that remain unresolved at the type-model level. Each will need either a working decision or an explicit deferral before the type engine can be implemented end to end. Concerns that have already been folded into the Key Design Points above are not repeated here.
 
 ### Hash Erasure Does Not Specify How `Hash[K, V]` Is Reconstructed
 
@@ -586,36 +522,6 @@ The shape model relies on visibility and reader/writer roles, but Ruby's surface
 - `attr_writer :x` without a matching reader, or an overridden accessor that mutates additional state, is not covered by the read-only/read-write/write-only categorization.
 - `private` and `protected` boundaries change the set of "visible" members for `respond_to?` and external sends. Shape entries should distinguish all three visibilities, not collapse into public/non-public.
 - `respond_to?(:foo, true)` and `respond_to?(:foo)` produce different facts; the difference must propagate into shape entries to avoid silently widening visibility.
-
-### Positioning Relative to Existing Ruby Type Tooling Needed Clarification
-
-Sorbet, Steep, RBS-based linters, and `rbs-inline` occupy adjacent design space. ADR-0 mentions them, but ADR-1 does not articulate Rigor's compatibility and competition story:
-
-- How Rigor consumes the same RBS that Steep consumes, and where divergence is acceptable.
-- Whether Rigor intends to read Steep- or Sorbet-style ignore markers, or to define its own.
-- How `RBS::Extended` annotations are expected to interact with existing tools that may also place `%a{...}` annotations on the same nodes.
-
-Working response:
-
-- RBS and rbs-inline are first-order compatibility targets for type syntax. Rigor aims to accept them as type sources without warning or rewriting.
-- Steep 2.0 behavior is the secondary norm for inline annotation interpretation and for precedence between separate-file RBS and inline annotations.
-- `# rbs_inline: enabled` and `# rbs_inline: disabled` do not gate Rigor analysis. Rigor reads compatible annotations whenever present.
-- TypeScript, PHPStan, and Python typing remain comparison material for missing concepts and analyzer features, not compatibility targets.
-- Ignore-marker compatibility remains open. Rigor should decide separately whether it reads Steep or Sorbet suppression comments, defines its own configuration-only suppression, or supports more than one form.
-
-### Behavior on Annotation-Poor Code Bases Is Not Described
-
-Rails-shaped applications are dominated by `untyped` until plugins fill in shapes. The value of the spec depends heavily on plugins, but ADR-1 does not state the minimum useful behavior when plugins are absent:
-
-- Which narrowing operations remain useful with widespread `untyped` (likely `nil?`, truthiness, `is_a?`, equality against literals)?
-- What is the diagnostic policy for "method on `untyped`": always allowed, allowed but reportable in strict mode, or progressively configurable?
-- How are common dynamic patterns (ActiveRecord finder chains, Sidekiq workers, RSpec doubles) handled before plugins ship?
-
-Working response:
-
-- Even without plugins, stable Ruby guards should narrow `Dynamic[top]` into `Dynamic[T]` where the static facet is justified by Ruby semantics or existing signatures. Useful first checks include nilability, truthiness, `is_a?`, `kind_of?`, `instance_of?`, literal equality for trusted built-in domains, and `respond_to?` member-existence facts.
-- Method calls on raw `Dynamic[top]` remain allowed by default so gradual code can be analyzed incrementally, but they are traceable and reportable in strict modes.
-- Plugin-specific framework behavior is still deferred, but the pre-plugin analyzer should explain whether a result came from a missing signature, an explicit `untyped`, or an analyzer/plugin limit.
 
 ### Numeric Refinements Stop at `Integer`
 

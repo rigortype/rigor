@@ -249,6 +249,53 @@ Object-shape entries should carry enough metadata to avoid confusing Ruby's dyna
 - stability and mutation information;
 - certainty, such as yes, maybe, or no.
 
+### Capability Roles and IO-Like Objects
+
+Rigor should model common Ruby "IO-like" relationships as capability roles, not as global class equivalence.
+
+`IO` and `StringIO` are the motivating example. A `StringIO` is often a good test double for an `IO` object when the code only reads, writes, rewinds, or closes a stream. It is not a subclass of `IO`, and it does not have the same complete method set. Treating `StringIO` as a subtype of `IO` would erase real runtime differences. Requiring every implementation to write `IO | StringIO` would also miss the point of Ruby duck typing.
+
+The better model is:
+
+- `IO` remains a nominal type for APIs that require an actual `IO` object or file-descriptor-backed behavior.
+- `StringIO` remains a separate nominal type.
+- Both classes may satisfy smaller structural interfaces such as readable, writable, seekable, flushable, or closable stream roles.
+- A method that only calls stream capability methods should be inferred as requiring the corresponding object shape or named interface, not the whole nominal `IO` type.
+- A method that calls `IO`-specific members such as file-descriptor operations should require `IO` or a more specific file-descriptor-backed role.
+
+The role names and method signatures below are illustrative, not final standard-library signatures:
+
+```rbs
+interface _ReadableStream
+  def read: (*untyped) -> String?
+end
+
+interface _RewindableStream
+  def rewind: () -> untyped
+end
+```
+
+```ruby
+def slurp(stream)
+  stream.rewind
+  stream.read
+end
+# Inferred requirement: _ReadableStream & _RewindableStream
+# `IO` and `StringIO` can both satisfy that requirement if their signatures match.
+```
+
+This also avoids comparing total method sets. Structural subtyping asks whether a value provides the target role's required members; it does not require the source object and target object to expose the same complete surface.
+
+Explicit declarations still matter. If an external RBS signature says a parameter is `IO`, Rigor should treat that as the public nominal contract. If the implementation and observed call sites only require `_ReadableStream`, Rigor may report that the declared type is narrower than the inferred capability requirement and suggest generalizing the signature to a structural interface. It should not silently rewrite a public `IO` contract into a structural one.
+
+When a method returns the same stream object it receives, Rigor should preserve the concrete input type through generics rather than widening to a role:
+
+```rbs
+def reset: [S < _RewindableStream] (S stream) -> S
+```
+
+Unions remain useful when the implementation genuinely has class-specific behavior. If the method branches on `IO` versus `StringIO`, calls members unique to each class, or returns class-specific values, then `IO | StringIO` is a faithful type. For ordinary duck-typed stream consumption, capability roles are the preferred model.
+
 RBS erasure should prefer a matching named interface when one exists. Anonymous object shapes that do not match a known interface erase to a conservative nominal base or `top`.
 
 ## Special Types
@@ -321,6 +368,7 @@ Rigor may infer types that RBS cannot spell directly. These types must always er
 | Truthiness refinement | Branch-sensitive nil/false elimination | Erased underlying type |
 | Relational fact, such as `x == "foo"` | Captures a guard that may not be soundly reducible to a value type because Ruby equality is dispatch | Erased marker |
 | Object shape | Known methods or singleton-object capabilities inferred locally | Named interface if available, otherwise `top` or nominal base |
+| Inferred capability role | Minimum structural interface required by a method body, such as readable and rewindable stream behavior | Named interface when available, otherwise object shape erasure |
 | Hash shape refinements beyond RBS records | Required keys, optional keys, read-only entries, open or closed extra-key policy, and key presence after guards | RBS record when exact, otherwise `Hash[K, V]` |
 | Fact stability marker | Records whether a local, member, shape entry, or hash key fact survives assignment, calls, or mutation | Erased marker |
 | Dynamic-origin marker | Tracks precision lost through `untyped` | Erased marker |
@@ -624,6 +672,7 @@ Rigor should prefer precise diagnostics over silent widening.
 - Writing through a read-only shape entry is a diagnostic when Rigor has that fact.
 - Passing unexpected keys to a closed keyword or options-hash shape is a diagnostic.
 - Invalid or contradictory `RBS::Extended` annotations are diagnostics.
+- When an explicit nominal parameter type rejects a call but the method body only requires a smaller inferred capability role, Rigor may suggest generalizing the public signature to an interface rather than adding an ad hoc union.
 - Losing precision during RBS export should be reportable when users request explanation or strict export mode.
 
 ## Implementation Expectations
@@ -635,6 +684,7 @@ The core type engine should expose:
 - immutable `Scope` snapshots;
 - edge-aware condition analysis for truthy, falsey, normal, exceptional, and unreachable exits;
 - a fact store that can represent value facts, negative facts, relational facts, member-existence facts, shape facts, dynamic-origin provenance, and stability facts;
+- capability-role inference that can extract the minimum structural requirement of a method body and match it against named interfaces when available;
 - normalization for unions, intersections, complements, differences, and impossible refinements;
 - semantic type queries for extensions so plugin authors ask capability questions rather than inspecting concrete type classes;
 - conservative RBS erasure with optional loss-of-precision explanations.

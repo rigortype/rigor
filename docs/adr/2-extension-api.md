@@ -134,6 +134,8 @@ Rigor dynamic reflection extensions should contribute method, attribute, constan
 
 Dynamic reflection must support structural interface checking, not only member lookup. A plugin-provided member should expose enough signature and certainty information for Rigor to decide whether a nominal type or object shape satisfies an RBS interface. A `respond_to_missing?`-style fact may be useful for a guarded send while still being too weak for full interface conformance.
 
+The same mechanism should support capability roles for standard and framework objects. For example, `IO` and `StringIO` can both satisfy readable or rewindable stream interfaces without either becoming a subtype of the other. A standard-library fact provider or plugin should be able to contribute role conformance, member signatures, and role-specific exclusions such as file-descriptor-backed behavior.
+
 ## Broad Expression and Operator Hooks
 
 PHPStan has catch-all expression type resolver extensions and operator type specifying extensions. Its documentation recommends narrow hooks, such as dynamic return type extensions, when possible.
@@ -171,6 +173,7 @@ Reconstructing `docs/types.md` exposes several extension API requirements that a
 - `Scope` must be edge-aware. Plugin facts must participate in the same short-circuiting machinery as built-in guards so `&&`, `||`, `unless`, `elsif`, `case`, and pattern matching can refine scopes before later operands or arms are analyzed.
 - Target paths need a staged design. The first annotation grammar may support only `self` and named parameters, but the plugin API should be prepared for local variables, receiver members, instance variables, hash keys, tuple elements, and stable method-result paths.
 - The API needs relation facts in addition to type facts. Ruby `==`, `respond_to?`, key-presence checks, and framework predicates often prove relations or capabilities that are weaker than `target is T`.
+- Extensions and standard-library fact providers need a way to declare capability-role conformance, so unrelated nominal classes such as `IO` and `StringIO` can satisfy shared stream roles without becoming mutually assignable as whole classes.
 - Dynamic reflection should expose member certainty, provenance, visibility, call signature, mutation behavior, and stability. Without this, structural interface conformance would collapse into name-only duck typing.
 - Type and reflection APIs need trinary certainty for `yes`, `maybe`, and `no`, because plugin-provided dynamic behavior often cannot be modeled as a hard boolean.
 - Extension tests must be able to assert inferred types and facts at program points inside compound conditions, not only at statement boundaries.
@@ -198,6 +201,8 @@ Reconstructing `docs/types.md` exposes several extension API requirements that a
 - What is the smallest public shape of a flow contribution bundle that supports truthy, falsey, assertion, mutation, and invalidation effects?
 - Which target-path forms should be public in the first plugin API, and which should remain internal until fact-stability rules are clearer?
 - How should tests assert facts that exist only on the right side of `&&` or `||` before the surrounding `if` body is entered?
+- Should standard-library capability roles be supplied by core Rigor, generated RBS, or a bundled standard-library plugin?
+- How should plugins declare that a dynamic class satisfies only part of a role, or satisfies it with `maybe` certainty?
 
 ## Consequences
 

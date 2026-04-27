@@ -225,6 +225,20 @@ This is a pseudo-protocol model:
 
 Python's rule that mutable protocol attributes are invariant maps cleanly to Ruby method capabilities. A read-only attribute is a reader method and can be covariant in its result. A write-only attribute is a writer method and is checked contravariantly in its accepted value. A read-write accessor combines both constraints and is effectively invariant.
 
+### Capability Roles Beat Ad Hoc Mock Unions
+
+Ruby libraries often accept objects that are not related by inheritance but share the capability required by a method body. `IO` and `StringIO` are the central example: `StringIO` is useful as an in-memory test double for many stream consumers, but it is not a subclass of `IO` and does not expose the full `IO` method surface.
+
+Rigor should not model this by declaring `StringIO <: IO`. It should also avoid pushing users toward repetitive declarations such as `IO | StringIO` when the implementation merely needs a small stream capability. Instead, Rigor should infer and support structural capability roles such as readable, writable, rewindable, closable, seekable, and file-descriptor-backed.
+
+This keeps three facts separate:
+
+- `IO` is the nominal type for real `IO` objects and APIs that require file-descriptor-backed behavior.
+- `StringIO` is a separate nominal type that can satisfy some stream roles.
+- A method's inferred parameter requirement may be a smaller object shape or named interface, such as readable and rewindable stream behavior.
+
+Explicit RBS declarations still define public contracts. If a signature says `IO`, passing `StringIO` should not be silently accepted as a subtype. Rigor may instead report that the implementation appears to require only a smaller capability role and suggest generalizing the signature to an interface. Unions remain appropriate when the implementation genuinely branches on or uses class-specific behavior from both `IO` and `StringIO`.
+
 ### Control-Flow Narrowing Is Central
 
 Rigor should run appropriate CFA and data-flow analysis, similar in spirit to PHPStan, TypeScript, and Python type checkers.
@@ -303,6 +317,7 @@ Erasure can lose precision. It must not become narrower than the internal type.
 Reconstructing `docs/types.md` as the ideal type model adds several requirements that this ADR should carry forward:
 
 - Structural typing should be explicit but limited. RBS classes and modules remain nominal; RBS interfaces and Rigor object shapes are the bridge for Ruby duck typing.
+- IO-like compatibility should be modeled through inferred capability roles, not by treating unrelated nominal classes as subtypes or by requiring ad hoc unions at every call site.
 - Object-shape facts need member kind, call signature, visibility, provenance, stability, and certainty. A `respond_to?` guard can prove member existence, but it is not enough to prove full interface compatibility.
 - The type engine needs expression-edge scopes. Each expression should be able to produce normal, truthy, falsey, exceptional, and unreachable output scopes so short-circuiting conditions can update facts between operands.
 - Negative and difference types need a current-domain model. `~"foo"` inside `String | Symbol` is not the same as global `top - "foo"` unless the current domain is `top`.
@@ -380,6 +395,8 @@ Negative:
 - What is the smallest fact-stability model that makes shape and hash-key narrowing useful without becoming unsound around mutation?
 - Which equality methods are trusted by default for literal narrowing, and how should custom equality effects be declared?
 - How should diagnostics distinguish a proven type fact from a relational or dynamic-origin fact?
+- Which standard Ruby capability roles, such as readable stream, writable stream, rewindable stream, closable, enumerable, callable, and file-descriptor-backed, should Rigor ship as named interfaces?
+- Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
 
 ## Resulting Specification
 

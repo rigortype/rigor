@@ -15,13 +15,17 @@ The current implementation is an initial scaffold. It uses `Prism` to parse Ruby
 - Target Ruby is `4.0.3`.
 - The gemspec requires Ruby `>= 4.0.0`, `< 4.1`.
 - All development-time commands must run through the Flake. Do not run `bundle`, `rake`, `rspec`, `rubocop`, or `exe/rigor` directly from the host shell.
+- The Flake shell includes Git 2.54.0 and GNU Make.
 - The license is MPL-2.0.
 - The official repository is `https://github.com/rigortype/rigor`.
+
+The command examples below use `nix`. If `nix` is not available on `PATH`, run the same commands with `/nix/var/nix/profiles/default/bin/nix` in place of `nix`.
 
 Basic setup:
 
 ```sh
 nix --extra-experimental-features 'nix-command flakes' develop --command bundle install
+nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules
 nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake
 ```
 
@@ -43,6 +47,8 @@ nix --extra-experimental-features 'nix-command flakes' develop --command bundle 
 nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor version
 nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor check lib
 nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor check --format=json lib
+nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules
+nix --extra-experimental-features 'nix-command flakes' develop --command make pull-submodules
 ```
 
 `rigor init` writes a starter `.rigor.yml` file. Use `--force` when overwriting an existing file intentionally.
@@ -81,7 +87,7 @@ This submodule is not Rigor runtime code. In normal implementation work, do not 
 If the submodule is empty after cloning:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command git submodule update --init --recursive references/rbs
+nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules
 ```
 
 Update the submodule only when intentionally changing the referenced RBS version. During ordinary Rigor work, treat `references/rbs` as read-only reference material.
@@ -95,7 +101,7 @@ This submodule is not Rigor runtime code. In normal implementation work, do not 
 If the submodule is empty after cloning:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command git submodule update --init --recursive references/python-typing
+nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules
 ```
 
 Update the submodule only when intentionally changing the referenced typing-spec revision. During ordinary Rigor work, treat `references/python-typing` as read-only reference material.

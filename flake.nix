@@ -24,12 +24,24 @@
           rubyEnv = ruby.withPackages (ps: [
             ps.rake
           ]);
+          git = pkgs.git.overrideAttrs (oldAttrs: {
+            version = "2.54.0";
+            src = pkgs.fetchurl {
+              url = "https://www.kernel.org/pub/software/scm/git/git-2.54.0.tar.xz";
+              hash = "sha256-9okWI2TBDeee+Jqo2/SHMesFfjTtu9IKylEM4BVGgaM=";
+            };
+            patches = builtins.filter (
+              patch:
+              !(pkgs.lib.hasInfix "osxkeychain-define-build-targets-in-toplevel-Makefile.patch" (toString patch))
+            ) oldAttrs.patches;
+          });
         in
         {
           default = pkgs.mkShell {
             packages = [
               rubyEnv
-              pkgs.git
+              git
+              pkgs.gnumake
             ];
 
             BUNDLE_PATH = "vendor/bundle";

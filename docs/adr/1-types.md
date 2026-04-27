@@ -185,7 +185,7 @@ The TypeScript handbook and reference materials in `references/TypeScript-Websit
 | Mutability qualifiers | TypeScript has `readonly` properties, `ReadonlyArray`, readonly tuples, and mapped modifiers that add or remove `readonly` and optionality. These are compile-time use restrictions and do not imply deep runtime immutability. | Rigor should model read-only views, frozen values, shape entry mutability, and writer availability as separate facts. They should not become ordinary nominal value types unless RBS later standardizes them. |
 | Union, intersection, literal, and tuple types | TypeScript supports unions, intersections, string/number/boolean literals, discriminated unions, arrays, and tuples. Literal inference is sensitive to `let`, `const`, object mutability, and `as const`. | RBS already supports unions, intersections, literals, arrays, and tuples. Rigor should keep literal precision internally, then widen when mutation, aliasing, performance, or RBS erasure requires it. |
 | Flow narrowing | TypeScript narrows with `typeof`, truthiness, equality, `in`, `instanceof`, assignments, reachability, user-defined type predicates, assertion functions, discriminated unions, and `never` exhaustiveness checks. | Rigor should implement Ruby-specific CFA using guards such as `nil?`, `is_a?`, `kind_of?`, `instance_of?`, `respond_to?`, equality, pattern matching, returns, raises, and plugin facts. Predicate and assertion behavior belongs in `RBS::Extended` flow effects, not ordinary return types. |
-| Type predicates | TypeScript writes predicates as return types such as `parameter is Type`, and classes may use `this is Type`. | RBS has no equivalent return type form. Rigor should express these as annotations such as `rigor:predicate-if-true value is T` on ordinary RBS signatures. |
+| Type predicates | TypeScript writes predicates as return types such as `parameter is Type`, and classes may use `this is Type`. | RBS has no equivalent return type form. Rigor should express these as annotations such as `rigor:v1:predicate-if-true value is T` on ordinary RBS signatures. |
 | Exhaustiveness | TypeScript uses `never` after all union alternatives have been removed, often for exhaustive `switch` checks. | Rigor should use `bot` for impossible branches and exhaustiveness over finite literal unions, sealed-like plugin facts, and pattern matches. The canonical spelling remains `bot`. |
 | Type-level operators | TypeScript has `keyof`, type-context `typeof`, indexed access types, conditional types with `infer`, distributive conditional types, mapped types, template literal types, and utility types such as `Partial`, `Pick`, `Omit`, `Exclude`, `Extract`, and `NonNullable`. | RBS has no comparable general type-level computation. Rigor may support selected semantics through Rigor-native forms such as `key_of[T]`, `value_of[T]`, `T[K]`, `T - U`, `T & U`, and a future conditional type syntax. It should avoid importing TypeScript operator and utility names unless a concrete migration benefit appears. |
 | Generics and variance | TypeScript generic type parameters affect structural compatibility only where they are used in members. Variance is inferred from structural use, and explicit variance annotations are limited to instantiation-based comparisons. | RBS generics are declared on nominal and interface definitions, aliases, methods, and procs with RBS's own variance rules. Rigor should preserve RBS generic boundaries and use structural variance reasoning only where it is comparing shapes or interfaces. |
@@ -367,16 +367,20 @@ The working notation policy is:
 
 Advanced types may be attached to ordinary RBS declarations, members, and overloads using RBS `%a{...}` annotations. This preserves compatibility with standard RBS tooling while giving Rigor a place to read refinements such as `String - ""`, `~"foo"`, or `String where non_empty`.
 
-The canonical form should use a `rigor:` annotation key followed by a payload, for example:
+The canonical form should use an explicit versioned `rigor:v1:` annotation key followed by a payload, for example:
 
 ```rbs
-%a{rigor:predicate-if-true value is String}
+%a{rigor:v1:predicate-if-true value is String}
 def string?: (untyped value) -> bool
 ```
 
 Predicate targets should initially be limited to RBS parameter names and `self`. RBS parameter names use the `_var-name_ ::= /[a-z]\w*/` grammar, so Rigor does not need to encode arbitrary Ruby Symbol names in directive identifiers. Hyphenated directive names such as `predicate-if-true` are safe because they are parsed from the annotation payload by Rigor.
 
+The version prefix is part of the compatibility contract. Rigor-generated annotations must use `rigor:v1:`. Unversioned `rigor:` directives should be invalid for now rather than silently treated as v1. Unsupported future versions such as `rigor:v2:` are preserved by ordinary RBS tooling, but Rigor should report unsupported metadata when it analyzes the node.
+
 If `RBS::Extended` metadata conflicts with the ordinary RBS signature, Rigor should report a diagnostic.
+
+Multiple annotations on the same node are combined by directive kind, target, and flow edge. Exact duplicates are idempotent. Compatible effects compose; for example, true-edge and false-edge predicate annotations occupy different effect slots. Conflicts are always diagnostics, never first-wins or last-wins. This includes incompatible payload syntax, incompatible versions on the same node, two non-identical singleton directives for the same effect slot, contradictory refinements whose intersection is `bot`, and refinements that exceed the ordinary RBS signature.
 
 Type guard and assertion effects should be modeled as flow effects, not as ordinary return types. This keeps signatures RBS-compatible while still allowing TypeScript-style narrowing, PHPStan-style assertion behavior, and Python `TypeGuard`/`TypeIs`-style predicates.
 
@@ -547,6 +551,18 @@ Two aspects of the grammar are user-facing on disk and need an early decision:
 - Versioning: a future incompatible directive change cannot reuse the `rigor:` prefix without breaking existing files. A version-prefix scheme such as `rigor:v1:...`, or an out-of-band version declaration in `.rigor.yml`, must be picked.
 - Conflict resolution: the spec says conflicts must be reported, but the precedence model (first wins, last wins, severity-based, always error) is not pinned down. Without a single rule, plugin authors cannot predict outcomes.
 
+Working response:
+
+- Versioning is directive-local and explicit. The canonical v1 key shape is `rigor:v1:<directive>`, not unversioned `rigor:<directive>`.
+- Rigor-generated annotations must emit `rigor:v1:`. Unversioned `rigor:` directives are invalid for now; they should not be silently interpreted as v1 unless a concrete migration need appears.
+- Unsupported future versions are preserved by ordinary RBS tooling, but Rigor reports them as unsupported metadata when the annotated node is analyzed.
+- A single RBS node should not mix incompatible `RBS::Extended` versions. Mixed supported and unsupported versions on the same node are a diagnostic because Rigor cannot compose their semantics deterministically.
+- Conflict resolution is always diagnostic. Rigor must not implement first-wins or last-wins semantics for conflicting metadata.
+- Exact duplicate annotations are idempotent. Compatible annotations compose by directive kind, target, and flow edge. For example, `predicate-if-true value` and `predicate-if-false value` are distinct effect slots and may coexist.
+- Conflicts include invalid payload syntax, two non-identical singleton directives for the same effect slot, contradictory refinements whose intersection is `bot`, refinements that exceed the ordinary RBS signature, and effect declarations that cannot both be true such as "pure" plus a receiver mutation effect.
+
+This gives plugin authors and generated-signature tools a deterministic merge model. Remaining design work is the exact v1 directive grammar for effects beyond predicates and assertions.
+
 ### Hash Erasure Does Not Specify How `Hash[K, V]` Is Reconstructed
 
 `{ a: 1, b: "str" }` could erase to `Hash[Symbol, Integer | String]`, `Hash[:a | :b, Integer | String]`, or some intersection of those. The choice changes downstream precision and RBS readability:
@@ -692,8 +708,8 @@ Negative:
 - What is the canonical algorithm for erasing arbitrary hash shapes to `Hash[K, V]`, including the choice between literal-union and nominal keys?
 - Which existing suppression or ignore-marker conventions, if any, should Rigor support beyond ordinary RBS/rbs-inline/Steep type annotations?
 - What is the minimum useful narrowing surface in heavily `Dynamic[top]` code before plugins ship?
-- Should `RBS::Extended` annotation directives carry an explicit version prefix (`rigor:v1:...`) or be governed by a project-level version declaration?
-- What is the deterministic precedence rule when multiple `RBS::Extended` annotations on the same node disagree (first wins, last wins, severity-based, always-error)?
+- Which non-predicate `rigor:v1:` directives should be standardized first, and which should remain plugin-only metadata?
+- What diagnostic identifiers should distinguish unsupported `RBS::Extended` versions, invalid payloads, and semantic conflicts?
 - What exact display budget and wording should diagnostics use when negative-fact exclusions are omitted?
 - How should `Float`, `Rational`, `Complex`, and `coerce`-mediated promotions participate in scalar refinements?
 - Should visibility (`public`, `protected`, `private`) be a first-class facet of shape entries, or modeled separately as a side fact?

@@ -650,14 +650,14 @@ These annotations let users and plugin authors describe types that exceed standa
 Example:
 
 ```rbs
-%a{rigor:return String where non_empty}
+%a{rigor:v1:return String where non_empty}
 def read_name: () -> String
 
-%a{rigor:param value: String - ""}
+%a{rigor:v1:param value: String - ""}
 def normalize: (String value) -> String
 
-%a{rigor:assert-if-true value is "foo"}
-%a{rigor:assert-if-false value is ~"foo"}
+%a{rigor:v1:assert-if-true value is "foo"}
+%a{rigor:v1:assert-if-false value is ~"foo"}
 def check: (untyped value) -> bool
 ```
 
@@ -665,14 +665,19 @@ Rules:
 
 - The ordinary RBS signature remains the compatibility contract.
 - `RBS::Extended` annotations refine or explain that contract for Rigor.
-- Annotation keys use a `rigor:` namespace, for example `rigor:return` or `rigor:predicate-if-true`.
+- Annotation keys use a versioned `rigor:v1:` namespace, for example `rigor:v1:return` or `rigor:v1:predicate-if-true`.
 - The annotation key comes first; the remaining text is a Rigor-specific payload.
-- Multiple annotations on the same RBS node must be interpreted deterministically; if their effects conflict, Rigor must report a diagnostic.
+- Rigor-generated annotations must use the explicit `rigor:v1:` prefix. Unversioned `rigor:` directives should not be emitted and should be treated as invalid until a compatibility migration need exists.
+- The version prefix is part of the directive identity. Rigor v1 reads only `rigor:v1:` directives; an unsupported `rigor:vN:` directive is preserved by RBS tooling but reported by Rigor as unsupported metadata when it is on a node Rigor analyzes.
+- Multiple annotations on the same RBS node must be interpreted deterministically and independently of source order.
+- Exact duplicate annotations are idempotent.
+- Compatible annotations compose by directive kind, target, and flow edge. For example, true-edge and false-edge predicate facts on the same parameter are different effect slots.
+- Conflicting annotations are diagnostics; Rigor must not use first-wins or last-wins behavior. A conflict includes incompatible payload syntax, incompatible versions on the same node, two non-identical singleton directives for the same effect slot, contradictory refinements whose intersection is `bot`, and any annotation whose refinement exceeds the ordinary RBS contract.
 - Prefer `T - U` for explicit user-authored difference types.
 - Use `~T` primarily for negative facts and compact diagnostic display.
 - If an annotation conflicts with the RBS signature, Rigor must report a diagnostic.
 - Exported plain RBS must drop or erase Rigor-only annotations unless the user asks to preserve them.
-- The annotation grammar is provisional and should remain small until implementation experience proves it out.
+- The annotation grammar is versioned and should remain small until implementation experience proves it out. Incompatible grammar changes require a new version prefix rather than changing `rigor:v1:` semantics.
 
 ### Type Predicates and Assertions
 
@@ -681,37 +686,37 @@ Rigor models Python `TypeGuard`/`TypeIs`-style predicates, TypeScript-style type
 Predicate examples:
 
 ```rbs
-%a{rigor:predicate-if-true value is String}
-%a{rigor:predicate-if-false value is ~String}
+%a{rigor:v1:predicate-if-true value is String}
+%a{rigor:v1:predicate-if-false value is ~String}
 def string?: (untyped value) -> bool
 
-%a{rigor:predicate-if-true self is LoggedInUser}
+%a{rigor:v1:predicate-if-true self is LoggedInUser}
 def logged_in?: () -> bool
 ```
 
 Assertion examples:
 
 ```rbs
-%a{rigor:assert value is String}
+%a{rigor:v1:assert value is String}
 def assert_string!: (untyped value) -> void
 
-%a{rigor:assert-if-true value is String}
+%a{rigor:v1:assert-if-true value is String}
 def valid_string?: (untyped value) -> bool
 ```
 
 Meanings:
 
-- `rigor:predicate-if-true target is T` refines `target` to `T` on the true branch of a call used as a condition.
-- `rigor:predicate-if-false target is T` refines `target` to `T` on the false branch.
-- `rigor:assert target is T` refines `target` after the method returns normally.
-- `rigor:assert-if-true target is T` refines `target` when the method returns a truthy value.
-- `rigor:assert-if-false target is T` refines `target` when the method returns `false` or `nil`.
+- `rigor:v1:predicate-if-true target is T` refines `target` to `T` on the true branch of a call used as a condition.
+- `rigor:v1:predicate-if-false target is T` refines `target` to `T` on the false branch.
+- `rigor:v1:assert target is T` refines `target` after the method returns normally.
+- `rigor:v1:assert-if-true target is T` refines `target` when the method returns a truthy value.
+- `rigor:v1:assert-if-false target is T` refines `target` when the method returns `false` or `nil`.
 
 A true-branch-only predicate is sufficient for Python `TypeGuard`-like behavior. A predicate pair that describes both branches is sufficient for Python `TypeIs`-like behavior. The false branch may be written as an explicit negative type when that is clearer:
 
 ```rbs
-%a{rigor:predicate-if-true value is String}
-%a{rigor:predicate-if-false value is ~String}
+%a{rigor:v1:predicate-if-true value is String}
+%a{rigor:v1:predicate-if-false value is ~String}
 def string?: (untyped value) -> bool
 ```
 
@@ -727,7 +732,7 @@ If a predicate needs to refer to an argument, the RBS method type must name that
 
 ```rbs
 # Good: `value` can be referenced.
-%a{rigor:predicate-if-true value is String}
+%a{rigor:v1:predicate-if-true value is String}
 def string?: (untyped value) -> bool
 
 # Not enough information for a predicate target.

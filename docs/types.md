@@ -802,12 +802,73 @@ Erasure rules:
 - Unsupported literal kinds erase to their nominal class.
 - Integer ranges erase to `Integer`.
 - Complement and difference refinements erase to their current domain type.
-- Hash shape openness, extra-key, and read-only markers are erased. Exact closed shapes erase to RBS records when possible; otherwise they erase to `Hash[K, V]`.
+- Hash shape openness, extra-key, and read-only markers are erased by the hash-shape erasure algorithm below.
 - Object shapes erase to a matching named interface when one exists, otherwise a conservative nominal or `top`.
 - Dynamic-origin wrappers erase to `untyped` when exported as unchecked boundary types. When a value has already been checked against a non-dynamic contract, the contract type is exported and the dynamic marker is not represented in RBS.
 - Invalid-context `void`, `self`, `instance`, or `class` forms are rewritten to valid conservative RBS and reported as precision loss.
 
 Erasure is conservative: if `erase(T) = R`, then every value accepted by `T` must be accepted by `R`.
+
+### Hash Shape Erasure
+
+Hash shapes carry more information than RBS records and `Hash[K, V]` can express: required keys, optional keys, read-only entries, open or closed extra-key policy, key presence facts, dynamic-origin provenance, and stability. RBS erasure should lose that information deterministically and conservatively.
+
+Exact closed shapes erase to RBS records when every key can be represented by RBS record syntax:
+
+- Required entries become required record fields.
+- Optional entries become optional record fields when RBS can spell the optional key.
+- Entry value types erase recursively.
+- Read-only, provenance, stability, and key-presence markers are erased.
+- Missing optional keys do not add `nil` to the value type. Absence is not a stored value.
+
+For example:
+
+```text
+closed { a: 1, b: "str" }
+  => { a: 1, b: "str" }
+
+closed { a: Integer, ?b: String }
+  => { a: Integer, ?b: String }
+```
+
+If the shape cannot be represented as an exact RBS record, it erases to `Hash[K, V]`.
+
+The key type `K` is reconstructed from:
+
+- known literal keys, kept as a literal union while the set is finite and within the export budget;
+- widened nominal key classes when the literal-key set is too large for readable RBS;
+- the declared extra-key bound for open shapes with typed extra keys;
+- `top` for statically open shapes with unknown extra keys;
+- `untyped` for dynamic-origin extra keys.
+
+The value type `V` is reconstructed from:
+
+- values of all known required entries;
+- values of known optional entries, because they may be present;
+- the declared extra-value bound for open shapes with typed extra keys;
+- `top` for statically open shapes with unknown extra values;
+- `untyped` for dynamic-origin extra values.
+
+Optional-key absence does not contribute `nil` to `V` unless the entry value type itself includes `nil`.
+
+An exact empty closed record erases to `{}`. If a target RBS version or output mode cannot preserve an empty record, the fallback is `Hash[bot, bot]`.
+
+For open shapes, the extra-value bound must be used when known. Rigor should not use only the current known value union for unknown extra keys, because an unseen extra key may hold a value unrelated to the observed entries.
+
+Examples:
+
+```text
+open { a: 1, b: "str", **String => bool }
+  => Hash[:a | :b | String, 1 | "str" | bool]
+
+open { a: 1, b: "str", **unknown }
+  => Hash[top, top]
+
+dynamic-open { a: 1, **untyped }
+  => Hash[untyped, untyped]
+```
+
+If literal key or value unions exceed the export budget, Rigor widens them to nominal bases deterministically, such as `Hash[Symbol, Integer | String]`. Losing closedness, optional-key precision, read-only status, or literal precision should be reportable in strict export or explanation mode.
 
 ## Inference Budgets and User-Supplied Boundaries
 

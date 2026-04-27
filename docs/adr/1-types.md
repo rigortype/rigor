@@ -507,6 +507,19 @@ A critical review of the type specification and the decisions above surfaced the
 - Should values be unioned, widened to a least common nominal supertype, or both forms be available behind a flag?
 - For open shapes, what is the value type when extra keys are accepted but unknown? `untyped`, the current shape's value union, or the user-declared extra-key bound?
 
+Working response:
+
+- Exact closed hash shapes erase to RBS records when RBS can represent every key. Required entries become required fields, optional entries become optional fields when spellable, and values erase recursively.
+- Optional-key absence is not a stored `nil`. Rigor must not add `nil` to a value type merely because a key is optional.
+- Read-only, provenance, stability, key-presence, and open/closed markers are erased. Losing them is reportable in strict export or explanation mode.
+- Shapes that cannot be represented exactly as records erase to `Hash[K, V]`.
+- `K` is the union of known literal keys, widened nominal key classes when literal unions exceed the export budget, and the extra-key bound for open shapes. Statically unknown extra keys use `top`; dynamic-origin extra keys use `untyped`.
+- `V` is the union of known required values, known optional values when present, and the extra-value bound for open shapes. Statically unknown extra values use `top`; dynamic-origin extra values use `untyped`.
+- For open shapes, the extra-value bound wins over the current observed value union. Rigor should not infer that all future extra keys have values drawn only from already-seen entries.
+- Exact empty closed records erase to `{}` when supported by the target RBS output. If an output mode cannot preserve an empty record, the conservative fallback is `Hash[bot, bot]`.
+
+This gives Rigor a deterministic default: preserve exact records when possible; otherwise export a conservative `Hash[K, V]` assembled from known entries plus explicit or unknown extra-key policy. Remaining work is the concrete export budget for literal key and value unions.
+
 ### Difference and Complement Notation Needs a Domain-Aware Display Contract
 
 `~T` is "complement of `T` within the current known domain", but display is the only place users see it:
@@ -611,7 +624,7 @@ Negative:
 - Should `Float` equality narrowing ever be opt-in, and what proof should be required to exclude `NaN` and signed-zero pitfalls?
 - What exact effect payload should encode block call timing, closure escape, receiver or argument mutation, and read-only/pure behavior?
 - Which Ruby core and stdlib methods should receive built-in call-timing and mutation summaries first?
-- What is the canonical algorithm for erasing arbitrary hash shapes to `Hash[K, V]`, including the choice between literal-union and nominal keys?
+- What literal key and value union budgets should hash-shape erasure use before widening to nominal bases?
 - Which existing suppression or ignore-marker conventions, if any, should Rigor support beyond ordinary RBS/rbs-inline/Steep type annotations?
 - What is the minimum useful narrowing surface in heavily `Dynamic[top]` code before plugins ship?
 - Which non-predicate `rigor:v1:` directives should be standardized first, and which should remain plugin-only metadata?

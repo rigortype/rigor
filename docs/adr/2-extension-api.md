@@ -56,12 +56,16 @@ PHPStan's `Scope` represents the analyzer state at the current AST position. It 
 Rigor should provide a similar immutable `Scope` object. It should expose:
 
 - `type_of(node)` for expression type queries.
+- `analyze_condition(node)` or an equivalent analyzer-owned operation that can produce truthy, falsey, normal, exceptional, and unreachable output scopes.
 - Current file, lexical nesting, class/module singleton context, method, block, and visibility context.
 - Current receiver type and known local, instance-variable, class-variable, global, constant, and shape facts.
+- Value facts, negative facts, relational facts, member-existence facts, shape facts, dynamic-origin provenance, and fact-stability metadata.
 - Name and constant resolution helpers for Ruby lexical lookup.
 - Flow-edge context such as truthy branch, falsy branch, assertion context, rescue context, and unreachable context.
 
 Extensions should not mutate `Scope` directly. They should return facts, diagnostics, synthetic nodes, or metadata to the analyzer, which applies them through normal control-flow machinery.
+
+The scope model must be precise enough for short-circuiting conditions. If a plugin-defined predicate appears on the left side of `&&`, its true-edge facts must be visible while analyzing the right side. If it appears on the left side of `||`, its false-edge facts must be visible while analyzing the right side.
 
 ## Type System Object Model
 
@@ -104,6 +108,8 @@ Rigor should use the same shape for Ruby method calls:
 
 This hook is appropriate for APIs such as containers, ORMs, factories, schema-backed accessors, `Hash#fetch`-like wrappers, and framework query builders. If ordinary RBS overloads, generics, or `RBS::Extended` conditional return metadata are enough, those should be preferred over custom code.
 
+A typed effect bundle may include the normal return type, receiver or argument mutation facts, introduced dynamic members, thrown or non-returning control-flow facts, and fact invalidations. This keeps Ruby APIs such as builders, validators, schema loaders, and memoized dynamic accessors expressible without allowing extensions to edit `Scope`.
+
 ## Type-Specifying Extensions
 
 PHPStan type-specifying extensions provide flow facts based on calls to type-checking functions or methods. They receive the call node, method/function reflection, scope, and a context object that says whether the call is being evaluated as truthy, falsy, null, or as an assertion. They return `SpecifiedTypes`, often through a central `TypeSpecifier`.
@@ -116,6 +122,8 @@ Rigor should make this a first-class extension family because Ruby code often na
 
 The extension result should describe positive and negative facts separately. It should also support a true-only form when the false branch does not imply the complement, matching PHPStan's distinction between equality-like assertions and one-sided predicates.
 
+Rigor also needs relation-aware facts for Ruby-specific guards. Some calls prove `target is T`; others prove only `target == literal`, `target responds_to method`, `hash has key`, or `receiver.member is stable`. The extension API should preserve this difference so the core analyzer can decide whether the fact can be reduced to a type, kept as a relation, or invalidated after mutation.
+
 ## Dynamic Reflection and Magic Members
 
 PHPStan class reflection extensions describe magic properties and methods exposed through `__get`, `__set`, `__call`, and similar mechanisms. The reflection layer asks registered extensions when native reflection cannot find a member.
@@ -123,6 +131,8 @@ PHPStan class reflection extensions describe magic properties and methods expose
 Rigor needs the same capability for Ruby's `method_missing`, `respond_to_missing?`, `define_method`, Rails-style generated methods, ActiveRecord attributes, enum helpers, associations, serializers, delegated methods, and DSL-generated constants.
 
 Rigor dynamic reflection extensions should contribute method, attribute, constant, and shape members with ordinary reflection objects. Those reflection objects should expose readable and writable types, method overloads, visibility, deprecation/internal facts, side-effect facts, and source/provenance for diagnostics.
+
+Dynamic reflection must support structural interface checking, not only member lookup. A plugin-provided member should expose enough signature and certainty information for Rigor to decide whether a nominal type or object shape satisfies an RBS interface. A `respond_to_missing?`-style fact may be useful for a guarded send while still being too weak for full interface conformance.
 
 ## Broad Expression and Operator Hooks
 
@@ -153,6 +163,19 @@ Rigor should provide the same two test styles:
 
 Once public, extension protocols should have a backward-compatibility policy. Rigor can evolve internal type representations freely, but plugin-facing interfaces need versioning, deprecation windows, and migration notes.
 
+## Feedback from the Resulting Type Specification
+
+Reconstructing `docs/types.md` exposes several extension API requirements that are not optional for the ideal type model:
+
+- Extensions need to return flow contributions, not just types. A contribution should be able to describe truthy facts, falsey facts, post-return assertion facts, normal return type, exceptional or non-returning effects, receiver and argument mutations, and fact invalidations.
+- `Scope` must be edge-aware. Plugin facts must participate in the same short-circuiting machinery as built-in guards so `&&`, `||`, `unless`, `elsif`, `case`, and pattern matching can refine scopes before later operands or arms are analyzed.
+- Target paths need a staged design. The first annotation grammar may support only `self` and named parameters, but the plugin API should be prepared for local variables, receiver members, instance variables, hash keys, tuple elements, and stable method-result paths.
+- The API needs relation facts in addition to type facts. Ruby `==`, `respond_to?`, key-presence checks, and framework predicates often prove relations or capabilities that are weaker than `target is T`.
+- Dynamic reflection should expose member certainty, provenance, visibility, call signature, mutation behavior, and stability. Without this, structural interface conformance would collapse into name-only duck typing.
+- Type and reflection APIs need trinary certainty for `yes`, `maybe`, and `no`, because plugin-provided dynamic behavior often cannot be modeled as a hard boolean.
+- Extension tests must be able to assert inferred types and facts at program points inside compound conditions, not only at statement boundaries.
+- Cache metadata must include external schemas, generated signatures, gem versions, plugin configuration, and any files used to produce dynamic members or flow facts.
+
 ## Rejected and Deferred Candidate Decisions
 
 | Candidate | Status | Reason |
@@ -172,6 +195,9 @@ Once public, extension protocols should have a backward-compatibility policy. Ri
 - How should Rigor version public extension protocols separately from internal analyzer classes?
 - Should Rigor expose synthetic or virtual AST nodes to rules in the first custom-rule milestone?
 - What is the first testing helper spelling for asserting inferred types in Ruby fixtures?
+- What is the smallest public shape of a flow contribution bundle that supports truthy, falsey, assertion, mutation, and invalidation effects?
+- Which target-path forms should be public in the first plugin API, and which should remain internal until fact-stability rules are clearer?
+- How should tests assert facts that exist only on the right side of `&&` or `||` before the surrounding `if` body is entered?
 
 ## Consequences
 

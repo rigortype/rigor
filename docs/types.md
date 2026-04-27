@@ -14,6 +14,25 @@ Rigor uses RBS as the interoperability surface and a richer internal type model 
 
 Rigor should aggressively learn from PHPStan, TypeScript, and Python's typing specification. In particular, it should support precise literal types, finite unions, flow-sensitive narrowing, negative facts, refined scalar domains, object and hash shapes, gradual typing discipline, and type operators that make practical static analysis expressive without requiring inline annotations in Ruby application code.
 
+The borrowed ideas must remain Ruby-shaped:
+
+- RBS classes and modules stay nominal.
+- RBS interfaces and Rigor object shapes provide structural duck typing.
+- Ruby truthiness means only `false` and `nil` are falsey.
+- Ruby equality, case equality, `respond_to?`, `method_missing`, singleton methods, and module inclusion are runtime behaviors that must be modeled through Ruby semantics, RBS signatures, or plugin facts rather than copied from another language.
+- Application Ruby code stays free of Rigor-only annotation syntax.
+
+## Design Priorities
+
+This document is organized around the ideal type model, not the first implementation milestone. The priorities are:
+
+1. Preserve every RBS type and every RBS export rule.
+2. Keep Ruby runtime behavior as the source of truth for narrowing and member availability.
+3. Make gradual loss of precision explicit through `untyped` provenance.
+4. Treat control-flow facts as scope transitions at expression edges, not only as block-level branch labels.
+5. Support Ruby duck typing through structural interfaces and object shapes without making all class compatibility structural.
+6. Let plugins and `RBS::Extended` contribute facts, effects, and dynamic reflection while the analyzer keeps ownership of scope application and normalization.
+
 ## Relations
 
 Rigor distinguishes two relations:
@@ -50,27 +69,47 @@ T & bot = bot
 
 Rigor performs flow-sensitive type analysis in the style of PHPStan, TypeScript, and Python type checkers.
 
-The type environment is refined by guards, returns, raises, loop exits, pattern matches, equality comparisons, predicate methods, and plugin-provided facts. Each control-flow edge carries both positive facts and negative facts. Joins merge those facts conservatively.
+The type environment is refined by guards, returns, raises, loop exits, pattern matches, equality comparisons, predicate methods, and plugin-provided facts. Each expression is analyzed with an input `Scope` and produces output scopes for the relevant edges:
 
-Example:
+- normal completion;
+- truthy condition result;
+- falsey condition result;
+- exceptional or non-returning exit;
+- unreachable result, represented by `bot`.
 
-```rbs
-def puts: (untyped value) -> void
-```
+These scopes carry both positive facts and negative facts. Joins merge those facts conservatively.
+
+This is finer than assigning one scope to the whole `if` condition. Short-circuiting expressions update the scope between operands:
+
+- `a && b` analyzes `b` in the truthy scope produced by `a`.
+- `a || b` analyzes `b` in the falsey scope produced by `a`.
+- `!a` swaps truthy and falsey scopes.
+- `unless a` uses the same condition facts as `if a`, then swaps branch destinations.
+- `case`, pattern matching, and chained `elsif` expressions pass negative facts from earlier arms to later arms.
 
 ```ruby
-def puts(value)
-  if value == "foo"
-    p value # Rigor type: "foo"
-  else
-    p value # Rigor type: ~"foo"
+def contradictory(foo)
+  # Assume `foo` has a finite literal domain and ordinary String equality.
+  if foo == "foo" && foo == "bar"
+    p foo # Rigor type: bot; this edge is unreachable.
   end
 end
 ```
 
-In this example, the parameter begins as `untyped`. The true branch receives the positive fact `value == "foo"`, so the visible type becomes the literal type `"foo"`. The false branch receives the negative fact `value != "foo"`, displayed as `~"foo"`.
+The right side of `&&` is analyzed after the left side's true fact has refined `foo` to `"foo"`. The true edge of `foo == "bar"` then intersects `"foo"` with `"bar"`, normalizes to `bot`, and marks the body as unreachable. Rigor should be able to report the contradiction at the comparison or at the unreachable body, depending on diagnostic policy.
 
-Because the original value came from `untyped`, the implementation should retain dynamic-origin provenance even when it displays the narrowed branch type. A more explicit internal form may be `untyped & ~"foo"` or `Dynamic<~"foo">`; the display form may be shorter when that is clearer.
+For `||`, the same precision applies in the opposite direction:
+
+```ruby
+def impossible_after_or(foo)
+  # Assume `foo` has a finite literal domain and ordinary String equality.
+  if foo == "foo" || foo == "bar"
+    p foo # Rigor type includes only the "foo" and "bar" alternatives.
+  else
+    p foo # Rigor type excludes both "foo" and "bar".
+  end
+end
+```
 
 Supported narrowing sources should include:
 
@@ -86,6 +125,33 @@ Supported narrowing sources should include:
 Negative facts are first-class. Rigor should preserve facts such as "not nil", "not false", "not this literal", and "does not have this nominal class" when they improve later diagnostics.
 
 Python's `TypeGuard` and `TypeIs` are useful reference points for predicate effects. A predicate that refines only the true branch is `TypeGuard`-like. A predicate that refines both true and false branches is `TypeIs`-like; internally, the false branch should be modeled as intersection with a complement, such as `A & ~R`, or as an equivalent difference type.
+
+### Equality and Ruby Runtime Semantics
+
+Ruby equality is method dispatch. A syntactic comparison such as `foo == "foo"` calls `foo.==("foo")`, and arbitrary classes may override that method. Rigor must therefore distinguish:
+
+- identity facts, such as `x.equal?(obj)`, which can prove singleton identity;
+- nil and boolean checks, which are stable Ruby value tests;
+- equality facts for known built-in immutable domains, such as finite `String`, `Symbol`, `Integer`, `true`, `false`, and `nil` alternatives;
+- comparison facts contributed by RBS or plugins for trusted predicate and equality methods;
+- unknown equality methods, which should produce at most a relational fact unless the analyzer has enough method information to refine the value type.
+
+When a value starts as `untyped`, Rigor may display a narrowed fact inside a guard, but the value keeps dynamic-origin provenance. For example, a trusted guard may display `Dynamic<"foo">` or simply `"foo"` in a short diagnostic, while the internal type still records that the fact crossed an unchecked boundary.
+
+This rule keeps TypeScript- and PHPStan-style equality narrowing useful without pretending that Ruby `==` is a built-in identity operator.
+
+### Fact Stability and Mutation
+
+Flow facts are valid only while the analyzer can trust the path they describe. Rigor should invalidate or weaken facts when Ruby behavior can mutate or replace the observed value.
+
+The first implementation can be conservative:
+
+- Local variable facts are stable until assignment to that local.
+- Instance-variable, class-variable, global, constant, hash-entry, and object-shape facts may be invalidated by writes, unknown method calls, yielded blocks, and plugin-declared side effects.
+- A frozen, literal, freshly allocated, or otherwise proven-stable value may keep stronger facts for longer.
+- A plugin may return an explicit mutation or invalidation effect rather than mutating `Scope` directly.
+
+This is especially important for structural object shapes and hash shapes. A guard can prove that a key or method is present at one program point, but ordinary Ruby mutation can remove or redefine it later unless Rigor has a stability fact.
 
 ## RBS-Compatible Types
 
@@ -121,7 +187,14 @@ Rigor preserves RBS contextual limitations for export. For example, `self`, `ins
 
 Rigor models Python `Protocol`-style structural subtyping through RBS interfaces and internal object shapes.
 
-An RBS interface type, such as `_Closable`, is a named structural contract. An internal object shape is an anonymous structural type inferred from local definitions, singleton methods, module members, plugin facts, or control-flow guards. A nominal type or object shape is assignable to an interface when Rigor can prove that it provides all required members with compatible types.
+An RBS interface type, such as `_Closable`, is a named structural contract. An internal object shape is an anonymous structural type inferred from local definitions, singleton methods, module members, included modules, plugin facts, or control-flow guards. A nominal type or object shape is assignable to an interface when Rigor can prove that it provides all required members with compatible types.
+
+This is the structural part of Ruby duck typing. Rigor should not make ordinary class-to-class compatibility TypeScript-style structural by default. Class and module names remain nominal because RBS uses those names as declarations about Ruby constants and because Ruby runtime checks such as `is_a?` and `kind_of?` depend on class/module relationships. Structural typing lives at these boundaries:
+
+- assigning or passing a value where an RBS interface is expected;
+- checking whether an inferred object shape satisfies an interface;
+- checking a direct method send against a known shape;
+- using plugin-provided dynamic reflection to add members to a shape or nominal type.
 
 This gives Rigor a pseudo-protocol model without adding Python syntax:
 
@@ -155,7 +228,7 @@ Structural assignability rules:
 - Callable object shapes may satisfy proc-like or interface-like call contracts through a known `call` method when the signature is compatible.
 - Singleton class and module object shapes may satisfy interfaces through singleton methods and module-level members, but this should be implemented after instance-side structural checks.
 
-Member compatibility follows method type compatibility, not just name existence. Overloaded members must be compared through the ordinary overload assignability rules once those exist.
+Member compatibility follows method type compatibility, not just name existence. Rigor must compare visibility, arity, positional parameters, keyword parameters, blocks, overloads, return types, and receiver constraints through the ordinary method-assignability rules once those exist.
 
 Reader and writer capabilities matter:
 
@@ -165,7 +238,16 @@ Reader and writer capabilities matter:
 
 This mirrors Python's protocol-attribute lesson without importing Python attributes directly. In Ruby, attributes are methods, so Rigor should reason about the reader and writer methods that actually exist.
 
-`respond_to?` checks can refine an object to an existence-only shape, for example "has method `close`". That fact is useful for diagnostics and guarded sends, but it does not prove full signature compatibility with an interface unless Rigor also knows the method type.
+`respond_to?` checks can refine an object to an existence-only shape, for example "has method `close`". That fact is useful for diagnostics and guarded sends, but it does not prove full signature compatibility with an interface unless Rigor also knows the method type. The optional `include_private` argument must affect the visibility fact. If the method exists only through `method_missing`, the fact should be recorded with dynamic provenance so diagnostics can explain why the call was accepted.
+
+Object-shape entries should carry enough metadata to avoid confusing Ruby's dynamic surface with a static protocol proof:
+
+- member kind, such as method, reader, writer, constant, or index operation;
+- call signature or readable/writable value type;
+- visibility;
+- source and provenance, such as source definition, RBS, plugin, `respond_to?`, or `method_missing`;
+- stability and mutation information;
+- certainty, such as yes, maybe, or no.
 
 RBS erasure should prefer a matching named interface when one exists. Anonymous object shapes that do not match a known interface erase to a conservative nominal base or `top`.
 
@@ -237,8 +319,10 @@ Rigor may infer types that RBS cannot spell directly. These types must always er
 | Integer range, such as `Integer[1..]` | Numeric comparisons and bounds | `Integer` |
 | Finite set of literals | Precise branch and enum tracking | RBS literal union when possible, otherwise nominal base |
 | Truthiness refinement | Branch-sensitive nil/false elimination | Erased underlying type |
+| Relational fact, such as `x == "foo"` | Captures a guard that may not be soundly reducible to a value type because Ruby equality is dispatch | Erased marker |
 | Object shape | Known methods or singleton-object capabilities inferred locally | Named interface if available, otherwise `top` or nominal base |
 | Hash shape refinements beyond RBS records | Required keys, optional keys, read-only entries, open or closed extra-key policy, and key presence after guards | RBS record when exact, otherwise `Hash[K, V]` |
+| Fact stability marker | Records whether a local, member, shape entry, or hash key fact survives assignment, calls, or mutation | Erased marker |
 | Dynamic-origin marker | Tracks precision lost through `untyped` | Erased marker |
 | Negation or complement type, such as `~"foo"` | Represents values in the current domain except a type | Erased domain type |
 | Conditional type | Models type-level branching when needed for library signatures | Conservative union or bound |
@@ -466,6 +550,34 @@ def string?: (untyped) -> bool
 
 Future versions may extend targets to instance variables, record keys, shape paths, and block parameters, but those should use explicit path syntax rather than overloading the annotation directive name.
 
+### Flow Effects and Extension Contributions
+
+The type specification depends on the extension API exposing facts, not direct scope mutation. A plugin or `RBS::Extended` annotation may contribute a flow effect bundle with:
+
+- normal return type;
+- truthy-edge facts;
+- falsey-edge facts;
+- post-return assertion facts;
+- exceptional or non-returning effects;
+- receiver and argument mutation effects;
+- fact invalidation effects;
+- dynamic reflection members introduced by the call.
+
+The analyzer applies these contributions through the same control-flow machinery it uses for built-in guards. This keeps short-circuiting expressions precise. For example, a plugin-defined predicate used on the left side of `&&` must refine the scope used to analyze the right side, and its negative fact must flow into the right side of `||`.
+
+Future target grammar should grow only with clear stability rules. Plausible targets include:
+
+- `self`;
+- named parameters;
+- local variables visible at the call site;
+- receiver members, such as `self.name`;
+- instance variables, such as `@name`;
+- hash or record keys, such as `config[:mode]`;
+- tuple or array elements with literal indexes;
+- method-result paths on the same receiver, when the method is known to be pure or stable.
+
+Targets that can be mutated behind the analyzer's back should either be rejected in annotations, treated as `maybe`, or paired with explicit stability metadata.
+
 ## Normalization
 
 Rigor normalizes types before comparison and reporting.
@@ -516,4 +628,15 @@ Rigor should prefer precise diagnostics over silent widening.
 
 ## Implementation Expectations
 
-The implementation should keep parsing, internal type representation, subtyping, consistency, normalization, and RBS erasure as separate concepts. This keeps RBS compatibility stable while leaving room for inference-oriented internal precision.
+The implementation should keep parsing, internal type representation, subtyping, consistency, normalization, scope transition, effect application, and RBS erasure as separate concepts. This keeps RBS compatibility stable while leaving room for inference-oriented internal precision.
+
+The core type engine should expose:
+
+- immutable `Scope` snapshots;
+- edge-aware condition analysis for truthy, falsey, normal, exceptional, and unreachable exits;
+- a fact store that can represent value facts, negative facts, relational facts, member-existence facts, shape facts, dynamic-origin provenance, and stability facts;
+- normalization for unions, intersections, complements, differences, and impossible refinements;
+- semantic type queries for extensions so plugin authors ask capability questions rather than inspecting concrete type classes;
+- conservative RBS erasure with optional loss-of-precision explanations.
+
+This structure is necessary for the ideal behavior described above: precise Ruby-shaped duck typing, expression-level narrowing inside compound conditions, and a plugin API that can add framework knowledge without taking ownership of the analyzer's control-flow state.

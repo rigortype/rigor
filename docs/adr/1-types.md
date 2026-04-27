@@ -233,6 +233,10 @@ For example, after `value == "foo"`, the true branch can narrow `value` to `"foo
 
 Python's `TypeGuard` and `TypeIs` distinction supports the same design direction: predicate behavior is a flow effect. A true-only predicate is enough for `TypeGuard`-like behavior; paired true and false facts, or a false fact expressed as `T & ~U`, provide `TypeIs`-like behavior.
 
+CFA must be fine-grained enough to update scope inside a condition expression, not only after the whole condition has been evaluated. For `if foo == "foo" && foo == "bar"`, the right side of `&&` is analyzed in the scope produced by the left side's true edge. If the current domain makes `"foo" & "bar"` impossible, the whole true branch becomes `bot`. The same principle applies to `||`, `!`, `unless`, `elsif`, `case`, and pattern matching.
+
+Ruby equality is method dispatch, so equality narrowing cannot be a purely syntactic rule. `equal?`, `nil?`, boolean checks, trusted built-in literal domains, and predicate effects declared by RBS or plugins can produce type facts. Unknown `==` implementations should produce a weaker relational fact unless Rigor has method information that justifies a value-type refinement.
+
 ### `void` Is a Return-Position Marker
 
 RBS treats `void` as top-like but context-limited. Rigor should model `void` internally as a result marker that says the return value should not be used.
@@ -293,6 +297,19 @@ Type guard and assertion effects should be modeled as flow effects, not as ordin
 If `T` is a Rigor type and `erase(T)` is the generated RBS type, every value accepted by `T` must be accepted by `erase(T)`.
 
 Erasure can lose precision. It must not become narrower than the internal type.
+
+## Feedback from the Resulting Type Specification
+
+Reconstructing `docs/types.md` as the ideal type model adds several requirements that this ADR should carry forward:
+
+- Structural typing should be explicit but limited. RBS classes and modules remain nominal; RBS interfaces and Rigor object shapes are the bridge for Ruby duck typing.
+- Object-shape facts need member kind, call signature, visibility, provenance, stability, and certainty. A `respond_to?` guard can prove member existence, but it is not enough to prove full interface compatibility.
+- The type engine needs expression-edge scopes. Each expression should be able to produce normal, truthy, falsey, exceptional, and unreachable output scopes so short-circuiting conditions can update facts between operands.
+- Negative and difference types need a current-domain model. `~"foo"` inside `String | Symbol` is not the same as global `top - "foo"` unless the current domain is `top`.
+- Equality narrowing must respect Ruby dispatch. Rigor needs trusted equality facts for built-ins, RBS effects, or plugins; otherwise it should keep relational facts instead of silently pretending `==` is identity.
+- Gradual facts need provenance. Narrowing an `untyped` value can be useful inside a branch, but diagnostics and joins should still know that the value crossed an unchecked boundary.
+- Shape, member, and hash-key facts need invalidation rules. Assignments, mutation, unknown calls, yielded blocks, and plugin-declared effects may weaken or remove facts.
+- RBS erasure is part of the type design, not a presentation layer. Every internal refinement, relation, and provenance marker needs a conservative erasure rule.
 
 ## Rejected and Deferred Candidate Decisions
 
@@ -360,6 +377,9 @@ Negative:
 - Should generated RBS preserve `RBS::Extended` annotations that explain erased refinements when users request an annotated export?
 - Should `untyped` operations produce optional informational diagnostics in strict mode?
 - What plugin API is needed for framework-specific object shapes and dynamic method resolution?
+- What is the smallest fact-stability model that makes shape and hash-key narrowing useful without becoming unsound around mutation?
+- Which equality methods are trusted by default for literal narrowing, and how should custom equality effects be declared?
+- How should diagnostics distinguish a proven type fact from a relational or dynamic-origin fact?
 
 ## Resulting Specification
 

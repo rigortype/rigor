@@ -15,3 +15,6 @@
 [submodule "references/rbs-inline-wiki"]
 	path = references/rbs-inline-wiki
 	url = https://github.com/soutaro/rbs-inline.wiki.git
+[submodule "references/steep"]
+	path = references/steep
+	url = git@github.com:soutaro/steep.git

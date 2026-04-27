@@ -146,6 +146,16 @@ Strict modes use this provenance rather than changing the core relation. One lev
 
 The documentation should write the gradual-consistency relation as `consistent(A, B)`, not `A ~ B`, because `~T` is reserved for negative or complement types.
 
+### Trinary Certainty Is Not a Proof System Shortcut
+
+Relationship queries should return `yes`, `no`, or `maybe` when uncertainty is meaningful. `yes` and `no` are reserved for results that are proven under the current source, accepted signatures, plugin facts, and analyzer assumptions. `maybe` means the analyzer cannot prove either side.
+
+Accepted method signatures still define trusted method-boundary contracts. Parameters and called method return values are analyzed according to their accepted RBS, rbs-inline, Steep-compatible, generated, or `RBS::Extended` contracts; Rigor does not turn every value received from another method into an uncertain value merely because the implementation is elsewhere.
+
+`maybe` is not enough to narrow as though the relationship were `yes`, and it does not imply the opposite edge as though the relationship were `no`. It may be retained as a weak relational, member-existence, dynamic-origin, or plugin-provenance fact for diagnostics. Repeated `maybe` evidence remains `maybe` unless a stronger proof is supplied.
+
+Diagnostics for `maybe` are policy-driven. Like PHPStan error levels, Rigor should leave room for a permissive level that accepts maybe-dependent calls without reporting them and stricter levels that report uncertain method calls, role matches, or branch proofs.
+
 ### PHPStan Compared with RBS
 
 The PHPStan documentation in `references/phpstan/website/src/writing-php-code/` is useful because it describes the feature surface of a mature analyzer for a dynamic language. PHPStan is not a compatibility target, and PHPDoc syntax should not become Rigor syntax, but its features are a strong checklist for what users eventually expect from precise static analysis.
@@ -281,6 +291,8 @@ This keeps three facts separate:
 - A method's inferred parameter requirement may be a smaller object shape or named interface, such as readable and rewindable stream behavior.
 
 Explicit RBS declarations still define public contracts. If a signature says `IO`, passing `StringIO` should not be silently accepted as a subtype. Rigor may instead report that the implementation appears to require only a smaller capability role and suggest generalizing the signature to an interface. Unions remain appropriate when the implementation genuinely branches on or uses class-specific behavior from both `IO` and `StringIO`.
+
+Rigor should ship an opinionated core catalog of common standard-library capability roles instead of making the first plugin milestone invent its own names. The initial catalog should be small, with roles such as readable stream, writable stream, rewindable stream, seekable stream, closable, enumerable, callable, and file-descriptor-backed. Plugins may add roles, additional conformance facts, role-specific exclusions, and uncertain conformance, but they should not silently replace the core catalog.
 
 ### Capability-Role Inference Discipline
 
@@ -519,6 +531,8 @@ Multiple annotations on the same node are combined by directive kind, target, an
 
 Type guard and assertion effects should be modeled as flow effects, not as ordinary return types. This keeps signatures RBS-compatible while still allowing TypeScript-style narrowing, PHPStan-style assertion behavior, and Python `TypeGuard`/`TypeIs`-style predicates.
 
+ADR-1 owns the semantic schema for flow effect bundles: the field set, target-path meaning, certainty rules, and how effects change scopes. ADR-2 owns the extension API packaging, registration, service lifetime, and plugin provenance for those bundles. The product specification in `docs/types.md` is the detailed normative table both ADRs should reference.
+
 ### Erasure Must Be Conservative
 
 If `T` is a Rigor type and `erase(T)` is the generated RBS type, every value accepted by `T` must be accepted by `erase(T)`.
@@ -624,7 +638,7 @@ Negative:
 - What is the smallest fact-stability model that makes shape and hash-key narrowing useful without becoming unsound around mutation?
 - What exact `RBS::Extended` or plugin payload should declare custom equality effects?
 - How should diagnostics distinguish a proven type fact from a relational or dynamic-origin fact?
-- Which standard Ruby capability roles, such as readable stream, writable stream, rewindable stream, closable, enumerable, callable, and file-descriptor-backed, should Rigor ship as named interfaces?
+- What exact method surfaces should Rigor's core capability roles expose for readable stream, writable stream, rewindable stream, closable, enumerable, callable, file-descriptor-backed, and related roles?
 - Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
 - What cache keys and invalidation rules should capability requirement summaries use across edits and dependency signature changes?
 - What candidate and intersection budgets should named-interface matching use before falling back to anonymous shapes?

@@ -44,6 +44,18 @@ This distinction is required because `untyped` is not simply `top`. `top` is the
 
 The specification avoids using `~` as the gradual-consistency relation because `~T` is reserved as the candidate notation for negative or complement types.
 
+## Certainty
+
+Type, reflection, role-conformance, and member-availability queries return `yes`, `no`, or `maybe`.
+
+`yes` and `no` are reserved for results Rigor can treat as proven under the current source, signatures, plugin facts, and configured analyzer assumptions. `maybe` means every other case: the analyzer cannot prove the relationship, the answer depends on dynamic behavior, a plugin supplied an uncertain member, or an inference budget was exhausted.
+
+Rigor still trusts accepted method signatures at method boundaries. If a parameter or called method return value has an accepted RBS, rbs-inline, Steep-compatible, generated, or `RBS::Extended` contract, callers analyze through that contract rather than treating every external value as `maybe`. Diagnostics may still preserve dynamic provenance when the contract includes `untyped` or came from a plugin.
+
+`maybe` is not a proof for narrowing. A `maybe` relationship can be retained as a weak relational, member-existence, or dynamic-origin fact for diagnostics and later explanation, but it should not refine a value as if the answer were `yes`, and it should not produce the complementary false-edge fact as if the answer were `no`.
+
+Diagnostic policy is level-dependent, similar in spirit to PHPStan error levels. A permissive level may accept a method call or role match that depends on `maybe` evidence without reporting it. Stricter levels may report that the proof is uncertain and suggest adding a guard, a signature, generated metadata, or a plugin configuration. Repeated `maybe` evidence remains `maybe`; Rigor must not promote uncertainty to `yes` merely by count.
+
 ## Value Lattice
 
 The ordinary value lattice has:
@@ -352,6 +364,8 @@ The better model is:
 - Both classes may satisfy smaller structural interfaces such as readable, writable, seekable, flushable, or closable stream roles.
 - A method that only calls stream capability methods should be inferred as requiring the corresponding object shape or named interface, not the whole nominal `IO` type.
 - A method that calls `IO`-specific members such as file-descriptor operations should require `IO` or a more specific file-descriptor-backed role.
+
+Rigor should ship an opinionated core catalog of common standard-library capability roles rather than leaving every role to external plugins. The initial catalog should be small and Ruby-shaped, with roles such as readable stream, writable stream, rewindable stream, seekable stream, closable, enumerable, callable, and file-descriptor-backed. Plugins may add framework roles, additional conformance facts, role-specific exclusions, and `maybe` conformance, but they should not silently replace the core role definitions.
 
 The role names and method signatures below are illustrative, not final standard-library signatures:
 
@@ -785,6 +799,8 @@ Future versions may extend targets to instance variables, record keys, shape pat
 
 ### Flow Effects and Extension Contributions
 
+This section is the canonical semantic schema for flow effect bundles. Extension API documents should reference this schema when describing how plugins package and return contributions.
+
 The type specification depends on the extension API exposing facts, not direct scope mutation. A plugin or `RBS::Extended` annotation may contribute a flow effect bundle with:
 
 - normal return type;
@@ -797,6 +813,7 @@ The type specification depends on the extension API exposing facts, not direct s
 - receiver and argument mutation effects;
 - fact invalidation effects;
 - dynamic reflection members introduced by the call.
+- provenance and certainty for the contributed facts and effects.
 
 The analyzer applies these contributions through the same control-flow machinery it uses for built-in guards. This keeps short-circuiting expressions precise. For example, a plugin-defined predicate used on the left side of `&&` must refine the scope used to analyze the right side, and its negative fact must flow into the right side of `||`.
 
@@ -973,6 +990,7 @@ Rigor should prefer precise diagnostics over silent widening.
 - Method implementations are checked against accepted signature contracts regardless of source: inline `#:`, `# @rbs`, rbs-inline parameter annotations, generated stubs, and external `.rbs` declarations all have the same implementation-side force.
 - When inference stops because of recursion, operator ambiguity, dynamic dispatch, or budget exhaustion, Rigor should report the cutoff and suggest a boundary contract rather than pretending the inferred type is precise.
 - When an explicit nominal parameter type rejects a call but the method body only requires a smaller inferred capability role, Rigor may suggest generalizing the public signature to an interface rather than adding an ad hoc union.
+- Diagnostics that involve plugin, generated, or `RBS::Extended` facts should carry stable identifiers. Public identifiers should use prefixes that make the source family clear, such as `plugin.<plugin-id>.<name>`, `rbs_extended.<name>`, or `generated.<provider>.<name>`, while internal diagnostic metadata may retain richer provenance.
 - Losing precision during RBS export should be reportable when users request explanation or strict export mode.
 
 ## Implementation Expectations

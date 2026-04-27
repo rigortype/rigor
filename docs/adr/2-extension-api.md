@@ -79,6 +79,10 @@ Rigor should adopt the same style:
 - Type constructors should normalize through combinators, for example union, intersection, difference, and erasure helpers.
 - Custom type-like refinements should implement relationship, normalization, display, and RBS erasure behavior.
 
+`yes` and `no` are reserved for results that are proven under the current source, accepted signatures, plugin facts, and analyzer assumptions. `maybe` means the analyzer cannot prove either side. Accepted method signatures still define trusted method-boundary contracts: parameters and called method return values are analyzed through their accepted RBS, rbs-inline, Steep-compatible, generated, or `RBS::Extended` contracts rather than treated as uncertain merely because the implementation is outside the current method.
+
+`maybe` is not enough to narrow as though a relationship were `yes`, and it does not imply the opposite edge as though the answer were `no`. It may be retained as a weak relational, member-existence, dynamic-origin, or plugin-provenance fact for diagnostics. Whether maybe-dependent calls are reported is an error-level policy, similar in spirit to PHPStan: permissive levels may accept them silently, while stricter levels can report uncertain method calls, role matches, or branch proofs.
+
 This matters because a type such as `non-empty-string` may be represented as a string plus an accessory refinement, and a union of string literals should still answer as a string. Extension authors should not need to know every concrete internal representation.
 
 ## Reflection Objects
@@ -136,11 +140,23 @@ Dynamic reflection must support structural interface checking, not only member l
 
 The same mechanism should support capability roles for standard and framework objects. For example, `IO` and `StringIO` can both satisfy readable or rewindable stream interfaces without either becoming a subtype of the other. A standard-library fact provider or plugin should be able to contribute role conformance, member signatures, and role-specific exclusions such as file-descriptor-backed behavior.
 
+Rigor should ship an opinionated core catalog of common standard-library capability roles, such as readable stream, writable stream, rewindable stream, seekable stream, closable, enumerable, callable, and file-descriptor-backed. Plugins may add roles, additional conformance facts, role-specific exclusions, and `maybe` conformance, but they should not silently replace the core catalog.
+
+## Reflection Layer Rebuilds
+
+The reflection layer should be layered by input source rather than rebuilt as one monolithic table. The initial layers are core and standard-library signatures, project source declarations, accepted RBS and inline signatures, generated signatures, and plugin-provided dynamic members.
+
+Each reflection contribution should have a stable identity and cache key at the narrowest practical slice: class or module declaration, singleton object, member entry, shape provider, generated signature unit, or plugin dynamic-member provider. A single edited source file should invalidate the affected declaration and member slices, not every plugin fact or every reflected class.
+
+Plugin-provided dynamic members must carry provenance and dependency descriptors. If a Rails plugin builds members from schema files, model source, plugin configuration, and gem versions, those inputs belong to the dynamic-member cache key. Stable dynamic members may be reused across files and runs; members that depend on the analyzed file or call-site context should be recomputed at that narrower analysis point.
+
 ## Broad Expression and Operator Hooks
 
 PHPStan has catch-all expression type resolver extensions and operator type specifying extensions. Its documentation recommends narrow hooks, such as dynamic return type extensions, when possible.
 
 Rigor should keep broad expression hooks behind a higher bar because they can make analysis order and performance harder to reason about. They are still useful for Ruby constructs that do not fit method-call hooks, such as custom `[]` access, pattern-matching helpers, DSL literals, or operator-like methods whose meaning is framework-specific.
+
+The first public plugin milestone should defer broad expression and operator hooks unless a concrete framework use case cannot be represented by narrower hooks. When introduced, broad hooks must come with traversal-order guarantees, invocation budgets, timeouts or cancellation behavior, and a diagnostic tracing mode that shows which hook affected an expression.
 
 ## Plugin Contribution Merging
 
@@ -172,6 +188,14 @@ Repeated `maybe` results remain `maybe` unless a stronger proof is supplied. Cou
 
 This gives plugin authors a predictable rule: contributions refine the existing Ruby/RBS contract, and conflicts are reported rather than silently ordered away.
 
+## Plugin Diagnostic Provenance
+
+Diagnostics that depend on plugin, generated, or `RBS::Extended` contributions should expose stable identifiers, similar to PHPStan error identifiers. Public identifiers should use source-family prefixes, for example `plugin.<plugin-id>.<name>`, `rbs_extended.<name>`, or `generated.<provider>.<name>`.
+
+The public identifier is not the whole provenance model. Internally, facts, effects, and diagnostics should retain source tier, plugin identifier, plugin version, configuration source, dependency descriptors, target path, effect kind, and contributing reflection or signature object where available. This richer data supports explanations, cache invalidation, and future suppression policies.
+
+Diagnostic de-duplication should use a normalized key such as diagnostic identifier, location, target path, normalized fact or effect kind, and contributing source family. When several plugins contribute the same conflicting fact, Rigor should report one diagnostic with multiple sources rather than repeating the same message.
+
 ## Registration, Configuration, and Caching
 
 PHPStan registers extensions as services with tags. Services are long-lived objects constructed by dependency injection; value objects such as types, scopes, and reflections are created during analysis or returned from services. PHPStan also validates custom configuration parameters with schemas.
@@ -182,7 +206,21 @@ Rigor should use plugin manifests and project configuration to register extensio
 - Constructor injection for analyzer services such as reflection providers, type factories, loggers, and configuration readers.
 - Explicit plugin configuration schema so typos are diagnostics.
 - Deterministic extension ordering.
-- Cache metadata hooks so plugins can invalidate results when external schemas, generated files, gem versions, or configuration change.
+- Declarative cache dependency descriptors so plugins can invalidate results when external schemas, generated files, gem versions, plugin versions, or configuration change.
+
+Cache dependencies should be explicit descriptors rather than an after-the-fact list of arbitrary reads. The initial descriptor families should include project files by digest or mtime policy, generated signature units, gem names and versions, plugin gem versions, plugin configuration keys, and named dependency-metadata files such as lockfiles.
+
+The descriptor attaches to the contribution or reflection slice it produced. A plugin-wide dependency is allowed when the fact truly depends on the whole plugin configuration, but the preferred granularity is per dynamic-member provider, generated signature unit, receiver family, analyzed file, or flow contribution. This keeps one edited schema or fixture from invalidating the entire result cache.
+
+## Plugin Trust and I/O Policy
+
+Plugins must not execute application code. They may inspect parsed Ruby, RBS, generated signatures, project configuration, dependency metadata, and cached plugin metadata.
+
+The first implementation should treat plugins as trusted Ruby gems selected by the user, their Gemfile, or project configuration. Rigor should document that trust model rather than pretending ordinary in-process Ruby plugins are sandboxed. Future implementations may explore stronger isolation such as Ruby::Box or process isolation, but that is not part of the first public plugin contract.
+
+During analysis, network access should be disabled by default for determinism. File reads should normally be scoped to the project root, configured generated files, dependency metadata, and installed gem metadata. Reads outside those areas require explicit configuration and should be reflected in cache dependency descriptors.
+
+Plugin failures should be isolated at the analyzer boundary. A plugin exception should become a plugin diagnostic with provenance and, where possible, should degrade only the affected contribution rather than crashing `rigor check`.
 
 ## Testing and Compatibility
 
@@ -193,7 +231,9 @@ Rigor should provide the same two test styles:
 - Rule tests that analyze fixture files and assert diagnostics with line numbers and identifiers.
 - Type inference tests that use fixture code and helper assertions to check inferred types, narrowed types, dynamic return types, and plugin-provided members.
 
-Once public, extension protocols should have a backward-compatibility policy. Rigor can evolve internal type representations freely, but plugin-facing interfaces need versioning, deprecation windows, and migration notes.
+Type-inference assertion syntax is fixture-harness syntax, not application Ruby syntax. The first test helper should use comments or external expectation files that Prism can parse as ordinary Ruby without a custom dialect. Production analysis ignores the markers completely unless an explicit test harness enables them.
+
+Extension compatibility should initially be managed through Ruby gem version dependencies and a Rigor-provided extension test suite rather than a separate protocol-version number. Public extension namespaces should be documented as public; internal protocols should be explicitly marked internal so plugin authors do not depend on them accidentally. Rigor can evolve internal type representations freely, but documented plugin-facing interfaces need deprecation windows, compatibility tests, and migration notes once they are released as public gem APIs.
 
 ## Feedback from the Resulting Type Specification
 
@@ -209,95 +249,69 @@ Reconstructing `docs/types.md` exposes several extension API requirements that a
 - Extension tests must be able to assert inferred types and facts at program points inside compound conditions, not only at statement boundaries.
 - Cache metadata must include external schemas, generated signatures, gem versions, plugin configuration, and any files used to produce dynamic members or flow facts.
 
-## Identified Concerns from Critical Review
+## Critical Review Working Responses
 
-A critical review of the extension API draft surfaced the following risks. They are not blockers for the current direction, but each will need either a working decision or an explicit deferral before plugin authors can build against a stable contract.
+A critical review of the extension API draft surfaced the following risks. The working responses below record the current decisions or explicit deferrals. Exact object shapes, naming, and budgets can still evolve before the first public plugin API.
 
-### Cache Invalidation Needs a Declarative API, Not Just a List of Inputs
+### Cache Invalidation Needs a Declarative API
 
-The draft requires that cache metadata cover external schemas, generated signatures, gem versions, plugin configuration, and any files used by plugins, but the mechanism is not designed:
+Concern: plugin cache metadata named important inputs, but did not define how a plugin ties facts to files, generated signatures, gem versions, plugin versions, or configuration keys.
 
-- How does a plugin declare "I read this YAML; my facts depend on its mtime/digest"?
-- What is the granularity of invalidation: per file, per receiver type, per plugin, per fact?
-- How are plugin facts attributed to specific cache slots so that a single edited fixture does not invalidate the entire result cache?
-- What is the cache-key contract for plugin configuration changes (e.g., user toggles a Rails feature) versus plugin code changes (e.g., upgrading a plugin gem)?
+Working response: plugin facts and reflection contributions should carry declarative dependency descriptors attached to the cache slice they produced. Preferred granularity is contribution, generated signature unit, receiver family, dynamic-member provider, or analyzed file. Plugin-wide invalidation is allowed only when the whole plugin configuration truly affects the fact.
 
-### Type-Inference Assertions Risk Leaking Rigor Syntax into Ruby Code
+### Type-Inference Assertions Must Stay Fixture-Only
 
-The draft proposes "type inference tests using fixture code and helper assertions". For tests this is unavoidable, but the boundary needs care:
+Concern: type inference tests need program-point assertions, but helper syntax could accidentally become a Rigor-specific Ruby dialect.
 
-- Fixture-only assertion DSLs (e.g., `T(/expected/)`, magic comments, helper methods) must be explicitly scoped to test fixtures so the project's "no Rigor syntax in application Ruby" rule is not weakened in practice.
-- If fixtures share files with real application code (a common copy-from-production pattern), the marker syntax should be ignorable by Rigor at production-analysis time.
-- The assertion harness's syntax should not require a separate parser plugin or modify Prism behavior; otherwise the analyzer ends up with two Ruby dialects.
+Working response: assertion markers are fixture-harness syntax. They should use comments or external expectation files that Prism parses as ordinary Ruby, and production analysis ignores them unless an explicit test harness enables them.
 
-### Plugin Sandboxing and I/O Policy Is Undecided
+### Plugin Sandboxing and I/O Start from a Trusted-Gem Model
 
-"Plugins must not execute application code" is one constraint but not a complete policy:
+Concern: "plugins must not execute application code" is not a complete filesystem, network, failure-isolation, or trust policy.
 
-- May plugins read arbitrary files outside the project directory? Without a rule, cache reproducibility is fragile and security exposure is unclear.
-- May plugins make network calls during analysis? CLI determinism strongly suggests no by default.
-- How are plugin failures isolated from analyzer crashes? A misbehaving plugin should not be able to take down `rigor check`.
-- Plugin code itself runs as ordinary Ruby. The trust model for third-party plugins (review, signing, allowlists, lockfile pinning) should be acknowledged even if the first cut is "trust the user's Gemfile".
+Working response: the first implementation treats plugins as trusted Ruby gems selected by the user, Gemfile, or project configuration. Network access is disabled by default during analysis, ordinary reads are scoped to project and dependency inputs, and reads outside those inputs require explicit configuration plus cache dependency descriptors. Plugin exceptions become diagnostics at the analyzer boundary. Stronger isolation, such as Ruby::Box or process isolation, remains a future option.
 
-### Trinary `maybe` Lacks an Operational Policy
+### Trinary `maybe` Is Policy-Aware Uncertainty
 
-Relationship queries return `yes`/`maybe`/`no`, but the operational meaning of `maybe` is policy-driven:
+Concern: relationship queries return `yes`/`maybe`/`no`, but the operational meaning of `maybe` was underspecified.
 
-- Does `maybe` produce a diagnostic in default mode, in strict mode, or never?
-- Does `maybe` participate in narrowing as a positive fact, a negative fact, both, or neither?
-- When two queries return `maybe` for the same condition, does Rigor promote to `yes`, demote to `no`, or stay at `maybe`?
-- How is `maybe` displayed to users so they can act on it (e.g., add a guard, supply a stub, mark as accepted)?
+Working response: `yes` and `no` are proven answers under the current accepted contracts and analyzer assumptions; `maybe` is everything else. `maybe` does not narrow as a positive proof, does not create a complementary false-edge proof, and repeated `maybe` evidence remains `maybe`. Error levels decide whether maybe-dependent calls are accepted silently, reported as weak diagnostics, or rejected more strictly.
 
-### Capability-Role Provider Question Is Foundational, Not Deferable
+### Capability Roles Are Supplied by Core
 
-The capability-role provider question is currently Open, but it shapes:
+Concern: plugin authors need to know which standard roles exist and whether Rigor depends on a core role provider, bundled plugin, or external plugin.
 
-- Which roles plugin authors can rely on, and how they import them.
-- Whether Rigor ships with a bundled standard-library plugin or links roles directly into core.
-- The RBS files (or `RBS::Extended` annotations) that core depends on at startup.
+Working response: Rigor ships an opinionated core catalog of common standard-library capability roles. Plugins may add framework roles, additional conformance facts, role-specific exclusions, and uncertain conformance, but they should not silently replace core role definitions.
 
-Leaving this open delays the plugin contract design. A working decision (even one as light as "core ships an opinionated set under `lib/rigor/roles`, with replacement allowed via plugins") should be documented soon.
+### ADR-1 Owns Flow-Effect Semantics
 
-### Authoritative Source for the Flow-Effect Bundle Is Split
+Concern: ADR-1 and ADR-2 both mention flow-effect bundle fields, which risks drift.
 
-The flow-effect bundle is specified in both ADR-1 ("Flow Effects and Extension Contributions") and ADR-2 ("Type-Specifying Extensions" and "Dynamic Return Type Extensions"). When the two diverge, which is authoritative?
+Working response: ADR-1 owns the semantic schema: fields, target-path meaning, certainty rules, and scope transitions. ADR-2 owns plugin packaging, registration, service lifetime, and provenance. `docs/types.md` carries the detailed normative product specification both ADRs reference.
 
-- A clear rule (for example, ADR-1 owns semantics and the field set, ADR-2 owns the API surface and packaging) avoids drift.
-- The bundle's fields are listed in both ADRs but not guaranteed to remain in sync. A single normative table referenced from both ADRs would prevent silent divergence.
+### Reflection Rebuilds Are Slice-Based
 
-### Reflection Layer Needs an Incremental-Rebuild Story
+Concern: combining source declarations, RBS, generated signatures, plugin members, and core/stdlib signatures into one reflection model needs an incremental rebuild story.
 
-Rigor combines source declarations, RBS, generated signatures, plugin members, and core/stdlib signatures into a single reflection model. The draft does not describe:
+Working response: reflection inputs are layered by source and cached by stable slices such as declaration, member entry, singleton object, shape provider, generated signature unit, and plugin dynamic-member provider. Plugin dynamic members carry provenance and dependency descriptors so a single edited file or schema invalidates only the affected reflection slices.
 
-- Which inputs are pre-built before analysis vs. constructed on demand.
-- How a single edited file invalidates only the affected reflection slices (member of a class, attribute of a record, plugin-provided dynamic member).
-- Whether plugin-provided dynamic members are expected to be stable across runs or recomputed per file.
+### Diagnostic Provenance Uses Public Prefixes and Internal Detail
 
-For CLI-first responsiveness, this is a foundational concern; without it, ADR-0's "high-performance caching" goal is hard to meet.
+Concern: plugin-related diagnostics need attribution, de-duplication, and future suppression behavior.
 
-### Plugin Diagnostic Provenance and De-Duplication
+Working response: public diagnostic identifiers should use source-family prefixes similar to PHPStan error identifiers, such as `plugin.<plugin-id>.<name>`, `rbs_extended.<name>`, or `generated.<provider>.<name>`. Internally, diagnostics retain richer provenance for explanations, cache keys, and future suppression policy. Duplicate diagnostics are grouped by normalized identifier, location, target, fact/effect kind, and source family.
 
-When a plugin contributes a fact that leads to a diagnostic, attribution matters:
+### Compatibility Uses Gem Versions and Test Suites First
 
-- Diagnostics should identify the contributing plugin so users can fix root causes upstream.
-- Two plugins contributing the "same" fact about the same expression should not produce duplicate diagnostics.
-- Suppression mechanisms (e.g., a future `rigor:disable` comment or configuration entry) interact with plugin facts. The policy on whether suppression covers plugin facts, core facts, or both should be explicit.
+Concern: public extension protocols need compatibility policy, but a separate protocol-version system may be premature.
 
-### Extension Protocol Versioning Timing
+Working response: the first public contract should rely on Ruby gem version dependencies, documented public namespaces, explicit internal namespaces, and a Rigor-provided extension conformance test suite. A separate extension protocol version can be introduced later if gem version constraints and tests are not enough.
 
-"Once public, extension protocols should have a backward-compatibility policy" is correct, but timing is unspecified:
+### Broad Expression and Operator Hooks Are Deferred
 
-- Is "public" the first release, the first stable release, or the end of a designated experimental window?
-- Internal-only protocols should be marked as such so plugin authors do not depend on them by accident.
-- A policy for major-version transitions (deprecation length, parallel-protocol periods, migration guides) should be sketched even if numbers are placeholders.
+Concern: broad hooks can make analysis order and performance difficult to reason about.
 
-### Operator and Expression Hooks Have No Cost Model
-
-The draft accepts broad expression and operator hooks "behind a higher bar" without describing what that bar is:
-
-- The analyzer's traversal order with broad hooks active is not documented. A misbehaving hook can silently change which scopes are seen by other extensions.
-- Performance budgets for broad hooks (e.g., maximum invocations per file, time-out per call) are not described, which makes plugin behavior in large code bases unpredictable.
-- A diagnostic mode that surfaces broad-hook activity to plugin authors and end users would help, but is not part of the current draft.
+Working response: the first public plugin milestone should defer broad expression and operator hooks unless a concrete framework use case cannot be represented by narrow hooks. Any future broad hook must specify traversal-order guarantees, invocation budgets, timeout or cancellation behavior, and diagnostic tracing.
 
 ## Rejected and Deferred Candidate Decisions
 
@@ -307,32 +321,25 @@ The draft accepts broad expression and operator hooks "behind a higher bar" with
 | Letting plugins mutate the current scope directly | Rejected | Scope mutation would make CFA order-dependent. Plugins should return facts and effects for the analyzer to apply. |
 | Executing application code to discover framework behavior | Rejected | Rigor remains a static analyzer with zero runtime dependency. Plugins may read source, signatures, generated metadata, and configuration. |
 | Making PHPDoc or Rigor-specific inline Ruby comments the main extension interface | Rejected | Rigor should not invent a new application-code annotation DSL. Existing RBS-, rbs-inline-, and Steep-compatible annotations are accepted as type sources; RBS, `RBS::Extended`, generated signatures, and plugins remain the extension surfaces. |
+| Making type-inference assertion helpers part of application Ruby | Rejected | Assertion markers are fixture-harness syntax only. Production analysis must ignore them unless a test harness explicitly enables them. |
+| Introducing a separate extension protocol version before gem compatibility proves insufficient | Deferred | Ruby gem version dependencies, documented public namespaces, explicit internal namespaces, and Rigor-provided conformance tests should carry the first public compatibility contract. |
 | Shipping all PHPStan-style extension points in the MVP | Deferred | Dynamic return types, type-specifying extensions, and dynamic reflection provide the most immediate value. Output, dead-code, and broad infrastructure hooks can follow later. |
 
 ## Open Questions
 
 - What is the smallest stable `Scope` interface needed for the first plugin milestone?
 - Should dynamic return extensions match by nominal receiver type only at first, or also by structural interface and object shape?
-- How should plugin-provided facts be displayed in diagnostics so users can tell core inference from plugin inference?
 - What is the initial plugin manifest format and configuration schema language?
-- How should Rigor version public extension protocols separately from internal analyzer classes?
 - Should Rigor expose synthetic or virtual AST nodes to rules in the first custom-rule milestone?
-- What is the first testing helper spelling for asserting inferred types in Ruby fixtures?
-- What is the smallest public shape of a flow contribution bundle that supports truthy, falsey, assertion, mutation, and invalidation effects?
+- What is the exact fixture marker spelling for asserting inferred types and branch-local facts in Ruby fixtures, including facts that exist only while analyzing the right side of `&&` or `||`?
+- What is the smallest public API object shape for packaging the flow contribution bundle defined by ADR-1 and `docs/types.md`?
 - Which target-path forms should be public in the first plugin API, and which should remain internal until fact-stability rules are clearer?
-- How should tests assert facts that exist only on the right side of `&&` or `||` before the surrounding `if` body is entered?
-- Should standard-library capability roles be supplied by core Rigor, generated RBS, or a bundled standard-library plugin?
-- How should plugins declare that a dynamic class satisfies only part of a role, or satisfies it with `maybe` certainty?
-- What diagnostic identifiers and display format should Rigor use for conflicting plugin, generated, and `RBS::Extended` contributions?
-- What is the declarative API a plugin uses to register cache invalidation inputs (file paths, digests, gem versions, configuration keys)?
-- What is the boundary between fixture-only test syntax and ordinary application Ruby for type-inference assertions, and how is that boundary enforced at production-analysis time?
-- What is the minimum sandbox and I/O policy for third-party plugins, including filesystem scope, network access, and crash isolation?
-- What operational policy applies to `maybe` results in default mode versus strict mode, including narrowing behavior and diagnostic emission?
-- Which document owns the canonical schema of the flow-effect bundle, and how is the schema kept in sync between ADR-1 and ADR-2?
-- What is the rebuild granularity of the reflection layer when source, RBS, generated signatures, or plugin-provided members change?
-- How are plugin-contributed diagnostics attributed and de-duplicated, and how do future suppression mechanisms interact with them?
-- When does an extension protocol become "public" for versioning purposes, and what deprecation or parallel-protocol policy applies after that point?
-- What performance and traversal-order guarantees apply to broad expression and operator hooks, and how are they surfaced to plugin authors?
+- What exact payload should plugins use to declare full, partial, excluded, or `maybe` capability-role conformance?
+- What exact diagnostic identifier taxonomy and display format should Rigor use for conflicting plugin, generated, and `RBS::Extended` contributions?
+- What exact descriptor schema should plugins use for cache dependencies, including digest policy, gem version keys, plugin version keys, and configuration keys?
+- What exact reflection cache key schema and persistence format should represent source, RBS, generated, and plugin-provided slices?
+- What gem dependency ranges and Rigor-provided conformance tests define compatibility for public extension namespaces?
+- If broad expression or operator hooks are enabled later, what concrete invocation budgets, timeout behavior, traversal-order guarantees, and tracing output should they use?
 
 ## Consequences
 

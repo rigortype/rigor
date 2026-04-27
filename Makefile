@@ -2,12 +2,14 @@
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
+	references/rbs-inline-wiki \
 	references/phpstan \
 	references/python-typing \
 	references/TypeScript-Website
 
 init-submodules:
 	git submodule update --init --filter=blob:none references/rbs
+	git submodule update --init --filter=blob:none references/rbs-inline-wiki
 	git submodule update --init --filter=blob:none --no-checkout references/phpstan
 	git -C references/phpstan sparse-checkout init --cone
 	git -C references/phpstan sparse-checkout set website

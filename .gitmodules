@@ -12,3 +12,6 @@
 	path = references/phpstan
 	url = https://github.com/phpstan/phpstan.git
 	branch = 2.2.x
+[submodule "references/rbs-inline-wiki"]
+	path = references/rbs-inline-wiki
+	url = https://github.com/soutaro/rbs-inline.wiki.git

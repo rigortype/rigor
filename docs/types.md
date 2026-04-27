@@ -573,6 +573,15 @@ Initial scalar refinements:
 | `non-negative-int` | `Integer` greater than or equal to `0` | `Integer` |
 | `non-zero-int` | `Integer` except `0` | `Integer` |
 
+Integer refinements are deliberately `Integer` refinements, not sign refinements for all `Numeric` values. Ruby's numeric classes have different equality, ordering, and promotion behavior, so Rigor should not generalize `positive-int`, `negative-int`, or `non-zero-int` across nominal numeric boundaries.
+
+Non-integer numeric refinements have separate rules:
+
+- `Float` literal equality and exhaustiveness narrowing are refused by default. `NaN`, infinities, signed zero, and coercion-sensitive comparisons make literal partitions easy to misstate. Rigor may retain relational facts from float comparisons, and a future `finite-float` or non-`NaN` proof may unlock narrower float-specific refinements.
+- `Rational` is exact and ordered, but it is not an `Integer`. Future sign or range facts for `Rational` should be Rational-specific and should not reuse `*-int` names.
+- `Complex` does not have a total ordering in Ruby, so positive, negative, and interval refinements do not apply to `Complex`. Facts about zero-ness, real parts, imaginary parts, or magnitude need explicit predicates or plugin/RBS effects.
+- Mixed numeric operations and comparisons follow Ruby method dispatch and `coerce`, not subtype promotion. Refinements do not automatically cross from `Integer` to `Float`, `Rational`, or another `Numeric` class. When a mixed operation is known, the result type follows the Ruby/RBS operator signature or a trusted plugin fact; otherwise Rigor keeps a relational or dynamic-origin fact and widens conservatively.
+
 The canonical lowercase string name is `lowercase-string`; `lower-string` should not be accepted as a separate alias unless a concrete usability problem appears.
 
 Initial collection and shape refinements:

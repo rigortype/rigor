@@ -570,6 +570,16 @@ The scalar refinement table lists positive/negative/non-zero integer refinements
 - `Rational` and `Complex`, which RBS recognizes as core numeric classes.
 - Promotion rules across `Integer | Float`, `Integer | Rational`, and similar unions, which Ruby resolves at runtime through `coerce`. Rigor must decide whether refinements transit `coerce` boundaries or stop at the nominal level.
 
+Working response:
+
+- The initial refinement surface intentionally stops at `Integer`. The `positive-int`, `negative-int`, `non-positive-int`, `non-negative-int`, and `non-zero-int` names are exact integer refinements, not sign refinements for arbitrary `Numeric` values.
+- `Float` should keep the existing conservative rule: equality and exhaustiveness narrowing are refused by default. Comparisons may produce relational facts, but float-specific value refinements require a proof that excludes `NaN` and handles infinities and signed zero explicitly.
+- `Rational` may eventually receive exact ordered refinements, but those refinements must be Rational-specific. Rigor should not silently treat a Rational sign fact as an integer range fact.
+- `Complex` should not participate in positive, negative, or interval refinements because Ruby does not provide a total ordering for complex numbers. Any useful `Complex` facts need explicit predicates or plugin/RBS effects.
+- Refinements do not automatically transit `coerce` boundaries. Mixed numeric operations follow Ruby dispatch and the relevant RBS or plugin signature. If Rigor cannot prove the operation and promotion path, it should preserve a relational or dynamic-origin fact and widen to the conservative nominal result.
+
+This resolves the default rule: integer refinements remain nominally scoped, and non-integer numeric precision is opt-in through future built-ins, trusted predicates, or plugin/RBS effects.
+
 ## Rejected and Deferred Candidate Decisions
 
 This ADR keeps explicit notes for candidate ideas that were discussed but not accepted as the current direction.
@@ -647,7 +657,7 @@ Negative:
 - What inference budgets should trigger incomplete-inference diagnostics, and which of them should be configurable?
 - How should interactive CLI prompts choose between inline `#:`, full `# @rbs`, generated stubs, and external `.rbs` persistence targets?
 - Which generic variance cases require special handling for `Dynamic[T]` slots in the first implementation?
-- Should `Float` equality narrowing ever be opt-in, and what proof should be required to exclude `NaN` and signed-zero pitfalls?
+- What exact trusted predicate or effect payload should prove finite, non-`NaN`, and signed-zero behavior if float refinements are introduced later?
 - What exact effect payload should encode block call timing, closure escape, receiver or argument mutation, and read-only/pure behavior?
 - Which Ruby core and stdlib methods should receive built-in call-timing and mutation summaries first?
 - What literal key and value union budgets should hash-shape erasure use before widening to nominal bases?
@@ -656,7 +666,7 @@ Negative:
 - Which non-predicate `rigor:v1:` directives should be standardized first, and which should remain plugin-only metadata?
 - What diagnostic identifiers should distinguish unsupported `RBS::Extended` versions, invalid payloads, and semantic conflicts?
 - What exact display budget and wording should diagnostics use when negative-fact exclusions are omitted?
-- How should `Float`, `Rational`, `Complex`, and `coerce`-mediated promotions participate in scalar refinements?
+- Which non-integer numeric refinement names, if any, should be accepted after the integer refinement milestone?
 - How exactly should Rigor model Ruby protected-call receiver restrictions in structural interface and object-shape checks?
 - Should method summaries store visibility per overload, per method entry, or both when reopened classes change visibility around definitions?
 

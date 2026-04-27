@@ -800,6 +800,16 @@ The type specification depends on the extension API exposing facts, not direct s
 
 The analyzer applies these contributions through the same control-flow machinery it uses for built-in guards. This keeps short-circuiting expressions precise. For example, a plugin-defined predicate used on the left side of `&&` must refine the scope used to analyze the right side, and its negative fact must flow into the right side of `||`.
 
+Contribution merging is deterministic and analyzer-owned:
+
+- Contributions carry provenance, including whether they came from core Ruby semantics, an accepted signature or `RBS::Extended` annotation, generated metadata, or a plugin.
+- Core Ruby semantics and accepted signature contracts are authoritative. `RBS::Extended`, generated metadata, and plugins may refine compatible facts, but they must not weaken or contradict the ordinary Ruby/RBS contract.
+- Compatible facts on the same target, flow edge, and effect kind are composed. Positive type facts intersect, negative facts and relational facts accumulate under their normal budgets, and mutation, escape, and invalidation effects are unioned conservatively.
+- Contradictory contributions are diagnostics, not first-wins or last-wins behavior. Rigor should keep the nearest non-conflicting authoritative fact and ignore or weaken the conflicting contribution for that target and edge.
+- Truthy-edge and falsey-edge facts remain edge-local. A plugin may contribute one-sided facts, but Rigor must not infer the opposite edge unless the contribution explicitly provides it or the core analyzer can derive it.
+- Dynamic return contributions are checked against the selected signature or default return contract. A plugin may narrow a compatible return, but an incompatible return contribution is a conflict diagnostic rather than an override of the contract.
+- Repeated `maybe` evidence does not become `yes` merely by count. Certainty changes only when a contribution supplies a stronger proof or the core analyzer can derive one from compatible facts.
+
 Future target grammar should grow only with clear stability rules. Plausible targets include:
 
 - `self`;

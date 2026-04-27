@@ -192,6 +192,18 @@ Multiple flow contributions can target the same call:
 - The draft says ordering is deterministic, but it does not pick a model (registration order, priority field, alphabetical, configuration-driven). Plugin authors cannot predict outcomes without one.
 - The rule for combining a plugin's truthy-edge fact with a built-in falsey-edge fact (or vice versa) in the same condition is not documented.
 
+Working response:
+
+- Extensions do not override `Scope`, method reflection, or the selected RBS contract directly. They return provenance-bearing contributions that the analyzer merges through the same control-flow machinery as built-in rules.
+- Authority tiers are explicit: core Ruby semantics and accepted ordinary RBS/rbs-inline/Steep-compatible contracts are authoritative; `RBS::Extended` and generated metadata may refine those contracts; plugins may refine compatible analyzer facts. Lower tiers must not weaken or contradict higher tiers.
+- Deterministic plugin order is project configuration order after dependency constraints are satisfied, with plugin identifier order as the tie-breaker. The first public API should not expose ad hoc priority fields.
+- Compatible contributions compose by target, flow edge, and effect kind. Positive facts intersect, negative and relational facts accumulate under the normal fact budgets, return types are checked against the selected signature, and mutation, escape, and invalidation effects are unioned conservatively.
+- Contradictions are diagnostics, not first-wins or last-wins behavior. If two same-tier plugin facts conflict, Rigor reports both sources and falls back to the nearest non-conflicting higher-tier or default fact for that target and edge.
+- Truthy-edge and falsey-edge facts stay edge-local. A plugin's true-edge fact does not imply the false-edge complement unless the contribution explicitly says so or a trusted core rule derives it.
+- Repeated `maybe` results remain `maybe` unless a stronger proof is supplied. Counting two uncertain plugin answers is not enough to promote a relationship to `yes`.
+
+This gives plugin authors a predictable rule: write contributions that refine the existing Ruby/RBS contract, and expect conflicts to be reported rather than silently ordered away.
+
 ### Cache Invalidation Needs a Declarative API, Not Just a List of Inputs
 
 The draft requires that cache metadata cover external schemas, generated signatures, gem versions, plugin configuration, and any files used by plugins, but the mechanism is not designed:
@@ -302,7 +314,7 @@ The draft accepts broad expression and operator hooks "behind a higher bar" with
 - How should tests assert facts that exist only on the right side of `&&` or `||` before the surrounding `if` body is entered?
 - Should standard-library capability roles be supplied by core Rigor, generated RBS, or a bundled standard-library plugin?
 - How should plugins declare that a dynamic class satisfies only part of a role, or satisfies it with `maybe` certainty?
-- What is the precedence rule when built-in narrowing and one or more plugin-provided facts target the same call or condition?
+- What diagnostic identifiers and display format should Rigor use for conflicting plugin, generated, and `RBS::Extended` contributions?
 - What is the declarative API a plugin uses to register cache invalidation inputs (file paths, digests, gem versions, configuration keys)?
 - What is the boundary between fixture-only test syntax and ordinary application Ruby for type-inference assertions, and how is that boundary enforced at production-analysis time?
 - What is the minimum sandbox and I/O policy for third-party plugins, including filesystem scope, network access, and crash isolation?

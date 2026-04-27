@@ -8,3 +8,7 @@
 	path = references/TypeScript-Website
 	url = https://github.com/microsoft/TypeScript-Website.git
 	branch = v2
+[submodule "references/phpstan"]
+	path = references/phpstan
+	url = https://github.com/phpstan/phpstan.git
+	branch = 2.2.x

@@ -142,6 +142,36 @@ PHPStan has catch-all expression type resolver extensions and operator type spec
 
 Rigor should keep broad expression hooks behind a higher bar because they can make analysis order and performance harder to reason about. They are still useful for Ruby constructs that do not fit method-call hooks, such as custom `[]` access, pattern-matching helpers, DSL literals, or operator-like methods whose meaning is framework-specific.
 
+## Plugin Contribution Merging
+
+Multiple flow contributions can target the same call: a built-in narrowing rule and a plugin-provided fact may apply at the same site, two plugins may both register for the same receiver family, and `RBS::Extended` annotations may add their own facts. Rigor merges these contributions deterministically rather than letting any one source silently override another.
+
+Extensions do not override `Scope`, method reflection, or the selected RBS contract directly. They return provenance-bearing contributions that the analyzer merges through the same control-flow machinery as built-in rules.
+
+Authority tiers are explicit:
+
+- Core Ruby semantics and accepted ordinary RBS, rbs-inline, and Steep-compatible contracts are authoritative.
+- `RBS::Extended` annotations and generated metadata may refine those contracts.
+- Plugins may refine compatible analyzer facts.
+- Lower tiers must not weaken or contradict higher tiers. Lower-tier contributions that contradict a higher tier are diagnostics, not silent overrides.
+
+Plugin order within the same tier is deterministic: project configuration order after dependency constraints are satisfied, with plugin identifier order as the tie-breaker. The first public API does not expose ad hoc priority fields.
+
+Compatible contributions compose by target, flow edge, and effect kind:
+
+- Positive type facts on the same target and edge are intersected. "Compatible" means the intersection of value domains does not collapse to `bot`; intersections that do collapse are conflicts.
+- Negative and relational facts accumulate under the normal fact budgets defined in ADR-1.
+- Return types from dynamic return extensions are checked against the selected signature. A plugin may narrow within the contract; an incompatible return is a conflict diagnostic, not a contract override.
+- Mutation, escape, and invalidation effects are unioned conservatively. Effect declarations that cannot both be true, such as `pure` combined with a receiver-mutation effect, are conflicts.
+
+Contradictions are diagnostics, not first-wins or last-wins behavior. When two same-tier contributions conflict, Rigor reports both sources and falls back to the nearest non-conflicting higher-tier or default fact for that target and edge.
+
+Truthy-edge and falsey-edge facts stay edge-local. A plugin's true-edge fact does not imply the false-edge complement unless the contribution explicitly supplies it or a trusted core rule derives it. Plugins that want PHPStan `@phpstan-assert`- or TypeScript `is`-style two-edge narrowing should declare both edges explicitly, for example with paired `predicate-if-true` and `predicate-if-false` effects.
+
+Repeated `maybe` results remain `maybe` unless a stronger proof is supplied. Counting two uncertain plugin answers is not enough to promote a relationship to `yes`. Certainty changes only when a contribution supplies a stronger proof or the core analyzer can derive one from compatible facts.
+
+This gives plugin authors a predictable rule: contributions refine the existing Ruby/RBS contract, and conflicts are reported rather than silently ordered away.
+
 ## Registration, Configuration, and Caching
 
 PHPStan registers extensions as services with tags. Services are long-lived objects constructed by dependency injection; value objects such as types, scopes, and reflections are created during analysis or returned from services. PHPStan also validates custom configuration parameters with schemas.
@@ -182,27 +212,6 @@ Reconstructing `docs/types.md` exposes several extension API requirements that a
 ## Identified Concerns from Critical Review
 
 A critical review of the extension API draft surfaced the following risks. They are not blockers for the current direction, but each will need either a working decision or an explicit deferral before plugin authors can build against a stable contract.
-
-### Plugin Precedence and Merging Are Unspecified
-
-Multiple flow contributions can target the same call:
-
-- A built-in narrowing rule (e.g., `is_a?`) and a plugin-provided fact may both apply to the same call site. The precedence rule between core inference and plugins is not stated.
-- Two plugins may both register for the same receiver family. Their results may agree, refine through intersection, or contradict; the merge policy in each case is unspecified.
-- The draft says ordering is deterministic, but it does not pick a model (registration order, priority field, alphabetical, configuration-driven). Plugin authors cannot predict outcomes without one.
-- The rule for combining a plugin's truthy-edge fact with a built-in falsey-edge fact (or vice versa) in the same condition is not documented.
-
-Working response:
-
-- Extensions do not override `Scope`, method reflection, or the selected RBS contract directly. They return provenance-bearing contributions that the analyzer merges through the same control-flow machinery as built-in rules.
-- Authority tiers are explicit: core Ruby semantics and accepted ordinary RBS/rbs-inline/Steep-compatible contracts are authoritative; `RBS::Extended` and generated metadata may refine those contracts; plugins may refine compatible analyzer facts. Lower tiers must not weaken or contradict higher tiers.
-- Deterministic plugin order is project configuration order after dependency constraints are satisfied, with plugin identifier order as the tie-breaker. The first public API should not expose ad hoc priority fields.
-- Compatible contributions compose by target, flow edge, and effect kind. Positive facts intersect, negative and relational facts accumulate under the normal fact budgets, return types are checked against the selected signature, and mutation, escape, and invalidation effects are unioned conservatively.
-- Contradictions are diagnostics, not first-wins or last-wins behavior. If two same-tier plugin facts conflict, Rigor reports both sources and falls back to the nearest non-conflicting higher-tier or default fact for that target and edge.
-- Truthy-edge and falsey-edge facts stay edge-local. A plugin's true-edge fact does not imply the false-edge complement unless the contribution explicitly says so or a trusted core rule derives it.
-- Repeated `maybe` results remain `maybe` unless a stronger proof is supplied. Counting two uncertain plugin answers is not enough to promote a relationship to `yes`.
-
-This gives plugin authors a predictable rule: write contributions that refine the existing Ruby/RBS contract, and expect conflicts to be reported rather than silently ordered away.
 
 ### Cache Invalidation Needs a Declarative API, Not Just a List of Inputs
 

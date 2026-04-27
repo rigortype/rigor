@@ -244,6 +244,30 @@ This is a pseudo-protocol model:
 
 Python's rule that mutable protocol attributes are invariant maps cleanly to Ruby method capabilities. A read-only attribute is a reader method and can be covariant in its result. A write-only attribute is a writer method and is checked contravariantly in its accepted value. A read-write accessor combines both constraints and is effectively invariant.
 
+### Method Shapes and Visibility
+
+Reader and writer capabilities are method capabilities, not field declarations. `attr_reader`, `attr_writer`, and `attr_accessor` are sources of method facts; Rigor models the resulting `x` and `x=` methods as separate entries on the shape.
+
+- `attr_reader :x` contributes a public reader method `x` unless surrounding Ruby visibility state changes it.
+- `attr_writer :x` contributes a writer method `x=` and does not imply a reader.
+- `attr_accessor :x` contributes both methods, but Rigor still keeps them as two method entries.
+- A manually defined or overridden `x` or `x=` method replaces or refines the method fact according to ordinary Ruby method lookup and source order. Reader and writer capability does not imply purity.
+
+Visibility is a first-class facet on every method-shape entry. Rigor tracks at least `public`, `protected`, and `private`, plus the call context in which a member may be used:
+
+- External explicit receiver sends require a public method.
+- Private methods may be called only in private-call contexts, not as ordinary explicit receiver sends.
+- Protected methods follow Ruby's protected receiver restriction and do not satisfy public structural interface requirements by default.
+- Public structural interfaces require public members unless an internal check or a future interface form explicitly requests another visibility.
+
+`respond_to?` checks refine an object to an existence-only shape, not to full signature compatibility. The optional `include_private` argument changes the visibility fact:
+
+- `obj.respond_to?(:foo)` and `obj.respond_to?(:foo, false)` produce a public existence fact for `foo` on the true branch.
+- `obj.respond_to?(:foo, true)` produces an existence fact whose visibility may be public, protected, or private. By itself it does not prove that `obj.foo` is legal as an external explicit receiver call.
+- If the second argument is not statically known, Rigor records a weaker maybe-private visibility fact.
+
+`respond_to_missing?` and `method_missing` facts carry dynamic provenance and an unknown or plugin-provided signature. They can justify guarded dynamic calls but do not prove full interface compatibility on their own.
+
 ### Capability Roles Beat Ad Hoc Mock Unions
 
 Ruby libraries often accept objects that are not related by inheritance but share the capability required by a method body. `IO` and `StringIO` are the central example: `StringIO` is useful as an in-memory test double for many stream consumers, but it is not a subclass of `IO` and does not expose the full `IO` method surface.
@@ -411,6 +435,17 @@ Each budget produces an incomplete-inference result with a reason rather than a 
 
 Rigor can infer refined types such as non-empty strings, positive integers, literal sets, truthiness-narrowed types, and hash/object shapes. These refinements improve diagnostics and flow analysis, but they erase to ordinary RBS.
 
+### Numeric Refinement Scope
+
+The initial scalar refinement surface intentionally stops at `Integer`. The reserved names `positive-int`, `negative-int`, `non-positive-int`, `non-negative-int`, and `non-zero-int` are exact integer refinements, not generic sign refinements for arbitrary `Numeric` values.
+
+- `Float` keeps the conservative rule: equality and exhaustiveness narrowing are refused by default. Comparisons may produce relational facts, but float-specific value refinements require a proof that excludes `NaN` and handles infinities and signed zero explicitly. A future `finite-float` or non-`NaN` predicate may unlock narrower facts.
+- `Rational` may eventually receive exact ordered refinements, but those refinements must be Rational-specific. Rigor should not silently treat a Rational sign fact as an integer-range fact.
+- `Complex` does not participate in positive, negative, or interval refinements because Ruby does not provide a total ordering for complex numbers. Useful `Complex` facts need explicit predicates or plugin/RBS effects.
+- Refinements do not automatically transit `coerce` boundaries. Mixed numeric operations follow Ruby dispatch and the relevant RBS or plugin signature. If Rigor cannot prove the operation and promotion path, it preserves a relational or dynamic-origin fact and widens to the conservative nominal result.
+
+Non-integer numeric precision is therefore opt-in through future built-ins, trusted predicates, or plugin and RBS effects, not through silent promotion of `*-int` refinements across nominal numeric boundaries.
+
 ### Pre-Plugin Inference Surface
 
 Many Ruby code bases are dominated by `Dynamic[top]` until plugins, generated stubs, or RBS files fill in shapes. The pre-plugin surface should still produce useful facts:
@@ -451,8 +486,17 @@ Retention follows finite-domain precision and a budget for open domains:
 
 - Finite domains normalize exactly. `"foo" | "bar"` minus `"foo"` becomes `"bar"`; removing every alternative becomes `bot`.
 - Large or unknown domains keep negative facts under a budget. When the budget is exceeded, Rigor records that exclusions were omitted and falls back to the positive domain rather than rendering unstable chains such as `Integer - 0 - 1 - 2 - ...`.
-- Display should prefer domain-bearing forms such as `String - "foo"` when bare `~"foo"` would be ambiguous; `~T` is reserved for compact branch-local display when the surrounding domain is already visible.
 - Negative facts follow the same stability rules as other flow facts: assignment, mutation, unknown calls, yielded blocks, and plugin-declared invalidation may weaken or remove them.
+
+Diagnostic display follows a domain-aware contract so users do not misread negative facts as global complements:
+
+- Internal normalization may continue to use `T & ~U`, but diagnostics should render with the current positive domain visible.
+- Small finite domains display as their normalized positive union. For example, `"foo" | "bar" - "foo"` displays as `"bar"`.
+- Broad known domains display as `D - U`, such as `String - "foo"` or `Integer - 0`, rather than a bare complement.
+- Multiple retained exclusions display as a flattened difference, such as `String - ("" | "foo")`, rather than nested differences or repeated intersections.
+- Bare `~U` is allowed only for compact branch-local display when the surrounding diagnostic already states the domain. Otherwise Rigor prefers `D - U`, `top - U`, or prose that names the domain.
+- Dynamic-origin provenance does not replace the domain display. A diagnostic may show `String - "foo"` with a dynamic-origin note, while technical traces may show `Dynamic[String - "foo"]`.
+- When the exclusion budget is exceeded, Rigor displays the positive domain plus an omission note instead of a long unstable chain.
 
 ### `RBS::Extended` Is an Annotation-Based Metadata Layer
 
@@ -481,6 +525,21 @@ If `T` is a Rigor type and `erase(T)` is the generated RBS type, every value acc
 
 Erasure can lose precision. It must not become narrower than the internal type.
 
+### Hash Shape Erasure
+
+Hash shapes carry more information than RBS records and `Hash[K, V]` can express. Rigor's erasure rule preserves what RBS can spell and falls back deterministically when it cannot. The detailed algorithm lives in `docs/types.md`; the strategic decisions are:
+
+- Exact closed shapes erase to RBS records when every key can be represented by RBS record syntax. Required entries become required record fields, optional entries become optional fields when spellable, and values erase recursively.
+- Optional-key absence is not a stored `nil`. Rigor must not add `nil` to a value type merely because a key is optional.
+- Read-only, provenance, stability, key-presence, and open/closed markers are erased. Losing them is reportable in strict export or explanation mode.
+- Shapes that cannot be represented exactly as records erase to `Hash[K, V]`.
+- `K` is the union of known literal keys, widened nominal key classes when literal unions exceed the export budget, and the extra-key bound for open shapes. Statically unknown extra keys use `top`; dynamic-origin extra keys use `untyped`.
+- `V` is the union of known required values, known optional values, and the extra-value bound for open shapes. Statically unknown extra values use `top`; dynamic-origin extra values use `untyped`.
+- For open shapes, the extra-value bound wins over the current observed value union. Rigor does not infer that all future extra keys have values drawn only from already-seen entries.
+- Exact empty closed records erase to `{}` when the target RBS output supports it; otherwise the conservative fallback is `Hash[bot, bot]`, which preserves the "no entries possible" fact.
+
+Concrete export budgets for literal key and value unions remain in Open Questions.
+
 ## Feedback from the Resulting Type Specification
 
 Reconstructing `docs/types.md` as the ideal type model adds several requirements that this ADR should carry forward:
@@ -494,91 +553,6 @@ Reconstructing `docs/types.md` as the ideal type model adds several requirements
 - Gradual facts need provenance. Narrowing an `untyped` value can be useful inside a branch, but diagnostics, generic slots, and joins should still know that the value crossed an unchecked boundary. The working internal form is `Dynamic[T]`, with raw `untyped` represented as `Dynamic[top]`.
 - Shape, member, and hash-key facts need invalidation rules. Assignments, mutation, unknown calls, yielded blocks, and plugin-declared effects may weaken or remove facts.
 - RBS erasure is part of the type design, not a presentation layer. Every internal refinement, relation, and provenance marker needs a conservative erasure rule.
-
-## Identified Concerns from Critical Review
-
-A critical review of the type specification and the decisions above surfaced the following risks that remain unresolved at the type-model level. Each will need either a working decision or an explicit deferral before the type engine can be implemented end to end. Concerns that have already been folded into the Key Design Points above are not repeated here.
-
-### Hash Erasure Does Not Specify How `Hash[K, V]` Is Reconstructed
-
-`{ a: 1, b: "str" }` could erase to `Hash[Symbol, Integer | String]`, `Hash[:a | :b, Integer | String]`, or some intersection of those. The choice changes downstream precision and RBS readability:
-
-- Should keys widen to their nominal class or stay as a literal union when finite?
-- Should values be unioned, widened to a least common nominal supertype, or both forms be available behind a flag?
-- For open shapes, what is the value type when extra keys are accepted but unknown? `untyped`, the current shape's value union, or the user-declared extra-key bound?
-
-Working response:
-
-- Exact closed hash shapes erase to RBS records when RBS can represent every key. Required entries become required fields, optional entries become optional fields when spellable, and values erase recursively.
-- Optional-key absence is not a stored `nil`. Rigor must not add `nil` to a value type merely because a key is optional.
-- Read-only, provenance, stability, key-presence, and open/closed markers are erased. Losing them is reportable in strict export or explanation mode.
-- Shapes that cannot be represented exactly as records erase to `Hash[K, V]`.
-- `K` is the union of known literal keys, widened nominal key classes when literal unions exceed the export budget, and the extra-key bound for open shapes. Statically unknown extra keys use `top`; dynamic-origin extra keys use `untyped`.
-- `V` is the union of known required values, known optional values when present, and the extra-value bound for open shapes. Statically unknown extra values use `top`; dynamic-origin extra values use `untyped`.
-- For open shapes, the extra-value bound wins over the current observed value union. Rigor should not infer that all future extra keys have values drawn only from already-seen entries.
-- Exact empty closed records erase to `{}` when supported by the target RBS output. If an output mode cannot preserve an empty record, the conservative fallback is `Hash[bot, bot]`.
-
-This gives Rigor a deterministic default: preserve exact records when possible; otherwise export a conservative `Hash[K, V]` assembled from known entries plus explicit or unknown extra-key policy. Remaining work is the concrete export budget for literal key and value unions.
-
-### Difference and Complement Notation Needs a Domain-Aware Display Contract
-
-`~T` is "complement of `T` within the current known domain", but display is the only place users see it:
-
-- Diagnostics that print `~"foo"` without the surrounding domain are easy to misread as global complements. A combined display such as `String - "foo"` or `~"foo" : String` would be clearer.
-- Nested differences (`(String - "") - "foo"`) and intersections with negative members (`A & ~B & ~C`) need a normalized form so equivalent diagnostics render identically across code paths.
-- The rule for when `~T` should be rendered as `T - U` and vice versa is implicit. A single canonical rendering keeps user mental models stable.
-
-Working response:
-
-- Internal normalization may continue to use `T & ~U`, but diagnostics should render with the current positive domain visible.
-- Small finite domains display as their normalized positive union. For example, `"foo" | "bar" - "foo"` displays as `"bar"`.
-- Broad known domains display as `D - U`, such as `String - "foo"` or `Integer - 0`.
-- Multiple retained exclusions display as a flattened difference, such as `String - ("" | "foo")`, rather than nested differences or repeated intersections.
-- Bare `~U` is allowed only for compact branch-local display when the surrounding diagnostic already states the domain. Otherwise Rigor should prefer `D - U`, `top - U`, or prose that names the domain.
-- Dynamic-origin provenance should not replace the domain display. A diagnostic may show `String - "foo"` with a dynamic-origin note, while technical traces may show `Dynamic[String - "foo"]`.
-- When the exclusion budget is exceeded, Rigor displays the positive domain plus an omission note instead of a long unstable chain.
-
-This resolves the display contract. The remaining open question is the concrete budget and wording for omitted exclusions.
-
-### Visibility, Accessor Inference, and Method-Shape Capture Are Under-Specified
-
-The shape model relies on visibility and reader/writer roles, but Ruby's surface is more flexible than the current text:
-
-- `attr_writer :x` without a matching reader, or an overridden accessor that mutates additional state, is not covered by the read-only/read-write/write-only categorization.
-- `private` and `protected` boundaries change the set of "visible" members for `respond_to?` and external sends. Shape entries should distinguish all three visibilities, not collapse into public/non-public.
-- `respond_to?(:foo, true)` and `respond_to?(:foo)` produce different facts; the difference must propagate into shape entries to avoid silently widening visibility.
-
-Working response:
-
-- Reader and writer capabilities are method capabilities, not field declarations. `attr_reader`, `attr_writer`, and `attr_accessor` are sources of method facts, but Rigor models the resulting `x` and `x=` methods separately.
-- `attr_writer :x` contributes write-only capability unless a reader method is also present. `attr_accessor :x` contributes both reader and writer capability, but it is still two method entries.
-- Overridden or manually defined accessors are ordinary methods. They may mutate state or return unexpected values unless a signature, implementation analysis, or plugin effect proves otherwise.
-- Visibility is a first-class facet on shape entries. Rigor tracks at least `public`, `protected`, and `private`, plus the call context in which a member may be used.
-- External explicit receiver sends require public methods. Protected methods follow Ruby's protected receiver restriction, and private methods do not satisfy ordinary explicit receiver calls.
-- Public structural interfaces require public members unless an internal check or future interface form explicitly requests another visibility.
-- `respond_to?(:foo)` and `respond_to?(:foo, false)` create public existence facts. `respond_to?(:foo, true)` creates an existence fact that may be public, protected, or private; it does not prove that `obj.foo` is legal as an external explicit receiver call.
-- If the `include_private` argument is not statically known, Rigor records a weaker maybe-private visibility fact.
-- `respond_to_missing?` and `method_missing` facts carry dynamic provenance and an unknown or plugin-provided signature. They can justify guarded dynamic calls but do not prove full interface compatibility by themselves.
-
-This resolves method-shape capture at the type-model level. Remaining work is exact Ruby protected-call context modeling and the initial representation of per-overload visibility in method summaries.
-
-### Numeric Refinements Stop at `Integer`
-
-The scalar refinement table lists positive/negative/non-zero integer refinements but does not address adjacent cases:
-
-- `Float` (with `NaN`, `+0.0`/`-0.0`, infinities), where ordinary equality and ordering are partial.
-- `Rational` and `Complex`, which RBS recognizes as core numeric classes.
-- Promotion rules across `Integer | Float`, `Integer | Rational`, and similar unions, which Ruby resolves at runtime through `coerce`. Rigor must decide whether refinements transit `coerce` boundaries or stop at the nominal level.
-
-Working response:
-
-- The initial refinement surface intentionally stops at `Integer`. The `positive-int`, `negative-int`, `non-positive-int`, `non-negative-int`, and `non-zero-int` names are exact integer refinements, not sign refinements for arbitrary `Numeric` values.
-- `Float` should keep the existing conservative rule: equality and exhaustiveness narrowing are refused by default. Comparisons may produce relational facts, but float-specific value refinements require a proof that excludes `NaN` and handles infinities and signed zero explicitly.
-- `Rational` may eventually receive exact ordered refinements, but those refinements must be Rational-specific. Rigor should not silently treat a Rational sign fact as an integer range fact.
-- `Complex` should not participate in positive, negative, or interval refinements because Ruby does not provide a total ordering for complex numbers. Any useful `Complex` facts need explicit predicates or plugin/RBS effects.
-- Refinements do not automatically transit `coerce` boundaries. Mixed numeric operations follow Ruby dispatch and the relevant RBS or plugin signature. If Rigor cannot prove the operation and promotion path, it should preserve a relational or dynamic-origin fact and widen to the conservative nominal result.
-
-This resolves the default rule: integer refinements remain nominally scoped, and non-integer numeric precision is opt-in through future built-ins, trusted predicates, or plugin/RBS effects.
 
 ## Rejected and Deferred Candidate Decisions
 

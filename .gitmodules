@@ -4,3 +4,7 @@
 [submodule "references/python-typing"]
 	path = references/python-typing
 	url = git@github.com:python/typing.git
+[submodule "references/TypeScript-Website"]
+	path = references/TypeScript-Website
+	url = https://github.com/microsoft/TypeScript-Website.git
+	branch = v2

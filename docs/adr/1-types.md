@@ -257,6 +257,53 @@ RBS treats `void` as top-like but context-limited. Rigor should model `void` int
 
 This enables diagnostics such as assigning the result of a `void` method call. In statement context, `void` is fine. In value context, Rigor reports a diagnostic and recovers with `top`.
 
+### Provisional: minimalist inline `#:` annotations and inference boundaries (not finalized)
+
+This subsection records in-flight design ideas. It is **not** a committed specification. Items may be adopted, revised, or dropped.
+
+**Motivation (performance and stability).** For large bodies of code, exhaustively re-analyzing every method on every run is expensive. A short `#:` return hint on a small set of *critical* or *deep* methods can act as an **inference boundary**: the checker treats the header as the contract for the return, optionally **skips** deep, recursive re-inference of the method body, and still stays compatible with RBS comment conventions understood by Steep, `rbs-inline`, and similar tools. That can reduce work and memory for methods whose bodies are expensive to walk but whose author is willing to name the return in one token.
+
+**Policy.** Standalone `.rbs` files (or generated stubs) remain the **primary** home for type definitions. Within Ruby sources, Rigor’s narrow exception is to **encourage** only **minimal** `#: …` return annotations, used on purpose to mark **inference boundaries**—not to duplicate full RBS in comments.
+
+**Purpose.** When the return is given explicitly in this form, the analyzer can **stop** propagating a freshly inferred return from the last expression, avoid re-entering the body for a precise return, and still align with the author’s contract. The annotation is a **hint** to Rigor, not a replacement for full signatures elsewhere.
+
+**Allowed spellings (keep them tiny).** To limit noise in application code and keep headers easy for both humans and LLMs, inline return hints on a single line should be limited to **simple identifier forms**:
+
+- `void` — the method is intended to be used for **side effects only**; the return is a no-use marker in the RBS sense.
+- `bot` — the **bottom** type: the call does not return normally (for example, always raises, or is intended as non-terminating). This supports **unreachable / dead-code** analysis after the call, comparable to `never` in other languages.
+- **Simple nominal names** — a single constant path segment such as `String`, `User`, or RBS-idiomatic `bool` for booleans. **No** inline unions, generics, records, or nested type expressions.
+
+**Guideline.** Anything richer (generics, unions, optional shapes, or nested types) **belongs in** `.rbs` (or in `RBS::Extended` metadata where that exists). A one-line `#:` in Ruby should read as a **short boundary marker**, not a second copy of the full type language.
+
+**Recursive inference and boundaries.** The intended operational rule is: do **not** always walk every nested call for a refined return. Where `#: void` (or another allowed token) is present, inference can **stop at that header** and treat the declared return as fixed for boundary purposes, so work does not fan out into the body without need.
+
+**Bottom type in inline form.** Supporting `#: bot` in the same family gives a stable way to mark never-returning or always-exception paths; downstream control flow and dead-code diagnostics can use that without inferring the body.
+
+**Compatibility and Rigor’s stance on noise.** The **syntax** follows existing RBS-in-comment practice so other tools can ignore or share it. The **operational** rule is Rigor’s: *complex types stay in `.rbs` files;* Ruby line tails stay one-token hints so application code stays readable and low-noise for humans and for AI-assisted editing.
+
+**Example.**
+
+```ruby
+def print(foo) #: void
+  puts '====='
+  p foo
+  puts '====='
+end
+```
+
+**Why a `void` hint can matter for Ruby.** A `#: void` return hint tells the analyzer to treat the return as `void` and not to **propagate** a more precise inferred return from the last expression. The last line is still a Ruby value (implicit return), but the **type contract** is “no meaningful return for typing,” matching RBS’s `void` meaning.
+
+**Interaction with implicit return at runtime.** Ruby’s last-expression return means a value almost always **exists** in the VM. Rigor’s obligation remains **static** (value context, assignment, chains, boundary behavior), not a proof that the runtime value is never observed.
+
+**Proposed (optional) flow rule: `void` that never narrows.** A candidate rule, still under debate, is that bindings or expressions fixed as **explicit** inline `void` in this family carry no refinable return type: **control-flow facts would not narrow** that result to a smaller type, and it would **stay** `void` in all branches. That would:
+
+- Keep `void` aligned with the author’s refusal to let the checker treat the result as a concrete type.
+- Distinguish `void` from `untyped` (where narrowing may help) and from ordinary inferred returns.
+- Avoid diagnostics that first sound like `String` and only secondarily about `void` misuse.
+- Apply only to **explicit** return hints in allowed form; it would not apply to other locals or parameters unless separately annotated.
+
+**Open questions if this path is taken.** How `#: …` lines compose with separate-file RBS for the same method, whether block and proc return positions get the same treatment, and how diagnostic precedence between “use of `void` in value context” and “operation on a recovered `top`” should be recorded remain to be decided; see the critical-review concern in [Identified Concerns from Critical Review](#void-interacts-with-the-lattice-but-is-described-only-in-return-position).
+
 ### RBS Context Rules Are Preserved
 
 `self`, `instance`, `class`, and `void` have context restrictions in RBS. Rigor may carry richer contextual information internally, but exported RBS must obey those restrictions.

@@ -2,7 +2,15 @@
 
 ## Status
 
-Draft
+Draft.
+
+ADR-1 records type-model design decisions and their rationale. The companion document `docs/types.md` is the type specification: it defines how the analyzer behaves at the level of normalization, narrowing, erasure, signature handling, and diagnostic surfaces. When the two documents discuss the same area:
+
+- `docs/types.md` is authoritative for *what the analyzer does*, including concrete rules, defaults, and budgets.
+- ADR-1 is authoritative for *why a decision was taken* and for the design boundaries that scope follow-up work.
+- If the two documents diverge in observable behavior, treat `docs/types.md` as the binding text and update ADR-1 to match. ADR-1 should not silently restate a behavior contract that lives in the spec.
+
+ADR-1 also defers to ADR-2 for plugin extension API design. ADR-1 only fixes the analyzer-side surface that ADR-2 must attach to (Scope queries, fact contributions, capability roles, mutation summaries, diagnostic identifier prefixes); concrete plugin lifecycle, configuration, and merging rules are normative in ADR-2.
 
 ## Context
 
@@ -14,9 +22,9 @@ Rigor should also learn aggressively from PHPStan, TypeScript, and Python's typi
 
 The initial design requirement is:
 
-- Every RBS type is a valid Rigor type.
+- Every RBS type is a valid Rigor type, and the RBS→Rigor direction is *lossless*: any RBS type round-trips through Rigor's internal representation without losing precision. Internal wrappers such as `Dynamic[T]` are reversible at the boundary.
 - Rigor may infer richer types than RBS.
-- Every Rigor-inferred type can be conservatively erased to valid RBS.
+- Every Rigor-inferred type can be conservatively erased to valid RBS, but the Rigor→RBS direction is generally *not* lossless: erasure may collapse refinements, literal unions, shapes, and dynamic-origin provenance. Erasure must never produce a narrower type than Rigor proved, but it may produce a wider one.
 - Special RBS types such as `untyped`, `top`, `bot`, and `void` must be handled with type-theoretic clarity rather than as ad hoc aliases.
 - Types that exceed RBS may be recorded in RBS annotations under a provisional `RBS::Extended` convention.
 
@@ -25,6 +33,8 @@ The compatibility hierarchy is:
 - RBS and rbs-inline are first-order norms for type syntax and inline annotation compatibility.
 - Steep 2.0 behavior is the second-order norm for how existing annotations are interpreted when prose specifications leave behavior open.
 - TypeScript, PHPStan, and Python typing are design references used to find missing concepts and practical analyzer features; they are not syntax compatibility targets.
+
+This ADR cites locations under `references/` (for example `references/phpstan/...`, `references/typescript/...`, `references/python-typing/...`) as indicative reference paths inside the Rigor checkout. The exact files and line numbers depend on the submodule revisions configured by `make init-submodules`. If a path does not resolve in a particular checkout, treat the citation as a pointer into the upstream repository at the corresponding revision rather than as a hard reference.
 
 ## Goals
 
@@ -158,6 +168,12 @@ Accepted method signatures still define trusted method-boundary contracts. Param
 
 Diagnostics for `maybe` are policy-driven. Like PHPStan error levels, Rigor should leave room for a permissive level that accepts maybe-dependent calls without reporting them and stricter levels that report uncertain method calls, role matches, or branch proofs.
 
+`maybe` and incomplete inference are distinct concepts and must not be conflated:
+
+- `maybe` is a *relational query result*. It answers a question such as subtype relationship, structural compatibility, or member existence with three values. It applies even when inference is complete: the analyzer simply cannot prove either side under the available evidence.
+- Incomplete inference is an *analyzer outcome* triggered by a budget cutoff (recursion depth, call-graph width, operator ambiguity, and so on). It produces a `static.*` diagnostic with a reason and a placeholder type such as `Dynamic[top]` or another conservative incomplete-inference marker. The cutoff is independent of any specific relational question.
+- The two compose. A relational query against a placeholder type is allowed to return `maybe` because the missing precision prevents a `yes`/`no` answer, but the underlying cause is the cutoff and the diagnostic identifies it as such. Implementers must not collapse "stopped early" into a relational `maybe` that hides the cutoff from users.
+
 ### PHPStan Compared with RBS
 
 The PHPStan documentation in `references/phpstan/website/src/writing-php-code/` is useful because it describes the feature surface of a mature analyzer for a dynamic language. PHPStan is not a compatibility target, and PHPDoc syntax should not become Rigor syntax, but its features are a strong checklist for what users eventually expect from precise static analysis.
@@ -280,16 +296,18 @@ Visibility is a first-class facet on every method-shape entry. Rigor tracks at l
 
 `respond_to_missing?` and `method_missing` facts carry dynamic provenance and an unknown or plugin-provided signature. They can justify guarded dynamic calls but do not prove full interface compatibility on their own.
 
-The minimal first implementation representation pairs one method-shape entry with one Ruby `def`:
+The minimal first implementation representation pairs one method-shape entry with one resolved Ruby method body:
 
-- A `MethodEntry` is one record per `(class-or-module, method name)` and corresponds to exactly one Ruby `def`. Ruby has no per-signature overloading at runtime, so multiple `def foo` definitions in the same class collapse to a single entry.
+- A `MethodEntry` is one record per `(class-or-module, method name)`. Ruby has no per-signature overloading at runtime, so the entry corresponds to the runtime-resolved method body for that name on that class or module.
+- A single source-level `def foo` is the simplest input that produces a `MethodEntry`. Multiple source-level `def foo` definitions on the same class or module — whether from a single file, partial classes split across files, monkey patching, or `prepend` and `include` chains — feed into the same entry as merge candidates rather than distinct entries.
 - Visibility is stored at the `MethodEntry` level. Ruby's `private :foo` toggles the whole method, not a particular signature variant, so per-overload visibility is not represented in the first version.
 - Signature variants from RBS overloads, `RBS::Extended` payloads, or plugin contributions are stored as a list of branches inside the entry. Branches share the entry's visibility but may carry different argument shapes, return types, predicate effects, and mutation effects.
 - Conditional `def`, conditional `private`, and other dynamically constructed method definitions are out of scope for the first implementation. They surface as ordinary diagnostics or dynamic-origin facts and may be revisited later.
 
-Open classes and monkey patches are first-class but represented as merge inputs to the same `MethodEntry`:
+Open classes, monkey patches, and ancestor chain insertions all feed the same `MethodEntry`:
 
-- Each `def foo` across files contributes a candidate definition. The default merge policy is source order with a last-definition-wins resolution, matching Ruby's runtime behavior.
+- Each candidate `def foo` (whether from the original class, a reopened class, a `prepend`ed or `include`d module that ends up resolving on this receiver, or a refinement scope where Rigor has visibility) contributes one input.
+- The default merge policy follows Ruby's runtime resolution: the candidate that Ruby would actually dispatch wins. Among ordinary same-class redefinitions this is source order with a last-definition-wins resolution; among ancestor chains this is the lookup order Ruby uses for `prepend` over the class over `include`d modules over the superclass chain.
 - Strict mode raises a diagnostic when a re-definition changes RBS-visible signature or visibility without an explicit override marker. The intended override marker is a future `RBS::Extended` directive (working name `rigor:v1:override=replace`); until that exists, strict mode reports the suspected silent monkey patch.
 - Module includes and refinements are not flattened into the host class's `MethodEntry`. They remain on their owning module and participate in lookup through the ancestor chain.
 
@@ -337,6 +355,14 @@ Capability roles are summaries, not searches. The inference must stay bounded an
 - Candidate selection is deterministic: exact member-signature match first, configured standard-library roles before coincidental user interfaces, fewer extra required members next, then stable lexical name order. Ambiguity at the top of that ordering means no named suggestion is reported.
 - Intersections of roles are allowed but bounded. The first implementation may use exact single-interface matches, explicit standard role bundles, or a small greedy intersection under a strict candidate limit. It does not solve an unbounded set-cover problem.
 - Generic preservation is handled by identity tracking, not the role matcher. If a method returns the same parameter object it received, Rigor may infer `[S < _Role] (S value) -> S`. If the body may replace the value or return a delegated object, Rigor uses the ordinary inferred return type.
+
+When the body's inferred capability requirement and the declared nominal type disagree, Rigor escalates along three explicit levels:
+
+- **Diagnostic** is reserved for genuine type mismatches at call sites. A call that does not satisfy the declared parameter type is a diagnostic regardless of how the body is implemented. This level is unconditional and does not depend on configuration.
+- **Hint** applies when the body's inferred role is strictly smaller than the declared nominal type and a generalization to a structural interface would still type-check. Hints are emitted under the `hint.role-generalization.*` category and are gated by the `style.suggest_role_generalization` configuration switch. The default is off so library authors who chose a nominal contract are not nudged out of it; opting in is appropriate for application code that wants to discover structural opportunities.
+- **Silent** is the default for the remaining cases: the inferred role and the declared type are compatible, no generalization is offered to the user, and the inference result is retained internally for callers and refactor tooling. Plugins and reflective queries can still observe the inferred role through the `Scope` API.
+
+The three levels are mutually exclusive at any given site. Rigor never both rejects a call and offers a generalization hint for the same parameter, and never silently rewrites a public nominal contract into a structural one.
 
 ### Control-Flow Narrowing Is Central
 
@@ -438,6 +464,8 @@ Built-in mutation summaries are not a closed list. New entries may be added in a
 
 RBS treats `void` as top-like but context-limited. Rigor should model `void` internally as a result marker that says the return value should not be used.
 
+Rigor's value-context recovery is consistent with RBS's "top-like" treatment: when a `void` result reaches a value position the recovered type is `top`, not a stricter or weaker substitute. Rigor's contribution on top of the RBS rule is to record that the value reached the position by recovery from `void` and to surface that as a primary diagnostic, so the analyzer can explain *why* a `top` appeared and the user can fix the call site rather than learning to live with a generic `top`. Generated RBS continues to spell `void` only in the positions RBS allows.
+
 This enables diagnostics such as assigning the result of a `void` method call. In statement context, `void` is fine. In value context, Rigor reports a diagnostic and recovers with `top`.
 
 In normalized result summaries, `void | bot` collapses to `void`. A path that always raises is acceptable in a `void` context, so the union does not weaken the marker.
@@ -448,7 +476,15 @@ Rigor's "no Rigor-specific inline type syntax" goal is about keeping Ruby code r
 
 Rigor should be 100% compatible with RBS and rbs-inline annotation syntax, and should follow Steep 2.0 behavior for inline annotation interpretation and precedence. RBS and rbs-inline are the primary norms for inline type syntax; Steep's implementation is the secondary norm where behavior is not fully specified in prose. TypeScript, PHPStan, and Python typing remain reference material for missing concepts, not compatibility targets.
 
-Rigor should read existing rbs-inline and Steep-compatible annotations as official type sources. It should not rewrite them, warn only because they are complex, or require `# rbs_inline: enabled`. The `rbs_inline` magic comments are ignored for Rigor analysis; compatible annotations are read whenever present.
+When the three sources differ, the resolution order is:
+
+1. RBS prose specification wins.
+2. rbs-inline documentation wins for inline-syntax questions that the RBS prose does not address.
+3. Steep 2.0 behavior wins only when neither RBS prose nor rbs-inline documentation specifies the behavior.
+
+Where Steep diverges from a higher-priority source, Rigor follows the higher-priority source and treats the divergence as documented behavior. Such cases should be called out individually in `docs/types.md` so users migrating from Steep see the difference instead of discovering it through a diagnostic.
+
+Rigor should read existing rbs-inline and Steep-compatible annotations as official type sources. It should not rewrite them, warn only because they are complex, or require `# rbs_inline: enabled`. Only the rbs-inline configuration directives such as `# rbs_inline: enabled` and `# rbs_inline: disabled` are ignored; the rbs-inline annotation comments themselves (for example `#: String`, `# @rbs`, parameter annotations) are always parsed and used as type sources whenever present.
 
 Standalone `.rbs` files and generated stubs remain the preferred place for complete type definitions. Inline annotations are nevertheless real contracts when present. They are not merely hints.
 
@@ -486,7 +522,7 @@ end
 
 **Imported RBS slots.** Existing RBS can place `void` in generic or callback slots, such as `Enumerator[Elem, void]` or a block parameter whose value is intentionally ignored. Rigor preserves these signatures for compatibility. If substitution makes such a slot appear in a value-producing position, the result is handled as a `void` result marker rather than as an ordinary value-set type.
 
-**Interactive inference cutoffs.** Some methods are not worth inferring from implementation alone. Recursive code with unconstrained operators is the clearest case:
+**Interactive inference cutoffs (target behavior, not current scaffold).** This subsection describes Rigor's intended CLI behavior once the analyzer ships an interactive surface. The current scaffold does not yet implement these prompts; the description is normative for the target product, not a checklist of features that already exist. Some methods are not worth inferring from implementation alone. Recursive code with unconstrained operators is the clearest case:
 
 ```ruby
 def tarai(x, y, z)
@@ -584,19 +620,26 @@ Many Ruby code bases are dominated by `Dynamic[top]` until plugins, generated st
 
 This is the analyzer's baseline before framework- or library-specific plugins ship. Plugin-specific behavior remains deferred to ADR-2.
 
-The first user-visible milestone scopes the baseline narrowing surface explicitly so the v1 release does not over-promise. v1 ships:
+When this ADR refers to "v1," it means the *first user-visible product release* of the Rigor analyzer. v1 is a shipping milestone, not the entire type-model specification. The full specification described in this ADR and `docs/types.md` is normative for the long-term analyzer; v1 ships a deliberately scoped slice of that specification so the first release does not over-promise. The boundary is:
+
+- The full specification — fact-stability buckets, capability-role catalog, mutation summary set, Dynamic[T] algebra, type operators, RBS::Extended schema — is normative. Internal data structures may be present in v1 even when the user-visible narrowing surface does not yet exploit them.
+- The v1 narrowing surface is the subset of derivation rules that are turned on for end users in the first release.
+- v1.1 is the next user-visible release; it expands the narrowing surface using rules that the data structures already support, behind feature flags so v1 behavior is preserved.
+
+The v1 narrowing surface ships:
 
 - Literal narrowing for `nil`, `true`, `false`, integer and string literals, and finite literal-union refinements produced by equality checks against trusted built-in domains.
 - Syntax-level guards: `is_a?`, `kind_of?`, `instance_of?`, `nil?`, truthiness, `respond_to?`, equality with literal sets, and class- and pattern-matching narrowing in `case` and `case/in` forms that do not require dataflow across statements.
 - Method-call resolution that uses RBS or `RBS::Extended` for core Ruby and a curated subset of stdlib without requiring user plugins. Generated signatures from `RBS::Extended` may participate.
+- Direct application of the bundled mutation summaries described in `Fact Stability and Mutation Effects` at call sites where the receiver is statically known. The summaries drive bucket invalidation locally; cross-statement propagation of those effects is a v1.1 surface.
 
-v1 does not yet rely on intra-procedural inference of capability roles, propagated mutation effects, or plugin-supplied flow contributions for narrowing. Those expand the surface in v1.1 in a controlled, additive way:
+The v1 narrowing surface does *not* yet expose:
 
-- Intra-procedural propagation of facts produced by v1 guards across straight-line code, joins, and loops.
-- Pre-plugin propagation of mutation summaries shipped with the analyzer for core and curated stdlib.
-- Capability-role inference using the role catalog defined in `Capability Roles Beat Ad Hoc Mock Unions`.
+- Intra-procedural propagation of facts and mutation effects across statements, joins, and loops.
+- Inference of capability-role *requirements* from method bodies (the catalog and explicit conformance directives are available; inferring "what role does this body require" is v1.1).
+- Plugin-supplied flow contributions, which depend on ADR-2.
 
-Each v1.1 step ships behind feature flags so the v1 surface stays stable while the larger surface lands.
+Each v1.1 surface ships behind a feature flag so the v1 release behaves consistently while the larger surface lands.
 
 ### Imported Built-Ins Follow Ruby Semantics
 
@@ -651,16 +694,28 @@ The omission contract is concrete enough that diagnostics stay short by default 
 
 Advanced types may be attached to ordinary RBS declarations, members, and overloads using RBS `%a{...}` annotations. This preserves compatibility with standard RBS tooling while giving Rigor a place to read refinements such as `String - ""`, `~"foo"`, or `String where non_empty`.
 
-The canonical form should use an explicit versioned `rigor:v1:` annotation key followed by a payload, for example:
+`RBS::Extended` is Rigor's name for the convention of carrying its metadata inside ordinary RBS `%a{...}` annotations under a reserved key namespace. The reserved keys for the first version are `rigor:v1:<directive>` payloads. Other tools' annotations under unrelated keys are not consumed by Rigor and pass through analysis unchanged. Rigor never rewrites another tool's `%a{...}` annotations during erasure.
+
+The canonical directive form is a versioned `rigor:v1:` key followed by a payload. The schema lives in `docs/types.md` `RBS::Extended Annotations`; ADR-1 defines design decisions and uses `docs/types.md` as the single source of truth for the directive grammar. The canonical predicate example referenced from this ADR is:
 
 ```rbs
 %a{rigor:v1:predicate-if-true value is String}
 def string?: (untyped value) -> bool
 ```
 
-Predicate targets should initially be limited to RBS parameter names and `self`. RBS parameter names use the `_var-name_ ::= /[a-z]\w*/` grammar, so Rigor does not need to encode arbitrary Ruby Symbol names in directive identifiers. Hyphenated directive names such as `predicate-if-true` are safe because they are parsed from the annotation payload by Rigor.
+Predicate targets are initially limited to RBS parameter names and `self`. RBS parameter names use the `_var-name_ ::= /[a-z]\w*/` grammar, so Rigor does not need to encode arbitrary Ruby Symbol names in directive identifiers. Hyphenated directive names such as `predicate-if-true` are safe because they are parsed from the annotation payload by Rigor. Other directive spellings live in `docs/types.md`.
 
 The version prefix is part of the compatibility contract. Rigor-generated annotations must use `rigor:v1:`. Unversioned `rigor:` directives should be invalid for now rather than silently treated as v1. Unsupported future versions such as `rigor:v2:` are preserved by ordinary RBS tooling, but Rigor should report unsupported metadata when it analyzes the node.
+
+Conformance can be checked implicitly or explicitly. Implicit conformance is the default: ordinary assignments, parameter passing, and method calls trigger structural compatibility checks against the relevant interface or capability role. No author-visible opt-in is required. In addition, Rigor accepts an explicit *design assertion* directive:
+
+```rbs
+%a{rigor:v1:conforms-to _RewindableStream}
+class MyBuffer
+end
+```
+
+The directive instructs Rigor to verify that `MyBuffer` satisfies `_RewindableStream` regardless of whether any current call site exercises that requirement. It is useful for libraries that want to guarantee a class meets a structural interface as part of their public contract. The directive is purely additive: it does not change the semantics of implicit conformance, and a class that already satisfies the interface continues to type-check without the annotation.
 
 If `RBS::Extended` metadata conflicts with the ordinary RBS signature, Rigor should report a diagnostic.
 
@@ -756,46 +811,6 @@ Negative:
 - `RBS::Extended` needs a careful annotation payload grammar and conflict rules.
 - Negative and complement types require domain-aware normalization.
 
-## Critical review notes
-
-This subsection records contradictions, tensions, and clarification gaps noticed when reading this ADR against itself and against `docs/types.md`. It is meant to steer edits to the main text, not to duplicate every item already listed under **Open Questions**.
-
-### Contradictions or tensions to resolve
-
-- **Lossless import versus conservative export.** The context requires every RBS type to be a valid Rigor type and every internal type to erase to RBS. `docs/types.md` adds that every RBS type has a *lossless* representation in Rigor. The ADR should state explicitly that Rigor→RBS erasure is generally *not* lossless, and that “lossless” applies only to the RBS→Rigor direction (or define a different term if internal wrappers like `Dynamic[T]` are always reversible).
-
-- **v1 milestone versus propagation features.** The document simultaneously promises a scoped v1 narrowing surface (limited CFA), states that v1 does *not* yet rely on intra-procedural propagation of capability roles or propagated mutation effects, and describes detailed mutation summaries, fact buckets, and role inference for v1. Clarify which layers are “specified for later implementation under the same milestone” versus “normative for the first shipping analyzer,” and whether “v1” means product version or specification slice.
-
-- **“One `MethodEntry` per `(class-or-module, method name)`” versus overload branches.** The text says one entry corresponds to “exactly one Ruby `def`” while also storing RBS overload branches inside the entry. Reconcile: runtime single dispatch versus multiple source `def`s merging; whether “one def” means “one resolved runtime body” after merge, and how partial classes and `prepend`/`include` order interact with that statement.
-
-- **`rbs_inline` magic comments “ignored” versus full compatibility.** Ignoring `rbs_inline` enable/disable directives is compatible with reading embedded signatures, but the phrase risks sounding like Rigor skips rbs-inline altogether. A single sentence tying “ignored” to *only* magic-comment configuration would remove the ambiguity.
-
-- **Steep as second-order norm.** When Steep’s behavior differs from RBS prose *and* from rbs-inline documentation, the resolution order is not stated (Steep wins, or pick the least surprising for migration?). Worth one explicit rule to avoid ecosystem arguments.
-
-- **`void` in value positions versus “top-like” RBS rules.** The ADR models `void` as a no-use return marker and recovers with `top` in value context. If RBS’s own rules treat `void` as comparable to `top` in some positions, the ADR should either cite alignment or document deliberate divergence so generated RBS and Rigor diagnostics stay consistent.
-
-### Clarifications that would help readers
-
-- **`RBS::Extended` naming.** The document uses `RBS::Extended` as a convention name, `%a{rigor:v1:...}` in examples, and phrases like “annotation-based metadata layer.” Clarify whether `RBS::Extended` denotes *any* `rigor:v1:` (and future) payload in `%a{...}`, or only a subset, and how that relates to ordinary RBS `%a{...}` uses by other tools.
-
-- **`maybe` versus incomplete inference.** Trinary certainty says `maybe` is for unproven relationships; elsewhere, incomplete inference is a first-class outcome with budgets. State whether “incomplete inference” is always surfaced as `maybe`, as a distinct “unknown/incomplete” pseudo-type, or via `static.*` diagnostics only—so implementers do not conflate “cannot prove subtyping” with “stopped early.”
-
-- **Structural interfaces without opt-in versus “explicit conformance” open questions.** The text says structural assignability should not require opt-in, while **Open Questions** asks whether to add an explicit conformance annotation. The trade-off between inferred structural satisfaction and explicit verification requests should be summarized in one place.
-
-- **Capability roles versus nominal `IO` signatures.** The IO/StringIO story is clear; add an explicit rule for when Rigor escalates to a **diagnostic** (reject call) versus a **hint** (signature generalization), versus silent internal reasoning only—since all three appear in different paragraphs.
-
-- **Reference paths.** PHPStan and TypeScript paths under `references/` assume submodule layout; if checkouts differ, readers may not find files. A short note that paths are indicative reference locations would set expectations.
-
-- **Predicate / assertion spelling.** Examples use forms like `rigor:v1:predicate-if-true value is String` and narrative mentions `parameter is Type`; ensure one canonical example links to the schema owned by this ADR versus `docs/types.md` so tooling authors see a single source of truth.
-
-### Scope and maintainability
-
-- **Length and duplication.** The PHPStan, TypeScript, and Python comparison tables are valuable but overlap with `docs/types.md` and each other on structural typing and flow. Consider a maintenance note: which document is authoritative when tables diverge, and whether compressed “see types.md §X” links could shrink repetition.
-
-- **Forward-looking CLI behavior.** Interactive prompts for incomplete inference describe behavior that may not exist in the current scaffold; label clearly as **target behavior** so the ADR is not mistaken for an implementation checklist.
-
-- **Plugin and ADR-2 boundaries.** Several sections preview plugins while deferring to ADR-2; a short boundary sentence (what ADR-1 must define minimally so ADR-2 can attach) would reduce overlap risk.
-
 ## Open Questions
 
 - Which Rigor-only refinements should be implemented first after the MVP union/no-method diagnostic?
@@ -804,12 +819,10 @@ This subsection records contradictions, tensions, and clarification gaps noticed
 - How quickly should predicate targets grow beyond `parameter-name` and `self`?
 - Which Python `TypedDict`-inspired shape facts, such as read-only keys and open or closed extra-key policies, should ship first?
 - Should Rigor model finality and read-only member facts separately from value types in the first signature metadata grammar?
-- Should Rigor add an explicit `RBS::Extended` conformance annotation, or rely on ordinary assignments and calls to trigger interface conformance checks?
 - Should generated RBS preserve `RBS::Extended` annotations that explain erased refinements when users request an annotated export?
 - Which dynamic-origin sources should be classified as explicit user intent, missing signatures, analyzer limits, or plugin-declared dynamic behavior?
 - What plugin API is needed for framework-specific object shapes and dynamic method resolution?
 - What exact `RBS::Extended` or plugin payload should declare custom equality effects?
-- Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
 - What cache keys and invalidation rules should capability requirement summaries use across edits and dependency signature changes?
 - How should interactive CLI prompts choose between inline `#:`, full `# @rbs`, generated stubs, and external `.rbs` persistence targets?
 - Which generic variance cases require special handling for `Dynamic[T]` slots in the first implementation?

@@ -4,11 +4,15 @@
 
 Draft. This document defines the intended type model for Rigor. It is a product specification, not an implementation status report.
 
+This document is authoritative for the analyzer's observable behavior: type normalization, narrowing, erasure, signature handling, diagnostic identifiers, and budgets. Design rationale and decision history live in `docs/adr/1-types.md` (and ADR-2 for plugin extension API decisions). When this document and an ADR appear to disagree on what the analyzer does, this document binds and the ADR should be amended.
+
 ## Core Principle
 
 Rigor's type language is a strict superset of RBS.
 
-Every RBS type must have a lossless representation in Rigor. Every Rigor-inferred type must also have an RBS erasure so Rigor can export an approximation as ordinary RBS. Erasure may lose precision, but it must not invent a narrower type than Rigor proved.
+The RBS→Rigor direction is *lossless*: every RBS type has a representation in Rigor that round-trips back to the same RBS type. Internal precision-bearing wrappers such as `Dynamic[T]` are reversible at the boundary so the round-trip is exact rather than approximate.
+
+The Rigor→RBS direction is *not* lossless. Every Rigor-inferred type must have an RBS erasure so Rigor can export an approximation as ordinary RBS, but erasure may collapse refinements, literal unions, shapes, and dynamic-origin provenance. Erasure must never produce a narrower type than Rigor proved; it may produce a wider one.
 
 Rigor uses RBS as the interoperability surface and a richer internal type model for inference, control-flow analysis, and diagnostics.
 
@@ -55,6 +59,12 @@ Rigor still trusts accepted method signatures at method boundaries. If a paramet
 `maybe` is not a proof for narrowing. A `maybe` relationship can be retained as a weak relational, member-existence, or dynamic-origin fact for diagnostics and later explanation, but it should not refine a value as if the answer were `yes`, and it should not produce the complementary false-edge fact as if the answer were `no`.
 
 Diagnostic policy is level-dependent, similar in spirit to PHPStan error levels. A permissive level may accept a method call or role match that depends on `maybe` evidence without reporting it. Stricter levels may report that the proof is uncertain and suggest adding a guard, a signature, generated metadata, or a plugin configuration. Repeated `maybe` evidence remains `maybe`; Rigor must not promote uncertainty to `yes` merely by count.
+
+`maybe` is distinct from incomplete inference:
+
+- `maybe` is a relational query result and applies even when inference is complete.
+- Incomplete inference is an analyzer outcome triggered by a budget cutoff (recursion depth, call-graph width, operator ambiguity, and so on). It produces a `static.*` diagnostic with the cutoff reason and a conservative placeholder type such as `Dynamic[top]`.
+- A relational query against a placeholder may return `maybe` because the missing precision blocks a `yes` or `no`, but the underlying cause is the cutoff and the diagnostic must identify it as such. Rigor must not collapse "stopped early" into a relational `maybe` that hides the cutoff from users.
 
 ## Value Lattice
 
@@ -460,6 +470,14 @@ This also avoids comparing total method sets. Structural subtyping asks whether 
 
 Explicit declarations still matter. If an external RBS signature says a parameter is `IO`, Rigor should treat that as the public nominal contract. If the implementation and observed call sites only require `_Reader`, Rigor may report that the declared type is narrower than the inferred capability requirement and suggest generalizing the signature to a structural interface. It should not silently rewrite a public `IO` contract into a structural one.
 
+The escalation rule used when the inferred role and the declared type disagree is explicit:
+
+- **Diagnostic.** A call that does not satisfy the declared parameter type is always reported, regardless of how the body is implemented. This level is independent of any configuration.
+- **Hint.** When the body's inferred role is strictly smaller than the declared nominal type and a generalization to a structural interface would still type-check, Rigor may emit a `hint.role-generalization.*` diagnostic. Hints are gated by the `style.suggest_role_generalization` configuration switch and default to off so libraries that intentionally chose a nominal contract are not nudged out of it.
+- **Silent.** Otherwise the inference result is retained internally and available to callers, refactor tooling, and the plugin `Scope` API, but no diagnostic is emitted.
+
+The three levels are mutually exclusive for a given site. Rigor never both rejects a call and offers a hint for the same parameter, and never silently rewrites a public nominal contract into a structural one.
+
 When a method returns the same stream object it receives, Rigor should preserve the concrete input type through generics rather than widening to a role:
 
 ```rbs
@@ -559,19 +577,24 @@ Rigor should distinguish dynamic-origin sources:
 
 The type relation is the same for all of them, but diagnostics can distinguish deliberate gradual boundaries from places where users may want better signatures.
 
-The pre-plugin narrowing surface is the set of facts Rigor produces in heavily `Dynamic[top]` code before any user plugin is loaded. The first user-visible milestone (v1) ships:
+The pre-plugin narrowing surface is the set of facts Rigor produces in heavily `Dynamic[top]` code before any user plugin is loaded.
+
+This specification describes the full pre-plugin surface that the analyzer ultimately supports. The first user-visible product release (v1) is a scoped slice of that surface; it does not redefine the spec. Internal data structures such as fact buckets, the capability-role catalog, and built-in mutation summaries are normative from v1; the *derivation rules* exposed to users are tightened in v1 and broaden in v1.1.
+
+v1 narrowing surface:
 
 - Literal narrowing for `nil`, `true`, `false`, integer and string literals, and finite literal-union refinements produced by equality checks against trusted built-in domains.
 - Syntax-level guards: `is_a?`, `kind_of?`, `instance_of?`, `nil?`, truthiness, `respond_to?`, equality with literal sets, and class- or pattern-matching narrowing in `case` and `case/in` forms that do not require dataflow across statements.
 - Method-call resolution that uses RBS or `RBS::Extended` for core Ruby and a curated subset of stdlib without requiring user plugins. Generated signatures from `RBS::Extended` may participate.
+- Direct application of the bundled core/stdlib mutation summaries at call sites where the receiver is statically known. Summaries drive bucket invalidation locally; cross-statement propagation of those effects is a v1.1 surface.
 
-v1 does not yet rely on intra-procedural inference of capability roles, propagated mutation effects, or plugin-supplied flow contributions for narrowing. Those expand the surface in v1.1 in a controlled, additive way:
+v1 narrowing surface does not yet expose:
 
-- intra-procedural propagation of facts produced by v1 guards across straight-line code, joins, and loops;
-- pre-plugin propagation of mutation summaries shipped with the analyzer for core and curated stdlib;
-- capability-role inference using the role catalog defined in `Capability Roles and IO-Like Objects`.
+- intra-procedural propagation of facts and mutation effects across straight-line code, joins, and loops;
+- capability-role *requirement inference* from method bodies (the catalog and explicit `conforms-to` directives are already available; deriving "what role does this body require" is v1.1);
+- plugin-supplied flow contributions.
 
-Each v1.1 step ships behind feature flags so the v1 surface stays stable while the larger surface lands.
+Each v1.1 surface ships behind a feature flag so v1 behavior stays stable while the larger surface lands.
 
 ### `void`
 
@@ -789,7 +812,7 @@ The omission contract has a concrete shape so default diagnostics stay readable 
 
 Rigor may read Rigor-specific metadata from RBS annotations in `*.rbs` files under the provisional name `RBS::Extended`.
 
-RBS already supports `%a{...}` annotations on declarations, members, and method overloads. `RBS::Extended` should use that mechanism as the canonical attachment point because annotations are parsed into the RBS AST and remain associated with the signature node they describe.
+RBS already supports `%a{...}` annotations on declarations, members, and method overloads. `RBS::Extended` is Rigor's name for the convention of attaching Rigor metadata to those annotations under a reserved key namespace; the first version reserves `rigor:v1:<directive>` payloads. Annotations on the same node that use unrelated keys belong to other tools and are not consumed by Rigor. Rigor preserves them unmodified during analysis and erasure.
 
 These annotations let users and plugin authors describe types that exceed standard RBS without changing Ruby application code and without breaking ordinary RBS parsers. Standard RBS tools should be able to preserve or ignore these annotations. This follows the same compatibility principle as Python's `Annotated[T, metadata]`: the base type remains meaningful to tools that do not understand the metadata.
 
@@ -886,6 +909,22 @@ def string?: (untyped) -> bool
 ```
 
 Future versions may extend targets to instance variables, record keys, shape paths, and block parameters, but those should use explicit path syntax rather than overloading the annotation directive name.
+
+### Explicit Conformance Directive
+
+Implicit structural conformance is the default. Ordinary assignments, parameter passing, and method calls trigger structural compatibility checks against the relevant interface or capability role without requiring author-visible opt-in.
+
+In addition, an explicit conformance directive lets a class declare that it satisfies a structural interface as part of its public contract:
+
+```rbs
+%a{rigor:v1:conforms-to _RewindableStream}
+class MyBuffer
+end
+```
+
+The directive instructs Rigor to verify the conformance regardless of whether any current call site exercises that requirement, which is useful for libraries that want their structural contract to be a checked design assertion rather than an emergent property of usage. Multiple `conforms-to` directives on the same class are allowed and combine like an intersection of interfaces. Rigor reports a diagnostic when a declared `conforms-to` interface is not satisfied; satisfied directives are silent.
+
+The directive is purely additive. Implicit structural compatibility continues to apply, and a class that already satisfies the interface continues to type-check without the annotation.
 
 ### Flow Effects and Extension Contributions
 

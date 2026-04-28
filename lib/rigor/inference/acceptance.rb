@@ -19,9 +19,18 @@ module Rigor
     # reserves `:strict` for later slices (the entry point raises
     # ArgumentError on strict for now). The table covers the leaf and
     # combinator types added through phase 2b: Top, Bot, Dynamic,
-    # Nominal, Singleton, Constant, and Union. Future shape carriers
-    # (Tuple, HashShape, Record) will register their own routes by
-    # adding entries to {TYPE_HANDLERS}.
+    # Nominal, Singleton, Constant, and Union.
+    #
+    # Slice 5 phase 1 registers the shape carriers `Tuple` and
+    # `HashShape`. Tuple/HashShape acceptance compares per-position
+    # element types (covariant) and per-key entry types (depth
+    # covariant, width permissive). When the receiver side is a
+    # generic `Nominal[Array, [E]]` or `Nominal[Hash, [K, V]]` the
+    # shape is projected to its underlying nominal so the existing
+    # generic-acceptance pipeline continues to apply; the converse
+    # direction (a Tuple receiver accepting a generic Array) stays
+    # conservative because the analyzer cannot verify arity from a
+    # raw nominal alone.
     # rubocop:disable Metrics/ModuleLength
     module Acceptance
       module_function
@@ -53,7 +62,9 @@ module Rigor
         Type::Union => :accepts_union_self,
         Type::Singleton => :accepts_singleton,
         Type::Nominal => :accepts_nominal,
-        Type::Constant => :accepts_constant
+        Type::Constant => :accepts_constant,
+        Type::Tuple => :accepts_tuple,
+        Type::HashShape => :accepts_hash_shape
       }.freeze
       private_constant :TYPE_HANDLERS
 
@@ -164,28 +175,68 @@ module Rigor
         #   are ignored here because a Constant carries a concrete
         #   value, not a generic instantiation, and the analyzer has no
         #   way to refute the args from a literal alone.
+        # - Tuple[*] when self is the Array (or a supertype) family.
+        #   The Tuple is projected to `Nominal[Array, [union(elements)]]`
+        #   so the existing generic-arg machinery handles it.
+        # - HashShape{*} when self is the Hash (or a supertype) family,
+        #   projected to `Nominal[Hash, [union(keys), union(values)]]`.
         # - Singleton: never (wrong value kind).
         def accepts_nominal(self_type, other_type, mode)
           case other_type
           when Type::Nominal
-            class_result = class_subtype_result(
-              target_name: self_type.class_name,
-              actual_name: other_type.class_name,
-              mode: mode,
-              kind: :instance
-            )
-            return class_result if class_result.no?
-
-            args_result = accepts_nominal_args(self_type, other_type, mode)
-            combine_results(class_result, args_result, mode)
+            accepts_nominal_from_nominal(self_type, other_type, mode)
           when Type::Constant
             accepts_nominal_from_constant(self_type, other_type, mode)
+          when Type::Tuple
+            accepts(self_type, project_tuple_to_nominal(other_type), mode: mode)
+              .with_reason("projected Tuple to Nominal[Array]")
+          when Type::HashShape
+            accepts(self_type, project_hash_shape_to_nominal(other_type), mode: mode)
+              .with_reason("projected HashShape to Nominal[Hash]")
           else
             Type::AcceptsResult.no(
               mode: mode,
               reasons: "Nominal[#{self_type.class_name}] rejects #{other_type.class}"
             )
           end
+        end
+
+        def accepts_nominal_from_nominal(self_type, other_type, mode)
+          class_result = class_subtype_result(
+            target_name: self_type.class_name,
+            actual_name: other_type.class_name,
+            mode: mode,
+            kind: :instance
+          )
+          return class_result if class_result.no?
+
+          args_result = accepts_nominal_args(self_type, other_type, mode)
+          combine_results(class_result, args_result, mode)
+        end
+
+        def project_tuple_to_nominal(tuple)
+          if tuple.elements.empty?
+            Type::Combinator.nominal_of(Array)
+          else
+            Type::Combinator.nominal_of(
+              Array,
+              type_args: [Type::Combinator.union(*tuple.elements)]
+            )
+          end
+        end
+
+        def project_hash_shape_to_nominal(shape)
+          return Type::Combinator.nominal_of(Hash) if shape.pairs.empty?
+
+          key_types = shape.pairs.keys.map { |k| Type::Combinator.constant_of(k) }
+          value_types = shape.pairs.values
+          Type::Combinator.nominal_of(
+            Hash,
+            type_args: [
+              Type::Combinator.union(*key_types),
+              Type::Combinator.union(*value_types)
+            ]
+          )
         end
 
         # Slice 4 phase 2d generic acceptance. Type arguments are
@@ -273,6 +324,60 @@ module Rigor
               reasons: "Constant[#{self_type.value.inspect}] rejects #{other_type.class}"
             )
           end
+        end
+
+        # Tuple[A1..An] accepts:
+        # - Tuple[B1..Bn] when arities match and each Ai accepts Bi
+        #   (covariant per-position).
+        # - Anything else: no (we cannot prove the arity from a generic
+        #   nominal alone).
+        def accepts_tuple(self_type, other_type, mode)
+          unless other_type.is_a?(Type::Tuple)
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Tuple does not accept #{other_type.class}"
+            )
+          end
+
+          if self_type.elements.size != other_type.elements.size
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "tuple arity mismatch: #{self_type.elements.size} vs #{other_type.elements.size}"
+            )
+          end
+
+          per_element = self_type.elements.zip(other_type.elements).map do |formal, actual|
+            accepts(formal, actual, mode: mode)
+          end
+          combine_arg_results(per_element, mode)
+        end
+
+        # HashShape{k1: T1, ...} accepts another HashShape{k1: U1, ...}
+        # when every required key (every key of self) is present on
+        # the other side and Ti accepts Ui (depth covariant). Other
+        # types are rejected; the converse direction (a Nominal
+        # accepting a HashShape) is handled by `accepts_nominal` via
+        # projection.
+        def accepts_hash_shape(self_type, other_type, mode)
+          unless other_type.is_a?(Type::HashShape)
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "HashShape does not accept #{other_type.class}"
+            )
+          end
+
+          missing = self_type.pairs.keys - other_type.pairs.keys
+          unless missing.empty?
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "HashShape missing required keys: #{missing.inspect}"
+            )
+          end
+
+          per_entry = self_type.pairs.map do |k, formal|
+            accepts(formal, other_type.pairs.fetch(k), mode: mode)
+          end
+          combine_arg_results(per_entry, mode)
         end
 
         # Slice 4 phase 2c uses Ruby's actual class hierarchy to answer

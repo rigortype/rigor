@@ -170,6 +170,35 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       end
     end
 
+    describe "shape carriers (Slice 5 phase 1)" do
+      it "projects Tuple[A, B] receiver to Array[union] for dispatch" do
+        tup = Rigor::Type::Combinator.tuple_of(
+          Rigor::Type::Combinator.constant_of(1),
+          Rigor::Type::Combinator.constant_of(2)
+        )
+        type = dispatch(tup, :first)
+        expect(type).to be_a(Rigor::Type::Union)
+        expect(type.members.map(&:value)).to contain_exactly(1, 2)
+      end
+
+      it "projects empty Tuple to raw Array (no element evidence)" do
+        tup = Rigor::Type::Combinator.tuple_of
+        type = dispatch(tup, :length)
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Integer")
+      end
+
+      it "projects HashShape{a: Int} receiver onto Hash[Symbol, Int] for #fetch" do
+        sh = Rigor::Type::Combinator.hash_shape_of(
+          a: Rigor::Type::Combinator.constant_of(1),
+          b: Rigor::Type::Combinator.constant_of(2)
+        )
+        type = dispatch(sh, :fetch, [Rigor::Type::Combinator.constant_of(:a)])
+        expect(type).to be_a(Rigor::Type::Union)
+        expect(type.members.map(&:value)).to contain_exactly(1, 2)
+      end
+    end
+
     it "returns nil when the environment has no RBS loader" do
       blank_env = Rigor::Environment.new
       expect(blank_env.rbs_loader).to be_nil

@@ -287,14 +287,65 @@ module Rigor
         end
       end
 
-      # Slice 4 phase 2d carries `Hash[K, V]` through hash literals by
-      # unioning the types of all assoc keys and values. Splatted
-      # entries (`{ **other }`) and dynamic keys widen to the
-      # contributed types they expose; when no concrete pair survives
-      # we fall back to the raw `Hash` so callers stay backward
-      # compatible.
+      # Slice 5 phase 1 upgrades hash literals to `HashShape{...}`
+      # when every entry is a static `AssocNode` whose key is a
+      # `SymbolNode` or `StringNode` with a known value (covering the
+      # `{ a: 1, "b" => 2 }` pattern and falling back to the generic
+      # `Hash[K, V]` form otherwise). Splatted entries
+      # (`{ **other }`) and dynamic keys widen to the underlying
+      # `Hash[K, V]` form by unioning the types each entry exposes;
+      # when no concrete pair survives we fall back to the raw `Hash`
+      # so callers stay backward compatible.
       def type_of_hash(node)
         elements = node.respond_to?(:elements) ? node.elements : []
+        return Type::Combinator.nominal_of(Hash) if elements.empty?
+
+        shape = static_hash_shape_for(elements)
+        return shape if shape
+
+        keys, values = generic_hash_pairs_for(elements)
+        return Type::Combinator.nominal_of(Hash) if keys.empty? || values.empty?
+
+        Type::Combinator.nominal_of(
+          Hash,
+          type_args: [Type::Combinator.union(*keys), Type::Combinator.union(*values)]
+        )
+      end
+
+      # Builds `HashShape{...}` when every entry is an `AssocNode`
+      # whose key is a static Symbol or String literal. Returns nil
+      # otherwise so the caller falls back to the generic shape.
+      def static_hash_shape_for(elements)
+        pairs = {}
+        elements.each do |entry|
+          return nil unless entry.is_a?(Prism::AssocNode)
+
+          key = static_hash_key(entry.key)
+          return nil if key.nil?
+          return nil if pairs.key?(key)
+
+          pairs[key] = type_of(entry.value)
+        end
+        return nil if pairs.empty?
+
+        Type::Combinator.hash_shape_of(pairs)
+      end
+
+      # Returns the static (Symbol|String) literal carried by a hash
+      # key node, or nil when the key is dynamic. We only treat
+      # SymbolNode#value and StringNode#unescaped as static when they
+      # are non-nil (interpolation produces a nil unescaped).
+      def static_hash_key(node)
+        case node
+        when Prism::SymbolNode
+          raw = node.value
+          raw&.to_sym
+        when Prism::StringNode
+          node.unescaped
+        end
+      end
+
+      def generic_hash_pairs_for(elements)
         keys = []
         values = []
         elements.each do |entry|
@@ -303,12 +354,7 @@ module Rigor
           keys << type_of(entry.key)
           values << type_of(entry.value)
         end
-        return Type::Combinator.nominal_of(Hash) if keys.empty? || values.empty?
-
-        Type::Combinator.nominal_of(
-          Hash,
-          type_args: [Type::Combinator.union(*keys), Type::Combinator.union(*values)]
-        )
+        [keys, values]
       end
 
       def type_of_interpolated_string(_node)
@@ -537,19 +583,24 @@ module Rigor
         scope.local(node.name) || dynamic_top
       end
 
-      # Slice 4 phase 2d wires array literals through the generic
-      # `Nominal[Array, [Elem]]` shape so calls like `[1, 2].first(1)`
-      # resolve to `Array[Constant[1] | Constant[2]]` instead of the
-      # raw `Array`. An empty literal still types as the raw `Array`
-      # (no element evidence to carry); element-type inference for
-      # mutated arrays remains a Slice 3 / Slice 5 concern.
+      # Slice 5 phase 1 upgrades array literals to `Tuple[T1..Tn]`
+      # when every element is a non-splat value. Splatted entries
+      # (`[*xs, 1]`) preserve the Slice 4 phase 2d behavior: we union
+      # the contributed element types and emit
+      # `Nominal[Array, [union]]`. An empty literal stays as the raw
+      # `Array` (no element evidence to lock either an arity or an
+      # element type).
       def array_type_for(node)
         elements = node.elements
         return Type::Combinator.nominal_of(Array) if elements.empty?
 
-        element_types = elements.map { |e| type_of(e) }
-        element_union = Type::Combinator.union(*element_types)
-        Type::Combinator.nominal_of(Array, type_args: [element_union])
+        if elements.any?(Prism::SplatNode)
+          element_types = elements.map { |e| type_of(e) }
+          element_union = Type::Combinator.union(*element_types)
+          return Type::Combinator.nominal_of(Array, type_args: [element_union])
+        end
+
+        Type::Combinator.tuple_of(*elements.map { |e| type_of(e) })
       end
 
       def parentheses_type_for(node)

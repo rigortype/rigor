@@ -217,6 +217,86 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
   end
 
+  describe "Tuple acceptance (Slice 5 phase 1)" do
+    def tuple_of(*elems)
+      Rigor::Type::Combinator.tuple_of(*elems)
+    end
+
+    it "accepts Tuple of equal arity element-wise (covariant)" do
+      a = tuple_of(numeric_nominal, str_nominal)
+      b = tuple_of(int_nominal, str_nominal)
+      expect(accepts(a, b)).to be_yes
+    end
+
+    it "rejects Tuple of mismatched arity" do
+      a = tuple_of(int_nominal, str_nominal)
+      b = tuple_of(int_nominal)
+      expect(accepts(a, b)).to be_no
+    end
+
+    it "rejects non-Tuple values" do
+      a = tuple_of(int_nominal)
+      expect(accepts(a, int_nominal)).to be_no
+      expect(accepts(a, Rigor::Type::Combinator.nominal_of(Array))).to be_no
+    end
+
+    it "Nominal[Array] accepts a Tuple via projection" do
+      array_raw = Rigor::Type::Combinator.nominal_of(Array)
+      tup = tuple_of(int_constant, str_constant)
+      expect(accepts(array_raw, tup)).to be_yes
+    end
+
+    it "Nominal[Array, [union]] accepts Tuple element-wise via projection" do
+      array_int = Rigor::Type::Combinator.nominal_of(Array, type_args: [int_nominal])
+      tup = tuple_of(int_constant, Rigor::Type::Combinator.constant_of(2))
+      expect(accepts(array_int, tup)).to be_yes
+    end
+  end
+
+  describe "HashShape acceptance (Slice 5 phase 1)" do
+    def shape(pairs)
+      Rigor::Type::Combinator.hash_shape_of(pairs)
+    end
+
+    it "accepts a HashShape with the same keys and accepted values (depth covariant)" do
+      a = shape(a: numeric_nominal)
+      b = shape(a: int_nominal)
+      expect(accepts(a, b)).to be_yes
+    end
+
+    it "accepts a HashShape with extra keys on the right (width permissive)" do
+      a = shape(a: int_nominal)
+      b = shape(a: int_nominal, b: str_nominal)
+      expect(accepts(a, b)).to be_yes
+    end
+
+    it "rejects a HashShape missing a required key" do
+      a = shape(a: int_nominal, b: str_nominal)
+      b = shape(a: int_nominal)
+      expect(accepts(a, b)).to be_no
+    end
+
+    it "rejects non-HashShape values" do
+      a = shape(a: int_nominal)
+      expect(accepts(a, Rigor::Type::Combinator.nominal_of(Hash))).to be_no
+    end
+
+    it "Nominal[Hash] accepts a HashShape via projection" do
+      hash_raw = Rigor::Type::Combinator.nominal_of(Hash)
+      sh = shape(a: int_constant, b: str_constant)
+      expect(accepts(hash_raw, sh)).to be_yes
+    end
+
+    it "Nominal[Hash, [Symbol, Integer]] accepts HashShape with symbol keys and integer values" do
+      hash_int = Rigor::Type::Combinator.nominal_of(
+        Hash,
+        type_args: [Rigor::Type::Combinator.nominal_of(Symbol), int_nominal]
+      )
+      sh = shape(a: int_constant, b: Rigor::Type::Combinator.constant_of(2))
+      expect(accepts(hash_int, sh)).to be_yes
+    end
+  end
+
   describe "Type#accepts public surface" do
     it "every type form exposes accepts as a public method" do
       [top, bot, dyn_top, int_nominal, int_singleton, int_constant, int_or_str].each do |t|

@@ -116,14 +116,20 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
       expect(type.members).to include(Rigor::Type::Combinator.constant_of(nil))
     end
 
-    it "degrades tuples and records to Array and Hash nominals" do
+    it "translates tuples to Rigor::Type::Tuple (Slice 5 phase 1)" do
       tuple = described_class.translate(parse_rbs("[::Integer, ::String]"))
-      expect(tuple).to be_a(Rigor::Type::Nominal)
-      expect(tuple.class_name).to eq("Array")
+      expect(tuple).to be_a(Rigor::Type::Tuple)
+      expect(tuple.elements.size).to eq(2)
+      expect(tuple.elements[0]).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(tuple.elements[1]).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
 
-      record = described_class.translate(parse_rbs("{ a: ::Integer }"))
-      expect(record).to be_a(Rigor::Type::Nominal)
-      expect(record.class_name).to eq("Hash")
+    it "translates records to Rigor::Type::HashShape (Slice 5 phase 1)" do
+      record = described_class.translate(parse_rbs("{ a: ::Integer, b: ::String }"))
+      expect(record).to be_a(Rigor::Type::HashShape)
+      expect(record.pairs.keys).to eq(%i[a b])
+      expect(record.pairs[:a]).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(record.pairs[:b]).to eq(Rigor::Type::Combinator.nominal_of("String"))
     end
 
     it "degrades type variables to Dynamic[Top]" do

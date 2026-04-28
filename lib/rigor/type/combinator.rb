@@ -6,6 +6,8 @@ require_relative "dynamic"
 require_relative "nominal"
 require_relative "singleton"
 require_relative "constant"
+require_relative "tuple"
+require_relative "hash_shape"
 require_relative "union"
 
 module Rigor
@@ -61,6 +63,20 @@ module Rigor
 
       def constant_of(value)
         Constant.new(value)
+      end
+
+      # Constructs a heterogeneous, fixed-arity Tuple from positional
+      # element types. `tuple_of()` produces the empty tuple `Tuple[]`,
+      # which is structurally distinct from the raw `Nominal[Array]`.
+      def tuple_of(*elements)
+        Tuple.new(elements)
+      end
+
+      # Constructs a HashShape from an ordered (Symbol|String) -> type
+      # map. The argument is duped and frozen by the carrier; callers
+      # MUST NOT rely on later mutation.
+      def hash_shape_of(pairs)
+        HashShape.new(pairs)
       end
 
       # Normalized union. Flattens nested Unions, deduplicates structurally

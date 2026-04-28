@@ -38,6 +38,14 @@ module Rigor
       # arities mismatch (raw receiver, partial generics) the map is
       # left empty and free variables degrade as before.
       #
+      # Slice 5 phase 1 projects shape-carrying receivers onto their
+      # underlying nominal so the existing dispatch + substitution
+      # machinery works without duplication: `Tuple[Integer, String]`
+      # dispatches as `Array[Integer | String]`, and
+      # `HashShape{a: Integer}` dispatches as `Hash[Symbol, Integer]`.
+      # Tuple-aware refinements (e.g., `tuple[0]` returning the precise
+      # member) are deferred to Slice 5 phase 2.
+      #
       # Remaining limitations:
       #
       # * `block_type:` is ignored; method types that constrain the
@@ -73,6 +81,7 @@ module Rigor
           )
         end
 
+        # rubocop:disable Metrics/ClassLength
         class << self
           private
 
@@ -125,6 +134,10 @@ module Rigor
           # singleton receivers, since `Singleton[Foo]` carries no
           # generic args today). Returns nil when the receiver does
           # not correspond to a single concrete class.
+          #
+          # Slice 5 phase 1 projects Tuple/HashShape receivers to
+          # their underlying Array/Hash nominal so dispatch reuses the
+          # generic-typed pipeline.
           def receiver_descriptor(receiver)
             case receiver
             when Type::Constant
@@ -133,9 +146,30 @@ module Rigor
               [receiver.class_name, :instance, receiver.type_args]
             when Type::Singleton
               [receiver.class_name, :singleton, []]
+            when Type::Tuple
+              ["Array", :instance, tuple_type_args(receiver)]
+            when Type::HashShape
+              ["Hash", :instance, hash_shape_type_args(receiver)]
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
             end
+          end
+
+          def tuple_type_args(tuple)
+            return [] if tuple.elements.empty?
+
+            [Type::Combinator.union(*tuple.elements)]
+          end
+
+          def hash_shape_type_args(shape)
+            return [] if shape.pairs.empty?
+
+            key_types = shape.pairs.keys.map { |k| Type::Combinator.constant_of(k) }
+            value_types = shape.pairs.values
+            [
+              Type::Combinator.union(*key_types),
+              Type::Combinator.union(*value_types)
+            ]
           end
 
           def lookup_method(environment, class_name, kind, method_name)
@@ -194,6 +228,7 @@ module Rigor
             )
           end
         end
+        # rubocop:enable Metrics/ClassLength
       end
       # rubocop:enable Metrics/ModuleLength
     end

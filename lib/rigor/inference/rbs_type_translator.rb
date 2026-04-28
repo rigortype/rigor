@@ -18,6 +18,15 @@ module Rigor
     #   when it is not bound, the variable degrades to `Dynamic[Top]` so
     #   uninstantiated generics keep their fail-soft behavior.
     #
+    # Slice 5 phase 1 maps tuples and records to their dedicated shape
+    # carriers:
+    # - `RBS::Types::Tuple` becomes `Rigor::Type::Tuple[...]` so the
+    #   arity and per-position element types survive the boundary.
+    # - `RBS::Types::Record` becomes `Rigor::Type::HashShape{...}`,
+    #   carrying the (Symbol -> Type) map intact.
+    # Element and value types are translated recursively under the
+    # caller's `self_type` / `instance_type` / `type_vars` context.
+    #
     # Interface and intersection types still degrade to `Dynamic[Top]`;
     # they are bound to acceptance and dispatch rules that Slice 5+
     # will replace.
@@ -31,6 +40,7 @@ module Rigor
     #   `Nominal[C]` regardless of which method body we are in.
     # When either argument is omitted, the corresponding token degrades
     # to Dynamic[Top].
+    # rubocop:disable Metrics/ModuleLength
     module RbsTypeTranslator
       # Hash-based dispatch keeps `translate` linear and dodges the
       # bookkeeping costs of a 20-arm `case` (RuboCop AbcSize/CCN/Length
@@ -51,8 +61,8 @@ module Rigor
         RBS::Types::Union => :translate_union,
         RBS::Types::Literal => :translate_literal,
         RBS::Types::ClassInstance => :translate_class_instance,
-        RBS::Types::Tuple => :translate_array_nominal,
-        RBS::Types::Record => :translate_hash_nominal,
+        RBS::Types::Tuple => :translate_tuple,
+        RBS::Types::Record => :translate_record,
         RBS::Types::Proc => :translate_proc_nominal,
         RBS::Types::ClassSingleton => :translate_class_singleton,
         RBS::Types::Alias => :translate_untyped,
@@ -151,15 +161,26 @@ module Rigor
           Type::Combinator.nominal_of(name, type_args: translated_args)
         end
 
-        def translate_array_nominal(_rbs_type, _self_type, _instance_type, _type_vars)
-          # Tuple precision lands in Slice 5 alongside the dedicated
-          # Tuple/HashShape carriers from ADR-3. For now we erase the
-          # tuple shape to the bare Array nominal.
-          Type::Combinator.nominal_of(Array)
+        # Slice 5 phase 1: preserve tuple precision through the
+        # boundary. Each positional element type is translated
+        # recursively under the caller's substitution context, and the
+        # resulting list is wrapped in a `Rigor::Type::Tuple`.
+        def translate_tuple(rbs_type, self_type, instance_type, type_vars)
+          elements = rbs_type.types.map do |t|
+            translate(t, self_type: self_type, instance_type: instance_type, type_vars: type_vars)
+          end
+          Type::Combinator.tuple_of(*elements)
         end
 
-        def translate_hash_nominal(_rbs_type, _self_type, _instance_type, _type_vars)
-          Type::Combinator.nominal_of(Hash)
+        # Slice 5 phase 1: preserve hash-record precision through the
+        # boundary. RBS records use Symbol keys; the translator keeps
+        # them as Symbol keys on the resulting HashShape so erasure can
+        # round-trip back to `{ a: T }` syntax.
+        def translate_record(rbs_type, self_type, instance_type, type_vars)
+          pairs = rbs_type.fields.each_with_object({}) do |(key, value), acc|
+            acc[key] = translate(value, self_type: self_type, instance_type: instance_type, type_vars: type_vars)
+          end
+          Type::Combinator.hash_shape_of(pairs)
         end
 
         def translate_proc_nominal(_rbs_type, _self_type, _instance_type, _type_vars)
@@ -184,5 +205,6 @@ module Rigor
         end
       end
     end
+    # rubocop:enable Metrics/ModuleLength
   end
 end

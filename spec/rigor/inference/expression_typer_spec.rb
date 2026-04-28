@@ -75,18 +75,28 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.type_args).to eq([])
     end
 
-    it "types non-empty arrays as Array[Elem] with the element union (Slice 4 phase 2d)" do
+    it "types non-empty arrays as Tuple[T1, T2, ...] (Slice 5 phase 1)" do
       type = scope.type_of(parse_expression('[1, "hi", :foo]'))
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements).to eq(
+        [
+          Rigor::Type::Combinator.constant_of(1),
+          Rigor::Type::Combinator.constant_of("hi"),
+          Rigor::Type::Combinator.constant_of(:foo)
+        ]
+      )
+    end
+
+    it "falls back to Nominal[Array, [Elem]] when an element is splatted" do
+      array_int = Rigor::Type::Combinator.nominal_of(
+        Array,
+        type_args: [Rigor::Type::Combinator.nominal_of(Integer)]
+      )
+      bound = scope.with_local(:xs, array_int)
+      type = bound.type_of(parse_expression("[*xs, 1]", scopes: [[:xs]]))
       expect(type).to be_a(Rigor::Type::Nominal)
       expect(type.class_name).to eq("Array")
       expect(type.type_args.size).to eq(1)
-      element = type.type_args.first
-      expect(element).to be_a(Rigor::Type::Union)
-      expect(element.members).to contain_exactly(
-        Rigor::Type::Combinator.constant_of(1),
-        Rigor::Type::Combinator.constant_of("hi"),
-        Rigor::Type::Combinator.constant_of(:foo)
-      )
     end
   end
 
@@ -492,17 +502,15 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Array")
     end
 
-    it "Hash literal carries Hash[K, V] type_args (Slice 4 phase 2d)" do
+    it "Hash literal carries HashShape{a: 1, b: 2} (Slice 5 phase 1)" do
       type = scope.type_of(parse_expression("{ a: 1, b: 2 }"))
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("Hash")
-      expect(type.type_args.size).to eq(2)
-      key_type, value_type = type.type_args
-      expect(key_type.members.map(&:value)).to contain_exactly(:a, :b) if key_type.is_a?(Rigor::Type::Union)
-      expect(value_type.members.map(&:value)).to contain_exactly(1, 2) if value_type.is_a?(Rigor::Type::Union)
+      expect(type).to be_a(Rigor::Type::HashShape)
+      expect(type.pairs.keys).to eq(%i[a b])
+      expect(type.pairs[:a]).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(type.pairs[:b]).to eq(Rigor::Type::Combinator.constant_of(2))
     end
 
-    it "Hash#fetch substitutes V from the receiver's type_args" do
+    it "Hash#fetch projects HashShape to Hash[K, V] and substitutes V" do
       type = scope.type_of(parse_expression("{ a: 1, b: 2 }.fetch(:a)"))
       expect(type).to be_a(Rigor::Type::Union)
       expect(type.members.map(&:value)).to contain_exactly(1, 2)
@@ -538,8 +546,15 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
   end
 
   describe "containers and definitions (Slice 2 strengthening)" do
-    it "types HashNode as Nominal[Hash]" do
+    it "types HashNode with static symbol keys as HashShape (Slice 5 phase 1)" do
       type = scope.type_of(parse_expression("{ a: 1, b: 2 }"))
+
+      expect(type).to be_a(Rigor::Type::HashShape)
+      expect(type.pairs.keys).to eq(%i[a b])
+    end
+
+    it "types empty HashNode as raw Nominal[Hash]" do
+      type = scope.type_of(parse_expression("{}"))
 
       expect(type).to be_a(Rigor::Type::Nominal)
       expect(type.class_name).to eq("Hash")

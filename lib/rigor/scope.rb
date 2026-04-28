@@ -3,6 +3,7 @@
 require_relative "type"
 require_relative "environment"
 require_relative "inference/expression_typer"
+require_relative "inference/statement_evaluator"
 
 module Rigor
   # Immutable analyzer scope: holds local-variable bindings and a reference
@@ -38,6 +39,16 @@ module Rigor
 
     def type_of(node, tracer: nil)
       Inference::ExpressionTyper.new(scope: self, tracer: tracer).type_of(node)
+    end
+
+    # Statement-level evaluation: returns the pair `[type, scope']`
+    # where `type` is what the node produces and `scope'` is the
+    # scope observable after the node has run. The receiver scope is
+    # never mutated. See {Rigor::Inference::StatementEvaluator} for
+    # the catalogue of nodes that thread scope; everything else
+    # defers to {#type_of} and returns the receiver scope unchanged.
+    def evaluate(node, tracer: nil)
+      Inference::StatementEvaluator.new(scope: self, tracer: tracer).evaluate(node)
     end
 
     # Joins this scope with another at a control-flow merge point. The

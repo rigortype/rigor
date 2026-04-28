@@ -183,6 +183,50 @@ Local variable read nodes (`Prism::LocalVariableReadNode`) MUST be looked up in 
 
 Local variable write nodes (`Prism::LocalVariableWriteNode` and the targets that imply it) MUST be typed as the type of their value expression. Binding the result back into the scope is the responsibility of the statement-level evaluator (see Slice 3 in [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md)); `Scope#type_of` itself MUST NOT mutate the scope.
 
+## Statement-Level Evaluation
+
+`Rigor::Scope#type_of` is a pure expression-level query and MUST NOT thread scope. The statement-level evaluator `Rigor::Inference::StatementEvaluator` (Slice 3 phase 2) sits next to it and provides the complementary scope-threading surface. Its public delegate on `Rigor::Scope` MUST exist:
+
+```ruby
+Rigor::Scope#evaluate(node, tracer: nil) #=> [Rigor::Type, Rigor::Scope]
+```
+
+The contract MUST satisfy:
+
+- The first element of the returned pair MUST be the type that `node` produces, equivalent to what `Scope#type_of(node)` would return for a pure expression. The second element MUST be the scope observable AFTER `node` has run; for nodes that perform no scope effect this MUST be the receiver scope (compared with `==`, the receiver's identity MAY differ).
+- The receiver scope MUST never be mutated. Internal recursion MUST allocate fresh `StatementEvaluator` instances for every forked scope so branches stay isolated and the equality of distinct branch outputs is observable.
+- The `tracer:` keyword MUST be threaded into every nested `Scope#type_of` call so fail-soft fallbacks emitted while typing children of a statement-y node are recorded under the same tracer.
+- An `evaluate` call against a node that the evaluator does not specialise MUST defer to `Scope#type_of(node, tracer:)` and MUST return the receiver scope unchanged. This preserves the Slice 1 fail-soft policy: an unrecognised statement-y node MUST NOT raise.
+
+The catalogue of nodes that the evaluator MUST recognise in Slice 3 phase 2 is:
+
+- `Prism::ProgramNode` and `Prism::StatementsNode` — sequential evaluation that threads scope through every child statement in declaration order. The body's value MUST be the type of the last statement (or `Constant[nil]` for an empty body); the post-scope MUST be the post-scope of the last statement.
+- `Prism::LocalVariableWriteNode` — evaluates the rvalue under the entry scope and binds `name` to the resulting type via `Scope#with_local`. The pair's type MUST equal the rvalue type.
+- `Prism::IfNode` and `Prism::UnlessNode` — evaluate the predicate first (its post-scope is shared by both branches), then evaluate each branch under the post-predicate scope. The result type MUST be the union of the two branch types; the post-scope MUST be the join-with-nil-injection of the two branch scopes (see below). A `nil` branch (no else / no then) MUST contribute `Constant[nil]` and the post-predicate scope.
+- `Prism::ElseNode` — evaluates its body under the receiver scope, returning `[Constant[nil], scope]` for empty bodies.
+- `Prism::CaseNode` and `Prism::CaseMatchNode` — evaluate the predicate first; every `WhenNode`/`InNode` body and the optional else-clause are evaluated independently under the post-predicate scope and merged with the same join-with-nil-injection rule generalised to N branches.
+- `Prism::WhenNode` and `Prism::InNode` — evaluate their statements under the receiver scope; an empty body MUST be `[Constant[nil], scope]`.
+- `Prism::BeginNode` — evaluate the primary path (body, then optional else-clause; the else-clause MUST replace the body's value while the body's scope effects still apply because the body did run before the else). Each `Prism::RescueNode` in the chain is an alternative exit path evaluated under the entry scope. The exit type MUST be the union of the primary and rescue exits; the exit scope MUST be the join-with-nil-injection of the primary and rescue scopes. When an `ensure_clause` is present, its scope effects MUST be layered on the joined exit scope, so locals bound exclusively in the ensure stay observable; the ensure's value MUST NOT contribute to the exit type.
+- `Prism::WhileNode` and `Prism::UntilNode` — evaluate the predicate (its post-scope is observable in the body), then evaluate the body. The result type MUST be `Constant[nil]`. The post-scope MUST be the join-with-nil-injection of the post-predicate scope and the post-body scope, modelling "body might have run zero or more times".
+- `Prism::AndNode` and `Prism::OrNode` — evaluate the LHS, then the RHS under the LHS's post-scope. The result type MUST be the union of the two operand types; the post-scope MUST be the join-with-nil-injection of the LHS and RHS post-scopes (modelling "LHS always ran; RHS only sometimes ran"). Slice 3 phase 2 does NOT narrow on the LHS's truthiness; that refinement is the job of Slice 6.
+- `Prism::ParenthesesNode` — threads scope through the inner expression so `(x = 1; x + 2)` binds `x` and produces `Constant[3]`.
+
+### Join with Nil-Injection
+
+`Scope#join` drops names bound in only one receiver (per the [Immutable Scope Discipline](#immutable-scope-discipline) above). The statement-level evaluator's branch-merge MUST instead inject `Constant[nil]` for half-bound names so the joined scope sees them as `T | nil`:
+
+- For names bound in `scope_a` but not `scope_b`: bind those names to `Constant[nil]` in `scope_b` before joining.
+- For names bound in `scope_b` but not `scope_a`: bind those names to `Constant[nil]` in `scope_a` before joining.
+- Then call `Scope#join` on the augmented scopes; the result MUST contain every name from either side, with the union including `Constant[nil]` for names bound in only one side.
+
+This is the contract that the Slice 3 phase 1 [Immutable Scope Discipline](#immutable-scope-discipline) defers to the statement-level evaluator. N-ary branch merges (case/when, begin/rescue chain) reduce by repeated pairwise join-with-nil-injection; the reduce order does not affect the result because nil-injection commutes with union under `Scope#join`.
+
+### Boundaries
+
+Slice 3 phase 2 does NOT thread scope through the *interior* of arbitrary expressions: `foo(x = 1)` and `[1, x = 2]` do not propagate `x` to the post-scope, because the recursive descent stops at expression-level children that the evaluator's catalogue does not cover. This is a deliberate Phase 2 simplification; later slices may expand the catalogue to thread scope through call arguments and array/hash elements. Statement-y constructs at the top level (assignments, ifs, cases, begins, loops, parens) propagate as specified above.
+
+Slice 3 phase 2 also does NOT yet consume the result of `Scope#evaluate` from the CLI (`rigor type-of` and `rigor type-scan` still operate against `Scope#type_of` with an empty scope). That integration is a follow-up concern; the stability of the StatementEvaluator surface above MUST hold across that future work.
+
 ## Environment Surface
 
 `Rigor::Environment` is the engine's view of the type universe outside the current scope: nominal classes, RBS definitions, plugin-supplied facts (Slice 6+), and any other module-level information. The minimum public surface that Slice 1 binds is:

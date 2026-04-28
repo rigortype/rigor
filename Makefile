@@ -1,4 +1,4 @@
-.PHONY: init-submodules pull-submodules
+.PHONY: setup install init-submodules pull-submodules
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -6,6 +6,11 @@ REFERENCE_SUBMODULES := \
 	references/phpstan \
 	references/python-typing \
 	references/TypeScript-Website
+
+setup: install init-submodules
+
+install:
+	bundle install
 
 init-submodules:
 	git submodule update --init --filter=blob:none references/rbs

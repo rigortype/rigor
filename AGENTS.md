@@ -30,11 +30,19 @@ Or prefix one-shot invocations with `nix --extra-experimental-features 'nix-comm
 
 ### Basic setup
 
+Inside the Flake shell, run:
+
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle install
-nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake
+make setup
 ```
+
+From outside the Flake shell, prefix the same target:
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' develop --command make setup
+```
+
+`make setup` runs `bundle install` and then `make init-submodules`. After it finishes, follow the steps in [Verification Notes](#verification-notes).
 
 ## Common Commands
 

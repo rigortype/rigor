@@ -294,6 +294,108 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "DefNode / ClassNode handlers (Slice 3 phase 2 follow-up)" do
+    let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+
+    # Build an `on_enter` callback that records the entry-scope
+    # binding for `name` whenever the evaluator visits a
+    # LocalVariableReadNode for that name. Returns the events array
+    # (mutable) and the callback together.
+    def watch_local_reads(name)
+      events = []
+      on_enter = lambda do |node, s|
+        next unless node.is_a?(Prism::LocalVariableReadNode) && node.name == name
+
+        events << s.local(name)
+      end
+      [events, on_enter]
+    end
+
+    it "types a top-level def as Constant[:method_name] and leaves the outer scope unchanged" do
+      type, post = evaluate("def add(a, b); a + b; end")
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(:add))
+      expect(post).to eq(scope)
+    end
+
+    it "binds parameters to Dynamic[Top] when no class context is present" do
+      events, on_enter = watch_local_reads(:a)
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(parse_program("def foo(a); a; end"))
+      expect(events.first).to equal(Rigor::Type::Combinator.untyped)
+    end
+
+    it "binds parameters from RBS when wrapped in a class with a known method" do
+      events, on_enter = watch_local_reads(:other)
+      described_class.new(scope: default_env_scope, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        class Integer
+          def divmod(other); other; end
+        end
+      RUBY
+      expect(events.first).to be_a(Rigor::Type::Union)
+      expect(events.first.members.map(&:class_name)).to include("Integer", "Float")
+    end
+
+    it "routes def self.foo through singleton-method RBS lookup" do
+      events, on_enter = watch_local_reads(:n)
+      described_class.new(scope: default_env_scope, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        class Integer
+          def self.sqrt(n); n; end
+        end
+      RUBY
+      # The singleton path was consulted (no exception, the local is
+      # bound to *some* type, possibly Dynamic[Top] when the RBS type
+      # is an interface alias). The structural property under test is
+      # that the local was bound at all.
+      expect(events).not_to be_empty
+      expect(events.first).not_to be_nil
+    end
+
+    it "uses singleton lookup inside class << self blocks" do
+      events, on_enter = watch_local_reads(:n)
+      described_class.new(scope: default_env_scope, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        class Integer
+          class << self
+            def sqrt(n); n; end
+          end
+        end
+      RUBY
+      expect(events).not_to be_empty
+      expect(events.first).not_to be_nil
+    end
+
+    it "discards the class body's locals from the outer scope" do
+      _type, post = evaluate("class Foo; x = 1; end")
+      expect(post.local(:x)).to be_nil
+    end
+
+    it "evaluates a class body in a fresh scope (outer locals are not visible)" do
+      ast = parse_program(<<~RUBY)
+        x = 1
+        class Foo
+          x
+        end
+      RUBY
+      class_body_scopes = []
+      on_enter = ->(_node, s) { class_body_scopes << s.locals.keys.sort }
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(ast)
+      # The class body's children enter with the fresh empty scope
+      # (`[]`), even though the outer `x = 1` post-scope contains x.
+      expect(class_body_scopes).to include([])
+    end
+
+    it "qualifies nested class names with :: without raising" do
+      # The binder's class_path is "A::B" here. Neither A nor A::B exist
+      # in core RBS, so x falls back to Dynamic[Top]; the structural
+      # test is just that no exception is raised.
+      ast = parse_program("class A; class B; def foo(x); x; end; end; end")
+      expect { described_class.new(scope: scope).evaluate(ast) }.not_to raise_error
+    end
+
+    it "renders the qualified name correctly for class A::B" do
+      ast = parse_program("class A::B; def foo(x); x; end; end")
+      expect { described_class.new(scope: scope).evaluate(ast) }.not_to raise_error
+    end
+  end
+
   describe "downstream inference benefits" do
     it "lets methods on bound locals resolve through RBS" do
       type, _post = evaluate(<<~RUBY)

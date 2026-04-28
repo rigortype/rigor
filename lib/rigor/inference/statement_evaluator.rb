@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "method_parameter_binder"
 
 module Rigor
   module Inference
@@ -62,9 +63,19 @@ module Rigor
         Prism::UntilNode => :eval_loop,
         Prism::AndNode => :eval_and_or,
         Prism::OrNode => :eval_and_or,
-        Prism::ParenthesesNode => :eval_parentheses
+        Prism::ParenthesesNode => :eval_parentheses,
+        Prism::DefNode => :eval_def,
+        Prism::ClassNode => :eval_class_or_module,
+        Prism::ModuleNode => :eval_class_or_module,
+        Prism::SingletonClassNode => :eval_singleton_class
       }.freeze
       private_constant :HANDLERS
+
+      # Lexical class frame: the `name:` field is the qualified class
+      # name as it would render in Ruby (e.g., `"Foo::Bar"`); the
+      # `singleton:` field is `true` for `class << self` frames so
+      # nested defs resolve to singleton-method RBS lookups.
+      ClassFrame = Data.define(:name, :singleton)
 
       # @param scope [Rigor::Scope]
       # @param tracer [Rigor::Inference::FallbackTracer, nil]
@@ -75,10 +86,15 @@ module Rigor
       #   scope index (`Rigor::Inference::ScopeIndexer`) can record the
       #   entry scope for every Prism node the evaluator visits without
       #   the StatementEvaluator carrying any additional state itself.
-      def initialize(scope:, tracer: nil, on_enter: nil)
+      # @param class_context [Array<ClassFrame>] lexical class scope used
+      #   by {#eval_def} to look up the method's RBS signature. Each
+      #   `ClassNode`/`ModuleNode` entry pushes a frame; `SingletonClassNode`
+      #   over `self` flips the innermost frame to singleton mode.
+      def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze)
         @scope = scope
         @tracer = tracer
         @on_enter = on_enter
+        @class_context = class_context.freeze
       end
 
       # Evaluate `node` under the receiver scope. Returns `[type, scope']`
@@ -305,10 +321,128 @@ module Rigor
         sub_eval(node.body, scope)
       end
 
+      # `class Foo; body; end` and `module Foo; body; end`. The class
+      # body runs in a fresh scope (Ruby's class scope does not see
+      # the outer locals), and the StatementEvaluator pushes a new
+      # `ClassFrame` so nested `def`s know their lexical owner. The
+      # outer scope is unchanged on exit because Ruby's class
+      # definition does not bind any local in the enclosing scope.
+      # The class body's value is the value of its last statement
+      # (`Constant[nil]` for an empty body); we discard the body's
+      # post-scope.
+      def eval_class_or_module(node)
+        name = qualified_name_for(node.constant_path)
+        new_context = @class_context + [ClassFrame.new(name: name, singleton: false)]
+        body_type, _body_scope = eval_class_body(node, new_context)
+        [body_type, scope]
+      end
+
+      # `class << expr; body; end`. When `expr` is `self`, the body
+      # defines class methods on the immediate enclosing class — the
+      # innermost frame flips to `singleton: true` so a nested
+      # `def foo` resolves through `singleton_method` rather than
+      # `instance_method`. For non-`self` expressions we cannot
+      # statically resolve the receiver, so we keep the existing
+      # context and accept that nested defs degrade to the
+      # `Dynamic[Top]` default.
+      def eval_singleton_class(node)
+        new_context = singleton_context_for(node)
+        body_type, _body_scope = eval_class_body(node, new_context)
+        [body_type, scope]
+      end
+
+      # `def name(params); body; end`. Builds the method-entry scope
+      # by binding the parameter list (RBS-driven where available, or
+      # `Dynamic[Top]` for the slice 3 phase 2 fallback) into a fresh
+      # scope, then evaluates the body under that scope. The outer
+      # scope is left unchanged: a `def` does not introduce a binding
+      # in its enclosing scope. Ruby evaluates `def` to the method's
+      # name as a Symbol, so the produced type is `Constant[:name]`.
+      def eval_def(node)
+        body_scope = build_method_entry_scope(node)
+        sub_eval(node.body, body_scope, class_context: @class_context) if node.body
+        [Type::Combinator.constant_of(node.name), scope]
+      end
+
+      # ----- def/class helpers -----
+
+      def eval_class_body(node, new_context)
+        return [Type::Combinator.constant_of(nil), scope] if node.body.nil?
+
+        # Class/module bodies run in a fresh scope: the outer scope's
+        # locals are NOT visible inside `class Foo; ... end`. We keep
+        # the same Environment so RBS lookups continue to work, and
+        # simply drop the locals.
+        fresh = Scope.empty(environment: scope.environment)
+        sub_eval(node.body, fresh, class_context: new_context)
+      end
+
+      def build_method_entry_scope(def_node)
+        binder = MethodParameterBinder.new(
+          environment: scope.environment,
+          class_path: current_class_path,
+          singleton: current_frame_singleton?
+        )
+        bindings = binder.bind(def_node)
+
+        # Method bodies do NOT see the outer scope's locals. They start
+        # from a fresh scope with the same environment, then receive
+        # the parameter bindings.
+        fresh = Scope.empty(environment: scope.environment)
+        bindings.reduce(fresh) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      def qualified_name_for(constant_path_node)
+        case constant_path_node
+        when Prism::ConstantReadNode
+          constant_path_node.name.to_s
+        when Prism::ConstantPathNode
+          render_constant_path(constant_path_node)
+        end
+      end
+
+      def render_constant_path(node)
+        prefix =
+          case node.parent
+          when Prism::ConstantReadNode then "#{node.parent.name}::"
+          when Prism::ConstantPathNode then "#{render_constant_path(node.parent)}::"
+          else ""
+          end
+        "#{prefix}#{node.name}"
+      end
+
+      def singleton_context_for(node)
+        return @class_context unless node.expression.is_a?(Prism::SelfNode)
+        return @class_context if @class_context.empty?
+
+        outer = @class_context[0..-2]
+        last = @class_context.last
+        outer + [ClassFrame.new(name: last.name, singleton: true)]
+      end
+
+      # The qualified name of the immediately-enclosing class (joining
+      # every nested `ClassFrame` with `::`). Returns `nil` for a
+      # top-level def with no enclosing class, which routes the
+      # parameter binder past RBS lookup.
+      def current_class_path
+        return nil if @class_context.empty?
+
+        @class_context.map(&:name).join("::")
+      end
+
+      def current_frame_singleton?
+        @class_context.last&.singleton == true
+      end
+
       # ----- helpers -----
 
-      def sub_eval(node, with_scope)
-        StatementEvaluator.new(scope: with_scope, tracer: tracer, on_enter: @on_enter).evaluate(node)
+      def sub_eval(node, with_scope, class_context: @class_context)
+        StatementEvaluator.new(
+          scope: with_scope,
+          tracer: tracer,
+          on_enter: @on_enter,
+          class_context: class_context
+        ).evaluate(node)
       end
 
       def eval_branch_or_nil(branch_node, branch_scope)

@@ -46,19 +46,19 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make se
 
 ## Common Commands
 
+Primary workflows (from the Flake shell, `make test`, `make lint`, `make check`; from outside, prefix with `nix --extra-experimental-features 'nix-command flakes' develop --command`):
+
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rspec
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rubocop
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor help
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor version
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor check lib
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor check --format=json lib
-nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules
-nix --extra-experimental-features 'nix-command flakes' develop --command make pull-submodules
+nix --extra-experimental-features 'nix-command flakes' develop --command make test
+nix --extra-experimental-features 'nix-command flakes' develop --command make lint
+nix --extra-experimental-features 'nix-command flakes' develop --command make check
 ```
 
-`rigor init` writes a starter `.rigor.yml` file. Use `--force` when overwriting an existing file intentionally.
+- `make verify` runs `test`, `lint`, and `check` in sequence.
+- `make check-json` runs `rigor check --format=json lib` (machine-readable diagnostics).
+- Submodule maintenance: `make init-submodules`, `make pull-submodules`.
+
+`bundle exec exe/rigor help` and `bundle exec exe/rigor version` remain available for CLI discovery. `rigor init` writes a starter `.rigor.yml` file. Use `--force` when overwriting an existing file intentionally.
 
 ## Directory Layout
 
@@ -111,9 +111,11 @@ rg PATTERN --no-ignore references/python-typing
 After making changes, run:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake
+nix --extra-experimental-features 'nix-command flakes' develop --command make verify
 nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
 ```
+
+Inside the Flake shell, `make verify` is enough for the project checks.
 
 If the Flake shell or its dependencies are unavailable, mention any skipped verification in the final report. For a minimal syntax-only check:
 

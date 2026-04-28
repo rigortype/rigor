@@ -1,4 +1,4 @@
-.PHONY: setup install init-submodules pull-submodules
+.PHONY: setup install init-submodules pull-submodules test lint check verify check-json
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -45,3 +45,17 @@ init-submodules:
 
 pull-submodules: init-submodules
 	git submodule update --remote --merge $(REFERENCE_SUBMODULES)
+
+test:
+	bundle exec rspec
+
+lint:
+	bundle exec rubocop
+
+check:
+	bundle exec exe/rigor check lib
+
+check-json:
+	bundle exec exe/rigor check --format=json lib
+
+verify: test lint check

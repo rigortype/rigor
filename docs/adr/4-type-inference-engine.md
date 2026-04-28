@@ -45,7 +45,7 @@ Rationale for choosing the hybrid for the slice:
 
 Risks (logged for the slice review):
 
-- A literal array `[1, 2, 3]` needs a documented answer — Slice 4 makes it a `Tuple` of `Constant` rather than a constant-array shape carrying raw values, so the `Tuple` class is structural and the `Constant` class is pointwise.
+- A literal array `[1, 2, 3]` needs a documented answer — Slice 5 makes it a `Tuple` of `Constant` rather than a constant-array shape carrying raw values, so the `Tuple` class is structural and the `Constant` class is pointwise.
 - If refinement projections turn out to need per-class dispatch frequently, we revisit and migrate scalar carriage to per-class (`String::Constant`, `Integer::Constant`, …) before the slice promotes.
 
 ### OQ2: Trinary-Returning Predicate Naming — tentative answer **Option A (Drop the `?`)**
@@ -76,7 +76,7 @@ If Slice 1 review concludes Option C (dual API) is more usable, ADR-3 OQ2 is upd
 
 PHPStan exposes one feature that Rigor adopts early: `$scope->getType($node)` accepts both real parser nodes and *synthetic* nodes that embed a `Type` value directly. PHPStan's `TypeExpr` lets callers ask "what would `$scope->getType(new Add(new LNumber(1), new TypeExpr(new IntType())))` infer?" without constructing a fake AST. Plugins use the same shape to simulate refactors, narrow values, and probe method-return rules.
 
-Rigor introduces this in Slice 1 strengthening rather than waiting for Slice 3. The contract lives in [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md) under *Virtual Nodes*. The minimum shipped surface is `Rigor::AST::Node` (a marker module) and `Rigor::AST::TypeNode`. Additional synthetic kinds (call expressions, container literals, narrowing wrappers) land alongside the slices that actually consume them.
+Rigor introduces this in Slice 1 strengthening rather than waiting for the dispatcher slices. The contract lives in [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md) under *Virtual Nodes*. The minimum shipped surface is `Rigor::AST::Node` (a marker module) and `Rigor::AST::TypeNode`. Additional synthetic kinds (call expressions, container literals, narrowing wrappers) land alongside the slices that actually consume them.
 
 ### Rejected option: specialising type classes for operator-method dispatch
 
@@ -86,7 +86,7 @@ A plausible alternative is to specialise `Rigor::Type` for Ruby built-ins that h
 - PHPStan's own design separates the same concerns. `Type::Type` answers capability and projection queries; method dispatch goes through `MethodReflection` and the `*ReturnTypeExtension` plugin points. Subclasses such as `ConstantStringType extends StringType` exist for *representation* specialisation, not for method-dispatch specialisation.
 - The Rigor extension API in ADR-2 expects plugin authors to add or override built-in method behaviour (framework knowledge, gem-specific idioms). Concentrating that surface on type classes makes it harder to extend without subclassing the engine.
 
-The chosen design instead routes method dispatch through `Rigor::Inference::MethodDispatcher` (introduced in Slice 3) with a layered lookup: the RBS environment, then a built-in operator/method table, then ADR-2 plugin extensions. Type classes stay thin, the dispatcher's input is uniform across real and synthetic nodes (via the Virtual Nodes contract above), and operator semantics are pluggable.
+The chosen design instead routes method dispatch through `Rigor::Inference::MethodDispatcher` (introduced as a constant-folding stub in Slice 2 and extended with RBS lookups in Slice 4) with a layered lookup: the constant-folding rule book, then the RBS environment, then a built-in operator/method table, then ADR-2 plugin extensions. Type classes stay thin, the dispatcher's input is uniform across real and synthetic nodes (via the Virtual Nodes contract above), and operator semantics are pluggable.
 
 ## Slice Roadmap
 
@@ -103,7 +103,7 @@ Code surface added:
 - `Rigor::Type::Top`, `Bot`, `Dynamic`, `Nominal`, `Constant`, `Union`.
 - `Rigor::Type::Combinator` factory: `union`, `dynamic`, `nominal_of`, `constant_of`.
 - `Rigor::Environment::ClassRegistry` with hardcoded entries for `Integer`, `Float`, `String`, `Symbol`, `NilClass`, `TrueClass`, `FalseClass`, `Object`, `BasicObject`.
-- `Rigor::Environment` public entry that wraps the registry (RBS loader is added in Slice 3).
+- `Rigor::Environment` public entry that wraps the registry (RBS loader is added in Slice 4).
 - `Rigor::Scope.empty(environment:)`, `#with_local`, `#local`, `#type_of`.
 - `Rigor::Inference::ExpressionTyper#type_of(node, scope)` for the supported nodes.
 - `Rigor::AST::Node` marker module and `Rigor::AST::TypeNode` synthetic node, dispatched alongside Prism nodes by the typer.
@@ -119,7 +119,18 @@ Prism nodes recognised in Slice 1:
 
 All other nodes return `Dynamic[Top]` from `type_of`. The contract for the fail-soft path is normative in [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md).
 
-### Slice 2 — Locals, Joins, and Statements
+### Slice 2 — Method Dispatch (constant-folding stub)
+
+The roadmap originally placed `Locals, Joins, and Statements` here and `Method Dispatch (RBS-backed)` after it. The order was reshuffled when the `rigor type-scan lib` dogfood loop landed: roughly 28 % of all unrecognised expressions in this very codebase were `Prism::CallNode` and `Prism::ArgumentsNode`, dwarfing the value-add of any other Slice 2 candidate. Locals/joins still ship next, just as Slice 3.
+
+Adds:
+
+- `Rigor::Inference::MethodDispatcher` (entry module) and `Rigor::Inference::MethodDispatcher::ConstantFolding` (rule book) with `dispatch(receiver_type:, method_name:, arg_types:, block_type:)`. The dispatcher returns a `Rigor::Type` when it can fold the call and `nil` for "no rule" so the typer owns the fail-soft fallback.
+- Constant-folding rule book covering binary numeric (`+ - * / % < <= > >= == != <=>`), string (`+ * == != < <= > >= <=>`, with a `STRING_FOLD_BYTE_LIMIT` cap to avoid run-away outputs), symbol (`== != <=> < <= > >=`), boolean (`& | ^ == !=`) and nil (`==, !=`) operators on `Rigor::Type::Constant` receivers with `Constant` arguments. Anything outside the whitelist returns `nil`; runtime exceptions during folding are rescued and downgraded to `nil` as well.
+- `ExpressionTyper` recognises `Prism::CallNode` (routes through the dispatcher; falls back to `Dynamic[Top]` for any miss) and `Prism::ArgumentsNode` (treated as a non-value position so the coverage scanner stops flagging it; the CallNode handler reads its children directly).
+- `ExpressionTyper#type_of` is rewritten as a `PRISM_DISPATCH` hash so the recognised-node catalogue can grow in future slices without re-tripping cyclomatic-complexity budgets.
+
+### Slice 3 — Locals, Joins, and Statements
 
 Adds:
 
@@ -127,25 +138,26 @@ Adds:
 - `IfNode`, `UnlessNode` — both branches typed and Scope-joined; **no narrowing yet**.
 - `Rigor::Scope#join(other)` routed through `Type::Combinator.union`.
 
-### Slice 3 — Method Dispatch (RBS-backed)
+### Slice 4 — Method Dispatch (RBS-backed)
+
+Layers an RBS-backed dispatch tier behind the Slice 2 constant-folding rule book.
 
 Adds:
 
 - `Rigor::Environment::RbsLoader` wrapping the `rbs` gem.
 - `Rigor::Type::SubtypeResult`, `AcceptsResult`.
-- `Rigor::Inference::MethodDispatcher` consulting RBS definitions.
-- `CallNode` recognised by `ExpressionTyper`.
+- `Rigor::Inference::MethodDispatcher` extended to consult RBS definitions when the constant-folding tier returns `nil`.
 - Argument acceptance via `accepts(other, mode:)`; failure paths still fail-soft to `Dynamic[Top]` so the slice does not block on diagnostic plumbing.
 
-### Slice 4 — Shape Inference
+### Slice 5 — Shape Inference
 
 Adds `Tuple`, `HashShape`, `Record`, the `ArrayNode → Tuple` upgrade when all elements are finite, and `HashNode` typing. Implements `erase_to_rbs` for hash shapes per [`rbs-erasure.md`](../type-specification/rbs-erasure.md).
 
-### Slice 5 — Narrowing (Minimal CFA)
+### Slice 6 — Narrowing (Minimal CFA)
 
 Adds `Rigor::Analysis::FactStore` (value facts and nil facts only), edge-aware truthy/falsey narrowing on `IfNode`, and the conventional narrowing predicates (`nil?`, `kind_of?`, `is_a?`, literal `==`).
 
-### Slice 6 — Refinements (Minimal)
+### Slice 7 — Refinements (Minimal)
 
 Adds `Rigor::Type::RefinedNominal` with `non-empty-string` and `positive-int` from [`imported-built-in-types.md`](../type-specification/imported-built-in-types.md).
 
@@ -171,7 +183,7 @@ lib/rigor/
    └─ expression_typer.rb          # AST → Type
 ```
 
-Slice 3 adds `lib/rigor/environment/rbs_loader.rb` and `lib/rigor/inference/method_dispatcher.rb`. Slice 5 adds `lib/rigor/analysis/fact_store.rb`. The `lib/rigor/analysis/` directory keeps holding diagnostic and runner code; the inference engine is a separate concern under `lib/rigor/inference/`.
+Slice 2 adds `lib/rigor/inference/method_dispatcher.rb` and `lib/rigor/inference/method_dispatcher/constant_folding.rb`. Slice 4 adds `lib/rigor/environment/rbs_loader.rb` and the RBS-backed dispatch tier inside `MethodDispatcher`. Slice 6 adds `lib/rigor/analysis/fact_store.rb`. The `lib/rigor/analysis/` directory keeps holding diagnostic and runner code; the inference engine is a separate concern under `lib/rigor/inference/`.
 
 ## Public API (post-Slice 1)
 
@@ -198,9 +210,9 @@ The Slice 1 surface is consistent with the method-surface contract in [`internal
 
 - **Tentative OQ answers may flip later.** Production code paths route through `Type::Combinator`; direct type-class constructors are an internal-only escape hatch. CI lint guards `?`-suffixed methods against returning `Trinary`. Capability predicates added in Slice 1 are minimal so a rename is mechanical.
 - **Prism API evolution.** The typer uses Ruby's pattern-matching (`case node in Prism::IntegerNode`) rather than visitor inheritance, so we do not extend Prism class hierarchies. Future Prism releases break the typer in a localised way.
-- **RBS environment startup cost.** RBS loading is deferred to Slice 3; Slice 1 ships with a hardcoded registry. The Slice 3 loader is wrapped to allow caching across runs and tests.
+- **RBS environment startup cost.** RBS loading is deferred to Slice 4; Slice 1 ships with a hardcoded registry and Slice 2 only relies on constant-folding rules. The Slice 4 loader is wrapped to allow caching across runs and tests.
 - **Fail-soft `Dynamic[Top]` masking regressions.** From Slice 1 onward, the typer optionally records a `Diagnostic::Trace` when it falls back to `Dynamic[Top]`. The trace is opt-in to avoid noise, but is plumbed so later slices can detect coverage regressions.
-- **Scope ergonomics.** Returning `[Type, Scope']` from `evaluate(node, scope)` (Slice 2) is verbose. We accept the verbosity in exchange for explicit immutability. Helper builders (`scope.evaluate(node) { |type| ... }`) MAY be added once two or three call sites exist.
+- **Scope ergonomics.** Returning `[Type, Scope']` from `evaluate(node, scope)` (Slice 3) is verbose. We accept the verbosity in exchange for explicit immutability. Helper builders (`scope.evaluate(node) { |type| ... }`) MAY be added once two or three call sites exist.
 
 ## References
 
@@ -213,7 +225,7 @@ The Slice 1 surface is consistent with the method-surface contract in [`internal
 - [`docs/type-specification/relations-and-certainty.md`](../type-specification/relations-and-certainty.md) — subtyping, gradual consistency, trinary semantics.
 - [`docs/type-specification/value-lattice.md`](../type-specification/value-lattice.md) — `Dynamic[T]` algebra.
 - [`docs/type-specification/normalization.md`](../type-specification/normalization.md) — deterministic normalization rules.
-- [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md) — Scope/CFA target for Slice 5.
+- [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md) — Scope/CFA target for Slice 6.
 
 External (PHPStan source code, not part of Rigor's submodules):
 

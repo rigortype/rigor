@@ -106,7 +106,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
   describe "purity" do
     it "produces structurally equal results across calls" do
       node = parse_expression("[1, 2, 3]")
-      expect(scope.type_of(node)).to eq(scope.type_of(node))
+      first = scope.type_of(node)
+      second = scope.type_of(node)
+      expect(first).to eq(second)
     end
   end
 
@@ -138,6 +140,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     it "fails soft on an unknown synthetic node" do
       unknown_node_class = Class.new do
         include Rigor::AST::Node
+
         def initialize
           freeze
         end
@@ -171,6 +174,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     it "records a virtual-family fallback for unknown synthetic nodes" do
       unknown_node_class = Class.new do
         include Rigor::AST::Node
+
         def initialize
           freeze
         end
@@ -201,6 +205,71 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     it "leaves recognised TypeNode synthetic nodes untraced" do
       type_node = Rigor::AST::TypeNode.new(Rigor::Type::Combinator.constant_of(1))
       scope.type_of(type_node, tracer: tracer)
+      expect(tracer).to be_empty
+    end
+  end
+
+  describe "method dispatch (Slice 2)" do
+    it "folds Constant Integer + Constant Integer into Constant" do
+      type = scope.type_of(parse_expression("1 + 2"))
+
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq(3)
+    end
+
+    it "folds nested arithmetic expressions" do
+      type = scope.type_of(parse_expression("(1 + 2) * 3"))
+
+      expect(type.value).to eq(9)
+    end
+
+    it "folds string concatenation between Constant Strings" do
+      type = scope.type_of(parse_expression('"foo" + "bar"'))
+
+      expect(type.value).to eq("foobar")
+    end
+
+    it "folds symbol equality into Constant boolean" do
+      type = scope.type_of(parse_expression(":a == :a"))
+
+      expect(type.value).to be(true)
+    end
+
+    it "falls back to Dynamic[Top] for calls with no receiver" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      node = parse_expression("foo()")
+      type = scope.type_of(node, tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.kinds).to include(Prism::CallNode)
+    end
+
+    it "falls back to Dynamic[Top] for receivers the dispatcher cannot fold" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      node = parse_expression("[1, 2].map")
+      type = scope.type_of(node, tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.kinds).to include(Prism::CallNode)
+    end
+
+    it "falls back when an argument is not a Constant" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      node = parse_expression("1 + bar()")
+      type = scope.type_of(node, tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.kinds).to include(Prism::CallNode)
+    end
+
+    it "treats ArgumentsNode as a non-value position (Dynamic[Top], no fallback)" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      call_node = parse_expression("foo(1, 2)")
+      arguments_node = call_node.arguments
+
+      type = scope.type_of(arguments_node, tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
       expect(tracer).to be_empty
     end
   end

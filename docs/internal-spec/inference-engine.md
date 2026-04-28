@@ -79,7 +79,7 @@ The tracer protocol exposed by `Rigor::Inference::FallbackTracer` MUST satisfy:
 - `empty?` and `size` MUST report the current number of recorded events.
 - `each` MUST iterate the recorded events in insertion order; the tracer MUST `include Enumerable`.
 
-The tracer is the ONLY mutable state observable from `Scope#type_of`; it MUST NOT change the return value of `type_of` and MUST NOT be exposed through `Rigor::Scope` accessors. Implementations MAY add additional `record_*` methods (for example `record_dispatch_miss` in Slice 3, `record_budget_cutoff` in Slice 5) so multiple event families share a single tracer; new methods MUST follow the immutable-event-value-object pattern above.
+The tracer is the ONLY mutable state observable from `Scope#type_of`; it MUST NOT change the return value of `type_of` and MUST NOT be exposed through `Rigor::Scope` accessors. Implementations MAY add additional `record_*` methods (for example a richer `record_dispatch_miss` once the Slice 2 dispatcher gains tiers, or `record_budget_cutoff` in Slice 6) so multiple event families share a single tracer; new methods MUST follow the immutable-event-value-object pattern above.
 
 ## Virtual Nodes
 
@@ -108,7 +108,22 @@ Additional synthetic node kinds (call expressions, container literals, narrowing
 
 Method dispatch (the rule that determines the result type of a call expression given a receiver type and argument types) MUST NOT live on `Rigor::Type` instances. Type classes remain thin value objects per [`internal-type-api.md`](internal-type-api.md): they hold structural data and answer capability questions, but they do not carry method-summary tables or operator handlers.
 
-Slice 3 introduces `Rigor::Inference::MethodDispatcher` as a separate engine surface. The dispatcher MUST consult, in order, the RBS environment, the built-in operator table, and the plugin-supplied method extensions defined by ADR-2. It MUST take its input as a uniform call-shape that may carry either Prism child nodes or synthetic `Rigor::AST::Node` arguments (by way of the *Virtual Nodes* contract above), so synthesised expressions and real expressions share a single dispatch path.
+Slice 2 introduces `Rigor::Inference::MethodDispatcher` as a separate engine surface, originally planned for Slice 3 but pulled forward after the `rigor type-scan` dogfood signal showed `Prism::CallNode` and `Prism::ArgumentsNode` were the largest single source of unrecognised expressions. The Slice 2 dispatcher ships only a constant-folding tier; Slice 4 layers RBS-backed lookups behind it (see [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md)).
+
+The dispatcher's public signature is:
+
+```ruby
+Rigor::Inference::MethodDispatcher.dispatch(
+  receiver_type:,   # Rigor::Type or nil (implicit self; unsupported in Slice 2)
+  method_name:,     # Symbol
+  arg_types:,       # Array<Rigor::Type>
+  block_type: nil   # reserved
+) #=> Rigor::Type, or nil when no rule matches
+```
+
+A `nil` return value is the deliberate "no rule" signal. Callers MUST own the fail-soft fallback (`ExpressionTyper` records a `FallbackTracer` event and returns `Dynamic[Top]`); the dispatcher itself MUST NOT touch the tracer or raise on unrecognised inputs.
+
+Once Slice 4 lands, the dispatcher MUST consult, in order, the constant-folding tier, the RBS environment, the built-in operator/method table beyond the constant-folding rules, and the plugin-supplied method extensions defined by ADR-2. It MUST take its input as a uniform call-shape that may carry either Prism child nodes or synthetic `Rigor::AST::Node` arguments (by way of the *Virtual Nodes* contract above), so synthesised expressions and real expressions share a single dispatch path.
 
 This split is normative: implementations MUST NOT define operator-method-aware subclasses of any `Rigor::Type` form (for example, a hypothetical `Rigor::Type::IntegerType` carrying `+`/`*` rules). Operator semantics MUST be expressed as method-handler entries that the dispatcher consults; specialising the type class for built-in arithmetic is rejected to keep the type lattice and method semantics independently extensible.
 
@@ -116,17 +131,17 @@ This split is normative: implementations MUST NOT define operator-method-aware s
 
 Local variable read nodes (`Prism::LocalVariableReadNode`) MUST be looked up in the receiver scope. A bound name MUST return the bound `Rigor::Type`. An unbound name MUST fail soft to `Dynamic[Top]` per the rule above; `Scope#type_of` MUST NOT raise on unbound locals.
 
-Local variable write nodes (`Prism::LocalVariableWriteNode` and the targets that imply it) MUST be typed as the type of their value expression. Binding the result back into the scope is the responsibility of the statement-level evaluator (see Slice 2 in [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md)); `Scope#type_of` itself MUST NOT mutate the scope.
+Local variable write nodes (`Prism::LocalVariableWriteNode` and the targets that imply it) MUST be typed as the type of their value expression. Binding the result back into the scope is the responsibility of the statement-level evaluator (see Slice 3 in [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md)); `Scope#type_of` itself MUST NOT mutate the scope.
 
 ## Environment Surface
 
-`Rigor::Environment` is the engine's view of the type universe outside the current scope: nominal classes, RBS definitions (Slice 3+), plugin-supplied facts (Slice 5+), and any other module-level information. The minimum public surface that Slice 1 binds is:
+`Rigor::Environment` is the engine's view of the type universe outside the current scope: nominal classes, RBS definitions (Slice 4+), plugin-supplied facts (Slice 6+), and any other module-level information. The minimum public surface that Slice 1 binds is:
 
 - `Rigor::Environment#class_registry` — returns a `Rigor::Environment::ClassRegistry` that can resolve a Ruby `Class` or `Module` object to a `Rigor::Type::Nominal`.
 - `Rigor::Environment::ClassRegistry#nominal_for(class_object)` — returns the registered `Rigor::Type::Nominal` for a registered class, or raises if the class is not registered.
 - `Rigor::Environment::ClassRegistry#registered?(class_object)` — returns `true` or `false` for whether the class is registered.
 
-Slice 3 introduces `Rigor::Environment#rbs_loader`. Slice 5 introduces fact-store access. The methods added in later slices MUST NOT change the Slice 1 surface.
+Slice 4 introduces `Rigor::Environment#rbs_loader`. Slice 6 introduces fact-store access. The methods added in later slices MUST NOT change the Slice 1 surface.
 
 The class registry MUST always recognise the following Ruby classes: `Integer`, `Float`, `String`, `Symbol`, `NilClass`, `TrueClass`, `FalseClass`, `Object`, `BasicObject`. Implementations MAY extend this list as long as the listed classes remain present.
 
@@ -152,7 +167,7 @@ The following are explicitly out of the stability contract until later slices pr
 
 - The exact catalogue of Prism nodes recognised by `ExpressionTyper`.
 - The internal layout of `Rigor::Scope` and its caching strategy.
-- The fact-store schema (Slice 5+) and the RBS-loader cache shape (Slice 3+).
+- The fact-store schema (Slice 6+) and the RBS-loader cache shape (Slice 4+).
 - The capability and projection surfaces on `Rigor::Type`, which depend on the resolution of ADR-3's open questions.
 
 ## Related Documents
@@ -163,4 +178,4 @@ The following are explicitly out of the stability contract until later slices pr
 - [`docs/adr/3-type-representation.md`](../adr/3-type-representation.md) — type-object representation and the open questions whose tentative answers ADR-4 commits.
 - [`docs/type-specification/relations-and-certainty.md`](../type-specification/relations-and-certainty.md) — subtyping, gradual consistency, trinary semantics.
 - [`docs/type-specification/value-lattice.md`](../type-specification/value-lattice.md) — `Dynamic[T]` algebra used by the fail-soft path.
-- [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md) — Slice 5 narrowing target.
+- [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md) — Slice 6 narrowing target.

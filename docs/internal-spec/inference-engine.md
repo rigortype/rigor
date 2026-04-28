@@ -135,7 +135,16 @@ The RBS-backed tier MUST resolve receiver types to a `(class_name, kind)` pair w
 - `Type::Dynamic[T]` recurses into `T`'s static facet using the same rules.
 - `Type::Top` and `Type::Bot` produce no descriptor; the dispatcher MUST return `nil`.
 
-`Union` receivers MUST dispatch each member individually — when every member resolves, the per-member return types are unioned and that union is returned; when any member returns `nil`, the whole dispatch MUST return `nil`. Mixing instance and singleton members within a single union MUST NOT be a special case; each member is dispatched against its own descriptor. When the resolved RBS method has multiple overloads, the first overload's return type wins; argument-driven overload selection is deferred to Slice 4 phase 2c.
+`Union` receivers MUST dispatch each member individually — when every member resolves, the per-member return types are unioned and that union is returned; when any member returns `nil`, the whole dispatch MUST return `nil`. Mixing instance and singleton members within a single union MUST NOT be a special case; each member is dispatched against its own descriptor.
+
+When the resolved RBS method has multiple overloads, Slice 4 phase 2c selects one of them through `Rigor::Inference::MethodDispatcher::OverloadSelector`. The selector MUST:
+
+- Filter overloads by positional arity. The actual `arg_types.size` MUST satisfy `required_positionals.size + trailing_positionals.size <= n` and either `rest_positionals` is present or `n <= required + optional + trailing`.
+- Skip overloads whose `required_keywords` is non-empty. Slice 4 phase 2c does not thread keyword arguments through the call site, so a keyword-required overload is unreachable from the current call shape.
+- Among the remaining overloads, MUST consult `param_type.accepts(arg_type, mode: :gradual)` for every (formal, actual) positional pair (rest positionals consume one declaration repeatedly). An overload matches when every pair returns `yes` or `maybe`.
+- Pick the first matching overload in declaration order. When no overload matches, fall back to `method_types.first`. The fallback is the only normative deviation from "first match wins": it preserves the fail-soft contract of Slice 4 phase 1 / 2b for call sites whose actual argument types cannot be matched by any overload (because of `untyped`-degraded interfaces, generics, or callers we have not yet wired in).
+
+Implementations MAY pre-translate parameter types per overload for performance, but MUST NOT cache results across `(class_name, method_name)` keys because `self_type` and `instance_type` substitution depends on the dispatch site.
 
 `Rigor::Inference::RbsTypeTranslator.translate(rbs_type, self_type:, instance_type:)` is the only normative path from `RBS::Types::*` to `Rigor::Type`. It MUST be deterministic, MUST NOT raise on any well-formed RBS type, and MUST follow the mapping documented in [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md). The two substitution keywords are independent:
 

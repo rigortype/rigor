@@ -452,6 +452,48 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  describe "overload selection (Slice 4 phase 2c)" do
+    it "selects the 1-arg overload of Array#first based on arity" do
+      type = scope.type_of(parse_expression("[1, 2, 3].first(2)"))
+
+      # `(::int n) -> ::Array[Elem]` — Array[Elem] erases to Nominal[Array].
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Array")
+    end
+
+    it "still resolves the 0-arg overload of Array#first" do
+      # () -> Elem; Elem is a type variable -> Dynamic[Top].
+      type = scope.type_of(parse_expression("[1, 2, 3].first"))
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+    end
+
+    it "selects the 0-arg singleton overload of Array.new" do
+      type = scope.type_of(parse_expression("Array.new"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Array")
+    end
+
+    it "falls back to the first overload when no overload accepts the args" do
+      # Integer#+ has overloads for Integer/Float/Rational/Complex.
+      # Symbol matches none, so the selector falls back to the first
+      # overload (Integer) and returns Nominal[Integer].
+      union_recv = Rigor::Type::Combinator.nominal_of(Integer)
+      sym_arg = Rigor::Type::Combinator.constant_of(:foo)
+
+      result = Rigor::Inference::MethodDispatcher.dispatch(
+        receiver_type: union_recv,
+        method_name: :+,
+        arg_types: [sym_arg],
+        environment: scope.environment
+      )
+
+      expect(result).to be_a(Rigor::Type::Nominal)
+      expect(result.class_name).to eq("Integer")
+    end
+  end
+
   describe "containers and definitions (Slice 2 strengthening)" do
     it "types HashNode as Nominal[Hash]" do
       type = scope.type_of(parse_expression("{ a: 1, b: 2 }"))

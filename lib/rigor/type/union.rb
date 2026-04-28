@@ -44,6 +44,10 @@ module Rigor
         members.any? { |m| m.respond_to?(:dynamic) && m.dynamic.yes? } ? Trinary.maybe : Trinary.no
       end
 
+      def accepts(other, mode: :gradual)
+        Inference::Acceptance.accepts(self, other, mode: mode)
+      end
+
       def ==(other)
         other.is_a?(Union) && members == other.members
       end

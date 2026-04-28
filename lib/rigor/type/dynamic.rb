@@ -39,6 +39,10 @@ module Rigor
         Trinary.yes
       end
 
+      def accepts(other, mode: :gradual)
+        Inference::Acceptance.accepts(self, other, mode: mode)
+      end
+
       def ==(other)
         other.is_a?(Dynamic) && static_facet == other.static_facet
       end

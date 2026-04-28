@@ -67,6 +67,10 @@ module Rigor
         Trinary.no
       end
 
+      def accepts(other, mode: :gradual)
+        Inference::Acceptance.accepts(self, other, mode: mode)
+      end
+
       def ==(other)
         other.is_a?(Constant) && value.class == other.value.class && value == other.value
       end

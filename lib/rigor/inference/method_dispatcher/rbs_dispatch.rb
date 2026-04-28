@@ -2,6 +2,7 @@
 
 require_relative "../../type"
 require_relative "../rbs_type_translator"
+require_relative "overload_selector"
 
 module Rigor
   module Inference
@@ -18,16 +19,25 @@ module Rigor
       # resolves to `Singleton[Foo]`, and `Foo.new` / `Foo.bar` look up
       # the corresponding *class* methods.
       #
+      # Phase 2c adds argument-typed overload selection: instead of
+      # always returning `method_types.first`, the dispatcher delegates
+      # to {OverloadSelector} which filters overloads by positional
+      # arity and consults `Rigor::Type#accepts` for each parameter.
+      # When no overload accepts the actual argument types, the
+      # selector falls back to the first overload so the existing
+      # phase-1/2b behavior is preserved.
+      #
       # Remaining limitations:
       #
-      # * Only the first overload of a method is consulted. Argument-
-      #   driven overload selection lands in Slice 4 phase 2c.
       # * Generics are erased: `Array[Integer]#first` translates to
       #   `Optional[Integer?]` with `Integer?` resolved as
       #   `Dynamic[Top]` because we do not yet substitute the type
       #   variable. Generics instantiation lands in Slice 4 phase 2d.
       # * `block_type:` is ignored; method types that constrain the
       #   block return type are not yet honored.
+      # * Keyword arguments are not threaded through call_arg_types,
+      #   so overloads with required keywords are skipped (they cannot
+      #   match the empty kwargs we send).
       #
       # See docs/adr/4-type-inference-engine.md for the broader plan.
       module RbsDispatch
@@ -56,6 +66,7 @@ module Rigor
           private
 
           def dispatch_for(receiver:, method_name:, args:, environment:)
+            args ||= []
             case receiver
             when Type::Union
               dispatch_union(receiver, method_name, args, environment)
@@ -73,7 +84,7 @@ module Rigor
             Type::Combinator.union(*results)
           end
 
-          def dispatch_one(receiver, method_name, _args, environment)
+          def dispatch_one(receiver, method_name, args, environment)
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
@@ -81,7 +92,7 @@ module Rigor
             method_definition = lookup_method(environment, class_name, kind, method_name)
             return nil unless method_definition
 
-            translate_return_type(method_definition, class_name, kind)
+            translate_return_type(method_definition, class_name, kind, args)
           rescue StandardError
             # Defensive: if RBS' definition builder raises on a broken
             # hierarchy (e.g., partially loaded user signatures), the
@@ -121,19 +132,24 @@ module Rigor
             end
           end
 
-          def translate_return_type(method_definition, class_name, kind)
-            method_type = method_definition.method_types.first
-            return nil unless method_type
-
-            return_type = method_type.type.return_type
+          def translate_return_type(method_definition, class_name, kind, args)
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
               case kind
               when :singleton then Type::Combinator.singleton_of(class_name)
               else                 instance_type
               end
+
+            method_type = OverloadSelector.select(
+              method_definition,
+              arg_types: args,
+              self_type: self_type,
+              instance_type: instance_type
+            )
+            return nil unless method_type
+
             RbsTypeTranslator.translate(
-              return_type,
+              method_type.type.return_type,
               self_type: self_type,
               instance_type: instance_type
             )

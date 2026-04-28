@@ -38,7 +38,8 @@ module Rigor
       # @param environment [Rigor::Environment, nil] required for
       #   RBS-backed dispatch; when nil only constant folding can fire.
       # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
-      def dispatch(receiver_type:, method_name:, arg_types:, block_type: nil, environment: nil) # rubocop:disable Lint/UnusedMethodArgument
+      # rubocop:disable Lint/UnusedMethodArgument
+      def dispatch(receiver_type:, method_name:, arg_types:, block_type: nil, environment: nil)
         return nil if receiver_type.nil?
 
         constant_result = ConstantFolding.try_fold(
@@ -55,6 +56,7 @@ module Rigor
           environment: environment
         )
       end
+      # rubocop:enable Lint/UnusedMethodArgument
     end
   end
 end

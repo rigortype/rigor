@@ -1,34 +1,46 @@
-# Rigor Type Specification (moved)
+# Rigor Type System — Quick Guide
 
-This document has moved to [`docs/type-specification/`](type-specification/README.md).
+Rigor is an inference-first static analyzer for Ruby. Its type language is a **strict superset of RBS**: every RBS type round-trips losslessly through Rigor's internal representation, and every Rigor-inferred type erases conservatively back to ordinary RBS.
 
-The type specification is now maintained as a set of topical Markdown files at the granularity of Python's typing specification. The new directory is the authoritative source for the analyzer's observable behavior. Any future edits SHOULD update the topical files there rather than this stub.
+This file is the one-page entry point. The full normative specification lives in [`docs/type-specification/`](type-specification/README.md). Design rationale and rejected/deferred options live in [`docs/adr/1-types.md`](adr/1-types.md).
 
-## Reading order
+## Concept
 
-Start with [`docs/type-specification/README.md`](type-specification/README.md). It lists the documents in the recommended order and states the conventions (RFC 2119 keywords, RBS-first compatibility, the relationship to `docs/adr/1-types.md`).
+- **No inline DSL.** Application Ruby code stays free of Rigor-only annotation syntax. RBS, rbs-inline, and Steep-compatible annotations are accepted as type sources.
+- **Lossless RBS in, conservative RBS out.** Internal precision (literal sets, refinements, shapes, dynamic-origin provenance) MAY exceed what RBS can spell. On export, Rigor erases to ordinary RBS that is never narrower than what was proved.
+- **Three-valued certainty.** Type, reflection, and member queries return `yes`, `no`, or `maybe`. `maybe` does not narrow as if `yes` and does not produce the opposite-edge fact as if `no`.
+- **Two relations, kept separate.** Subtyping (`A <: B`, value-set inclusion) and gradual consistency (`consistent(A, B)`, dynamic-boundary compatibility) are not unified. `untyped` is the dynamic type, distinct from `top`.
 
-Quick links to the most-referenced sections:
+## Main features
 
-- [Overview and core principle](type-specification/overview.md)
-- [Relations and certainty](type-specification/relations-and-certainty.md)
-- [Value lattice](type-specification/value-lattice.md)
-- [Special types: `top`, `bot`, `untyped`/`Dynamic[T]`, `void`, `nil`, `bool`](type-specification/special-types.md)
-- [RBS-compatible types](type-specification/rbs-compatible-types.md)
-- [Rigor extensions](type-specification/rigor-extensions.md)
-- [Imported built-in types](type-specification/imported-built-in-types.md)
-- [Type operators](type-specification/type-operators.md)
-- [Structural interfaces, object shapes, and capability roles](type-specification/structural-interfaces-and-object-shapes.md)
-- [Control-flow analysis](type-specification/control-flow-analysis.md)
-- [`RBS::Extended` annotations](type-specification/rbs-extended.md)
-- [Normalization](type-specification/normalization.md)
-- [RBS erasure](type-specification/rbs-erasure.md)
-- [Inference budgets](type-specification/inference-budgets.md)
-- [Diagnostic policy](type-specification/diagnostic-policy.md)
-- [Implementation expectations](type-specification/implementation-expectations.md)
+| Feature | Where to read more |
+| --- | --- |
+| `Dynamic[T]` algebra and gradual-typing provenance | [value-lattice.md](type-specification/value-lattice.md), [special-types.md](type-specification/special-types.md) |
+| Edge-aware control-flow narrowing inside compound conditions | [control-flow-analysis.md](type-specification/control-flow-analysis.md) |
+| Negative facts, difference types, complement display contract | [type-operators.md](type-specification/type-operators.md) |
+| Structural duck typing through RBS interfaces and inferred object shapes | [structural-interfaces-and-object-shapes.md](type-specification/structural-interfaces-and-object-shapes.md) |
+| Capability roles (`_RewindableStream`, `_ClosableStream`, …) for IO-like compatibility | [structural-interfaces-and-object-shapes.md](type-specification/structural-interfaces-and-object-shapes.md) |
+| Refinements (`non-empty-string`, `positive-int`, hash-shape extra-key policy, …) | [imported-built-in-types.md](type-specification/imported-built-in-types.md), [rigor-extensions.md](type-specification/rigor-extensions.md) |
+| `RBS::Extended` annotations (`%a{rigor:v1:…}` for predicates, assertions, conformance) | [rbs-extended.md](type-specification/rbs-extended.md) |
+| Inference budgets and boundary contracts for recursion / operator ambiguity | [inference-budgets.md](type-specification/inference-budgets.md) |
+| Diagnostic identifier taxonomy and suppression markers | [diagnostic-policy.md](type-specification/diagnostic-policy.md) |
+| Conservative RBS erasure and hash-shape erasure algorithm | [rbs-erasure.md](type-specification/rbs-erasure.md) |
 
-## Why the move
+## Quick reading paths
 
-The earlier single-file draft mixed many concerns (lattice, narrowing, erasure, diagnostics, budgets, …). Splitting it lets each topic be referenced and evolved independently, lets cross-references between the new files stay short, and makes the granularity comparable to other written-down typing specifications such as Python's `python/typing` repository.
+- **Just want the mental model?** Read [overview.md](type-specification/overview.md), [value-lattice.md](type-specification/value-lattice.md), and [special-types.md](type-specification/special-types.md) in that order.
+- **Implementing inference?** Add [control-flow-analysis.md](type-specification/control-flow-analysis.md), [normalization.md](type-specification/normalization.md), [inference-budgets.md](type-specification/inference-budgets.md), and [implementation-expectations.md](type-specification/implementation-expectations.md).
+- **Writing RBS or `RBS::Extended` payloads?** Read [rbs-compatible-types.md](type-specification/rbs-compatible-types.md) and [rbs-extended.md](type-specification/rbs-extended.md), then [rbs-erasure.md](type-specification/rbs-erasure.md) to see how they round-trip.
+- **Reviewing or extending the diagnostic surface?** Read [diagnostic-policy.md](type-specification/diagnostic-policy.md) alongside [type-operators.md](type-specification/type-operators.md).
 
-Design rationale, options that were rejected or deferred, and open questions remain in [`docs/adr/1-types.md`](adr/1-types.md). When the specification and an ADR appear to disagree on what the analyzer does, the specification under `docs/type-specification/` binds.
+## Specification index
+
+The full reading order, conventions (RFC 2119 keywords, RBS-first compatibility hierarchy), and one-line description of each topical document live in [`docs/type-specification/README.md`](type-specification/README.md).
+
+## Related documents
+
+- [`README.md`](../README.md) — project overview and CLI entry point
+- [`AGENTS.md`](../AGENTS.md) — development workflow for this repository
+- [`docs/adr/0-concept.md`](adr/0-concept.md) — Rigor's high-level concept ADR
+- [`docs/adr/1-types.md`](adr/1-types.md) — type-model ADR (design rationale, options considered, rejected/deferred items, open questions)
+- [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — plugin extension API ADR

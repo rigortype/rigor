@@ -47,4 +47,5 @@ For analyzer-internal contracts that complement the type specification (engine-s
 - [`docs/adr/1-types.md`](adr/1-types.md) — type-model ADR (design rationale, options considered, rejected/deferred items, open questions)
 - [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — plugin extension API ADR
 - [`docs/adr/3-type-representation.md`](adr/3-type-representation.md) — internal type representation ADR (design rationale and open questions)
-- [`docs/internal-spec/README.md`](internal-spec/README.md) — analyzer-internal contracts (engine surface, type-object public API)
+- [`docs/adr/4-type-inference-engine.md`](adr/4-type-inference-engine.md) — type inference engine ADR (slice roadmap, tentative answers to ADR-3 open questions)
+- [`docs/internal-spec/README.md`](internal-spec/README.md) — analyzer-internal contracts (engine surface, type-object public API, inference engine)

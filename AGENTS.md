@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file is a development note for agents working in this repository. For broader project context, read `README.md` and `docs/adr/0-concept.md`. For the type system, start with the quick guide at `docs/types.md`; the normative specification is split into topical documents under `docs/type-specification/`.
+This file is a development note for agents working in this repository. For broader project context, read `README.md` and `docs/adr/0-concept.md`. For the type system, start with the quick guide at `docs/types.md`; the normative type-language specification is split into topical documents under `docs/type-specification/`, and the analyzer-internal contracts (engine surface, type-object public API) live alongside it under `docs/internal-spec/`.
 
 All project-authored documentation in this repository should be written in English. Treat external vendored or submodule documentation as upstream material and do not rewrite it only for language consistency.
 
@@ -68,6 +68,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make ch
 - `spec`: RSpec test suite
 - `docs/types.md`: one-page quick guide to the Rigor type system
 - `docs/type-specification`: normative type specification, split into topical documents
+- `docs/internal-spec`: analyzer-internal contracts (engine surface, type-object public API)
 - `docs/adr`: architecture decision records
 - `references/`: long-lived **external** specifications and upstream submodules (not Rigor product code; see below)
 
@@ -105,6 +106,7 @@ rg PATTERN --no-ignore references/python-typing
 - Use RBS for external dependency and standard library type information. Future Rigor-specific advanced type expressions live in RBS comment extensions.
 - Keep metaprogramming support out of the core where possible; steer it toward the future plugin API.
 - For any change that touches type-model behavior — normalization, narrowing, erasure, signature handling, diagnostic identifiers, budgets — treat `docs/type-specification/` as the binding specification and `docs/adr/1-types.md` as the design-rationale companion. Update the relevant topical document when behavior changes.
+- For any change that touches analyzer-internal contracts — `Scope`, fact store, effect model, capability-role inference, type-object public surface, factory-routed normalization, diagnostics-display routing — treat `docs/internal-spec/` as the binding specification and `docs/adr/3-type-representation.md` as the design-rationale companion. Update the relevant document when contracts change.
 
 ## Verification Notes
 

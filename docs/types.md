@@ -29,13 +29,15 @@ This file is the one-page entry point. The full normative specification lives in
 ## Quick reading paths
 
 - **Just want the mental model?** Read [overview.md](type-specification/overview.md), [value-lattice.md](type-specification/value-lattice.md), and [special-types.md](type-specification/special-types.md) in that order.
-- **Implementing inference?** Add [control-flow-analysis.md](type-specification/control-flow-analysis.md), [normalization.md](type-specification/normalization.md), [inference-budgets.md](type-specification/inference-budgets.md), and [implementation-expectations.md](type-specification/implementation-expectations.md).
+- **Implementing inference?** Add [control-flow-analysis.md](type-specification/control-flow-analysis.md), [normalization.md](type-specification/normalization.md), [inference-budgets.md](type-specification/inference-budgets.md), and the analyzer-internal contracts in [`docs/internal-spec/`](internal-spec/README.md) — start with [implementation-expectations.md](internal-spec/implementation-expectations.md) and [internal-type-api.md](internal-spec/internal-type-api.md).
 - **Writing RBS or `RBS::Extended` payloads?** Read [rbs-compatible-types.md](type-specification/rbs-compatible-types.md) and [rbs-extended.md](type-specification/rbs-extended.md), then [rbs-erasure.md](type-specification/rbs-erasure.md) to see how they round-trip.
 - **Reviewing or extending the diagnostic surface?** Read [diagnostic-policy.md](type-specification/diagnostic-policy.md) alongside [type-operators.md](type-specification/type-operators.md).
 
 ## Specification index
 
 The full reading order, conventions (RFC 2119 keywords, RBS-first compatibility hierarchy), and one-line description of each topical document live in [`docs/type-specification/README.md`](type-specification/README.md).
+
+For analyzer-internal contracts that complement the type specification (engine-surface, type-object public API), see [`docs/internal-spec/README.md`](internal-spec/README.md).
 
 ## Related documents
 
@@ -44,3 +46,5 @@ The full reading order, conventions (RFC 2119 keywords, RBS-first compatibility 
 - [`docs/adr/0-concept.md`](adr/0-concept.md) — Rigor's high-level concept ADR
 - [`docs/adr/1-types.md`](adr/1-types.md) — type-model ADR (design rationale, options considered, rejected/deferred items, open questions)
 - [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — plugin extension API ADR
+- [`docs/adr/3-type-representation.md`](adr/3-type-representation.md) — internal type representation ADR (design rationale and open questions)
+- [`docs/internal-spec/README.md`](internal-spec/README.md) — analyzer-internal contracts (engine surface, type-object public API)

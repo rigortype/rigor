@@ -6,7 +6,9 @@ Draft. This directory is the authoritative specification of the Rigor type model
 
 The documents under `docs/type-specification/` describe what the analyzer does. They define type normalization, narrowing, erasure, signature handling, diagnostic identifiers, inference budgets, and the surfaces exposed to plugins and `RBS::Extended` annotations.
 
-Design rationale, the decision history, options that were rejected or deferred, and open questions live in `docs/adr/1-types.md` (and `docs/adr/2-*` for plugin extension API decisions). When the specification and an ADR appear to disagree on what the analyzer does, **the specification binds** and the ADR should be amended.
+Analyzer-internal contracts — the engine-surface that downstream features depend on and the public type-object model that plugins, rules, and CLI components consume — live alongside this specification in [`docs/internal-spec/`](../internal-spec/README.md). When this specification and `docs/internal-spec/` describe the same surface, **this specification binds** for the observable type-language behavior and `docs/internal-spec/` binds for the Ruby-side contract.
+
+Design rationale, the decision history, options that were rejected or deferred, and open questions live in `docs/adr/1-types.md` (and `docs/adr/2-*` for plugin extension API decisions, `docs/adr/3-*` for the internal type representation rationale). When the specification and an ADR appear to disagree on what the analyzer does, **the specification binds** and the ADR should be amended.
 
 This specification covers the long-term type model. It is normative for the eventual analyzer behavior. The first user-visible release (v1) ships a deliberately scoped slice of the surface; sections that distinguish v1 from v1.1 mark the difference inline.
 
@@ -51,4 +53,7 @@ The documents are organized so foundational definitions come first and specific 
 | [rbs-erasure.md](rbs-erasure.md) | Conservative erasure to RBS, including the hash-shape erasure algorithm. |
 | [inference-budgets.md](inference-budgets.md) | Budget table, configuration, and boundary-contract behavior. |
 | [diagnostic-policy.md](diagnostic-policy.md) | Diagnostic identifier taxonomy, `Dynamic[T]` display rules, suppression markers. |
-| [implementation-expectations.md](implementation-expectations.md) | The engine-surface contract that downstream features depend on. |
+
+## Related: analyzer-internal contracts
+
+The engine-surface contract (`Scope`, fact store, effect model, capability-role inference, normalization, RBS-erasure routing, public stability rules) and the public type-object contract (method surface, identity and equality, immutability, factory normalization, diagnostics-display routing) are normative in [`docs/internal-spec/`](../internal-spec/README.md). The two corpora are complementary: this directory binds the type-language semantics, and `docs/internal-spec/` binds the Ruby-side surfaces that satisfy them.

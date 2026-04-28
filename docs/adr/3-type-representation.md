@@ -4,9 +4,9 @@
 
 Draft.
 
-ADR-3 records the design space for Rigor's internal type-object layout: the Ruby classes, modules, methods, and value objects that implement the type model. ADR-3 does **not** redefine semantics — those are owned by ADR-1 and the type specification — and it does **not** define the plugin contract — that is owned by ADR-2. ADR-3 fixes the analyzer-side data shapes that ADR-1 and ADR-2 attach to.
+ADR-3 records the design space for Rigor's internal type-object layout: the Ruby classes, modules, methods, and value objects that implement the type model. ADR-3 does **not** redefine semantics — those are owned by ADR-1 and the type specification — and it does **not** define the plugin contract — that is owned by ADR-2. ADR-3 captures the rationale and the open questions that surround the analyzer-side data shapes that ADR-1 and ADR-2 attach to.
 
-When this document and the type specification disagree on observable behavior, [`docs/type-specification/`](../type-specification/) is binding and ADR-3 must be updated to match. ADR-3 is authoritative only for *which Ruby objects exist, what methods they expose, and how they compose*.
+The decisions that have stabilized are normative in [`docs/internal-spec/internal-type-api.md`](../internal-spec/internal-type-api.md). When that document and this ADR disagree, the spec binds and this ADR is updated to match. The same precedence applies to the type specification: when [`docs/type-specification/`](../type-specification/) disagrees with this ADR on observable behavior, the type spec binds.
 
 ## Context
 
@@ -44,20 +44,13 @@ Rigor targets Ruby. Three properties of Ruby drive deviations from the PHPStan m
 - **`?`-suffixed methods conventionally return booleans.** Ruby readers expect `string?` to return `true` or `false`. Rigor's capability queries return a three-valued result. The naming convention must either drop the `?`, redefine it locally, or expose two parallel surfaces. This is the substance of open question 2.
 - **Mixin-based composition is idiomatic.** Ruby modules can share trait-like behavior without imposing a class hierarchy. Rigor uses modules narrowly for shared structural-equality and identity contracts, not as a type taxonomy.
 
-The rest of this ADR fixes the parts of the design that follow from the type specification and the PHPStan reference, then records the remaining open questions.
+The rest of this ADR records the design rationale, the open questions, and the planning checklist. The decisions that have stabilized are normative in [`docs/internal-spec/internal-type-api.md`](../internal-spec/internal-type-api.md); when this ADR and that document appear to disagree, the spec binds.
 
-## Working Principles
+## Normative Contract
 
-These principles are **decided** for the first implementation slice. They are not part of an Options Considered list because the type specification, ADR-1, or ADR-2 already constrain them.
+The decided parts of the internal type representation — immutable value objects, structural equality, no inheritance between type classes, capability queries returning `Rigor::Trinary`, refinement projections returning `Array<Type>`, compound forms as wrappers, relational queries returning result objects, factory-routed normalization, the method surface, the module layout, and the diagnostics-display routing — are normative in [`docs/internal-spec/internal-type-api.md`](../internal-spec/internal-type-api.md). Engine and plugin code MUST follow that document. This ADR is retained for design rationale, the rejected/deferred options below, and the planning checklist; it MUST NOT be treated as binding for the contracts that have moved.
 
-1. **No inheritance between type classes.** Rigor type implementations do not extend each other. There is no `class Constant < String` analogue. Common surface is documented as a Ruby duck-type contract; concrete classes implement that contract independently. Module mixins MAY be used for narrow, mechanical sharing such as structural equality, hashing, freezing, or identity caches, but MUST NOT be used as a substitute for inheritance to express subtype relations.
-2. **Type instances are immutable value objects.** Every type instance MUST be `freeze`d at construction. Equality MUST be structural (`==` and `eql?` agree) and `hash` MUST be derived from the same structural data so types can serve as hash keys. Mutation is an analyzer effect, not a property of the type representation.
-3. **Capability queries return `Rigor::Trinary`.** Methods that ask "does this type behave like a string / integer / array / etc." return a `yes`/`no`/`maybe` value, not a Ruby boolean. The trinary class itself is a flyweight value object with `yes?`, `no?`, `maybe?` predicates and the usual Boolean-like combinators (`and`, `or`, `negate`). The semantics are fixed by [`relations-and-certainty.md`](../type-specification/relations-and-certainty.md): `maybe` is a real third value and never narrows or implies a complementary edge.
-4. **Refinement projections return `Array<Type>`.** Methods that enumerate witnesses (constant strings, constant arrays, finite values, enum cases, …) return Ruby arrays. An empty array means "no proven witnesses for this projection"; a non-empty array means the analyzer can enumerate them. Unions and intersections compose by combining witness lists per the PHPStan pattern. This avoids inheritance-based dispatch (`is_a?(ConstantStringType)`) and matches the monadic style requested by the ADR.
-5. **Compound forms are wrappers.** `Dynamic[T]`, refinements, unions, intersections, differences, complements, and generic position carriers hold inner `Type` references rather than extending a base type. The dynamic-origin algebra in [`value-lattice.md`](../type-specification/value-lattice.md) requires this: `Dynamic[A] | Dynamic[B] = Dynamic[A | B]` is implementable as a join over wrappers, not as a class-hierarchy operation.
-6. **Relational queries return result value objects.** `subtype_of` and `accepts` return a small immutable result object that bundles a `Trinary` answer with reason metadata (the rules invoked, the dynamic-origin facts consulted, the budget cutoffs hit). This corresponds to PHPStan's `IsSuperTypeOfResult` and `AcceptsResult`. Simpler queries such as `consistent_with` or `equal_value?` MAY return a plain `Trinary` when there is no useful reason payload.
-7. **Combinators are factories, not instance methods.** `Type.union(*types)`, `Type.intersect(*types)`, `Type.difference(a, b)`, `Type.complement_within(domain, t)` live on a separate factory module so that instances stay closed for value-semantics reasons. Refinement attachment (`refine(predicate)`) MAY be either a factory call or an instance method that returns a new value; the choice is part of open question 1's vertical slice.
-8. **Normalization is the responsibility of factories.** Factories MUST route construction through the deterministic normalization rules in [`normalization.md`](../type-specification/normalization.md) so that two structurally-equivalent inputs produce identical (`==` and `equal?`-comparable when flyweighted) outputs. Direct constructor calls bypassing normalization are an internal escape hatch for tests and migration only.
+The engine-surface contract that surrounds those type objects (`Scope`, fact store, effect model, capability-role inference, normalization, RBS erasure routing, public stability rules) is normative in [`docs/internal-spec/implementation-expectations.md`](../internal-spec/implementation-expectations.md).
 
 ## Open Questions
 
@@ -127,19 +120,6 @@ Capability methods return `Rigor::Trinary`, not Ruby booleans. Ruby's convention
 - Whichever option is chosen, every `Rigor::Type` method that returns a trinary MUST follow the same convention (no per-class deviation).
 - The capability surface and the relational surface MUST agree: if capability methods drop `?`, relational methods do too, and vice versa.
 
-## Method Surface Sketch
-
-The first-cut public method surface every concrete `Rigor::Type` MUST satisfy is grouped below. Names use the naming convention from open question 2 and are written here without the `?` for readability; the final form follows whichever option resolves that question.
-
-- **Capability predicates (return `Rigor::Trinary`):** `string`, `integer`, `float`, `symbol`, `boolean`, `nil_value`, `array`, `hash`, `tuple`, `record`, `proc`, `callable`, `iterable`, `void`, `dynamic`, `class_object`, `module_object`. These mirror the trinary-returning capability methods on PHPStan's `Type`.
-- **Refinement projections (return `Array<Rigor::Type>`):** `constant_strings`, `constant_integers`, `constant_floats`, `constant_symbols`, `constant_booleans`, `constant_arrays`, `arrays`, `tuples`, `records`, `hashes`, `enum_cases`, `finite_values`. Empty array means "no proven witnesses". Unions, intersections, and `Dynamic` wrappers MUST forward into their inner types and combine results consistently with [`value-lattice.md`](../type-specification/value-lattice.md).
-- **Relational queries (return result objects):** `subtype_of(other)` and `accepts(other, mode:)` return a result value bundling a `Trinary` and a reason payload. `consistent_with(other)` and `equal_value(other)` return a plain `Trinary` when there is no useful reason payload to expose.
-- **Structural queries:** `has_method(name)` (returns `Trinary`), `method(name, scope:)` (returns a method-reflection result or a sentinel), `members` (returns the structured shape from [`structural-interfaces-and-object-shapes.md`](../type-specification/structural-interfaces-and-object-shapes.md)), `key_type`, `value_type`, `tuple_arity`, `iterable_key_type`, `iterable_value_type`. Where PHPStan returns specific reflection objects, Rigor returns the analyzer's reflection objects (defined separately, in line with ADR-2).
-- **Operations (combinators on the factory module):** `Rigor::Type.union(*)`, `Rigor::Type.intersect(*)`, `Rigor::Type.difference(a, b)`, `Rigor::Type.complement_within(domain, t)`, `Rigor::Type.refine(base, predicate)`. Instances do not expose mutating combinators; an instance method such as `with_refinement` MAY be added once the refinement model from open question 1 is settled.
-- **Meta:** `describe(verbosity)` returns the diagnostic representation under [`diagnostic-policy.md`](../type-specification/diagnostic-policy.md) and [`type-operators.md`](../type-specification/type-operators.md); `erase_to_rbs` returns the conservative RBS erasure under [`rbs-erasure.md`](../type-specification/rbs-erasure.md); `normalize` is idempotent and returns `self` when already normalized; `traverse(&block)` walks inner types for combinators and wrappers; `==`, `eql?`, and `hash` are structural and consistent.
-
-This list is intentionally narrower than PHPStan's `Type` interface. Operations that are PHP-language-specific (the array-mutation helpers, PHP coercion casts, `looseCompare`, `isSmallerThan`) are deferred until a corresponding Ruby need surfaces. The intent is to start with a small surface that matches the type specification, then grow with concrete user stories.
-
 ## Class Catalogue Draft
 
 This catalogue is **not** normative. It is a checklist that the type specification is covered by the planned representation. Each entry cross-references the binding spec section.
@@ -153,35 +133,7 @@ This catalogue is **not** normative. It is a checklist that the type specificati
 - **Refinements**: `RefinedNominal` (e.g. `String where non_empty`), `IntegerRange`, `FiniteLiteralUnion`, `TruthinessRefinement`, `RelationalFact`, `FactStability`, `TemplateLiteralLikeString`. See [`rigor-extensions.md`](../type-specification/rigor-extensions.md). Imported built-in refinement names are catalogued in [`imported-built-in-types.md`](../type-specification/imported-built-in-types.md).
 - **Generic position carriers**: `Generic`, `TemplateParameter`, `Variance`. Variance is a tag, not a separate type form. See [`rbs-compatible-types.md`](../type-specification/rbs-compatible-types.md).
 
-Every entry MUST satisfy the *Method Surface Sketch* above. Wrappers (`Dynamic`, refinements, combinators, generic carriers) MUST forward queries into their inner types according to the algebraic rules in [`value-lattice.md`](../type-specification/value-lattice.md).
-
-## Module Layout
-
-Proposed Ruby layout, subject to refinement during implementation:
-
-- `Rigor::Type` is a documentation-only module that names the duck-type contract. It is **not** a base class; concrete types do not `include Rigor::Type` to gain behavior.
-- Concrete type classes live under `Rigor::Type::*` in `lib/rigor/type/*.rb`. One file per type form.
-- `Rigor::Trinary` is a top-level value object in `lib/rigor/trinary.rb` because it is shared with non-type code (CFA results, plugin Scope queries) and does not belong inside the type namespace.
-- Combinators and constructors live on a factory module (working name `Rigor::Type::Combinator`) in `lib/rigor/type/combinator.rb`, which routes through the normalization rules.
-- Result objects (`Rigor::Type::SubtypeResult`, `Rigor::Type::AcceptsResult`) live alongside the relational methods that produce them.
-- `sig/rigor.rbs` will describe these once the surface stabilizes; ADR-3 itself does not block on the RBS work.
-
-## Identity, Equality, Hashing, Normalization
-
-- Every type instance MUST be `freeze`d at construction.
-- `==`, `eql?`, and `hash` MUST be derived from the same structural data so two structurally-equivalent types compare equal and produce the same hash. Equality MUST NOT depend on instance identity.
-- Construction routes through the factory module, which applies the deterministic normalization rules in [`normalization.md`](../type-specification/normalization.md). Two equivalent inputs produce the same normalized output. Direct constructor calls that bypass normalization are an internal escape hatch.
-- Flyweighting is permitted where it is observably an optimization. `Rigor::Trinary` instances MUST be a flyweight (three singletons). Other types MAY be cached when caching is safe and demonstrably useful; caching is never required for correctness.
-
-## Diagnostics and Display Contract
-
-`describe(verbosity)` is the single entry point for diagnostic rendering. It MUST follow:
-
-- The `Dynamic[T]` display rules in [`diagnostic-policy.md`](../type-specification/diagnostic-policy.md), including the `dynamic.*` family carve-out.
-- The negative-fact and operator display contract in [`type-operators.md`](../type-specification/type-operators.md), including the omission rules that keep negative-fact diagnostics readable.
-- The hash-shape and tuple display rules in [`structural-interfaces-and-object-shapes.md`](../type-specification/structural-interfaces-and-object-shapes.md) and [`rbs-erasure.md`](../type-specification/rbs-erasure.md).
-
-Type instances MUST NOT format themselves with ad hoc `inspect`-style strings; `describe(verbosity)` is the binding output for diagnostics and explanations, and `inspect` is for development convenience only.
+Every entry MUST satisfy the method surface in [`docs/internal-spec/internal-type-api.md`](../internal-spec/internal-type-api.md). Wrappers (`Dynamic`, refinements, combinators, generic carriers) MUST forward queries into their inner types according to the algebraic rules in [`value-lattice.md`](../type-specification/value-lattice.md).
 
 ## Implementation Roadmap
 
@@ -203,6 +155,8 @@ When the slice lands, ADR-3 is updated to record the resolved Working Decisions.
 
 Rigor documents:
 
+- [`docs/internal-spec/internal-type-api.md`](../internal-spec/internal-type-api.md) — normative public contract for the type-object surface decided by this ADR.
+- [`docs/internal-spec/implementation-expectations.md`](../internal-spec/implementation-expectations.md) — engine-surface contract that surrounds the type objects.
 - [`docs/adr/1-types.md`](1-types.md) — type-model semantics, dynamic-origin algebra, trinary certainty.
 - [`docs/adr/2-extension-api.md`](2-extension-api.md) — extension surface that consumes Type values; *Type System Object Model* and *Scope Object* sections.
 - [`docs/type-specification/relations-and-certainty.md`](../type-specification/relations-and-certainty.md) — subtyping, gradual consistency, trinary certainty.

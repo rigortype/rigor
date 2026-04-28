@@ -12,3 +12,4 @@ module Rigor
 end
 
 require_relative "source/node_locator"
+require_relative "source/node_walker"

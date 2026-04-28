@@ -159,4 +159,108 @@ RSpec.describe Rigor::CLI do
       expect(err).to include("past the end")
     end
   end
+
+  describe "type-scan" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write_fixture(name, contents)
+      path = File.join(tmpdir, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      path
+    end
+
+    it "reports a coverage summary in text format" do
+      path = write_fixture("a.rb", "[1, 2]\nfoo()\n")
+
+      status, out, err = run_cli("type-scan", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("Type-of scan: 1 file")
+      expect(out).to include("AST nodes visited:")
+      expect(out).to match(%r{Prism::CallNode\s+\d+/\d+})
+      expect(out).to include("Unrecognized examples")
+    end
+
+    it "emits JSON when --format=json is supplied" do
+      path = write_fixture("a.rb", "foo()\n")
+
+      status, out, _err = run_cli("type-scan", "--format=json", path)
+
+      expect(status).to eq(0)
+      payload = JSON.parse(out)
+      expect(payload["summary"]).to include("visited", "unrecognized", "unrecognized_ratio")
+      expect(payload["by_class"]).to include("Prism::CallNode")
+      expect(payload["events"]).to be_an(Array)
+      expect(payload["events"].first).to include("file" => path, "node_class" => "Prism::CallNode")
+    end
+
+    it "exits 1 when the unrecognized ratio exceeds --threshold" do
+      path = write_fixture("a.rb", "foo()\n")
+
+      status, _out, _err = run_cli("type-scan", "--threshold=0.1", path)
+
+      expect(status).to eq(1)
+    end
+
+    it "exits 0 when the unrecognized ratio is at or below --threshold" do
+      path = write_fixture("a.rb", "foo()\n")
+
+      status, _out, _err = run_cli("type-scan", "--threshold=0.99", path)
+
+      expect(status).to eq(0)
+    end
+
+    it "recurses into directories and aggregates files" do
+      write_fixture("nested/one.rb", "1\n")
+      write_fixture("nested/two.rb", "foo()\n")
+
+      status, out, _err = run_cli("type-scan", File.join(tmpdir, "nested"))
+
+      expect(status).to eq(0)
+      expect(out).to include("Type-of scan: 2 files")
+    end
+
+    it "hides 0% classes by default and shows them with --show-recognized" do
+      path = write_fixture("a.rb", "1\n")
+
+      _status, out_default, _err = run_cli("type-scan", path)
+      _status, out_full, _err = run_cli("type-scan", "--show-recognized", path)
+
+      expect(out_default).not_to include("Prism::IntegerNode")
+      expect(out_full).to include("Prism::IntegerNode")
+    end
+
+    it "reports parse errors and exits 1" do
+      path = write_fixture("a.rb", "def\n")
+
+      status, out, _err = run_cli("type-scan", path)
+
+      expect(status).to eq(1)
+      expect(out).to include("Parse errors:")
+    end
+
+    it "rejects missing paths with a usage error" do
+      status, _out, err = run_cli("type-scan", "/no/such/path.rb")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("not a file or directory")
+    end
+
+    it "requires at least one path" do
+      status, _out, err = run_cli("type-scan")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("at least one path is required")
+    end
+
+    it "lists type-scan in the help text" do
+      _status, out, _err = run_cli("help")
+
+      expect(out).to include("type-scan")
+    end
+  end
 end

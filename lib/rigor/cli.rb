@@ -17,6 +17,13 @@ module Rigor
   class CLI # rubocop:disable Metrics/ClassLength
     EXIT_USAGE = 64
 
+    HANDLERS = {
+      "check" => :run_check,
+      "init" => :run_init,
+      "type-of" => :run_type_of,
+      "type-scan" => :run_type_scan
+    }.freeze
+
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
       new(argv.dup, out: out, err: err).run
     end
@@ -37,16 +44,8 @@ module Rigor
       when "version", "-v", "--version"
         @out.puts("rigor #{Rigor::VERSION}")
         0
-      when "check"
-        run_check
-      when "init"
-        run_init
-      when "type-of"
-        run_type_of
       else
-        @err.puts("Unknown command: #{command}")
-        @err.puts(help)
-        EXIT_USAGE
+        dispatch(command)
       end
     rescue OptionParser::ParseError => e
       @err.puts(e.message)
@@ -54,6 +53,15 @@ module Rigor
     end
 
     private
+
+    def dispatch(command)
+      handler = HANDLERS[command]
+      return send(handler) if handler
+
+      @err.puts("Unknown command: #{command}")
+      @err.puts(help)
+      EXIT_USAGE
+    end
 
     def run_check
       require_relative "analysis/runner"
@@ -108,6 +116,12 @@ module Rigor
       TypeOfCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_type_scan
+      require_relative "cli/type_scan_command"
+
+      TypeScanCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def write_result(result, format)
       case format
       when "json"
@@ -131,6 +145,7 @@ module Rigor
           check      Analyze Ruby source files
           init       Create a starter .rigor.yml
           type-of    Print the inferred type at FILE:LINE:COL
+          type-scan  Report Scope#type_of coverage across PATHs
           version    Print the Rigor version
           help       Print this help
       HELP

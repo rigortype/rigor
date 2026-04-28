@@ -756,6 +756,46 @@ Negative:
 - `RBS::Extended` needs a careful annotation payload grammar and conflict rules.
 - Negative and complement types require domain-aware normalization.
 
+## Critical review notes
+
+This subsection records contradictions, tensions, and clarification gaps noticed when reading this ADR against itself and against `docs/types.md`. It is meant to steer edits to the main text, not to duplicate every item already listed under **Open Questions**.
+
+### Contradictions or tensions to resolve
+
+- **Lossless import versus conservative export.** The context requires every RBS type to be a valid Rigor type and every internal type to erase to RBS. `docs/types.md` adds that every RBS type has a *lossless* representation in Rigor. The ADR should state explicitly that Rigor→RBS erasure is generally *not* lossless, and that “lossless” applies only to the RBS→Rigor direction (or define a different term if internal wrappers like `Dynamic[T]` are always reversible).
+
+- **v1 milestone versus propagation features.** The document simultaneously promises a scoped v1 narrowing surface (limited CFA), states that v1 does *not* yet rely on intra-procedural propagation of capability roles or propagated mutation effects, and describes detailed mutation summaries, fact buckets, and role inference for v1. Clarify which layers are “specified for later implementation under the same milestone” versus “normative for the first shipping analyzer,” and whether “v1” means product version or specification slice.
+
+- **“One `MethodEntry` per `(class-or-module, method name)`” versus overload branches.** The text says one entry corresponds to “exactly one Ruby `def`” while also storing RBS overload branches inside the entry. Reconcile: runtime single dispatch versus multiple source `def`s merging; whether “one def” means “one resolved runtime body” after merge, and how partial classes and `prepend`/`include` order interact with that statement.
+
+- **`rbs_inline` magic comments “ignored” versus full compatibility.** Ignoring `rbs_inline` enable/disable directives is compatible with reading embedded signatures, but the phrase risks sounding like Rigor skips rbs-inline altogether. A single sentence tying “ignored” to *only* magic-comment configuration would remove the ambiguity.
+
+- **Steep as second-order norm.** When Steep’s behavior differs from RBS prose *and* from rbs-inline documentation, the resolution order is not stated (Steep wins, or pick the least surprising for migration?). Worth one explicit rule to avoid ecosystem arguments.
+
+- **`void` in value positions versus “top-like” RBS rules.** The ADR models `void` as a no-use return marker and recovers with `top` in value context. If RBS’s own rules treat `void` as comparable to `top` in some positions, the ADR should either cite alignment or document deliberate divergence so generated RBS and Rigor diagnostics stay consistent.
+
+### Clarifications that would help readers
+
+- **`RBS::Extended` naming.** The document uses `RBS::Extended` as a convention name, `%a{rigor:v1:...}` in examples, and phrases like “annotation-based metadata layer.” Clarify whether `RBS::Extended` denotes *any* `rigor:v1:` (and future) payload in `%a{...}`, or only a subset, and how that relates to ordinary RBS `%a{...}` uses by other tools.
+
+- **`maybe` versus incomplete inference.** Trinary certainty says `maybe` is for unproven relationships; elsewhere, incomplete inference is a first-class outcome with budgets. State whether “incomplete inference” is always surfaced as `maybe`, as a distinct “unknown/incomplete” pseudo-type, or via `static.*` diagnostics only—so implementers do not conflate “cannot prove subtyping” with “stopped early.”
+
+- **Structural interfaces without opt-in versus “explicit conformance” open questions.** The text says structural assignability should not require opt-in, while **Open Questions** asks whether to add an explicit conformance annotation. The trade-off between inferred structural satisfaction and explicit verification requests should be summarized in one place.
+
+- **Capability roles versus nominal `IO` signatures.** The IO/StringIO story is clear; add an explicit rule for when Rigor escalates to a **diagnostic** (reject call) versus a **hint** (signature generalization), versus silent internal reasoning only—since all three appear in different paragraphs.
+
+- **Reference paths.** PHPStan and TypeScript paths under `references/` assume submodule layout; if checkouts differ, readers may not find files. A short note that paths are indicative reference locations would set expectations.
+
+- **Predicate / assertion spelling.** Examples use forms like `rigor:v1:predicate-if-true value is String` and narrative mentions `parameter is Type`; ensure one canonical example links to the schema owned by this ADR versus `docs/types.md` so tooling authors see a single source of truth.
+
+### Scope and maintainability
+
+- **Length and duplication.** The PHPStan, TypeScript, and Python comparison tables are valuable but overlap with `docs/types.md` and each other on structural typing and flow. Consider a maintenance note: which document is authoritative when tables diverge, and whether compressed “see types.md §X” links could shrink repetition.
+
+- **Forward-looking CLI behavior.** Interactive prompts for incomplete inference describe behavior that may not exist in the current scaffold; label clearly as **target behavior** so the ADR is not mistaken for an implementation checklist.
+
+- **Plugin and ADR-2 boundaries.** Several sections preview plugins while deferring to ADR-2; a short boundary sentence (what ADR-1 must define minimally so ADR-2 can attach) would reduce overlap risk.
+
 ## Open Questions
 
 - Which Rigor-only refinements should be implemented first after the MVP union/no-method diagnostic?

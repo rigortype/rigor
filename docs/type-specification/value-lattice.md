@@ -52,6 +52,10 @@ Dynamic[T] - U = Dynamic[T - U]
 
 When `U` is `top`, the result MAY be displayed as `untyped`, but the internal form MUST still record dynamic-origin provenance. Diagnostic display rules are in [diagnostic-policy.md](diagnostic-policy.md).
 
+### Worked example
+
+`untyped & String` becomes `Dynamic[String]`, not plain `String` and not raw `untyped`. A trusted guard MAY narrow `Dynamic[top]` to `Dynamic[String]`; a method call such as `upcase` MAY then use `String` method facts. The receiver remains traceable to the unchecked source, and diagnostics MAY record that the call was enabled by a dynamic-origin fact.
+
 ### Generic positions
 
 Generic positions preserve dynamic-origin slots. For example, `Array[untyped]` is internally `Array[Dynamic[top]]`, **not** `Array[top]`. Reading an element returns `Dynamic[top]`. Writing an element follows gradual consistency, and stricter modes MAY report that the collection stores unchecked values. The same rule applies to hashes, tuples, records, proc parameters and returns, and shape members.

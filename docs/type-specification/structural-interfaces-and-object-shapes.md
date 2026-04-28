@@ -2,6 +2,8 @@
 
 Rigor models Ruby duck typing through RBS interfaces, internal object shapes, and a curated catalog of capability roles. Class and module names remain nominal; structural typing applies only at specific boundaries.
 
+An RBS interface type, such as `_Closable`, is a **named structural contract**. An **internal object shape** is an anonymous structural type inferred from local definitions, singleton methods, module members, included modules, plugin facts, or control-flow guards. A nominal type or object shape is assignable to an interface when Rigor can prove that it provides all required members with compatible types.
+
 This document defines:
 
 - the boundary at which structural typing applies;

@@ -244,18 +244,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(tracer.kinds).to include(Prism::CallNode)
     end
 
-    it "falls back to Dynamic[Top] for receivers the dispatcher cannot fold" do
+    it "falls back when neither the constant folder nor RBS knows the method" do
       tracer = Rigor::Inference::FallbackTracer.new
-      node = parse_expression("[1, 2].map")
-      type = scope.type_of(node, tracer: tracer)
-
-      expect(type).to equal(Rigor::Type::Combinator.untyped)
-      expect(tracer.kinds).to include(Prism::CallNode)
-    end
-
-    it "falls back when an argument is not a Constant" do
-      tracer = Rigor::Inference::FallbackTracer.new
-      node = parse_expression("1 + bar()")
+      node = parse_expression("[1, 2].this_method_does_not_exist")
       type = scope.type_of(node, tracer: tracer)
 
       expect(type).to equal(Rigor::Type::Combinator.untyped)
@@ -271,6 +262,103 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
       expect(type).to equal(Rigor::Type::Combinator.untyped)
       expect(tracer).to be_empty
+    end
+  end
+
+  describe "method dispatch (Slice 4: RBS-backed)" do
+    it "resolves Integer#succ via RBS as Nominal[Integer]" do
+      type = scope.type_of(parse_expression("1.succ"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Integer")
+    end
+
+    it "resolves Constant#to_s as Nominal[String] via RBS" do
+      type = scope.type_of(parse_expression("3.to_s"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("String")
+    end
+
+    it "resolves Array#length on a Nominal[Array] receiver" do
+      type = scope.type_of(parse_expression("[1, 2, 3].length"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Integer")
+    end
+
+    it "resolves String#upcase on a Constant[String] receiver as Nominal[String]" do
+      type = scope.type_of(parse_expression('"hi".upcase'))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("String")
+    end
+
+    it "resolves bool predicates as Union[Constant[true], Constant[false]]" do
+      type = scope.type_of(parse_expression("1.zero?"))
+
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members.map(&:class)).to all(eq(Rigor::Type::Constant))
+      expect(type.members.map(&:value)).to contain_exactly(true, false)
+    end
+
+    it "constant folding still wins over RBS dispatch when applicable" do
+      type = scope.type_of(parse_expression("1 + 2"))
+
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq(3)
+    end
+
+    it "honors Dynamic-receiver dispatch by unwrapping the static facet" do
+      dyn_int = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of(Integer))
+      bound = scope.with_local(:x, dyn_int)
+      type = bound.type_of(parse_expression("x.succ", scopes: [[:x]]))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Integer")
+    end
+
+    it "unions return types when the receiver is a Union" do
+      union_type = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of(Integer),
+        Rigor::Type::Combinator.nominal_of(String)
+      )
+      bound = scope.with_local(:x, union_type)
+      type = bound.type_of(parse_expression("x.to_s", scopes: [[:x]]))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("String")
+    end
+
+    it "falls back when one Union member does not implement the method" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      union_type = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of(Integer),
+        Rigor::Type::Combinator.nominal_of(String)
+      )
+      bound = scope.with_local(:x, union_type)
+      node = parse_expression("x.bit_length", scopes: [[:x]])
+
+      type = bound.type_of(node, tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.kinds).to include(Prism::CallNode)
+    end
+
+    it "resolves an RBS-only constant (Encoding::Converter) as Nominal" do
+      type = scope.type_of(parse_expression("Encoding::Converter"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Encoding::Converter")
+    end
+
+    it "silently propagates Dynamic when the receiver is Dynamic[Top] and no rule matches" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      bound = scope.with_local(:x, Rigor::Type::Combinator.untyped)
+      type = bound.type_of(parse_expression("x.something_unknown", scopes: [[:x]]), tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.kinds).not_to include(Prism::CallNode)
     end
   end
 

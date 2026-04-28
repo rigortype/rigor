@@ -149,14 +149,22 @@ Coverage uplift on `rigor type-scan lib`: from 26.1 % unrecognised after the Sli
 
 ### Slice 4 — Method Dispatch (RBS-backed)
 
-Layers an RBS-backed dispatch tier behind the Slice 2 constant-folding rule book.
+Layers an RBS-backed dispatch tier behind the Slice 2 constant-folding rule book. Slice 4 lands in two phases.
+
+**Phase 1 (this slice ships first):** the engine consults RBS *core* signatures for receiver-class method dispatch and constant-name resolution. Argument-driven overload selection, generics instantiation, intersection and interface types, and stdlib/gem RBS loading are deferred to Phase 2. The first overload of every method wins, which already covers `Integer#succ`, `Integer#to_s`, `String#upcase`, `Array#length`, `1.zero?`, and the long tail of "method exists on a known class, return type is a single concrete class instance" cases.
 
 Adds:
 
-- `Rigor::Environment::RbsLoader` wrapping the `rbs` gem.
-- `Rigor::Type::SubtypeResult`, `AcceptsResult`.
-- `Rigor::Inference::MethodDispatcher` extended to consult RBS definitions when the constant-folding tier returns `nil`.
-- Argument acceptance via `accepts(other, mode:)`; failure paths still fail-soft to `Dynamic[Top]` so the slice does not block on diagnostic plumbing.
+- `Rigor::Environment::RbsLoader` wraps `RBS::EnvironmentLoader.new` (core only) plus a lazily built `RBS::DefinitionBuilder`. The default loader is a frozen, process-shared singleton with monotonic per-class definition caches; the heavy `RBS::Environment` is built on first method/class query so test runs that never hit RBS pay no startup cost.
+- `Rigor::Inference::RbsTypeTranslator` translates `RBS::Types::*` to `Rigor::Type` through a hash-based dispatch table. Generics arguments are dropped (`Array[Integer]` → `Nominal[Array]`), `Optional[T]` becomes `Union[T, Constant[nil]]`, `bool` becomes `Union[Constant[true], Constant[false]]`, `self`/`instance` substitute the `self_type:` keyword when supplied (the receiver class) and degrade to `Dynamic[Top]` otherwise. `Alias`, `Intersection`, `Variable`, and `Interface` degrade to `Dynamic[Top]`.
+- `Rigor::Inference::MethodDispatcher::RbsDispatch` resolves `(receiver, method_name)` to an RBS instance method. Receiver-class names are derived from `Constant` (via `value.class.name`), `Nominal` (`class_name`), and `Dynamic` (recursing into `static_facet`); `Top`, `Bot`, and other receivers return `nil`. `Union` receivers dispatch each member in turn — when every member resolves, the results are unioned; if any member misses, the whole dispatch returns `nil`.
+- `MethodDispatcher.dispatch` accepts an `environment:` keyword and chains `ConstantFolding` → `RbsDispatch`. Constant folding still wins when applicable, so `1 + 2` keeps its `Constant[3]` precision; only the calls the folder cannot prove fall through to RBS.
+- `Rigor::Environment#nominal_for_name(name)` consults the static class registry first, then asks `RbsLoader#class_known?` and synthesises a `Nominal` for the name. `ExpressionTyper#type_of_constant_read` and `type_of_constant_path` use this combined lookup, so `Encoding::Converter` and other RBS-only core constants resolve without bloating the hardcoded registry.
+- `ExpressionTyper#call_type_for` adds a *Dynamic-origin propagation* tier after the dispatcher: when the receiver is `Dynamic[T]` and no positive rule resolved, the result silently degrades to `Dynamic[Top]` without firing the fallback tracer. This is a recognised semantic outcome (Dynamic infects), not a fail-soft compromise; documented under *Method Dispatch Boundary* in [`inference-engine.md`](../internal-spec/inference-engine.md).
+
+Coverage uplift on `rigor type-scan lib`: from 22.3 % unrecognised after Slice 3 phase 1 down to **15.1 %** after Slice 4 phase 1. The `CallNode` unrecognised rate drops from 82.8 % to 38.5 %; the remaining unrecognised mass is dominated by user-defined `ConstantReadNode`/`ConstantPathNode` (Rigor's own `Rigor::*` types are not in core RBS) and by `CallNode` against `Nominal[<user type>]` receivers. Slice 4 phase 2 (project-RBS loading and stdlib registration) and Slice 5 (generics, overloads, shape inference) chip away at both buckets.
+
+**Phase 2 (later, scope tracked separately):** argument-typed overload selection (`accepts(other, mode:)`), generics instantiation (`Array[Element]#first → Element?` substituting `Element` from the receiver type), `Rigor::Type::SubtypeResult`/`AcceptsResult` carriers, stdlib RBS loading, project-RBS loading from the local `sig/`/`rbs_collection.lock.yaml`, and class-method (singleton-scope) dispatch. Failure paths still fail-soft to `Dynamic[Top]` so the slice does not block on diagnostic plumbing.
 
 ### Slice 5 — Shape Inference
 

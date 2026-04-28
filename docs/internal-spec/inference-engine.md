@@ -115,16 +115,23 @@ The dispatcher's public signature is:
 
 ```ruby
 Rigor::Inference::MethodDispatcher.dispatch(
-  receiver_type:,   # Rigor::Type or nil (implicit self; unsupported in Slice 2)
-  method_name:,     # Symbol
-  arg_types:,       # Array<Rigor::Type>
-  block_type: nil   # reserved
+  receiver_type:,        # Rigor::Type or nil (implicit self; unsupported in Slice 2)
+  method_name:,          # Symbol
+  arg_types:,            # Array<Rigor::Type>
+  block_type: nil,       # reserved
+  environment: nil       # Rigor::Environment; required for RBS-backed dispatch
 ) #=> Rigor::Type, or nil when no rule matches
 ```
 
 A `nil` return value is the deliberate "no rule" signal. Callers MUST own the fail-soft fallback (`ExpressionTyper` records a `FallbackTracer` event and returns `Dynamic[Top]`); the dispatcher itself MUST NOT touch the tracer or raise on unrecognised inputs.
 
-Once Slice 4 lands, the dispatcher MUST consult, in order, the constant-folding tier, the RBS environment, the built-in operator/method table beyond the constant-folding rules, and the plugin-supplied method extensions defined by ADR-2. It MUST take its input as a uniform call-shape that may carry either Prism child nodes or synthetic `Rigor::AST::Node` arguments (by way of the *Virtual Nodes* contract above), so synthesised expressions and real expressions share a single dispatch path.
+The dispatcher MUST consult tiers in this order: the constant-folding tier (Slice 2), the RBS-backed dispatch tier (Slice 4), and — once those land — the plugin-supplied method extensions defined by ADR-2. The first tier that returns a non-`nil` `Rigor::Type` wins; subsequent tiers MUST NOT be consulted on a hit. The dispatcher MUST take its input as a uniform call-shape that may carry either Prism child nodes or synthetic `Rigor::AST::Node` arguments (by way of the *Virtual Nodes* contract above), so synthesised expressions and real expressions share a single dispatch path.
+
+The RBS-backed tier MUST resolve receiver types to a Ruby class name as follows: `Constant[v]` uses `v.class.name`; `Nominal[name]` uses `name`; `Dynamic[T]` recurses into `T`'s static facet; `Top` and `Bot` produce no class name. `Union` receivers MUST dispatch each member individually — when every member resolves, the per-member return types are unioned and that union is returned; when any member returns `nil`, the whole dispatch MUST return `nil`. The RBS tier consults instance methods only in Slice 4 phase 1; class-method (singleton-scope) dispatch is deferred. When the resolved RBS method has multiple overloads, the first overload's return type wins; argument-driven overload selection is deferred to Slice 4 phase 2.
+
+`Rigor::Inference::RbsTypeTranslator.translate(rbs_type, self_type:)` is the only normative path from `RBS::Types::*` to `Rigor::Type`. It MUST be deterministic, MUST NOT raise on any well-formed RBS type, and MUST follow the Slice 4 phase 1 mapping documented in [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md). Future slices that refine the mapping (generics, intersection, interfaces, alias resolution) MUST keep the existing entries' Slice 4 phase 1 outputs unchanged on the gradual-typing axis: any tightening of precision MUST be a non-breaking change to subtyping queries against the result type.
+
+When the receiver of a call is a `Rigor::Type::Dynamic` and no positive dispatcher tier matches, `ExpressionTyper#call_type_for` MUST return `Dynamic[Top]` *silently*, without recording a `FallbackTracer` event. This is a recognised semantic outcome — the value-lattice algebra in [`value-lattice.md`](../type-specification/value-lattice.md) requires Dynamic to propagate through opaque method calls — and not a fail-soft compromise. Receivers that are not Dynamic still trigger the standard fail-soft fallback (with a tracer event) when no rule resolves.
 
 This split is normative: implementations MUST NOT define operator-method-aware subclasses of any `Rigor::Type` form (for example, a hypothetical `Rigor::Type::IntegerType` carrying `+`/`*` rules). Operator semantics MUST be expressed as method-handler entries that the dispatcher consults; specialising the type class for built-in arithmetic is rejected to keep the type lattice and method semantics independently extensible.
 
@@ -136,15 +143,25 @@ Local variable write nodes (`Prism::LocalVariableWriteNode` and the targets that
 
 ## Environment Surface
 
-`Rigor::Environment` is the engine's view of the type universe outside the current scope: nominal classes, RBS definitions (Slice 4+), plugin-supplied facts (Slice 6+), and any other module-level information. The minimum public surface that Slice 1 binds is:
+`Rigor::Environment` is the engine's view of the type universe outside the current scope: nominal classes, RBS definitions, plugin-supplied facts (Slice 6+), and any other module-level information. The minimum public surface that Slice 1 binds is:
 
 - `Rigor::Environment#class_registry` — returns a `Rigor::Environment::ClassRegistry` that can resolve a Ruby `Class` or `Module` object to a `Rigor::Type::Nominal`.
 - `Rigor::Environment::ClassRegistry#nominal_for(class_object)` — returns the registered `Rigor::Type::Nominal` for a registered class, or raises if the class is not registered.
 - `Rigor::Environment::ClassRegistry#registered?(class_object)` — returns `true` or `false` for whether the class is registered.
+- `Rigor::Environment::ClassRegistry#nominal_for_name(name)` — returns the registered `Rigor::Type::Nominal` for a Symbol/String class name, or `nil` when the name is unknown.
 
-Slice 4 introduces `Rigor::Environment#rbs_loader`. Slice 6 introduces fact-store access. The methods added in later slices MUST NOT change the Slice 1 surface.
+Slice 4 introduces:
+
+- `Rigor::Environment#rbs_loader` — returns the `Rigor::Environment::RbsLoader` attached to the environment, or `nil` for an "RBS-blind" environment (test fixture).
+- `Rigor::Environment::RbsLoader#class_known?(name)` — returns `true` when the RBS environment defines a class or module by that name; nil-safe and string/symbol tolerant.
+- `Rigor::Environment::RbsLoader#instance_method(class_name:, method_name:)` — returns the resolved `RBS::Definition::Method` for the given instance method, or `nil` when the class or method is unknown. Inherited methods MUST be visible through this call (the loader uses `RBS::DefinitionBuilder#build_instance` which walks the ancestor chain).
+- `Rigor::Environment#nominal_for_name(name)` — consults the class registry first, then the RBS loader (when present); returns the `Rigor::Type::Nominal` for the first hit, or `nil` when no hit. This is the canonical entry point for typing `Prism::ConstantReadNode`/`Prism::ConstantPathNode`; `ExpressionTyper` MUST route through it rather than addressing the registry and loader independently.
+
+Slice 6 introduces fact-store access. The methods added in later slices MUST NOT change the Slice 1 surface.
 
 The class registry MUST always recognise the following Ruby classes: `Integer`, `Float`, `String`, `Symbol`, `NilClass`, `TrueClass`, `FalseClass`, `Object`, `BasicObject`. Implementations MAY extend this list as long as the listed classes remain present.
+
+The default `Rigor::Environment.default` MUST attach a default `RbsLoader` covering RBS core. Constructing `Rigor::Environment.new` (no kwargs) MUST produce an RBS-blind environment so test fixtures can assert engine behaviour without paying RBS startup cost.
 
 ## Determinism and Caching
 

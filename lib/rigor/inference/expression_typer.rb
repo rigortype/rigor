@@ -241,7 +241,7 @@ module Rigor
       end
 
       def type_of_constant_read(node)
-        nominal = scope.environment.class_registry.nominal_for_name(node.name)
+        nominal = scope.environment.nominal_for_name(node.name)
         return nominal if nominal
 
         fallback_for(node, family: :prism)
@@ -250,7 +250,7 @@ module Rigor
       def type_of_constant_path(node)
         full_name = build_constant_path_name(node)
         if full_name
-          nominal = scope.environment.class_registry.nominal_for_name(full_name)
+          nominal = scope.environment.nominal_for_name(full_name)
           return nominal if nominal
         end
 
@@ -555,9 +555,17 @@ module Rigor
         result = MethodDispatcher.dispatch(
           receiver_type: receiver,
           method_name: node.name,
-          arg_types: arg_types
+          arg_types: arg_types,
+          environment: scope.environment
         )
         return result if result
+
+        # Dynamic-origin propagation: when the receiver is Dynamic[T] and
+        # no positive rule resolves the call, the result inherits the
+        # dynamic origin. Per the value-lattice algebra, this is a
+        # recognised semantic outcome, not a fail-soft compromise, so it
+        # MUST NOT record a tracer event.
+        return dynamic_top if receiver.is_a?(Type::Dynamic)
 
         fallback_for(node, family: :prism)
       end

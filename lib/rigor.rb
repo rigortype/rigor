@@ -2,6 +2,11 @@
 
 require_relative "rigor/version"
 require_relative "rigor/configuration"
+require_relative "rigor/trinary"
+require_relative "rigor/type"
+require_relative "rigor/environment"
+require_relative "rigor/inference/expression_typer"
+require_relative "rigor/scope"
 require_relative "rigor/analysis/diagnostic"
 require_relative "rigor/analysis/result"
 require_relative "rigor/cli"

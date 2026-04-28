@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file is a development note for agents working in this repository. For the broader project context, read `README.md` and `docs/adr/0-concept.md`. For the type system, start with the quick guide at `docs/types.md`; the normative specification is split into topical documents under `docs/type-specification/`.
+This file is a development note for agents working in this repository. For broader project context, read `README.md` and `docs/adr/0-concept.md`. For the type system, start with the quick guide at `docs/types.md`; the normative specification is split into topical documents under `docs/type-specification/`.
 
 All project-authored documentation in this repository should be written in English. Treat external vendored or submodule documentation as upstream material and do not rewrite it only for language consistency.
 
@@ -12,30 +12,29 @@ The current implementation is an initial scaffold. It uses `Prism` to parse Ruby
 
 ## Development Environment
 
-- Target Ruby is `4.0.3`.
-- The gemspec requires Ruby `>= 4.0.0`, `< 4.1`.
-- All development-time commands must run through the Flake. Do not run `bundle`, `rake`, `rspec`, `rubocop`, or `exe/rigor` directly from the host shell.
+- Target Ruby is `4.0.3`. The gemspec requires Ruby `>= 4.0.0`, `< 4.1`.
+- All development-time commands MUST run through the Flake. Do not run `bundle`, `rake`, `rspec`, `rubocop`, or `exe/rigor` directly from the host shell.
 - The Flake shell includes Git 2.54.0 and GNU Make.
-- The license is MPL-2.0.
-- The official repository is `https://github.com/rigortype/rigor`.
+- `flake.nix` points Bundler at `vendor/bundle`; keep local gem installs isolated from global machine state.
+- The license is MPL-2.0. The official repository is `https://github.com/rigortype/rigor`.
 
-The command examples below use `nix`. If `nix` is not available on `PATH`, run the same commands with `/nix/var/nix/profiles/default/bin/nix` in place of `nix`.
+### Running commands through the Flake
 
-Basic setup:
+Enter the Flake shell for interactive work:
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' develop
+```
+
+Or prefix one-shot invocations with `nix --extra-experimental-features 'nix-command flakes' develop --command`. The command listings below use that prefix in full so each line is directly runnable. If `nix` is not on `PATH`, substitute `/nix/var/nix/profiles/default/bin/nix`.
+
+### Basic setup
 
 ```sh
 nix --extra-experimental-features 'nix-command flakes' develop --command bundle install
 nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules
 nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake
 ```
-
-For interactive work, enter the Flake shell first and then run development commands from inside that shell:
-
-```sh
-nix --extra-experimental-features 'nix-command flakes' develop
-```
-
-`flake.nix` points Bundler at `vendor/bundle`. Keep local gem installs isolated from global machine state whenever possible.
 
 ## Common Commands
 
@@ -62,71 +61,53 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make pu
 - `docs/types.md`: one-page quick guide to the Rigor type system
 - `docs/type-specification`: normative type specification, split into topical documents
 - `docs/adr`: architecture decision records
-- `references/`: long-lived **external** specification and upstream submodules (not Rigor product code; see below)
+- `references/`: long-lived **external** specifications and upstream submodules (not Rigor product code; see below)
 
-## External reference trees and ripgrep
+## References under `references/`
 
-The `references/` directory groups Git submodules used only as read-only, written specifications or upstream codebases. They can be very large, and matching them from the repository root is often noise when you mean to search Rigor’s own `lib/`, `spec/`, and `docs/adr`.
+The `references/` directory groups Git submodules used only as read-only specifications or upstream codebases. They are large, so the root [`.ignore`](.ignore) file lists `/references/` to keep [`ripgrep` (`rg`)](https://github.com/BurntSushi/ripgrep) from traversing them by default. Git is unaffected.
 
-A root [`.ignore`](.ignore) file lists `/references/` so that [`ripgrep` (`rg`)](https://github.com/BurntSushi/ripgrep) does not traverse those checkouts in the default case. (Git is unaffected: submodule paths stay tracked the same as before.)
-
-To search a reference tree on purpose, disable ignore files for that run and **scope the path** to the tree you need, for example:
+To search a reference tree intentionally, disable ignore files and **scope the path** to the tree you need:
 
 ```sh
-rg PATTERN --no-ignore references/
 rg PATTERN --no-ignore references/rbs
 rg PATTERN --no-ignore references/python-typing
 ```
 
-`--no-ignore` turns off all ignore files for that `rg` invocation, so you should pass a `references/…` path to avoid pulling in other normally ignored areas (for example `vendor/`) in the same run. The short flag `-u` (unrestricted) has a similar effect; the same scoping advice applies if you use it to search `references/`.
+`--no-ignore` (or short `-u`) turns off all ignore files for that invocation. Scoping the path avoids pulling in normally ignored areas such as `vendor/`.
 
-## Purpose of the references/rbs Submodule
+### Catalog
 
-`references/rbs` is a Git submodule that points to `https://github.com/ruby/rbs.git`. It exists as reference material so Rigor can stay compatible with the RBS ecosystem. Use it to inspect RBS syntax, standard library signatures, test cases, and implementation behavior.
+| Submodule | Upstream | Use |
+| --- | --- | --- |
+| `references/rbs` | `https://github.com/ruby/rbs.git` | RBS syntax, standard library signatures, test cases, and implementation behavior. Reference material for staying compatible with the RBS ecosystem. |
+| `references/python-typing` | `https://github.com/python/typing.git` | Written-down Python typing concepts (gradual typing, generics, protocols, variance) borrowed only by idea. Not a syntax compatibility target. |
 
-This submodule is not Rigor runtime code. In normal implementation work, do not require or import files from `references/rbs`, and do not copy upstream implementation into Rigor product code. Read the relevant specification or behavior there, then implement the smallest appropriate Rigor-side behavior.
+### Submodule rules
 
-If the submodule is empty after cloning:
-
-```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules
-```
-
-Update the submodule only when intentionally changing the referenced RBS version. During ordinary Rigor work, treat `references/rbs` as read-only reference material.
-
-## Purpose of the references/python-typing Submodule
-
-`references/python-typing` is a Git submodule that points to `https://github.com/python/typing.git`. It holds the **explicit** Python type system as documented specifications and PEPs (for example the `typing` standard library and typing-spec prose). Rigor is Ruby- and RBS-oriented, but this tree is useful reference material when comparing or borrowing **written-down** typing concepts (gradual typing, generics, protocols, variance) that are spelled out in normative or semi-normative documents, without treating Python syntax as a compatibility target.
-
-This submodule is not Rigor runtime code. In normal implementation work, do not require or import files from `references/python-typing`, and do not copy CPython- or stubs-specific logic into the analyzer. Read the relevant specification, then port only the ideas that fit Ruby semantics and the RBS ecosystem.
-
-If the submodule is empty after cloning:
-
-```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules
-```
-
-Update the submodule only when intentionally changing the referenced typing-spec revision. During ordinary Rigor work, treat `references/python-typing` as read-only reference material.
+- These submodules are reference material, not Rigor runtime code. Do not require, import, or copy upstream implementation into Rigor product code. Read the relevant specification or behavior, then implement the smallest appropriate Rigor-side behavior.
+- Update a submodule only when intentionally changing the referenced revision.
+- If a submodule is empty after cloning, run `nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules`.
 
 ## Implementation Guidelines
 
 - Keep additions small and aligned with the existing structure and naming.
 - Prioritize the CLI-first workflow. Do not assume an LSP server or long-running daemon yet.
-- Preserve the design goal that Ruby application code should not require Rigor-specific annotations or DSLs.
-- Use RBS for external dependency and standard library type information. Future Rigor-specific advanced type expressions should live in RBS comment extensions.
+- Preserve the design goal that Ruby application code MUST NOT require Rigor-specific annotations or DSLs.
+- Use RBS for external dependency and standard library type information. Future Rigor-specific advanced type expressions live in RBS comment extensions.
 - Keep metaprogramming support out of the core where possible; steer it toward the future plugin API.
 - For any change that touches type-model behavior — normalization, narrowing, erasure, signature handling, diagnostic identifiers, budgets — treat `docs/type-specification/` as the binding specification and `docs/adr/1-types.md` as the design-rationale companion. Update the relevant topical document when behavior changes.
 
 ## Verification Notes
 
-After making changes, run at least:
+After making changes, run:
 
 ```sh
 nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake
 nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
 ```
 
-If the Flake shell or its dependencies are unavailable in the current environment, mention any skipped verification in the final report. For a minimal syntax-only check, run:
+If the Flake shell or its dependencies are unavailable, mention any skipped verification in the final report. For a minimal syntax-only check:
 
 ```sh
 nix --extra-experimental-features 'nix-command flakes' develop --command sh -c 'for f in $(find bin exe lib spec -name "*.rb"); do ruby -c "$f" || exit 1; done'

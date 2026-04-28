@@ -13,6 +13,43 @@ RSpec.describe Rigor::Environment::RbsLoader do
     it "returns a frozen loader" do
       expect(described_class.default).to be_frozen
     end
+
+    it "loads core only (no opt-in libraries or signature paths)" do
+      expect(described_class.default.libraries).to be_empty
+      expect(described_class.default.signature_paths).to be_empty
+    end
+  end
+
+  describe "with stdlib library opt-in" do
+    let(:custom_loader) { described_class.new(libraries: ["pathname"]) }
+
+    it "loads the requested stdlib classes" do
+      expect(custom_loader.class_known?("Pathname")).to be(true)
+    end
+
+    it "tolerates unknown library names by failing soft" do
+      bad_loader = described_class.new(libraries: ["this_library_does_not_exist_xyz"])
+      expect(bad_loader.class_known?("Integer")).to be(true)
+    end
+  end
+
+  describe "with project signature paths" do
+    let(:project_loader) do
+      described_class.new(
+        signature_paths: [Pathname(__dir__).join("../../../sig").expand_path]
+      )
+    end
+
+    it "loads classes declared in the project's sig/ tree" do
+      expect(project_loader.class_known?("Rigor::Configuration")).to be(true)
+      expect(project_loader.class_known?("Rigor::Analysis::Diagnostic")).to be(true)
+    end
+
+    it "silently ignores non-existent signature directories" do
+      empty_loader = described_class.new(signature_paths: ["/path/that/definitely/does/not/exist"])
+      expect(empty_loader.class_known?("Integer")).to be(true)
+      expect(empty_loader.class_known?("Rigor::Configuration")).to be(false)
+    end
   end
 
   describe "#class_known?" do

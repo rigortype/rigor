@@ -12,6 +12,9 @@ module Rigor
   #
   # See docs/internal-spec/inference-engine.md for the binding contract.
   class Environment
+    DEFAULT_PROJECT_SIG_DIR = "sig"
+    private_constant :DEFAULT_PROJECT_SIG_DIR
+
     attr_reader :class_registry, :rbs_loader
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
@@ -27,8 +30,36 @@ module Rigor
       freeze
     end
 
-    def self.default
-      @default ||= new(rbs_loader: RbsLoader.default).freeze
+    class << self
+      def default
+        @default ||= new(rbs_loader: RbsLoader.default).freeze
+      end
+
+      # Builds an Environment that consults the project's local
+      # signatures and any opt-in stdlib libraries on top of RBS core.
+      #
+      # @param root [String, Pathname] project root used to auto-detect
+      #   the default signature path. Defaults to the current working
+      #   directory.
+      # @param libraries [Array<String, Symbol>] stdlib libraries to
+      #   load (e.g., `["pathname", "json"]`). Empty by default.
+      # @param signature_paths [Array<String, Pathname>, nil] explicit
+      #   list of `sig/`-style directories. When `nil` (the default),
+      #   the canonical project layout `<root>/sig` is used if it
+      #   exists, otherwise no signature path is loaded.
+      # @return [Rigor::Environment]
+      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil)
+        resolved_paths = signature_paths || default_signature_paths(root)
+        loader = RbsLoader.new(libraries: libraries, signature_paths: resolved_paths)
+        new(rbs_loader: loader)
+      end
+
+      private
+
+      def default_signature_paths(root)
+        sig = Pathname(root) / DEFAULT_PROJECT_SIG_DIR
+        sig.directory? ? [sig] : []
+      end
     end
 
     # Resolves a constant name to a Rigor::Type::Nominal. Consults the

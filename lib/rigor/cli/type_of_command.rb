@@ -3,6 +3,7 @@
 require "optionparser"
 require "prism"
 
+require_relative "../environment"
 require_relative "../scope"
 require_relative "../source/node_locator"
 require_relative "../inference/fallback_tracer"
@@ -70,11 +71,21 @@ module Rigor
         return 1 if node.nil?
 
         tracer = options[:trace] ? Inference::FallbackTracer.new : nil
-        type = Scope.empty.type_of(node, tracer: tracer)
+        scope = Scope.empty(environment: project_environment(file))
+        type = scope.type_of(node, tracer: tracer)
         result = Result.new(file: file, line: line, column: column, node: node, type: type, tracer: tracer)
 
         TypeOfRenderer.new(out: @out).render(result, format: options.fetch(:format))
         0
+      end
+
+      # Builds a project-aware environment relative to the probed file.
+      # Project-RBS auto-detection roots at CWD today; future work will
+      # walk parent directories to find the enclosing `Gemfile`/`*.gemspec`
+      # so probes against files outside the current process's CWD still
+      # see the right `sig/` tree.
+      def project_environment(_file)
+        Environment.for_project
       end
 
       def file_exists?(file)

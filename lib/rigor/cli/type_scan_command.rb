@@ -3,7 +3,9 @@
 require "optionparser"
 require "prism"
 
+require_relative "../environment"
 require_relative "../inference/coverage_scanner"
+require_relative "../scope"
 require_relative "type_scan_renderer"
 require_relative "type_scan_report"
 
@@ -84,10 +86,20 @@ module Rigor
       end
 
       def scan_paths(paths, options)
-        scanner = Inference::CoverageScanner.new
+        scope = Scope.empty(environment: project_environment)
+        scanner = Inference::CoverageScanner.new(scope: scope)
         accumulator = ScanAccumulator.new
         paths.each { |path| scan_one(path, scanner, accumulator) }
         accumulator.to_report(paths, options)
+      end
+
+      # Builds a project-aware environment that auto-detects `<cwd>/sig`
+      # so calls scoped to the current project resolve through the
+      # local RBS tree. Phase 2a does not yet wire stdlib opt-in here;
+      # that lands when the configuration layer (`.rigor.yml`) gains an
+      # `rbs:` section.
+      def project_environment
+        Environment.for_project
       end
 
       def scan_one(path, scanner, accumulator)

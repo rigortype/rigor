@@ -158,6 +158,24 @@ RSpec.describe Rigor::CLI do
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
       expect(err).to include("past the end")
     end
+
+    it "auto-loads sig/ from the project root for constant resolution" do
+      Dir.chdir(tmpdir) do
+        FileUtils.mkdir_p("sig")
+        File.write("sig/cli_demo.rbs", <<~RBS)
+          class CliRbsDemoFixture
+            def name: () -> ::String
+          end
+        RBS
+        File.write("source.rb", "CliRbsDemoFixture\n")
+
+        status, out, err = run_cli("type-of", "source.rb:1:1")
+
+        expect(err).to eq("")
+        expect(status).to eq(0)
+        expect(out).to include("type:    CliRbsDemoFixture")
+      end
+    end
   end
 
   describe "type-scan" do
@@ -261,6 +279,24 @@ RSpec.describe Rigor::CLI do
       _status, out, _err = run_cli("help")
 
       expect(out).to include("type-scan")
+    end
+
+    it "auto-loads sig/ from the project root when scanning" do
+      Dir.chdir(tmpdir) do
+        FileUtils.mkdir_p("sig")
+        File.write("sig/scan_demo.rbs", <<~RBS)
+          class ScanRbsDemoFixture
+          end
+        RBS
+        File.write("source.rb", "ScanRbsDemoFixture\n")
+
+        status, out, _err = run_cli("type-scan", "source.rb")
+
+        expect(status).to eq(0)
+        # ScanRbsDemoFixture would be unrecognized without the project
+        # signature loader; with sig/ in scope it resolves cleanly.
+        expect(out).not_to match(%r{Prism::ConstantReadNode\s+\d+/\d+})
+      end
     end
   end
 end

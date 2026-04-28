@@ -52,7 +52,3 @@ The documents are organized so foundational definitions come first and specific 
 | [inference-budgets.md](inference-budgets.md) | Budget table, configuration, and boundary-contract behavior. |
 | [diagnostic-policy.md](diagnostic-policy.md) | Diagnostic identifier taxonomy, `Dynamic[T]` display rules, suppression markers. |
 | [implementation-expectations.md](implementation-expectations.md) | The engine-surface contract that downstream features depend on. |
-
-## Relationship to `docs/types.md`
-
-`docs/types.md` previously held a single-file draft of the type specification. The normative content has been split into the topical files in this directory. `docs/types.md` is retained as a redirect for the old path; future edits MUST update the topical files here.

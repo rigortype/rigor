@@ -1,0 +1,216 @@
+# Current Work — Inference Engine Checkpoint
+
+This document captures the state of the inference engine work-in-progress on
+`impl/scope-type-of`. It is a transient bookmark used to break a long
+implementation thread into reviewable chunks; the **normative** contracts and
+slice roadmap remain in
+[`docs/internal-spec/inference-engine.md`](internal-spec/inference-engine.md)
+and [`docs/adr/4-type-inference-engine.md`](adr/4-type-inference-engine.md). If
+this file disagrees with either of those, the spec/ADR binds and this file is
+out of date.
+
+## Branch and Commit Trail
+
+Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
+
+| Slice / Phase | Commit | One-line |
+| --- | --- | --- |
+| ADR + spec scaffold | `c0761cb` | ADR-4 and `inference-engine.md` introducing `Scope#type_of` |
+| Slice 1 | `45b5a8b` | Literal typer with `Scope#type_of` |
+| Slice 1 follow-up | `0ded72b` | `Rigor::AST::TypeNode` virtual-node infra |
+| Slice 1 follow-up | `1d20f4c` | `FallbackTracer` for fail-soft observability |
+| CLI probe | `5d6ff9c` | `rigor type-of FILE:LINE:COL` |
+| CLI probe | `08b9ee9` | `rigor type-scan PATH...` coverage report |
+| Slice 2 | `fd9793c` | Method dispatcher with constant-folding rule book |
+| Slice 2 follow-up | `91b6260` | Typer broadens to constants, containers, definitions, writes |
+| Slice 3 phase 1 | `a19ec1f` | Control-flow typing and `Scope#join` |
+| Slice 4 phase 1 | `996ab5c` | RBS-backed method dispatch (core only, first-overload-wins) |
+| Slice 4 phase 2a | `820cabb` | Project + stdlib RBS loading |
+| Slice 4 phase 2b | `3693e7e` | Class-method (singleton) dispatch + `Singleton[T]` |
+| Slice 4 phase 2c | `a152d45` | `Type#accepts` + overload-selecting dispatch |
+| Slice 4 phase 2d | `9a49b8a` | Generics instantiation through `Nominal#type_args` |
+| Slice 5 phase 1 | `e4b76bd` | `Tuple` and `HashShape` carriers + literal upgrades |
+| Slice 3 phase 2 | `aed00d0` | `StatementEvaluator` threading scope across statements |
+| Slice 3 phase 2 (CLI) | `84f2b01` | `type-of` and `type-scan` route through `ScopeIndexer` |
+| Slice 3 phase 2 (DefNode) | `fe2fe7e` | DefNode-aware scope builder (`MethodParameterBinder`) |
+
+## What is in Place Today
+
+### Public CLI surface
+
+- `rigor type-of FILE:LINE:COL` — probes `Scope#type_of` at a position and
+  prints the recognised node class plus the inferred type and its RBS
+  erasure. Routes through `ScopeIndexer` so locals bound earlier in the
+  file flow into the probed scope.
+- `rigor type-scan PATH...` — walks every Prism node in the given files and
+  reports per-node-class coverage of `Scope#type_of`. Supports `--format=json`
+  for tooling and `--threshold` for CI gating.
+- `rigor check`, `rigor init`, `rigor version`, `rigor help` — pre-existing.
+
+### Type model (carriers)
+
+`Rigor::Type::*` ships:
+
+- Lattice: `Top`, `Bot`, `Dynamic[T]`.
+- Nominal: `Nominal[Class, type_args]`, `Singleton[Class]`.
+- Literal: `Constant[v]`.
+- Composite: `Union[A, B, ...]`.
+- Shape (Slice 5 phase 1): `Tuple[T1, ..., Tn]`, `HashShape[{ k1 => T1, ... }]`.
+- Trinary: `Rigor::Trinary` (`yes`/`no`/`maybe`).
+- Acceptance result (Slice 4 phase 2c): `Rigor::Type::AcceptsResult`.
+
+Combinator factories (`Rigor::Type::Combinator`) enforce deterministic
+normalisation and are the only sanctioned way to construct types.
+
+### Inference engine (`Rigor::Inference::*`)
+
+- `ExpressionTyper` — pure dispatch from Prism nodes to types.
+- `MethodDispatcher` — `ConstantFolding` (Slice 2) over `RbsDispatch` (Slice 4)
+  with `OverloadSelector` (phase 2c) and generics instantiation (phase 2d).
+- `Acceptance` — shared `accepts(other, mode:)` logic across every type.
+- `RbsTypeTranslator` — translates `RBS::Types::*` to `Rigor::Type`,
+  including `Tuple`/`Record`/`Variable`.
+- `FallbackTracer` + `Fallback` — fail-soft observability.
+- `StatementEvaluator` — threads `[type, scope']` through statement-level
+  control flow (`if`/`unless`/`case`/`begin`/`while`/`and`/`or`, locals,
+  classes, modules, defs, singleton classes).
+- `MethodParameterBinder` — translates a `DefNode`'s parameter list into a
+  binding map driven by the surrounding class's RBS signature.
+- `ScopeIndexer` — builds a per-node scope index for the CLI to consume.
+- `CoverageScanner` — backs `type-scan`.
+
+### Environment
+
+- `Environment` — registry + RBS loader bundle.
+- `Environment::ClassRegistry` — small whitelist of well-known core classes.
+- `Environment::RbsLoader` — wraps `RBS::EnvironmentLoader`/`DefinitionBuilder`
+  with project/stdlib loading and lazy memoisation. Supports
+  `instance_method`, `singleton_method`, `class_type_param_names`.
+
+### Source helpers
+
+- `Source::NodeLocator` — `(line, column)` to deepest enclosing Prism node.
+- `Source::NodeWalker` — DFS pre-order over every Prism node.
+
+## Verification Status
+
+- **RSpec**: 513 examples, 0 failures (as of `fe2fe7e`).
+- **RuboCop**: 9 pre-existing offences in `references/steep/` submodule
+  files; 0 in Rigor product code.
+- **`rigor type-scan lib`**: 13.47 % unrecognised (1 838 / 13 650 nodes).
+  Top contributors:
+  - `Prism::CallNode` 802 / 2 289 (35.0 %)
+  - `Prism::ConstantReadNode` 623 / 861 (72.4 %)
+  - `Prism::ConstantPathNode` 411 / 412 (99.8 %)
+  - `Prism::MultiTargetNode` 2 / 2 (100.0 %)
+- **`rigor type-of` smoke probe**:
+  `class Integer; def divmod(other); other; end; end` — `other` reads as
+  `Float | Integer | Numeric | Rational` inside the body.
+
+## Known Boundaries (Deliberate, Not Bugs)
+
+These follow from the slice roadmap; each has a planned slice that lifts it.
+
+1. **Expression-interior scope threading**: `foo(x = 1)` and `[1, x = 2]`
+   do not propagate `x` to the post-scope. The StatementEvaluator does not
+   recurse into call arguments or array/hash element interiors.
+2. **Block parameter binding**: `Array#each { |elem| ... }` does not bind
+   `elem`. The DefNode-aware scope builder covers method parameters only;
+   `BlockNode` is the symmetric follow-up.
+3. **Truthy/nil narrowing**: `if x.nil?; ...; else; x.foo; end` does not
+   narrow `x` inside the else branch. This is Slice 6 territory.
+4. **Shape narrowing on dispatch**: `Tuple[Integer, String][0]` returns
+   the broad `Nominal[Array]#[]` result rather than `Integer`. This is the
+   Slice 5 phase 2 deliverable.
+5. **RBS interface / alias degradation**: types like `int` and `_ToS`
+   currently translate to `Dynamic[Top]`. Refining this would tighten
+   parameter bindings for many core methods (`Array#first(n)`, etc.).
+6. **No Rigor-authored RBS for itself**: `sig/rigor/**/*.rbs` is essentially
+   empty. The dominant `ConstantReadNode`/`ConstantPathNode`/`CallNode`
+   unrecognised mass on `type-scan lib` is calls and references against
+   Rigor's own classes; writing those signatures would move the metric
+   substantially.
+7. **Untyped writes to ivars / cvars / globals**: `@x = 1` writes are
+   typed but do not add a binding to a (nonexistent) ivar scope. Slice 7+.
+8. **Method-call return-type narrowing on receiver shape**: covered for
+   generics on `Nominal[T]`, not yet for narrowing through `Dynamic[T]`'s
+   static facet beyond the Slice 4 phase 2c overload selection.
+
+## Specs and Documentation Authoritative Pointers
+
+- Public type semantics: [`docs/type-specification/`](type-specification/).
+- Internal type-object contract: [`docs/internal-spec/internal-type-api.md`](internal-spec/internal-type-api.md).
+- Inference engine contract: [`docs/internal-spec/inference-engine.md`](internal-spec/inference-engine.md).
+- Decision records: [`docs/adr/`](adr/) (ADR-1 = type model, ADR-3 = type
+  representation, ADR-4 = inference engine).
+
+## Candidate Next Steps
+
+The picks below are ordered by my best estimate of how much they move the
+overall analyzer forward. Each one is a self-contained, reviewable slice on
+top of the current branch.
+
+### A. Author Rigor-side RBS for Rigor itself
+
+Write `sig/rigor/**/*.rbs` for the public surface of `Rigor::Type::*`,
+`Rigor::Trinary`, `Rigor::Inference::*`, `Rigor::Environment`, etc. The
+project loader (Slice 4 phase 2a) already picks `sig/` up automatically.
+
+- **type-scan impact**: high — every unrecognised
+  `ConstantReadNode`/`ConstantPathNode`/`CallNode` against a `Rigor::*`
+  receiver would resolve. Plausible to push `lib/` from 13.47 % to single
+  digits.
+- **engine impact**: low (no new code paths) but big precision wins for
+  any future analysis on Rigor itself.
+- **risk**: documentation-flavoured work, mostly mechanical.
+
+### B. Slice 5 phase 2 — Shape-aware dispatch
+
+Make `Tuple#[Integer]`, `Tuple#first`, `HashShape#fetch(:k)`, and
+destructuring `a, b = tuple` return precise members rather than the
+generic `Array#[]`/`Hash#fetch` return types.
+
+- **type-scan impact**: medium on `lib/`, large on
+  shape-heavy code.
+- **engine impact**: medium — adds Tuple/HashShape-aware overloads to
+  `MethodDispatcher`.
+- **risk**: low; the Shape carriers and `Acceptance` plumbing are in
+  place from Slice 5 phase 1.
+
+### C. BlockNode parameter binding
+
+Symmetric to the DefNode-aware scope builder. Extend the
+`StatementEvaluator` catalogue with `BlockNode`, build a fresh
+block-entry scope, and bind block parameters from the call-site receiver
+(e.g., `Array[Integer]#each { |elem| ... }` binds `elem: Integer`).
+
+- **type-scan impact**: medium — the dominant unrecognised pattern in
+  `lib/rigor/inference/expression_typer.rb` and similar files is block
+  bodies that read parameters.
+- **engine impact**: medium — needs to talk to the dispatcher to learn
+  the block's expected parameter types.
+- **risk**: medium; requires a clean handshake between the dispatcher
+  and the StatementEvaluator about block argument types.
+
+### D. Slice 6 — Truthiness and `nil` narrowing
+
+`if x; ...; end` narrows `x` to its non-nil/non-false fragment inside the
+then branch. `if x.nil?; ...; else; ...; end` is the cleanest form.
+This is the first true *narrowing* feature and unlocks a long tail of
+real-world precision.
+
+- **type-scan impact**: small (most narrowing happens on already-typed
+  receivers; the unrecognised count is dominated by other things).
+- **engine impact**: large architecturally — introduces the narrowing
+  predicate machinery the engine has been deferring since Slice 1.
+- **risk**: medium-high; the interaction with `Scope#join` and
+  nil-injection at branch merges needs care.
+
+### Recommended ordering
+
+If precision and tooling experience are the priority: **A → C → B → D**.
+
+If pushing the engine architecture forward is the priority: **D → B → C → A**.
+
+A is the only one that is "just write down what's already true" rather
+than implementing new analyzer behaviour. B/C/D each enlarge the engine.

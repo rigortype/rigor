@@ -146,4 +146,62 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type).to equal(Rigor::Type::Combinator.untyped)
     end
   end
+
+  describe "fallback tracer" do
+    let(:tracer) { Rigor::Inference::FallbackTracer.new }
+
+    it "records nothing when no fallback occurs" do
+      scope.type_of(parse_expression("42"), tracer: tracer)
+      expect(tracer).to be_empty
+    end
+
+    it "records a Prism-family fallback for unrecognised Prism nodes" do
+      node = parse_expression("foo()")
+      type = scope.type_of(node, tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.size).to eq(1)
+      event = tracer.events.first
+      expect(event.node_class).to eq(node.class)
+      expect(event.family).to eq(:prism)
+      expect(event.inner_type).to equal(Rigor::Type::Combinator.untyped)
+      expect(event.location).not_to be_nil
+    end
+
+    it "records a virtual-family fallback for unknown synthetic nodes" do
+      unknown_node_class = Class.new do
+        include Rigor::AST::Node
+        def initialize
+          freeze
+        end
+      end
+      type = scope.type_of(unknown_node_class.new, tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.size).to eq(1)
+      event = tracer.events.first
+      expect(event.family).to eq(:virtual)
+      expect(event.location).to be_nil
+    end
+
+    it "records nested fallbacks discovered while traversing children" do
+      # ArrayNode is recognised in slice 1; its element CallNode is not.
+      node = parse_expression("[foo(), 1]")
+      scope.type_of(node, tracer: tracer)
+      expect(tracer.kinds).to include(Prism::CallNode)
+    end
+
+    it "does not change the type returned regardless of tracer presence" do
+      node = parse_expression("foo()")
+      with_tracer = scope.type_of(node, tracer: tracer)
+      without_tracer = scope.type_of(node)
+      expect(with_tracer).to eq(without_tracer)
+    end
+
+    it "leaves recognised TypeNode synthetic nodes untraced" do
+      type_node = Rigor::AST::TypeNode.new(Rigor::Type::Combinator.constant_of(1))
+      scope.type_of(type_node, tracer: tracer)
+      expect(tracer).to be_empty
+    end
+  end
 end

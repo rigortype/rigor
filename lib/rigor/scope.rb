@@ -40,8 +40,8 @@ module Rigor
       @locals
     end
 
-    def type_of(node)
-      Inference::ExpressionTyper.new(scope: self).type_of(node)
+    def type_of(node, tracer: nil)
+      Inference::ExpressionTyper.new(scope: self, tracer: tracer).type_of(node)
     end
 
     def ==(other)

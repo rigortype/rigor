@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "../ast"
+require_relative "fallback"
 
 module Rigor
   module Inference
@@ -19,10 +20,14 @@ module Rigor
     # Slice 1 recognises literal expressions, local-variable reads/writes,
     # shallow Array literals, and Rigor::AST::TypeNode. Every other node
     # falls back to Dynamic[Top] per the fail-soft policy in
-    # docs/internal-spec/inference-engine.md.
+    # docs/internal-spec/inference-engine.md. The optional tracer is a
+    # Rigor::Inference::FallbackTracer (or any object answering
+    # #record_fallback) that receives a Fallback event for each fallback;
+    # the tracer MUST NOT change the return value of type_of.
     class ExpressionTyper
-      def initialize(scope:)
+      def initialize(scope:, tracer: nil)
         @scope = scope
+        @tracer = tracer
       end
 
       def type_of(node)
@@ -43,13 +48,13 @@ module Rigor
         when Prism::StatementsNode then statements_type_for(node)
         when Prism::ProgramNode then statements_type_for(node.statements)
         else
-          dynamic_top
+          fallback_for(node, family: :prism)
         end
       end
 
       private
 
-      attr_reader :scope
+      attr_reader :scope, :tracer
 
       def dynamic_top
         Type::Combinator.untyped
@@ -59,8 +64,27 @@ module Rigor
         case node
         when AST::TypeNode then node.type
         else
-          dynamic_top
+          fallback_for(node, family: :virtual)
         end
+      end
+
+      def fallback_for(node, family:)
+        inner = dynamic_top
+        record_fallback(node, family: family, inner_type: inner)
+        inner
+      end
+
+      def record_fallback(node, family:, inner_type:)
+        return unless tracer
+
+        location = node.respond_to?(:location) ? node.location : nil
+        event = Fallback.new(
+          node_class: node.class,
+          location: location,
+          family: family,
+          inner_type: inner_type
+        )
+        tracer.record_fallback(event)
       end
 
       def symbol_type_for(node)

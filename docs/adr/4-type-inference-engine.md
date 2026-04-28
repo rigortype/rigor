@@ -107,6 +107,7 @@ Code surface added:
 - `Rigor::Scope.empty(environment:)`, `#with_local`, `#local`, `#type_of`.
 - `Rigor::Inference::ExpressionTyper#type_of(node, scope)` for the supported nodes.
 - `Rigor::AST::Node` marker module and `Rigor::AST::TypeNode` synthetic node, dispatched alongside Prism nodes by the typer.
+- `Rigor::Inference::Fallback` value object and `Rigor::Inference::FallbackTracer` observer, threaded through `Scope#type_of(node, tracer: ...)`. Records every fail-soft fallback so coverage regressions are observable from Slice 1 onward; later slices add `record_dispatch_miss`, `record_budget_cutoff`, etc. on the same tracer.
 
 Prism nodes recognised in Slice 1:
 

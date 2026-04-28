@@ -45,15 +45,41 @@ State changes MUST be expressed as new scopes returned from explicit transition 
 
 ## Fail-Soft Policy
 
-When the typer encounters a Prism node it does not yet recognise, `Scope#type_of(node)` MUST return `Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.top)` — the canonical `Dynamic[Top]` representation of "untyped, unchecked".
+When the typer encounters a node it does not yet recognise — either a Prism node whose class the engine has not yet wired in or a `Rigor::AST::Node` of an unknown kind — `Scope#type_of(node)` MUST return `Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.top)`, the canonical `Dynamic[Top]` representation of "untyped, unchecked".
 
 The fail-soft path MUST satisfy:
 
-- It MUST NOT raise. Callers MAY rely on `Scope#type_of` for any expression node Prism produces.
+- It MUST NOT raise. Callers MAY rely on `Scope#type_of` for any expression node Prism produces and for any synthetic node that includes `Rigor::AST::Node`.
 - It MUST preserve the dynamic-origin algebra in [`value-lattice.md`](../type-specification/value-lattice.md). Downstream queries against the returned type MUST observe the same gradual-typing rules that any other `Dynamic[T]` would.
-- It MUST be observable to instrumentation. Implementations MAY expose a side channel that records the encountered node kind so coverage regressions can be detected. The channel MUST NOT change the return value of `type_of`.
+- It MUST be observable to instrumentation through the *Fallback Tracer* contract below.
 
 When a slice introduces support for a node kind, the fail-soft path for that kind MUST be removed in the same slice. The typer MUST NOT keep a fallback that masks an incorrectly-typed node.
+
+### Fallback Tracer
+
+`Rigor::Scope#type_of` MUST accept an optional `tracer:` keyword argument. When `tracer` is `nil` (the default), the engine MUST behave as if no tracer were attached: no events MUST be recorded and no allocations beyond those needed to produce the return value MUST be made on the fallback path.
+
+When `tracer` is non-`nil`, every fail-soft fallback (both Prism and synthetic) MUST be recorded into the tracer through a single method call:
+
+```ruby
+tracer.record_fallback(event)
+```
+
+`event` MUST be a `Rigor::Inference::Fallback` value object with the following structurally-equal fields:
+
+- `node_class` — the Ruby `Class` of the node that triggered the fallback (e.g. `Prism::CallNode`, `Rigor::AST::SomeFutureNode`).
+- `location` — the Prism source location object for real Prism nodes, or `nil` for synthetic nodes that do not expose a location.
+- `family` — the symbol `:prism` for real Prism nodes and `:virtual` for nodes that include `Rigor::AST::Node`.
+- `inner_type` — the `Rigor::Type` returned to the caller. This is `Dynamic[Top]` today; later slices MAY enrich the inner type while keeping the fallback observable.
+
+The tracer protocol exposed by `Rigor::Inference::FallbackTracer` MUST satisfy:
+
+- `record_fallback(event)` MUST accept any `Rigor::Inference::Fallback` and reject other arguments.
+- `events` MUST return a frozen, ordered snapshot of recorded events.
+- `empty?` and `size` MUST report the current number of recorded events.
+- `each` MUST iterate the recorded events in insertion order; the tracer MUST `include Enumerable`.
+
+The tracer is the ONLY mutable state observable from `Scope#type_of`; it MUST NOT change the return value of `type_of` and MUST NOT be exposed through `Rigor::Scope` accessors. Implementations MAY add additional `record_*` methods (for example `record_dispatch_miss` in Slice 3, `record_budget_cutoff` in Slice 5) so multiple event families share a single tracer; new methods MUST follow the immutable-event-value-object pattern above.
 
 ## Virtual Nodes
 
@@ -114,9 +140,10 @@ Two scopes that compare structurally equal MUST produce structurally equal resul
 
 The contracts in this document are stable within a major version. The following are additionally stable:
 
-- The `Scope#type_of` shape (input types, return type, purity).
+- The `Scope#type_of` shape (input types, return type, purity, optional `tracer:` keyword).
 - The `Scope.empty(environment:)` constructor signature.
 - The fail-soft policy and its `Dynamic[Top]` return value.
+- The Fallback Tracer protocol (`record_fallback`, `events`, `empty?`, `size`, `each`) and the `Rigor::Inference::Fallback` value object.
 - The minimum class-registry surface listed above.
 - The `Rigor::AST::Node` marker module and the existence of `Rigor::AST::TypeNode` with the round-trip behaviour above.
 - The method-dispatch boundary: method-summary tables MUST NOT live on `Rigor::Type` instances.

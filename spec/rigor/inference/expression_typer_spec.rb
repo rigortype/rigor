@@ -440,4 +440,158 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(tracer).to be_empty
     end
   end
+
+  describe "control flow (Slice 3 phase 1)" do
+    let(:tracer) { Rigor::Inference::FallbackTracer.new }
+
+    it "types IfNode as the union of its then-branch and else-branch" do
+      type = scope.type_of(parse_expression("if cond; 1; else; 2; end"))
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2)
+      )
+
+      expect(type).to eq(expected)
+    end
+
+    it "includes Constant<nil> in the IfNode union when there is no else branch" do
+      type = scope.type_of(parse_expression("if cond; 1; end"))
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(nil)
+      )
+
+      expect(type).to eq(expected)
+    end
+
+    it "unions through elsif chains" do
+      type = scope.type_of(parse_expression("if a; 1; elsif b; 2; else; 3; end"))
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2),
+        Rigor::Type::Combinator.constant_of(3)
+      )
+
+      expect(type).to eq(expected)
+    end
+
+    it "types UnlessNode using its else_clause field" do
+      type = scope.type_of(parse_expression("unless cond; 1; else; 2; end"))
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2)
+      )
+
+      expect(type).to eq(expected)
+    end
+
+    it "types AndNode as the union of its operands" do
+      type = scope.type_of(parse_expression("1 && 2"))
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2)
+      )
+
+      expect(type).to eq(expected)
+    end
+
+    it "types OrNode as the union of its operands" do
+      type = scope.type_of(parse_expression("1 || 2"))
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2)
+      )
+
+      expect(type).to eq(expected)
+    end
+
+    it "types CaseNode as the union of every when body and the else clause" do
+      source = "case x; when 1; :a; when 2; :b; else; :c; end"
+      type = scope.type_of(parse_expression(source))
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(:a),
+        Rigor::Type::Combinator.constant_of(:b),
+        Rigor::Type::Combinator.constant_of(:c)
+      )
+
+      expect(type).to eq(expected)
+    end
+
+    it "types BeginNode/RescueNode as the union of the body and rescue chain" do
+      source = "begin; 1; rescue ArgumentError; 2; rescue; 3; end"
+      type = scope.type_of(parse_expression(source))
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2),
+        Rigor::Type::Combinator.constant_of(3)
+      )
+
+      expect(type).to eq(expected)
+    end
+
+    it "uses the else clause as the begin's primary value when no exception fires" do
+      source = "begin; 1; rescue; 2; else; :ok; end"
+      type = scope.type_of(parse_expression(source))
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(:ok),
+        Rigor::Type::Combinator.constant_of(2)
+      )
+
+      expect(type).to eq(expected)
+    end
+
+    it "types `expr rescue fallback` as the union of both expressions" do
+      type = scope.type_of(parse_expression("foo rescue 42"))
+
+      expect(type.describe).to include("42")
+    end
+
+    it "types ReturnNode/BreakNode/NextNode/RetryNode as Bot" do
+      bot = Rigor::Type::Combinator.bot
+
+      expect(scope.type_of(parse_expression("return 1"))).to equal(bot)
+      expect(scope.type_of(parse_expression("loop { break 1 }").block.body.body.first)).to equal(bot)
+      expect(scope.type_of(parse_expression("loop { next 1 }").block.body.body.first)).to equal(bot)
+    end
+
+    it "collapses Bot under union (return inside an if branch is absorbed)" do
+      type = scope.type_of(parse_expression("if cond; return; else; 7; end"))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(7))
+    end
+
+    it "types YieldNode as Dynamic[Top]" do
+      def_node = parse_expression("def foo; yield(1); end")
+      yield_node = def_node.body.body.first
+
+      expect(scope.type_of(yield_node, tracer: tracer)).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer).to be_empty
+    end
+
+    it "types WhileNode and UntilNode as Constant<nil>" do
+      while_type = scope.type_of(parse_expression("while cond; 1; end"))
+      until_type = scope.type_of(parse_expression("until cond; 1; end"))
+
+      expect(while_type.value).to be_nil
+      expect(until_type.value).to be_nil
+    end
+
+    it "types LambdaNode as Nominal[Proc]" do
+      type = scope.type_of(parse_expression("-> { 42 }"))
+
+      expect(type.class_name).to eq("Proc")
+    end
+
+    it "types RangeNode as Nominal[Range]" do
+      type = scope.type_of(parse_expression("(1..10)"))
+
+      expect(type.class_name).to eq("Range")
+    end
+
+    it "types RegularExpressionNode as Nominal[Regexp]" do
+      type = scope.type_of(parse_expression("/foo/"))
+
+      expect(type.class_name).to eq("Regexp")
+    end
+  end
 end

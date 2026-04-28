@@ -129,7 +129,42 @@ module Rigor
         Prism::NoKeywordsParameterNode => :type_of_non_value,
         Prism::ImplicitRestNode => :type_of_non_value,
         Prism::BlockNode => :type_of_dynamic_top,
-        Prism::SplatNode => :type_of_non_value
+        Prism::SplatNode => :type_of_non_value,
+        # Control flow (Slice 3 phase 1): branch types are unioned, jumps
+        # type as Bot, loops type as Constant[nil].
+        Prism::IfNode => :type_of_if,
+        Prism::UnlessNode => :type_of_unless,
+        Prism::ElseNode => :type_of_else,
+        Prism::AndNode => :type_of_and_or,
+        Prism::OrNode => :type_of_and_or,
+        Prism::CaseNode => :type_of_case,
+        Prism::CaseMatchNode => :type_of_case,
+        Prism::WhenNode => :type_of_when_or_in,
+        Prism::InNode => :type_of_when_or_in,
+        Prism::BeginNode => :type_of_begin,
+        Prism::RescueNode => :type_of_rescue,
+        Prism::RescueModifierNode => :type_of_rescue_modifier,
+        Prism::EnsureNode => :type_of_ensure,
+        Prism::ReturnNode => :type_of_jump,
+        Prism::BreakNode => :type_of_jump,
+        Prism::NextNode => :type_of_jump,
+        Prism::RetryNode => :type_of_jump,
+        Prism::RedoNode => :type_of_jump,
+        Prism::YieldNode => :type_of_dynamic_top,
+        Prism::SuperNode => :type_of_dynamic_top,
+        Prism::ForwardingArgumentsNode => :type_of_non_value,
+        Prism::WhileNode => :type_of_loop,
+        Prism::UntilNode => :type_of_loop,
+        Prism::ForNode => :type_of_dynamic_top,
+        Prism::DefinedNode => :type_of_dynamic_top,
+        Prism::MatchPredicateNode => :type_of_dynamic_top,
+        Prism::MatchRequiredNode => :type_of_dynamic_top,
+        Prism::MatchWriteNode => :type_of_dynamic_top,
+        # Literal containers
+        Prism::LambdaNode => :type_of_lambda,
+        Prism::RangeNode => :type_of_range,
+        Prism::RegularExpressionNode => :type_of_regexp,
+        Prism::InterpolatedRegularExpressionNode => :type_of_regexp
       }.freeze
       private_constant :PRISM_DISPATCH
 
@@ -276,6 +311,153 @@ module Rigor
       # runtime; the constant carrier captures that exactly.
       def type_of_nil_value(_node)
         Type::Combinator.constant_of(nil)
+      end
+
+      # `if c; t; (elsif c2; ...; )* else; e; end`. Prism nests `elsif`
+      # branches as `IfNode#subsequent`. Slice 3 phase 1 types both
+      # branches in the receiver scope and returns their union; scope
+      # rebinding is the StatementEvaluator's job (Slice 3 phase 2).
+      # Without an else clause the branch's implicit value is nil, which
+      # is included in the union.
+      def type_of_if(node)
+        then_type = statements_or_nil(node.statements)
+        else_type =
+          if node.subsequent
+            type_of(node.subsequent)
+          else
+            Type::Combinator.constant_of(nil)
+          end
+        Type::Combinator.union(then_type, else_type)
+      end
+
+      # `unless c; t; else; e; end`. Prism uses `else_clause` here (no
+      # `elsif` chain).
+      def type_of_unless(node)
+        then_type = statements_or_nil(node.statements)
+        else_type =
+          if node.else_clause
+            type_of(node.else_clause)
+          else
+            Type::Combinator.constant_of(nil)
+          end
+        Type::Combinator.union(then_type, else_type)
+      end
+
+      def type_of_else(node)
+        statements_or_nil(node.statements)
+      end
+
+      # `a && b` and `a || b` short-circuit. Without a truthy/falsy
+      # narrowing model (Slice 6), the result of either side is reachable
+      # so the type is the union of the operand types.
+      def type_of_and_or(node)
+        Type::Combinator.union(type_of(node.left), type_of(node.right))
+      end
+
+      def type_of_case(node)
+        branch_types = node.conditions.map { |branch| type_of(branch) }
+        else_type =
+          if node.else_clause
+            type_of(node.else_clause)
+          else
+            Type::Combinator.constant_of(nil)
+          end
+        Type::Combinator.union(*branch_types, else_type)
+      end
+
+      # `when` clauses for `case` and `in` clauses for `case ... in` have
+      # the same body shape; we reuse one handler for both Prism node
+      # classes.
+      def type_of_when_or_in(node)
+        statements_or_nil(node.statements)
+      end
+
+      # `begin; body; rescue R => e; r1; rescue; r2; else; e; ensure; f; end`.
+      # The result is the union of every value-producing branch: the body
+      # (or the else-clause when present, since it replaces the body's
+      # value when no exception fires), plus each rescue body in the
+      # rescue chain. The ensure clause runs but does not contribute to
+      # the begin's value.
+      def type_of_begin(node)
+        rescue_clause = node.rescue_clause
+        else_clause = node.else_clause
+
+        primary_type =
+          if else_clause
+            type_of(else_clause)
+          elsif node.statements
+            statements_or_nil(node.statements)
+          else
+            Type::Combinator.constant_of(nil)
+          end
+
+        rescue_types = rescue_chain_types(rescue_clause)
+        Type::Combinator.union(primary_type, *rescue_types)
+      end
+
+      def rescue_chain_types(rescue_node)
+        types = []
+        current = rescue_node
+        while current
+          types << statements_or_nil(current.statements)
+          current = current.subsequent
+        end
+        types
+      end
+
+      def type_of_rescue(node)
+        statements_or_nil(node.statements)
+      end
+
+      # `expr rescue fallback` is RescueModifierNode in Prism. The result
+      # is `expr`'s type when no exception is raised and `fallback`'s
+      # type otherwise; both paths are reachable, so the result is their
+      # union.
+      def type_of_rescue_modifier(node)
+        Type::Combinator.union(type_of(node.expression), type_of(node.rescue_expression))
+      end
+
+      def type_of_ensure(node)
+        statements_or_nil(node.statements)
+      end
+
+      # `return`, `break`, `next`, `retry`, and `redo` all transfer
+      # control instead of producing a value. Their type is Bot, the
+      # empty type that absorbs cleanly under union (e.g.
+      # `Constant[1] | Bot == Constant[1]`), so the surrounding
+      # control-flow handlers collapse correctly when one branch jumps.
+      def type_of_jump(_node)
+        Type::Combinator.bot
+      end
+
+      # `while` and `until` loops produce nil unless interrupted by
+      # `break VALUE`, which Slice 3 phase 1 does not yet model.
+      # Returning Constant[nil] is safe and matches Ruby semantics for
+      # the common case.
+      def type_of_loop(_node)
+        Type::Combinator.constant_of(nil)
+      end
+
+      def type_of_lambda(_node)
+        Type::Combinator.nominal_of(Proc)
+      end
+
+      def type_of_range(_node)
+        Type::Combinator.nominal_of(Range)
+      end
+
+      def type_of_regexp(_node)
+        Type::Combinator.nominal_of(Regexp)
+      end
+
+      # Helper for the many control-flow handlers that read a body
+      # `Prism::StatementsNode` or treat its absence as nil. Note that
+      # Prism uses nil (rather than an empty `StatementsNode`) for
+      # missing bodies in many node kinds.
+      def statements_or_nil(statements_node)
+        return Type::Combinator.constant_of(nil) if statements_node.nil?
+
+        statements_type_for(statements_node)
       end
 
       def type_of_virtual(node)

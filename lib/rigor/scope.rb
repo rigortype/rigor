@@ -13,7 +13,7 @@ module Rigor
   #
   # See docs/internal-spec/inference-engine.md for the binding contract.
   class Scope
-    attr_reader :environment
+    attr_reader :environment, :locals
 
     class << self
       def empty(environment: Environment.default)
@@ -36,12 +36,29 @@ module Rigor
       self.class.new(environment: environment, locals: new_locals)
     end
 
-    def locals
-      @locals
-    end
-
     def type_of(node, tracer: nil)
       Inference::ExpressionTyper.new(scope: self, tracer: tracer).type_of(node)
+    end
+
+    # Joins this scope with another at a control-flow merge point. The
+    # joined scope is bound to every local that BOTH branches bind, with
+    # the type widened to the union of both sides. Names bound in only
+    # one branch are dropped from the joined scope; the eventual
+    # statement-level evaluator (Slice 3 phase 2) is responsible for
+    # nil-injecting half-bound names where the language semantics demand
+    # it. The two scopes MUST share the same Environment.
+    def join(other)
+      raise ArgumentError, "join requires a Rigor::Scope, got #{other.class}" unless other.is_a?(Scope)
+
+      unless environment.equal?(other.environment)
+        raise ArgumentError, "join requires both scopes to share the same Environment"
+      end
+
+      shared = locals.keys & other.locals.keys
+      joined_locals = shared.to_h do |name|
+        [name, Type::Combinator.union(locals[name], other.locals[name])]
+      end
+      self.class.new(environment: environment, locals: joined_locals.freeze)
     end
 
     def ==(other)

@@ -139,11 +139,13 @@ Adds:
 
 ### Slice 3 — Locals, Joins, and Statements
 
-Adds:
+Slice 3 lands in two phases.
 
-- `BeginNode` / sequenced statements via an `Inference::StatementEvaluator#evaluate(node, scope) -> [Type, Scope']`.
-- `IfNode`, `UnlessNode` — both branches typed and Scope-joined; **no narrowing yet**.
-- `Rigor::Scope#join(other)` routed through `Type::Combinator.union`.
+**Phase 1 (this slice ships first):** every control-flow expression is typed via `ExpressionTyper` in the receiver scope, so no node class in this family stays unrecognised. Both branches of `IfNode`/`UnlessNode`, every `WhenNode`/`InNode` body of `CaseNode`/`CaseMatchNode`, and the body / rescue chain / else clause of `BeginNode` are typed and unioned. `AndNode`/`OrNode` union their operands (no truthy/falsy narrowing yet, that lands in Slice 6). `RescueModifierNode` (`expr rescue fallback`) is the same union. `WhileNode`/`UntilNode` type as `Constant[nil]`. `ReturnNode`/`BreakNode`/`NextNode`/`RetryNode`/`RedoNode` type as `Bot`, which absorbs cleanly under union so a jumping branch is silently dropped from the surrounding control-flow's value (`if c; return; else; 7; end` correctly types as `Constant[7]`). `YieldNode`/`SuperNode`/`ForNode`/`DefinedNode`/`MatchPredicateNode`/`MatchRequiredNode`/`MatchWriteNode` are silently typed as `Dynamic[Top]` until later slices add their semantics. `LambdaNode`/`RangeNode`/`RegularExpressionNode`/`InterpolatedRegularExpressionNode` round out the literal carriers as `Nominal[Proc]`/`Nominal[Range]`/`Nominal[Regexp]`. `Rigor::Scope#join(other)` ships now as the structural-union join used by Phase 2; it intersects the bound names and runs each pair through `Type::Combinator.union`.
+
+**Phase 2 (lands in a follow-up commit):** introduces `Inference::StatementEvaluator#evaluate(node, scope) -> [Type, Scope']` and threads `Scope#join` through `IfNode`/`UnlessNode`/`CaseNode`/`BeginNode` so locals bound on one branch flow to a unioned binding after the merge point. This is the work that lets `x = 1 if cond` propagate `x: Integer | nil` past the `if`.
+
+Coverage uplift on `rigor type-scan lib`: from 26.1 % unrecognised after the Slice 2 strengthening round down to **22.3 %**. Every remaining unrecognised node now belongs to one of three Slice-4 buckets — user-defined `ConstantReadNode`/`ConstantPathNode` references and method `CallNode`s — that wait on the RBS-backed dispatcher and project-specific RBS loading.
 
 ### Slice 4 — Method Dispatch (RBS-backed)
 

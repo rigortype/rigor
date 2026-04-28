@@ -38,6 +38,7 @@ State changes MUST be expressed as new scopes returned from explicit transition 
 - `Rigor::Scope.empty(environment:)` — constructs a scope with no local bindings, attached to a `Rigor::Environment`.
 - `Rigor::Scope#with_local(name, type)` — returns a new scope identical to the receiver except that `name` is bound to `type`.
 - `Rigor::Scope#local(name)` — returns the bound `Rigor::Type` or `nil` if `name` is not bound.
+- `Rigor::Scope#join(other)` — returns a new scope at a control-flow merge point. Implementations MUST require the two scopes to share the same `Environment`. The joined scope MUST be bound to every name that BOTH receivers bind; for each such name the joined type MUST be `Type::Combinator.union(self.local(name), other.local(name))`. Names bound in only one receiver MUST be dropped from the joined scope; nil-injection of half-bound names is the responsibility of the statement-level evaluator (see Slice 3 in [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md)), not of `#join`.
 
 `Rigor::Scope` MUST share underlying data structurally where useful. Two scopes that share a parent and differ in one binding MAY share the storage of all other bindings; this is an implementation detail and not part of the contract.
 
@@ -157,6 +158,7 @@ The contracts in this document are stable within a major version. The following 
 
 - The `Scope#type_of` shape (input types, return type, purity, optional `tracer:` keyword).
 - The `Scope.empty(environment:)` constructor signature.
+- The `Scope#join(other)` semantics: same-environment requirement, intersection of bound names, union of types.
 - The fail-soft policy and its `Dynamic[Top]` return value.
 - The Fallback Tracer protocol (`record_fallback`, `events`, `empty?`, `size`, `each`) and the `Rigor::Inference::Fallback` value object.
 - The minimum class-registry surface listed above.

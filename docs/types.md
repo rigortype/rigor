@@ -247,6 +247,18 @@ The pre-plugin purity policy controls how method-call results are remembered or 
 - A configuration switch makes the default look more like PHPStan's "value-returning is pure unless declared impure" policy for projects that want stronger narrowing across repeated calls. The switch flips the default but never overrides explicit `pure` or mutation declarations.
 - `pure` combined with any receiver-mutation, argument-mutation, or fact-invalidation effect is a contract conflict, as already specified in the `RBS::Extended` merge rules.
 
+The first user-visible milestone (v1) ships built-in mutation, purity, and call-timing summaries for a fixed set of core and stdlib classes. The covered set is `Array`, `Hash`, `String`, `Set`, `IO`, `StringIO`, `File`, `Tempfile`, `Pathname`, and `Logger`. Each summary records:
+
+- per-method receiver-mutation status, argument-mutation status, and fact-invalidation effect;
+- per-method block call timing using the categories above;
+- per-method purity declaration where it can be made without overpromising.
+
+Classes outside this set follow the impure-by-default policy until ordinary RBS, `RBS::Extended`, or plugin facts say otherwise. Rigor does not silently assume purity or mutation behavior for them.
+
+The v1.1 roadmap extends coverage to additional core classes (`Numeric` and its descendants, `Symbol`, `Range`, `Regexp`, `Proc`, `Method`, `Time`, `Date`, `DateTime`), broadly used stdlib (`Date`, `JSON`, `URI`, `OpenStruct`, `Forwardable`, `Comparable`-bearing classes that need explicit mutation summaries), and selected metaprogramming-adjacent core APIs (`Module`, `Class`, `BasicObject`). Each addition ships behind a feature flag so v1 behavior is not perturbed as the larger surface lands.
+
+Built-in mutation summaries are not a closed list. New entries may be added in any minor release as long as their addition does not change the meaning of code that does not call them; the published roadmap is a planning aid, not a contract.
+
 ## RBS-Compatible Types
 
 Rigor supports every type form documented by RBS syntax.
@@ -392,16 +404,45 @@ The better model is:
 - A method that only calls stream capability methods should be inferred as requiring the corresponding object shape or named interface, not the whole nominal `IO` type.
 - A method that calls `IO`-specific members such as file-descriptor operations should require `IO` or a more specific file-descriptor-backed role.
 
-Rigor should ship an opinionated core catalog of common standard-library capability roles rather than leaving every role to external plugins. The initial catalog should be small and Ruby-shaped, with roles such as readable stream, writable stream, rewindable stream, seekable stream, closable, enumerable, callable, and file-descriptor-backed. Plugins may add framework roles, additional conformance facts, role-specific exclusions, and `maybe` conformance, but they should not silently replace the core role definitions.
+Rigor should ship an opinionated core catalog of common standard-library capability roles rather than leaving every role to external plugins. The catalog reuses existing RBS-defined interfaces wherever Ruby and the standard library already provide them, and adds a small set of Rigor-specific roles only where existing interfaces are missing or would conflate distinct capabilities.
+
+Reused RBS interfaces (matched by their existing RBS shape, not redefined by Rigor):
+
+| Interface | Use |
+|---|---|
+| `_Each[T]` | Enumerable iteration over `T` |
+| `_Reader` | Stream-like read access |
+| `_Writer` | Stream-like write access |
+| `_ToS` | Implicit string conversion through `to_s` |
+| `_ToStr` | Explicit string coercion through `to_str` |
+| `_ToInt` | Explicit integer coercion through `to_int` |
+| `_ToProc` | Block conversion through `to_proc` |
+| `_ToHash[K, V]` | Hash coercion through `to_hash` |
+| `_ToA[T]` | Array conversion through `to_a` |
+| `_ToAry[T]` | Strict array coercion through `to_ary` |
+| `Enumerable[T]` | Broad collection protocol, treated as a nominal interface for role matching |
+| `Comparable` | Ordering protocol, treated as a nominal interface for role matching |
+
+Rigor-specific roles added in the first milestone, each shipped with an explicit RBS interface in Rigor's bundled signatures:
+
+| Role | Purpose | Required members |
+|---|---|---|
+| `_RewindableStream` | Stream-like objects that can be replayed from the start | `read`, `rewind` |
+| `_ClosableStream` | Stream-like objects whose lifetime can be closed | `close`, `closed?` |
+| `_FileDescriptorBacked` | Real OS-backed streams that justify diagnostics requiring an actual `IO` | `fileno` |
+| `_Callable[**A, R]` | Anything that responds to `call`, distinct from `_ToProc` | `call(*A) -> R` |
+
+Plugins may add framework roles, additional conformance facts, role-specific exclusions, and `maybe` conformance, but they cannot silently replace either the reused RBS interfaces or the Rigor-specific roles in this catalog.
 
 The role names and method signatures below are illustrative, not final standard-library signatures:
 
 ```rbs
-interface _ReadableStream
+interface _Reader
   def read: (*untyped) -> String?
 end
 
 interface _RewindableStream
+  def read: (*untyped) -> String?
   def rewind: () -> untyped
 end
 ```
@@ -411,13 +452,13 @@ def slurp(stream)
   stream.rewind
   stream.read
 end
-# Inferred requirement: _ReadableStream & _RewindableStream
+# Inferred requirement: _RewindableStream
 # `IO` and `StringIO` can both satisfy that requirement if their signatures match.
 ```
 
 This also avoids comparing total method sets. Structural subtyping asks whether a value provides the target role's required members; it does not require the source object and target object to expose the same complete surface.
 
-Explicit declarations still matter. If an external RBS signature says a parameter is `IO`, Rigor should treat that as the public nominal contract. If the implementation and observed call sites only require `_ReadableStream`, Rigor may report that the declared type is narrower than the inferred capability requirement and suggest generalizing the signature to a structural interface. It should not silently rewrite a public `IO` contract into a structural one.
+Explicit declarations still matter. If an external RBS signature says a parameter is `IO`, Rigor should treat that as the public nominal contract. If the implementation and observed call sites only require `_Reader`, Rigor may report that the declared type is narrower than the inferred capability requirement and suggest generalizing the signature to a structural interface. It should not silently rewrite a public `IO` contract into a structural one.
 
 When a method returns the same stream object it receives, Rigor should preserve the concrete input type through generics rather than widening to a role:
 
@@ -517,6 +558,20 @@ Rigor should distinguish dynamic-origin sources:
 - analyzer limits, failed inference, or plugin-declared dynamic behavior.
 
 The type relation is the same for all of them, but diagnostics can distinguish deliberate gradual boundaries from places where users may want better signatures.
+
+The pre-plugin narrowing surface is the set of facts Rigor produces in heavily `Dynamic[top]` code before any user plugin is loaded. The first user-visible milestone (v1) ships:
+
+- Literal narrowing for `nil`, `true`, `false`, integer and string literals, and finite literal-union refinements produced by equality checks against trusted built-in domains.
+- Syntax-level guards: `is_a?`, `kind_of?`, `instance_of?`, `nil?`, truthiness, `respond_to?`, equality with literal sets, and class- or pattern-matching narrowing in `case` and `case/in` forms that do not require dataflow across statements.
+- Method-call resolution that uses RBS or `RBS::Extended` for core Ruby and a curated subset of stdlib without requiring user plugins. Generated signatures from `RBS::Extended` may participate.
+
+v1 does not yet rely on intra-procedural inference of capability roles, propagated mutation effects, or plugin-supplied flow contributions for narrowing. Those expand the surface in v1.1 in a controlled, additive way:
+
+- intra-procedural propagation of facts produced by v1 guards across straight-line code, joins, and loops;
+- pre-plugin propagation of mutation summaries shipped with the analyzer for core and curated stdlib;
+- capability-role inference using the role catalog defined in `Capability Roles and IO-Like Objects`.
+
+Each v1.1 step ships behind feature flags so the v1 surface stays stable while the larger surface lands.
 
 ### `void`
 
@@ -721,6 +776,14 @@ top - nil           # Any Ruby value except nil
 ```
 
 When the domain is finite, difference and complement should normalize precisely. When the domain is large or unknown, they should become refinements rather than expanding to enormous unions. Implementations should keep a configurable budget for retained negative literals or exclusions. Over budget, diagnostics should prefer the positive domain plus an indication that some exclusions were omitted over rendering a long unstable type.
+
+The omission contract has a concrete shape so default diagnostics stay readable while explanations stay complete:
+
+- The default display budget keeps the top three retained exclusions and ends the rendered list with `+N more` when more exclusions were retained internally. The display budget is `budgets.negative_fact_display` and is configurable.
+- Selection prefers exclusions that participated most recently in narrowing decisions, then literal values over nominal bases, then lexicographic order so output is stable.
+- The `+N more` suffix links to the diagnostic identifier so the user knows the full breakdown is available.
+- `rigor explain <diagnostic-id>` (also `--explain` on the CLI) prints every retained exclusion, the budget that was exceeded, and the order of selection. This is Rigor's analogue to PHPStan's analysis explanation.
+- Plugins may read the full retained-exclusion list through the `Scope` API and render their own higher-tier diagnostics from it; the default display budget is a presentation rule, not an information limit.
 
 ## RBS::Extended Annotations
 
@@ -966,6 +1029,8 @@ dynamic-open { a: 1, **untyped }
 
 If literal key or value unions exceed the export budget, Rigor widens them to nominal bases deterministically, such as `Hash[Symbol, Integer | String]`. Losing closedness, optional-key precision, read-only status, or literal precision should be reportable in strict export or explanation mode.
 
+The literal-key and literal-value unions have separate budgets because keys carry more identifier-like meaning than values do. The first implementation defaults are 16 for the literal-key union (`budgets.hash_erasure_keys`) and 8 for the literal-value union (`budgets.hash_erasure_values`); both are configurable in `.rigor.yml`. When one budget is exceeded, only that axis widens to the nearest nominal base; the other axis remains a literal union if it still fits. Widening is deterministic: the widened nominal base for keys is the least common nominal class among the literal keys (for example `Symbol`, `String`, `Integer`); the widened nominal base for values is the least common nominal class or `top` when the values do not share a useful base. Rigor explains a budget-driven widening as `+N more` in the diagnostic and full details through `rigor explain`.
+
 ## Inference Budgets and User-Supplied Boundaries
 
 Rigor should stop inference before hard cases become global searches. Recursive methods, mutually recursive call graphs, overloaded operators, dynamic dispatch, large unions, and unconstrained structural inference all need explicit budgets. When a budget is exceeded, Rigor should produce an incomplete-inference result with a reason instead of silently inventing precision.
@@ -999,6 +1064,23 @@ The prompt should prefer small, ecosystem-compatible annotations. For return-onl
 
 If no boundary is supplied, callers should not receive a fabricated precise type. Rigor may use `Dynamic[top]`, `top`, or another conservative incomplete-inference marker internally, but diagnostics and exports must preserve the fact that inference stopped.
 
+Every budget category is configurable through `.rigor.yml` under `budgets:`, and the analyzer enforces a healthy range for each entry. The first implementation defaults are:
+
+| Key | Category | Default | Range |
+|---|---|---|---|
+| `recursion_depth` | Recursion depth | 5 | 1–32 |
+| `call_graph_width` | Call-graph expansion | 16 | 1–256 |
+| `overload_candidates` | Overload candidate count | 8 | 1–64 |
+| `operator_ambiguity` | Operator ambiguity per call | 4 | 1–32 |
+| `union_size` | Union size for joined returns | 24 | 4–256 |
+| `structural_growth` | Structural requirement growth | 16 | 1–256 |
+| `interface_candidates` | Named-interface candidate matches | 8 | 1–64 |
+| `hash_erasure_keys` | Hash-shape literal-key union | 16 | 1–256 |
+| `hash_erasure_values` | Hash-shape literal-value union | 8 | 1–256 |
+| `negative_fact_display` | Retained negative-fact display | 3 | 0–32 |
+
+Values outside the accepted range produce a configuration diagnostic and the analyzer falls back to the default for that key. The `hash_erasure_values` default is intentionally smaller than `hash_erasure_keys`: hash keys carry more identifier-like meaning than values do, so retaining wider key unions is more useful in diagnostics and erasure than retaining wide value unions. See `Hash Shape Erasure` for how the budgets shape the erased type.
+
 ## Diagnostic Policy
 
 Rigor should prefer precise diagnostics over silent widening.
@@ -1019,6 +1101,38 @@ Rigor should prefer precise diagnostics over silent widening.
 - When an explicit nominal parameter type rejects a call but the method body only requires a smaller inferred capability role, Rigor may suggest generalizing the public signature to an interface rather than adding an ad hoc union.
 - Diagnostics that involve plugin, generated, or `RBS::Extended` facts should carry stable identifiers. Public identifiers should use prefixes that make the source family clear, such as `plugin.<plugin-id>.<name>`, `rbs_extended.<name>`, or `generated.<provider>.<name>`, while internal diagnostic metadata may retain richer provenance.
 - Losing precision during RBS export should be reportable when users request explanation or strict export mode.
+
+### Diagnostic Identifier Taxonomy
+
+Diagnostic identifiers are hierarchical so plugin authors, RBS metadata, and user suppression markers can address them without colliding with internal numbering. Identifiers are stable within a major version. New diagnostics may be added under any prefix; renames or removals require a deprecation window.
+
+| Prefix | Use |
+|---|---|
+| `dynamic.*` | `untyped` and `Dynamic[T]` boundary crossings, unchecked generic leaks, and method calls whose proof depends on dynamic origin |
+| `static.*` | Static checks that stop short of a proof, including incomplete-inference cutoffs |
+| `flow.*` | Control-flow narrowing failures, equality and predicate refinement issues, fact-stability violations |
+| `compat.*` | RBS, rbs-inline, and Steep-compatible signature compatibility |
+| `rbs_extended.*` | `RBS::Extended` payload validity, version compatibility, and conflict reports |
+| `plugin.<plugin-id>.*` | Plugin-contributed diagnostics |
+| `generated.<provider>.*` | Generated-signature provider diagnostics |
+
+### `Dynamic[T]` Display Rules
+
+`Dynamic[T]` provenance is rendered by the diagnostic prefix family rather than by branch:
+
+- Diagnostics outside the `dynamic.*` family render the narrowed static facet `T` with a small `from untyped` provenance note. The narrowed facet is what the user can reason about; the wrapped form would only add noise to messages that are not about the dynamic boundary itself.
+- Diagnostics in `dynamic.*` and explanations requested through `rigor explain` or `--explain` show the full `Dynamic[T]` form, because that is exactly the information they exist to surface.
+- Internal traces, cache keys, and plugin `Scope` queries always retain the full `Dynamic[T]` form regardless of how the message renders. Plugins that need the dynamic facet to compose a higher-tier diagnostic do not need to reconstruct it.
+
+### Suppression Markers
+
+Rigor recognizes three families of suppression markers so the analyzer can interoperate with existing ecosystems while keeping a clean Rigor-native form:
+
+- Steep-style markers such as `# steep:ignore` are recognized by default. Only line-scoped Steep markers are accepted, and Rigor maps them to its own diagnostic suppression. Nothing in Steep's marker grammar is reinterpreted as Rigor configuration.
+- Sorbet-style file-level markers (`# typed:`) and RuboCop-style suppression comments (`# rubocop:disable`, `# rubocop:enable`) are opt-in. Projects enable them with `compat.sorbet_ignore` and `compat.rubocop_disable` switches in `.rigor.yml`. Sorbet's typed-mode policy and RuboCop's lint scope are not the same as Rigor's diagnostic suppression, so defaulting them on would conflate concerns.
+- Rigor-native markers use a Ruby comment grammar that mirrors PHPStan's annotation feel without inventing application-side type DSL. The line form is `# rigor:ignore[<diagnostic.id>]`. The block form is `# rigor:ignore-start[<diagnostic.id>]` paired with `# rigor:ignore-end`. The diagnostic identifier list uses the prefixes above.
+
+A marker that names an unknown diagnostic identifier produces a warning so dead suppressions surface during refactoring. A marker without an identifier list is a diagnostic by default; strict mode rejects it entirely.
 
 ## Implementation Expectations
 

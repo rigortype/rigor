@@ -146,6 +146,8 @@ Strict modes use this provenance rather than changing the core relation. One lev
 
 The documentation should write the gradual-consistency relation as `consistent(A, B)`, not `A ~ B`, because `~T` is reserved for negative or complement types.
 
+Display of `Dynamic[T]` follows the diagnostic identifier system. Diagnostics outside the `dynamic.*` family render the narrowed static facet `T` with a small `from untyped` provenance note rather than the wrapped form, because the dynamic origin is incidental to most user-facing messages. Diagnostics in `dynamic.*` and explanations requested through `rigor explain` show the full `Dynamic[T]` form. Internal traces, cache keys, and plugin `Scope` queries always retain the wrapped form regardless of display choices, so reasoning chains across plugins and refactors remain stable.
+
 ### Trinary Certainty Is Not a Proof System Shortcut
 
 Relationship queries should return `yes`, `no`, or `maybe` when uncertainty is meaningful. `yes` and `no` are reserved for results that are proven under the current source, accepted signatures, plugin facts, and analyzer assumptions. `maybe` means the analyzer cannot prove either side.
@@ -305,7 +307,23 @@ This keeps three facts separate:
 
 Explicit RBS declarations still define public contracts. If a signature says `IO`, passing `StringIO` should not be silently accepted as a subtype. Rigor may instead report that the implementation appears to require only a smaller capability role and suggest generalizing the signature to an interface. Unions remain appropriate when the implementation genuinely branches on or uses class-specific behavior from both `IO` and `StringIO`.
 
-Rigor should ship an opinionated core catalog of common standard-library capability roles instead of making the first plugin milestone invent its own names. The initial catalog should be small, with roles such as readable stream, writable stream, rewindable stream, seekable stream, closable, enumerable, callable, and file-descriptor-backed. Plugins may add roles, additional conformance facts, role-specific exclusions, and uncertain conformance, but they should not silently replace the core catalog.
+Rigor should ship an opinionated core catalog of common standard-library capability roles instead of making the first plugin milestone invent its own names. The catalog reuses existing RBS-defined interfaces wherever Ruby and the standard library already provide them, and adds a small set of Rigor-specific roles only where existing interfaces are missing or would conflate distinct capabilities.
+
+Initial reused RBS interfaces:
+
+- `_Each[T]`, `_Reader`, `_Writer`, `_ToS`, `_ToStr`, `_ToInt`, `_ToProc`, `_ToHash[K, V]`, `_ToA[T]`, `_ToAry[T]` for the established stdlib interfaces. Rigor matches these by their existing RBS shape and does not redefine them.
+- `Enumerable[T]` and `Comparable` for the broad collection and ordering protocols. They participate in role matching as nominal interfaces rather than fresh structural roles.
+
+Rigor-specific roles introduced for the first milestone (each one ships with an explicit RBS interface in Rigor's bundled signatures):
+
+| Role | Purpose | Required members |
+|---|---|---|
+| `_RewindableStream` | Stream-like objects that can be replayed from the start | `read`, `rewind` |
+| `_ClosableStream` | Stream-like objects whose lifetime can be closed | `close`, `closed?` |
+| `_FileDescriptorBacked` | Real OS-backed streams that justify diagnostics requiring an actual `IO` | `fileno` |
+| `_Callable[**A, R]` | Anything that responds to `call`, distinct from `_ToProc` | `call(*A) -> R` |
+
+Plugins may add roles, additional conformance facts, role-specific exclusions, and uncertain conformance, but they cannot silently replace either the reused RBS interfaces or the Rigor-specific roles in this catalog.
 
 ### Capability-Role Inference Discipline
 
@@ -382,6 +400,39 @@ The pre-plugin purity policy controls how method-call results are remembered or 
 - Purity becomes effective only when an authoritative source declares it. Core Ruby and stdlib RBS distributed with Rigor, accepted ordinary RBS files, and explicit `rigor:v1:pure` annotations on `RBS::Extended` are the initial sources. Generated signatures and plugin contributions may refine purity within their tier.
 - A configuration switch should make the default look more like PHPStan's "value-returning is pure unless declared impure" policy for projects that want stronger narrowing across repeated calls. The switch flips the default but never overrides explicit `pure` or mutation declarations.
 - `pure` combined with any receiver-mutation, argument-mutation, or fact-invalidation effect remains a contract conflict, as already specified in the `RBS::Extended` merge rules.
+
+The first user-visible milestone (v1) ships built-in mutation, purity, and call-timing summaries for a small, deliberately chosen set of core and stdlib classes. Picking a fixed set keeps the v1 narrowing surface honest: code outside this set falls back to "impure by default" without pretending to know more, and authors who need precision earlier can supply `RBS::Extended` annotations or plugins.
+
+The v1 covered set is:
+
+| Class | Reason |
+|---|---|
+| `Array` | The most commonly mutated container in Ruby code; clear distinction between `<<`, `push`, `pop`, `replace` (mutate) and `map`, `select`, `+` (pure). |
+| `Hash` | Same role as `Array` for keyed storage; needed for `merge!` versus `merge`, `[]=` versus `dup`-then-modify patterns. |
+| `String` | Frequent target of in-place mutation (`<<`, `gsub!`, `replace`) where mistaking a pure call for impure produces real false positives. |
+| `Set` | The only widely used non-core collection where in-place semantics differ from immutable composition; `add`, `delete`, `merge` versus `|`, `&`, `-`. |
+| `IO` | Effect-heavy class whose call timing (`each_line`, `read`, `write`) directly drives flow stability for real file-descriptor-backed code. |
+| `StringIO` | Used as a stand-in for `IO` in tests and pipelines; needs the same call-timing model so capability roles behave consistently. |
+| `File` | Adds path-bound side effects on top of `IO`; `File.open` block timing and `File.write` are common enough that missing them weakens v1 noticeably. |
+| `Tempfile` | Has lifetime effects (creation, unlink) that pair naturally with `_ClosableStream` and `_FileDescriptorBacked` roles. |
+| `Pathname` | Common boundary for filesystem-touching code; mostly pure transformations with a small set of effectful methods (`mkdir`, `rmtree`). |
+| `Logger` | Representative effect-only API; useful for validating that pure/impure separation does not regress diagnostics for side-effect-only callers. |
+
+The v1 summaries cover, for each class:
+
+- per-method receiver-mutation status, argument-mutation status, and fact-invalidation effect;
+- per-method block call timing (no block, immediate non-escaping known-count, immediate non-escaping unknown-count, deferred or escaping, unknown);
+- per-method purity declaration where it can be made without overpromising.
+
+Classes outside this set are not silently assumed pure or impure. They follow the default impure policy until ordinary RBS, `RBS::Extended`, or plugin facts say otherwise.
+
+The v1.1 roadmap extends coverage along three axes, behind feature flags so v1 behavior stays stable as the larger surface lands:
+
+- additional core classes (`Numeric` and its descendants, `Symbol`, `Range`, `Regexp`, `Proc`, `Method`, `Time`, `Date`, `DateTime`);
+- additional widely used stdlib (`Date`, `JSON`, `URI`, `OpenStruct`, `Forwardable`, `Comparable`-bearing classes that need explicit mutation summaries);
+- selected metaprogramming-adjacent core APIs (`Module`, `Class`, `BasicObject`) once their analyzer-side modeling is stable.
+
+Built-in mutation summaries are not a closed list. New entries may be added in any minor release as long as their addition does not change the meaning of code that does not call them; the published roadmap is a planning aid, not a contract.
 
 ### `void` Is a Return-Position Marker
 
@@ -464,7 +515,45 @@ The initial budget categories are explicit so cutoffs are predictable:
 
 Each budget produces an incomplete-inference result with a reason rather than a fabricated precise type. This keeps the inference compatible with the "no Rigor-specific inline type syntax in Ruby code" goal: the user resolves the cutoff with an accepted RBS-shaped contract, not with a Rigor-only DSL.
 
-**Ignore-marker compatibility is open.** Rigor has not committed to reading Steep- or Sorbet-style suppression comments, defining its own configuration-only suppression form, or supporting more than one mechanism. The decision is tracked in Open Questions and is independent of accepted signature sources.
+Every budget category is configurable through `.rigor.yml` under a single `budgets:` namespace, with healthy ranges enforced by the analyzer. Values outside the accepted range produce a configuration diagnostic rather than silent acceptance. The first implementation defaults and ranges are:
+
+| Category | Default | Accepted range |
+|---|---|---|
+| Recursion depth | 5 | 1–32 |
+| Call-graph expansion width | 16 | 1–256 |
+| Overload candidate count | 8 | 1–64 |
+| Operator ambiguity per call | 4 | 1–32 |
+| Union size for inferred returns | 24 | 4–256 |
+| Structural requirement growth | 16 | 1–256 |
+| Named-interface candidate matches | 8 | 1–64 |
+
+The same `budgets:` namespace also carries the hash-shape erasure key budget (default 16) and value budget (default 8); see `Hash Shape Erasure`. The negative-fact display budget for difference and complement diagnostics defaults to 3 retained exclusions; see `Type Operators Are Provisional`.
+
+### Diagnostic Identifiers, Display, and Suppression
+
+Diagnostics use hierarchical identifiers so plugin authors, RBS metadata, and user suppression markers can address them without colliding with internal numbering. The first implementation prefixes are:
+
+| Prefix | Use |
+|---|---|
+| `dynamic.*` | `untyped` and `Dynamic[T]` boundary crossings, unchecked generic leaks, and method calls whose proof depends on dynamic origin |
+| `static.*` | Static checks that stop short of a proof, including incomplete-inference cutoffs |
+| `flow.*` | Control-flow narrowing failures, equality and predicate refinement issues, fact-stability violations |
+| `compat.*` | RBS, rbs-inline, and Steep-compatible signature compatibility |
+| `rbs_extended.*` | `RBS::Extended` payload validity, version compatibility, and conflict reports |
+| `plugin.<plugin-id>.*` | Plugin-contributed diagnostics, as already specified in ADR-2 |
+| `generated.<provider>.*` | Generated-signature provider diagnostics |
+
+Identifiers are stable within a major version. New diagnostics may be added under any prefix; renames or removals are breaking changes that require a deprecation window.
+
+`Dynamic[T]` provenance is displayed conservatively. Ordinary diagnostics show the narrowed static facet `T` with a small `from untyped` provenance note rather than the wrapped `Dynamic[T]` form. Diagnostics in the `dynamic.*` category, and explanations requested through `rigor explain`, show the full `Dynamic[T]` form so the dynamic origin is visible at the point where it actually matters. Internal traces and cache keys always retain the wrapped form regardless of display rules.
+
+Suppression markers are recognized in three families to balance ecosystem migration with a clean Rigor-native form:
+
+- Steep-style markers such as `# steep:ignore` are recognized by default. Rigor maps them to its own diagnostic suppression so existing Steep-using projects can adopt Rigor without rewriting suppression comments. The mapping is intentionally conservative: only line-scoped Steep markers are accepted, and nothing in Steep's marker grammar is reinterpreted as Rigor-specific configuration.
+- Sorbet-style file-level markers (`# typed:`) and RuboCop-style suppression comments are opt-in. Projects enable them through `compat.sorbet_ignore` and `compat.rubocop_disable` switches in `.rigor.yml`. Defaulting them on would conflate Sorbet's typed-mode policy and RuboCop's lint scope with Rigor's diagnostic suppression.
+- Rigor-native markers use a Ruby comment grammar that mirrors PHPStan's annotation feel without inventing application-side type DSL. The line form is `# rigor:ignore[<diagnostic.id>]`; the block form is `# rigor:ignore-start[<diagnostic.id>]` and `# rigor:ignore-end`. The diagnostic identifier list uses the prefixes defined above.
+
+Markers that name an unknown diagnostic identifier produce a warning so dead suppressions are visible. Markers without an identifier list are diagnostics by default; strict mode rejects them entirely.
 
 ### RBS Context Rules Are Preserved
 
@@ -494,6 +583,20 @@ Many Ruby code bases are dominated by `Dynamic[top]` until plugins, generated st
 - Diagnostics should explain whether a `Dynamic[T]` came from a missing signature, an explicit `untyped`, or an analyzer or plugin limit, even when no plugin is loaded.
 
 This is the analyzer's baseline before framework- or library-specific plugins ship. Plugin-specific behavior remains deferred to ADR-2.
+
+The first user-visible milestone scopes the baseline narrowing surface explicitly so the v1 release does not over-promise. v1 ships:
+
+- Literal narrowing for `nil`, `true`, `false`, integer and string literals, and finite literal-union refinements produced by equality checks against trusted built-in domains.
+- Syntax-level guards: `is_a?`, `kind_of?`, `instance_of?`, `nil?`, truthiness, `respond_to?`, equality with literal sets, and class- and pattern-matching narrowing in `case` and `case/in` forms that do not require dataflow across statements.
+- Method-call resolution that uses RBS or `RBS::Extended` for core Ruby and a curated subset of stdlib without requiring user plugins. Generated signatures from `RBS::Extended` may participate.
+
+v1 does not yet rely on intra-procedural inference of capability roles, propagated mutation effects, or plugin-supplied flow contributions for narrowing. Those expand the surface in v1.1 in a controlled, additive way:
+
+- Intra-procedural propagation of facts produced by v1 guards across straight-line code, joins, and loops.
+- Pre-plugin propagation of mutation summaries shipped with the analyzer for core and curated stdlib.
+- Capability-role inference using the role catalog defined in `Capability Roles Beat Ad Hoc Mock Unions`.
+
+Each v1.1 step ships behind feature flags so the v1 surface stays stable while the larger surface lands.
 
 ### Imported Built-Ins Follow Ruby Semantics
 
@@ -537,6 +640,13 @@ Diagnostic display follows a domain-aware contract so users do not misread negat
 - Dynamic-origin provenance does not replace the domain display. A diagnostic may show `String - "foo"` with a dynamic-origin note, while technical traces may show `Dynamic[String - "foo"]`.
 - When the exclusion budget is exceeded, Rigor displays the positive domain plus an omission note instead of a long unstable chain.
 
+The omission contract is concrete enough that diagnostics stay short by default and remain explorable on demand:
+
+- The default display budget keeps the top three retained exclusions and ends with `+N more` when more were retained internally. Selection prefers values that participated most recently in narrowing decisions, then literal values over nominal bases, then lexicographic order to keep output stable.
+- The `+N more` note links to the diagnostic identifier so users know they can ask for the full breakdown.
+- `rigor explain <diagnostic-id>` (and the equivalent `--explain` CLI flag) prints the full domain difference, including every retained exclusion and the budget that was exceeded, in the spirit of PHPStan's analysis explanation. The full form is also available to plugins through the `Scope` API for higher-tier diagnostics that want to render the whole reasoning chain.
+- The default budget is configurable through `.rigor.yml` (`budgets.negative_fact_display`) within the same healthy-range enforcement as other budgets.
+
 ### `RBS::Extended` Is an Annotation-Based Metadata Layer
 
 Advanced types may be attached to ordinary RBS declarations, members, and overloads using RBS `%a{...}` annotations. This preserves compatibility with standard RBS tooling while giving Rigor a place to read refinements such as `String - ""`, `~"foo"`, or `String where non_empty`.
@@ -579,7 +689,7 @@ Hash shapes carry more information than RBS records and `Hash[K, V]` can express
 - For open shapes, the extra-value bound wins over the current observed value union. Rigor does not infer that all future extra keys have values drawn only from already-seen entries.
 - Exact empty closed records erase to `{}` when the target RBS output supports it; otherwise the conservative fallback is `Hash[bot, bot]`, which preserves the "no entries possible" fact.
 
-Concrete export budgets for literal key and value unions remain in Open Questions.
+Key and value export budgets are configured separately because hash keys carry more identifier-like meaning than values do. The first implementation defaults are 16 for the literal-key union and 8 for the literal-value union, both configurable through `.rigor.yml` (`budgets.hash_erasure_keys`, `budgets.hash_erasure_values`). When a budget is exceeded, the corresponding axis widens to the nearest nominal base while the other axis stays as a literal union if it still fits.
 
 ## Feedback from the Resulting Type Specification
 
@@ -652,33 +762,20 @@ Negative:
 - How much of the `~T` and `T - U` notation should be accepted in user-authored `RBS::Extended` annotations in the first implementation?
 - Which imported built-in refinements should be accepted in the first parser milestone beyond `non-empty-string` and integer ranges?
 - How quickly should predicate targets grow beyond `parameter-name` and `self`?
-- When should diagnostics display internal `Dynamic[...]` provenance versus only the narrowed static facet?
-- How aggressively should literal unions widen for performance and diagnostic readability?
 - Which Python `TypedDict`-inspired shape facts, such as read-only keys and open or closed extra-key policies, should ship first?
 - Should Rigor model finality and read-only member facts separately from value types in the first signature metadata grammar?
 - Should Rigor add an explicit `RBS::Extended` conformance annotation, or rely on ordinary assignments and calls to trigger interface conformance checks?
 - Should generated RBS preserve `RBS::Extended` annotations that explain erased refinements when users request an annotated export?
-- Which strict-dynamic and strict-static diagnostic identifiers should be attached to dynamic-to-precise crossings, unchecked generic leaks, and method calls whose proof depends on `Dynamic[T]`?
 - Which dynamic-origin sources should be classified as explicit user intent, missing signatures, analyzer limits, or plugin-declared dynamic behavior?
 - What plugin API is needed for framework-specific object shapes and dynamic method resolution?
 - What exact `RBS::Extended` or plugin payload should declare custom equality effects?
-- How should diagnostics distinguish a proven type fact from a relational or dynamic-origin fact?
-- What exact method surfaces should Rigor's core capability roles expose for readable stream, writable stream, rewindable stream, closable, enumerable, callable, file-descriptor-backed, and related roles?
 - Should Rigor emit a signature-generalization hint when a public nominal annotation such as `IO` is stricter than the method body's inferred capability role?
 - What cache keys and invalidation rules should capability requirement summaries use across edits and dependency signature changes?
-- What candidate and intersection budgets should named-interface matching use before falling back to anonymous shapes?
-- What inference budgets should trigger incomplete-inference diagnostics, and which of them should be configurable?
 - How should interactive CLI prompts choose between inline `#:`, full `# @rbs`, generated stubs, and external `.rbs` persistence targets?
 - Which generic variance cases require special handling for `Dynamic[T]` slots in the first implementation?
 - What exact trusted predicate or effect payload should prove finite, non-`NaN`, and signed-zero behavior if float refinements are introduced later?
 - What exact effect payload should encode block call timing, closure escape, receiver or argument mutation, and read-only/pure behavior?
-- Which Ruby core and stdlib methods should receive built-in call-timing and mutation summaries first?
-- What literal key and value union budgets should hash-shape erasure use before widening to nominal bases?
-- Which existing suppression or ignore-marker conventions, if any, should Rigor support beyond ordinary RBS/rbs-inline/Steep type annotations?
-- What is the minimum useful narrowing surface in heavily `Dynamic[top]` code before plugins ship?
 - Which non-predicate `rigor:v1:` directives should be standardized first, and which should remain plugin-only metadata?
-- What diagnostic identifiers should distinguish unsupported `RBS::Extended` versions, invalid payloads, and semantic conflicts?
-- What exact display budget and wording should diagnostics use when negative-fact exclusions are omitted?
 - Which non-integer numeric refinement names, if any, should be accepted after the integer refinement milestone?
 - How exactly should Rigor model Ruby protected-call receiver restrictions in structural interface and object-shape checks?
 

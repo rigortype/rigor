@@ -273,4 +273,171 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(tracer).to be_empty
     end
   end
+
+  describe "constant resolution (Slice 2 strengthening)" do
+    it "resolves a registered Slice 1 built-in via ConstantReadNode" do
+      type = scope.type_of(parse_expression("Integer"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Integer")
+    end
+
+    it "resolves Slice 2 built-ins like Hash and StandardError" do
+      hash_type = scope.type_of(parse_expression("Hash"))
+      err_type = scope.type_of(parse_expression("StandardError"))
+
+      expect(hash_type.class_name).to eq("Hash")
+      expect(err_type.class_name).to eq("StandardError")
+    end
+
+    it "falls back to Dynamic[Top] for unknown ConstantReadNode names" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      type = scope.type_of(parse_expression("Foo"), tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.kinds).to include(Prism::ConstantReadNode)
+    end
+
+    it "resolves a top-level ConstantPathNode (`::Integer`)" do
+      type = scope.type_of(parse_expression("::Integer"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Integer")
+    end
+
+    it "falls back to Dynamic[Top] for unregistered ConstantPathNode" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      type = scope.type_of(parse_expression("Foo::Bar"), tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.kinds).to include(Prism::ConstantPathNode)
+    end
+
+    it "types ConstantWriteNode as the rvalue's type" do
+      type = scope.type_of(parse_expression("FOO = 42"))
+
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq(42)
+    end
+  end
+
+  describe "containers and definitions (Slice 2 strengthening)" do
+    it "types HashNode as Nominal[Hash]" do
+      type = scope.type_of(parse_expression("{ a: 1, b: 2 }"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Hash")
+    end
+
+    it "types InterpolatedStringNode as Nominal[String]" do
+      type = scope.type_of(parse_expression("\"foo \#{42}\""))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("String")
+    end
+
+    it "types InterpolatedSymbolNode as Nominal[Symbol]" do
+      type = scope.type_of(parse_expression(":\"foo\#{42}\""))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Symbol")
+    end
+
+    it "types DefNode as Constant<Symbol> of the method name" do
+      type = scope.type_of(parse_expression("def my_method; end"))
+
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq(:my_method)
+    end
+
+    it "propagates ClassNode body to the last expression's type" do
+      type = scope.type_of(parse_expression("class Foo; 42; end"))
+
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq(42)
+    end
+
+    it "types an empty class as Constant<nil>" do
+      type = scope.type_of(parse_expression("class Foo; end"))
+
+      expect(type.value).to be_nil
+    end
+
+    it "propagates ModuleNode body to the last expression's type" do
+      type = scope.type_of(parse_expression("module Foo; :ok; end"))
+
+      expect(type.value).to eq(:ok)
+    end
+
+    it "types AliasMethodNode/UndefNode as Constant<nil>" do
+      alias_type = scope.type_of(parse_expression("alias new_name old_name"))
+      undef_type = scope.type_of(parse_expression("undef foo"))
+
+      expect(alias_type.value).to be_nil
+      expect(undef_type.value).to be_nil
+    end
+  end
+
+  describe "variables and self (Slice 2 strengthening)" do
+    let(:tracer) { Rigor::Inference::FallbackTracer.new }
+
+    it "silently types SelfNode as Dynamic[Top]" do
+      type = scope.type_of(parse_expression("self"), tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer).to be_empty
+    end
+
+    it "silently types InstanceVariableReadNode as Dynamic[Top]" do
+      type = scope.type_of(parse_expression("@x"), tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer).to be_empty
+    end
+
+    it "types InstanceVariableWriteNode as the rvalue type" do
+      type = scope.type_of(parse_expression("@x = 7"), tracer: tracer)
+
+      expect(type.value).to eq(7)
+      expect(tracer).to be_empty
+    end
+
+    it "silently types ClassVariableReadNode as Dynamic[Top]" do
+      type = scope.type_of(parse_expression("@@x"), tracer: tracer)
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer).to be_empty
+    end
+
+    it "types InstanceVariableOrWriteNode as the rvalue type" do
+      type = scope.type_of(parse_expression("@x ||= 7"), tracer: tracer)
+
+      expect(type.value).to eq(7)
+      expect(tracer).to be_empty
+    end
+  end
+
+  describe "parameter and block positions (Slice 2 strengthening)" do
+    let(:tracer) { Rigor::Inference::FallbackTracer.new }
+
+    it "silently types ParametersNode and its parameter children as Dynamic[Top]" do
+      def_node = parse_expression("def foo(a, b: 1, *c, **d, &e); end")
+      params = def_node.parameters
+
+      expect(scope.type_of(params, tracer: tracer)).to equal(Rigor::Type::Combinator.untyped)
+      params.requireds.each do |param|
+        expect(scope.type_of(param, tracer: tracer)).to equal(Rigor::Type::Combinator.untyped)
+      end
+      expect(tracer).to be_empty
+    end
+
+    it "silently types BlockNode/BlockParametersNode/BlockArgumentNode as Dynamic[Top]" do
+      call_node = parse_expression("foo(&blk) { |x| x }")
+      block_node = call_node.block
+
+      expect(scope.type_of(block_node, tracer: tracer)).to equal(Rigor::Type::Combinator.untyped)
+      expect(scope.type_of(block_node.parameters, tracer: tracer)).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer).to be_empty
+    end
+  end
 end

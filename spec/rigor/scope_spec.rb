@@ -54,20 +54,3 @@ RSpec.describe Rigor::Scope do
     end
   end
 end
-
-RSpec.describe Rigor::Environment::ClassRegistry do
-  let(:registry) { described_class.default }
-
-  it "recognises slice 1 built-ins" do
-    %w[Integer Float String Symbol NilClass TrueClass FalseClass Object BasicObject].each do |name|
-      klass = Object.const_get(name)
-      expect(registry.registered?(klass)).to be true
-      expect(registry.nominal_for(klass).class_name).to eq(name)
-    end
-  end
-
-  it "rejects classes it does not know" do
-    expect(registry.registered?(Hash)).to be false
-    expect { registry.nominal_for(Hash) }.to raise_error(KeyError)
-  end
-end

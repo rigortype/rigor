@@ -233,6 +233,20 @@ A plugin may return explicit mutation, escape, call-timing, purity, or invalidat
 
 This is especially important for structural object shapes and hash shapes. A guard can prove that a key or method is present at one program point, but ordinary Ruby mutation can remove or redefine it later unless Rigor has a stability fact.
 
+The first implementation pairs a category-bucketed fact store with immutable per-edge `Scope` snapshots:
+
+- Each `Scope` is an immutable snapshot keyed by control-flow edge. Joins, narrowing, and invalidation produce new snapshots through structural sharing rather than in-place mutation.
+- Within a snapshot, facts are partitioned into buckets that mirror the categories above: local-binding, captured-local, object-content, global-storage, dynamic-origin, and relational. Invalidation rules act on a specific bucket, so an unknown method call sweeps object-content while leaving local-binding intact.
+- Relational facts that span multiple targets live in their own bucket and are invalidated when any participating target's bucket records a change.
+- The public surface of `Scope` does not expose buckets directly. Plugins, narrowing rules, and diagnostics ask `Scope` for facts about a target; the bucket layout is an internal optimization that may evolve.
+
+The pre-plugin purity policy controls how method-call results are remembered or forgotten across re-invocations:
+
+- Methods are treated as impure by default. Calling an impure method on a receiver invalidates the receiver's object-content bucket and discards remembered value facts for prior calls to the same receiver.
+- Purity becomes effective only when an authoritative source declares it: core Ruby and stdlib RBS distributed with Rigor, accepted ordinary RBS files, or explicit `rigor:v1:pure` annotations on `RBS::Extended`. Generated signatures and plugin contributions may refine purity within their tier.
+- A configuration switch makes the default look more like PHPStan's "value-returning is pure unless declared impure" policy for projects that want stronger narrowing across repeated calls. The switch flips the default but never overrides explicit `pure` or mutation declarations.
+- `pure` combined with any receiver-mutation, argument-mutation, or fact-invalidation effect is a contract conflict, as already specified in the `RBS::Extended` merge rules.
+
 ## RBS-Compatible Types
 
 Rigor supports every type form documented by RBS syntax.
@@ -350,6 +364,19 @@ Object-shape entries should carry enough metadata to avoid confusing Ruby's dyna
 - source and provenance, such as source definition, RBS, plugin, `respond_to?`, or `method_missing`;
 - stability and mutation information;
 - certainty, such as yes, maybe, or no.
+
+The first implementation pairs one method-shape entry with one Ruby `def`:
+
+- A method-shape entry is one record per `(class-or-module, method name)` and corresponds to exactly one Ruby `def`. Ruby has no per-signature overloading at runtime, so multiple `def foo` definitions in the same class collapse to a single entry.
+- Visibility is stored at the entry level. `private :foo` and similar visibility toggles act on the whole method, not on a particular signature variant.
+- Signature variants from RBS overloads, `RBS::Extended` payloads, or plugin contributions are stored as a list of branches inside the entry. Branches share the entry's visibility but may carry different argument shapes, return types, predicate effects, and mutation effects.
+- Conditional `def`, conditional `private`, and other dynamically constructed method definitions stay out of scope for the first implementation. They surface as ordinary diagnostics or dynamic-origin facts.
+
+Open classes, reopens, and monkey patches contribute to the same entry rather than producing parallel ones:
+
+- Each `def foo` across files contributes a candidate definition. The default merge policy is source order with a last-definition-wins resolution, matching Ruby's runtime behavior.
+- Strict mode raises a diagnostic when a re-definition changes RBS-visible signature or visibility without an explicit override marker (working name `rigor:v1:override=replace`).
+- Module includes and refinements are not flattened into the host class's entry. They remain on their owning module and participate in lookup through the ancestor chain.
 
 ### Capability Roles and IO-Like Objects
 

@@ -67,6 +67,16 @@ Extensions should not mutate `Scope` directly. They should return facts, diagnos
 
 The scope model must be precise enough for short-circuiting conditions. If a plugin-defined predicate appears on the left side of `&&`, its true-edge facts must be visible while analyzing the right side. If it appears on the left side of `||`, its false-edge facts must be visible while analyzing the right side.
 
+The minimal first implementation surface for `Scope` is intentionally narrow:
+
+- Type queries: `type_of(target)` returns the current narrowed type for a supported target.
+- Relational queries with trinary results: `has_member?(target, name)`, `has_key?(target, key)`, and `equals?(target, value)` return `yes`, `maybe`, or `no` so plugins can ask for relational facts without forcing them into types.
+- Edge-aware narrowing: plugins receive separate truthy and falsey scopes for the conditions they participate in, rather than reading flags off a single mutable `Scope`.
+
+A small `ContextInfo` companion object exposes lexical context that does not belong on `Scope` itself, including current file, surrounding class or module, current method, current visibility scope, and whether the call is being analyzed inside a private, protected, or assertion context. Plugin authors should treat it as descriptive only; analyzer state never flows back into `ContextInfo`.
+
+Target paths accepted in the first plugin milestone are restricted to `self`, named parameters, named locals proven stable in the current scope, and stable receiver members where the receiver is itself a stable target. More expressive paths such as hash keys, tuple elements, instance variables, and method-result chains stay internal until fact-stability rules generalize.
+
 ## Type System Object Model
 
 PHPStan represents every type as an object implementing a common `Type` interface. Types answer capability and relationship queries such as `isSuperTypeOf`, `accepts`, `hasMethod`, `getMethod`, `hasProperty`, and `describe`. These answers often use trinary logic rather than booleans.
@@ -158,6 +168,25 @@ Rigor should keep broad expression hooks behind a higher bar because they can ma
 
 The first public plugin milestone should defer broad expression and operator hooks unless a concrete framework use case cannot be represented by narrower hooks. When introduced, broad hooks must come with traversal-order guarantees, invocation budgets, timeouts or cancellation behavior, and a diagnostic tracing mode that shows which hook affected an expression.
 
+## Flow Contribution Bundle
+
+Plugins, `RBS::Extended` annotations, and built-in narrowing rules all hand the analyzer the same kind of object: a bundle of facts and effects produced at a single call edge. The bundle is the public packaging of the flow contribution semantics owned by ADR-1.
+
+The minimal first implementation public bundle is a single struct with optional slots:
+
+- `return_type`: normal-edge return type.
+- `truthy_facts`, `falsey_facts`: facts that hold only on the corresponding control-flow edge.
+- `post_return_facts`: facts that hold after the call returns normally on any edge, used for assertions.
+- `mutations`: receiver and argument mutation effects.
+- `invalidations`: targeted fact invalidations beyond what mutations imply.
+- `exceptional`: non-returning, raising, or unreachable effects.
+- `role_conformance`: capability-role conformance facts when the contribution provides them.
+- `provenance`: source family, plugin id, annotation node, and any cache descriptor required for incremental rebuilds.
+
+A field that is left unset means the contribution does not assert anything in that slot. The struct is the only shape plugin authors need to learn; richer or more permissive shapes are not part of the first public contract.
+
+Internally the analyzer flattens each bundle into a tagged element list keyed by `(target, flow edge, effect kind)` before running the merge policy described below. The flattening is mechanical, deterministic, and round-trippable: a bundle and its element list represent the same contribution. Plugin authors should not rely on the element-list form, but it is the natural implementation of `Plugin Contribution Merging` because compatible elements compose by their tags and conflicts surface as duplicate elements with incompatible payloads.
+
 ## Plugin Contribution Merging
 
 Multiple flow contributions can target the same call: a built-in narrowing rule and a plugin-provided fact may apply at the same site, two plugins may both register for the same receiver family, and `RBS::Extended` annotations may add their own facts. Rigor merges these contributions deterministically rather than letting any one source silently override another.
@@ -208,9 +237,14 @@ Rigor should use plugin manifests and project configuration to register extensio
 - Deterministic extension ordering.
 - Declarative cache dependency descriptors so plugins can invalidate results when external schemas, generated files, gem versions, plugin versions, or configuration change.
 
-Cache dependencies should be explicit descriptors rather than an after-the-fact list of arbitrary reads. The initial descriptor families should include project files by digest or mtime policy, generated signature units, gem names and versions, plugin gem versions, plugin configuration keys, and named dependency-metadata files such as lockfiles.
+Cache dependencies should be explicit descriptors rather than an after-the-fact list of arbitrary reads. The first implementation uses a typed-slot schema with a fixed set of slots and per-entry comparators, rather than a flat list of kind-tagged entries:
 
-The descriptor attaches to the contribution or reflection slice it produced. A plugin-wide dependency is allowed when the fact truly depends on the whole plugin configuration, but the preferred granularity is per dynamic-member provider, generated signature unit, receiver family, analyzed file, or flow contribution. This keeps one edited schema or fixture from invalidating the entire result cache.
+- `files`: project or external file inputs. Each entry carries a path and a digest or mtime policy.
+- `gems`: gem name and version constraint or pinned version.
+- `plugins`: plugin identifier and pinned plugin gem version.
+- `configs`: configuration keys and a hash of their accepted value, so a toggled feature flag invalidates only the depending slice.
+
+A descriptor attaches to the contribution or reflection slice it produced. Plugin-wide dependencies are allowed when the fact truly depends on the whole plugin configuration, but the preferred granularity is per dynamic-member provider, generated signature unit, receiver family, analyzed file, or flow contribution. This keeps one edited schema or fixture from invalidating the entire result cache. Adding a new dimension such as environment variables is an explicit schema change and should be accompanied by an ADR update.
 
 ## Plugin Trust and I/O Policy
 
@@ -327,16 +361,12 @@ Working response: the first public plugin milestone should defer broad expressio
 
 ## Open Questions
 
-- What is the smallest stable `Scope` interface needed for the first plugin milestone?
 - Should dynamic return extensions match by nominal receiver type only at first, or also by structural interface and object shape?
 - What is the initial plugin manifest format and configuration schema language?
 - Should Rigor expose synthetic or virtual AST nodes to rules in the first custom-rule milestone?
 - What is the exact fixture marker spelling for asserting inferred types and branch-local facts in Ruby fixtures, including facts that exist only while analyzing the right side of `&&` or `||`?
-- What is the smallest public API object shape for packaging the flow contribution bundle defined by ADR-1 and `docs/types.md`?
-- Which target-path forms should be public in the first plugin API, and which should remain internal until fact-stability rules are clearer?
 - What exact payload should plugins use to declare full, partial, excluded, or `maybe` capability-role conformance?
 - What exact diagnostic identifier taxonomy and display format should Rigor use for conflicting plugin, generated, and `RBS::Extended` contributions?
-- What exact descriptor schema should plugins use for cache dependencies, including digest policy, gem version keys, plugin version keys, and configuration keys?
 - What exact reflection cache key schema and persistence format should represent source, RBS, generated, and plugin-provided slices?
 - What gem dependency ranges and Rigor-provided conformance tests define compatibility for public extension namespaces?
 - If broad expression or operator hooks are enabled later, what concrete invocation budgets, timeout behavior, traversal-order guarantees, and tracing output should they use?

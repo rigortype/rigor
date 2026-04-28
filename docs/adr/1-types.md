@@ -278,6 +278,19 @@ Visibility is a first-class facet on every method-shape entry. Rigor tracks at l
 
 `respond_to_missing?` and `method_missing` facts carry dynamic provenance and an unknown or plugin-provided signature. They can justify guarded dynamic calls but do not prove full interface compatibility on their own.
 
+The minimal first implementation representation pairs one method-shape entry with one Ruby `def`:
+
+- A `MethodEntry` is one record per `(class-or-module, method name)` and corresponds to exactly one Ruby `def`. Ruby has no per-signature overloading at runtime, so multiple `def foo` definitions in the same class collapse to a single entry.
+- Visibility is stored at the `MethodEntry` level. Ruby's `private :foo` toggles the whole method, not a particular signature variant, so per-overload visibility is not represented in the first version.
+- Signature variants from RBS overloads, `RBS::Extended` payloads, or plugin contributions are stored as a list of branches inside the entry. Branches share the entry's visibility but may carry different argument shapes, return types, predicate effects, and mutation effects.
+- Conditional `def`, conditional `private`, and other dynamically constructed method definitions are out of scope for the first implementation. They surface as ordinary diagnostics or dynamic-origin facts and may be revisited later.
+
+Open classes and monkey patches are first-class but represented as merge inputs to the same `MethodEntry`:
+
+- Each `def foo` across files contributes a candidate definition. The default merge policy is source order with a last-definition-wins resolution, matching Ruby's runtime behavior.
+- Strict mode raises a diagnostic when a re-definition changes RBS-visible signature or visibility without an explicit override marker. The intended override marker is a future `RBS::Extended` directive (working name `rigor:v1:override=replace`); until that exists, strict mode reports the suspected silent monkey patch.
+- Module includes and refinements are not flattened into the host class's `MethodEntry`. They remain on their owning module and participate in lookup through the ancestor chain.
+
 ### Capability Roles Beat Ad Hoc Mock Unions
 
 Ruby libraries often accept objects that are not related by inheritance but share the capability required by a method body. `IO` and `StringIO` are the central example: `StringIO` is useful as an in-memory test double for many stream consumers, but it is not a subclass of `IO` and does not expose the full `IO` method surface.
@@ -355,6 +368,20 @@ The first proof obligations for stable facts are concrete:
 - Values proven frozen for the relevant operation.
 - Fresh allocations that have not escaped.
 - RBS, `RBS::Extended`, or plugin effects that declare read-only, pure, or targeted mutation behavior.
+
+The minimal first implementation pairs a category-bucketed fact store with immutable per-edge `Scope` snapshots:
+
+- Each `Scope` is an immutable snapshot keyed by control-flow edge. Joins, narrowing, and invalidation produce new snapshots through structural sharing rather than in-place mutation.
+- Within a snapshot, facts are partitioned into buckets that mirror the categories above: local-binding, captured-local, object-content, global-storage, dynamic-origin, and relational. Invalidation rules act on a specific bucket, so an unknown method call sweeps object-content without touching local-binding.
+- Relational facts that span multiple targets live in their own bucket and are invalidated when any participating target's bucket records a change.
+- The public surface of `Scope` does not expose buckets directly. Plugins, narrowing rules, and diagnostics ask `Scope` for facts about a target; the bucket layout is an internal optimization that may evolve.
+
+The pre-plugin purity policy controls how method-call results are remembered or forgotten across re-invocations and how PHPStan-style remembered values map onto Rigor's category buckets:
+
+- Methods are treated as impure by default. Calling an impure method on a receiver invalidates the receiver's object-content bucket and discards remembered value facts for prior calls to the same receiver.
+- Purity becomes effective only when an authoritative source declares it. Core Ruby and stdlib RBS distributed with Rigor, accepted ordinary RBS files, and explicit `rigor:v1:pure` annotations on `RBS::Extended` are the initial sources. Generated signatures and plugin contributions may refine purity within their tier.
+- A configuration switch should make the default look more like PHPStan's "value-returning is pure unless declared impure" policy for projects that want stronger narrowing across repeated calls. The switch flips the default but never overrides explicit `pure` or mutation declarations.
+- `pure` combined with any receiver-mutation, argument-mutation, or fact-invalidation effect remains a contract conflict, as already specified in the `RBS::Extended` merge rules.
 
 ### `void` Is a Return-Position Marker
 
@@ -629,13 +656,11 @@ Negative:
 - How aggressively should literal unions widen for performance and diagnostic readability?
 - Which Python `TypedDict`-inspired shape facts, such as read-only keys and open or closed extra-key policies, should ship first?
 - Should Rigor model finality and read-only member facts separately from value types in the first signature metadata grammar?
-- What minimal method-shape representation is needed for structural interface assignability in the first implementation?
 - Should Rigor add an explicit `RBS::Extended` conformance annotation, or rely on ordinary assignments and calls to trigger interface conformance checks?
 - Should generated RBS preserve `RBS::Extended` annotations that explain erased refinements when users request an annotated export?
 - Which strict-dynamic and strict-static diagnostic identifiers should be attached to dynamic-to-precise crossings, unchecked generic leaks, and method calls whose proof depends on `Dynamic[T]`?
 - Which dynamic-origin sources should be classified as explicit user intent, missing signatures, analyzer limits, or plugin-declared dynamic behavior?
 - What plugin API is needed for framework-specific object shapes and dynamic method resolution?
-- What is the smallest fact-stability model that makes shape and hash-key narrowing useful without becoming unsound around mutation?
 - What exact `RBS::Extended` or plugin payload should declare custom equality effects?
 - How should diagnostics distinguish a proven type fact from a relational or dynamic-origin fact?
 - What exact method surfaces should Rigor's core capability roles expose for readable stream, writable stream, rewindable stream, closable, enumerable, callable, file-descriptor-backed, and related roles?
@@ -656,7 +681,6 @@ Negative:
 - What exact display budget and wording should diagnostics use when negative-fact exclusions are omitted?
 - Which non-integer numeric refinement names, if any, should be accepted after the integer refinement milestone?
 - How exactly should Rigor model Ruby protected-call receiver restrictions in structural interface and object-shape checks?
-- Should method summaries store visibility per overload, per method entry, or both when reopened classes change visibility around definitions?
 
 ## Resulting Specification
 

@@ -27,7 +27,7 @@ The query MUST return a `Rigor::Type` per [`internal-type-api.md`](internal-type
 
 The receiver MUST be a `Rigor::Scope` instance. Implementations MUST NOT accept a raw Hash or Array of bindings; the binding container is internal to `Rigor::Scope`.
 
-The `node` argument MUST be a `Prism::Node`. Implementations MAY accept additional Prism node families when added by upstream Prism, but MUST treat unrecognised node kinds under the fail-soft policy below rather than raising.
+The `node` argument MUST be either a `Prism::Node` or a `Rigor::AST::Node` (a synthetic node from the *Virtual Nodes* family below). Implementations MAY accept additional Prism node families when added by upstream Prism, and additional `Rigor::AST::Node` subtypes when registered through the engine, but MUST treat unrecognised concrete classes within either family under the fail-soft policy below rather than raising.
 
 ## Immutable Scope Discipline
 
@@ -54,6 +54,37 @@ The fail-soft path MUST satisfy:
 - It MUST be observable to instrumentation. Implementations MAY expose a side channel that records the encountered node kind so coverage regressions can be detected. The channel MUST NOT change the return value of `type_of`.
 
 When a slice introduces support for a node kind, the fail-soft path for that kind MUST be removed in the same slice. The typer MUST NOT keep a fallback that masks an incorrectly-typed node.
+
+## Virtual Nodes
+
+The engine MUST accept a synthetic AST family in addition to Prism nodes. Synthetic nodes are Ruby objects that include the documentation-only marker module `Rigor::AST::Node` and expose whatever node-specific data the engine needs to translate them into a `Rigor::Type`. They make it possible to ask `Scope#type_of` "what would the analyzer infer if a value of type T appeared here?" without constructing a real Prism expression.
+
+Synthetic nodes MUST satisfy:
+
+- They MUST be immutable. `Rigor::AST::Node` MUST be `freeze`d at construction.
+- They MUST support structural equality. Two synthetic nodes that hold structurally equivalent data MUST compare equal under `==` and `eql?` and MUST share the same `hash`.
+- They MUST be composable with real Prism children when the synthetic node has an inner-AST position. The engine MUST NOT require all transitive children to be synthetic.
+- They MUST NOT carry analyzer state or fact-store entries. Any such state lives on `Rigor::Scope` or in the engine's environment, not on the node.
+
+`Scope#type_of(virtual_node)` is dispatched through the same fail-soft contract as Prism nodes: an unrecognised concrete class within `Rigor::AST::Node` MUST return `Dynamic[Top]` rather than raise.
+
+### `Rigor::AST::TypeNode`
+
+The minimum synthetic node family that this specification binds is `Rigor::AST::TypeNode`. It MUST exist, MUST include `Rigor::AST::Node`, MUST be constructible from a single `Rigor::Type`, and MUST satisfy:
+
+- `Rigor::Scope#type_of(Rigor::AST::TypeNode.new(t))` MUST return a `Rigor::Type` that compares structurally equal to `t` for any non-`nil` `t`.
+- The engine MUST NOT modify, normalise, annotate, or wrap the inner type. Round-trip through `TypeNode` is observably the identity.
+- `TypeNode` MUST NOT be wrapped in `Dynamic[T]`, refinements, or any other carrier as a side effect of `Scope#type_of`.
+
+Additional synthetic node kinds (call expressions, container literals, narrowing wrappers) are added by later slices and are non-normative until promoted. New kinds MUST follow the immutability, structural-equality, and composability rules above.
+
+## Method Dispatch Boundary
+
+Method dispatch (the rule that determines the result type of a call expression given a receiver type and argument types) MUST NOT live on `Rigor::Type` instances. Type classes remain thin value objects per [`internal-type-api.md`](internal-type-api.md): they hold structural data and answer capability questions, but they do not carry method-summary tables or operator handlers.
+
+Slice 3 introduces `Rigor::Inference::MethodDispatcher` as a separate engine surface. The dispatcher MUST consult, in order, the RBS environment, the built-in operator table, and the plugin-supplied method extensions defined by ADR-2. It MUST take its input as a uniform call-shape that may carry either Prism child nodes or synthetic `Rigor::AST::Node` arguments (by way of the *Virtual Nodes* contract above), so synthesised expressions and real expressions share a single dispatch path.
+
+This split is normative: implementations MUST NOT define operator-method-aware subclasses of any `Rigor::Type` form (for example, a hypothetical `Rigor::Type::IntegerType` carrying `+`/`*` rules). Operator semantics MUST be expressed as method-handler entries that the dispatcher consults; specialising the type class for built-in arithmetic is rejected to keep the type lattice and method semantics independently extensible.
 
 ## Local Variables
 
@@ -87,6 +118,8 @@ The contracts in this document are stable within a major version. The following 
 - The `Scope.empty(environment:)` constructor signature.
 - The fail-soft policy and its `Dynamic[Top]` return value.
 - The minimum class-registry surface listed above.
+- The `Rigor::AST::Node` marker module and the existence of `Rigor::AST::TypeNode` with the round-trip behaviour above.
+- The method-dispatch boundary: method-summary tables MUST NOT live on `Rigor::Type` instances.
 
 The following are explicitly out of the stability contract until later slices promote them:
 

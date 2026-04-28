@@ -72,13 +72,29 @@ Risks:
 
 If Slice 1 review concludes Option C (dual API) is more usable, ADR-3 OQ2 is updated and the `?` sugar is added across the type surface in a single follow-up.
 
+## Virtual Nodes and the Method-Dispatch Boundary
+
+PHPStan exposes one feature that Rigor adopts early: `$scope->getType($node)` accepts both real parser nodes and *synthetic* nodes that embed a `Type` value directly. PHPStan's `TypeExpr` lets callers ask "what would `$scope->getType(new Add(new LNumber(1), new TypeExpr(new IntType())))` infer?" without constructing a fake AST. Plugins use the same shape to simulate refactors, narrow values, and probe method-return rules.
+
+Rigor introduces this in Slice 1 strengthening rather than waiting for Slice 3. The contract lives in [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md) under *Virtual Nodes*. The minimum shipped surface is `Rigor::AST::Node` (a marker module) and `Rigor::AST::TypeNode`. Additional synthetic kinds (call expressions, container literals, narrowing wrappers) land alongside the slices that actually consume them.
+
+### Rejected option: specialising type classes for operator-method dispatch
+
+A plausible alternative is to specialise `Rigor::Type` for Ruby built-ins that have operator methods — `Rigor::Type::IntegerType` knowing arithmetic, `Rigor::Type::StringType` knowing concatenation, and so on — so that `1 + 2` dispatches by asking the receiver type to evaluate the call. This option is **rejected**. The reasoning:
+
+- It would require either inheritance between type classes (forbidden by ADR-3) or an open-ended duck-type contract on every type form for "evaluate `:+` with these args", which contradicts the thin-value-object rule in [`internal-type-api.md`](../internal-spec/internal-type-api.md).
+- PHPStan's own design separates the same concerns. `Type::Type` answers capability and projection queries; method dispatch goes through `MethodReflection` and the `*ReturnTypeExtension` plugin points. Subclasses such as `ConstantStringType extends StringType` exist for *representation* specialisation, not for method-dispatch specialisation.
+- The Rigor extension API in ADR-2 expects plugin authors to add or override built-in method behaviour (framework knowledge, gem-specific idioms). Concentrating that surface on type classes makes it harder to extend without subclassing the engine.
+
+The chosen design instead routes method dispatch through `Rigor::Inference::MethodDispatcher` (introduced in Slice 3) with a layered lookup: the RBS environment, then a built-in operator/method table, then ADR-2 plugin extensions. Type classes stay thin, the dispatcher's input is uniform across real and synthetic nodes (via the Virtual Nodes contract above), and operator semantics are pluggable.
+
 ## Slice Roadmap
 
 Each slice ships independently, keeps the previous slice green, and can be reverted without taking down the codebase.
 
 ### Slice 1 — Literal Typer (this slice)
 
-Public deliverable: `Rigor::Scope#type_of(node)` returns the right type for literal expressions, local-variable reads, and shallow `Array` literals; everything else falls back to `Dynamic[Top]`.
+Public deliverable: `Rigor::Scope#type_of(node)` returns the right type for literal expressions, local-variable reads, and shallow `Array` literals; everything else falls back to `Dynamic[Top]`. Slice 1 strengthening additionally lands the Virtual Nodes infrastructure described above so synthetic typed positions are usable from day one.
 
 Code surface added:
 
@@ -90,6 +106,7 @@ Code surface added:
 - `Rigor::Environment` public entry that wraps the registry (RBS loader is added in Slice 3).
 - `Rigor::Scope.empty(environment:)`, `#with_local`, `#local`, `#type_of`.
 - `Rigor::Inference::ExpressionTyper#type_of(node, scope)` for the supported nodes.
+- `Rigor::AST::Node` marker module and `Rigor::AST::TypeNode` synthetic node, dispatched alongside Prism nodes by the typer.
 
 Prism nodes recognised in Slice 1:
 

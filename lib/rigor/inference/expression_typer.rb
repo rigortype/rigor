@@ -3,17 +3,22 @@
 require "prism"
 
 require_relative "../type"
+require_relative "../ast"
 
 module Rigor
   module Inference
-    # Translates Prism AST nodes into Rigor::Type values, consulting the
-    # surrounding Rigor::Scope for local-variable bindings and the
-    # environment registry for nominal-type resolution. Pure: never mutates
-    # the receiver scope.
+    # Translates AST nodes into Rigor::Type values, consulting the surrounding
+    # Rigor::Scope for local-variable bindings and the environment registry
+    # for nominal-type resolution. Pure: never mutates the receiver scope.
+    #
+    # Accepts both real Prism nodes and synthetic Rigor::AST::Node
+    # instances; the synthetic family lets callers and plugins ask
+    # "what would the analyzer infer if a value of type T appeared here?"
+    # without building a real Prism expression.
     #
     # Slice 1 recognises literal expressions, local-variable reads/writes,
-    # and shallow Array literals. Every other Prism node falls back to
-    # Dynamic[Top] per the fail-soft policy in
+    # shallow Array literals, and Rigor::AST::TypeNode. Every other node
+    # falls back to Dynamic[Top] per the fail-soft policy in
     # docs/internal-spec/inference-engine.md.
     class ExpressionTyper
       def initialize(scope:)
@@ -21,6 +26,8 @@ module Rigor
       end
 
       def type_of(node)
+        return type_of_virtual(node) if node.is_a?(AST::Node)
+
         case node
         when Prism::IntegerNode then Type::Combinator.constant_of(node.value)
         when Prism::FloatNode then Type::Combinator.constant_of(node.value)
@@ -46,6 +53,14 @@ module Rigor
 
       def dynamic_top
         Type::Combinator.untyped
+      end
+
+      def type_of_virtual(node)
+        case node
+        when AST::TypeNode then node.type
+        else
+          dynamic_top
+        end
       end
 
       def symbol_type_for(node)

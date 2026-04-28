@@ -109,4 +109,41 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(scope.type_of(node)).to eq(scope.type_of(node))
     end
   end
+
+  describe "virtual nodes" do
+    it "round-trips a TypeNode wrapping a Constant" do
+      inner = Rigor::Type::Combinator.constant_of(42)
+      type = scope.type_of(Rigor::AST::TypeNode.new(inner))
+      expect(type).to eq(inner)
+    end
+
+    it "round-trips a TypeNode wrapping a Nominal" do
+      inner = Rigor::Type::Combinator.nominal_of(String)
+      type = scope.type_of(Rigor::AST::TypeNode.new(inner))
+      expect(type).to eq(inner)
+    end
+
+    it "round-trips a TypeNode wrapping Dynamic[Top]" do
+      inner = Rigor::Type::Combinator.untyped
+      type = scope.type_of(Rigor::AST::TypeNode.new(inner))
+      expect(type).to equal(inner)
+    end
+
+    it "does not wrap or annotate the inner type" do
+      inner = Rigor::Type::Combinator.nominal_of(Integer)
+      type = scope.type_of(Rigor::AST::TypeNode.new(inner))
+      expect(type).not_to be_a(Rigor::Type::Dynamic)
+    end
+
+    it "fails soft on an unknown synthetic node" do
+      unknown_node_class = Class.new do
+        include Rigor::AST::Node
+        def initialize
+          freeze
+        end
+      end
+      type = scope.type_of(unknown_node_class.new)
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+    end
+  end
 end

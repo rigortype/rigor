@@ -13,16 +13,16 @@ The exhaustive erasure rules, including the hash-shape erasure algorithm, are in
 | `alias`, `alias[A]` | Alias reference, expanded on demand | Same or expanded alias |
 | `singleton(C)` | Singleton class object type | Same |
 | string, symbol, integer, `true`, `false` literal | Literal singleton type | Same |
-| `A | B` | Union type | Same after erased operands |
+| `A \| B` | Union type | Same after erased operands |
 | `A & B` | Intersection type | Same after erased operands |
-| `T?` | `T | nil` | Optional syntax when valid, otherwise union |
+| `T?` | `T \| nil` | Optional syntax when valid, otherwise union |
 | `{ key: T }` | Hash record with known keys | Same |
 | `[A, B]` | Array tuple with fixed arity | Same |
 | type variable | Scoped type variable with bounds and variance | Same |
 | `self` | Open-recursive receiver type in self-context | Same when the RBS context allows it |
 | `instance` | Current class instance type in classish-context | Same when the RBS context allows it |
 | `class` | Current class singleton type in classish-context | Same when the RBS context allows it |
-| `bool` | Alias for `true | false` | `bool` |
+| `bool` | Alias for `true \| false` | `bool` |
 | `nil` | The singleton `nil` value | `nil` |
 | `untyped` | Dynamic type | `untyped` |
 | `top` | Greatest static value type | `top` |

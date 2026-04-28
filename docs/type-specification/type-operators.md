@@ -10,7 +10,7 @@ This document defines the semantics of those operators, the diagnostic display c
 | --- | --- |
 | `T \| U` | Union, RBS-compatible |
 | `T & U` | Intersection, RBS-compatible |
-| `T?` | `T | nil`, RBS-compatible |
+| `T?` | `T \| nil`, RBS-compatible |
 | `~T` | Complement of `T` within the current known domain (internal) |
 | `T - U` | Difference: values in `T` excluding values in `U` (internal) |
 | `key_of[T]` | Known keys of a record, hash shape, tuple, or shape-like type |

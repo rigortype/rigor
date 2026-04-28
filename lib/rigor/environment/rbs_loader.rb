@@ -59,6 +59,7 @@ module Rigor
         @signature_paths = signature_paths.map { |p| Pathname(p) }.freeze
         @state = { env: nil, builder: nil }
         @instance_definition_cache = {}
+        @singleton_definition_cache = {}
         @class_known_cache = {}
       end
 
@@ -87,6 +88,30 @@ module Rigor
       # @return [RBS::Definition::Method, nil]
       def instance_method(class_name:, method_name:)
         definition = instance_definition(class_name)
+        return nil unless definition
+
+        definition.methods[method_name.to_sym]
+      end
+
+      # @return [RBS::Definition, nil] the resolved singleton (class
+      #   object) definition for `class_name`. The methods on this
+      #   definition are the *class methods* of `class_name`, including
+      #   those inherited from `Class` and `Module` for class types.
+      #   Returns nil for unknown names and on RBS build errors (fail-soft).
+      def singleton_definition(class_name)
+        key = class_name.to_s
+        return @singleton_definition_cache[key] if @singleton_definition_cache.key?(key)
+
+        @singleton_definition_cache[key] = build_singleton_definition(class_name)
+      end
+
+      # @return [RBS::Definition::Method, nil] the class method on
+      #   `class_name`. For example, `singleton_method(class_name:
+      #   "Integer", method_name: :sqrt)` returns the definition for
+      #   `Integer.sqrt`, while `singleton_method(class_name: "Foo",
+      #   method_name: :new)` returns Class#new for any class type.
+      def singleton_method(class_name:, method_name:)
+        definition = singleton_definition(class_name)
         return nil unless definition
 
         definition.methods[method_name.to_sym]
@@ -128,6 +153,16 @@ module Rigor
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_instance(rbs_name)
+      rescue StandardError
+        nil
+      end
+
+      def build_singleton_definition(class_name)
+        rbs_name = parse_type_name(class_name)
+        return nil unless rbs_name
+        return nil unless env.class_decls.key?(rbs_name)
+
+        builder.build_singleton(rbs_name)
       rescue StandardError
         nil
       end

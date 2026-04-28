@@ -62,16 +62,49 @@ module Rigor
       end
     end
 
-    # Resolves a constant name to a Rigor::Type::Nominal. Consults the
-    # static class registry first (cheap, hardcoded), then falls back to
-    # the RBS loader. Returns nil when the name is unknown to both.
+    # Resolves a constant name to a Rigor::Type::Nominal (the *instance*
+    # type carrier). Consults the static class registry first (cheap,
+    # hardcoded), then falls back to the RBS loader. Returns nil when
+    # the name is unknown to both.
+    #
+    # NOTE: This is the construction helper for "an instance of class
+    # `Foo`". For "the class object `Foo` itself" (the value of the
+    # constant), use {#singleton_for_name} instead.
     def nominal_for_name(name)
       registered = class_registry.nominal_for_name(name)
       return registered if registered
-      return nil unless rbs_loader
-      return nil unless rbs_loader.class_known?(name)
 
-      Type::Combinator.nominal_of(name.to_s)
+      class_known_in_rbs?(name) ? Type::Combinator.nominal_of(name.to_s) : nil
+    end
+
+    # Resolves a constant name to a Rigor::Type::Singleton (the *class
+    # object* carrier). The expression `Foo` evaluates to the class
+    # object, whose RBS type is `singleton(Foo)` -- this method is the
+    # corresponding Rigor construction helper.
+    #
+    # The lookup uses the same registry/RBS chain as {#nominal_for_name}
+    # so a class is either known to both queries or to neither.
+    def singleton_for_name(name)
+      return nil unless class_known?(name)
+
+      Type::Combinator.singleton_of(name.to_s)
+    end
+
+    # Returns true when the constant name is known to either the static
+    # registry or the RBS loader. Useful for callers that only need a
+    # presence check without materialising a type carrier.
+    def class_known?(name)
+      return true if class_registry.nominal_for_name(name)
+
+      class_known_in_rbs?(name)
+    end
+
+    private
+
+    def class_known_in_rbs?(name)
+      return false unless rbs_loader
+
+      rbs_loader.class_known?(name)
     end
   end
 end

@@ -173,7 +173,11 @@ RSpec.describe Rigor::CLI do
 
         expect(err).to eq("")
         expect(status).to eq(0)
-        expect(out).to include("type:    CliRbsDemoFixture")
+        # The constant reference evaluates to the class object itself,
+        # i.e. singleton(CliRbsDemoFixture). Phase 2b enforces this
+        # distinction so subsequent class-method dispatch can hit
+        # singleton-side definitions.
+        expect(out).to include("type:    singleton(CliRbsDemoFixture)")
       end
     end
   end

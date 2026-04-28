@@ -345,10 +345,10 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(tracer.kinds).to include(Prism::CallNode)
     end
 
-    it "resolves an RBS-only constant (Encoding::Converter) as Nominal" do
+    it "resolves an RBS-only constant (Encoding::Converter) as Singleton" do
       type = scope.type_of(parse_expression("Encoding::Converter"))
 
-      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type).to be_a(Rigor::Type::Singleton)
       expect(type.class_name).to eq("Encoding::Converter")
     end
 
@@ -362,18 +362,20 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
-  describe "constant resolution (Slice 2 strengthening)" do
-    it "resolves a registered Slice 1 built-in via ConstantReadNode" do
+  describe "constant resolution (Slice 2 strengthening, Slice 4 phase 2b semantics)" do
+    it "resolves a registered Slice 1 built-in via ConstantReadNode as Singleton" do
       type = scope.type_of(parse_expression("Integer"))
 
-      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type).to be_a(Rigor::Type::Singleton)
       expect(type.class_name).to eq("Integer")
     end
 
-    it "resolves Slice 2 built-ins like Hash and StandardError" do
+    it "resolves Slice 2 built-ins like Hash and StandardError as Singleton" do
       hash_type = scope.type_of(parse_expression("Hash"))
       err_type = scope.type_of(parse_expression("StandardError"))
 
+      expect(hash_type).to be_a(Rigor::Type::Singleton)
+      expect(err_type).to be_a(Rigor::Type::Singleton)
       expect(hash_type.class_name).to eq("Hash")
       expect(err_type.class_name).to eq("StandardError")
     end
@@ -386,10 +388,10 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(tracer.kinds).to include(Prism::ConstantReadNode)
     end
 
-    it "resolves a top-level ConstantPathNode (`::Integer`)" do
+    it "resolves a top-level ConstantPathNode (`::Integer`) as Singleton" do
       type = scope.type_of(parse_expression("::Integer"))
 
-      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type).to be_a(Rigor::Type::Singleton)
       expect(type.class_name).to eq("Integer")
     end
 
@@ -406,6 +408,47 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
       expect(type).to be_a(Rigor::Type::Constant)
       expect(type.value).to eq(42)
+    end
+  end
+
+  describe "class-method dispatch (Slice 4 phase 2b)" do
+    it "resolves Integer.sqrt(4) as Nominal[Integer] via singleton dispatch" do
+      type = scope.type_of(parse_expression("Integer.sqrt(4)"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Integer")
+    end
+
+    it "resolves Array.new(3) as Nominal[Array] via singleton dispatch" do
+      type = scope.type_of(parse_expression("Array.new(3)"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Array")
+    end
+
+    it "Integer.new resolves to Nominal[Integer] via inherited Class#new" do
+      type = scope.type_of(parse_expression("Integer.new"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Integer")
+    end
+
+    it "Integer.name resolves to Nominal[String] via Module#name" do
+      type = scope.type_of(parse_expression("Integer.name"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("String")
+    end
+
+    it "Singleton[Foo] for an unknown method falls back to Dynamic[Top]" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      type = scope.type_of(
+        parse_expression("Integer.this_class_method_does_not_exist"),
+        tracer: tracer
+      )
+
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer.kinds).to include(Prism::CallNode)
     end
   end
 

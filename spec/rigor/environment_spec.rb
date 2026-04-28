@@ -46,6 +46,42 @@ RSpec.describe Rigor::Environment do
     end
   end
 
+  describe "#singleton_for_name (Slice 4 phase 2b)" do
+    let(:env) { described_class.default }
+
+    it "resolves a registry-known class to Singleton" do
+      type = env.singleton_for_name("Integer")
+      expect(type).to be_a(Rigor::Type::Singleton)
+      expect(type.class_name).to eq("Integer")
+    end
+
+    it "resolves an RBS-only constant to Singleton" do
+      type = env.singleton_for_name("Encoding::Converter")
+      expect(type).to be_a(Rigor::Type::Singleton)
+      expect(type.class_name).to eq("Encoding::Converter")
+    end
+
+    it "returns nil for an unknown name" do
+      expect(env.singleton_for_name("ThisClassDoesNotExist123")).to be_nil
+    end
+  end
+
+  describe "#class_known?" do
+    let(:env) { described_class.default }
+
+    it "is true for registry-known names" do
+      expect(env.class_known?("Integer")).to be(true)
+    end
+
+    it "is true for RBS-only names" do
+      expect(env.class_known?("Encoding::Converter")).to be(true)
+    end
+
+    it "is false for unknown names" do
+      expect(env.class_known?("ThisClassDoesNotExist123")).to be(false)
+    end
+  end
+
   describe ".for_project" do
     def with_demo_project_root
       Dir.mktmpdir do |tmpdir|
@@ -102,7 +138,7 @@ RSpec.describe Rigor::Environment do
         scope = Rigor::Scope.empty(environment: env)
         ast = Prism.parse("DemoFixture::Widget").value
         type = scope.type_of(ast.statements.body.first)
-        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type).to be_a(Rigor::Type::Singleton)
         expect(type.class_name).to eq("DemoFixture::Widget")
       end
     end

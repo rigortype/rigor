@@ -117,4 +117,55 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(loader.instance_definition("ThisClassDoesNotExist123")).to be_nil
     end
   end
+
+  describe "#singleton_method (Slice 4 phase 2b)" do
+    it "returns class methods declared on the class itself (Integer.sqrt)" do
+      method = loader.singleton_method(class_name: "Integer", method_name: :sqrt)
+      expect(method).to be_a(RBS::Definition::Method)
+      expect(method.method_types).not_to be_empty
+    end
+
+    it "returns inherited class methods (Foo.new from Class#new)" do
+      method = loader.singleton_method(class_name: "Integer", method_name: :new)
+      expect(method).not_to be_nil
+    end
+
+    it "returns inherited class methods from Module (Foo.name)" do
+      method = loader.singleton_method(class_name: "Integer", method_name: :name)
+      expect(method).not_to be_nil
+    end
+
+    it "is namespace-disjoint from #instance_method" do
+      # Module#instance_methods is a singleton-side method on every
+      # class type; it MUST NOT be exposed on the instance side.
+      expect(loader.instance_method(class_name: "Integer", method_name: :instance_methods)).to be_nil
+      expect(loader.singleton_method(class_name: "Integer", method_name: :instance_methods)).not_to be_nil
+    end
+
+    it "returns nil for unknown methods" do
+      expect(loader.singleton_method(class_name: "Integer", method_name: :totally_does_not_exist)).to be_nil
+    end
+
+    it "returns nil for unknown classes" do
+      expect(loader.singleton_method(class_name: "ThisClassDoesNotExist123", method_name: :new)).to be_nil
+    end
+  end
+
+  describe "#singleton_definition (Slice 4 phase 2b)" do
+    it "memoizes per-class definitions" do
+      first = loader.singleton_definition("Integer")
+      second = loader.singleton_definition("Integer")
+      expect(first).to equal(second)
+    end
+
+    it "is distinct from instance_definition for the same class" do
+      inst = loader.instance_definition("Integer")
+      sing = loader.singleton_definition("Integer")
+      expect(inst).not_to equal(sing)
+    end
+
+    it "returns nil for unknown classes" do
+      expect(loader.singleton_definition("ThisClassDoesNotExist123")).to be_nil
+    end
+  end
 end

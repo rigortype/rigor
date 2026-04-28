@@ -90,5 +90,37 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
       var = RBS::Types::Variable.new(name: :T, location: nil)
       expect(described_class.translate(var)).to equal(Rigor::Type::Combinator.untyped)
     end
+
+    describe "instance_type and singleton(...) (Slice 4 phase 2b)" do
+      it "uses instance_type for `instance` references when supplied" do
+        instance_type = Rigor::Type::Combinator.nominal_of("Foo")
+        type = described_class.translate(parse_rbs("instance"), instance_type: instance_type)
+        expect(type).to equal(instance_type)
+      end
+
+      it "degrades `instance` to Dynamic[Top] without instance_type" do
+        type = described_class.translate(parse_rbs("instance"))
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+      end
+
+      it "treats `self` and `instance` as separable substitutions" do
+        self_type = Rigor::Type::Combinator.singleton_of("Foo")
+        instance_type = Rigor::Type::Combinator.nominal_of("Foo")
+        u = described_class.translate(
+          parse_rbs("self | instance"),
+          self_type: self_type,
+          instance_type: instance_type
+        )
+        expect(u).to be_a(Rigor::Type::Union)
+        expect(u.members).to include(self_type)
+        expect(u.members).to include(instance_type)
+      end
+
+      it "translates singleton(::Integer) to Singleton[Integer]" do
+        type = described_class.translate(parse_rbs("singleton(::Integer)"))
+        expect(type).to be_a(Rigor::Type::Singleton)
+        expect(type.class_name).to eq("Integer")
+      end
+    end
   end
 end

@@ -71,6 +71,46 @@ RSpec.describe Rigor::Type::Combinator do
     end
   end
 
+  describe ".singleton_of" do
+    it "accepts Class/Module objects" do
+      s = described_class.singleton_of(Integer)
+      expect(s).to be_a(Rigor::Type::Singleton)
+      expect(s.class_name).to eq("Integer")
+      expect(s.describe).to eq("singleton(Integer)")
+      expect(s.erase_to_rbs).to eq("singleton(Integer)")
+    end
+
+    it "accepts class-name strings" do
+      expect(described_class.singleton_of("MyClass").describe).to eq("singleton(MyClass)")
+    end
+
+    it "rejects anonymous classes" do
+      anon = Class.new
+      expect { described_class.singleton_of(anon) }.to raise_error(ArgumentError)
+    end
+
+    it "is structurally distinct from Nominal even for the same class name" do
+      n = described_class.nominal_of("Foo")
+      s = described_class.singleton_of("Foo")
+      expect(s).not_to eq(n)
+      expect(n).not_to eq(s)
+    end
+
+    it "compares structurally across independent constructions" do
+      a = described_class.singleton_of("Foo")
+      b = described_class.singleton_of("Foo")
+      expect(a).to eq(b)
+      expect(a.hash).to eq(b.hash)
+    end
+
+    it "answers top/bot/dynamic with Trinary.no" do
+      s = described_class.singleton_of("Foo")
+      expect(s.top).to eq(Rigor::Trinary.no)
+      expect(s.bot).to eq(Rigor::Trinary.no)
+      expect(s.dynamic).to eq(Rigor::Trinary.no)
+    end
+  end
+
   describe ".constant_of" do
     it "wraps scalar literals" do
       expect(described_class.constant_of(1).describe).to eq("1")

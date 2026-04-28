@@ -28,12 +28,20 @@ module Rigor
     # and explicit handlers for parameter, block, splat, instance/class/
     # global-variable, and self positions. Many of those handlers return
     # Dynamic[Top] silently because they are non-value or out-of-scope
-    # positions for Slice 2; later slices refine them in place. Every
-    # other node falls back to Dynamic[Top] per the fail-soft policy in
-    # docs/internal-spec/inference-engine.md. The optional tracer is a
-    # Rigor::Inference::FallbackTracer (or any object answering
-    # #record_fallback) that receives a Fallback event for each fallback;
-    # the tracer MUST NOT change the return value of type_of.
+    # positions for Slice 2; later slices refine them in place.
+    #
+    # Slice 4 phase 2b types bare-constant references (`Foo`, `Foo::Bar`)
+    # as `Singleton[Foo]` rather than `Nominal[Foo]`, so that method
+    # dispatch on the constant correctly looks up *class* methods. The
+    # corresponding instance type is reachable through `Foo.new` and the
+    # value-lattice projections.
+    #
+    # Every other node falls back to Dynamic[Top] per the fail-soft
+    # policy in docs/internal-spec/inference-engine.md. The optional
+    # tracer is a Rigor::Inference::FallbackTracer (or any object
+    # answering #record_fallback) that receives a Fallback event for
+    # each fallback; the tracer MUST NOT change the return value of
+    # type_of.
     # rubocop:disable Metrics/ClassLength
     class ExpressionTyper
       # Hash-based dispatch keeps `type_of` linear and lets future slices add
@@ -240,9 +248,13 @@ module Rigor
         dynamic_top
       end
 
+      # The expression `Foo` evaluates to the *class object* `Foo`, not
+      # an instance. From Slice 4 phase 2b on we therefore type a
+      # bare-constant reference as `Singleton[Foo]`; method dispatch on
+      # that receiver looks up class methods (`Foo.new`, `Foo.bar`, ...).
       def type_of_constant_read(node)
-        nominal = scope.environment.nominal_for_name(node.name)
-        return nominal if nominal
+        singleton = scope.environment.singleton_for_name(node.name)
+        return singleton if singleton
 
         fallback_for(node, family: :prism)
       end
@@ -250,8 +262,8 @@ module Rigor
       def type_of_constant_path(node)
         full_name = build_constant_path_name(node)
         if full_name
-          nominal = scope.environment.nominal_for_name(full_name)
-          return nominal if nominal
+          singleton = scope.environment.singleton_for_name(full_name)
+          return singleton if singleton
         end
 
         fallback_for(node, family: :prism)

@@ -4,6 +4,7 @@ require_relative "top"
 require_relative "bot"
 require_relative "dynamic"
 require_relative "nominal"
+require_relative "singleton"
 require_relative "constant"
 require_relative "union"
 
@@ -45,17 +46,11 @@ module Rigor
       end
 
       def nominal_of(class_name_or_object)
-        name =
-          case class_name_or_object
-          when Module then class_name_or_object.name
-          when String then class_name_or_object
-          else
-            raise ArgumentError, "expected Class/Module or String, got #{class_name_or_object.class}"
-          end
+        Nominal.new(resolve_class_name(class_name_or_object))
+      end
 
-        raise ArgumentError, "anonymous class has no name" if name.nil? || name.empty?
-
-        Nominal.new(name)
+      def singleton_of(class_name_or_object)
+        Singleton.new(resolve_class_name(class_name_or_object))
       end
 
       def constant_of(value)
@@ -88,6 +83,20 @@ module Rigor
 
       class << self
         private
+
+        def resolve_class_name(class_name_or_object)
+          name =
+            case class_name_or_object
+            when Module then class_name_or_object.name
+            when String then class_name_or_object
+            else
+              raise ArgumentError, "expected Class/Module or String, got #{class_name_or_object.class}"
+            end
+
+          raise ArgumentError, "anonymous class has no name" if name.nil? || name.empty?
+
+          name
+        end
 
         def flatten_into(acc, type)
           if type.is_a?(Union)

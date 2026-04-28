@@ -169,6 +169,54 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
   end
 
+  describe "generics (Slice 4 phase 2d)" do
+    def array_of(*type_args)
+      Rigor::Type::Combinator.nominal_of(Array, type_args: type_args)
+    end
+
+    it "is lenient when self has no type_args (raw form accepts any instantiation)" do
+      raw = Rigor::Type::Combinator.nominal_of(Array)
+      applied = array_of(int_nominal)
+      expect(accepts(raw, applied)).to be_yes
+    end
+
+    it "is maybe when other has no type_args (other is raw, self is applied)" do
+      applied = array_of(int_nominal)
+      raw = Rigor::Type::Combinator.nominal_of(Array)
+      expect(accepts(applied, raw)).to be_maybe
+    end
+
+    it "yes when applied generics agree element-wise" do
+      a = array_of(int_nominal)
+      b = array_of(int_nominal)
+      expect(accepts(a, b)).to be_yes
+    end
+
+    it "no when applied generics differ on a non-subtype element" do
+      a = array_of(int_nominal)
+      b = array_of(str_nominal)
+      expect(accepts(a, b)).to be_no
+    end
+
+    it "yes when an element is covariantly accepted (Numeric accepts Integer)" do
+      a = array_of(numeric_nominal)
+      b = array_of(int_nominal)
+      expect(accepts(a, b)).to be_yes
+    end
+
+    it "no on type_args arity mismatch" do
+      a = array_of(int_nominal)
+      b = array_of(int_nominal, str_nominal)
+      expect(accepts(a, b)).to be_no
+    end
+
+    it "still rejects when the class names disagree" do
+      a = array_of(int_nominal)
+      b = Rigor::Type::Combinator.nominal_of(Hash, type_args: [int_nominal])
+      expect(accepts(a, b)).to be_no
+    end
+  end
+
   describe "Type#accepts public surface" do
     it "every type form exposes accepts as a public method" do
       [top, bot, dyn_top, int_nominal, int_singleton, int_constant, int_or_str].each do |t|

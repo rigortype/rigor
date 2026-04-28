@@ -69,6 +69,54 @@ RSpec.describe Rigor::Type::Combinator do
       anon = Class.new
       expect { described_class.nominal_of(anon) }.to raise_error(ArgumentError)
     end
+
+    describe "type_args (Slice 4 phase 2d)" do
+      it "defaults to an empty type_args list (raw form)" do
+        n = described_class.nominal_of(Array)
+        expect(n.type_args).to eq([])
+        expect(n.describe).to eq("Array")
+        expect(n.erase_to_rbs).to eq("Array")
+      end
+
+      it "carries an applied generic in describe and erase_to_rbs" do
+        n = described_class.nominal_of(Array, type_args: [described_class.nominal_of(Integer)])
+        expect(n.type_args).to eq([described_class.nominal_of(Integer)])
+        expect(n.describe).to eq("Array[Integer]")
+        expect(n.erase_to_rbs).to eq("Array[Integer]")
+      end
+
+      it "renders multiple type_args separated by commas" do
+        n = described_class.nominal_of(
+          Hash,
+          type_args: [described_class.nominal_of(Symbol), described_class.nominal_of(Integer)]
+        )
+        expect(n.describe).to eq("Hash[Symbol, Integer]")
+      end
+
+      it "is structurally distinct from the raw form for the same class" do
+        raw = described_class.nominal_of(Array)
+        applied = described_class.nominal_of(Array, type_args: [described_class.nominal_of(Integer)])
+        expect(raw).not_to eq(applied)
+        expect(raw.hash).not_to eq(applied.hash)
+      end
+
+      it "is structurally equal across independent constructions" do
+        a = described_class.nominal_of(Array, type_args: [described_class.nominal_of(Integer)])
+        b = described_class.nominal_of(Array, type_args: [described_class.nominal_of(Integer)])
+        expect(a).to eq(b)
+        expect(a.hash).to eq(b.hash)
+      end
+
+      it "freezes the type_args array" do
+        n = described_class.nominal_of(Array, type_args: [described_class.nominal_of(Integer)])
+        expect(n.type_args).to be_frozen
+      end
+
+      it "rejects non-array type_args" do
+        expect { Rigor::Type::Nominal.new("Array", :not_an_array) }
+          .to raise_error(ArgumentError, /type_args must be an Array/)
+      end
+    end
   end
 
   describe ".singleton_of" do

@@ -117,6 +117,25 @@ module Rigor
         definition.methods[method_name.to_sym]
       end
 
+      # Slice 4 phase 2d. Returns the class's declared type-parameter
+      # names as Symbols (e.g., `[:Elem]` for `Array`, `[:K, :V]` for
+      # `Hash`). Used by the dispatcher to build the substitution map
+      # from receiver `type_args` into the method's return type. The
+      # instance definition is the canonical source because singleton
+      # methods (e.g., `Array.new`) parameterize over the same `Elem`
+      # as instance methods.
+      #
+      # Returns an empty array for non-generic classes and for unknown
+      # names (the loader stays fail-soft). NOTE: in the `rbs` gem,
+      # `RBS::Definition#type_params` returns `Array<Symbol>` directly,
+      # not the AST `TypeParam` object (those live on the AST level).
+      def class_type_param_names(class_name)
+        definition = instance_definition(class_name)
+        return [] unless definition
+
+        definition.type_params.dup
+      end
+
       private
 
       def env

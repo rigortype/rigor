@@ -168,4 +168,23 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(loader.singleton_definition("ThisClassDoesNotExist123")).to be_nil
     end
   end
+
+  describe "#class_type_param_names (Slice 4 phase 2d)" do
+    it "returns Array's [:Elem]" do
+      expect(loader.class_type_param_names("Array")).to eq([:Elem])
+    end
+
+    it "returns Hash's [:K, :V]" do
+      expect(loader.class_type_param_names("Hash")).to eq(%i[K V])
+    end
+
+    it "returns an empty array for non-generic classes" do
+      expect(loader.class_type_param_names("Integer")).to eq([])
+      expect(loader.class_type_param_names("String")).to eq([])
+    end
+
+    it "returns an empty array for unknown classes (fail-soft)" do
+      expect(loader.class_type_param_names("ThisClassDoesNotExist123")).to eq([])
+    end
+  end
 end

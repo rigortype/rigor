@@ -33,14 +33,26 @@ module Rigor
         #   positional order. Empty when there are no arguments.
         # @param self_type [Rigor::Type] substitute for `Bases::Self`.
         # @param instance_type [Rigor::Type] substitute for `Bases::Instance`.
+        # @param type_vars [Hash{Symbol => Rigor::Type}] substitution map
+        #   for class-level type variables (Slice 4 phase 2d). The
+        #   selector threads it through to {RbsTypeTranslator} so
+        #   parameter types like `::Array[Elem]` substitute Elem before
+        #   the accepts check, instead of degrading the param to
+        #   `Array[Dynamic[Top]]`.
         # @return [RBS::MethodType, nil] the chosen overload, or nil
         #   when the definition has no method types at all.
-        def select(method_definition, arg_types:, self_type:, instance_type:)
+        def select(method_definition, arg_types:, self_type:, instance_type:, type_vars: {})
           overloads = method_definition.method_types
           return nil if overloads.empty?
 
           match = overloads.find do |method_type|
-            matches?(method_type, arg_types, self_type: self_type, instance_type: instance_type)
+            matches?(
+              method_type,
+              arg_types,
+              self_type: self_type,
+              instance_type: instance_type,
+              type_vars: type_vars
+            )
           end
 
           match || overloads.first
@@ -49,7 +61,7 @@ module Rigor
         class << self
           private
 
-          def matches?(method_type, arg_types, self_type:, instance_type:)
+          def matches?(method_type, arg_types, self_type:, instance_type:, type_vars:)
             return false if method_type.respond_to?(:type_params) && rejects_keyword_required?(method_type)
 
             fun = method_type.type
@@ -57,7 +69,13 @@ module Rigor
 
             params = positional_params_for(fun, arg_types.size)
             params.zip(arg_types).all? do |param, arg|
-              accepts_param?(param, arg, self_type: self_type, instance_type: instance_type)
+              accepts_param?(
+                param,
+                arg,
+                self_type: self_type,
+                instance_type: instance_type,
+                type_vars: type_vars
+              )
             end
           end
 
@@ -104,11 +122,12 @@ module Rigor
             head
           end
 
-          def accepts_param?(param, arg, self_type:, instance_type:)
+          def accepts_param?(param, arg, self_type:, instance_type:, type_vars:)
             param_type = RbsTypeTranslator.translate(
               param.type,
               self_type: self_type,
-              instance_type: instance_type
+              instance_type: instance_type,
+              type_vars: type_vars
             )
             result = param_type.accepts(arg, mode: :gradual)
             result.yes? || result.maybe?

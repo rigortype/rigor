@@ -115,6 +115,61 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       end
     end
 
+    describe "generics instantiation (Slice 4 phase 2d)" do
+      it "substitutes Elem from Array[Integer] receiver into Array#first" do
+        recv = Rigor::Type::Combinator.nominal_of(
+          Array,
+          type_args: [Rigor::Type::Combinator.nominal_of(Integer)]
+        )
+        type = dispatch(recv, :first)
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+      end
+
+      it "carries Elem through to a generic return type (Array#first(n) -> Array[Elem])" do
+        recv = Rigor::Type::Combinator.nominal_of(
+          Array,
+          type_args: [Rigor::Type::Combinator.nominal_of(Integer)]
+        )
+        type = dispatch(recv, :first, [Rigor::Type::Combinator.constant_of(2)])
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+        expect(type.type_args).to eq([Rigor::Type::Combinator.nominal_of(Integer)])
+      end
+
+      it "leaves unbound variables as Dynamic[Top] for raw receivers" do
+        # Raw `Nominal[Array]` carries no type_args, so Array#first on
+        # the raw form falls back to the original phase-2c behavior.
+        type = dispatch(Rigor::Type::Combinator.nominal_of(Array), :first)
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+      end
+
+      it "substitutes both type_vars in Hash[K, V]#fetch (returns V)" do
+        recv = Rigor::Type::Combinator.nominal_of(
+          Hash,
+          type_args: [
+            Rigor::Type::Combinator.nominal_of(Symbol),
+            Rigor::Type::Combinator.nominal_of(Integer)
+          ]
+        )
+        type = dispatch(recv, :fetch, [Rigor::Type::Combinator.constant_of(:k)])
+        # `Hash[K, V]#fetch(K) -> V` -> Nominal[Integer]
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+      end
+
+      it "leaves type_vars empty when receiver type_args arity disagrees with class params" do
+        # Constructed bogusly: Array declares 1 type param but receiver carries 2.
+        recv = Rigor::Type::Combinator.nominal_of(
+          Array,
+          type_args: [
+            Rigor::Type::Combinator.nominal_of(Integer),
+            Rigor::Type::Combinator.nominal_of(String)
+          ]
+        )
+        type = dispatch(recv, :first)
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+      end
+    end
+
     it "returns nil when the environment has no RBS loader" do
       blank_env = Rigor::Environment.new
       expect(blank_env.rbs_loader).to be_nil

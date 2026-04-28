@@ -158,18 +158,26 @@ module Rigor
         end
 
         # Nominal[C] accepts:
-        # - Nominal[D] when D <= C (Ruby class subtype);
-        # - Constant[v] when v.is_a?(klass(C));
+        # - Nominal[D] when D <= C (Ruby class subtype) and the
+        #   `type_args` are compatible (see {#accepts_nominal_args});
+        # - Constant[v] when v.is_a?(klass(C)). The type_args of self
+        #   are ignored here because a Constant carries a concrete
+        #   value, not a generic instantiation, and the analyzer has no
+        #   way to refute the args from a literal alone.
         # - Singleton: never (wrong value kind).
         def accepts_nominal(self_type, other_type, mode)
           case other_type
           when Type::Nominal
-            class_subtype_result(
+            class_result = class_subtype_result(
               target_name: self_type.class_name,
               actual_name: other_type.class_name,
               mode: mode,
               kind: :instance
             )
+            return class_result if class_result.no?
+
+            args_result = accepts_nominal_args(self_type, other_type, mode)
+            combine_results(class_result, args_result, mode)
           when Type::Constant
             accepts_nominal_from_constant(self_type, other_type, mode)
           else
@@ -178,6 +186,60 @@ module Rigor
               reasons: "Nominal[#{self_type.class_name}] rejects #{other_type.class}"
             )
           end
+        end
+
+        # Slice 4 phase 2d generic acceptance. Type arguments are
+        # treated covariantly element-wise (gradual default; declared
+        # variance lands in Slice 5+). When either side has no
+        # type_args we are lenient: the absent side is the "raw" form
+        # that historically meant "any instantiation", so we keep
+        # backward compatibility for call sites that have not yet
+        # learned to carry generics.
+        def accepts_nominal_args(self_type, other_type, mode)
+          shortcut = nominal_args_shortcut(self_type, other_type, mode)
+          return shortcut if shortcut
+
+          per_arg = self_type.type_args.zip(other_type.type_args).map do |formal, actual|
+            accepts(formal, actual, mode: mode)
+          end
+          combine_arg_results(per_arg, mode)
+        end
+
+        # Returns an `AcceptsResult` for the universal short-circuits
+        # (raw self, raw other, arity mismatch) or `nil` when the full
+        # element-wise check still has to run.
+        def nominal_args_shortcut(self_type, other_type, mode)
+          return Type::AcceptsResult.yes(mode: mode, reasons: "self has no type_args") if self_type.type_args.empty?
+          if other_type.type_args.empty?
+            return Type::AcceptsResult.maybe(
+              mode: mode,
+              reasons: "other has no type_args; assuming compatible (raw)"
+            )
+          end
+
+          return nil if self_type.type_args.size == other_type.type_args.size
+
+          Type::AcceptsResult.no(
+            mode: mode,
+            reasons: "type_args arity mismatch: #{self_type.type_args.size} vs #{other_type.type_args.size}"
+          )
+        end
+
+        def combine_arg_results(per_arg, mode)
+          if per_arg.any?(&:no?)
+            return Type::AcceptsResult.no(mode: mode, reasons: "a type_arg is rejected (covariant)")
+          end
+
+          if per_arg.any?(&:maybe?)
+            Type::AcceptsResult.maybe(mode: mode, reasons: "a type_arg could not be proven accepted")
+          else
+            Type::AcceptsResult.yes(mode: mode, reasons: "every type_arg accepted (covariant)")
+          end
+        end
+
+        def combine_results(class_result, args_result, mode)
+          combined_trinary = class_result.trinary.and(args_result.trinary)
+          Type::AcceptsResult.new(combined_trinary, mode: mode, reasons: class_result.reasons + args_result.reasons)
         end
 
         def accepts_nominal_from_constant(self_type, constant, mode)

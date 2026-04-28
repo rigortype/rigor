@@ -287,8 +287,28 @@ module Rigor
         end
       end
 
-      def type_of_hash(_node)
-        Type::Combinator.nominal_of(Hash)
+      # Slice 4 phase 2d carries `Hash[K, V]` through hash literals by
+      # unioning the types of all assoc keys and values. Splatted
+      # entries (`{ **other }`) and dynamic keys widen to the
+      # contributed types they expose; when no concrete pair survives
+      # we fall back to the raw `Hash` so callers stay backward
+      # compatible.
+      def type_of_hash(node)
+        elements = node.respond_to?(:elements) ? node.elements : []
+        keys = []
+        values = []
+        elements.each do |entry|
+          next unless entry.is_a?(Prism::AssocNode)
+
+          keys << type_of(entry.key)
+          values << type_of(entry.value)
+        end
+        return Type::Combinator.nominal_of(Hash) if keys.empty? || values.empty?
+
+        Type::Combinator.nominal_of(
+          Hash,
+          type_args: [Type::Combinator.union(*keys), Type::Combinator.union(*values)]
+        )
       end
 
       def type_of_interpolated_string(_node)
@@ -517,25 +537,19 @@ module Rigor
         scope.local(node.name) || dynamic_top
       end
 
+      # Slice 4 phase 2d wires array literals through the generic
+      # `Nominal[Array, [Elem]]` shape so calls like `[1, 2].first(1)`
+      # resolve to `Array[Constant[1] | Constant[2]]` instead of the
+      # raw `Array`. An empty literal still types as the raw `Array`
+      # (no element evidence to carry); element-type inference for
+      # mutated arrays remains a Slice 3 / Slice 5 concern.
       def array_type_for(node)
         elements = node.elements
-        return empty_array_type if elements.empty?
+        return Type::Combinator.nominal_of(Array) if elements.empty?
 
         element_types = elements.map { |e| type_of(e) }
         element_union = Type::Combinator.union(*element_types)
-        array_of(element_union)
-      end
-
-      def empty_array_type
-        array_of(Type::Combinator.bot)
-      end
-
-      # Slice 1 represents Array literals as Array (the bare nominal)
-      # without preserving element-type or tuple precision. Tuple inference
-      # and Array[T] generic carriage land in Slice 4 alongside the
-      # Tuple/HashShape/Record dedicated classes.
-      def array_of(_element_type)
-        Type::Combinator.nominal_of(Array)
+        Type::Combinator.nominal_of(Array, type_args: [element_union])
       end
 
       def parentheses_type_for(node)

@@ -8,12 +8,19 @@ module Rigor
   module Inference
     # Translates `RBS::Types::*` instances into `Rigor::Type` values.
     #
-    # The translator is intentionally conservative for Slice 4: generics
-    # are erased, type variables degrade to Dynamic[Top], and
-    # interface/intersection types are not modelled. The mapping is
-    # documented in docs/internal-spec/inference-engine.md so callers
-    # can rely on the boundaries even before the deeper generics work
-    # in Slice 5+.
+    # Slice 4 phase 2d adds two pieces of generic plumbing:
+    # - `RBS::Types::ClassInstance` arguments are translated recursively
+    #   so `Array[Integer]` becomes `Nominal["Array", [Nominal["Integer"]]]`
+    #   (and `Hash[Symbol, Integer]` becomes `Nominal["Hash", [...]]`).
+    # - `RBS::Types::Variable` consults a caller-supplied substitution
+    #   map (`type_vars:`) keyed by the variable's RBS name. When the
+    #   variable is bound, the bound `Rigor::Type` is returned unchanged;
+    #   when it is not bound, the variable degrades to `Dynamic[Top]` so
+    #   uninstantiated generics keep their fail-soft behavior.
+    #
+    # Interface and intersection types still degrade to `Dynamic[Top]`;
+    # they are bound to acceptance and dispatch rules that Slice 5+
+    # will replace.
     #
     # The optional `self_type:` and `instance_type:` arguments are the
     # Rigor counterparts of RBS's `self` and `instance` tokens:
@@ -50,10 +57,13 @@ module Rigor
         RBS::Types::ClassSingleton => :translate_class_singleton,
         RBS::Types::Alias => :translate_untyped,
         RBS::Types::Intersection => :translate_untyped,
-        RBS::Types::Variable => :translate_untyped,
+        RBS::Types::Variable => :translate_variable,
         RBS::Types::Interface => :translate_untyped
       }.freeze
       private_constant :TRANSLATORS
+
+      EMPTY_TYPE_VARS = {}.freeze
+      private_constant :EMPTY_TYPE_VARS
 
       class << self
         # @param rbs_type [RBS::Types::Bases::Base, RBS::Types::ClassInstance, ...]
@@ -61,29 +71,33 @@ module Rigor
         # @param instance_type [Rigor::Type, nil] substitute for
         #   `Bases::Instance`. Defaults to `nil`, which degrades to
         #   Dynamic[Top].
+        # @param type_vars [Hash{Symbol => Rigor::Type}] substitution map
+        #   for `Bases::Variable`. Keys are the RBS variable names (e.g.,
+        #   `:Elem`); values are Rigor types that replace the variable.
+        #   Variables that are not bound in the map degrade to Dynamic[Top].
         # @return [Rigor::Type]
-        def translate(rbs_type, self_type: nil, instance_type: nil)
+        def translate(rbs_type, self_type: nil, instance_type: nil, type_vars: EMPTY_TYPE_VARS)
           handler = TRANSLATORS[rbs_type.class]
-          return send(handler, rbs_type, self_type, instance_type) if handler
+          return send(handler, rbs_type, self_type, instance_type, type_vars) if handler
 
           Type::Combinator.untyped
         end
 
         private
 
-        def translate_top(_rbs_type, _self_type, _instance_type)
+        def translate_top(_rbs_type, _self_type, _instance_type, _type_vars)
           Type::Combinator.top
         end
 
-        def translate_bot(_rbs_type, _self_type, _instance_type)
+        def translate_bot(_rbs_type, _self_type, _instance_type, _type_vars)
           Type::Combinator.bot
         end
 
-        def translate_untyped(_rbs_type, _self_type, _instance_type)
+        def translate_untyped(_rbs_type, _self_type, _instance_type, _type_vars)
           Type::Combinator.untyped
         end
 
-        def translate_nil(_rbs_type, _self_type, _instance_type)
+        def translate_nil(_rbs_type, _self_type, _instance_type, _type_vars)
           Type::Combinator.constant_of(nil)
         end
 
@@ -91,7 +105,7 @@ module Rigor
         # eagerly so downstream comparisons (e.g., `result == Constant[true]`)
         # remain structural. Memoized at the module level because the
         # union is value-equal across calls.
-        def translate_bool(_rbs_type, _self_type, _instance_type)
+        def translate_bool(_rbs_type, _self_type, _instance_type, _type_vars)
           BOOL_UNION
         end
 
@@ -101,59 +115,72 @@ module Rigor
         ).freeze
         private_constant :BOOL_UNION
 
-        def translate_self(_rbs_type, self_type, _instance_type)
+        def translate_self(_rbs_type, self_type, _instance_type, _type_vars)
           self_type || Type::Combinator.untyped
         end
 
-        def translate_instance(_rbs_type, _self_type, instance_type)
+        def translate_instance(_rbs_type, _self_type, instance_type, _type_vars)
           instance_type || Type::Combinator.untyped
         end
 
-        def translate_optional(rbs_type, self_type, instance_type)
-          inner = translate(rbs_type.type, self_type: self_type, instance_type: instance_type)
+        def translate_optional(rbs_type, self_type, instance_type, type_vars)
+          inner = translate(rbs_type.type, self_type: self_type, instance_type: instance_type, type_vars: type_vars)
           Type::Combinator.union(inner, Type::Combinator.constant_of(nil))
         end
 
-        def translate_union(rbs_type, self_type, instance_type)
+        def translate_union(rbs_type, self_type, instance_type, type_vars)
           members = rbs_type.types.map do |t|
-            translate(t, self_type: self_type, instance_type: instance_type)
+            translate(t, self_type: self_type, instance_type: instance_type, type_vars: type_vars)
           end
           Type::Combinator.union(*members)
         end
 
-        def translate_literal(rbs_type, _self_type, _instance_type)
+        def translate_literal(rbs_type, _self_type, _instance_type, _type_vars)
           Type::Combinator.constant_of(rbs_type.literal)
         end
 
-        def translate_class_instance(rbs_type, _self_type, _instance_type)
+        # Slice 4 phase 2d translates the type arguments recursively so
+        # `Array[Integer]` round-trips into `Nominal["Array", [Nominal["Integer"]]]`.
+        # Variables inside the args participate in substitution through
+        # the same `type_vars:` map.
+        def translate_class_instance(rbs_type, self_type, instance_type, type_vars)
           name = rbs_type.name.relative!.to_s
-          # Slice 4 phase 1 drops the type arguments; we do not model
-          # generic Nominals yet (e.g., `Array[Integer]` becomes
-          # `Array`). Slice 5 will plumb args through the type model.
-          Type::Combinator.nominal_of(name)
+          translated_args = rbs_type.args.map do |arg|
+            translate(arg, self_type: self_type, instance_type: instance_type, type_vars: type_vars)
+          end
+          Type::Combinator.nominal_of(name, type_args: translated_args)
         end
 
-        def translate_array_nominal(_rbs_type, _self_type, _instance_type)
-          # Slice 4 phase 1 erases tuple shape to `Array`. Tuple
-          # precision lands in Slice 5 alongside the dedicated
-          # Tuple/HashShape carriers from ADR-3.
+        def translate_array_nominal(_rbs_type, _self_type, _instance_type, _type_vars)
+          # Tuple precision lands in Slice 5 alongside the dedicated
+          # Tuple/HashShape carriers from ADR-3. For now we erase the
+          # tuple shape to the bare Array nominal.
           Type::Combinator.nominal_of(Array)
         end
 
-        def translate_hash_nominal(_rbs_type, _self_type, _instance_type)
+        def translate_hash_nominal(_rbs_type, _self_type, _instance_type, _type_vars)
           Type::Combinator.nominal_of(Hash)
         end
 
-        def translate_proc_nominal(_rbs_type, _self_type, _instance_type)
+        def translate_proc_nominal(_rbs_type, _self_type, _instance_type, _type_vars)
           Type::Combinator.nominal_of(Proc)
         end
 
         # `singleton(Foo)` is the type of the constant `Foo` itself
         # (the class object). With the dedicated Singleton type added in
         # Slice 4 phase 2b, we map directly to `Singleton[Foo]`.
-        def translate_class_singleton(rbs_type, _self_type, _instance_type)
+        def translate_class_singleton(rbs_type, _self_type, _instance_type, _type_vars)
           name = rbs_type.name.relative!.to_s
           Type::Combinator.singleton_of(name)
+        end
+
+        # Slice 4 phase 2d. Looks up the variable's RBS name in the
+        # substitution map; bound variables are replaced inline, free
+        # variables degrade to Dynamic[Top]. We use `fetch` with a
+        # default rather than `[]` so a deliberate `nil` binding (a
+        # caller mistake) is never silently consumed.
+        def translate_variable(rbs_type, _self_type, _instance_type, type_vars)
+          type_vars.fetch(rbs_type.name) { Type::Combinator.untyped }
         end
       end
     end

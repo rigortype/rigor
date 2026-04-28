@@ -4,8 +4,8 @@ require "spec_helper"
 require "rbs"
 
 RSpec.describe Rigor::Inference::RbsTypeTranslator do
-  def parse_rbs(source)
-    RBS::Parser.parse_type(source)
+  def parse_rbs(source, variables: [])
+    RBS::Parser.parse_type(source, variables: variables)
   end
 
   describe ".translate" do
@@ -23,10 +23,50 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
       expect(type.class_name).to eq("Integer")
     end
 
-    it "drops type arguments from generic class instances (Slice 4 phase 1)" do
+    it "carries type arguments through generic class instances (Slice 4 phase 2d)" do
       type = described_class.translate(parse_rbs("::Array[::Integer]"))
       expect(type).to be_a(Rigor::Type::Nominal)
       expect(type.class_name).to eq("Array")
+      expect(type.type_args).to eq([Rigor::Type::Combinator.nominal_of(Integer)])
+      expect(type.describe).to eq("Array[Integer]")
+    end
+
+    it "translates Hash[K, V] preserving both type_args" do
+      type = described_class.translate(parse_rbs("::Hash[::Symbol, ::Integer]"))
+      expect(type.type_args).to eq(
+        [
+          Rigor::Type::Combinator.nominal_of(Symbol),
+          Rigor::Type::Combinator.nominal_of(Integer)
+        ]
+      )
+    end
+
+    it "substitutes RBS type variables via the type_vars: map (Slice 4 phase 2d)" do
+      var = parse_rbs("Elem", variables: [:Elem])
+      type = described_class.translate(
+        var,
+        type_vars: { Elem: Rigor::Type::Combinator.nominal_of(Integer) }
+      )
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+    end
+
+    it "degrades unbound RBS type variables to Dynamic[Top]" do
+      var = parse_rbs("Elem", variables: [:Elem])
+      type = described_class.translate(var, type_vars: {})
+      expect(type).to equal(Rigor::Type::Combinator.untyped)
+    end
+
+    it "substitutes variables nested inside a generic instantiation" do
+      type = described_class.translate(
+        parse_rbs("::Array[Elem]", variables: [:Elem]),
+        type_vars: { Elem: Rigor::Type::Combinator.nominal_of(String) }
+      )
+      expect(type).to eq(
+        Rigor::Type::Combinator.nominal_of(
+          Array,
+          type_args: [Rigor::Type::Combinator.nominal_of(String)]
+        )
+      )
     end
 
     it "translates Optional[T] into Union[T, Constant[nil]]" do

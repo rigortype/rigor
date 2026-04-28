@@ -68,15 +68,25 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
   end
 
   describe "shallow array literals" do
-    it "types empty arrays as Array (slice 1 widening)" do
+    it "types empty arrays as raw Array (no element evidence to carry)" do
       type = scope.type_of(parse_expression("[]"))
       expect(type.describe).to eq("Array")
       expect(type.erase_to_rbs).to eq("Array")
+      expect(type.type_args).to eq([])
     end
 
-    it "types non-empty arrays as Array (slice 1 widening)" do
+    it "types non-empty arrays as Array[Elem] with the element union (Slice 4 phase 2d)" do
       type = scope.type_of(parse_expression('[1, "hi", :foo]'))
-      expect(type.describe).to eq("Array")
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Array")
+      expect(type.type_args.size).to eq(1)
+      element = type.type_args.first
+      expect(element).to be_a(Rigor::Type::Union)
+      expect(element.members).to contain_exactly(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of("hi"),
+        Rigor::Type::Combinator.constant_of(:foo)
+      )
     end
   end
 
@@ -462,10 +472,17 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "still resolves the 0-arg overload of Array#first" do
-      # () -> Elem; Elem is a type variable -> Dynamic[Top].
+      # () -> Elem; Slice 4 phase 2d substitutes Elem from the
+      # receiver's type_args, so [1,2,3].first now returns
+      # `Constant[1] | Constant[2] | Constant[3]`.
       type = scope.type_of(parse_expression("[1, 2, 3].first"))
 
-      expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to contain_exactly(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2),
+        Rigor::Type::Combinator.constant_of(3)
+      )
     end
 
     it "selects the 0-arg singleton overload of Array.new" do
@@ -473,6 +490,32 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
 
       expect(type).to be_a(Rigor::Type::Nominal)
       expect(type.class_name).to eq("Array")
+    end
+
+    it "Hash literal carries Hash[K, V] type_args (Slice 4 phase 2d)" do
+      type = scope.type_of(parse_expression("{ a: 1, b: 2 }"))
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Hash")
+      expect(type.type_args.size).to eq(2)
+      key_type, value_type = type.type_args
+      expect(key_type.members.map(&:value)).to contain_exactly(:a, :b) if key_type.is_a?(Rigor::Type::Union)
+      expect(value_type.members.map(&:value)).to contain_exactly(1, 2) if value_type.is_a?(Rigor::Type::Union)
+    end
+
+    it "Hash#fetch substitutes V from the receiver's type_args" do
+      type = scope.type_of(parse_expression("{ a: 1, b: 2 }.fetch(:a)"))
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members.map(&:value)).to contain_exactly(1, 2)
+    end
+
+    it "Array#first(n) returns Array carrying the same Elem (end-to-end)" do
+      type = scope.type_of(parse_expression("[1, 2, 3].first(2)"))
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Array")
+      expect(type.type_args.size).to eq(1)
+      element = type.type_args.first
+      expect(element).to be_a(Rigor::Type::Union)
+      expect(element.members.map(&:value)).to contain_exactly(1, 2, 3)
     end
 
     it "falls back to the first overload when no overload accepts the args" do

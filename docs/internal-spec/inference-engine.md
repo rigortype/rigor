@@ -146,13 +146,22 @@ When the resolved RBS method has multiple overloads, Slice 4 phase 2c selects on
 
 Implementations MAY pre-translate parameter types per overload for performance, but MUST NOT cache results across `(class_name, method_name)` keys because `self_type` and `instance_type` substitution depends on the dispatch site.
 
-`Rigor::Inference::RbsTypeTranslator.translate(rbs_type, self_type:, instance_type:)` is the only normative path from `RBS::Types::*` to `Rigor::Type`. It MUST be deterministic, MUST NOT raise on any well-formed RBS type, and MUST follow the mapping documented in [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md). The two substitution keywords are independent:
+`Rigor::Inference::RbsTypeTranslator.translate(rbs_type, self_type:, instance_type:, type_vars:)` is the only normative path from `RBS::Types::*` to `Rigor::Type`. It MUST be deterministic, MUST NOT raise on any well-formed RBS type, and MUST follow the mapping documented in [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md). The substitution keywords are independent:
 
 - `Bases::Self` MUST be substituted by `self_type:`. For instance dispatch this is `Nominal[C]`; for singleton dispatch it is `Singleton[C]`.
 - `Bases::Instance` MUST be substituted by `instance_type:`. The dispatcher passes `Nominal[C]` regardless of dispatch kind so that `def self.create: () -> instance` resolves to `Nominal[C]` even when the receiver is `Singleton[C]`.
-- Either keyword MAY be omitted; the corresponding RBS token then degrades to `Dynamic[Top]`.
+- `Variable` (Slice 4 phase 2d) MUST be substituted by `type_vars:`. The map is keyed by the RBS variable's `name` symbol (`:Elem`, `:K`, `:V`, ...). Bound variables MUST be replaced by the bound `Rigor::Type` value; unbound variables MUST degrade to `Dynamic[Top]`.
+- `ClassInstance` MUST translate its `args` recursively through the same `translate` call so `::Array[Elem]` round-trips into `Nominal["Array", [type_vars[:Elem]]]`. Translators for sibling generic forms (`Tuple`, `Record`, `Proc`) follow the same recursion rule once they grow generic carriage in Slice 5+.
+- Any keyword MAY be omitted; the corresponding RBS token then degrades to `Dynamic[Top]`. The `type_vars:` default MUST be the empty hash so the keyword does not influence non-generic calls.
 
-Future slices that refine the mapping (generics, intersection, interfaces, alias resolution) MUST keep the existing entries' outputs unchanged on the gradual-typing axis: any tightening of precision MUST be a non-breaking change to subtyping queries against the result type.
+Future slices that refine the mapping (intersection, interfaces, alias resolution) MUST keep the existing entries' outputs unchanged on the gradual-typing axis: any tightening of precision MUST be a non-breaking change to subtyping queries against the result type.
+
+The Slice 4 phase 2d generic dispatch contract MUST also satisfy:
+
+- `Rigor::Type::Nominal` MUST carry an ordered, frozen `type_args` array. The empty array MUST denote the "raw" form (`Array`) and any non-empty array MUST denote an applied generic (`Array[Integer]`). Two carriers MUST compare structurally equal only when both `class_name` AND `type_args` match.
+- `Rigor::Environment::RbsLoader#class_type_param_names(class_name)` MUST return the class's declared type-parameter names as `Array<Symbol>`, drawing from the instance definition because singleton methods parameterize over the same names. It MUST return an empty array for non-generic classes and for unknown names (fail-soft).
+- The dispatcher MUST build the `type_vars` map by zipping `class_type_param_names` against the receiver's `type_args`. Empty `type_args` (raw receivers and singletons) MUST yield an empty map so free variables degrade as before. Arity disagreement between params and args MUST yield an empty map; the dispatcher MUST NOT silently truncate or pad.
+- The dispatcher MUST thread the same `type_vars` map through both the overload selector and the final return-type translation, so parameter types like `::Array[Elem]` substitute Elem before the accepts check rather than degrading to `Array[Dynamic[Top]]`.
 
 When the receiver of a call is a `Rigor::Type::Dynamic` and no positive dispatcher tier matches, `ExpressionTyper#call_type_for` MUST return `Dynamic[Top]` *silently*, without recording a `FallbackTracer` event. This is a recognised semantic outcome — the value-lattice algebra in [`value-lattice.md`](../type-specification/value-lattice.md) requires Dynamic to propagate through opaque method calls — and not a fail-soft compromise. Receivers that are not Dynamic still trigger the standard fail-soft fallback (with a tracer event) when no rule resolves.
 

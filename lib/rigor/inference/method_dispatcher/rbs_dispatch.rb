@@ -27,19 +27,30 @@ module Rigor
       # selector falls back to the first overload so the existing
       # phase-1/2b behavior is preserved.
       #
+      # Phase 2d adds generics instantiation. Receivers carry an
+      # ordered `type_args` array on `Rigor::Type::Nominal`. The
+      # dispatcher zips the receiver's `type_args` against the class's
+      # declared type-parameter names (`Array` -> `[:Elem]`, `Hash` ->
+      # `[:K, :V]`, ...) to build a substitution map; that map is then
+      # threaded through {RbsTypeTranslator} so a return type like
+      # `::Array[Elem]` resolves to `Nominal["Array", [Integer]]`
+      # rather than degrading the variable to `Dynamic[Top]`. When
+      # arities mismatch (raw receiver, partial generics) the map is
+      # left empty and free variables degrade as before.
+      #
       # Remaining limitations:
       #
-      # * Generics are erased: `Array[Integer]#first` translates to
-      #   `Optional[Integer?]` with `Integer?` resolved as
-      #   `Dynamic[Top]` because we do not yet substitute the type
-      #   variable. Generics instantiation lands in Slice 4 phase 2d.
       # * `block_type:` is ignored; method types that constrain the
       #   block return type are not yet honored.
       # * Keyword arguments are not threaded through call_arg_types,
       #   so overloads with required keywords are skipped (they cannot
       #   match the empty kwargs we send).
+      # * Method-level type parameters (e.g., `def foo[T]: (T) -> T`)
+      #   are not bound; their variables remain `Dynamic[Top]` after
+      #   substitution.
       #
       # See docs/adr/4-type-inference-engine.md for the broader plan.
+      # rubocop:disable Metrics/ModuleLength
       module RbsDispatch
         module_function
 
@@ -88,11 +99,18 @@ module Rigor
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
-            class_name, kind = descriptor
+            class_name, kind, receiver_args = descriptor
             method_definition = lookup_method(environment, class_name, kind, method_name)
             return nil unless method_definition
 
-            translate_return_type(method_definition, class_name, kind, args)
+            type_vars = build_type_vars(environment, class_name, receiver_args)
+            translate_return_type(
+              method_definition,
+              class_name: class_name,
+              kind: kind,
+              args: args,
+              type_vars: type_vars
+            )
           rescue StandardError
             # Defensive: if RBS' definition builder raises on a broken
             # hierarchy (e.g., partially loaded user signatures), the
@@ -100,18 +118,21 @@ module Rigor
             nil
           end
 
-          # Maps a Rigor::Type receiver to a `[class_name, kind]` pair
-          # where `kind` is either `:instance` or `:singleton`. Returns
-          # nil when the receiver does not correspond to a single
-          # concrete class -- callers fall back to Dynamic[Top].
+          # Maps a Rigor::Type receiver to a
+          # `[class_name, kind, type_args]` triple where `kind` is
+          # either `:instance` or `:singleton` and `type_args` carries
+          # the receiver's generic instantiation (empty for raw or
+          # singleton receivers, since `Singleton[Foo]` carries no
+          # generic args today). Returns nil when the receiver does
+          # not correspond to a single concrete class.
           def receiver_descriptor(receiver)
             case receiver
             when Type::Constant
-              [receiver.value.class.name, :instance]
+              [receiver.value.class.name, :instance, []]
             when Type::Nominal
-              [receiver.class_name, :instance]
+              [receiver.class_name, :instance, receiver.type_args]
             when Type::Singleton
-              [receiver.class_name, :singleton]
+              [receiver.class_name, :singleton, []]
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
             end
@@ -132,7 +153,23 @@ module Rigor
             end
           end
 
-          def translate_return_type(method_definition, class_name, kind, args)
+          # Slice 4 phase 2d substitution map. Zips the class's
+          # declared type-parameter names against the receiver's
+          # `type_args`. Returns an empty hash when either side is
+          # empty or when arities disagree -- in both cases free
+          # variables in the method's return type degrade to
+          # `Dynamic[Top]` per the translator's contract.
+          def build_type_vars(environment, class_name, receiver_args)
+            return {} if receiver_args.empty?
+
+            param_names = environment.rbs_loader.class_type_param_names(class_name)
+            return {} if param_names.empty?
+            return {} if param_names.size != receiver_args.size
+
+            param_names.zip(receiver_args).to_h
+          end
+
+          def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:)
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
               case kind
@@ -144,18 +181,21 @@ module Rigor
               method_definition,
               arg_types: args,
               self_type: self_type,
-              instance_type: instance_type
+              instance_type: instance_type,
+              type_vars: type_vars
             )
             return nil unless method_type
 
             RbsTypeTranslator.translate(
               method_type.type.return_type,
               self_type: self_type,
-              instance_type: instance_type
+              instance_type: instance_type,
+              type_vars: type_vars
             )
           end
         end
       end
+      # rubocop:enable Metrics/ModuleLength
     end
   end
 end

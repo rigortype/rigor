@@ -8,7 +8,7 @@ This document defines the semantics of those operators, the diagnostic display c
 
 | Form | Meaning |
 | --- | --- |
-| `T | U` | Union, RBS-compatible |
+| `T \| U` | Union, RBS-compatible |
 | `T & U` | Intersection, RBS-compatible |
 | `T?` | `T | nil`, RBS-compatible |
 | `~T` | Complement of `T` within the current known domain (internal) |

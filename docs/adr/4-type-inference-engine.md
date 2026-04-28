@@ -108,6 +108,8 @@ Code surface added:
 - `Rigor::Inference::ExpressionTyper#type_of(node, scope)` for the supported nodes.
 - `Rigor::AST::Node` marker module and `Rigor::AST::TypeNode` synthetic node, dispatched alongside Prism nodes by the typer.
 - `Rigor::Inference::Fallback` value object and `Rigor::Inference::FallbackTracer` observer, threaded through `Scope#type_of(node, tracer: ...)`. Records every fail-soft fallback so coverage regressions are observable from Slice 1 onward; later slices add `record_dispatch_miss`, `record_budget_cutoff`, etc. on the same tracer.
+- `Rigor::Source::NodeLocator` (under a new `Rigor::Source` namespace for source-text and AST positioning utilities) maps `(source, line, column)` or a byte offset to the deepest enclosing Prism node.
+- A `rigor type-of FILE:LINE:COL` CLI subcommand wraps the locator and `Scope#type_of`. It prints the inferred type and RBS erasure (text or `--format=json`); `--trace` attaches a `FallbackTracer` and reports the recorded events. This is the first dogfood loop for the engine surface and the primary tool for inspecting fail-soft coverage on real source files.
 
 Prism nodes recognised in Slice 1:
 

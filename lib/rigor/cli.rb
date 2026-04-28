@@ -10,7 +10,11 @@ require_relative "analysis/diagnostic"
 require_relative "analysis/result"
 
 module Rigor
-  class CLI
+  # The CLI class is a dispatcher: each `run_*` method delegates to a
+  # command-specific class once the command grows beyond a few lines (see
+  # {CLI::TypeOfCommand}). The class-length budget is intentionally relaxed
+  # here so dispatch wiring can live alongside still-inlined commands.
+  class CLI # rubocop:disable Metrics/ClassLength
     EXIT_USAGE = 64
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -37,6 +41,8 @@ module Rigor
         run_check
       when "init"
         run_init
+      when "type-of"
+        run_type_of
       else
         @err.puts("Unknown command: #{command}")
         @err.puts(help)
@@ -96,6 +102,12 @@ module Rigor
       0
     end
 
+    def run_type_of
+      require_relative "cli/type_of_command"
+
+      TypeOfCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def write_result(result, format)
       case format
       when "json"
@@ -118,6 +130,7 @@ module Rigor
         Commands:
           check      Analyze Ruby source files
           init       Create a starter .rigor.yml
+          type-of    Print the inferred type at FILE:LINE:COL
           version    Print the Rigor version
           help       Print this help
       HELP

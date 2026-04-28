@@ -221,11 +221,30 @@ The catalogue of nodes that the evaluator MUST recognise in Slice 3 phase 2 is:
 
 This is the contract that the Slice 3 phase 1 [Immutable Scope Discipline](#immutable-scope-discipline) defers to the statement-level evaluator. N-ary branch merges (case/when, begin/rescue chain) reduce by repeated pairwise join-with-nil-injection; the reduce order does not affect the result because nil-injection commutes with union under `Scope#join`.
 
+### Per-Node Scope Index
+
+`Rigor::Inference::ScopeIndexer.index(root, default_scope:)` is the canonical surface that converts a Prism program subtree into a per-node scope lookup. It MUST satisfy:
+
+- The return value MUST be an identity-comparing `Hash{Prism::Node => Rigor::Scope}`. Looking up a node not contained in `root`'s subtree MUST yield `default_scope` (the `Hash#default` slot).
+- For every Prism node the StatementEvaluator visits during `evaluate(root)`, the indexer MUST record the entry scope observed at that visit. Visits are fired through the `on_enter:` callback the indexer wires onto a fresh evaluator (the StatementEvaluator therefore stays state-free; the indexer carries the table).
+- For every Prism node in `root`'s subtree the StatementEvaluator does NOT visit (expression-interior children of nodes that the evaluator's default branch fell through on), the indexer MUST set the recorded scope to the nearest recorded ancestor's scope. The DFS pre-order propagation is a contract: a child MUST observe an entry scope at least as informative as its parent's, never weaker.
+- The indexer MUST run its internal StatementEvaluator with `tracer: nil`. CLI callers that want fail-soft fallback events MUST attach their tracer only to the post-index `type_of` probe, so the events come exactly from the second pass and are not double-recorded by the indexer's own typing of the program tree.
+
+The CLI commands `rigor type-of` and `rigor type-scan` MUST consult the index when typing nodes from a parsed file, so locals bound earlier in the program flow into the scope used to type later nodes. Both commands look up `index[node]` and then run `node_scope.type_of(node, tracer:)`. The contract above is what makes this composition correct.
+
+### `Rigor::Inference::StatementEvaluator#initialize(on_enter:)`
+
+The third constructor keyword on `StatementEvaluator` is the hook the ScopeIndexer drives. It MUST satisfy:
+
+- `on_enter:` defaults to `nil`. When `nil`, no callback fires and the evaluator's behaviour MUST be observably identical to a slice 3 phase 2 evaluator constructed without the keyword.
+- When non-`nil`, the callback MUST be called exactly once at the start of every `evaluate(node)` call, before the handler dispatch, with `(node, scope)` as the arguments — `node` is the Prism node being entered and `scope` is the entry scope (`@scope` at that recursion level).
+- The callback MUST be threaded through every recursive `sub_eval` so that nested invocations on forked scopes still report their own entries.
+
 ### Boundaries
 
 Slice 3 phase 2 does NOT thread scope through the *interior* of arbitrary expressions: `foo(x = 1)` and `[1, x = 2]` do not propagate `x` to the post-scope, because the recursive descent stops at expression-level children that the evaluator's catalogue does not cover. This is a deliberate Phase 2 simplification; later slices may expand the catalogue to thread scope through call arguments and array/hash elements. Statement-y constructs at the top level (assignments, ifs, cases, begins, loops, parens) propagate as specified above.
 
-Slice 3 phase 2 also does NOT yet consume the result of `Scope#evaluate` from the CLI (`rigor type-of` and `rigor type-scan` still operate against `Scope#type_of` with an empty scope). That integration is a follow-up concern; the stability of the StatementEvaluator surface above MUST hold across that future work.
+Slice 3 phase 2 also does NOT bind method-definition parameters into the scope (a `DefNode` body is opaque to the evaluator's traversal); parameter reads inside a method body therefore still resolve to `Dynamic[Top]` until a future slice grows a method-entry scope-builder.
 
 ## Environment Surface
 

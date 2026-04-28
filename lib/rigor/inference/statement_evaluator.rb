@@ -68,9 +68,17 @@ module Rigor
 
       # @param scope [Rigor::Scope]
       # @param tracer [Rigor::Inference::FallbackTracer, nil]
-      def initialize(scope:, tracer: nil)
+      # @param on_enter [#call, nil] optional `(node, scope) ->` callable
+      #   invoked once at the start of every {#evaluate} call (the node
+      #   itself, *before* its handler runs). Threaded through every
+      #   recursive `sub_eval` so the tooling that builds a per-node
+      #   scope index (`Rigor::Inference::ScopeIndexer`) can record the
+      #   entry scope for every Prism node the evaluator visits without
+      #   the StatementEvaluator carrying any additional state itself.
+      def initialize(scope:, tracer: nil, on_enter: nil)
         @scope = scope
         @tracer = tracer
+        @on_enter = on_enter
       end
 
       # Evaluate `node` under the receiver scope. Returns `[type, scope']`
@@ -81,6 +89,8 @@ module Rigor
       # @param node [Prism::Node]
       # @return [Array(Rigor::Type, Rigor::Scope)]
       def evaluate(node)
+        @on_enter&.call(node, @scope)
+
         handler = HANDLERS[node.class]
         return send(handler, node) if handler
 
@@ -298,7 +308,7 @@ module Rigor
       # ----- helpers -----
 
       def sub_eval(node, with_scope)
-        StatementEvaluator.new(scope: with_scope, tracer: tracer).evaluate(node)
+        StatementEvaluator.new(scope: with_scope, tracer: tracer, on_enter: @on_enter).evaluate(node)
       end
 
       def eval_branch_or_nil(branch_node, branch_scope)

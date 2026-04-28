@@ -3,6 +3,7 @@
 require_relative "../source/node_walker"
 require_relative "../scope"
 require_relative "fallback_tracer"
+require_relative "scope_indexer"
 
 module Rigor
   module Inference
@@ -55,11 +56,20 @@ module Rigor
         unrecognized = Hash.new(0)
         events = []
 
+        # Build the per-node scope index once per scan so locals bound
+        # earlier in the program flow into the scope used to type every
+        # later node. The indexer walks the program with a tracer-less
+        # StatementEvaluator and propagates the recorded scope down to
+        # expression-interior nodes the evaluator does not visit. The
+        # second pass below re-types each node with its own tracer so
+        # the per-class fallback statistics stay attributable.
+        scope_index = ScopeIndexer.index(root, default_scope: @scope)
+
         Source::NodeWalker.each(root) do |node|
           visits[node.class] += 1
 
           tracer = FallbackTracer.new
-          @scope.type_of(node, tracer: tracer)
+          scope_index[node].type_of(node, tracer: tracer)
 
           first_event = tracer.events.first
           next unless first_event && first_event.node_class == node.class

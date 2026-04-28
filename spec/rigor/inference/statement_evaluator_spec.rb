@@ -258,6 +258,42 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "on_enter callback" do
+    it "fires once per visited node with the entry scope" do
+      events = []
+      on_enter = ->(node, scope) { events << [node.class, scope.locals.keys.sort] }
+      ast = parse_program(<<~RUBY)
+        x = 1
+        y = x + 2
+      RUBY
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(ast)
+
+      # Sanity: every recursive sub_eval threads the callback so the
+      # rvalue (`x + 2`) is recorded with `x` already bound.
+      x_plus_2_event = events.find { |klass, _| klass == Prism::CallNode }
+      expect(x_plus_2_event).not_to be_nil
+      expect(x_plus_2_event[1]).to include(:x)
+    end
+
+    it "fires for nodes whose handler is the default fallback branch" do
+      events = []
+      on_enter = ->(node, _scope) { events << node.class }
+      ast = parse_program("foo(1)")
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(ast)
+
+      # The CallNode has no statement-evaluator handler; the default
+      # branch still fires on_enter so callers (the ScopeIndexer) can
+      # record its entry scope.
+      expect(events).to include(Prism::CallNode)
+    end
+
+    it "is optional and does not affect the result when omitted" do
+      ast = parse_program("x = 1")
+      _, post = described_class.new(scope: scope).evaluate(ast)
+      expect(post.local(:x)).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+  end
+
   describe "downstream inference benefits" do
     it "lets methods on bound locals resolve through RBS" do
       type, _post = evaluate(<<~RUBY)

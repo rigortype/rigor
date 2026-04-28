@@ -7,6 +7,7 @@ require_relative "../environment"
 require_relative "../scope"
 require_relative "../source/node_locator"
 require_relative "../inference/fallback_tracer"
+require_relative "../inference/scope_indexer"
 require_relative "type_of_renderer"
 
 module Rigor
@@ -71,8 +72,18 @@ module Rigor
         return 1 if node.nil?
 
         tracer = options[:trace] ? Inference::FallbackTracer.new : nil
-        scope = Scope.empty(environment: project_environment(file))
-        type = scope.type_of(node, tracer: tracer)
+        base_scope = Scope.empty(environment: project_environment(file))
+
+        # Build a per-node scope index so locals bound earlier in the
+        # file flow into the scope used to type the queried node. We
+        # build the index with no tracer attached (it would otherwise
+        # double-record fallback events with the second-pass type_of
+        # call below), then look up the scope visible at the queried
+        # node and run the actual probe under it.
+        scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
+        node_scope = scope_index[node]
+
+        type = node_scope.type_of(node, tracer: tracer)
         result = Result.new(file: file, line: line, column: column, node: node, type: type, tracer: tracer)
 
         TypeOfRenderer.new(out: @out).render(result, format: options.fetch(:format))

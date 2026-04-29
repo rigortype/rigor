@@ -39,6 +39,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 6 phase 2 sub 1 | `37eb158` | Class-membership narrowing (`is_a?`/`kind_of?`/`instance_of?`) |
 | Slice 5 phase 2 sub 2 | `0164317` | Destructuring + multi-arg `dig` + `Hash#values_at` (`MultiTargetBinder`) |
 | Slice 6 phase C sub 2 | `379cca7` | Destructuring blocks + numbered params + `block_type:` (`Array#map { ... }` → `Array[T]`) |
+| Slice 6 phase 2 sub 2 | working tree | Equality narrowing + `Rigor::Analysis::FactStore` |
 
 ## What is in Place Today
 
@@ -67,6 +68,18 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 
 Combinator factories (`Rigor::Type::Combinator`) enforce deterministic
 normalisation and are the only sanctioned way to construct types.
+
+### Analysis facts
+
+- `Rigor::Analysis::FactStore` — Slice 6 phase 2 sub-phase 2. Immutable
+  fact bundle carried by each `Scope` snapshot. It defines target/fact
+  value objects, the initial bucket vocabulary (`local_binding`,
+  `captured_local`, `object_content`, `global_storage`, `dynamic_origin`,
+  `relational`), target invalidation, and conservative joins that retain
+  only facts present on both edges. `Scope#with_local` invalidates facts
+  attached to the rebound local; equality predicates record either a
+  `local_binding` fact (when the type narrows) or a `relational` fact
+  (when the comparison is remembered but cannot safely narrow the value).
 
 ### Inference engine (`Rigor::Inference::*`)
 
@@ -99,16 +112,20 @@ normalisation and are the only sanctioned way to construct types.
   `Constant[nil]`, binding the rest target as a `Tuple` of middle
   elements) and falls back to `Dynamic[Top]` per slot for non-Tuple
   carriers. Recurses into nested `MultiTargetNode` targets.
-- `Narrowing` — Slice 6 phases 1 and 2 sub-phase 1.
+- `Narrowing` — Slice 6 phases 1 and 2.
   Exposes `narrow_truthy`/`narrow_falsey`/`narrow_nil`/`narrow_non_nil`
   type primitives, `narrow_class`/`narrow_not_class` (Slice 6 phase 2
-  sub-phase 1), plus `predicate_scopes(node, scope)` which returns
+  sub-phase 1), `narrow_equal`/`narrow_not_equal` (Slice 6 phase 2
+  sub-phase 2), plus `predicate_scopes(node, scope)` which returns
   `[truthy_scope, falsey_scope]` for the recognised predicate
   catalogue (`LocalVariableReadNode`, `recv.nil?`, `!recv`,
   `recv.is_a?(C)`/`recv.kind_of?(C)`/`recv.instance_of?(C)`,
-  `ParenthesesNode`, `&&`/`||` composition). The class-membership
-  shapes require a static constant argument and a local-read receiver;
-  anything else falls through to the no-narrowing branch.
+  `local == literal`/`literal == local` and the `!=` mirror,
+  `ParenthesesNode`, `&&`/`||` composition). Class-membership shapes
+  require a static constant argument and a local-read receiver; equality
+  shapes require one local side and one trusted static literal side
+  (`String`, `Symbol`, `Integer`, booleans, or `nil`; not `Float`).
+  Anything else falls through to the no-narrowing branch.
 - `ScopeIndexer` — builds a per-node scope index for the CLI to consume.
 - `CoverageScanner` — backs `type-scan`.
 
@@ -118,7 +135,8 @@ normalisation and are the only sanctioned way to construct types.
 - `Environment::ClassRegistry` — small whitelist of well-known core classes.
 - `Environment::RbsLoader` — wraps `RBS::EnvironmentLoader`/`DefinitionBuilder`
   with project/stdlib loading and lazy memoisation. Supports
-  `instance_method`, `singleton_method`, `class_type_param_names`.
+  `instance_method`, `singleton_method`, `class_type_param_names`, and
+  `class_ordering` over `RBS::Definition#ancestors`.
 
 ### Source helpers
 
@@ -127,9 +145,11 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 681 examples, 0 failures (as of the Slice 6 phase C sub-phase 2 work).
-- **RuboCop**: pre-existing offences in `references/` submodules only;
-  0 in Rigor product code.
+- **RSpec**: 708 examples, 0 failures (as of the Slice 6 phase 2
+  sub-phase 2 working tree).
+- **RuboCop**: `make lint` is clean. `.rubocop.yml` excludes the whole
+  `references/` tree so upstream submodules are not linted as Rigor
+  product code.
 - **`rigor type-scan lib`**: ~13.8 % unrecognised. The block-return-type
   uplift mostly affects user code that calls `Array#map`/`select`/
   `flat_map` with literal blocks; `lib/` itself does not depend
@@ -185,6 +205,16 @@ normalisation and are the only sanctioned way to construct types.
   (`Nominal[Numeric]` or `Union[Integer, String]`) the same
   predicate narrows precisely on both edges, which is exercised
   through the spec suite.
+- **`rigor type-of` smoke probe (Slice 6 phase 2 sub-phase 2
+  equality narrowing)**:
+  `x = ["a", "b"].first; result = if x == "a"; x; else; x; end; result`
+  narrows the then branch to `Constant["a"]` and the else branch to
+  `Constant["b"]` when the receiver domain is a finite trusted
+  literal union. `x == nil` similarly extracts `nil` from
+  `Integer | nil`. `Dynamic[Top] == "a"` records a relational fact
+  but keeps the local as `Dynamic[Top]`, honoring the rule that
+  equality must not manufacture a positive literal domain from an
+  unchecked receiver.
 
 ## Known Boundaries (Deliberate, Not Bugs)
 
@@ -193,25 +223,23 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
 1. **Expression-interior scope threading**: `foo(x = 1)` and `[1, x = 2]`
    do not propagate `x` to the post-scope. The StatementEvaluator does not
    recurse into call arguments or array/hash element interiors.
-2. **Block parameter binding**: covered for the curated catalogue in
-   Slice 6 phase C sub-phase 1
+2. **Block parameter binding**: covered for the curated catalogue through
+   Slice 6 phase C sub-phases 1 and 2
    (`Rigor::Inference::BlockParameterBinder`), driven by the receiving
    method's RBS block signature through
    `MethodDispatcher.expected_block_param_types`. Destructuring block
    targets (`|(a, b), c|`), numbered parameters (`_1`/`_2`), and the
-   block-return-type-aware dispatch (so `[1, 2, 3].map { |n| n.to_s }`
-   types as `Array[String]`) are deferred to sub-phase 2.
-3. **Equality narrowing and FactStore**: equality predicates
-   (`x == "literal"`, `x == nil`, ...) do not yet narrow. This is
-   Slice 6 phase 2 sub-phase 2 territory. Phases 1 and 2 sub-phase 1
-   already cover truthiness, `nil?`, and class-membership narrowing
-   (`is_a?`/`kind_of?`/`instance_of?`) on local bindings, plus the
-   unary `!` inverter and short-circuit `&&`/`||` composition. The
-   class-membership analyser uses host-Ruby `Object.const_get` for
-   hierarchy checks, so classes the host has not loaded fall through
-   to the conservative answer; sub-phase 2 will replace this with
-   the analyzer's own registry/RBS loader hierarchy lookup so
-   offline analyses become deterministic.
+   block-return-type-aware dispatch are in place. Union-aware destructuring
+   for block parameters (for example a `Union[Tuple, Tuple]` slot) remains
+   a follow-up.
+3. **Equality trust boundaries**: equality predicates now narrow only
+   on the deliberately small trusted surface from
+   [`control-flow-analysis.md`](type-specification/control-flow-analysis.md):
+   finite literal domains for `String`, `Symbol`, and `Integer`, plus
+   singleton extraction for `nil`, `true`, and `false`. `Float`
+   literals, broad nominal domains (`String`, `Integer`, ...),
+   user-defined equality, `eql?`, `===`, and `Dynamic[Top]` comparisons
+   stay relational-only until RBS/plugin-declared flow effects land.
 4. **Shape narrowing on dispatch**: covered for the curated
    element-access catalogue (Slice 5 phase 2 sub-phase 1) plus
    destructuring assignment, multi-arg `dig` chains, and
@@ -306,39 +334,29 @@ the "escaped" capability fact.
 - **risk**: medium; the invalidation must compose cleanly with the
   Slice 6 phase 2 sub-phase 2 equality narrowing.
 
-### D. Slice 6 phase 2 sub-phase 2 — Equality narrowing + FactStore
+### D. Completed in working tree — Slice 6 phase 2 sub-phase 2
 
-Phase 1 (already in) ships truthiness and `nil?` narrowing. Phase 2
-sub-phase 1 (this commit) ships `is_a?`/`kind_of?`/`instance_of?`
-class-membership narrowing using host-Ruby `Object.const_get` for
-hierarchy checks. Phase 2 sub-phase 2 extends the analyser with
-trusted equality narrowing for finite literal sets per [`docs/type-specification/control-flow-analysis.md`](type-specification/control-flow-analysis.md), plus the formal `Rigor::Analysis::FactStore`
-that drives heap and relational facts. Sub-phase 2 also lifts
-`eval_and_or`'s value type from `union(left, right)` to a narrowing-
-aware `union(narrow_falsey(left), right)` for `&&` (and the symmetric
-form for `||`), and migrates the class-membership analyser's
-hierarchy lookup from `Object.const_get` to the registry/RBS
-loader so offline analyses become deterministic.
+Phase 2 sub-phase 2 is now implemented in the working tree. It adds
+trusted equality narrowing for finite literal sets per
+[`docs/type-specification/control-flow-analysis.md`](type-specification/control-flow-analysis.md),
+the formal `Rigor::Analysis::FactStore`, narrowing-aware `&&`/`||`
+value types, and registry/RBS-loader-backed hierarchy lookup for
+class-membership predicates.
 
 - **type-scan impact**: small to medium (most narrowing happens on
   already-typed receivers; the unrecognised count is dominated by
   other things).
-- **engine impact**: medium — extends the predicate-analyser
-  catalogue and adds the `FactStore` scaffolding.
-- **risk**: medium; equality trust levels and closure-capture
-  invalidation need careful handling per the control-flow-analysis
-  spec.
+- **engine impact**: landed — predicate analysis now covers the
+  trusted equality surface and `Scope` snapshots carry fact stores.
+- **remaining risk**: closure-capture invalidation still needs its
+  follow-up slice; equality itself remains intentionally narrow.
 
 ### Recommended ordering
 
-The user-priority ordering for this branch is **D → B → C → A**:
-Slice 6 phase 1 (the truthiness/`nil` half of D), Slice 5 phase 2
-sub-phases 1 and 2 (the dispatch + destructuring halves of B), Slice 6
-phase C sub-phases 1 and 2 (the block-parameter + block-return-type
-halves of C), and Slice 6 phase 2 sub-phase 1 (the class-membership
-half of D) are all already in. The remaining sub-phases are sub-phase
-3 of B (range / start-length `[]` and the Rigor-extension hash-shape
-policies), sub-phase 3 of C (closure-captured-local invalidation,
-gated on the FactStore), and sub-phase 2 of D (equality narrowing +
-the formal FactStore). A — authoring Rigor-side RBS for Rigor itself
-— remains the largest single lever for the `type-scan lib` metric.
+After the Slice 6 phase 2 sub-phase 2 working-tree changes, the
+remaining user-priority ordering is **B → C → A**. The remaining
+sub-phases are sub-phase 3 of B (range / start-length `[]` and the
+Rigor-extension hash-shape policies) and sub-phase 3 of C
+(closure-captured-local invalidation, now unblocked by the FactStore).
+A — authoring Rigor-side RBS for Rigor itself — remains the largest
+single lever for the `type-scan lib` metric.

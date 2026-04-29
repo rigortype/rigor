@@ -2,6 +2,7 @@
 
 require_relative "type"
 require_relative "environment"
+require_relative "analysis/fact_store"
 require_relative "inference/expression_typer"
 require_relative "inference/statement_evaluator"
 
@@ -14,17 +15,18 @@ module Rigor
   #
   # See docs/internal-spec/inference-engine.md for the binding contract.
   class Scope
-    attr_reader :environment, :locals
+    attr_reader :environment, :locals, :fact_store
 
     class << self
       def empty(environment: Environment.default)
-        new(environment: environment, locals: {}.freeze)
+        new(environment: environment, locals: {}.freeze, fact_store: Analysis::FactStore.empty)
       end
     end
 
-    def initialize(environment:, locals:)
+    def initialize(environment:, locals:, fact_store: Analysis::FactStore.empty)
       @environment = environment
       @locals = locals
+      @fact_store = fact_store
       freeze
     end
 
@@ -34,7 +36,20 @@ module Rigor
 
     def with_local(name, type)
       new_locals = @locals.merge(name.to_sym => type).freeze
-      self.class.new(environment: environment, locals: new_locals)
+      new_fact_store = fact_store.invalidate_target(Analysis::FactStore::Target.local(name))
+      self.class.new(environment: environment, locals: new_locals, fact_store: new_fact_store)
+    end
+
+    def with_fact(fact)
+      self.class.new(environment: environment, locals: locals, fact_store: fact_store.with_fact(fact))
+    end
+
+    def facts_for(target: nil, bucket: nil)
+      fact_store.facts_for(target: target, bucket: bucket)
+    end
+
+    def local_facts(name, bucket: nil)
+      facts_for(target: Analysis::FactStore::Target.local(name), bucket: bucket)
     end
 
     def type_of(node, tracer: nil)
@@ -69,16 +84,29 @@ module Rigor
       joined_locals = shared.to_h do |name|
         [name, Type::Combinator.union(locals[name], other.locals[name])]
       end
-      self.class.new(environment: environment, locals: joined_locals.freeze)
+      build_joined_scope(joined_locals, other)
     end
 
     def ==(other)
-      other.is_a?(Scope) && environment.equal?(other.environment) && @locals == other.locals
+      other.is_a?(Scope) &&
+        environment.equal?(other.environment) &&
+        @locals == other.locals &&
+        fact_store == other.fact_store
     end
     alias eql? ==
 
     def hash
-      [Scope, environment.object_id, @locals].hash
+      [Scope, environment.object_id, @locals, fact_store].hash
+    end
+
+    private
+
+    def build_joined_scope(joined_locals, other)
+      self.class.new(
+        environment: environment,
+        locals: joined_locals.freeze,
+        fact_store: fact_store.join(other.fact_store)
+      )
     end
   end
 end

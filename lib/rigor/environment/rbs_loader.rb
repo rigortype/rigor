@@ -3,6 +3,7 @@
 require "rbs"
 
 require_relative "../type"
+require_relative "rbs_hierarchy"
 
 module Rigor
   class Environment
@@ -61,6 +62,7 @@ module Rigor
         @instance_definition_cache = {}
         @singleton_definition_cache = {}
         @class_known_cache = {}
+        @hierarchy = RbsHierarchy.new(self)
       end
 
       # Returns true when an RBS class or module declaration with the given
@@ -134,6 +136,10 @@ module Rigor
         return [] unless definition
 
         definition.type_params.dup
+      end
+
+      def class_ordering(lhs, rhs)
+        @hierarchy.class_ordering(lhs, rhs)
       end
 
       private

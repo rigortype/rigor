@@ -76,6 +76,7 @@ module Rigor
 
       def initialize
         @nominals = {}
+        @class_objects = {}
       end
 
       def register(class_object)
@@ -83,6 +84,7 @@ module Rigor
         raise ArgumentError, "anonymous class has no name" if class_object.name.nil?
 
         @nominals[class_object.name] ||= Type::Combinator.nominal_of(class_object)
+        @class_objects[class_object.name] ||= class_object
         self
       end
 
@@ -109,6 +111,30 @@ module Rigor
         return nil if name.nil?
 
         @nominals[name.to_s]
+      end
+
+      def class_ordering(lhs, rhs)
+        lhs = normalize_name(lhs)
+        rhs = normalize_name(rhs)
+        return :equal if lhs == rhs
+
+        lhs_class = @class_objects[lhs]
+        rhs_class = @class_objects[rhs]
+        return :unknown if lhs_class.nil? || rhs_class.nil?
+
+        if lhs_class <= rhs_class
+          :subclass
+        elsif rhs_class <= lhs_class
+          :superclass
+        else
+          :disjoint
+        end
+      end
+
+      private
+
+      def normalize_name(name)
+        name.to_s.delete_prefix("::")
       end
     end
   end

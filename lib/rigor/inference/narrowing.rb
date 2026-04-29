@@ -3,6 +3,8 @@
 require "prism"
 
 require_relative "../type"
+require_relative "../environment"
+require_relative "../analysis/fact_store"
 
 module Rigor
   module Inference
@@ -26,12 +28,10 @@ module Rigor
     # Predicate-level narrowing is consumed by
     # `Rigor::Inference::StatementEvaluator` to refine the `then` and
     # `else` scopes of `IfNode`/`UnlessNode`. Phase 1 narrows local
-    # bindings on truthiness and `nil?`; phase 2 sub-phase 1 extends
-    # the catalogue with class-membership predicates (`is_a?`,
-    # `kind_of?`, `instance_of?`) when the argument is a static
-    # constant reference. Equality narrowing, ivar/cvar narrowing,
-    # and the formal `Rigor::Analysis::FactStore` are still deferred
-    # to phase 2 sub-phase 2+.
+    # bindings on truthiness and `nil?`; phase 2 extends the catalogue
+    # with class-membership predicates (`is_a?`, `kind_of?`,
+    # `instance_of?`) and trusted equality/inequality checks against
+    # static literals.
     #
     # The module is pure: every public function returns fresh values and
     # MUST NOT mutate its inputs. Unrecognised predicate shapes degrade
@@ -45,6 +45,11 @@ module Rigor
     # binding contract.
     # rubocop:disable Metrics/ModuleLength
     module Narrowing
+      TRUSTED_EQUALITY_LITERAL_CLASSES = [String, Symbol, Integer, TrueClass, FalseClass, NilClass].freeze
+      SINGLETON_LITERAL_CLASSES = [TrueClass, FalseClass, NilClass].freeze
+      ClassNarrowingContext = Data.define(:exact, :polarity, :environment)
+      private_constant :TRUSTED_EQUALITY_LITERAL_CLASSES, :SINGLETON_LITERAL_CLASSES, :ClassNarrowingContext
+
       module_function
 
       # Truthy fragment of `type`: the subset whose inhabitants are truthy
@@ -115,6 +120,40 @@ module Rigor
         end
       end
 
+      # Equality fragment of `type` against a trusted literal.
+      #
+      # String/Symbol/Integer equality narrows only when the current
+      # domain is already a finite union of trusted literals. Nil and
+      # booleans are singleton values, so they can be extracted from a
+      # mixed union such as `Integer | nil` without manufacturing a new
+      # positive domain from the comparison alone.
+      def narrow_equal(type, literal)
+        return type unless trusted_equality_literal?(literal)
+
+        if singleton_literal?(literal)
+          narrow_singleton_equal(type, literal)
+        elsif finite_trusted_literal_domain?(type)
+          narrow_finite_equal(type, literal)
+        else
+          type
+        end
+      end
+
+      # Complement of {.narrow_equal}. Negative facts are domain-relative:
+      # they remove a literal from an already-known domain but do not create
+      # an unbounded difference type when the domain is broad or dynamic.
+      def narrow_not_equal(type, literal)
+        return type unless trusted_equality_literal?(literal)
+
+        if singleton_literal?(literal)
+          narrow_singleton_not_equal(type, literal)
+        elsif finite_trusted_literal_domain?(type)
+          narrow_finite_not_equal(type, literal)
+        else
+          type
+        end
+      end
+
       # Class-membership fragment of `type`: the subset whose
       # inhabitants are instances of `class_name` (or its subclasses
       # when `exact: false`). `class_name` is the qualified name of
@@ -122,17 +161,17 @@ module Rigor
       # Slice 6 phase 2 sub-phase 1 narrows the `if x.is_a?(C)`
       # / `if x.kind_of?(C)` / `if x.instance_of?(C)` truthy edge.
       #
-      # Nominal narrowing is hierarchy-aware via Ruby's runtime
-      # `<=` operator on `Class` objects: when the bound type is a
-      # supertype of `class_name` the result narrows DOWN to
-      # `Nominal[class_name]` (e.g., `Numeric & Integer = Integer`);
-      # when the bound type is already a subtype it is preserved;
-      # disjoint hierarchies collapse to `Bot`. Classes the host
-      # Ruby cannot resolve (`Object.const_get` fails) fall back to
-      # the conservative answer (the type unchanged) so the
-      # analyzer never asserts narrowing it cannot prove.
-      def narrow_class(type, class_name, exact: false)
-        narrow_class_dispatch(type, class_name, exact: exact, polarity: :positive)
+      # Nominal narrowing is hierarchy-aware through the analyzer
+      # environment: when the bound type is a supertype of
+      # `class_name` the result narrows DOWN to `Nominal[class_name]`
+      # (e.g., `Numeric & Integer = Integer`); when the bound type is
+      # already a subtype it is preserved; disjoint hierarchies
+      # collapse to `Bot`. Classes the environment cannot resolve
+      # fall back to the conservative answer (the type unchanged) so
+      # the analyzer never asserts narrowing it cannot prove.
+      def narrow_class(type, class_name, exact: false, environment: Environment.default)
+        context = ClassNarrowingContext.new(exact: exact, polarity: :positive, environment: environment)
+        narrow_class_dispatch(type, class_name, context)
       end
 
       # Mirror of {.narrow_class} for the falsey edge of
@@ -141,8 +180,9 @@ module Rigor
       # are preserved. Conservative on Top/Dynamic/Bot (preserved
       # unchanged) because the analyzer cannot prove the negative
       # without a richer carrier.
-      def narrow_not_class(type, class_name, exact: false)
-        narrow_class_dispatch(type, class_name, exact: exact, polarity: :negative)
+      def narrow_not_class(type, class_name, exact: false, environment: Environment.default)
+        context = ClassNarrowingContext.new(exact: exact, polarity: :negative, environment: environment)
+        narrow_class_dispatch(type, class_name, context)
       end
 
       # Public predicate analyser. Returns `[truthy_scope, falsey_scope]`,
@@ -218,6 +258,79 @@ module Rigor
           end
         end
 
+        def trusted_equality_literal?(literal)
+          literal.is_a?(Type::Constant) &&
+            TRUSTED_EQUALITY_LITERAL_CLASSES.include?(literal.value.class)
+        end
+
+        def singleton_literal?(literal)
+          SINGLETON_LITERAL_CLASSES.include?(literal.value.class)
+        end
+
+        def finite_trusted_literal_domain?(type)
+          case type
+          when Type::Bot then true
+          when Type::Constant then trusted_equality_literal?(type)
+          when Type::Union then type.members.all? { |member| finite_trusted_literal_domain?(member) }
+          else false
+          end
+        end
+
+        def narrow_finite_equal(type, literal)
+          case type
+          when Type::Bot then type
+          when Type::Constant then type == literal ? type : Type::Combinator.bot
+          when Type::Union
+            Type::Combinator.union(*type.members.map { |member| narrow_finite_equal(member, literal) })
+          else Type::Combinator.bot
+          end
+        end
+
+        def narrow_finite_not_equal(type, literal)
+          case type
+          when Type::Constant then type == literal ? Type::Combinator.bot : type
+          when Type::Union
+            Type::Combinator.union(*type.members.map { |member| narrow_finite_not_equal(member, literal) })
+          else type
+          end
+        end
+
+        def narrow_singleton_equal(type, literal)
+          case type
+          when Type::Constant then type == literal ? type : Type::Combinator.bot
+          when Type::Nominal then singleton_nominal_matches?(type, literal) ? type : Type::Combinator.bot
+          when Type::Union
+            Type::Combinator.union(*type.members.map { |member| narrow_singleton_equal(member, literal) })
+          else narrow_singleton_equal_other(type)
+          end
+        end
+
+        def narrow_singleton_equal_other(type)
+          case type
+          when Type::Singleton, Type::Tuple, Type::HashShape then Type::Combinator.bot
+          else type
+          end
+        end
+
+        def narrow_singleton_not_equal(type, literal)
+          case type
+          when Type::Constant then type == literal ? Type::Combinator.bot : type
+          when Type::Nominal then singleton_nominal_matches?(type, literal) ? Type::Combinator.bot : type
+          when Type::Union
+            Type::Combinator.union(*type.members.map { |member| narrow_singleton_not_equal(member, literal) })
+          else type
+          end
+        end
+
+        def singleton_nominal_matches?(nominal, literal)
+          case literal.value
+          when nil then nominal.class_name == "NilClass"
+          when true then nominal.class_name == "TrueClass"
+          when false then nominal.class_name == "FalseClass"
+          else false
+          end
+        end
+
         def analyse_parentheses(node, scope)
           return nil if node.body.nil?
 
@@ -253,6 +366,8 @@ module Rigor
         # - `recv.is_a?(C)` / `recv.kind_of?(C)` / `recv.instance_of?(C)`
         #   with a single static-constant argument and no block
         #   (Slice 6 phase 2 sub-phase 1).
+        # - `local == literal` / `literal == local` and the `!=` mirror
+        #   for trusted static literals (Slice 6 phase 2 sub-phase 2).
         # Anything else returns nil so the surrounding analyser falls
         # through to the no-narrowing fallback.
         def analyse_call(node, scope)
@@ -267,6 +382,7 @@ module Rigor
           when :nil?, :! then dispatch_unary_predicate(node, scope, name)
           when :is_a?, :kind_of? then analyse_class_predicate(node, scope, exact: false)
           when :instance_of? then analyse_class_predicate(node, scope, exact: true)
+          when :==, :!= then analyse_equality_predicate(node, scope, equality: name)
           end
         end
 
@@ -281,6 +397,76 @@ module Rigor
 
         def argument_free?(node)
           node.arguments.nil? || node.arguments.arguments.empty?
+        end
+
+        def analyse_equality_predicate(node, scope, equality:)
+          return nil if node.arguments.nil?
+          return nil unless node.arguments.arguments.size == 1
+
+          match = equality_local_literal(node.receiver, node.arguments.arguments.first, scope)
+          return nil if match.nil?
+
+          name, literal = match
+          current = scope.local(name)
+          return nil if current.nil?
+
+          positive = equality_scope(scope, name, current, literal, predicate: :==)
+          negative = equality_scope(scope, name, current, literal, predicate: :!=)
+          equality == :== ? [positive, negative] : [negative, positive]
+        end
+
+        def equality_local_literal(left, right, scope)
+          if left.is_a?(Prism::LocalVariableReadNode)
+            literal = static_literal_type(right, scope)
+            return [left.name, literal] if trusted_equality_literal?(literal)
+          end
+
+          return nil unless right.is_a?(Prism::LocalVariableReadNode)
+
+          literal = static_literal_type(left, scope)
+          return [right.name, literal] if trusted_equality_literal?(literal)
+
+          nil
+        end
+
+        def static_literal_type(node, scope)
+          case node
+          when Prism::IntegerNode,
+               Prism::StringNode,
+               Prism::SymbolNode,
+               Prism::TrueNode,
+               Prism::FalseNode,
+               Prism::NilNode
+            scope.type_of(node)
+          end
+        end
+
+        def equality_scope(scope, name, current, literal, predicate:)
+          narrowed =
+            if predicate == :==
+              narrow_equal(current, literal)
+            else
+              narrow_not_equal(current, literal)
+            end
+
+          scope
+            .with_local(name, narrowed)
+            .with_fact(equality_fact(name, current, narrowed, literal, predicate: predicate))
+        end
+
+        def equality_fact(name, original, narrowed, literal, predicate:)
+          Analysis::FactStore::Fact.new(
+            bucket: equality_fact_bucket(original, narrowed),
+            target: Analysis::FactStore::Target.local(name),
+            predicate: predicate,
+            payload: literal,
+            polarity: predicate == :== ? :positive : :negative,
+            stability: :local_binding
+          )
+        end
+
+        def equality_fact_bucket(original, narrowed)
+          narrowed == original ? :relational : :local_binding
         end
 
         # `recv.is_a?(C)` / `recv.kind_of?(C)` / `recv.instance_of?(C)`
@@ -300,9 +486,19 @@ module Rigor
           current = scope.local(node.receiver.name)
           return nil if current.nil?
 
+          class_predicate_scopes(scope, node.receiver.name, current, class_name, exact: exact)
+        end
+
+        def class_predicate_scopes(scope, name, current, class_name, exact:)
           [
-            scope.with_local(node.receiver.name, narrow_class(current, class_name, exact: exact)),
-            scope.with_local(node.receiver.name, narrow_not_class(current, class_name, exact: exact))
+            scope.with_local(
+              name,
+              narrow_class(current, class_name, exact: exact, environment: scope.environment)
+            ),
+            scope.with_local(
+              name,
+              narrow_not_class(current, class_name, exact: exact, environment: scope.environment)
+            )
           ]
         end
 
@@ -332,68 +528,68 @@ module Rigor
         # case statement and keeps each public surface a thin
         # delegate; the per-carrier helpers know which polarity to
         # apply by looking at `polarity:`.
-        def narrow_class_dispatch(type, class_name, exact:, polarity:)
+        def narrow_class_dispatch(type, class_name, context)
           case type
-          when Type::Constant then narrow_constant_class(type, class_name, exact: exact, polarity: polarity)
-          when Type::Nominal then narrow_nominal_class(type, class_name, exact: exact, polarity: polarity)
-          when Type::Union then narrow_union_class(type, class_name, exact: exact, polarity: polarity)
-          when Type::Tuple then narrow_shape_class(type, "Array", class_name, exact: exact, polarity: polarity)
-          when Type::HashShape then narrow_shape_class(type, "Hash", class_name, exact: exact, polarity: polarity)
-          when Type::Singleton then narrow_singleton_class(type, class_name, exact: exact, polarity: polarity)
-          else narrow_other_class(type, class_name, polarity: polarity)
+          when Type::Constant then narrow_constant_class(type, class_name, context)
+          when Type::Nominal then narrow_nominal_class(type, class_name, context)
+          when Type::Union then narrow_union_class(type, class_name, context)
+          when Type::Tuple then narrow_shape_class(type, "Array", class_name, context)
+          when Type::HashShape then narrow_shape_class(type, "Hash", class_name, context)
+          when Type::Singleton then narrow_singleton_class(type, class_name, context)
+          else narrow_other_class(type, class_name, context)
           end
         end
 
-        def narrow_constant_class(constant, class_name, exact:, polarity:)
-          if polarity == :positive
-            narrow_constant_to_class(constant, class_name, exact: exact)
+        def narrow_constant_class(constant, class_name, context)
+          if context.polarity == :positive
+            narrow_constant_to_class(constant, class_name, context)
           else
-            narrow_constant_not_class(constant, class_name, exact: exact)
+            narrow_constant_not_class(constant, class_name, context)
           end
         end
 
-        def narrow_nominal_class(nominal, class_name, exact:, polarity:)
-          if polarity == :positive
-            narrow_nominal_to_class(nominal, class_name, exact: exact)
+        def narrow_nominal_class(nominal, class_name, context)
+          if context.polarity == :positive
+            narrow_nominal_to_class(nominal, class_name, context)
           else
-            narrow_nominal_not_class(nominal, class_name, exact: exact)
+            narrow_nominal_not_class(nominal, class_name, context)
           end
         end
 
-        def narrow_union_class(union, class_name, exact:, polarity:)
+        def narrow_union_class(union, class_name, context)
           Type::Combinator.union(
-            *union.members.map { |m| narrow_class_dispatch(m, class_name, exact: exact, polarity: polarity) }
+            *union.members.map { |member| narrow_class_dispatch(member, class_name, context) }
           )
         end
 
-        def narrow_shape_class(shape, projected_class, class_name, exact:, polarity:)
-          if polarity == :positive
-            narrow_shape_to_class(shape, projected_class, class_name, exact: exact)
+        def narrow_shape_class(shape, projected_class, class_name, context)
+          if context.polarity == :positive
+            narrow_shape_to_class(shape, projected_class, class_name, context)
           else
-            narrow_shape_not_class(shape, projected_class, class_name, exact: exact)
+            narrow_shape_not_class(shape, projected_class, class_name, context)
           end
         end
 
-        def narrow_singleton_class(singleton, class_name, exact:, polarity:)
-          if polarity == :positive
-            narrow_singleton_to_class(singleton, class_name, exact: exact)
+        def narrow_singleton_class(singleton, class_name, context)
+          if context.polarity == :positive
+            narrow_singleton_to_class(singleton, class_name, context)
           else
-            narrow_singleton_not_class(singleton, class_name, exact: exact)
+            narrow_singleton_not_class(singleton, class_name, context)
           end
         end
 
-        def narrow_other_class(type, class_name, polarity:)
-          polarity == :positive ? narrow_class_other(type, class_name) : type
+        def narrow_other_class(type, class_name, context)
+          context.polarity == :positive ? narrow_class_other(type, class_name) : type
         end
 
-        def narrow_constant_to_class(constant, class_name, exact:)
+        def narrow_constant_to_class(constant, class_name, context)
           rigor_class = constant.value.class.name
-          subclass_of?(rigor_class, class_name, exact: exact) ? constant : Type::Combinator.bot
+          subclass_of?(rigor_class, class_name, context) ? constant : Type::Combinator.bot
         end
 
-        def narrow_constant_not_class(constant, class_name, exact:)
+        def narrow_constant_not_class(constant, class_name, context)
           rigor_class = constant.value.class.name
-          subclass_of?(rigor_class, class_name, exact: exact) ? Type::Combinator.bot : constant
+          subclass_of?(rigor_class, class_name, context) ? Type::Combinator.bot : constant
         end
 
         # Narrow a Nominal under `is_a?(class_name)`: when the
@@ -403,36 +599,36 @@ module Rigor
         # (`Nominal[Numeric]` under `is_a?(Integer)`) narrow DOWN
         # to `Nominal[class_name]`; otherwise (disjoint hierarchies
         # under `is_a?`, mismatch under `instance_of?`) collapse to
-        # `Bot`. Conservative when the host Ruby cannot resolve
-        # either class.
-        def narrow_nominal_to_class(nominal, class_name, exact:)
+        # `Bot`. Conservative when the analyzer environment cannot
+        # resolve either class.
+        def narrow_nominal_to_class(nominal, class_name, context)
           return nominal if nominal.class_name == class_name
-          return Type::Combinator.bot if exact
+          return Type::Combinator.bot if context.exact
 
-          case class_ordering(nominal.class_name, class_name)
+          case class_ordering(nominal.class_name, class_name, context)
           when :superclass then Type::Combinator.nominal_of(class_name)
           when :disjoint then Type::Combinator.bot
           else nominal # :subclass preserves the bound; :unknown stays conservative
           end
         end
 
-        def narrow_nominal_not_class(nominal, class_name, exact:)
+        def narrow_nominal_not_class(nominal, class_name, context)
           return Type::Combinator.bot if nominal.class_name == class_name
-          return nominal if exact
+          return nominal if context.exact
 
-          ordering = class_ordering(nominal.class_name, class_name)
+          ordering = class_ordering(nominal.class_name, class_name, context)
           case ordering
           when :subclass then Type::Combinator.bot
           else nominal
           end
         end
 
-        def narrow_shape_to_class(shape, projected_class, class_name, exact:)
-          subclass_of?(projected_class, class_name, exact: exact) ? shape : Type::Combinator.bot
+        def narrow_shape_to_class(shape, projected_class, class_name, context)
+          subclass_of?(projected_class, class_name, context) ? shape : Type::Combinator.bot
         end
 
-        def narrow_shape_not_class(shape, projected_class, class_name, exact:)
-          subclass_of?(projected_class, class_name, exact: exact) ? Type::Combinator.bot : shape
+        def narrow_shape_not_class(shape, projected_class, class_name, context)
+          subclass_of?(projected_class, class_name, context) ? Type::Combinator.bot : shape
         end
 
         # `Singleton[Foo]` is the *class object* `Foo`, an instance of
@@ -440,12 +636,12 @@ module Rigor
         # `Foo.is_a?(Class)` returns true; `Foo.is_a?(Foo)` returns
         # false unless `Foo` is `Class` itself. We approximate this
         # by treating singletons uniformly as `Class` instances.
-        def narrow_singleton_to_class(singleton, class_name, exact:)
-          subclass_of?("Class", class_name, exact: exact) ? singleton : Type::Combinator.bot
+        def narrow_singleton_to_class(singleton, class_name, context)
+          subclass_of?("Class", class_name, context) ? singleton : Type::Combinator.bot
         end
 
-        def narrow_singleton_not_class(singleton, class_name, exact:)
-          subclass_of?("Class", class_name, exact: exact) ? Type::Combinator.bot : singleton
+        def narrow_singleton_not_class(singleton, class_name, context)
+          subclass_of?("Class", class_name, context) ? Type::Combinator.bot : singleton
         end
 
         # Top/Dynamic narrow to `Nominal[class_name]` so dispatch
@@ -461,38 +657,24 @@ module Rigor
         # satisfies `is_a?(target_class_name)` (or
         # `instance_of?(target_class_name)` when `exact: true`).
         # Falls back to the safe `false` when either name does not
-        # resolve to a host-Ruby class.
-        def subclass_of?(rigor_class_name, target_class_name, exact:)
-          return rigor_class_name == target_class_name if exact
+        # resolve through the analyzer environment.
+        def subclass_of?(rigor_class_name, target_class_name, context)
+          return rigor_class_name == target_class_name if context.exact
 
-          %i[subclass equal].include?(class_ordering(rigor_class_name, target_class_name))
+          %i[subclass equal].include?(
+            class_ordering(rigor_class_name, target_class_name, context)
+          )
         end
 
-        # Compares two class names through the host Ruby's class
-        # hierarchy. Returns `:equal` when they resolve to the same
-        # class, `:subclass` when `lhs <= rhs`, `:superclass` when
+        # Compares two class names through the analyzer environment.
+        # Returns `:equal` when they resolve to the same class,
+        # `:subclass` when `lhs <= rhs`, `:superclass` when
         # `rhs <= lhs`, `:disjoint` when neither, and `:unknown` when
         # either name does not resolve.
-        def class_ordering(lhs, rhs)
+        def class_ordering(lhs, rhs, context)
           return :equal if lhs == rhs
 
-          klass_a = safe_const_get(lhs)
-          klass_b = safe_const_get(rhs)
-          return :unknown if klass_a.nil? || klass_b.nil?
-
-          if klass_a <= klass_b
-            klass_a == klass_b ? :equal : :subclass
-          elsif klass_b <= klass_a
-            :superclass
-          else
-            :disjoint
-          end
-        end
-
-        def safe_const_get(name)
-          Object.const_get(name)
-        rescue NameError, ArgumentError
-          nil
+          context.environment.class_ordering(lhs, rhs)
         end
 
         def analyse_nil_predicate(receiver, scope)

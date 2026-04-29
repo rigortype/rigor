@@ -526,6 +526,17 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type.members).to include(Rigor::Type::Combinator.nominal_of("Integer"))
     end
 
+    it "uses only the LHS falsey fragment in the value type of `&&`" do
+      bound = scope.with_local(:x, union_int_nil)
+      type, _post = bound.evaluate(parse_with_locals("x && 1"))
+
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to contain_exactly(
+        Rigor::Type::Combinator.constant_of(nil),
+        Rigor::Type::Combinator.constant_of(1)
+      )
+    end
+
     it "evaluates the RHS of `||` under the LHS falsey scope" do
       # `x || x.nil?` reads `x` on the RHS only when the LHS is
       # falsey, i.e. when `x` is `nil`. Slice 6 phase 1 narrows
@@ -548,6 +559,17 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       # `Constant[true]` because `x` was narrowed to `nil` in the
       # falsey branch. The full expression unions LHS and RHS.
       expect(type.members).to include(Rigor::Type::Combinator.constant_of(true))
+    end
+
+    it "uses only the LHS truthy fragment in the value type of `||`" do
+      bound = scope.with_local(:x, union_int_nil)
+      type, _post = bound.evaluate(parse_with_locals("x || 1"))
+
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to contain_exactly(
+        Rigor::Type::Combinator.nominal_of("Integer"),
+        Rigor::Type::Combinator.constant_of(1)
+      )
     end
 
     it "leaves locals untouched on if without a narrowable predicate" do
@@ -582,6 +604,18 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         Rigor::Type::Combinator.nominal_of("Integer"),
         Rigor::Type::Combinator.constant_of(0)
       )
+    end
+
+    it "threads equality narrowing across `&&` predicates" do
+      literal_a = Rigor::Type::Combinator.constant_of("a")
+      literal_b = Rigor::Type::Combinator.constant_of("b")
+      union = Rigor::Type::Combinator.union(literal_a, literal_b)
+      bound = scope.with_local(:x, union)
+      type, _post = bound.evaluate(parse_with_locals('if x == "a" && x == "b"; x; else; 0; end'))
+
+      # The truthy branch is unreachable because the RHS sees x
+      # narrowed to "a", then intersects that with "b".
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(0))
     end
 
     it "narrows is_a?(C) on a Union[Integer, String] in the then branch" do

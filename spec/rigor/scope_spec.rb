@@ -14,6 +14,10 @@ RSpec.describe Rigor::Scope do
       expect(scope.local(:x)).to be_nil
     end
 
+    it "starts with an empty fact store" do
+      expect(scope.fact_store).to be_empty
+    end
+
     it "is frozen" do
       expect(scope).to be_frozen
     end
@@ -37,6 +41,36 @@ RSpec.describe Rigor::Scope do
       next_scope = scope.with_local(:x, Rigor::Type::Combinator.constant_of(1))
       expect(next_scope).to be_frozen
     end
+
+    it "invalidates facts attached to the rebound local" do
+      fact = Rigor::Analysis::FactStore::Fact.new(
+        bucket: :local_binding,
+        target: Rigor::Analysis::FactStore::Target.local(:x),
+        predicate: :==,
+        payload: Rigor::Type::Combinator.constant_of(1)
+      )
+      with_fact = scope.with_fact(fact)
+
+      next_scope = with_fact.with_local(:x, Rigor::Type::Combinator.constant_of(2))
+
+      expect(next_scope.local_facts(:x)).to be_empty
+    end
+  end
+
+  describe "#with_fact" do
+    it "returns a new scope with the fact added" do
+      fact = Rigor::Analysis::FactStore::Fact.new(
+        bucket: :local_binding,
+        target: Rigor::Analysis::FactStore::Target.local(:x),
+        predicate: :==,
+        payload: Rigor::Type::Combinator.constant_of(1)
+      )
+      next_scope = scope.with_fact(fact)
+
+      expect(next_scope).not_to equal(scope)
+      expect(next_scope.local_facts(:x)).to eq([fact])
+      expect(scope.local_facts(:x)).to be_empty
+    end
   end
 
   describe "structural equality" do
@@ -51,6 +85,16 @@ RSpec.describe Rigor::Scope do
       a = scope.with_local(:x, Rigor::Type::Combinator.constant_of(1))
       b = scope.with_local(:x, Rigor::Type::Combinator.constant_of(2))
       expect(a).not_to eq(b)
+    end
+
+    it "differs when fact stores differ" do
+      fact = Rigor::Analysis::FactStore::Fact.new(
+        bucket: :local_binding,
+        target: Rigor::Analysis::FactStore::Target.local(:x),
+        predicate: :==,
+        payload: Rigor::Type::Combinator.constant_of(1)
+      )
+      expect(scope.with_fact(fact)).not_to eq(scope)
     end
   end
 
@@ -123,6 +167,19 @@ RSpec.describe Rigor::Scope do
       other = described_class.empty(environment: other_environment)
 
       expect { scope.join(other) }.to raise_error(ArgumentError, /same Environment/)
+    end
+
+    it "joins fact stores conservatively" do
+      fact = Rigor::Analysis::FactStore::Fact.new(
+        bucket: :local_binding,
+        target: Rigor::Analysis::FactStore::Target.local(:x),
+        predicate: :==,
+        payload: integer_one
+      )
+      a = scope.with_local(:x, integer_one).with_fact(fact)
+      b = scope.with_local(:x, integer_one).with_fact(fact)
+
+      expect(a.join(b).local_facts(:x)).to eq([fact])
     end
   end
 end

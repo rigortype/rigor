@@ -82,6 +82,32 @@ RSpec.describe Rigor::Environment do
     end
   end
 
+  describe "#class_ordering" do
+    it "answers built-in hierarchy questions through the registry/RBS chain" do
+      env = described_class.default
+      expect(env.class_ordering("Integer", "Numeric")).to eq(:subclass)
+      expect(env.class_ordering("Numeric", "Integer")).to eq(:superclass)
+      expect(env.class_ordering("Integer", "String")).to eq(:disjoint)
+    end
+
+    it "uses project RBS declarations for classes that host Ruby has not loaded" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "hierarchy.rbs"), <<~RBS)
+          module HierarchyFixture
+            class Parent
+            end
+
+            class Child < Parent
+            end
+          end
+        RBS
+        env = described_class.for_project(signature_paths: [dir])
+
+        expect(env.class_ordering("HierarchyFixture::Child", "HierarchyFixture::Parent")).to eq(:subclass)
+      end
+    end
+  end
+
   describe ".for_project" do
     def with_demo_project_root
       Dir.mktmpdir do |tmpdir|

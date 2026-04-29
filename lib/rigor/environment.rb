@@ -99,12 +99,34 @@ module Rigor
       class_known_in_rbs?(name)
     end
 
+    # Compares two class/module names using analyzer-owned class data.
+    # Returns `:equal`, `:subclass`, `:superclass`, `:disjoint`, or
+    # `:unknown`. The static registry handles built-ins cheaply; the RBS
+    # loader handles project/stdlib classes without relying on host Ruby
+    # constants being loaded.
+    def class_ordering(lhs, rhs)
+      lhs = normalize_class_name(lhs)
+      rhs = normalize_class_name(rhs)
+      return :equal if lhs == rhs
+
+      registry_result = class_registry.class_ordering(lhs, rhs)
+      return registry_result unless registry_result == :unknown
+
+      return :unknown unless rbs_loader
+
+      rbs_loader.class_ordering(lhs, rhs)
+    end
+
     private
 
     def class_known_in_rbs?(name)
       return false unless rbs_loader
 
       rbs_loader.class_known?(name)
+    end
+
+    def normalize_class_name(name)
+      name.to_s.delete_prefix("::")
     end
   end
 end

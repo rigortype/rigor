@@ -187,4 +187,16 @@ RSpec.describe Rigor::Environment::RbsLoader do
       expect(loader.class_type_param_names("ThisClassDoesNotExist123")).to eq([])
     end
   end
+
+  describe "#class_ordering" do
+    it "compares core inheritance through RBS ancestors" do
+      expect(loader.class_ordering("Integer", "Numeric")).to eq(:subclass)
+      expect(loader.class_ordering("Numeric", "Integer")).to eq(:superclass)
+      expect(loader.class_ordering("Integer", "String")).to eq(:disjoint)
+    end
+
+    it "returns unknown when either class is absent" do
+      expect(loader.class_ordering("Integer", "ThisClassDoesNotExist123")).to eq(:unknown)
+    end
+  end
 end

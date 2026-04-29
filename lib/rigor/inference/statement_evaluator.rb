@@ -336,17 +336,23 @@ module Rigor
       # `a || b` evaluates `b` under the falsey edge of `a`. The
       # narrowed RHS post-scope is joined with the LHS post-scope
       # (RHS skipped) using nil-injection so half-bound names from
-      # the RHS still degrade to `T | nil`. The result type is the
-      # union of the two operand types — Slice 6 phase 2 will refine
-      # the value type with the LHS narrowing too (an `a || b`
-      # value cannot be the falsey fragment of `a`).
+      # the RHS still degrade to `T | nil`. The result type is
+      # edge-aware: `a && b` can only produce the falsey fragment of
+      # `a` when the RHS is skipped, while `a || b` can only produce
+      # the truthy fragment of `a` when the RHS is skipped.
       def eval_and_or(node)
         left_type, left_scope = sub_eval(node.left, scope)
         truthy_left, falsey_left = Narrowing.predicate_scopes(node.left, left_scope)
         rhs_entry = node.is_a?(Prism::AndNode) ? truthy_left : falsey_left
         right_type, right_scope = sub_eval(node.right, rhs_entry)
+        skipped_type =
+          if node.is_a?(Prism::AndNode)
+            Narrowing.narrow_falsey(left_type)
+          else
+            Narrowing.narrow_truthy(left_type)
+          end
         [
-          Type::Combinator.union(left_type, right_type),
+          Type::Combinator.union(skipped_type, right_type),
           join_with_nil_injection(left_scope, right_scope)
         ]
       end

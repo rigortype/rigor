@@ -24,9 +24,7 @@ module Rigor
       end
 
       def record_fallback(event)
-        unless event.is_a?(Fallback)
-          raise ArgumentError, "expected Rigor::Inference::Fallback, got #{event.class}"
-        end
+        raise ArgumentError, "expected Rigor::Inference::Fallback, got #{event.class}" unless event.is_a?(Fallback)
 
         @events << event
         self

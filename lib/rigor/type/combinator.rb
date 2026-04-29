@@ -82,29 +82,35 @@ module Rigor
       # Normalized union. Flattens nested Unions, deduplicates structurally
       # equal members, drops Bot, and collapses 0/1-member results.
       def union(*types)
-        flattened = []
-        types.each { |t| flatten_into(flattened, t) }
-
-        # Drop Bot (identity for union).
-        flattened.reject! { |t| t.is_a?(Bot) }
-
-        # Top absorbs everything.
-        return top if flattened.any? { |t| t.is_a?(Top) }
-
-        # Deduplicate structurally.
-        unique = []
-        flattened.each { |t| unique << t unless unique.any? { |u| u == t } }
-
-        case unique.size
-        when 0 then bot
-        when 1 then unique.first
-        else
-          Union.new(sort_members(unique))
-        end
+        collapse_union(normalized_union_members(types))
       end
 
       class << self
         private
+
+        def normalized_union_members(types)
+          flattened = []
+          types.each { |t| flatten_into(flattened, t) }
+          flattened.reject! { |t| t.is_a?(Bot) }
+
+          return [top] if flattened.any?(Top)
+
+          unique_members(flattened)
+        end
+
+        def unique_members(types)
+          types.each_with_object([]) do |type, unique|
+            unique << type unless unique.any? { |member| member == type }
+          end
+        end
+
+        def collapse_union(types)
+          case types.size
+          when 0 then bot
+          when 1 then types.first
+          else Union.new(sort_members(types))
+          end
+        end
 
         def resolve_class_name(class_name_or_object)
           name =

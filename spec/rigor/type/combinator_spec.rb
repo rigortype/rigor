@@ -185,7 +185,9 @@ RSpec.describe Rigor::Type::Combinator do
     end
 
     it "compares structurally including value class" do
-      expect(described_class.constant_of(1)).to eq(described_class.constant_of(1))
+      one = described_class.constant_of(1)
+      another_one = described_class.constant_of(1)
+      expect(one).to eq(another_one)
       expect(described_class.constant_of(1)).not_to eq(described_class.constant_of(1.0))
       expect(described_class.constant_of("a")).not_to eq(described_class.constant_of(:a))
     end

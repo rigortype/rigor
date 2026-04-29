@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "prism"
+require "tmpdir"
 
 RSpec.describe Rigor::Inference::Narrowing do
   let(:scope) { Rigor::Scope.empty }
@@ -37,6 +38,21 @@ RSpec.describe Rigor::Inference::Narrowing do
   def parse_predicate(source, locals: %i[x y])
     program = parse_program(source, locals: locals)
     program.statements.body.first
+  end
+
+  def with_rbs_hierarchy_env
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "hierarchy.rbs"), <<~RBS)
+        module NarrowingFixture
+          class Parent
+          end
+
+          class Child < Parent
+          end
+        end
+      RBS
+      yield Rigor::Environment.for_project(signature_paths: [dir])
+    end
   end
 
   describe ".narrow_truthy" do
@@ -150,6 +166,36 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
   end
 
+  describe ".narrow_equal and .narrow_not_equal" do
+    it "narrows a finite String literal union to the compared literal" do
+      literal_a = Rigor::Type::Combinator.constant_of("a")
+      literal_b = Rigor::Type::Combinator.constant_of("b")
+      union = Rigor::Type::Combinator.union(literal_a, literal_b)
+
+      expect(described_class.narrow_equal(union, literal_a)).to eq(literal_a)
+      expect(described_class.narrow_not_equal(union, literal_a)).to eq(literal_b)
+    end
+
+    it "does not manufacture a String literal from broad String" do
+      literal = Rigor::Type::Combinator.constant_of("a")
+      expect(described_class.narrow_equal(string_nominal, literal)).to eq(string_nominal)
+      expect(described_class.narrow_not_equal(string_nominal, literal)).to eq(string_nominal)
+    end
+
+    it "extracts nil from a mixed domain without requiring a finite literal set" do
+      union = Rigor::Type::Combinator.union(integer_nominal, constant_nil)
+      expect(described_class.narrow_equal(union, constant_nil)).to eq(constant_nil)
+      expect(described_class.narrow_not_equal(union, constant_nil)).to eq(integer_nominal)
+    end
+
+    it "refuses Float literal narrowing" do
+      one = Rigor::Type::Combinator.constant_of(1.0)
+      two = Rigor::Type::Combinator.constant_of(2.0)
+      union = Rigor::Type::Combinator.union(one, two)
+      expect(described_class.narrow_equal(union, one)).to eq(union)
+    end
+  end
+
   describe ".predicate_scopes" do
     let(:union_int_nil) { Rigor::Type::Combinator.union(integer_nominal, constant_nil) }
 
@@ -251,6 +297,67 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(truthy).to eq(scope)
       expect(falsey).to eq(scope)
     end
+
+    it "narrows equality against a literal inside a finite domain" do
+      literal_a = Rigor::Type::Combinator.constant_of("a")
+      literal_b = Rigor::Type::Combinator.constant_of("b")
+      union = Rigor::Type::Combinator.union(literal_a, literal_b)
+      bound = scope.with_local(:x, union)
+      pred = parse_predicate('x == "a"')
+
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+
+      expect(truthy.local(:x)).to eq(literal_a)
+      expect(falsey.local(:x)).to eq(literal_b)
+      expect(truthy.local_facts(:x, bucket: :local_binding).first.payload).to eq(literal_a)
+    end
+
+    it "narrows inequality against a literal inside a finite domain" do
+      literal_a = Rigor::Type::Combinator.constant_of("a")
+      literal_b = Rigor::Type::Combinator.constant_of("b")
+      union = Rigor::Type::Combinator.union(literal_a, literal_b)
+      bound = scope.with_local(:x, union)
+      pred = parse_predicate('x != "a"')
+
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+
+      expect(truthy.local(:x)).to eq(literal_b)
+      expect(falsey.local(:x)).to eq(literal_a)
+    end
+
+    it "records a relational fact without narrowing Dynamic[Top]" do
+      literal = Rigor::Type::Combinator.constant_of("a")
+      bound = scope.with_local(:x, Rigor::Type::Combinator.untyped)
+      pred = parse_predicate('x == "a"')
+
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+
+      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.untyped)
+      expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.untyped)
+      expect(truthy.local_facts(:x, bucket: :relational).first.payload).to eq(literal)
+    end
+
+    it "narrows nil equality from a mixed domain" do
+      bound = scope.with_local(:x, union_int_nil)
+      pred = parse_predicate("x == nil")
+
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+
+      expect(truthy.local(:x)).to eq(constant_nil)
+      expect(falsey.local(:x)).to eq(integer_nominal)
+    end
+
+    it "also recognises literal == local" do
+      literal_a = Rigor::Type::Combinator.constant_of("a")
+      literal_b = Rigor::Type::Combinator.constant_of("b")
+      bound = scope.with_local(:x, Rigor::Type::Combinator.union(literal_a, literal_b))
+      pred = parse_predicate('"a" == x')
+
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+
+      expect(truthy.local(:x)).to eq(literal_a)
+      expect(falsey.local(:x)).to eq(literal_b)
+    end
   end
 
   describe ".narrow_class (Slice 6 phase 2 sub-phase 1)" do
@@ -323,6 +430,18 @@ RSpec.describe Rigor::Inference::Narrowing do
       # `Foo::Bar` is not defined in the test environment, so the
       # ordering check returns `:unknown` and we stay conservative.
       expect(described_class.narrow_class(integer_nominal, "Foo::Bar")).to eq(integer_nominal)
+    end
+
+    it "uses the analyzer environment for RBS-only hierarchy lookups" do
+      with_rbs_hierarchy_env do |env|
+        child = Rigor::Type::Combinator.nominal_of("NarrowingFixture::Child")
+        parent = Rigor::Type::Combinator.nominal_of("NarrowingFixture::Parent")
+
+        expect(described_class.narrow_class(child, "NarrowingFixture::Parent", environment: env)).to eq(child)
+        expect(described_class.narrow_class(parent, "NarrowingFixture::Child", environment: env)).to eq(
+          Rigor::Type::Combinator.nominal_of("NarrowingFixture::Child")
+        )
+      end
     end
   end
 

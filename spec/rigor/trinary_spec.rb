@@ -11,7 +11,7 @@ RSpec.describe Rigor::Trinary do
     end
 
     it "exposes structural equality" do
-      expect(described_class.yes).to eq(described_class.yes)
+      expect(described_class.yes).to eq(described_class.new(:yes))
       expect(described_class.yes).not_to eq(described_class.no)
     end
 

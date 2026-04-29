@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "method_parameter_binder"
+require_relative "narrowing"
 
 module Rigor
   module Inference
@@ -151,15 +152,21 @@ module Rigor
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its
-      # post-scope is shared by both branches), then evaluates each
-      # branch under the post-predicate scope. The branches' result
-      # types are unioned and their post-scopes are joined with
+      # post-scope is shared by both branches), then asks
+      # `Rigor::Inference::Narrowing` for the truthy and falsey edge
+      # scopes derived from the predicate. Slice 6 phase 1 narrows
+      # local-variable bindings on truthiness, `nil?`, `!`, and `&&`/
+      # `||` predicate composition; predicates the analyser does not
+      # specialise return the post-predicate scope unchanged on both
+      # edges, preserving the Slice 3 phase 2 behaviour. The branches'
+      # result types are unioned; their post-scopes are joined with
       # nil-injection on half-bound names so a name set in one branch
       # but not the other is observable as `T | nil` after the if.
       def eval_if(node)
         _pred_type, post_pred = sub_eval(node.predicate, scope)
-        then_type, then_scope = eval_branch_or_nil(node.statements, post_pred)
-        else_type, else_scope = eval_branch_or_nil(node.subsequent, post_pred)
+        truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_pred)
+        then_type, then_scope = eval_branch_or_nil(node.statements, truthy_scope)
+        else_type, else_scope = eval_branch_or_nil(node.subsequent, falsey_scope)
         [
           Type::Combinator.union(then_type, else_type),
           join_with_nil_injection(then_scope, else_scope)
@@ -167,11 +174,14 @@ module Rigor
       end
 
       # `unless pred; t; else; e; end`. Same shape as `if`, but Prism
-      # exposes the else-branch as `else_clause` (no elsif chain).
+      # exposes the else-branch as `else_clause` (no elsif chain). The
+      # narrower's truthy/falsey edges are routed in swapped form
+      # because `unless` runs its body when the predicate is falsey.
       def eval_unless(node)
         _pred_type, post_pred = sub_eval(node.predicate, scope)
-        then_type, then_scope = eval_branch_or_nil(node.statements, post_pred)
-        else_type, else_scope = eval_branch_or_nil(node.else_clause, post_pred)
+        truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_pred)
+        then_type, then_scope = eval_branch_or_nil(node.statements, falsey_scope)
+        else_type, else_scope = eval_branch_or_nil(node.else_clause, truthy_scope)
         [
           Type::Combinator.union(then_type, else_type),
           join_with_nil_injection(then_scope, else_scope)
@@ -299,14 +309,20 @@ module Rigor
       end
 
       # `a && b` / `a || b`. The LHS always runs, the RHS only
-      # sometimes runs. Slice 3 phase 2 does not narrow the LHS's
-      # truthiness (Slice 6 will), so both exits are reachable: the
-      # post-LHS scope (RHS skipped) joins with the post-RHS scope
-      # (RHS ran), with nil-injection. The result type is the union
-      # of the two operand types.
+      # sometimes runs. Slice 6 phase 1 narrows the RHS evaluation:
+      # `a && b` evaluates `b` under the truthy edge of `a`, and
+      # `a || b` evaluates `b` under the falsey edge of `a`. The
+      # narrowed RHS post-scope is joined with the LHS post-scope
+      # (RHS skipped) using nil-injection so half-bound names from
+      # the RHS still degrade to `T | nil`. The result type is the
+      # union of the two operand types — Slice 6 phase 2 will refine
+      # the value type with the LHS narrowing too (an `a || b`
+      # value cannot be the falsey fragment of `a`).
       def eval_and_or(node)
         left_type, left_scope = sub_eval(node.left, scope)
-        right_type, right_scope = sub_eval(node.right, left_scope)
+        truthy_left, falsey_left = Narrowing.predicate_scopes(node.left, left_scope)
+        rhs_entry = node.is_a?(Prism::AndNode) ? truthy_left : falsey_left
+        right_type, right_scope = sub_eval(node.right, rhs_entry)
         [
           Type::Combinator.union(left_type, right_type),
           join_with_nil_injection(left_scope, right_scope)

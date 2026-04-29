@@ -248,7 +248,24 @@ Concrete uplift: `[1, 2, 3]` types as `Tuple[Constant[1], Constant[2], Constant[
 
 ### Slice 6 — Narrowing (Minimal CFA)
 
-Adds `Rigor::Analysis::FactStore` (value facts and nil facts only), edge-aware truthy/falsey narrowing on `IfNode`, and the conventional narrowing predicates (`nil?`, `kind_of?`, `is_a?`, literal `==`).
+Slice 6 lands in two phases. Phase 1 ships truthiness and `nil?` narrowing on `IfNode`/`UnlessNode` plus the corresponding RHS-entry narrowing on `AndNode`/`OrNode`; phase 2 adds class-membership predicates (`is_a?`, `kind_of?`, `instance_of?`), equality narrowing for finite literal sets, and the formal `Rigor::Analysis::FactStore` carriage that drives heap and relational facts in [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md).
+
+**Phase 1 (this sub-phase ships with this commit) — Truthiness and nil narrowing on local bindings.** Components added:
+
+1. `Rigor::Inference::Narrowing` is a pure module exposing the type-level primitives (`narrow_truthy`, `narrow_falsey`, `narrow_nil`, `narrow_non_nil`) and the predicate-level analyser `predicate_scopes(node, scope) -> [truthy_scope, falsey_scope]`. The contract is bound in [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md) under "Narrowing (Slice 6 phase 1)".
+2. The Slice 6 phase 1 predicate catalogue is `LocalVariableReadNode` (truthy/falsey narrowing of the bound local), `CallNode` for `recv.nil?` and the unary `!recv` (only when the call carries no arguments or block), `ParenthesesNode`/`StatementsNode` (recurse into the body / last statement), and the short-circuiting `AndNode`/`OrNode` (compose sub-edges through `Scope#join`). Anything else falls through to "no narrowing" — both edges return the entry scope unchanged so the Slice 3 phase 2 behaviour is preserved on uncovered shapes.
+3. `Rigor::Inference::StatementEvaluator` is now narrowing-aware. `eval_if` evaluates the `then` branch under the predicate's truthy scope and the `else` branch under the falsey scope; `eval_unless` swaps the two; `eval_and_or` enters the RHS under the LHS's truthy scope (`&&`) or the LHS's falsey scope (`||`). The half-bound nil-injection at branch merges is unchanged.
+
+The acceptance algebra is delegated to `narrow_truthy`/`narrow_falsey` rather than per-class predicates so type instances stay thin (per ADR-3): `Constant` consults its scalar `value`, `Nominal` consults `class_name` against the `NilClass`/`FalseClass` shortlist, `Union` recurses element-wise, and `Top`/`Dynamic` flow through unchanged because the analyzer cannot express the difference type without a richer carrier yet.
+
+Concrete behavioural uplift (verified through CLI smoke probes):
+
+- `xs = [1, 2, nil]; y = xs.first; if y.nil?; "got nil"; else; y; end` types as `Constant["got nil"] | Constant[1] | Constant[2]`. Pre-narrowing the result included `Constant[nil]` because `y` was not refined in the else branch.
+- `Union[Integer, nil].evaluate("if x; x.succ; end")` types `x.succ` against `Nominal[Integer]` (the dispatch resolves cleanly because the receiver is narrowed), where the un-narrowed dispatch could not prove `NilClass#succ` and would fall back.
+
+Coverage on `rigor type-scan lib`: 13.45 % → **13.8 %** unrecognised. As ADR-4 anticipated for Slice 6, the small upward wobble reflects the new `lib/rigor/inference/narrowing.rb` file (its constant references contribute to the unrecognised bucket against `Rigor::*` types not yet covered by RBS) rather than a precision regression. The behavioural uplift is concentrated on already-typed values.
+
+**Phase 2 (deferred to a follow-up commit):** introduces `is_a?`/`kind_of?`/`instance_of?` narrowing for classes the registry/RBS loader can resolve; trusted equality narrowing for finite literal sets per [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md); `Rigor::Analysis::FactStore` for negative facts, relational facts, and the heap-vs-local fact buckets; and closure-captured-local invalidation. Phase 2 also lifts `eval_and_or`'s value type from a plain `union(left, right)` to a narrowing-aware `union(narrow_falsey(left), right)` for `&&` (and the symmetric form for `||`), so `(x = a || b)` records the LHS narrowing in the assigned local.
 
 ### Slice 7 — Refinements (Minimal)
 

@@ -261,6 +261,53 @@ Slice 3 phase 2 does NOT thread scope through the *interior* of arbitrary expres
 
 Slice 3 phase 2 narrowly limits the *expressivity* of the parameter binding too: the binder picks the union across overloads at each slot, but does NOT yet refine the binding by argument-call-site type the way `MethodDispatcher::OverloadSelector` does for return types. RBS interface types (`int`, `_ToS`, ...) and aliases still degrade to `Dynamic[Top]` through the existing `RbsTypeTranslator` translator, so `def first(n)` redefinitions where the only overload's parameter is `int` MUST observably bind `n` to `Dynamic[Top]`. This matches the existing translator's gradual-typing posture.
 
+## Narrowing (Slice 6 phase 1)
+
+Slice 6 phase 1 adds the first edge-aware refinement surface to the engine. It is exposed through `Rigor::Inference::Narrowing`, a pure module consumed by `Rigor::Inference::StatementEvaluator` to refine the `then` and `else` scopes of `Prism::IfNode`/`Prism::UnlessNode` (and the RHS-entry scope of `Prism::AndNode`/`Prism::OrNode`).
+
+### Type-level narrowing primitives
+
+The module MUST expose the following module functions, each producing a fresh `Rigor::Type` value and never mutating its input:
+
+- `Narrowing.narrow_truthy(type)` — the truthy fragment of `type`. `Constant[v]` collapses to `Bot` when `v` is `nil` or `false` and is preserved otherwise; `Nominal[NilClass]`/`Nominal[FalseClass]` collapse to `Bot` and other `Nominal` carriers are preserved; `Union` recurses element-wise; `Top`, `Dynamic[T]`, `Bot`, `Singleton`, `Tuple`, and `HashShape` flow through unchanged.
+- `Narrowing.narrow_falsey(type)` — the falsey fragment of `type`. `Constant[nil]`/`Constant[false]` and `Nominal[NilClass]`/`Nominal[FalseClass]` are preserved; other `Constant`/`Nominal` carriers collapse to `Bot`; `Union` recurses element-wise; `Singleton`/`Tuple`/`HashShape` collapse to `Bot` (their inhabitants are truthy); `Top`/`Dynamic[T]`/`Bot` flow through unchanged because the analyzer cannot prove the falsey side empty.
+- `Narrowing.narrow_nil(type)` — the nil fragment of `type`. `Constant[nil]` and `Nominal[NilClass]` are preserved; non-nil `Constant`/`Nominal` carriers collapse to `Bot`; `Union` recurses element-wise; `Top`/`Dynamic[T]` MUST narrow to the canonical `Constant[nil]` so downstream dispatch resolves through `NilClass`; carriers that never inhabit nil (`Singleton`, `Tuple`, `HashShape`) collapse to `Bot`; `Bot` is its own nil fragment.
+- `Narrowing.narrow_non_nil(type)` — the non-nil fragment of `type`. Mirror of `narrow_nil`: nil-only carriers collapse to `Bot` and non-nil carriers are preserved; `Top`/`Dynamic[T]`/`Singleton`/`Tuple`/`HashShape` flow through unchanged; `Union` recurses element-wise.
+
+These primitives MUST be deterministic and structurally pure: two calls with structurally-equal inputs produce structurally-equal outputs, and calling them never alters the input.
+
+### Predicate-level narrowing
+
+`Narrowing.predicate_scopes(node, scope)` MUST return an `[truthy_scope, falsey_scope]` pair. When `node` is `nil` or its shape is not in the recognised catalogue the pair MUST be `[scope, scope]` so the caller observes "no narrowing" without a special return value. The recognised Slice 6 phase 1 catalogue is:
+
+- `Prism::ParenthesesNode` — recurse into the body when present.
+- `Prism::StatementsNode` — analyse the last statement; earlier statements MAY have scope effects, but the StatementEvaluator has already produced the post-predicate scope before calling `Narrowing`, so the analyser does NOT thread additional effects.
+- `Prism::LocalVariableReadNode` — when the local is bound in `scope`, narrow truthy → `narrow_truthy(local)` and falsey → `narrow_falsey(local)`. Unbound locals fall through to the no-narrowing fallback.
+- `Prism::CallNode` — the catalogue covers two predicates, both rejected silently when the call has any positional/keyword argument or a block: `recv.nil?` (narrow the receiver-local through `narrow_nil`/`narrow_non_nil`) and the unary `!recv` (analyse `recv` and swap the resulting pair).
+- `Prism::AndNode` — `a && b` narrows the truthy edge with `b`'s truthy scope under `a`'s truthy scope; the falsey edge unions `a`'s falsey scope (b skipped) and `b`'s falsey scope (b ran but returned falsey) via `Scope#join`.
+- `Prism::OrNode` — `a || b` narrows the truthy edge with `Scope#join` of `a`'s truthy scope and `b`'s truthy scope (under `a`'s falsey scope); the falsey edge is `b`'s falsey scope under `a`'s falsey scope.
+
+The analyser MUST NOT raise on unrecognised predicate shapes, MUST NOT thread any tracer (predicate analysis is a pure query that consults already-typed scope information), and MUST NOT mutate the receiver scope.
+
+### StatementEvaluator integration
+
+`Rigor::Inference::StatementEvaluator` MUST consume the predicate analyser as follows:
+
+- `Prism::IfNode` — after evaluating the predicate to obtain `post_pred`, call `Narrowing.predicate_scopes(node.predicate, post_pred)` to derive `(truthy_scope, falsey_scope)`. The `then` branch MUST be evaluated under `truthy_scope`; the `else` branch (or an absent else, which contributes `Constant[nil]` and the predicate's post-scope) MUST be evaluated under `falsey_scope`. The branch types are unioned and the post-scopes are merged through the existing nil-injection rule.
+- `Prism::UnlessNode` — same shape as `IfNode`, but the `then` branch (which runs when the predicate is falsey) MUST be evaluated under `falsey_scope` and the `else` branch under `truthy_scope`.
+- `Prism::AndNode`/`Prism::OrNode` — after evaluating the LHS to obtain `left_scope`, call `Narrowing.predicate_scopes(node.left, left_scope)`. The RHS MUST be evaluated under the LHS's truthy scope for `&&` and the LHS's falsey scope for `||`. The post-scope MUST still be the join-with-nil-injection of `left_scope` and the RHS's post-scope (modelling "RHS sometimes ran") so half-bound names from the RHS continue to nil-inject. The result type stays `union(left_type, right_type)`; refining the value type with the LHS narrowing is deferred to a follow-up.
+
+### Boundaries
+
+Slice 6 phase 1 binds local-variable narrowing only. The following surfaces are deliberately deferred to a follow-up:
+
+- Class-membership predicates (`is_a?`, `kind_of?`, `instance_of?`) MUST currently fall through to the no-narrowing branch. Once they land they MUST follow the same `[truthy_scope, falsey_scope]` shape.
+- Equality narrowing (`x == "literal"`, `x == nil`, ...) is still relational only — `x == nil` does not narrow yet and the trust levels in [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md) MUST be honoured when the surface lands.
+- Closure-captured locals are treated as ordinary locals; explicit invalidation across closure invocation is deferred.
+- Instance-, class-, and global-variable narrowing remains out of scope; only `Prism::LocalVariableReadNode` is recognised by the analyser today.
+
+These boundaries MUST NOT silently degrade Slice 6 phase 1 callers: predicates that fall outside the recognised catalogue MUST observe the entry scope on both edges, preserving the Slice 3 phase 2 behaviour.
+
 ## Environment Surface
 
 `Rigor::Environment` is the engine's view of the type universe outside the current scope: nominal classes, RBS definitions, plugin-supplied facts (Slice 6+), and any other module-level information. The minimum public surface that Slice 1 binds is:

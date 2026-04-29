@@ -33,6 +33,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 3 phase 2 | `aed00d0` | `StatementEvaluator` threading scope across statements |
 | Slice 3 phase 2 (CLI) | `84f2b01` | `type-of` and `type-scan` route through `ScopeIndexer` |
 | Slice 3 phase 2 (DefNode) | `fe2fe7e` | DefNode-aware scope builder (`MethodParameterBinder`) |
+| Slice 6 phase 1 | _pending_ | Truthiness and `nil?` narrowing on `IfNode`/`UnlessNode` (`Rigor::Inference::Narrowing`) |
 
 ## What is in Place Today
 
@@ -76,6 +77,12 @@ normalisation and are the only sanctioned way to construct types.
   classes, modules, defs, singleton classes).
 - `MethodParameterBinder` — translates a `DefNode`'s parameter list into a
   binding map driven by the surrounding class's RBS signature.
+- `Narrowing` — Slice 6 phase 1 truthiness and `nil?` narrowing.
+  Exposes `narrow_truthy`/`narrow_falsey`/`narrow_nil`/`narrow_non_nil`
+  type primitives plus `predicate_scopes(node, scope)` which returns
+  `[truthy_scope, falsey_scope]` for the recognised predicate
+  catalogue (`LocalVariableReadNode`, `recv.nil?`, `!recv`,
+  `ParenthesesNode`, `&&`/`||` composition).
 - `ScopeIndexer` — builds a per-node scope index for the CLI to consume.
 - `CoverageScanner` — backs `type-scan`.
 
@@ -94,18 +101,23 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 513 examples, 0 failures (as of `fe2fe7e`).
-- **RuboCop**: 9 pre-existing offences in `references/steep/` submodule
-  files; 0 in Rigor product code.
-- **`rigor type-scan lib`**: 13.47 % unrecognised (1 838 / 13 650 nodes).
+- **RSpec**: 553 examples, 0 failures (as of the Slice 6 phase 1 work).
+- **RuboCop**: pre-existing offences in `references/` submodules only;
+  0 in Rigor product code.
+- **`rigor type-scan lib`**: 13.8 % unrecognised (1 983 / 14 355 nodes).
   Top contributors:
-  - `Prism::CallNode` 802 / 2 289 (35.0 %)
-  - `Prism::ConstantReadNode` 623 / 861 (72.4 %)
-  - `Prism::ConstantPathNode` 411 / 412 (99.8 %)
+  - `Prism::CallNode` 860 / 2 409 (35.7 %)
+  - `Prism::ConstantReadNode` 669 / 908 (73.7 %)
+  - `Prism::ConstantPathNode` 452 / 453 (99.8 %)
   - `Prism::MultiTargetNode` 2 / 2 (100.0 %)
-- **`rigor type-of` smoke probe**:
+- **`rigor type-of` smoke probe (DefNode binder)**:
   `class Integer; def divmod(other); other; end; end` — `other` reads as
   `Float | Integer | Numeric | Rational` inside the body.
+- **`rigor type-of` smoke probe (Slice 6 phase 1 narrowing)**:
+  `xs = [1, 2, nil]; y = xs.first; result = if y.nil?; "got nil"; else; y; end; result`
+  types `result` as `"got nil" | 1 | 2`; `y` is narrowed to
+  `Constant[1] | Constant[2]` inside the else branch (without
+  narrowing the union still carried `Constant[nil]`).
 
 ## Known Boundaries (Deliberate, Not Bugs)
 
@@ -117,8 +129,13 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
 2. **Block parameter binding**: `Array#each { |elem| ... }` does not bind
    `elem`. The DefNode-aware scope builder covers method parameters only;
    `BlockNode` is the symmetric follow-up.
-3. **Truthy/nil narrowing**: `if x.nil?; ...; else; x.foo; end` does not
-   narrow `x` inside the else branch. This is Slice 6 territory.
+3. **Class-membership and equality narrowing**: `is_a?`/`kind_of?`/
+   `instance_of?` and equality predicates (`x == "literal"`,
+   `x == nil`, ...) do not yet narrow. This is Slice 6 phase 2
+   territory; phase 1 already covers truthiness and `nil?` narrowing
+   on local bindings, plus the unary `!` inverter and short-circuit
+   `&&`/`||` composition. Class- and equality-based narrowing follow
+   the same `[truthy_scope, falsey_scope]` analyser shape.
 4. **Shape narrowing on dispatch**: `Tuple[Integer, String][0]` returns
    the broad `Nominal[Array]#[]` result rather than `Integer`. This is the
    Slice 5 phase 2 deliverable.
@@ -192,19 +209,25 @@ block-entry scope, and bind block parameters from the call-site receiver
 - **risk**: medium; requires a clean handshake between the dispatcher
   and the StatementEvaluator about block argument types.
 
-### D. Slice 6 — Truthiness and `nil` narrowing
+### D. Slice 6 phase 2 — Class-membership and equality narrowing
 
-`if x; ...; end` narrows `x` to its non-nil/non-false fragment inside the
-then branch. `if x.nil?; ...; else; ...; end` is the cleanest form.
-This is the first true *narrowing* feature and unlocks a long tail of
-real-world precision.
+Phase 1 (this commit) ships truthiness and `nil?` narrowing. Phase 2
+extends the predicate analyser with `is_a?`/`kind_of?`/`instance_of?`
+class-membership predicates and trusted equality narrowing for finite
+literal sets per [`docs/type-specification/control-flow-analysis.md`](type-specification/control-flow-analysis.md), plus the formal `Rigor::Analysis::FactStore`
+that drives heap and relational facts. Phase 2 also lifts
+`eval_and_or`'s value type from `union(left, right)` to a narrowing-
+aware `union(narrow_falsey(left), right)` for `&&` (and the symmetric
+form for `||`).
 
-- **type-scan impact**: small (most narrowing happens on already-typed
-  receivers; the unrecognised count is dominated by other things).
-- **engine impact**: large architecturally — introduces the narrowing
-  predicate machinery the engine has been deferring since Slice 1.
-- **risk**: medium-high; the interaction with `Scope#join` and
-  nil-injection at branch merges needs care.
+- **type-scan impact**: small to medium (most narrowing happens on
+  already-typed receivers; the unrecognised count is dominated by
+  other things).
+- **engine impact**: medium — extends the predicate-analyser
+  catalogue and adds the `FactStore` scaffolding.
+- **risk**: medium; equality trust levels and closure-capture
+  invalidation need careful handling per the control-flow-analysis
+  spec.
 
 ### Recommended ordering
 

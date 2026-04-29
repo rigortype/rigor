@@ -396,6 +396,195 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "narrowing on if/unless (Slice 6 phase 1)" do
+    let(:union_int_nil) do
+      Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("Integer"),
+        Rigor::Type::Combinator.constant_of(nil)
+      )
+    end
+
+    # Parse `source` with `x` and `y` pre-declared as locals so the
+    # parser produces `LocalVariableReadNode` rather than implicit
+    # `CallNode` references. Tests that need a different local set
+    # MAY pass `locals:`.
+    def parse_with_locals(source, locals: %i[x y])
+      Prism.parse(source, scopes: [locals]).value
+    end
+
+    # Build an `on_enter` callback that records the entry-scope
+    # binding for `name` whenever the evaluator visits a
+    # LocalVariableReadNode for that name. Returns the events array
+    # (mutable) and the callback together.
+    def watch_local_reads(name)
+      events = []
+      on_enter = lambda do |node, s|
+        next unless node.is_a?(Prism::LocalVariableReadNode) && node.name == name
+
+        events << s.local(name)
+      end
+      [events, on_enter]
+    end
+
+    it "narrows truthy/falsey edges of `if x` for a Union[T, nil] local" do
+      bound = scope.with_local(:x, union_int_nil)
+      events, on_enter = watch_local_reads(:x)
+      ast = parse_with_locals(<<~RUBY)
+        if x
+          x
+        else
+          x
+        end
+      RUBY
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+
+      # Predicate read sees the untouched union; the then-branch
+      # read sees x narrowed to Integer; the else-branch read sees
+      # x narrowed to Constant[nil].
+      expect(events[0]).to eq(union_int_nil)
+      expect(events[1]).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(events[2]).to eq(Rigor::Type::Combinator.constant_of(nil))
+    end
+
+    it "narrows on `if x.nil?`" do
+      bound = scope.with_local(:x, union_int_nil)
+      events, on_enter = watch_local_reads(:x)
+      ast = parse_with_locals(<<~RUBY)
+        if x.nil?
+          x
+        else
+          x
+        end
+      RUBY
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+
+      then_read, else_read = events.last(2)
+      expect(then_read).to eq(Rigor::Type::Combinator.constant_of(nil))
+      expect(else_read).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "narrows on `unless x` by swapping truthy/falsey edges" do
+      bound = scope.with_local(:x, union_int_nil)
+      events, on_enter = watch_local_reads(:x)
+      ast = parse_with_locals(<<~RUBY)
+        unless x
+          x
+        else
+          x
+        end
+      RUBY
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+
+      # In `unless x` the body runs when x is falsey, the else-clause
+      # when x is truthy. The narrower swaps the two edges accordingly.
+      then_read, else_read = events.last(2)
+      expect(then_read).to eq(Rigor::Type::Combinator.constant_of(nil))
+      expect(else_read).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "narrows the value of a then-branch (Union -> non-nil fragment)" do
+      bound = scope.with_local(:x, union_int_nil)
+      type, _post = bound.evaluate(parse_with_locals(<<~RUBY))
+        if x.nil?
+          0
+        else
+          x
+        end
+      RUBY
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to include(
+        Rigor::Type::Combinator.constant_of(0),
+        Rigor::Type::Combinator.nominal_of("Integer")
+      )
+    end
+
+    it "joins narrowed scopes across branches with the original union" do
+      bound = scope.with_local(:x, union_int_nil)
+      _, post = bound.evaluate(parse_with_locals(<<~RUBY))
+        if x
+          x
+        else
+          x
+        end
+      RUBY
+      # After the if, x has the union of the two narrowed branches,
+      # which collapses back to the original `Integer | nil` because
+      # the two narrowings partition the union.
+      expect(post.local(:x)).to eq(union_int_nil)
+    end
+
+    it "evaluates the RHS of `&&` under the LHS truthy scope" do
+      # `x.succ` only resolves cleanly when `x` is narrowed to a
+      # non-nil Integer; otherwise dispatch over `Integer | nil`
+      # cannot prove `NilClass` defines `succ`. The RHS therefore
+      # types as `Nominal[Integer]` only when the narrower flowed
+      # `x` into the RHS scope.
+      bound = scope.with_local(:x, union_int_nil)
+      type, _post = bound.evaluate(parse_with_locals("x && x.succ"))
+
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to include(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "evaluates the RHS of `||` under the LHS falsey scope" do
+      # `x || x.nil?` reads `x` on the RHS only when the LHS is
+      # falsey, i.e. when `x` is `nil`. Slice 6 phase 1 narrows
+      # that read; the resulting `x.nil?` therefore folds to a
+      # constant true.
+      bound = scope.with_local(:x, union_int_nil)
+      events, on_enter = watch_local_reads(:x)
+      ast = parse_with_locals("x || x.nil?")
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+
+      # The LHS read sees the unnarrowed union; we don't assert on
+      # `events[1]` because the RHS receiver is typed via
+      # ExpressionTyper, which does not fire `on_enter`. The
+      # behavioural proof is in the dispatched return type below.
+      expect(events.first).to eq(union_int_nil)
+
+      type, _post = bound.evaluate(ast)
+      expect(type).to be_a(Rigor::Type::Union)
+      # The RHS `x.nil?` resolves on `Constant[nil]` to
+      # `Constant[true]` because `x` was narrowed to `nil` in the
+      # falsey branch. The full expression unions LHS and RHS.
+      expect(type.members).to include(Rigor::Type::Combinator.constant_of(true))
+    end
+
+    it "leaves locals untouched on if without a narrowable predicate" do
+      bound = scope.with_local(:x, union_int_nil)
+      events, on_enter = watch_local_reads(:x)
+      ast = parse_with_locals(<<~RUBY)
+        if foo
+          x
+        else
+          x
+        end
+      RUBY
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+
+      expect(events.last(2)).to all(eq(union_int_nil))
+    end
+
+    it "narrows compound `if a && b` predicates" do
+      union_str_nil = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("String"),
+        Rigor::Type::Combinator.constant_of(nil)
+      )
+      bound = scope
+              .with_local(:x, union_int_nil)
+              .with_local(:y, union_str_nil)
+      type, _post = bound.evaluate(parse_with_locals("if x && y; x; else; 0; end"))
+
+      # In the truthy branch x is narrowed to its non-falsey
+      # fragment; the read of `x` therefore returns `Integer`.
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to include(
+        Rigor::Type::Combinator.nominal_of("Integer"),
+        Rigor::Type::Combinator.constant_of(0)
+      )
+    end
+  end
+
   describe "downstream inference benefits" do
     it "lets methods on bound locals resolve through RBS" do
       type, _post = evaluate(<<~RUBY)

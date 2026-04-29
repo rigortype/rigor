@@ -809,8 +809,14 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Proc")
     end
 
-    it "types RangeNode as Nominal[Range]" do
+    it "types static integer RangeNode as Constant[Range]" do
       type = scope.type_of(parse_expression("(1..10)"))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1..10))
+    end
+
+    it "keeps dynamic RangeNode as Nominal[Range]" do
+      type = scope.type_of(parse_expression("(start..10)"))
 
       expect(type.class_name).to eq("Range")
     end

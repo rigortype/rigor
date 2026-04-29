@@ -12,6 +12,9 @@ RSpec.describe Rigor::Type::HashShape do
       expect(shape.pairs.keys).to eq(%i[a b])
       expect(shape.pairs[:a]).to equal(int_nominal)
       expect(shape.pairs[:b]).to equal(str_nominal)
+      expect(shape.required_keys).to match_array(%i[a b])
+      expect(shape.optional_keys).to be_empty
+      expect(shape).to be_closed
     end
 
     it "accepts String keys" do
@@ -27,6 +30,32 @@ RSpec.describe Rigor::Type::HashShape do
     it "rejects keys that are not Symbol or String" do
       expect { described_class.new(1 => int_nominal) }
         .to raise_error(ArgumentError, /HashShape keys must be Symbol or String/)
+    end
+
+    it "classifies optional and read-only keys" do
+      shape = described_class.new(
+        { a: int_nominal, b: str_nominal },
+        optional_keys: [:b],
+        read_only_keys: [:a],
+        extra_keys: :open
+      )
+      expect(shape.required_key?(:a)).to be(true)
+      expect(shape.optional_key?(:b)).to be(true)
+      expect(shape.read_only_key?(:a)).to be(true)
+      expect(shape).to be_open
+    end
+
+    it "treats unmentioned keys as optional when only required_keys is supplied" do
+      shape = described_class.new({ a: int_nominal, b: str_nominal }, required_keys: [:a])
+      expect(shape.required_keys).to eq([:a])
+      expect(shape.optional_keys).to eq([:b])
+    end
+
+    it "rejects invalid policy fields" do
+      expect { described_class.new({ a: int_nominal }, optional_keys: [:missing]) }
+        .to raise_error(ArgumentError, /optional_keys contains keys not present/)
+      expect { described_class.new({ a: int_nominal }, extra_keys: :typed) }
+        .to raise_error(ArgumentError, /extra_keys must be :open or :closed/)
     end
 
     it "freezes the pairs hash" do
@@ -51,16 +80,35 @@ RSpec.describe Rigor::Type::HashShape do
       expect(shape.erase_to_rbs).to eq("{ a: Integer, b: String }")
     end
 
+    it "renders optional and read-only entries" do
+      shape = described_class.new(
+        { a: int_nominal, b: str_nominal },
+        optional_keys: [:b],
+        read_only_keys: [:a]
+      )
+      expect(shape.describe).to eq("{ readonly a: Integer, ?b: String }")
+      expect(shape.erase_to_rbs).to eq("{ a: Integer, ?b: String }")
+    end
+
+    it "marks open shapes and erases them to generic Hash bounds" do
+      shape = described_class.new({ a: int_nominal, b: str_nominal }, extra_keys: :open)
+      expect(shape.describe).to eq("{ a: Integer, b: String, ... }")
+      expect(shape.erase_to_rbs).to eq("Hash[top, top]")
+    end
+
     it "renders string-keyed shapes with quoted keys in describe" do
       shape = described_class.new("a" => int_nominal)
       expect(shape.describe).to eq("{ \"a\": Integer }")
     end
 
-    it "erases empty and string-keyed shapes to bare Hash" do
+    it "erases empty closed shapes to an empty RBS record" do
       empty = described_class.new({})
+      expect(empty.erase_to_rbs).to eq("{}")
+    end
+
+    it "erases string-keyed shapes to generic Hash bounds" do
       string_keyed = described_class.new("a" => int_nominal)
-      expect(empty.erase_to_rbs).to eq("Hash")
-      expect(string_keyed.erase_to_rbs).to eq("Hash")
+      expect(string_keyed.erase_to_rbs).to eq("Hash[String, Integer]")
     end
   end
 
@@ -82,6 +130,12 @@ RSpec.describe Rigor::Type::HashShape do
       a = described_class.new(a: int_nominal)
       b = described_class.new(a: str_nominal)
       expect(a).not_to eq(b)
+    end
+
+    it "includes policy fields" do
+      closed = described_class.new(a: int_nominal)
+      open = described_class.new({ a: int_nominal }, extra_keys: :open)
+      expect(closed).not_to eq(open)
     end
   end
 

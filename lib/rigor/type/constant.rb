@@ -4,10 +4,11 @@ require_relative "../trinary"
 
 module Rigor
   module Type
-    # A scalar literal carrier under ADR-3 OQ1 Option C (Hybrid). Wraps a
-    # Ruby literal value of one of the supported scalar classes. Compound
+    # A literal carrier under ADR-3 OQ1 Option C (Hybrid). Wraps a Ruby
+    # literal value of one of the supported immutable-ish classes. Compound
     # literal shapes (Tuple, HashShape, Record) get dedicated classes in
-    # later slices.
+    # later slices; Range is carried only when both static endpoints are
+    # known enough for tuple slicing.
     #
     # See docs/adr/4-type-inference-engine.md for the tentative answer to
     # the open question and docs/type-specification/rigor-extensions.md for
@@ -18,6 +19,7 @@ module Rigor
         Float,
         String,
         Symbol,
+        Range,
         Rational,
         Complex,
         TrueClass,

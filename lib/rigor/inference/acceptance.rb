@@ -21,10 +21,11 @@ module Rigor
     # combinator types added through phase 2b: Top, Bot, Dynamic,
     # Nominal, Singleton, Constant, and Union.
     #
-    # Slice 5 phase 1 registers the shape carriers `Tuple` and
-    # `HashShape`. Tuple/HashShape acceptance compares per-position
-    # element types (covariant) and per-key entry types (depth
-    # covariant, width permissive). When the receiver side is a
+    # Slice 5 registers the shape carriers `Tuple` and `HashShape`.
+    # Tuple/HashShape acceptance compares per-position element types
+    # (covariant) and per-key entry types (depth covariant), including
+    # HashShape required/optional/closed-extra-key policy. When the
+    # receiver side is a
     # generic `Nominal[Array, [E]]` or `Nominal[Hash, [K, V]]` the
     # shape is projected to its underlying nominal so the existing
     # generic-acceptance pipeline continues to apply; the converse
@@ -352,9 +353,11 @@ module Rigor
           combine_arg_results(per_element, mode)
         end
 
-        # HashShape{k1: T1, ...} accepts another HashShape{k1: U1, ...}
-        # when every required key (every key of self) is present on
-        # the other side and Ti accepts Ui (depth covariant). Other
+        # HashShape{k1: T1, ...} accepts another HashShape when every
+        # required key of self is required on the other side and Ti
+        # accepts Ui (depth covariant). Optional keys may be absent on
+        # the other side; when present, their values are checked. A
+        # closed self rejects known or possible extra keys. Other
         # types are rejected; the converse direction (a Nominal
         # accepting a HashShape) is handled by `accepts_nominal` via
         # projection.
@@ -366,18 +369,32 @@ module Rigor
             )
           end
 
-          missing = self_type.pairs.keys - other_type.pairs.keys
-          unless missing.empty?
-            return Type::AcceptsResult.no(
-              mode: mode,
-              reasons: "HashShape missing required keys: #{missing.inspect}"
-            )
+          missing = self_type.required_keys.reject { |key| other_type.required_key?(key) }
+          return hash_shape_no(mode, "HashShape missing required keys: #{missing.inspect}") unless missing.empty?
+
+          if self_type.closed?
+            return hash_shape_no(mode, "HashShape closed target rejects open source") if other_type.open?
+
+            extra = other_type.pairs.keys - self_type.pairs.keys
+            unless extra.empty?
+              return hash_shape_no(mode, "HashShape closed target rejects extra keys: #{extra.inspect}")
+            end
           end
 
-          per_entry = self_type.pairs.map do |k, formal|
-            accepts(formal, other_type.pairs.fetch(k), mode: mode)
-          end
+          per_entry = hash_shape_entry_results(self_type, other_type, mode)
           combine_arg_results(per_entry, mode)
+        end
+
+        def hash_shape_entry_results(self_type, other_type, mode)
+          self_type.pairs.filter_map do |key, formal|
+            next unless other_type.pairs.key?(key)
+
+            accepts(formal, other_type.pairs.fetch(key), mode: mode)
+          end
+        end
+
+        def hash_shape_no(mode, reason)
+          Type::AcceptsResult.no(mode: mode, reasons: reason)
         end
 
         # Slice 4 phase 2c uses Ruby's actual class hierarchy to answer

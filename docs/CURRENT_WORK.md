@@ -37,9 +37,10 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 5 phase 2 sub 1 | `04d112a` | Shape-aware element dispatch (`Rigor::Inference::MethodDispatcher::ShapeDispatch`) |
 | Slice 6 phase C sub 1 | `13d587f` | BlockNode parameter binding (`Rigor::Inference::BlockParameterBinder`) |
 | Slice 6 phase 2 sub 1 | `37eb158` | Class-membership narrowing (`is_a?`/`kind_of?`/`instance_of?`) |
-| Slice 5 phase 2 sub 2 | `0164317` | Destructuring + multi-arg `dig` + `Hash#values_at` (`MultiTargetBinder`) |
-| Slice 6 phase C sub 2 | `379cca7` | Destructuring blocks + numbered params + `block_type:` (`Array#map { ... }` → `Array[T]`) |
-| Slice 6 phase 2 sub 2 | working tree | Equality narrowing + `Rigor::Analysis::FactStore` |
+| Slice 5 phase 2 sub 2 | `e7d0692` | Destructuring + multi-arg `dig` + `Hash#values_at` (`MultiTargetBinder`) |
+| Slice 6 phase C sub 2 | `58f88dc` | Destructuring blocks + numbered params + `block_type:` (`Array#map { ... }` → `Array[T]`) |
+| Slice 6 phase 2 sub 2 | `6bc38de` | Equality narrowing + `Rigor::Analysis::FactStore` |
+| Slice 5 phase 2 sub 3 | working tree | Range/start-length tuple slices + HashShape policies |
 
 ## What is in Place Today
 
@@ -62,7 +63,9 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 - Nominal: `Nominal[Class, type_args]`, `Singleton[Class]`.
 - Literal: `Constant[v]`.
 - Composite: `Union[A, B, ...]`.
-- Shape (Slice 5 phase 1): `Tuple[T1, ..., Tn]`, `HashShape[{ k1 => T1, ... }]`.
+- Shape (Slice 5): `Tuple[T1, ..., Tn]`, `HashShape[{ k1 => T1, ... }]`
+  with required/optional/read-only key policy and open/closed extra-key
+  policy.
 - Trinary: `Rigor::Trinary` (`yes`/`no`/`maybe`).
 - Acceptance result (Slice 4 phase 2c): `Rigor::Type::AcceptsResult`.
 
@@ -145,8 +148,8 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 708 examples, 0 failures (as of the Slice 6 phase 2
-  sub-phase 2 working tree).
+- **RSpec**: 730 examples, 0 failures (as of the Slice 5 phase 2
+  sub-phase 3 working tree).
 - **RuboCop**: `make lint` is clean. `.rubocop.yml` excludes the whole
   `references/` tree so upstream submodules are not linted as Rigor
   product code.
@@ -194,6 +197,14 @@ normalisation and are the only sanctioned way to construct types.
   types as `Constant["00100"]` (chain dig walks into the inner
   HashShape). `{ a: 1, b: "two" }.values_at(:a, :b)` types as
   `Tuple[Constant[1], Constant["two"]]`.
+- **`rigor type-of` smoke probe (Slice 5 phase 2 sub-phase 3
+  range/start-length slices + HashShape policies)**:
+  `xs = [1, 2, 3]; xs[1, 2]` and `xs[1..]` both type as
+  `Tuple[Constant[2], Constant[3]]`. Static nil slices such as
+  `xs[4..5]` resolve to `Constant[nil]`. RBS records with optional
+  fields now translate to closed `HashShape` values with optional
+  keys, optional-key `[]`/`dig` reads include `nil`, and closed
+  HashShape acceptance rejects extra/open sources.
 - **`rigor type-of` smoke probe (Slice 6 phase 2 sub-phase 1
   class-membership narrowing)**:
   `def f(x); if x.is_a?(Integer); x; else; x; end; end` — the
@@ -241,13 +252,12 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
    user-defined equality, `eql?`, `===`, and `Dynamic[Top]` comparisons
    stay relational-only until RBS/plugin-declared flow effects land.
 4. **Shape narrowing on dispatch**: covered for the curated
-   element-access catalogue (Slice 5 phase 2 sub-phase 1) plus
-   destructuring assignment, multi-arg `dig` chains, and
-   `Hash#values_at` (Slice 5 phase 2 sub-phase 2). Range and
-   start-length forms of `[]` (`tuple[1, 2]`, `tuple[1..3]`)
-   and the Rigor-extension hash-shape policies (required/optional/
-   closed-extra-key, read-only entries) are deferred to Slice 5
-   phase 2 sub-phase 3.
+   element-access catalogue (Slice 5 phase 2 sub-phase 1),
+   destructuring assignment, multi-arg `dig` chains, `Hash#values_at`
+   (Slice 5 phase 2 sub-phase 2), and tuple range/start-length `[]`
+   plus HashShape required/optional/closed/read-only policies (Slice 5
+   phase 2 sub-phase 3). Mutation methods, read-only write diagnostics,
+   and typed extra-key bounds remain follow-ups for the effect model.
 5. **RBS interface / alias degradation**: types like `int` and `_ToS`
    currently translate to `Dynamic[Top]`. Refining this would tighten
    parameter bindings for many core methods (`Array#first(n)`, etc.).
@@ -272,9 +282,10 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
 
 ## Candidate Next Steps
 
-The picks below are ordered by my best estimate of how much they move the
-overall analyzer forward. Each one is a self-contained, reviewable slice on
-top of the current branch.
+Slice 5 phase 2 sub-phase 3 is now in the working tree, and Slice 6 phase 2
+sub-phase 2 is committed as `6bc38de`. The remaining self-contained follow-up
+order is **C → A**: closure-captured-local invalidation first, then Rigor-side
+RBS authoring for the largest `type-scan lib` metric win.
 
 ### A. Author Rigor-side RBS for Rigor itself
 
@@ -290,25 +301,24 @@ project loader (Slice 4 phase 2a) already picks `sig/` up automatically.
   any future analysis on Rigor itself.
 - **risk**: documentation-flavoured work, mostly mechanical.
 
-### B. Slice 5 phase 2 sub-phase 3 — Range/start-length `[]` + Rigor extensions
+### B. Completed in working tree — Slice 5 phase 2 sub-phase 3
 
 Sub-phase 1 (already in) shipped `ShapeDispatch` for element access;
-sub-phase 2 (this commit) adds destructuring assignment, multi-arg
-`dig` chains, and `Hash#values_at`. Sub-phase 3 extends `ShapeDispatch`
-to recognise `tuple[start, length]` and `tuple[range]` (returning a
-sliced `Tuple`), introduces the required/optional/closed-extra-key
-and read-only HashShape policies per [`rigor-extensions.md`](type-specification/rigor-extensions.md),
-and wires the policies through `Acceptance` so a closed shape can
-reject extra keys.
+sub-phase 2 added destructuring assignment, multi-arg `dig` chains,
+and `Hash#values_at`. Sub-phase 3 now extends `ShapeDispatch` to
+recognise `tuple[start, length]` and `tuple[range]` (returning a
+sliced `Tuple`), introduces the required/optional/closed-extra-key and
+read-only HashShape policies per [`rigor-extensions.md`](type-specification/rigor-extensions.md),
+and wires the policies through `Acceptance` so a closed shape rejects
+extra/open sources.
 
 - **type-scan impact**: small on `lib/`, medium on user code that
   slices arrays by range or uses the closed-extra-key policy.
-- **engine impact**: medium — adds slice handlers to `ShapeDispatch`,
-  introduces a policy field on `HashShape`, and threads it through
-  `Acceptance`.
-- **risk**: low to medium; the carriers and dispatch infrastructure
-  are in place; the policy field needs careful migration of every
-  `HashShape.new` call site.
+- **engine impact**: landed in the working tree — adds slice handlers
+  to `ShapeDispatch`, introduces policy fields on `HashShape`, and
+  threads them through `Acceptance`.
+- **remaining risk**: low; full-suite verification and lint are clean
+  for the working tree.
 
 ### C. Slice 6 phase C sub-phase 3 — Closure-captured-local invalidation
 
@@ -334,9 +344,9 @@ the "escaped" capability fact.
 - **risk**: medium; the invalidation must compose cleanly with the
   Slice 6 phase 2 sub-phase 2 equality narrowing.
 
-### D. Completed in working tree — Slice 6 phase 2 sub-phase 2
+### D. Completed in commit `6bc38de` — Slice 6 phase 2 sub-phase 2
 
-Phase 2 sub-phase 2 is now implemented in the working tree. It adds
+Phase 2 sub-phase 2 is committed. It adds
 trusted equality narrowing for finite literal sets per
 [`docs/type-specification/control-flow-analysis.md`](type-specification/control-flow-analysis.md),
 the formal `Rigor::Analysis::FactStore`, narrowing-aware `&&`/`||`
@@ -353,10 +363,8 @@ class-membership predicates.
 
 ### Recommended ordering
 
-After the Slice 6 phase 2 sub-phase 2 working-tree changes, the
-remaining user-priority ordering is **B → C → A**. The remaining
-sub-phases are sub-phase 3 of B (range / start-length `[]` and the
-Rigor-extension hash-shape policies) and sub-phase 3 of C
-(closure-captured-local invalidation, now unblocked by the FactStore).
-A — authoring Rigor-side RBS for Rigor itself — remains the largest
-single lever for the `type-scan lib` metric.
+After the Slice 5 phase 2 sub-phase 3 working-tree changes, the
+remaining user-priority ordering is **C → A**. Closure-captured-local
+invalidation is now unblocked by the FactStore. A — authoring
+Rigor-side RBS for Rigor itself — remains the largest single lever for
+the `type-scan lib` metric.

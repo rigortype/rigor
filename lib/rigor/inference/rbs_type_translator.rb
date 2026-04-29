@@ -22,8 +22,9 @@ module Rigor
     # carriers:
     # - `RBS::Types::Tuple` becomes `Rigor::Type::Tuple[...]` so the
     #   arity and per-position element types survive the boundary.
-    # - `RBS::Types::Record` becomes `Rigor::Type::HashShape{...}`,
-    #   carrying the (Symbol -> Type) map intact.
+    # - `RBS::Types::Record` becomes an exact closed
+    #   `Rigor::Type::HashShape{...}`, carrying required and optional
+    #   fields intact.
     # Element and value types are translated recursively under the
     # caller's `self_type` / `instance_type` / `type_vars` context.
     #
@@ -172,15 +173,23 @@ module Rigor
           Type::Combinator.tuple_of(*elements)
         end
 
-        # Slice 5 phase 1: preserve hash-record precision through the
-        # boundary. RBS records use Symbol keys; the translator keeps
-        # them as Symbol keys on the resulting HashShape so erasure can
-        # round-trip back to `{ a: T }` syntax.
+        # Slice 5: preserve hash-record precision through the boundary.
+        # RBS records use Symbol keys; the translator keeps them as
+        # Symbol keys on the resulting exact closed HashShape so
+        # erasure can round-trip back to `{ a: T, ?b: U }` syntax.
         def translate_record(rbs_type, self_type, instance_type, type_vars)
           pairs = rbs_type.fields.each_with_object({}) do |(key, value), acc|
             acc[key] = translate(value, self_type: self_type, instance_type: instance_type, type_vars: type_vars)
           end
-          Type::Combinator.hash_shape_of(pairs)
+          optional_pairs = rbs_type.optional_fields.each_with_object({}) do |(key, value), acc|
+            acc[key] = translate(value, self_type: self_type, instance_type: instance_type, type_vars: type_vars)
+          end
+          Type::Combinator.hash_shape_of(
+            pairs.merge(optional_pairs),
+            required_keys: pairs.keys,
+            optional_keys: optional_pairs.keys,
+            extra_keys: :closed
+          )
         end
 
         def translate_proc_nominal(_rbs_type, _self_type, _instance_type, _type_vars)

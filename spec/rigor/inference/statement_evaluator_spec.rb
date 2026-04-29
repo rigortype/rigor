@@ -802,6 +802,32 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type).to eq(Rigor::Type::Combinator.constant_of(3))
     end
 
+    it "returns a sliced Tuple for tuple[start, length]" do
+      type, _post = evaluate(<<~RUBY)
+        xs = [1, 2, 3]
+        xs[1, 2]
+      RUBY
+      expect(type).to eq(
+        Rigor::Type::Combinator.tuple_of(
+          Rigor::Type::Combinator.constant_of(2),
+          Rigor::Type::Combinator.constant_of(3)
+        )
+      )
+    end
+
+    it "returns a sliced Tuple for tuple[range]" do
+      type, _post = evaluate(<<~RUBY)
+        xs = [1, 2, 3]
+        xs[1..]
+      RUBY
+      expect(type).to eq(
+        Rigor::Type::Combinator.tuple_of(
+          Rigor::Type::Combinator.constant_of(2),
+          Rigor::Type::Combinator.constant_of(3)
+        )
+      )
+    end
+
     it "returns Constant[size] for tuple.size" do
       type, _post = evaluate(<<~RUBY)
         xs = [1, 2, 3]

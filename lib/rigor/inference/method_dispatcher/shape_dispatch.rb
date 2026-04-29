@@ -19,13 +19,15 @@ module Rigor
       # `nil` so the surrounding pipeline falls through to
       # {RbsDispatch} and the projection-based answer.
       #
-      # Catalogue (Slice 5 phase 2 sub-phases 1 and 2):
+      # Catalogue (Slice 5 phase 2):
       #
       # - Tuple#`first`, Tuple#`last`, Tuple#`size`/`length`/`count`:
       #   no-arg, no-block.
       # - Tuple#`[]`, Tuple#`fetch` with a single `Constant[Integer]`
       #   argument inside the tuple's bounds (negative indices are
-      #   normalised by length).
+      #   normalised by length). Tuple#`[]` also handles static
+      #   Range and start-length slices, returning a sliced Tuple or
+      #   `Constant[nil]` for statically nil slices.
       # - Tuple#`dig` with a chain of `Constant[Integer]` /
       #   `Constant[Symbol|String]` arguments (Slice 5 phase 2 sub-
       #   phase 2). Each step recurses through the resolved member; a
@@ -53,15 +55,14 @@ module Rigor
       # - Iteration methods that bind block parameters (`each`, `map`,
       #   `select`, ...). Those land alongside the BlockNode-aware
       #   scope builder.
-      # - Range and start-length forms of `[]` (`tuple[1, 2]`,
-      #   `tuple[1..3]`) — Slice 5 phase 2 sub-phase 3 territory.
-      # - The Rigor-extension hash-shape policies (required/optional/
-      #   closed-extra-key, read-only entries).
+      # - Tuple/HashShape mutation methods. These land with the future
+      #   effect model so read-only entries and mutation invalidation
+      #   have one place to report diagnostics.
       #
       # See docs/internal-spec/inference-engine.md (Slice 5 phase 2)
       # and docs/adr/4-type-inference-engine.md for the slice
       # rationale.
-      # rubocop:disable Metrics/ModuleLength
+      # rubocop:disable Metrics/ClassLength, Metrics/ModuleLength
       module ShapeDispatch
         module_function
 
@@ -132,21 +133,54 @@ module Rigor
             Type::Combinator.constant_of(tuple.elements.size)
           end
 
-          # `tuple[i]` and `tuple.fetch(i)` for a known integer index.
-          # Out-of-range indices return nil (`tuple[100]` -> nil at
-          # runtime, `tuple.fetch(100)` raises) so we let the projection
-          # answer apply rather than manufacturing a value.
-          def tuple_index(tuple, _method_name, args)
-            return nil unless args.size == 1
+          # `tuple[i]`, `tuple[range]`, `tuple[start, length]`, and
+          # `tuple.fetch(i)` for static arguments. Out-of-range single
+          # indices still fall through because the same handler serves
+          # `fetch`, while statically nil slices can be represented
+          # precisely for `[]`.
+          def tuple_index(tuple, method_name, args)
+            case args.size
+            when 1 then tuple_single_index(tuple, method_name, args.first)
+            when 2 then tuple_start_length_slice(tuple, method_name, args)
+            end
+          end
 
-            arg = args.first
+          def tuple_single_index(tuple, method_name, arg)
             return nil unless arg.is_a?(Type::Constant)
+
+            return tuple_range_slice(tuple, arg.value) if method_name == :[] && arg.value.is_a?(Range)
             return nil unless arg.value.is_a?(Integer)
 
             idx = normalise_index(arg.value, tuple.elements.size)
             return nil unless idx
 
             tuple.elements[idx]
+          end
+
+          def tuple_start_length_slice(tuple, method_name, args)
+            return nil unless method_name == :[]
+
+            start, length = args
+            return nil unless start.is_a?(Type::Constant) && length.is_a?(Type::Constant)
+            return nil unless start.value.is_a?(Integer) && length.value.is_a?(Integer)
+
+            tuple_slice(tuple.elements[start.value, length.value])
+          end
+
+          def tuple_range_slice(tuple, range)
+            return nil unless integer_range?(range)
+
+            tuple_slice(tuple.elements[range])
+          end
+
+          def tuple_slice(elements)
+            return Type::Combinator.constant_of(nil) if elements.nil?
+
+            Type::Combinator.tuple_of(*elements)
+          end
+
+          def integer_range?(range)
+            [range.begin, range.end].all? { |endpoint| endpoint.nil? || endpoint.is_a?(Integer) }
           end
 
           # `tuple.dig(i, ...)` with a chain of static keys/indices.
@@ -187,6 +221,8 @@ module Rigor
 
           def hash_size(shape, _method_name, args)
             return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
 
             Type::Combinator.constant_of(shape.pairs.size)
           end
@@ -204,6 +240,7 @@ module Rigor
 
             step = hash_dig_step(shape, args.first)
             return nil if step.nil?
+            return nil if method_name == :fetch && optional_key_step?(shape, args.first)
             return step unless missing_key_step?(shape, args.first)
 
             return step if method_name == :[]
@@ -236,9 +273,20 @@ module Rigor
             key = arg.value
             return nil unless key.is_a?(Symbol) || key.is_a?(String)
 
-            return shape.pairs[key] if shape.pairs.key?(key)
+            if shape.pairs.key?(key)
+              value = shape.pairs[key]
+              return value unless shape.optional_key?(key)
+
+              return Type::Combinator.union(value, Type::Combinator.constant_of(nil))
+            end
 
             Type::Combinator.constant_of(nil)
+          end
+
+          def optional_key_step?(shape, arg)
+            return false unless arg.is_a?(Type::Constant)
+
+            shape.optional_key?(arg.value)
           end
 
           def missing_key_step?(shape, arg)
@@ -282,7 +330,7 @@ module Rigor
           end
         end
       end
-      # rubocop:enable Metrics/ModuleLength
+      # rubocop:enable Metrics/ClassLength, Metrics/ModuleLength
     end
   end
 end

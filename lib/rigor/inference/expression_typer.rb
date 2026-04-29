@@ -521,12 +521,23 @@ module Rigor
         Type::Combinator.nominal_of(Proc)
       end
 
-      def type_of_range(_node)
-        Type::Combinator.nominal_of(Range)
+      def type_of_range(node)
+        left_static, left = static_range_endpoint(node.left)
+        right_static, right = static_range_endpoint(node.right)
+        return Type::Combinator.nominal_of(Range) unless left_static && right_static
+
+        Type::Combinator.constant_of(Range.new(left, right, node.exclude_end?))
       end
 
       def type_of_regexp(_node)
         Type::Combinator.nominal_of(Regexp)
+      end
+
+      def static_range_endpoint(node)
+        return [true, nil] if node.nil?
+        return [true, node.value] if node.is_a?(Prism::IntegerNode)
+
+        [false, nil]
       end
 
       # Helper for the many control-flow handlers that read a body

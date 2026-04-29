@@ -76,7 +76,7 @@ Distinct classes such as `Rigor::Type::String::Constant`, `Rigor::Type::Integer:
 
 **Option C — Hybrid.**
 
-Unified `Constant` for scalar-like literals (`String`, `Integer`, `Float`, `Symbol`, `Rational`, `Complex`, `true`, `false`, `nil`); dedicated classes for compound literal shapes (`Tuple`, `HashShape`, `Record`) because those carry inner `Type` references and shape policies that don't compress to a single Ruby value.
+Unified `Constant` for scalar-like literals (`String`, `Integer`, `Float`, `Symbol`, `Rational`, `Complex`, `true`, `false`, `nil`) plus static integer-endpoint `Range` literals used by tuple slicing; dedicated classes for compound literal shapes (`Tuple`, `HashShape`, `Record`) because those carry inner `Type` references and shape policies that don't compress to a single Ruby value.
 
 - Benefits: scalar carriage stays compact and Ruby-idiomatic; compound shapes get the structure they need anyway; matches the way [`rigor-extensions.md`](../type-specification/rigor-extensions.md) already separates "finite set of literals" from "object/hash shape refinements".
 - Drawbacks: introduces a soft boundary between "scalar literal" and "compound literal" that has to be documented; a compound literal whose elements are all constants (`[1, 2, 3]`) needs a clear answer about whether it's a `Tuple` of `Constant`s or a constant-array shape carrying raw values.

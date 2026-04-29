@@ -253,9 +253,13 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
   end
 
-  describe "HashShape acceptance (Slice 5 phase 1)" do
-    def shape(pairs)
-      Rigor::Type::Combinator.hash_shape_of(pairs)
+  describe "HashShape acceptance (Slice 5)" do
+    def shape(pairs = nil, **options)
+      if pairs.nil?
+        pairs = options
+        options = {}
+      end
+      Rigor::Type::Combinator.hash_shape_of(pairs, **options)
     end
 
     it "accepts a HashShape with the same keys and accepted values (depth covariant)" do
@@ -264,8 +268,14 @@ RSpec.describe Rigor::Inference::Acceptance do
       expect(accepts(a, b)).to be_yes
     end
 
-    it "accepts a HashShape with extra keys on the right (width permissive)" do
+    it "rejects extra known keys when the target shape is closed" do
       a = shape(a: int_nominal)
+      b = shape(a: int_nominal, b: str_nominal)
+      expect(accepts(a, b)).to be_no
+    end
+
+    it "accepts extra known keys when the target shape is open" do
+      a = shape({ a: int_nominal }, extra_keys: :open)
       b = shape(a: int_nominal, b: str_nominal)
       expect(accepts(a, b)).to be_yes
     end
@@ -273,6 +283,24 @@ RSpec.describe Rigor::Inference::Acceptance do
     it "rejects a HashShape missing a required key" do
       a = shape(a: int_nominal, b: str_nominal)
       b = shape(a: int_nominal)
+      expect(accepts(a, b)).to be_no
+    end
+
+    it "allows optional keys to be absent on the right" do
+      a = shape({ a: int_nominal, b: str_nominal }, optional_keys: [:b])
+      b = shape(a: int_nominal)
+      expect(accepts(a, b)).to be_yes
+    end
+
+    it "rejects an optional source key for a required target key" do
+      a = shape(a: int_nominal)
+      b = shape({ a: int_nominal }, optional_keys: [:a])
+      expect(accepts(a, b)).to be_no
+    end
+
+    it "rejects an open source when the target shape is closed" do
+      a = shape(a: int_nominal)
+      b = shape({ a: int_nominal }, extra_keys: :open)
       expect(accepts(a, b)).to be_no
     end
 

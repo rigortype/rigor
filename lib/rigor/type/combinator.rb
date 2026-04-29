@@ -75,8 +75,13 @@ module Rigor
       # Constructs a HashShape from an ordered (Symbol|String) -> type
       # map. The argument is duped and frozen by the carrier; callers
       # MUST NOT rely on later mutation.
-      def hash_shape_of(pairs)
-        HashShape.new(pairs)
+      def hash_shape_of(pairs = nil, **options)
+        if pairs.nil?
+          pairs = options
+          options = {}
+        end
+
+        HashShape.new(pairs, **options)
       end
 
       # Normalized union. Flattens nested Unions, deduplicates structurally

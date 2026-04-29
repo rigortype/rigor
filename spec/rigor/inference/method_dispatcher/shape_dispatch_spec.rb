@@ -35,6 +35,31 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: t, method_name: :[], args: [constant(-4)])).to be_nil
     end
 
+    it "returns a sliced Tuple for `tuple[start, length]`" do
+      result = dispatch(receiver: t, method_name: :[], args: [constant(1), constant(2)])
+      expect(result).to eq(tuple(constant(2), constant(3)))
+    end
+
+    it "returns Constant[nil] for statically nil start-length slices" do
+      expect(dispatch(receiver: t, method_name: :[], args: [constant(4), constant(1)])).to eq(constant(nil))
+      expect(dispatch(receiver: t, method_name: :[], args: [constant(1), constant(-1)])).to eq(constant(nil))
+    end
+
+    it "returns a sliced Tuple for `tuple[range]`" do
+      expect(dispatch(receiver: t, method_name: :[], args: [constant(0..1)])).to eq(tuple(constant(1), constant(2)))
+      expect(dispatch(receiver: t, method_name: :[], args: [constant(1...3)])).to eq(tuple(constant(2), constant(3)))
+      expect(dispatch(receiver: t, method_name: :[], args: [constant(1..)])).to eq(tuple(constant(2), constant(3)))
+    end
+
+    it "returns Constant[nil] for statically nil range slices" do
+      expect(dispatch(receiver: t, method_name: :[], args: [constant(4..5)])).to eq(constant(nil))
+    end
+
+    it "does not claim fetch with Range or start-length arguments" do
+      expect(dispatch(receiver: t, method_name: :fetch, args: [constant(0..1)])).to be_nil
+      expect(dispatch(receiver: t, method_name: :fetch, args: [constant(0), constant(1)])).to be_nil
+    end
+
     it "treats `fetch(i)` like `[]` when the index is in range" do
       expect(dispatch(receiver: t, method_name: :fetch, args: [constant(1)])).to eq(constant(2))
     end
@@ -117,6 +142,23 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     it "returns size/length as a Constant" do
       expect(dispatch(receiver: shape, method_name: :size)).to eq(constant(2))
       expect(dispatch(receiver: shape, method_name: :length)).to eq(constant(2))
+    end
+
+    it "falls through for open-shape size because extra keys are possible" do
+      open_shape = Rigor::Type::Combinator.hash_shape_of({ a: constant(1) }, extra_keys: :open)
+      expect(dispatch(receiver: open_shape, method_name: :size)).to be_nil
+    end
+
+    it "adds nil for optional-key reads" do
+      optional_shape = Rigor::Type::Combinator.hash_shape_of(
+        { a: constant(1), b: constant("two") },
+        optional_keys: [:b]
+      )
+      expected = Rigor::Type::Combinator.union(constant("two"), constant(nil))
+      expect(dispatch(receiver: optional_shape, method_name: :[], args: [constant(:b)])).to eq(expected)
+      expect(dispatch(receiver: optional_shape, method_name: :dig, args: [constant(:b)])).to eq(expected)
+      expect(dispatch(receiver: optional_shape, method_name: :fetch, args: [constant(:b)])).to be_nil
+      expect(dispatch(receiver: optional_shape, method_name: :size)).to be_nil
     end
 
     it "falls through for non-static keys" do

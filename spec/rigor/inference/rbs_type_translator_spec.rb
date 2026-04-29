@@ -130,6 +130,16 @@ RSpec.describe Rigor::Inference::RbsTypeTranslator do
       expect(record.pairs.keys).to eq(%i[a b])
       expect(record.pairs[:a]).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
       expect(record.pairs[:b]).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      expect(record).to be_closed
+      expect(record.required_keys).to match_array(%i[a b])
+    end
+
+    it "translates optional record fields to optional HashShape keys" do
+      record = described_class.translate(parse_rbs("{ a: ::Integer, ?b: ::String }"))
+      expect(record.pairs.keys).to eq(%i[a b])
+      expect(record.required_keys).to eq([:a])
+      expect(record.optional_keys).to eq([:b])
+      expect(record.erase_to_rbs).to eq("{ a: Integer, ?b: String }")
     end
 
     it "degrades type variables to Dynamic[Top]" do

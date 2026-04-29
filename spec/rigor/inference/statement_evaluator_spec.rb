@@ -690,4 +690,117 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
     end
   end
+
+  describe "block parameter binding (Slice 6 phase C sub-phase 1)" do
+    let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+
+    def watch_local_reads(name)
+      events = []
+      on_enter = lambda do |node, s|
+        next unless node.is_a?(Prism::LocalVariableReadNode) && node.name == name
+
+        events << s.local(name)
+      end
+      [events, on_enter]
+    end
+
+    def run_eval(base_scope, on_enter, source)
+      described_class.new(scope: base_scope, on_enter: on_enter).evaluate(parse_program(source))
+    end
+
+    it "binds the block parameter as the tuple element union for Array[Tuple]#each" do
+      events, on_enter = watch_local_reads(:x)
+      run_eval(default_env_scope, on_enter, "[1, 2, 3].each { |x| x }")
+      # `[1, 2, 3]` carries `Tuple[Constant[1], Constant[2], Constant[3]]`,
+      # which projects to `Array[Constant[1] | Constant[2] | Constant[3]]`
+      # for dispatch; the block's `Elem` parameter therefore binds to
+      # the same union.
+      expect(events).not_to be_empty
+      expect(events.first).to be_a(Rigor::Type::Union)
+      expect(events.first.members).to contain_exactly(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2),
+        Rigor::Type::Combinator.constant_of(3)
+      )
+    end
+
+    it "binds the block parameter as Integer when the receiver is Array[Integer] (no shape)" do
+      events, on_enter = watch_local_reads(:x)
+      bound = default_env_scope.with_local(
+        :nums,
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")])
+      )
+      ast = Prism.parse("nums.each { |x| x }", scopes: [[:nums]]).value
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+      expect(events).not_to be_empty
+      expect(events.first).to be_a(Rigor::Type::Nominal)
+      expect(events.first.class_name).to eq("Integer")
+    end
+
+    it "binds multiple block parameters in declaration order" do
+      events_k, watch_k = watch_local_reads(:k)
+      events_v, watch_v = watch_local_reads(:v)
+      combined = lambda do |node, s|
+        watch_k.call(node, s)
+        watch_v.call(node, s)
+      end
+      run_eval(default_env_scope, combined, "{ a: 1, b: 2 }.each { |k, v| k; v }")
+      # The receiver is a HashShape{a: 1, b: 2}; Hash#each yields
+      # `[K, V]` tuples and the binder receives the tuple slot type
+      # for each positional. We assert that the bindings are present
+      # rather than the exact tuple shape (which can vary across
+      # RBS revisions).
+      expect(events_k.first).not_to be_nil
+      expect(events_v.first).not_to be_nil
+    end
+
+    it "defaults block parameters to Dynamic[Top] when the receiver has no RBS signature" do
+      events, on_enter = watch_local_reads(:x)
+      # `foo` resolves to an implicit-self call without a known
+      # signature. The block param falls back to Dynamic[Top].
+      run_eval(default_env_scope, on_enter, "foo { |x| x }")
+      expect(events).not_to be_empty
+      expect(events.first).to eq(Rigor::Type::Combinator.untyped)
+    end
+
+    it "does not leak block-local writes into the post-call scope" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        [1, 2, 3].each { |x| inner = x }
+      RUBY
+      expect(post.local(:inner)).to be_nil
+    end
+
+    it "threads block parameter bindings through statements within the block body" do
+      events, on_enter = watch_local_reads(:x)
+      run_eval(default_env_scope, on_enter, "[1, 2, 3].each { |x| y = x; x }")
+      # `x` is read twice; the binding must stay the tuple element
+      # union (Constant[1]|Constant[2]|Constant[3]) throughout.
+      expect(events.size).to be >= 2
+      expect(events.last.members).to contain_exactly(
+        Rigor::Type::Combinator.constant_of(1),
+        Rigor::Type::Combinator.constant_of(2),
+        Rigor::Type::Combinator.constant_of(3)
+      )
+    end
+
+    it "evaluates the block body's terminal statement under the bound block param" do
+      # `n + 1` is itself a CallNode, so the inner `n` read does not
+      # fire `on_enter`; we probe the entry scope at the CallNode
+      # level instead, which sees the bound `n` via `type_of`.
+      events = []
+      on_enter = lambda do |node, s|
+        next unless node.is_a?(Prism::CallNode) && node.name == :+
+
+        events << s.type_of(node.receiver)
+      end
+      run_eval(default_env_scope, on_enter, "[1, 2, 3].map { |n| n + 1 }")
+      expect(events.first).to be_a(Rigor::Type::Union)
+    end
+
+    it "does not crash on numbered-block parameters (`_1`)" do
+      expect do
+        default_env_scope.evaluate(parse_program("[1, 2, 3].each { _1.succ }"))
+      end.not_to raise_error
+    end
+  end
 end

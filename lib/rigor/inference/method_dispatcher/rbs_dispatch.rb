@@ -81,6 +81,40 @@ module Rigor
           )
         end
 
+        # Slice 6 (Phase C sub-phase 1) probe: returns the positional
+        # block-parameter types declared by the receiving method's
+        # selected RBS overload, translated into `Rigor::Type`. Used
+        # by the StatementEvaluator to bind block parameter names
+        # before evaluating the block body.
+        #
+        # The probe shares the receiver descriptor / overload selector
+        # plumbing with `try_dispatch`; only the projection at the end
+        # differs (the block's positional params instead of the return
+        # type). Returns an empty array when:
+        #
+        # - the environment / RBS loader is missing,
+        # - the receiver does not project to a known class,
+        # - the method has no signature in RBS,
+        # - the selected overload has no `block:` clause, or
+        # - the block is `untyped` / `UntypedFunction` (no statically
+        #   declared parameter types).
+        #
+        # This deliberately does NOT differentiate "no overload had a
+        # block" from "the block is untyped"; the binder treats both
+        # the same way (every parameter defaults to `Dynamic[Top]`).
+        # @return [Array<Rigor::Type>] positional block parameter types.
+        def block_param_types(receiver:, method_name:, args:, environment:)
+          return [] if environment.nil?
+          return [] unless environment.rbs_loader
+
+          probe_block_param_types(
+            receiver: receiver,
+            method_name: method_name,
+            args: args,
+            environment: environment
+          )
+        end
+
         # rubocop:disable Metrics/ClassLength
         class << self
           private
@@ -226,6 +260,101 @@ module Rigor
               instance_type: instance_type,
               type_vars: type_vars
             )
+          end
+
+          # ----- block parameter probe (Phase C sub-phase 1) -----
+
+          def probe_block_param_types(receiver:, method_name:, args:, environment:)
+            args ||= []
+            case receiver
+            when Type::Union then probe_block_param_types_union(receiver, method_name, args, environment)
+            else                  probe_block_param_types_one(receiver, method_name, args, environment)
+            end
+          end
+
+          # For a union receiver we keep the conservative answer: only
+          # return block param types when every member resolves the
+          # same arity and types (otherwise the call sites would have
+          # to thread per-member binders, which the slice does not
+          # support yet). Mismatches degrade to the empty array so the
+          # binder defaults all params to Dynamic[Top].
+          def probe_block_param_types_union(receiver, method_name, args, environment)
+            results = receiver.members.map do |member|
+              probe_block_param_types_one(member, method_name, args, environment)
+            end
+            return [] if results.empty?
+            return [] unless results.all? { |r| r == results.first }
+
+            results.first
+          end
+
+          def probe_block_param_types_one(receiver, method_name, args, environment)
+            descriptor = receiver_descriptor(receiver)
+            return [] unless descriptor
+
+            class_name, kind, receiver_args = descriptor
+            method_definition = lookup_method(environment, class_name, kind, method_name)
+            return [] unless method_definition
+
+            type_vars = build_type_vars(environment, class_name, receiver_args)
+            extract_block_param_types(
+              method_definition,
+              class_name: class_name,
+              kind: kind,
+              args: args,
+              type_vars: type_vars
+            )
+          rescue StandardError
+            []
+          end
+
+          def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:)
+            instance_type = Type::Combinator.nominal_of(class_name)
+            self_type =
+              case kind
+              when :singleton then Type::Combinator.singleton_of(class_name)
+              else                 instance_type
+              end
+
+            method_type = OverloadSelector.select(
+              method_definition,
+              arg_types: args,
+              self_type: self_type,
+              instance_type: instance_type,
+              type_vars: type_vars,
+              block_required: true
+            )
+            return [] unless method_type
+
+            block = method_type.respond_to?(:block) ? method_type.block : nil
+            return [] unless block
+
+            translate_block_positional_params(
+              block,
+              self_type: self_type,
+              instance_type: instance_type,
+              type_vars: type_vars
+            )
+          end
+
+          # `RBS::Types::Block#type` is normally an `RBS::Types::Function`
+          # carrying the block's parameter list; some signatures use
+          # `RBS::Types::UntypedFunction` (a `(?)` block) which exposes
+          # no parameter types -- we treat it as "no information" and
+          # return an empty array so the binder defaults every slot.
+          def translate_block_positional_params(block, self_type:, instance_type:, type_vars:)
+            fun = block.type
+            return [] unless fun.respond_to?(:required_positionals)
+
+            params = fun.required_positionals + fun.optional_positionals
+            params.map do |param|
+              RbsTypeTranslator.translate(
+                param.type,
+                self_type: self_type,
+                instance_type: instance_type,
+                type_vars: type_vars
+              )
+            end
           end
         end
         # rubocop:enable Metrics/ClassLength

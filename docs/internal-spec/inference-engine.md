@@ -262,6 +262,32 @@ The third constructor keyword on `StatementEvaluator` is the hook the ScopeIndex
 - A `*rest` parameter's bound type MUST be `Nominal["Array", [T]]` where `T` is the translated rest element type. A `**kw_rest` parameter's bound type MUST be `Nominal["Hash", [Nominal["Symbol"], V]]` where `V` is the translated rest-keyword value type. The binder MUST NOT bind a rest parameter to a single element type — the local actually holds the array/hash.
 - When `def_node.receiver` is a `Prism::SelfNode` OR `singleton:` is `true`, the binder MUST consult `RbsLoader#singleton_method` (the immediate enclosing lexical scope is a singleton class). Otherwise it MUST consult `RbsLoader#instance_method`. The translator's `self_type:` and `instance_type:` keywords MUST be set to `(Singleton[C], Nominal[C])` for the singleton route and `(Nominal[C], Nominal[C])` for the instance route.
 
+### Block Parameter Binding (Slice 6 phase C sub-phase 1)
+
+`Rigor::Inference::BlockParameterBinder` is the canonical surface that builds the entry scope augmentation for a `Prism::BlockNode`. It MUST satisfy:
+
+- `BlockParameterBinder.new(expected_param_types:)` accepts an ordered array of `Rigor::Type` values, one per positional block parameter as supplied by the receiving method's RBS signature. Indices the binder cannot fill from this array (the array is shorter than the parameter list, or the slot is a kind that is not driven by the array) MUST default to `Dynamic[Top]`.
+- `bind(block_node)` MUST return an ordered `Hash{Symbol => Rigor::Type}` of parameter name to bound type, in declaration order. Anonymous parameters and `Prism::MultiTargetNode` destructuring slots (the `|(a, b), c|` form) MUST be skipped silently; the latter are deferred to a follow-up that recurses into the destructured targets.
+- A `*rest` parameter MUST be bound to `Nominal["Array", [Dynamic[Top]]]`. A `**kw_rest` parameter MUST be bound to `Nominal["Hash", [Nominal["Symbol"], Dynamic[Top]]]`. An explicit `&block` parameter MUST be bound to `Nominal[Proc]`. Keyword parameters (required and optional) MUST be bound to `Dynamic[Top]` because Slice 6 phase C sub-phase 1 does not introspect the receiving method's block keyword signature.
+- `NumberedParametersNode` (the implicit-`_1` form) MUST yield an empty bindings hash. The body's reads of `_1`/`_2`/... fall through to the unbound-local fail-soft path until a follow-up wires them in.
+- The binder MUST NOT raise on any well-formed Prism block node and MUST NOT mutate its input.
+
+`Rigor::Inference::MethodDispatcher.expected_block_param_types(receiver_type:, method_name:, arg_types:, environment:)` is the canonical query that supplies the binder's `expected_param_types:` array. It MUST satisfy:
+
+- It MUST return an ordered `Array<Rigor::Type>` of the positional block parameters (`required_positionals` + `optional_positionals`) declared by the selected RBS overload. Block-only keyword parameters and rest forms MUST be excluded from the returned array; the binder handles those slots independently.
+- It MUST select the overload through `OverloadSelector.select` with `block_required: true`, so a block-bearing call (`Array#each { ... }`) does not accidentally bind through the no-block overload (`Array#each() -> Enumerator`).
+- It MUST consult the same shape/generic-substitution machinery that `RbsDispatch.try_dispatch` uses, so generic block parameters resolve through the receiver's `type_args` (a `Tuple[Constant[1], Constant[2]]` receiver makes `Array#each`'s `Elem` block parameter resolve to `Constant[1] | Constant[2]`).
+- It MUST return an empty array when the environment, RBS loader, receiver descriptor, method definition, selected overload, or block clause is missing or untyped. The binder MUST treat the empty array as "no information" and default every parameter to `Dynamic[Top]`.
+- For `Union` receivers it MUST take the per-member answers and return them only when every member yields the structurally equal block parameter list; otherwise it MUST return the empty array. Mixed-arity unions therefore degrade to `Dynamic[Top]` rather than producing a non-deterministic block binding.
+- It MUST NOT raise on any well-formed input. Defensive `rescue StandardError` around RBS' `DefinitionBuilder` is permitted to keep the probe fail-soft.
+
+`Rigor::Inference::StatementEvaluator` MUST consume both surfaces through a `Prism::CallNode` handler:
+
+- The handler MUST evaluate the call expression as a pure value (delegating to `Scope#type_of` so the existing dispatch chain and shape tier still apply) and MUST return the receiver scope unchanged. Block effects MUST NOT leak into the post-call scope; locals bound exclusively inside a block MUST NOT be observable on the outer side of the call.
+- When `node.block` is a `Prism::BlockNode`, the handler MUST build the block's entry scope by augmenting the *receiver's outer scope* with the bindings produced by `BlockParameterBinder.bind`. The block body inherits the outer scope's locals (Ruby's lexical scoping rule), with the block parameters layered on top.
+- The handler MUST `sub_eval` the `BlockNode`, threading the block's entry scope through the body so the per-node scope index sees the parameter bindings. The block's `Prism::BlockNode` MUST itself have a handler that delegates to `sub_eval(body, scope)` so the body's statement chain is visited under the augmented scope.
+- The handler's exception envelope MUST treat a probe failure as "no expected types"; the binder still runs and defaults every parameter to `Dynamic[Top]`.
+
 ### Boundaries
 
 Slice 3 phase 2 does NOT thread scope through the *interior* of arbitrary expressions: `foo(x = 1)` and `[1, x = 2]` do not propagate `x` to the post-scope, because the recursive descent stops at expression-level children that the evaluator's catalogue does not cover. This is a deliberate Phase 2 simplification; later slices may expand the catalogue to thread scope through call arguments and array/hash elements. Statement-y constructs at the top level (assignments, ifs, cases, begins, loops, parens) propagate as specified above.

@@ -75,6 +75,35 @@ module Rigor
         )
       end
       # rubocop:enable Lint/UnusedMethodArgument
+
+      # Returns the positional block parameter types declared by the
+      # receiving method's selected RBS overload, translated into
+      # `Rigor::Type`. Used by the StatementEvaluator's CallNode
+      # handler to bind block parameter names before evaluating the
+      # block body.
+      #
+      # The probe is best-effort: it returns an empty array whenever
+      # the receiver, environment, method definition, or selected
+      # overload does not provide statically declared block parameter
+      # types. Callers MUST treat the empty array as "no information";
+      # the binder falls back to `Dynamic[Top]` for every parameter
+      # slot in that case.
+      #
+      # @param receiver_type [Rigor::Type, nil]
+      # @param method_name [Symbol]
+      # @param arg_types [Array<Rigor::Type>]
+      # @param environment [Rigor::Environment, nil]
+      # @return [Array<Rigor::Type>]
+      def expected_block_param_types(receiver_type:, method_name:, arg_types:, environment: nil)
+        return [] if receiver_type.nil?
+
+        RbsDispatch.block_param_types(
+          receiver: receiver_type,
+          method_name: method_name,
+          args: arg_types,
+          environment: environment
+        )
+      end
     end
   end
 end

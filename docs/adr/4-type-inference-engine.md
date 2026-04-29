@@ -284,6 +284,31 @@ Coverage on `rigor type-scan lib`: 13.45 % → **13.8 %** unrecognised. As ADR-4
 
 **Phase 2 (deferred to a follow-up commit):** introduces `is_a?`/`kind_of?`/`instance_of?` narrowing for classes the registry/RBS loader can resolve; trusted equality narrowing for finite literal sets per [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md); `Rigor::Analysis::FactStore` for negative facts, relational facts, and the heap-vs-local fact buckets; and closure-captured-local invalidation. Phase 2 also lifts `eval_and_or`'s value type from a plain `union(left, right)` to a narrowing-aware `union(narrow_falsey(left), right)` for `&&` (and the symmetric form for `||`), so `(x = a || b)` records the LHS narrowing in the assigned local.
 
+### Slice 6 phase C — BlockNode parameter binding
+
+The DefNode-aware scope builder (Slice 3 phase 2 follow-up) bound method parameters from RBS. This slice ships its symmetric counterpart for `Prism::BlockNode`.
+
+**Sub-phase 1 (this sub-phase ships with this commit) — Block parameter binding driven by the receiving method's RBS signature.** Components added:
+
+1. `Rigor::Inference::BlockParameterBinder` is a thin value object: `BlockParameterBinder.new(expected_param_types: [...])` consumes a per-position `Rigor::Type` array and produces a `name -> Type` binding map by walking `Prism::BlockParametersNode#parameters`. Required, optional, and trailing positionals are matched by index against the expected array; rest (`*r`), keyword (`k:`/`k: 0`), keyword rest (`**kw`), and explicit block (`&blk`) slots get conservative typed defaults (`Array[Dynamic[Top]]`, `Dynamic[Top]`, `Hash[Symbol, Dynamic[Top]]`, `Nominal[Proc]` respectively). MultiTargetNode destructuring (`|(a, b), c|`) and numbered parameters (`_1`/`_2`) are deferred. The binder MUST NOT raise on any well-formed Prism block node.
+2. `Rigor::Inference::MethodDispatcher.expected_block_param_types(receiver_type:, method_name:, arg_types:, environment:)` is the canonical query that supplies the binder's `expected_param_types:` array. Internally it uses `RbsDispatch.block_param_types`, which selects an overload through the existing `OverloadSelector` (extended with a `block_required: true` flag so a block-bearing call does not bind through a no-block overload), pulls the `RBS::Types::Block#type` Function, and translates its `required_positionals + optional_positionals` parameters into `Rigor::Type` values. Generic substitution flows through the same `type_vars` map the return-type tier uses, so an `Elem` block parameter on `Array#each` resolves through the receiver's `type_args`. Union receivers degrade to the empty array unless every member yields the structurally equal block parameter list.
+3. `Rigor::Inference::StatementEvaluator` adds a `Prism::CallNode` handler. The handler:
+   - Asks the existing `Scope#type_of` for the call's value type (so the constant-folding / shape / RBS dispatch chain still applies and `MethodDispatcher.dispatch` is the single source of truth for return types).
+   - Probes `MethodDispatcher.expected_block_param_types` for the call's expected block parameter array.
+   - Builds the block's entry scope by augmenting the *outer* scope with the binder's bindings (Ruby's lexical scoping rule: blocks see outer locals; block parameters layer on top).
+   - Recurses into the `Prism::BlockNode` (which has its own handler that delegates to `sub_eval(body, scope)`) so the per-node scope index sees the parameter bindings.
+   - Returns the receiver scope unchanged. Block effects therefore do not leak into the post-call scope; locals bound exclusively inside the block are intentionally invisible on the outside until the closure-capture rules in [`control-flow-analysis.md`](../type-specification/control-flow-analysis.md) land.
+
+Concrete behavioural uplift (verified through CLI smoke probes):
+
+- `xs = [1, 2, 3]; xs.each { |x| y = x.succ }` types `y` as `Nominal[Integer]` inside the block (the block parameter `x` is bound to the tuple element union and `Integer#succ` resolves through dispatch). Pre-binding, `x` was unbound and `x.succ` fell through to `Dynamic[Top]`.
+- `[1, 2, 3].map { |n| n + 1 }`'s receiver `n` types as the same tuple element union; `n + 1` therefore resolves through the constant-folding tier on each element type.
+- `foo { |x| x }` — when the receiving call has no RBS signature, the binder defaults `x` to `Dynamic[Top]`, matching the Slice 3 phase 2 fail-soft posture.
+
+Coverage on `rigor type-scan lib`: 13.6 % → **13.5 %** unrecognised (2 122 / 15 734 nodes; total node count grew because blocks are now visited through the StatementEvaluator's per-node scope index). The metric is dominated by Rigor's own constant references, which only RBS authoring (Candidate A) will move further.
+
+**Sub-phase 2 (deferred to a follow-up commit) — Destructuring block parameters, numbered parameters, and block-return-type-aware dispatch.** Sub-phase 2 walks `MultiTargetNode` block targets to bind each component (`|(a, b), c|`), wires `_1`/`_2`/... numbered-parameter reads to the expected positionals, and threads the block's *return type* into `MethodDispatcher.dispatch` through the reserved `block_type:` keyword so `[1, 2, 3].map { |n| n.to_s }` types as `Array[String]` rather than the projected `Array[Elem]`. Closure-captured-local invalidation lands alongside the Slice 6 phase 2 FactStore work.
+
 ### Slice 7 — Refinements (Minimal)
 
 Adds `Rigor::Type::RefinedNominal` with `non-empty-string` and `positive-int` from [`imported-built-in-types.md`](../type-specification/imported-built-in-types.md).

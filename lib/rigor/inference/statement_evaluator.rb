@@ -3,6 +3,8 @@
 require "prism"
 
 require_relative "../type"
+require_relative "block_parameter_binder"
+require_relative "method_dispatcher"
 require_relative "method_parameter_binder"
 require_relative "narrowing"
 
@@ -68,7 +70,9 @@ module Rigor
         Prism::DefNode => :eval_def,
         Prism::ClassNode => :eval_class_or_module,
         Prism::ModuleNode => :eval_class_or_module,
-        Prism::SingletonClassNode => :eval_singleton_class
+        Prism::SingletonClassNode => :eval_singleton_class,
+        Prism::CallNode => :eval_call,
+        Prism::BlockNode => :eval_block
       }.freeze
       private_constant :HANDLERS
 
@@ -378,6 +382,80 @@ module Rigor
         body_scope = build_method_entry_scope(node)
         sub_eval(node.body, body_scope, class_context: @class_context) if node.body
         [Type::Combinator.constant_of(node.name), scope]
+      end
+
+      # `recv.foo(args) { |params| body }` and friends. The result
+      # type comes from `Scope#type_of` (which routes through
+      # `MethodDispatcher`), exactly as it would for a CallNode the
+      # default branch handles. The handler exists to bind the block
+      # parameters into a fresh per-block scope before evaluating
+      # the block body, so the ScopeIndexer sees the entry scope of
+      # every node inside the block.
+      #
+      # Block effects do NOT leak into the post-call scope: Slice 6
+      # phase 1 keeps the block treatment conservative (a block-local
+      # write is observed only inside the block body). The receiver
+      # and arguments still observe the outer scope, matching Ruby
+      # evaluation order.
+      def eval_call(node)
+        call_type = scope.type_of(node, tracer: tracer)
+        evaluate_block_if_present(node)
+        [call_type, scope]
+      end
+
+      def evaluate_block_if_present(node)
+        block = node.block
+        return unless block.is_a?(Prism::BlockNode)
+
+        block_entry = build_block_entry_scope(node, block)
+        sub_eval(block, block_entry)
+      end
+
+      # `Prism::BlockNode` is reached through {#eval_call}; the
+      # handler runs the body under `scope`, which the caller has
+      # already augmented with the block's parameter bindings. Effects
+      # do not leak past the block (the outer eval_call returns the
+      # caller's scope unchanged), but the body's local writes are
+      # threaded through subsequent statements *inside* the block so
+      # `each { |x| sum = x; sum.succ }` types `sum.succ` under the
+      # `sum: x` binding.
+      def eval_block(node)
+        return [Type::Combinator.constant_of(nil), scope] if node.body.nil?
+
+        sub_eval(node.body, scope)
+      end
+
+      # Builds the entry scope for a block body. The block sees the
+      # outer scope's locals (Ruby's lexical scoping rule) and adds
+      # bindings for every named block parameter on top. Parameter
+      # types come from the receiving method's RBS signature when
+      # one is available; the rest default to `Dynamic[Top]`.
+      def build_block_entry_scope(call_node, block_node)
+        expected = expected_block_param_types_for(call_node)
+        bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_node)
+        bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      def expected_block_param_types_for(call_node)
+        receiver_type = call_node.receiver ? scope.type_of(call_node.receiver, tracer: tracer) : nil
+        return [] if receiver_type.nil?
+
+        arg_types = call_arg_types_for(call_node)
+        MethodDispatcher.expected_block_param_types(
+          receiver_type: receiver_type,
+          method_name: call_node.name,
+          arg_types: arg_types,
+          environment: scope.environment
+        )
+      rescue StandardError
+        []
+      end
+
+      def call_arg_types_for(call_node)
+        arguments = call_node.arguments
+        return [] if arguments.nil?
+
+        arguments.arguments.map { |arg| scope.type_of(arg, tracer: tracer) }
       end
 
       # ----- def/class helpers -----

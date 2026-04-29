@@ -39,27 +39,57 @@ module Rigor
         #   parameter types like `::Array[Elem]` substitute Elem before
         #   the accepts check, instead of degrading the param to
         #   `Array[Dynamic[Top]]`.
+        # @param block_required [Boolean] when `true`, only overloads
+        #   that declare a block clause are considered (Slice 6 phase C
+        #   sub-phase 1). The fallback also prefers a block-bearing
+        #   overload over `method_types.first`. When `false` (the
+        #   Slice 4 phase 2c default) the selector behaves exactly as
+        #   before: `find` over arity-compatible overloads, falling
+        #   back to the first declaration.
         # @return [RBS::MethodType, nil] the chosen overload, or nil
         #   when the definition has no method types at all.
-        def select(method_definition, arg_types:, self_type:, instance_type:, type_vars: {})
+        # rubocop:disable Metrics/ParameterLists
+        def select(method_definition, arg_types:, self_type:, instance_type:, type_vars: {}, block_required: false)
           overloads = method_definition.method_types
           return nil if overloads.empty?
 
-          match = overloads.find do |method_type|
-            matches?(
-              method_type,
-              arg_types,
-              self_type: self_type,
-              instance_type: instance_type,
-              type_vars: type_vars
-            )
-          end
+          match = find_matching_overload(
+            overloads,
+            arg_types: arg_types,
+            self_type: self_type,
+            instance_type: instance_type,
+            type_vars: type_vars,
+            block_required: block_required
+          )
+          return match if match
+          return overloads.find { |mt| overload_has_block?(mt) } if block_required
 
-          match || overloads.first
+          overloads.first
+        end
+        # rubocop:enable Metrics/ParameterLists
+
+        def overload_has_block?(method_type)
+          method_type.respond_to?(:block) && method_type.block
         end
 
         class << self
           private
+
+          # rubocop:disable Metrics/ParameterLists
+          def find_matching_overload(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:)
+            overloads.find do |method_type|
+              next false if block_required && !OverloadSelector.overload_has_block?(method_type)
+
+              matches?(
+                method_type,
+                arg_types,
+                self_type: self_type,
+                instance_type: instance_type,
+                type_vars: type_vars
+              )
+            end
+          end
+          # rubocop:enable Metrics/ParameterLists
 
           def matches?(method_type, arg_types, self_type:, instance_type:, type_vars:)
             return false if method_type.respond_to?(:type_params) && rejects_keyword_required?(method_type)

@@ -6,6 +6,7 @@ require_relative "../type"
 require_relative "block_parameter_binder"
 require_relative "method_dispatcher"
 require_relative "method_parameter_binder"
+require_relative "multi_target_binder"
 require_relative "narrowing"
 
 module Rigor
@@ -52,6 +53,7 @@ module Rigor
         Prism::StatementsNode => :eval_statements,
         Prism::ProgramNode => :eval_program,
         Prism::LocalVariableWriteNode => :eval_local_write,
+        Prism::MultiWriteNode => :eval_multi_write,
         Prism::IfNode => :eval_if,
         Prism::UnlessNode => :eval_unless,
         Prism::ElseNode => :eval_else,
@@ -153,6 +155,22 @@ module Rigor
       def eval_local_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         [rhs_type, post_rhs.with_local(node.name, rhs_type)]
+      end
+
+      # `a, b = rhs` — Slice 5 phase 2 sub-phase 2 destructuring.
+      # Evaluates the right-hand side under the entry scope, then
+      # decomposes its type against the multi-write target tree
+      # (Prism::MultiWriteNode#lefts/rest/rights, including nested
+      # Prism::MultiTargetNode for the `(b, c)` form). Tuple-shaped
+      # right-hand sides produce per-slot types element-wise; other
+      # carriers fall back to `Dynamic[Top]` per slot. The expression
+      # value is the right-hand side type (matching Ruby's semantics:
+      # `(a, b = [1, 2])` evaluates to `[1, 2]`).
+      def eval_multi_write(node)
+        rhs_type, post_rhs = sub_eval(node.value, scope)
+        bindings = MultiTargetBinder.bind(node, rhs_type)
+        post = bindings.reduce(post_rhs) { |acc, (name, type)| acc.with_local(name, type) }
+        [rhs_type, post]
       end
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its

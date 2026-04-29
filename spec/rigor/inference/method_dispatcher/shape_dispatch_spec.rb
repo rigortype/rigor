@@ -128,12 +128,125 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: shape, method_name: :[], args: [constant(1)])).to be_nil
     end
 
-    it "falls through for multi-arg dig" do
+    it "falls through for multi-arg dig when the intermediate is a non-shape Constant" do
+      # shape.dig(:a, :b) — :a resolves to Constant[1], which is
+      # neither nil nor a shape, so the chain cannot continue.
       expect(dispatch(receiver: shape, method_name: :dig, args: [constant(:a), constant(:b)])).to be_nil
     end
 
     it "falls through for methods outside the catalogue" do
       expect(dispatch(receiver: shape, method_name: :keys)).to be_nil
+    end
+  end
+
+  describe "Tuple#dig (Slice 5 phase 2 sub-phase 2)" do
+    it "resolves a single-arg dig identically to []" do
+      t = tuple(constant(10), constant(20))
+      expect(dispatch(receiver: t, method_name: :dig, args: [constant(0)])).to eq(constant(10))
+    end
+
+    it "returns Constant[nil] for an out-of-range single-arg dig" do
+      t = tuple(constant(10), constant(20))
+      expect(dispatch(receiver: t, method_name: :dig, args: [constant(5)])).to eq(constant(nil))
+    end
+
+    it "chains Tuple -> HashShape lookups" do
+      inner = hash_shape(name: constant("Alice"))
+      t = tuple(inner, constant(42))
+      expect(
+        dispatch(receiver: t, method_name: :dig, args: [constant(0), constant(:name)])
+      ).to eq(constant("Alice"))
+    end
+
+    it "returns Constant[nil] when a chain step misses on the inner HashShape" do
+      inner = hash_shape(name: constant("Alice"))
+      t = tuple(inner)
+      expect(
+        dispatch(receiver: t, method_name: :dig, args: [constant(0), constant(:missing)])
+      ).to eq(constant(nil))
+    end
+
+    it "short-circuits on a Constant[nil] member of the chain" do
+      t = tuple(constant(nil), constant(42))
+      expect(
+        dispatch(receiver: t, method_name: :dig, args: [constant(0), constant(:any)])
+      ).to eq(constant(nil))
+    end
+
+    it "falls through when an intermediate is a non-shape, non-nil Constant" do
+      t = tuple(constant(1))
+      expect(
+        dispatch(receiver: t, method_name: :dig, args: [constant(0), constant(:k)])
+      ).to be_nil
+    end
+
+    it "falls through when the first arg is non-static" do
+      t = tuple(constant(1), constant(2))
+      dyn = Rigor::Type::Combinator.untyped
+      expect(dispatch(receiver: t, method_name: :dig, args: [dyn])).to be_nil
+    end
+  end
+
+  describe "HashShape#dig (Slice 5 phase 2 sub-phase 2)" do
+    it "chains HashShape -> HashShape lookups" do
+      inner = hash_shape(zip: constant("00000"))
+      shape = hash_shape(addr: inner)
+      expect(
+        dispatch(receiver: shape, method_name: :dig, args: [constant(:addr), constant(:zip)])
+      ).to eq(constant("00000"))
+    end
+
+    it "chains HashShape -> Tuple lookups" do
+      inner = tuple(constant("a"), constant("b"))
+      shape = hash_shape(letters: inner)
+      expect(
+        dispatch(receiver: shape, method_name: :dig, args: [constant(:letters), constant(1)])
+      ).to eq(constant("b"))
+    end
+
+    it "returns Constant[nil] for a missing top-level key in a multi-arg dig" do
+      shape = hash_shape(a: constant(1))
+      expect(
+        dispatch(receiver: shape, method_name: :dig, args: [constant(:missing), constant(:k)])
+      ).to eq(constant(nil))
+    end
+
+    it "short-circuits on a nil intermediate" do
+      shape = hash_shape(addr: constant(nil))
+      expect(
+        dispatch(receiver: shape, method_name: :dig, args: [constant(:addr), constant(:zip)])
+      ).to eq(constant(nil))
+    end
+  end
+
+  describe "HashShape#values_at (Slice 5 phase 2 sub-phase 2)" do
+    let(:shape) { hash_shape(a: constant(1), b: constant("two")) }
+
+    it "returns a Tuple of per-key values for static keys" do
+      result = dispatch(receiver: shape, method_name: :values_at, args: [constant(:a), constant(:b)])
+      expect(result).to be_a(Rigor::Type::Tuple)
+      expect(result.elements).to eq([constant(1), constant("two")])
+    end
+
+    it "fills missing keys with Constant[nil]" do
+      result = dispatch(receiver: shape, method_name: :values_at, args: [constant(:a), constant(:missing)])
+      expect(result.elements).to eq([constant(1), constant(nil)])
+    end
+
+    it "supports a single-key call" do
+      result = dispatch(receiver: shape, method_name: :values_at, args: [constant(:a)])
+      expect(result.elements).to eq([constant(1)])
+    end
+
+    it "falls through when any argument is non-static" do
+      dyn = Rigor::Type::Combinator.untyped
+      expect(
+        dispatch(receiver: shape, method_name: :values_at, args: [constant(:a), dyn])
+      ).to be_nil
+    end
+
+    it "falls through when called with no arguments" do
+      expect(dispatch(receiver: shape, method_name: :values_at, args: [])).to be_nil
     end
   end
 

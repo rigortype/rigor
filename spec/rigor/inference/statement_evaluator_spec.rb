@@ -629,6 +629,73 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "multi-write destructuring (Slice 5 phase 2 sub-phase 2)" do
+    it "binds two targets element-wise from a tuple-typed rvalue" do
+      _, post = evaluate("a, b = [1, 2]")
+      expect(post.local(:a)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:b)).to eq(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "fills extra targets with Constant[nil] when the tuple is shorter" do
+      _, post = evaluate("a, b, c = [1, 2]")
+      expect(post.local(:a)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:b)).to eq(Rigor::Type::Combinator.constant_of(2))
+      expect(post.local(:c)).to eq(Rigor::Type::Combinator.constant_of(nil))
+    end
+
+    it "binds the rest target as a Tuple of middle elements" do
+      _, post = evaluate("a, *r, c = [1, 2, 3, 4]")
+      expect(post.local(:a)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:c)).to eq(Rigor::Type::Combinator.constant_of(4))
+      expect(post.local(:r)).to eq(
+        Rigor::Type::Combinator.tuple_of(
+          Rigor::Type::Combinator.constant_of(2),
+          Rigor::Type::Combinator.constant_of(3)
+        )
+      )
+    end
+
+    it "recurses into nested MultiTargetNodes" do
+      _, post = evaluate("a, (b, c) = [1, [2, 3]]")
+      expect(post.local(:a)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:b)).to eq(Rigor::Type::Combinator.constant_of(2))
+      expect(post.local(:c)).to eq(Rigor::Type::Combinator.constant_of(3))
+    end
+
+    it "evaluates rhs once and exposes its bindings to the destructuring" do
+      _, post = evaluate(<<~RUBY)
+        pair = [10, 20]
+        a, b = pair
+      RUBY
+      # `pair` is Tuple[10, 20], so destructuring sees the precise members.
+      expect(post.local(:a)).to eq(Rigor::Type::Combinator.constant_of(10))
+      expect(post.local(:b)).to eq(Rigor::Type::Combinator.constant_of(20))
+    end
+
+    it "binds dynamic values when the rhs is not a tuple carrier" do
+      _, post = evaluate("a, b = foo")
+      dyn = Rigor::Type::Combinator.untyped
+      expect(post.local(:a)).to eq(dyn)
+      expect(post.local(:b)).to eq(dyn)
+    end
+
+    it "preserves the multi-write expression's value as the rhs type" do
+      type, _post = evaluate("a, b = [1, 2]")
+      expect(type).to eq(
+        Rigor::Type::Combinator.tuple_of(
+          Rigor::Type::Combinator.constant_of(1),
+          Rigor::Type::Combinator.constant_of(2)
+        )
+      )
+    end
+
+    it "skips non-local destructuring targets" do
+      _, post = evaluate("@x, b = [1, 2]")
+      expect(post.local(:b)).to eq(Rigor::Type::Combinator.constant_of(2))
+      expect(post.local(:@x)).to be_nil
+    end
+  end
+
   describe "downstream inference benefits" do
     it "lets methods on bound locals resolve through RBS" do
       type, _post = evaluate(<<~RUBY)

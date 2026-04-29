@@ -37,6 +37,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 5 phase 2 sub 1 | `04d112a` | Shape-aware element dispatch (`Rigor::Inference::MethodDispatcher::ShapeDispatch`) |
 | Slice 6 phase C sub 1 | `13d587f` | BlockNode parameter binding (`Rigor::Inference::BlockParameterBinder`) |
 | Slice 6 phase 2 sub 1 | `37eb158` | Class-membership narrowing (`is_a?`/`kind_of?`/`instance_of?`) |
+| Slice 5 phase 2 sub 2 | _pending_ | Destructuring + multi-arg `dig` + `Hash#values_at` (`MultiTargetBinder`) |
 
 ## What is in Place Today
 
@@ -87,6 +88,13 @@ normalisation and are the only sanctioned way to construct types.
   `MethodDispatcher.expected_block_param_types`) and binds each
   named block parameter; rest / keyword-rest / `&blk` slots get
   conservative typed defaults.
+- `MultiTargetBinder` — Slice 5 phase 2 sub-phase 2 destructuring
+  binder shared between `StatementEvaluator#eval_multi_write` and
+  the future block-target path. Decomposes a `Type::Tuple`
+  right-hand side element-wise (filling missing slots with
+  `Constant[nil]`, binding the rest target as a `Tuple` of middle
+  elements) and falls back to `Dynamic[Top]` per slot for non-Tuple
+  carriers. Recurses into nested `MultiTargetNode` targets.
 - `Narrowing` — Slice 6 phases 1 and 2 sub-phase 1.
   Exposes `narrow_truthy`/`narrow_falsey`/`narrow_nil`/`narrow_non_nil`
   type primitives, `narrow_class`/`narrow_not_class` (Slice 6 phase 2
@@ -115,19 +123,16 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 639 examples, 0 failures (as of the Slice 6 phase 2 sub-phase 1 work).
+- **RSpec**: 674 examples, 0 failures (as of the Slice 5 phase 2 sub-phase 2 work).
 - **RuboCop**: pre-existing offences in `references/` submodules only;
   0 in Rigor product code.
-- **`rigor type-scan lib`**: 13.8 % unrecognised (2 301 / ~16 700 nodes).
-  The small upward step from sub-phase C's 13.5 % reflects the new
-  `lib/rigor/inference/narrowing.rb` content (its `Object.const_get`
-  / `class_ordering` calls and constant references add to the
-  unrecognised bucket against `Rigor::*` types not yet covered by
-  RBS) rather than a precision regression. Top contributors:
-  - `Prism::CallNode` 1 059 / 2 726 (38.8 %)
-  - `Prism::ConstantReadNode` 735 / 985 (74.6 %)
-  - `Prism::ConstantPathNode` 504 / 505 (99.8 %)
-  - `Prism::MultiTargetNode` 3 / 3 (100.0 %)
+- **`rigor type-scan lib`**: 13.8 % unrecognised (2 380 / ~17 200 nodes).
+  The new `lib/rigor/inference/multi_target_binder.rb` file and the
+  expanded `shape_dispatch.rb` content add to the unrecognised
+  bucket (their `Rigor::*`/`Prism::*` constant references are not
+  yet covered by Rigor-side RBS) but the destructuring and chain
+  `dig` precision wins are concentrated on already-typed values
+  outside `lib/`.
 - **`rigor type-of` smoke probe (DefNode binder)**:
   `class Integer; def divmod(other); other; end; end` — `other` reads as
   `Float | Integer | Numeric | Rational` inside the body.
@@ -147,6 +152,15 @@ normalisation and are the only sanctioned way to construct types.
   to the tuple element union and `Integer#succ` resolves through
   dispatch). Pre-binding `x` was unbound and `x.succ` fell through
   to `Dynamic[Top]`.
+- **`rigor type-of` smoke probe (Slice 5 phase 2 sub-phase 2
+  destructuring + chain dig)**:
+  `pair = [10, 20]; a, b = pair; sum = a + b` — `sum` types as
+  `Constant[30]` (destructuring binds `a`/`b` element-wise from
+  the tuple; `+` constant-folds across the precise members).
+  `users = { addr: { zip: "00100" } }; users.dig(:addr, :zip)`
+  types as `Constant["00100"]` (chain dig walks into the inner
+  HashShape). `{ a: 1, b: "two" }.values_at(:a, :b)` types as
+  `Tuple[Constant[1], Constant["two"]]`.
 - **`rigor type-of` smoke probe (Slice 6 phase 2 sub-phase 1
   class-membership narrowing)**:
   `def f(x); if x.is_a?(Integer); x; else; x; end; end` — the
@@ -186,12 +200,13 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
    the analyzer's own registry/RBS loader hierarchy lookup so
    offline analyses become deterministic.
 4. **Shape narrowing on dispatch**: covered for the curated
-   element-access catalogue in Slice 5 phase 2 sub-phase 1
-   (`Tuple#[i]`, `tuple.first`/`last`, `tuple.size`, `HashShape#[k]`,
-   `shape.fetch(:k)`, `shape.dig(:k)`). Destructuring assignment
-   (`a, b = tuple`), multi-arg `dig`, range / start-length forms of
-   `[]`, and the Rigor-extension hash-shape policies are still
-   deferred to Slice 5 phase 2 sub-phase 2.
+   element-access catalogue (Slice 5 phase 2 sub-phase 1) plus
+   destructuring assignment, multi-arg `dig` chains, and
+   `Hash#values_at` (Slice 5 phase 2 sub-phase 2). Range and
+   start-length forms of `[]` (`tuple[1, 2]`, `tuple[1..3]`)
+   and the Rigor-extension hash-shape policies (required/optional/
+   closed-extra-key, read-only entries) are deferred to Slice 5
+   phase 2 sub-phase 3.
 5. **RBS interface / alias degradation**: types like `int` and `_ToS`
    currently translate to `Dynamic[Top]`. Refining this would tighten
    parameter bindings for many core methods (`Array#first(n)`, etc.).
@@ -234,24 +249,25 @@ project loader (Slice 4 phase 2a) already picks `sig/` up automatically.
   any future analysis on Rigor itself.
 - **risk**: documentation-flavoured work, mostly mechanical.
 
-### B. Slice 5 phase 2 sub-phase 2 — Destructuring + shape extras
+### B. Slice 5 phase 2 sub-phase 3 — Range/start-length `[]` + Rigor extensions
 
-Sub-phase 1 (this commit) ships `ShapeDispatch` for the curated
-element-access catalogue (`Tuple#[i]`, `tuple.first`/`last`,
-`tuple.size`, `HashShape#[k]`, `shape.fetch(:k)`, `shape.dig(:k)`).
-Sub-phase 2 wires `Prism::MultiWriteNode` into `StatementEvaluator`
-so `a, b = tuple` binds each target to the matching tuple element
-type, extends `ShapeDispatch` with multi-arg `dig`, range and
-start-length forms of `[]`, and `Hash#values_at`, and starts the
-Rigor-extension hash-shape policies (required/optional/closed-extra-key,
-read-only entries) per [`rigor-extensions.md`](type-specification/rigor-extensions.md).
+Sub-phase 1 (already in) shipped `ShapeDispatch` for element access;
+sub-phase 2 (this commit) adds destructuring assignment, multi-arg
+`dig` chains, and `Hash#values_at`. Sub-phase 3 extends `ShapeDispatch`
+to recognise `tuple[start, length]` and `tuple[range]` (returning a
+sliced `Tuple`), introduces the required/optional/closed-extra-key
+and read-only HashShape policies per [`rigor-extensions.md`](type-specification/rigor-extensions.md),
+and wires the policies through `Acceptance` so a closed shape can
+reject extra keys.
 
 - **type-scan impact**: small on `lib/`, medium on user code that
-  destructures or uses `dig`/`values_at`.
-- **engine impact**: medium — adds a `MultiWriteNode` handler to
-  `StatementEvaluator` and a small extension to `ShapeDispatch`.
-- **risk**: low; the shape dispatch infrastructure and `Tuple`/`HashShape`
-  carriers are in place.
+  slices arrays by range or uses the closed-extra-key policy.
+- **engine impact**: medium — adds slice handlers to `ShapeDispatch`,
+  introduces a policy field on `HashShape`, and threads it through
+  `Acceptance`.
+- **risk**: low to medium; the carriers and dispatch infrastructure
+  are in place; the policy field needs careful migration of every
+  `HashShape.new` call site.
 
 ### C. Slice 6 phase C sub-phase 2 — Destructuring blocks + block return type
 

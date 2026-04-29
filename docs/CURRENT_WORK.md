@@ -36,7 +36,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 6 phase 1 | `6807a94` | Truthiness and `nil?` narrowing on `IfNode`/`UnlessNode` (`Rigor::Inference::Narrowing`) |
 | Slice 5 phase 2 sub 1 | `04d112a` | Shape-aware element dispatch (`Rigor::Inference::MethodDispatcher::ShapeDispatch`) |
 | Slice 6 phase C sub 1 | `13d587f` | BlockNode parameter binding (`Rigor::Inference::BlockParameterBinder`) |
-| Slice 6 phase 2 sub 1 | _pending_ | Class-membership narrowing (`is_a?`/`kind_of?`/`instance_of?`) |
+| Slice 6 phase 2 sub 1 | `37eb158` | Class-membership narrowing (`is_a?`/`kind_of?`/`instance_of?`) |
 
 ## What is in Place Today
 

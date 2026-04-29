@@ -34,6 +34,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 3 phase 2 (CLI) | `84f2b01` | `type-of` and `type-scan` route through `ScopeIndexer` |
 | Slice 3 phase 2 (DefNode) | `fe2fe7e` | DefNode-aware scope builder (`MethodParameterBinder`) |
 | Slice 6 phase 1 | `f5f75f1` | Truthiness and `nil?` narrowing on `IfNode`/`UnlessNode` (`Rigor::Inference::Narrowing`) |
+| Slice 5 phase 2 sub 1 | `8241ed7` | Shape-aware element dispatch (`Rigor::Inference::MethodDispatcher::ShapeDispatch`) |
 
 ## What is in Place Today
 
@@ -66,8 +67,9 @@ normalisation and are the only sanctioned way to construct types.
 ### Inference engine (`Rigor::Inference::*`)
 
 - `ExpressionTyper` — pure dispatch from Prism nodes to types.
-- `MethodDispatcher` — `ConstantFolding` (Slice 2) over `RbsDispatch` (Slice 4)
-  with `OverloadSelector` (phase 2c) and generics instantiation (phase 2d).
+- `MethodDispatcher` — `ConstantFolding` (Slice 2) → `ShapeDispatch`
+  (Slice 5 phase 2) → `RbsDispatch` (Slice 4) with `OverloadSelector`
+  (phase 2c) and generics instantiation (phase 2d).
 - `Acceptance` — shared `accepts(other, mode:)` logic across every type.
 - `RbsTypeTranslator` — translates `RBS::Types::*` to `Rigor::Type`,
   including `Tuple`/`Record`/`Variable`.
@@ -101,23 +103,28 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 553 examples, 0 failures (as of the Slice 6 phase 1 work).
+- **RSpec**: 587 examples, 0 failures (as of the Slice 5 phase 2 sub-phase 1 work).
 - **RuboCop**: pre-existing offences in `references/` submodules only;
   0 in Rigor product code.
-- **`rigor type-scan lib`**: 13.8 % unrecognised (1 983 / 14 355 nodes).
+- **`rigor type-scan lib`**: 13.6 % unrecognised (2 015 / 14 776 nodes).
   Top contributors:
-  - `Prism::CallNode` 860 / 2 409 (35.7 %)
-  - `Prism::ConstantReadNode` 669 / 908 (73.7 %)
-  - `Prism::ConstantPathNode` 452 / 453 (99.8 %)
+  - `Prism::CallNode` 868 / 2 471 (35.1 %)
+  - `Prism::ConstantReadNode` 684 / 927 (73.8 %)
+  - `Prism::ConstantPathNode` 461 / 462 (99.8 %)
   - `Prism::MultiTargetNode` 2 / 2 (100.0 %)
 - **`rigor type-of` smoke probe (DefNode binder)**:
   `class Integer; def divmod(other); other; end; end` — `other` reads as
   `Float | Integer | Numeric | Rational` inside the body.
+- **`rigor type-of` smoke probe (Slice 5 phase 2 shape dispatch)**:
+  `xs = [10, 20, 30]; xs[0]` types as `Constant[10]`;
+  `xs[-1]` types as `Constant[30]`; `xs.size` types as `Constant[3]`.
+  `h = { name: "Alice", age: 30 }; h[:name]` types as `Constant["Alice"]`;
+  `h.fetch(:age)` types as `Constant[30]`.
 - **`rigor type-of` smoke probe (Slice 6 phase 1 narrowing)**:
   `xs = [1, 2, nil]; y = xs.first; result = if y.nil?; "got nil"; else; y; end; result`
-  types `result` as `"got nil" | 1 | 2`; `y` is narrowed to
-  `Constant[1] | Constant[2]` inside the else branch (without
-  narrowing the union still carried `Constant[nil]`).
+  types `result` as `"got nil" | 1` (with shape-aware dispatch
+  `xs.first` resolves to `Constant[1]`, narrowing then drops the
+  `nil` contribution from the else branch).
 
 ## Known Boundaries (Deliberate, Not Bugs)
 
@@ -136,9 +143,13 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
    on local bindings, plus the unary `!` inverter and short-circuit
    `&&`/`||` composition. Class- and equality-based narrowing follow
    the same `[truthy_scope, falsey_scope]` analyser shape.
-4. **Shape narrowing on dispatch**: `Tuple[Integer, String][0]` returns
-   the broad `Nominal[Array]#[]` result rather than `Integer`. This is the
-   Slice 5 phase 2 deliverable.
+4. **Shape narrowing on dispatch**: covered for the curated
+   element-access catalogue in Slice 5 phase 2 sub-phase 1
+   (`Tuple#[i]`, `tuple.first`/`last`, `tuple.size`, `HashShape#[k]`,
+   `shape.fetch(:k)`, `shape.dig(:k)`). Destructuring assignment
+   (`a, b = tuple`), multi-arg `dig`, range / start-length forms of
+   `[]`, and the Rigor-extension hash-shape policies are still
+   deferred to Slice 5 phase 2 sub-phase 2.
 5. **RBS interface / alias degradation**: types like `int` and `_ToS`
    currently translate to `Dynamic[Top]`. Refining this would tighten
    parameter bindings for many core methods (`Array#first(n)`, etc.).
@@ -181,18 +192,24 @@ project loader (Slice 4 phase 2a) already picks `sig/` up automatically.
   any future analysis on Rigor itself.
 - **risk**: documentation-flavoured work, mostly mechanical.
 
-### B. Slice 5 phase 2 — Shape-aware dispatch
+### B. Slice 5 phase 2 sub-phase 2 — Destructuring + shape extras
 
-Make `Tuple#[Integer]`, `Tuple#first`, `HashShape#fetch(:k)`, and
-destructuring `a, b = tuple` return precise members rather than the
-generic `Array#[]`/`Hash#fetch` return types.
+Sub-phase 1 (this commit) ships `ShapeDispatch` for the curated
+element-access catalogue (`Tuple#[i]`, `tuple.first`/`last`,
+`tuple.size`, `HashShape#[k]`, `shape.fetch(:k)`, `shape.dig(:k)`).
+Sub-phase 2 wires `Prism::MultiWriteNode` into `StatementEvaluator`
+so `a, b = tuple` binds each target to the matching tuple element
+type, extends `ShapeDispatch` with multi-arg `dig`, range and
+start-length forms of `[]`, and `Hash#values_at`, and starts the
+Rigor-extension hash-shape policies (required/optional/closed-extra-key,
+read-only entries) per [`rigor-extensions.md`](type-specification/rigor-extensions.md).
 
-- **type-scan impact**: medium on `lib/`, large on
-  shape-heavy code.
-- **engine impact**: medium — adds Tuple/HashShape-aware overloads to
-  `MethodDispatcher`.
-- **risk**: low; the Shape carriers and `Acceptance` plumbing are in
-  place from Slice 5 phase 1.
+- **type-scan impact**: small on `lib/`, medium on user code that
+  destructures or uses `dig`/`values_at`.
+- **engine impact**: medium — adds a `MultiWriteNode` handler to
+  `StatementEvaluator` and a small extension to `ShapeDispatch`.
+- **risk**: low; the shape dispatch infrastructure and `Tuple`/`HashShape`
+  carriers are in place.
 
 ### C. BlockNode parameter binding
 
@@ -231,9 +248,10 @@ form for `||`).
 
 ### Recommended ordering
 
-If precision and tooling experience are the priority: **A → C → B → D**.
-
-If pushing the engine architecture forward is the priority: **D → B → C → A**.
-
-A is the only one that is "just write down what's already true" rather
-than implementing new analyzer behaviour. B/C/D each enlarge the engine.
+The user-priority ordering for this branch is **D → B → C → A**:
+Slice 6 phase 1 (the truthiness/`nil` half of D) and Slice 5 phase 2
+sub-phase 1 (the dispatch half of B) are both already in. The next
+candidates are sub-phase 2 of B (destructuring + shape extras) and
+C (BlockNode parameter binding). A — authoring Rigor-side RBS for
+Rigor itself — remains the largest single lever for the
+`type-scan lib` metric.

@@ -37,7 +37,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 5 phase 2 sub 1 | `04d112a` | Shape-aware element dispatch (`Rigor::Inference::MethodDispatcher::ShapeDispatch`) |
 | Slice 6 phase C sub 1 | `13d587f` | BlockNode parameter binding (`Rigor::Inference::BlockParameterBinder`) |
 | Slice 6 phase 2 sub 1 | `37eb158` | Class-membership narrowing (`is_a?`/`kind_of?`/`instance_of?`) |
-| Slice 5 phase 2 sub 2 | _pending_ | Destructuring + multi-arg `dig` + `Hash#values_at` (`MultiTargetBinder`) |
+| Slice 5 phase 2 sub 2 | `0164317` | Destructuring + multi-arg `dig` + `Hash#values_at` (`MultiTargetBinder`) |
 
 ## What is in Place Today
 

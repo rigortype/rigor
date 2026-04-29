@@ -999,4 +999,43 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       end.not_to raise_error
     end
   end
+
+  describe "closure escape fact recording (Slice 6 phase C sub-phase 3b)" do
+    let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+
+    def closure_escape_facts(post)
+      post.facts_for(bucket: :dynamic_origin).select { |f| f.predicate == :closure_escape }
+    end
+
+    it "leaves the post-scope fact_store untouched for non-escaping core iteration" do
+      _, post = default_env_scope.evaluate(parse_program("[1, 2, 3].each { |x| x }"))
+      expect(closure_escape_facts(post)).to be_empty
+    end
+
+    it "leaves the fact_store untouched for Object#tap on any receiver" do
+      _, post = default_env_scope.evaluate(parse_program("\"hi\".tap { |s| s }"))
+      expect(closure_escape_facts(post)).to be_empty
+    end
+
+    it "records a dynamic_origin closure_escape fact for known escaping methods" do
+      _, post = default_env_scope.evaluate(parse_program("Thread.new { 1 }"))
+      facts = closure_escape_facts(post)
+      expect(facts.size).to eq(1)
+      expect(facts.first.payload).to include(method_name: :new, classification: :escaping)
+      expect(facts.first.target.kind).to eq(:closure)
+      expect(facts.first.target.name).to eq(:new)
+    end
+
+    it "records :unknown classification when the receiver is uncatalogued" do
+      _, post = default_env_scope.evaluate(parse_program("foo.bar { |x| x }"))
+      facts = closure_escape_facts(post)
+      expect(facts.size).to eq(1)
+      expect(facts.first.payload[:classification]).to eq(:unknown)
+    end
+
+    it "does not record a fact for block-less calls" do
+      _, post = default_env_scope.evaluate(parse_program("foo.bar(1, 2)"))
+      expect(closure_escape_facts(post)).to be_empty
+    end
+  end
 end

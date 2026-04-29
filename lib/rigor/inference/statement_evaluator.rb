@@ -3,7 +3,9 @@
 require "prism"
 
 require_relative "../type"
+require_relative "../analysis/fact_store"
 require_relative "block_parameter_binder"
+require_relative "closure_escape_analyzer"
 require_relative "method_dispatcher"
 require_relative "method_parameter_binder"
 require_relative "multi_target_binder"
@@ -427,7 +429,8 @@ module Rigor
       def eval_call(node)
         call_type = scope.type_of(node, tracer: tracer)
         evaluate_block_if_present(node)
-        [call_type, scope]
+        post_scope = record_closure_escape_if_any(node)
+        [call_type, post_scope]
       end
 
       def evaluate_block_if_present(node)
@@ -436,6 +439,40 @@ module Rigor
 
         block_entry = build_block_entry_scope(node, block)
         sub_eval(block, block_entry)
+      end
+
+      # Slice 6 phase C sub-phase 3b. When the call carries a block
+      # whose receiving method is NOT proven non-escaping, attach a
+      # `dynamic_origin` fact to the post-call scope recording that
+      # the closure may have escaped. Sub-phase 3b only records the
+      # fact; sub-phase 3c reads it to invalidate narrowed types of
+      # locals the block can rebind. A `:non_escaping` classification
+      # (or no block at all) leaves the scope untouched.
+      def record_closure_escape_if_any(node)
+        return scope unless node.block.is_a?(Prism::BlockNode)
+
+        classification = classify_closure_escape(node)
+        return scope if classification == :non_escaping
+
+        fact = Analysis::FactStore::Fact.new(
+          bucket: :dynamic_origin,
+          target: Analysis::FactStore::Target.new(kind: :closure, name: node.name.to_sym),
+          predicate: :closure_escape,
+          payload: { method_name: node.name.to_sym, classification: classification },
+          stability: :unstable
+        )
+        scope.with_fact(fact)
+      end
+
+      def classify_closure_escape(call_node)
+        receiver_type = call_node.receiver ? scope.type_of(call_node.receiver, tracer: tracer) : nil
+        ClosureEscapeAnalyzer.classify(
+          receiver_type: receiver_type,
+          method_name: call_node.name,
+          environment: scope.environment
+        )
+      rescue StandardError
+        :unknown
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the

@@ -301,10 +301,12 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "resolves Array#length on a Nominal[Array] receiver" do
+      # Slice 5 phase 2 returns the precise tuple length as a
+      # Constant rather than the projected Nominal[Integer]; the
+      # carrier still erases to Integer.
       type = scope.type_of(parse_expression("[1, 2, 3].length"))
 
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("Integer")
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(3))
     end
 
     it "resolves String#upcase on a Constant[String] receiver as Nominal[String]" do
@@ -482,17 +484,12 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
 
     it "still resolves the 0-arg overload of Array#first" do
-      # () -> Elem; Slice 4 phase 2d substitutes Elem from the
-      # receiver's type_args, so [1,2,3].first now returns
-      # `Constant[1] | Constant[2] | Constant[3]`.
+      # () -> Elem. Slice 5 phase 2 narrows the precise first member
+      # of the Tuple shape rather than returning the projected
+      # `Elem` union from the underlying `Array#first`.
       type = scope.type_of(parse_expression("[1, 2, 3].first"))
 
-      expect(type).to be_a(Rigor::Type::Union)
-      expect(type.members).to contain_exactly(
-        Rigor::Type::Combinator.constant_of(1),
-        Rigor::Type::Combinator.constant_of(2),
-        Rigor::Type::Combinator.constant_of(3)
-      )
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
     it "selects the 0-arg singleton overload of Array.new" do
@@ -510,10 +507,9 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.pairs[:b]).to eq(Rigor::Type::Combinator.constant_of(2))
     end
 
-    it "Hash#fetch projects HashShape to Hash[K, V] and substitutes V" do
+    it "Hash#fetch returns the precise value for a static key (Slice 5 phase 2)" do
       type = scope.type_of(parse_expression("{ a: 1, b: 2 }.fetch(:a)"))
-      expect(type).to be_a(Rigor::Type::Union)
-      expect(type.members.map(&:value)).to contain_exactly(1, 2)
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
     it "Array#first(n) returns Array carrying the same Elem (end-to-end)" do

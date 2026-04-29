@@ -175,6 +175,13 @@ The Slice 5 phase 1 shape-dispatch contract MUST also satisfy:
 
 When the receiver of a call is a `Rigor::Type::Dynamic` and no positive dispatcher tier matches, `ExpressionTyper#call_type_for` MUST return `Dynamic[Top]` *silently*, without recording a `FallbackTracer` event. This is a recognised semantic outcome — the value-lattice algebra in [`value-lattice.md`](../type-specification/value-lattice.md) requires Dynamic to propagate through opaque method calls — and not a fail-soft compromise. Receivers that are not Dynamic still trigger the standard fail-soft fallback (with a tracer event) when no rule resolves.
 
+The Slice 5 phase 2 shape-aware dispatch tier (`Rigor::Inference::MethodDispatcher::ShapeDispatch`) MUST run between the constant-folding tier and the RBS-backed tier so that `Tuple` and `HashShape` receivers resolve element-access methods to their precise per-position / per-key type rather than the projected `Array#[]` / `Hash#fetch` answer. The tier MUST handle the following catalogue, returning `nil` to defer to `RbsDispatch` when the call cannot be proved against the static shape:
+
+- Tuple receivers: `first`, `last`, `size`/`length`/`count` (no-arg, no-block) MUST return the precise tuple element / `Constant[size]`. `[]` and `fetch` with a single `Constant[Integer]` argument MUST normalise negative indices by length and return the precise element when the index is in `[-size, size)`; out-of-range indices MUST defer (`nil`) so the projection answer applies.
+- HashShape receivers: `size`/`length` (no-arg) MUST return `Constant[size]`. `[]`, `fetch`, and `dig` with a single `Constant[Symbol|String]` argument MUST return the precise value when the key is declared. Missing keys MUST resolve to `Constant[nil]` for `[]` and `dig` (matching Ruby's runtime behaviour) and MUST defer for `fetch` (which would raise `KeyError` at runtime).
+
+The shape tier MUST NOT consult the RBS environment, MUST NOT raise on any input, and MUST NOT touch the fallback tracer; it is a pure refinement layered on the type carriers. Methods outside the catalogue, non-static keys/indices, and multi-arg `dig` calls MUST defer so the projection-based `RbsDispatch` answer applies.
+
 This split is normative: implementations MUST NOT define operator-method-aware subclasses of any `Rigor::Type` form (for example, a hypothetical `Rigor::Type::IntegerType` carrying `+`/`*` rules). Operator semantics MUST be expressed as method-handler entries that the dispatcher consults; specialising the type class for built-in arithmetic is rejected to keep the type lattice and method semantics independently extensible.
 
 ## Local Variables

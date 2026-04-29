@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "method_dispatcher/constant_folding"
+require_relative "method_dispatcher/shape_dispatch"
 require_relative "method_dispatcher/rbs_dispatch"
 
 module Rigor
@@ -19,9 +20,19 @@ module Rigor
     # 1. {ConstantFolding}: executes the Ruby operation directly when
     #    the receiver and argument are `Constant` carriers and the
     #    method is on the curated whitelist. Slice 2.
-    # 2. {RbsDispatch}: looks up the receiver's class in the RBS
+    # 2. {ShapeDispatch}: returns the precise element/value type for a
+    #    curated catalogue of `Tuple`/`HashShape` element-access
+    #    methods (`first`, `last`, `[]` with a static integer/key,
+    #    `fetch`, `dig`, `size`/`length`/`count`). Slice 5 phase 2.
+    # 3. {RbsDispatch}: looks up the receiver's class in the RBS
     #    environment carried by the scope and translates the method's
     #    return type into a Rigor::Type. Slice 4.
+    #
+    # `ShapeDispatch` deliberately runs *above* {RbsDispatch} so the
+    # precise per-position/per-key answer wins over the projected
+    # `Array#[]`/`Hash#fetch` answer; it falls through (`nil`) when
+    # the call cannot be proved against the static shape, in which
+    # case the projection answer from {RbsDispatch} applies.
     #
     # The dispatcher's public signature reserves space for `block_type:`
     # and ADR-2 plugin extensions (later slices), so call sites added
@@ -48,6 +59,13 @@ module Rigor
           args: arg_types
         )
         return constant_result if constant_result
+
+        shape_result = ShapeDispatch.try_dispatch(
+          receiver: receiver_type,
+          method_name: method_name,
+          args: arg_types
+        )
+        return shape_result if shape_result
 
         RbsDispatch.try_dispatch(
           receiver: receiver_type,

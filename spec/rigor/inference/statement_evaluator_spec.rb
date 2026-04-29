@@ -596,12 +596,13 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
 
     it "lets shape-typed locals resolve through dispatch" do
+      # Slice 5 phase 2 picks the first element directly rather than
+      # the projected union; the test asserts the precise answer.
       type, _post = evaluate(<<~RUBY)
         xs = [1, 2, 3]
         xs.first
       RUBY
-      expect(type).to be_a(Rigor::Type::Union)
-      expect(type.members.map(&:value)).to contain_exactly(1, 2, 3)
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
     end
 
     it "propagates HashShape locals through fetch" do
@@ -609,8 +610,84 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         h = { a: 1, b: 2 }
         h.fetch(:a)
       RUBY
-      expect(type).to be_a(Rigor::Type::Union)
-      expect(type.members.map(&:value)).to contain_exactly(1, 2)
+      # Slice 5 phase 2 picks the precise value for the static key.
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+  end
+
+  describe "shape-aware dispatch (Slice 5 phase 2)" do
+    it "returns the precise tuple element for `tuple[i]`" do
+      type, _post = evaluate(<<~RUBY)
+        xs = [1, 2, 3]
+        xs[1]
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "returns the precise tuple element for negative indices" do
+      type, _post = evaluate(<<~RUBY)
+        xs = [1, 2, 3]
+        xs[-1]
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(3))
+    end
+
+    it "returns Constant[size] for tuple.size" do
+      type, _post = evaluate(<<~RUBY)
+        xs = [1, 2, 3]
+        xs.size
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(3))
+    end
+
+    it "returns the first element rather than the projected union for tuple.first" do
+      type, _post = evaluate(<<~RUBY)
+        xs = [1, 2, 3]
+        xs.first
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "returns the last element for tuple.last" do
+      type, _post = evaluate(<<~RUBY)
+        xs = [1, 2, 3]
+        xs.last
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(3))
+    end
+
+    it "falls back to the projected union for out-of-range tuple indices" do
+      type, _post = evaluate(<<~RUBY)
+        xs = [1, 2, 3]
+        xs[100]
+      RUBY
+      # The shape tier defers; RbsDispatch returns Array#[]'s projected
+      # type, which is Elem | nil under the value-lattice.
+      expect(type).not_to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "returns the precise value for hash_shape[k] with a static key" do
+      type, _post = evaluate(<<~RUBY)
+        h = { a: 1, b: "two" }
+        h[:b]
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of("two"))
+    end
+
+    it "returns Constant[nil] for hash_shape[missing_key]" do
+      type, _post = evaluate(<<~RUBY)
+        h = { a: 1 }
+        h[:missing]
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(nil))
+    end
+
+    it "returns the precise dig value for a single static key" do
+      type, _post = evaluate(<<~RUBY)
+        h = { a: 1 }
+        h.dig(:a)
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
     end
   end
 end

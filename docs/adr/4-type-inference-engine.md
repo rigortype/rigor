@@ -244,7 +244,24 @@ Slice 5 lands in two phases. The roadmap originally lumped `Tuple`, `HashShape`,
 
 Concrete uplift: `[1, 2, 3]` types as `Tuple[Constant[1], Constant[2], Constant[3]]` (was `Nominal[Array, [Constant[1] | Constant[2] | Constant[3]]]`); `{ a: 1, b: 2 }` types as `HashShape{a: Constant[1], b: Constant[2]}` (was `Nominal[Hash, [Symbol-union, Integer-union]]`). Method dispatch through the carriers preserves the same return-type precision via projection: `[1, 2, 3].first(2)` still resolves to `Array[Constant[1] | Constant[2] | Constant[3]]`, `{ a: 1 }.fetch(:a)` still substitutes V into the union of values. Coverage on `rigor type-scan lib`: 13.4% → **13.5%** unrecognised; the small wobble reflects the new lib files (Tuple/HashShape carriers) contributing their own constant references rather than any precision regression.
 
-**Phase 2 (deferred to a follow-up commit):** introduces the inferred object shape (`Record`), tuple-aware method dispatch (`tuple[0]`, `tuple.first` returning the precise member, destructuring assignment), and the Rigor-extension hash-shape policies (required/optional/closed-extra-key, read-only entries) per [`rigor-extensions.md`](../type-specification/rigor-extensions.md).
+**Phase 2 lands in sub-phases.** The carriers and projection-based dispatch shipped in phase 1 leave room for incremental precision uplifts.
+
+**Phase 2 sub-phase 1 (this sub-phase ships with this commit) — Shape-aware element dispatch.** Adds `Rigor::Inference::MethodDispatcher::ShapeDispatch`, a new tier inserted between `ConstantFolding` and `RbsDispatch`. The contract is bound in [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md) under "Method Dispatch Boundary"; the tier resolves element-access methods on `Tuple` and `HashShape` to their precise per-position/per-key type rather than the projected `Array#[]`/`Hash#fetch` answer. Components added:
+
+1. `ShapeDispatch.try_dispatch(receiver:, method_name:, args:)` returns the precise element/value type or `nil` to defer to the next tier. The recognised Tuple catalogue is `first`/`last`/`size`/`length`/`count` (no-arg) plus `[]`/`fetch` with a single `Constant[Integer]` argument; the recognised HashShape catalogue is `size`/`length` (no-arg) plus `[]`/`fetch`/`dig` with a single `Constant[Symbol|String]` argument. Out-of-range indices, missing-key `fetch`, multi-arg `dig`, and non-static keys defer to `RbsDispatch` so the projection answer keeps applying.
+2. `MethodDispatcher.dispatch` threads the new tier above `RbsDispatch`. The phase 1 projection still applies on misses: `tuple.map`, `shape.transform_values`, and other iteration calls keep their previous behaviour.
+3. Negative tuple indices are normalised by length (`tuple[-1]` returns the last element). Missing-key resolution mirrors Ruby semantics: `shape[:missing]` and `shape.dig(:missing)` resolve to `Constant[nil]` while `shape.fetch(:missing)` defers because the runtime would raise `KeyError`.
+
+Concrete behavioural uplift (verified through CLI smoke probes):
+
+- `[1, 2, 3].first` types as `Constant[1]` (was `Constant[1] | Constant[2] | Constant[3]`).
+- `[1, 2, 3][-1]` types as `Constant[3]`; `[1, 2, 3].size` types as `Constant[3]`.
+- `{ name: "Alice", age: 30 }[:name]` types as `Constant["Alice"]` (was the projected value-union).
+- `{ a: 1 }[:missing]` types as `Constant[nil]`; `{ a: 1 }.fetch(:missing)` keeps the projection answer.
+
+Coverage on `rigor type-scan lib`: 13.8 % → **13.6 %** unrecognised; `Prism::CallNode` 35.7 % → 35.1 %. The lift is concentrated in code that constructs tuples and hash shapes locally; user-typed receivers (Rigor's own `Rigor::*` types) still wait on RBS authoring for further coverage. The previously-recorded uplift quotes for Slice 4 phase 2c/d (`[1, 2, 3].first` as a union, `{ a: 1, b: 2 }.fetch(:a)` as a value union) reflect that slice's commit-time behaviour and are superseded here: those expressions now resolve through `ShapeDispatch` to the precise first member / value.
+
+**Phase 2 sub-phase 2 (deferred to a follow-up commit) — Destructuring assignment, multi-arg `dig`, range / start-length `[]`, and the inferred object shape (`Record`).** Sub-phase 2 wires `Prism::MultiWriteNode` into `StatementEvaluator` so `a, b = tuple` binds each target to the matching tuple element type, extends `ShapeDispatch` to multi-arg `dig`, range / start-length forms of `[]`, and `Hash#values_at`, and introduces the Rigor-extension hash-shape policies (required/optional/closed-extra-key, read-only entries) per [`rigor-extensions.md`](../type-specification/rigor-extensions.md). The `Record` carrier (the inferred object shape, see [`structural-interfaces-and-object-shapes.md`](../type-specification/structural-interfaces-and-object-shapes.md)) lands alongside capability-role inference in a later slice; the literal-driven `HashShape` continues to cover the hash side until then.
 
 ### Slice 6 — Narrowing (Minimal CFA)
 

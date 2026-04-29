@@ -40,7 +40,9 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 5 phase 2 sub 2 | `e7d0692` | Destructuring + multi-arg `dig` + `Hash#values_at` (`MultiTargetBinder`) |
 | Slice 6 phase C sub 2 | `58f88dc` | Destructuring blocks + numbered params + `block_type:` (`Array#map { ... }` → `Array[T]`) |
 | Slice 6 phase 2 sub 2 | `6bc38de` | Equality narrowing + `Rigor::Analysis::FactStore` |
-| Slice 5 phase 2 sub 3 | working tree | Range/start-length tuple slices + HashShape policies |
+| Slice 5 phase 2 sub 3 | `d1c6ba2` | Range/start-length tuple slices + HashShape policies |
+| Slice 6 phase C sub 3a | `22c0a77` | `ClosureEscapeAnalyzer` + non-escaping/escaping core catalogue (pure query, no wiring yet) |
+| Slice 6 phase C sub 3b | `54c9dcc` | `StatementEvaluator#eval_call` records `dynamic_origin` `closure_escape` facts on `:escaping` / `:unknown` block calls |
 
 ## What is in Place Today
 
@@ -129,6 +131,24 @@ normalisation and are the only sanctioned way to construct types.
   shapes require one local side and one trusted static literal side
   (`String`, `Symbol`, `Integer`, booleans, or `nil`; not `Float`).
   Anything else falls through to the no-narrowing branch.
+- `ClosureEscapeAnalyzer` — Slice 6 phase C sub-phase 3a. Pure
+  classification query
+  `classify(receiver_type:, method_name:, environment:)` returning
+  `:non_escaping`, `:escaping`, or `:unknown` for block-accepting
+  calls. Ships a hardcoded RBS-blind catalogue of core iteration
+  methods (Array/Hash/Range/Set/Integer/Enumerator/Object#tap/
+  then/yield_self) as non-escaping and a small known-retainer set
+  (`Module#define_method`, `Thread.new`/`start`/`fork`,
+  `Fiber.new`, `Proc.new`) as escaping. Tuple→Array,
+  HashShape→Hash, Constant→value-class. Sub-phase 3b wires it
+  into `StatementEvaluator#eval_call`: `:escaping` and `:unknown`
+  classifications attach a `dynamic_origin` `closure_escape`
+  fact to the post-call scope (target
+  `Target.new(kind: :closure, name: method)`, payload
+  `{method_name:, classification:}`, `stability: :unstable`);
+  `:non_escaping` leaves the fact_store untouched. Sub-phase 3c
+  will consume the fact to drop narrowed types of captured
+  locals.
 - `ScopeIndexer` — builds a per-node scope index for the CLI to consume.
 - `CoverageScanner` — backs `type-scan`.
 
@@ -148,8 +168,11 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 730 examples, 0 failures (as of the Slice 5 phase 2
-  sub-phase 3 working tree).
+- **RSpec**: 752 examples, 0 failures (Slice 6 phase C sub-phase
+  3b working tree; the +17 over `d1c6ba2`'s 730 are
+  `closure_escape_analyzer_spec.rb` and the +5 over 3a are the
+  3b "closure escape fact recording" group in
+  `statement_evaluator_spec.rb`).
 - **RuboCop**: `make lint` is clean. `.rubocop.yml` excludes the whole
   `references/` tree so upstream submodules are not linted as Rigor
   product code.
@@ -323,8 +346,8 @@ extra/open sources.
 ### C. Slice 6 phase C sub-phase 3 — Closure-captured-local invalidation
 
 Sub-phase 1 shipped block parameter binding driven by the receiving
-method's RBS signature; sub-phase 2 (this commit) adds destructuring
-block targets (`|(a, b), c|`), numbered-parameter binding (`_1`,
+method's RBS signature; sub-phase 2 added destructuring block
+targets (`|(a, b), c|`), numbered-parameter binding (`_1`,
 `_2`, ...), and the `block_type:` uplift so `Array#map { ... }`
 resolves the method-level type variable from the block's return
 type. Sub-phase 3 adds closure-captured-local invalidation: when a
@@ -332,9 +355,23 @@ block escapes its enclosing scope (passed to a method that retains
 the closure, returned as a method value, ...) the analyzer MUST
 drop the narrowed type of every captured local at the call boundary
 so a subsequent read inside the closure observes the conservative
-type rather than a stale narrowed binding. This work waits on the
-Slice 6 phase 2 FactStore so the invalidation has a place to record
-the "escaped" capability fact.
+type rather than a stale narrowed binding.
+
+Split into 3a → 3b → 3c:
+
+- **3a (working tree)**: `Rigor::Inference::ClosureEscapeAnalyzer`
+  pure classification with a hardcoded core-and-stdlib catalogue.
+  Returns `:non_escaping`/`:escaping`/`:unknown`. Not wired into
+  any consumer yet — landing the query first lets 3b/3c be
+  reviewed as small, focused diffs.
+- **3b**: Wire the analyzer into `StatementEvaluator#eval_call`
+  and add a `FactStore` interaction that records the
+  "escaped" capability fact in the `dynamic_origin` bucket.
+- **3c**: At the call boundary for `:escaping` / `:unknown`
+  outcomes, drop the narrowed type of every captured local that
+  the block can rebind (collected via a block-body
+  `LocalVariableWriteNode` walk) so subsequent reads after the
+  call observe the conservative join.
 
 - **type-scan impact**: small on `lib/`; medium on user code that
   relies on heavy block usage with locals captured from the

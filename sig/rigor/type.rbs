@@ -1,0 +1,171 @@
+module Rigor
+  module Type
+    type t = Top | Bot | Dynamic | Constant | Nominal | Singleton | Union | Tuple | HashShape
+
+    type accepts_mode = :strict | :gradual | :loose
+
+    class Top
+      def self.instance: () -> Top
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class Bot
+      def self.instance: () -> Bot
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class Dynamic
+      attr_reader static_facet: Type::t
+      def initialize: (Type::t static_facet) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class Constant
+      attr_reader value: untyped
+      def initialize: (untyped value) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class Nominal
+      attr_reader class_name: String
+      attr_reader type_args: Array[Type::t]
+      def initialize: (String class_name, ?Array[Type::t] type_args) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class Singleton
+      attr_reader class_name: String
+      def initialize: (String class_name) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class Union
+      attr_reader members: Array[Type::t]
+      def initialize: (Array[Type::t] members) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class Tuple
+      attr_reader elements: Array[Type::t]
+      def initialize: (Array[Type::t] elements) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class HashShape
+      attr_reader pairs: Hash[untyped, Type::t]
+      attr_reader required_keys: Array[untyped]
+      attr_reader optional_keys: Array[untyped]
+      attr_reader read_only_keys: Array[untyped]
+      attr_reader extra_keys: Symbol
+      def initialize: (?Hash[untyped, Type::t]? pairs, **untyped keywords) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def open?: () -> bool
+      def closed?: () -> bool
+      def required_key?: (untyped key) -> bool
+      def optional_key?: (untyped key) -> bool
+      def read_only_key?: (untyped key) -> bool
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class AcceptsResult
+      attr_reader trinary: Trinary
+      attr_reader mode: accepts_mode
+      attr_reader reasons: Array[String]
+      def self.yes: (?mode: accepts_mode, ?reasons: (Array[String] | String)?) -> AcceptsResult
+      def self.no: (?mode: accepts_mode, ?reasons: (Array[String] | String)?) -> AcceptsResult
+      def self.maybe: (?mode: accepts_mode, ?reasons: (Array[String] | String)?) -> AcceptsResult
+      def initialize: (Trinary trinary, ?mode: accepts_mode, ?reasons: (Array[String] | String)?) -> void
+      def yes?: () -> bool
+      def no?: () -> bool
+      def maybe?: () -> bool
+      def with_reason: (String reason) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    module Combinator
+      def self?.top: () -> Top
+      def self?.bot: () -> Bot
+      def self?.untyped: () -> Dynamic
+      def self?.dynamic: (Type::t static_facet) -> Dynamic
+      def self?.nominal_of: (Module | String class_name_or_object, ?type_args: Array[Type::t]) -> Nominal
+      def self?.singleton_of: (Module | String class_name_or_object) -> Singleton
+      def self?.constant_of: (untyped value) -> Constant
+      def self?.tuple_of: (*Type::t elements) -> Tuple
+      def self?.hash_shape_of: (?Hash[untyped, Type::t]? pairs, **untyped options) -> HashShape
+      def self?.union: (*Type::t types) -> Type::t
+    end
+  end
+end

@@ -1,0 +1,29 @@
+module Rigor
+  class Trinary
+    type value = :yes | :no | :maybe
+
+    VALUES: Array[value]
+    YES: Trinary
+    NO: Trinary
+    MAYBE: Trinary
+
+    attr_reader value: value
+
+    def self.yes: () -> Trinary
+    def self.no: () -> Trinary
+    def self.maybe: () -> Trinary
+    def self.from_symbol: (Symbol symbol) -> Trinary
+
+    def initialize: (value value) -> void
+    def yes?: () -> bool
+    def no?: () -> bool
+    def maybe?: () -> bool
+    def negate: () -> Trinary
+    def and: (Trinary other) -> Trinary
+    def or: (Trinary other) -> Trinary
+    def ==: (untyped other) -> bool
+    def hash: () -> Integer
+    def to_s: () -> String
+    def inspect: () -> String
+  end
+end

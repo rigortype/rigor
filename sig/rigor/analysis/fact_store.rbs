@@ -1,0 +1,45 @@
+module Rigor
+  module Analysis
+    class FactStore
+      type bucket = :local_binding | :captured_local | :object_content | :global_storage | :dynamic_origin | :relational
+      type polarity = :positive | :negative
+      type stability = :local_binding | :unstable | :pure | :immutable
+
+      BUCKETS: Array[bucket]
+
+      class Target
+        attr_reader kind: Symbol
+        attr_reader name: untyped
+        def self.local: (String | Symbol name) -> Target
+        def self.new: (kind: Symbol, name: untyped) -> Target
+        def initialize: (kind: Symbol, name: untyped) -> void
+      end
+
+      class Fact
+        attr_reader bucket: bucket
+        attr_reader target: Target | Array[Target]
+        attr_reader predicate: Symbol
+        attr_reader payload: untyped
+        attr_reader polarity: polarity
+        attr_reader stability: stability
+        def self.new: (bucket: bucket, target: Target | Array[Target], predicate: Symbol, ?payload: untyped, ?polarity: polarity, ?stability: stability) -> Fact
+        def initialize: (bucket: bucket, target: Target | Array[Target], predicate: Symbol, ?payload: untyped, ?polarity: polarity, ?stability: stability) -> void
+      end
+
+      attr_reader facts: Array[Fact]
+
+      def self.empty: () -> FactStore
+
+      def initialize: (?facts: Array[Fact]) -> void
+      def empty?: () -> bool
+      def with_fact: (Fact fact) -> FactStore
+      def with_local_fact: (String | Symbol name, predicate: Symbol, ?payload: untyped, ?bucket: bucket, ?polarity: polarity) -> FactStore
+      def facts_for: (?target: Target?, ?bucket: bucket?) -> Array[Fact]
+      def invalidate_target: (Target target, ?buckets: Array[bucket]?) -> FactStore
+      def join: (FactStore other) -> FactStore
+      def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
+      def hash: () -> Integer
+    end
+  end
+end

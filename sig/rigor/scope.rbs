@@ -1,0 +1,21 @@
+module Rigor
+  class Scope
+    attr_reader environment: Environment
+    attr_reader locals: Hash[Symbol, Type::t]
+    attr_reader fact_store: Analysis::FactStore
+
+    def self.empty: (?environment: Environment) -> Scope
+
+    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore) -> void
+    def local: (String | Symbol name) -> Type::t?
+    def with_local: (String | Symbol name, Type::t type) -> Scope
+    def with_fact: (Analysis::FactStore::Fact fact) -> Scope
+    def facts_for: (?target: Analysis::FactStore::Target?, ?bucket: Symbol?) -> Array[Analysis::FactStore::Fact]
+    def local_facts: (String | Symbol name, ?bucket: Symbol?) -> Array[Analysis::FactStore::Fact]
+    def type_of: (untyped node, ?tracer: Inference::FallbackTracer?) -> Type::t
+    def evaluate: (untyped node, ?tracer: Inference::FallbackTracer?) -> [Type::t, Scope]
+    def join: (Scope other) -> Scope
+    def ==: (untyped other) -> bool
+    def hash: () -> Integer
+  end
+end

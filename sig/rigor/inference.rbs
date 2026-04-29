@@ -1,0 +1,102 @@
+module Rigor
+  module Inference
+    type closure_classification = :non_escaping | :escaping | :unknown
+
+    class ExpressionTyper
+      def initialize: (scope: Scope, ?tracer: FallbackTracer?) -> void
+      def type_of: (untyped node) -> Type::t
+    end
+
+    class StatementEvaluator
+      class ClassFrame
+        attr_reader name: String
+        attr_reader singleton: bool
+        def self.new: (name: String, singleton: bool) -> ClassFrame
+        def initialize: (name: String, singleton: bool) -> void
+      end
+
+      def initialize: (scope: Scope, ?tracer: FallbackTracer?, ?on_enter: (^(untyped, Scope) -> void)?, ?class_context: Array[ClassFrame]) -> void
+      def evaluate: (untyped node) -> [Type::t, Scope]
+    end
+
+    module MethodDispatcher
+      def self?.dispatch: (receiver_type: Type::t?, method_name: Symbol, arg_types: Array[Type::t], ?block_type: Type::t?, ?environment: Environment?) -> Type::t?
+      def self?.expected_block_param_types: (receiver_type: Type::t?, method_name: Symbol, arg_types: Array[Type::t], ?environment: Environment?) -> Array[Type::t]
+    end
+
+    class MethodParameterBinder
+      def initialize: (environment: Environment, class_path: String, singleton: bool) -> void
+      def bind: (untyped def_node) -> Hash[Symbol, Type::t]
+    end
+
+    class BlockParameterBinder
+      def initialize: (?expected_param_types: Array[Type::t]) -> void
+      def bind: (untyped block_node) -> Hash[Symbol, Type::t]
+    end
+
+    module MultiTargetBinder
+      def self?.bind: (untyped target_node, Type::t rhs_type) -> Hash[Symbol, Type::t]
+    end
+
+    module Narrowing
+      def self?.narrow_truthy: (Type::t type) -> Type::t
+      def self?.narrow_falsey: (Type::t type) -> Type::t
+      def self?.narrow_nil: (Type::t type) -> Type::t
+      def self?.narrow_non_nil: (Type::t type) -> Type::t
+      def self?.narrow_equal: (Type::t type, untyped literal) -> Type::t
+      def self?.narrow_not_equal: (Type::t type, untyped literal) -> Type::t
+      def self?.narrow_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment) -> Type::t
+      def self?.narrow_not_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment) -> Type::t
+      def self?.predicate_scopes: (untyped node, Scope scope) -> [Scope, Scope]
+      def self?.analyse: (untyped node, Scope scope) -> untyped
+    end
+
+    module ClosureEscapeAnalyzer
+      def self?.classify: (receiver_type: Type::t?, method_name: Symbol, ?environment: Environment?) -> closure_classification
+    end
+
+    module Acceptance
+      def self?.accepts: (Type::t self_type, Type::t other_type, ?mode: Type::accepts_mode) -> Type::AcceptsResult
+    end
+
+    module RbsTypeTranslator
+      def self.translate: (untyped rbs_type, ?self_type: Type::t?, ?instance_type: Type::t?, ?type_vars: Hash[Symbol, Type::t]) -> Type::t
+    end
+
+    class Fallback
+      attr_reader node_class: Class
+      attr_reader location: untyped
+      attr_reader family: Symbol
+      attr_reader inner_type: Type::t
+      def initialize: (node_class: Class, location: untyped, family: Symbol, inner_type: Type::t) -> void
+    end
+
+    class FallbackTracer
+      def initialize: () -> void
+      def events: () -> Array[Fallback]
+      def record_fallback: (Fallback event) -> void
+      def empty?: () -> bool
+      def size: () -> Integer
+      def each: () { (Fallback) -> void } -> self
+                | () -> Enumerator[Fallback, self]
+      def kinds: () -> Array[Class]
+      def families: () -> Array[Symbol]
+      def clear: () -> void
+    end
+
+    module ScopeIndexer
+      def self?.index: (untyped root, default_scope: Scope) -> Hash[untyped, Scope]
+    end
+
+    class CoverageScanner
+      class Stats
+        def visited_count: () -> Integer
+        def unrecognized_count: () -> Integer
+        def unrecognized_ratio: () -> Float
+      end
+
+      def initialize: (?scope: Scope?) -> void
+      def scan: (untyped root) -> Stats
+    end
+  end
+end

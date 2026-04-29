@@ -1038,4 +1038,66 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(closure_escape_facts(post)).to be_empty
     end
   end
+
+  describe "captured-local invalidation on closure escape (Slice 6 phase C sub-phase 3c)" do
+    let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+
+    def integer_constant(value) = Rigor::Type::Combinator.constant_of(value)
+
+    it "preserves captured-local types across non-escaping iteration" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        x = 1
+        [1, 2, 3].each { |n| n }
+      RUBY
+      expect(post.local(:x)).to eq(integer_constant(1))
+    end
+
+    it "drops the narrowed type of an outer local that an escaping block writes" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        x = 1
+        Thread.new { x = 2 }
+      RUBY
+      expect(post.local(:x)).to be_a(Rigor::Type::Dynamic)
+      expect(post.local(:x).static_facet).to be_a(Rigor::Type::Top)
+    end
+
+    it "leaves outer locals the escaping block only reads untouched" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        x = 1
+        Thread.new { x }
+      RUBY
+      expect(post.local(:x)).to eq(integer_constant(1))
+    end
+
+    it "respects block-parameter shadowing (write to a parameter is not a captured rebind)" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        x = 1
+        Thread.new { |x| x = 99 }
+      RUBY
+      expect(post.local(:x)).to eq(integer_constant(1))
+    end
+
+    it "drops captured locals on :unknown classification too" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        x = 1
+        foo.bar { x = 2 }
+      RUBY
+      expect(post.local(:x)).to be_a(Rigor::Type::Dynamic)
+    end
+
+    it "invalidates the local_binding fact on the dropped local" do
+      # Pre-bind x with a fact, then escape; the with_local call inside
+      # the drop must invalidate the local_binding bucket entry.
+      base = default_env_scope.with_local(:x, integer_constant(1))
+      base = base.with_fact(
+        Rigor::Analysis::FactStore::Fact.new(
+          bucket: :local_binding,
+          target: Rigor::Analysis::FactStore::Target.local(:x),
+          predicate: :is_int
+        )
+      )
+      _, post = base.evaluate(parse_program("Thread.new { x = 2 }"))
+      expect(post.local_facts(:x, bucket: :local_binding)).to be_empty
+    end
+  end
 end

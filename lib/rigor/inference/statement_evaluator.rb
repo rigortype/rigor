@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "../analysis/fact_store"
+require_relative "../source/node_walker"
 require_relative "block_parameter_binder"
 require_relative "closure_escape_analyzer"
 require_relative "method_dispatcher"
@@ -441,27 +442,39 @@ module Rigor
         sub_eval(block, block_entry)
       end
 
-      # Slice 6 phase C sub-phase 3b. When the call carries a block
-      # whose receiving method is NOT proven non-escaping, attach a
-      # `dynamic_origin` fact to the post-call scope recording that
-      # the closure may have escaped. Sub-phase 3b only records the
-      # fact; sub-phase 3c reads it to invalidate narrowed types of
-      # locals the block can rebind. A `:non_escaping` classification
-      # (or no block at all) leaves the scope untouched.
+      # Slice 6 phase C sub-phase 3b/3c. When the call carries a
+      # block whose receiving method is NOT proven non-escaping:
+      #
+      # - 3b: attach a `dynamic_origin` `closure_escape` fact to the
+      #   post-call scope so consumers can see that the closure may
+      #   have been retained past the call.
+      # - 3c: drop the narrowed type of every captured outer local
+      #   that the block body can rebind, replacing it with
+      #   `Dynamic[Top]` through `Scope#with_local` (which also
+      #   invalidates the local's `local_binding` facts). Locals
+      #   shadowed by a block parameter or a `;`-prefixed
+      #   block-local declaration are untouched. Locals the block
+      #   only reads (without writing) are also untouched: read-only
+      #   captures cannot rebind the outer variable.
+      #
+      # A `:non_escaping` classification (or any block-less call)
+      # leaves the post-call scope unchanged.
       def record_closure_escape_if_any(node)
         return scope unless node.block.is_a?(Prism::BlockNode)
 
         classification = classify_closure_escape(node)
         return scope if classification == :non_escaping
 
-        fact = Analysis::FactStore::Fact.new(
-          bucket: :dynamic_origin,
-          target: Analysis::FactStore::Target.new(kind: :closure, name: node.name.to_sym),
-          predicate: :closure_escape,
-          payload: { method_name: node.name.to_sym, classification: classification },
-          stability: :unstable
+        post_scope = drop_captured_narrowing(node.block, scope)
+        post_scope.with_fact(
+          Analysis::FactStore::Fact.new(
+            bucket: :dynamic_origin,
+            target: Analysis::FactStore::Target.new(kind: :closure, name: node.name.to_sym),
+            predicate: :closure_escape,
+            payload: { method_name: node.name.to_sym, classification: classification },
+            stability: :unstable
+          )
         )
-        scope.with_fact(fact)
       end
 
       def classify_closure_escape(call_node)
@@ -473,6 +486,49 @@ module Rigor
         )
       rescue StandardError
         :unknown
+      end
+
+      # Sub-phase 3c. Replace the outer-local types that the block
+      # body can rebind with `Dynamic[Top]`. The conservative drop
+      # matches the spec line "facts about locals it can write
+      # become unstable after the escape point": rather than
+      # synthesise the union of the block's write types (which the
+      # current pass does not yet expose), we discard the narrowed
+      # binding altogether. A future sub-phase MAY refine this to
+      # the union of the block's actual writes.
+      def drop_captured_narrowing(block_node, base_scope)
+        names = captured_local_writes(block_node, base_scope)
+        return base_scope if names.empty?
+
+        names.reduce(base_scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
+      end
+
+      def captured_local_writes(block_node, base_scope)
+        body = block_node.body
+        return [] if body.nil?
+
+        introduced = block_introduced_locals(block_node)
+        outer_writes = []
+        Source::NodeWalker.each(body) do |descendant|
+          next unless descendant.is_a?(Prism::LocalVariableWriteNode)
+          next if introduced.include?(descendant.name)
+          next unless base_scope.locals.key?(descendant.name)
+
+          outer_writes << descendant.name
+        end
+        outer_writes.uniq
+      end
+
+      # Names introduced by the block itself (parameters, numbered
+      # parameters via `BlockParameterBinder`, plus explicit
+      # `;`-prefixed block-locals on `BlockParametersNode`). Writes
+      # to these names are local to the block and MUST NOT be
+      # treated as captured rebinds of an outer local.
+      def block_introduced_locals(block_node)
+        introduced = Set.new(BlockParameterBinder.new.bind(block_node).keys)
+        params_root = block_node.parameters
+        params_root.locals.each { |loc| introduced << loc.name } if params_root.is_a?(Prism::BlockParametersNode)
+        introduced
       end
 
       # `Prism::BlockNode` is reached through {#eval_call}; the

@@ -43,6 +43,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 5 phase 2 sub 3 | `d1c6ba2` | Range/start-length tuple slices + HashShape policies |
 | Slice 6 phase C sub 3a | `22c0a77` | `ClosureEscapeAnalyzer` + non-escaping/escaping core catalogue (pure query, no wiring yet) |
 | Slice 6 phase C sub 3b | `54c9dcc` | `StatementEvaluator#eval_call` records `dynamic_origin` `closure_escape` facts on `:escaping` / `:unknown` block calls |
+| Slice 6 phase C sub 3c | `8008020` | Drop narrowed type of captured-outer locals the block can rebind on `:escaping` / `:unknown` block calls |
 
 ## What is in Place Today
 
@@ -147,8 +148,15 @@ normalisation and are the only sanctioned way to construct types.
   `Target.new(kind: :closure, name: method)`, payload
   `{method_name:, classification:}`, `stability: :unstable`);
   `:non_escaping` leaves the fact_store untouched. Sub-phase 3c
-  will consume the fact to drop narrowed types of captured
-  locals.
+  additionally drops the narrowed type of every captured outer
+  local that the block body can rebind, replacing it with
+  `Dynamic[Top]` through `Scope#with_local` (which also
+  invalidates the local's `local_binding` facts). Captured
+  outer locals are computed by walking `BlockNode#body` for
+  `LocalVariableWriteNode`s whose name is in the call-site
+  `Scope#locals` and is NOT introduced by the block (block
+  parameters or `;`-prefixed block-locals). Read-only captures
+  and parameter-shadowed names stay narrowed.
 - `ScopeIndexer` — builds a per-node scope index for the CLI to consume.
 - `CoverageScanner` — backs `type-scan`.
 
@@ -168,10 +176,11 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 752 examples, 0 failures (Slice 6 phase C sub-phase
-  3b working tree; the +17 over `d1c6ba2`'s 730 are
-  `closure_escape_analyzer_spec.rb` and the +5 over 3a are the
-  3b "closure escape fact recording" group in
+- **RSpec**: 758 examples, 0 failures (Slice 6 phase C sub-phase
+  3c working tree; the +17 over `d1c6ba2`'s 730 are
+  `closure_escape_analyzer_spec.rb`, the +5 above that are the
+  3b "closure escape fact recording" group, and the +6 above
+  that are the 3c "captured-local invalidation" group in
   `statement_evaluator_spec.rb`).
 - **RuboCop**: `make lint` is clean. `.rubocop.yml` excludes the whole
   `references/` tree so upstream submodules are not linted as Rigor

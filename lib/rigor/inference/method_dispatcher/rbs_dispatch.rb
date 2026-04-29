@@ -66,10 +66,16 @@ module Rigor
         # @param method_name [Symbol]
         # @param args [Array<Rigor::Type>]
         # @param environment [Rigor::Environment]
+        # @param block_type [Rigor::Type, nil] inferred block return
+        #   type, propagated from `MethodDispatcher.dispatch`. When
+        #   non-nil, the selector prefers a block-bearing overload
+        #   and binds the method-level type parameter that the
+        #   block's return type references to `block_type` (Slice 6
+        #   phase C sub-phase 2).
         # @return [Rigor::Type, nil] inferred return type, or `nil`
         #   when no rule resolves (no class name, no method, dispatch
         #   on a Top/Dynamic[Top] receiver, etc.).
-        def try_dispatch(receiver:, method_name:, args:, environment:)
+        def try_dispatch(receiver:, method_name:, args:, environment:, block_type: nil)
           return nil if environment.nil?
           return nil unless environment.rbs_loader
 
@@ -77,7 +83,8 @@ module Rigor
             receiver: receiver,
             method_name: method_name,
             args: args,
-            environment: environment
+            environment: environment,
+            block_type: block_type
           )
         end
 
@@ -119,26 +126,26 @@ module Rigor
         class << self
           private
 
-          def dispatch_for(receiver:, method_name:, args:, environment:)
+          def dispatch_for(receiver:, method_name:, args:, environment:, block_type:)
             args ||= []
             case receiver
             when Type::Union
-              dispatch_union(receiver, method_name, args, environment)
+              dispatch_union(receiver, method_name, args, environment, block_type)
             else
-              dispatch_one(receiver, method_name, args, environment)
+              dispatch_one(receiver, method_name, args, environment, block_type)
             end
           end
 
-          def dispatch_union(receiver, method_name, args, environment)
+          def dispatch_union(receiver, method_name, args, environment, block_type)
             results = receiver.members.map do |member|
-              dispatch_one(member, method_name, args, environment)
+              dispatch_one(member, method_name, args, environment, block_type)
             end
             return nil if results.any?(&:nil?)
 
             Type::Combinator.union(*results)
           end
 
-          def dispatch_one(receiver, method_name, args, environment)
+          def dispatch_one(receiver, method_name, args, environment, block_type)
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
@@ -152,7 +159,8 @@ module Rigor
               class_name: class_name,
               kind: kind,
               args: args,
-              type_vars: type_vars
+              type_vars: type_vars,
+              block_type: block_type
             )
           rescue StandardError
             # Defensive: if RBS' definition builder raises on a broken
@@ -237,7 +245,8 @@ module Rigor
             param_names.zip(receiver_args).to_h
           end
 
-          def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:)
+          # rubocop:disable Metrics/ParameterLists
+          def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:)
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
               case kind
@@ -250,16 +259,63 @@ module Rigor
               arg_types: args,
               self_type: self_type,
               instance_type: instance_type,
-              type_vars: type_vars
+              type_vars: type_vars,
+              block_required: !block_type.nil?
             )
             return nil unless method_type
+
+            full_type_vars = compose_block_type_vars(method_type, type_vars, block_type)
 
             RbsTypeTranslator.translate(
               method_type.type.return_type,
               self_type: self_type,
               instance_type: instance_type,
-              type_vars: type_vars
+              type_vars: full_type_vars
             )
+          end
+          # rubocop:enable Metrics/ParameterLists
+
+          # When a block type is supplied, locate the method-level
+          # type parameter that the selected overload's block return
+          # type references and bind it to `block_type`. The
+          # contribution layers on top of the receiver-derived
+          # `type_vars` so a method like
+          # `def map[U] { (Elem) -> U } -> Array[U]` resolves
+          # `Elem` from the receiver and `U` from the block return
+          # type at the same call site. Anything outside this exact
+          # shape (no block clause, an `untyped` block, a non-
+          # variable block return type, a variable not declared in
+          # `type_params`) returns the original `type_vars` so
+          # fallbacks stay consistent.
+          def compose_block_type_vars(method_type, type_vars, block_type)
+            return type_vars if block_type.nil?
+
+            block_var_name = method_type_block_return_variable(method_type)
+            return type_vars if block_var_name.nil?
+
+            type_vars.merge(block_var_name => block_type)
+          end
+
+          def method_type_block_return_variable(method_type)
+            return_variable = block_return_variable(method_type)
+            return nil if return_variable.nil?
+
+            params = method_type.respond_to?(:type_params) ? method_type.type_params : []
+            return nil if params.nil?
+            return nil unless params.any? { |tp| tp.name == return_variable.name }
+
+            return_variable.name
+          end
+
+          def block_return_variable(method_type)
+            block = method_type.respond_to?(:block) ? method_type.block : nil
+            return nil if block.nil?
+
+            fun = block.type
+            return nil unless fun.respond_to?(:return_type)
+
+            return_type = fun.return_type
+            return_type.is_a?(RBS::Types::Variable) ? return_type : nil
           end
 
           # ----- block parameter probe (Phase C sub-phase 1) -----

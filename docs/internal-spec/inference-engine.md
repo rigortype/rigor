@@ -118,7 +118,14 @@ Rigor::Inference::MethodDispatcher.dispatch(
   receiver_type:,        # Rigor::Type or nil (implicit self; unsupported in Slice 2)
   method_name:,          # Symbol
   arg_types:,            # Array<Rigor::Type>
-  block_type: nil,       # reserved
+  block_type: nil,       # Rigor::Type or nil; the inferred return type of an
+                         #   accompanying `do ... end` / `{ ... }` block.
+                         #   Slice 6 phase C sub-phase 2: when non-nil, the
+                         #   selector prefers a block-bearing overload and the
+                         #   method-level type parameter that the block's
+                         #   return type references is bound to `block_type`
+                         #   so a return like `Array[U]` resolves to
+                         #   `Array[block_type]`.
   environment: nil       # Rigor::Environment; required for RBS-backed dispatch
 ) #=> Rigor::Type, or nil when no rule matches
 ```
@@ -274,14 +281,14 @@ The third constructor keyword on `StatementEvaluator` is the hook the ScopeIndex
 - Non-local targets (`InstanceVariableTargetNode`, `ConstantTargetNode`, `IndexTargetNode`, `CallTargetNode`, `ConstantPathTargetNode`, `ImplicitRestNode`, anonymous splat without an expression, ...) MUST be silently skipped: they have no observable contribution to the local-variable scope the StatementEvaluator threads.
 - The binder MUST NOT raise on any well-formed Prism input and MUST NOT mutate its arguments.
 
-### Block Parameter Binding (Slice 6 phase C sub-phase 1)
+### Block Parameter Binding (Slice 6 phase C sub-phases 1 and 2)
 
 `Rigor::Inference::BlockParameterBinder` is the canonical surface that builds the entry scope augmentation for a `Prism::BlockNode`. It MUST satisfy:
 
 - `BlockParameterBinder.new(expected_param_types:)` accepts an ordered array of `Rigor::Type` values, one per positional block parameter as supplied by the receiving method's RBS signature. Indices the binder cannot fill from this array (the array is shorter than the parameter list, or the slot is a kind that is not driven by the array) MUST default to `Dynamic[Top]`.
-- `bind(block_node)` MUST return an ordered `Hash{Symbol => Rigor::Type}` of parameter name to bound type, in declaration order. Anonymous parameters and `Prism::MultiTargetNode` destructuring slots (the `|(a, b), c|` form) MUST be skipped silently; the latter are deferred to a follow-up that recurses into the destructured targets.
+- `bind(block_node)` MUST return an ordered `Hash{Symbol => Rigor::Type}` of parameter name to bound type, in declaration order. Anonymous parameters MUST be skipped silently. `Prism::MultiTargetNode` destructuring slots (the `|(a, b), c|` form) MUST be expanded through `Rigor::Inference::MultiTargetBinder` against the slot's expected type (Slice 6 phase C sub-phase 2): a `Type::Tuple` slot decomposes element-wise; any other carrier collapses every inner local to `Dynamic[Top]`. The inner targets are `Prism::RequiredParameterNode` instances (block-side encoding); `MultiTargetBinder` MUST treat them uniformly with `Prism::LocalVariableTargetNode` for binding purposes.
 - A `*rest` parameter MUST be bound to `Nominal["Array", [Dynamic[Top]]]`. A `**kw_rest` parameter MUST be bound to `Nominal["Hash", [Nominal["Symbol"], Dynamic[Top]]]`. An explicit `&block` parameter MUST be bound to `Nominal[Proc]`. Keyword parameters (required and optional) MUST be bound to `Dynamic[Top]` because Slice 6 phase C sub-phase 1 does not introspect the receiving method's block keyword signature.
-- `NumberedParametersNode` (the implicit-`_1` form) MUST yield an empty bindings hash. The body's reads of `_1`/`_2`/... fall through to the unbound-local fail-soft path until a follow-up wires them in.
+- `NumberedParametersNode` (the implicit-`_1` form) MUST yield bindings for `:_1`, `:_2`, ... up to `numbered_node.maximum`, each driven by the same per-position `expected_param_types:` array used for explicit parameters. Slots past the array's length MUST default to `Dynamic[Top]`. This is the Slice 6 phase C sub-phase 2 contract; the previous slice's "no-bindings" behaviour is superseded.
 - The binder MUST NOT raise on any well-formed Prism block node and MUST NOT mutate its input.
 
 `Rigor::Inference::MethodDispatcher.expected_block_param_types(receiver_type:, method_name:, arg_types:, environment:)` is the canonical query that supplies the binder's `expected_param_types:` array. It MUST satisfy:
@@ -299,6 +306,7 @@ The third constructor keyword on `StatementEvaluator` is the hook the ScopeIndex
 - When `node.block` is a `Prism::BlockNode`, the handler MUST build the block's entry scope by augmenting the *receiver's outer scope* with the bindings produced by `BlockParameterBinder.bind`. The block body inherits the outer scope's locals (Ruby's lexical scoping rule), with the block parameters layered on top.
 - The handler MUST `sub_eval` the `BlockNode`, threading the block's entry scope through the body so the per-node scope index sees the parameter bindings. The block's `Prism::BlockNode` MUST itself have a handler that delegates to `sub_eval(body, scope)` so the body's statement chain is visited under the augmented scope.
 - The handler's exception envelope MUST treat a probe failure as "no expected types"; the binder still runs and defaults every parameter to `Dynamic[Top]`.
+- Block-aware result typing (Slice 6 phase C sub-phase 2) lives in `Rigor::Inference::ExpressionTyper#call_type_for`: when the call carries a `Prism::BlockNode`, the typer MUST build the same block-entry scope (`outer-scope + BlockParameterBinder.bind`), type the block's body under that scope, and pass the body's value type as `block_type:` into `MethodDispatcher.dispatch`. This is the exact mechanism that makes `[1, 2, 3].map { |n| n.to_s }` resolve to `Array[String]` from any call site (CLI `type-of`, ScopeIndexer, plain `Scope#type_of`) without requiring the StatementEvaluator to be in the loop. The StatementEvaluator's CallNode handler MUST stay aligned: it delegates to the same `Scope#type_of` for the result type and only re-evaluates the block body for the per-node scope index.
 
 ### Boundaries
 

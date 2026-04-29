@@ -33,13 +33,22 @@ module Rigor
     #
     # Targets the binder recognises:
     #
-    # - `Prism::LocalVariableTargetNode` — binds `target.name` to its
-    #   slice of the right-hand side.
+    # - `Prism::LocalVariableTargetNode` — used by the statement-level
+    #   `a, b = rhs` form. Binds `target.name` to its slice of the
+    #   right-hand side.
+    # - `Prism::RequiredParameterNode` — used by block-parameter
+    #   destructuring (`|(a, b), c|`). Prism encodes the inner names
+    #   of a block-side `MultiTargetNode` as parameter nodes rather
+    #   than target nodes; the binder treats them uniformly with
+    #   their `LocalVariableTargetNode` cousins because they carry
+    #   the same `name:` field and the same observable semantics
+    #   (binding a fresh local in the block-entry scope).
     # - `Prism::MultiTargetNode` — recurses with the slot's type as
     #   the new right-hand side.
     # - `Prism::SplatNode` (used for `rest`) — its `expression` MUST
-    #   be a `Prism::LocalVariableTargetNode` to be observable; an
-    #   anonymous `*` splat or a non-local target is skipped.
+    #   be a `Prism::LocalVariableTargetNode` or a
+    #   `Prism::RequiredParameterNode` to be observable; an anonymous
+    #   `*` splat or a non-local target is skipped.
     #
     # Other target kinds (`InstanceVariableTargetNode`,
     # `ConstantTargetNode`, `IndexTargetNode`, `CallTargetNode`,
@@ -114,7 +123,7 @@ module Rigor
 
         def bind_target(target, type, bindings)
           case target
-          when Prism::LocalVariableTargetNode
+          when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode
             bindings[target.name] = type
           when Prism::MultiTargetNode
             visit(target, type, bindings)
@@ -124,7 +133,7 @@ module Rigor
         def bind_rest_target(splat_node, type, bindings)
           expression = splat_node.expression
           case expression
-          when Prism::LocalVariableTargetNode
+          when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode
             bindings[expression.name] = type
           end
         end

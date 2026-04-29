@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "multi_target_binder"
 
 module Rigor
   module Inference
@@ -23,14 +24,22 @@ module Rigor
     # binding presence is what later slices need to attach narrowing
     # facts to).
     #
-    # MultiTargetNode parameters (`|(a, b), c|`) are deferred to a
-    # follow-up: the binder skips them entirely so the surrounding
-    # block body still type-checks under the outer scope. Block-local
-    # declarations after `;` (e.g., `|x; y, z|`) are also skipped --
-    # they are explicitly block-local, so the outer scope MUST NOT
-    # observe them and the binder leaves them unbound.
+    # MultiTargetNode parameters (`|(a, b), c|`) are bound by
+    # delegating each destructuring slot to
+    # {Rigor::Inference::MultiTargetBinder}, so a Tuple-shaped
+    # expected element type projects element-wise into the inner
+    # locals (Slice 6 phase C sub-phase 2). Numbered parameters
+    # (`_1`, `_2`, ...) are bound from `Prism::NumberedParametersNode`
+    # using the same per-position `expected_param_types:` array, so
+    # `[1, 2, 3].each { _1 + _2 }` sees `_1`/`_2` typed identically
+    # to their explicit `|x, y|` counterparts.
+    #
+    # Block-local declarations after `;` (e.g., `|x; y, z|`) are
+    # still skipped — they are explicitly block-local, so the outer
+    # scope MUST NOT observe them and the binder leaves them unbound.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
+    # rubocop:disable Metrics/ClassLength
     class BlockParameterBinder
       # @param expected_param_types [Array<Rigor::Type>] positional block
       #   parameter types in order. Indices the binder cannot fill from
@@ -43,13 +52,44 @@ module Rigor
 
       # @param block_node [Prism::BlockNode]
       # @return [Hash{Symbol => Rigor::Type}] ordered map from parameter
-      #   name to bound type. Anonymous parameters and MultiTargetNode
-      #   destructuring slots are skipped.
+      #   name to bound type. Anonymous parameters are skipped;
+      #   MultiTargetNode destructuring slots delegate to
+      #   {MultiTargetBinder} and contribute every named local in
+      #   declaration order. Numbered-parameter forms (`_1`, `_2`,
+      #   ...) bind `:_1`, `:_2`, ... up to the maximum the block
+      #   body refers to.
       def bind(block_node)
         params_root = block_node.parameters
         return {} if params_root.nil?
 
-        params_node = block_parameters_for(params_root)
+        case params_root
+        when Prism::NumberedParametersNode
+          bind_numbered_parameters(params_root)
+        when Prism::BlockParametersNode
+          bind_block_parameters(params_root)
+        else
+          {}
+        end
+      end
+
+      private
+
+      # `|_1, _2|` numbered-parameter form. Prism exposes the
+      # implicit count through `NumberedParametersNode#maximum`
+      # (the highest `_N` referenced in the body); we materialise
+      # bindings for `:_1` through `:_maximum` so the block body's
+      # `LocalVariableReadNode` lookups see the same types as the
+      # equivalent explicit `|x, y|` form would.
+      def bind_numbered_parameters(numbered_node)
+        bindings = {}
+        numbered_node.maximum.times do |i|
+          bindings[:"_#{i + 1}"] = positional_type_at(i)
+        end
+        bindings
+      end
+
+      def bind_block_parameters(params_root)
+        params_node = params_root.parameters
         return {} if params_node.nil?
 
         bindings = {}
@@ -61,21 +101,6 @@ module Rigor
         bindings
       end
 
-      private
-
-      # `BlockNode#parameters` is normally a `BlockParametersNode` whose
-      # `parameters` field is a `ParametersNode` (the same shape as a
-      # method's parameter list). Numbered-block forms expose a
-      # `NumberedParametersNode` directly; we treat those as having
-      # no named locals to bind (the body still uses `_1`/`_2`/... but
-      # those reads are surfaced as `LocalVariableReadNode` only
-      # implicitly and are not handled in this slice).
-      def block_parameters_for(params_root)
-        return nil unless params_root.is_a?(Prism::BlockParametersNode)
-
-        params_root.parameters
-      end
-
       def bind_positionals(params_node, bindings, cursor)
         cursor = bind_required_positionals(params_node, bindings, cursor)
         cursor = bind_optional_positionals(params_node, bindings, cursor)
@@ -84,8 +109,7 @@ module Rigor
 
       def bind_required_positionals(params_node, bindings, cursor)
         params_node.requireds.each do |param|
-          name = required_name(param)
-          bindings[name] = positional_type_at(cursor) if name
+          bind_required_param(param, cursor, bindings)
           cursor += 1
         end
         cursor
@@ -150,18 +174,25 @@ module Rigor
 
       # Required parameters in a block list can be either a plain
       # `RequiredParameterNode` (named) or a `MultiTargetNode` (the
-      # `|(a, b), c|` destructuring form). The latter has no top-level
-      # name to bind, so the binder skips it; sub-phase 2 will recurse
-      # into the targets and bind each component.
-      def required_name(param)
-        return param.name if param.is_a?(Prism::RequiredParameterNode)
-
-        nil
+      # `|(a, b), c|` destructuring form). Slice 6 phase C sub-phase 2
+      # delegates the latter to {MultiTargetBinder}, which decomposes
+      # the slot's expected Tuple element-wise and binds every named
+      # inner local. Other shapes (anonymous required parameters,
+      # forward arguments) are silently skipped.
+      def bind_required_param(param, cursor, bindings)
+        case param
+        when Prism::RequiredParameterNode
+          bindings[param.name] = positional_type_at(cursor)
+        when Prism::MultiTargetNode
+          nested = MultiTargetBinder.bind(param, positional_type_at(cursor))
+          bindings.merge!(nested)
+        end
       end
 
       def positional_type_at(index)
         @expected_param_types[index] || Type::Combinator.untyped
       end
     end
+    # rubocop:enable Metrics/ClassLength
   end
 end

@@ -402,19 +402,22 @@ module Rigor
         [Type::Combinator.constant_of(node.name), scope]
       end
 
-      # `recv.foo(args) { |params| body }` and friends. The result
+      # `recv.foo(args) { |params| body }` and friends. The call
       # type comes from `Scope#type_of` (which routes through
-      # `MethodDispatcher`), exactly as it would for a CallNode the
-      # default branch handles. The handler exists to bind the block
-      # parameters into a fresh per-block scope before evaluating
-      # the block body, so the ScopeIndexer sees the entry scope of
-      # every node inside the block.
+      # `ExpressionTyper#call_type_for` and is itself block-aware
+      # since Slice 6 phase C sub-phase 2: it builds the block-entry
+      # scope from the receiving method's RBS signature, types the
+      # block body, and threads the body's type into
+      # `MethodDispatcher.dispatch`'s `block_type:` so generic
+      # methods like `Array#map { |n| n.to_s }` resolve to
+      # `Array[String]`).
       #
-      # Block effects do NOT leak into the post-call scope: Slice 6
-      # phase 1 keeps the block treatment conservative (a block-local
-      # write is observed only inside the block body). The receiver
-      # and arguments still observe the outer scope, matching Ruby
-      # evaluation order.
+      # The handler still re-evaluates the block under its entry
+      # scope so the per-node scope index sees the bindings on the
+      # `on_enter` callback path. Block effects do NOT leak into the
+      # post-call scope: a block-local write is observed only
+      # inside the block body. The receiver and arguments still
+      # observe the outer scope, matching Ruby evaluation order.
       def eval_call(node)
         call_type = scope.type_of(node, tracer: tracer)
         evaluate_block_if_present(node)

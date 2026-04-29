@@ -44,12 +44,15 @@ module Rigor
       #   `nil` for an implicit-self call.
       # @param method_name [Symbol]
       # @param arg_types [Array<Rigor::Type>] positional argument types.
-      # @param block_type [Rigor::Type, nil] reserved; ignored in Slice 4
-      #   phase 1.
+      # @param block_type [Rigor::Type, nil] inferred return type of the
+      #   accompanying `do ... end` / `{ ... }` block (Slice 6 phase C
+      #   sub-phase 2). When non-nil, the dispatcher prefers an
+      #   overload that declares a block, and binds the method's
+      #   block-return type variable to `block_type` so a return type
+      #   like `Array[U]` resolves to `Array[block_type]`.
       # @param environment [Rigor::Environment, nil] required for
       #   RBS-backed dispatch; when nil only constant folding can fire.
       # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
-      # rubocop:disable Lint/UnusedMethodArgument
       def dispatch(receiver_type:, method_name:, arg_types:, block_type: nil, environment: nil)
         return nil if receiver_type.nil?
 
@@ -71,10 +74,10 @@ module Rigor
           receiver: receiver_type,
           method_name: method_name,
           args: arg_types,
-          environment: environment
+          environment: environment,
+          block_type: block_type
         )
       end
-      # rubocop:enable Lint/UnusedMethodArgument
 
       # Returns the positional block parameter types declared by the
       # receiving method's selected RBS overload, translated into

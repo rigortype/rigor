@@ -696,6 +696,31 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "block return type uplift (Slice 6 phase C sub-phase 2)" do
+    it "infers Array[String] from `[1, 2, 3].map { |n| n.to_s }`" do
+      type, _post = evaluate("[1, 2, 3].map { |n| n.to_s }")
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Array")
+      expect(type.type_args.size).to eq(1)
+      expect(type.type_args.first).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    it "binds numbered-parameter receivers and threads the block return type" do
+      type, _post = evaluate("[1, 2, 3].map { _1 + 1 }")
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Array")
+      # `_1 + 1` collapses to Integer once the dispatcher projects
+      # the receiver union; the test asserts the projection survives
+      # through `Array#map`'s `U` binding.
+      expect(type.type_args.first).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "does not raise when the receiver is unknown and the block has named parameters" do
+      type, _post = evaluate("foo.map { |n| n.to_s }")
+      expect(type).to eq(Rigor::Type::Combinator.untyped)
+    end
+  end
+
   describe "downstream inference benefits" do
     it "lets methods on bound locals resolve through RBS" do
       type, _post = evaluate(<<~RUBY)

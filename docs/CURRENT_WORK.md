@@ -38,6 +38,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 6 phase C sub 1 | `13d587f` | BlockNode parameter binding (`Rigor::Inference::BlockParameterBinder`) |
 | Slice 6 phase 2 sub 1 | `37eb158` | Class-membership narrowing (`is_a?`/`kind_of?`/`instance_of?`) |
 | Slice 5 phase 2 sub 2 | `0164317` | Destructuring + multi-arg `dig` + `Hash#values_at` (`MultiTargetBinder`) |
+| Slice 6 phase C sub 2 | _pending_ | Destructuring blocks + numbered params + `block_type:` (`Array#map { ... }` → `Array[T]`) |
 
 ## What is in Place Today
 
@@ -82,12 +83,15 @@ normalisation and are the only sanctioned way to construct types.
   classes, modules, defs, singleton classes).
 - `MethodParameterBinder` — translates a `DefNode`'s parameter list into a
   binding map driven by the surrounding class's RBS signature.
-- `BlockParameterBinder` — Slice 6 phase C sub-phase 1 symmetric
-  counterpart for `Prism::BlockNode`. Consumes a per-position
-  `expected_param_types:` array (supplied by
+- `BlockParameterBinder` — Slice 6 phase C sub-phases 1 and 2
+  symmetric counterpart for `Prism::BlockNode`. Consumes a
+  per-position `expected_param_types:` array (supplied by
   `MethodDispatcher.expected_block_param_types`) and binds each
   named block parameter; rest / keyword-rest / `&blk` slots get
-  conservative typed defaults.
+  conservative typed defaults. Sub-phase 2 expands the binder to
+  destructure `MultiTargetNode` parameters (`|(a, b), c|`) through
+  `MultiTargetBinder` and to bind `_1`/`_2`/... reads from
+  `NumberedParametersNode`.
 - `MultiTargetBinder` — Slice 5 phase 2 sub-phase 2 destructuring
   binder shared between `StatementEvaluator#eval_multi_write` and
   the future block-target path. Decomposes a `Type::Tuple`
@@ -123,16 +127,13 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 674 examples, 0 failures (as of the Slice 5 phase 2 sub-phase 2 work).
+- **RSpec**: 681 examples, 0 failures (as of the Slice 6 phase C sub-phase 2 work).
 - **RuboCop**: pre-existing offences in `references/` submodules only;
   0 in Rigor product code.
-- **`rigor type-scan lib`**: 13.8 % unrecognised (2 380 / ~17 200 nodes).
-  The new `lib/rigor/inference/multi_target_binder.rb` file and the
-  expanded `shape_dispatch.rb` content add to the unrecognised
-  bucket (their `Rigor::*`/`Prism::*` constant references are not
-  yet covered by Rigor-side RBS) but the destructuring and chain
-  `dig` precision wins are concentrated on already-typed values
-  outside `lib/`.
+- **`rigor type-scan lib`**: ~13.8 % unrecognised. The block-return-type
+  uplift mostly affects user code that calls `Array#map`/`select`/
+  `flat_map` with literal blocks; `lib/` itself does not depend
+  heavily on this pattern, so the lib-side coverage stays nearly flat.
 - **`rigor type-of` smoke probe (DefNode binder)**:
   `class Integer; def divmod(other); other; end; end` — `other` reads as
   `Float | Integer | Numeric | Rational` inside the body.
@@ -152,6 +153,18 @@ normalisation and are the only sanctioned way to construct types.
   to the tuple element union and `Integer#succ` resolves through
   dispatch). Pre-binding `x` was unbound and `x.succ` fell through
   to `Dynamic[Top]`.
+- **`rigor type-of` smoke probe (Slice 6 phase C sub-phase 2
+  block-return-type uplift)**:
+  `[1, 2, 3].map { |n| n.to_s }` types as `Array[String]` (was
+  `Array[Dynamic[Top]]` projecting through `Array[Elem]`).
+  `[1, 2, 3].map { _1 + 1 }` types as `Array[Integer]` — the
+  numbered parameter binds to the projected element type, the
+  block returns `Integer`, and the dispatcher resolves
+  `Array#map`'s `U` to `Integer`. `pairs = [[1, "a"], [2, "b"]];
+  pairs.map { |(i, _)| i }` still collapses to `Array[Dynamic[Top]]`
+  because the block parameter slot is a `Union[Tuple, Tuple]`
+  rather than a single `Tuple`; that case waits on the
+  Union-aware destructuring follow-up.
 - **`rigor type-of` smoke probe (Slice 5 phase 2 sub-phase 2
   destructuring + chain dig)**:
   `pair = [10, 20]; a, b = pair; sum = a + b` — `sum` types as
@@ -269,32 +282,29 @@ reject extra keys.
   are in place; the policy field needs careful migration of every
   `HashShape.new` call site.
 
-### C. Slice 6 phase C sub-phase 2 — Destructuring blocks + block return type
+### C. Slice 6 phase C sub-phase 3 — Closure-captured-local invalidation
 
-Sub-phase 1 (this commit) ships block parameter binding for the
-flat-positional / rest / keyword catalogue, driven by the receiving
-method's RBS signature. Sub-phase 2:
+Sub-phase 1 shipped block parameter binding driven by the receiving
+method's RBS signature; sub-phase 2 (this commit) adds destructuring
+block targets (`|(a, b), c|`), numbered-parameter binding (`_1`,
+`_2`, ...), and the `block_type:` uplift so `Array#map { ... }`
+resolves the method-level type variable from the block's return
+type. Sub-phase 3 adds closure-captured-local invalidation: when a
+block escapes its enclosing scope (passed to a method that retains
+the closure, returned as a method value, ...) the analyzer MUST
+drop the narrowed type of every captured local at the call boundary
+so a subsequent read inside the closure observes the conservative
+type rather than a stale narrowed binding. This work waits on the
+Slice 6 phase 2 FactStore so the invalidation has a place to record
+the "escaped" capability fact.
 
-- Walks `MultiTargetNode` block targets (`|(a, b), c|`) and binds each
-  component element-wise from the expected parameter type (Tuple
-  destructuring projects to per-position members).
-- Wires numbered parameters (`_1`, `_2`, ...) so their reads see the
-  same types as the implicit positional bindings.
-- Threads the block's *return type* into `MethodDispatcher.dispatch`
-  through the reserved `block_type:` keyword so
-  `[1, 2, 3].map { |n| n.to_s }` types as `Array[String]` rather than
-  the projected `Array[Elem]`.
-- Adds closure-captured-local invalidation alongside the Slice 6
-  phase 2 FactStore work.
-
-- **type-scan impact**: small to medium — most blocks are flat
-  positionals already covered by sub-phase 1; sub-phase 2 mostly
-  improves the precision of receiver / Array / Enumerable-chained
-  receivers.
-- **engine impact**: medium — the block-return-type uplift is a
-  cross-cut between `MethodDispatcher` and `StatementEvaluator`.
-- **risk**: medium; closure invalidation needs careful interaction
-  with the FactStore.
+- **type-scan impact**: small on `lib/`; medium on user code that
+  relies on heavy block usage with locals captured from the
+  enclosing method.
+- **engine impact**: medium — needs a closure-escape detector and
+  a fact-store interaction to record the invalidation.
+- **risk**: medium; the invalidation must compose cleanly with the
+  Slice 6 phase 2 sub-phase 2 equality narrowing.
 
 ### D. Slice 6 phase 2 sub-phase 2 — Equality narrowing + FactStore
 
@@ -323,11 +333,12 @@ loader so offline analyses become deterministic.
 
 The user-priority ordering for this branch is **D → B → C → A**:
 Slice 6 phase 1 (the truthiness/`nil` half of D), Slice 5 phase 2
-sub-phase 1 (the dispatch half of B), Slice 6 phase C sub-phase 1
-(the block-parameter half of C), and Slice 6 phase 2 sub-phase 1
-(the class-membership half of D) are all already in. The next
-candidates are sub-phase 2 of B (destructuring + shape extras),
-sub-phase 2 of C (destructuring blocks + block return type), and
-sub-phase 2 of D (equality narrowing + the formal FactStore). A —
-authoring Rigor-side RBS for Rigor itself — remains the largest
-single lever for the `type-scan lib` metric.
+sub-phases 1 and 2 (the dispatch + destructuring halves of B), Slice 6
+phase C sub-phases 1 and 2 (the block-parameter + block-return-type
+halves of C), and Slice 6 phase 2 sub-phase 1 (the class-membership
+half of D) are all already in. The remaining sub-phases are sub-phase
+3 of B (range / start-length `[]` and the Rigor-extension hash-shape
+policies), sub-phase 3 of C (closure-captured-local invalidation,
+gated on the FactStore), and sub-phase 2 of D (equality narrowing +
+the formal FactStore). A — authoring Rigor-side RBS for Rigor itself
+— remains the largest single lever for the `type-scan lib` metric.

@@ -98,14 +98,16 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
       expect(bindings[:blk]).to eq(Rigor::Type::Combinator.nominal_of(Proc))
     end
 
-    it "skips MultiTargetNode destructuring slots (deferred)" do
+    it "binds MultiTargetNode block parameters with a non-Tuple slot to Dynamic[Top]" do
+      # When the slot expected type is not a Tuple, MultiTargetBinder
+      # falls back to Dynamic[Top] for every inner local. The outer
+      # `c` still binds to its slot type.
       block = parse_block("foo { |(a, b), c| c }")
       bindings = described_class.new(
         expected_param_types: [integer_nominal, string_nominal]
       ).bind(block)
-      # Only the second slot has a top-level name; the destructured
-      # tuple slot defers until sub-phase 2.
-      expect(bindings).to eq(c: string_nominal)
+      dyn = Rigor::Type::Combinator.untyped
+      expect(bindings).to eq(a: dyn, b: dyn, c: string_nominal)
     end
 
     it "binds trailing positionals" do
@@ -116,13 +118,45 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
       expect(bindings).to eq(a: integer_nominal, b: string_nominal, c: integer_nominal)
     end
 
-    it "treats numbered-block parameters as no named bindings" do
-      # `_1` is implicit and exposed as a NumberedParametersNode rather
-      # than a BlockParametersNode; we deliberately bind nothing.
+    it "binds numbered-block parameters from NumberedParametersNode" do
+      # `_1` is implicit; Slice 6 phase C sub-phase 2 binds it from
+      # the per-position expected_param_types array, just like an
+      # explicit `|x|` would.
       block = parse_block("foo { _1.succ }")
       expect(block.parameters).to be_a(Prism::NumberedParametersNode)
       bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)
-      expect(bindings).to eq({})
+      expect(bindings).to eq(_1: integer_nominal)
+    end
+
+    it "binds multiple numbered-block parameters up to the body's maximum" do
+      block = parse_block("foo { _1 + _2 }")
+      bindings = described_class.new(
+        expected_param_types: [integer_nominal, integer_nominal]
+      ).bind(block)
+      expect(bindings).to eq(_1: integer_nominal, _2: integer_nominal)
+    end
+
+    it "defaults missing numbered slots to Dynamic[Top]" do
+      block = parse_block("foo { _1 + _2 }")
+      bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)
+      expect(bindings[:_1]).to eq(integer_nominal)
+      expect(bindings[:_2]).to eq(Rigor::Type::Combinator.untyped)
+    end
+
+    it "destructures MultiTargetNode block parameters element-wise from a Tuple" do
+      block = parse_block("foo { |(a, b), c| a }")
+      tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+      bindings = described_class.new(
+        expected_param_types: [tuple, integer_nominal]
+      ).bind(block)
+      expect(bindings).to eq(a: integer_nominal, b: string_nominal, c: integer_nominal)
+    end
+
+    it "falls back to Dynamic[Top] for MultiTargetNode slots when the slot is not a Tuple" do
+      block = parse_block("foo { |(a, b)| a }")
+      bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)
+      dyn = Rigor::Type::Combinator.untyped
+      expect(bindings).to eq(a: dyn, b: dyn)
     end
   end
 end

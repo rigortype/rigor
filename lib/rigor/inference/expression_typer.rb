@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "../ast"
+require_relative "block_parameter_binder"
 require_relative "fallback"
 require_relative "method_dispatcher"
 
@@ -628,11 +629,13 @@ module Rigor
       def call_type_for(node)
         receiver = node.receiver ? type_of(node.receiver) : nil
         arg_types = call_arg_types(node)
+        block_type = block_return_type_for(node, receiver, arg_types)
 
         result = MethodDispatcher.dispatch(
           receiver_type: receiver,
           method_name: node.name,
           arg_types: arg_types,
+          block_type: block_type,
           environment: scope.environment
         )
         return result if result
@@ -652,6 +655,42 @@ module Rigor
         return [] if arguments_node.nil?
 
         arguments_node.arguments.map { |argument| type_of(argument) }
+      end
+
+      # When the call carries a `Prism::BlockNode`, build the block's
+      # entry scope (outer locals plus parameter bindings driven by
+      # the receiving method's RBS signature), type the block body
+      # under that scope, and return the body's value type. The
+      # result feeds `MethodDispatcher.dispatch`'s `block_type:` so
+      # generic methods like `Array#map[U] { (Elem) -> U } -> Array[U]`
+      # resolve `U` to the block's return type. Returns `nil` when
+      # the call has no block, when the receiver is unknown, or
+      # when typing the body raises (defensive against malformed
+      # subtrees); the dispatcher then runs in its no-block-aware
+      # path.
+      def block_return_type_for(call_node, receiver_type, arg_types)
+        block_node = call_node.block
+        return nil unless block_node.is_a?(Prism::BlockNode)
+        return nil if receiver_type.nil?
+
+        expected = MethodDispatcher.expected_block_param_types(
+          receiver_type: receiver_type,
+          method_name: call_node.name,
+          arg_types: arg_types,
+          environment: scope.environment
+        )
+        bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_node)
+        block_scope = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        type_block_body(block_node, block_scope)
+      rescue StandardError
+        nil
+      end
+
+      def type_block_body(block_node, block_scope)
+        body = block_node.body
+        return Type::Combinator.constant_of(nil) if body.nil?
+
+        block_scope.type_of(body)
       end
     end
     # rubocop:enable Metrics/ClassLength

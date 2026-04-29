@@ -33,8 +33,8 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 3 phase 2 | `aed00d0` | `StatementEvaluator` threading scope across statements |
 | Slice 3 phase 2 (CLI) | `84f2b01` | `type-of` and `type-scan` route through `ScopeIndexer` |
 | Slice 3 phase 2 (DefNode) | `fe2fe7e` | DefNode-aware scope builder (`MethodParameterBinder`) |
-| Slice 6 phase 1 | `f5f75f1` | Truthiness and `nil?` narrowing on `IfNode`/`UnlessNode` (`Rigor::Inference::Narrowing`) |
-| Slice 5 phase 2 sub 1 | `8241ed7` | Shape-aware element dispatch (`Rigor::Inference::MethodDispatcher::ShapeDispatch`) |
+| Slice 6 phase 1 | `6807a94` | Truthiness and `nil?` narrowing on `IfNode`/`UnlessNode` (`Rigor::Inference::Narrowing`) |
+| Slice 5 phase 2 sub 1 | `04d112a` | Shape-aware element dispatch (`Rigor::Inference::MethodDispatcher::ShapeDispatch`) |
 | Slice 6 phase C sub 1 | `23a8332` | BlockNode parameter binding (`Rigor::Inference::BlockParameterBinder`) |
 
 ## What is in Place Today

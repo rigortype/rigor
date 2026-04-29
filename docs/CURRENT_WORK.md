@@ -44,6 +44,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 6 phase C sub 3a | `22c0a77` | `ClosureEscapeAnalyzer` + non-escaping/escaping core catalogue (pure query, no wiring yet) |
 | Slice 6 phase C sub 3b | `54c9dcc` | `StatementEvaluator#eval_call` records `dynamic_origin` `closure_escape` facts on `:escaping` / `:unknown` block calls |
 | Slice 6 phase C sub 3c | `8008020` | Drop narrowed type of captured-outer locals the block can rebind on `:escaping` / `:unknown` block calls |
+| Slice A pass 1 | `295b6ae` | Author Rigor-side RBS for Type/Trinary/Scope/Environment/Analysis::FactStore/Inference/Source/AST |
 
 ## What is in Place Today
 
@@ -185,10 +186,20 @@ normalisation and are the only sanctioned way to construct types.
 - **RuboCop**: `make lint` is clean. `.rubocop.yml` excludes the whole
   `references/` tree so upstream submodules are not linted as Rigor
   product code.
-- **`rigor type-scan lib`**: ~13.8 % unrecognised. The block-return-type
-  uplift mostly affects user code that calls `Array#map`/`select`/
-  `flat_map` with literal blocks; `lib/` itself does not depend
-  heavily on this pattern, so the lib-side coverage stays nearly flat.
+- **`rigor type-scan lib`**: ~13.7 % unrecognised after Slice A
+  pass 1 (Rigor self-RBS), down from ~13.8 % at `d1c6ba2`. The
+  bulk of remaining unrecognised CallNodes are module-declaration
+  intrinsics (`require_relative` 128, `raise` 37, `private` 33,
+  `attr_reader` 20, `private_constant` 14, `module_function`
+  12, `freeze` 12) and reads on parameter receivers whose
+  declared type is still `Dynamic[Top]` because the surrounding
+  `def` has no Rigor-internal RBS signature
+  (`scope.X` 83, `other.X` 25, `node.X` 15, ...). Class-reference
+  resolution does land — `Rigor::Type::Combinator.constant_of(1)`
+  now infers as `Rigor::Type::Constant` — so the structural
+  surface is in place; the metric will not move further until
+  Rigor itself ships per-method RBS signatures or `def`-parameter
+  inference is strengthened.
 - **`rigor type-of` smoke probe (DefNode binder)**:
   `class Integer; def divmod(other); other; end; end` — `other` reads as
   `Float | Integer | Numeric | Rational` inside the body.
@@ -321,17 +332,29 @@ RBS authoring for the largest `type-scan lib` metric win.
 
 ### A. Author Rigor-side RBS for Rigor itself
 
-Write `sig/rigor/**/*.rbs` for the public surface of `Rigor::Type::*`,
-`Rigor::Trinary`, `Rigor::Inference::*`, `Rigor::Environment`, etc. The
-project loader (Slice 4 phase 2a) already picks `sig/` up automatically.
+Pass 1 (working tree) authors class-level RBS for `Rigor::Type::*`,
+`Rigor::Trinary`, `Rigor::Scope`, `Rigor::Environment` (incl.
+`ClassRegistry`/`RbsLoader`/`RbsHierarchy`),
+`Rigor::Analysis::FactStore`, `Rigor::Inference::*`,
+`Rigor::Source::*`, and `Rigor::AST::*`. Class references such as
+`Rigor::Type::Combinator` now resolve to a `Singleton[T]` and
+`Type::Combinator.constant_of(1)` types as `Rigor::Type::Constant`.
 
-- **type-scan impact**: high — every unrecognised
-  `ConstantReadNode`/`ConstantPathNode`/`CallNode` against a `Rigor::*`
-  receiver would resolve. Plausible to push `lib/` from 13.47 % to single
-  digits.
-- **engine impact**: low (no new code paths) but big precision wins for
-  any future analysis on Rigor itself.
-- **risk**: documentation-flavoured work, mostly mechanical.
+- **type-scan impact (observed)**: small — `lib/` moved from
+  13.8 % to 13.7 % unrecognised. The remainder is dominated by
+  module-declaration intrinsics (`require_relative`, `raise`,
+  `private`, `attr_reader`, `private_constant`,
+  `module_function`, `freeze`) and method-parameter receivers
+  whose declared type is `Dynamic[Top]` because the surrounding
+  `def` has no per-method RBS signature.
+- **engine impact**: structural — the canonical Rigor surface is
+  now visible to the analyzer, unblocking deeper Rigor-on-Rigor
+  analysis.
+- **next pass**: write per-method RBS overloads for the heavy
+  internal call sites (Scope/Type/Combinator/Inference) so the
+  parameter binder can lift `scope`/`other`/`node`/`arg` reads
+  off `Dynamic[Top]`, OR strengthen `def`-parameter inference
+  beyond the current RBS-class-only path.
 
 ### B. Completed in working tree — Slice 5 phase 2 sub-phase 3
 

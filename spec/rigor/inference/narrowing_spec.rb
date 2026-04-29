@@ -252,4 +252,179 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey).to eq(scope)
     end
   end
+
+  describe ".narrow_class (Slice 6 phase 2 sub-phase 1)" do
+    let(:numeric_nominal) { Rigor::Type::Combinator.nominal_of("Numeric") }
+
+    it "preserves Constant[v] when v.class is the asked class" do
+      expect(described_class.narrow_class(integer_one, "Integer")).to eq(integer_one)
+    end
+
+    it "preserves Constant[v] when v.class is a subclass of the asked class" do
+      # Integer < Numeric; `1.is_a?(Numeric)` is true.
+      expect(described_class.narrow_class(integer_one, "Numeric")).to eq(integer_one)
+    end
+
+    it "rejects Constant[v] when v.class is unrelated to the asked class" do
+      expect(described_class.narrow_class(integer_one, "String")).to eq(Rigor::Type::Combinator.bot)
+    end
+
+    it "preserves Nominal[C] when C matches the asked class" do
+      expect(described_class.narrow_class(integer_nominal, "Integer")).to eq(integer_nominal)
+    end
+
+    it "preserves Nominal[Integer] under is_a?(Numeric)" do
+      expect(described_class.narrow_class(integer_nominal, "Numeric")).to eq(integer_nominal)
+    end
+
+    it "narrows Nominal[Numeric] under is_a?(Integer) DOWN to Nominal[Integer]" do
+      expect(described_class.narrow_class(numeric_nominal, "Integer")).to eq(integer_nominal)
+    end
+
+    it "rejects Nominal[String] under is_a?(Integer)" do
+      expect(described_class.narrow_class(string_nominal, "Integer")).to eq(Rigor::Type::Combinator.bot)
+    end
+
+    it "narrows Union element-wise, dropping disjoint members" do
+      union = Rigor::Type::Combinator.union(integer_nominal, string_nominal)
+      result = described_class.narrow_class(union, "Integer")
+      expect(result).to eq(integer_nominal)
+    end
+
+    it "narrows Top to Nominal[asked class]" do
+      expect(described_class.narrow_class(Rigor::Type::Combinator.top, "Integer")).to eq(integer_nominal)
+    end
+
+    it "narrows Dynamic[Top] to Nominal[asked class]" do
+      expect(described_class.narrow_class(Rigor::Type::Combinator.untyped, "Integer")).to eq(integer_nominal)
+    end
+
+    it "preserves Tuple under is_a?(Array)" do
+      tuple = Rigor::Type::Combinator.tuple_of(integer_nominal)
+      expect(described_class.narrow_class(tuple, "Array")).to eq(tuple)
+    end
+
+    it "rejects Tuple under is_a?(Hash)" do
+      tuple = Rigor::Type::Combinator.tuple_of(integer_nominal)
+      expect(described_class.narrow_class(tuple, "Hash")).to eq(Rigor::Type::Combinator.bot)
+    end
+
+    it "uses exact equality under instance_of?" do
+      # `Integer.new(...).instance_of?(Numeric)` is FALSE in Ruby
+      # (instance_of? is exact, not inclusive of subclasses).
+      expect(described_class.narrow_class(integer_nominal, "Numeric", exact: true)).to eq(Rigor::Type::Combinator.bot)
+    end
+
+    it "preserves Nominal[C] under instance_of?(C) when names match exactly" do
+      expect(described_class.narrow_class(integer_nominal, "Integer", exact: true)).to eq(integer_nominal)
+    end
+
+    it "leaves the type unchanged when the asked class is unknown to the host Ruby" do
+      # `Foo::Bar` is not defined in the test environment, so the
+      # ordering check returns `:unknown` and we stay conservative.
+      expect(described_class.narrow_class(integer_nominal, "Foo::Bar")).to eq(integer_nominal)
+    end
+  end
+
+  describe ".narrow_not_class (Slice 6 phase 2 sub-phase 1)" do
+    it "rejects Constant whose class is the asked class (or its subclass)" do
+      expect(described_class.narrow_not_class(integer_one, "Integer")).to eq(Rigor::Type::Combinator.bot)
+      expect(described_class.narrow_not_class(integer_one, "Numeric")).to eq(Rigor::Type::Combinator.bot)
+    end
+
+    it "preserves Constant whose class is unrelated to the asked class" do
+      expect(described_class.narrow_not_class(integer_one, "String")).to eq(integer_one)
+    end
+
+    it "rejects Nominal that already matches the asked class" do
+      expect(described_class.narrow_not_class(integer_nominal, "Integer")).to eq(Rigor::Type::Combinator.bot)
+    end
+
+    it "preserves Nominal[Numeric] under !is_a?(Integer)" do
+      # The narrower cannot prove a Numeric is NOT an Integer, so it
+      # stays conservative and preserves the type.
+      numeric = Rigor::Type::Combinator.nominal_of("Numeric")
+      expect(described_class.narrow_not_class(numeric, "Integer")).to eq(numeric)
+    end
+
+    it "removes only the matching union member" do
+      union = Rigor::Type::Combinator.union(integer_nominal, string_nominal)
+      result = described_class.narrow_not_class(union, "Integer")
+      expect(result).to eq(string_nominal)
+    end
+
+    it "preserves Constant under instance_of? when v.class is a subclass of the asked class but not equal" do
+      # `1.instance_of?(Numeric)` is FALSE, so the falsey edge KEEPS
+      # Constant[1] (it does not satisfy the predicate, so it
+      # belongs to the not-class fragment).
+      expect(described_class.narrow_not_class(integer_one, "Numeric", exact: true)).to eq(integer_one)
+    end
+  end
+
+  describe "class-membership predicate narrowing through predicate_scopes" do
+    let(:union_int_str) { Rigor::Type::Combinator.union(integer_nominal, string_nominal) }
+
+    it "narrows x.is_a?(Integer) on a Union[Integer, String]" do
+      bound = scope.with_local(:x, union_int_str)
+      pred = parse_predicate("x.is_a?(Integer)")
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:x)).to eq(integer_nominal)
+      expect(falsey.local(:x)).to eq(string_nominal)
+    end
+
+    it "treats kind_of? identically to is_a?" do
+      bound = scope.with_local(:x, union_int_str)
+      pred = parse_predicate("x.kind_of?(String)")
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:x)).to eq(string_nominal)
+      expect(falsey.local(:x)).to eq(integer_nominal)
+    end
+
+    it "uses exact matching for instance_of?" do
+      numeric = Rigor::Type::Combinator.nominal_of("Numeric")
+      bound = scope.with_local(:x, numeric)
+      # `Numeric#instance_of?(Numeric)` could be true (a literal
+      # Numeric instance) but `instance_of?(Integer)` requires the
+      # class to be exactly Integer. Under exact matching the
+      # truthy edge therefore collapses (we cannot prove it is
+      # Integer-exact from a Nominal[Numeric] alone).
+      pred = parse_predicate("x.instance_of?(Integer)")
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.bot)
+      expect(falsey.local(:x)).to eq(numeric)
+    end
+
+    it "narrows nested constants like x.is_a?(::String)" do
+      bound = scope.with_local(:x, union_int_str)
+      pred = parse_predicate("x.is_a?(::String)")
+      truthy, _falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:x)).to eq(string_nominal)
+    end
+
+    it "falls through when the receiver is not a local" do
+      pred = parse_predicate("foo.is_a?(Integer)")
+      truthy, falsey = described_class.predicate_scopes(pred, scope)
+      expect(truthy).to eq(scope)
+      expect(falsey).to eq(scope)
+    end
+
+    it "falls through when the argument is not a static constant" do
+      bound = scope.with_local(:x, union_int_str)
+      bound = bound.with_local(:y, integer_nominal)
+      pred = parse_predicate("x.is_a?(y)")
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:x)).to eq(union_int_str)
+      expect(falsey.local(:x)).to eq(union_int_str)
+    end
+
+    it "composes with the unary `!` inverter" do
+      bound = scope.with_local(:x, union_int_str)
+      pred = parse_predicate("!x.is_a?(Integer)")
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      # `!x.is_a?(Integer)` is true exactly when x is not an Integer,
+      # so the truthy edge is the falsey edge of `x.is_a?(Integer)`.
+      expect(truthy.local(:x)).to eq(string_nominal)
+      expect(falsey.local(:x)).to eq(integer_nominal)
+    end
+  end
 end

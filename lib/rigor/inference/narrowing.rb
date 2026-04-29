@@ -26,9 +26,12 @@ module Rigor
     # Predicate-level narrowing is consumed by
     # `Rigor::Inference::StatementEvaluator` to refine the `then` and
     # `else` scopes of `IfNode`/`UnlessNode`. Phase 1 narrows local
-    # bindings only; class-membership predicates (`is_a?`, `kind_of?`,
-    # `instance_of?`), equality narrowing, and ivar/cvar narrowing are
-    # deferred to a follow-up.
+    # bindings on truthiness and `nil?`; phase 2 sub-phase 1 extends
+    # the catalogue with class-membership predicates (`is_a?`,
+    # `kind_of?`, `instance_of?`) when the argument is a static
+    # constant reference. Equality narrowing, ivar/cvar narrowing,
+    # and the formal `Rigor::Analysis::FactStore` are still deferred
+    # to phase 2 sub-phase 2+.
     #
     # The module is pure: every public function returns fresh values and
     # MUST NOT mutate its inputs. Unrecognised predicate shapes degrade
@@ -112,6 +115,36 @@ module Rigor
         end
       end
 
+      # Class-membership fragment of `type`: the subset whose
+      # inhabitants are instances of `class_name` (or its subclasses
+      # when `exact: false`). `class_name` is the qualified name of
+      # the class as it appears in source (`"Integer"`, `"Foo::Bar"`).
+      # Slice 6 phase 2 sub-phase 1 narrows the `if x.is_a?(C)`
+      # / `if x.kind_of?(C)` / `if x.instance_of?(C)` truthy edge.
+      #
+      # Nominal narrowing is hierarchy-aware via Ruby's runtime
+      # `<=` operator on `Class` objects: when the bound type is a
+      # supertype of `class_name` the result narrows DOWN to
+      # `Nominal[class_name]` (e.g., `Numeric & Integer = Integer`);
+      # when the bound type is already a subtype it is preserved;
+      # disjoint hierarchies collapse to `Bot`. Classes the host
+      # Ruby cannot resolve (`Object.const_get` fails) fall back to
+      # the conservative answer (the type unchanged) so the
+      # analyzer never asserts narrowing it cannot prove.
+      def narrow_class(type, class_name, exact: false)
+        narrow_class_dispatch(type, class_name, exact: exact, polarity: :positive)
+      end
+
+      # Mirror of {.narrow_class} for the falsey edge of
+      # `is_a?`/`kind_of?`/`instance_of?`. Inhabitants that DO
+      # satisfy the predicate are removed; inhabitants that do not
+      # are preserved. Conservative on Top/Dynamic/Bot (preserved
+      # unchanged) because the analyzer cannot prove the negative
+      # without a richer carrier.
+      def narrow_not_class(type, class_name, exact: false)
+        narrow_class_dispatch(type, class_name, exact: exact, polarity: :negative)
+      end
+
       # Public predicate analyser. Returns `[truthy_scope, falsey_scope]`,
       # always; when no narrowing rule matches the predicate node both
       # entries are the receiver scope unchanged.
@@ -147,6 +180,7 @@ module Rigor
         end
       end
 
+      # rubocop:disable Metrics/ClassLength
       class << self
         private
 
@@ -213,16 +247,33 @@ module Rigor
           ]
         end
 
-        # Recognised CallNode predicates in phase 1: `recv.nil?` (no
-        # args, no block) and the unary `!recv` (which is a CallNode
-        # in Prism with `name == :!`). Anything else returns nil so
-        # the surrounding analyser falls through.
+        # Recognised CallNode predicates:
+        # - `recv.nil?` (Slice 6 phase 1, no args, no block)
+        # - unary `!recv` (`name == :!`, no args, no block)
+        # - `recv.is_a?(C)` / `recv.kind_of?(C)` / `recv.instance_of?(C)`
+        #   with a single static-constant argument and no block
+        #   (Slice 6 phase 2 sub-phase 1).
+        # Anything else returns nil so the surrounding analyser falls
+        # through to the no-narrowing fallback.
         def analyse_call(node, scope)
-          return nil unless argument_free?(node)
           return nil if node.block
           return nil if node.receiver.nil?
 
-          case node.name
+          dispatch_call(node, scope, node.name)
+        end
+
+        def dispatch_call(node, scope, name)
+          case name
+          when :nil?, :! then dispatch_unary_predicate(node, scope, name)
+          when :is_a?, :kind_of? then analyse_class_predicate(node, scope, exact: false)
+          when :instance_of? then analyse_class_predicate(node, scope, exact: true)
+          end
+        end
+
+        def dispatch_unary_predicate(node, scope, name)
+          return nil unless argument_free?(node)
+
+          case name
           when :nil? then analyse_nil_predicate(node.receiver, scope)
           when :! then analyse(node.receiver, scope)&.reverse
           end
@@ -230,6 +281,218 @@ module Rigor
 
         def argument_free?(node)
           node.arguments.nil? || node.arguments.arguments.empty?
+        end
+
+        # `recv.is_a?(C)` / `recv.kind_of?(C)` / `recv.instance_of?(C)`
+        # narrowing. The receiver MUST be a `LocalVariableReadNode`
+        # (so we have a name to rebind), and the argument MUST be a
+        # single static constant reference (`Foo` or `Foo::Bar`) we
+        # can resolve to a qualified class name. Anything else falls
+        # through to "no narrowing".
+        def analyse_class_predicate(node, scope, exact:)
+          return nil unless node.receiver.is_a?(Prism::LocalVariableReadNode)
+          return nil if node.arguments.nil?
+          return nil unless node.arguments.arguments.size == 1
+
+          class_name = static_class_name(node.arguments.arguments.first)
+          return nil if class_name.nil?
+
+          current = scope.local(node.receiver.name)
+          return nil if current.nil?
+
+          [
+            scope.with_local(node.receiver.name, narrow_class(current, class_name, exact: exact)),
+            scope.with_local(node.receiver.name, narrow_not_class(current, class_name, exact: exact))
+          ]
+        end
+
+        # Walks a constant-reference subtree (`Prism::ConstantReadNode`,
+        # `Prism::ConstantPathNode`) and renders its qualified name.
+        # Returns nil for any non-constant argument shape so the
+        # caller can fall through.
+        def static_class_name(node)
+          case node
+          when Prism::ConstantReadNode
+            node.name.to_s
+          when Prism::ConstantPathNode
+            parent = node.parent
+            return node.name.to_s if parent.nil?
+
+            parent_name = static_class_name(parent)
+            return nil if parent_name.nil?
+
+            "#{parent_name}::#{node.name}"
+          end
+        end
+
+        # ----- narrow_class / narrow_not_class helpers -----
+
+        # Polarity-aware dispatch table for {.narrow_class} /
+        # {.narrow_not_class}. Avoids duplicating the per-carrier
+        # case statement and keeps each public surface a thin
+        # delegate; the per-carrier helpers know which polarity to
+        # apply by looking at `polarity:`.
+        def narrow_class_dispatch(type, class_name, exact:, polarity:)
+          case type
+          when Type::Constant then narrow_constant_class(type, class_name, exact: exact, polarity: polarity)
+          when Type::Nominal then narrow_nominal_class(type, class_name, exact: exact, polarity: polarity)
+          when Type::Union then narrow_union_class(type, class_name, exact: exact, polarity: polarity)
+          when Type::Tuple then narrow_shape_class(type, "Array", class_name, exact: exact, polarity: polarity)
+          when Type::HashShape then narrow_shape_class(type, "Hash", class_name, exact: exact, polarity: polarity)
+          when Type::Singleton then narrow_singleton_class(type, class_name, exact: exact, polarity: polarity)
+          else narrow_other_class(type, class_name, polarity: polarity)
+          end
+        end
+
+        def narrow_constant_class(constant, class_name, exact:, polarity:)
+          if polarity == :positive
+            narrow_constant_to_class(constant, class_name, exact: exact)
+          else
+            narrow_constant_not_class(constant, class_name, exact: exact)
+          end
+        end
+
+        def narrow_nominal_class(nominal, class_name, exact:, polarity:)
+          if polarity == :positive
+            narrow_nominal_to_class(nominal, class_name, exact: exact)
+          else
+            narrow_nominal_not_class(nominal, class_name, exact: exact)
+          end
+        end
+
+        def narrow_union_class(union, class_name, exact:, polarity:)
+          Type::Combinator.union(
+            *union.members.map { |m| narrow_class_dispatch(m, class_name, exact: exact, polarity: polarity) }
+          )
+        end
+
+        def narrow_shape_class(shape, projected_class, class_name, exact:, polarity:)
+          if polarity == :positive
+            narrow_shape_to_class(shape, projected_class, class_name, exact: exact)
+          else
+            narrow_shape_not_class(shape, projected_class, class_name, exact: exact)
+          end
+        end
+
+        def narrow_singleton_class(singleton, class_name, exact:, polarity:)
+          if polarity == :positive
+            narrow_singleton_to_class(singleton, class_name, exact: exact)
+          else
+            narrow_singleton_not_class(singleton, class_name, exact: exact)
+          end
+        end
+
+        def narrow_other_class(type, class_name, polarity:)
+          polarity == :positive ? narrow_class_other(type, class_name) : type
+        end
+
+        def narrow_constant_to_class(constant, class_name, exact:)
+          rigor_class = constant.value.class.name
+          subclass_of?(rigor_class, class_name, exact: exact) ? constant : Type::Combinator.bot
+        end
+
+        def narrow_constant_not_class(constant, class_name, exact:)
+          rigor_class = constant.value.class.name
+          subclass_of?(rigor_class, class_name, exact: exact) ? Type::Combinator.bot : constant
+        end
+
+        # Narrow a Nominal under `is_a?(class_name)`: when the
+        # nominal's class is already a subclass of `class_name`
+        # (or matches under `exact: true`) preserve it; when
+        # `class_name` is a subclass of the nominal's class
+        # (`Nominal[Numeric]` under `is_a?(Integer)`) narrow DOWN
+        # to `Nominal[class_name]`; otherwise (disjoint hierarchies
+        # under `is_a?`, mismatch under `instance_of?`) collapse to
+        # `Bot`. Conservative when the host Ruby cannot resolve
+        # either class.
+        def narrow_nominal_to_class(nominal, class_name, exact:)
+          return nominal if nominal.class_name == class_name
+          return Type::Combinator.bot if exact
+
+          case class_ordering(nominal.class_name, class_name)
+          when :superclass then Type::Combinator.nominal_of(class_name)
+          when :disjoint then Type::Combinator.bot
+          else nominal # :subclass preserves the bound; :unknown stays conservative
+          end
+        end
+
+        def narrow_nominal_not_class(nominal, class_name, exact:)
+          return Type::Combinator.bot if nominal.class_name == class_name
+          return nominal if exact
+
+          ordering = class_ordering(nominal.class_name, class_name)
+          case ordering
+          when :subclass then Type::Combinator.bot
+          else nominal
+          end
+        end
+
+        def narrow_shape_to_class(shape, projected_class, class_name, exact:)
+          subclass_of?(projected_class, class_name, exact: exact) ? shape : Type::Combinator.bot
+        end
+
+        def narrow_shape_not_class(shape, projected_class, class_name, exact:)
+          subclass_of?(projected_class, class_name, exact: exact) ? Type::Combinator.bot : shape
+        end
+
+        # `Singleton[Foo]` is the *class object* `Foo`, an instance of
+        # `Class` (which is a subclass of `Module`). Asking
+        # `Foo.is_a?(Class)` returns true; `Foo.is_a?(Foo)` returns
+        # false unless `Foo` is `Class` itself. We approximate this
+        # by treating singletons uniformly as `Class` instances.
+        def narrow_singleton_to_class(singleton, class_name, exact:)
+          subclass_of?("Class", class_name, exact: exact) ? singleton : Type::Combinator.bot
+        end
+
+        def narrow_singleton_not_class(singleton, class_name, exact:)
+          subclass_of?("Class", class_name, exact: exact) ? Type::Combinator.bot : singleton
+        end
+
+        # Top/Dynamic narrow to `Nominal[class_name]` so dispatch
+        # can resolve through the asked class; Bot stays Bot.
+        def narrow_class_other(type, class_name)
+          case type
+          when Type::Dynamic, Type::Top then Type::Combinator.nominal_of(class_name)
+          else type
+          end
+        end
+
+        # Returns `true` when an instance of `rigor_class_name`
+        # satisfies `is_a?(target_class_name)` (or
+        # `instance_of?(target_class_name)` when `exact: true`).
+        # Falls back to the safe `false` when either name does not
+        # resolve to a host-Ruby class.
+        def subclass_of?(rigor_class_name, target_class_name, exact:)
+          return rigor_class_name == target_class_name if exact
+
+          %i[subclass equal].include?(class_ordering(rigor_class_name, target_class_name))
+        end
+
+        # Compares two class names through the host Ruby's class
+        # hierarchy. Returns `:equal` when they resolve to the same
+        # class, `:subclass` when `lhs <= rhs`, `:superclass` when
+        # `rhs <= lhs`, `:disjoint` when neither, and `:unknown` when
+        # either name does not resolve.
+        def class_ordering(lhs, rhs)
+          return :equal if lhs == rhs
+
+          klass_a = safe_const_get(lhs)
+          klass_b = safe_const_get(rhs)
+          return :unknown if klass_a.nil? || klass_b.nil?
+
+          if klass_a <= klass_b
+            klass_a == klass_b ? :equal : :subclass
+          elsif klass_b <= klass_a
+            :superclass
+          else
+            :disjoint
+          end
+        end
+
+        def safe_const_get(name)
+          Object.const_get(name)
+        rescue NameError, ArgumentError
+          nil
         end
 
         def analyse_nil_predicate(receiver, scope)
@@ -267,6 +530,7 @@ module Rigor
           [truthy_a.join(truthy_b), falsey_b]
         end
       end
+      # rubocop:enable Metrics/ClassLength
     end
     # rubocop:enable Metrics/ModuleLength
   end

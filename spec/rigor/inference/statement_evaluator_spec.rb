@@ -583,6 +583,50 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         Rigor::Type::Combinator.constant_of(0)
       )
     end
+
+    it "narrows is_a?(C) on a Union[Integer, String] in the then branch" do
+      union_int_str = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("Integer"),
+        Rigor::Type::Combinator.nominal_of("String")
+      )
+      bound = scope.with_local(:x, union_int_str)
+      ast = parse_with_locals("if x.is_a?(Integer); x; else; x; end")
+      events, on_enter = watch_local_reads(:x)
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+      # The predicate receiver is typed by ExpressionTyper directly
+      # and is not surfaced through `on_enter`. Only the two
+      # body-position reads of `x` are observed here.
+      expect(events.size).to eq(2)
+      then_read, else_read = events
+      expect(then_read).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(else_read).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    it "narrows Numeric DOWN to Integer under is_a?(Integer)" do
+      bound = scope.with_local(:x, Rigor::Type::Combinator.nominal_of("Numeric"))
+      ast = parse_with_locals("if x.is_a?(Integer); x; else; x; end")
+      events, on_enter = watch_local_reads(:x)
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+      then_read, else_read = events
+      expect(then_read).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      # The else edge cannot prove "Numeric is not an Integer", so it
+      # stays conservative and preserves Nominal[Numeric].
+      expect(else_read).to eq(Rigor::Type::Combinator.nominal_of("Numeric"))
+    end
+
+    it "treats `unless x.is_a?(Integer)` as a swap of the truthy/falsey edges" do
+      union_int_str = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("Integer"),
+        Rigor::Type::Combinator.nominal_of("String")
+      )
+      bound = scope.with_local(:x, union_int_str)
+      ast = parse_with_locals("unless x.is_a?(Integer); x; else; x; end")
+      events, on_enter = watch_local_reads(:x)
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+      then_read, else_read = events
+      expect(then_read).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      expect(else_read).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
   end
 
   describe "downstream inference benefits" do

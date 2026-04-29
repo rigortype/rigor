@@ -294,9 +294,9 @@ Slice 3 phase 2 does NOT thread scope through the *interior* of arbitrary expres
 
 Slice 3 phase 2 narrowly limits the *expressivity* of the parameter binding too: the binder picks the union across overloads at each slot, but does NOT yet refine the binding by argument-call-site type the way `MethodDispatcher::OverloadSelector` does for return types. RBS interface types (`int`, `_ToS`, ...) and aliases still degrade to `Dynamic[Top]` through the existing `RbsTypeTranslator` translator, so `def first(n)` redefinitions where the only overload's parameter is `int` MUST observably bind `n` to `Dynamic[Top]`. This matches the existing translator's gradual-typing posture.
 
-## Narrowing (Slice 6 phase 1)
+## Narrowing (Slice 6 phases 1 and 2 sub-phase 1)
 
-Slice 6 phase 1 adds the first edge-aware refinement surface to the engine. It is exposed through `Rigor::Inference::Narrowing`, a pure module consumed by `Rigor::Inference::StatementEvaluator` to refine the `then` and `else` scopes of `Prism::IfNode`/`Prism::UnlessNode` (and the RHS-entry scope of `Prism::AndNode`/`Prism::OrNode`).
+Slice 6 phase 1 adds the first edge-aware refinement surface to the engine. It is exposed through `Rigor::Inference::Narrowing`, a pure module consumed by `Rigor::Inference::StatementEvaluator` to refine the `then` and `else` scopes of `Prism::IfNode`/`Prism::UnlessNode` (and the RHS-entry scope of `Prism::AndNode`/`Prism::OrNode`). Slice 6 phase 2 sub-phase 1 extends the catalogue with class-membership predicates (`is_a?`, `kind_of?`, `instance_of?`) without changing the consumption contract.
 
 ### Type-level narrowing primitives
 
@@ -306,6 +306,15 @@ The module MUST expose the following module functions, each producing a fresh `R
 - `Narrowing.narrow_falsey(type)` — the falsey fragment of `type`. `Constant[nil]`/`Constant[false]` and `Nominal[NilClass]`/`Nominal[FalseClass]` are preserved; other `Constant`/`Nominal` carriers collapse to `Bot`; `Union` recurses element-wise; `Singleton`/`Tuple`/`HashShape` collapse to `Bot` (their inhabitants are truthy); `Top`/`Dynamic[T]`/`Bot` flow through unchanged because the analyzer cannot prove the falsey side empty.
 - `Narrowing.narrow_nil(type)` — the nil fragment of `type`. `Constant[nil]` and `Nominal[NilClass]` are preserved; non-nil `Constant`/`Nominal` carriers collapse to `Bot`; `Union` recurses element-wise; `Top`/`Dynamic[T]` MUST narrow to the canonical `Constant[nil]` so downstream dispatch resolves through `NilClass`; carriers that never inhabit nil (`Singleton`, `Tuple`, `HashShape`) collapse to `Bot`; `Bot` is its own nil fragment.
 - `Narrowing.narrow_non_nil(type)` — the non-nil fragment of `type`. Mirror of `narrow_nil`: nil-only carriers collapse to `Bot` and non-nil carriers are preserved; `Top`/`Dynamic[T]`/`Singleton`/`Tuple`/`HashShape` flow through unchanged; `Union` recurses element-wise.
+- `Narrowing.narrow_class(type, class_name, exact: false)` (Slice 6 phase 2 sub-phase 1) — the class-membership fragment of `type`. The `class_name` argument is the qualified name of the asked class as it appears in source (`"Integer"`, `"Foo::Bar"`); `exact: false` models `is_a?`/`kind_of?` (subclass-inclusive) and `exact: true` models `instance_of?` (exact). The carrier rules MUST be:
+  - `Constant[v]` — preserved when `v.class` satisfies the predicate (subclass-or-equal of the asked class under `exact: false`; equal under `exact: true`); collapses to `Bot` otherwise.
+  - `Nominal[C]` — when the bound `C` is the same as the asked class (or already its subclass under `exact: false`) it is preserved. When the asked class is a subclass of `C` under `exact: false` the type narrows DOWN to `Nominal[asked]` (e.g., `Nominal[Numeric]` under `is_a?(Integer)` becomes `Nominal[Integer]`). Disjoint hierarchies under `exact: false` and any non-equal class under `exact: true` collapse to `Bot`. When either class name does not resolve through `Object.const_get`, the result MUST stay conservative and preserve the input type.
+  - `Union` — recurses element-wise, dropping disjoint members.
+  - `Tuple[*]`/`HashShape{*}` — projected uniformly through `"Array"`/`"Hash"` against the asked class.
+  - `Singleton[C]` — projected uniformly through `"Class"` against the asked class (the inhabitants are class objects).
+  - `Top`/`Dynamic[T]` — narrow to `Nominal[asked]` so downstream dispatch can resolve through the asked class.
+  - `Bot` — preserved.
+- `Narrowing.narrow_not_class(type, class_name, exact: false)` (Slice 6 phase 2 sub-phase 1) — the falsey fragment of the same predicate. `Constant`/`Nominal`/`Union`/`Tuple`/`HashShape`/`Singleton` carriers that DO satisfy the predicate collapse to `Bot`; carriers that do NOT satisfy it are preserved unchanged (for `Nominal` this means `Nominal[Numeric]` under `!is_a?(Integer)` stays `Nominal[Numeric]`, since the analyzer cannot prove the disjunction without a richer carrier). `Top`/`Dynamic[T]`/`Bot` flow through unchanged.
 
 These primitives MUST be deterministic and structurally pure: two calls with structurally-equal inputs produce structurally-equal outputs, and calling them never alters the input.
 
@@ -316,7 +325,10 @@ These primitives MUST be deterministic and structurally pure: two calls with str
 - `Prism::ParenthesesNode` — recurse into the body when present.
 - `Prism::StatementsNode` — analyse the last statement; earlier statements MAY have scope effects, but the StatementEvaluator has already produced the post-predicate scope before calling `Narrowing`, so the analyser does NOT thread additional effects.
 - `Prism::LocalVariableReadNode` — when the local is bound in `scope`, narrow truthy → `narrow_truthy(local)` and falsey → `narrow_falsey(local)`. Unbound locals fall through to the no-narrowing fallback.
-- `Prism::CallNode` — the catalogue covers two predicates, both rejected silently when the call has any positional/keyword argument or a block: `recv.nil?` (narrow the receiver-local through `narrow_nil`/`narrow_non_nil`) and the unary `!recv` (analyse `recv` and swap the resulting pair).
+- `Prism::CallNode` — the catalogue covers four predicate shapes, all rejected silently when the call has a block or its receiver is `nil`:
+  - `recv.nil?` (no positional/keyword argument): narrow the receiver-local through `narrow_nil`/`narrow_non_nil`.
+  - unary `!recv` (`name == :!`, no positional/keyword argument): analyse `recv` and swap the resulting pair.
+  - `recv.is_a?(C)` / `recv.kind_of?(C)` / `recv.instance_of?(C)` (Slice 6 phase 2 sub-phase 1): require the receiver to be a `Prism::LocalVariableReadNode` and the single argument to be a static constant reference (`Prism::ConstantReadNode` or `Prism::ConstantPathNode`). The qualified name MUST be rendered via the parent-walk `Foo::Bar` form. The truthy edge rebinds the local through `narrow_class(local, class_name, exact:)` (`exact: true` only for `instance_of?`); the falsey edge rebinds through `narrow_not_class(local, class_name, exact:)`. Anything else (a local-only argument, a method-call argument, multiple arguments) MUST fall through to the no-narrowing branch.
 - `Prism::AndNode` — `a && b` narrows the truthy edge with `b`'s truthy scope under `a`'s truthy scope; the falsey edge unions `a`'s falsey scope (b skipped) and `b`'s falsey scope (b ran but returned falsey) via `Scope#join`.
 - `Prism::OrNode` — `a || b` narrows the truthy edge with `Scope#join` of `a`'s truthy scope and `b`'s truthy scope (under `a`'s falsey scope); the falsey edge is `b`'s falsey scope under `a`'s falsey scope.
 
@@ -332,10 +344,10 @@ The analyser MUST NOT raise on unrecognised predicate shapes, MUST NOT thread an
 
 ### Boundaries
 
-Slice 6 phase 1 binds local-variable narrowing only. The following surfaces are deliberately deferred to a follow-up:
+Slice 6 phase 1 + phase 2 sub-phase 1 binds local-variable narrowing for truthiness, `nil?`, and class-membership predicates only. The following surfaces are deliberately deferred to a follow-up:
 
-- Class-membership predicates (`is_a?`, `kind_of?`, `instance_of?`) MUST currently fall through to the no-narrowing branch. Once they land they MUST follow the same `[truthy_scope, falsey_scope]` shape.
 - Equality narrowing (`x == "literal"`, `x == nil`, ...) is still relational only — `x == nil` does not narrow yet and the trust levels in [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md) MUST be honoured when the surface lands.
+- The class-membership analyser uses host-Ruby `Object.const_get` for hierarchy checks; classes the analyzer host has not loaded fall through to the conservative answer (the type unchanged on the truthy edge, the type unchanged on the falsey edge). A formal `Rigor::Analysis::FactStore` (Slice 6 phase 2 sub-phase 2+) will replace this lookup with the analyzer's own class registry so the result becomes deterministic in offline analysis.
 - Closure-captured locals are treated as ordinary locals; explicit invalidation across closure invocation is deferred.
 - Instance-, class-, and global-variable narrowing remains out of scope; only `Prism::LocalVariableReadNode` is recognised by the analyser today.
 

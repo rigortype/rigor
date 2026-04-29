@@ -35,6 +35,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 3 phase 2 (DefNode) | `fe2fe7e` | DefNode-aware scope builder (`MethodParameterBinder`) |
 | Slice 6 phase 1 | `f5f75f1` | Truthiness and `nil?` narrowing on `IfNode`/`UnlessNode` (`Rigor::Inference::Narrowing`) |
 | Slice 5 phase 2 sub 1 | `8241ed7` | Shape-aware element dispatch (`Rigor::Inference::MethodDispatcher::ShapeDispatch`) |
+| Slice 6 phase C sub 1 | `23a8332` | BlockNode parameter binding (`Rigor::Inference::BlockParameterBinder`) |
 
 ## What is in Place Today
 
@@ -79,6 +80,12 @@ normalisation and are the only sanctioned way to construct types.
   classes, modules, defs, singleton classes).
 - `MethodParameterBinder` — translates a `DefNode`'s parameter list into a
   binding map driven by the surrounding class's RBS signature.
+- `BlockParameterBinder` — Slice 6 phase C sub-phase 1 symmetric
+  counterpart for `Prism::BlockNode`. Consumes a per-position
+  `expected_param_types:` array (supplied by
+  `MethodDispatcher.expected_block_param_types`) and binds each
+  named block parameter; rest / keyword-rest / `&blk` slots get
+  conservative typed defaults.
 - `Narrowing` — Slice 6 phase 1 truthiness and `nil?` narrowing.
   Exposes `narrow_truthy`/`narrow_falsey`/`narrow_nil`/`narrow_non_nil`
   type primitives plus `predicate_scopes(node, scope)` which returns
@@ -103,15 +110,15 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 587 examples, 0 failures (as of the Slice 5 phase 2 sub-phase 1 work).
+- **RSpec**: 608 examples, 0 failures (as of the Slice 6 phase C sub-phase 1 work).
 - **RuboCop**: pre-existing offences in `references/` submodules only;
   0 in Rigor product code.
-- **`rigor type-scan lib`**: 13.6 % unrecognised (2 015 / 14 776 nodes).
+- **`rigor type-scan lib`**: 13.5 % unrecognised (2 122 / 15 734 nodes).
   Top contributors:
-  - `Prism::CallNode` 868 / 2 471 (35.1 %)
-  - `Prism::ConstantReadNode` 684 / 927 (73.8 %)
-  - `Prism::ConstantPathNode` 461 / 462 (99.8 %)
-  - `Prism::MultiTargetNode` 2 / 2 (100.0 %)
+  - `Prism::CallNode` 928 / 2 617 (35.5 %)
+  - `Prism::ConstantReadNode` 711 / 958 (74.2 %)
+  - `Prism::ConstantPathNode` 480 / 481 (99.8 %)
+  - `Prism::MultiTargetNode` 3 / 3 (100.0 %)
 - **`rigor type-of` smoke probe (DefNode binder)**:
   `class Integer; def divmod(other); other; end; end` — `other` reads as
   `Float | Integer | Numeric | Rational` inside the body.
@@ -125,6 +132,12 @@ normalisation and are the only sanctioned way to construct types.
   types `result` as `"got nil" | 1` (with shape-aware dispatch
   `xs.first` resolves to `Constant[1]`, narrowing then drops the
   `nil` contribution from the else branch).
+- **`rigor type-of` smoke probe (Slice 6 phase C block binding)**:
+  `xs = [1, 2, 3]; xs.each do |x|; y = x.succ; end` — `y` types as
+  `Nominal[Integer]` inside the block (the block parameter `x` binds
+  to the tuple element union and `Integer#succ` resolves through
+  dispatch). Pre-binding `x` was unbound and `x.succ` fell through
+  to `Dynamic[Top]`.
 
 ## Known Boundaries (Deliberate, Not Bugs)
 
@@ -133,9 +146,14 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
 1. **Expression-interior scope threading**: `foo(x = 1)` and `[1, x = 2]`
    do not propagate `x` to the post-scope. The StatementEvaluator does not
    recurse into call arguments or array/hash element interiors.
-2. **Block parameter binding**: `Array#each { |elem| ... }` does not bind
-   `elem`. The DefNode-aware scope builder covers method parameters only;
-   `BlockNode` is the symmetric follow-up.
+2. **Block parameter binding**: covered for the curated catalogue in
+   Slice 6 phase C sub-phase 1
+   (`Rigor::Inference::BlockParameterBinder`), driven by the receiving
+   method's RBS block signature through
+   `MethodDispatcher.expected_block_param_types`. Destructuring block
+   targets (`|(a, b), c|`), numbered parameters (`_1`/`_2`), and the
+   block-return-type-aware dispatch (so `[1, 2, 3].map { |n| n.to_s }`
+   types as `Array[String]`) are deferred to sub-phase 2.
 3. **Class-membership and equality narrowing**: `is_a?`/`kind_of?`/
    `instance_of?` and equality predicates (`x == "literal"`,
    `x == nil`, ...) do not yet narrow. This is Slice 6 phase 2
@@ -211,20 +229,32 @@ read-only entries) per [`rigor-extensions.md`](type-specification/rigor-extensio
 - **risk**: low; the shape dispatch infrastructure and `Tuple`/`HashShape`
   carriers are in place.
 
-### C. BlockNode parameter binding
+### C. Slice 6 phase C sub-phase 2 — Destructuring blocks + block return type
 
-Symmetric to the DefNode-aware scope builder. Extend the
-`StatementEvaluator` catalogue with `BlockNode`, build a fresh
-block-entry scope, and bind block parameters from the call-site receiver
-(e.g., `Array[Integer]#each { |elem| ... }` binds `elem: Integer`).
+Sub-phase 1 (this commit) ships block parameter binding for the
+flat-positional / rest / keyword catalogue, driven by the receiving
+method's RBS signature. Sub-phase 2:
 
-- **type-scan impact**: medium — the dominant unrecognised pattern in
-  `lib/rigor/inference/expression_typer.rb` and similar files is block
-  bodies that read parameters.
-- **engine impact**: medium — needs to talk to the dispatcher to learn
-  the block's expected parameter types.
-- **risk**: medium; requires a clean handshake between the dispatcher
-  and the StatementEvaluator about block argument types.
+- Walks `MultiTargetNode` block targets (`|(a, b), c|`) and binds each
+  component element-wise from the expected parameter type (Tuple
+  destructuring projects to per-position members).
+- Wires numbered parameters (`_1`, `_2`, ...) so their reads see the
+  same types as the implicit positional bindings.
+- Threads the block's *return type* into `MethodDispatcher.dispatch`
+  through the reserved `block_type:` keyword so
+  `[1, 2, 3].map { |n| n.to_s }` types as `Array[String]` rather than
+  the projected `Array[Elem]`.
+- Adds closure-captured-local invalidation alongside the Slice 6
+  phase 2 FactStore work.
+
+- **type-scan impact**: small to medium — most blocks are flat
+  positionals already covered by sub-phase 1; sub-phase 2 mostly
+  improves the precision of receiver / Array / Enumerable-chained
+  receivers.
+- **engine impact**: medium — the block-return-type uplift is a
+  cross-cut between `MethodDispatcher` and `StatementEvaluator`.
+- **risk**: medium; closure invalidation needs careful interaction
+  with the FactStore.
 
 ### D. Slice 6 phase 2 — Class-membership and equality narrowing
 
@@ -249,9 +279,11 @@ form for `||`).
 ### Recommended ordering
 
 The user-priority ordering for this branch is **D → B → C → A**:
-Slice 6 phase 1 (the truthiness/`nil` half of D) and Slice 5 phase 2
-sub-phase 1 (the dispatch half of B) are both already in. The next
-candidates are sub-phase 2 of B (destructuring + shape extras) and
-C (BlockNode parameter binding). A — authoring Rigor-side RBS for
-Rigor itself — remains the largest single lever for the
-`type-scan lib` metric.
+Slice 6 phase 1 (the truthiness/`nil` half of D), Slice 5 phase 2
+sub-phase 1 (the dispatch half of B), and Slice 6 phase C
+sub-phase 1 (the block-parameter half of C) are all already in.
+The next candidates are sub-phase 2 of B (destructuring + shape
+extras), sub-phase 2 of C (destructuring blocks + block return type),
+and Slice 6 phase 2 (class-membership / equality narrowing + the
+formal FactStore). A — authoring Rigor-side RBS for Rigor itself —
+remains the largest single lever for the `type-scan lib` metric.

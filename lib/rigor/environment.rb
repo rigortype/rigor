@@ -15,6 +15,30 @@ module Rigor
     DEFAULT_PROJECT_SIG_DIR = "sig"
     private_constant :DEFAULT_PROJECT_SIG_DIR
 
+    # Slice A stdlib expansion. Stdlib libraries that
+    # `Environment.for_project` loads on top of RBS core unless
+    # the caller passes an explicit `libraries:` array. Each
+    # entry MUST be a stdlib library name accepted by
+    # `RBS::EnvironmentLoader#has_library?`; unknown libraries
+    # MUST fail-soft (`RbsLoader#build_env` already filters
+    # through `has_library?`). The default set covers the common
+    # stdlib surface a Ruby program is likely to import
+    # (`pathname`, `optparse`, `json`, `yaml`, `fileutils`,
+    # `tempfile`, `uri`, `logger`, `date`) plus the analyzer-
+    # adjacent gems shipping their own RBS in this bundle
+    # (`prism`, `rbs`). On hosts where one of these libraries is
+    # not installed, the loader silently drops it.
+    #
+    # Callers MAY add to the default by passing
+    # `libraries: %w[csv ...]`; the explicit list is appended to
+    # `DEFAULT_LIBRARIES` and de-duplicated. Callers that need
+    # a strictly RBS-core view MUST construct an `RbsLoader`
+    # directly instead of going through `for_project`.
+    DEFAULT_LIBRARIES = %w[
+      pathname optparse json yaml fileutils tempfile uri logger date
+      prism rbs
+    ].freeze
+
     attr_reader :class_registry, :rbs_loader
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
@@ -41,8 +65,11 @@ module Rigor
       # @param root [String, Pathname] project root used to auto-detect
       #   the default signature path. Defaults to the current working
       #   directory.
-      # @param libraries [Array<String, Symbol>] stdlib libraries to
-      #   load (e.g., `["pathname", "json"]`). Empty by default.
+      # @param libraries [Array<String, Symbol>] additional stdlib
+      #   libraries to load on top of {DEFAULT_LIBRARIES}. The
+      #   final list is the union of the two, de-duplicated while
+      #   preserving order. Pass an empty array (the default) to
+      #   load only the defaults.
       # @param signature_paths [Array<String, Pathname>, nil] explicit
       #   list of `sig/`-style directories. When `nil` (the default),
       #   the canonical project layout `<root>/sig` is used if it
@@ -50,7 +77,8 @@ module Rigor
       # @return [Rigor::Environment]
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil)
         resolved_paths = signature_paths || default_signature_paths(root)
-        loader = RbsLoader.new(libraries: libraries, signature_paths: resolved_paths)
+        merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
+        loader = RbsLoader.new(libraries: merged_libraries, signature_paths: resolved_paths)
         new(rbs_loader: loader)
       end
 

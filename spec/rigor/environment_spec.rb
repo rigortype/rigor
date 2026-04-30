@@ -157,6 +157,27 @@ RSpec.describe Rigor::Environment do
       expect(env.nominal_for_name("JSON")&.class_name).to eq("JSON")
     end
 
+    describe "DEFAULT_LIBRARIES (Slice A stdlib expansion)" do
+      it "loads the common stdlib by default without requiring the caller to pass libraries:" do
+        env = described_class.for_project(signature_paths: [])
+        # OptionParser / JSON / YAML / Pathname are part of DEFAULT_LIBRARIES.
+        expect(env.singleton_for_name("OptionParser")).not_to be_nil
+        expect(env.singleton_for_name("JSON")).not_to be_nil
+        expect(env.singleton_for_name("YAML")).not_to be_nil
+        expect(env.singleton_for_name("Pathname")).not_to be_nil
+      end
+
+      it "merges caller-supplied libraries on top of the defaults, preserving order and de-duplicating" do
+        # `csv` is not in DEFAULT_LIBRARIES; we add it here.
+        env = described_class.for_project(libraries: %w[csv json], signature_paths: [])
+        loader = env.rbs_loader
+        expect(loader.libraries).to start_with(*Rigor::Environment::DEFAULT_LIBRARIES)
+        expect(loader.libraries).to include("csv")
+        # `json` is in defaults already; the merge MUST NOT duplicate it.
+        expect(loader.libraries.count("json")).to eq(1)
+      end
+    end
+
     it "wires through Scope.empty for type_of queries" do
       require "prism"
       with_demo_project_root do |root|

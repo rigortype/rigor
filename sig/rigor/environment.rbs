@@ -2,6 +2,8 @@ module Rigor
   class Environment
     type ordering = :equal | :subclass | :superclass | :disjoint | :unknown
 
+    DEFAULT_LIBRARIES: Array[String]
+
     attr_reader class_registry: ClassRegistry
     attr_reader rbs_loader: RbsLoader?
 

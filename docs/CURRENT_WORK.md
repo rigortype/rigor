@@ -50,6 +50,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice A constant-walk | `60336be` | Lexical constant lookup in ExpressionTyper using `scope.self_type` (lib/ unrecognised: 10.5 % → 6.2 %) |
 | Slice A constant-value | `7d2777b` | `Environment#constant_for_name` + `RbsLoader#constant_type` for non-class RBS constant decls (lib/ unrecognised: 6.2 % → 6.0 %) |
 | Slice A stdlib | `d0096fc` | `Environment::DEFAULT_LIBRARIES` (pathname/optparse/json/yaml/fileutils/tempfile/uri/logger/date/prism/rbs) loaded by default in `for_project` (lib/ unrecognised: 6.0 % → 3.8 %) |
+| Slice A declarations | `8ec609e` | `Scope#declared_types` + `ScopeIndexer`-populated overrides for `module Foo` / `class Bar` headers (lib/ ConstantReadNode unrecognised: 7.0 % → 6.3 %) |
 
 ## What is in Place Today
 
@@ -192,13 +193,14 @@ normalisation and are the only sanctioned way to construct types.
   `references/` tree so upstream submodules are not linted as Rigor
   product code.
 - **`rigor type-scan lib`**: 3.8 % unrecognised after Slice A
-  stdlib (DEFAULT_LIBRARIES wired into `for_project`), down from
-  6.0 % at Slice A constant-value and from 13.8 % at the start
-  of the Slice A series. ConstantPathNode unrecognised dropped
-  to 0.2 % (1/616); ConstantReadNode to 6.9 % (82/1183);
-  CallNode steady at 20.4 % (719/3522). The remaining tail is
-  dominated by class-constant references that still need sig
-  decls and module/class declaration ConstantReadNodes. ConstantPathNode unrecognised dropped from 99.8 %
+  declarations (`module Foo` / `class Bar` header overrides),
+  steady from 3.8 % at Slice A stdlib once the new code's own
+  CallNode footprint is accounted for, and down from 13.8 % at
+  the start of the Slice A series. ConstantPathNode 0.2 %
+  (1/624); ConstantReadNode 6.3 % (75/1191) — the eight
+  declaration-position ConstantReadNodes (`module Node`,
+  `class TypeOfRenderer`, `module ConstantFolding`, ...) now
+  resolve to their Singleton type via the indexer override. ConstantPathNode unrecognised dropped from 99.8 %
   (611/612) to 42.8 % (263/614); ConstantReadNode dropped from
   74.9 % (881/1177) to 26.5 % (313/1179). The remaining
   unrecognised count is dominated by class-constant references

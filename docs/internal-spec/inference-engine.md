@@ -260,6 +260,17 @@ The catalogue of nodes that the evaluator MUST recognise in Slice 3 phase 2 is:
 
 `Scope#==` and `Scope#hash` MUST include `self_type`. `Scope#join` MUST keep `self_type` when both sides agree and reset it to `nil` when they differ. `Scope#with_local`, `Scope#with_fact`, and `Scope#with_self_type` MUST all preserve the other two fields.
 
+### Lexical constant lookup (Slice A constant-walk)
+
+`ExpressionTyper#type_of_constant_read` and `#type_of_constant_path` MUST resolve a constant by walking the surrounding lexical class context, mirroring Ruby's runtime constant lookup rules at the granularity the analyzer can prove statically:
+
+1. The qualified candidate `<class_path>::<name>` MUST be tried first, where `<class_path>` is the `class_name` of `Scope#self_type` when the latter is a `Type::Nominal` or `Type::Singleton`.
+2. The candidate path MUST then be peeled one `::segment` at a time and re-tried (`<class_path>::<name>` → `<parent_path>::<name>` → ... → `<top>::<name>`).
+3. The bare `<name>` MUST be tried last, preserving the pre-walk top-level behaviour.
+4. The first candidate that resolves through `Environment#singleton_for_name` produces the result `Type::Singleton[<resolved>]`. If no candidate resolves, the engine MUST fall through to `fallback_for(node, family: :prism)` exactly as before.
+
+Top-level scopes (no `self_type` set) MUST yield only the bare candidate so the pre-walk behaviour is observable for tests that do not configure a class context. The walk MUST NOT mutate the receiver scope, MUST NOT raise on names that fail to resolve, and MUST NOT traverse the singleton ancestry chain — that refinement (and constant-value lookup for non-class constants such as `BUCKETS: Array[Symbol]` declared on a class) is a future slice.
+
 ### Join with Nil-Injection
 
 `Scope#join` drops names bound in only one receiver (per the [Immutable Scope Discipline](#immutable-scope-discipline) above). The statement-level evaluator's branch-merge MUST instead inject `Constant[nil]` for half-bound names so the joined scope sees them as `T | nil`:

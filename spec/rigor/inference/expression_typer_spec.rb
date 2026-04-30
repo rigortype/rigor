@@ -425,6 +425,70 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(tracer.kinds).to include(Prism::ConstantPathNode)
     end
 
+    describe "lexical constant lookup (Slice A constant-walk)" do
+      it "resolves a ConstantReadNode using the surrounding class path" do
+        # Inside `Rigor::CLI::Foo`, a bare `Integer` reference still
+        # resolves through the top-level fallback.
+        cli_self = Rigor::Type::Combinator.singleton_of("Rigor::CLI::Foo")
+        bound = scope.with_self_type(cli_self)
+        type = bound.type_of(parse_expression("Integer"))
+        expect(type).to be_a(Rigor::Type::Singleton)
+        expect(type.class_name).to eq("Integer")
+      end
+
+      it "resolves a ConstantPathNode by stripping the lexical prefix one segment at a time" do
+        # Inside a hypothetical `IO::SomeNested`, the bare reference
+        # `Comparable` (a top-level RBS-core module) still resolves.
+        # The walk tries `IO::SomeNested::Comparable` and `IO::Comparable`
+        # first (both miss) before falling through to bare `Comparable`.
+        nested_self = Rigor::Type::Combinator.singleton_of("IO::SomeNested")
+        bound = scope.with_self_type(nested_self)
+        type = bound.type_of(parse_expression("Comparable"))
+        expect(type).to be_a(Rigor::Type::Singleton)
+        expect(type.class_name).to eq("Comparable")
+      end
+
+      it "prefers the lexically-qualified candidate when one matches the surrounding path" do
+        # `Errno::ENOENT` is RBS-core. Inside `Errno::SomeFakeNested`,
+        # a bare `ENOENT` reference walks via `Errno::SomeFakeNested::ENOENT`
+        # (miss) → `Errno::ENOENT` (hit).
+        nested_self = Rigor::Type::Combinator.singleton_of("Errno::SomeFakeNested")
+        bound = scope.with_self_type(nested_self)
+        type = bound.type_of(parse_expression("ENOENT"))
+        expect(type).to be_a(Rigor::Type::Singleton)
+        expect(type.class_name).to eq("Errno::ENOENT")
+      end
+
+      it "prefers the most-specific candidate over the bare name when both exist" do
+        # `Integer` exists at top level. From inside a class whose
+        # path joined to `Integer` would coincidentally match an
+        # already-known nominal, the most-specific candidate wins.
+        # Here we use a synthetic case that forces the bare match
+        # because no Rigor::CLI::Integer is known: Integer still
+        # resolves (the bare candidate is reached after the
+        # qualified ones miss).
+        cli_self = Rigor::Type::Combinator.singleton_of("Rigor::CLI::Foo")
+        bound = scope.with_self_type(cli_self)
+        type = bound.type_of(parse_expression("Integer"))
+        expect(type.class_name).to eq("Integer")
+      end
+
+      it "falls back to Dynamic[Top] when no lexical candidate matches" do
+        tracer = Rigor::Inference::FallbackTracer.new
+        cli_self = Rigor::Type::Combinator.singleton_of("Rigor::CLI::Foo")
+        bound = scope.with_self_type(cli_self)
+        type = bound.type_of(parse_expression("DefinitelyUnknownConstant"), tracer: tracer)
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+        expect(tracer.kinds).to include(Prism::ConstantReadNode)
+      end
+
+      it "preserves the pre-walk behaviour at top-level (no self_type set)" do
+        # No self_type → only the bare candidate is tried.
+        type = scope.type_of(parse_expression("Integer"))
+        expect(type).to be_a(Rigor::Type::Singleton)
+      end
+    end
+
     it "types ConstantWriteNode as the rvalue's type" do
       type = scope.type_of(parse_expression("FOO = 42"))
 

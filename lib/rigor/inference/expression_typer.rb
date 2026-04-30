@@ -264,21 +264,64 @@ module Rigor
       # an instance. From Slice 4 phase 2b on we therefore type a
       # bare-constant reference as `Singleton[Foo]`; method dispatch on
       # that receiver looks up class methods (`Foo.new`, `Foo.bar`, ...).
+      #
+      # Slice A constant-walk: when the literal name does not resolve,
+      # we try a lexical walk based on the surrounding class context
+      # exposed through `scope.self_type` so a reference like
+      # `Inference::FallbackTracer` from inside `Rigor::CLI::Foo`
+      # resolves to `Rigor::Inference::FallbackTracer`.
       def type_of_constant_read(node)
-        singleton = scope.environment.singleton_for_name(node.name)
-        return singleton if singleton
-
-        fallback_for(node, family: :prism)
+        resolve_constant_name(node.name.to_s) || fallback_for(node, family: :prism)
       end
 
       def type_of_constant_path(node)
         full_name = build_constant_path_name(node)
-        if full_name
-          singleton = scope.environment.singleton_for_name(full_name)
+        return fallback_for(node, family: :prism) if full_name.nil?
+
+        resolve_constant_name(full_name) || fallback_for(node, family: :prism)
+      end
+
+      # Try the literal name first, then walk Ruby's lexical lookup by
+      # progressively prefixing the surrounding class path (peeled
+      # one `::segment` at a time). Returns the matched
+      # `Type::Singleton` or nil. Caller decides whether to fall
+      # back.
+      def resolve_constant_name(name)
+        env = scope.environment
+        candidates = lexical_constant_candidates(name)
+        candidates.each do |candidate|
+          singleton = env.singleton_for_name(candidate)
           return singleton if singleton
         end
+        nil
+      end
 
-        fallback_for(node, family: :prism)
+      # The candidate qualified names to try, in Ruby's lexical
+      # order: most-qualified first (the surrounding class path
+      # joined to `name`), then progressively less-qualified, then
+      # the bare `name`. Top-level scopes (no `self_type`) yield
+      # only `[name]`, preserving the pre-walk behaviour.
+      def lexical_constant_candidates(name)
+        prefix = enclosing_class_path
+        candidates = []
+        while prefix && !prefix.empty?
+          candidates << "#{prefix}::#{name}"
+          prefix = prefix.rpartition("::").first
+          prefix = nil if prefix.empty?
+        end
+        candidates << name
+        candidates
+      end
+
+      # Pulls the enclosing qualified class name out of
+      # `scope.self_type` when one is set. `Nominal[T]` and
+      # `Singleton[T]` both expose `class_name`. Returns nil when
+      # no class context is available (top-level).
+      def enclosing_class_path
+        st = scope.self_type
+        case st
+        when Type::Nominal, Type::Singleton then st.class_name
+        end
       end
 
       # Builds the dotted-colon name for a `Foo`, `Foo::Bar`, or `::Foo`

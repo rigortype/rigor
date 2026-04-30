@@ -47,6 +47,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice A pass 1 | `295b6ae` | Author Rigor-side RBS for Type/Trinary/Scope/Environment/Analysis::FactStore/Inference/Source/AST |
 | Slice A-engine | `f022b1a` | `Scope#self_type` + class/def body injection + `SelfNode` & implicit-self call typing (lib/ unrecognised: 13.8 % → 11.1 %) |
 | Slice A pass 2 | `8171c80` | Per-method RBS for StatementEvaluator/ExpressionTyper/BlockParameterBinder/FactStore/Narrowing/Environment private helpers (lib/ unrecognised: 11.1 % → 10.5 %) |
+| Slice A constant-walk | `60336be` | Lexical constant lookup in ExpressionTyper using `scope.self_type` (lib/ unrecognised: 10.5 % → 6.2 %) |
 
 ## What is in Place Today
 
@@ -188,14 +189,19 @@ normalisation and are the only sanctioned way to construct types.
 - **RuboCop**: `make lint` is clean. `.rubocop.yml` excludes the whole
   `references/` tree so upstream submodules are not linted as Rigor
   product code.
-- **`rigor type-scan lib`**: 10.5 % unrecognised after
-  Slice A pass 2 (per-method private-helper RBS), down from
-  11.1 % at Slice A-engine. CallNode unrecognised dropped to
-  19.8 % (691/3488). The remaining unrecognised count is
-  dominated by ConstantPathNode/ConstantReadNode in declarative
-  positions (module/class headers) and Module-instance
-  intrinsics (`require_relative`, `raise`, `private`,
-  `private_constant`, `module_function`, `freeze`).
+- **`rigor type-scan lib`**: 6.2 % unrecognised after Slice A
+  constant-walk (lexical constant lookup), down from 10.5 % at
+  Slice A pass 2 and from 13.8 % at the start of the Slice A
+  series. ConstantPathNode unrecognised dropped from 99.8 %
+  (611/612) to 42.8 % (263/614); ConstantReadNode dropped from
+  74.9 % (881/1177) to 26.5 % (313/1179). The remaining
+  unrecognised count is dominated by class-constant references
+  (`BUCKETS`, `USAGE`, `EXIT_USAGE`, `DEFAULT_PATH`, `RUBY_GLOB`)
+  that need a constant-value lookup path beyond
+  `singleton_for_name`, plus stdlib classes that the default
+  RBS environment does not cover (`OptionParser`,
+  `OptionParser::ParseError`, ...) and module/class declaration
+  positions (`module Foo`, `class Bar`).
 - **`rigor type-of` smoke probe (DefNode binder)**:
   `class Integer; def divmod(other); other; end; end` — `other` reads as
   `Float | Integer | Numeric | Rational` inside the body.

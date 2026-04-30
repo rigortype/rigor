@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../scope"
+require_relative "../type"
 require_relative "statement_evaluator"
 
 module Rigor
@@ -48,14 +49,74 @@ module Rigor
       # @return [Hash{Prism::Node => Rigor::Scope}] identity-comparing
       #   table whose default value is `default_scope`.
       def index(root, default_scope:)
+        # Slice A-declarations. Build the declaration overrides
+        # first so every scope handed to the StatementEvaluator
+        # already carries the table; structural sharing through
+        # `Scope#with_local` / `#with_fact` / `#with_self_type`
+        # propagates it across every derived scope.
+        declared_types = build_declaration_overrides(root)
+        seeded_scope = default_scope.with_declared_types(declared_types)
+
         table = {}.compare_by_identity
-        table.default = default_scope
+        table.default = seeded_scope
 
         on_enter = ->(node, scope) { table[node] = scope unless table.key?(node) }
-        StatementEvaluator.new(scope: default_scope, on_enter: on_enter).evaluate(root)
+        StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter).evaluate(root)
 
-        propagate(root, table, default_scope)
+        propagate(root, table, seeded_scope)
         table
+      end
+
+      # Walks the program once for `Prism::ModuleNode` and
+      # `Prism::ClassNode`, recording the `Singleton[<qualified>]`
+      # type for the outermost `constant_path` node of each
+      # declaration. Inner segments of a `class Foo::Bar::Baz`
+      # path remain real references (resolved through the
+      # ordinary lexical walk), so we annotate ONLY the topmost
+      # path node. Nested declarations contribute their fully
+      # qualified path: `class A::B; class C; ...` produces
+      # `A::B` for the outer and `A::B::C` for the inner.
+      def build_declaration_overrides(root)
+        table = {}.compare_by_identity
+        record_declarations(root, [], table)
+        table.freeze
+      end
+
+      def record_declarations(node, qualified_prefix, table)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ModuleNode, Prism::ClassNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            full = (qualified_prefix + [name]).join("::")
+            table[node.constant_path] = Type::Combinator.singleton_of(full)
+            child_prefix = qualified_prefix + [name]
+            record_declarations(node.body, child_prefix, table) if node.body
+            return
+          end
+        end
+
+        node.compact_child_nodes.each { |child| record_declarations(child, qualified_prefix, table) }
+      end
+
+      def qualified_name_for(constant_path_node)
+        case constant_path_node
+        when Prism::ConstantReadNode
+          constant_path_node.name.to_s
+        when Prism::ConstantPathNode
+          render_constant_path(constant_path_node)
+        end
+      end
+
+      def render_constant_path(node)
+        prefix =
+          case node.parent
+          when Prism::ConstantReadNode then "#{node.parent.name}::"
+          when Prism::ConstantPathNode then "#{render_constant_path(node.parent)}::"
+          else ""
+          end
+        "#{prefix}#{node.name}"
       end
 
       # Walks `node`'s subtree DFS and fills in scope entries for every

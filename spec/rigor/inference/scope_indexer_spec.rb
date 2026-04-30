@@ -126,4 +126,76 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(idx[foreign]).to eq(default_scope)
     end
   end
+
+  describe "declaration overrides (Slice A-declarations)" do
+    it "annotates the constant_path of `module Foo` with Singleton[Foo]" do
+      program = parse("module Foo\nend")
+      idx = described_class.index(program, default_scope: default_scope)
+      module_node = program.statements.body.first
+      const_node = module_node.constant_path
+      seeded = idx[program]
+      expect(seeded.declared_types[const_node]).to eq(Rigor::Type::Combinator.singleton_of("Foo"))
+    end
+
+    it "annotates `class Bar` headers with Singleton[Bar]" do
+      program = parse("class Bar\nend")
+      idx = described_class.index(program, default_scope: default_scope)
+      class_node = program.statements.body.first
+      seeded = idx[program]
+      expect(seeded.declared_types[class_node.constant_path])
+        .to eq(Rigor::Type::Combinator.singleton_of("Bar"))
+    end
+
+    it "qualifies nested module/class declarations with their full lexical path" do
+      program = parse("module Outer\n  module Inner\n    class Leaf\n    end\n  end\nend\n")
+      idx = described_class.index(program, default_scope: default_scope)
+      seeded = idx[program]
+      outer = program.statements.body.first
+      inner = outer.body.body.first
+      leaf = inner.body.body.first
+      expected = {
+        outer.constant_path => "Outer",
+        inner.constant_path => "Outer::Inner",
+        leaf.constant_path => "Outer::Inner::Leaf"
+      }
+      expected.each do |node, name|
+        expect(seeded.declared_types[node]).to eq(Rigor::Type::Combinator.singleton_of(name))
+      end
+    end
+
+    it "ExpressionTyper resolves the declaration position to the recorded Singleton" do
+      program = parse(<<~RUBY)
+        module Outer
+          module Inner
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      inner = program.statements.body.first.body.body.first
+      const_node = inner.constant_path
+      node_scope = idx[const_node]
+      expect(node_scope.type_of(const_node))
+        .to eq(Rigor::Type::Combinator.singleton_of("Outer::Inner"))
+    end
+
+    it "propagates declared_types through class/method bodies (fresh scopes preserve the table)" do
+      program = parse(<<~RUBY)
+        module Outer
+          class Mid
+            def go
+              :sym
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      mid = program.statements.body.first.body.body.first
+      def_node = mid.body.body.first
+      method_body_scope = idx[def_node.body.body.first]
+      # The fresh method-body scope still sees declared_types so a
+      # later override probe (e.g. SelfNode lookup, or a future
+      # constant-position annotation inside the body) can resolve.
+      expect(method_body_scope.declared_types).not_to be_empty
+    end
+  end
 end

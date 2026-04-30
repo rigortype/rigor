@@ -272,6 +272,20 @@ The catalogue of nodes that the evaluator MUST recognise in Slice 3 phase 2 is:
 
 `Environment#constant_for_name(name)` MUST consult the attached `RbsLoader` and return `nil` when the loader is absent or the name has no constant decl. `RbsLoader#constant_type(name)` MUST translate `RBS::AST::Declarations::Constant#type` through `Rigor::Inference::RbsTypeTranslator.translate` and return the resulting `Rigor::Type`, or `nil` when translation produces `Type::Bot` (an empty type). The query MUST NOT raise on malformed inputs; the loader stays fail-soft.
 
+### Declaration-position overrides (Slice A-declarations)
+
+`Rigor::Scope` carries a `declared_types:` field — an identity-comparing `Hash[Prism::Node, Rigor::Type]` that overrides `ExpressionTyper#type_of` for specific node identities. The default value is a frozen empty hash; `Scope#with_declared_types(table)` returns a scope carrying the provided table. `Scope#with_local`, `Scope#with_fact`, `Scope#with_self_type`, and the join helpers MUST preserve the table by structural reference.
+
+`ExpressionTyper#type_of(node)` MUST consult `scope.declared_types[node]` BEFORE any other dispatch. When a value is present, the typer MUST return it as-is and MUST NOT record a fallback event.
+
+`Rigor::Inference::ScopeIndexer.index(root, default_scope:)` MUST populate the table for declaration-position nodes:
+
+- `Prism::ModuleNode#constant_path` MUST map to `Singleton[<qualified-path>]` where `<qualified-path>` is the join of every enclosing `ModuleNode`/`ClassNode` declaration name.
+- `Prism::ClassNode#constant_path` MUST map to the corresponding `Singleton[<qualified-path>]`.
+- The override MUST cover the OUTERMOST `constant_path` node only. For `class Foo::Bar`, the inner `Foo` reference remains a real lookup (resolved through the lexical walk).
+
+The seeded scope produced by `index` MUST carry the populated table so the StatementEvaluator's class-body and method-body fresh scopes (`Scope.empty(environment: ...)` followed by `with_self_type` and `with_declared_types`) propagate the override into nested bodies. Indexer-produced scopes MUST be used by `Rigor::Scope#type_of` callers (CLI probes, test fixtures) so the override actually fires; bare `Rigor::Scope.empty` scopes consciously preserve the empty-table behaviour for test isolation.
+
 Top-level scopes (no `self_type` set) MUST yield only the bare candidate so the pre-walk behaviour is observable for tests that do not configure a class context. The walk MUST NOT mutate the receiver scope, MUST NOT raise on names that fail to resolve, and MUST NOT traverse the singleton ancestry chain — that refinement is a future slice.
 
 ### Join with Nil-Injection

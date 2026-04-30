@@ -15,7 +15,10 @@ module Rigor
   #
   # See docs/internal-spec/inference-engine.md for the binding contract.
   class Scope
-    attr_reader :environment, :locals, :fact_store, :self_type
+    attr_reader :environment, :locals, :fact_store, :self_type, :declared_types
+
+    EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
+    private_constant :EMPTY_DECLARED_TYPES
 
     class << self
       def empty(environment: Environment.default)
@@ -23,11 +26,17 @@ module Rigor
       end
     end
 
-    def initialize(environment:, locals:, fact_store: Analysis::FactStore.empty, self_type: nil)
+    def initialize(
+      environment:, locals:,
+      fact_store: Analysis::FactStore.empty,
+      self_type: nil,
+      declared_types: EMPTY_DECLARED_TYPES
+    )
       @environment = environment
       @locals = locals
       @fact_store = fact_store
       @self_type = self_type
+      @declared_types = declared_types
       freeze
     end
 
@@ -40,14 +49,16 @@ module Rigor
       new_fact_store = fact_store.invalidate_target(Analysis::FactStore::Target.local(name))
       self.class.new(
         environment: environment, locals: new_locals,
-        fact_store: new_fact_store, self_type: self_type
+        fact_store: new_fact_store, self_type: self_type,
+        declared_types: declared_types
       )
     end
 
     def with_fact(fact)
       self.class.new(
         environment: environment, locals: locals,
-        fact_store: fact_store.with_fact(fact), self_type: self_type
+        fact_store: fact_store.with_fact(fact), self_type: self_type,
+        declared_types: declared_types
       )
     end
 
@@ -59,7 +70,29 @@ module Rigor
     def with_self_type(type)
       self.class.new(
         environment: environment, locals: locals,
-        fact_store: fact_store, self_type: type
+        fact_store: fact_store, self_type: type,
+        declared_types: declared_types
+      )
+    end
+
+    # Slice A-declarations. Returns a scope that carries an
+    # identity-comparing Hash of `Prism::Node => Rigor::Type`
+    # overrides. `ExpressionTyper#type_of(node)` MUST consult
+    # `declared_types[node]` before any other dispatch and
+    # return the recorded type as-is when present. The table is
+    # populated by `ScopeIndexer` for declaration-position
+    # nodes (the `constant_path` of `Prism::ModuleNode` and
+    # `Prism::ClassNode`) so a `module Foo` / `class Bar`
+    # header types as `Singleton[<qualified path>]` instead of
+    # falling through to `Dynamic[Top]`. The table is shared
+    # by structural reference across every derived scope so
+    # `with_local` / `with_fact` / `with_self_type` carry it
+    # transparently.
+    def with_declared_types(table)
+      self.class.new(
+        environment: environment, locals: locals,
+        fact_store: fact_store, self_type: self_type,
+        declared_types: table
       )
     end
 
@@ -126,7 +159,8 @@ module Rigor
         environment: environment,
         locals: joined_locals.freeze,
         fact_store: fact_store.join(other.fact_store),
-        self_type: self_type == other.self_type ? self_type : nil
+        self_type: self_type == other.self_type ? self_type : nil,
+        declared_types: declared_types
       )
     end
   end

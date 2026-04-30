@@ -183,6 +183,16 @@ module Rigor
       end
 
       def type_of(node)
+        # Slice A-declarations. ScopeIndexer pre-fills
+        # `scope.declared_types` for declaration-position nodes
+        # (`module Foo` / `class Bar` headers) with the qualified
+        # `Singleton` type so the header itself does not fall
+        # through to `Dynamic[Top]`. The override is consulted
+        # before any other dispatch and bypasses fail-soft
+        # tracing on a recognised match.
+        declared = scope.declared_types[node]
+        return declared if declared
+
         return type_of_virtual(node) if node.is_a?(AST::Node)
 
         handler = PRISM_DISPATCH[node.class]

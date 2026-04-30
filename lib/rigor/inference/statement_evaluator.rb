@@ -589,7 +589,7 @@ module Rigor
         # simply drop the locals. Slice A-engine: `self` inside a
         # class body is the class object itself, so we set
         # `self_type` to `Singleton[<qualified>]`.
-        fresh = Scope.empty(environment: scope.environment)
+        fresh = build_fresh_body_scope
         body_self = self_type_for_class_body(new_context)
         fresh = fresh.with_self_type(body_self) if body_self
         sub_eval(node.body, fresh, class_context: new_context)
@@ -607,10 +607,20 @@ module Rigor
         # Method bodies do NOT see the outer scope's locals. They start
         # from a fresh scope with the same environment, then receive
         # the parameter bindings.
-        fresh = Scope.empty(environment: scope.environment)
+        fresh = build_fresh_body_scope
         body_self = self_type_for_method_body(singleton: singleton)
         fresh = fresh.with_self_type(body_self) if body_self
         bindings.reduce(fresh) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      # Slice A-declarations. Class- and method-bodies start from a
+      # fresh local-empty scope, but they MUST keep the
+      # `declared_types` table visible at the outer scope so the
+      # ScopeIndexer-populated declaration overrides
+      # (`Prism::ConstantReadNode` for `module Foo` headers, etc.)
+      # remain reachable from inside nested bodies.
+      def build_fresh_body_scope
+        Scope.empty(environment: scope.environment).with_declared_types(scope.declared_types)
       end
 
       def singleton_def?(def_node)

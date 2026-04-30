@@ -16,12 +16,14 @@ module Rigor
 
     class ClassRegistry
       def self.default: () -> ClassRegistry
+      def self.build_default: () -> ClassRegistry
       def initialize: () -> void
       def register: (Module class_object) -> void
       def registered?: (Module class_object) -> bool
       def nominal_for: (Module class_object) -> Type::Nominal
       def nominal_for_name: (String | Symbol name) -> Type::Nominal?
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+      def normalize_name: (Module | String | Symbol name) -> String
     end
 
     class RbsLoader
@@ -44,6 +46,8 @@ module Rigor
     class RbsHierarchy
       def initialize: (RbsLoader loader) -> void
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+      def loader: () -> RbsLoader
+      def normalize_name: (String | Symbol name) -> String
     end
   end
 end

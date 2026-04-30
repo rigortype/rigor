@@ -40,6 +40,8 @@ module Rigor
       def ==: (untyped other) -> bool
       def eql?: (untyped other) -> bool
       def hash: () -> Integer
+      def normalize: (Array[Fact] raw_facts) -> Array[Fact]
+      def fact_targets: (Fact fact) -> Array[Target]
     end
   end
 end

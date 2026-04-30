@@ -15,7 +15,7 @@ module Rigor
   #
   # See docs/internal-spec/inference-engine.md for the binding contract.
   class Scope
-    attr_reader :environment, :locals, :fact_store
+    attr_reader :environment, :locals, :fact_store, :self_type
 
     class << self
       def empty(environment: Environment.default)
@@ -23,10 +23,11 @@ module Rigor
       end
     end
 
-    def initialize(environment:, locals:, fact_store: Analysis::FactStore.empty)
+    def initialize(environment:, locals:, fact_store: Analysis::FactStore.empty, self_type: nil)
       @environment = environment
       @locals = locals
       @fact_store = fact_store
+      @self_type = self_type
       freeze
     end
 
@@ -37,11 +38,29 @@ module Rigor
     def with_local(name, type)
       new_locals = @locals.merge(name.to_sym => type).freeze
       new_fact_store = fact_store.invalidate_target(Analysis::FactStore::Target.local(name))
-      self.class.new(environment: environment, locals: new_locals, fact_store: new_fact_store)
+      self.class.new(
+        environment: environment, locals: new_locals,
+        fact_store: new_fact_store, self_type: self_type
+      )
     end
 
     def with_fact(fact)
-      self.class.new(environment: environment, locals: locals, fact_store: fact_store.with_fact(fact))
+      self.class.new(
+        environment: environment, locals: locals,
+        fact_store: fact_store.with_fact(fact), self_type: self_type
+      )
+    end
+
+    # Slice A-engine. Returns a scope with `self_type` set to `type`,
+    # preserving locals and facts. `StatementEvaluator` injects this
+    # at class-body and method-body boundaries; `ExpressionTyper`
+    # consults it when typing `Prism::SelfNode` and implicit-self
+    # `Prism::CallNode` receivers.
+    def with_self_type(type)
+      self.class.new(
+        environment: environment, locals: locals,
+        fact_store: fact_store, self_type: type
+      )
     end
 
     def facts_for(target: nil, bucket: nil)
@@ -91,12 +110,13 @@ module Rigor
       other.is_a?(Scope) &&
         environment.equal?(other.environment) &&
         @locals == other.locals &&
-        fact_store == other.fact_store
+        fact_store == other.fact_store &&
+        self_type == other.self_type
     end
     alias eql? ==
 
     def hash
-      [Scope, environment.object_id, @locals, fact_store].hash
+      [Scope, environment.object_id, @locals, fact_store, self_type].hash
     end
 
     private
@@ -105,7 +125,8 @@ module Rigor
       self.class.new(
         environment: environment,
         locals: joined_locals.freeze,
-        fact_store: fact_store.join(other.fact_store)
+        fact_store: fact_store.join(other.fact_store),
+        self_type: self_type == other.self_type ? self_type : nil
       )
     end
   end

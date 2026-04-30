@@ -245,6 +245,21 @@ The catalogue of nodes that the evaluator MUST recognise in Slice 3 phase 2 is:
 - `Prism::SingletonClassNode` — same fresh-scope contract. When the singleton expression is `self`, the innermost lexical class frame MUST be flipped to `singleton: true` for the body's evaluation, so a `def foo` inside `class << self` resolves through `RbsLoader#singleton_method`. For non-`self` expressions the receiver class is not statically resolvable; the evaluator MUST keep the existing class context unchanged and accept that nested defs degrade to the `Dynamic[Top]` parameter default.
 - `Prism::DefNode` — builds the method-entry scope by binding every named parameter through `Rigor::Inference::MethodParameterBinder` (see below) and evaluates the body under that scope. The pair's type MUST be `Constant[:method_name]` (matching Ruby's runtime behaviour of `def` evaluating to a Symbol) and the pair's scope MUST be the receiver scope unchanged (a `def` does not introduce a binding in its enclosing scope). The body MUST NOT see the outer scope's locals.
 
+### Self typing (Slice A-engine)
+
+`Rigor::Scope` carries an optional `self_type:` field, accessed through `Scope#self_type` and updated via `Scope#with_self_type(type)`. The field is `nil` for top-level scopes and is injected by the `StatementEvaluator` at the boundaries where Ruby gives `self` a definite identity:
+
+- `Prism::ClassNode` / `Prism::ModuleNode` body: `self_type` MUST be `Singleton[<qualified-name>]` (because `self` inside the class body is the class object itself).
+- `Prism::SingletonClassNode` body when the receiver is `self`: same as above (the body still runs with `self` = the enclosing class object), and the innermost class frame additionally flips to `singleton: true`.
+- `Prism::DefNode` body: when the def is on the singleton side (`def self.foo` or any def lexically inside `class << self`) or the surrounding class frame is already singleton, `self_type` MUST be `Singleton[<qualified-name>]`. Otherwise (an ordinary instance def), `self_type` MUST be `Nominal[<qualified-name>]` with no type arguments. Top-level defs (no enclosing class) MUST leave `self_type` as `nil`.
+
+`ExpressionTyper` consumes the field in two places:
+
+- `Prism::SelfNode` MUST type as `scope.self_type` when set, or `Dynamic[Top]` when nil. This MUST NOT record a fallback event in either case.
+- `Prism::CallNode` with `receiver: nil` (an implicit-self call such as `attr_reader_method`, `private_helper`, ...) MUST adopt `scope.self_type` as the receiver type for `MethodDispatcher.dispatch`. When `self_type` is nil, the receiver remains nil and the existing top-level fallback applies.
+
+`Scope#==` and `Scope#hash` MUST include `self_type`. `Scope#join` MUST keep `self_type` when both sides agree and reset it to `nil` when they differ. `Scope#with_local`, `Scope#with_fact`, and `Scope#with_self_type` MUST all preserve the other two fields.
+
 ### Join with Nil-Injection
 
 `Scope#join` drops names bound in only one receiver (per the [Immutable Scope Discipline](#immutable-scope-discipline) above). The statement-level evaluator's branch-merge MUST instead inject `Constant[nil]` for half-bound names so the joined scope sees them as `T | nil`:

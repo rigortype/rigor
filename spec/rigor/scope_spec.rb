@@ -182,4 +182,51 @@ RSpec.describe Rigor::Scope do
       expect(a.join(b).local_facts(:x)).to eq([fact])
     end
   end
+
+  describe "self_type (Slice A-engine)" do
+    let(:integer_one) { Rigor::Type::Combinator.constant_of(1) }
+    let(:foo) { Rigor::Type::Combinator.nominal_of("Foo") }
+    let(:bar) { Rigor::Type::Combinator.nominal_of("Bar") }
+
+    it "defaults to nil for an empty scope" do
+      expect(scope.self_type).to be_nil
+    end
+
+    it "with_self_type returns a fresh scope, preserving locals and facts" do
+      bound = scope.with_local(:x, integer_one).with_self_type(foo)
+      expect(bound.self_type).to eq(foo)
+      expect(bound.local(:x)).to eq(integer_one)
+    end
+
+    it "does not mutate the receiver" do
+      _ = scope.with_self_type(foo)
+      expect(scope.self_type).to be_nil
+    end
+
+    it "with_local preserves self_type" do
+      typed = scope.with_self_type(foo).with_local(:x, integer_one)
+      expect(typed.self_type).to eq(foo)
+    end
+
+    it "join keeps self_type when both sides agree" do
+      a = scope.with_local(:x, integer_one).with_self_type(foo)
+      b = scope.with_local(:x, integer_one).with_self_type(foo)
+      expect(a.join(b).self_type).to eq(foo)
+    end
+
+    it "join drops self_type to nil when sides disagree" do
+      a = scope.with_local(:x, integer_one).with_self_type(foo)
+      c = scope.with_local(:x, integer_one).with_self_type(bar)
+      expect(a.join(c).self_type).to be_nil
+    end
+
+    it "==/hash include self_type" do
+      a = scope.with_self_type(foo)
+      b = scope.with_self_type(foo)
+      c = scope.with_self_type(bar)
+      expect(a).to eq(b)
+      expect(a.hash).to eq(b.hash)
+      expect(a).not_to eq(c)
+    end
+  end
 end

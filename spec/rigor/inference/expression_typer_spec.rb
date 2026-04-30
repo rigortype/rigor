@@ -608,10 +608,18 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
   describe "variables and self (Slice 2 strengthening)" do
     let(:tracer) { Rigor::Inference::FallbackTracer.new }
 
-    it "silently types SelfNode as Dynamic[Top]" do
+    it "silently types SelfNode as Dynamic[Top] when scope has no self_type" do
       type = scope.type_of(parse_expression("self"), tracer: tracer)
 
       expect(type).to equal(Rigor::Type::Combinator.untyped)
+      expect(tracer).to be_empty
+    end
+
+    it "types SelfNode as the scope's self_type when one is set (Slice A-engine)" do
+      foo = Rigor::Type::Combinator.nominal_of("Foo")
+      bound = scope.with_self_type(foo)
+      type = bound.type_of(parse_expression("self"), tracer: tracer)
+      expect(type).to eq(foo)
       expect(tracer).to be_empty
     end
 

@@ -586,16 +586,21 @@ module Rigor
         # Class/module bodies run in a fresh scope: the outer scope's
         # locals are NOT visible inside `class Foo; ... end`. We keep
         # the same Environment so RBS lookups continue to work, and
-        # simply drop the locals.
+        # simply drop the locals. Slice A-engine: `self` inside a
+        # class body is the class object itself, so we set
+        # `self_type` to `Singleton[<qualified>]`.
         fresh = Scope.empty(environment: scope.environment)
+        body_self = self_type_for_class_body(new_context)
+        fresh = fresh.with_self_type(body_self) if body_self
         sub_eval(node.body, fresh, class_context: new_context)
       end
 
       def build_method_entry_scope(def_node)
+        singleton = singleton_def?(def_node)
         binder = MethodParameterBinder.new(
           environment: scope.environment,
           class_path: current_class_path,
-          singleton: current_frame_singleton?
+          singleton: singleton
         )
         bindings = binder.bind(def_node)
 
@@ -603,7 +608,43 @@ module Rigor
         # from a fresh scope with the same environment, then receive
         # the parameter bindings.
         fresh = Scope.empty(environment: scope.environment)
+        body_self = self_type_for_method_body(singleton: singleton)
+        fresh = fresh.with_self_type(body_self) if body_self
         bindings.reduce(fresh) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      def singleton_def?(def_node)
+        def_node.receiver.is_a?(Prism::SelfNode) || current_frame_singleton?
+      end
+
+      # Slice A-engine. Inside a class body `class Foo; ...; end`,
+      # `self` is the class object — `Singleton[Foo]`. Returns nil
+      # at the top level (no enclosing class).
+      def self_type_for_class_body(class_context)
+        return nil if class_context.empty?
+
+        Type::Combinator.singleton_of(class_context.map(&:name).join("::"))
+      end
+
+      # Slice A-engine. Inside a method body, `self` depends on
+      # whether the def is on the singleton or instance side of the
+      # surrounding class:
+      #
+      # - `def self.foo` or any def inside `class << self`: self is
+      #   the class object → `Singleton[Foo]`.
+      # - ordinary instance `def foo`: self is an instance →
+      #   `Nominal[Foo]`.
+      #
+      # Returns nil for top-level defs that have no enclosing class.
+      def self_type_for_method_body(singleton:)
+        path = current_class_path
+        return nil if path.nil?
+
+        if singleton
+          Type::Combinator.singleton_of(path)
+        else
+          Type::Combinator.nominal_of(path)
+        end
       end
 
       def qualified_name_for(constant_path_node)

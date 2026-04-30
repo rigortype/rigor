@@ -80,7 +80,7 @@ module Rigor
         Prism::ConstantPathOrWriteNode => :type_of_assignment_write,
         Prism::ConstantPathAndWriteNode => :type_of_assignment_write,
         # Self and instance/class/global variables
-        Prism::SelfNode => :type_of_dynamic_top,
+        Prism::SelfNode => :type_of_self_node,
         Prism::InstanceVariableReadNode => :type_of_dynamic_top,
         Prism::InstanceVariableWriteNode => :type_of_assignment_write,
         Prism::InstanceVariableOperatorWriteNode => :type_of_assignment_write,
@@ -245,6 +245,17 @@ module Rigor
       # Slice 3+ refines these in place; for now we acknowledge the node
       # class so the coverage scanner stops flagging it without recording
       # a fail-soft event for every occurrence.
+      # Slice A-engine. `Prism::SelfNode` resolves to the scope's
+      # `self_type` when one has been injected (by
+      # `StatementEvaluator` at class-body and method-body
+      # boundaries) or `Dynamic[Top]` at the top level. Class-body
+      # `self` is `Singleton[<class>]`; instance-method `self` is
+      # `Nominal[<class>]`; singleton-method `self` is
+      # `Singleton[<class>]`.
+      def type_of_self_node(_node)
+        scope.self_type || dynamic_top
+      end
+
       def type_of_dynamic_top(_node)
         dynamic_top
       end
@@ -638,7 +649,7 @@ module Rigor
       # their own fallbacks for unrecognised receivers/args, so the tracer
       # captures both the immediate dispatch miss and the deeper cause).
       def call_type_for(node)
-        receiver = node.receiver ? type_of(node.receiver) : nil
+        receiver = call_receiver_type_for(node)
         arg_types = call_arg_types(node)
         block_type = block_return_type_for(node, receiver, arg_types)
 
@@ -659,6 +670,20 @@ module Rigor
         return dynamic_top if receiver.is_a?(Type::Dynamic)
 
         fallback_for(node, family: :prism)
+      end
+
+      # Slice A-engine. Implicit-self calls (no `node.receiver`)
+      # adopt the surrounding scope's `self_type` as their receiver
+      # so calls like `attr_reader_method_name` or
+      # `private_helper(...)` inside an instance method dispatch
+      # against the enclosing class. When `self_type` is nil
+      # (top-level program) the receiver remains nil, preserving
+      # the pre-Slice-A behaviour of `Kernel`-only resolution
+      # through fail-soft fallback.
+      def call_receiver_type_for(node)
+        return type_of(node.receiver) if node.receiver
+
+        scope.self_type
       end
 
       def call_arg_types(node)

@@ -382,6 +382,65 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(class_body_scopes).to include([])
     end
 
+    it "injects Singleton[Foo] as self_type inside `class Foo` body (Slice A-engine)" do
+      observed = []
+      on_enter = ->(node, s) { observed << s.self_type if node.is_a?(Prism::SelfNode) }
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        class Foo
+          self
+        end
+      RUBY
+      expect(observed.first).to eq(Rigor::Type::Combinator.singleton_of("Foo"))
+    end
+
+    it "injects Nominal[Foo] as self_type inside an instance method body" do
+      observed = []
+      on_enter = ->(node, s) { observed << s.self_type if node.is_a?(Prism::SelfNode) }
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        class Foo
+          def bar; self; end
+        end
+      RUBY
+      expect(observed).to include(Rigor::Type::Combinator.nominal_of("Foo"))
+    end
+
+    it "injects Singleton[Foo] inside a `def self.bar` body" do
+      observed = []
+      on_enter = lambda do |node, s|
+        next unless node.is_a?(Prism::SelfNode) && s.self_type.is_a?(Rigor::Type::Singleton)
+
+        observed << s.self_type
+      end
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        class Foo
+          def self.bar; self; end
+        end
+      RUBY
+      expect(observed.last).to eq(Rigor::Type::Combinator.singleton_of("Foo"))
+    end
+
+    it "injects Singleton[Foo] inside `class << self` def bodies" do
+      observed = []
+      on_enter = ->(node, s) { observed << [node.class, s.self_type] if node.is_a?(Prism::SelfNode) }
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        class Foo
+          class << self
+            def bar; self; end
+          end
+        end
+      RUBY
+      # The body of `bar` sees self as Singleton[Foo].
+      types = observed.map(&:last)
+      expect(types).to include(Rigor::Type::Combinator.singleton_of("Foo"))
+    end
+
+    it "leaves self_type nil for top-level defs" do
+      observed = []
+      on_enter = ->(node, s) { observed << s.self_type if node.is_a?(Prism::SelfNode) }
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(parse_program("def bar; self; end"))
+      expect(observed.first).to be_nil
+    end
+
     it "qualifies nested class names with :: without raising" do
       # The binder's class_path is "A::B" here. Neither A nor A::B exist
       # in core RBS, so x falls back to Dynamic[Top]; the structural

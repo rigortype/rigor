@@ -5,6 +5,8 @@ module Rigor
     class ExpressionTyper
       def initialize: (scope: Scope, ?tracer: FallbackTracer?) -> void
       def type_of: (untyped node) -> Type::t
+      def scope: () -> Scope
+      def tracer: () -> FallbackTracer?
     end
 
     class StatementEvaluator
@@ -17,6 +19,8 @@ module Rigor
 
       def initialize: (scope: Scope, ?tracer: FallbackTracer?, ?on_enter: (^(untyped, Scope) -> void)?, ?class_context: Array[ClassFrame]) -> void
       def evaluate: (untyped node) -> [Type::t, Scope]
+      def scope: () -> Scope
+      def tracer: () -> FallbackTracer?
     end
 
     module MethodDispatcher

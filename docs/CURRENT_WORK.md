@@ -45,6 +45,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 6 phase C sub 3b | `54c9dcc` | `StatementEvaluator#eval_call` records `dynamic_origin` `closure_escape` facts on `:escaping` / `:unknown` block calls |
 | Slice 6 phase C sub 3c | `8008020` | Drop narrowed type of captured-outer locals the block can rebind on `:escaping` / `:unknown` block calls |
 | Slice A pass 1 | `295b6ae` | Author Rigor-side RBS for Type/Trinary/Scope/Environment/Analysis::FactStore/Inference/Source/AST |
+| Slice A-engine | `f022b1a` | `Scope#self_type` + class/def body injection + `SelfNode` & implicit-self call typing (lib/ unrecognised: 13.8 % → 11.1 %) |
 
 ## What is in Place Today
 
@@ -186,20 +187,16 @@ normalisation and are the only sanctioned way to construct types.
 - **RuboCop**: `make lint` is clean. `.rubocop.yml` excludes the whole
   `references/` tree so upstream submodules are not linted as Rigor
   product code.
-- **`rigor type-scan lib`**: ~13.7 % unrecognised after Slice A
-  pass 1 (Rigor self-RBS), down from ~13.8 % at `d1c6ba2`. The
-  bulk of remaining unrecognised CallNodes are module-declaration
-  intrinsics (`require_relative` 128, `raise` 37, `private` 33,
-  `attr_reader` 20, `private_constant` 14, `module_function`
-  12, `freeze` 12) and reads on parameter receivers whose
-  declared type is still `Dynamic[Top]` because the surrounding
-  `def` has no Rigor-internal RBS signature
-  (`scope.X` 83, `other.X` 25, `node.X` 15, ...). Class-reference
-  resolution does land — `Rigor::Type::Combinator.constant_of(1)`
-  now infers as `Rigor::Type::Constant` — so the structural
-  surface is in place; the metric will not move further until
-  Rigor itself ships per-method RBS signatures or `def`-parameter
-  inference is strengthened.
+- **`rigor type-scan lib`**: 11.1 % unrecognised after
+  Slice A-engine (self typing), down from 13.7 % at Slice A
+  pass 1. CallNode unrecognised dropped from 39.7 % (1370/3452)
+  to 23.6 % (823/3488) as implicit-self / `attr_reader`-derived
+  reads inside Rigor's own classes now dispatch through the
+  enclosing class's RBS. The remaining unrecognised count is
+  dominated by ConstantPathNode/ConstantReadNode in declarative
+  positions (module/class headers) and Module-instance
+  intrinsics (`require_relative`, `raise`, `private`,
+  `private_constant`, `module_function`, `freeze`).
 - **`rigor type-of` smoke probe (DefNode binder)**:
   `class Integer; def divmod(other); other; end; end` — `other` reads as
   `Float | Integer | Numeric | Rational` inside the body.

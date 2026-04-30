@@ -283,15 +283,20 @@ module Rigor
 
       # Try the literal name first, then walk Ruby's lexical lookup by
       # progressively prefixing the surrounding class path (peeled
-      # one `::segment` at a time). Returns the matched
-      # `Type::Singleton` or nil. Caller decides whether to fall
-      # back.
+      # one `::segment` at a time). For each candidate the lookup
+      # consults `Environment#singleton_for_name` (a class object)
+      # and then `Environment#constant_for_name` (a non-class
+      # constant value such as `BUCKETS: Array[Symbol]`).
+      # Returns the matched `Rigor::Type` or nil; the caller decides
+      # whether to fall back.
       def resolve_constant_name(name)
         env = scope.environment
-        candidates = lexical_constant_candidates(name)
-        candidates.each do |candidate|
+        lexical_constant_candidates(name).each do |candidate|
           singleton = env.singleton_for_name(candidate)
           return singleton if singleton
+
+          value = env.constant_for_name(candidate)
+          return value if value
         end
         nil
       end

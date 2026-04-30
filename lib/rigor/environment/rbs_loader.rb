@@ -3,6 +3,7 @@
 require "rbs"
 
 require_relative "../type"
+require_relative "../inference/rbs_type_translator"
 require_relative "rbs_hierarchy"
 
 module Rigor
@@ -27,6 +28,7 @@ module Rigor
     # functional.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
+    # rubocop:disable Metrics/ClassLength
     class RbsLoader
       class << self
         def default
@@ -142,6 +144,28 @@ module Rigor
         @hierarchy.class_ordering(lhs, rhs)
       end
 
+      # Slice A constant-value lookup. Returns the translated
+      # `Rigor::Type` for a non-class constant declaration
+      # (`BUCKETS: Array[Symbol]`, `DEFAULT_PATH: String`, ...) or
+      # `nil` when no constant entry exists for `name` in the
+      # loaded RBS environment. Callers MUST treat the return
+      # value as authoritative when present and as "unknown" when
+      # nil; the loader does NOT consult the class declarations
+      # here — class objects are still resolved through
+      # {#class_known?} and `Environment#singleton_for_name`.
+      def constant_type(name)
+        rbs_name = parse_type_name(name)
+        return nil unless rbs_name
+
+        entry = env.constant_decls[rbs_name]
+        return nil unless entry
+
+        translated = Inference::RbsTypeTranslator.translate(entry.decl.type)
+        translated unless translated.is_a?(Type::Bot)
+      rescue StandardError
+        nil
+      end
+
       private
 
       def env
@@ -215,5 +239,6 @@ module Rigor
         false
       end
     end
+    # rubocop:enable Metrics/ClassLength
   end
 end

@@ -90,6 +90,23 @@ module Rigor
       Type::Combinator.singleton_of(name.to_s)
     end
 
+    # Slice A constant-value lookup. Returns the translated
+    # `Rigor::Type` for an RBS-declared **non-class** constant
+    # (`Rigor::Analysis::FactStore::BUCKETS: Array[Symbol]`,
+    # `Rigor::Configuration::DEFAULT_PATH: String`, ...) or `nil`
+    # when no RBS constant declaration covers `name`. This is the
+    # value-bearing counterpart of {#singleton_for_name}, which
+    # only resolves names that name a class or module. Callers
+    # that need to type a `Prism::ConstantReadNode`/
+    # `Prism::ConstantPathNode` MUST consult {#singleton_for_name}
+    # first and fall through to this query when the constant is
+    # not a class.
+    def constant_for_name(name)
+      return nil if rbs_loader.nil?
+
+      rbs_loader.constant_type(name.to_s)
+    end
+
     # Returns true when the constant name is known to either the static
     # registry or the RBS loader. Useful for callers that only need a
     # presence check without materialising a type carrier.

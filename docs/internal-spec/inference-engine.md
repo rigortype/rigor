@@ -267,9 +267,12 @@ The catalogue of nodes that the evaluator MUST recognise in Slice 3 phase 2 is:
 1. The qualified candidate `<class_path>::<name>` MUST be tried first, where `<class_path>` is the `class_name` of `Scope#self_type` when the latter is a `Type::Nominal` or `Type::Singleton`.
 2. The candidate path MUST then be peeled one `::segment` at a time and re-tried (`<class_path>::<name>` → `<parent_path>::<name>` → ... → `<top>::<name>`).
 3. The bare `<name>` MUST be tried last, preserving the pre-walk top-level behaviour.
-4. The first candidate that resolves through `Environment#singleton_for_name` produces the result `Type::Singleton[<resolved>]`. If no candidate resolves, the engine MUST fall through to `fallback_for(node, family: :prism)` exactly as before.
+4. For each candidate, the typer MUST first consult `Environment#singleton_for_name(candidate)` (resolves a class object → `Type::Singleton[candidate]`), then `Environment#constant_for_name(candidate)` (resolves a non-class RBS constant declaration to its translated `Rigor::Type`). The first hit wins; the walk continues only when both miss for that candidate.
+5. If no candidate resolves through either query, the engine MUST fall through to `fallback_for(node, family: :prism)` exactly as before.
 
-Top-level scopes (no `self_type` set) MUST yield only the bare candidate so the pre-walk behaviour is observable for tests that do not configure a class context. The walk MUST NOT mutate the receiver scope, MUST NOT raise on names that fail to resolve, and MUST NOT traverse the singleton ancestry chain — that refinement (and constant-value lookup for non-class constants such as `BUCKETS: Array[Symbol]` declared on a class) is a future slice.
+`Environment#constant_for_name(name)` MUST consult the attached `RbsLoader` and return `nil` when the loader is absent or the name has no constant decl. `RbsLoader#constant_type(name)` MUST translate `RBS::AST::Declarations::Constant#type` through `Rigor::Inference::RbsTypeTranslator.translate` and return the resulting `Rigor::Type`, or `nil` when translation produces `Type::Bot` (an empty type). The query MUST NOT raise on malformed inputs; the loader stays fail-soft.
+
+Top-level scopes (no `self_type` set) MUST yield only the bare candidate so the pre-walk behaviour is observable for tests that do not configure a class context. The walk MUST NOT mutate the receiver scope, MUST NOT raise on names that fail to resolve, and MUST NOT traverse the singleton ancestry chain — that refinement is a future slice.
 
 ### Join with Nil-Injection
 

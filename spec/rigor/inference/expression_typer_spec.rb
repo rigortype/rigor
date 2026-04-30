@@ -487,6 +487,30 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         type = scope.type_of(parse_expression("Integer"))
         expect(type).to be_a(Rigor::Type::Singleton)
       end
+
+      it "resolves a non-class constant declared in RBS through Environment#constant_for_name" do
+        # `Rigor::Analysis::FactStore::BUCKETS` is declared in
+        # sig/rigor/analysis/fact_store.rbs as Array[bucket].
+        # singleton_for_name MUST miss (BUCKETS is not a class)
+        # and constant_for_name MUST take over.
+        project_env = Rigor::Environment.for_project
+        project_scope = Rigor::Scope.empty(environment: project_env)
+        type = project_scope.type_of(parse_expression("Rigor::Analysis::FactStore::BUCKETS"))
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+      end
+
+      it "resolves the same constant through the lexical walk from inside FactStore" do
+        # Inside Rigor::Analysis::FactStore the bare `BUCKETS`
+        # reference walks the candidate list and lands on the
+        # qualified `Rigor::Analysis::FactStore::BUCKETS` decl.
+        project_env = Rigor::Environment.for_project
+        inner_self = Rigor::Type::Combinator.singleton_of("Rigor::Analysis::FactStore")
+        bound = Rigor::Scope.empty(environment: project_env).with_self_type(inner_self)
+        type = bound.type_of(parse_expression("BUCKETS"))
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+      end
     end
 
     it "types ConstantWriteNode as the rvalue's type" do

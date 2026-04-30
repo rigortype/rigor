@@ -11,6 +11,7 @@ module Rigor
     def initialize: (?class_registry: ClassRegistry, ?rbs_loader: RbsLoader?) -> void
     def nominal_for_name: (String | Symbol name) -> Type::Nominal?
     def singleton_for_name: (String | Symbol name) -> Type::Singleton?
+    def constant_for_name: (String | Symbol name) -> Type::t?
     def class_known?: (String | Symbol name) -> bool
     def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
 
@@ -41,6 +42,7 @@ module Rigor
       def singleton_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped
       def class_type_param_names: (String | Symbol class_name) -> Array[Symbol]
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+      def constant_type: (String name) -> Type::t?
     end
 
     class RbsHierarchy

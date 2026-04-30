@@ -46,6 +46,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 6 phase C sub 3c | `8008020` | Drop narrowed type of captured-outer locals the block can rebind on `:escaping` / `:unknown` block calls |
 | Slice A pass 1 | `295b6ae` | Author Rigor-side RBS for Type/Trinary/Scope/Environment/Analysis::FactStore/Inference/Source/AST |
 | Slice A-engine | `f022b1a` | `Scope#self_type` + class/def body injection + `SelfNode` & implicit-self call typing (lib/ unrecognised: 13.8 % → 11.1 %) |
+| Slice A pass 2 | `8171c80` | Per-method RBS for StatementEvaluator/ExpressionTyper/BlockParameterBinder/FactStore/Narrowing/Environment private helpers (lib/ unrecognised: 11.1 % → 10.5 %) |
 
 ## What is in Place Today
 
@@ -187,12 +188,10 @@ normalisation and are the only sanctioned way to construct types.
 - **RuboCop**: `make lint` is clean. `.rubocop.yml` excludes the whole
   `references/` tree so upstream submodules are not linted as Rigor
   product code.
-- **`rigor type-scan lib`**: 11.1 % unrecognised after
-  Slice A-engine (self typing), down from 13.7 % at Slice A
-  pass 1. CallNode unrecognised dropped from 39.7 % (1370/3452)
-  to 23.6 % (823/3488) as implicit-self / `attr_reader`-derived
-  reads inside Rigor's own classes now dispatch through the
-  enclosing class's RBS. The remaining unrecognised count is
+- **`rigor type-scan lib`**: 10.5 % unrecognised after
+  Slice A pass 2 (per-method private-helper RBS), down from
+  11.1 % at Slice A-engine. CallNode unrecognised dropped to
+  19.8 % (691/3488). The remaining unrecognised count is
   dominated by ConstantPathNode/ConstantReadNode in declarative
   positions (module/class headers) and Module-instance
   intrinsics (`require_relative`, `raise`, `private`,

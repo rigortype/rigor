@@ -99,6 +99,44 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
+  # Methods unlocked by the offline numeric.yml catalog: methods
+  # whose CRuby implementation the catalog classifies as `leaf`
+  # (no Ruby-level callout) or `leaf_when_numeric` (callout only on
+  # non-Numeric arg, gated upstream by the literal-only fold).
+  # The hand-rolled `NUMERIC_BINARY` / `INTEGER_UNARY` sets do not
+  # cover these, so before the wiring landed the fold returned nil.
+  describe "catalog-driven binary fold" do
+    it "folds Integer#** (power)" do
+      expect(fold(2, :**, [10]).value).to eq(1024)
+      expect(fold(5, :**, [3]).value).to eq(125)
+    end
+
+    it "folds Float#** (power)" do
+      expect(fold(2.0, :**, [10]).value).to eq(1024.0)
+    end
+
+    it "folds bitwise & | ^ << >>" do
+      expect(fold(0xff, :&, [0x0f]).value).to eq(0x0f)
+      expect(fold(1, :|, [2]).value).to eq(3)
+      expect(fold(0xa, :^, [0xc]).value).to eq(6)
+      expect(fold(1, :<<, [3]).value).to eq(8)
+      expect(fold(8, :>>, [2]).value).to eq(2)
+    end
+
+    it "folds Integer#=== (case-equality is value-equality on Integer)" do
+      expect(fold(5, :===, [5]).value).to be(true)
+      expect(fold(5, :===, [6]).value).to be(false)
+    end
+
+    it "folds Integer#div / #fdiv / #modulo / #remainder / #pow" do
+      expect(fold(5, :div, [2]).value).to eq(2)
+      expect(fold(5, :fdiv, [2]).value).to eq(2.5)
+      expect(fold(5, :modulo, [2]).value).to eq(1)
+      expect(fold(5, :remainder, [2]).value).to eq(1)
+      expect(fold(2, :pow, [10]).value).to eq(1024)
+    end
+  end
+
   # Union[Constant…] folding. Each Constant in a union represents a
   # possible runtime value; a binary op over two unions is the
   # cartesian fold, deduplicated. Bounded by the input/output

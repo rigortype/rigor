@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "../builtins/numeric_catalog"
 
 module Rigor
   module Inference
@@ -585,7 +586,30 @@ module Rigor
         end
 
         def unary_safe?(receiver_value, method_name)
-          unary_ops_for(receiver_value).include?(method_name)
+          return true if unary_ops_for(receiver_value).include?(method_name)
+
+          catalog_allows?(receiver_value, method_name)
+        end
+
+        # Consults the offline numeric catalog (data/builtins/ruby_core/
+        # numeric.yml) as a superset of the hand-rolled unary/binary
+        # allow lists. The catalog's `leaf` / `trivial` /
+        # `leaf_when_numeric` entries promise the underlying CRuby
+        # implementation does not call back into user-redefinable
+        # Ruby methods, so executing them on a literal Integer/Float
+        # is safe regardless of monkey-patching.
+        def catalog_allows?(receiver_value, method_name)
+          class_name = catalog_class_for(receiver_value)
+          return false unless class_name
+
+          Builtins::NumericCatalog.safe_for_folding?(class_name, method_name)
+        end
+
+        def catalog_class_for(receiver_value)
+          case receiver_value
+          when Integer then "Integer"
+          when Float   then "Float"
+          end
         end
 
         def unary_ops_for(receiver_value)
@@ -629,8 +653,9 @@ module Rigor
         end
 
         def safe?(receiver_value, method_name, arg_value)
-          ops = ops_for(receiver_value)
-          return false unless ops.include?(method_name)
+          allowed = ops_for(receiver_value).include?(method_name) ||
+                    catalog_allows?(receiver_value, method_name)
+          return false unless allowed
           return false if integer_division_by_zero?(receiver_value, method_name, arg_value)
           return false if string_blow_up?(receiver_value, method_name, arg_value)
 

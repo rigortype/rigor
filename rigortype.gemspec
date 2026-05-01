@@ -29,6 +29,7 @@ Gem::Specification.new do |spec|
       exe/*
       lib/**/*.rb
       sig/**/*.rbs
+      data/builtins/**/*.yml
     ]
   )
   spec.bindir = "exe"

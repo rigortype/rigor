@@ -63,6 +63,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 7 phase 10 | `b82e789` | Implicit-self defaults to `Object` + user-class ancestor fallback for Module/Kernel intrinsics; `attr_reader`/`require`/`private` etc. resolve (lib/ unrecognised 3.9 % → 3.2 %) |
 | Slice 7 phase 11 | `fc1da90` | `rigor check` wrong-arity rule + Tuple/HashShape receiver projection in `CheckRules` |
 | Slice 7 phase 12 | `fcb3820` | `Scope#discovered_methods` (def + define_method walk) suppresses check false positives on reopened classes |
+| Slice 7 phase 13 | `db8eb2b` | First-preview README rewrite + commented `rigor init` template |
 
 ## What is in Place Today
 

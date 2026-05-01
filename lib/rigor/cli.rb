@@ -134,6 +134,15 @@ module Rigor
         #                `# rigor:disable <rule>` comments at the end
         #                of an offending line silence per-line; use
         #                `# rigor:disable all` to suppress every rule.
+        # - libraries:   stdlib libraries to load on top of the
+        #                bundled defaults (e.g. ["csv", "set"]).
+        #                Each entry must be a name accepted by
+        #                `RBS::EnvironmentLoader#has_library?`.
+        # - signature_paths:
+        #                explicit list of `sig/`-style directories.
+        #                Leave unset (or `null`) to auto-detect
+        #                `<root>/sig`. Use `[]` to disable
+        #                project-RBS loading entirely.
         # - cache.path:  where Rigor will eventually persist
         #                analysis results across runs.
         #

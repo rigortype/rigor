@@ -27,7 +27,10 @@ module Rigor
       # is built once at run start through `Environment.for_project`
       # so all files share the same RBS load.
       def run(paths = @configuration.paths)
-        environment = Environment.for_project
+        environment = Environment.for_project(
+          libraries: @configuration.libraries,
+          signature_paths: @configuration.signature_paths
+        )
         expansion = expand_paths(paths)
 
         diagnostics = expansion.fetch(:errors)

@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`.rigor.yml` `libraries:` and `signature_paths:` keys.** The
+  configuration layer now passes through to
+  `Rigor::Environment.for_project`:
+  - `libraries:` lists stdlib libraries to load on top of
+    `Environment::DEFAULT_LIBRARIES` (e.g. `["csv", "set"]`). Each
+    entry must be a name accepted by
+    `RBS::EnvironmentLoader#has_library?`; unknown libraries
+    fail-soft.
+  - `signature_paths:` is an explicit list of `sig/`-style
+    directories. Leaving the key unset (or `null`) preserves the
+    auto-detect-`<root>/sig` default; `[]` disables project-RBS
+    loading entirely.
+
+  Wired through `rigor check`, `rigor type-of`, and `rigor type-scan`
+  (the latter two gain a `--config=PATH` option matching `check`).
+
 - **Per-rule diagnostic suppression.** Two mechanisms compose:
   - **Project-level**: `.rigor.yml`'s new `disable:` key
     accepts a list of `rigor check` rule identifiers

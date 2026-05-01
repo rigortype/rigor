@@ -10,12 +10,15 @@ module Rigor
       "paths" => ["lib"],
       "plugins" => [],
       "disable" => [],
+      "libraries" => [],
+      "signature_paths" => nil,
       "cache" => {
         "path" => ".rigor/cache"
       }
     }.freeze
 
-    attr_reader :target_ruby, :paths, :plugins, :cache_path, :disabled_rules
+    attr_reader :target_ruby, :paths, :plugins, :cache_path, :disabled_rules,
+                :libraries, :signature_paths
 
     def self.load(path = DEFAULT_PATH)
       data = if File.exist?(path)
@@ -27,13 +30,16 @@ module Rigor
       new(DEFAULTS.merge(data))
     end
 
-    def initialize(data = DEFAULTS)
+    def initialize(data = DEFAULTS) # rubocop:disable Metrics/AbcSize
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))
 
       @target_ruby = data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")).to_s
       @paths = Array(data.fetch("paths", DEFAULTS.fetch("paths"))).map(&:to_s)
       @plugins = Array(data.fetch("plugins", DEFAULTS.fetch("plugins"))).map(&:to_s)
       @disabled_rules = Array(data.fetch("disable", DEFAULTS.fetch("disable"))).map(&:to_s).freeze
+      @libraries = Array(data.fetch("libraries", DEFAULTS.fetch("libraries"))).map(&:to_s).freeze
+      sig_paths = data.fetch("signature_paths", DEFAULTS.fetch("signature_paths"))
+      @signature_paths = sig_paths.nil? ? nil : Array(sig_paths).map(&:to_s).freeze
       @cache_path = cache.fetch("path").to_s
     end
 
@@ -43,6 +49,8 @@ module Rigor
         "paths" => paths,
         "plugins" => plugins,
         "disable" => disabled_rules,
+        "libraries" => libraries,
+        "signature_paths" => signature_paths,
         "cache" => {
           "path" => cache_path
         }

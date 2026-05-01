@@ -3,6 +3,7 @@
 require "optionparser"
 require "prism"
 
+require_relative "../configuration"
 require_relative "../environment"
 require_relative "../inference/coverage_scanner"
 require_relative "../scope"
@@ -44,11 +45,13 @@ module Rigor
       private
 
       def parse_options
-        options = { format: "text", limit: 10, show_recognized: false, threshold: nil }
+        options = { format: "text", limit: 10, show_recognized: false, threshold: nil,
+                    config: Configuration::DEFAULT_PATH }
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
+          opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
           opts.on("--limit=N", Integer, "Max example events to print (text only)") do |value|
             options[:limit] = value
           end
@@ -86,7 +89,8 @@ module Rigor
       end
 
       def scan_paths(paths, options)
-        scope = Scope.empty(environment: project_environment)
+        configuration = Configuration.load(options.fetch(:config))
+        scope = Scope.empty(environment: project_environment(configuration))
         scanner = Inference::CoverageScanner.new(scope: scope)
         accumulator = ScanAccumulator.new
         paths.each { |path| scan_one(path, scanner, accumulator) }
@@ -94,12 +98,13 @@ module Rigor
       end
 
       # Builds a project-aware environment that auto-detects `<cwd>/sig`
-      # so calls scoped to the current project resolve through the
-      # local RBS tree. Phase 2a does not yet wire stdlib opt-in here;
-      # that lands when the configuration layer (`.rigor.yml`) gains an
-      # `rbs:` section.
-      def project_environment
-        Environment.for_project
+      # by default and honours the configuration's `libraries:` /
+      # `signature_paths:` keys when present.
+      def project_environment(configuration)
+        Environment.for_project(
+          libraries: configuration.libraries,
+          signature_paths: configuration.signature_paths
+        )
       end
 
       def scan_one(path, scanner, accumulator)

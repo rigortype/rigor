@@ -3,6 +3,7 @@
 require "optionparser"
 require "prism"
 
+require_relative "../configuration"
 require_relative "../environment"
 require_relative "../scope"
 require_relative "../source/node_locator"
@@ -47,19 +48,20 @@ module Rigor
       private
 
       def parse_options
-        options = { format: "text", trace: false }
+        options = { format: "text", trace: false, config: Configuration::DEFAULT_PATH }
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
           opts.on("--trace", "Record fail-soft fallbacks via FallbackTracer") { options[:trace] = true }
+          opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
         end
         parser.parse!(@argv)
 
         options
       end
 
-      def execute(target:, options:)
+      def execute(target:, options:) # rubocop:disable Metrics/AbcSize
         file, line, column = target
         return 1 unless file_exists?(file)
 
@@ -72,7 +74,8 @@ module Rigor
         return 1 if node.nil?
 
         tracer = options[:trace] ? Inference::FallbackTracer.new : nil
-        base_scope = Scope.empty(environment: project_environment(file))
+        configuration = Configuration.load(options.fetch(:config))
+        base_scope = Scope.empty(environment: project_environment(file, configuration))
 
         # Build a per-node scope index so locals bound earlier in the
         # file flow into the scope used to type the queried node. We
@@ -95,8 +98,11 @@ module Rigor
       # walk parent directories to find the enclosing `Gemfile`/`*.gemspec`
       # so probes against files outside the current process's CWD still
       # see the right `sig/` tree.
-      def project_environment(_file)
-        Environment.for_project
+      def project_environment(_file, configuration)
+        Environment.for_project(
+          libraries: configuration.libraries,
+          signature_paths: configuration.signature_paths
+        )
       end
 
       def file_exists?(file)

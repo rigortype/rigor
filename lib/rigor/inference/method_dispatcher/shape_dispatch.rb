@@ -94,6 +94,7 @@ module Rigor
           when Type::Tuple then dispatch_tuple(receiver, method_name, args)
           when Type::HashShape then dispatch_hash_shape(receiver, method_name, args)
           when Type::Nominal then dispatch_nominal_size(receiver, method_name, args)
+          when Type::Difference then dispatch_difference(receiver, method_name, args)
           end
         end
 
@@ -111,6 +112,15 @@ module Rigor
           "Range" => %i[size length count]
         }.freeze
         private_constant :SIZE_RETURNING_NOMINALS
+
+        # When the difference removes the empty value of the
+        # base type (`Constant[""]`, `Constant[0]`, an empty
+        # Tuple, an empty HashShape), `size` / `length` /
+        # `count` MUST be `positive-int` (the base's
+        # non-negative range minus the removed point's `0`),
+        # and `empty?` / `zero?` MUST be `Constant[false]`.
+        EMPTY_REMOVAL_BASES = %w[String Array Hash Set].freeze
+        private_constant :EMPTY_REMOVAL_BASES
 
         class << self
           private
@@ -136,6 +146,78 @@ module Rigor
             return nil unless selectors&.include?(method_name)
 
             Type::Combinator.non_negative_int
+          end
+
+          # Refinement-aware projections over a `Difference[base,
+          # removed]` receiver. When the removed value is the
+          # empty witness of the base (`Constant[""]` for
+          # String, `Tuple[]` for Array, `HashShape{}` for Hash,
+          # `Constant[0]` for Integer), the catalog tier knows:
+          #
+          #   ns.size                      # positive-int
+          #   ns.size == 0                 # Constant[false]   (via narrowing tier)
+          #   ns.empty?                    # Constant[false]
+          #   nzi.zero?                    # Constant[false]
+          #
+          # For any other base method, the difference is opaque
+          # to ShapeDispatch — we delegate to the base nominal
+          # so the size/length tier still answers the broader
+          # `non_negative_int` envelope where applicable.
+          def dispatch_difference(difference, method_name, args)
+            base = difference.base
+            return nil unless base.is_a?(Type::Nominal)
+
+            if removes_empty_witness?(difference)
+              precise = empty_removal_projection(base, method_name, args)
+              return precise if precise
+            end
+
+            dispatch_nominal_size(base, method_name, args)
+          end
+
+          EMPTY_WITNESS_PREDICATES = {
+            "String" => ->(removed) { removed.is_a?(Type::Constant) && removed.value == "" },
+            "Integer" => lambda { |removed|
+              removed.is_a?(Type::Constant) && removed.value.is_a?(Integer) && removed.value.zero?
+            },
+            "Array" => ->(removed) { removed.is_a?(Type::Tuple) && removed.elements.empty? },
+            "Hash" => ->(removed) { removed.is_a?(Type::HashShape) && removed.pairs.empty? }
+          }.freeze
+          private_constant :EMPTY_WITNESS_PREDICATES
+
+          def removes_empty_witness?(difference)
+            return false unless difference.base.is_a?(Type::Nominal)
+
+            predicate = EMPTY_WITNESS_PREDICATES[difference.base.class_name]
+            !!(predicate && predicate.call(difference.removed))
+          end
+
+          def empty_removal_projection(base, method_name, args)
+            return nil unless args.empty?
+
+            if %i[size length count bytesize].include?(method_name)
+              return size_returning_for_empty_removal(base, method_name)
+            end
+
+            empty_predicate_projection(base, method_name)
+          end
+
+          def empty_predicate_projection(base, method_name)
+            case method_name
+            when :empty?
+              base.class_name == "Integer" ? nil : Type::Combinator.constant_of(false)
+            when :zero?
+              base.class_name == "Integer" ? Type::Combinator.constant_of(false) : nil
+            end
+          end
+
+          def size_returning_for_empty_removal(base, method_name)
+            return nil if base.class_name == "Integer" # Integer has no size method on Difference
+
+            selectors = SIZE_RETURNING_NOMINALS[base.class_name]
+            return nil unless selectors&.include?(method_name)
+
+            Type::Combinator.positive_int
           end
 
           def tuple_first(tuple, _method_name, args)

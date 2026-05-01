@@ -10,6 +10,7 @@ require_relative "integer_range"
 require_relative "tuple"
 require_relative "hash_shape"
 require_relative "union"
+require_relative "difference"
 
 module Rigor
   module Type
@@ -21,7 +22,7 @@ module Rigor
     #
     # See docs/internal-spec/internal-type-api.md and
     # docs/type-specification/normalization.md.
-    module Combinator
+    module Combinator # rubocop:disable Metrics/ModuleLength
       module_function
 
       def top
@@ -94,6 +95,42 @@ module Rigor
 
       def universal_int
         IntegerRange.new(IntegerRange::NEG_INFINITY, IntegerRange::POS_INFINITY)
+      end
+
+      # Point-removal refinement carrier (ADR-3 OQ3 Option C). Use
+      # `non_empty_string` / `non_zero_int` / `non_empty_array` /
+      # `non_empty_hash` for the imported built-in shapes; raw
+      # `difference(base, removed)` for ad-hoc refinements an
+      # `RBS::Extended` annotation introduces.
+      def difference(base, removed)
+        Difference.new(base, removed)
+      end
+
+      def non_empty_string
+        Difference.new(nominal_of("String"), constant_of(""))
+      end
+
+      def non_zero_int
+        Difference.new(nominal_of("Integer"), constant_of(0))
+      end
+
+      # `non-empty-array[T]` requires the element type so the
+      # `Nominal[Array, [T]]` projection through Array#first /
+      # #last keeps element precision intact. The default
+      # `Top` admits any array element when the caller does
+      # not have a more specific element type.
+      def non_empty_array(element = top)
+        Difference.new(
+          nominal_of("Array", type_args: [element]),
+          tuple_of
+        )
+      end
+
+      def non_empty_hash(key = top, value = top)
+        Difference.new(
+          nominal_of("Hash", type_args: [key, value]),
+          hash_shape_of({})
+        )
       end
 
       # Constructs a heterogeneous, fixed-arity Tuple from positional

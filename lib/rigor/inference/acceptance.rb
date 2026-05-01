@@ -65,6 +65,7 @@ module Rigor
         Type::Nominal => :accepts_nominal,
         Type::Constant => :accepts_constant,
         Type::IntegerRange => :accepts_integer_range,
+        Type::Difference => :accepts_difference,
         Type::Tuple => :accepts_tuple,
         Type::HashShape => :accepts_hash_shape
       }.freeze
@@ -450,6 +451,45 @@ module Rigor
               mode: mode,
               reasons: "non-universal IntegerRange rejects Nominal[Integer] (could fall outside #{self_type.describe})"
             )
+          end
+        end
+
+        # `Difference[base, removed]` accepts another type X when
+        # the base accepts X *and* X's value set is provably
+        # disjoint from `removed`. The disjointness test is the
+        # subtle part — it is NOT the same as `removed.accepts(X)`,
+        # because `Nominal[String]` includes `""` even though
+        # `Constant[""]` does not "accept" `Nominal[String]`.
+        # The conservative rule here: we can prove disjointness
+        # only when X is itself a `Constant` carrier (compare
+        # values directly) or another `Difference` with the same
+        # removed value (already exhibits the disjointness). Any
+        # other shape — Nominal, Union, IntegerRange — could
+        # overlap the removed value, so the difference rejects
+        # it under gradual mode.
+        def accepts_difference(self_type, other_type, mode)
+          base_result = accepts(self_type.base, other_type, mode: mode)
+          return base_result if base_result.no?
+
+          unless provably_disjoint_from_removed?(other_type, self_type.removed)
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "#{self_type.describe} cannot prove #{other_type.class} excludes the removed value"
+            )
+          end
+
+          base_result.with_reason("#{self_type.describe}: base accepts and removed is disjoint")
+        end
+
+        def provably_disjoint_from_removed?(other_type, removed)
+          case other_type
+          when Type::Constant
+            !(removed.is_a?(Type::Constant) && removed.value == other_type.value)
+          when Type::Difference
+            # `Difference[A, removed_R].accepts(Difference[B, R])` —
+            # the inner difference exhibits the same disjointness;
+            # forward to the base.
+            other_type.removed == removed && provably_disjoint_from_removed?(other_type.base, removed)
           end
         end
 

@@ -633,11 +633,27 @@ module Rigor
 
         # Method bodies do NOT see the outer scope's locals. They start
         # from a fresh scope with the same environment, then receive
-        # the parameter bindings.
+        # the parameter bindings. Slice 7 phase 2: instance defs ALSO
+        # seed their `ivars` map from the class-level accumulator so
+        # `def get; @x; end` reads the type that a sibling
+        # `def init; @x = 1; end` wrote.
         fresh = build_fresh_body_scope
         body_self = self_type_for_method_body(singleton: singleton)
         fresh = fresh.with_self_type(body_self) if body_self
+        fresh = seed_instance_ivars(fresh, singleton: singleton)
         bindings.reduce(fresh) { |acc, (name, type)| acc.with_local(name, type) }
+      end
+
+      def seed_instance_ivars(body_scope, singleton:)
+        return body_scope if singleton
+
+        path = current_class_path
+        return body_scope if path.nil?
+
+        seeded = scope.class_ivars_for(path)
+        return body_scope if seeded.empty?
+
+        seeded.reduce(body_scope) { |acc, (name, type)| acc.with_ivar(name, type) }
       end
 
       # Slice A-declarations. Class- and method-bodies start from a
@@ -647,7 +663,9 @@ module Rigor
       # (`Prism::ConstantReadNode` for `module Foo` headers, etc.)
       # remain reachable from inside nested bodies.
       def build_fresh_body_scope
-        Scope.empty(environment: scope.environment).with_declared_types(scope.declared_types)
+        Scope.empty(environment: scope.environment)
+             .with_declared_types(scope.declared_types)
+             .with_class_ivars(scope.class_ivars)
       end
 
       def singleton_def?(def_node)

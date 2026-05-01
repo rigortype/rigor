@@ -8,6 +8,7 @@ module Rigor
     attr_reader ivars: Hash[Symbol, Type::t]
     attr_reader cvars: Hash[Symbol, Type::t]
     attr_reader globals: Hash[Symbol, Type::t]
+    attr_reader class_ivars: Hash[String, Hash[Symbol, Type::t]]
 
     def self.empty: (?environment: Environment) -> Scope
 
@@ -20,6 +21,8 @@ module Rigor
     def with_ivar: (String | Symbol name, Type::t type) -> Scope
     def with_cvar: (String | Symbol name, Type::t type) -> Scope
     def with_global: (String | Symbol name, Type::t type) -> Scope
+    def class_ivars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
+    def with_class_ivars: (Hash[String, Hash[Symbol, Type::t]] table) -> Scope
     def with_fact: (Analysis::FactStore::Fact fact) -> Scope
     def with_self_type: (Type::t? type) -> Scope
     def with_declared_types: (Hash[untyped, Type::t] table) -> Scope

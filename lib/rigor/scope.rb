@@ -17,11 +17,12 @@ module Rigor
   # rubocop:disable Metrics/ClassLength,Metrics/ParameterLists
   class Scope
     attr_reader :environment, :locals, :fact_store, :self_type, :declared_types,
-                :ivars, :cvars, :globals
+                :ivars, :cvars, :globals, :class_ivars
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
-    private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS
+    EMPTY_CLASS_IVARS = {}.freeze
+    private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS, :EMPTY_CLASS_IVARS
 
     class << self
       def empty(environment: Environment.default)
@@ -36,7 +37,8 @@ module Rigor
       declared_types: EMPTY_DECLARED_TYPES,
       ivars: EMPTY_VAR_BINDINGS,
       cvars: EMPTY_VAR_BINDINGS,
-      globals: EMPTY_VAR_BINDINGS
+      globals: EMPTY_VAR_BINDINGS,
+      class_ivars: EMPTY_CLASS_IVARS
     )
       @environment = environment
       @locals = locals
@@ -46,6 +48,7 @@ module Rigor
       @ivars = ivars
       @cvars = cvars
       @globals = globals
+      @class_ivars = class_ivars
       freeze
     end
 
@@ -122,6 +125,29 @@ module Rigor
       rebuild(globals: @globals.merge(name.to_sym => type).freeze)
     end
 
+    # Slice 7 phase 2 — class-level ivar accumulator. Keyed by
+    # the qualified class name (e.g. `"Rigor::Scope"`); the
+    # value is a `Hash[Symbol, Type::t]` of every ivar that
+    # appears as a write target inside any def body of that
+    # class. `StatementEvaluator#build_method_entry_scope`
+    # seeds the method body's `ivars` map from this table so a
+    # `def get; @x; end` reads the type written in a sibling
+    # `def init; @x = 1; end`.
+    #
+    # `ScopeIndexer` populates the table once at index time
+    # through a separate pre-pass over the program. The map is
+    # frozen and shared by structural reference across every
+    # derived scope.
+    def class_ivars_for(class_name)
+      return EMPTY_VAR_BINDINGS if class_name.nil?
+
+      @class_ivars[class_name.to_s] || EMPTY_VAR_BINDINGS
+    end
+
+    def with_class_ivars(table)
+      rebuild(class_ivars: table)
+    end
+
     def facts_for(target: nil, bucket: nil)
       fact_store.facts_for(target: target, bucket: bucket)
     end
@@ -185,13 +211,15 @@ module Rigor
 
     def rebuild(
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
-      declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals
+      declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals,
+      class_ivars: @class_ivars
     )
       self.class.new(
         environment: environment, locals: locals,
         fact_store: fact_store, self_type: self_type,
         declared_types: declared_types,
-        ivars: ivars, cvars: cvars, globals: globals
+        ivars: ivars, cvars: cvars, globals: globals,
+        class_ivars: class_ivars
       )
     end
 
@@ -209,7 +237,8 @@ module Rigor
         declared_types: declared_types,
         ivars: joined_ivars,
         cvars: joined_cvars,
-        globals: joined_globals
+        globals: joined_globals,
+        class_ivars: class_ivars
       )
     end
   end

@@ -36,6 +36,7 @@ module Rigor
     # `default_scope`. The returned Hash is mutable in principle but
     # callers MUST treat it as read-only; the indexer itself never
     # exposes a way to update it past construction.
+    # rubocop:disable Metrics/ModuleLength
     module ScopeIndexer
       module_function
 
@@ -57,6 +58,13 @@ module Rigor
         declared_types = build_declaration_overrides(root)
         seeded_scope = default_scope.with_declared_types(declared_types)
 
+        # Slice 7 phase 2. Pre-pass over every class/module body
+        # to collect the per-class ivar accumulator. Seeded after
+        # declared_types so the rvalue typer in the pre-pass can
+        # see declaration overrides.
+        class_ivars = build_class_ivar_index(root, seeded_scope)
+        seeded_scope = seeded_scope.with_class_ivars(class_ivars)
+
         table = {}.compare_by_identity
         table.default = seeded_scope
 
@@ -65,6 +73,83 @@ module Rigor
 
         propagate(root, table, seeded_scope)
         table
+      end
+
+      # Slice 7 phase 2. Builds the class-level ivar accumulator
+      # by walking every `Prism::ClassNode` / `Prism::ModuleNode`
+      # body, descending into each nested `Prism::DefNode`, and
+      # typing every `Prism::InstanceVariableWriteNode` rvalue
+      # under a scope that carries the appropriate `self_type`
+      # for that def (singleton vs instance). The rvalue is
+      # typed with NO local bindings — the pre-pass lacks
+      # statement-level threading — so `@x = 1` records
+      # `Constant[1]` but `@x = some_local + 1` records
+      # `Dynamic[Top]` (since `some_local` is unbound at
+      # pre-pass time). Multiple writes to the same ivar union
+      # via `Type::Combinator.union`.
+      def build_class_ivar_index(root, default_scope)
+        accumulator = {}
+        walk_class_ivars(root, [], default_scope, accumulator)
+        accumulator.transform_values(&:freeze).freeze
+      end
+
+      def walk_class_ivars(node, qualified_prefix, default_scope, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            child_prefix = qualified_prefix + [name]
+            walk_class_ivars(node.body, child_prefix, default_scope, accumulator) if node.body
+            return
+          end
+        when Prism::DefNode
+          collect_def_ivar_writes(node, qualified_prefix, default_scope, accumulator)
+          return
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_class_ivars(child, qualified_prefix, default_scope, accumulator)
+        end
+      end
+
+      def collect_def_ivar_writes(def_node, qualified_prefix, default_scope, accumulator)
+        return if def_node.body.nil? || qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        self_type =
+          if def_node.receiver.is_a?(Prism::SelfNode)
+            Type::Combinator.singleton_of(class_name)
+          else
+            Type::Combinator.nominal_of(class_name)
+          end
+        body_scope = default_scope.with_self_type(self_type)
+
+        gather_ivar_writes(def_node.body, body_scope, class_name, accumulator)
+      end
+
+      IVAR_BARRIER_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze
+      private_constant :IVAR_BARRIER_NODES
+
+      def gather_ivar_writes(node, scope, class_name, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        record_ivar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::InstanceVariableWriteNode)
+
+        # Don't recurse into nested defs, classes, or modules; their
+        # ivars belong to their own enclosing class.
+        return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        node.compact_child_nodes.each { |c| gather_ivar_writes(c, scope, class_name, accumulator) }
+      end
+
+      def record_ivar_write(node, scope, class_name, accumulator)
+        rvalue_type = scope.type_of(node.value)
+        accumulator[class_name] ||= {}
+        existing = accumulator[class_name][node.name]
+        accumulator[class_name][node.name] =
+          existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end
 
       # Walks the program once for `Prism::ModuleNode` and
@@ -137,5 +222,6 @@ module Rigor
         node.compact_child_nodes.each { |child| propagate(child, table, current_scope) }
       end
     end
+    # rubocop:enable Metrics/ModuleLength
   end
 end

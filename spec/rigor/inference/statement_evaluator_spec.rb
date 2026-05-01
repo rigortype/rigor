@@ -1154,6 +1154,61 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "cross-method ivar tracking via class accumulator (Slice 7 phase 2)" do
+    it "seeds an instance method body's ivars from sibling-method writes when routed through ScopeIndexer" do
+      ast = parse_program(<<~RUBY)
+        class Foo
+          def init; @cache = "hello"; end
+          def get; @cache; end
+        end
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(ast, default_scope: scope)
+      # Find the @cache read node in the get body.
+      read_node = nil
+      Rigor::Source::NodeWalker.each(ast) do |n|
+        read_node = n if n.is_a?(Prism::InstanceVariableReadNode) && n.name == :@cache
+      end
+      expect(index[read_node].ivar(:@cache)).to eq(Rigor::Type::Combinator.constant_of("hello"))
+    end
+
+    it "unions ivar types written in different sibling methods" do
+      ast = parse_program(<<~RUBY)
+        class Foo
+          def init; @x = 1; end
+          def reset; @x = nil; end
+          def get; @x; end
+        end
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(ast, default_scope: scope)
+      get_def = nil
+      Rigor::Source::NodeWalker.each(ast) do |n|
+        get_def = n if n.is_a?(Prism::DefNode) && n.name == :get
+      end
+      union = index[get_def.body].ivar(:@x)
+      expect(union).to be_a(Rigor::Type::Union)
+      expect(union.members.map(&:value)).to contain_exactly(1, nil)
+    end
+
+    it "does NOT seed class-method (singleton) bodies — they have their own self" do
+      ast = parse_program(<<~RUBY)
+        class Foo
+          def init; @cache = "hello"; end
+          def self.get; @cache; end
+        end
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(ast, default_scope: scope)
+      read_node = nil
+      Rigor::Source::NodeWalker.each(ast) do |n|
+        read_node = n if n.is_a?(Prism::InstanceVariableReadNode)
+      end
+      # `def self.get`'s `@cache` is a class-level ivar of `Foo` the
+      # class object, NOT an instance ivar of a Foo instance. The
+      # accumulator tracks only instance defs, so this read stays
+      # unbound.
+      expect(index[read_node].ivar(:@cache)).to be_nil
+    end
+  end
+
   describe "captured-local invalidation on closure escape (Slice 6 phase C sub-phase 3c)" do
     let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
 

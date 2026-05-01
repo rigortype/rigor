@@ -271,7 +271,9 @@ The `StatementEvaluator` MUST handle `Prism::InstanceVariableWriteNode`, `Prism:
 
 `Scope#join` MUST union ivar/cvar/global bindings the same way it unions locals (drop any name not bound in BOTH sides; the statement-level evaluator is responsible for nil-injection on half-bound names if the catalogue ever extends to a control-flow construct that needs it). `Scope#==` and `Scope#hash` MUST include the three binding maps.
 
-The first cut is **method-local**: each `def` enters with a fresh scope built by `build_method_entry_scope`, so ivar / cvar / global writes do not leak across method boundaries. Cross-method ivar tracking (an instance-level binding map keyed by `self_type`'s qualified class name) is a follow-up slice. Until that lands, reads of an ivar in a method that did not write it MUST type as `Dynamic[Top]`, matching the pre-Slice-7 behaviour for unwritten reads.
+Slice 7 phase 2 lifts the method-local boundary for ivars: `Scope` carries a `class_ivars: Hash[String, Hash[Symbol, Type]]` accumulator keyed by qualified class name. `ScopeIndexer` populates it once at index time through a separate pre-pass that walks every `Prism::ClassNode` / `Prism::ModuleNode`, descends into each nested instance `Prism::DefNode`, and types every `Prism::InstanceVariableWriteNode` rvalue under a scope that carries the appropriate `self_type` (instance defs only — singleton defs operate on a different `self`). Multiple writes to the same ivar within the class union via `Type::Combinator.union`. `StatementEvaluator#build_method_entry_scope` MUST seed an instance method body's `ivars` from `Scope#class_ivars_for(current_class_path)`; singleton-method bodies (`def self.foo` or any def lexically inside `class << self`) MUST NOT consult the accumulator because their `self` is the class object itself.
+
+The pre-pass types rvalues with no local bindings, so `@x = 1` records `Constant[1]` but `@x = some_local + 1` records `Dynamic[Top]`. Cvars and globals remain method-local; the equivalent class-level / process-level accumulators are a follow-up slice.
 
 ### Lexical constant lookup (Slice A constant-walk)
 

@@ -383,6 +383,7 @@ module Rigor
           when :is_a?, :kind_of? then analyse_class_predicate(node, scope, exact: false)
           when :instance_of? then analyse_class_predicate(node, scope, exact: true)
           when :==, :!= then analyse_equality_predicate(node, scope, equality: name)
+          when :=== then analyse_case_equality_predicate(node, scope)
           end
         end
 
@@ -500,6 +501,101 @@ module Rigor
               narrow_not_class(current, class_name, exact: exact, environment: scope.environment)
             )
           ]
+        end
+
+        # Slice 7 phase 4 — `===`-narrowing. The case-equality
+        # predicate `<receiver> === local` is the operator that
+        # backs Ruby's `case`/`when` dispatch. Three receiver
+        # shapes produce sound narrowing rules:
+        #
+        # - **Class / Module receiver**: `Foo === x` is
+        #   isomorphic to `x.is_a?(Foo)` (the default behaviour
+        #   of `Module#===`). Reuse `class_predicate_scopes` so
+        #   the truthy edge narrows down to `Foo` and the falsey
+        #   edge subtracts `Foo` from a union.
+        # - **Range literal receiver** (`(1..10) === x`): the
+        #   default `Range#===` includes `x` iff the endpoints
+        #   compare it. We conservatively narrow `x` to
+        #   `Numeric` for integer-endpoint ranges and to
+        #   `String` for string-endpoint ranges; other endpoint
+        #   types fall through.
+        # - **Regexp literal receiver** (`/foo/ === x`): the
+        #   match operator coerces `x` to a String, so the
+        #   truthy edge narrows `x` to `String`. The falsey
+        #   edge keeps the entry type unchanged because
+        #   `Regexp#===` returns false for non-Strings AND for
+        #   Strings that simply do not match.
+        #
+        # Anything else — non-local LHS argument, dynamic
+        # receiver, custom `===` method — falls through to
+        # the no-narrowing branch (nil), preserving the
+        # entry scope on both edges.
+        def analyse_case_equality_predicate(node, scope)
+          return nil if node.arguments.nil?
+          return nil unless node.arguments.arguments.size == 1
+
+          local_arg = node.arguments.arguments.first
+          return nil unless local_arg.is_a?(Prism::LocalVariableReadNode)
+
+          current = scope.local(local_arg.name)
+          return nil if current.nil?
+
+          analyse_case_equality_receiver(node.receiver, scope, local_arg.name, current)
+        end
+
+        def analyse_case_equality_receiver(receiver, scope, local_name, current)
+          if (class_name = static_class_name(receiver))
+            return class_predicate_scopes(scope, local_name, current, class_name, exact: false)
+          end
+
+          target_class = case_equality_target_class(receiver)
+          return nil if target_class.nil?
+
+          narrowed = narrow_class(current, target_class, exact: false, environment: scope.environment)
+          [
+            scope.with_local(local_name, narrowed),
+            scope.with_local(local_name, current)
+          ]
+        end
+
+        # Maps a case-equality literal receiver to the class
+        # whose membership is implied by the truthy edge.
+        # `Prism::ParenthesesNode` wrappers are transparently
+        # unwrapped (`(1..10) === x` is parsed with the range
+        # inside parentheses).  Range literals: integer
+        # endpoints → `Numeric`; string endpoints → `String`.
+        # Regexp literals → `String`. Other shapes return nil
+        # so the caller falls through.
+        def case_equality_target_class(receiver)
+          receiver = unwrap_parens(receiver)
+          case receiver
+          when Prism::RangeNode then range_target_class(receiver)
+          when Prism::RegularExpressionNode, Prism::InterpolatedRegularExpressionNode then "String"
+          end
+        end
+
+        def unwrap_parens(node)
+          while node.is_a?(Prism::ParenthesesNode) && node.body.is_a?(Prism::StatementsNode) &&
+                node.body.body.size == 1
+            node = node.body.body.first
+          end
+          node
+        end
+
+        def range_target_class(range_node)
+          left = range_node.left
+          right = range_node.right
+          return "Numeric" if integer_endpoint?(left) || integer_endpoint?(right)
+
+          "String" if string_endpoint?(left) || string_endpoint?(right)
+        end
+
+        def integer_endpoint?(node)
+          node.is_a?(Prism::IntegerNode) || node.is_a?(Prism::FloatNode)
+        end
+
+        def string_endpoint?(node)
+          node.is_a?(Prism::StringNode)
         end
 
         # Walks a constant-reference subtree (`Prism::ConstantReadNode`,

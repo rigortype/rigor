@@ -545,5 +545,41 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(truthy.local(:x)).to eq(string_nominal)
       expect(falsey.local(:x)).to eq(integer_nominal)
     end
+
+    describe "case-equality (===) narrowing (Slice 7 phase 4)" do
+      it "Class === local narrows like is_a?" do
+        bound = scope.with_local(:x, union_int_str)
+        pred = parse_predicate("Integer === x")
+        truthy, falsey = described_class.predicate_scopes(pred, bound)
+        expect(truthy.local(:x)).to eq(integer_nominal)
+        expect(falsey.local(:x)).to eq(string_nominal)
+      end
+
+      it "Regexp literal === local narrows the truthy edge to String" do
+        bound = scope.with_local(:x, union_int_str)
+        pred = parse_predicate("/foo/ === x")
+        truthy, falsey = described_class.predicate_scopes(pred, bound)
+        expect(truthy.local(:x)).to eq(string_nominal)
+        # Falsey edge keeps the entry type — Regexp#=== returns
+        # false for non-Strings AND non-matching Strings.
+        expect(falsey.local(:x)).to eq(union_int_str)
+      end
+
+      it "Integer-endpoint Range literal === local narrows to Numeric on the truthy edge" do
+        bound = scope.with_local(:x, union_int_str)
+        pred = parse_predicate("(1..10) === x")
+        truthy, _falsey = described_class.predicate_scopes(pred, bound)
+        # x must be Numeric on the truthy edge; the Integer member
+        # of the union survives, String is dropped.
+        expect(truthy.local(:x)).to eq(integer_nominal)
+      end
+
+      it "falls through (no narrowing) when the LHS argument is not a local read" do
+        pred = parse_predicate("Integer === foo")
+        truthy, falsey = described_class.predicate_scopes(pred, scope)
+        expect(truthy).to eq(scope)
+        expect(falsey).to eq(scope)
+      end
+    end
   end
 end

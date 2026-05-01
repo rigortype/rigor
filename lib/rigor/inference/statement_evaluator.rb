@@ -605,7 +605,86 @@ module Rigor
         call_type = scope.type_of(node, tracer: tracer)
         evaluate_block_if_present(node)
         post_scope = record_closure_escape_if_any(node)
+        post_scope = apply_rbs_extended_assertions(node, post_scope)
         [call_type, post_scope]
+      end
+
+      # v0.0.2 — applies `RBS::Extended` `assert <target> is T`
+      # directives to the post-call scope. The conditional
+      # variants (`assert-if-true` / `assert-if-false`) are
+      # NOT applied here — they refine the scope only when the
+      # call is observed as a truthy / falsey predicate, which
+      # `Narrowing.predicate_scopes` handles separately.
+      def apply_rbs_extended_assertions(call_node, current_scope)
+        method_def = resolve_call_method(call_node, current_scope)
+        return current_scope if method_def.nil?
+
+        effects = RbsExtended.read_assert_effects(method_def)
+        return current_scope if effects.empty?
+
+        effects.reduce(current_scope) do |scope_acc, effect|
+          next scope_acc unless effect.always?
+
+          apply_assert_effect(effect, call_node, scope_acc, method_def)
+        end
+      end
+
+      def resolve_call_method(call_node, current_scope) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        receiver_node = call_node.receiver
+        receiver_type =
+          if receiver_node
+            current_scope.type_of(receiver_node, tracer: tracer)
+          else
+            current_scope.self_type
+          end
+        return nil if receiver_type.nil?
+
+        loader = current_scope.environment.rbs_loader
+        return nil if loader.nil?
+
+        class_name = assertion_class_name(receiver_type)
+        return nil if class_name.nil?
+        return nil unless loader.class_known?(class_name)
+
+        if receiver_type.is_a?(Type::Singleton)
+          loader.singleton_method(class_name: class_name, method_name: call_node.name)
+        else
+          loader.instance_method(class_name: class_name, method_name: call_node.name)
+        end
+      rescue StandardError
+        nil
+      end
+
+      def assertion_class_name(receiver_type)
+        case receiver_type
+        when Type::Nominal, Type::Singleton then receiver_type.class_name
+        end
+      end
+
+      def apply_assert_effect(effect, call_node, current_scope, method_def)
+        return current_scope if effect.target_kind != :parameter
+
+        arg_node = lookup_assert_arg(call_node, method_def, effect.target_name)
+        return current_scope unless arg_node.is_a?(Prism::LocalVariableReadNode)
+
+        local_name = arg_node.name
+        current_type = current_scope.local(local_name)
+        return current_scope if current_type.nil?
+
+        narrowed = Narrowing.narrow_class(
+          current_type, effect.class_name, exact: false, environment: current_scope.environment
+        )
+        current_scope.with_local(local_name, narrowed)
+      end
+
+      def lookup_assert_arg(call_node, method_def, target_name)
+        arguments = call_node.arguments&.arguments || []
+        method_def.method_types.each do |mt|
+          params = mt.type.required_positionals + mt.type.optional_positionals
+          index = params.find_index { |param| param.name == target_name }
+          return arguments[index] if index && arguments[index]
+        end
+        nil
       end
 
       def evaluate_block_if_present(node)

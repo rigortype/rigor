@@ -121,4 +121,36 @@ RSpec.describe Rigor::RbsExtended do
       end
     end
   end
+
+  describe ".parse_assert_annotation (v0.0.2)" do
+    it "parses an unconditional `assert` directive" do
+      effect = described_class.parse_assert_annotation("rigor:v1:assert value is String")
+      expect(effect).to be_a(Rigor::RbsExtended::AssertEffect)
+      expect(effect.condition).to eq(:always)
+      expect(effect.target_kind).to eq(:parameter)
+      expect(effect.target_name).to eq(:value)
+      expect(effect.class_name).to eq("String")
+      expect(effect).to be_always
+    end
+
+    it "parses `assert-if-true`" do
+      effect = described_class.parse_assert_annotation("rigor:v1:assert-if-true value is Integer")
+      expect(effect.condition).to eq(:if_truthy_return)
+      expect(effect).to be_if_truthy_return
+    end
+
+    it "parses `assert-if-false`" do
+      effect = described_class.parse_assert_annotation("rigor:v1:assert-if-false value is NilClass")
+      expect(effect.condition).to eq(:if_falsey_return)
+      expect(effect).to be_if_falsey_return
+    end
+
+    it "returns nil for non-assert directives (e.g. predicate-if-true)" do
+      expect(described_class.parse_assert_annotation("rigor:v1:predicate-if-true value is String")).to be_nil
+    end
+
+    it "returns nil for unrecognised payload shape" do
+      expect(described_class.parse_assert_annotation("rigor:v1:assert garbage")).to be_nil
+    end
+  end
 end

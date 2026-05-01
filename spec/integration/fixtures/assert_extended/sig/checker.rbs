@@ -1,0 +1,8 @@
+class Checker
+  %a{rigor:v1:assert value is String}
+  def must_be_string!: (untyped value) -> void
+
+  %a{rigor:v1:assert-if-true value is Integer}
+  %a{rigor:v1:assert-if-false value is NilClass}
+  def integer?: (untyped value) -> bool
+end

@@ -424,7 +424,32 @@ module Rigor
           # `rigor:v1:predicate-if-true` / `predicate-if-false`
           # annotations, apply them to narrow the corresponding
           # local-variable arguments on each edge.
-          analyse_rbs_extended_predicate(node, scope)
+          predicate_result = analyse_rbs_extended_predicate(node, scope)
+          assert_result = analyse_rbs_extended_assert_if(node, scope)
+          merge_extended_results(predicate_result, assert_result, scope)
+        end
+
+        # Combines two `[truthy_scope, falsey_scope]` pair
+        # results from sibling RBS::Extended analysers
+        # (`predicate-if-*` and `assert-if-*`). When only one
+        # side fires, return it directly; when both fire the
+        # right side's per-local deltas are applied on top of
+        # the left side's edges so the rules compose.
+        def merge_extended_results(left, right, base_scope)
+          return left if right.nil?
+          return right if left.nil?
+
+          [
+            merge_scope_pair(left[0], right[0], base_scope),
+            merge_scope_pair(left[1], right[1], base_scope)
+          ]
+        end
+
+        def merge_scope_pair(left_scope, right_scope, base_scope)
+          right_scope.locals.reduce(left_scope) do |acc, (name, type)|
+            base_type = base_scope.local(name)
+            type.equal?(base_type) ? acc : acc.with_local(name, type)
+          end
         end
 
         def dispatch_call(node, scope, name)
@@ -668,6 +693,47 @@ module Rigor
           end
           [truthy_scope, falsey_scope]
         end
+
+        # v0.0.2 — `assert-if-true` / `assert-if-false`. Reads
+        # the conditional assertion effects off the called
+        # method and narrows the matching argument on the
+        # corresponding edge. The unconditional `assert`
+        # variant is NOT applied here; `StatementEvaluator`
+        # applies it directly to the post-call scope.
+        def analyse_rbs_extended_assert_if(node, scope)
+          method_def = resolve_rbs_extended_method(node, scope)
+          return nil if method_def.nil?
+
+          effects = RbsExtended.read_assert_effects(method_def).reject(&:always?)
+          return nil if effects.empty?
+
+          truthy_scope = scope
+          falsey_scope = scope
+          effects.each do |effect|
+            truthy_scope, falsey_scope =
+              apply_assert_if_effect(effect, node, scope, truthy_scope, falsey_scope, method_def)
+          end
+          [truthy_scope, falsey_scope]
+        end
+
+        # rubocop:disable Metrics/ParameterLists
+        def apply_assert_if_effect(effect, call_node, entry_scope, truthy_scope, falsey_scope, method_def)
+          arg_node = lookup_positional_arg(call_node, method_def, effect.target_name)
+          return [truthy_scope, falsey_scope] if effect.target_kind != :parameter
+          return [truthy_scope, falsey_scope] unless arg_node.is_a?(Prism::LocalVariableReadNode)
+
+          local_name = arg_node.name
+          current = entry_scope.local(local_name)
+          return [truthy_scope, falsey_scope] if current.nil?
+
+          narrowed = narrow_class(current, effect.class_name, exact: false, environment: entry_scope.environment)
+          if effect.if_truthy_return?
+            [truthy_scope.with_local(local_name, narrowed), falsey_scope]
+          else
+            [truthy_scope, falsey_scope.with_local(local_name, narrowed)]
+          end
+        end
+        # rubocop:enable Metrics/ParameterLists
 
         def resolve_rbs_extended_method(node, scope)
           loader = scope.environment.rbs_loader

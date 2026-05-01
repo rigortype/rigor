@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `RBS::Extended` recognises three additional directives:
+  - `rigor:v1:assert <target> is <Class>` — refines the
+    matching argument's local in the post-call scope
+    unconditionally. Wires through
+    `StatementEvaluator#eval_call`.
+  - `rigor:v1:assert-if-true <target> is <Class>` — refines
+    the argument when the call is observed as a truthy
+    predicate (e.g. `if call_node`). Wires through
+    `Narrowing.predicate_scopes` alongside `predicate-if-*`.
+  - `rigor:v1:assert-if-false <target> is <Class>` —
+    symmetric for falsey.
+
+  The three directives complement `predicate-if-true` /
+  `predicate-if-false` — together they cover the
+  `must_be_string!` / `validate!` / `valid_string?` /
+  `integer?` patterns common in Ruby. `Rigor::RbsExtended::AssertEffect`
+  is the new data class returned by
+  `RbsExtended.read_assert_effects(method_def)`.
+
 - `Rigor::Environment::DEFAULT_LIBRARIES` now includes
   `tmpdir`, `stringio`, `forwardable`, `digest`, and
   `securerandom`. Common stdlib calls

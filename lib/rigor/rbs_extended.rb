@@ -10,20 +10,28 @@ module Rigor
   # This module reads `%a{rigor:v1:<directive> <payload>}`
   # annotations off RBS method definitions and returns
   # well-typed effect objects the inference engine can
-  # consume. The first preview ships only the **type
-  # predicate** directives:
+  # consume. v0.0.2 recognises:
   #
   # - `rigor:v1:predicate-if-true <target> is <ClassName>`
   # - `rigor:v1:predicate-if-false <target> is <ClassName>`
+  # - `rigor:v1:assert <target> is <ClassName>`
+  # - `rigor:v1:assert-if-true <target> is <ClassName>`
+  # - `rigor:v1:assert-if-false <target> is <ClassName>`
   #
-  # Other directives in the spec (`assert`, `assert-if-true`,
-  # `assert-if-false`, `param`, `return`, `conforms-to`, ...)
-  # are intentionally deferred. Annotations whose key is in
-  # the `rigor:v1:` namespace but whose directive is
-  # unrecognised are silently ignored at first-preview
-  # quality (a future slice MAY surface them as
-  # diagnostics-on-Rigor-itself per the spec's "unsupported
-  # metadata" guidance).
+  # `predicate-if-*` fires when the call is used as an
+  # `if` / `unless` condition; `assert` fires unconditionally
+  # at the call's post-scope; `assert-if-true` /
+  # `assert-if-false` fire at the post-scope only when the
+  # call's return value can be observed as truthy / falsey
+  # (currently: when the call is the predicate of a
+  # subsequent `if` / `unless`). Other directives in the spec
+  # (`param`, `return`, `conforms-to`, negation `~T`,
+  # `target: self` narrowing, ...) remain on the v0.0.x
+  # roadmap. Annotations whose key is in the `rigor:v1:`
+  # namespace but whose directive is unrecognised are
+  # silently ignored at first-preview quality (a future slice
+  # MAY surface them as diagnostics-on-Rigor-itself per the
+  # spec's "unsupported metadata" guidance).
   #
   # The parser is minimal: it accepts a strict shape
   # `<target> is <ClassName>` where `<target>` is a Ruby
@@ -41,6 +49,24 @@ module Rigor
     PredicateEffect = Data.define(:edge, :target_kind, :target_name, :class_name) do
       def truthy_only? = edge == :truthy_only
       def falsey_only? = edge == :falsey_only
+    end
+
+    # Returned for `assert` / `assert-if-true` /
+    # `assert-if-false`. `condition` is one of:
+    #
+    # - `:always`           — refines `target` at the call's
+    #                        post-scope unconditionally
+    #                        (`assert`).
+    # - `:if_truthy_return` — refines `target` only when the
+    #                        call's return value is observed
+    #                        as truthy (currently: as the
+    #                        predicate of a subsequent
+    #                        `if` / `unless`).
+    # - `:if_falsey_return` — symmetric for falsey.
+    AssertEffect = Data.define(:condition, :target_kind, :target_name, :class_name) do
+      def always? = condition == :always
+      def if_truthy_return? = condition == :if_truthy_return
+      def if_falsey_return? = condition == :if_falsey_return
     end
 
     module_function
@@ -89,6 +115,64 @@ module Rigor
       target_name = target == "self" ? :self : target.to_sym
       PredicateEffect.new(
         edge: edge,
+        target_kind: target_kind,
+        target_name: target_name,
+        class_name: class_name
+      )
+    end
+
+    # Reads RBS::Extended assertion effects (`assert`,
+    # `assert-if-true`, `assert-if-false`) off
+    # `RBS::Definition::Method#annotations`. Returns an empty
+    # array when no recognised assertion directives are
+    # attached to the method.
+    def read_assert_effects(method_def)
+      return [] if method_def.nil?
+
+      annotations = method_def.annotations
+      return [] if annotations.nil? || annotations.empty?
+
+      effects = []
+      annotations.each do |annotation|
+        effect = parse_assert_annotation(annotation.string)
+        effects << effect if effect
+      end
+      effects.uniq
+    end
+
+    ASSERT_DIRECTIVE_PATTERN = /
+      \A
+      rigor:v1:(?<directive>assert(?:-if-(?:true|false))?)
+      \s+
+      (?<target>self|[a-z_][a-zA-Z0-9_]*)
+      \s+is\s+
+      (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
+      \s*
+      \z
+    /x
+    private_constant :ASSERT_DIRECTIVE_PATTERN
+
+    ASSERT_CONDITIONS = {
+      "assert" => :always,
+      "assert-if-true" => :if_truthy_return,
+      "assert-if-false" => :if_falsey_return
+    }.freeze
+    private_constant :ASSERT_CONDITIONS
+
+    def parse_assert_annotation(string)
+      match = ASSERT_DIRECTIVE_PATTERN.match(string)
+      return nil if match.nil?
+
+      directive = match[:directive].to_s
+      condition = ASSERT_CONDITIONS[directive]
+      return nil if condition.nil?
+
+      target = match[:target].to_s
+      class_name = match[:class_name].to_s.sub(/\A::/, "")
+      target_kind = target == "self" ? :self : :parameter
+      target_name = target == "self" ? :self : target.to_sym
+      AssertEffect.new(
+        condition: condition,
         target_kind: target_kind,
         target_name: target_name,
         class_name: class_name

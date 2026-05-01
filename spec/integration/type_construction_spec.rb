@@ -142,6 +142,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/assert_extended/ — RBS::Extended `assert` / `assert-if-*` (v0.0.2)" do
+    let(:harness) { harness_for("assert_extended") }
+
+    it "narrows the argument unconditionally after a call annotated with `assert`" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/predicate_extended/ — RBS::Extended `predicate-if-*`" do
     let(:harness) { harness_for("predicate_extended") }
 

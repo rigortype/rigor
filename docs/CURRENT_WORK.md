@@ -476,3 +476,68 @@ implementation order.
 12. **`rigor check` rule reference** — per-rule docs with
     canonical examples, false-positive guidance, and the
     suppressing comment syntax.
+
+## Future Roadmap (v0.0.3 and beyond)
+
+Items captured here are not in the v0.0.2 commitment. They
+get scheduled as an explicit version pick when the v0.0.2
+surface ships.
+
+### Aggressive constant folding through user methods
+
+When a user-defined method's body is a single expression
+whose all inputs are `Constant[v]` at the call site, the
+result should fold to a `Constant` rather than the RBS-
+declared widened type. Pinned by:
+
+```ruby
+class Parity
+  def is_odd(n)
+    n.odd?
+  end
+end
+
+# Today (v0.0.2):
+Parity.new.is_odd(3)   # => `false | true`
+3.odd?                  # => `false | true`
+
+# Wanted (v0.0.3+):
+Parity.new.is_odd(3)   # => `Constant[true]`
+3.odd?                  # => `Constant[true]`
+```
+
+Two prerequisites:
+
+1. **Stdlib `pure` summary catalogue.** A whitelist of
+   stdlib methods that the analyzer can evaluate at static
+   time when every receiver / argument is `Constant`.
+   `Integer#odd?` / `#even?`, `String#upcase` / `#downcase`
+   on literal strings, `Array#first` / `#size` on literal
+   tuples (the existing `ShapeDispatch` already handles
+   the last category, so the framework is in place — what
+   is missing is the per-method dispatch into MRI for
+   pure scalar methods). `ConstantFolding` is the natural
+   home; the catalogue would mirror its existing
+   per-method whitelist.
+
+2. **Constant propagation through user-method inference.**
+   Slice 7 / v0.0.2 #5 already re-types the body with the
+   call's argument `Constant`s bound to the parameters.
+   Once #1 lands, the body's last expression
+   (`n.odd?`) folds to `Constant[true]` automatically and
+   the existing inter-procedural path returns the
+   propagated `Constant`.
+
+The work is gated on the stdlib pure-summary work because
+constant folding at the engine level only fires when the
+operation is on the curated whitelist. Without the
+whitelist, `Constant[3].odd?` falls through to the RBS
+return type `bool` which is the v0.0.2 ceiling.
+
+This complements but does NOT subsume `RBS::Extended`'s
+predicate / assert directives — those refine the *call
+site*'s edges, not the call's *return value*. A future
+slice could combine the two: a pure-summary catalogue
+backed by user-supplied annotations
+(`%a{rigor:v0.0.3:pure}`) so projects can opt their own
+methods into the constant-folding path.

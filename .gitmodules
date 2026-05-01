@@ -18,3 +18,7 @@
 [submodule "references/steep"]
 	path = references/steep
 	url = git@github.com:soutaro/steep.git
+[submodule "references/ruby"]
+	path = references/ruby
+	url = https://github.com/ruby/ruby.git
+	branch = ruby_4_0

@@ -110,6 +110,7 @@ rg PATTERN --no-ignore references/python-typing
 | --- | --- | --- |
 | `references/rbs` | `https://github.com/ruby/rbs.git` | RBS syntax, standard library signatures, test cases, and implementation behavior. Reference material for staying compatible with the RBS ecosystem. |
 | `references/python-typing` | `https://github.com/python/typing.git` | Written-down Python typing concepts (gradual typing, generics, protocols, variance) borrowed only by idea. Not a syntax compatibility target. |
+| `references/ruby` | `https://github.com/ruby/ruby.git` (branch `ruby_4_0`) | Ruby interpreter source. Parsed offline to derive a PHPStan-functionMap-style catalog of built-in methods: argument/return types plus per-method effect facets (pure, self-mutating, block-dependent). Read-only; do not link Rigor runtime code against it. |
 
 ### Submodule rules
 

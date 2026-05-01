@@ -89,5 +89,73 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(result).to be_success
       end
     end
+
+    describe "wrong-arity rule (Slice 7 phase 11)" do
+      it "flags too many positional arguments to a fixed-arity method" do
+        Dir.mktmpdir do |dir|
+          source_path = File.join(dir, "rotate.rb")
+          File.write(source_path, "[1, 2].rotate(1, 2)\n")
+
+          configuration = Rigor::Configuration.new("paths" => [dir])
+          result = described_class.new(configuration: configuration).run
+
+          diag = result.diagnostics.find { |d| d.message.include?("rotate") }
+          expect(diag).not_to be_nil
+          expect(diag.message).to include("expected 0..1")
+          expect(diag.message).to include("given 2")
+        end
+      end
+
+      it "flags too few positional arguments to a method with required args" do
+        Dir.mktmpdir do |dir|
+          source_path = File.join(dir, "fetch.rb")
+          File.write(source_path, "[1, 2].fetch\n")
+
+          configuration = Rigor::Configuration.new("paths" => [dir])
+          result = described_class.new(configuration: configuration).run
+
+          diag = result.diagnostics.find { |d| d.message.include?("fetch") }
+          expect(diag).not_to be_nil
+          expect(diag.message).to include("expected 1..2")
+          expect(diag.message).to include("given 0")
+        end
+      end
+
+      it "does not flag a call whose argument count fits the envelope" do
+        Dir.mktmpdir do |dir|
+          source_path = File.join(dir, "ok.rb")
+          File.write(source_path, "[1, 2, 3].rotate(1)\n[1].fetch(0)\n")
+
+          configuration = Rigor::Configuration.new("paths" => [dir])
+          result = described_class.new(configuration: configuration).run
+
+          expect(result).to be_success
+        end
+      end
+
+      it "skips calls with splat arguments (caller arity unknown)" do
+        Dir.mktmpdir do |dir|
+          source_path = File.join(dir, "splat.rb")
+          File.write(source_path, "args = [1]; [1].rotate(*args)\n")
+
+          configuration = Rigor::Configuration.new("paths" => [dir])
+          result = described_class.new(configuration: configuration).run
+
+          expect(result).to be_success
+        end
+      end
+
+      it "skips methods with required keyword arguments" do
+        Dir.mktmpdir do |dir|
+          source_path = File.join(dir, "kw.rb")
+          File.write(source_path, "[1, 2].push(1)\n")
+
+          configuration = Rigor::Configuration.new("paths" => [dir])
+          result = described_class.new(configuration: configuration).run
+
+          expect(result).to be_success
+        end
+      end
+    end
   end
 end

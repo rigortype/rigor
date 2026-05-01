@@ -165,6 +165,11 @@ RSpec.describe Rigor::Environment do
         expect(env.singleton_for_name("JSON")).not_to be_nil
         expect(env.singleton_for_name("YAML")).not_to be_nil
         expect(env.singleton_for_name("Pathname")).not_to be_nil
+        # `tmpdir` extends Dir with `Dir.mktmpdir`; verify the
+        # singleton method is now reachable.
+        loader = env.rbs_loader
+        expect(loader.singleton_method(class_name: "Dir", method_name: :mktmpdir)).not_to be_nil
+        expect(env.singleton_for_name("StringIO")).not_to be_nil
       end
 
       it "merges caller-supplied libraries on top of the defaults, preserving order and de-duplicating" do

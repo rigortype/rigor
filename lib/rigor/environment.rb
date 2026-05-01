@@ -35,7 +35,9 @@ module Rigor
     # a strictly RBS-core view MUST construct an `RbsLoader`
     # directly instead of going through `for_project`.
     DEFAULT_LIBRARIES = %w[
-      pathname optparse json yaml fileutils tempfile uri logger date
+      pathname optparse json yaml fileutils tempfile tmpdir
+      stringio forwardable digest securerandom
+      uri logger date
       prism rbs
     ].freeze
 

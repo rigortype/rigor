@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Rigor::Environment::DEFAULT_LIBRARIES` now includes
+  `tmpdir`, `stringio`, `forwardable`, `digest`, and
+  `securerandom`. Common stdlib calls
+  (`Dir.mktmpdir`, `StringIO.new`, `Forwardable#def_delegator`,
+  `Digest::SHA256.hexdigest`, `SecureRandom.hex`) resolve
+  through their RBS sigs without the user having to enumerate
+  the libraries themselves.
+
+### Changed
+
+- `Rigor::Analysis::CheckRules` `dump_type` / `assert_type`
+  rules are suppressed when the call site's `self_type` is
+  `Rigor` or `Rigor::Testing`. The reflexive
+  `Testing.dump_type(value)` / `Testing.assert_type(...)` calls
+  inside Rigor's own stub no longer surface diagnostics on
+  `rigor check lib`.
+
 ## [0.0.1] - 2026-05-01
 
 The first preview release. Rigor can be pointed at a real Ruby

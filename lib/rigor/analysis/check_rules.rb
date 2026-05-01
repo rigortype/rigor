@@ -361,13 +361,14 @@ module Rigor
         # The diagnostic does NOT count toward `Result#error_count`
         # so a fixture peppered with `dump_type` calls still
         # passes `rigor check`.
-        def dump_type_diagnostic(path, call_node, scope_index)
+        def dump_type_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity
           return nil unless rigor_testing_call?(call_node, :dump_type)
           return nil if call_node.arguments.nil? || call_node.arguments.arguments.empty?
 
           arg = call_node.arguments.arguments.first
           scope = scope_index[arg] || scope_index[call_node]
           return nil if scope.nil?
+          return nil if inside_rigor_testing?(scope)
 
           type = scope.type_of(arg)
           location = call_node.message_loc || call_node.location
@@ -388,7 +389,7 @@ module Rigor
         # is emitted; matching calls produce no output. This
         # lets a fixture document its expected types inline:
         # subsequent `rigor check` runs flag any drift.
-        def assert_type_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity
+        def assert_type_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return nil unless rigor_testing_call?(call_node, :assert_type)
           return nil if call_node.arguments.nil? || call_node.arguments.arguments.size < 2
 
@@ -398,6 +399,7 @@ module Rigor
           value_node = call_node.arguments.arguments[1]
           scope = scope_index[value_node] || scope_index[call_node]
           return nil if scope.nil?
+          return nil if inside_rigor_testing?(scope)
 
           actual = scope.type_of(value_node).describe(:short)
           expected = expected_node.unescaped.to_s
@@ -418,6 +420,24 @@ module Rigor
         # invocation.
         RIGOR_TESTING_RECEIVERS = ["Rigor", "Rigor::Testing", "Testing"].freeze
         private_constant :RIGOR_TESTING_RECEIVERS
+
+        # The dump/assert helpers' own implementation methods
+        # call back into `Testing.dump_type` / `assert_type` to
+        # share the no-op runtime stub. We do NOT want those
+        # internal calls to surface diagnostics — they are
+        # reflexive plumbing, not user assertions. This filter
+        # skips diagnostics when the call site's `self_type` is
+        # the `Rigor` or `Rigor::Testing` module itself.
+        SELF_REFERENTIAL_SCOPES = ["Rigor", "Rigor::Testing"].freeze
+        private_constant :SELF_REFERENTIAL_SCOPES
+
+        def inside_rigor_testing?(scope)
+          self_type = scope.self_type
+          return false if self_type.nil?
+          return false unless self_type.respond_to?(:class_name)
+
+          SELF_REFERENTIAL_SCOPES.include?(self_type.class_name)
+        end
 
         def rigor_testing_call?(call_node, method_name)
           return false unless call_node.name == method_name

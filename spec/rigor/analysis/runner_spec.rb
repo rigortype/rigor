@@ -145,6 +145,42 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      it "suppresses the diagnostic when the method is defined via def in source" do
+        Dir.mktmpdir do |dir|
+          source_path = File.join(dir, "extended.rb")
+          File.write(source_path, <<~RUBY)
+            class String
+              def my_extension; self; end
+            end
+
+            "x".my_extension
+          RUBY
+
+          configuration = Rigor::Configuration.new("paths" => [dir])
+          result = described_class.new(configuration: configuration).run
+
+          expect(result).to be_success
+        end
+      end
+
+      it "suppresses the diagnostic when the method is defined via define_method" do
+        Dir.mktmpdir do |dir|
+          source_path = File.join(dir, "dm.rb")
+          File.write(source_path, <<~RUBY)
+            class String
+              define_method(:special) { |x| x }
+            end
+
+            "x".special(1)
+          RUBY
+
+          configuration = Rigor::Configuration.new("paths" => [dir])
+          result = described_class.new(configuration: configuration).run
+
+          expect(result).to be_success
+        end
+      end
+
       it "skips methods with required keyword arguments" do
         Dir.mktmpdir do |dir|
           source_path = File.join(dir, "kw.rb")

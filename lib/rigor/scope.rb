@@ -19,7 +19,7 @@ module Rigor
     attr_reader :environment, :locals, :fact_store, :self_type, :declared_types,
                 :ivars, :cvars, :globals,
                 :class_ivars, :class_cvars, :program_globals,
-                :discovered_classes, :in_source_constants
+                :discovered_classes, :in_source_constants, :discovered_methods
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
@@ -44,7 +44,8 @@ module Rigor
       class_cvars: EMPTY_CLASS_BINDINGS,
       program_globals: EMPTY_VAR_BINDINGS,
       discovered_classes: EMPTY_VAR_BINDINGS,
-      in_source_constants: EMPTY_VAR_BINDINGS
+      in_source_constants: EMPTY_VAR_BINDINGS,
+      discovered_methods: EMPTY_CLASS_BINDINGS
     )
       @environment = environment
       @locals = locals
@@ -59,6 +60,7 @@ module Rigor
       @program_globals = program_globals
       @discovered_classes = discovered_classes
       @in_source_constants = in_source_constants
+      @discovered_methods = discovered_methods
       freeze
     end
 
@@ -209,6 +211,26 @@ module Rigor
       rebuild(in_source_constants: table)
     end
 
+    # Slice 7 phase 12 — in-source method discovery. Maps a
+    # qualified class name to a `Hash[Symbol, Symbol]` of
+    # `method_name => :instance | :singleton`. Populated by
+    # `ScopeIndexer` from every `Prism::DefNode` and recognised
+    # `define_method` invocation inside class/module bodies. The
+    # `rigor check` undefined-method and wrong-arity rules
+    # consult this map to suppress diagnostics for methods the
+    # user has defined dynamically, even when no RBS sig
+    # describes them.
+    def discovered_method?(class_name, method_name, kind)
+      table = @discovered_methods[class_name.to_s]
+      return false unless table
+
+      table[method_name.to_sym] == kind
+    end
+
+    def with_discovered_methods(table)
+      rebuild(discovered_methods: table)
+    end
+
     def facts_for(target: nil, bucket: nil)
       fact_store.facts_for(target: target, bucket: bucket)
     end
@@ -274,7 +296,8 @@ module Rigor
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
       declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals,
       class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals,
-      discovered_classes: @discovered_classes, in_source_constants: @in_source_constants
+      discovered_classes: @discovered_classes, in_source_constants: @in_source_constants,
+      discovered_methods: @discovered_methods
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -284,7 +307,8 @@ module Rigor
         class_ivars: class_ivars, class_cvars: class_cvars,
         program_globals: program_globals,
         discovered_classes: discovered_classes,
-        in_source_constants: in_source_constants
+        in_source_constants: in_source_constants,
+        discovered_methods: discovered_methods
       )
     end
 
@@ -307,7 +331,8 @@ module Rigor
         class_cvars: class_cvars,
         program_globals: program_globals,
         discovered_classes: discovered_classes,
-        in_source_constants: in_source_constants
+        in_source_constants: in_source_constants,
+        discovered_methods: discovered_methods
       )
     end
   end

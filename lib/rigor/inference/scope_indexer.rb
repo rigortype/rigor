@@ -89,6 +89,15 @@ module Rigor
         in_source_constants = build_in_source_constants(root, seeded_scope)
         seeded_scope = seeded_scope.with_in_source_constants(in_source_constants)
 
+        # Slice 7 phase 12. In-source method discovery. Walks
+        # every class/module body for `Prism::DefNode` and
+        # recognised `define_method` calls and records the
+        # introduced method names. `rigor check` consults the
+        # table to suppress false positives for methods the
+        # user has defined but no RBS sig describes.
+        discovered_methods = build_discovered_methods(root)
+        seeded_scope = seeded_scope.with_discovered_methods(discovered_methods)
+
         table = {}.compare_by_identity
         table.default = seeded_scope
 
@@ -309,6 +318,74 @@ module Rigor
         rvalue_type = body_scope.type_of(node.value)
         existing = accumulator[full]
         accumulator[full] = existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+      end
+
+      # Slice 7 phase 12 — in-source method discovery pre-pass.
+      # Walks every class/module body and records the methods
+      # introduced via `Prism::DefNode` (instance + singleton)
+      # and via recognised `define_method(:name) { ... }` calls.
+      # The returned table maps qualified class name to a
+      # `Hash[Symbol, :instance | :singleton]`.
+      def build_discovered_methods(root)
+        accumulator = {}
+        walk_methods(root, [], false, accumulator)
+        accumulator.transform_values(&:freeze).freeze
+      end
+
+      def walk_methods(node, qualified_prefix, in_singleton_class, accumulator) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            child_prefix = qualified_prefix + [name]
+            walk_methods(node.body, child_prefix, false, accumulator) if node.body
+            return
+          end
+        when Prism::SingletonClassNode
+          if node.expression.is_a?(Prism::SelfNode) && node.body
+            walk_methods(node.body, qualified_prefix, true, accumulator)
+            return
+          end
+        when Prism::DefNode
+          record_def_method(node, qualified_prefix, in_singleton_class, accumulator)
+          return
+        when Prism::CallNode
+          record_define_method(node, qualified_prefix, in_singleton_class, accumulator) if node.name == :define_method
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_methods(child, qualified_prefix, in_singleton_class, accumulator)
+        end
+      end
+
+      def record_def_method(def_node, qualified_prefix, in_singleton_class, accumulator)
+        return if qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        kind = def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
+        accumulator[class_name] ||= {}
+        accumulator[class_name][def_node.name] = kind
+      end
+
+      def record_define_method(call_node, qualified_prefix, in_singleton_class, accumulator)
+        return if qualified_prefix.empty?
+        return if call_node.arguments.nil? || call_node.arguments.arguments.empty?
+
+        first_arg = call_node.arguments.arguments.first
+        method_name = literal_method_name(first_arg)
+        return if method_name.nil?
+
+        class_name = qualified_prefix.join("::")
+        accumulator[class_name] ||= {}
+        accumulator[class_name][method_name] = in_singleton_class ? :singleton : :instance
+      end
+
+      def literal_method_name(node)
+        return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
+
+        node.unescaped&.to_sym
       end
 
       # Walks the program once for `Prism::ModuleNode` and

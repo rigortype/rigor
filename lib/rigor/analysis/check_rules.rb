@@ -71,7 +71,7 @@ module Rigor
       class << self
         private
 
-        def undefined_method_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity
+        def undefined_method_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return nil if call_node.receiver.nil?
 
           scope = scope_index[call_node]
@@ -80,6 +80,12 @@ module Rigor
           receiver_type = scope.type_of(call_node.receiver)
           class_name = concrete_class_name(receiver_type)
           return nil if class_name.nil?
+
+          # Slice 7 phase 12 — suppress when the user has
+          # declared the method in source (instance `def`,
+          # `def self.foo`, or recognised `define_method`).
+          kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
+          return nil if scope.discovered_method?(class_name, call_node.name, kind)
 
           loader = scope.environment.rbs_loader
           return nil if loader.nil?
@@ -176,6 +182,9 @@ module Rigor
           receiver_type = scope.type_of(call_node.receiver)
           class_name = concrete_class_name(receiver_type)
           return nil if class_name.nil?
+
+          kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
+          return nil if scope.discovered_method?(class_name, call_node.name, kind)
 
           loader = scope.environment.rbs_loader
           return nil if loader.nil?

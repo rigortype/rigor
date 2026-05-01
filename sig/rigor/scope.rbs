@@ -13,6 +13,7 @@ module Rigor
     attr_reader program_globals: Hash[Symbol, Type::t]
     attr_reader discovered_classes: Hash[String, Type::Singleton]
     attr_reader in_source_constants: Hash[String, Type::t]
+    attr_reader discovered_methods: Hash[String, Hash[Symbol, Symbol]]
 
     def self.empty: (?environment: Environment) -> Scope
 
@@ -32,6 +33,8 @@ module Rigor
     def with_program_globals: (Hash[Symbol, Type::t] table) -> Scope
     def with_discovered_classes: (Hash[String, Type::Singleton] table) -> Scope
     def with_in_source_constants: (Hash[String, Type::t] table) -> Scope
+    def with_discovered_methods: (Hash[String, Hash[Symbol, Symbol]] table) -> Scope
+    def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool
     def with_fact: (Analysis::FactStore::Fact fact) -> Scope
     def with_self_type: (Type::t? type) -> Scope
     def with_declared_types: (Hash[untyped, Type::t] table) -> Scope

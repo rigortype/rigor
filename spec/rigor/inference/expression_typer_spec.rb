@@ -515,6 +515,21 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         expect(type).to eq(Rigor::Type::Combinator.constant_of(:overridden))
       end
 
+      it "dispatches a Kernel intrinsic on top-level implicit-self calls (Slice 7 phase 10)" do
+        project = Rigor::Scope.empty(environment: Rigor::Environment.for_project)
+        type = project.type_of(parse_expression("require_relative('foo')"))
+        expect(type).not_to equal(Rigor::Type::Combinator.untyped)
+      end
+
+      it "returns Nominal[T] from `Singleton[T].new` for user-defined classes" do
+        bound = scope.with_discovered_classes(
+          { "ScanAccumulator" => Rigor::Type::Combinator.singleton_of("ScanAccumulator") }.freeze
+        )
+        type = bound.type_of(parse_expression("ScanAccumulator.new"))
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("ScanAccumulator")
+      end
+
       it "resolves a non-class constant declared in RBS through Environment#constant_for_name" do
         # `Rigor::Analysis::FactStore::BUCKETS` is declared in
         # sig/rigor/analysis/fact_store.rbs as Array[bucket].

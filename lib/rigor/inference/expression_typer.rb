@@ -767,14 +767,20 @@ module Rigor
       # adopt the surrounding scope's `self_type` as their receiver
       # so calls like `attr_reader_method_name` or
       # `private_helper(...)` inside an instance method dispatch
-      # against the enclosing class. When `self_type` is nil
-      # (top-level program) the receiver remains nil, preserving
-      # the pre-Slice-A behaviour of `Kernel`-only resolution
-      # through fail-soft fallback.
+      # against the enclosing class. Slice 7 phase 10 — when
+      # `self_type` is nil (top-level program), the receiver
+      # MUST default to `Nominal[Object]` so Kernel intrinsics
+      # like `require`, `require_relative`, `raise`, and `puts`
+      # dispatch through Object/Kernel rather than falling through
+      # to `Dynamic[Top]`.
       def call_receiver_type_for(node)
         return type_of(node.receiver) if node.receiver
 
-        scope.self_type
+        scope.self_type || implicit_top_level_self
+      end
+
+      def implicit_top_level_self
+        scope.environment.nominal_for_name("Object") || dynamic_top
       end
 
       def call_arg_types(node)

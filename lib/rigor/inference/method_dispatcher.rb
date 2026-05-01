@@ -73,13 +73,58 @@ module Rigor
         )
         return shape_result if shape_result
 
-        RbsDispatch.try_dispatch(
+        rbs_result = RbsDispatch.try_dispatch(
           receiver: receiver_type,
           method_name: method_name,
           args: arg_types,
           environment: environment,
           block_type: block_type
         )
+        return rbs_result if rbs_result
+
+        # Slice 7 phase 10 — user-class ancestor fallback. When
+        # the receiver is `Nominal[T]` or `Singleton[T]` for a
+        # class not in the RBS environment (typically a
+        # user-defined class), retry the dispatch against the
+        # implicit ancestor: `Nominal[Object]` for instance
+        # receivers and `Singleton[Object]` for singleton
+        # receivers. This resolves Kernel intrinsics
+        # (`require`, `raise`, `puts`, ...) and Module/Class
+        # introspection (`attr_reader`, `private`, ...) on
+        # user classes without requiring the user to author
+        # their own RBS.
+        try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type)
+      end
+
+      def try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type)
+        return nil if environment.nil?
+
+        fallback_receiver = user_class_fallback_receiver(receiver_type, environment)
+        return nil if fallback_receiver.nil?
+
+        RbsDispatch.try_dispatch(
+          receiver: fallback_receiver,
+          method_name: method_name,
+          args: arg_types,
+          environment: environment,
+          block_type: block_type
+        )
+      end
+
+      def user_class_fallback_receiver(receiver_type, environment)
+        loader = environment.rbs_loader
+        return nil if loader.nil?
+
+        case receiver_type
+        when Type::Nominal
+          return nil if loader.class_known?(receiver_type.class_name)
+
+          environment.nominal_for_name("Object")
+        when Type::Singleton
+          return nil if loader.class_known?(receiver_type.class_name)
+
+          environment.singleton_for_name("Class")
+        end
       end
 
       # Slice 7 phase 8 — meta-introspection shortcuts. The
@@ -95,12 +140,29 @@ module Rigor
       # later as the rule catalogue grows; for now only `class`
       # is handled.
       def try_meta_introspection(receiver_type, method_name)
-        return nil unless method_name == :class
+        case method_name
+        when :class then meta_class(receiver_type)
+        when :new then meta_new(receiver_type)
+        end
+      end
 
+      def meta_class(receiver_type)
         case receiver_type
         when Type::Nominal then Type::Combinator.singleton_of(receiver_type.class_name)
         when Type::Constant then constant_metaclass(receiver_type.value)
         end
+      end
+
+      # `Singleton[Foo].new` returns `Nominal[Foo]` (a fresh
+      # instance), regardless of whether Foo is in RBS. This
+      # short-circuits the Class.new generic-`instance`
+      # plumbing for user classes, so a discovered-class
+      # `ScanAccumulator.new` types as `Nominal[ScanAccumulator]`
+      # rather than `Class`.
+      def meta_new(receiver_type)
+        return nil unless receiver_type.is_a?(Type::Singleton)
+
+        Type::Combinator.nominal_of(receiver_type.class_name)
       end
 
       CONSTANT_METACLASSES = {

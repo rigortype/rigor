@@ -738,6 +738,32 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.value).to eq(7)
       expect(tracer).to be_empty
     end
+
+    describe "ivar/cvar/global reads consult Scope bindings (Slice 7 phase 1)" do
+      it "returns the bound type for an InstanceVariableReadNode" do
+        bound = scope.with_ivar(:@x, Rigor::Type::Combinator.constant_of(7))
+        type = bound.type_of(parse_expression("@x"))
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(7))
+      end
+
+      it "returns the bound type for a ClassVariableReadNode" do
+        bound = scope.with_cvar(:@@k, Rigor::Type::Combinator.constant_of("v"))
+        type = bound.type_of(parse_expression("@@k"))
+        expect(type).to eq(Rigor::Type::Combinator.constant_of("v"))
+      end
+
+      it "returns the bound type for a GlobalVariableReadNode" do
+        bound = scope.with_global(:$g, Rigor::Type::Combinator.constant_of(42))
+        type = bound.type_of(parse_expression("$g"))
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(42))
+      end
+
+      it "falls through to Dynamic[Top] (without a fallback event) when no binding exists" do
+        type = scope.type_of(parse_expression("@unbound"), tracer: tracer)
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+        expect(tracer).to be_empty
+      end
+    end
   end
 
   describe "parameter and block positions (Slice 2 strengthening)" do

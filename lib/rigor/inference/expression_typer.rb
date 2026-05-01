@@ -81,17 +81,17 @@ module Rigor
         Prism::ConstantPathAndWriteNode => :type_of_assignment_write,
         # Self and instance/class/global variables
         Prism::SelfNode => :type_of_self_node,
-        Prism::InstanceVariableReadNode => :type_of_dynamic_top,
+        Prism::InstanceVariableReadNode => :type_of_instance_variable_read,
         Prism::InstanceVariableWriteNode => :type_of_assignment_write,
         Prism::InstanceVariableOperatorWriteNode => :type_of_assignment_write,
         Prism::InstanceVariableOrWriteNode => :type_of_assignment_write,
         Prism::InstanceVariableAndWriteNode => :type_of_assignment_write,
-        Prism::ClassVariableReadNode => :type_of_dynamic_top,
+        Prism::ClassVariableReadNode => :type_of_class_variable_read,
         Prism::ClassVariableWriteNode => :type_of_assignment_write,
         Prism::ClassVariableOperatorWriteNode => :type_of_assignment_write,
         Prism::ClassVariableOrWriteNode => :type_of_assignment_write,
         Prism::ClassVariableAndWriteNode => :type_of_assignment_write,
-        Prism::GlobalVariableReadNode => :type_of_dynamic_top,
+        Prism::GlobalVariableReadNode => :type_of_global_variable_read,
         Prism::GlobalVariableWriteNode => :type_of_assignment_write,
         Prism::GlobalVariableOperatorWriteNode => :type_of_assignment_write,
         Prism::GlobalVariableOrWriteNode => :type_of_assignment_write,
@@ -231,6 +231,28 @@ module Rigor
       # never of `type_of` itself.
       def type_of_assignment_write(node)
         type_of(node.value)
+      end
+
+      # Slice 7 phase 1 — instance/class/global variable reads.
+      # Each lookup returns the type currently bound in the
+      # surrounding scope's per-kind binding map (populated by
+      # `StatementEvaluator` write handlers within the same
+      # method body), falling through to `Dynamic[Top]` when no
+      # binding is recorded. Cross-method ivar/cvar inference is
+      # a follow-up slice; the read handlers MUST NOT raise on a
+      # missing binding and MUST NOT record a fallback event in
+      # either branch — the absence of a binding is a recognised
+      # semantic outcome, not a fail-soft compromise.
+      def type_of_instance_variable_read(node)
+        scope.ivar(node.name) || dynamic_top
+      end
+
+      def type_of_class_variable_read(node)
+        scope.cvar(node.name) || dynamic_top
+      end
+
+      def type_of_global_variable_read(node)
+        scope.global(node.name) || dynamic_top
       end
 
       def type_of_statements_node(node)

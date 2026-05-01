@@ -1098,6 +1098,62 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "ivar/cvar/global writes thread through scope (Slice 7 phase 1)" do
+    it "binds an InstanceVariableWriteNode into the post-scope ivars map" do
+      type, post = evaluate("@x = 7")
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(7))
+      expect(post.ivar(:@x)).to eq(Rigor::Type::Combinator.constant_of(7))
+    end
+
+    it "threads ivar bindings across statements" do
+      type, post = evaluate(<<~RUBY)
+        @x = 1
+        @y = @x + 2
+        @y
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(3))
+      expect(post.ivar(:@x)).to eq(Rigor::Type::Combinator.constant_of(1))
+      expect(post.ivar(:@y)).to eq(Rigor::Type::Combinator.constant_of(3))
+    end
+
+    it "binds ClassVariableWriteNode and GlobalVariableWriteNode the same way" do
+      _, post_c = evaluate("@@count = 5")
+      _, post_g = evaluate("$verbose = true")
+      expect(post_c.cvar(:@@count)).to eq(Rigor::Type::Combinator.constant_of(5))
+      expect(post_g.global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
+    it "joins ivar bindings across if-branches like locals" do
+      _, post = evaluate(<<~RUBY)
+        if cond
+          @x = 1
+        else
+          @x = "two"
+        end
+      RUBY
+      members = post.ivar(:@x).members.map(&:value)
+      expect(members).to contain_exactly(1, "two")
+    end
+
+    it "starts ivars fresh inside a method body (no cross-method leak)" do
+      observed = []
+      on_enter = lambda do |node, s|
+        next unless node.is_a?(Prism::InstanceVariableReadNode) && node.name == :@x
+
+        observed << s.ivar(:@x)
+      end
+      bound = scope.with_ivar(:@x, Rigor::Type::Combinator.constant_of(99))
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        def foo
+          @x
+        end
+      RUBY
+      # Inside the method body the outer @x = 99 binding MUST NOT
+      # be visible — `def` enters with a fresh scope.
+      expect(observed.first).to be_nil
+    end
+  end
+
   describe "captured-local invalidation on closure escape (Slice 6 phase C sub-phase 3c)" do
     let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
 

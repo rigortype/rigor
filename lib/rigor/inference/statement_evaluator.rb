@@ -56,6 +56,9 @@ module Rigor
         Prism::StatementsNode => :eval_statements,
         Prism::ProgramNode => :eval_program,
         Prism::LocalVariableWriteNode => :eval_local_write,
+        Prism::InstanceVariableWriteNode => :eval_ivar_write,
+        Prism::ClassVariableWriteNode => :eval_cvar_write,
+        Prism::GlobalVariableWriteNode => :eval_global_write,
         Prism::MultiWriteNode => :eval_multi_write,
         Prism::IfNode => :eval_if,
         Prism::UnlessNode => :eval_unless,
@@ -158,6 +161,30 @@ module Rigor
       def eval_local_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         [rhs_type, post_rhs.with_local(node.name, rhs_type)]
+      end
+
+      # Slice 7 phase 1 — instance/class/global variable
+      # writes. Each handler evaluates the rvalue under the
+      # entry scope and binds the named variable into the
+      # post-scope's per-kind binding map. The expression value
+      # is the rvalue type, matching Ruby's semantics. Bindings
+      # are method-local: a fresh scope is built at every `def`
+      # entry through `build_method_entry_scope`, so writes do
+      # not leak across method boundaries until cross-method
+      # ivar/cvar tracking lands.
+      def eval_ivar_write(node)
+        rhs_type, post_rhs = sub_eval(node.value, scope)
+        [rhs_type, post_rhs.with_ivar(node.name, rhs_type)]
+      end
+
+      def eval_cvar_write(node)
+        rhs_type, post_rhs = sub_eval(node.value, scope)
+        [rhs_type, post_rhs.with_cvar(node.name, rhs_type)]
+      end
+
+      def eval_global_write(node)
+        rhs_type, post_rhs = sub_eval(node.value, scope)
+        [rhs_type, post_rhs.with_global(node.name, rhs_type)]
       end
 
       # `a, b = rhs` — Slice 5 phase 2 sub-phase 2 destructuring.

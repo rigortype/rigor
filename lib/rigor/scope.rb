@@ -14,11 +14,14 @@ module Rigor
   # $scope->getType($node).
   #
   # See docs/internal-spec/inference-engine.md for the binding contract.
+  # rubocop:disable Metrics/ClassLength,Metrics/ParameterLists
   class Scope
-    attr_reader :environment, :locals, :fact_store, :self_type, :declared_types
+    attr_reader :environment, :locals, :fact_store, :self_type, :declared_types,
+                :ivars, :cvars, :globals
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
-    private_constant :EMPTY_DECLARED_TYPES
+    EMPTY_VAR_BINDINGS = {}.freeze
+    private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS
 
     class << self
       def empty(environment: Environment.default)
@@ -30,13 +33,19 @@ module Rigor
       environment:, locals:,
       fact_store: Analysis::FactStore.empty,
       self_type: nil,
-      declared_types: EMPTY_DECLARED_TYPES
+      declared_types: EMPTY_DECLARED_TYPES,
+      ivars: EMPTY_VAR_BINDINGS,
+      cvars: EMPTY_VAR_BINDINGS,
+      globals: EMPTY_VAR_BINDINGS
     )
       @environment = environment
       @locals = locals
       @fact_store = fact_store
       @self_type = self_type
       @declared_types = declared_types
+      @ivars = ivars
+      @cvars = cvars
+      @globals = globals
       freeze
     end
 
@@ -47,19 +56,11 @@ module Rigor
     def with_local(name, type)
       new_locals = @locals.merge(name.to_sym => type).freeze
       new_fact_store = fact_store.invalidate_target(Analysis::FactStore::Target.local(name))
-      self.class.new(
-        environment: environment, locals: new_locals,
-        fact_store: new_fact_store, self_type: self_type,
-        declared_types: declared_types
-      )
+      rebuild(locals: new_locals, fact_store: new_fact_store)
     end
 
     def with_fact(fact)
-      self.class.new(
-        environment: environment, locals: locals,
-        fact_store: fact_store.with_fact(fact), self_type: self_type,
-        declared_types: declared_types
-      )
+      rebuild(fact_store: fact_store.with_fact(fact))
     end
 
     # Slice A-engine. Returns a scope with `self_type` set to `type`,
@@ -68,11 +69,7 @@ module Rigor
     # consults it when typing `Prism::SelfNode` and implicit-self
     # `Prism::CallNode` receivers.
     def with_self_type(type)
-      self.class.new(
-        environment: environment, locals: locals,
-        fact_store: fact_store, self_type: type,
-        declared_types: declared_types
-      )
+      rebuild(self_type: type)
     end
 
     # Slice A-declarations. Returns a scope that carries an
@@ -89,11 +86,40 @@ module Rigor
     # `with_local` / `with_fact` / `with_self_type` carry it
     # transparently.
     def with_declared_types(table)
-      self.class.new(
-        environment: environment, locals: locals,
-        fact_store: fact_store, self_type: self_type,
-        declared_types: table
-      )
+      rebuild(declared_types: table)
+    end
+
+    # Slice 7 phase 1 — instance/class/global variable bindings.
+    # `ivar(name)` / `cvar(name)` / `global(name)` return the
+    # type currently bound for the named variable, or `nil` when
+    # the variable has not been written in the analyzed slice of
+    # the program. The first cut tracks bindings only within a
+    # single method body (each `def` enters with a fresh binding
+    # map), so reads in other methods of the same class fall
+    # through to `Dynamic[Top]`. Cross-method ivar/cvar inference
+    # is a follow-up slice.
+    def ivar(name)
+      @ivars[name.to_sym]
+    end
+
+    def cvar(name)
+      @cvars[name.to_sym]
+    end
+
+    def global(name)
+      @globals[name.to_sym]
+    end
+
+    def with_ivar(name, type)
+      rebuild(ivars: @ivars.merge(name.to_sym => type).freeze)
+    end
+
+    def with_cvar(name, type)
+      rebuild(cvars: @cvars.merge(name.to_sym => type).freeze)
+    end
+
+    def with_global(name, type)
+      rebuild(globals: @globals.merge(name.to_sym => type).freeze)
     end
 
     def facts_for(target: nil, bucket: nil)
@@ -132,36 +158,60 @@ module Rigor
         raise ArgumentError, "join requires both scopes to share the same Environment"
       end
 
-      shared = locals.keys & other.locals.keys
-      joined_locals = shared.to_h do |name|
-        [name, Type::Combinator.union(locals[name], other.locals[name])]
-      end
-      build_joined_scope(joined_locals, other)
+      joined_locals = join_bindings(locals, other.locals)
+      joined_ivars = join_bindings(ivars, other.ivars)
+      joined_cvars = join_bindings(cvars, other.cvars)
+      joined_globals = join_bindings(globals, other.globals)
+      build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other)
     end
 
-    def ==(other)
+    def ==(other) # rubocop:disable Metrics/CyclomaticComplexity
       other.is_a?(Scope) &&
         environment.equal?(other.environment) &&
         @locals == other.locals &&
         fact_store == other.fact_store &&
-        self_type == other.self_type
+        self_type == other.self_type &&
+        @ivars == other.ivars &&
+        @cvars == other.cvars &&
+        @globals == other.globals
     end
     alias eql? ==
 
     def hash
-      [Scope, environment.object_id, @locals, fact_store, self_type].hash
+      [Scope, environment.object_id, @locals, fact_store, self_type, @ivars, @cvars, @globals].hash
     end
 
     private
 
-    def build_joined_scope(joined_locals, other)
+    def rebuild(
+      locals: @locals, fact_store: @fact_store, self_type: @self_type,
+      declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals
+    )
+      self.class.new(
+        environment: environment, locals: locals,
+        fact_store: fact_store, self_type: self_type,
+        declared_types: declared_types,
+        ivars: ivars, cvars: cvars, globals: globals
+      )
+    end
+
+    def join_bindings(left, right)
+      shared = left.keys & right.keys
+      shared.to_h { |name| [name, Type::Combinator.union(left[name], right[name])] }.freeze
+    end
+
+    def build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other)
       self.class.new(
         environment: environment,
         locals: joined_locals.freeze,
         fact_store: fact_store.join(other.fact_store),
         self_type: self_type == other.self_type ? self_type : nil,
-        declared_types: declared_types
+        declared_types: declared_types,
+        ivars: joined_ivars,
+        cvars: joined_cvars,
+        globals: joined_globals
       )
     end
   end
+  # rubocop:enable Metrics/ClassLength,Metrics/ParameterLists
 end

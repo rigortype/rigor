@@ -5,12 +5,21 @@ module Rigor
     attr_reader fact_store: Analysis::FactStore
     attr_reader self_type: Type::t?
     attr_reader declared_types: Hash[untyped, Type::t]
+    attr_reader ivars: Hash[Symbol, Type::t]
+    attr_reader cvars: Hash[Symbol, Type::t]
+    attr_reader globals: Hash[Symbol, Type::t]
 
     def self.empty: (?environment: Environment) -> Scope
 
-    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?declared_types: Hash[untyped, Type::t]) -> void
+    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?declared_types: Hash[untyped, Type::t], ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t]) -> void
     def local: (String | Symbol name) -> Type::t?
+    def ivar: (String | Symbol name) -> Type::t?
+    def cvar: (String | Symbol name) -> Type::t?
+    def global: (String | Symbol name) -> Type::t?
     def with_local: (String | Symbol name, Type::t type) -> Scope
+    def with_ivar: (String | Symbol name, Type::t type) -> Scope
+    def with_cvar: (String | Symbol name, Type::t type) -> Scope
+    def with_global: (String | Symbol name, Type::t type) -> Scope
     def with_fact: (Analysis::FactStore::Fact fact) -> Scope
     def with_self_type: (Type::t? type) -> Scope
     def with_declared_types: (Hash[untyped, Type::t] table) -> Scope

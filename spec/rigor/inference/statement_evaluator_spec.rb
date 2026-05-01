@@ -816,12 +816,18 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
   describe "downstream inference benefits" do
     it "lets methods on bound locals resolve through RBS" do
+      # Constant folding (v0.0.3 C) folds `1.succ` to
+      # `Constant[2]`, which is strictly more precise than
+      # the RBS-widened `Nominal[Integer]`. The RBS
+      # dispatch tier is still exercised — the same call
+      # on a non-constant receiver returns Nominal — see
+      # the wider-union tests in expression_typer_spec.rb.
       type, _post = evaluate(<<~RUBY)
         x = 1
         x.succ
       RUBY
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("Integer")
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq(2)
     end
 
     it "lets shape-typed locals resolve through dispatch" do

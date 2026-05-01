@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Aggressive constant folding through user methods (v0.0.3 C).**
+  `Rigor::Inference::MethodDispatcher::ConstantFolding` gains a
+  curated unary catalogue covering pure, side-effect-free
+  zero-arg methods on Integer / Float / String / Symbol /
+  TrueClass / FalseClass / NilClass (`odd?`, `even?`, `zero?`,
+  `succ`, `to_s`, `upcase`, `downcase`, `reverse`, `length`,
+  `empty?`, `nil?`, `!`, …). When the receiver is a
+  `Constant`, the method is invoked at static time and the
+  result is wrapped in a fresh `Constant`. Combined with
+  inter-procedural inference (v0.0.2 #5):
+
+  ```ruby
+  class Parity
+    def is_odd(n) = n.odd?
+  end
+  Parity.new.is_odd(3)   # was `false | true` in v0.0.2
+                         # is now `Constant[true]`
+  3.odd?                 # was `false | true` in v0.0.2
+                         # is now `Constant[true]`
+  ```
+
+  Results outside the foldable scalar envelope (Array,
+  Hash, Proc, …) and methods that raise are conservatively
+  held back — the engine falls through to the RBS tier as
+  before. Per-class catalogues curated to never raise on
+  the type's full domain; the rescue is a safety net.
+
 - **Implicit-self calls prefer in-source `def` over RBS dispatch.**
   When `node.receiver` is nil (true implicit self) and the file
   has a same-named top-level `def` (or DSL-block-nested `def`,

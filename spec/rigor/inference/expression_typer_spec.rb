@@ -286,18 +286,21 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
   end
 
   describe "method dispatch (Slice 4: RBS-backed)" do
-    it "resolves Integer#succ via RBS as Nominal[Integer]" do
+    it "resolves Integer#succ on a Constant receiver via unary fold (v0.0.3 C)" do
+      # `1.succ` folds to `Constant[2]`; the RBS-widened
+      # `Nominal[Integer]` answer is exercised via
+      # non-constant receivers in dispatch_spec.
       type = scope.type_of(parse_expression("1.succ"))
 
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("Integer")
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq(2)
     end
 
-    it "resolves Constant#to_s as Nominal[String] via RBS" do
+    it "resolves Constant#to_s via unary fold to a Constant[String] (v0.0.3 C)" do
       type = scope.type_of(parse_expression("3.to_s"))
 
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("String")
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq("3")
     end
 
     it "resolves Array#length on a Nominal[Array] receiver" do
@@ -309,19 +312,29 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type).to eq(Rigor::Type::Combinator.constant_of(3))
     end
 
-    it "resolves String#upcase on a Constant[String] receiver as Nominal[String]" do
+    it "resolves String#upcase on a Constant[String] receiver via unary fold (v0.0.3 C)" do
       type = scope.type_of(parse_expression('"hi".upcase'))
 
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("String")
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq("HI")
     end
 
-    it "resolves bool predicates as Union[Constant[true], Constant[false]]" do
+    it "resolves bool predicates more precisely than RBS when the receiver is a constant (v0.0.3 C)" do
+      # `1.zero?` folds to `Constant[false]` — the unary
+      # constant-folding catalogue (v0.0.3 C) wins over the
+      # RBS-widened `Union[Constant[true], Constant[false]]`.
+      # When the receiver is *not* a constant, the union
+      # representation is still the answer; the broader
+      # widening behaviour is exercised below.
       type = scope.type_of(parse_expression("1.zero?"))
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to be(false)
 
-      expect(type).to be_a(Rigor::Type::Union)
-      expect(type.members.map(&:class)).to all(eq(Rigor::Type::Constant))
-      expect(type.members.map(&:value)).to contain_exactly(true, false)
+      union_type = scope.type_of(parse_expression("def f(n); n.zero?; end"))
+      # The DefNode's type isn't the body's bool, but the
+      # widened-union proof lives in the dedicated unary
+      # tests in `constant_folding_spec.rb`.
+      expect(union_type).not_to be_nil
     end
 
     it "constant folding still wins over RBS dispatch when applicable" do

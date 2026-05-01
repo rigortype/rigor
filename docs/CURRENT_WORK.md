@@ -483,7 +483,26 @@ Items captured here are not in the v0.0.2 commitment. They
 get scheduled as an explicit version pick when the v0.0.2
 surface ships.
 
-### Aggressive constant folding through user methods
+### Aggressive constant folding through user methods — landed (v0.0.3 C)
+
+`ConstantFolding` gained a per-class pure-unary catalogue
+(`INTEGER_UNARY`, `FLOAT_UNARY`, `STRING_UNARY`,
+`SYMBOL_UNARY`, `BOOL_UNARY`, `NIL_UNARY`). Combined with
+inter-procedural inference (v0.0.2 #5), the worked
+example below now folds end-to-end:
+
+  Parity.new.is_odd(3)  # => Constant[true]
+  3.odd?                # => Constant[true]
+
+The integration fixture `user_methods.rb` is updated to
+self-assert `Constant[true]` rather than the
+v0.0.2-era `false | true`. The matching
+`user_methods_with_sig/` fixture intentionally pins the
+RBS-widened path: when the user supplies a sig the
+declared return type wins (the sig is the authoritative
+contract).
+
+Original analysis follows for reference:
 
 When a user-defined method's body is a single expression
 whose all inputs are `Constant[v]` at the call site, the

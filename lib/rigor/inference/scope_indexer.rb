@@ -65,6 +65,18 @@ module Rigor
         class_ivars = build_class_ivar_index(root, seeded_scope)
         seeded_scope = seeded_scope.with_class_ivars(class_ivars)
 
+        # Slice 7 phase 6. Same pre-pass shape for cvars (per
+        # class) and globals (program-wide). Globals are also
+        # materialised into the top-level scope's `globals` map
+        # so reads at the top level (and in CLI probes that do
+        # not enter a method body) observe the precise type
+        # without consulting the accumulator on every lookup.
+        class_cvars = build_class_cvar_index(root, seeded_scope)
+        seeded_scope = seeded_scope.with_class_cvars(class_cvars)
+        program_globals = build_program_global_index(root, seeded_scope)
+        seeded_scope = seeded_scope.with_program_globals(program_globals)
+        program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
+
         table = {}.compare_by_identity
         table.default = seeded_scope
 
@@ -149,6 +161,91 @@ module Rigor
         accumulator[class_name] ||= {}
         existing = accumulator[class_name][node.name]
         accumulator[class_name][node.name] =
+          existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+      end
+
+      # Slice 7 phase 6 — class-cvar pre-pass. Same shape as the
+      # ivar pre-pass but collects `Prism::ClassVariableWriteNode`
+      # writes inside ANY def body (instance or singleton) of the
+      # enclosing class, because Ruby cvars are shared across both
+      # facets. The resulting table is seeded into both instance
+      # and singleton method bodies through
+      # `Scope#class_cvars_for`.
+      def build_class_cvar_index(root, default_scope)
+        accumulator = {}
+        walk_class_cvars(root, [], default_scope, accumulator)
+        accumulator.transform_values(&:freeze).freeze
+      end
+
+      def walk_class_cvars(node, qualified_prefix, default_scope, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            child_prefix = qualified_prefix + [name]
+            walk_class_cvars(node.body, child_prefix, default_scope, accumulator) if node.body
+            return
+          end
+        when Prism::DefNode
+          collect_def_cvar_writes(node, qualified_prefix, default_scope, accumulator)
+          return
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_class_cvars(child, qualified_prefix, default_scope, accumulator)
+        end
+      end
+
+      def collect_def_cvar_writes(def_node, qualified_prefix, default_scope, accumulator)
+        return if def_node.body.nil? || qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        body_scope = default_scope.with_self_type(Type::Combinator.nominal_of(class_name))
+        gather_cvar_writes(def_node.body, body_scope, class_name, accumulator)
+      end
+
+      def gather_cvar_writes(node, scope, class_name, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        record_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::ClassVariableWriteNode)
+        return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        node.compact_child_nodes.each { |c| gather_cvar_writes(c, scope, class_name, accumulator) }
+      end
+
+      def record_cvar_write(node, scope, class_name, accumulator)
+        rvalue_type = scope.type_of(node.value)
+        accumulator[class_name] ||= {}
+        existing = accumulator[class_name][node.name]
+        accumulator[class_name][node.name] =
+          existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+      end
+
+      # Slice 7 phase 6 — program-global pre-pass. Globals are
+      # process-wide so the accumulator is a flat
+      # `Hash[Symbol, Type::t]` populated from every
+      # `Prism::GlobalVariableWriteNode` in the program (top-level
+      # AND inside method bodies). The same accumulator is
+      # seeded into every method body and the top-level scope.
+      def build_program_global_index(root, default_scope)
+        accumulator = {}
+        gather_global_writes(root, default_scope, accumulator)
+        accumulator.freeze
+      end
+
+      def gather_global_writes(node, scope, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        record_global_write(node, scope, accumulator) if node.is_a?(Prism::GlobalVariableWriteNode)
+        node.compact_child_nodes.each { |c| gather_global_writes(c, scope, accumulator) }
+      end
+
+      def record_global_write(node, scope, accumulator)
+        rvalue_type = scope.type_of(node.value)
+        existing = accumulator[node.name]
+        accumulator[node.name] =
           existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end
 

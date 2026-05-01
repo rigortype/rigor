@@ -17,12 +17,13 @@ module Rigor
   # rubocop:disable Metrics/ClassLength,Metrics/ParameterLists
   class Scope
     attr_reader :environment, :locals, :fact_store, :self_type, :declared_types,
-                :ivars, :cvars, :globals, :class_ivars
+                :ivars, :cvars, :globals,
+                :class_ivars, :class_cvars, :program_globals
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
-    EMPTY_CLASS_IVARS = {}.freeze
-    private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS, :EMPTY_CLASS_IVARS
+    EMPTY_CLASS_BINDINGS = {}.freeze
+    private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS, :EMPTY_CLASS_BINDINGS
 
     class << self
       def empty(environment: Environment.default)
@@ -38,7 +39,9 @@ module Rigor
       ivars: EMPTY_VAR_BINDINGS,
       cvars: EMPTY_VAR_BINDINGS,
       globals: EMPTY_VAR_BINDINGS,
-      class_ivars: EMPTY_CLASS_IVARS
+      class_ivars: EMPTY_CLASS_BINDINGS,
+      class_cvars: EMPTY_CLASS_BINDINGS,
+      program_globals: EMPTY_VAR_BINDINGS
     )
       @environment = environment
       @locals = locals
@@ -49,6 +52,8 @@ module Rigor
       @cvars = cvars
       @globals = globals
       @class_ivars = class_ivars
+      @class_cvars = class_cvars
+      @program_globals = program_globals
       freeze
     end
 
@@ -148,6 +153,30 @@ module Rigor
       rebuild(class_ivars: table)
     end
 
+    # Slice 7 phase 6 — class-level cvar accumulator (same shape
+    # as `class_ivars` but populated from `Prism::ClassVariableWriteNode`
+    # writes, and seeded on BOTH instance and singleton method
+    # bodies because Ruby cvars are visible from each).
+    def class_cvars_for(class_name)
+      return EMPTY_VAR_BINDINGS if class_name.nil?
+
+      @class_cvars[class_name.to_s] || EMPTY_VAR_BINDINGS
+    end
+
+    def with_class_cvars(table)
+      rebuild(class_cvars: table)
+    end
+
+    # Slice 7 phase 6 — program-level globals accumulator.
+    # Globals are process-wide in Ruby, so the analyzer carries a
+    # single map (`Hash[Symbol, Type]`) keyed by the variable name
+    # and seeded into every method body (instance and singleton)
+    # plus the top-level program scope. `ScopeIndexer` populates
+    # it from a single program-wide pre-pass.
+    def with_program_globals(table)
+      rebuild(program_globals: table)
+    end
+
     def facts_for(target: nil, bucket: nil)
       fact_store.facts_for(target: target, bucket: bucket)
     end
@@ -212,14 +241,15 @@ module Rigor
     def rebuild(
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
       declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals,
-      class_ivars: @class_ivars
+      class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals
     )
       self.class.new(
         environment: environment, locals: locals,
         fact_store: fact_store, self_type: self_type,
         declared_types: declared_types,
         ivars: ivars, cvars: cvars, globals: globals,
-        class_ivars: class_ivars
+        class_ivars: class_ivars, class_cvars: class_cvars,
+        program_globals: program_globals
       )
     end
 
@@ -238,7 +268,9 @@ module Rigor
         ivars: joined_ivars,
         cvars: joined_cvars,
         globals: joined_globals,
-        class_ivars: class_ivars
+        class_ivars: class_ivars,
+        class_cvars: class_cvars,
+        program_globals: program_globals
       )
     end
   end

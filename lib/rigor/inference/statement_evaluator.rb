@@ -770,6 +770,8 @@ module Rigor
         body_self = self_type_for_method_body(singleton: singleton)
         fresh = fresh.with_self_type(body_self) if body_self
         fresh = seed_instance_ivars(fresh, singleton: singleton)
+        fresh = seed_class_cvars(fresh)
+        fresh = seed_program_globals(fresh)
         bindings.reduce(fresh) { |acc, (name, type)| acc.with_local(name, type) }
       end
 
@@ -785,6 +787,32 @@ module Rigor
         seeded.reduce(body_scope) { |acc, (name, type)| acc.with_ivar(name, type) }
       end
 
+      # Cvars are visible from BOTH instance and singleton method
+      # bodies of the enclosing class, so this seed is unconditional
+      # (no `singleton:` gate). At the top-level (no class context)
+      # the accumulator is empty and the seed is a no-op.
+      def seed_class_cvars(body_scope)
+        path = current_class_path
+        return body_scope if path.nil?
+
+        seeded = scope.class_cvars_for(path)
+        return body_scope if seeded.empty?
+
+        seeded.reduce(body_scope) { |acc, (name, type)| acc.with_cvar(name, type) }
+      end
+
+      # Globals are process-wide. The body scope already inherited
+      # the program-globals accumulator through `with_program_globals`;
+      # seeding here just materialises each entry into the body's
+      # `globals` map so reads observe a precise type without
+      # consulting the accumulator on every lookup.
+      def seed_program_globals(body_scope)
+        seeded = scope.program_globals
+        return body_scope if seeded.empty?
+
+        seeded.reduce(body_scope) { |acc, (name, type)| acc.with_global(name, type) }
+      end
+
       # Slice A-declarations. Class- and method-bodies start from a
       # fresh local-empty scope, but they MUST keep the
       # `declared_types` table visible at the outer scope so the
@@ -795,6 +823,8 @@ module Rigor
         Scope.empty(environment: scope.environment)
              .with_declared_types(scope.declared_types)
              .with_class_ivars(scope.class_ivars)
+             .with_class_cvars(scope.class_cvars)
+             .with_program_globals(scope.program_globals)
       end
 
       def singleton_def?(def_node)

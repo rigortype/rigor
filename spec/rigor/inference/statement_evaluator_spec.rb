@@ -1240,6 +1240,34 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(union.members.map(&:value)).to contain_exactly(1, nil)
     end
 
+    it "seeds cvars from sibling-method writes, including singleton-method bodies (Slice 7 phase 6)" do
+      ast = parse_program(<<~RUBY)
+        class Foo
+          def init; @@count = 1; end
+          def self.get; @@count; end
+        end
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(ast, default_scope: scope)
+      read_node = nil
+      Rigor::Source::NodeWalker.each(ast) do |n|
+        read_node = n if n.is_a?(Prism::ClassVariableReadNode) && n.name == :@@count
+      end
+      expect(index[read_node].cvar(:@@count)).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "seeds globals from any program-level write into every method body (Slice 7 phase 6)" do
+      ast = parse_program(<<~RUBY)
+        $verbose = true
+        def banner; $verbose; end
+      RUBY
+      index = Rigor::Inference::ScopeIndexer.index(ast, default_scope: scope)
+      read_node = nil
+      Rigor::Source::NodeWalker.each(ast) do |n|
+        read_node = n if n.is_a?(Prism::GlobalVariableReadNode) && n.name == :$verbose
+      end
+      expect(index[read_node].global(:$verbose)).to eq(Rigor::Type::Combinator.constant_of(true))
+    end
+
     it "does NOT seed class-method (singleton) bodies — they have their own self" do
       ast = parse_program(<<~RUBY)
         class Foo

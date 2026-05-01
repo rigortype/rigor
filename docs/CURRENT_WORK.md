@@ -348,7 +348,7 @@ preview is concrete: a user can point `rigor` at a real Ruby
 project, get diagnostics back, and have the analyzer survive
 the round-trip. It is NOT a complete static-typing solution;
 the [Next Release](#next-release) section below names the
-specific gaps a v0.2 preview must close.
+specific gaps a v0.0.2 preview must close.
 
 Concrete preview deliverables:
 
@@ -400,14 +400,14 @@ Concrete preview deliverables:
   (`predicate-if-true` / `predicate-if-false`). `assert`,
   `assert-if-true`, `assert-if-false`, `param`, `return`,
   `conforms-to`, negation (`~T`), and intersection/union
-  refinements are deferred to v0.2.
+  refinements are deferred to v0.0.2.
 - No persistent cache. Every `rigor check` run re-parses and
   re-types the project. The configuration file already has a
-  `cache.path` slot; the cache implementation is v0.2 work.
+  `cache.path` slot; the cache implementation is v0.0.2 work.
 - No plugin contribution layer. Only the bundled `RBS::Extended`
   reader can contribute analyzer behavior past ordinary RBS.
 
-## Next Release (v0.2)
+## Next Release (v0.0.2)
 
 Captured here so the first-preview surface stays focused. The
 items are listed roughly by user-visible value, not by
@@ -428,37 +428,51 @@ implementation order.
    non-nil edge.
 3. **`self`-targeted predicate effects actually narrow** —
    today the parser accepts `target: self` but the engine
-   discards the effect. v0.2 should mutate the receiver
+   discards the effect. v0.0.2 should mutate the receiver
    scope's `self_type` on the matching edge.
 4. **More `check` rules**: type-incompatible argument (uses
    `Acceptance`), return-type mismatch, unreachable
    branches, unused locals, redundant nil checks.
-5. **Per-rule severity + suppression**: project-level
+5. **Inter-procedural inference for user-defined methods** —
+   pinned by `spec/integration/fixtures/user_methods.rb`. A
+   class with `def is_odd(n) = n.odd?` currently surfaces as
+   `Dynamic[top]` at the call site because the engine has no
+   return-type inference for user methods (the body's
+   `n.odd?` types correctly inside the def, but the type is
+   not propagated to the caller). The companion
+   `user_methods_with_sig/` fixture proves the dispatch path
+   works once a sig is supplied; v0.0.2 should reuse the
+   same dispatch but with engine-inferred return types so
+   users do not need to author RBS for every helper.
+   Approach: a per-method type cache populated by walking
+   `Prism::DefNode` bodies in topological order (or with a
+   fixed-point iteration for recursion).
+6. **Per-rule severity + suppression**: project-level
    `.rigor.yml` rule toggles, in-source `# rigor:disable`
    comments, severity downgrade.
 
 ### CLI + workflow
 
-6. **Persistent analysis cache** — wire the `cache.path`
+7. **Persistent analysis cache** — wire the `cache.path`
    config slot through to a per-file analysis cache so
    subsequent `rigor check` runs only re-analyze changed
    files.
-7. **Configuration: `libraries:` and `signature_paths:`
+8. **Configuration: `libraries:` and `signature_paths:`
    passthrough** — `.rigor.yml` keys that reach
    `Environment.for_project` so users can extend the
    stdlib bundle without touching code.
-8. **Plugin contribution layer** per ADR-2 — load
+9. **Plugin contribution layer** per ADR-2 — load
    user-supplied Ruby files that register additional
    `CheckRules` or RBS shim methods.
-9. **Diagnostic publication of `FallbackTracer` events** —
-   optional `--explain` mode surfacing where the engine
-   degraded to `Dynamic[Top]`.
+10. **Diagnostic publication of `FallbackTracer` events** —
+    optional `--explain` mode surfacing where the engine
+    degraded to `Dynamic[Top]`.
 
 ### Documentation + adoption
 
-10. **Quickstart on a real Rails / sinatra-style app** —
+11. **Quickstart on a real Rails / sinatra-style app** —
     expanded README walkthrough including dependency RBS
     onboarding and recommended `paths:` / sig layout.
-11. **`rigor check` rule reference** — per-rule docs with
+12. **`rigor check` rule reference** — per-rule docs with
     canonical examples, false-positive guidance, and the
     suppressing comment syntax.

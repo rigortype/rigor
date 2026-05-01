@@ -206,6 +206,55 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      describe "dump_type / assert_type rules (Slice 7 phase 19)" do # rubocop:disable RSpec/NestedGroups
+        it "emits an info-severity diagnostic for `dump_type(value)`" do
+          Dir.mktmpdir do |dir|
+            File.write(File.join(dir, "demo.rb"), <<~RUBY)
+              require "rigor/testing"
+              include Rigor::Testing
+              n = 4
+              dump_type(n)
+            RUBY
+
+            configuration = Rigor::Configuration.new("paths" => [dir])
+            result = described_class.new(configuration: configuration).run
+
+            dump = result.diagnostics.find { |d| d.message.start_with?("dump_type") }
+            expect(dump).not_to be_nil
+            expect(dump.severity).to eq(:info)
+            expect(dump.message).to include("4")
+            # info-severity does not fail the run.
+            expect(result).to be_success
+          end
+        end
+
+        it "errors on `assert_type` mismatch and stays silent on a match" do # rubocop:disable RSpec/ExampleLength
+          Dir.mktmpdir do |dir|
+            File.write(File.join(dir, "match.rb"), <<~RUBY)
+              require "rigor/testing"
+              include Rigor::Testing
+              x = 4
+              assert_type("4", x)
+            RUBY
+            File.write(File.join(dir, "miss.rb"), <<~RUBY)
+              require "rigor/testing"
+              include Rigor::Testing
+              x = 4
+              assert_type("Integer", x)
+            RUBY
+
+            configuration = Rigor::Configuration.new("paths" => [dir])
+            result = described_class.new(configuration: configuration).run
+
+            mismatch = result.diagnostics.find { |d| d.message.start_with?("assert_type mismatch") }
+            expect(mismatch).not_to be_nil
+            expect(mismatch.path).to end_with("miss.rb")
+            expect(mismatch.message).to include('expected "Integer"')
+            expect(mismatch.message).to include('got "4"')
+          end
+        end
+      end
+
       describe "nil-receiver rule (Slice 7 phase 14)" do # rubocop:disable RSpec/NestedGroups
         it "flags a call to a method that does not exist on NilClass when receiver is T | nil" do
           Dir.mktmpdir do |dir|

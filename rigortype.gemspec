@@ -3,7 +3,7 @@
 require_relative "lib/rigor/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "rigor"
+  spec.name = "rigortype"
   spec.version = Rigor::VERSION
   spec.authors = ["Rigor contributors"]
   spec.email = ["maintainers@example.invalid"]

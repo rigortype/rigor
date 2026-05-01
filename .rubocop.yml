@@ -4,6 +4,7 @@ AllCops:
   Exclude:
     - "references/**/*"
     - "vendor/**/*"
+    - "spec/integration/fixtures/**/*"
 
 plugins:
   - rubocop-rake

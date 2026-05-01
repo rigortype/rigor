@@ -582,4 +582,80 @@ RSpec.describe Rigor::Inference::Narrowing do
       end
     end
   end
+
+  describe ".case_when_scopes (Slice 7 phase 5)" do
+    let(:union_int_str) do
+      Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("Integer"),
+        Rigor::Type::Combinator.nominal_of("String")
+      )
+    end
+
+    let(:integer_nominal) { Rigor::Type::Combinator.nominal_of("Integer") }
+    let(:string_nominal) { Rigor::Type::Combinator.nominal_of("String") }
+
+    # Parses a `case` statement with `x` declared as a local
+    # (via the existing `parse_program(locals:)` helper) so
+    # Prism resolves the bare `x` subject as a
+    # `LocalVariableReadNode` rather than the variable-call
+    # `CallNode` that an unbound bare read parses to.
+    def parse_case_of_x(case_source)
+      parse_program(case_source).statements.body.first
+    end
+
+    it "narrows the body scope to the when-clause class" do
+      bound = scope.with_local(:x, union_int_str)
+      case_node = parse_case_of_x(<<~RUBY)
+        case x
+        when Integer then x
+        when String then x
+        end
+      RUBY
+      first_when = case_node.conditions.first
+      body, _falsey = described_class.case_when_scopes(case_node.predicate, first_when.conditions, bound)
+      expect(body.local(:x)).to eq(integer_nominal)
+    end
+
+    it "subtracts every prior matched class from the falsey edge so subsequent branches see the narrowed type" do
+      bound = scope.with_local(:x, union_int_str)
+      case_node = parse_case_of_x(<<~RUBY)
+        case x
+        when Integer then x
+        when String then x
+        end
+      RUBY
+      first_when = case_node.conditions.first
+      _body, falsey = described_class.case_when_scopes(case_node.predicate, first_when.conditions, bound)
+      expect(falsey.local(:x)).to eq(string_nominal)
+    end
+
+    it "unions multiple matchers in a single when clause on the truthy edge" do
+      union_int_str_nil = Rigor::Type::Combinator.union(
+        union_int_str,
+        Rigor::Type::Combinator.nominal_of("NilClass")
+      )
+      bound = scope.with_local(:x, union_int_str_nil)
+      case_node = parse_case_of_x(<<~RUBY)
+        case x
+        when Integer, String then x
+        end
+      RUBY
+      first_when = case_node.conditions.first
+      body, _falsey = described_class.case_when_scopes(case_node.predicate, first_when.conditions, bound)
+      expect(body.local(:x)).to eq(union_int_str)
+    end
+
+    it "falls through with no narrowing when the subject is not a local read" do
+      bound = scope.with_local(:x, union_int_str)
+      case_node = parse_case_of_x(<<~RUBY)
+        case x.length
+        when 1 then 1
+        end
+      RUBY
+      first_when = case_node.conditions.first
+      body, falsey = described_class.case_when_scopes(case_node.predicate, first_when.conditions, bound)
+      expect(body).to eq(bound)
+      expect(falsey).to eq(bound)
+    end
+  end
 end

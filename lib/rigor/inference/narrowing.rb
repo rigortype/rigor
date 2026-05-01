@@ -199,6 +199,47 @@ module Rigor
         result || [scope, scope]
       end
 
+      # Slice 7 phase 5 — `case`/`when` narrowing.
+      #
+      # Given the subject of a `case` (the expression after the
+      # `case` keyword) and an array of `when`-clause condition
+      # nodes (`when_clause.conditions`), returns a pair of
+      # scopes:
+      #
+      # - `body_scope`: the scope under which the body of the
+      #   `when` clause MUST be evaluated. The subject local is
+      #   narrowed by the union of every condition's truthy
+      #   edge so the body sees the most specific type
+      #   compatible with "any of the conditions matched".
+      # - `falsey_scope`: the scope under which the next branch
+      #   (the next `when` or the `else`) MUST be evaluated.
+      #   The subject is narrowed by the conjunction of every
+      #   condition's falsey edge.
+      #
+      # The narrowing is best-effort: if the subject is not a
+      # `Prism::LocalVariableReadNode` or none of the condition
+      # shapes are recognised, both returned scopes equal the
+      # input scope. The catalogue mirrors
+      # {.case_equality_target_class}: static class/module
+      # constants narrow as `is_a?`; integer/float-endpoint
+      # ranges narrow to `Numeric`; string-endpoint ranges and
+      # regexp literals narrow to `String`.
+      #
+      # @param subject [Prism::Node, nil] the `case` subject.
+      # @param conditions [Array<Prism::Node>] the `when`
+      #   clause's `conditions` array.
+      # @param scope [Rigor::Scope]
+      # @return [Array(Rigor::Scope, Rigor::Scope)]
+      def case_when_scopes(subject, conditions, scope)
+        return [scope, scope] unless subject.is_a?(Prism::LocalVariableReadNode)
+
+        local_name = subject.name
+        current = scope.local(local_name)
+        return [scope, scope] if current.nil?
+
+        accumulate_case_when_scopes(scope, local_name, current, conditions)
+      end
+
       # Internal analyser. Returns `[truthy_scope, falsey_scope]` when
       # the predicate shape is recognised, or `nil` to signal "no
       # narrowing" so the public surface can fall back to the entry
@@ -580,6 +621,40 @@ module Rigor
             node = node.body.body.first
           end
           node
+        end
+
+        # Slice 7 phase 5 — case/when accumulator. Walks each
+        # `when` condition, computes the narrowed type for the
+        # subject as if `condition === subject`, and accumulates
+        # them. The body's narrowed type is the union across
+        # all conditions; the falsey type is the running result
+        # after subtracting every condition's class. Conditions
+        # whose shape we cannot statically classify are treated
+        # as "no narrowing": the body falls back to the union of
+        # what we did learn (or the entry type when nothing
+        # learned), and the falsey edge is the entry type
+        # (because we cannot prove the unknown condition didn't
+        # match).
+        def accumulate_case_when_scopes(scope, local_name, current, conditions)
+          truthy_members = []
+          falsey_type = current
+          fully_narrowable = true
+
+          conditions.each do |condition|
+            target = static_class_name(condition) || case_equality_target_class(condition)
+            if target
+              truthy_members << narrow_class(current, target, exact: false, environment: scope.environment)
+              falsey_type = narrow_not_class(falsey_type, target, exact: false, environment: scope.environment)
+            else
+              fully_narrowable = false
+            end
+          end
+
+          truthy = truthy_members.empty? ? current : Type::Combinator.union(*truthy_members)
+          [
+            scope.with_local(local_name, truthy),
+            scope.with_local(local_name, fully_narrowable ? falsey_type : current)
+          ]
         end
 
         def range_target_class(range_node)

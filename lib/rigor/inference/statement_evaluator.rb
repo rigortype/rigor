@@ -373,22 +373,31 @@ module Rigor
       # names degrade to `T | nil`.
       def eval_case(node)
         post_pred = node.predicate ? sub_eval(node.predicate, scope).last : scope
-
-        branch_results = node.conditions.map { |branch| sub_eval(branch, post_pred) }
-        else_result =
-          if node.else_clause
-            sub_eval(node.else_clause, post_pred)
-          else
-            [Type::Combinator.constant_of(nil), post_pred]
-          end
+        branch_results, falsey_scope = eval_case_when_branches(node.predicate, node.conditions, post_pred)
+        else_result = eval_case_else(node.else_clause, falsey_scope)
 
         all_results = [*branch_results, else_result]
-        types = all_results.map(&:first)
-        scopes = all_results.map(&:last)
         [
-          Type::Combinator.union(*types),
-          reduce_scopes_with_nil_injection(scopes)
+          Type::Combinator.union(*all_results.map(&:first)),
+          reduce_scopes_with_nil_injection(all_results.map(&:last))
         ]
+      end
+
+      def eval_case_when_branches(subject, conditions, entry_scope)
+        results = []
+        falsey_scope = entry_scope
+        conditions.each do |branch|
+          when_conditions = branch.respond_to?(:conditions) ? branch.conditions : []
+          body_scope, falsey_scope = Narrowing.case_when_scopes(subject, when_conditions, falsey_scope)
+          results << sub_eval(branch, body_scope)
+        end
+        [results, falsey_scope]
+      end
+
+      def eval_case_else(else_clause, falsey_scope)
+        return sub_eval(else_clause, falsey_scope) if else_clause
+
+        [Type::Combinator.constant_of(nil), falsey_scope]
       end
 
       def eval_when_or_in(node)

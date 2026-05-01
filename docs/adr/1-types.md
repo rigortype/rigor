@@ -131,6 +131,8 @@ RBS remains the boundary format. Rigor's internal type representation may includ
 
 `RBS::Extended` annotations are metadata layered on top of ordinary RBS. They are not a replacement for internal inference and should not require annotations in Ruby application code.
 
+How Rigor *chooses* between candidate types when authoring its own signatures (built-in catalog entries, inferred user-method types, RBS::Extended payloads) is governed by the asymmetric robustness principle in [ADR-5](5-robustness-principle.md): strict returns to maximise downstream precision propagation, lenient parameters to avoid forcing callers to paste defensive coercions. Hand-written RBS authorship binds; the principle directs the default choice when Rigor authors the signature itself.
+
 ## Key Design Points
 
 ### Subtyping and Gradual Consistency Are Separate

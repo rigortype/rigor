@@ -39,6 +39,7 @@ The documents are organized so foundational definitions come first and specific 
 | Document | Scope |
 | --- | --- |
 | [overview.md](overview.md) | Core principle (RBS superset), design priorities, scope of the specification. |
+| [robustness-principle.md](robustness-principle.md) | Postel's law for types: strict returns, lenient parameters. The asymmetric authorship rule every Rigor-authored type observes. |
 | [relations-and-certainty.md](relations-and-certainty.md) | Subtyping (`<:`) and gradual consistency (`consistent`), trinary certainty (`yes`/`no`/`maybe`). |
 | [value-lattice.md](value-lattice.md) | Value lattice, lattice identities, and the `Dynamic[T]` algebra. |
 | [special-types.md](special-types.md) | `top`, `bot`, `untyped`/`Dynamic[T]`, `void`, `nil`/`NilClass`, `bool`/`boolish`. |

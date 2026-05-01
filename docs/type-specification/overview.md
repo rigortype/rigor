@@ -30,6 +30,7 @@ This specification is organized around the ideal type model, not the first imple
 4. Treat control-flow facts as scope transitions at expression edges, not only as block-level branch labels.
 5. Support Ruby duck typing through structural interfaces and object shapes without making all class compatibility structural.
 6. Let plugins and `RBS::Extended` contribute facts, effects, and dynamic reflection while the analyzer keeps ownership of scope application and normalization.
+7. Apply the [robustness principle](robustness-principle.md) (Postel's law) to every Rigor-authored type — strict on returns, lenient on parameters — so precision propagates downstream and call sites avoid coercion noise.
 
 ## Release scope
 

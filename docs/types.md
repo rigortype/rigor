@@ -10,6 +10,7 @@ This file is the one-page entry point. The full normative specification lives in
 - **Lossless RBS in, conservative RBS out.** Internal precision (literal sets, refinements, shapes, dynamic-origin provenance) MAY exceed what RBS can spell. On export, Rigor erases to ordinary RBS that is never narrower than what was proved.
 - **Three-valued certainty.** Type, reflection, and member queries return `yes`, `no`, or `maybe`. `maybe` does not narrow as if `yes` and does not produce the opposite-edge fact as if `no`.
 - **Two relations, kept separate.** Subtyping (`A <: B`, value-set inclusion) and gradual consistency (`consistent(A, B)`, dynamic-boundary compatibility) are not unified. `untyped` is the dynamic type, distinct from `top`.
+- **Robustness principle (Postel's law).** Rigor-authored types are *strict on returns* and *lenient on parameters*. A precise return propagates useful facts through the inference engine; a permissive parameter prevents coercion workarounds at call sites. Hand-written RBS authorship binds — the principle directs Rigor's defaults, not user-supplied signatures. See [robustness-principle.md](type-specification/robustness-principle.md) for the normative rule and [adr/5-robustness-principle.md](adr/5-robustness-principle.md) for the design rationale.
 
 ## Main features
 

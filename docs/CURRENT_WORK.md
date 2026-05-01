@@ -58,6 +58,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 7 phase 5 | `12898cd` | `Narrowing.case_when_scopes` + `eval_case` integration: each `when` body sees subject narrowed by the union of its conditions; the `else` sees the conjunction of falsey edges |
 | Slice 7 phase 6 | `bdbdeac` | Cross-method cvar tracking + program-wide global accumulator (parallels Slice 7 phase 2 ivar accumulator) |
 | Slice 7 phase 7 | `583a254` | `Scope#discovered_classes` populated by `ScopeIndexer`: references to user-defined classes resolve as `Singleton[T]` even without an RBS sig |
+| Slice 7 phase 8 | `9237e36` | `rigor check` first preview: `Rigor::Analysis::CheckRules` flags "undefined method on typed receiver" + `Object#class` precise meta-introspection |
 
 ## What is in Place Today
 
@@ -367,10 +368,11 @@ clean.
 
 ## Known Limitations of the First Preview
 
-- The `check` CLI command is a minimal stub — it does not yet
-  produce diagnostics for real-world Ruby code; only the
-  `type-of` and `type-scan` probes exercise the engine
-  end-to-end.
+- The `check` CLI command ships one rule for first preview
+  (undefined method on typed receiver). Other rule families
+  (type-incompatible writes, unbound locals, unreachable
+  branches) remain on the roadmap. Severity is hard-coded to
+  `:error`; per-rule severity configuration is future work.
 - Constants whose value is bound to a non-class type
   (`BUCKETS = [...]`) resolve through RBS constant decls but do
   NOT pick up types from in-source assignments (the engine

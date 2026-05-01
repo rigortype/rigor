@@ -120,6 +120,13 @@ rg PATTERN --no-ignore references/python-typing
 - For any change that touches type-model behavior — normalization, narrowing, erasure, signature handling, diagnostic identifiers, budgets — treat `docs/type-specification/` as the binding specification and `docs/adr/1-types.md` as the design-rationale companion. Update the relevant topical document when behavior changes.
 - For any change that touches analyzer-internal contracts — `Scope`, fact store, effect model, capability-role inference, type-object public surface, factory-routed normalization, diagnostics-display routing — treat `docs/internal-spec/` as the binding specification and `docs/adr/3-type-representation.md` as the design-rationale companion. Update the relevant document when contracts change.
 
+## Commit Messages
+
+- Use a plain imperative subject in sentence case (e.g. `Add GitHub Actions CI running make verify on Ruby 4.0`, `Bump up version to 0.0.1`).
+- Do **not** use Conventional-Commits-style `type:` or `area:` prefixes. The subject starts with a capitalised verb, no leading tag.
+- Keep the subject self-contained and reasonably short; detail belongs in the body. Wrap the body at ~72 columns and write it for humans — explain the why and any context a future reader will need, not the diff itself.
+- Release version bumps follow the fixed form `Bump up version to x.y.z`. See [`.codex/skills/rigor-release-prep/SKILL.md`](.codex/skills/rigor-release-prep/SKILL.md) for the full release-prep flow.
+
 ## Verification Notes
 
 After making changes, run:

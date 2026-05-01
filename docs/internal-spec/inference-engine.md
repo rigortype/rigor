@@ -275,6 +275,13 @@ Slice 7 phase 2 lifts the method-local boundary for ivars: `Scope` carries a `cl
 
 The pre-pass types rvalues with no local bindings, so `@x = 1` records `Constant[1]` but `@x = some_local + 1` records `Dynamic[Top]`. Cvars and globals remain method-local; the equivalent class-level / process-level accumulators are a follow-up slice.
 
+Slice 7 phase 3 extends `StatementEvaluator` with **compound writes** for every variable kind. The handlers cover `Prism::{Local,InstanceVariable,ClassVariable,GlobalVariable}{Or,And,Operator}WriteNode` and apply uniform semantics:
+
+- The current type is read from the appropriate scope binding map (`local`/`ivar`/`cvar`/`global`); unbound variables read as `Dynamic[Top]`.
+- The rvalue is evaluated under the entry scope through `sub_eval`.
+- The result type for `||=` is `union(Narrowing.narrow_truthy(current), rhs)`; for `&&=` it is `union(Narrowing.narrow_falsey(current), rhs)`; for operator forms (`+=`, `-=`, `*=`, ...) the typer dispatches `current.send(operator, rhs)` through `MethodDispatcher` and falls back to `Dynamic[Top]` on a miss.
+- The variable is then rebound into the post-scope through the same `with_*` builder used by the plain write handler. The expression value is the result type, matching Ruby's semantics.
+
 ### Lexical constant lookup (Slice A constant-walk)
 
 `ExpressionTyper#type_of_constant_read` and `#type_of_constant_path` MUST resolve a constant by walking the surrounding lexical class context, mirroring Ruby's runtime constant lookup rules at the granularity the analyzer can prove statically:

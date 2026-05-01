@@ -1154,6 +1154,57 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  describe "compound writes rebind into post-scope (Slice 7 phase 3)" do
+    def constant(value) = Rigor::Type::Combinator.constant_of(value)
+
+    it "||= rebinds the local with union(narrow_truthy(current), rhs)" do
+      _, post = evaluate(<<~RUBY)
+        x = nil
+        x ||= 1
+      RUBY
+      expect(post.local(:x)).to eq(constant(1))
+    end
+
+    it "&&= rebinds the local with union(narrow_falsey(current), rhs)" do
+      _, post = evaluate(<<~RUBY)
+        x = 1
+        x &&= "two"
+      RUBY
+      expect(post.local(:x)).to eq(constant("two"))
+    end
+
+    it "+= rebinds via operator dispatch (constant folding when both sides are constants)" do
+      _, post = evaluate(<<~RUBY)
+        y = 0
+        y += 5
+      RUBY
+      expect(post.local(:y)).to eq(constant(5))
+    end
+
+    it "ivar ||= rebinds the post-scope ivar map" do
+      _, post = evaluate(<<~RUBY)
+        @x = nil
+        @x ||= "set"
+      RUBY
+      expect(post.ivar(:@x)).to eq(constant("set"))
+    end
+
+    it "ivar += dispatches the operator and rebinds" do
+      _, post = evaluate(<<~RUBY)
+        @count = 1
+        @count += 2
+      RUBY
+      expect(post.ivar(:@count)).to eq(constant(3))
+    end
+
+    it "global ||= and cvar &&= rebind their respective maps" do
+      _, post_g = evaluate("$g = nil; $g ||= 7")
+      _, post_c = evaluate("@@k = 1; @@k &&= 9")
+      expect(post_g.global(:$g)).to eq(constant(7))
+      expect(post_c.cvar(:@@k)).to eq(constant(9))
+    end
+  end
+
   describe "cross-method ivar tracking via class accumulator (Slice 7 phase 2)" do
     it "seeds an instance method body's ivars from sibling-method writes when routed through ScopeIndexer" do
       ast = parse_program(<<~RUBY)

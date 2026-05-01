@@ -56,9 +56,21 @@ module Rigor
         Prism::StatementsNode => :eval_statements,
         Prism::ProgramNode => :eval_program,
         Prism::LocalVariableWriteNode => :eval_local_write,
+        Prism::LocalVariableOrWriteNode => :eval_local_or_write,
+        Prism::LocalVariableAndWriteNode => :eval_local_and_write,
+        Prism::LocalVariableOperatorWriteNode => :eval_local_operator_write,
         Prism::InstanceVariableWriteNode => :eval_ivar_write,
+        Prism::InstanceVariableOrWriteNode => :eval_ivar_or_write,
+        Prism::InstanceVariableAndWriteNode => :eval_ivar_and_write,
+        Prism::InstanceVariableOperatorWriteNode => :eval_ivar_operator_write,
         Prism::ClassVariableWriteNode => :eval_cvar_write,
+        Prism::ClassVariableOrWriteNode => :eval_cvar_or_write,
+        Prism::ClassVariableAndWriteNode => :eval_cvar_and_write,
+        Prism::ClassVariableOperatorWriteNode => :eval_cvar_operator_write,
         Prism::GlobalVariableWriteNode => :eval_global_write,
+        Prism::GlobalVariableOrWriteNode => :eval_global_or_write,
+        Prism::GlobalVariableAndWriteNode => :eval_global_and_write,
+        Prism::GlobalVariableOperatorWriteNode => :eval_global_operator_write,
         Prism::MultiWriteNode => :eval_multi_write,
         Prism::IfNode => :eval_if,
         Prism::UnlessNode => :eval_unless,
@@ -185,6 +197,114 @@ module Rigor
       def eval_global_write(node)
         rhs_type, post_rhs = sub_eval(node.value, scope)
         [rhs_type, post_rhs.with_global(node.name, rhs_type)]
+      end
+
+      # Slice 7 phase 3 — compound writes (||=, &&=, +=/-=/...)
+      # for every variable kind. Each handler:
+      #   1. Reads the current type from the appropriate scope
+      #      binding map (or `Dynamic[Top]` when unbound).
+      #   2. Evaluates the rvalue under the entry scope and
+      #      threads any scope effects (rare for compound RHS,
+      #      but matches Ruby evaluation order).
+      #   3. Computes the result type via `compound_result_type`:
+      #      `||=` → `union(narrow_truthy(current), rhs)`;
+      #      `&&=` → `union(narrow_falsey(current), rhs)`;
+      #      operator forms (`+=`, `-=`, `*=`, ...) dispatch
+      #      `current.send(op, rhs)` through `MethodDispatcher`,
+      #      falling back to `Dynamic[Top]` on a miss.
+      #   4. Rebinds the variable into the post-scope through
+      #      the same `with_*` builder used by the plain write
+      #      handler, so subsequent reads observe the result.
+      def eval_local_or_write(node)
+        compound_eval(node, kind: :local, op: :or)
+      end
+
+      def eval_local_and_write(node)
+        compound_eval(node, kind: :local, op: :and)
+      end
+
+      def eval_local_operator_write(node)
+        compound_eval(node, kind: :local, op: node.binary_operator)
+      end
+
+      def eval_ivar_or_write(node)
+        compound_eval(node, kind: :ivar, op: :or)
+      end
+
+      def eval_ivar_and_write(node)
+        compound_eval(node, kind: :ivar, op: :and)
+      end
+
+      def eval_ivar_operator_write(node)
+        compound_eval(node, kind: :ivar, op: node.binary_operator)
+      end
+
+      def eval_cvar_or_write(node)
+        compound_eval(node, kind: :cvar, op: :or)
+      end
+
+      def eval_cvar_and_write(node)
+        compound_eval(node, kind: :cvar, op: :and)
+      end
+
+      def eval_cvar_operator_write(node)
+        compound_eval(node, kind: :cvar, op: node.binary_operator)
+      end
+
+      def eval_global_or_write(node)
+        compound_eval(node, kind: :global, op: :or)
+      end
+
+      def eval_global_and_write(node)
+        compound_eval(node, kind: :global, op: :and)
+      end
+
+      def eval_global_operator_write(node)
+        compound_eval(node, kind: :global, op: node.binary_operator)
+      end
+
+      def compound_eval(node, kind:, op:) # rubocop:disable Naming/MethodParameterName
+        current_type = current_type_for(kind, node.name)
+        rhs_type, post_rhs = sub_eval(node.value, scope)
+        result_type = compound_result_type(current_type, rhs_type, op)
+        [result_type, rebind_variable(post_rhs, kind, node.name, result_type)]
+      end
+
+      VAR_KIND_GETTERS = {
+        local: :local, ivar: :ivar, cvar: :cvar, global: :global
+      }.freeze
+      VAR_KIND_BUILDERS = {
+        local: :with_local, ivar: :with_ivar, cvar: :with_cvar, global: :with_global
+      }.freeze
+      private_constant :VAR_KIND_GETTERS, :VAR_KIND_BUILDERS
+
+      def current_type_for(kind, name)
+        scope.public_send(VAR_KIND_GETTERS.fetch(kind), name) || Type::Combinator.untyped
+      end
+
+      def rebind_variable(target_scope, kind, name, type)
+        target_scope.public_send(VAR_KIND_BUILDERS.fetch(kind), name, type)
+      end
+
+      def compound_result_type(current, rhs, operator)
+        case operator
+        when :or
+          Type::Combinator.union(Narrowing.narrow_truthy(current), rhs)
+        when :and
+          Type::Combinator.union(Narrowing.narrow_falsey(current), rhs)
+        else
+          dispatch_operator(current, rhs, operator)
+        end
+      end
+
+      def dispatch_operator(current, rhs, operator)
+        result = MethodDispatcher.dispatch(
+          receiver_type: current,
+          method_name: operator.to_sym,
+          arg_types: [rhs],
+          environment: scope.environment
+        )
+        result || Type::Combinator.untyped
       end
 
       # `a, b = rhs` — Slice 5 phase 2 sub-phase 2 destructuring.

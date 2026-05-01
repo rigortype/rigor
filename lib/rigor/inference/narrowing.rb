@@ -155,6 +155,28 @@ module Rigor
         end
       end
 
+      # Integer-comparison fragment of `type` against an Integer
+      # literal `bound`. Narrows the receiver of `x < n`, `x <= n`,
+      # `x > n`, `x >= n` (and the reversed forms) to the subset of
+      # the existing domain that satisfies the comparison. Hooks in:
+      # - `Constant<Integer>` is preserved when it satisfies the
+      #   comparison, otherwise collapsed to `Bot`.
+      # - `IntegerRange[a..b]` becomes the intersection with the
+      #   half-line implied by the comparison; an empty intersection
+      #   collapses to `Bot`, a single-point intersection collapses
+      #   to `Constant<Integer>`.
+      # - `Nominal[Integer]` becomes the half-line itself (e.g.
+      #   `x > 0` on `Nominal[Integer]` is `positive_int`).
+      # - `Union` narrows each member independently.
+      # - Other carriers (Float, String, Top, Dynamic) flow through
+      #   unchanged: the analyzer does not have a Float-range carrier
+      #   today, and no other carrier participates in numeric ordering.
+      def narrow_integer_comparison(type, comparator, bound)
+        return type unless bound.is_a?(Integer) && %i[< <= > >=].include?(comparator)
+
+        narrow_integer_comparison_dispatch(type, comparator, bound)
+      end
+
       # Class-membership fragment of `type`: the subset whose
       # inhabitants are instances of `class_name` (or its subclasses
       # when `exact: false`). `class_name` is the qualified name of
@@ -459,6 +481,7 @@ module Rigor
           when :instance_of? then analyse_class_predicate(node, scope, exact: true)
           when :==, :!= then analyse_equality_predicate(node, scope, equality: name)
           when :=== then analyse_case_equality_predicate(node, scope)
+          when :<, :<=, :>, :>= then analyse_comparison_predicate(node, scope, comparator: name)
           end
         end
 
@@ -489,6 +512,101 @@ module Rigor
           positive = equality_scope(scope, name, current, literal, predicate: :==)
           negative = equality_scope(scope, name, current, literal, predicate: :!=)
           equality == :== ? [positive, negative] : [negative, positive]
+        end
+
+        # Comparison predicate analyser. Recognised shapes:
+        #   x  <  Int        x  <=  Int        x  >  Int        x  >=  Int
+        #   Int <  x         Int <=  x         Int >  x         Int >=  x
+        # The reversed (literal-on-left) form is normalised by
+        # transposing the operator so the receiver-local always
+        # appears on the left of the rule.
+        INVERT_COMPARISON_OP = { :< => :>=, :<= => :>, :> => :<=, :>= => :< }.freeze
+        REVERSE_COMPARISON_OP = { :< => :>, :<= => :>=, :> => :<, :>= => :<= }.freeze
+        private_constant :INVERT_COMPARISON_OP, :REVERSE_COMPARISON_OP
+
+        def analyse_comparison_predicate(node, scope, comparator:)
+          return nil if node.arguments.nil?
+          return nil unless node.arguments.arguments.size == 1
+
+          match = comparison_local_literal(node.receiver, node.arguments.arguments.first, comparator)
+          return nil if match.nil?
+
+          local_name, normalised_op, bound = match
+          current = scope.local(local_name)
+          return nil if current.nil?
+
+          truthy = narrow_integer_comparison(current, normalised_op, bound)
+          falsey = narrow_integer_comparison(current, INVERT_COMPARISON_OP[normalised_op], bound)
+          [scope.with_local(local_name, truthy), scope.with_local(local_name, falsey)]
+        end
+
+        def comparison_local_literal(left, right, comparator)
+          if left.is_a?(Prism::LocalVariableReadNode) && right.is_a?(Prism::IntegerNode)
+            return [left.name, comparator, right.value]
+          end
+          return nil unless right.is_a?(Prism::LocalVariableReadNode) && left.is_a?(Prism::IntegerNode)
+
+          [right.name, REVERSE_COMPARISON_OP[comparator], left.value]
+        end
+
+        def narrow_integer_comparison_dispatch(type, comparator, bound)
+          case type
+          when Type::Constant
+            integer_constant_satisfies?(type.value, comparator, bound) ? type : Type::Combinator.bot
+          when Type::IntegerRange
+            intersect_integer_range(type, comparator, bound)
+          when Type::Nominal
+            narrow_integer_comparison_nominal(type, comparator, bound)
+          when Type::Union
+            Type::Combinator.union(
+              *type.members.map { |m| narrow_integer_comparison(m, comparator, bound) }
+            )
+          else
+            type
+          end
+        end
+
+        def narrow_integer_comparison_nominal(nominal, comparator, bound)
+          return nominal unless nominal.class_name == "Integer" && nominal.type_args.empty?
+
+          intersect_integer_range(Type::Combinator.universal_int, comparator, bound)
+        end
+
+        def integer_constant_satisfies?(value, comparator, bound)
+          return false unless value.is_a?(Integer)
+
+          case comparator
+          when :<  then value < bound
+          when :<= then value <= bound
+          when :>  then value > bound
+          when :>= then value >= bound
+          end
+        end
+
+        def intersect_integer_range(range, comparator, bound)
+          new_lower, new_upper = comparison_endpoints(range, comparator, bound)
+          return Type::Combinator.bot if new_lower > new_upper
+
+          build_narrowing_integer_range(new_lower, new_upper)
+        end
+
+        def comparison_endpoints(range, comparator, bound)
+          case comparator
+          when :<  then [range.lower, [range.upper, bound - 1].min]
+          when :<= then [range.lower, [range.upper, bound].min]
+          when :>  then [[range.lower, bound + 1].max, range.upper]
+          when :>= then [[range.lower, bound].max, range.upper]
+          end
+        end
+
+        def build_narrowing_integer_range(lower, upper)
+          min = lower == -Float::INFINITY ? Type::IntegerRange::NEG_INFINITY : Integer(lower)
+          max = upper == Float::INFINITY ? Type::IntegerRange::POS_INFINITY : Integer(upper)
+          if min.is_a?(Integer) && max.is_a?(Integer) && min == max
+            Type::Combinator.constant_of(min)
+          else
+            Type::Combinator.integer_range(min, max)
+          end
         end
 
         def equality_local_literal(left, right, scope)

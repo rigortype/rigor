@@ -583,6 +583,139 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
   end
 
+  describe ".narrow_integer_comparison (Slice 6 phase D — range narrowing)" do
+    def positive_int = Rigor::Type::Combinator.positive_int
+    def non_negative_int = Rigor::Type::Combinator.non_negative_int
+    def negative_int = Rigor::Type::Combinator.negative_int
+    def non_positive_int = Rigor::Type::Combinator.non_positive_int
+
+    describe "Nominal[Integer] receivers" do
+      it "narrows `x > 0` to positive_int" do
+        expect(described_class.narrow_integer_comparison(integer_nominal, :>, 0)).to eq(positive_int)
+      end
+
+      it "narrows `x >= 0` to non_negative_int" do
+        expect(described_class.narrow_integer_comparison(integer_nominal, :>=, 0)).to eq(non_negative_int)
+      end
+
+      it "narrows `x < 0` to negative_int" do
+        expect(described_class.narrow_integer_comparison(integer_nominal, :<, 0)).to eq(negative_int)
+      end
+
+      it "narrows `x <= 0` to non_positive_int" do
+        expect(described_class.narrow_integer_comparison(integer_nominal, :<=, 0)).to eq(non_positive_int)
+      end
+    end
+
+    describe "IntegerRange receivers" do
+      it "intersects with the comparison half-line" do
+        range = Rigor::Type::Combinator.integer_range(-5, 5)
+        expect(described_class.narrow_integer_comparison(range, :>, 0))
+          .to eq(Rigor::Type::Combinator.integer_range(1, 5))
+      end
+
+      it "is a no-op when the range is already on the satisfying side" do
+        range = Rigor::Type::Combinator.integer_range(1, 10)
+        expect(described_class.narrow_integer_comparison(range, :>, 0)).to eq(range)
+      end
+
+      it "collapses to Bot when the intersection is empty" do
+        range = Rigor::Type::Combinator.integer_range(-10, -1)
+        expect(described_class.narrow_integer_comparison(range, :>, 0))
+          .to be_a(Rigor::Type::Bot)
+      end
+
+      it "collapses a single-point intersection to Constant" do
+        # int<-1, 1> & (>= 1) = int<1, 1> -> Constant[1]
+        range = Rigor::Type::Combinator.integer_range(-1, 1)
+        expect(described_class.narrow_integer_comparison(range, :>=, 1))
+          .to eq(Rigor::Type::Combinator.constant_of(1))
+      end
+    end
+
+    describe "Constant receivers" do
+      it "preserves a Constant that satisfies the comparison" do
+        c = Rigor::Type::Combinator.constant_of(5)
+        expect(described_class.narrow_integer_comparison(c, :>, 0)).to eq(c)
+      end
+
+      it "drops a Constant that does not satisfy the comparison" do
+        c = Rigor::Type::Combinator.constant_of(-3)
+        expect(described_class.narrow_integer_comparison(c, :>, 0))
+          .to be_a(Rigor::Type::Bot)
+      end
+
+      it "leaves non-Integer Constants untouched (Bot rather than widen)" do
+        # `Constant["foo"]` cannot satisfy `> 0`; collapses to Bot
+        # rather than the analyser silently leaving a non-numeric
+        # value on the truthy edge of an integer comparison.
+        c = Rigor::Type::Combinator.constant_of("foo")
+        expect(described_class.narrow_integer_comparison(c, :>, 0))
+          .to be_a(Rigor::Type::Bot)
+      end
+    end
+
+    describe "Union receivers" do
+      it "narrows each member independently" do
+        union = Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.constant_of(-3),
+          Rigor::Type::Combinator.constant_of(0),
+          Rigor::Type::Combinator.constant_of(5)
+        )
+        result = described_class.narrow_integer_comparison(union, :>, 0)
+        expect(result).to eq(Rigor::Type::Combinator.constant_of(5))
+      end
+    end
+
+    describe "non-numeric receivers" do
+      it "leaves Nominal[String] untouched" do
+        expect(described_class.narrow_integer_comparison(string_nominal, :>, 0))
+          .to eq(string_nominal)
+      end
+    end
+  end
+
+  describe "comparison predicate narrowing through predicate_scopes" do
+    let(:integer_nominal_scope) { scope.with_local(:x, integer_nominal) }
+
+    it "narrows `if x > 0` to positive_int / non_positive_int on each edge" do
+      truthy, falsey = described_class.predicate_scopes(parse_predicate("x > 0"), integer_nominal_scope)
+      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.positive_int)
+      expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.non_positive_int)
+    end
+
+    it "narrows `if x >= 0` to non_negative_int / negative_int" do
+      truthy, falsey = described_class.predicate_scopes(parse_predicate("x >= 0"), integer_nominal_scope)
+      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.non_negative_int)
+      expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.negative_int)
+    end
+
+    it "narrows the reversed form `0 < x` (literal-on-left)" do
+      truthy, falsey = described_class.predicate_scopes(parse_predicate("0 < x"), integer_nominal_scope)
+      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.positive_int)
+      expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.non_positive_int)
+    end
+
+    it "intersects with an existing IntegerRange bound" do
+      bound = scope.with_local(:x, Rigor::Type::Combinator.integer_range(-10, 10))
+      truthy, _falsey = described_class.predicate_scopes(parse_predicate("x > 5"), bound)
+      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.integer_range(6, 10))
+    end
+
+    it "passes through unchanged when the local has no current type" do
+      empty = scope
+      truthy, falsey = described_class.predicate_scopes(parse_predicate("x > 0"), empty)
+      expect(truthy).to eq(empty)
+      expect(falsey).to eq(empty)
+    end
+
+    it "passes through unchanged when the bound is non-Integer" do
+      truthy, falsey = described_class.predicate_scopes(parse_predicate("x > 'a'"), integer_nominal_scope)
+      expect(truthy.local(:x)).to eq(integer_nominal)
+      expect(falsey.local(:x)).to eq(integer_nominal)
+    end
+  end
+
   describe ".case_when_scopes (Slice 7 phase 5)" do
     let(:union_int_str) do
       Rigor::Type::Combinator.union(

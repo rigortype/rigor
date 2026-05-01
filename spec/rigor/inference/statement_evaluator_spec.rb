@@ -541,6 +541,41 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(else_read).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
     end
 
+    # Slice 6 phase D — IntegerRange narrowing wired into IfNode.
+    it "narrows `if x > 0` to positive_int / non_positive_int" do
+      bound = scope.with_local(:x, Rigor::Type::Combinator.nominal_of("Integer"))
+      events, on_enter = watch_local_reads(:x)
+      ast = parse_with_locals(<<~RUBY)
+        if x > 0
+          x
+        else
+          x
+        end
+      RUBY
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+
+      then_read, else_read = events.last(2)
+      expect(then_read).to eq(Rigor::Type::Combinator.positive_int)
+      expect(else_read).to eq(Rigor::Type::Combinator.non_positive_int)
+    end
+
+    it "intersects with an existing IntegerRange bound" do
+      bound = scope.with_local(:x, Rigor::Type::Combinator.integer_range(-10, 10))
+      events, on_enter = watch_local_reads(:x)
+      ast = parse_with_locals(<<~RUBY)
+        if x >= 5
+          x
+        else
+          x
+        end
+      RUBY
+      described_class.new(scope: bound, on_enter: on_enter).evaluate(ast)
+
+      then_read, else_read = events.last(2)
+      expect(then_read).to eq(Rigor::Type::Combinator.integer_range(5, 10))
+      expect(else_read).to eq(Rigor::Type::Combinator.integer_range(-10, 4))
+    end
+
     it "narrows the value of a then-branch (Union -> non-nil fragment)" do
       bound = scope.with_local(:x, union_int_nil)
       type, _post = bound.evaluate(parse_with_locals(<<~RUBY))

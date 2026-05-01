@@ -55,6 +55,9 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 7 phase 2 | `d1b424e` | Cross-method ivar tracking via class accumulator; `def init; @x = 1; end; def get; @x; end` resolves `@x` to `Constant[1]` |
 | Slice 7 phase 3 | `970cf00` | Compound writes (`||=`, `&&=`, `+=`, ...) thread through scope for local/ivar/cvar/global with operator dispatch |
 | Slice 7 phase 4 | `bbdac83` | Case-equality (`===`) narrowing for Class/Module receivers (is_a? isomorphism), Range literals (Numeric/String), Regexp literals (String) |
+| Slice 7 phase 5 | `12898cd` | `Narrowing.case_when_scopes` + `eval_case` integration: each `when` body sees subject narrowed by the union of its conditions; the `else` sees the conjunction of falsey edges |
+| Slice 7 phase 6 | `bdbdeac` | Cross-method cvar tracking + program-wide global accumulator (parallels Slice 7 phase 2 ivar accumulator) |
+| Slice 7 phase 7 | `583a254` | `Scope#discovered_classes` populated by `ScopeIndexer`: references to user-defined classes resolve as `Singleton[T]` even without an RBS sig |
 
 ## What is in Place Today
 
@@ -187,33 +190,21 @@ normalisation and are the only sanctioned way to construct types.
 
 ## Verification Status
 
-- **RSpec**: 758 examples, 0 failures (Slice 6 phase C sub-phase
-  3c working tree; the +17 over `d1c6ba2`'s 730 are
-  `closure_escape_analyzer_spec.rb`, the +5 above that are the
-  3b "closure escape fact recording" group, and the +6 above
-  that are the 3c "captured-local invalidation" group in
-  `statement_evaluator_spec.rb`).
+- **RSpec**: 815 examples, 0 failures across the full Slice 7
+  series (phases 1 → 7) and the Slice A series (pass 1 → stdlib
+  → declarations).
 - **RuboCop**: `make lint` is clean. `.rubocop.yml` excludes the whole
   `references/` tree so upstream submodules are not linted as Rigor
   product code.
-- **`rigor type-scan lib`**: 3.8 % unrecognised after Slice A
-  declarations (`module Foo` / `class Bar` header overrides),
-  steady from 3.8 % at Slice A stdlib once the new code's own
-  CallNode footprint is accounted for, and down from 13.8 % at
-  the start of the Slice A series. ConstantPathNode 0.2 %
-  (1/624); ConstantReadNode 6.3 % (75/1191) — the eight
-  declaration-position ConstantReadNodes (`module Node`,
-  `class TypeOfRenderer`, `module ConstantFolding`, ...) now
-  resolve to their Singleton type via the indexer override. ConstantPathNode unrecognised dropped from 99.8 %
-  (611/612) to 42.8 % (263/614); ConstantReadNode dropped from
-  74.9 % (881/1177) to 26.5 % (313/1179). The remaining
-  unrecognised count is dominated by class-constant references
-  (`BUCKETS`, `USAGE`, `EXIT_USAGE`, `DEFAULT_PATH`, `RUBY_GLOB`)
-  that need a constant-value lookup path beyond
-  `singleton_for_name`, plus stdlib classes that the default
-  RBS environment does not cover (`OptionParser`,
-  `OptionParser::ParseError`, ...) and module/class declaration
-  positions (`module Foo`, `class Bar`).
+- **`rigor type-scan lib`**: 4.2 % unrecognised after Slice 7
+  phase 7, down from 13.8 % at the start of the Slice A series.
+  ConstantPathNode 0.1 % (1/678); ConstantReadNode 7.1 %
+  (90/1264); CallNode 22.5 % (875/3885). The remaining tail is
+  dominated by Module-level intrinsics (`require_relative`,
+  `raise`, `private`, `private_constant`, `module_function`,
+  `freeze`) and parameter receivers whose static type is
+  `Dynamic[Top]` until per-method RBS for the corresponding
+  internal helpers is authored.
 - **`rigor type-of` smoke probe (DefNode binder)**:
   `class Integer; def divmod(other); other; end; end` — `other` reads as
   `Float | Integer | Numeric | Rational` inside the body.
@@ -341,117 +332,95 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
 - Decision records: [`docs/adr/`](adr/) (ADR-1 = type model, ADR-3 = type
   representation, ADR-4 = inference engine).
 
-## Candidate Next Steps
+## First Preview Status
 
-Slice 5 phase 2 sub-phase 3 is now in the working tree, and Slice 6 phase 2
-sub-phase 2 is committed as `6bc38de`. The remaining self-contained follow-up
-order is **C → A**: closure-captured-local invalidation first, then Rigor-side
-RBS authoring for the largest `type-scan lib` metric win.
+The branch has reached a **first comprehensive preview** of the
+inference engine. Every major engine surface mentioned in the
+ADR-4 / `inference-engine.md` plan is now landed at least at a
+working level:
 
-### A. Author Rigor-side RBS for Rigor itself
+- Local, instance, class, and global variable bindings tracked
+  through `Scope`, with cross-method ivar/cvar accumulators and
+  a program-wide globals accumulator.
+- Compound writes (`||=`, `&&=`, `+=`, ...) thread through
+  scope for every variable kind.
+- `self` typing at class- and method-body boundaries; implicit-self
+  call dispatch routes through the enclosing class's RBS.
+- Lexical constant lookup with project sig, RBS-core, common
+  stdlib (`Environment::DEFAULT_LIBRARIES`), and in-source
+  class discovery (`Scope#discovered_classes`).
+- Predicate narrowing for truthiness, `nil?`, `is_a?`/`kind_of?`/
+  `instance_of?`, finite-literal equality, case-equality (`===`)
+  for Class/Module/Range/Regexp, and `case`/`when` integration.
+- Block parameter binding (incl. destructuring + numbered
+  parameters), block-return-type uplift through generic methods,
+  closure escape classification, and captured-local invalidation
+  on `:escaping` / `:unknown` block calls.
+- Tuple and HashShape carriers with shape-aware element access,
+  range/start-length slices, and closed/open/required/optional
+  policies threaded through `Acceptance`.
 
-Pass 1 (working tree) authors class-level RBS for `Rigor::Type::*`,
-`Rigor::Trinary`, `Rigor::Scope`, `Rigor::Environment` (incl.
-`ClassRegistry`/`RbsLoader`/`RbsHierarchy`),
-`Rigor::Analysis::FactStore`, `Rigor::Inference::*`,
-`Rigor::Source::*`, and `Rigor::AST::*`. Class references such as
-`Rigor::Type::Combinator` now resolve to a `Singleton[T]` and
-`Type::Combinator.constant_of(1)` types as `Rigor::Type::Constant`.
+`rigor type-scan lib` reports **4.2 % unrecognised** for Rigor's
+own `lib/` tree (down from 13.8 % at the start of the Slice A
+series). The full RSpec suite (815 examples) and `rubocop` are
+clean.
 
-- **type-scan impact (observed)**: small — `lib/` moved from
-  13.8 % to 13.7 % unrecognised. The remainder is dominated by
-  module-declaration intrinsics (`require_relative`, `raise`,
-  `private`, `attr_reader`, `private_constant`,
-  `module_function`, `freeze`) and method-parameter receivers
-  whose declared type is `Dynamic[Top]` because the surrounding
-  `def` has no per-method RBS signature.
-- **engine impact**: structural — the canonical Rigor surface is
-  now visible to the analyzer, unblocking deeper Rigor-on-Rigor
-  analysis.
-- **next pass**: write per-method RBS overloads for the heavy
-  internal call sites (Scope/Type/Combinator/Inference) so the
-  parameter binder can lift `scope`/`other`/`node`/`arg` reads
-  off `Dynamic[Top]`, OR strengthen `def`-parameter inference
-  beyond the current RBS-class-only path.
+## Known Limitations of the First Preview
 
-### B. Completed in working tree — Slice 5 phase 2 sub-phase 3
+- The `check` CLI command is a minimal stub — it does not yet
+  produce diagnostics for real-world Ruby code; only the
+  `type-of` and `type-scan` probes exercise the engine
+  end-to-end.
+- Constants whose value is bound to a non-class type
+  (`BUCKETS = [...]`) resolve through RBS constant decls but do
+  NOT pick up types from in-source assignments (the engine
+  currently consults RBS only).
+- Module-level intrinsics (`attr_reader`, `attr_accessor`,
+  `private`, `private_constant`, `module_function`,
+  `require_relative`) are unrecognised CallNodes; type-scan
+  flags them but the engine continues without raising.
+- Per-method RBS for Rigor itself covers the heavy internal
+  paths (StatementEvaluator/ExpressionTyper/Narrowing/
+  BlockParameterBinder/FactStore) but does not enumerate every
+  helper. New private helpers added in subsequent slices may
+  briefly fall through to `Dynamic[Top]` until their RBS
+  signature is added.
+- Cross-method instance state precision is limited to
+  `Constant[v]` rvalues at pre-pass time; rvalues that depend
+  on locals inside the writing method record `Dynamic[Top]`
+  (the pre-pass has no local context).
+- Plugins, `RBS::Extended` flow effects, and explicit purity /
+  mutation summaries remain on the roadmap. The first preview
+  uses the impure-by-default policy from
+  `docs/type-specification/control-flow-analysis.md`.
 
-Sub-phase 1 (already in) shipped `ShapeDispatch` for element access;
-sub-phase 2 added destructuring assignment, multi-arg `dig` chains,
-and `Hash#values_at`. Sub-phase 3 now extends `ShapeDispatch` to
-recognise `tuple[start, length]` and `tuple[range]` (returning a
-sliced `Tuple`), introduces the required/optional/closed-extra-key and
-read-only HashShape policies per [`rigor-extensions.md`](type-specification/rigor-extensions.md),
-and wires the policies through `Acceptance` so a closed shape rejects
-extra/open sources.
+## Candidate Next Steps Past First Preview
 
-- **type-scan impact**: small on `lib/`, medium on user code that
-  slices arrays by range or uses the closed-extra-key policy.
-- **engine impact**: landed in the working tree — adds slice handlers
-  to `ShapeDispatch`, introduces policy fields on `HashShape`, and
-  threads them through `Acceptance`.
-- **remaining risk**: low; full-suite verification and lint are clean
-  for the working tree.
+Listed roughly in increasing engine impact:
 
-### C. Slice 6 phase C sub-phase 3 — Closure-captured-local invalidation
+1. **`check` CLI command**: produce real diagnostics for a
+   curated rule set (unbound locals, unknown method calls on
+   typed receivers, type-incompatible writes).
+2. **Constant-value tracking from in-source writes**: extend
+   `ScopeIndexer` to populate a per-program constant table from
+   `Prism::ConstantWriteNode`, so `BUCKETS = [:a, :b]; BUCKETS`
+   resolves to the rvalue type even without RBS.
+3. **Module-instance intrinsics catalogue**: short-circuit
+   `attr_reader` / `attr_accessor` / `private_constant` so
+   they no longer count as unrecognised in type-scan.
+4. **`define_method` and dynamic dispatch summaries**: the
+   current `ClosureEscapeAnalyzer` flags `define_method` as
+   escaping; a follow-up could track the method it defines so
+   subsequent calls dispatch through the closure body.
+5. **Plugin / `RBS::Extended` effect plumbing** per
+   `docs/type-specification/rbs-extended.md` — the formal way
+   to declare purity, mutation, escape, and call-timing effects
+   on top of ordinary RBS.
+6. **Diagnostic publication**: surface `FallbackTracer` events
+   plus narrowing failures through the `check` command's
+   `Rigor::Analysis::Diagnostic` pipeline so users see the
+   engine's confidence per node.
 
-Sub-phase 1 shipped block parameter binding driven by the receiving
-method's RBS signature; sub-phase 2 added destructuring block
-targets (`|(a, b), c|`), numbered-parameter binding (`_1`,
-`_2`, ...), and the `block_type:` uplift so `Array#map { ... }`
-resolves the method-level type variable from the block's return
-type. Sub-phase 3 adds closure-captured-local invalidation: when a
-block escapes its enclosing scope (passed to a method that retains
-the closure, returned as a method value, ...) the analyzer MUST
-drop the narrowed type of every captured local at the call boundary
-so a subsequent read inside the closure observes the conservative
-type rather than a stale narrowed binding.
-
-Split into 3a → 3b → 3c:
-
-- **3a (working tree)**: `Rigor::Inference::ClosureEscapeAnalyzer`
-  pure classification with a hardcoded core-and-stdlib catalogue.
-  Returns `:non_escaping`/`:escaping`/`:unknown`. Not wired into
-  any consumer yet — landing the query first lets 3b/3c be
-  reviewed as small, focused diffs.
-- **3b**: Wire the analyzer into `StatementEvaluator#eval_call`
-  and add a `FactStore` interaction that records the
-  "escaped" capability fact in the `dynamic_origin` bucket.
-- **3c**: At the call boundary for `:escaping` / `:unknown`
-  outcomes, drop the narrowed type of every captured local that
-  the block can rebind (collected via a block-body
-  `LocalVariableWriteNode` walk) so subsequent reads after the
-  call observe the conservative join.
-
-- **type-scan impact**: small on `lib/`; medium on user code that
-  relies on heavy block usage with locals captured from the
-  enclosing method.
-- **engine impact**: medium — needs a closure-escape detector and
-  a fact-store interaction to record the invalidation.
-- **risk**: medium; the invalidation must compose cleanly with the
-  Slice 6 phase 2 sub-phase 2 equality narrowing.
-
-### D. Completed in commit `6bc38de` — Slice 6 phase 2 sub-phase 2
-
-Phase 2 sub-phase 2 is committed. It adds
-trusted equality narrowing for finite literal sets per
-[`docs/type-specification/control-flow-analysis.md`](type-specification/control-flow-analysis.md),
-the formal `Rigor::Analysis::FactStore`, narrowing-aware `&&`/`||`
-value types, and registry/RBS-loader-backed hierarchy lookup for
-class-membership predicates.
-
-- **type-scan impact**: small to medium (most narrowing happens on
-  already-typed receivers; the unrecognised count is dominated by
-  other things).
-- **engine impact**: landed — predicate analysis now covers the
-  trusted equality surface and `Scope` snapshots carry fact stores.
-- **remaining risk**: closure-capture invalidation still needs its
-  follow-up slice; equality itself remains intentionally narrow.
-
-### Recommended ordering
-
-After the Slice 5 phase 2 sub-phase 3 working-tree changes, the
-remaining user-priority ordering is **C → A**. Closure-captured-local
-invalidation is now unblocked by the FactStore. A — authoring
-Rigor-side RBS for Rigor itself — remains the largest single lever for
-the `type-scan lib` metric.
+The recommended first step is **(1) `check` command** because
+it converts the engine's existing typing precision into
+user-visible value without requiring further engine surface.

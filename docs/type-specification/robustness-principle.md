@@ -53,6 +53,14 @@ A clause-1 candidate MUST NOT be adopted if it would falsely exclude values that
 - **Tuple-shaped returns.** Methods that return a fixed-arity heterogeneous array (e.g. `Integer#divmod`) SHOULD surface as `Tuple[…]` so multi-target destructuring threads the per-slot type into locals.
 - **Constant folding under the catalog.** Any method classified `:leaf` / `:trivial` / `:leaf_when_numeric` whose receiver and arguments are concrete constants SHOULD fold to a `Constant`. The `MethodCatalog` layer is the toolchain that observes clause 1 across the broadest method surface.
 
+### Platform-host portability
+
+The strict-as-proven envelope EXCLUDES Constants whose value depends on the analyzer host's platform when the user's deployment target may differ. `File.basename`, `File.dirname`, `File.extname`, `File.join`, `File.split`, and `File.absolute_path?` all read `File::SEPARATOR` / `File::ALT_SEPARATOR` and produce different answers on Windows vs POSIX hosts. The default Rigor mode declines to fold them so the inferred type stays portable.
+
+Configuration opt-in (`fold_platform_specific_paths: true` in `.rigor.yml`) trades platform-portability for the precision payoff. Single-platform projects (most internal tooling, server-only deployments) MAY enable it; the default is off so an analyzer running on a developer's macOS machine never silently bakes POSIX-specific path semantics into a project that also runs on Windows CI.
+
+The reserved `non-empty-string` refinement (see [imported-built-in-types.md](imported-built-in-types.md)) is the planned platform-agnostic tightening for the path-method returns. It surfaces "result is a non-empty String" without committing to a specific separator. Until the refinement infrastructure ships, the path methods land at `Nominal[String]` in default mode.
+
 ### When clause 1 yields
 
 - **The contract is for all callers**, not the current call site. A signature describes the method's promise to every caller; clause 1 does NOT permit tightening a method's signature for a specific call. That work belongs to `ConstantFolding` and the per-call-site dispatcher tier.

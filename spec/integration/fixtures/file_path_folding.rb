@@ -4,31 +4,35 @@ include Rigor::Testing
 # `File` carries a small set of path-manipulation class methods
 # that are pure functions over their string arguments — they
 # never touch the filesystem and never depend on the current
-# working directory. Rigor folds them when every argument is a
-# `Constant<String>` so the analyzer carries the precise path
-# string downstream.
+# working directory.
+#
+# All of them, however, observe `File::SEPARATOR` /
+# `File::ALT_SEPARATOR` and produce different answers on Windows
+# vs POSIX hosts (`File.basename("a\\b.rb")` is `"b.rb"` on
+# Windows and `"a\\b.rb"` on POSIX, etc). Folding to a
+# `Constant<String>` would silently bake the analyzer-host's
+# platform into the inferred type and mis-report it on a host
+# with a different separator policy.
+#
+# The default policy (`fold_platform_specific_paths: false`) is
+# therefore platform-agnostic: the analyzer declines the fold so
+# the RBS tier answers with the wider `Nominal[String]` envelope.
+# Single-platform projects can opt in via:
+#
+#   # .rigor.yml
+#   fold_platform_specific_paths: true
+#
+# (See `spec/integration/fixtures/file_path_folding_optin/`.)
 
-assert_type('"bar.rb"', File.basename("/foo/bar.rb"))
-assert_type('"bar"',    File.basename("/foo/bar.rb", ".rb"))
-assert_type('"/foo"',   File.dirname("/foo/bar.rb"))
-assert_type('".rb"',    File.extname("hello.rb"))
-assert_type('""',       File.extname("plain"))
-assert_type('"a/b/c.rb"', File.join("a", "b", "c.rb"))
-assert_type('["/foo", "bar.rb"]', File.split("/foo/bar.rb"))
+# In the default mode each fold lands at the RBS-declared shape:
+assert_type("String", File.basename("/foo/bar.rb"))
+assert_type("String", File.dirname("/foo/bar.rb"))
+assert_type("String", File.extname("hello.rb"))
+assert_type("String", File.join("a", "b", "c.rb"))
+assert_type("[String, String]", File.split("/foo/bar.rb"))
+assert_type("false | true", File.absolute_path?("/foo"))
 
-# Boolean predicate folds to Constant[true|false].
-assert_type("true",  File.absolute_path?("/foo/bar"))
-assert_type("false", File.absolute_path?("foo/bar"))
-
-# Composes with the String catalog: `File.extname(p).end_with?(".rb")`
-# threads the precise extension into the predicate so the truthy
-# edge collapses to `Constant[true]`.
-assert_type("true", File.extname("hello.rb").end_with?(".rb"))
-
-# Filesystem-touching methods (`File.read`, `File.exist?`) DO NOT
-# fold — they have side effects and the analyzer leaves the RBS
-# tier to type them. The principle here is clause-1 of the
-# robustness rule: strict where we can prove it, RBS-widened
-# where we cannot.
+# Filesystem-touching methods stay outside the FileFolding tier
+# regardless of mode — they have side effects.
 contents = (File.read("test.txt") rescue "fallback")
 assert_type('"fallback" | String', contents)

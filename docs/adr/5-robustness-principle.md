@@ -93,6 +93,30 @@ The principle does not change the RBS round-trip rules from ADR-1:
 
 The principle therefore only sets the *default* the analyzer reaches for when it has authorship of the signature: in built-in catalog entries, in inferred user-method types when no RBS signature is present, and in `RBS::Extended` payloads. RBS authorship that already exists is respected.
 
+### Platform-host correctness wins over precision
+
+Clause 1 directs the analyzer toward the strictest correctness-preserving carrier. "Correctness-preserving" includes preserving the answer the user's *deployment target* would observe — not just the analyzer host's answer.
+
+Path-manipulation methods on `File` (`basename`, `dirname`, `extname`, `join`, `split`, `absolute_path?`) read `File::SEPARATOR` / `File::ALT_SEPARATOR` and produce different answers on Windows vs POSIX hosts:
+
+```
+File.basename("a\\b.rb")       # "a\\b.rb" on POSIX, "b.rb" on Windows
+File.absolute_path?("/foo")    # true on POSIX, false on Windows (no drive letter)
+```
+
+The Ruby process running the analyzer hosts ONE platform. Folding to a `Constant<String>` would silently bake the analyzer-host's answer into the inferred type and mis-report it on a host with a different separator policy. Clause 1's "as strict as proven" therefore EXCLUDES platform-specific Constants by default — the platform-agnostic envelope (`Nominal[String]` / `Tuple[Nominal[String], Nominal[String]]` / `bool`) is the strictest *correctness-preserving* result.
+
+Single-platform projects (most internal tooling, Rails apps deployed to Linux containers, scripts that only run on developer machines) opt in via configuration:
+
+```
+# .rigor.yml
+fold_platform_specific_paths: true
+```
+
+The opt-in trades platform-portability for the precision payoff. The default refuses the trade so the analyzer is safe to use on any host without producing answers the deployment target will not see.
+
+The future `non-empty-string` refinement carrier (see [imported-built-in-types.md](../type-specification/imported-built-in-types.md)) will tighten the path-method returns *without* leaking platform specifics: `File.basename(p)` of a non-empty path is always non-empty regardless of separator. Today the carrier is documented but not yet implemented; the platform-agnostic default lands at `Nominal[String]` until that infrastructure exists.
+
 ### Correctness still wins
 
 When clause 1 and correctness conflict, correctness wins. Examples:

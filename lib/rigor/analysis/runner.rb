@@ -6,6 +6,7 @@ require_relative "../environment"
 require_relative "../scope"
 require_relative "../inference/coverage_scanner"
 require_relative "../inference/scope_indexer"
+require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
 require_relative "diagnostic"
 require_relative "result"
@@ -29,6 +30,9 @@ module Rigor
       # is built once at run start through `Environment.for_project`
       # so all files share the same RBS load.
       def run(paths = @configuration.paths)
+        Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
+          @configuration.fold_platform_specific_paths
+
         environment = Environment.for_project(
           libraries: @configuration.libraries,
           signature_paths: @configuration.signature_paths

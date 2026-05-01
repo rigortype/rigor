@@ -46,5 +46,21 @@ RSpec.describe Rigor::Configuration do
         expect(configuration.signature_paths).to eq([])
       end
     end
+
+    it "defaults fold_platform_specific_paths to false (platform-agnostic)" do
+      Dir.mktmpdir do |dir|
+        configuration = described_class.load(File.join(dir, "missing.yml"))
+        expect(configuration.fold_platform_specific_paths).to be(false)
+      end
+    end
+
+    it "reads fold_platform_specific_paths: true to opt into platform-specific path folds" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "fold_platform_specific_paths: true\n")
+        configuration = described_class.load(path)
+        expect(configuration.fold_platform_specific_paths).to be(true)
+      end
+    end
   end
 end

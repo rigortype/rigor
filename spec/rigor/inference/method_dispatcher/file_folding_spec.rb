@@ -14,7 +14,31 @@ RSpec.describe Rigor::Inference::MethodDispatcher::FileFolding do
     )
   end
 
-  describe "path manipulation folds" do
+  # Toggle the module-global flag for the duration of a single
+  # test; restore it afterwards so other specs see the default.
+  around do |example|
+    original = described_class.fold_platform_specific_paths
+    example.run
+  ensure
+    described_class.fold_platform_specific_paths = original
+  end
+
+  describe "default platform-agnostic mode" do
+    before { described_class.fold_platform_specific_paths = false }
+
+    it "declines every path-manipulation method by default" do
+      expect(fold(:basename, "/foo/bar.rb")).to be_nil
+      expect(fold(:dirname, "/foo/bar.rb")).to be_nil
+      expect(fold(:extname, "hello.rb")).to be_nil
+      expect(fold(:join, "a", "b", "c.rb")).to be_nil
+      expect(fold(:split, "/foo/bar.rb")).to be_nil
+      expect(fold(:absolute_path?, "/foo")).to be_nil
+    end
+  end
+
+  describe "opt-in platform-specific mode" do
+    before { described_class.fold_platform_specific_paths = true }
+
     it "folds File.basename(path)" do
       expect(fold(:basename, "/foo/bar.rb")).to eq(constant_of("bar.rb"))
     end
@@ -44,13 +68,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::FileFolding do
 
     it "folds File.absolute_path?(path)" do
       expect(fold(:absolute_path?, "/foo/bar")).to eq(constant_of(true))
-      expect(fold(:absolute_path?, "foo/bar")).to eq(constant_of(false))
     end
   end
 
-  describe "non-folding cases" do
+  describe "non-folding cases (independent of mode)" do
+    before { described_class.fold_platform_specific_paths = true }
+
     it "declines for unknown class methods" do
-      # `File.read(path)` touches the filesystem — never fold.
       expect(fold(:read, "any.txt")).to be_nil
     end
 

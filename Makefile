@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json extract-builtin-catalogs
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -76,3 +76,6 @@ check-json:
 	bundle exec exe/rigor check --format=json lib
 
 verify: test lint check
+
+extract-builtin-catalogs:
+	bundle exec ruby tool/extract_numeric_catalog.rb

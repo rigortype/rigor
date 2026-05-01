@@ -24,18 +24,28 @@
 #   for the same classes. Parsed with the RBS gem and joined onto the
 #   method records by (class, selector).
 #
-# Purity classification (initial pass; covers 1/3 of the eventual
-# decision tree — C-body static analysis is the next slice):
+# Purity classification:
 #
-# - `leaf`: prelude method carries `Primitive.attr! :leaf`. The CRuby
-#   VM enforces that such iseqs do not call back into Ruby; treat as
-#   safe to invoke during constant folding.
+# - `leaf`: prelude method carries `Primitive.attr! :leaf`, OR the C body
+#   matches the leaf-pure pattern (no rb_funcall*, rb_yield*, mutation,
+#   or known dispatch helpers). VM-enforced when prelude-marked; static
+#   for C-body matches. Safe to invoke during constant folding.
 # - `trivial`: prelude method body is a single literal return (`self`,
 #   `true`, `false`, `nil`, an Integer literal). Always safe.
+# - `leaf_when_numeric`: C body returns directly for FIXNUM/BIGNUM/FLOAT
+#   operands and falls through to `rb_num_coerce_bin/_cmp/_relop` only
+#   when an operand is non-numeric. Safe to fold when every argument
+#   is itself a concrete numeric literal.
 # - `inline_block`: prelude method carries `Primitive.attr! :inline_block`
 #   or `:use_block`. Block-dependent — fold only when the block is
 #   itself proven pure.
-# - `unknown`: everything else. Awaiting C-body analysis.
+# - `dispatch`: C body calls user-redefinable methods (rb_funcall*,
+#   rb_equal, rb_Float, num_funcall*, etc). Not safe to fold.
+# - `block_dependent`: C body yields or checks `rb_block_given_p`.
+# - `mutates_self`: C body explicitly checks frozen-ness of self,
+#   typically as a prelude to mutation.
+# - `unknown`: cfunc body not located in indexed C files (e.g. defined
+#   in a sibling reference file we have not added yet).
 
 require "prism"
 require "rbs"
@@ -52,6 +62,11 @@ RBS_PATHS = {
 }.freeze
 
 OUTPUT_PATH = File.join(ROOT, "data/builtins/ruby_core/numeric.yml")
+
+C_INDEX_PATHS = [
+  File.join(ROOT, "references/ruby/numeric.c"),
+  File.join(ROOT, "references/ruby/bignum.c")
+].freeze
 
 # ---------------------------------------------------------------------
 # C side: parse the Init_Numeric body.
@@ -229,6 +244,133 @@ class CInitParser
       "defined_at" => "references/ruby/numeric.c:#{lineno}"
     }
     true
+  end
+end
+
+# ---------------------------------------------------------------------
+# C body indexer + classifier. Locates each cfunc's body across the
+# indexed C files and tags it with effect facets.
+# ---------------------------------------------------------------------
+
+class CBodyIndex
+  FUNC_HEADER_RE = /\A([A-Za-z_]\w*)\s*\(/.freeze
+  TYPE_LINE_RE = /\b(?:VALUE|void|int|long|double|bool|char|short|unsigned|size_t|ID|rb_\w+_t)\b\s*\*?\s*\z/.freeze
+
+  Body = Struct.new(:cfunc, :path, :start_line, :text, keyword_init: true)
+
+  MACRO_ALIAS_RE = /\A\s*#\s*define\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*$/.freeze
+
+  def initialize(paths)
+    @paths = paths
+    @bodies = nil
+    @aliases = {}
+  end
+
+  def lookup(cfunc)
+    @bodies ||= build
+    target = cfunc
+    seen = Set.new
+    while @aliases.key?(target) && !seen.include?(target)
+      seen << target
+      target = @aliases[target]
+    end
+    @bodies[target]
+  end
+
+  private
+
+  def build
+    bodies = {}
+    @paths.each { |path| index_file(path, bodies) }
+    bodies
+  end
+
+  def collect_macro_alias(line)
+    return unless (m = line.match(MACRO_ALIAS_RE))
+
+    @aliases[m[1]] = m[2]
+  end
+
+  # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def index_file(path, bodies)
+    lines = File.readlines(path)
+    rel = path.sub("#{ROOT}/", "")
+
+    i = 0
+    while i < lines.length
+      header = lines[i]
+      collect_macro_alias(header)
+      if (m = header.match(FUNC_HEADER_RE)) && i.positive?
+        prev = lines[i - 1].rstrip
+        if prev =~ TYPE_LINE_RE && !prev.end_with?(";") && !prev.lstrip.start_with?("#")
+          name = m[1]
+          j = i + 1
+          j += 1 while j < lines.length && !lines[j].start_with?("{")
+          if j < lines.length
+            depth = 0
+            k = j
+            while k < lines.length
+              depth += lines[k].count("{")
+              depth -= lines[k].count("}")
+              break if depth.zero?
+
+              k += 1
+            end
+            if k < lines.length
+              body_text = lines[j..k].join
+              bodies[name] ||= Body.new(cfunc: name, path: rel, start_line: i + 1, text: body_text)
+              i = k + 1
+              next
+            end
+          end
+        end
+      end
+      i += 1
+    end
+  end
+  # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+end
+
+module CBodyClassifier
+  module_function
+
+  DISPATCH_RE = /
+    \b(?:
+      rb_funcall\w* |
+      rb_check_funcall\w* |
+      num_funcall\d? |
+      rb_exec_recursive\w* |
+      do_coerce |
+      rb_equal | rb_eql |
+      rb_Float | rb_Integer | rb_String | rb_Array | rb_Hash |
+      rb_to_int | rb_to_float | rb_to_str |
+      rb_check_string_type |
+      rb_convert_type\w* |
+      rb_inspect |
+      rb_method_basic_definition_p
+    )\b
+  /x.freeze
+  COERCE_FALLBACK_RE = /\brb_num_coerce_(?:bin|cmp|relop)\b/.freeze
+  BLOCK_RE = /\b(?:rb_yield\w*|rb_block_given_p|rb_iterator_p|rb_block_call\w*)\b/.freeze
+  MUTATE_RE = /\brb_check_frozen\w*\b/.freeze
+  RAISE_RE = /\b(?:rb_raise\w*|rb_num_zerodiv|rb_cmperr\w*|rb_name_error\w*|rb_bug)\b/.freeze
+
+  def classify(body_text)
+    text = strip_comments(body_text)
+
+    {
+      block: text =~ BLOCK_RE ? true : false,
+      mutate: text =~ MUTATE_RE ? true : false,
+      coerce_fallback: text =~ COERCE_FALLBACK_RE ? true : false,
+      dispatch: text =~ DISPATCH_RE ? true : false,
+      raises: text =~ RAISE_RE ? true : false
+    }
+  end
+
+  def strip_comments(text)
+    # Drop C block comments and line comments so doc-comment examples
+    # do not confuse the dispatch regex.
+    text.gsub(%r{/\*.*?\*/}m, "").gsub(%r{//[^\n]*}, "")
   end
 end
 
@@ -457,11 +599,12 @@ end
 # ---------------------------------------------------------------------
 
 class CatalogBuilder
-  def initialize(c_result:, prelude_methods:, prelude_aliases:, rbs:)
+  def initialize(c_result:, prelude_methods:, prelude_aliases:, rbs:, c_bodies:)
     @c_result = c_result
     @prelude_methods = prelude_methods
     @prelude_aliases = prelude_aliases
     @rbs = rbs
+    @c_bodies = c_bodies
   end
 
   def build
@@ -493,10 +636,14 @@ class CatalogBuilder
 
   def purity_levels
     {
-      "leaf" => "Prelude method carries Primitive.attr! :leaf — VM-enforced no-callout iseq.",
+      "leaf" => "Prelude :leaf marker (VM-enforced) or C body uses no dispatch/yield/mutation.",
       "trivial" => "Prelude method body is a literal return (self/true/false/nil/Integer).",
+      "leaf_when_numeric" => "C body falls through to rb_num_coerce_* only when an operand is non-numeric; safe to fold when every argument is a concrete numeric.",
       "inline_block" => "Prelude method carries :inline_block or :use_block; block-dependent.",
-      "unknown" => "Awaiting C-body static classification."
+      "block_dependent" => "C body yields or checks rb_block_given_p.",
+      "mutates_self" => "C body checks rb_check_frozen — typically a prelude to mutation.",
+      "dispatch" => "C body calls user-redefinable methods (rb_funcall*, rb_equal, rb_Float, num_funcall*, etc).",
+      "unknown" => "C body not located in indexed C files."
     }
   end
 
@@ -526,9 +673,9 @@ class CatalogBuilder
         "source" => "c",
         "cfunc" => entry["cfunc"],
         "arity" => entry["arity"],
-        "defined_at" => entry["defined_at"],
-        "purity" => "unknown"
+        "defined_at" => entry["defined_at"]
       }
+      apply_c_classification(record, entry["cfunc"])
       apply_rbs(record, entry["class"], entry["selector"], entry["kind"])
       bucket[entry["selector"]] = record
     end
@@ -536,6 +683,29 @@ class CatalogBuilder
     @c_result.undefs.each do |entry|
       classes.dig(entry["class"], "undefined")&.push(entry["selector"])
     end
+  end
+
+  def apply_c_classification(record, cfunc)
+    body = @c_bodies.lookup(cfunc)
+    unless body
+      record["purity"] = "unknown"
+      record["c_body_at"] = "not_found"
+      return
+    end
+
+    record["c_body_at"] = "#{body.path}:#{body.start_line}"
+    effects = CBodyClassifier.classify(body.text)
+    record["c_effects"] = effects.select { |_, v| v }.keys.map(&:to_s)
+    record["purity"] = c_purity_from_effects(effects)
+  end
+
+  def c_purity_from_effects(effects)
+    return "block_dependent" if effects[:block]
+    return "mutates_self" if effects[:mutate]
+    return "dispatch" if effects[:dispatch]
+    return "leaf_when_numeric" if effects[:coerce_fallback]
+
+    "leaf"
   end
 
   # rubocop:disable Metrics/AbcSize
@@ -556,6 +726,18 @@ class CatalogBuilder
       record["arity"] = existing ? existing["arity"] : m.arity
       record["cfunc"] = existing ? existing["cfunc"] : m.cexpr_cfunc
       record["defined_at"] = (existing && existing["defined_at"]) || m.defined_at
+      record["c_body_at"] = existing["c_body_at"] if existing && existing["c_body_at"]
+      record["c_effects"] = existing["c_effects"] if existing && existing["c_effects"]
+
+      # If the prelude defines the method via Primitive.cexpr! pointing to a known
+      # C function, classify that target so leaf-pure / dispatch is recorded too.
+      if !existing && m.cexpr_cfunc
+        c_record = {}
+        apply_c_classification(c_record, m.cexpr_cfunc)
+        record["c_body_at"] = c_record["c_body_at"] if c_record["c_body_at"]
+        record["c_effects"] = c_record["c_effects"] if c_record["c_effects"]
+      end
+
       apply_rbs(record, m.class_name, m.selector, m.kind)
       bucket[m.selector] = record
     end
@@ -628,12 +810,14 @@ end
 c_result = CInitParser.new(NUMERIC_C_PATH).parse
 prelude_methods, prelude_aliases = PreludeParser.new(NUMERIC_RB_PATH).parse
 rbs = RbsCatalog.new(RBS_PATHS)
+c_bodies = CBodyIndex.new(C_INDEX_PATHS)
 
 catalog = CatalogBuilder.new(
   c_result: c_result,
   prelude_methods: prelude_methods,
   prelude_aliases: prelude_aliases,
-  rbs: rbs
+  rbs: rbs,
+  c_bodies: c_bodies
 ).build
 
 FileUtils.mkdir_p(File.dirname(OUTPUT_PATH)) if defined?(FileUtils)
@@ -641,14 +825,12 @@ require "fileutils"
 FileUtils.mkdir_p(File.dirname(OUTPUT_PATH))
 File.write(OUTPUT_PATH, "# DO NOT EDIT — generated by tool/extract_numeric_catalog.rb\n#{catalog.to_yaml}")
 
-stats = {
-  classes: catalog["classes"].size,
-  instance_methods: catalog["classes"].values.sum { |c| c["instance_methods"].size },
-  singleton_methods: catalog["classes"].values.sum { |c| c["singleton_methods"].size },
-  aliases: catalog["classes"].values.sum { |c| c["aliases"].size },
-  constants: catalog["classes"].values.sum { |c| c["constants"].size },
-  leaf: 0, trivial: 0, inline_block: 0, unknown: 0
-}
+stats = Hash.new(0)
+stats[:classes] = catalog["classes"].size
+stats[:instance_methods] = catalog["classes"].values.sum { |c| c["instance_methods"].size }
+stats[:singleton_methods] = catalog["classes"].values.sum { |c| c["singleton_methods"].size }
+stats[:aliases] = catalog["classes"].values.sum { |c| c["aliases"].size }
+stats[:constants] = catalog["classes"].values.sum { |c| c["constants"].size }
 catalog["classes"].each_value do |c|
   c["instance_methods"].each_value { |m| stats[m["purity"].to_sym] += 1 }
   c["singleton_methods"].each_value { |m| stats[m["purity"].to_sym] += 1 }

@@ -19,7 +19,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "returns nil when the method is not in the binary catalogue" do
-      expect(fold(1, :divmod, [2])).to be_nil
+      # `:foo_no_such_op` is purely synthetic — the existing surface
+      # gates folds via the `NUMERIC_BINARY` set, and `divmod` now
+      # has its own Tuple-shaped fold path (covered separately below).
+      expect(fold(1, :foo_no_such_op, [2])).to be_nil
     end
   end
 
@@ -248,6 +251,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
     def integer_range(low, high) = Rigor::Type::Combinator.integer_range(low, high)
 
+    def constant_union(*values)
+      Rigor::Type::Combinator.union(*values.map { |v| constant_of(v) })
+    end
+
     def fold_types(receiver, method_name, args = [])
       described_class.try_fold(
         receiver: receiver, method_name: method_name, args: args
@@ -455,6 +462,98 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
 
       it "widens to non_negative_int for unbounded ranges" do
         expect(fold_types(positive_int, :bit_length)).to eq(non_negative_int)
+      end
+    end
+
+    describe "divmod (Tuple-shaped result)" do
+      it "folds 5.divmod(3) to Tuple[Constant[1], Constant[2]]" do
+        type = fold_types(constant_of(5), :divmod, [constant_of(3)])
+        expect(type).to be_a(Rigor::Type::Tuple)
+        expect(type.elements.size).to eq(2)
+        expect(type.elements[0]).to eq(constant_of(1))
+        expect(type.elements[1]).to eq(constant_of(2))
+      end
+
+      it "uses Ruby's floor-division semantics for negatives" do
+        # (-7).divmod(3) is [-3, 2] in Ruby (floor toward −∞), not [-2, -1].
+        type = fold_types(constant_of(-7), :divmod, [constant_of(3)])
+        expect(type.elements[0]).to eq(constant_of(-3))
+        expect(type.elements[1]).to eq(constant_of(2))
+      end
+
+      it "handles negative divisor" do
+        # 7.divmod(-3) → [-3, -2]
+        type = fold_types(constant_of(7), :divmod, [constant_of(-3)])
+        expect(type.elements[0]).to eq(constant_of(-3))
+        expect(type.elements[1]).to eq(constant_of(-2))
+      end
+
+      it "folds Float divmod to Tuple[Constant[Integer], Constant[Float]]" do
+        # 5.0.divmod(2.5) → [2, 0.0]
+        type = fold_types(constant_of(5.0), :divmod, [constant_of(2.5)])
+        expect(type).to be_a(Rigor::Type::Tuple)
+        expect(type.elements[0]).to eq(constant_of(2))
+        expect(type.elements[1]).to eq(constant_of(0.0))
+      end
+
+      it "folds 5.divmod(2.5) to a mixed Integer/Float tuple" do
+        # 5.divmod(2.5) → [2, 0.0]
+        type = fold_types(constant_of(5), :divmod, [constant_of(2.5)])
+        expect(type.elements[0]).to eq(constant_of(2))
+        expect(type.elements[1]).to eq(constant_of(0.0))
+      end
+
+      it "bails on integer divmod by 0 (always raises)" do
+        expect(fold_types(constant_of(5), :divmod, [constant_of(0)])).to be_nil
+      end
+
+      it "rejects non-Numeric arguments" do
+        expect(fold_types(constant_of(5), :divmod, [constant_of("3")])).to be_nil
+      end
+
+      it "projects union receivers per tuple position" do
+        # Union[5, 7].divmod(3) → 5.divmod(3) = [1, 2]; 7.divmod(3) = [2, 1]
+        # → Tuple[Union[Constant[1], Constant[2]], Union[Constant[1], Constant[2]]]
+        type = fold_types(constant_union(5, 7), :divmod, [constant_of(3)])
+        expect(type).to be_a(Rigor::Type::Tuple)
+        expect(type.elements.size).to eq(2)
+        q = type.elements[0]
+        r = type.elements[1]
+        expect(q).to be_a(Rigor::Type::Union)
+        expect(q.members.map(&:value).sort).to eq([1, 2])
+        expect(r).to be_a(Rigor::Type::Union)
+        expect(r.members.map(&:value).sort).to eq([1, 2])
+      end
+
+      it "drops always-raising pairs and keeps the safe ones in a union" do
+        # Union[5, 7].divmod(Union[0, 3]) — (·, 0) raises ZDE; (5,3)=[1,2], (7,3)=[2,1]
+        type = fold_types(
+          constant_union(5, 7), :divmod, [constant_union(0, 3)]
+        )
+        expect(type).to be_a(Rigor::Type::Tuple)
+        expect(type.elements[0]).to be_a(Rigor::Type::Union)
+        expect(type.elements[0].members.map(&:value).sort).to eq([1, 2])
+        expect(type.elements[1]).to be_a(Rigor::Type::Union)
+        expect(type.elements[1].members.map(&:value).sort).to eq([1, 2])
+      end
+
+      it "returns nil when every pair raises" do
+        expect(
+          fold_types(constant_union(5, 7), :divmod, [constant_of(0)])
+        ).to be_nil
+      end
+
+      it "respects the input cardinality cap" do
+        # 6 * 6 = 36 > UNION_FOLD_INPUT_LIMIT — bail before invocation.
+        receiver = Rigor::Type::Combinator.union(*(1..6).map { |v| constant_of(v) })
+        arg = Rigor::Type::Combinator.union(*(7..12).map { |v| constant_of(v) })
+        expect(fold_types(receiver, :divmod, [arg])).to be_nil
+      end
+
+      it "does not yet fold IntegerRange divmod (returns nil)" do
+        # Range divmod is a follow-up; for now the fold bails so the
+        # caller can fall back to the RBS-widened result.
+        expect(fold_types(positive_int, :divmod, [constant_of(3)])).to be_nil
       end
     end
 

@@ -132,11 +132,60 @@ module Rigor
         end
 
         def try_fold_binary(left, method_name, right)
+          return try_fold_divmod(left, right) if method_name == :divmod
+
           if left.is_a?(Type::IntegerRange) || right.is_a?(Type::IntegerRange)
             try_fold_binary_range(left, method_name, right)
           else
             try_fold_binary_set(left, method_name, right)
           end
+        end
+
+        # `Integer#divmod` and `Float#divmod` return a 2-element array
+        # `[quotient, remainder]`. We project that into
+        # `Tuple[Constant[q], Constant[r]]` so downstream rules see
+        # the precise element types. Union/range receivers are
+        # widened per-position: each tuple slot carries the union of
+        # quotients (resp. remainders) over every safe input pair.
+        # Range inputs are not yet folded — they bail to nil.
+        def try_fold_divmod(left, right)
+          pairs = collect_divmod_pairs(left, right)
+          return nil unless pairs && !pairs.empty?
+
+          q_type = build_constant_type(pairs.map(&:first))
+          r_type = build_constant_type(pairs.map(&:last))
+          return nil unless q_type && r_type
+
+          Type::Combinator.tuple_of(q_type, r_type)
+        end
+
+        def collect_divmod_pairs(left, right)
+          return nil unless left.is_a?(Array) && right.is_a?(Array)
+          return nil if left.size * right.size > UNION_FOLD_INPUT_LIMIT
+
+          left.flat_map do |lv|
+            right.flat_map { |rv| invoke_divmod(lv, rv) || [] }
+          end
+        end
+
+        # Returns `[[quotient, remainder]]` (single-element array
+        # wrapping the tuple) on success; `nil` to signal "skip this
+        # pair". The wrapping mirrors `invoke_binary` so we can
+        # use `flat_map` and not lose legitimate 0/false elements.
+        def invoke_divmod(receiver_value, arg_value)
+          return nil unless receiver_value.is_a?(Numeric) && arg_value.is_a?(Numeric)
+
+          result = receiver_value.divmod(arg_value)
+          divmod_result_to_pair(result)
+        rescue StandardError
+          nil
+        end
+
+        def divmod_result_to_pair(result)
+          return nil unless result.is_a?(Array) && result.size == 2
+          return nil unless result.all? { |v| foldable_constant_value?(v) }
+
+          [result]
         end
 
         def try_fold_unary_set(receiver_values, method_name)

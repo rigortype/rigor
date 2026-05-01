@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Diagnose common submodule corruption modes.
+#
+# Reports issues but does not fix them automatically. Recovery procedures are
+# documented in AGENTS.md under "References under references/".
+#
+# Exit code: 0 if all checks pass, 1 if any issue is found.
+
+set -u
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT" || { echo "doctor-submodules: not in a git repository" >&2; exit 2; }
+
+issues=0
+note() { echo "  - $*"; }
+fail() { issues=$((issues + 1)); note "$*"; }
+
+echo "Checking submodule consistency (root: $ROOT)..."
+
+# 1. .gitmodules paths exist as worktrees and have valid .git linkage.
+if [ -f .gitmodules ]; then
+  paths=$(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}')
+  for path in $paths; do
+    if [ ! -d "$path" ]; then
+      note "$path: working tree directory missing (run \`make init-submodules\`)"
+      continue
+    fi
+
+    git_link="$path/.git"
+    if [ ! -e "$git_link" ]; then
+      # Empty/uninitialized submodule — not an error, just a state.
+      if [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
+        note "$path: uninitialized (run \`make init-submodules\`)"
+      else
+        fail "$path: working tree present but \`.git\` link missing"
+      fi
+      continue
+    fi
+
+    # Resolve the gitdir pointer.
+    if [ -f "$git_link" ]; then
+      gitdir_ref=$(awk -F': *' '/^gitdir:/ {print $2; exit}' "$git_link")
+      if [ -z "$gitdir_ref" ]; then
+        fail "$path: \`.git\` file is malformed (no gitdir: line)"
+        continue
+      fi
+      case "$gitdir_ref" in
+        /*) abs="$gitdir_ref" ;;
+        *)  abs="$path/$gitdir_ref" ;;
+      esac
+      if [ ! -d "$abs" ]; then
+        fail "$path: \`.git\` points to missing dir \`$gitdir_ref\`"
+        continue
+      fi
+      if [ ! -f "$abs/HEAD" ] || [ ! -d "$abs/objects" ]; then
+        fail "$path: gitdir at \`$gitdir_ref\` is incomplete (no HEAD or objects)"
+      fi
+    fi
+  done
+else
+  note ".gitmodules not found; skipping submodule path checks"
+fi
+
+# 2. .git/config submodule sections that have no matching .gitmodules entry.
+config_names=$(git config --get-regexp '^submodule\..*\.url$' 2>/dev/null \
+  | awk '{print $1}' \
+  | sed -E 's/^submodule\.(.*)\.url$/\1/')
+gitmodules_names=""
+if [ -f .gitmodules ]; then
+  gitmodules_names=$(git config -f .gitmodules --get-regexp '^submodule\..*\.url$' 2>/dev/null \
+    | awk '{print $1}' \
+    | sed -E 's/^submodule\.(.*)\.url$/\1/')
+fi
+for name in $config_names; do
+  if ! printf '%s\n' $gitmodules_names | grep -qx -- "$name"; then
+    fail ".git/config has stale submodule section \`$name\` not in .gitmodules"
+    note "    fix: git config --remove-section submodule.\"$name\""
+  fi
+done
+
+# 3. .git/modules/ subtrees that are not referenced by .gitmodules.
+if [ -d .git/modules ] && [ -n "$gitmodules_names" ]; then
+  found_dirs=$(find .git/modules -type d -name objects 2>/dev/null | sed 's|/objects$||' | sed 's|^.git/modules/||')
+  for dir in $found_dirs; do
+    if ! printf '%s\n' $gitmodules_names | grep -qx -- "$dir"; then
+      fail ".git/modules/$dir is orphaned (no matching .gitmodules entry)"
+      note "    fix: rm -rf .git/modules/$dir  # only after confirming the path is unused"
+    fi
+  done
+fi
+
+if [ "$issues" -eq 0 ]; then
+  echo "OK — no submodule issues detected."
+  exit 0
+else
+  echo
+  echo "$issues issue(s) detected. See messages above for suggested fixes."
+  exit 1
+fi

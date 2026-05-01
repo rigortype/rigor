@@ -43,7 +43,14 @@ From outside the Flake shell, prefix the same target:
 nix --extra-experimental-features 'nix-command flakes' develop --command make setup
 ```
 
-`make setup` runs `bundle install` and then `make init-submodules`. After it finishes, follow the steps in [Verification Notes](#verification-notes).
+`make setup` runs `bundle install`, then `make init-git-config` (applies local git submodule-safety defaults — see below), and then `make init-submodules`. After it finishes, follow the steps in [Verification Notes](#verification-notes).
+
+`make init-git-config` is idempotent and only writes to this clone's `.git/config`. It sets:
+
+- `submodule.recurse = false` — parent operations (`reset`, `checkout`, `pull`) do **not** recurse into submodules. Submodule updates go through explicit `make init-submodules` / `make pull-submodules` instead, so a single broken submodule cannot abort a parent-side `git reset --hard`.
+- `fetch.recurseSubmodules = on-demand` — `git fetch` only pulls submodule objects when the parent commits actually need them.
+- `status.submoduleSummary = true` and `diff.submodule = log` — submodule pointer changes show up in `git status` and `git diff` instead of being silent.
+- `push.recurseSubmodules = check` — `git push` refuses if a referenced submodule commit is not yet pushed upstream.
 
 ## Common Commands
 
@@ -109,6 +116,14 @@ rg PATTERN --no-ignore references/python-typing
 - These submodules are reference material, not Rigor runtime code. Do not require, import, or copy upstream implementation into Rigor product code. Read the relevant specification or behavior, then implement the smallest appropriate Rigor-side behavior.
 - Update a submodule only when intentionally changing the referenced revision.
 - If a submodule is empty after cloning, run `nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules`.
+- Drive submodule lifecycle through Make targets: `make init-submodules`, `make pull-submodules`. Avoid raw `git submodule update --recursive` against the whole tree — it bypasses the sparse-checkout setup baked into `init-submodules` for `references/phpstan` and `references/TypeScript-Website`.
+- Do **not** hand-edit `.gitmodules` or `.git/config` for renames. Use `git mv old/path new/path` and then `git submodule sync` so `.git/config` follows `.gitmodules`. Hand edits leave stale `submodule.<name>.*` sections in `.git/config` and orphan `.git/modules/<old>/` directories, which can crash later parent operations with a `submodule.c` BUG assertion.
+- Run `make doctor-submodules` if anything looks off (e.g. `git status` failing, parent operations exploding on a submodule). It detects: stale `.git/config` sections without a matching `.gitmodules` entry, dangling `.git` pointers in submodule worktrees, orphaned `.git/modules/<name>/` directories, and incomplete gitdirs (missing `HEAD` or `objects`). It reports issues and suggested fixes; it does not modify anything itself.
+- Recovery cookbook for the common breakage modes (run after a backup if anything looks valuable):
+  - **Stale `.git/config` section** (renamed away in `.gitmodules`): `git config --remove-section submodule.<old/name>`.
+  - **Orphaned `.git/modules/<name>/`** (no longer in `.gitmodules`): `rm -rf .git/modules/<name>` after confirming nothing references it.
+  - **Submodule worktree `.git` points to a missing/incomplete gitdir**: `git submodule deinit -f <path>` then `make init-submodules` to re-clone cleanly.
+  - **Parent `git reset` aborts because of submodule recursion**: should not happen once `make init-git-config` has run, but as an escape hatch use `git -c submodule.recurse=false reset --hard <ref>`.
 
 ## Implementation Guidelines
 

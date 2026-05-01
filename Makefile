@@ -1,4 +1,4 @@
-.PHONY: setup install init-submodules pull-submodules test lint check verify check-json
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -7,10 +7,22 @@ REFERENCE_SUBMODULES := \
 	references/python-typing \
 	references/TypeScript-Website
 
-setup: install init-submodules
+setup: install init-git-config init-submodules
 
 install:
 	bundle install
+
+init-git-config:
+	@# Local-only safety defaults for this clone. Idempotent.
+	@# Why: submodule.recurse=true on a parent operation amplifies any submodule
+	@# breakage into a parent-side fatal. We disable recursion and instead drive
+	@# submodule updates explicitly via `make init-submodules` / `make pull-submodules`.
+	git config submodule.recurse false
+	git config fetch.recurseSubmodules on-demand
+	git config status.submoduleSummary true
+	git config diff.submodule log
+	git config push.recurseSubmodules check
+	@echo "Local git submodule-safety config applied."
 
 init-submodules:
 	git submodule update --init --filter=blob:none references/rbs
@@ -45,6 +57,9 @@ init-submodules:
 
 pull-submodules: init-submodules
 	git submodule update --remote --merge $(REFERENCE_SUBMODULES)
+
+doctor-submodules:
+	@bin/doctor-submodules
 
 test:
 	bundle exec rspec

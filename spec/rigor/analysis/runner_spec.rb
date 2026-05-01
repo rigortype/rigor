@@ -4,6 +4,31 @@ require "tmpdir"
 require "rigor/analysis/runner"
 
 RSpec.describe Rigor::Analysis::Runner do
+  it "emits a diagnostic for a non-existent path instead of silently passing" do
+    Dir.mktmpdir do |dir|
+      missing = File.join(dir, "ghost.rb")
+      configuration = Rigor::Configuration.new("paths" => [missing])
+      result = described_class.new(configuration: configuration).run
+
+      expect(result).not_to be_success
+      diag = result.diagnostics.first
+      expect(diag.path).to eq(missing)
+      expect(diag.message).to include("no such file")
+    end
+  end
+
+  it "emits a diagnostic for a non-Ruby file path" do
+    Dir.mktmpdir do |dir|
+      txt = File.join(dir, "notes.txt")
+      File.write(txt, "hello")
+      configuration = Rigor::Configuration.new("paths" => [txt])
+      result = described_class.new(configuration: configuration).run
+
+      expect(result).not_to be_success
+      expect(result.diagnostics.first.message).to include("not a Ruby file")
+    end
+  end
+
   it "reports Prism parse errors as diagnostics" do
     Dir.mktmpdir do |dir|
       source_path = File.join(dir, "broken.rb")

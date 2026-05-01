@@ -156,14 +156,26 @@ module Rigor
       when "json"
         @out.puts(JSON.pretty_generate(result.to_h))
       when "text"
-        if result.success?
-          @out.puts("No diagnostics")
-        else
-          result.diagnostics.each { |diagnostic| @out.puts(diagnostic) }
-        end
+        write_text_result(result)
       else
         raise OptionParser::InvalidArgument, "unsupported format: #{format}"
       end
+    end
+
+    # Text output adds a one-line summary so users see the
+    # diagnostic-count immediately. The summary distinguishes
+    # the success and failure cases and reports the affected
+    # file count for failures.
+    def write_text_result(result)
+      if result.success?
+        @out.puts("No diagnostics")
+        return
+      end
+
+      result.diagnostics.each { |diagnostic| @out.puts(diagnostic) }
+      file_count = result.diagnostics.map(&:path).uniq.size
+      @out.puts("")
+      @out.puts("#{result.error_count} error(s) in #{file_count} file(s)")
     end
 
     def help

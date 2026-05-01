@@ -342,94 +342,122 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
 
 ## First Preview Status
 
-The branch has reached a **first comprehensive preview** of the
-inference engine. Every major engine surface mentioned in the
-ADR-4 / `inference-engine.md` plan is now landed at least at a
-working level:
+The branch has reached a **first preview**. The intent of the
+preview is concrete: a user can point `rigor` at a real Ruby
+project, get diagnostics back, and have the analyzer survive
+the round-trip. It is NOT a complete static-typing solution;
+the [Next Release](#next-release) section below names the
+specific gaps a v0.2 preview must close.
 
-- Local, instance, class, and global variable bindings tracked
-  through `Scope`, with cross-method ivar/cvar accumulators and
-  a program-wide globals accumulator.
-- Compound writes (`||=`, `&&=`, `+=`, ...) thread through
-  scope for every variable kind.
-- `self` typing at class- and method-body boundaries; implicit-self
-  call dispatch routes through the enclosing class's RBS.
-- Lexical constant lookup with project sig, RBS-core, common
-  stdlib (`Environment::DEFAULT_LIBRARIES`), and in-source
-  class discovery (`Scope#discovered_classes`).
-- Predicate narrowing for truthiness, `nil?`, `is_a?`/`kind_of?`/
-  `instance_of?`, finite-literal equality, case-equality (`===`)
-  for Class/Module/Range/Regexp, and `case`/`when` integration.
-- Block parameter binding (incl. destructuring + numbered
-  parameters), block-return-type uplift through generic methods,
-  closure escape classification, and captured-local invalidation
-  on `:escaping` / `:unknown` block calls.
-- Tuple and HashShape carriers with shape-aware element access,
-  range/start-length slices, and closed/open/required/optional
-  policies threaded through `Acceptance`.
+Concrete preview deliverables:
 
-`rigor type-scan lib` reports **4.2 % unrecognised** for Rigor's
-own `lib/` tree (down from 13.8 % at the start of the Slice A
-series). The full RSpec suite (815 examples) and `rubocop` are
-clean.
+- **`rigor check`** end-to-end pipeline: parse → scope index →
+  three rule catalogue. Surfaces real diagnostics on real
+  projects, exits 1 on any error, prints a one-line summary.
+  Missing paths produce an explicit diagnostic instead of
+  silently passing.
+- **`rigor type-of`** + **`rigor type-scan`** for inspection
+  and coverage probing.
+- **`rigor init`** writes a header-commented `.rigor.yml`.
+- Engine resolves the bulk of canonical Ruby surface: locals,
+  ivars / cvars / globals (intra- and cross-method), `self`
+  typing, lexical constant lookup, predicate narrowing
+  (`is_a?` / `==` / `===` / `case`-`when`), block parameter
+  binding, closure escape, Tuple / HashShape carriers, and
+  `RBS::Extended` predicate effects (first-preview subset).
+- 846 RSpec examples / 0 failures, RuboCop clean.
+  `rigor type-scan lib` reports 3.2 % unrecognised on
+  Rigor's own tree (down from 13.8 % at the start of the
+  Slice A series).
+- Smoke probe (representative Ruby project with typed bugs):
+  `rigor check` flags exactly the planted wrong-arity and
+  undefined-method bugs while ignoring legitimate calls
+  (early-return guards, `attr_reader`-derived methods,
+  `define_method` etc.).
 
 ## Known Limitations of the First Preview
 
-- The `check` CLI command ships one rule for first preview
-  (undefined method on typed receiver). Other rule families
-  (type-incompatible writes, unbound locals, unreachable
-  branches) remain on the roadmap. Severity is hard-coded to
-  `:error`; per-rule severity configuration is future work.
-- Constants whose value is bound to a non-class type
-  (`BUCKETS = [...]`) resolve through RBS constant decls but do
-  NOT pick up types from in-source assignments (the engine
-  currently consults RBS only).
-- Module-level intrinsics (`attr_reader`, `attr_accessor`,
-  `private`, `private_constant`, `module_function`,
-  `require_relative`) are unrecognised CallNodes; type-scan
-  flags them but the engine continues without raising.
+- `rigor check` ships three rules: undefined method on typed
+  receiver, wrong number of arguments, possible nil receiver.
+  Other rule families (type-incompatible writes, unbound
+  locals, unreachable branches, return-type mismatch) remain
+  on the roadmap. Severity is hard-coded to `:error`; per-rule
+  severity configuration is future work.
+- The nil-receiver rule fires only on
+  `Prism::LocalVariableReadNode` receivers; chained / method-
+  call receivers are silently skipped because the engine cannot
+  flow-narrow them yet.
 - Per-method RBS for Rigor itself covers the heavy internal
-  paths (StatementEvaluator/ExpressionTyper/Narrowing/
-  BlockParameterBinder/FactStore) but does not enumerate every
-  helper. New private helpers added in subsequent slices may
-  briefly fall through to `Dynamic[Top]` until their RBS
-  signature is added.
-- Cross-method instance state precision is limited to
-  `Constant[v]` rvalues at pre-pass time; rvalues that depend
-  on locals inside the writing method record `Dynamic[Top]`
-  (the pre-pass has no local context).
-- Plugins, `RBS::Extended` flow effects, and explicit purity /
-  mutation summaries remain on the roadmap. The first preview
-  uses the impure-by-default policy from
-  `docs/type-specification/control-flow-analysis.md`.
+  paths but does not enumerate every helper. New private
+  helpers added in subsequent slices may briefly fall through
+  to `Dynamic[Top]` until their RBS signature is added.
+- Cross-method instance state precision: rvalue typing during
+  the per-class ivar/cvar pre-pass has no local context, so
+  `@x = some_local + 1` records `Dynamic[Top]`. Direct literal
+  writes record their precise constant.
+- `RBS::Extended` ships the predicate-effect surface only
+  (`predicate-if-true` / `predicate-if-false`). `assert`,
+  `assert-if-true`, `assert-if-false`, `param`, `return`,
+  `conforms-to`, negation (`~T`), and intersection/union
+  refinements are deferred to v0.2.
+- No persistent cache. Every `rigor check` run re-parses and
+  re-types the project. The configuration file already has a
+  `cache.path` slot; the cache implementation is v0.2 work.
+- No plugin contribution layer. Only the bundled `RBS::Extended`
+  reader can contribute analyzer behavior past ordinary RBS.
 
-## Candidate Next Steps Past First Preview
+## Next Release (v0.2)
 
-Listed roughly in increasing engine impact:
+Captured here so the first-preview surface stays focused. The
+items are listed roughly by user-visible value, not by
+implementation order.
 
-1. **`check` CLI command**: produce real diagnostics for a
-   curated rule set (unbound locals, unknown method calls on
-   typed receivers, type-incompatible writes).
-2. **Constant-value tracking from in-source writes**: extend
-   `ScopeIndexer` to populate a per-program constant table from
-   `Prism::ConstantWriteNode`, so `BUCKETS = [:a, :b]; BUCKETS`
-   resolves to the rvalue type even without RBS.
-3. **Module-instance intrinsics catalogue**: short-circuit
-   `attr_reader` / `attr_accessor` / `private_constant` so
-   they no longer count as unrecognised in type-scan.
-4. **`define_method` and dynamic dispatch summaries**: the
-   current `ClosureEscapeAnalyzer` flags `define_method` as
-   escaping; a follow-up could track the method it defines so
-   subsequent calls dispatch through the closure body.
-5. **Plugin / `RBS::Extended` effect plumbing** per
-   `docs/type-specification/rbs-extended.md` — the formal way
-   to declare purity, mutation, escape, and call-timing effects
-   on top of ordinary RBS.
-6. **Diagnostic publication**: surface `FallbackTracer` events
-   plus narrowing failures through the `check` command's
-   `Rigor::Analysis::Diagnostic` pipeline so users see the
-   engine's confidence per node.
+### Engine + RBS::Extended
 
-The recommended first step is **(1) `check` command** because
-it converts the engine's existing typing precision into
-user-visible value without requiring further engine surface.
+1. **`assert` / `assert-if-true` / `assert-if-false` directives**
+   — extend `Rigor::RbsExtended` to recognise the assertion
+   directives from `docs/type-specification/rbs-extended.md`,
+   then wire them into `StatementEvaluator` so a method call
+   refines its target after returning. Required for
+   `must_be_string!` / `validate!` patterns.
+2. **Negation in predicate / assert types (`~T`)** — extend
+   the `RBS::Extended` parser and `Narrowing.narrow_class` /
+   `Narrowing.narrow_not_class` so a directive like
+   `predicate-if-true value is ~NilClass` produces the
+   non-nil edge.
+3. **`self`-targeted predicate effects actually narrow** —
+   today the parser accepts `target: self` but the engine
+   discards the effect. v0.2 should mutate the receiver
+   scope's `self_type` on the matching edge.
+4. **More `check` rules**: type-incompatible argument (uses
+   `Acceptance`), return-type mismatch, unreachable
+   branches, unused locals, redundant nil checks.
+5. **Per-rule severity + suppression**: project-level
+   `.rigor.yml` rule toggles, in-source `# rigor:disable`
+   comments, severity downgrade.
+
+### CLI + workflow
+
+6. **Persistent analysis cache** — wire the `cache.path`
+   config slot through to a per-file analysis cache so
+   subsequent `rigor check` runs only re-analyze changed
+   files.
+7. **Configuration: `libraries:` and `signature_paths:`
+   passthrough** — `.rigor.yml` keys that reach
+   `Environment.for_project` so users can extend the
+   stdlib bundle without touching code.
+8. **Plugin contribution layer** per ADR-2 — load
+   user-supplied Ruby files that register additional
+   `CheckRules` or RBS shim methods.
+9. **Diagnostic publication of `FallbackTracer` events** —
+   optional `--explain` mode surfacing where the engine
+   degraded to `Dynamic[Top]`.
+
+### Documentation + adoption
+
+10. **Quickstart on a real Rails / sinatra-style app** —
+    expanded README walkthrough including dependency RBS
+    onboarding and recommended `paths:` / sig layout.
+11. **`rigor check` rule reference** — per-rule docs with
+    canonical examples, false-positive guidance, and the
+    suppressing comment syntax.

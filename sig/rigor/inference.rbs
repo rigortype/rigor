@@ -138,14 +138,17 @@ module Rigor
     end
 
     class CoverageScanner
-      class Stats
+      class Result
+        attr_reader visits: Hash[Class, Integer]
+        attr_reader unrecognized: Hash[Class, Integer]
+        attr_reader events: Array[Fallback]
         def visited_count: () -> Integer
         def unrecognized_count: () -> Integer
         def unrecognized_ratio: () -> Float
       end
 
       def initialize: (?scope: Scope?) -> void
-      def scan: (untyped root) -> Stats
+      def scan: (untyped root) -> Result
     end
   end
 end

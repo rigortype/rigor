@@ -541,3 +541,94 @@ slice could combine the two: a pure-summary catalogue
 backed by user-supplied annotations
 (`%a{rigor:v0.0.3:pure}`) so projects can opt their own
 methods into the constant-folding path.
+
+### Self-check false positives (`rigor check lib spec/rigor`)
+
+Running the analyzer over its own tree at the v0.0.2 cut
+yields **0 errors in `lib/`** and **13 errors across 4 spec
+files**, all of them engine-limitation false positives. Each
+class of failure pins a concrete v0.0.3+ engine improvement:
+
+#### A. Implicit-self calls inside RSpec `def` helpers
+mis-route through unrelated RBS
+
+```
+spec/rigor/inference/method_dispatcher/overload_selector_spec.rb
+  :33,34,39,41,42,51,61,66,76 — 9 hits
+  "undefined method `type' for Array[String]"
+```
+
+The spec defines a local helper `def select(class_name, ...)`
+inside the RSpec example group and calls it without an
+explicit receiver. The engine types the implicit-self call
+through the enclosing class — but the enclosing class is the
+anonymous RSpec example group, which has no useful RBS, so
+the typer falls through to a sibling `Array#select` overload
+and reports the helper's return as `Array[String]`. Subsequent
+`mt.type.required_positionals` calls then fail
+"undefined method `type` for Array[String]".
+
+Two paths forward:
+
+1. **Local-method-table priority for implicit-self calls.**
+   When the enclosing scope has an in-source `def` matching
+   the called name, prefer it over RBS dispatch. Today the
+   inter-procedural inference table is built (v0.0.2 #5) but
+   only consulted on Nominal-receiver calls.
+2. **Skip undefined-method / argument-type-mismatch when the
+   call sits in an RSpec example group with no useful self
+   type.** Heuristic: when `self_type` resolves to a
+   `Class.new` / `Module.new` block scope, treat
+   implicit-self calls as Dynamic (matches the existing
+   user-class fallback envelope).
+
+#### B. `find` / `index`-style nil-returning calls escape narrowing
+
+```
+spec/rigor/inference/expression_typer_spec.rb:670
+  result.class_name      # `result` is `T | nil` from a find
+spec/rigor/inference/statement_evaluator_spec.rb:275
+  x_plus_2_event[1]      # `events.find { ... }` result
+spec/rigor/inference/statement_evaluator_spec.rb:1240
+  union.members          # `index[get_def.body].ivar(:@x)` returns Union | nil
+spec/rigor/source/node_locator_spec.rb:82
+  string_node_offset + 1 # `String#index` returns Integer | nil
+```
+
+The engine correctly types these as `T | nil` from RBS but
+does not narrow on the line that follows
+"`expect(x).not_to be_nil`". A v0.0.3 narrowing improvement
+should:
+
+1. Recognise the RSpec matcher-call pattern
+   `expect(x).not_to be_nil` (and `to_not be_nil`,
+   `not_to be(nil)`) as an assert-shaped narrow that drops
+   `NilClass` from `x`'s type on subsequent statements. This
+   would close the most common idiomatic source of these
+   diagnostics in the project's own spec tree.
+2. As a complement, surface a `RBS::Extended`-style
+   `assert <target> is ~NilClass` directive on RSpec's
+   matcher signatures (project-level shim under
+   `sig/rigor/spec/`) so users can reproduce the effect for
+   their own custom matchers.
+
+This is the same family of work that v0.0.2 #4
+(argument-type-mismatch) opened up: the engine has the
+narrowing primitive (`Narrowing.narrow_not_class`) and the
+RBS::Extended `~T` syntax (v0.0.2 #2); what is missing is
+the matcher-call recognition pass.
+
+#### Status
+
+- v0.0.2 #6 (`# rigor:disable possible-nil-receiver`) is the
+  user-visible escape hatch today. The four sites above each
+  resolve with a single line-end comment, so the project's
+  own check-run cleanliness is a `disable:` configuration
+  decision, not a blocker. Recording the engine fix here
+  rather than papering over the false positives in-source.
+- The `Stats` → `Result` rename in
+  `sig/rigor/inference.rbs` (committed alongside this note)
+  was a real defect: `lib/` was self-flagging because the
+  project's own RBS for `CoverageScanner#scan` was stale.
+  The engine read it correctly; the fix was to update the
+  sig.

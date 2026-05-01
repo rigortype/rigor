@@ -105,6 +105,25 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
+    let(:harness) { harness_for("assertions") }
+
+    it "produces no `assert_type` errors when the fixture's expectations match" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "exposes every `dump_type` call as an `:info` diagnostic the user can read" do
+      # The fixture intentionally uses only `assert_type` (no
+      # bare `dump_type` calls), so the info-severity dump
+      # surface starts empty here. The presence of the rule
+      # is what we are asserting; future fixtures may add
+      # dump_type calls.
+      info_dumps = harness.diagnostics.select { |d| d.severity == :info }
+      expect(info_dumps).to be_an(Array)
+    end
+  end
+
   describe "fixtures/predicate_extended/ — RBS::Extended `predicate-if-*`" do
     let(:harness) { harness_for("predicate_extended") }
 

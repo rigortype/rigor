@@ -1,0 +1,9 @@
+module Rigor
+  module Testing
+    def self?.dump_type: (untyped value) -> untyped
+    def self?.assert_type: (String expected, untyped value) -> untyped
+  end
+
+  def self.dump_type: (untyped value) -> untyped
+  def self.assert_type: (String expected, untyped value) -> untyped
+end

@@ -53,7 +53,7 @@ module Rigor
       # @param root [Prism::Node]
       # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
       # @return [Array<Rigor::Analysis::Diagnostic>]
-      def diagnose(path:, root:, scope_index:)
+      def diagnose(path:, root:, scope_index:) # rubocop:disable Metrics/CyclomaticComplexity
         diagnostics = []
         Source::NodeWalker.each(root) do |node|
           next unless node.is_a?(Prism::CallNode)
@@ -66,6 +66,12 @@ module Rigor
 
           nil_diagnostic = nil_receiver_diagnostic(path, node, scope_index)
           diagnostics << nil_diagnostic if nil_diagnostic
+
+          dump_diagnostic = dump_type_diagnostic(path, node, scope_index)
+          diagnostics << dump_diagnostic if dump_diagnostic
+
+          assert_diagnostic = assert_type_diagnostic(path, node, scope_index)
+          diagnostics << assert_diagnostic if assert_diagnostic
         end
         diagnostics
       end
@@ -344,6 +350,111 @@ module Rigor
           return false if definition.nil?
 
           !definition.methods[method_name.to_sym].nil?
+        end
+
+        # Slice 7 phase 19 — PHPStan-style `dump_type(value)`.
+        # When the engine recognises a call to `dump_type` (with
+        # any of the supported receiver shapes — implicit self
+        # after `include Rigor::Testing`, `Rigor::Testing.dump_type`,
+        # or `Rigor.dump_type`), it emits an `:info` diagnostic
+        # showing the inferred type of the argument expression.
+        # The diagnostic does NOT count toward `Result#error_count`
+        # so a fixture peppered with `dump_type` calls still
+        # passes `rigor check`.
+        def dump_type_diagnostic(path, call_node, scope_index)
+          return nil unless rigor_testing_call?(call_node, :dump_type)
+          return nil if call_node.arguments.nil? || call_node.arguments.arguments.empty?
+
+          arg = call_node.arguments.arguments.first
+          scope = scope_index[arg] || scope_index[call_node]
+          return nil if scope.nil?
+
+          type = scope.type_of(arg)
+          location = call_node.message_loc || call_node.location
+          Diagnostic.new(
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "dump_type: #{type.describe(:short)}",
+            severity: :info
+          )
+        end
+
+        # Slice 7 phase 19 — PHPStan-style `assert_type("...", value)`.
+        # The first argument MUST be a string literal containing
+        # the expected `Type#describe(:short)` rendering. When
+        # the inferred type's short description does not equal
+        # the expected literal, an `:error`-severity diagnostic
+        # is emitted; matching calls produce no output. This
+        # lets a fixture document its expected types inline:
+        # subsequent `rigor check` runs flag any drift.
+        def assert_type_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity
+          return nil unless rigor_testing_call?(call_node, :assert_type)
+          return nil if call_node.arguments.nil? || call_node.arguments.arguments.size < 2
+
+          expected_node = call_node.arguments.arguments.first
+          return nil unless expected_node.is_a?(Prism::StringNode)
+
+          value_node = call_node.arguments.arguments[1]
+          scope = scope_index[value_node] || scope_index[call_node]
+          return nil if scope.nil?
+
+          actual = scope.type_of(value_node).describe(:short)
+          expected = expected_node.unescaped.to_s
+          return nil if actual == expected
+
+          build_assert_type_diagnostic(path, call_node, expected, actual)
+        end
+
+        # Recognises any of:
+        #   `dump_type(x)`        (implicit self after `include Rigor::Testing`)
+        #   `Testing.dump_type(x)`
+        #   `Rigor.dump_type(x)`
+        #   `Rigor::Testing.dump_type(x)`
+        # The receiver check is purely structural — we do not
+        # consult RBS — because the helpers are no-op stubs the
+        # user MAY shadow with their own definition; a name
+        # clash is the deliberate trade-off for ergonomic
+        # invocation.
+        RIGOR_TESTING_RECEIVERS = ["Rigor", "Rigor::Testing", "Testing"].freeze
+        private_constant :RIGOR_TESTING_RECEIVERS
+
+        def rigor_testing_call?(call_node, method_name)
+          return false unless call_node.name == method_name
+
+          receiver = call_node.receiver
+          return true if receiver.nil?
+
+          name = constant_name_of(receiver)
+          return false if name.nil?
+
+          RIGOR_TESTING_RECEIVERS.include?(name)
+        end
+
+        def constant_name_of(node)
+          case node
+          when Prism::ConstantReadNode then node.name.to_s
+          when Prism::ConstantPathNode then render_constant_path(node)
+          end
+        end
+
+        def render_constant_path(node)
+          parent = node.parent
+          base = constant_name_of(parent)
+          return nil if parent && base.nil?
+
+          parent ? "#{base}::#{node.name}" : node.name.to_s
+        end
+
+        def build_assert_type_diagnostic(path, call_node, expected, actual)
+          location = call_node.message_loc || call_node.location
+          Diagnostic.new(
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "assert_type mismatch: expected #{expected.inspect}, got #{actual.inspect}",
+            severity: :error
+          )
         end
 
         def build_nil_receiver_diagnostic(path, call_node)

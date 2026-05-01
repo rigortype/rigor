@@ -57,6 +57,24 @@ module Rigor
         post_scope.local(name)
       end
 
+      # Runs the full `Rigor::Analysis::CheckRules` catalogue
+      # against the fixture and returns the resulting
+      # diagnostics. Used by the self-asserting fixtures
+      # (e.g. `assertions.rb`) — `harness.diagnostics` should
+      # be empty when the fixture's `assert_type(...)` calls
+      # all match the engine's inference.
+      def diagnostics
+        @diagnostics ||= Rigor::Analysis::CheckRules.diagnose(
+          path: name,
+          root: tree,
+          scope_index: index
+        )
+      end
+
+      def errors
+        diagnostics.select(&:error?)
+      end
+
       private
 
       def load_fixture

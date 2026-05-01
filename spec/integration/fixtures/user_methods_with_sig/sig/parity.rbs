@@ -1,0 +1,4 @@
+class Parity
+  def is_odd: (Integer n) -> bool
+  def is_even: (Integer n) -> bool
+end

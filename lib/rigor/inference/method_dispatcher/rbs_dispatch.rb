@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "../../rbs_extended"
 require_relative "../rbs_type_translator"
 require_relative "overload_selector"
 
@@ -247,6 +248,9 @@ module Rigor
 
           # rubocop:disable Metrics/ParameterLists
           def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:)
+            override = RbsExtended.read_return_type_override(method_definition)
+            return override if override
+
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
               case kind

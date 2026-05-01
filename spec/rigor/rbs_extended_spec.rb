@@ -172,4 +172,35 @@ RSpec.describe Rigor::RbsExtended do
       end
     end
   end
+
+  describe ".parse_return_type_override" do
+    it "resolves a kebab-case refinement to its Type carrier" do
+      type = described_class.parse_return_type_override("rigor:v1:return: non-empty-string")
+      expect(type).to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "resolves the IntegerRange refinements" do
+      expect(described_class.parse_return_type_override("rigor:v1:return: positive-int"))
+        .to eq(Rigor::Type::Combinator.positive_int)
+      expect(described_class.parse_return_type_override("rigor:v1:return: non-negative-int"))
+        .to eq(Rigor::Type::Combinator.non_negative_int)
+    end
+
+    it "returns nil for an unknown refinement name" do
+      expect(described_class.parse_return_type_override("rigor:v1:return: frobinator-string"))
+        .to be_nil
+    end
+
+    it "returns nil for non-`return:` directives" do
+      expect(described_class.parse_return_type_override("rigor:v1:assert value is String"))
+        .to be_nil
+      expect(described_class.parse_return_type_override("steep:foo:bar"))
+        .to be_nil
+    end
+
+    it "tolerates extra whitespace around the refinement name" do
+      type = described_class.parse_return_type_override("rigor:v1:return:    non-empty-string   ")
+      expect(type).to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+  end
 end

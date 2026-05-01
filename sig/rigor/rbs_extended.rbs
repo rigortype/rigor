@@ -39,5 +39,8 @@ module Rigor
 
     def self?.read_assert_effects: (untyped method_def) -> Array[AssertEffect]
     def self?.parse_assert_annotation: (String string) -> AssertEffect?
+
+    def self?.read_return_type_override: (untyped method_def) -> Type::t?
+    def self?.parse_return_type_override: (String string) -> Type::t?
   end
 end

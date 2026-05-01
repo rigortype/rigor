@@ -1,0 +1,7 @@
+class User
+  %a{rigor:v1:return: non-empty-string}
+  def name: () -> String
+
+  %a{rigor:v1:return: positive-int}
+  def age: () -> Integer
+end

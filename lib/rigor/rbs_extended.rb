@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "type"
+require_relative "builtins/imported_refinements"
 
 module Rigor
   # Slice 7 phase 15 — first-preview reader for the
@@ -40,7 +41,7 @@ module Rigor
   # `::Foo::Bar` style constant path. Negative refinements
   # (`~T`), intersections, and unions are deferred to the
   # next iteration.
-  module RbsExtended
+  module RbsExtended # rubocop:disable Metrics/ModuleLength
     DIRECTIVE_PREFIX = "rigor:v1:"
 
     # Returned for `predicate-if-true` / `predicate-if-false`.
@@ -189,6 +190,69 @@ module Rigor
         class_name: class_name,
         negative: match[:negation].to_s == "~"
       )
+    end
+
+    # Reads the `rigor:v1:return: <kebab-name>` directive off
+    # `RBS::Definition::Method#annotations`. The directive
+    # overrides a method's RBS-declared return type with one of
+    # the imported-built-in refinements registered in
+    # `Rigor::Builtins::ImportedRefinements`. The override is the
+    # primary integration path for refinement carriers
+    # (`non-empty-string`, `positive-int`, `non-empty-array`, …)
+    # in v0.0 — annotation-driven, opt-in per method, and never
+    # silently rewrites a hand-authored RBS signature outside the
+    # annotation.
+    #
+    # Example annotation in an RBS file:
+    #
+    #   class User
+    #     %a{rigor:v1:return: non-empty-string}
+    #     def name: () -> String
+    #   end
+    #
+    # The RBS-declared return is `String`. The override
+    # tightens it to `non-empty-string` (i.e.
+    # `Difference[String, ""]`) for callers; RBS erasure of the
+    # tightened return goes back to `String` so the round-trip
+    # to ordinary RBS is unaffected.
+    #
+    # Returns the resolved `Rigor::Type` value, or `nil` when:
+    # - the method has no annotations,
+    # - none of the annotations match the `rigor:v1:return:`
+    #   directive,
+    # - the directive's payload names a refinement not
+    #   registered in `Rigor::Builtins::ImportedRefinements`
+    #   (the analyzer prefers a silent miss over crashing on a
+    #   typo; future slices MAY surface the miss as a
+    #   `:warning` self-diagnostic).
+    def read_return_type_override(method_def)
+      return nil if method_def.nil?
+
+      annotations = method_def.annotations
+      return nil if annotations.nil? || annotations.empty?
+
+      annotations.each do |annotation|
+        type = parse_return_type_override(annotation.string)
+        return type if type
+      end
+      nil
+    end
+
+    RETURN_DIRECTIVE_PATTERN = /
+      \A
+      rigor:v1:return:
+      \s+
+      (?<refinement>[a-z][a-z0-9-]*)
+      \s*
+      \z
+    /x
+    private_constant :RETURN_DIRECTIVE_PATTERN
+
+    def parse_return_type_override(string)
+      match = RETURN_DIRECTIVE_PATTERN.match(string)
+      return nil if match.nil?
+
+      Builtins::ImportedRefinements.lookup(match[:refinement])
     end
   end
 end

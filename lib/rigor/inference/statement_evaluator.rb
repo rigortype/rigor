@@ -662,17 +662,26 @@ module Rigor
       end
 
       def apply_assert_effect(effect, call_node, current_scope, method_def)
-        return current_scope if effect.target_kind != :parameter
+        target_node = assert_effect_target_node(effect, call_node, method_def)
+        return current_scope unless target_node.is_a?(Prism::LocalVariableReadNode)
 
-        arg_node = lookup_assert_arg(call_node, method_def, effect.target_name)
-        return current_scope unless arg_node.is_a?(Prism::LocalVariableReadNode)
-
-        local_name = arg_node.name
+        local_name = target_node.name
         current_type = current_scope.local(local_name)
         return current_scope if current_type.nil?
 
         narrowed = narrow_for_assert_effect(current_type, effect, current_scope.environment)
         current_scope.with_local(local_name, narrowed)
+      end
+
+      # v0.0.2 #3 — same `target: self` accommodation as
+      # `Narrowing.effect_target_node`: the call's receiver
+      # serves as the target for self-targeted directives.
+      def assert_effect_target_node(effect, call_node, method_def)
+        if effect.target_kind == :self
+          call_node.receiver
+        else
+          lookup_assert_arg(call_node, method_def, effect.target_name)
+        end
       end
 
       def narrow_for_assert_effect(current_type, effect, environment)

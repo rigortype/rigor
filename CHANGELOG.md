@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `RBS::Extended` `target: self` directives now actually
+  narrow the receiver local on the matching edge (was: parser
+  accepted but engine discarded). Covers all three rule
+  shapes:
+  - `predicate-if-true self is LoggedInUser` /
+    `predicate-if-false self is User` — narrows the receiver
+    local on the truthy / falsey edge of an `if` / `unless`
+    predicate.
+  - `assert-if-true self is AdminUser` — same shape, applied
+    when the call is observed as a truthy predicate.
+  - `assert self is RegisteredUser` — narrows the receiver
+    local unconditionally at the post-call scope.
+
+  Narrowing only fires when the call's receiver is a
+  `Prism::LocalVariableReadNode` (the engine's narrowing
+  surface) AND the receiver type is statically known
+  (Nominal / Singleton / Constant — required for the engine
+  to even resolve which class's method carries the
+  annotation).
+
 - `RBS::Extended` recognises **negation** in predicate / assert
   directives via the `~ClassName` syntax:
   - `predicate-if-true value is ~NilClass` narrows `value`

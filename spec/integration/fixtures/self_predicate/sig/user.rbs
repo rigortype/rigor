@@ -1,0 +1,19 @@
+class User
+  %a{rigor:v1:predicate-if-true self is LoggedInUser}
+  def logged_in?: () -> bool
+
+  %a{rigor:v1:assert-if-true self is AdminUser}
+  def admin?: () -> bool
+
+  %a{rigor:v1:assert self is RegisteredUser}
+  def ensure_registered!: () -> void
+end
+
+class LoggedInUser < User
+end
+
+class AdminUser < User
+end
+
+class RegisteredUser < User
+end

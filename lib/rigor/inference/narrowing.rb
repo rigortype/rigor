@@ -718,11 +718,10 @@ module Rigor
 
         # rubocop:disable Metrics/ParameterLists
         def apply_assert_if_effect(effect, call_node, entry_scope, truthy_scope, falsey_scope, method_def)
-          arg_node = lookup_positional_arg(call_node, method_def, effect.target_name)
-          return [truthy_scope, falsey_scope] if effect.target_kind != :parameter
-          return [truthy_scope, falsey_scope] unless arg_node.is_a?(Prism::LocalVariableReadNode)
+          target_node = effect_target_node(effect, call_node, method_def)
+          return [truthy_scope, falsey_scope] unless target_node.is_a?(Prism::LocalVariableReadNode)
 
-          local_name = arg_node.name
+          local_name = target_node.name
           current = entry_scope.local(local_name)
           return [truthy_scope, falsey_scope] if current.nil?
 
@@ -734,6 +733,21 @@ module Rigor
           end
         end
         # rubocop:enable Metrics/ParameterLists
+
+        # v0.0.2 #3 — resolves an effect's target node. For
+        # `target: <param>` we look up the matching positional
+        # argument; for `target: self` we use the call's
+        # receiver. In both cases the caller still requires a
+        # `Prism::LocalVariableReadNode` for narrowing to
+        # actually fire (the engine's narrowing surface only
+        # rebinds locals).
+        def effect_target_node(effect, call_node, method_def)
+          if effect.target_kind == :self
+            call_node.receiver
+          else
+            lookup_positional_arg(call_node, method_def, effect.target_name)
+          end
+        end
 
         # v0.0.2 — selects `narrow_class` (positive) or
         # `narrow_not_class` (negative `~T` form) based on
@@ -787,11 +801,10 @@ module Rigor
 
         # rubocop:disable Metrics/ParameterLists
         def apply_predicate_effect(effect, call_node, entry_scope, truthy_scope, falsey_scope, method_def)
-          arg_node = lookup_positional_arg(call_node, method_def, effect.target_name)
-          return [truthy_scope, falsey_scope] if effect.target_kind != :parameter
-          return [truthy_scope, falsey_scope] unless arg_node.is_a?(Prism::LocalVariableReadNode)
+          target_node = effect_target_node(effect, call_node, method_def)
+          return [truthy_scope, falsey_scope] unless target_node.is_a?(Prism::LocalVariableReadNode)
 
-          local_name = arg_node.name
+          local_name = target_node.name
           current = entry_scope.local(local_name)
           return [truthy_scope, falsey_scope] if current.nil?
 

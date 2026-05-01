@@ -160,6 +160,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/self_predicate/ — RBS::Extended `target: self` narrowing (v0.0.2 #3)" do
+    let(:harness) { harness_for("self_predicate") }
+
+    it "narrows the receiver local for `predicate-if-*`, `assert-if-*`, and `assert` self-targeted directives" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/predicate_extended/ — RBS::Extended `predicate-if-*`" do
     let(:harness) { harness_for("predicate_extended") }
 

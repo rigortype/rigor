@@ -232,6 +232,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/string_array_catalog.rb — String/Symbol/Array catalog-driven folding" do
+    let(:harness) { harness_for("string_array_catalog") }
+
+    it "self-asserts the new String/Symbol fold coverage" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/always_raises/ — division-by-zero diagnostic" do
     let(:harness) { harness_for("always_raises") }
 

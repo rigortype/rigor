@@ -2,6 +2,8 @@
 
 require_relative "../../type"
 require_relative "../builtins/numeric_catalog"
+require_relative "../builtins/string_catalog"
+require_relative "../builtins/array_catalog"
 
 module Rigor
   module Inference
@@ -618,16 +620,22 @@ module Rigor
         # Ruby methods, so executing them on a literal Integer/Float
         # is safe regardless of monkey-patching.
         def catalog_allows?(receiver_value, method_name)
-          class_name = catalog_class_for(receiver_value)
-          return false unless class_name
+          catalog, class_name = catalog_for(receiver_value)
+          return false unless catalog
 
-          Builtins::NumericCatalog.safe_for_folding?(class_name, method_name)
+          catalog.safe_for_folding?(class_name, method_name)
         end
 
-        def catalog_class_for(receiver_value)
+        # Returns `[catalog, class_name]` for receivers we have a
+        # catalog for; nil otherwise. The class_name is what the
+        # catalog's RBS-rooted entries are keyed by.
+        def catalog_for(receiver_value)
           case receiver_value
-          when Integer then "Integer"
-          when Float   then "Float"
+          when Integer then [Builtins::NumericCatalog, "Integer"]
+          when Float   then [Builtins::NumericCatalog, "Float"]
+          when String  then [Builtins::STRING_CATALOG, "String"]
+          when Symbol  then [Builtins::STRING_CATALOG, "Symbol"]
+          when Array   then [Builtins::ARRAY_CATALOG,  "Array"]
           end
         end
 

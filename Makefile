@@ -78,4 +78,4 @@ check-json:
 verify: test lint check
 
 extract-builtin-catalogs:
-	bundle exec ruby tool/extract_numeric_catalog.rb
+	bundle exec ruby tool/extract_builtin_catalog.rb

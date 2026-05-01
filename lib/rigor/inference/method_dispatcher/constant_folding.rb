@@ -5,15 +5,20 @@ require_relative "../../type"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Slice 2 rule book that folds binary operations on `Rigor::Type::Constant`
-      # receivers into another `Constant` whenever:
+      # Slice 2 rule book that folds method calls on `Rigor::Type::Constant`
+      # receivers (and unions of them) into another `Constant` (or a small
+      # `Union[Constant, …]`) whenever:
       #
-      # * the receiver is a recognised scalar literal,
-      # * exactly one argument is supplied and it is also a `Constant`,
+      # * the receiver is a recognised scalar literal, OR a `Union` whose
+      #   members are all `Constant`,
+      # * arguments (zero or one) are likewise `Constant` or `Union[Constant…]`,
       # * the method name is in the curated whitelist for the receiver's class,
       # * the operation cannot accidentally explode the analyzer (we cap
-      #   string-fold output at `STRING_FOLD_BYTE_LIMIT` bytes), and
-      # * the actual Ruby invocation does not raise.
+      #   string-fold output at `STRING_FOLD_BYTE_LIMIT` bytes, the input
+      #   cartesian product at `UNION_FOLD_INPUT_LIMIT`, and the deduped
+      #   output union at `UNION_FOLD_OUTPUT_LIMIT`), and
+      # * the actual Ruby invocation does not raise on at least one
+      #   receiver/argument combination.
       #
       # Anything else returns `nil`, signalling "no rule matched" so the
       # caller (`ExpressionTyper`) falls back to `Dynamic[Top]` and records a
@@ -76,45 +81,98 @@ module Rigor
 
         STRING_FOLD_BYTE_LIMIT = 4096
 
-        # @return [Rigor::Type::Constant, nil]
+        # Input cartesian product hard cap. Keeps fold cost bounded even
+        # when the receiver and argument are both `Union[Constant…]`.
+        # 5 × 5 = 25 inputs is permitted; 6 × 6 = 36 is not. The user-
+        # facing payoff (a precise small enum) drops off fast past this
+        # range and CRuby method invocation cost adds up.
+        UNION_FOLD_INPUT_LIMIT = 32
+
+        # Output cardinality cap on the deduped result union. A single
+        # binary op on a small range can collapse: `[1,2,3] + [2,4,6]`
+        # produces 9 raw pairs but only 7 distinct sums. The output cap
+        # is what ultimately limits how wide an inferred type gets.
+        UNION_FOLD_OUTPUT_LIMIT = 8
+
+        # @return [Rigor::Type::Constant, Rigor::Type::Union, nil]
         def try_fold(receiver:, method_name:, args:)
-          return nil unless receiver.is_a?(Type::Constant)
+          receiver_values = constant_values_of(receiver)
+          return nil unless receiver_values
+
+          arg_value_sets = args.map { |a| constant_values_of(a) }
+          return nil if arg_value_sets.any?(&:nil?)
 
           case args.size
-          when 0 then try_fold_unary(receiver, method_name)
-          when 1 then try_fold_binary(receiver, method_name, args.first)
+          when 0 then try_fold_unary_set(receiver_values, method_name)
+          when 1 then try_fold_binary_set(receiver_values, method_name, arg_value_sets.first)
           end
         end
 
-        def try_fold_binary(receiver, method_name, arg)
-          return nil unless arg.is_a?(Type::Constant)
-          return nil unless safe?(receiver.value, method_name, arg.value)
+        # Returns the array of underlying Ruby values when `type` is a
+        # `Constant` (1-element array) or a `Union` whose every member
+        # is a `Constant` (n-element array). Returns `nil` for any other
+        # shape — the catch-all that bails the fold.
+        def constant_values_of(type)
+          case type
+          when Type::Constant
+            [type.value]
+          when Type::Union
+            return nil unless type.members.all?(Type::Constant)
 
-          Type::Combinator.constant_of(receiver.value.public_send(method_name, arg.value))
+            type.members.map(&:value)
+          end
+        end
+
+        def try_fold_unary_set(receiver_values, method_name)
+          results = receiver_values.flat_map do |rv|
+            invoke_unary(rv, method_name) || []
+          end
+          build_constant_type(results)
+        end
+
+        def try_fold_binary_set(receiver_values, method_name, arg_values)
+          return nil if receiver_values.size * arg_values.size > UNION_FOLD_INPUT_LIMIT
+
+          results = receiver_values.flat_map do |rv|
+            arg_values.flat_map { |av| invoke_binary(rv, method_name, av) || [] }
+          end
+          build_constant_type(results)
+        end
+
+        # Builds a Constant or Union[Constant…] from a flat list of
+        # Ruby values. Returns nil when the result set is empty (no
+        # safe pair) or exceeds `UNION_FOLD_OUTPUT_LIMIT`.
+        def build_constant_type(values)
+          return nil if values.empty?
+
+          unique = values.uniq
+          return nil if unique.size > UNION_FOLD_OUTPUT_LIMIT
+
+          constants = unique.map { |v| Type::Combinator.constant_of(v) }
+          constants.size == 1 ? constants.first : Type::Combinator.union(*constants)
+        end
+
+        # Returns `[value]` on success, `nil` to signal "skip this pair".
+        # The 1-element-array shape lets callers distinguish a successful
+        # `false`/`nil` fold from a skipped pair when chaining via
+        # `flat_map`.
+        def invoke_binary(receiver_value, method_name, arg_value)
+          return nil unless safe?(receiver_value, method_name, arg_value)
+
+          result = receiver_value.public_send(method_name, arg_value)
+          foldable_constant_value?(result) ? [result] : nil
         rescue StandardError
           nil
         end
 
-        # v0.0.3 C — zero-arg pure-unary fold. Returns a
-        # `Constant` carrier, or `nil` when:
-        # - the method is not in the receiver's pure-unary
-        #   catalogue,
-        # - invoking it raises (the catalogue is curated to
-        #   minimise this; the rescue is a safety net),
-        # - the result is a host object the analyzer should
-        #   not surface as a `Constant` (e.g. an `Array` or
-        #   `Proc` — those would need carrier-aware
-        #   handling that the constant lattice does not
-        #   model today). The post-result type guard caps
-        #   the surface at scalar / String / Symbol values.
-        def try_fold_unary(receiver, method_name)
-          return nil unless unary_safe?(receiver.value, method_name)
-          return nil if string_unary_blow_up?(receiver.value, method_name)
+        # Returns `[value]` on success, `nil` to signal "skip". See
+        # `invoke_binary` for why we wrap.
+        def invoke_unary(receiver_value, method_name)
+          return nil unless unary_safe?(receiver_value, method_name)
+          return nil if string_unary_blow_up?(receiver_value, method_name)
 
-          result = receiver.value.public_send(method_name)
-          return nil unless foldable_constant_value?(result)
-
-          Type::Combinator.constant_of(result)
+          result = receiver_value.public_send(method_name)
+          foldable_constant_value?(result) ? [result] : nil
         rescue StandardError
           nil
         end

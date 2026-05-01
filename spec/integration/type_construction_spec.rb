@@ -87,12 +87,18 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
   describe "fixtures/block_map.rb — block-return type uplift on Array#map" do
     let(:harness) { harness_for("block_map") }
 
-    it "binds `strings` to `Array[String]`" do
+    it "binds `strings` to a precise constant union of stringified literals" do
+      # Union-fold lifts `[1,2,3].map { |n| n.to_s }` to
+      # `Array[Union[Constant["1"], Constant["2"], Constant["3"]]]` —
+      # strictly more precise than the previous `Array[String]`.
+      # Wider receivers (e.g. `Nominal[Integer]`) still widen back
+      # to `Array[String]` via the RBS tier.
       strings = harness.local(:strings)
       expect(strings).to be_a(Rigor::Type::Nominal)
       expect(strings.class_name).to eq("Array")
-      expect(strings.type_args.first).to be_a(Rigor::Type::Nominal)
-      expect(strings.type_args.first.class_name).to eq("String")
+      element = strings.type_args.first
+      expect(element).to be_a(Rigor::Type::Union)
+      expect(element.members.map(&:value).sort).to eq(%w[1 2 3])
     end
   end
 

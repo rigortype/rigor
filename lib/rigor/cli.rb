@@ -105,9 +105,38 @@ module Rigor
         return 1
       end
 
-      File.write(path, YAML.dump(Configuration::DEFAULTS))
+      File.write(path, init_template)
       @out.puts("Created #{path}")
       0
+    end
+
+    # Renders the starter `.rigor.yml` body. The template
+    # serialises `Configuration::DEFAULTS` (so the on-disk file
+    # round-trips through `Configuration.load`) and prepends a
+    # short header that points the user at the keys they are
+    # most likely to want to edit.
+    def init_template
+      <<~YAML
+        # Rigor configuration. See docs/CURRENT_WORK.md for the
+        # full set of features the analyzer ships in this preview.
+        #
+        # Keys you may want to edit:
+        # - target_ruby: minimum Ruby version your project targets.
+        # - paths:       directories scanned by `rigor check` and
+        #                `rigor type-scan` when no path is given.
+        # - plugins:     reserved for future plugin contributions
+        #                (no plugins are loaded today).
+        # - cache.path:  where Rigor will eventually persist
+        #                analysis results across runs.
+        #
+        # `Rigor::Environment.for_project` automatically loads
+        # the project's `sig/` directory plus a curated stdlib
+        # bundle (pathname, optparse, json, yaml, fileutils,
+        # tempfile, uri, logger, date, prism, rbs). Adding a
+        # `sig/<gem>.rbs` file under `sig/` is the simplest way
+        # to extend type coverage today.
+        #{YAML.dump(Configuration::DEFAULTS).sub(/\A---\n/, '')}
+      YAML
     end
 
     def run_type_of

@@ -79,6 +79,16 @@ module Rigor
         seeded_scope = seeded_scope.with_program_globals(program_globals)
         program_globals.each { |name, type| seeded_scope = seeded_scope.with_global(name, type) }
 
+        # Slice 7 phase 9. In-source constant value tracking.
+        # Walks every ConstantWriteNode/ConstantPathWriteNode in
+        # the program and types its rvalue under a scope that
+        # carries the surrounding qualified prefix as
+        # `self_type`, so the rvalue typer sees in-class
+        # references resolve correctly. Multiple writes to the
+        # same qualified name union via `Type::Combinator.union`.
+        in_source_constants = build_in_source_constants(root, seeded_scope)
+        seeded_scope = seeded_scope.with_in_source_constants(in_source_constants)
+
         table = {}.compare_by_identity
         table.default = seeded_scope
 
@@ -249,6 +259,56 @@ module Rigor
         existing = accumulator[node.name]
         accumulator[node.name] =
           existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+      end
+
+      # Slice 7 phase 9 — in-source constant value pre-pass.
+      # Walks the entire program (top-level AND inside class /
+      # module / def bodies) for `Prism::ConstantWriteNode` and
+      # `Prism::ConstantPathWriteNode`, types each rvalue, and
+      # accumulates by qualified name. Constants defined inside
+      # a class body are qualified with the surrounding class
+      # path; constants written via a path (`Foo::BAR = ...`)
+      # use the rendered path as-is.
+      def build_in_source_constants(root, default_scope)
+        accumulator = {}
+        walk_constant_writes(root, [], default_scope, accumulator)
+        accumulator.freeze
+      end
+
+      def walk_constant_writes(node, qualified_prefix, default_scope, accumulator) # rubocop:disable Metrics/CyclomaticComplexity
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            child_prefix = qualified_prefix + [name]
+            walk_constant_writes(node.body, child_prefix, default_scope, accumulator) if node.body
+            return
+          end
+        when Prism::ConstantWriteNode
+          record_constant_write(node, qualified_prefix, default_scope, accumulator, node.name.to_s)
+          return
+        when Prism::ConstantPathWriteNode
+          full = qualified_name_for(node.target)
+          record_constant_write(node, [], default_scope, accumulator, full) if full
+          return
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_constant_writes(child, qualified_prefix, default_scope, accumulator)
+        end
+      end
+
+      def record_constant_write(node, qualified_prefix, default_scope, accumulator, base_name)
+        full = qualified_prefix.empty? ? base_name : "#{qualified_prefix.join('::')}::#{base_name}"
+        body_scope = default_scope
+        unless qualified_prefix.empty?
+          body_scope = body_scope.with_self_type(Type::Combinator.singleton_of(qualified_prefix.join("::")))
+        end
+        rvalue_type = body_scope.type_of(node.value)
+        existing = accumulator[full]
+        accumulator[full] = existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end
 
       # Walks the program once for `Prism::ModuleNode` and

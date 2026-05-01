@@ -822,6 +822,8 @@ module Rigor
       def build_fresh_body_scope
         Scope.empty(environment: scope.environment)
              .with_declared_types(scope.declared_types)
+             .with_discovered_classes(scope.discovered_classes)
+             .with_in_source_constants(scope.in_source_constants)
              .with_class_ivars(scope.class_ivars)
              .with_class_cvars(scope.class_cvars)
              .with_program_globals(scope.program_globals)

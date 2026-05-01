@@ -324,12 +324,19 @@ module Rigor
       def resolve_constant_name(name)
         env = scope.environment
         discovered = scope.discovered_classes
+        in_source = scope.in_source_constants
         lexical_constant_candidates(name).each do |candidate|
           singleton = env.singleton_for_name(candidate)
           return singleton if singleton
 
-          in_source = discovered[candidate]
-          return in_source if in_source
+          in_source_class = discovered[candidate]
+          return in_source_class if in_source_class
+
+          # In-source value-bearing constants take precedence
+          # over RBS constant decls because user code is the
+          # authoritative source for its own constants.
+          in_source_value = in_source[candidate]
+          return in_source_value if in_source_value
 
           value = env.constant_for_name(candidate)
           return value if value

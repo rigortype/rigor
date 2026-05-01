@@ -497,6 +497,24 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         expect(type.class_name).to eq("Account")
       end
 
+      it "resolves in-source constant values through Scope#in_source_constants (Slice 7 phase 9)" do
+        constants = { "BUCKETS" => Rigor::Type::Combinator.constant_of(:hello) }.freeze
+        bound = scope.with_in_source_constants(constants)
+        type = bound.type_of(parse_expression("BUCKETS"))
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(:hello))
+      end
+
+      it "in-source value overrides an RBS constant decl of the same name" do
+        # Sanity: the RBS constant lookup would normally win; the
+        # in-source map takes precedence per Ruby's runtime
+        # semantics (user code is the authoritative source for
+        # its own constants).
+        constants = { "Float::INFINITY" => Rigor::Type::Combinator.constant_of(:overridden) }.freeze
+        bound = scope.with_in_source_constants(constants)
+        type = bound.type_of(parse_expression("Float::INFINITY"))
+        expect(type).to eq(Rigor::Type::Combinator.constant_of(:overridden))
+      end
+
       it "resolves a non-class constant declared in RBS through Environment#constant_for_name" do
         # `Rigor::Analysis::FactStore::BUCKETS` is declared in
         # sig/rigor/analysis/fact_store.rbs as Array[bucket].

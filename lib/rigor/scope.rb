@@ -19,7 +19,7 @@ module Rigor
     attr_reader :environment, :locals, :fact_store, :self_type, :declared_types,
                 :ivars, :cvars, :globals,
                 :class_ivars, :class_cvars, :program_globals,
-                :discovered_classes
+                :discovered_classes, :in_source_constants
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
@@ -43,7 +43,8 @@ module Rigor
       class_ivars: EMPTY_CLASS_BINDINGS,
       class_cvars: EMPTY_CLASS_BINDINGS,
       program_globals: EMPTY_VAR_BINDINGS,
-      discovered_classes: EMPTY_VAR_BINDINGS
+      discovered_classes: EMPTY_VAR_BINDINGS,
+      in_source_constants: EMPTY_VAR_BINDINGS
     )
       @environment = environment
       @locals = locals
@@ -57,6 +58,7 @@ module Rigor
       @class_cvars = class_cvars
       @program_globals = program_globals
       @discovered_classes = discovered_classes
+      @in_source_constants = in_source_constants
       freeze
     end
 
@@ -192,6 +194,21 @@ module Rigor
       rebuild(discovered_classes: table)
     end
 
+    # Slice 7 phase 9 — in-source constant-value tracking.
+    # Maps a qualified constant name (e.g. `"BUCKETS"` or
+    # `"Rigor::Analysis::FactStore::BUCKETS"`) to the type of
+    # the rvalue assigned at its `Prism::ConstantWriteNode` /
+    # `Prism::ConstantPathWriteNode`. Populated by
+    # `ScopeIndexer` once at index time. `ExpressionTyper#resolve_constant_name`
+    # consults this map after class lookups so an in-source
+    # constant assignment overrides any RBS-declared constant
+    # of the same qualified name (matching Ruby's runtime
+    # precedence: a constant defined in user code is the
+    # authoritative value).
+    def with_in_source_constants(table)
+      rebuild(in_source_constants: table)
+    end
+
     def facts_for(target: nil, bucket: nil)
       fact_store.facts_for(target: target, bucket: bucket)
     end
@@ -257,7 +274,7 @@ module Rigor
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
       declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals,
       class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals,
-      discovered_classes: @discovered_classes
+      discovered_classes: @discovered_classes, in_source_constants: @in_source_constants
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -266,7 +283,8 @@ module Rigor
         ivars: ivars, cvars: cvars, globals: globals,
         class_ivars: class_ivars, class_cvars: class_cvars,
         program_globals: program_globals,
-        discovered_classes: discovered_classes
+        discovered_classes: discovered_classes,
+        in_source_constants: in_source_constants
       )
     end
 
@@ -288,7 +306,8 @@ module Rigor
         class_ivars: class_ivars,
         class_cvars: class_cvars,
         program_globals: program_globals,
-        discovered_classes: discovered_classes
+        discovered_classes: discovered_classes,
+        in_source_constants: in_source_constants
       )
     end
   end

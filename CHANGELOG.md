@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-05-01
+
+The second preview. v0.0.2 closes the must-have envelope around the
+v0.0.1 pipeline: a richer `RBS::Extended` directive surface
+(`assert` / `assert-if-true` / `assert-if-false`, `~T` negation,
+`target: self`), inter-procedural inference for user-defined
+methods, an `argument-type-mismatch` rule, per-rule diagnostic
+suppression (project-level + in-source comments),
+configuration passthrough for stdlib libraries and signature
+paths, and a `--explain` mode that surfaces fail-soft fallback
+events.
+
 ### Added
 
 - **`rigor check --explain` mode.** Surfaces fail-soft inference
@@ -264,5 +276,6 @@ The gem is published to RubyGems as **`rigortype`** (the
   reserved for `dump_type`); per-rule configuration and
   suppression comments are deferred.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/rigortype/rigor/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/rigortype/rigor/releases/tag/v0.0.1

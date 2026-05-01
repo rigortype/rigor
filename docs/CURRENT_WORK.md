@@ -61,6 +61,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 7 phase 8 | `9237e36` | `rigor check` first preview: `Rigor::Analysis::CheckRules` flags "undefined method on typed receiver" + `Object#class` precise meta-introspection |
 | Slice 7 phase 9 | `eea9bb6` | In-source constant value tracking via `Scope#in_source_constants`; `BUCKETS = [:a, :b]; BUCKETS.first` resolves to `:a` (lib/ ConstantReadNode 7.1 % → 0.8 %) |
 | Slice 7 phase 10 | `b82e789` | Implicit-self defaults to `Object` + user-class ancestor fallback for Module/Kernel intrinsics; `attr_reader`/`require`/`private` etc. resolve (lib/ unrecognised 3.9 % → 3.2 %) |
+| Slice 7 phase 11 | `fc1da90` | `rigor check` wrong-arity rule + Tuple/HashShape receiver projection in `CheckRules` |
 
 ## What is in Place Today
 

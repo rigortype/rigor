@@ -50,6 +50,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice A constant-walk | `60336be` | Lexical constant lookup in ExpressionTyper using `scope.self_type` (lib/ unrecognised: 10.5 % → 6.2 %) |
 | Slice A constant-value | `7d2777b` | `Environment#constant_for_name` + `RbsLoader#constant_type` for non-class RBS constant decls (lib/ unrecognised: 6.2 % → 6.0 %) |
 | Slice A stdlib | `d0096fc` | `Environment::DEFAULT_LIBRARIES` (pathname/optparse/json/yaml/fileutils/tempfile/uri/logger/date/prism/rbs) loaded by default in `for_project` (lib/ unrecognised: 6.0 % → 3.8 %) |
+| Slice 7 phase 1 | `740573a` | Method-local ivar/cvar/global type bindings on `Scope`; `@x = 1; @x` reads as `Constant[1]` inside the same method |
 | Slice A declarations | `8ec609e` | `Scope#declared_types` + `ScopeIndexer`-populated overrides for `module Foo` / `class Bar` headers (lib/ ConstantReadNode unrecognised: 7.0 % → 6.3 %) |
 
 ## What is in Place Today
@@ -319,8 +320,12 @@ These follow from the slice roadmap; each has a planned slice that lifts it.
    unrecognised mass on `type-scan lib` is calls and references against
    Rigor's own classes; writing those signatures would move the metric
    substantially.
-7. **Untyped writes to ivars / cvars / globals**: `@x = 1` writes are
-   typed but do not add a binding to a (nonexistent) ivar scope. Slice 7+.
+7. **Cross-method ivar / cvar / global bindings**: Slice 7 phase 1
+   binds writes within a single method body, so `@x = 1; @x` reads as
+   `Constant[1]` inside the same method. Reads in other methods of
+   the same class still observe `Dynamic[Top]`; an instance-level
+   binding map keyed by `self_type`'s qualified class name is a
+   follow-up slice.
 8. **Method-call return-type narrowing on receiver shape**: covered for
    generics on `Nominal[T]`, not yet for narrowing through `Dynamic[T]`'s
    static facet beyond the Slice 4 phase 2c overload selection.

@@ -64,6 +64,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 7 phase 11 | `fc1da90` | `rigor check` wrong-arity rule + Tuple/HashShape receiver projection in `CheckRules` |
 | Slice 7 phase 12 | `fcb3820` | `Scope#discovered_methods` (def + define_method walk) suppresses check false positives on reopened classes |
 | Slice 7 phase 13 | `db8eb2b` | First-preview README rewrite + commented `rigor init` template |
+| Slice 7 phase 14 | `3c30082` | `rigor check` nil-receiver rule + early-return narrowing in `eval_if` / `eval_unless` |
 
 ## What is in Place Today
 

@@ -7,18 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-05-02
+
+The third preview. v0.0.3 makes the inference engine "see literal
+values where it can prove them" across a far wider surface than
+v0.0.2: aggressive constant folding (unary + binary + Union[Constant]
+cartesian + integer-range arithmetic + Tuple-shaped divmod), a
+PHPStan-style imported-built-in refinement carrier
+(`non-empty-string`, `positive-int`, `non-zero-int`,
+`non-empty-array[T]`, `non-empty-hash[K, V]`, `negative-int`,
+`non-positive-int`, `non-negative-int`), an extracted built-in
+method catalog driving the fold dispatcher (Numeric / String /
+Symbol / Array / IO / File auto-extracted from CRuby), iterator-
+block-parameter typing, scope-level integer-range narrowing,
+case/when range narrowing, an `always-raises` diagnostic for
+provable Integer division-by-zero, and end-to-end opt-in of the
+new refinement carrier through `RBS::Extended`'s new
+`rigor:v1:return:` directive.
+
+The robustness principle (Postel's law for types — strict on
+returns, lenient on parameters) is now a normative section of the
+type specification with ADR-5 as the design rationale.
+
 ### Added
 
-- **Aggressive constant folding through user methods (v0.0.3 C).**
-  `Rigor::Inference::MethodDispatcher::ConstantFolding` gains a
-  curated unary catalogue covering pure, side-effect-free
-  zero-arg methods on Integer / Float / String / Symbol /
-  TrueClass / FalseClass / NilClass (`odd?`, `even?`, `zero?`,
-  `succ`, `to_s`, `upcase`, `downcase`, `reverse`, `length`,
-  `empty?`, `nil?`, `!`, …). When the receiver is a
-  `Constant`, the method is invoked at static time and the
-  result is wrapped in a fresh `Constant`. Combined with
-  inter-procedural inference (v0.0.2 #5):
+- **Aggressive constant folding through user methods.**
+  `Rigor::Inference::MethodDispatcher::ConstantFolding` invokes
+  the real Ruby method on `Constant` receivers and arguments
+  whenever the method is in a curated allow-list, the operation
+  cannot raise on the receiver's domain, and the result is a
+  scalar that round-trips through `Type::Combinator.constant_of`.
+  Combined with inter-procedural inference (v0.0.2 #5):
 
   ```ruby
   class Parity
@@ -26,56 +45,226 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end
   Parity.new.is_odd(3)   # was `false | true` in v0.0.2
                          # is now `Constant[true]`
-  3.odd?                 # was `false | true` in v0.0.2
-                         # is now `Constant[true]`
   ```
 
-  Results outside the foldable scalar envelope (Array,
-  Hash, Proc, …) and methods that raise are conservatively
-  held back — the engine falls through to the RBS tier as
-  before. Per-class catalogues curated to never raise on
-  the type's full domain; the rescue is a safety net.
+- **Cartesian fold over `Union[Constant…]`.** Binary arithmetic
+  and comparison fold pairwise across Union receivers and
+  arguments, deduplicate, and rebuild a precise `Union[Constant…]`
+  result. Bounded by `UNION_FOLD_INPUT_LIMIT = 32` and
+  `UNION_FOLD_OUTPUT_LIMIT = 8`; when the output cap is exceeded
+  for an Integer-only result set, the analyzer gracefully widens
+  to the bounding `IntegerRange[min, max]` instead of giving up.
+
+- **`Type::IntegerRange` carrier and range arithmetic.** PHPStan-
+  style `int<min, max>` family with named aliases `positive-int`
+  (`1..`), `non-negative-int` (`0..`), `negative-int` (`..-1`),
+  `non-positive-int` (`..0`), and `int<a, b>`. Erases to
+  `Integer` in RBS. Binary `+`, `-`, `*`, `/`, `%` and unary
+  `succ` / `pred` / `abs` / `-@` / `even?` / `odd?` /
+  `bit_length` / `zero?` / `positive?` / `negative?` all fold
+  precisely. Single-point intersections (`int<5, 5>`) collapse
+  to `Constant[5]`.
+
+- **Scope-level range narrowing through comparisons and
+  predicates.** `if x > 0 ... end` narrows `x` to `positive-int`
+  on the truthy edge, `non-positive-int` on the falsey edge.
+  Same for `<`, `<=`, `>=`, the reversed forms (`0 < x`),
+  `x.positive?` / `x.negative?` / `x.zero?` / `x.nonzero?`, and
+  `x.between?(a, b)`. The narrowing intersects with an existing
+  `IntegerRange` bound when one is already in scope.
+
+- **`case/when` integer-range narrowing.** `case n when 1..10
+  then …` narrows `n` to `int<1, 10>` inside the body;
+  `when 1...10` narrows to `int<1, 9>` (exclusive end);
+  `when (100..)` narrows to `int<100, max>`; `when (..-1)`
+  narrows to `negative-int`; `when 0` narrows to `Constant[0]`.
+
+- **Iterator block-parameter typing.** `5.times { |i| … }` types
+  `i` as `int<0, 4>`; `1.times { |i| … }` collapses to
+  `Constant[0]`; `3.upto(7) { |i| … }` and `7.downto(3)
+  { |i| … }` both type `i` as `int<3, 7>`. Wider Integer
+  receivers (`Nominal[Integer]`, `positive-int`) fall back to
+  `non-negative-int`.
+
+- **Branch elision on provably-truthy/falsey predicates.**
+  `if 4.even? ; :even ; else ; :odd ; end` resolves to
+  `Constant[:even]` only — the dead branch is skipped — when
+  the predicate's narrow_truthy / narrow_falsey collapses one
+  side to `Bot`. `Constant[true]` / `Constant[false]` /
+  `Nominal[Integer]` (always truthy) all qualify; `Union[true,
+  false]` keeps both branches active as before.
+
+- **`Tuple`-shaped `Integer#divmod` / `Float#divmod` folds.**
+  `5.divmod(3)` lifts to `Tuple[Constant[1], Constant[2]]` so
+  multi-target destructuring threads the per-slot type into
+  locals (`q, r = 11.divmod(4)` binds `q: 2`, `r: 3`).
+  Float / mixed Integer-Float divmod produces a mixed
+  `Tuple[Constant<Integer>, Constant<Float>]`.
+
+- **Built-in method catalog extraction pipeline.**
+  `tool/extract_builtin_catalog.rb` parses CRuby's
+  `Init_<Topic>` blocks (Numeric / Integer / Float / String /
+  Symbol / Array / IO / File), classifies each cfunc body
+  statically (leaf / leaf-when-numeric / dispatch /
+  block-dependent / mutates-self / raises / unknown), and
+  joins the result with the matching `references/rbs/core/*.rbs`
+  signatures. Output lives at `data/builtins/ruby_core/<topic>.yml`
+  (regenerated via `make extract-builtin-catalogs`). Generated
+  YAML ships with the gem.
+
+  `Rigor::Inference::Builtins::NumericCatalog` /
+  `STRING_CATALOG` / `ARRAY_CATALOG` consume the catalogs at
+  runtime and gate the constant-fold dispatcher on
+  per-method purity. Per-class blocklists guard against
+  classifier false positives (the C-body regex does not
+  follow indirect mutators like `rb_str_replace` →
+  `str_modifiable`); bang-suffixed selectors are universally
+  blocked.
+
+  Folds unlocked in v0.0.3 include: `Integer#**`, `&`, `|`,
+  `^`, `<<`, `>>`, `===`, `div`, `fdiv`, `modulo`,
+  `remainder`, `pow`; `Float#**`; `String#[]`, `include?`,
+  `start_with?`, `end_with?`, `index`, `count`, `inspect`;
+  `Symbol#length`, `empty?`, `casecmp?`.
+
+- **`Type::IntegerRange` returns from container `#size` /
+  `#length` / `#bytesize`.** `Nominal[Array]#size`,
+  `Nominal[String]#length`, `Nominal[Hash]#size`,
+  `Nominal[Set]#size`, `Nominal[Range]#size` now return
+  `non_negative_int` instead of the RBS-declared `Integer`.
+  Composes with the comparison-narrowing tier so `if
+  arr.size > 0` narrows the local to `positive-int` and
+  `arr.size - 1` evaluates as `non-negative-int`.
+
+- **`File` path-manipulation folding (opt-in).**
+  `File.basename`, `#dirname`, `#extname`, `#join`,
+  `#split`, `#absolute_path?` over `Constant<String>`
+  arguments fold to a precise `Constant` (or
+  `Tuple[Constant, Constant]` for `split`) when
+  `fold_platform_specific_paths: true` is set in
+  `.rigor.yml`. Default mode is platform-agnostic — these
+  methods read `File::SEPARATOR` / `ALT_SEPARATOR` and would
+  otherwise bake the analyzer-host's platform into the
+  inferred type — so the RBS tier answers with
+  `Nominal[String]` / `Tuple[String, String]` / `bool`.
+  Single-platform projects opt in for the precision payoff;
+  cross-platform projects keep the safe envelope.
+
+- **`Type::Difference` carrier (OQ3 point-removal half).**
+  `Difference[base, removed]` represents `base` minus a
+  finite removed value set, the structural primitive every
+  imported-built-in refinement of the "non-empty / non-zero /
+  non-empty-array / non-empty-hash" family uses. Acceptance
+  is conservative: only `Constant` and same-removed
+  `Difference` candidates can be proved disjoint from the
+  removed set, so `Difference[String, ""].accepts(Nominal[String])`
+  correctly returns `no` (the wider Nominal could be `""`).
+  `MethodDispatcher::ShapeDispatch` projects the
+  empty-removal case directly: `nes.size` →
+  `positive-int`, `nes.empty?` → `Constant[false]`,
+  `nzi.zero?` → `Constant[false]`. Erases to the base
+  nominal in RBS.
+
+- **`Rigor::Builtins::ImportedRefinements` registry.** Maps
+  every imported-built-in kebab-case name
+  (`non-empty-string`, `non-zero-int`, `non-empty-array`,
+  `non-empty-hash`, `positive-int`, `non-negative-int`,
+  `negative-int`, `non-positive-int`) to its Rigor type
+  carrier. Single integration point for `RBS::Extended` and
+  for future tokeniser slices.
+
+- **`rigor:v1:return:` `RBS::Extended` directive.** Overrides
+  a method's RBS-declared return type with one of the
+  imported-built-in refinements. Annotation in the sig
+  file:
+
+  ```rbs
+  class User
+    %a{rigor:v1:return: non-empty-string}
+    def name: () -> String
+
+    %a{rigor:v1:return: positive-int}
+    def age: () -> Integer
+  end
+  ```
+
+  At call sites the override propagates: `User.new.name.size`
+  is `positive-int`, `User.new.name.empty?` is
+  `Constant[false]`, `User.new.age.zero?` is
+  `Constant[false]`. The RBS erasure stays at the base
+  nominal so the round-trip to ordinary RBS is unaffected.
+  Unknown refinement names degrade to the RBS-declared
+  return (silent miss, no crash).
+
+- **`always-raises` diagnostic rule.** `5 / 0`, `5 % 0`,
+  `5.div(0)`, `5.modulo(0)`, `5.divmod(0)`, and
+  `rand(100) / 0` all surface as `:error` diagnostics under
+  rule `always-raises` ("always raises ZeroDivisionError").
+  Float arithmetic (`5.0 / 0` returns `Infinity`) and
+  `Integer#fdiv(0)` stay silent. Suppressible per-line via
+  `# rigor:disable always-raises`.
 
 - **Implicit-self calls prefer in-source `def` over RBS dispatch.**
-  When `node.receiver` is nil (true implicit self) and the file
-  has a same-named top-level `def` (or DSL-block-nested `def`,
-  e.g. inside `RSpec.describe ... do ... end`), the engine
-  routes through inter-procedural inference on that body
-  before consulting the receiver class's RBS. When the local
-  def's parameter shape is too complex for the binder
+  When `node.receiver` is nil (true implicit self) and the
+  file has a same-named top-level `def` (or DSL-block-nested
+  `def`, e.g. inside `RSpec.describe ... do ... end`), the
+  engine routes through inter-procedural inference on that
+  body before consulting the receiver class's RBS. When the
+  local def's parameter shape is too complex for the binder
   (kwargs / optionals / rest), the engine returns
-  `Dynamic[Top]` instead of falling through to (incorrect) RBS
-  dispatch — the local `def` shadows whatever ancestor method
-  the receiver's class might otherwise resolve to. Self-check
-  on `spec/rigor` drops from 10 to 1 false positives at this
-  commit (the 9 `overload_selector_spec.rb` mis-routings clear).
+  `Dynamic[Top]` instead of falling through to (incorrect)
+  RBS dispatch.
 
-- **RSpec matcher narrowing.** The engine now recognises a
+- **RSpec matcher narrowing.** The engine recognises a
   small catalogue of RSpec matcher patterns as
   assert-shaped narrows on the local passed to
-  `expect(...)`. The narrowing applies to the post-call
-  scope, so subsequent statements observe the refined type
-  without a per-line `# rigor:disable possible-nil-receiver`
-  comment. Recognised today:
-  - `expect(x).not_to be_nil` / `expect(x).to_not be_nil`
-    drop `NilClass` from `x`'s type.
-  - `expect(x).to be_a(C)` / `be_kind_of(C)` narrow `x` to
-    `C` (subtype-permitting); `be_an_instance_of(C)` /
-    `be_instance_of(C)` narrow exactly.
+  `expect(...)`. `expect(x).not_to be_nil` /
+  `expect(x).to_not be_nil` drop `NilClass` from `x`'s
+  type; `expect(x).to be_a(C)` / `be_kind_of(C)` narrow `x`
+  to `C` (subtype-permitting); `be_an_instance_of(C)` /
+  `be_instance_of(C)` narrow exactly. Pattern matching is
+  purely AST-shape — no RBS for RSpec is required.
 
-  Pattern matching is purely AST-shape — no RBS for RSpec
-  is required. Self-check on `spec/rigor` drops from 13 to
-  10 false positives at this commit, fully clearing
-  `expression_typer_spec.rb` and `statement_evaluator_spec.rb`.
+- **`fold_platform_specific_paths` configuration option.**
+  Boolean in `.rigor.yml`, default `false`. Enables File
+  path-manipulation folds (see above) for projects that
+  target a single platform.
+
+- **Robustness principle (Postel's law) for types.** New
+  ADR ([`docs/adr/5-robustness-principle.md`](docs/adr/5-robustness-principle.md))
+  and normative spec section
+  ([`docs/type-specification/robustness-principle.md`](docs/type-specification/robustness-principle.md))
+  document the asymmetric authorship rule: Rigor-authored
+  return types should be as strict as can be proved;
+  Rigor-authored parameter types should be as permissive as
+  the body's correct behaviour permits. Hand-written RBS
+  authorship binds; the principle directs Rigor's defaults
+  only.
+
+- **ADR-3 working decisions.** OQ1 (Constant scalar shape):
+  Option C (hybrid). OQ2 (Trinary-returning predicate
+  naming): Option A (drop the `?`). OQ3 (refinement carrier
+  strategy): Option C (two-tier hybrid — `Difference` for
+  point-removal, `Refined` for predicate-subset; the latter
+  ships in v0.0.4).
 
 ### Fixed
 
 - `Rigor::Analysis::CheckRules` `arity_eligible?` /
   `argument_check_eligible?` no longer raise when the RBS
-  function is `RBS::Types::UntypedFunction` (e.g. `(?) ->` or
-  certain stdlib variadic sigs). Both predicates now return
-  `false` for untyped functions — the conservative
+  function is `RBS::Types::UntypedFunction` (e.g. `(?) ->`
+  or certain stdlib variadic sigs). Both predicates now
+  return `false` for untyped functions — the conservative
   outcome — instead of crashing the file's analysis.
+
+- `ConstantFolding`'s union fold no longer silently drops
+  members for which the method is unsupported. The previous
+  behaviour folded `Union[Constant[String], Constant[nil]].nil?`
+  to `Constant[true]` because `String#nil?` was not in
+  `STRING_UNARY` and the partial fold dropped the String
+  pair. The fold now requires every receiver's method to be
+  in the allow set; partial coverage bails to RBS instead
+  of producing a wrong answer.
 
 ## [0.0.2] - 2026-05-01
 
@@ -346,6 +535,7 @@ The gem is published to RubyGems as **`rigortype`** (the
   reserved for `dump_type`); per-rule configuration and
   suppression comments are deferred.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/rigortype/rigor/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/rigortype/rigor/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/rigortype/rigor/releases/tag/v0.0.1

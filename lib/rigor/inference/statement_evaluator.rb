@@ -335,7 +335,17 @@ module Rigor
       # nil-injection on half-bound names so a name set in one branch
       # but not the other is observable as `T | nil` after the if.
       def eval_if(node)
-        _pred_type, post_pred = sub_eval(node.predicate, scope)
+        pred_type, post_pred = sub_eval(node.predicate, scope)
+
+        # When the predicate is a known-truthy / known-falsey type
+        # (notably `Constant[true]` / `Constant[false]` after the
+        # constant-fold tier), only the live branch contributes a
+        # type and a post-scope. The dead branch is skipped so the
+        # result type is precise (`Constant[:even]` instead of the
+        # joined `Constant[:even] | Constant[:odd]`).
+        live = live_branch_for_if(node, pred_type, post_pred)
+        return live if live
+
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_pred)
         then_type, then_scope = eval_branch_or_nil(node.statements, truthy_scope)
         else_type, else_scope = eval_branch_or_nil(node.subsequent, falsey_scope)
@@ -360,7 +370,11 @@ module Rigor
       # narrower's truthy/falsey edges are routed in swapped form
       # because `unless` runs its body when the predicate is falsey.
       def eval_unless(node)
-        _pred_type, post_pred = sub_eval(node.predicate, scope)
+        pred_type, post_pred = sub_eval(node.predicate, scope)
+
+        live = live_branch_for_unless(node, pred_type, post_pred)
+        return live if live
+
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_pred)
         then_type, then_scope = eval_branch_or_nil(node.statements, falsey_scope)
         else_type, else_scope = eval_branch_or_nil(node.else_clause, truthy_scope)
@@ -376,6 +390,38 @@ module Rigor
           Type::Combinator.union(then_type, else_type),
           join_with_nil_injection(then_scope, else_scope)
         ]
+      end
+
+      # Returns the `[type, post_scope]` of the live branch when the
+      # predicate is provably truthy / falsey, else nil so the
+      # caller falls through to the standard both-branch evaluation.
+      # Constant `true`/`false` is the obvious trigger; non-falsey
+      # carriers like `Nominal[Integer]` (Integer is always truthy
+      # in Ruby — including 0) also collapse the dead else.
+      def live_branch_for_if(node, pred_type, post_pred)
+        case predicate_certainty(pred_type)
+        when :always_truthy then eval_branch_or_nil(node.statements, post_pred)
+        when :always_falsey then eval_branch_or_nil(node.subsequent, post_pred)
+        end
+      end
+
+      def live_branch_for_unless(node, pred_type, post_pred)
+        case predicate_certainty(pred_type)
+        when :always_truthy then eval_branch_or_nil(node.else_clause, post_pred)
+        when :always_falsey then eval_branch_or_nil(node.statements, post_pred)
+        end
+      end
+
+      def predicate_certainty(pred_type)
+        return nil if pred_type.nil? || pred_type.is_a?(Type::Bot)
+
+        truthy_bot = Narrowing.narrow_truthy(pred_type).is_a?(Type::Bot)
+        falsey_bot = Narrowing.narrow_falsey(pred_type).is_a?(Type::Bot)
+
+        return :always_falsey if truthy_bot && !falsey_bot
+        return :always_truthy if !truthy_bot && falsey_bot
+
+        nil
       end
 
       def eval_else(node)

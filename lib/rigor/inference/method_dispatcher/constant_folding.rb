@@ -190,6 +190,14 @@ module Rigor
         end
 
         def try_fold_unary_set(receiver_values, method_name)
+          # Type-level allow check on every receiver. If one member's
+          # type does not have the method in its allow list (e.g.
+          # `Union[String, nil].nil?` — `:nil?` is not in
+          # `STRING_UNARY`), bail the fold so the RBS tier answers.
+          # Silently dropping the unsafe member would lie about the
+          # remaining receivers' behaviour.
+          return nil unless receiver_values.all? { |rv| unary_method_allowed?(rv, method_name) }
+
           results = receiver_values.flat_map do |rv|
             invoke_unary(rv, method_name) || []
           end
@@ -198,11 +206,22 @@ module Rigor
 
         def try_fold_binary_set(receiver_values, method_name, arg_values)
           return nil if receiver_values.size * arg_values.size > UNION_FOLD_INPUT_LIMIT
+          return nil unless receiver_values.all? { |rv| binary_method_allowed?(rv, method_name) }
 
           results = receiver_values.flat_map do |rv|
             arg_values.flat_map { |av| invoke_binary(rv, method_name, av) || [] }
           end
           build_constant_type(results, source: receiver_values + arg_values)
+        end
+
+        def unary_method_allowed?(receiver_value, method_name)
+          unary_ops_for(receiver_value).include?(method_name) ||
+            catalog_allows?(receiver_value, method_name)
+        end
+
+        def binary_method_allowed?(receiver_value, method_name)
+          ops_for(receiver_value).include?(method_name) ||
+            catalog_allows?(receiver_value, method_name)
         end
 
         # Builds a Constant or Union[Constant…] from a flat list of

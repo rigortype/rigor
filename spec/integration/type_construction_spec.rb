@@ -24,10 +24,19 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
   describe "fixtures/parity.rb — even/odd predicate" do
     let(:harness) { harness_for("parity") }
 
-    it "binds `result` to `Constant[:even] | Constant[:odd]`" do
-      result_type = harness.local(:result)
-      expect(result_type).to be_a(Rigor::Type::Union)
-      expect(result_type.members.map(&:value)).to contain_exactly(:even, :odd)
+    it "binds `result` to the live-branch `Constant[:even]` when the predicate folds to true" do
+      # `4.even?` constant-folds to `Constant[true]`, so the
+      # else-branch is dead and the if-expression resolves to
+      # `Constant[:even]` only. The bool-valued path (when the
+      # receiver is a non-literal Integer) joins both edges into
+      # `Constant[:even] | Constant[:odd]` — the fixture itself
+      # `assert_type`s that case.
+      expect(harness.local(:result)).to eq(constant(:even))
+    end
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
     end
   end
 

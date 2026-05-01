@@ -5,13 +5,15 @@ include Rigor::Testing
 n = 4
 assert_type("4", n)
 
-# An if-else over a predicate constructs a Symbol-literal union.
+# An if-else over a constant-folded predicate (`4.even?` -> `true`)
+# resolves to the live branch only. A wider receiver would keep
+# both edges and the result would join into a Symbol-literal union.
 parity = if n.even?
   :even
 else
   :odd
 end
-assert_type(":even | :odd", parity)
+assert_type(":even", parity)
 
 # case/when over an integer subject constructs a three-way union.
 label = case n

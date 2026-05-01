@@ -18,7 +18,8 @@ module Rigor
   class Scope
     attr_reader :environment, :locals, :fact_store, :self_type, :declared_types,
                 :ivars, :cvars, :globals,
-                :class_ivars, :class_cvars, :program_globals
+                :class_ivars, :class_cvars, :program_globals,
+                :discovered_classes
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
@@ -41,7 +42,8 @@ module Rigor
       globals: EMPTY_VAR_BINDINGS,
       class_ivars: EMPTY_CLASS_BINDINGS,
       class_cvars: EMPTY_CLASS_BINDINGS,
-      program_globals: EMPTY_VAR_BINDINGS
+      program_globals: EMPTY_VAR_BINDINGS,
+      discovered_classes: EMPTY_VAR_BINDINGS
     )
       @environment = environment
       @locals = locals
@@ -54,6 +56,7 @@ module Rigor
       @class_ivars = class_ivars
       @class_cvars = class_cvars
       @program_globals = program_globals
+      @discovered_classes = discovered_classes
       freeze
     end
 
@@ -177,6 +180,18 @@ module Rigor
       rebuild(program_globals: table)
     end
 
+    # Slice 7 phase 7 — in-source class discovery. Maps a
+    # qualified class name (e.g. `"Account"`) to its
+    # `Type::Singleton` so references to user-defined classes
+    # in the analyzed files resolve through
+    # `ExpressionTyper#resolve_constant_name` even when no RBS
+    # decl exists. Populated once at index time by
+    # `ScopeIndexer` from every `Prism::ClassNode` and
+    # `Prism::ModuleNode` it walks.
+    def with_discovered_classes(table)
+      rebuild(discovered_classes: table)
+    end
+
     def facts_for(target: nil, bucket: nil)
       fact_store.facts_for(target: target, bucket: bucket)
     end
@@ -241,7 +256,8 @@ module Rigor
     def rebuild(
       locals: @locals, fact_store: @fact_store, self_type: @self_type,
       declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals,
-      class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals
+      class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals,
+      discovered_classes: @discovered_classes
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -249,7 +265,8 @@ module Rigor
         declared_types: declared_types,
         ivars: ivars, cvars: cvars, globals: globals,
         class_ivars: class_ivars, class_cvars: class_cvars,
-        program_globals: program_globals
+        program_globals: program_globals,
+        discovered_classes: discovered_classes
       )
     end
 
@@ -270,7 +287,8 @@ module Rigor
         globals: joined_globals,
         class_ivars: class_ivars,
         class_cvars: class_cvars,
-        program_globals: program_globals
+        program_globals: program_globals,
+        discovered_classes: discovered_classes
       )
     end
   end

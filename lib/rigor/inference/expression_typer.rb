@@ -323,9 +323,13 @@ module Rigor
       # whether to fall back.
       def resolve_constant_name(name)
         env = scope.environment
+        discovered = scope.discovered_classes
         lexical_constant_candidates(name).each do |candidate|
           singleton = env.singleton_for_name(candidate)
           return singleton if singleton
+
+          in_source = discovered[candidate]
+          return in_source if in_source
 
           value = env.constant_for_name(candidate)
           return value if value

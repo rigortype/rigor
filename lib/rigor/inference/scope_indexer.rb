@@ -49,14 +49,16 @@ module Rigor
       #   `root`'s subtree.
       # @return [Hash{Prism::Node => Rigor::Scope}] identity-comparing
       #   table whose default value is `default_scope`.
-      def index(root, default_scope:)
+      def index(root, default_scope:) # rubocop:disable Metrics/AbcSize
         # Slice A-declarations. Build the declaration overrides
         # first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through
         # `Scope#with_local` / `#with_fact` / `#with_self_type`
         # propagates it across every derived scope.
-        declared_types = build_declaration_overrides(root)
-        seeded_scope = default_scope.with_declared_types(declared_types)
+        declared_types, discovered_classes = build_declaration_artifacts(root)
+        seeded_scope = default_scope
+                       .with_declared_types(declared_types)
+                       .with_discovered_classes(discovered_classes)
 
         # Slice 7 phase 2. Pre-pass over every class/module body
         # to collect the per-class ivar accumulator. Seeded after
@@ -258,13 +260,14 @@ module Rigor
       # path node. Nested declarations contribute their fully
       # qualified path: `class A::B; class C; ...` produces
       # `A::B` for the outer and `A::B::C` for the inner.
-      def build_declaration_overrides(root)
-        table = {}.compare_by_identity
-        record_declarations(root, [], table)
-        table.freeze
+      def build_declaration_artifacts(root)
+        identity_table = {}.compare_by_identity
+        discovered = {}
+        record_declarations(root, [], identity_table, discovered)
+        [identity_table.freeze, discovered.freeze]
       end
 
-      def record_declarations(node, qualified_prefix, table)
+      def record_declarations(node, qualified_prefix, identity_table, discovered)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -272,14 +275,18 @@ module Rigor
           name = qualified_name_for(node.constant_path)
           if name
             full = (qualified_prefix + [name]).join("::")
-            table[node.constant_path] = Type::Combinator.singleton_of(full)
+            singleton = Type::Combinator.singleton_of(full)
+            identity_table[node.constant_path] = singleton
+            discovered[full] = singleton
             child_prefix = qualified_prefix + [name]
-            record_declarations(node.body, child_prefix, table) if node.body
+            record_declarations(node.body, child_prefix, identity_table, discovered) if node.body
             return
           end
         end
 
-        node.compact_child_nodes.each { |child| record_declarations(child, qualified_prefix, table) }
+        node.compact_child_nodes.each do |child|
+          record_declarations(child, qualified_prefix, identity_table, discovered)
+        end
       end
 
       def qualified_name_for(constant_path_node)

@@ -488,6 +488,15 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         expect(type).to be_a(Rigor::Type::Singleton)
       end
 
+      it "resolves user-defined classes through Scope#discovered_classes (Slice 7 phase 7)" do
+        bound = scope.with_discovered_classes(
+          { "Account" => Rigor::Type::Combinator.singleton_of("Account") }.freeze
+        )
+        type = bound.type_of(parse_expression("Account"))
+        expect(type).to be_a(Rigor::Type::Singleton)
+        expect(type.class_name).to eq("Account")
+      end
+
       it "resolves a non-class constant declared in RBS through Environment#constant_for_name" do
         # `Rigor::Analysis::FactStore::BUCKETS` is declared in
         # sig/rigor/analysis/fact_store.rbs as Array[bucket].

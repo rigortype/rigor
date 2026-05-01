@@ -55,13 +55,9 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 
-    it "narrows the truthy branch to the String constant" do
-      # Line 7 col 3 is the read of `x` inside `if x.is_a?(String); x; ...`.
-      expect(harness.type_at(line: 7, column: 3)).to eq(constant("hello"))
-    end
-
-    it "narrows the falsey branch to the nil constant" do
-      expect(harness.type_at(line: 9, column: 3)).to eq(constant(nil))
+    it "narrows the truthy/falsey branches via assert_type" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
     end
   end
 
@@ -105,9 +101,9 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
   describe "fixtures/early_return.rb — return-if-nil narrowing" do
     let(:harness) { harness_for("early_return") }
 
-    it "drops nil from `String | nil` after the early-return guard" do
-      # Line 8 col 3 is the bare `x` read after `return if x.nil?`.
-      expect(harness.type_at(line: 8, column: 3)).to eq(constant("hello"))
+    it "drops nil from `String | nil` after the early-return guard via assert_type" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
     end
   end
 
@@ -197,6 +193,49 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       falsey = harness.type_at(line: 6, column: 5)
       expect(falsey).to be_a(Rigor::Type::Nominal)
       expect(falsey.class_name).to eq("NilClass")
+    end
+  end
+
+  describe "fixtures/divmod_tuple.rb — Integer#divmod folds to Tuple[Constant, Constant]" do
+    let(:harness) { harness_for("divmod_tuple") }
+
+    it "self-asserts via assert_type with no mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
+  describe "fixtures/integer_range_narrowing.rb — IntegerRange carrier and narrowing" do
+    let(:harness) { harness_for("integer_range_narrowing") }
+
+    it "self-asserts the comparison-narrowed range types via assert_type" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
+  describe "fixtures/union_arithmetic.rb — cartesian fold over Union[Constant…]" do
+    let(:harness) { harness_for("union_arithmetic") }
+
+    it "self-asserts the cartesian-fold and graceful-widening behaviours" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
+  # The fixtures below carry both an `assert_type` self-check
+  # (so the file is readable as documentation) and the
+  # finer-grained `harness.local` assertions above. The shared
+  # spec here only verifies the assert_type path; the type-
+  # specific assertions for each fixture live in their own
+  # `describe` block.
+  describe "self-asserting `assert_type` calls in converted fixtures" do
+    %w[parity case_when compound_writes tuple_access hash_shape block_map].each do |name|
+      it "produces no assert_type mismatches in fixtures/#{name}.rb" do
+        harness = harness_for(name)
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
     end
   end
 end

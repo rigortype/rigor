@@ -126,6 +126,14 @@ module Rigor
         #                `rigor type-scan` when no path is given.
         # - plugins:     reserved for future plugin contributions
         #                (no plugins are loaded today).
+        # - disable:     list of `rigor check` rule identifiers to
+        #                silence project-wide. The shipped rules are
+        #                undefined-method, wrong-arity,
+        #                argument-type-mismatch, possible-nil-receiver,
+        #                dump-type, assert-type. In-source
+        #                `# rigor:disable <rule>` comments at the end
+        #                of an offending line silence per-line; use
+        #                `# rigor:disable all` to suppress every rule.
         # - cache.path:  where Rigor will eventually persist
         #                analysis results across runs.
         #

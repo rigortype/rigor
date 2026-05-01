@@ -73,13 +73,19 @@ module Rigor
         )
       end
 
-      def analyze_file(path, environment)
+      def analyze_file(path, environment) # rubocop:disable Metrics/MethodLength
         parse_result = Prism.parse_file(path)
         return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
 
         scope = Scope.empty(environment: environment)
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
-        CheckRules.diagnose(path: path, root: parse_result.value, scope_index: index)
+        CheckRules.diagnose(
+          path: path,
+          root: parse_result.value,
+          scope_index: index,
+          comments: parse_result.comments,
+          disabled_rules: @configuration.disabled_rules
+        )
       rescue Errno::ENOENT => e
         [
           Diagnostic.new(

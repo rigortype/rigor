@@ -41,6 +41,28 @@ module Rigor
     # the first preview; later slices broaden it.
     # rubocop:disable Metrics/ModuleLength
     module CheckRules
+      # Stable identifiers for each rule. Used by the
+      # configuration `disable:` list and the in-source
+      # `# rigor:disable <rule>` suppression comment system
+      # to identify diagnostics by category. Rule identifiers
+      # are kebab-case strings; new rules MUST register here
+      # so user configuration can refer to them.
+      RULE_UNDEFINED_METHOD = "undefined-method"
+      RULE_WRONG_ARITY = "wrong-arity"
+      RULE_ARGUMENT_TYPE = "argument-type-mismatch"
+      RULE_NIL_RECEIVER = "possible-nil-receiver"
+      RULE_DUMP_TYPE = "dump-type"
+      RULE_ASSERT_TYPE = "assert-type"
+
+      ALL_RULES = [
+        RULE_UNDEFINED_METHOD,
+        RULE_WRONG_ARITY,
+        RULE_ARGUMENT_TYPE,
+        RULE_NIL_RECEIVER,
+        RULE_DUMP_TYPE,
+        RULE_ASSERT_TYPE
+      ].freeze
+
       module_function
 
       # Yields diagnostics for every unrecognised method call on
@@ -53,7 +75,7 @@ module Rigor
       # @param root [Prism::Node]
       # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
       # @return [Array<Rigor::Analysis::Diagnostic>]
-      def diagnose(path:, root:, scope_index:) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def diagnose(path:, root:, scope_index:, comments: [], disabled_rules: []) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         diagnostics = []
         Source::NodeWalker.each(root) do |node|
           next unless node.is_a?(Prism::CallNode)
@@ -76,7 +98,53 @@ module Rigor
           assert_diagnostic = assert_type_diagnostic(path, node, scope_index)
           diagnostics << assert_diagnostic if assert_diagnostic
         end
-        diagnostics
+        filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
+      end
+
+      # v0.0.2 #6 — diagnostic suppression. Two kinds of
+      # suppression compose:
+      #
+      # - **Project-level**: `disabled_rules` is the
+      #   project's `.rigor.yml` `disable:` list. Any
+      #   diagnostic whose `rule` is in the list is dropped.
+      # - **In-source**: `# rigor:disable <rule1>, <rule2>`
+      #   on the same line as the offending expression
+      #   suppresses the matching diagnostic for that line
+      #   only. `# rigor:disable all` on a line suppresses
+      #   every rule on that line.
+      #
+      # Diagnostics with `rule == nil` (parse errors, path
+      # errors, internal analyzer errors) are NEVER
+      # suppressed — they represent failures the user cannot
+      # silence away.
+      def filter_suppressed(diagnostics, comments:, disabled_rules:)
+        suppressions = parse_suppression_comments(comments)
+        disabled = disabled_rules.to_set(&:to_s)
+
+        diagnostics.reject do |diagnostic|
+          rule = diagnostic.rule
+          next false if rule.nil?
+          next true if disabled.include?(rule)
+
+          line_rules = suppressions[diagnostic.line]
+          line_rules && (line_rules.include?("all") || line_rules.include?(rule))
+        end
+      end
+
+      SUPPRESSION_PATTERN = /#\s*rigor:disable\s+(?<rules>[\w,\s-]+)/
+      private_constant :SUPPRESSION_PATTERN
+
+      def parse_suppression_comments(comments)
+        result = Hash.new { |h, k| h[k] = Set.new }
+        comments.each do |comment|
+          source = comment.location.slice
+          match = SUPPRESSION_PATTERN.match(source)
+          next if match.nil?
+
+          rules = match[:rules].to_s.split(/[\s,]+/).reject(&:empty?)
+          rules.each { |rule| result[comment.location.start_line] << rule }
+        end
+        result
       end
 
       # rubocop:disable Metrics/ClassLength
@@ -380,7 +448,8 @@ module Rigor
             line: location.start_line,
             column: location.start_column + 1,
             message: "dump_type: #{type.describe(:short)}",
-            severity: :info
+            severity: :info,
+            rule: RULE_DUMP_TYPE
           )
         end
 
@@ -472,6 +541,7 @@ module Rigor
         def build_assert_type_diagnostic(path, call_node, expected, actual)
           location = call_node.message_loc || call_node.location
           Diagnostic.new(
+            rule: RULE_ASSERT_TYPE,
             path: path,
             line: location.start_line,
             column: location.start_column + 1,
@@ -483,6 +553,7 @@ module Rigor
         def build_nil_receiver_diagnostic(path, call_node)
           location = call_node.message_loc || call_node.location
           Diagnostic.new(
+            rule: RULE_NIL_RECEIVER,
             path: path,
             line: location.start_line,
             column: location.start_column + 1,
@@ -593,6 +664,7 @@ module Rigor
                     "expected #{mismatch[:expected].describe(:short)}, " \
                     "got #{mismatch[:actual].describe(:short)}"
           Diagnostic.new(
+            rule: RULE_ARGUMENT_TYPE,
             path: path,
             line: location.start_line,
             column: location.start_column + 1,
@@ -608,6 +680,7 @@ module Rigor
           method_label = "`#{call_node.name}' on #{class_name}"
           message = "wrong number of arguments to #{method_label} (given #{actual}, expected #{range})"
           Diagnostic.new(
+            rule: RULE_WRONG_ARITY,
             path: path,
             line: location.start_line,
             column: location.start_column + 1,
@@ -621,6 +694,7 @@ module Rigor
           location = call_node.message_loc || call_node.location
           rendered_receiver = receiver_type.describe
           Diagnostic.new(
+            rule: RULE_UNDEFINED_METHOD,
             path: path,
             line: location.start_line,
             column: location.start_column + 1,

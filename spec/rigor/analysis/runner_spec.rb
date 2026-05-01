@@ -206,6 +206,45 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      describe "diagnostic suppression (v0.0.2 #6)" do # rubocop:disable RSpec/NestedGroups
+        it "skips rules listed in `disable:` of the configuration" do
+          Dir.mktmpdir do |dir|
+            File.write(File.join(dir, "code.rb"), %("x".no_method\n))
+            configuration = Rigor::Configuration.new(
+              "paths" => [dir],
+              "disable" => ["undefined-method"]
+            )
+            result = described_class.new(configuration: configuration).run
+
+            expect(result).to be_success
+          end
+        end
+
+        it "honors a `# rigor:disable <rule>` comment on the same line" do
+          Dir.mktmpdir do |dir|
+            File.write(File.join(dir, "code.rb"), %("x".no_method  # rigor:disable undefined-method\n))
+            configuration = Rigor::Configuration.new("paths" => [dir])
+            result = described_class.new(configuration: configuration).run
+
+            expect(result).to be_success
+          end
+        end
+
+        it "supports `# rigor:disable all` to suppress every rule on a line" do
+          Dir.mktmpdir do |dir|
+            File.write(File.join(dir, "code.rb"), <<~RUBY)
+              "x".no_method  # rigor:disable all
+              [1].rotate(1, 2)  # not suppressed
+            RUBY
+            configuration = Rigor::Configuration.new("paths" => [dir])
+            result = described_class.new(configuration: configuration).run
+
+            expect(result.diagnostics.size).to eq(1)
+            expect(result.diagnostics.first.rule).to eq("wrong-arity")
+          end
+        end
+      end
+
       describe "argument-type-mismatch rule (v0.0.2 #4)" do # rubocop:disable RSpec/NestedGroups
         # Helper: write a fixture under `dir` with the given Ruby
         # source plus a sig declaring `Demo#take_string: (String) -> String`,

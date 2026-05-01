@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-rule diagnostic suppression.** Two mechanisms compose:
+  - **Project-level**: `.rigor.yml`'s new `disable:` key
+    accepts a list of `rigor check` rule identifiers
+    (`undefined-method`, `wrong-arity`,
+    `argument-type-mismatch`, `possible-nil-receiver`,
+    `dump-type`, `assert-type`); matching diagnostics are
+    silenced project-wide.
+  - **In-source**: `# rigor:disable <rule>` (or
+    `<rule1>, <rule2>`) at the end of an offending line
+    silences per-line. `# rigor:disable all` suppresses
+    every rule on that line.
+
+  `Rigor::Analysis::Diagnostic` gains a `rule:` field
+  carrying the source rule's stable identifier. Parse
+  errors / path errors / internal analyzer errors leave
+  `rule` as `nil` and stay unsuppressible.
+
 - **Inter-procedural inference for user-defined methods.**
   When a call's receiver is `Nominal[T]` for a user-defined
   class without an RBS sig and the method has been

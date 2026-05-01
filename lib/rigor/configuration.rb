@@ -9,12 +9,13 @@ module Rigor
       "target_ruby" => "4.0",
       "paths" => ["lib"],
       "plugins" => [],
+      "disable" => [],
       "cache" => {
         "path" => ".rigor/cache"
       }
     }.freeze
 
-    attr_reader :target_ruby, :paths, :plugins, :cache_path
+    attr_reader :target_ruby, :paths, :plugins, :cache_path, :disabled_rules
 
     def self.load(path = DEFAULT_PATH)
       data = if File.exist?(path)
@@ -32,6 +33,7 @@ module Rigor
       @target_ruby = data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")).to_s
       @paths = Array(data.fetch("paths", DEFAULTS.fetch("paths"))).map(&:to_s)
       @plugins = Array(data.fetch("plugins", DEFAULTS.fetch("plugins"))).map(&:to_s)
+      @disabled_rules = Array(data.fetch("disable", DEFAULTS.fetch("disable"))).map(&:to_s).freeze
       @cache_path = cache.fetch("path").to_s
     end
 
@@ -40,6 +42,7 @@ module Rigor
         "target_ruby" => target_ruby,
         "paths" => paths,
         "plugins" => plugins,
+        "disable" => disabled_rules,
         "cache" => {
           "path" => cache_path
         }

@@ -113,7 +113,7 @@ RSpec.describe Rigor::Type::Combinator do
       end
 
       it "rejects non-array type_args" do
-        expect { Rigor::Type::Nominal.new("Array", :not_an_array) }
+        expect { Rigor::Type::Nominal.new("Array", :not_an_array) } # rigor:disable argument-type-mismatch
           .to raise_error(ArgumentError, /type_args must be an Array/)
       end
     end

@@ -60,6 +60,17 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make ch
 
 `bundle exec exe/rigor help` and `bundle exec exe/rigor version` remain available for CLI discovery. `rigor init` writes a starter `.rigor.yml` file. Use `--force` when overwriting an existing file intentionally.
 
+`rigor type-of FILE:LINE:COL` is a probe over `Scope#type_of`. It locates the deepest expression enclosing the position, runs the inference engine, and prints the inferred type and its RBS erasure. `--format=json` switches to machine-readable output, and `--trace` records fail-soft fallbacks via `Rigor::Inference::FallbackTracer` so the missing-node coverage is visible from the CLI.
+
+`rigor type-scan PATH...` is the file/directory-level companion. It walks every Prism node, runs `Scope#type_of` on each, and reports per-node-class coverage (visits vs. directly-unrecognized counts) plus a list of fallback example sites. Use it to track which expression shapes the engine still has to learn and to gate CI builds with `--threshold=RATIO`.
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor type-of lib/foo.rb:10:5
+nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor type-of --trace --format=json lib/foo.rb:10:5
+nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor type-scan lib
+nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor type-scan --format=json --threshold=0.7 lib
+```
+
 ## Directory Layout
 
 - `lib/rigor`: library code and CLI implementation

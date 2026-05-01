@@ -10,8 +10,19 @@ require_relative "analysis/diagnostic"
 require_relative "analysis/result"
 
 module Rigor
-  class CLI
+  # The CLI class is a dispatcher: each `run_*` method delegates to a
+  # command-specific class once the command grows beyond a few lines (see
+  # {CLI::TypeOfCommand}). The class-length budget is intentionally relaxed
+  # here so dispatch wiring can live alongside still-inlined commands.
+  class CLI # rubocop:disable Metrics/ClassLength
     EXIT_USAGE = 64
+
+    HANDLERS = {
+      "check" => :run_check,
+      "init" => :run_init,
+      "type-of" => :run_type_of,
+      "type-scan" => :run_type_scan
+    }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
       new(argv.dup, out: out, err: err).run
@@ -33,14 +44,8 @@ module Rigor
       when "version", "-v", "--version"
         @out.puts("rigor #{Rigor::VERSION}")
         0
-      when "check"
-        run_check
-      when "init"
-        run_init
       else
-        @err.puts("Unknown command: #{command}")
-        @err.puts(help)
-        EXIT_USAGE
+        dispatch(command)
       end
     rescue OptionParser::ParseError => e
       @err.puts(e.message)
@@ -48,6 +53,15 @@ module Rigor
     end
 
     private
+
+    def dispatch(command)
+      handler = HANDLERS[command]
+      return send(handler) if handler
+
+      @err.puts("Unknown command: #{command}")
+      @err.puts(help)
+      EXIT_USAGE
+    end
 
     def run_check
       require_relative "analysis/runner"
@@ -91,9 +105,50 @@ module Rigor
         return 1
       end
 
-      File.write(path, YAML.dump(Configuration::DEFAULTS))
+      File.write(path, init_template)
       @out.puts("Created #{path}")
       0
+    end
+
+    # Renders the starter `.rigor.yml` body. The template
+    # serialises `Configuration::DEFAULTS` (so the on-disk file
+    # round-trips through `Configuration.load`) and prepends a
+    # short header that points the user at the keys they are
+    # most likely to want to edit.
+    def init_template
+      <<~YAML
+        # Rigor configuration. See docs/CURRENT_WORK.md for the
+        # full set of features the analyzer ships in this preview.
+        #
+        # Keys you may want to edit:
+        # - target_ruby: minimum Ruby version your project targets.
+        # - paths:       directories scanned by `rigor check` and
+        #                `rigor type-scan` when no path is given.
+        # - plugins:     reserved for future plugin contributions
+        #                (no plugins are loaded today).
+        # - cache.path:  where Rigor will eventually persist
+        #                analysis results across runs.
+        #
+        # `Rigor::Environment.for_project` automatically loads
+        # the project's `sig/` directory plus a curated stdlib
+        # bundle (pathname, optparse, json, yaml, fileutils,
+        # tempfile, uri, logger, date, prism, rbs). Adding a
+        # `sig/<gem>.rbs` file under `sig/` is the simplest way
+        # to extend type coverage today.
+        #{YAML.dump(Configuration::DEFAULTS).sub(/\A---\n/, '')}
+      YAML
+    end
+
+    def run_type_of
+      require_relative "cli/type_of_command"
+
+      TypeOfCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
+    def run_type_scan
+      require_relative "cli/type_scan_command"
+
+      TypeScanCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
     def write_result(result, format)
@@ -101,14 +156,26 @@ module Rigor
       when "json"
         @out.puts(JSON.pretty_generate(result.to_h))
       when "text"
-        if result.success?
-          @out.puts("No diagnostics")
-        else
-          result.diagnostics.each { |diagnostic| @out.puts(diagnostic) }
-        end
+        write_text_result(result)
       else
         raise OptionParser::InvalidArgument, "unsupported format: #{format}"
       end
+    end
+
+    # Text output adds a one-line summary so users see the
+    # diagnostic-count immediately. The summary distinguishes
+    # the success and failure cases and reports the affected
+    # file count for failures.
+    def write_text_result(result)
+      if result.success?
+        @out.puts("No diagnostics")
+        return
+      end
+
+      result.diagnostics.each { |diagnostic| @out.puts(diagnostic) }
+      file_count = result.diagnostics.map(&:path).uniq.size
+      @out.puts("")
+      @out.puts("#{result.error_count} error(s) in #{file_count} file(s)")
     end
 
     def help
@@ -118,6 +185,8 @@ module Rigor
         Commands:
           check      Analyze Ruby source files
           init       Create a starter .rigor.yml
+          type-of    Print the inferred type at FILE:LINE:COL
+          type-scan  Report Scope#type_of coverage across PATHs
           version    Print the Rigor version
           help       Print this help
       HELP

@@ -1,0 +1,20 @@
+module Rigor
+  module Source
+    class NodeLocator
+      class OutOfRangeError < StandardError
+      end
+
+      def self.at_position: (source: String, root: untyped, line: Integer, column: Integer) -> untyped?
+      def self.at_offset: (root: untyped, offset: Integer) -> untyped?
+      def initialize: (source: String, root: untyped) -> void
+      def at_position: (line: Integer, column: Integer) -> untyped?
+      def at_offset: (Integer offset) -> untyped?
+    end
+
+    module NodeWalker
+      def self?.each: (untyped root) { (untyped) -> void } -> nil
+                    | (untyped root) -> Enumerator[untyped, nil]
+      def self?.walk: (untyped node) { (untyped) -> void } -> void
+    end
+  end
+end

@@ -3,6 +3,7 @@ module Rigor
 
   class Configuration
     DEFAULT_PATH: String
+    DEFAULTS: Hash[String, untyped]
 
     attr_reader target_ruby: String
     attr_reader paths: Array[String]
@@ -15,7 +16,26 @@ module Rigor
   end
 
   class CLI
+    EXIT_USAGE: Integer
+
     def self.start: (?Array[String] argv, ?out: untyped, ?err: untyped) -> Integer
+
+    def initialize: (?Array[String] argv, ?out: untyped, ?err: untyped) -> void
+    def run: () -> Integer
+
+    class TypeOfCommand
+      USAGE: String
+
+      def initialize: (argv: Array[String], out: untyped, err: untyped) -> void
+      def run: () -> Integer
+    end
+
+    class TypeScanCommand
+      USAGE: String
+
+      def initialize: (argv: Array[String], out: untyped, err: untyped) -> void
+      def run: () -> Integer
+    end
   end
 
   module Analysis
@@ -42,6 +62,7 @@ module Rigor
     end
 
     class Runner
+      RUBY_GLOB: String
       def initialize: (configuration: Configuration) -> void
       def run: (?Array[String] paths) -> Result
     end

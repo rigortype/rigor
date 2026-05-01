@@ -1,0 +1,59 @@
+module Rigor
+  class Environment
+    type ordering = :equal | :subclass | :superclass | :disjoint | :unknown
+
+    DEFAULT_LIBRARIES: Array[String]
+
+    attr_reader class_registry: ClassRegistry
+    attr_reader rbs_loader: RbsLoader?
+
+    def self.default: () -> Environment
+    def self.for_project: (?root: String, ?libraries: Array[String], ?signature_paths: Array[String | _ToPath]?) -> Environment
+
+    def initialize: (?class_registry: ClassRegistry, ?rbs_loader: RbsLoader?) -> void
+    def nominal_for_name: (String | Symbol name) -> Type::Nominal?
+    def singleton_for_name: (String | Symbol name) -> Type::Singleton?
+    def constant_for_name: (String | Symbol name) -> Type::t?
+    def class_known?: (String | Symbol name) -> bool
+    def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+
+    class ClassRegistry
+      def self.default: () -> ClassRegistry
+      def self.build_default: () -> ClassRegistry
+      def initialize: () -> void
+      def register: (Module class_object) -> void
+      def registered?: (Module class_object) -> bool
+      def nominal_for: (Module class_object) -> Type::Nominal
+      def nominal_for_name: (String | Symbol name) -> Type::Nominal?
+      def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+      def normalize_name: (Module | String | Symbol name) -> String
+    end
+
+    class RbsLoader
+      attr_reader libraries: Array[String]
+      attr_reader signature_paths: Array[String | _ToPath]
+
+      def self.default: () -> RbsLoader
+      def self.reset_default!: () -> void
+
+      def initialize: (?libraries: Array[String], ?signature_paths: Array[String | _ToPath]) -> void
+      def class_known?: (String | Symbol name) -> bool
+      def instance_definition: (String | Symbol class_name) -> untyped
+      def instance_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped
+      def singleton_definition: (String | Symbol class_name) -> untyped
+      def singleton_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped
+      def class_type_param_names: (String | Symbol class_name) -> Array[Symbol]
+      def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+      def constant_type: (String name) -> Type::t?
+      def instance_definition: (String | Symbol class_name) -> untyped?
+      def singleton_definition: (String | Symbol class_name) -> untyped?
+    end
+
+    class RbsHierarchy
+      def initialize: (RbsLoader loader) -> void
+      def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+      def loader: () -> RbsLoader
+      def normalize_name: (String | Symbol name) -> String
+    end
+  end
+end

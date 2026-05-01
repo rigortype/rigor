@@ -1,0 +1,49 @@
+module Rigor
+  class Scope
+    attr_reader environment: Environment
+    attr_reader locals: Hash[Symbol, Type::t]
+    attr_reader fact_store: Analysis::FactStore
+    attr_reader self_type: Type::t?
+    attr_reader declared_types: Hash[untyped, Type::t]
+    attr_reader ivars: Hash[Symbol, Type::t]
+    attr_reader cvars: Hash[Symbol, Type::t]
+    attr_reader globals: Hash[Symbol, Type::t]
+    attr_reader class_ivars: Hash[String, Hash[Symbol, Type::t]]
+    attr_reader class_cvars: Hash[String, Hash[Symbol, Type::t]]
+    attr_reader program_globals: Hash[Symbol, Type::t]
+    attr_reader discovered_classes: Hash[String, Type::Singleton]
+    attr_reader in_source_constants: Hash[String, Type::t]
+    attr_reader discovered_methods: Hash[String, Hash[Symbol, Symbol]]
+
+    def self.empty: (?environment: Environment) -> Scope
+
+    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?declared_types: Hash[untyped, Type::t], ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t]) -> void
+    def local: (String | Symbol name) -> Type::t?
+    def ivar: (String | Symbol name) -> Type::t?
+    def cvar: (String | Symbol name) -> Type::t?
+    def global: (String | Symbol name) -> Type::t?
+    def with_local: (String | Symbol name, Type::t type) -> Scope
+    def with_ivar: (String | Symbol name, Type::t type) -> Scope
+    def with_cvar: (String | Symbol name, Type::t type) -> Scope
+    def with_global: (String | Symbol name, Type::t type) -> Scope
+    def class_ivars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
+    def with_class_ivars: (Hash[String, Hash[Symbol, Type::t]] table) -> Scope
+    def class_cvars_for: (String | Symbol? class_name) -> Hash[Symbol, Type::t]
+    def with_class_cvars: (Hash[String, Hash[Symbol, Type::t]] table) -> Scope
+    def with_program_globals: (Hash[Symbol, Type::t] table) -> Scope
+    def with_discovered_classes: (Hash[String, Type::Singleton] table) -> Scope
+    def with_in_source_constants: (Hash[String, Type::t] table) -> Scope
+    def with_discovered_methods: (Hash[String, Hash[Symbol, Symbol]] table) -> Scope
+    def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool
+    def with_fact: (Analysis::FactStore::Fact fact) -> Scope
+    def with_self_type: (Type::t? type) -> Scope
+    def with_declared_types: (Hash[untyped, Type::t] table) -> Scope
+    def facts_for: (?target: Analysis::FactStore::Target?, ?bucket: Symbol?) -> Array[Analysis::FactStore::Fact]
+    def local_facts: (String | Symbol name, ?bucket: Symbol?) -> Array[Analysis::FactStore::Fact]
+    def type_of: (untyped node, ?tracer: Inference::FallbackTracer?) -> Type::t
+    def evaluate: (untyped node, ?tracer: Inference::FallbackTracer?) -> [Type::t, Scope]
+    def join: (Scope other) -> Scope
+    def ==: (untyped other) -> bool
+    def hash: () -> Integer
+  end
+end

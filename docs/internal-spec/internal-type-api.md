@@ -44,7 +44,14 @@ The `Rigor::Trinary` value object is the canonical three-valued result used by c
 Relational queries MUST return immutable result value objects, not bare booleans or bare `Rigor::Trinary` values, when the analyzer also has reason metadata that callers MAY consume.
 
 - The subtype query (`subtype_of`) MUST return an object that exposes a `Rigor::Trinary` answer through a method named consistently with the trinary-naming convention chosen for the rest of the type API, plus reason metadata describing which rules fired, which dynamic-origin facts were consulted, and which budget cutoffs were hit.
-- The acceptance query (`accepts`) MUST return an analogous object covering acceptance-specific metadata (mode, coercion path, dynamic-origin provenance).
+- The acceptance query (`accepts`) MUST return an analogous object covering acceptance-specific metadata (mode, coercion path, dynamic-origin provenance). Slice 4 phase 2c binds this to the concrete `Rigor::Type::AcceptsResult` value object with the following shape:
+  - `trinary` — the carried `Rigor::Trinary` answer.
+  - `mode` — the boundary mode the answer was computed under (`:gradual` ships now; `:strict` is reserved for later slices).
+  - `reasons` — a frozen `Array<String>` describing which rules fired in the order they fired.
+  - Predicates `yes?`, `no?`, `maybe?` MUST delegate to the carried `Rigor::Trinary` and remain the only methods on `AcceptsResult` that follow the `?`-returns-boolean convention.
+  - `with_reason(reason)` MUST return a new `AcceptsResult` with the same `trinary` and `mode` but with `reason` appended to `reasons`. It MUST NOT mutate the receiver. Passing `nil` or an empty string MUST be a no-op (same instance returned).
+  - Structural equality on `(trinary, mode, reasons)` MUST hold, in line with the *Identity and Immutability* section.
+  - The reasons MUST be treated as opaque by every caller except human-readable logging. Later slices MAY upgrade the entries to structured records (rule id, supporting facts, dynamic provenance) without further notice; callers that need a richer carrier MUST consume it through future named accessors rather than parsing the strings.
 - Simpler queries (`consistent_with`, `equal_value`) MAY return a bare `Rigor::Trinary` when no useful reason metadata exists.
 - Result objects MUST be immutable and structurally comparable on the same rules as type instances.
 

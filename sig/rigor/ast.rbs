@@ -1,0 +1,11 @@
+module Rigor
+  module AST
+    class TypeNode
+      attr_reader type: Type::t
+      def initialize: (Type::t type) -> void
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+  end
+end

@@ -1125,10 +1125,11 @@ module Rigor
           fully_narrowable = true
 
           conditions.each do |condition|
-            target = static_class_name(condition) || case_equality_target_class(condition)
-            if target
-              truthy_members << narrow_class(current, target, exact: false, environment: scope.environment)
-              falsey_type = narrow_not_class(falsey_type, target, exact: false, environment: scope.environment)
+            applied = apply_case_when_condition(scope, current, condition, falsey_type)
+            if applied
+              truthy_members << applied[:truthy]
+              falsey_type = applied[:falsey]
+              fully_narrowable &&= applied[:fully_narrowable]
             else
               fully_narrowable = false
             end
@@ -1139,6 +1140,100 @@ module Rigor
             scope.with_local(local_name, truthy),
             scope.with_local(local_name, fully_narrowable ? falsey_type : current)
           ]
+        end
+
+        # Per-condition rule. Returns `nil` when the condition shape
+        # is not recognised (caller marks `fully_narrowable = false`),
+        # or `{truthy:, falsey:, fully_narrowable:}` when it is.
+        def apply_case_when_condition(scope, current, condition, falsey_acc)
+          int_range = case_equality_integer_range(condition)
+          return integer_range_when_result(current, int_range, falsey_acc) if int_range && integer_rooted_type?(current)
+
+          int_literal = case_equality_integer_literal(condition)
+          if int_literal && integer_rooted_type?(current)
+            return integer_literal_when_result(current, int_literal, falsey_acc)
+          end
+
+          target = static_class_name(condition) || case_equality_target_class(condition)
+          return class_when_result(scope, current, target, falsey_acc) if target
+
+          nil
+        end
+
+        def case_equality_integer_literal(condition)
+          condition = unwrap_parens(condition)
+          condition.is_a?(Prism::IntegerNode) ? condition.value : nil
+        end
+
+        def integer_literal_when_result(current, value, falsey_acc)
+          # `case n when k` is `k === n` which for Integer is value
+          # equality. The truthy edge collapses the local to
+          # `Constant[k]`; the falsey edge tightens via
+          # `narrow_integer_not_equal` (only effective when k sits
+          # at one endpoint of the current range).
+          {
+            truthy: narrow_integer_equal(current, value),
+            falsey: narrow_integer_not_equal(falsey_acc, value),
+            fully_narrowable: true
+          }
+        end
+
+        def integer_range_when_result(current, range_pair, falsey_acc)
+          low, high = range_pair
+          truthy = narrow_integer_comparison(
+            narrow_integer_comparison(current, :>=, low),
+            :<=, high
+          )
+          # The falsey edge of `n in [a, b]` is two-piece; we cannot
+          # express the complement precisely with a single carrier,
+          # so keep the accumulator unchanged. `fully_narrowable: false`
+          # forces the else-branch to see `current` (the unmodified
+          # entry type), which mirrors `between?` falsey behaviour.
+          { truthy: truthy, falsey: falsey_acc, fully_narrowable: false }
+        end
+
+        def class_when_result(scope, current, target, falsey_acc)
+          {
+            truthy: narrow_class(current, target, exact: false, environment: scope.environment),
+            falsey: narrow_not_class(falsey_acc, target, exact: false, environment: scope.environment),
+            fully_narrowable: true
+          }
+        end
+
+        # Returns `[low, high]` for a `Prism::RangeNode` whose
+        # endpoints are both `Prism::IntegerNode` literals, with
+        # `..`/`...` exclusivity respected. Open-ended ranges use
+        # the symbolic infinities so the existing comparison
+        # narrowing tier handles them. Returns `nil` for any other
+        # shape (Float endpoints, String endpoints, dynamic
+        # expressions).
+        def case_equality_integer_range(condition)
+          condition = unwrap_parens(condition)
+          return nil unless condition.is_a?(Prism::RangeNode)
+
+          low = integer_range_endpoint(condition.left, default: Type::IntegerRange::NEG_INFINITY)
+          high = integer_range_endpoint(condition.right, default: Type::IntegerRange::POS_INFINITY)
+          return nil if low.nil? || high.nil?
+
+          high -= 1 if condition.exclude_end? && high.is_a?(Integer)
+          [low, high]
+        end
+
+        def integer_range_endpoint(node, default:)
+          return default if node.nil?
+          return node.value if node.is_a?(Prism::IntegerNode)
+
+          nil
+        end
+
+        def integer_rooted_type?(type)
+          case type
+          when Type::Constant then type.value.is_a?(Integer)
+          when Type::IntegerRange then true
+          when Type::Nominal then type.class_name == "Integer" && type.type_args.empty?
+          when Type::Union then type.members.all? { |m| integer_rooted_type?(m) }
+          else false
+          end
         end
 
         def range_target_class(range_node)

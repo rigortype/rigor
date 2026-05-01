@@ -852,6 +852,98 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
   end
 
+  describe "case-when integer-range narrowing" do
+    let(:integer_nominal_scope) { scope.with_local(:n, integer_nominal) }
+
+    def parse_case_of_n(source)
+      program = parse_program(source, locals: %i[n])
+      program.statements.body.first
+    end
+
+    def first_when_body_scope(case_node, base)
+      first_when = case_node.conditions.first
+      body, _falsey = described_class.case_when_scopes(case_node.predicate, first_when.conditions, base)
+      body
+    end
+
+    it "narrows `case n when 1..10` to int<1, 10>" do
+      case_node = parse_case_of_n(<<~RUBY)
+        case n
+        when 1..10 then n
+        end
+      RUBY
+      body = first_when_body_scope(case_node, integer_nominal_scope)
+      expect(body.local(:n)).to eq(Rigor::Type::Combinator.integer_range(1, 10))
+    end
+
+    it "narrows exclusive `case n when 1...10` to int<1, 9>" do
+      case_node = parse_case_of_n(<<~RUBY)
+        case n
+        when 1...10 then n
+        end
+      RUBY
+      body = first_when_body_scope(case_node, integer_nominal_scope)
+      expect(body.local(:n)).to eq(Rigor::Type::Combinator.integer_range(1, 9))
+    end
+
+    it "narrows endless `(100..)` to int<100, max>" do
+      case_node = parse_case_of_n(<<~RUBY)
+        case n
+        when (100..) then n
+        end
+      RUBY
+      body = first_when_body_scope(case_node, integer_nominal_scope)
+      expect(body.local(:n)).to eq(
+        Rigor::Type::Combinator.integer_range(100, Rigor::Type::IntegerRange::POS_INFINITY)
+      )
+    end
+
+    it "narrows beginless `(..-1)` to negative_int" do
+      case_node = parse_case_of_n(<<~RUBY)
+        case n
+        when (..-1) then n
+        end
+      RUBY
+      body = first_when_body_scope(case_node, integer_nominal_scope)
+      expect(body.local(:n)).to eq(Rigor::Type::Combinator.negative_int)
+    end
+
+    it "narrows an integer literal `case n when 0` to Constant[0]" do
+      case_node = parse_case_of_n(<<~RUBY)
+        case n
+        when 0 then n
+        end
+      RUBY
+      body = first_when_body_scope(case_node, integer_nominal_scope)
+      expect(body.local(:n)).to eq(Rigor::Type::Combinator.constant_of(0))
+    end
+
+    it "intersects with an existing IntegerRange bound" do
+      bound = scope.with_local(:n, Rigor::Type::Combinator.integer_range(-10, 10))
+      case_node = parse_case_of_n(<<~RUBY)
+        case n
+        when 5..15 then n
+        end
+      RUBY
+      body = first_when_body_scope(case_node, bound)
+      expect(body.local(:n)).to eq(Rigor::Type::Combinator.integer_range(5, 10))
+    end
+
+    it "leaves Range narrowing as Numeric for non-integer-rooted subjects" do
+      bound = scope.with_local(:n, string_nominal)
+      case_node = parse_case_of_n(<<~RUBY)
+        case n
+        when 1..10 then n
+        end
+      RUBY
+      body = first_when_body_scope(case_node, bound)
+      # `Nominal[String]` is not integer-rooted; the existing
+      # class-narrowing path runs and produces `narrow_class(String, "Numeric")`,
+      # which collapses to Bot since String is disjoint from Numeric.
+      expect(body.local(:n)).to be_a(Rigor::Type::Bot)
+    end
+  end
+
   describe ".case_when_scopes (Slice 7 phase 5)" do
     let(:union_int_str) do
       Rigor::Type::Combinator.union(

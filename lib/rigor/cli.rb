@@ -68,19 +68,21 @@ module Rigor
 
       options = {
         config: Configuration::DEFAULT_PATH,
-        format: "text"
+        format: "text",
+        explain: false
       }
 
       parser = OptionParser.new do |opts|
         opts.banner = "Usage: rigor check [options] [paths]"
         opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
         opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
+        opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
       end
       parser.parse!(@argv)
 
       configuration = Configuration.load(options.fetch(:config))
       paths = @argv.empty? ? configuration.paths : @argv
-      result = Analysis::Runner.new(configuration: configuration).run(paths)
+      result = Analysis::Runner.new(configuration: configuration, explain: options.fetch(:explain)).run(paths)
 
       write_result(result, options.fetch(:format))
       result.success? ? 0 : 1
@@ -184,15 +186,16 @@ module Rigor
     # the success and failure cases and reports the affected
     # file count for failures.
     def write_text_result(result)
+      result.diagnostics.each { |diagnostic| @out.puts(diagnostic) }
+
       if result.success?
-        @out.puts("No diagnostics")
+        @out.puts("No diagnostics") if result.diagnostics.empty?
         return
       end
 
-      result.diagnostics.each { |diagnostic| @out.puts(diagnostic) }
-      file_count = result.diagnostics.map(&:path).uniq.size
+      error_files = result.diagnostics.select(&:error?).map(&:path).uniq.size
       @out.puts("")
-      @out.puts("#{result.error_count} error(s) in #{file_count} file(s)")
+      @out.puts("#{result.error_count} error(s) in #{error_files} file(s)")
     end
 
     def help

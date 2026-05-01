@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`rigor check --explain` mode.** Surfaces fail-soft inference
+  fallbacks as `:info` diagnostics so users can see where the
+  engine degraded to `Dynamic[Top]`. Driven by
+  `Rigor::Inference::CoverageScanner` so each event is attributable
+  to the leaf node that triggered it (pass-through wrappers like
+  `ProgramNode` / `StatementsNode` / `ParenthesesNode` are not
+  double-counted). Each diagnostic carries `rule: "fallback"`,
+  `severity: :info`, and a short message naming the node class
+  and the type the engine fell back to. Info diagnostics do not
+  fail the run.
+
 - **`.rigor.yml` `libraries:` and `signature_paths:` keys.** The
   configuration layer now passes through to
   `Rigor::Environment.for_project`:

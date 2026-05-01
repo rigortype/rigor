@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../environment"
 require_relative "../scope"
+require_relative "../inference/coverage_scanner"
 require_relative "../inference/scope_indexer"
 require_relative "check_rules"
 require_relative "diagnostic"
@@ -11,11 +12,12 @@ require_relative "result"
 
 module Rigor
   module Analysis
-    class Runner
+    class Runner # rubocop:disable Metrics/ClassLength
       RUBY_GLOB = "**/*.rb"
 
-      def initialize(configuration:)
+      def initialize(configuration:, explain: false)
         @configuration = configuration
+        @explain = explain
       end
 
       # Walks every Ruby file under `paths`, parses it, builds a
@@ -82,13 +84,14 @@ module Rigor
 
         scope = Scope.empty(environment: environment)
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
-        CheckRules.diagnose(
+        diagnostics = CheckRules.diagnose(
           path: path,
           root: parse_result.value,
           scope_index: index,
           comments: parse_result.comments,
           disabled_rules: @configuration.disabled_rules
         )
+        diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [
           Diagnostic.new(
@@ -109,6 +112,37 @@ module Rigor
             severity: :error
           )
         ]
+      end
+
+      # v0.0.2 #10 — fail-soft fallback explanation. When
+      # `--explain` is set the runner additionally walks the
+      # file with `Rigor::Inference::CoverageScanner` and emits
+      # one `:info` diagnostic per directly-unrecognized node,
+      # naming the node class and the type the engine fell back
+      # to. The CoverageScanner is the canonical "first-event-
+      # per-node" probe: it already filters out pass-through
+      # wrappers (`ProgramNode`, `StatementsNode`,
+      # `ParenthesesNode`) so the explain stream is attributable
+      # to the leaf node that actually triggered the fallback.
+      def explain_diagnostics(path, root, scope)
+        return [] unless @explain
+
+        result = Inference::CoverageScanner.new(scope: scope).scan(root)
+        result.events.map { |event| explain_diagnostic(path, event) }
+      end
+
+      def explain_diagnostic(path, event)
+        location = event.location
+        line = location ? location.start_line : 1
+        column = location ? location.start_column + 1 : 1
+        Diagnostic.new(
+          path: path,
+          line: line,
+          column: column,
+          message: "fail-soft fallback at #{event.node_class}: #{event.inner_type.describe(:short)}",
+          severity: :info,
+          rule: "fallback"
+        )
       end
 
       def parse_diagnostics(path, parse_result)

@@ -433,4 +433,34 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
   end
+
+  describe "explain mode (v0.0.2 #10)" do
+    it "is silent by default" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "demo.rb"), "x = 1\n")
+
+        configuration = Rigor::Configuration.new("paths" => [dir])
+        result = described_class.new(configuration: configuration).run
+
+        expect(result.diagnostics.select { |d| d.rule == "fallback" }).to be_empty
+      end
+    end
+
+    it "emits :info fallback diagnostics when explain is on" do
+      Dir.mktmpdir do |dir|
+        # `BEGIN { ... }` is a Prism::PreExecutionNode the engine
+        # does not recognise — a stable explain-mode trigger.
+        File.write(File.join(dir, "demo.rb"), "BEGIN { 1 }\n")
+
+        configuration = Rigor::Configuration.new("paths" => [dir])
+        result = described_class.new(configuration: configuration, explain: true).run
+
+        fallback = result.diagnostics.find { |d| d.rule == "fallback" }
+        expect(fallback).not_to be_nil
+        expect(fallback.severity).to eq(:info)
+        expect(fallback.message).to include("fail-soft fallback")
+        expect(result).to be_success # info doesn't fail the run
+      end
+    end
+  end
 end

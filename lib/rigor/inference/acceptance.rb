@@ -64,6 +64,7 @@ module Rigor
         Type::Singleton => :accepts_singleton,
         Type::Nominal => :accepts_nominal,
         Type::Constant => :accepts_constant,
+        Type::IntegerRange => :accepts_integer_range,
         Type::Tuple => :accepts_tuple,
         Type::HashShape => :accepts_hash_shape
       }.freeze
@@ -190,6 +191,8 @@ module Rigor
             accepts_nominal_from_constant(self_type, other_type, mode)
           when Type::Singleton
             accepts_nominal_from_singleton(self_type, other_type, mode)
+          when Type::IntegerRange
+            accepts_nominal_from_integer_range(self_type, other_type, mode)
           when Type::Tuple
             accepts(self_type, project_tuple_to_nominal(other_type), mode: mode)
               .with_reason("projected Tuple to Nominal[Array]")
@@ -200,6 +203,33 @@ module Rigor
             Type::AcceptsResult.no(
               mode: mode,
               reasons: "Nominal[#{self_type.class_name}] rejects #{other_type.class}"
+            )
+          end
+        end
+
+        # `Nominal[Integer]` (and anything Integer is-a, like Numeric) accepts
+        # any `IntegerRange`; nothing else does. Argument-bearing `Nominal`s
+        # never accept `IntegerRange` because IntegerRange has no type args.
+        INTEGER_NOMINAL_ANCESTORS = %w[Integer Numeric Comparable Object BasicObject].freeze
+        private_constant :INTEGER_NOMINAL_ANCESTORS
+
+        def accepts_nominal_from_integer_range(self_type, _other_type, mode)
+          unless self_type.type_args.empty?
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Nominal[#{self_type.class_name}] with type args rejects IntegerRange"
+            )
+          end
+
+          if INTEGER_NOMINAL_ANCESTORS.include?(self_type.class_name)
+            Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "IntegerRange is-a #{self_type.class_name}"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Nominal[#{self_type.class_name}] rejects IntegerRange"
             )
           end
         end
@@ -340,6 +370,85 @@ module Rigor
             Type::AcceptsResult.no(
               mode: mode,
               reasons: "Constant value is not a #{self_type.class_name}"
+            )
+          end
+        end
+
+        # IntegerRange[a..b] accepts:
+        # - Constant[n] where n is an Integer covered by [a..b];
+        # - IntegerRange[c..d] where [c..d] ⊆ [a..b];
+        # - Nominal[Integer] only when self is the universal range
+        #   (`int<min, max>`), since otherwise an arbitrary Integer
+        #   could fall outside the bound.
+        # Anything else is rejected.
+        def accepts_integer_range(self_type, other_type, mode)
+          case other_type
+          when Type::Constant
+            accepts_integer_range_from_constant(self_type, other_type, mode)
+          when Type::IntegerRange
+            accepts_integer_range_from_integer_range(self_type, other_type, mode)
+          when Type::Nominal
+            accepts_integer_range_from_nominal(self_type, other_type, mode)
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "IntegerRange rejects #{other_type.class}"
+            )
+          end
+        end
+
+        def accepts_integer_range_from_constant(self_type, constant, mode)
+          unless constant.value.is_a?(Integer)
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "IntegerRange rejects non-Integer Constant"
+            )
+          end
+
+          if self_type.covers?(constant.value)
+            Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "Constant[#{constant.value}] is in #{self_type.describe}"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Constant[#{constant.value}] outside #{self_type.describe}"
+            )
+          end
+        end
+
+        def accepts_integer_range_from_integer_range(self_type, other_range, mode)
+          if self_type.lower <= other_range.lower && other_range.upper <= self_type.upper
+            Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "#{other_range.describe} ⊆ #{self_type.describe}"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "#{other_range.describe} not contained in #{self_type.describe}"
+            )
+          end
+        end
+
+        def accepts_integer_range_from_nominal(self_type, nominal, mode)
+          unless nominal.class_name == "Integer"
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "IntegerRange rejects Nominal[#{nominal.class_name}]"
+            )
+          end
+
+          if self_type.universal?
+            Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "universal IntegerRange accepts Nominal[Integer]"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "non-universal IntegerRange rejects Nominal[Integer] (could fall outside #{self_type.describe})"
             )
           end
         end

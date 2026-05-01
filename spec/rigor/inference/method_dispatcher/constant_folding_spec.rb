@@ -185,13 +185,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold_types(receiver, :+, [arg])).to be_nil
     end
 
-    it "returns nil when output cardinality exceeds UNION_FOLD_OUTPUT_LIMIT" do
-      # 5 × 5 = 25 inputs (under input cap), but `:+` over
-      # disjoint ranges produces > 8 distinct sums:
-      # `[1..5] + [10, 20, 30, 40, 50]` → 25 distinct sums.
+    it "widens to IntegerRange when output cardinality exceeds UNION_FOLD_OUTPUT_LIMIT" do
+      # 5 × 5 = 25 inputs (under input cap), `:+` over disjoint ranges
+      # produces 25 distinct sums (>8). The graceful escape valve is to
+      # return the bounding `IntegerRange[min..max]` rather than `nil`.
       receiver = constant_union(1, 2, 3, 4, 5)
       arg = constant_union(10, 20, 30, 40, 50)
-      expect(fold_types(receiver, :+, [arg])).to be_nil
+      type = fold_types(receiver, :+, [arg])
+      expect(type).to be_a(Rigor::Type::IntegerRange)
+      expect(type.min).to eq(11)
+      expect(type.max).to eq(55)
     end
 
     it "narrows to Union[true, false] via comparisons regardless of input width" do
@@ -230,6 +233,153 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         Rigor::Type::Combinator.nominal_of("Integer")
       )
       expect(fold_types(receiver, :+, [Rigor::Type::Combinator.constant_of(2)])).to be_nil
+    end
+  end
+
+  # IntegerRange (positive-int, non-negative-int, int<a, b>, …) folding.
+  # Compare to PHPStan's `int<min, max>` family. The carrier never widens
+  # beyond what the inputs imply, so `int<5, 10> + int<1, 2>` is exactly
+  # `int<6, 12>` rather than the looser `Nominal[Integer]`.
+  describe "integer range fold" do
+    def positive_int = Rigor::Type::Combinator.positive_int
+    def non_negative_int = Rigor::Type::Combinator.non_negative_int
+    def negative_int = Rigor::Type::Combinator.negative_int
+    def universal_int = Rigor::Type::Combinator.universal_int
+    def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
+    def integer_range(low, high) = Rigor::Type::Combinator.integer_range(low, high)
+
+    def fold_types(receiver, method_name, args = [])
+      described_class.try_fold(
+        receiver: receiver, method_name: method_name, args: args
+      )
+    end
+
+    describe "binary arithmetic" do
+      it "adds two finite ranges by summing endpoints" do
+        type = fold_types(integer_range(5, 10), :+, [integer_range(1, 2)])
+        expect(type).to eq(integer_range(6, 12))
+      end
+
+      it "subtracts ranges by reflecting the right endpoints" do
+        type = fold_types(integer_range(5, 10), :-, [integer_range(1, 2)])
+        expect(type).to eq(integer_range(3, 9))
+      end
+
+      it "promotes a Constant to a single-point range when added to a range" do
+        type = fold_types(positive_int, :+, [constant_of(3)])
+        expect(type).to eq(integer_range(4, Rigor::Type::IntegerRange::POS_INFINITY))
+      end
+
+      it "promotes the receiver Constant when added to a range" do
+        type = fold_types(constant_of(10), :-, [non_negative_int])
+        # 10 - [0..+∞] = [-∞..10]
+        expect(type).to eq(integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 10))
+      end
+    end
+
+    describe "binary comparison" do
+      it "is always-true when ranges are entirely ordered" do
+        # int<1, 5> < int<6, 10> → all true
+        expect(
+          fold_types(integer_range(1, 5), :<, [integer_range(6, 10)])
+        ).to eq(constant_of(true))
+      end
+
+      it "is always-false when ranges are reversed" do
+        expect(
+          fold_types(integer_range(6, 10), :<, [integer_range(1, 5)])
+        ).to eq(constant_of(false))
+      end
+
+      it "produces Union[true, false] on overlap" do
+        type = fold_types(integer_range(1, 5), :<, [integer_range(3, 7)])
+        expect(type).to be_a(Rigor::Type::Union)
+        expect(type.members.map(&:value).sort_by { |v| v ? 1 : 0 }).to eq([false, true])
+      end
+
+      it "compares positive-int < 0 as always-false" do
+        expect(fold_types(positive_int, :<, [constant_of(0)])).to eq(constant_of(false))
+        expect(fold_types(positive_int, :>, [constant_of(0)])).to eq(constant_of(true))
+      end
+
+      it "compares non-negative-int >= 0 as always-true" do
+        expect(fold_types(non_negative_int, :>=, [constant_of(0)])).to eq(constant_of(true))
+      end
+    end
+
+    describe "unary predicates" do
+      it "negative_int.negative? is always-true" do
+        expect(fold_types(negative_int, :negative?)).to eq(constant_of(true))
+        expect(fold_types(negative_int, :positive?)).to eq(constant_of(false))
+        expect(fold_types(negative_int, :zero?)).to eq(constant_of(false))
+      end
+
+      it "positive_int.positive? is always-true and zero? always-false" do
+        expect(fold_types(positive_int, :positive?)).to eq(constant_of(true))
+        expect(fold_types(positive_int, :zero?)).to eq(constant_of(false))
+      end
+
+      it "non-negative-int .zero? collapses to Union[true, false]" do
+        type = fold_types(non_negative_int, :zero?)
+        expect(type).to be_a(Rigor::Type::Union)
+        expect(type.members.map(&:value).sort_by { |v| v ? 1 : 0 }).to eq([false, true])
+      end
+    end
+
+    describe "unary shifts and abs" do
+      it "succ shifts the range by +1" do
+        expect(fold_types(integer_range(1, 5), :succ)).to eq(integer_range(2, 6))
+      end
+
+      it "pred shifts by -1" do
+        expect(fold_types(integer_range(1, 5), :pred)).to eq(integer_range(0, 4))
+      end
+
+      it "abs of a non-negative range is the range itself" do
+        expect(fold_types(non_negative_int, :abs)).to eq(non_negative_int)
+      end
+
+      it "abs of a strictly-negative range reflects to non-negative" do
+        expect(fold_types(integer_range(-10, -3), :abs)).to eq(integer_range(3, 10))
+      end
+
+      it "abs of a range straddling zero produces 0..max(|min|, |max|)" do
+        expect(fold_types(integer_range(-3, 5), :abs)).to eq(integer_range(0, 5))
+        expect(fold_types(integer_range(-7, 5), :abs)).to eq(integer_range(0, 7))
+      end
+
+      it "-@ negates the range" do
+        expect(fold_types(integer_range(1, 5), :-@)).to eq(integer_range(-5, -1))
+      end
+    end
+
+    describe "graceful widening" do
+      it "widens a Union[Constant<Integer>...] to a bounding IntegerRange when output cap exceeded" do
+        receiver = Rigor::Type::Combinator.union(
+          *(1..5).map { |v| constant_of(v) }
+        )
+        arg = Rigor::Type::Combinator.union(
+          *(10..14).map { |v| constant_of(v) }
+        )
+        type = fold_types(receiver, :+, [arg])
+        expect(type).to be_a(Rigor::Type::IntegerRange)
+        expect(type.min).to eq(11)
+        expect(type.max).to eq(19)
+      end
+
+      it "does not widen when the result set has non-Integer members" do
+        # Each Float arg keeps the result a Float, so widening is
+        # not an option. The cap becomes a hard nil.
+        receiver = Rigor::Type::Combinator.union(
+          *(1..5).map { |v| constant_of(v) }
+        )
+        arg = Rigor::Type::Combinator.union(
+          *(1..5).map { |v| constant_of(v.to_f) }
+        )
+        # 5×5 = 25 inputs (under input cap); 25 distinct Float sums (over output cap).
+        # Inputs include Float, so widening to IntegerRange is rejected.
+        expect(fold_types(receiver, :+, [arg])).to be_nil
+      end
     end
   end
 end

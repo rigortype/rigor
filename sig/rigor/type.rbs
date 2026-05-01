@@ -1,6 +1,6 @@
 module Rigor
   module Type
-    type t = Top | Bot | Dynamic | Constant | Nominal | Singleton | Union | Tuple | HashShape
+    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Tuple | HashShape
 
     type accepts_mode = :strict | :gradual | :loose
 
@@ -48,6 +48,30 @@ module Rigor
       attr_reader value: untyped
       def initialize: (untyped value) -> void
       def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class IntegerRange
+      NEG_INFINITY: Symbol
+      POS_INFINITY: Symbol
+      attr_reader min: (Integer | Symbol)
+      attr_reader max: (Integer | Symbol)
+      def initialize: ((Integer | Symbol) min, (Integer | Symbol) max) -> void
+      def universal?: () -> bool
+      def finite?: () -> bool
+      def cardinality: () -> (Integer | Float)
+      def covers?: (untyped value) -> bool
+      def lower: () -> Numeric
+      def upper: () -> Numeric
+      def describe: (?Symbol verbosity) -> String
+      def generic_description: () -> String
       def erase_to_rbs: () -> String
       def top: () -> Top
       def bot: () -> Bot
@@ -163,6 +187,12 @@ module Rigor
       def self?.nominal_of: (Module | String class_name_or_object, ?type_args: Array[Type::t]) -> Nominal
       def self?.singleton_of: (Module | String class_name_or_object) -> Singleton
       def self?.constant_of: (untyped value) -> Constant
+      def self?.integer_range: ((Integer | Symbol) min, (Integer | Symbol) max) -> IntegerRange
+      def self?.positive_int: () -> IntegerRange
+      def self?.non_negative_int: () -> IntegerRange
+      def self?.negative_int: () -> IntegerRange
+      def self?.non_positive_int: () -> IntegerRange
+      def self?.universal_int: () -> IntegerRange
       def self?.tuple_of: (*Type::t elements) -> Tuple
       def self?.hash_shape_of: (?Hash[untyped, Type::t]? pairs, **untyped options) -> HashShape
       def self?.union: (*Type::t types) -> Type::t

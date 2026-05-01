@@ -6,6 +6,7 @@ require_relative "dynamic"
 require_relative "nominal"
 require_relative "singleton"
 require_relative "constant"
+require_relative "integer_range"
 require_relative "tuple"
 require_relative "hash_shape"
 require_relative "union"
@@ -63,6 +64,36 @@ module Rigor
 
       def constant_of(value)
         Constant.new(value)
+      end
+
+      # Bounded-integer carrier. Each bound is either an `Integer` or
+      # one of `:neg_infinity` / `:pos_infinity` (sentinels exposed as
+      # `IntegerRange::NEG_INFINITY` / `POS_INFINITY`).
+      def integer_range(min, max)
+        IntegerRange.new(min, max)
+      end
+
+      # Convenience aliases for the most common bounded shapes. The
+      # named alias survives roundtrip through `describe` for nicer
+      # human-facing output.
+      def positive_int
+        IntegerRange.new(1, IntegerRange::POS_INFINITY)
+      end
+
+      def non_negative_int
+        IntegerRange.new(0, IntegerRange::POS_INFINITY)
+      end
+
+      def negative_int
+        IntegerRange.new(IntegerRange::NEG_INFINITY, -1)
+      end
+
+      def non_positive_int
+        IntegerRange.new(IntegerRange::NEG_INFINITY, 0)
+      end
+
+      def universal_int
+        IntegerRange.new(IntegerRange::NEG_INFINITY, IntegerRange::POS_INFINITY)
       end
 
       # Constructs a heterogeneous, fixed-arity Tuple from positional

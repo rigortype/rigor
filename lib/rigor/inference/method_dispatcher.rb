@@ -4,6 +4,7 @@ require_relative "../type"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/shape_dispatch"
 require_relative "method_dispatcher/rbs_dispatch"
+require_relative "method_dispatcher/iterator_dispatch"
 
 module Rigor
   module Inference
@@ -200,6 +201,13 @@ module Rigor
       # @return [Array<Rigor::Type>]
       def expected_block_param_types(receiver_type:, method_name:, arg_types:, environment: nil)
         return [] if receiver_type.nil?
+
+        iterator_result = IteratorDispatch.block_param_types(
+          receiver: receiver_type,
+          method_name: method_name,
+          args: arg_types
+        )
+        return iterator_result if iterator_result
 
         RbsDispatch.block_param_types(
           receiver: receiver_type,

@@ -203,19 +203,28 @@ module Rigor
         # IntegerRange arithmetic and comparison.
         # ----------------------------------------------------------------
 
-        RANGE_ARITHMETIC = Set[:+, :-].freeze
+        RANGE_ADDITIVE = Set[:+, :-].freeze
         RANGE_COMPARISON = Set[:<, :<=, :>, :>=, :==, :!=].freeze
+
+        # Per-operator dispatch table for binary range ops. Each
+        # value is a method symbol on `ConstantFolding` taking
+        # `(left, right)` and returning a `Type` or `nil`.
+        BINARY_RANGE_HANDLERS = {
+          :* => :range_multiply,
+          :/ => :range_divide,
+          :% => :range_modulo
+        }.freeze
+        private_constant :BINARY_RANGE_HANDLERS
 
         def try_fold_binary_range(left, method_name, right)
           l = ensure_integer_range(left)
           r = ensure_integer_range(right)
           return nil unless l && r
+          return range_additive(l, method_name, r) if RANGE_ADDITIVE.include?(method_name)
+          return range_comparison(l, method_name, r) if RANGE_COMPARISON.include?(method_name)
+          return send(BINARY_RANGE_HANDLERS[method_name], l, r) if BINARY_RANGE_HANDLERS.key?(method_name)
 
-          if RANGE_ARITHMETIC.include?(method_name)
-            range_arithmetic(l, method_name, r)
-          elsif RANGE_COMPARISON.include?(method_name)
-            range_comparison(l, method_name, r)
-          end
+          nil
         end
 
         # Promotes an array-of-values input to an `IntegerRange` when
@@ -233,7 +242,7 @@ module Rigor
           end
         end
 
-        def range_arithmetic(left, method_name, right)
+        def range_additive(left, method_name, right)
           lower, upper =
             case method_name
             when :+ then [left.lower + right.lower, left.upper + right.upper]
@@ -242,10 +251,88 @@ module Rigor
           build_integer_range(lower, upper)
         end
 
+        # Range × Range. Computes the four corner products with
+        # `safe_mul` so that `0 × ±∞` is treated as 0 rather than
+        # NaN — that captures the algebraic truth that the actual
+        # range elements are integers, never literal infinity.
+        def range_multiply(left, right)
+          corners = [
+            safe_mul(left.lower, right.lower),
+            safe_mul(left.lower, right.upper),
+            safe_mul(left.upper, right.lower),
+            safe_mul(left.upper, right.upper)
+          ]
+          build_integer_range(corners.min, corners.max)
+        end
+
+        # 0 dominates: 0 × anything (including ±∞) is 0. Without this
+        # special case Ruby's `0 * Float::INFINITY` is `NaN`, which
+        # would corrupt `min`/`max`.
+        def safe_mul(left, right)
+          return 0 if left.zero? || right.zero?
+
+          left * right
+        end
+
+        # Range ÷ Range using Ruby's integer floor division. If the
+        # right range covers 0 the operation may raise
+        # `ZeroDivisionError`, so the fold bails (caller falls back
+        # to RBS-widened `Integer`). When both inputs are finite we
+        # compute the four corner quotients; the universal-on-one-side
+        # case is handled by treating ±∞ ÷ n as ±∞ and n ÷ ±∞ as 0.
+        def range_divide(left, right)
+          return nil if right.covers?(0)
+
+          corners = [
+            safe_div(left.lower, right.lower),
+            safe_div(left.lower, right.upper),
+            safe_div(left.upper, right.lower),
+            safe_div(left.upper, right.upper)
+          ]
+          build_integer_range(corners.min, corners.max)
+        end
+
+        def safe_div(numer, denom)
+          return 0 if numer.zero?
+          return numer.positive? ^ denom.negative? ? Float::INFINITY : -Float::INFINITY if denom.zero?
+          return 0 if denom.infinite?
+
+          if numer.infinite?
+            return numer.positive? ^ denom.negative? ? Float::INFINITY : -Float::INFINITY
+          end
+
+          numer.to_i.div(denom.to_i).to_f
+        end
+
+        # Range % Range. Only the `(any range) % (positive constant n)`
+        # and `(any range) % (negative constant n)` cases are folded
+        # precisely — the former narrows to `int<0, n-1>`, the latter
+        # to `int<n+1, 0>`. Other shapes fall back to nil.
+        def range_modulo(_left, right)
+          return nil unless right.finite? && right.min == right.max
+
+          divisor = right.min
+          return nil if divisor.zero?
+
+          if divisor.positive?
+            build_integer_range(0, divisor - 1)
+          else
+            build_integer_range(divisor + 1, 0)
+          end
+        end
+
+        # Builds an `IntegerRange` from numeric `lower`/`upper`
+        # endpoints. Collapses single-point finite ranges to a
+        # `Constant` so downstream rules (which prefer the more
+        # specific carrier) see the most precise result.
         def build_integer_range(lower, upper)
           min = lower == -Float::INFINITY ? Type::IntegerRange::NEG_INFINITY : Integer(lower)
           max = upper == Float::INFINITY ? Type::IntegerRange::POS_INFINITY : Integer(upper)
-          Type::Combinator.integer_range(min, max)
+          if min.is_a?(Integer) && max.is_a?(Integer) && min == max
+            Type::Combinator.constant_of(min)
+          else
+            Type::Combinator.integer_range(min, max)
+          end
         end
 
         def range_comparison(left, method_name, right)
@@ -309,19 +396,61 @@ module Rigor
 
         RANGE_UNARY_PREDICATES = Set[:zero?, :positive?, :negative?].freeze
         RANGE_UNARY_SHIFTS = Set[:succ, :next, :pred].freeze
+        RANGE_UNARY_PARITY = Set[:even?, :odd?].freeze
+
+        # `(method_name) -> handler symbol` for the unary range
+        # surface that does not need extra context. The grouped
+        # categories (predicates / shifts / parity) stay separate
+        # because they share dispatch logic.
+        UNARY_RANGE_DIRECT = {
+          abs: :range_unary_abs,
+          magnitude: :range_unary_abs,
+          "-@": :range_unary_negate,
+          "+@": :range_unary_identity,
+          bit_length: :range_unary_bit_length
+        }.freeze
+        private_constant :UNARY_RANGE_DIRECT
 
         def try_fold_unary_range(range, method_name)
-          if RANGE_UNARY_PREDICATES.include?(method_name)
-            range_unary_predicate(range, method_name)
-          elsif RANGE_UNARY_SHIFTS.include?(method_name)
-            range_unary_shift(range, method_name)
-          elsif %i[abs magnitude].include?(method_name)
-            range_unary_abs(range)
-          elsif method_name == :-@
-            build_integer_range(-range.upper, -range.lower)
-          elsif method_name == :+@
-            range
+          return range_unary_predicate(range, method_name) if RANGE_UNARY_PREDICATES.include?(method_name)
+          return range_unary_shift(range, method_name) if RANGE_UNARY_SHIFTS.include?(method_name)
+          return range_unary_parity(range, method_name) if RANGE_UNARY_PARITY.include?(method_name)
+          return send(UNARY_RANGE_DIRECT[method_name], range) if UNARY_RANGE_DIRECT.key?(method_name)
+
+          nil
+        end
+
+        def range_unary_negate(range)
+          build_integer_range(-range.upper, -range.lower)
+        end
+
+        def range_unary_identity(range)
+          range
+        end
+
+        # `even?`/`odd?` on a single-point range collapses to an
+        # exact `Constant[bool]`. Any range spanning ≥ 2 integers
+        # contains both an even and an odd value, so the result is
+        # `Union[true, false]`.
+        def range_unary_parity(range, method_name)
+          if range.finite? && range.min == range.max
+            value = range.min.public_send(method_name)
+            Type::Combinator.constant_of(value)
+          else
+            bool_union
           end
+        end
+
+        # Integer#bit_length is non-negative and bounded by the
+        # bit_length of the wider endpoint. For half-open ranges the
+        # upper bound is unknown (any large integer is reachable), so
+        # we widen to non_negative_int. Negative endpoints map via
+        # `~n` semantics; using the magnitude is a safe upper bound.
+        def range_unary_bit_length(range)
+          return Type::Combinator.non_negative_int unless range.finite?
+
+          width = [range.min.bit_length, range.max.bit_length].max
+          build_integer_range(0, width)
         end
 
         def range_unary_predicate(range, method_name)

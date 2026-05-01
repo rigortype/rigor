@@ -353,6 +353,111 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
     end
 
+    describe "binary multiplication" do
+      it "multiplies two finite ranges via 4-corner min/max" do
+        # int<-2, 3> * int<1, 4> → corners {-2, -8, 3, 12} → int<-8, 12>
+        type = fold_types(integer_range(-2, 3), :*, [integer_range(1, 4)])
+        expect(type).to eq(integer_range(-8, 12))
+      end
+
+      it "preserves sign for two non-negative ranges" do
+        type = fold_types(integer_range(2, 5), :*, [integer_range(3, 7)])
+        expect(type).to eq(integer_range(6, 35))
+      end
+
+      it "treats 0 × +∞ as 0 (algebraic, not Float arithmetic)" do
+        # non_negative_int × Constant[0] = exactly Constant[0]
+        # because 0 × anything is 0 even at the +∞ endpoint.
+        type = fold_types(non_negative_int, :*, [constant_of(0)])
+        expect(type).to eq(constant_of(0))
+      end
+
+      it "extends to +∞ when a positive endpoint hits +∞" do
+        # positive_int × int<2, 3> → int<2, +∞>
+        type = fold_types(positive_int, :*, [integer_range(2, 3)])
+        expect(type).to eq(integer_range(2, Rigor::Type::IntegerRange::POS_INFINITY))
+      end
+    end
+
+    describe "binary integer division" do
+      it "divides two non-zero ranges via corner quotients" do
+        # int<10, 20> / int<2, 5> → corners {2, 5, 4, 10} → int<2, 10>
+        type = fold_types(integer_range(10, 20), :/, [integer_range(2, 5)])
+        expect(type).to eq(integer_range(2, 10))
+      end
+
+      it "bails when the divisor range covers 0" do
+        expect(fold_types(positive_int, :/, [integer_range(-1, 1)])).to be_nil
+        expect(fold_types(positive_int, :/, [non_negative_int])).to be_nil
+      end
+
+      it "narrows positive_int / Constant[2] to non_negative_int" do
+        # 1/2 = 0, ∞/2 = ∞ → int<0, +∞> = non-negative-int
+        type = fold_types(positive_int, :/, [constant_of(2)])
+        expect(type).to eq(non_negative_int)
+      end
+    end
+
+    describe "binary modulo" do
+      it "narrows `range % positive Constant` to int<0, n-1>" do
+        type = fold_types(integer_range(-100, 100), :%, [constant_of(5)])
+        expect(type).to eq(integer_range(0, 4))
+      end
+
+      it "narrows `range % negative Constant` to int<n+1, 0>" do
+        type = fold_types(integer_range(-100, 100), :%, [constant_of(-3)])
+        expect(type).to eq(integer_range(-2, 0))
+      end
+
+      it "bails on divisor 0" do
+        expect(fold_types(integer_range(-3, 3), :%, [constant_of(0)])).to be_nil
+      end
+
+      it "bails on non-point divisor (conservative)" do
+        expect(fold_types(positive_int, :%, [integer_range(2, 5)])).to be_nil
+      end
+    end
+
+    describe "even?/odd? precision" do
+      it "is exact on a single-point range" do
+        expect(fold_types(integer_range(4, 4), :even?)).to eq(constant_of(true))
+        expect(fold_types(integer_range(4, 4), :odd?)).to eq(constant_of(false))
+        expect(fold_types(integer_range(7, 7), :odd?)).to eq(constant_of(true))
+      end
+
+      it "produces Union[true, false] on any range with cardinality >= 2" do
+        type = fold_types(integer_range(1, 2), :even?)
+        expect(type).to be_a(Rigor::Type::Union)
+        expect(type.members.map(&:value).sort_by { |v| v ? 1 : 0 }).to eq([false, true])
+      end
+
+      it "produces Union[true, false] for unbounded ranges" do
+        type = fold_types(positive_int, :odd?)
+        expect(type).to be_a(Rigor::Type::Union)
+      end
+    end
+
+    describe "bit_length" do
+      it "narrows finite ranges to int<0, max_bit_length>" do
+        # 0..255 → bit_length 0..8
+        type = fold_types(integer_range(0, 255), :bit_length)
+        expect(type).to eq(integer_range(0, 8))
+      end
+
+      it "considers magnitude on the negative side" do
+        # int<-256, 100> → max bit_length is bit_length(256)=9 (for negatives, bit_length(-256)=8;
+        # but we use [|min|, |max|].max .bit_length per Ruby semantics here,
+        # which gives max(bit_length(-256), bit_length(100)) = max(8, 7) = 8.
+        type = fold_types(integer_range(-256, 100), :bit_length)
+        expect(type.min).to eq(0)
+        expect(type.max).to eq([-256.bit_length, 100.bit_length].max)
+      end
+
+      it "widens to non_negative_int for unbounded ranges" do
+        expect(fold_types(positive_int, :bit_length)).to eq(non_negative_int)
+      end
+    end
+
     describe "graceful widening" do
       it "widens a Union[Constant<Integer>...] to a bounding IntegerRange when output cap exceeded" do
         receiver = Rigor::Type::Combinator.union(

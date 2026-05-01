@@ -86,6 +86,7 @@ module Rigor
       def self?.narrow_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment) -> Type::t
       def self?.narrow_not_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment) -> Type::t
       def self?.predicate_scopes: (untyped node, Scope scope) -> [Scope, Scope]
+      def self?.case_when_scopes: (untyped subject, Array[untyped] conditions, Scope scope) -> [Scope, Scope]
       def self?.analyse: (untyped node, Scope scope) -> untyped
       def self?.subclass_of?: (String rigor_class_name, String target_class_name, untyped context) -> bool
       def self?.class_ordering: (String lhs, String rhs, untyped context) -> Symbol

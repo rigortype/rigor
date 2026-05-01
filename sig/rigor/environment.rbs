@@ -45,6 +45,8 @@ module Rigor
       def class_type_param_names: (String | Symbol class_name) -> Array[Symbol]
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
       def constant_type: (String name) -> Type::t?
+      def instance_definition: (String | Symbol class_name) -> untyped?
+      def singleton_definition: (String | Symbol class_name) -> untyped?
     end
 
     class RbsHierarchy

@@ -56,6 +56,9 @@ module Rigor
       def dispatch(receiver_type:, method_name:, arg_types:, block_type: nil, environment: nil)
         return nil if receiver_type.nil?
 
+        meta_result = try_meta_introspection(receiver_type, method_name)
+        return meta_result if meta_result
+
         constant_result = ConstantFolding.try_fold(
           receiver: receiver_type,
           method_name: method_name,
@@ -77,6 +80,42 @@ module Rigor
           environment: environment,
           block_type: block_type
         )
+      end
+
+      # Slice 7 phase 8 — meta-introspection shortcuts. The
+      # default `Object#class` RBS return type is `Class`, but
+      # for a receiver of known nominal identity we can do
+      # better: `instance_of(Foo).class` is `Singleton[Foo]`
+      # (the class object itself), which downstream dispatch
+      # uses to resolve `self.class.some_class_method`. The
+      # same logic answers `Foo.class` as `Singleton[Class]`
+      # (deliberate; calling `.class` on a class object yields
+      # `Class`, the metaclass). We also special-case `is_a?`-
+      # adjacent calls and the trivial `instance_of?(self)`
+      # later as the rule catalogue grows; for now only `class`
+      # is handled.
+      def try_meta_introspection(receiver_type, method_name)
+        return nil unless method_name == :class
+
+        case receiver_type
+        when Type::Nominal then Type::Combinator.singleton_of(receiver_type.class_name)
+        when Type::Constant then constant_metaclass(receiver_type.value)
+        end
+      end
+
+      CONSTANT_METACLASSES = {
+        Integer => "Integer", Float => "Float", String => "String",
+        Symbol => "Symbol", Range => "Range",
+        TrueClass => "TrueClass", FalseClass => "FalseClass",
+        NilClass => "NilClass"
+      }.freeze
+      private_constant :CONSTANT_METACLASSES
+
+      def constant_metaclass(value)
+        CONSTANT_METACLASSES.each do |klass, name|
+          return Type::Combinator.singleton_of(name) if value.is_a?(klass)
+        end
+        nil
       end
 
       # Returns the positional block parameter types declared by the

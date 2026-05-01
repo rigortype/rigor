@@ -1,5 +1,9 @@
 module Rigor
   module Analysis
+    module CheckRules
+      def self?.diagnose: (path: String, root: untyped, scope_index: Hash[untyped, Scope]) -> Array[Diagnostic]
+    end
+
     class FactStore
       type bucket = :local_binding | :captured_local | :object_content | :global_storage | :dynamic_origin | :relational
       type polarity = :positive | :negative

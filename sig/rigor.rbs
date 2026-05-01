@@ -20,12 +20,21 @@ module Rigor
 
     def self.start: (?Array[String] argv, ?out: untyped, ?err: untyped) -> Integer
 
+    def initialize: (?Array[String] argv, ?out: untyped, ?err: untyped) -> void
+    def run: () -> Integer
+
     class TypeOfCommand
       USAGE: String
+
+      def initialize: (argv: Array[String], out: untyped, err: untyped) -> void
+      def run: () -> Integer
     end
 
     class TypeScanCommand
       USAGE: String
+
+      def initialize: (argv: Array[String], out: untyped, err: untyped) -> void
+      def run: () -> Integer
     end
   end
 

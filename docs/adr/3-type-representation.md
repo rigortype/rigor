@@ -54,7 +54,7 @@ The engine-surface contract that surrounds those type objects (`Scope`, fact sto
 
 ## Open Questions
 
-Two questions are recorded here as Options Considered with explicit trade-offs. ADR-3 deliberately does **not** pick a Working Decision for either; both are deferred to the first implementation slice (see *Implementation Roadmap* below) so the chosen answer is exercised in real code before this document upgrades to a Working Decision.
+Three questions are recorded here as Options Considered with explicit trade-offs. ADR-3 deliberately does **not** pick a Working Decision for any of them; each is deferred to the first implementation slice that exercises it (see *Implementation Roadmap* below) so the chosen answer is exercised in real code before this document upgrades to a Working Decision.
 
 ### Open Question 1: Constant Scalar and Object Shape
 
@@ -120,6 +120,86 @@ Capability methods return `Rigor::Trinary`, not Ruby booleans. Ruby's convention
 - Whichever option is chosen, every `Rigor::Type` method that returns a trinary MUST follow the same convention (no per-class deviation).
 - The capability surface and the relational surface MUST agree: if capability methods drop `?`, relational methods do too, and vice versa.
 
+### Open Question 3: Refinement Carrier Strategy
+
+[`imported-built-in-types.md`](../type-specification/imported-built-in-types.md) reserves a catalogue of refinement names — `non-empty-string`, `lowercase-string`, `numeric-string`, `decimal-int-string`, `positive-int`, `non-empty-array[T]`, `non-empty-hash[K, V]`, … — that name a *subset* of an existing nominal type. The question is how the analyzer represents those subsets internally so that:
+
+- the refinement composes with combinators (`Union`, `Intersection`, `Difference`) without introducing a parallel algebra,
+- predicates whose answer is determined by the refinement (`ns.empty?` / `ns.size == 0` / `ns.size > 0` for `ns: non-empty-string`) reduce to the precise `Constant[bool]`, and
+- new refinement names — including plugin-contributed ones — slot in without bespoke carrier code per name.
+
+PHPStan implements this with **Accessory types**: a small per-refinement carrier (`AccessoryNonEmptyString`, `AccessoryLowercase`, `AccessoryNumericString`, …) that decorates a base via `IntersectionType`. `string & non-empty` is `IntersectionType[StringType, AccessoryNonEmptyStringType]`. Refinements that decorate the same base compose by intersection; the accessory's contribution to subtyping, narrowing, and projection is implemented per-class. See [`src/Type/Accessory/`](https://github.com/phpstan/phpstan-src/tree/2.2.x/src/Type/Accessory) in the upstream repo.
+
+Three options sit between "do exactly what PHPStan does" and "exploit Ruby's type-operator vocabulary".
+
+**Option A — Per-refinement Accessory carriers + IntersectionType.**
+
+Each reserved refinement name has its own carrier class (`Type::Accessory::NonEmptyString`, `Type::Accessory::LowercaseString`, `Type::Accessory::PositiveInt`, …). Composition with the base nominal goes through `Type::Intersection`. `non-empty-string` is `Intersection[Nominal[String], Accessory::NonEmptyString]`. Display routes through a registry that recognises the canonical intersection shape and prints the kebab-case name.
+
+- Benefits: matches the upstream reference closely; each refinement has a focused implementation surface for its specific algebra (`size`, `empty?`, `start_with?` projections may differ between `non-empty-string` and `lowercase-string`); plugin-contributed refinements can introduce new accessory classes through ADR-2; intersection composition (`non-empty-string & lowercase-string`) is a vanilla `Intersection` of two accessories with one base.
+- Drawbacks: one class per refinement — class count grows with the catalogue; the intersection algebra needs careful handling so `non-empty-string & non-empty-string` collapses (idempotence) and `non-empty-string & String` reduces to `non-empty-string`; the display registry has to know every canonical name to round-trip the kebab-case spelling; PHPStan's accessory tier and Rigor's value-lattice rules in [`value-lattice.md`](../type-specification/value-lattice.md) need an explicit reconciliation note.
+
+**Option B — Difference type against a forbidden value set.**
+
+Refinements that name a *point-removal* express directly as a `Difference`: `non-empty-string = Nominal[String] - Constant[""]`, `non-zero-int = Nominal[Integer] - Constant[0]`, `non-empty-array[T] = Nominal[Array, [T]] - Tuple[]`, `positive-int = Nominal[Integer] - non_positive_int` (using the existing `IntegerRange` carrier). The Difference type already has a defined display contract via [`type-operators.md`](../type-specification/type-operators.md) and reduces by the lattice algebra in [`value-lattice.md`](../type-specification/value-lattice.md).
+
+- Benefits: no new carrier classes; the existing `Difference` machinery (subtyping, narrowing-edge complements, RBS erasure) carries the refinement; the display routes through the existing canonical-name table for kebab-case spellings; predicate evaluation falls out from the lattice — `Difference[String, ""].empty?` resolves through the catalog rule for `String#empty?` on a receiver whose value set excludes `""`, which projects to `Constant[false]`; the `non-empty-string` ↔ `String - ""` equivalence is exactly the conceptual content of the refinement.
+- Drawbacks: refinements that are NOT point-removals do not fit. `lowercase-string` is "the subset of strings whose every character is lowercase" — not a finite set complement. `numeric-string` is "strings that parse as a Numeric" — also not a finite set. Difference cannot express these; a richer predicate-subset carrier would be needed for that family. The Difference encoding therefore covers a SUBSET of the imported-built-in catalogue; the rest needs a different mechanism.
+
+**Option C — Two-tier hybrid (point-removal `Difference`, predicate-subset `Refined`).**
+
+Split the catalogue along the natural mathematical boundary:
+
+- **Point-removal refinements** (the value set is the base type minus a finite, statically describable set of values): represented as a `Difference[BaseType, RemovedSet]`. Concrete examples:
+  - `non-empty-string` = `String - ""`
+  - `non-zero-int` = `Integer - 0`
+  - `non-empty-array[T]` = `Array[T] - []`
+  - `non-empty-hash[K, V]` = `Hash[K, V] - {}`
+  - `positive-int` and `non-negative-int` (already realised through `IntegerRange`, which is structurally a Difference against the complementary half-line)
+- **Predicate-subset refinements** (the value set is defined by a per-element predicate the analyzer cannot reduce to a finite complement): represented as a `Type::Refined` carrier that wraps a base type and a predicate identifier. Concrete examples:
+  - `lowercase-string` (every char lowercase)
+  - `numeric-string` (parses as a Numeric)
+  - `decimal-int-string`, `octal-int-string`, `hex-int-string`
+  - Plugin-contributed predicate refinements via ADR-2
+
+  The `Type::Refined` carrier composes through `Intersection` for predicate-and-predicate cases (`non-empty-lowercase-string` = `Refined[String, :lowercase] & Difference[String, ""]`).
+
+A canonical-name registry maps each kebab-case name to its carrier shape (Difference or Refined+key). Display routes through the registry: `Difference[String, ""]` prints as `non-empty-string`, `Refined[String, :lowercase]` prints as `lowercase-string`, and the parser accepts both kebab-case names and the equivalent operator forms in `RBS::Extended` payloads.
+
+- Benefits: each refinement lands in the carrier that matches its mathematical shape; point-removals reuse the existing `Difference` machinery (no new carrier class for the most common refinements); the predicate-subset family gets its own focused carrier instead of one accessory class per name; canonical-name printing and parsing live in one registry, kept in sync with [`imported-built-in-types.md`](../type-specification/imported-built-in-types.md); plugin authors contribute predicate refinements through ADR-2 by registering a `(name, base, predicate)` triple, not by introducing a per-name carrier class.
+- Drawbacks: introduces the soft boundary between "point-removal" and "predicate-subset" that has to be documented; the registry adds a new piece of state the catalogue must keep coherent; round-trip parsing of operator forms (`String - ""`) into the canonical name requires deterministic normalization (handled via [`normalization.md`](../type-specification/normalization.md), but the route must be specified).
+
+**Trade-off axes to revisit during the slice.**
+
+- *Predicate-evaluation propagation* — for `ns: non-empty-string` and the receiver-side method dispatch, each option must thread the refinement into the catalog tier so that the obvious truths reduce to a precise `Constant`:
+
+  ```ruby
+  ns.size                       # positive-int
+  ns.size == 0                  # Constant[false]
+  ns.size != 0                  # Constant[true]
+  ns.size > 0                   # Constant[true]
+  ns.empty?                     # Constant[false]
+  ```
+
+  All three options can do this, but the route differs. Option A requires per-accessory rules for each predicate the accessory implies. Option B and C reuse the existing integer-equal / comparison narrowing tier on the projected `positive-int` size. The hybrid is the simplest because Difference-receivers already participate in narrowing edges via the existing lattice — the catalog tier projects `String#size` over the *base* nominal as `non_negative_int`, the difference subtracts the `""` element (whose size is `0`), and the result is `positive-int` automatically.
+
+- *Composition with existing combinators* — `Intersection`, `Union`, `Difference` already have algebraic identities. Each option must specify how the refinement carrier flows through them. Option A relies on the intersection-of-accessories pattern; Option B and C reuse the existing reductions.
+
+- *Display contract* — [`diagnostic-policy.md`](../type-specification/diagnostic-policy.md) and [`type-operators.md`](../type-specification/type-operators.md) require that refinement-bearing types print canonically. The display registry's bidirectionality (canonical-name ↔ operator form) is a Hybrid (Option C) cross-cut that does not exist in Option A; the registry is small but its coherence is part of the spec.
+
+- *RBS erasure* — every refinement MUST erase to its base nominal per [`rbs-erasure.md`](../type-specification/rbs-erasure.md). All three options satisfy this; the implementations differ only in the data flow.
+
+- *Plugin authoring* — refinement-contributing plugins (ADR-2) need a stable surface. Option A asks plugins to subclass an accessory base; Option C asks them to register a `(name, base, predicate)` triple. The hybrid is the lighter authoring surface but requires the registry to be plugin-extensible without touching the carrier code.
+
+The slice that resolves OQ1 (constant scalar shape) is independent of OQ3, so OQ3 is also deferred. The first refinement-tier slice should land `non-empty-string` end to end through the chosen option, including:
+
+- the chosen carrier shape (Difference, Accessory, or Refined),
+- a catalog-tier rule that projects `String#size` / `String#empty?` over the refined receiver to the matching `positive-int` / `Constant[false]` result,
+- the integer-equal narrowing tier proving `positive-int == 0` reduces to `Constant[false]`, and
+- the bidirectional display registry entry (`non-empty-string` ↔ canonical operator form).
+
+When that slice lands, ADR-3 records the resolved Working Decision and adds a normative section to [`internal-type-api.md`](../internal-spec/internal-type-api.md). The remainder of the imported-built-in catalogue follows the same shape.
+
 ## Class Catalogue Draft
 
 This catalogue is **not** normative. It is a checklist that the type specification is covered by the planned representation. Each entry cross-references the binding spec section.
@@ -130,16 +210,16 @@ This catalogue is **not** normative. It is a checklist that the type specificati
 - **Containers**: `ArrayShape`, `Tuple`, `HashShape`, `Record`. See [`rbs-compatible-types.md`](../type-specification/rbs-compatible-types.md) for the RBS-derived forms and [`rigor-extensions.md`](../type-specification/rigor-extensions.md) for the refinements (required/optional keys, read-only entries, extra-key policy).
 - **Constants**: shape depends on open question 1. Either `Constant` (Option A), `String::Constant` / `Integer::Constant` / `Symbol::Constant` / … (Option B), or a hybrid (Option C). The rest of the catalogue does not depend on the resolution.
 - **Combinators**: `Union`, `Intersection`, `Difference`, `Complement`. See [`type-operators.md`](../type-specification/type-operators.md).
-- **Refinements**: `RefinedNominal` (e.g. `String where non_empty`), `IntegerRange`, `FiniteLiteralUnion`, `TruthinessRefinement`, `RelationalFact`, `FactStability`, `TemplateLiteralLikeString`. See [`rigor-extensions.md`](../type-specification/rigor-extensions.md). Imported built-in refinement names are catalogued in [`imported-built-in-types.md`](../type-specification/imported-built-in-types.md).
+- **Refinements**: shape depends on open question 3. Today's catalogue lists `RefinedNominal` (e.g. `String where non_empty`), `IntegerRange`, `FiniteLiteralUnion`, `TruthinessRefinement`, `RelationalFact`, `FactStability`, `TemplateLiteralLikeString` (see [`rigor-extensions.md`](../type-specification/rigor-extensions.md)); the OQ3 resolution decides whether refinements collapse onto `Difference` (Option B), gain per-name accessory carriers (Option A), or split into a `Difference`/`Refined` pair (Option C). Imported built-in refinement names are catalogued in [`imported-built-in-types.md`](../type-specification/imported-built-in-types.md).
 - **Generic position carriers**: `Generic`, `TemplateParameter`, `Variance`. Variance is a tag, not a separate type form. See [`rbs-compatible-types.md`](../type-specification/rbs-compatible-types.md).
 
 Every entry MUST satisfy the method surface in [`docs/internal-spec/internal-type-api.md`](../internal-spec/internal-type-api.md). Wrappers (`Dynamic`, refinements, combinators, generic carriers) MUST forward queries into their inner types according to the algebraic rules in [`value-lattice.md`](../type-specification/value-lattice.md).
 
 ## Implementation Roadmap
 
-The roadmap is informational, not normative. It scopes the first vertical slice that exercises both open questions in real code.
+The roadmap is informational, not normative. It scopes the first vertical slices that exercise the open questions in real code.
 
-The first slice should cover, end to end:
+The first slice (OQ1 + OQ2) should cover, end to end:
 
 - `Rigor::Trinary` with `yes`, `no`, `maybe` flyweights and the standard combinators.
 - `Top`, `Bot`, and `Dynamic[T]` wrapper.
@@ -149,7 +229,9 @@ The first slice should cover, end to end:
 - `subtype_of` returning a `SubtypeResult`.
 - `describe(verbosity)` and `erase_to_rbs` for each implemented form.
 
-When the slice lands, ADR-3 is updated to record the resolved Working Decisions. Subsequent slices add unions, intersections, refinements, container shapes, structural interfaces, generic carriers, and the rest of the catalogue.
+A subsequent slice resolves OQ3 by landing `non-empty-string` end to end: the chosen carrier shape (Difference, Accessory, or Refined), the catalog-tier rule that projects `String#size` to `positive-int` over the refined receiver, the integer-equal narrowing tier that proves `positive-int == 0` reduces to `Constant[false]`, and the bidirectional canonical-name display registry entry.
+
+When each slice lands, ADR-3 is updated to record the resolved Working Decisions. Subsequent slices add unions, intersections, refinements, container shapes, structural interfaces, generic carriers, and the rest of the catalogue.
 
 ## References
 

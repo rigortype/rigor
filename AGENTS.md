@@ -17,6 +17,7 @@ The current implementation is an initial scaffold. It uses `Prism` to parse Ruby
 - The Flake shell includes Git 2.54.0 and GNU Make.
 - `flake.nix` points Bundler at `vendor/bundle`; keep local gem installs isolated from global machine state.
 - The license is MPL-2.0. The official repository is `https://github.com/rigortype/rigor`.
+- The Flake mandate covers local development. CI (`.github/workflows/ci.yml`) installs Ruby via [`ruby/setup-ruby`](https://github.com/ruby/setup-ruby) instead of Nix and runs `make verify` directly; `references/` submodules are not checked out there because tests and `make check` do not consume them.
 
 ### Running commands through the Flake
 

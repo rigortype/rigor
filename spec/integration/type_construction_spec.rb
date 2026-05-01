@@ -223,6 +223,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/container_size.rb — Array/String/Hash#size tightened to non_negative_int" do
+    let(:harness) { harness_for("container_size") }
+
+    it "self-asserts the tightened size return types via assert_type" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/iterator_block_params.rb — IntegerRange-typed block parameters" do
     let(:harness) { harness_for("iterator_block_params") }
 

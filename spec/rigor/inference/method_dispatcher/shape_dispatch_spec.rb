@@ -293,10 +293,48 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
   end
 
   describe "non-shape receivers" do
-    it "returns nil for any non-Tuple/HashShape receiver" do
+    it "returns nil for any non-Tuple/HashShape receiver (excluding the size tier below)" do
       expect(dispatch(receiver: constant(1), method_name: :first)).to be_nil
       nominal = Rigor::Type::Combinator.nominal_of(Array)
       expect(dispatch(receiver: nominal, method_name: :first)).to be_nil
+    end
+  end
+
+  describe "Nominal#size / #length / #bytesize on container types" do
+    def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+    def non_negative_int = Rigor::Type::Combinator.non_negative_int
+
+    it "tightens Array#size / #length / #count to non_negative_int" do
+      %i[size length count].each do |sel|
+        expect(dispatch(receiver: nominal("Array"), method_name: sel)).to eq(non_negative_int)
+      end
+    end
+
+    it "tightens String#length / #size / #bytesize to non_negative_int" do
+      %i[length size bytesize].each do |sel|
+        expect(dispatch(receiver: nominal("String"), method_name: sel)).to eq(non_negative_int)
+      end
+    end
+
+    it "tightens Hash / Set / Range #size to non_negative_int" do
+      %w[Hash Set Range].each do |klass|
+        expect(dispatch(receiver: nominal(klass), method_name: :size)).to eq(non_negative_int)
+      end
+    end
+
+    it "declines for arity-bearing calls (size with an argument)" do
+      expect(
+        dispatch(receiver: nominal("Array"), method_name: :size, args: [constant(1)])
+      ).to be_nil
+    end
+
+    it "declines for unrelated nominals" do
+      expect(dispatch(receiver: nominal("Integer"), method_name: :size)).to be_nil
+      expect(dispatch(receiver: nominal("Foo"), method_name: :length)).to be_nil
+    end
+
+    it "declines for non-size/length selectors on container nominals" do
+      expect(dispatch(receiver: nominal("Array"), method_name: :first)).to be_nil
     end
   end
 end

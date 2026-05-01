@@ -93,8 +93,24 @@ module Rigor
           case receiver
           when Type::Tuple then dispatch_tuple(receiver, method_name, args)
           when Type::HashShape then dispatch_hash_shape(receiver, method_name, args)
+          when Type::Nominal then dispatch_nominal_size(receiver, method_name, args)
           end
         end
+
+        # Tightens `Array#size` / `Array#length` / `String#length` /
+        # `String#bytesize` / `Hash#size` etc. on a `Nominal` receiver
+        # from the RBS-declared `Integer` to `non_negative_int`. The
+        # tier ahead of RBS sees the more precise carrier so
+        # downstream narrowing (`if size > 0; …`) actually has a
+        # range to intersect with.
+        SIZE_RETURNING_NOMINALS = {
+          "Array" => %i[size length count],
+          "String" => %i[length size bytesize],
+          "Hash" => %i[size length count],
+          "Set" => %i[size length count],
+          "Range" => %i[size length count]
+        }.freeze
+        private_constant :SIZE_RETURNING_NOMINALS
 
         class << self
           private
@@ -111,6 +127,15 @@ module Rigor
             return nil unless handler
 
             send(handler, shape, method_name, args)
+          end
+
+          def dispatch_nominal_size(nominal, method_name, args)
+            return nil unless args.empty?
+
+            selectors = SIZE_RETURNING_NOMINALS[nominal.class_name]
+            return nil unless selectors&.include?(method_name)
+
+            Type::Combinator.non_negative_int
           end
 
           def tuple_first(tuple, _method_name, args)

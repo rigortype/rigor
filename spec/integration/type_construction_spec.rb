@@ -169,6 +169,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/argument_type/ — argument-type-mismatch check rule (v0.0.2 #4)" do
+    let(:harness) { harness_for("argument_type") }
+
+    it "produces no diagnostics when every call argument matches its parameter type" do
+      arg_errors = harness.errors.select { |d| d.message.start_with?("argument type mismatch") }
+      expect(arg_errors).to be_empty
+    end
+  end
+
   describe "fixtures/predicate_extended/ — RBS::Extended `predicate-if-*`" do
     let(:harness) { harness_for("predicate_extended") }
 

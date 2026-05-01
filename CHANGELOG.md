@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `rigor check` ships an **argument-type-mismatch** rule. For
+  every explicit-receiver `Prism::CallNode` whose method has
+  exactly one RBS overload (no `rest_positionals`, no
+  required keywords, no trailing positionals), the rule
+  routes each positional argument's inferred type through
+  `Rigor::Inference::Acceptance.accepts(parameter, argument,
+  mode: :gradual)` and emits an `:error` for the first
+  argument the parameter does not accept. Argument or
+  parameter types known only as `Dynamic` skip the check
+  (the call cannot be statically refuted). The receiver
+  must be `Nominal` / `Singleton` / `Constant`; user-class
+  fallback / shape carriers behave as in the wrong-arity
+  rule. The rule respects RBS even when the user has both a
+  `def` and a sig: the sig is the authoritative parameter
+  contract.
+
+- `Rigor::Inference::Acceptance` now treats `Singleton[T]`
+  as a subtype of `Module`, `Class`, `Object`, and
+  `BasicObject`. Without this rule a method whose parameter
+  is typed `Class | Module` (e.g. `Object#is_a?`,
+  `Module#define_method`) rejected every singleton receiver,
+  producing systemic false positives across both `lib/` and
+  `spec/`.
+
 - `RBS::Extended` `target: self` directives now actually
   narrow the receiver local on the matching edge (was: parser
   accepted but engine discarded). Covers all three rule

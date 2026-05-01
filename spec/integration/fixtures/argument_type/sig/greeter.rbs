@@ -1,0 +1,4 @@
+class Greeter
+  def greet: (String name) -> String
+  def repeat: (String word, Integer times) -> String
+end

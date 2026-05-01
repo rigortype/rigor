@@ -188,6 +188,8 @@ module Rigor
             accepts_nominal_from_nominal(self_type, other_type, mode)
           when Type::Constant
             accepts_nominal_from_constant(self_type, other_type, mode)
+          when Type::Singleton
+            accepts_nominal_from_singleton(self_type, other_type, mode)
           when Type::Tuple
             accepts(self_type, project_tuple_to_nominal(other_type), mode: mode)
               .with_reason("projected Tuple to Nominal[Array]")
@@ -200,6 +202,35 @@ module Rigor
               reasons: "Nominal[#{self_type.class_name}] rejects #{other_type.class}"
             )
           end
+        end
+
+        # v0.0.2 — meta-type rule. A `Singleton[T]` is the
+        # class object for `T`, so it is an instance of
+        # `Class` (when `T` is a class) and always an instance
+        # of `Module`. Without this rule a method whose
+        # parameter is typed `Class | Module` would reject
+        # every `is_a?(SomeClass)` call and similar
+        # introspection patterns. The rule conservatively
+        # answers `:yes` for `Module` (every singleton is at
+        # least a Module) and for `Class` / `Object` /
+        # `BasicObject` (the class object inherits from
+        # those). Other Nominals fall through to the default
+        # `:no`.
+        META_NOMINALS_FROM_SINGLETON = %w[Module Class Object BasicObject].freeze
+        private_constant :META_NOMINALS_FROM_SINGLETON
+
+        def accepts_nominal_from_singleton(self_type, other_type, mode)
+          if META_NOMINALS_FROM_SINGLETON.include?(self_type.class_name)
+            return Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "Singleton[#{other_type.class_name}] is-a #{self_type.class_name}"
+            )
+          end
+
+          Type::AcceptsResult.no(
+            mode: mode,
+            reasons: "Nominal[#{self_type.class_name}] rejects Singleton[#{other_type.class_name}]"
+          )
         end
 
         def accepts_nominal_from_nominal(self_type, other_type, mode)

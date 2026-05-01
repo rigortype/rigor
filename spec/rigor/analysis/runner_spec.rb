@@ -206,6 +206,49 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      describe "argument-type-mismatch rule (v0.0.2 #4)" do # rubocop:disable RSpec/NestedGroups
+        # Helper: write a fixture under `dir` with the given Ruby
+        # source plus a sig declaring `Demo#take_string: (String) -> String`,
+        # then run the analyzer with `Dir.chdir(dir)` so
+        # `Environment.for_project` picks up the sig directory.
+        def take_string_fixture(dir, ruby_body)
+          FileUtils.mkdir_p(File.join(dir, "sig"))
+          File.write(File.join(dir, "sig/demo.rbs"), <<~RBS)
+            class Demo
+              def take_string: (String value) -> String
+            end
+          RBS
+          File.write(File.join(dir, "demo.rb"), <<~RUBY)
+            class Demo
+              def take_string(value); value; end
+            end
+            #{ruby_body}
+          RUBY
+          configuration = Rigor::Configuration.new("paths" => [File.join(dir, "demo.rb")])
+          Dir.chdir(dir) { described_class.new(configuration: configuration).run }
+        end
+
+        it "flags an Integer passed where a String is expected" do
+          Dir.mktmpdir do |dir|
+            result = take_string_fixture(dir, "Demo.new.take_string(42)")
+
+            mismatch = result.diagnostics.find { |d| d.message.start_with?("argument type mismatch") }
+            expect(mismatch).not_to be_nil
+            expect(mismatch.message).to include("expected String")
+            expect(mismatch.message).to include("got 42")
+          end
+        end
+
+        it "stays silent on a matching call" do
+          Dir.mktmpdir do |dir|
+            result = take_string_fixture(dir, 'Demo.new.take_string("hello")')
+
+            arg_errors = result.diagnostics.select { |d| d.message.start_with?("argument type mismatch") }
+            expect(arg_errors).to be_empty
+          end
+        end
+      end
+
       describe "dump_type / assert_type rules (Slice 7 phase 19)" do # rubocop:disable RSpec/NestedGroups
         it "emits an info-severity diagnostic for `dump_type(value)`" do
           Dir.mktmpdir do |dir|

@@ -53,7 +53,7 @@ module Rigor
       # @param root [Prism::Node]
       # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
       # @return [Array<Rigor::Analysis::Diagnostic>]
-      def diagnose(path:, root:, scope_index:) # rubocop:disable Metrics/CyclomaticComplexity
+      def diagnose(path:, root:, scope_index:) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         diagnostics = []
         Source::NodeWalker.each(root) do |node|
           next unless node.is_a?(Prism::CallNode)
@@ -63,6 +63,9 @@ module Rigor
 
           arity_diagnostic = wrong_arity_diagnostic(path, node, scope_index)
           diagnostics << arity_diagnostic if arity_diagnostic
+
+          arg_type_diagnostic = argument_type_diagnostic(path, node, scope_index)
+          diagnostics << arg_type_diagnostic if arg_type_diagnostic
 
           nil_diagnostic = nil_receiver_diagnostic(path, node, scope_index)
           diagnostics << nil_diagnostic if nil_diagnostic
@@ -484,6 +487,116 @@ module Rigor
             line: location.start_line,
             column: location.start_column + 1,
             message: "possible nil receiver: `#{call_node.name}' is undefined on NilClass",
+            severity: :error
+          )
+        end
+
+        # v0.0.2 #4 — argument-type-mismatch diagnostic.
+        # Walks a call's positional arguments and checks each
+        # against the matching parameter's RBS type via
+        # `Rigor::Inference::Acceptance`. Emits an `:error`
+        # for the first argument whose type the parameter
+        # does NOT accept under the gradual mode.
+        #
+        # Conservative envelope (matches the wrong-arity rule
+        # plus a few additional skips):
+        # - Receiver must be Nominal / Singleton / Constant
+        #   (the same `concrete_class_name` test).
+        # - Method must be in RBS.
+        # - Method must have exactly ONE method type
+        #   (overload). Multi-overload checking is left for
+        #   a follow-up because picking the "intended"
+        #   overload requires the dispatcher's full
+        #   acceptance plumbing.
+        # - The selected overload must have NO
+        #   rest_positionals, NO required keywords, NO
+        #   trailing positionals.
+        # - The call must use plain positional arguments
+        #   (no splat / kw / block-pass / forwarded).
+        # - Per-argument: skip when EITHER side is `Dynamic`
+        #   (the call cannot be statically refuted).
+        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
+        def argument_type_diagnostic(path, call_node, scope_index)
+          return nil if call_node.receiver.nil?
+          return nil unless plain_positional_call?(call_node)
+
+          scope = scope_index[call_node]
+          return nil if scope.nil?
+
+          receiver_type = scope.type_of(call_node.receiver)
+          class_name = concrete_class_name(receiver_type)
+          return nil if class_name.nil?
+
+          # NOTE: unlike the undefined-method / wrong-arity
+          # rules, we deliberately do NOT skip when
+          # `discovered_method?` matches. When the user
+          # supplies BOTH a `def` and an RBS sig, the sig is
+          # the authoritative parameter contract and we
+          # should validate calls against it.
+          loader = scope.environment.rbs_loader
+          return nil if loader.nil?
+          return nil unless loader.class_known?(class_name)
+          return nil unless definition_available?(loader, receiver_type, class_name)
+
+          method_def = lookup_method(loader, receiver_type, class_name, call_node.name)
+          return nil if method_def.nil? || method_def == true
+          return nil unless method_def.method_types.size == 1
+
+          mismatch = first_argument_mismatch(method_def.method_types.first, call_node, scope)
+          return nil if mismatch.nil?
+
+          build_argument_type_diagnostic(path, call_node, class_name, mismatch)
+        end
+        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
+
+        def first_argument_mismatch(method_type, call_node, scope) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+          function = method_type.type
+          return nil unless argument_check_eligible?(function)
+
+          params = function.required_positionals + function.optional_positionals
+          arguments = call_node.arguments&.arguments || []
+          arguments.each_with_index do |arg, index|
+            param = params[index]
+            next if param.nil? # arity mismatch is the wrong-arity rule's concern.
+
+            param_type = translate_param_type(param.type, scope.environment)
+            next if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
+
+            arg_type = scope.type_of(arg)
+            next if arg_type.is_a?(Type::Dynamic) || arg_type.is_a?(Type::Top)
+
+            result = Inference::Acceptance.accepts(param_type, arg_type, mode: :gradual)
+            return { node: arg, name: param.name, expected: param_type, actual: arg_type } if result.no?
+          end
+          nil
+        end
+
+        def argument_check_eligible?(function)
+          function.rest_positionals.nil? &&
+            function.required_keywords.empty? &&
+            function.optional_keywords.empty? &&
+            function.rest_keywords.nil? &&
+            function.trailing_positionals.empty?
+        end
+
+        def translate_param_type(rbs_type, _environment)
+          Inference::RbsTypeTranslator.translate(rbs_type)
+        rescue StandardError
+          Type::Combinator.untyped
+        end
+
+        def build_argument_type_diagnostic(path, call_node, class_name, mismatch)
+          location = mismatch[:node].location
+          method_label = "`#{call_node.name}' on #{class_name}"
+          parameter_label = mismatch[:name] ? "parameter `#{mismatch[:name]}' of #{method_label}" : method_label
+          message = "argument type mismatch at #{parameter_label}: " \
+                    "expected #{mismatch[:expected].describe(:short)}, " \
+                    "got #{mismatch[:actual].describe(:short)}"
+          Diagnostic.new(
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: message,
             severity: :error
           )
         end

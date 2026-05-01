@@ -45,10 +45,14 @@ module Rigor
 
     # Returned for `predicate-if-true` / `predicate-if-false`.
     # `target_kind` is `:parameter` (with `target_name` the
-    # Ruby parameter symbol) or `:self`.
-    PredicateEffect = Data.define(:edge, :target_kind, :target_name, :class_name) do
+    # Ruby parameter symbol) or `:self`. `negative` is true
+    # when the directive uses the `~ClassName` form, in
+    # which case the engine narrows AWAY from `class_name`
+    # (`Narrowing.narrow_not_class`) instead of toward it.
+    PredicateEffect = Data.define(:edge, :target_kind, :target_name, :class_name, :negative) do
       def truthy_only? = edge == :truthy_only
       def falsey_only? = edge == :falsey_only
+      def negative? = negative == true
     end
 
     # Returned for `assert` / `assert-if-true` /
@@ -63,10 +67,14 @@ module Rigor
     #                        predicate of a subsequent
     #                        `if` / `unless`).
     # - `:if_falsey_return` — symmetric for falsey.
-    AssertEffect = Data.define(:condition, :target_kind, :target_name, :class_name) do
+    #
+    # `negative` mirrors `PredicateEffect`: true when the
+    # directive uses `~ClassName` syntax.
+    AssertEffect = Data.define(:condition, :target_kind, :target_name, :class_name, :negative) do
       def always? = condition == :always
       def if_truthy_return? = condition == :if_truthy_return
       def if_falsey_return? = condition == :if_falsey_return
+      def negative? = negative == true
     end
 
     module_function
@@ -97,6 +105,7 @@ module Rigor
       \s+
       (?<target>self|[a-z_][a-zA-Z0-9_]*)
       \s+is\s+
+      (?<negation>~?)
       (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
       \s*
       \z
@@ -117,7 +126,8 @@ module Rigor
         edge: edge,
         target_kind: target_kind,
         target_name: target_name,
-        class_name: class_name
+        class_name: class_name,
+        negative: match[:negation].to_s == "~"
       )
     end
 
@@ -146,6 +156,7 @@ module Rigor
       \s+
       (?<target>self|[a-z_][a-zA-Z0-9_]*)
       \s+is\s+
+      (?<negation>~?)
       (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
       \s*
       \z
@@ -175,7 +186,8 @@ module Rigor
         condition: condition,
         target_kind: target_kind,
         target_name: target_name,
-        class_name: class_name
+        class_name: class_name,
+        negative: match[:negation].to_s == "~"
       )
     end
   end

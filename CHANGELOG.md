@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `RBS::Extended` recognises **negation** in predicate / assert
+  directives via the `~ClassName` syntax:
+  - `predicate-if-true value is ~NilClass` narrows `value`
+    AWAY from `NilClass` on the truthy edge.
+  - `assert value is ~NilClass` narrows `value` AWAY from
+    `NilClass` in the post-call scope.
+
+  `Rigor::RbsExtended::PredicateEffect#negative?` and
+  `AssertEffect#negative?` are new boolean predicates; the
+  parser sets them when the directive's type literal starts
+  with `~`. The engine routes negative effects through
+  `Narrowing.narrow_not_class` instead of `narrow_class` so
+  the union loses the named class on the active edge.
+
 - `RBS::Extended` recognises three additional directives:
   - `rigor:v1:assert <target> is <Class>` — refines the
     matching argument's local in the post-call scope

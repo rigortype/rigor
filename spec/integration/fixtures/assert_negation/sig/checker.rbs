@@ -1,0 +1,8 @@
+class Checker
+  %a{rigor:v1:assert value is ~NilClass}
+  def must_not_be_nil!: (untyped value) -> void
+
+  %a{rigor:v1:predicate-if-true value is ~NilClass}
+  %a{rigor:v1:predicate-if-false value is NilClass}
+  def present?: (untyped value) -> bool
+end

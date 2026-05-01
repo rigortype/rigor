@@ -151,6 +151,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/assert_negation/ — RBS::Extended `~T` negation (v0.0.2 #2)" do
+    let(:harness) { harness_for("assert_negation") }
+
+    it "drops the negated class from the post-call union" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/predicate_extended/ — RBS::Extended `predicate-if-*`" do
     let(:harness) { harness_for("predicate_extended") }
 

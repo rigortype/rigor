@@ -152,5 +152,24 @@ RSpec.describe Rigor::RbsExtended do
     it "returns nil for unrecognised payload shape" do
       expect(described_class.parse_assert_annotation("rigor:v1:assert garbage")).to be_nil
     end
+
+    describe "negation `~T` (v0.0.2 #2)" do
+      it "marks the assert effect as negative when the type is `~ClassName`" do
+        effect = described_class.parse_assert_annotation("rigor:v1:assert value is ~NilClass")
+        expect(effect).to be_negative
+        expect(effect.class_name).to eq("NilClass")
+      end
+
+      it "leaves positive directives unmarked" do
+        effect = described_class.parse_assert_annotation("rigor:v1:assert value is String")
+        expect(effect).not_to be_negative
+      end
+
+      it "marks predicate effects as negative" do
+        effect = described_class.parse_predicate_annotation("rigor:v1:predicate-if-true value is ~NilClass")
+        expect(effect).to be_negative
+        expect(effect.class_name).to eq("NilClass")
+      end
+    end
   end
 end

@@ -671,10 +671,16 @@ module Rigor
         current_type = current_scope.local(local_name)
         return current_scope if current_type.nil?
 
-        narrowed = Narrowing.narrow_class(
-          current_type, effect.class_name, exact: false, environment: current_scope.environment
-        )
+        narrowed = narrow_for_assert_effect(current_type, effect, current_scope.environment)
         current_scope.with_local(local_name, narrowed)
+      end
+
+      def narrow_for_assert_effect(current_type, effect, environment)
+        if effect.negative?
+          Narrowing.narrow_not_class(current_type, effect.class_name, exact: false, environment: environment)
+        else
+          Narrowing.narrow_class(current_type, effect.class_name, exact: false, environment: environment)
+        end
       end
 
       def lookup_assert_arg(call_node, method_def, target_name)

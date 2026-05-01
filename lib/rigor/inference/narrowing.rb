@@ -726,7 +726,7 @@ module Rigor
           current = entry_scope.local(local_name)
           return [truthy_scope, falsey_scope] if current.nil?
 
-          narrowed = narrow_class(current, effect.class_name, exact: false, environment: entry_scope.environment)
+          narrowed = narrow_for_effect(current, effect, entry_scope.environment)
           if effect.if_truthy_return?
             [truthy_scope.with_local(local_name, narrowed), falsey_scope]
           else
@@ -734,6 +734,18 @@ module Rigor
           end
         end
         # rubocop:enable Metrics/ParameterLists
+
+        # v0.0.2 — selects `narrow_class` (positive) or
+        # `narrow_not_class` (negative `~T` form) based on
+        # the effect's `negative?` flag. Shared between
+        # predicate-if-* and assert-if-* application paths.
+        def narrow_for_effect(current, effect, environment)
+          if effect.negative?
+            narrow_not_class(current, effect.class_name, exact: false, environment: environment)
+          else
+            narrow_class(current, effect.class_name, exact: false, environment: environment)
+          end
+        end
 
         def resolve_rbs_extended_method(node, scope)
           loader = scope.environment.rbs_loader
@@ -783,7 +795,7 @@ module Rigor
           current = entry_scope.local(local_name)
           return [truthy_scope, falsey_scope] if current.nil?
 
-          narrowed = narrow_class(current, effect.class_name, exact: false, environment: entry_scope.environment)
+          narrowed = narrow_for_effect(current, effect, entry_scope.environment)
           if effect.truthy_only?
             [truthy_scope.with_local(local_name, narrowed), falsey_scope]
           else

@@ -232,6 +232,18 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/always_raises/ — division-by-zero diagnostic" do
+    let(:harness) { harness_for("always_raises") }
+
+    it "flags every Integer-by-zero call (suppressions in the fixture verify identification)" do
+      # The fixture uses `# rigor:disable always-raises` on each
+      # raising line, so a clean run proves both that the rule
+      # fired AND that the suppression comment matches.
+      raises = harness.errors.select { |d| d.rule == "always-raises" }
+      expect(raises).to be_empty
+    end
+  end
+
   describe "fixtures/iterator_block_params.rb — IntegerRange-typed block parameters" do
     let(:harness) { harness_for("iterator_block_params") }
 

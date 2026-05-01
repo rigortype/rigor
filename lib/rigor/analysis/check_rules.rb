@@ -53,6 +53,7 @@ module Rigor
       RULE_NIL_RECEIVER = "possible-nil-receiver"
       RULE_DUMP_TYPE = "dump-type"
       RULE_ASSERT_TYPE = "assert-type"
+      RULE_ALWAYS_RAISES = "always-raises"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -60,7 +61,8 @@ module Rigor
         RULE_ARGUMENT_TYPE,
         RULE_NIL_RECEIVER,
         RULE_DUMP_TYPE,
-        RULE_ASSERT_TYPE
+        RULE_ASSERT_TYPE,
+        RULE_ALWAYS_RAISES
       ].freeze
 
       module_function
@@ -97,6 +99,9 @@ module Rigor
 
           assert_diagnostic = assert_type_diagnostic(path, node, scope_index)
           diagnostics << assert_diagnostic if assert_diagnostic
+
+          raises_diagnostic = always_raises_diagnostic(path, node, scope_index)
+          diagnostics << raises_diagnostic if raises_diagnostic
         end
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
@@ -565,6 +570,74 @@ module Rigor
             line: location.start_line,
             column: location.start_column + 1,
             message: "possible nil receiver: `#{call_node.name}' is undefined on NilClass",
+            severity: :error
+          )
+        end
+
+        # Diagnoses calls that the analyzer can prove will always
+        # raise. Today the only triggering shape is integer
+        # division/modulo by a literal zero divisor:
+        #
+        #   5 / 0          # => ZeroDivisionError
+        #   x.modulo(0)    # => ZeroDivisionError when x: Integer
+        #   xs.size % 0    # same — non_negative_int / Constant[0]
+        #
+        # Float divmod by zero returns Infinity/NaN at runtime, so
+        # the rule restricts to Integer-rooted receivers (`Constant`,
+        # `IntegerRange`, `Nominal[Integer]`). The argument MUST be a
+        # `Constant<Integer>` whose value is exactly zero — a
+        # `Union[Constant[0], Constant[2]]` divisor "may" raise,
+        # which we surface separately (future slice).
+        INTEGER_RAISING_OPERATORS = %i[/ % div modulo divmod].freeze
+        private_constant :INTEGER_RAISING_OPERATORS
+
+        def always_raises_diagnostic(path, call_node, scope_index)
+          return nil unless integer_zero_division?(call_node, scope_index)
+
+          build_always_raises_diagnostic(path, call_node)
+        end
+
+        def integer_zero_division?(call_node, scope_index)
+          return false unless raising_call_shape?(call_node)
+
+          scope = scope_index[call_node]
+          return false if scope.nil?
+          return false unless integer_rooted_for_diagnostic?(scope.type_of(call_node.receiver))
+
+          arg = single_argument(call_node)
+          arg && integer_zero_constant?(scope.type_of(arg))
+        end
+
+        def raising_call_shape?(call_node)
+          !call_node.receiver.nil? && INTEGER_RAISING_OPERATORS.include?(call_node.name)
+        end
+
+        def single_argument(call_node)
+          args = call_node.arguments&.arguments || []
+          args.size == 1 ? args.first : nil
+        end
+
+        def integer_rooted_for_diagnostic?(type)
+          case type
+          when Type::Constant then type.value.is_a?(Integer)
+          when Type::IntegerRange then true
+          when Type::Nominal then type.class_name == "Integer" && type.type_args.empty?
+          else false
+          end
+        end
+
+        def integer_zero_constant?(type)
+          type.is_a?(Type::Constant) && type.value.is_a?(Integer) && type.value.zero?
+        end
+
+        def build_always_raises_diagnostic(path, call_node)
+          location = call_node.message_loc || call_node.location
+          Diagnostic.new(
+            rule: RULE_ALWAYS_RAISES,
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "always raises ZeroDivisionError: `#{call_node.name}' by zero on Integer receiver",
             severity: :error
           )
         end

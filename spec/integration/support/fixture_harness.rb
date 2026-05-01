@@ -67,7 +67,8 @@ module Rigor
         @diagnostics ||= Rigor::Analysis::CheckRules.diagnose(
           path: name,
           root: tree,
-          scope_index: index
+          scope_index: index,
+          comments: @comments || []
         )
       end
 
@@ -90,7 +91,9 @@ module Rigor
                                "(checked #{flat_path} and #{project_dir}/)"
         end
 
-        @tree = Prism.parse(@source).value
+        result = Prism.parse(@source)
+        @tree = result.value
+        @comments = result.comments
         @index = Rigor::Inference::ScopeIndexer.index(@tree, default_scope: @scope)
       end
 

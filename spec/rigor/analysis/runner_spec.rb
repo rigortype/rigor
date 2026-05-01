@@ -401,4 +401,65 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(result).to be_success # info doesn't fail the run
     end
   end
+
+  describe "always-raises rule (Integer division/modulo by zero)" do
+    it "flags `5 / 0` as always-raising at :error severity" do
+      result = analyze("5 / 0\n")
+      diag = result.diagnostics.find { |d| d.rule == "always-raises" }
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("ZeroDivisionError")
+      expect(diag.severity).to eq(:error)
+    end
+
+    it "flags every recognised raising operator on Integer" do
+      sources = {
+        "5 / 0\n" => "/",
+        "5 % 0\n" => "%",
+        "5.div(0)\n" => "div",
+        "5.modulo(0)\n" => "modulo",
+        "5.divmod(0)\n" => "divmod"
+      }
+      sources.each do |src, label|
+        diag = analyze(src).diagnostics.find { |d| d.rule == "always-raises" }
+        expect(diag).not_to(be_nil, "expected an always-raises diagnostic for `#{label}`")
+      end
+    end
+
+    it "fires when the receiver is Nominal[Integer] (wider receiver)" do
+      diag = analyze("rand(100) / 0\n").diagnostics.find { |d| d.rule == "always-raises" }
+      expect(diag).not_to be_nil
+    end
+
+    it "does not fire on Float arithmetic (returns Infinity, not raise)" do
+      expect(
+        analyze("5.0 / 0\n").diagnostics.find { |d| d.rule == "always-raises" }
+      ).to be_nil
+      expect(
+        analyze("5 / 0.0\n").diagnostics.find { |d| d.rule == "always-raises" }
+      ).to be_nil
+    end
+
+    it "does not fire on Integer#fdiv (returns Infinity, not raise)" do
+      expect(
+        analyze("5.fdiv(0)\n").diagnostics.find { |d| d.rule == "always-raises" }
+      ).to be_nil
+    end
+
+    it "does not fire when the divisor is non-zero" do
+      expect(analyze("5 / 2\n")).to be_success
+    end
+
+    it "does not fire when the divisor cannot be proved zero" do
+      # `rand(100)` could be zero but the analyzer cannot
+      # prove it, so the rule stays silent.
+      expect(
+        analyze("rand(100) / rand(100)\n").diagnostics.find { |d| d.rule == "always-raises" }
+      ).to be_nil
+    end
+
+    it "is suppressible via `# rigor:disable always-raises`" do
+      result = analyze("5 / 0 # rigor:disable always-raises\n")
+      expect(result.diagnostics.find { |d| d.rule == "always-raises" }).to be_nil
+    end
+  end
 end

@@ -52,6 +52,9 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice A stdlib | `d0096fc` | `Environment::DEFAULT_LIBRARIES` (pathname/optparse/json/yaml/fileutils/tempfile/uri/logger/date/prism/rbs) loaded by default in `for_project` (lib/ unrecognised: 6.0 % → 3.8 %) |
 | Slice 7 phase 1 | `740573a` | Method-local ivar/cvar/global type bindings on `Scope`; `@x = 1; @x` reads as `Constant[1]` inside the same method |
 | Slice A declarations | `8ec609e` | `Scope#declared_types` + `ScopeIndexer`-populated overrides for `module Foo` / `class Bar` headers (lib/ ConstantReadNode unrecognised: 7.0 % → 6.3 %) |
+| Slice 7 phase 2 | `d1b424e` | Cross-method ivar tracking via class accumulator; `def init; @x = 1; end; def get; @x; end` resolves `@x` to `Constant[1]` |
+| Slice 7 phase 3 | `970cf00` | Compound writes (`||=`, `&&=`, `+=`, ...) thread through scope for local/ivar/cvar/global with operator dispatch |
+| Slice 7 phase 4 | `bbdac83` | Case-equality (`===`) narrowing for Class/Module receivers (is_a? isomorphism), Range literals (Numeric/String), Regexp literals (String) |
 
 ## What is in Place Today
 

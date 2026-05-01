@@ -13,6 +13,12 @@ The first preview release. Rigor can be pointed at a real Ruby
 project, infer types end-to-end through a flow-sensitive scope,
 and emit diagnostics for a small but practical rule catalogue.
 
+The gem is published to RubyGems as **`rigortype`** (the
+`rigor` name was already taken). The Ruby module name remains
+`Rigor`, so user code uses `require "rigor"` and references
+`Rigor::Scope`, `Rigor::Testing`, etc. — only the
+`gem install` / `Gemfile` line uses `rigortype`.
+
 ### Added
 
 - **`rigor check` end-to-end pipeline.** Parses Ruby through

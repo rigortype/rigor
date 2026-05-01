@@ -98,6 +98,13 @@ module Rigor
         discovered_methods = build_discovered_methods(root)
         seeded_scope = seeded_scope.with_discovered_methods(discovered_methods)
 
+        # v0.0.2 #5 — also record the def node itself for
+        # instance methods so the engine can re-type the body
+        # when a call site dispatches against a user-defined
+        # method without an RBS sig.
+        discovered_def_nodes = build_discovered_def_nodes(root)
+        seeded_scope = seeded_scope.with_discovered_def_nodes(discovered_def_nodes)
+
         table = {}.compare_by_identity
         table.default = seeded_scope
 
@@ -367,6 +374,57 @@ module Rigor
         kind = def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = kind
+      end
+
+      # v0.0.2 #5 — instance-side def-node recording. Walks
+      # class bodies the same way as `build_discovered_methods`
+      # but records the actual `Prism::DefNode` for each
+      # **instance** method so `ExpressionTyper` can re-type
+      # the body at the call site for inter-procedural return
+      # inference. Singleton methods and `define_method` calls
+      # are intentionally skipped: the inference path needs a
+      # statically introspectable body, and singleton dispatch
+      # has its own complications (Class / Module ancestry)
+      # the first-iteration rule does not yet model.
+      def build_discovered_def_nodes(root)
+        accumulator = {}
+        walk_def_nodes(root, [], false, accumulator)
+        accumulator.transform_values(&:freeze).freeze
+      end
+
+      def walk_def_nodes(node, qualified_prefix, in_singleton_class, accumulator) # rubocop:disable Metrics/CyclomaticComplexity
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            child_prefix = qualified_prefix + [name]
+            walk_def_nodes(node.body, child_prefix, false, accumulator) if node.body
+            return
+          end
+        when Prism::SingletonClassNode
+          if node.expression.is_a?(Prism::SelfNode) && node.body
+            walk_def_nodes(node.body, qualified_prefix, true, accumulator)
+            return
+          end
+        when Prism::DefNode
+          record_def_node(node, qualified_prefix, in_singleton_class, accumulator)
+          return
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_def_nodes(child, qualified_prefix, in_singleton_class, accumulator)
+        end
+      end
+
+      def record_def_node(def_node, qualified_prefix, in_singleton_class, accumulator)
+        return if qualified_prefix.empty?
+        return if def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
+
+        class_name = qualified_prefix.join("::")
+        accumulator[class_name] ||= {}
+        accumulator[class_name][def_node.name] = def_node
       end
 
       def record_define_method(call_node, qualified_prefix, in_singleton_class, accumulator)

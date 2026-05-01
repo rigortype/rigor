@@ -19,7 +19,8 @@ module Rigor
     attr_reader :environment, :locals, :fact_store, :self_type, :declared_types,
                 :ivars, :cvars, :globals,
                 :class_ivars, :class_cvars, :program_globals,
-                :discovered_classes, :in_source_constants, :discovered_methods
+                :discovered_classes, :in_source_constants, :discovered_methods,
+                :discovered_def_nodes
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
@@ -45,7 +46,8 @@ module Rigor
       program_globals: EMPTY_VAR_BINDINGS,
       discovered_classes: EMPTY_VAR_BINDINGS,
       in_source_constants: EMPTY_VAR_BINDINGS,
-      discovered_methods: EMPTY_CLASS_BINDINGS
+      discovered_methods: EMPTY_CLASS_BINDINGS,
+      discovered_def_nodes: EMPTY_CLASS_BINDINGS
     )
       @environment = environment
       @locals = locals
@@ -61,6 +63,7 @@ module Rigor
       @discovered_classes = discovered_classes
       @in_source_constants = in_source_constants
       @discovered_methods = discovered_methods
+      @discovered_def_nodes = discovered_def_nodes
       freeze
     end
 
@@ -231,6 +234,26 @@ module Rigor
       rebuild(discovered_methods: table)
     end
 
+    # v0.0.2 #5 — per-class table mapping
+    # `method_name (Symbol) → Prism::DefNode`. Populated by
+    # `ScopeIndexer` alongside `discovered_methods` for
+    # instance-side defs only (singleton-side and
+    # `define_method`-introduced methods do not contribute a
+    # static body the engine can re-type). Consumed by
+    # `ExpressionTyper` to do inter-procedural return-type
+    # inference when the receiver class is user-defined and
+    # has no RBS sig.
+    def user_def_for(class_name, method_name)
+      table = @discovered_def_nodes[class_name.to_s]
+      return nil unless table
+
+      table[method_name.to_sym]
+    end
+
+    def with_discovered_def_nodes(table)
+      rebuild(discovered_def_nodes: table)
+    end
+
     def facts_for(target: nil, bucket: nil)
       fact_store.facts_for(target: target, bucket: bucket)
     end
@@ -297,7 +320,7 @@ module Rigor
       declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals,
       class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals,
       discovered_classes: @discovered_classes, in_source_constants: @in_source_constants,
-      discovered_methods: @discovered_methods
+      discovered_methods: @discovered_methods, discovered_def_nodes: @discovered_def_nodes
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -308,7 +331,8 @@ module Rigor
         program_globals: program_globals,
         discovered_classes: discovered_classes,
         in_source_constants: in_source_constants,
-        discovered_methods: discovered_methods
+        discovered_methods: discovered_methods,
+        discovered_def_nodes: discovered_def_nodes
       )
     end
 
@@ -332,7 +356,8 @@ module Rigor
         program_globals: program_globals,
         discovered_classes: discovered_classes,
         in_source_constants: in_source_constants,
-        discovered_methods: discovered_methods
+        discovered_methods: discovered_methods,
+        discovered_def_nodes: discovered_def_nodes
       )
     end
   end

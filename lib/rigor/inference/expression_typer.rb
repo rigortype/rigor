@@ -753,6 +753,14 @@ module Rigor
         )
         return result if result
 
+        # v0.0.2 #5 — inter-procedural inference for
+        # user-defined methods. When dispatch misses but the
+        # receiver is a user class with a `def` body, re-type
+        # the body with the call's argument types bound and
+        # return the body's last-expression type.
+        user_inference = try_user_method_inference(receiver, node, arg_types)
+        return user_inference if user_inference
+
         # Dynamic-origin propagation: when the receiver is Dynamic[T] and
         # no positive rule resolves the call, the result inherits the
         # dynamic origin. Per the value-lattice algebra, this is a
@@ -761,6 +769,102 @@ module Rigor
         return dynamic_top if receiver.is_a?(Type::Dynamic)
 
         fallback_for(node, family: :prism)
+      end
+
+      # v0.0.2 #5 — re-types the body of a user-defined
+      # instance method with the call site's argument types
+      # bound to the method's parameters. Used as a
+      # last-resort tier after `MethodDispatcher.dispatch`
+      # has exhausted its catalogue (RBS, shape, constant
+      # folding, user-class fallback). Returns nil when:
+      #
+      # - the receiver is not `Nominal[T]` for some T;
+      # - no def_node is recorded for that class/method
+      #   (the receiver is foreign or has only an RBS sig);
+      # - the def has no body, or has a parameter shape we
+      #   cannot bind from the call's positional args;
+      # - the inference is already in progress for this
+      #   (class, method, signature) tuple — recursion
+      #   safety net.
+      def try_user_method_inference(receiver, call_node, arg_types)
+        return nil unless receiver.is_a?(Type::Nominal)
+
+        def_node = scope.user_def_for(receiver.class_name, call_node.name)
+        return nil if def_node.nil?
+
+        infer_user_method_return(def_node, receiver, arg_types)
+      rescue StandardError
+        nil
+      end
+
+      INFERENCE_GUARD_KEY = :__rigor_user_method_inference_stack__
+      private_constant :INFERENCE_GUARD_KEY
+
+      def infer_user_method_return(def_node, receiver, arg_types)
+        return nil if def_node.body.nil?
+
+        body_scope = build_user_method_body_scope(def_node, receiver, arg_types)
+        return nil if body_scope.nil?
+
+        signature = [receiver.class_name, def_node.name, arg_types.map { |t| t.describe(:short) }]
+        stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
+        return Type::Combinator.untyped if stack.include?(signature)
+
+        stack.push(signature)
+        begin
+          type, _post = body_scope.evaluate(def_node.body)
+          type
+        ensure
+          stack.pop
+        end
+      end
+
+      # Builds the body scope for a user-defined instance
+      # method call: a fresh `Scope` with `self_type` set to
+      # the receiver's nominal type, the project-wide
+      # accumulators inherited (so the body sees the same
+      # `discovered_classes` / `class_ivars` / etc. the
+      # caller does), and required positional parameters
+      # bound from the call's `arg_types` by index. Returns
+      # nil when the parameter shape is too complex for the
+      # first-iteration binder (rest args, keyword args,
+      # block params, etc.).
+      def build_user_method_body_scope(def_node, receiver, arg_types) # rubocop:disable Metrics/AbcSize
+        params = def_node.parameters
+        required = params&.requireds || []
+        return nil unless params.nil? || user_method_param_shape_simple?(params)
+        return nil unless required.size == arg_types.size
+
+        fresh = Scope.empty(environment: scope.environment)
+                     .with_declared_types(scope.declared_types)
+                     .with_discovered_classes(scope.discovered_classes)
+                     .with_in_source_constants(scope.in_source_constants)
+                     .with_class_ivars(scope.class_ivars)
+                     .with_class_cvars(scope.class_cvars)
+                     .with_program_globals(scope.program_globals)
+                     .with_discovered_methods(scope.discovered_methods)
+                     .with_discovered_def_nodes(scope.discovered_def_nodes)
+                     .with_self_type(receiver)
+
+        required.each_with_index do |param, index|
+          fresh = fresh.with_local(param.name, arg_types[index])
+        end
+        fresh
+      end
+
+      # First iteration accepts only required positional
+      # parameters: `def foo(a, b, c)`. Optionals, rest,
+      # keyword params, and block params disqualify the
+      # method from inference (the caller observes
+      # `Dynamic[Top]` instead).
+      def user_method_param_shape_simple?(params)
+        return false unless params.is_a?(Prism::ParametersNode)
+
+        params.optionals.empty? &&
+          params.rest.nil? &&
+          params.keywords.empty? &&
+          params.keyword_rest.nil? &&
+          params.block.nil?
       end
 
       # Slice A-engine. Implicit-self calls (no `node.receiver`)

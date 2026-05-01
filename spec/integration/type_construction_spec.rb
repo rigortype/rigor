@@ -124,10 +124,10 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
-  describe "fixtures/user_methods.rb — user-defined `is_odd` / `is_even` without RBS" do
+  describe "fixtures/user_methods.rb — user-defined `is_odd` / `is_even` without RBS (v0.0.2 #5)" do
     let(:harness) { harness_for("user_methods") }
 
-    it "self-asserts the current limitation: caller sees Dynamic[top] without RBS" do
+    it "infers the return type from the def body so the caller observes `false | true`" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
     end

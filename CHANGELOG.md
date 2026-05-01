@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Inter-procedural inference for user-defined methods.**
+  When a call's receiver is `Nominal[T]` for a user-defined
+  class without an RBS sig and the method has been
+  discovered as an instance `def`, the engine re-types the
+  method's body at the call site with the call's argument
+  types bound to the parameters and returns the body's
+  last-expression type. The `user_methods.rb` integration
+  fixture now resolves `Parity.new.is_odd(3)` to
+  `false | true` (was `Dynamic[top]` in v0.0.1) without
+  requiring an RBS sig.
+
+  First iteration accepts only the simplest parameter shape
+  (required positionals, no optionals / rest / keywords /
+  block params); receiver must be `Nominal` (not Singleton);
+  recursion is guarded by a per-thread inference stack so
+  mutually recursive helpers fall back to `Dynamic[Top]`
+  rather than infinite-looping.
+
 - `rigor check` ships an **argument-type-mismatch** rule. For
   every explicit-receiver `Prism::CallNode` whose method has
   exactly one RBS overload (no `rest_positionals`, no

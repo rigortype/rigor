@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Implicit-self calls prefer in-source `def` over RBS dispatch.**
+  When `node.receiver` is nil (true implicit self) and the file
+  has a same-named top-level `def` (or DSL-block-nested `def`,
+  e.g. inside `RSpec.describe ... do ... end`), the engine
+  routes through inter-procedural inference on that body
+  before consulting the receiver class's RBS. When the local
+  def's parameter shape is too complex for the binder
+  (kwargs / optionals / rest), the engine returns
+  `Dynamic[Top]` instead of falling through to (incorrect) RBS
+  dispatch — the local `def` shadows whatever ancestor method
+  the receiver's class might otherwise resolve to. Self-check
+  on `spec/rigor` drops from 10 to 1 false positives at this
+  commit (the 9 `overload_selector_spec.rb` mis-routings clear).
+
 - **RSpec matcher narrowing.** The engine now recognises a
   small catalogue of RSpec matcher patterns as
   assert-shaped narrows on the local passed to
@@ -26,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is required. Self-check on `spec/rigor` drops from 13 to
   10 false positives at this commit, fully clearing
   `expression_typer_spec.rb` and `statement_evaluator_spec.rb`.
+
+### Fixed
+
+- `Rigor::Analysis::CheckRules` `arity_eligible?` /
+  `argument_check_eligible?` no longer raise when the RBS
+  function is `RBS::Types::UntypedFunction` (e.g. `(?) ->` or
+  certain stdlib variadic sigs). Both predicates now return
+  `false` for untyped functions — the conservative
+  outcome — instead of crashing the file's analysis.
 
 ## [0.0.2] - 2026-05-01
 

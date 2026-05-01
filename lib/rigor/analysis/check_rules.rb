@@ -333,6 +333,13 @@ module Rigor
         end
 
         def arity_eligible?(function)
+          # `RBS::Types::UntypedFunction` (used for `(?) ->`
+          # untyped sigs) does not expose the per-arity
+          # accessors. Treating it as ineligible is the
+          # correct conservative move: an untyped function
+          # has no static arity to enforce.
+          return false unless function.respond_to?(:required_keywords)
+
           function.required_keywords.empty? && function.trailing_positionals.empty?
         end
 
@@ -643,6 +650,11 @@ module Rigor
         end
 
         def argument_check_eligible?(function)
+          # See `arity_eligible?`: `UntypedFunction` lacks
+          # the per-arity accessors. Treat it as ineligible
+          # for argument-type-mismatch diagnostics.
+          return false unless function.respond_to?(:required_keywords)
+
           function.rest_positionals.nil? &&
             function.required_keywords.empty? &&
             function.optional_keywords.empty? &&

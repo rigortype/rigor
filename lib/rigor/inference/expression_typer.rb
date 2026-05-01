@@ -744,6 +744,33 @@ module Rigor
         arg_types = call_arg_types(node)
         block_type = block_return_type_for(node, receiver, arg_types)
 
+        # v0.0.3 A — implicit-self calls prefer a same-named
+        # top-level `def` over RBS dispatch. Without this,
+        # a helper like `def select(...)` defined inside an
+        # `RSpec.describe ... do ... end` block mis-routes
+        # through `Enumerable#select` / `Object#select` and
+        # the caller observes `Array[Elem]` instead of the
+        # helper's actual return type. The check fires only
+        # for `node.receiver.nil?` (true implicit self), so
+        # explicit-receiver dispatch is unaffected.
+        local_def = node.receiver.nil? ? scope.top_level_def_for(node.name) : nil
+        if local_def
+          local_inference = infer_top_level_user_method(local_def, receiver, arg_types)
+          return local_inference if local_inference
+
+          # The local def matches by name but the
+          # parameter shape is too complex for the first-
+          # iteration binder (kwargs / optionals / rest).
+          # Returning `Dynamic[Top]` is the safest answer:
+          # we know RBS dispatch would be wrong (the
+          # method is user-defined and shadows whatever
+          # ancestor method the dispatch would find), and
+          # `Dynamic[Top]` propagates correctly through
+          # downstream call chains without surfacing
+          # misleading false-positive diagnostics.
+          return dynamic_top
+        end
+
         result = MethodDispatcher.dispatch(
           receiver_type: receiver,
           method_name: node.name,
@@ -786,6 +813,22 @@ module Rigor
       # - the inference is already in progress for this
       #   (class, method, signature) tuple — recursion
       #   safety net.
+      # v0.0.3 A — re-types a top-level (or DSL-block-nested)
+      # `def` discovered by `ScopeIndexer` under the
+      # `TOP_LEVEL_DEF_KEY` sentinel. Mirrors the
+      # `infer_user_method_return` shape but uses the
+      # current `scope.self_type` (or implicit `Object`)
+      # as the receiver carrier so the body's own self is
+      # consistent with the call site's. Returns nil when
+      # the parameter shape disqualifies the def, when the
+      # body is empty, or when a recursion cycle is
+      # detected.
+      def infer_top_level_user_method(def_node, receiver, arg_types)
+        infer_user_method_return(def_node, receiver, arg_types)
+      rescue StandardError
+        nil
+      end
+
       def try_user_method_inference(receiver, call_node, arg_types)
         return nil unless receiver.is_a?(Type::Nominal)
 
@@ -806,7 +849,11 @@ module Rigor
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types)
         return nil if body_scope.nil?
 
-        signature = [receiver.class_name, def_node.name, arg_types.map { |t| t.describe(:short) }]
+        # Recursion-guard signature. Uses `describe(:short)`
+        # so non-Nominal receivers (e.g. the implicit
+        # `Object` carrier used for top-level / DSL-block
+        # defs in v0.0.3 A) can participate without raising.
+        signature = [receiver.describe(:short), def_node.name, arg_types.map { |t| t.describe(:short) }]
         stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
         return Type::Combinator.untyped if stack.include?(signature)
 

@@ -38,6 +38,7 @@ module Rigor
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool
     def with_discovered_def_nodes: (Hash[String, Hash[Symbol, untyped]] table) -> Scope
     def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
+    def top_level_def_for: (String | Symbol method_name) -> untyped?
     def with_fact: (Analysis::FactStore::Fact fact) -> Scope
     def with_self_type: (Type::t? type) -> Scope
     def with_declared_types: (Hash[untyped, Type::t] table) -> Scope

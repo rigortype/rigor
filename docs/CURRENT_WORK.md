@@ -549,8 +549,23 @@ yields **0 errors in `lib/`** and **13 errors across 4 spec
 files**, all of them engine-limitation false positives. Each
 class of failure pins a concrete v0.0.3+ engine improvement:
 
-#### A. Implicit-self calls inside RSpec `def` helpers
-mis-route through unrelated RBS
+#### A. Implicit-self calls inside RSpec `def` helpers mis-route through unrelated RBS — landed (v0.0.3)
+
+`ScopeIndexer` now records DefNodes outside any class body
+under a `<toplevel>` sentinel, and `ExpressionTyper`
+prefers an in-source `def` over RBS dispatch for
+implicit-self calls (`node.receiver.nil?`). When the local
+def's parameter shape is too complex for the binder, the
+engine returns `Dynamic[Top]` rather than falling through
+to RBS dispatch (which would silently mis-route through
+ancestor classes, producing the original
+`Array[String]` symptom). The 9
+`overload_selector_spec.rb` errors clear; remaining
+self-check is 1 error
+(`spec/rigor/source/node_locator_spec.rb:82`,
+`String#index + 1` without an `expect` guard).
+
+Original analysis follows for reference:
 
 ```
 spec/rigor/inference/method_dispatcher/overload_selector_spec.rb

@@ -418,11 +418,19 @@ module Rigor
         end
       end
 
+      # v0.0.3 A — sentinel key under which `record_def_node`
+      # files DefNodes that live outside any class / module
+      # body (top-level helpers, `def`s nested inside DSL
+      # blocks like `RSpec.describe ... do; def helper; end`).
+      # Looked up by `Scope#top_level_def_for` to give
+      # implicit-self calls priority over RBS dispatch when
+      # the file defines a same-named local method.
+      TOP_LEVEL_DEF_KEY = "<toplevel>"
+
       def record_def_node(def_node, qualified_prefix, in_singleton_class, accumulator)
-        return if qualified_prefix.empty?
         return if def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
 
-        class_name = qualified_prefix.join("::")
+        class_name = qualified_prefix.empty? ? TOP_LEVEL_DEF_KEY : qualified_prefix.join("::")
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = def_node
       end

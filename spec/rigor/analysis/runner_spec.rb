@@ -276,6 +276,42 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "implicit-self call dispatch (v0.0.3 A)" do
+    it "prefers a top-level `def` over RBS dispatch for implicit-self calls" do
+      result = analyze(<<~RUBY)
+        require "rigor/testing"
+        include Rigor::Testing
+        def helper(value)
+          value
+        end
+        x = helper(42)
+        assert_type("42", x)
+      RUBY
+
+      expect(result.diagnostics.select { |d| d.rule == "assert-type" }).to be_empty
+    end
+
+    it "returns Dynamic[Top] when the top-level def has a complex param shape" do
+      # `def helper(x, kind: :default)` has a kwarg — the
+      # first-iteration binder rejects it. The engine still
+      # prefers the local def over RBS dispatch and returns
+      # `Dynamic[Top]`, suppressing the spurious
+      # `Array#select`-style mis-routing that previously
+      # caused `select(...)` to type as `Array[Elem]`.
+      result = analyze(<<~RUBY)
+        def select(class_name, method_name, kind: :instance)
+          class_name
+        end
+        mt = select("Array", :first)
+        mt.no_such_method_on_array
+      RUBY
+
+      # `mt` is `Dynamic[Top]`; the undefined-method rule
+      # skips Dynamic receivers so no diagnostic surfaces.
+      expect(result.diagnostics.select { |d| d.rule == "undefined-method" }).to be_empty
+    end
+  end
+
   describe "RSpec matcher narrowing (v0.0.3 B)" do
     it "narrows away from nil after `expect(x).not_to be_nil`" do
       result = analyze(<<~RUBY)

@@ -250,6 +250,20 @@ module Rigor
       table[method_name.to_sym]
     end
 
+    # v0.0.3 A — top-level def lookup for implicit-self
+    # calls. Returns the `Prism::DefNode` for a top-level
+    # (or DSL-block-nested, outside any class body) `def
+    # <method_name>` in the file, or nil. The sentinel key
+    # is owned by `Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY`;
+    # consumers should treat its presence as an opaque
+    # implementation detail and go through this accessor.
+    def top_level_def_for(method_name)
+      table = @discovered_def_nodes[Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY]
+      return nil unless table
+
+      table[method_name.to_sym]
+    end
+
     def with_discovered_def_nodes(table)
       rebuild(discovered_def_nodes: table)
     end

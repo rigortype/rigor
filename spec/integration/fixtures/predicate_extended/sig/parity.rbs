@@ -1,0 +1,5 @@
+class Parity
+  %a{rigor:v1:predicate-if-true value is Integer}
+  %a{rigor:v1:predicate-if-false value is NilClass}
+  def integer?: (untyped value) -> bool
+end

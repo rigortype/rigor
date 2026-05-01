@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "../environment"
+require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
 
 module Rigor
@@ -415,7 +416,15 @@ module Rigor
           return nil if node.block
           return nil if node.receiver.nil?
 
-          dispatch_call(node, scope, node.name)
+          shape_result = dispatch_call(node, scope, node.name)
+          return shape_result if shape_result
+
+          # Slice 7 phase 15 — RBS::Extended predicate
+          # effects. When the method's RBS signature carries
+          # `rigor:v1:predicate-if-true` / `predicate-if-false`
+          # annotations, apply them to narrow the corresponding
+          # local-variable arguments on each edge.
+          analyse_rbs_extended_predicate(node, scope)
         end
 
         def dispatch_call(node, scope, name)
@@ -621,6 +630,115 @@ module Rigor
             node = node.body.body.first
           end
           node
+        end
+
+        # Slice 7 phase 15 — RBS::Extended predicate-effect
+        # analyser. Resolves the called method through the
+        # RBS environment, reads any `rigor:v1:predicate-if-*`
+        # annotations, and applies them to the call's
+        # local-variable arguments.
+        #
+        # Conservative envelope:
+        # - Receiver type must be `Type::Nominal`,
+        #   `Type::Singleton`, or `Type::Constant`.
+        # - The method must be present in the loader.
+        # - For each predicate effect, the corresponding
+        #   positional argument (matched by parameter name in
+        #   the selected overload) MUST be a
+        #   `Prism::LocalVariableReadNode` for narrowing to
+        #   apply.
+        # - When the target is `self`, narrowing applies to
+        #   the receiver — but the engine does not yet narrow
+        #   `self` itself (Slice A-engine self-typing is
+        #   read-only), so `self`-targeted effects are
+        #   accepted by the parser but currently produce no
+        #   scope edits.
+        def analyse_rbs_extended_predicate(node, scope)
+          method_def = resolve_rbs_extended_method(node, scope)
+          return nil if method_def.nil?
+
+          effects = RbsExtended.read_predicate_effects(method_def)
+          return nil if effects.empty?
+
+          truthy_scope = scope
+          falsey_scope = scope
+          effects.each do |effect|
+            truthy_scope, falsey_scope =
+              apply_predicate_effect(effect, node, scope, truthy_scope, falsey_scope, method_def)
+          end
+          [truthy_scope, falsey_scope]
+        end
+
+        def resolve_rbs_extended_method(node, scope)
+          loader = scope.environment.rbs_loader
+          return nil if loader.nil?
+
+          receiver_type = scope.type_of(node.receiver)
+          class_name = rbs_extended_class_name(receiver_type)
+          return nil if class_name.nil?
+          return nil unless loader.class_known?(class_name)
+
+          if receiver_type.is_a?(Type::Singleton)
+            loader.singleton_method(class_name: class_name, method_name: node.name)
+          else
+            loader.instance_method(class_name: class_name, method_name: node.name)
+          end
+        rescue StandardError
+          nil
+        end
+
+        def rbs_extended_class_name(receiver_type)
+          case receiver_type
+          when Type::Nominal, Type::Singleton then receiver_type.class_name
+          when Type::Constant then rbs_extended_constant_class(receiver_type.value)
+          end
+        end
+
+        CONSTANT_CLASSES = {
+          Integer => "Integer", Float => "Float", String => "String",
+          Symbol => "Symbol",
+          TrueClass => "TrueClass", FalseClass => "FalseClass",
+          NilClass => "NilClass"
+        }.freeze
+        private_constant :CONSTANT_CLASSES
+
+        def rbs_extended_constant_class(value)
+          CONSTANT_CLASSES.each { |klass, name| return name if value.is_a?(klass) }
+          nil
+        end
+
+        # rubocop:disable Metrics/ParameterLists
+        def apply_predicate_effect(effect, call_node, entry_scope, truthy_scope, falsey_scope, method_def)
+          arg_node = lookup_positional_arg(call_node, method_def, effect.target_name)
+          return [truthy_scope, falsey_scope] if effect.target_kind != :parameter
+          return [truthy_scope, falsey_scope] unless arg_node.is_a?(Prism::LocalVariableReadNode)
+
+          local_name = arg_node.name
+          current = entry_scope.local(local_name)
+          return [truthy_scope, falsey_scope] if current.nil?
+
+          narrowed = narrow_class(current, effect.class_name, exact: false, environment: entry_scope.environment)
+          if effect.truthy_only?
+            [truthy_scope.with_local(local_name, narrowed), falsey_scope]
+          else
+            [truthy_scope, falsey_scope.with_local(local_name, narrowed)]
+          end
+        end
+        # rubocop:enable Metrics/ParameterLists
+
+        # Maps the effect's target parameter name to the call
+        # site argument by inspecting the selected overload's
+        # required-positional parameter list. Returns the Prism
+        # arg node at that position, or nil when the overload
+        # shape does not allow a precise match.
+        def lookup_positional_arg(call_node, method_def, target_name)
+          arguments = call_node.arguments&.arguments || []
+          method_def.method_types.each do |mt|
+            params = mt.type.required_positionals + mt.type.optional_positionals
+            index = params.find_index { |param| param.name == target_name }
+            return arguments[index] if index && arguments[index]
+          end
+          nil
         end
 
         # Slice 7 phase 5 — case/when accumulator. Walks each

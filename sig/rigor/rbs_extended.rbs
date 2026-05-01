@@ -1,0 +1,22 @@
+module Rigor
+  module RbsExtended
+    DIRECTIVE_PREFIX: String
+
+    type predicate_edge = :truthy_only | :falsey_only
+    type target_kind = :parameter | :self
+
+    class PredicateEffect
+      attr_reader edge: predicate_edge
+      attr_reader target_kind: target_kind
+      attr_reader target_name: Symbol
+      attr_reader class_name: String
+
+      def self.new: (edge: predicate_edge, target_kind: target_kind, target_name: Symbol, class_name: String) -> PredicateEffect
+      def truthy_only?: () -> bool
+      def falsey_only?: () -> bool
+    end
+
+    def self?.read_predicate_effects: (untyped method_def) -> Array[PredicateEffect]
+    def self?.parse_predicate_annotation: (String string) -> PredicateEffect?
+  end
+end

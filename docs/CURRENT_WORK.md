@@ -65,6 +65,7 @@ Branch: `impl/scope-type-of`. Slice landings (oldest → newest):
 | Slice 7 phase 12 | `fcb3820` | `Scope#discovered_methods` (def + define_method walk) suppresses check false positives on reopened classes |
 | Slice 7 phase 13 | `db8eb2b` | First-preview README rewrite + commented `rigor init` template |
 | Slice 7 phase 14 | `3c30082` | `rigor check` nil-receiver rule + early-return narrowing in `eval_if` / `eval_unless` |
+| Slice 7 phase 15 | `e1f8172` | RBS::Extended predicate-effect reader + Narrowing integration (`rigor:v1:predicate-if-true/false`) |
 
 ## What is in Place Today
 

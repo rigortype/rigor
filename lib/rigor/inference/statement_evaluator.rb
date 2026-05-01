@@ -606,7 +606,170 @@ module Rigor
         evaluate_block_if_present(node)
         post_scope = record_closure_escape_if_any(node)
         post_scope = apply_rbs_extended_assertions(node, post_scope)
+        post_scope = apply_rspec_matcher_narrowing(node, post_scope)
         [call_type, post_scope]
+      end
+
+      # v0.0.3 — recognises a small catalogue of RSpec
+      # matcher patterns as assert-shaped narrows on the
+      # local passed to `expect(...)`. The pattern is
+      # matched purely on AST shape; no RBS for RSpec is
+      # required (and none is shipped today).
+      #
+      # Recognised today:
+      #
+      #   expect(x).not_to(be_nil)
+      #   expect(x).to_not(be_nil)
+      #     → narrow `x` AWAY from `NilClass`.
+      #
+      #   expect(x).to(be_a(C))
+      #   expect(x).to(be_kind_of(C))
+      #   expect(x).to(be_an_instance_of(C))
+      #     → narrow `x` to `C` (exact for
+      #       `be_an_instance_of`, subtype-permitting
+      #       otherwise).
+      #
+      # Anything else is silently passed through. Symmetric
+      # negative class assertions (`not_to be_a(C)`) and
+      # narrowing TO `NilClass` are intentionally NOT
+      # modelled: they are rarely useful in practice and
+      # risk masking bugs if the assertion later fails.
+      def apply_rspec_matcher_narrowing(call_node, current_scope)
+        narrow = rspec_matcher_narrowing_request(call_node)
+        return current_scope if narrow.nil?
+
+        local_name = narrow.fetch(:local)
+        current_type = current_scope.local(local_name)
+        return current_scope if current_type.nil?
+
+        narrowed = apply_rspec_narrow(current_type, narrow, current_scope.environment)
+        current_scope.with_local(local_name, narrowed)
+      end
+
+      # Decodes an `expect(x).<chain>` outer call into a
+      # narrowing request hash, or `nil` when the shape is
+      # not recognised. The hash carries `:local` (the local
+      # name being narrowed) plus the narrowing parameters.
+      def rspec_matcher_narrowing_request(call_node)
+        local_name = rspec_expectation_target(call_node)
+        return nil if local_name.nil?
+
+        case call_node.name
+        when :not_to, :to_not
+          rspec_negative_narrow(call_node, local_name)
+        when :to
+          rspec_positive_narrow(call_node, local_name)
+        end
+      end
+
+      def rspec_negative_narrow(call_node, local_name)
+        return nil unless rspec_matcher_argument?(call_node, :be_nil)
+
+        { local: local_name, kind: :not_class, class_name: "NilClass", exact: false }
+      end
+
+      def rspec_positive_narrow(call_node, local_name)
+        matcher = rspec_matcher_node(call_node)
+        return nil if matcher.nil?
+
+        case matcher.name
+        when :be_a, :be_kind_of
+          rspec_be_a_narrow(matcher, local_name, exact: false)
+        when :be_an_instance_of, :be_instance_of
+          rspec_be_a_narrow(matcher, local_name, exact: true)
+        end
+      end
+
+      # `be_a` / `be_kind_of` / `be_an_instance_of` accept a
+      # single class argument — either a `ConstantReadNode`
+      # (`Integer`) or a `ConstantPathNode` (`Rigor::Type::Nominal`).
+      def rspec_be_a_narrow(matcher, local_name, exact:)
+        args = matcher.arguments&.arguments || []
+        return nil unless args.size == 1
+
+        class_name = constant_node_name(args.first)
+        return nil if class_name.nil?
+
+        { local: local_name, kind: :class, class_name: class_name, exact: exact }
+      end
+
+      def apply_rspec_narrow(current_type, narrow, environment)
+        case narrow.fetch(:kind)
+        when :not_class
+          Narrowing.narrow_not_class(current_type, narrow.fetch(:class_name),
+                                     exact: narrow.fetch(:exact), environment: environment)
+        when :class
+          Narrowing.narrow_class(current_type, narrow.fetch(:class_name),
+                                 exact: narrow.fetch(:exact), environment: environment)
+        end
+      end
+
+      # Returns the local name passed to `expect(...)` when
+      # the receiver chain matches `expect(<local>)` exactly,
+      # or nil otherwise. Centralised so each per-matcher
+      # decoder can short-circuit on a non-matching outer
+      # call.
+      def rspec_expectation_target(call_node) # rubocop:disable Metrics/CyclomaticComplexity
+        receiver = call_node.receiver
+        return nil unless receiver.is_a?(Prism::CallNode) && receiver.name == :expect
+        return nil unless receiver.receiver.nil?
+
+        args = receiver.arguments&.arguments || []
+        return nil unless args.size == 1
+
+        target = args.first
+        target.is_a?(Prism::LocalVariableReadNode) ? target.name : nil
+      end
+
+      def rspec_matcher_node(call_node)
+        args = call_node.arguments&.arguments || []
+        return nil unless args.size == 1
+
+        matcher = args.first
+        return nil unless matcher.is_a?(Prism::CallNode) && matcher.receiver.nil? && matcher.block.nil?
+
+        matcher
+      end
+
+      # True when `call_node`'s sole argument is an
+      # implicit-self matcher call with the given name and
+      # no positional arguments — used by the no-arg
+      # matchers (`be_nil`).
+      def rspec_matcher_argument?(call_node, matcher_name)
+        matcher = rspec_matcher_node(call_node)
+        return false if matcher.nil?
+        return false unless matcher.name == matcher_name
+
+        matcher.arguments.nil? || matcher.arguments.arguments.empty?
+      end
+
+      # Decodes a `Prism::ConstantReadNode` /
+      # `Prism::ConstantPathNode` into a colon-joined class
+      # name string, or returns nil for any other node
+      # shape. Mirrors the conservative envelope used by the
+      # `is_a?` / `kind_of?` predicate narrower.
+      def constant_node_name(node)
+        case node
+        when Prism::ConstantReadNode
+          node.name.to_s
+        when Prism::ConstantPathNode
+          flatten_constant_path(node)
+        end
+      end
+
+      def flatten_constant_path(node)
+        parts = []
+        cursor = node
+        while cursor.is_a?(Prism::ConstantPathNode)
+          parts.unshift(cursor.name.to_s)
+          cursor = cursor.parent
+        end
+        case cursor
+        when Prism::ConstantReadNode then parts.unshift(cursor.name.to_s)
+        when nil then nil # ::Foo absolute root — preserve as-is
+        else return nil
+        end
+        parts.join("::")
       end
 
       # v0.0.2 — applies `RBS::Extended` `assert <target> is T`

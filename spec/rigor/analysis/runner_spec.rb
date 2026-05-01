@@ -276,6 +276,76 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "RSpec matcher narrowing (v0.0.3 B)" do
+    it "narrows away from nil after `expect(x).not_to be_nil`" do
+      result = analyze(<<~RUBY)
+        x = if rand < 0.5
+          "hello"
+        else
+          nil
+        end
+        expect(x).not_to be_nil
+        x.upcase
+      RUBY
+
+      nil_errors = result.diagnostics.select { |d| d.rule == "possible-nil-receiver" }
+      expect(nil_errors).to be_empty
+    end
+
+    it "also recognises `to_not be_nil` (alias)" do
+      result = analyze(<<~RUBY)
+        x = if rand < 0.5
+          "hello"
+        else
+          nil
+        end
+        expect(x).to_not be_nil
+        x.upcase
+      RUBY
+
+      expect(result.diagnostics.select { |d| d.rule == "possible-nil-receiver" }).to be_empty
+    end
+
+    it "narrows a union to the asserted class after `expect(x).to be_a(C)`" do
+      result = analyze(<<~RUBY)
+        require "rigor/testing"
+        include Rigor::Testing
+        x = if rand < 0.5
+          "hello"
+        else
+          42
+        end
+        expect(x).to be_a(Integer)
+        assert_type("42", x)
+      RUBY
+
+      # `String | 42` narrowed to `Integer` keeps only the
+      # integer-side carrier (Constant[42] survives because
+      # it is a subtype of Integer); the String carrier is
+      # dropped.
+      mismatch = result.diagnostics.find { |d| d.rule == "assert-type" }
+      expect(mismatch).to be_nil
+    end
+
+    it "leaves the scope unchanged when the matcher shape is unrecognised" do
+      # `to be_truthy` is intentionally NOT modelled; the
+      # post-call type of `x` should remain `String | nil`
+      # and `x.upcase` should still flag.
+      result = analyze(<<~RUBY)
+        x = if rand < 0.5
+          "hello"
+        else
+          nil
+        end
+        expect(x).to be_truthy
+        x.upcase
+      RUBY
+
+      nil_errors = result.diagnostics.select { |d| d.rule == "possible-nil-receiver" }
+      expect(nil_errors).not_to be_empty
+    end
+  end
+
   describe "explain mode (v0.0.2 #10)" do
     it "is silent by default" do
       result = analyze("x = 1\n")

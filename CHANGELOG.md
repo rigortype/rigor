@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **RSpec matcher narrowing.** The engine now recognises a
+  small catalogue of RSpec matcher patterns as
+  assert-shaped narrows on the local passed to
+  `expect(...)`. The narrowing applies to the post-call
+  scope, so subsequent statements observe the refined type
+  without a per-line `# rigor:disable possible-nil-receiver`
+  comment. Recognised today:
+  - `expect(x).not_to be_nil` / `expect(x).to_not be_nil`
+    drop `NilClass` from `x`'s type.
+  - `expect(x).to be_a(C)` / `be_kind_of(C)` narrow `x` to
+    `C` (subtype-permitting); `be_an_instance_of(C)` /
+    `be_instance_of(C)` narrow exactly.
+
+  Pattern matching is purely AST-shape — no RBS for RSpec
+  is required. Self-check on `spec/rigor` drops from 13 to
+  10 false positives at this commit, fully clearing
+  `expression_typer_spec.rb` and `statement_evaluator_spec.rb`.
+
 ## [0.0.2] - 2026-05-01
 
 The second preview. v0.0.2 closes the must-have envelope around the

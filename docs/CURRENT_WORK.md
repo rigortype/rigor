@@ -582,7 +582,22 @@ Two paths forward:
    implicit-self calls as Dynamic (matches the existing
    user-class fallback envelope).
 
-#### B. `find` / `index`-style nil-returning calls escape narrowing
+#### B. `find` / `index`-style nil-returning calls escape narrowing — partially landed (v0.0.3)
+
+The `expect(x).not_to be_nil` / `expect(x).to be_a(C)`
+matcher pattern was wired into `StatementEvaluator#eval_call`
+as an assert-shaped narrow that drops `NilClass` (or narrows
+to the matched class) from `x`'s type in the post-call
+scope. Self-check on `spec/rigor` drops from 13 to 10 errors;
+`expression_typer_spec.rb` and `statement_evaluator_spec.rb`
+clear fully. Remaining gap (`String#index` returning
+`Integer | nil` followed by an unguarded `+ 1`,
+`node_locator_spec.rb:82`) is not assert-shaped and falls
+back to the user-visible `# rigor:disable
+possible-nil-receiver` escape hatch until a richer flow-
+sensitive narrowing arrives.
+
+Original analysis follows for reference:
 
 ```
 spec/rigor/inference/expression_typer_spec.rb:670

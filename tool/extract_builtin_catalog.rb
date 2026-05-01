@@ -120,6 +120,27 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/array.c],
     output_path: "data/builtins/ruby_core/array.yml"
+  },
+  "io" => {
+    init_function: "Init_IO",
+    ruby_c_path: "references/ruby/io.c",
+    ruby_prelude_path: "references/ruby/io.rb",
+    rbs_paths: {
+      "IO" => "references/rbs/core/io.rbs"
+    },
+    c_index_paths: %w[references/ruby/io.c],
+    output_path: "data/builtins/ruby_core/io.yml"
+  },
+  "file" => {
+    init_function: "Init_File",
+    ruby_c_path: "references/ruby/file.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "File" => "references/rbs/core/file.rbs",
+      "FileTest" => "references/rbs/core/file_test.rbs"
+    },
+    c_index_paths: %w[references/ruby/file.c],
+    output_path: "data/builtins/ruby_core/file.yml"
   }
 }.freeze
 

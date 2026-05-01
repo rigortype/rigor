@@ -232,6 +232,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/file_path_folding.rb — File path-manipulation folding" do
+    let(:harness) { harness_for("file_path_folding") }
+
+    it "self-asserts every File.<path-method>(\"…\") fold" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/string_array_catalog.rb — String/Symbol/Array catalog-driven folding" do
     let(:harness) { harness_for("string_array_catalog") }
 

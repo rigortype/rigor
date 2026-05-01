@@ -177,6 +177,39 @@ module Rigor
         narrow_integer_comparison_dispatch(type, comparator, bound)
       end
 
+      # Equality fragment of `type` against an Integer `value`.
+      # `Constant<Integer>` is preserved when it equals `value`,
+      # otherwise collapses to `Bot`. `IntegerRange` covers? `value`
+      # narrows to `Constant[value]`; an out-of-range comparison
+      # collapses to `Bot`. `Nominal[Integer]` narrows to
+      # `Constant[value]`. `Union` narrows each member.
+      def narrow_integer_equal(type, value)
+        return type unless value.is_a?(Integer)
+
+        narrow_integer_equal_dispatch(type, value)
+      end
+
+      # Complement of {.narrow_integer_equal}. Removes a single
+      # integer value from the domain when one endpoint of an
+      # `IntegerRange` is exactly that value (so the result stays a
+      # contiguous range). Domains where the value sits strictly
+      # between the endpoints stay unchanged: punching a hole would
+      # require a two-piece carrier the lattice does not yet model.
+      def narrow_integer_not_equal(type, value)
+        return type unless value.is_a?(Integer)
+
+        case type
+        when Type::Constant
+          type.value == value ? Type::Combinator.bot : type
+        when Type::IntegerRange
+          narrow_integer_range_not_equal(type, value)
+        when Type::Union
+          Type::Combinator.union(*type.members.map { |m| narrow_integer_not_equal(m, value) })
+        else
+          type
+        end
+      end
+
       # Class-membership fragment of `type`: the subset whose
       # inhabitants are instances of `class_name` (or its subclasses
       # when `exact: false`). `class_name` is the qualified name of
@@ -474,15 +507,114 @@ module Rigor
           end
         end
 
+        ZERO_CLASS_PREDICATES = %i[positive? negative? zero? nonzero?].freeze
+        COMPARISON_OPERATORS = %i[< <= > >=].freeze
+        private_constant :ZERO_CLASS_PREDICATES, :COMPARISON_OPERATORS
+
         def dispatch_call(node, scope, name)
+          return dispatch_call_simple(node, scope, name) if simple_dispatch_name?(name)
+
+          dispatch_call_numeric(node, scope, name)
+        end
+
+        def simple_dispatch_name?(name)
+          %i[nil? ! is_a? kind_of? instance_of? == != ===].include?(name)
+        end
+
+        def dispatch_call_simple(node, scope, name)
           case name
           when :nil?, :! then dispatch_unary_predicate(node, scope, name)
           when :is_a?, :kind_of? then analyse_class_predicate(node, scope, exact: false)
           when :instance_of? then analyse_class_predicate(node, scope, exact: true)
           when :==, :!= then analyse_equality_predicate(node, scope, equality: name)
           when :=== then analyse_case_equality_predicate(node, scope)
-          when :<, :<=, :>, :>= then analyse_comparison_predicate(node, scope, comparator: name)
           end
+        end
+
+        def dispatch_call_numeric(node, scope, name)
+          if COMPARISON_OPERATORS.include?(name)
+            analyse_comparison_predicate(node, scope, comparator: name)
+          elsif ZERO_CLASS_PREDICATES.include?(name)
+            analyse_zero_class_predicate(node, scope, predicate: name)
+          elsif name == :between?
+            analyse_between_predicate(node, scope)
+          end
+        end
+
+        # `:positive?` / `:negative?` / `:zero?` / `:nonzero?` are
+        # zero-arg predicates on `Numeric`. We model them as
+        # comparisons against the literal 0 so the existing range
+        # narrowing handles them uniformly.
+        ZERO_CLASS_PREDICATE_RULES = {
+          positive?: { truthy: [:>, 0],  falsey: [:<=, 0] },
+          negative?: { truthy: [:<, 0],  falsey: [:>=, 0] },
+          zero?: { truthy: [:eq, 0], falsey: [:ne, 0] },
+          nonzero?: { truthy: [:ne, 0], falsey: [:eq, 0] }
+        }.freeze
+        private_constant :ZERO_CLASS_PREDICATE_RULES
+
+        def analyse_zero_class_predicate(node, scope, predicate:)
+          return nil unless argument_free?(node)
+          return nil unless node.receiver.is_a?(Prism::LocalVariableReadNode)
+
+          local_name = node.receiver.name
+          current = scope.local(local_name)
+          return nil if current.nil?
+
+          rules = ZERO_CLASS_PREDICATE_RULES[predicate]
+          truthy = apply_zero_rule(current, rules[:truthy])
+          falsey = apply_zero_rule(current, rules[:falsey])
+          [scope.with_local(local_name, truthy), scope.with_local(local_name, falsey)]
+        end
+
+        def apply_zero_rule(type, rule)
+          case rule[0]
+          when :eq then narrow_integer_equal(type, rule[1])
+          when :ne then narrow_integer_not_equal(type, rule[1])
+          else
+            narrow_integer_comparison(type, rule[0], rule[1])
+          end
+        end
+
+        # `x.between?(a, b)` truthy edge narrows to
+        # `narrow_integer_comparison(>=, a)` ∩
+        # `narrow_integer_comparison(<=, b)`. The falsey edge is left
+        # unchanged because the complement is a two-piece domain
+        # (`x < a || x > b`) that the lattice cannot express
+        # precisely. `a` and `b` MUST both be integer literals.
+        def analyse_between_predicate(node, scope)
+          return nil unless node.receiver.is_a?(Prism::LocalVariableReadNode)
+          return nil if node.arguments.nil?
+          return nil unless node.arguments.arguments.size == 2
+
+          low, high = node.arguments.arguments
+          return nil unless low.is_a?(Prism::IntegerNode) && high.is_a?(Prism::IntegerNode)
+
+          local_name = node.receiver.name
+          current = scope.local(local_name)
+          return nil if current.nil?
+
+          truthy = narrow_integer_comparison(
+            narrow_integer_comparison(current, :>=, low.value),
+            :<=, high.value
+          )
+          [scope.with_local(local_name, truthy), scope]
+        end
+
+        # Helper for {.narrow_integer_not_equal}. Only adjusts when the
+        # value sits exactly on one endpoint, so the result stays
+        # contiguous; otherwise the input range is preserved.
+        def narrow_integer_range_not_equal(range, value)
+          return range if range.lower > value || range.upper < value
+          return Type::Combinator.bot if single_point_range_equal?(range, value)
+          return build_narrowing_integer_range(value + 1, range.upper) if range.lower == value
+          return build_narrowing_integer_range(range.lower, value - 1) if range.upper == value
+
+          range
+        end
+
+        def single_point_range_equal?(range, value)
+          range.finite? && range.min == value && range.max == value
         end
 
         def dispatch_unary_predicate(node, scope, name)
@@ -547,6 +679,31 @@ module Rigor
           return nil unless right.is_a?(Prism::LocalVariableReadNode) && left.is_a?(Prism::IntegerNode)
 
           [right.name, REVERSE_COMPARISON_OP[comparator], left.value]
+        end
+
+        def narrow_integer_equal_dispatch(type, value)
+          case type
+          when Type::Constant then narrow_integer_equal_constant(type, value)
+          when Type::IntegerRange then narrow_integer_equal_range(type, value)
+          when Type::Nominal then narrow_integer_equal_nominal(type, value)
+          when Type::Union
+            Type::Combinator.union(*type.members.map { |m| narrow_integer_equal(m, value) })
+          else type
+          end
+        end
+
+        def narrow_integer_equal_constant(constant, value)
+          constant.value == value ? constant : Type::Combinator.bot
+        end
+
+        def narrow_integer_equal_range(range, value)
+          range.covers?(value) ? Type::Combinator.constant_of(value) : Type::Combinator.bot
+        end
+
+        def narrow_integer_equal_nominal(nominal, value)
+          return nominal unless nominal.class_name == "Integer" && nominal.type_args.empty?
+
+          Type::Combinator.constant_of(value)
         end
 
         def narrow_integer_comparison_dispatch(type, comparator, bound)

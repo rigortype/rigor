@@ -675,6 +675,142 @@ RSpec.describe Rigor::Inference::Narrowing do
     end
   end
 
+  describe ".narrow_integer_equal / .narrow_integer_not_equal" do
+    it "preserves a Constant equal to the value, drops a different one" do
+      expect(described_class.narrow_integer_equal(Rigor::Type::Combinator.constant_of(0), 0))
+        .to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(described_class.narrow_integer_equal(Rigor::Type::Combinator.constant_of(5), 0))
+        .to be_a(Rigor::Type::Bot)
+    end
+
+    it "narrows IntegerRange covers? value to Constant[value]" do
+      range = Rigor::Type::Combinator.integer_range(-5, 5)
+      expect(described_class.narrow_integer_equal(range, 0))
+        .to eq(Rigor::Type::Combinator.constant_of(0))
+    end
+
+    it "narrows IntegerRange not covering value to Bot" do
+      range = Rigor::Type::Combinator.integer_range(1, 10)
+      expect(described_class.narrow_integer_equal(range, 0)).to be_a(Rigor::Type::Bot)
+    end
+
+    it "narrows Nominal[Integer] to Constant[value]" do
+      expect(described_class.narrow_integer_equal(integer_nominal, 0))
+        .to eq(Rigor::Type::Combinator.constant_of(0))
+    end
+
+    it "drops the value at a range endpoint via not_equal" do
+      # int<0, 10> != 0  → int<1, 10>
+      range = Rigor::Type::Combinator.integer_range(0, 10)
+      expect(described_class.narrow_integer_not_equal(range, 0))
+        .to eq(Rigor::Type::Combinator.integer_range(1, 10))
+
+      # int<-5, 0> != 0  → int<-5, -1>
+      range2 = Rigor::Type::Combinator.integer_range(-5, 0)
+      expect(described_class.narrow_integer_not_equal(range2, 0))
+        .to eq(Rigor::Type::Combinator.integer_range(-5, -1))
+    end
+
+    it "preserves a range that already excludes the value" do
+      range = Rigor::Type::Combinator.integer_range(1, 10)
+      expect(described_class.narrow_integer_not_equal(range, 0)).to eq(range)
+    end
+
+    it "preserves a range that straddles the value (two-piece domain)" do
+      # int<-5, 5> != 0 cannot be expressed precisely as a single range.
+      range = Rigor::Type::Combinator.integer_range(-5, 5)
+      expect(described_class.narrow_integer_not_equal(range, 0)).to eq(range)
+    end
+  end
+
+  describe "zero-class predicate narrowing (positive? / negative? / zero? / nonzero?)" do
+    let(:integer_nominal_scope) { scope.with_local(:x, integer_nominal) }
+
+    def expect_truthy_falsey(predicate, expected_truthy, expected_falsey, base = integer_nominal_scope)
+      truthy, falsey = described_class.predicate_scopes(parse_predicate("x.#{predicate}"), base)
+      expect(truthy.local(:x)).to eq(expected_truthy)
+      expect(falsey.local(:x)).to eq(expected_falsey)
+    end
+
+    it "narrows positive? to positive_int / non_positive_int" do
+      expect_truthy_falsey(
+        :positive?,
+        Rigor::Type::Combinator.positive_int,
+        Rigor::Type::Combinator.non_positive_int
+      )
+    end
+
+    it "narrows negative? to negative_int / non_negative_int" do
+      expect_truthy_falsey(
+        :negative?,
+        Rigor::Type::Combinator.negative_int,
+        Rigor::Type::Combinator.non_negative_int
+      )
+    end
+
+    it "narrows zero? to Constant[0] / Nominal[Integer]" do
+      # truthy: Nominal[Integer] -> Constant[0]
+      # falsey: Nominal[Integer] -> preserved (cannot punch a hole)
+      expect_truthy_falsey(
+        :zero?,
+        Rigor::Type::Combinator.constant_of(0),
+        integer_nominal
+      )
+    end
+
+    it "narrows nonzero? to Nominal[Integer] / Constant[0]" do
+      expect_truthy_falsey(
+        :nonzero?,
+        integer_nominal,
+        Rigor::Type::Combinator.constant_of(0)
+      )
+    end
+
+    it "drops impossible truthy edges via covers? on a finite range" do
+      base = scope.with_local(:x, Rigor::Type::Combinator.integer_range(1, 10))
+      # x.zero? on int<1, 10> -> truthy = Bot
+      truthy, falsey = described_class.predicate_scopes(parse_predicate("x.zero?"), base)
+      expect(truthy.local(:x)).to be_a(Rigor::Type::Bot)
+      expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.integer_range(1, 10))
+    end
+
+    it "tightens an IntegerRange via positive?" do
+      base = scope.with_local(:x, Rigor::Type::Combinator.integer_range(-5, 5))
+      truthy, falsey = described_class.predicate_scopes(parse_predicate("x.positive?"), base)
+      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.integer_range(1, 5))
+      expect(falsey.local(:x)).to eq(Rigor::Type::Combinator.integer_range(-5, 0))
+    end
+  end
+
+  describe "between? predicate narrowing" do
+    let(:integer_nominal_scope) { scope.with_local(:x, integer_nominal) }
+
+    it "narrows the truthy edge to int<a, b> for `x.between?(a, b)`" do
+      truthy, falsey = described_class.predicate_scopes(
+        parse_predicate("x.between?(0, 100)"), integer_nominal_scope
+      )
+      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.integer_range(0, 100))
+      # Falsey edge is preserved (two-piece domain not modeled).
+      expect(falsey.local(:x)).to eq(integer_nominal)
+    end
+
+    it "intersects with an existing IntegerRange" do
+      base = scope.with_local(:x, Rigor::Type::Combinator.integer_range(-50, 50))
+      truthy, _falsey = described_class.predicate_scopes(
+        parse_predicate("x.between?(0, 100)"), base
+      )
+      expect(truthy.local(:x)).to eq(Rigor::Type::Combinator.integer_range(0, 50))
+    end
+
+    it "passes through unchanged when arguments are non-Integer literals" do
+      truthy, falsey = described_class.predicate_scopes(
+        parse_predicate("x.between?('a', 'z')"), integer_nominal_scope
+      )
+      expect(truthy.local(:x)).to eq(integer_nominal)
+      expect(falsey.local(:x)).to eq(integer_nominal)
+    end
+  end
+
   describe "comparison predicate narrowing through predicate_scopes" do
     let(:integer_nominal_scope) { scope.with_local(:x, integer_nominal) }
 

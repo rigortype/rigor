@@ -339,6 +339,16 @@ module Rigor
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_pred)
         then_type, then_scope = eval_branch_or_nil(node.statements, truthy_scope)
         else_type, else_scope = eval_branch_or_nil(node.subsequent, falsey_scope)
+        # Slice 7 phase 14 — early-return narrowing. When the
+        # then-branch unconditionally exits (return / next /
+        # break / raise) and there is no else, the post-scope
+        # is the falsey edge of the predicate (subsequent
+        # statements observe the predicate-was-false world).
+        return [Type::Combinator.union(then_type, else_type), falsey_scope] \
+          if branch_unconditionally_exits?(node.statements) && node.subsequent.nil?
+        return [Type::Combinator.union(then_type, else_type), truthy_scope] \
+          if branch_unconditionally_exits?(node.subsequent) && node.statements
+
         [
           Type::Combinator.union(then_type, else_type),
           join_with_nil_injection(then_scope, else_scope)
@@ -354,6 +364,14 @@ module Rigor
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_pred)
         then_type, then_scope = eval_branch_or_nil(node.statements, falsey_scope)
         else_type, else_scope = eval_branch_or_nil(node.else_clause, truthy_scope)
+        # Slice 7 phase 14 — same early-return narrowing as
+        # `if`: when the body unconditionally exits and there
+        # is no else, the post-scope is the truthy edge.
+        return [Type::Combinator.union(then_type, else_type), truthy_scope] \
+          if branch_unconditionally_exits?(node.statements) && node.else_clause.nil?
+        return [Type::Combinator.union(then_type, else_type), falsey_scope] \
+          if branch_unconditionally_exits?(node.else_clause) && node.statements
+
         [
           Type::Combinator.union(then_type, else_type),
           join_with_nil_injection(then_scope, else_scope)
@@ -914,6 +932,52 @@ module Rigor
           on_enter: @on_enter,
           class_context: class_context
         ).evaluate(node)
+      end
+
+      # Slice 7 phase 14 — branch exit detection. Returns true
+      # when the branch's body unconditionally exits the
+      # surrounding control flow through a `return`, `next`,
+      # `break`, or `raise`. Used by `eval_if` / `eval_unless`
+      # to narrow the post-scope: when one branch exits, the
+      # surrounding scope can carry the OTHER branch's edge
+      # forward without nil-injection.
+      #
+      # The detection is intentionally conservative — it
+      # recognises only the most common patterns:
+      # - A `Prism::ReturnNode`, `NextNode`, `BreakNode`.
+      # - A `Prism::CallNode` whose name is `:raise` or `:throw`.
+      # - A `Prism::StatementsNode`, `Prism::ParenthesesNode`, or
+      #   `Prism::IfNode`/`UnlessNode` whose final / both
+      #   branches recursively exit.
+      EXIT_CALL_NAMES = %i[raise throw exit abort fail].freeze
+      private_constant :EXIT_CALL_NAMES
+
+      def branch_unconditionally_exits?(node) # rubocop:disable Metrics/CyclomaticComplexity
+        return false if node.nil?
+
+        case node
+        when Prism::ReturnNode, Prism::NextNode, Prism::BreakNode
+          true
+        when Prism::CallNode
+          node.receiver.nil? && EXIT_CALL_NAMES.include?(node.name)
+        when Prism::StatementsNode
+          last = node.body.last
+          branch_unconditionally_exits?(last)
+        when Prism::ParenthesesNode
+          branch_unconditionally_exits?(node.body)
+        when Prism::IfNode, Prism::UnlessNode
+          branch_unconditionally_exits?(node.statements) &&
+            branch_unconditionally_exits?(node_else_branch(node))
+        else
+          false
+        end
+      end
+
+      def node_else_branch(node)
+        case node
+        when Prism::IfNode then node.subsequent
+        when Prism::UnlessNode then node.else_clause
+        end
       end
 
       def eval_branch_or_nil(branch_node, branch_scope)

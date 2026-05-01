@@ -63,6 +63,9 @@ module Rigor
 
           arity_diagnostic = wrong_arity_diagnostic(path, node, scope_index)
           diagnostics << arity_diagnostic if arity_diagnostic
+
+          nil_diagnostic = nil_receiver_diagnostic(path, node, scope_index)
+          diagnostics << nil_diagnostic if nil_diagnostic
         end
         diagnostics
       end
@@ -254,6 +257,104 @@ module Rigor
 
         def arity_eligible?(function)
           function.required_keywords.empty? && function.trailing_positionals.empty?
+        end
+
+        # Slice 7 phase 14 — nil-receiver diagnostic. Fires when
+        # the receiver type is a `Type::Union` containing a
+        # nil-bearing member (`Constant[nil]` or
+        # `Nominal[NilClass]`) AND the called method does not
+        # exist on `NilClass`. This is the canonical "you forgot
+        # to nil-check before calling X" signal: the engine has
+        # proved that on at least one execution path the receiver
+        # is nil, and the call would raise NoMethodError.
+        #
+        # The rule deliberately ignores receivers that are
+        # exactly `Constant[nil]` / `Nominal[NilClass]` (those
+        # are already covered by `undefined_method_diagnostic`)
+        # and union receivers where every member already
+        # disqualifies the call (avoid duplicating the
+        # undefined-method diagnostic).
+        def nil_receiver_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+          return nil if call_node.receiver.nil?
+          # Safe-navigation calls (`recv&.method`) already
+          # short-circuit on nil at runtime, so a nil-bearing
+          # receiver is not a bug for them.
+          return nil if call_node.safe_navigation?
+          # Restrict to direct local-variable reads. Local
+          # narrowing (Slice 6 phase 1) is the only narrowing
+          # surface that can prove a guard like
+          # `return if x.nil?` removed nil from the union, so
+          # firing on chained / method-call receivers would
+          # produce false positives we cannot suppress.
+          return nil unless call_node.receiver.is_a?(Prism::LocalVariableReadNode)
+
+          scope = scope_index[call_node]
+          return nil if scope.nil?
+
+          receiver_type = scope.type_of(call_node.receiver)
+          return nil unless receiver_type.is_a?(Type::Union)
+
+          loader = scope.environment.rbs_loader
+          return nil if loader.nil?
+
+          return nil unless union_contains_nil?(receiver_type)
+          return nil unless union_method_present_on_non_nil?(receiver_type, call_node.name, loader, scope)
+          return nil if nil_class_has_method?(call_node.name, loader)
+
+          build_nil_receiver_diagnostic(path, call_node)
+        end
+
+        def union_contains_nil?(union)
+          union.members.any? { |member| nil_member?(member) }
+        end
+
+        def nil_member?(member)
+          (member.is_a?(Type::Constant) && member.value.nil?) ||
+            (member.is_a?(Type::Nominal) && member.class_name == "NilClass")
+        end
+
+        # The non-nil members must collectively support the
+        # method (i.e. for every non-nil member, the method
+        # exists on its class via RBS or in-source discovery).
+        # Without this guard, the rule would also fire on calls
+        # that are unsound on the non-nil branch — that is the
+        # `undefined_method_diagnostic` rule's job, and we want
+        # exactly one diagnostic per offending call site.
+        def union_method_present_on_non_nil?(union, method_name, loader, scope)
+          non_nil_members = union.members.reject { |m| nil_member?(m) }
+          return false if non_nil_members.empty?
+
+          non_nil_members.all? { |m| method_present_anywhere?(m, method_name, loader, scope) }
+        end
+
+        def method_present_anywhere?(member, method_name, loader, scope)
+          class_name = concrete_class_name(member)
+          return true if class_name.nil? # Dynamic / Top / Bot — be permissive.
+          return true if scope.discovered_method?(class_name, method_name, :instance)
+          return true unless loader.class_known?(class_name)
+          return true unless definition_available?(loader, member, class_name)
+
+          !lookup_method(loader, member, class_name, method_name).nil?
+        end
+
+        def nil_class_has_method?(method_name, loader)
+          return false unless loader.class_known?("NilClass")
+
+          definition = loader.instance_definition("NilClass")
+          return false if definition.nil?
+
+          !definition.methods[method_name.to_sym].nil?
+        end
+
+        def build_nil_receiver_diagnostic(path, call_node)
+          location = call_node.message_loc || call_node.location
+          Diagnostic.new(
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "possible nil receiver: `#{call_node.name}' is undefined on NilClass",
+            severity: :error
+          )
         end
 
         # rubocop:disable Metrics/ParameterLists

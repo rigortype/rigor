@@ -181,6 +181,89 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      describe "nil-receiver rule (Slice 7 phase 14)" do # rubocop:disable RSpec/NestedGroups
+        it "flags a call to a method that does not exist on NilClass when receiver is T | nil" do
+          Dir.mktmpdir do |dir|
+            source_path = File.join(dir, "nil.rb")
+            File.write(source_path, <<~RUBY)
+              x = if rand < 0.5
+                "hello"
+              else
+                nil
+              end
+              x.upcase
+            RUBY
+
+            configuration = Rigor::Configuration.new("paths" => [dir])
+            result = described_class.new(configuration: configuration).run
+
+            diag = result.diagnostics.find { |d| d.message.include?("nil receiver") }
+            expect(diag).not_to be_nil
+            expect(diag.message).to include("upcase")
+          end
+        end
+
+        it "does not flag a method that NilClass also has (e.g. to_s)" do
+          Dir.mktmpdir do |dir|
+            source_path = File.join(dir, "ok.rb")
+            File.write(source_path, <<~RUBY)
+              x = if rand < 0.5
+                "hello"
+              else
+                nil
+              end
+              x.to_s
+            RUBY
+
+            configuration = Rigor::Configuration.new("paths" => [dir])
+            result = described_class.new(configuration: configuration).run
+
+            expect(result).to be_success
+          end
+        end
+
+        it "does not flag safe-navigation calls (`x&.method`)" do
+          Dir.mktmpdir do |dir|
+            source_path = File.join(dir, "safe.rb")
+            File.write(source_path, <<~RUBY)
+              x = if rand < 0.5
+                "hello"
+              else
+                nil
+              end
+              x&.upcase
+            RUBY
+
+            configuration = Rigor::Configuration.new("paths" => [dir])
+            result = described_class.new(configuration: configuration).run
+
+            expect(result).to be_success
+          end
+        end
+
+        it "is suppressed when an early-return guard narrows nil out (Slice 7 phase 14 narrowing)" do # rubocop:disable RSpec/ExampleLength
+          Dir.mktmpdir do |dir|
+            source_path = File.join(dir, "guard.rb")
+            File.write(source_path, <<~RUBY)
+              def go(_)
+                x = if rand < 0.5
+                  "hello"
+                else
+                  nil
+                end
+                return if x.nil?
+                x.upcase
+              end
+            RUBY
+
+            configuration = Rigor::Configuration.new("paths" => [dir])
+            result = described_class.new(configuration: configuration).run
+
+            expect(result).to be_success
+          end
+        end
+      end
+
       it "skips methods with required keyword arguments" do
         Dir.mktmpdir do |dir|
           source_path = File.join(dir, "kw.rb")

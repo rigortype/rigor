@@ -13,9 +13,10 @@ In-progress v0.0.4 surfaces. Two themes so far:
    plus the first six imported built-in predicate names, end-to-end
    with `RBS::Extended`'s `rigor:v1:return:` directive, the
    acceptance tier, and the case-fold projection pair.
-2. **Hash / Range / Set built-in catalog imports.** Three more core
-   classes feed the constant-fold dispatcher; the extractor learned
-   to recognise struct-defined registrations along the way.
+2. **Hash / Range / Set / Time built-in catalog imports.** Four
+   more core classes feed the constant-fold dispatcher; the
+   extractor learned to recognise struct-defined registrations
+   along the way.
 
 ### Added
 
@@ -112,6 +113,36 @@ In-progress v0.0.4 surfaces. Two themes so far:
   dispatch path). `Set#size` / `#length` / `#count` keep
   tightening through the existing `SIZE_RETURNING_NOMINALS`
   projection.
+- **`Time` joins the catalog-driven inference pipeline.** A new
+  `data/builtins/ruby_core/time.yml` is generated from
+  `Init_Time` in `references/ruby/time.c` plus the
+  `references/ruby/timev.rb` prelude (compiled into
+  `timev.rbinc` and `#include`d at the bottom of `time.c`); the
+  prelude path is what carries `Time.now`, `Time.at`, and
+  `Time.new` into the singleton-method bucket. The catalog
+  records 58 instance methods (48 `:leaf`, 8 `:dispatch`, 3
+  `:mutates_self`, 3 `:unknown`), 4 singleton methods, and the
+  `iso8601` ↔ `xmlschema` alias.
+  `MethodDispatcher::ConstantFolding#catalog_for` now routes
+  `Time` receivers through `Builtins::TIME_CATALOG`. The
+  per-class blocklist drops three false-positive `:leaf`
+  classifications: `localtime`, `gmtime`, and `utc` all call
+  `time_modify(time)` to mark the receiver mutable before
+  rewriting their `vtm` cache (the in-place sibling of
+  `getlocal` / `getgm` / `getutc`), but `time_modify` is not
+  in the C-body classifier's mutator regex, so the blocklist
+  catches them. `initialize_copy` is blocked for symmetry with
+  the other class catalogs. The reader surface (`#year`,
+  `#month`, `#day`, `#hour`, `#min`, `#sec`, `#wday`,
+  `#utc_offset`, the `#sunday?`-`#saturday?` predicate family,
+  `#utc?` / `#dst?`, `#strftime`, …) routes through the catalog
+  cleanly. `Time` does not gain an entry in
+  `SIZE_RETURNING_NOMINALS` — the reader methods preserve their
+  RBS-declared `Integer` return because the per-method ranges
+  (`Time#month` is in `1..12`, `Time#wday` is in `0..6`, …)
+  would need a parameterised `int<a, b>` overlay that is out
+  of scope for this slice. Self-asserting fixture:
+  `spec/integration/fixtures/time_catalog.rb`.
 - **`tool/extract_builtin_catalog.rb` recognises
   `rb_struct_define_without_accessor`.** The init-region scanner
   now joins multi-line statements before regex matching, and a

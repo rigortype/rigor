@@ -124,8 +124,8 @@ module Rigor
       \s+
       (?<target>self|[a-z_][a-zA-Z0-9_]*)
       \s+is\s+
+      (?<negation>~?)
       (?:
-        (?<negation>~?)
         (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
         |
         (?<refinement>[a-z][a-z0-9-]*(?:[\[<][^\]>]*[\]>])?)
@@ -181,8 +181,8 @@ module Rigor
       \s+
       (?<target>self|[a-z_][a-zA-Z0-9_]*)
       \s+is\s+
+      (?<negation>~?)
       (?:
-        (?<negation>~?)
         (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
         |
         (?<refinement>[a-z][a-z0-9-]*(?:[\[<][^\]>]*[\]>])?)
@@ -231,14 +231,19 @@ module Rigor
     #   nil, `negative` reflects the optional `~` prefix.
     # - Refinement arm matched: `class_name` is nil,
     #   `refinement_type` is the resolved `Rigor::Type`,
-    #   `negative` is `false` (refinement-form directives do
-    #   not support `~` negation in v0.0.4).
+    #   `negative` reflects the `~` prefix. v0.0.5 supports
+    #   refinement-form negation for the `Difference[base,
+    #   Constant]` shape (the narrowing tier computes the
+    #   complement decomposition); other refinement carriers
+    #   under negation fall back to the conservative
+    #   "current_type unchanged" answer.
     # - Refinement payload unparseable: returns
     #   `[nil, nil, false]` so callers can drop the directive
     #   silently (fail-soft policy).
     def resolve_directive_rhs(match)
+      negative = match[:negation].to_s == "~"
       class_capture = match[:class_name]
-      return [class_capture.to_s.sub(/\A::/, ""), nil, match[:negation].to_s == "~"] if class_capture
+      return [class_capture.to_s.sub(/\A::/, ""), nil, negative] if class_capture
 
       refinement_capture = match[:refinement]
       return [nil, nil, false] if refinement_capture.nil?
@@ -246,7 +251,7 @@ module Rigor
       type = Builtins::ImportedRefinements.parse(refinement_capture)
       return [nil, nil, false] if type.nil?
 
-      [nil, type, false]
+      [nil, type, negative]
     end
 
     def target_fields(target)

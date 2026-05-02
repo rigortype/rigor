@@ -345,4 +345,29 @@ RSpec.describe Rigor::RbsExtended do
       expect(described_class.param_type_override_map(nil)).to eq({})
     end
   end
+
+  describe "~refinement negation on assert / predicate-if-* (v0.0.5)" do
+    it "marks ~refinement payloads as negative on assert directives" do
+      effect = described_class.parse_assert_annotation("rigor:v1:assert value is ~non-empty-string")
+      expect(effect).to be_negative
+      expect(effect.refinement?).to be(true)
+      expect(effect.refinement_type).to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "marks ~refinement payloads as negative on predicate directives" do
+      effect = described_class.parse_predicate_annotation("rigor:v1:predicate-if-true v is ~non-empty-string")
+      expect(effect).to be_negative
+      expect(effect.refinement?).to be(true)
+      expect(effect.refinement_type).to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "leaves positive refinement directives unmarked" do
+      expect(described_class.parse_assert_annotation("rigor:v1:assert value is non-empty-string"))
+        .not_to be_negative
+    end
+
+    it "still rejects unknown refinements under negation" do
+      expect(described_class.parse_assert_annotation("rigor:v1:assert v is ~frobinator-string")).to be_nil
+    end
+  end
 end

@@ -47,7 +47,18 @@ module Rigor
         if other_type.is_a?(Type::Dynamic)
           return Type::AcceptsResult.yes(mode: mode, reasons: "gradual: Dynamic[T] passes any boundary")
         end
+
+        # Structural equality short-circuit. Two identical carriers
+        # describe the same value set, so they always accept each
+        # other. This is sound for any mode and covers cases where
+        # neither side has a per-class rule for the other's exact
+        # carrier kind (the canonical example is
+        # `Intersection.accepts(Intersection)`, where the disjunction
+        # rule below would otherwise reject equal-but-narrow LHSes).
+        return Type::AcceptsResult.yes(mode: mode, reasons: "structural equality") if self_type == other_type
+
         return accepts_union_other(self_type, other_type, mode) if other_type.is_a?(Type::Union)
+        return accepts_intersection_other(self_type, other_type, mode) if other_type.is_a?(Type::Intersection)
 
         accepts_one(self_type, other_type, mode)
       end
@@ -67,6 +78,7 @@ module Rigor
         Type::IntegerRange => :accepts_integer_range,
         Type::Difference => :accepts_difference,
         Type::Refined => :accepts_refined,
+        Type::Intersection => :accepts_intersection,
         Type::Tuple => :accepts_tuple,
         Type::HashShape => :accepts_hash_shape
       }.freeze
@@ -129,6 +141,27 @@ module Rigor
           end
         end
 
+        # self.accepts(Intersection[Y, Z]) iff self accepts at least
+        # one Y_i. Disjunction across members because the intersection
+        # is the meet of its members' value sets, so containment in
+        # any one member implies containment of the whole
+        # intersection. Symmetric counterpart to
+        # `accepts_union_other`.
+        def accepts_intersection_other(self_type, intersection, mode)
+          results = intersection.members.map { |m| accepts(self_type, m, mode: mode) }
+
+          if results.any?(&:yes?)
+            Type::AcceptsResult.yes(mode: mode, reasons: "self accepts an intersection member")
+          elsif results.any?(&:maybe?)
+            Type::AcceptsResult.maybe(
+              mode: mode,
+              reasons: "self could not be proven to accept any intersection member"
+            )
+          else
+            Type::AcceptsResult.no(mode: mode, reasons: "self rejects every intersection member")
+          end
+        end
+
         # self.accepts(Union[Y, Z]) iff self accepts every Y_i. Strict
         # AND across members: any "no" turns the whole result no, any
         # "maybe" without a "no" gives maybe, all "yes" gives yes.
@@ -187,20 +220,40 @@ module Rigor
         # - Singleton: never (wrong value kind).
         def accepts_nominal(self_type, other_type, mode)
           case other_type
-          when Type::Nominal
-            accepts_nominal_from_nominal(self_type, other_type, mode)
-          when Type::Constant
-            accepts_nominal_from_constant(self_type, other_type, mode)
-          when Type::Singleton
-            accepts_nominal_from_singleton(self_type, other_type, mode)
-          when Type::IntegerRange
-            accepts_nominal_from_integer_range(self_type, other_type, mode)
+          when Type::Nominal then accepts_nominal_from_nominal(self_type, other_type, mode)
+          when Type::Constant then accepts_nominal_from_constant(self_type, other_type, mode)
+          when Type::Singleton then accepts_nominal_from_singleton(self_type, other_type, mode)
+          when Type::IntegerRange then accepts_nominal_from_integer_range(self_type, other_type, mode)
+          else accepts_nominal_from_shape(self_type, other_type, mode)
+          end
+        end
+
+        # Tail of `accepts_nominal` that handles structural shape
+        # carriers (`Tuple` / `HashShape`) and refinement carriers
+        # (`Difference` / `Refined`). Each branch projects the
+        # other-side carrier to the nominal layer it sits above
+        # and re-runs acceptance — soundness follows because the
+        # carrier's value set is contained in the projected
+        # nominal's value set.
+        def accepts_nominal_from_shape(self_type, other_type, mode)
+          case other_type
           when Type::Tuple
             accepts(self_type, project_tuple_to_nominal(other_type), mode: mode)
               .with_reason("projected Tuple to Nominal[Array]")
           when Type::HashShape
             accepts(self_type, project_hash_shape_to_nominal(other_type), mode: mode)
               .with_reason("projected HashShape to Nominal[Hash]")
+          when Type::Difference, Type::Refined
+            # A refinement carrier's value set is a subset of its
+            # base. So if `self` (Nominal) accepts the base, it
+            # also accepts the refinement; if it rejects the
+            # base, it cannot accept any subset of it. Forward
+            # through to the base nominal so the standard subtype
+            # check applies. The recursion is bounded because
+            # every refinement carrier's `base` is closer to the
+            # nominal layer.
+            accepts(self_type, other_type.base, mode: mode)
+              .with_reason("projected #{other_type.class.name.split('::').last} to its base")
           else
             Type::AcceptsResult.no(
               mode: mode,
@@ -487,10 +540,18 @@ module Rigor
           when Type::Constant
             !(removed.is_a?(Type::Constant) && removed.value == other_type.value)
           when Type::Difference
-            # `Difference[A, removed_R].accepts(Difference[B, R])` —
-            # the inner difference exhibits the same disjointness;
-            # forward to the base.
-            other_type.removed == removed && provably_disjoint_from_removed?(other_type.base, removed)
+            # `Difference[A, R].accepts(Difference[B, R])`: the
+            # other carrier already excludes `R` at its difference
+            # layer, so the disjointness is exhibited regardless of
+            # how `B` (its base) relates to `R`. We do NOT recurse
+            # into `other_type.base` because that would always fail
+            # (a Nominal base contains the removed value).
+            other_type.removed == removed
+          when Type::Intersection
+            # Disjointness is monotonic over Intersection: if any
+            # member is provably disjoint from `removed`, the meet
+            # is too.
+            other_type.members.any? { |m| provably_disjoint_from_removed?(m, removed) }
           end
         end
 
@@ -568,6 +629,37 @@ module Rigor
             reasons: "#{self_type.describe} cannot prove #{other_type.class} satisfies " \
                      ":#{self_type.predicate_id}"
           )
+        end
+
+        # `Intersection[M1, M2, …]` accepts X iff *every* member
+        # accepts X — the meet of value sets is contained iff the
+        # candidate is contained in each. Conjunctive combine: any
+        # `:no` makes the result `:no`, any `:maybe` without a
+        # `:no` makes the result `:maybe`, all `:yes` makes the
+        # result `:yes`. The 0-member case is unreachable because
+        # `Combinator.intersection` collapses empty intersections
+        # to `Top`.
+        def accepts_intersection(self_type, other_type, mode)
+          per_member = self_type.members.map { |m| accepts(m, other_type, mode: mode) }
+
+          if per_member.any?(&:no?)
+            return Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "an intersection member rejected #{other_type.class}"
+            )
+          end
+
+          if per_member.any?(&:maybe?)
+            Type::AcceptsResult.maybe(
+              mode: mode,
+              reasons: "an intersection member could not be proven accepted"
+            )
+          else
+            Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "every intersection member accepted #{other_type.class}"
+            )
+          end
         end
 
         # Constant[v] accepts only Constant[v'] with structurally equal

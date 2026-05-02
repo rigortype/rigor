@@ -7,267 +7,211 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-In-progress v0.0.4 surfaces. Two themes so far:
+## [0.0.4] - 2026-05-02
 
-1. **OQ3 predicate-subset refinements.** `Type::Refined` carrier
-   plus the first six imported built-in predicate names, end-to-end
-   with `RBS::Extended`'s `rigor:v1:return:` directive, the
-   acceptance tier, and the case-fold projection pair.
-2. **Hash / Range / Set / Time built-in catalog imports.** Four
-   more core classes feed the constant-fold dispatcher; the
-   extractor learned to recognise struct-defined registrations
-   along the way.
+The fourth preview. Theme: **finish the OQ3 refinement-carrier
+strategy and broaden the RBS::Extended directive surface**.
+
+The OQ3 carrier triple (`Type::Difference` from v0.0.3 plus the
+new `Type::Refined` and `Type::Intersection`) is feature-complete
+against the imported-built-in catalogue ([`docs/type-specification/imported-built-in-types.md`](docs/type-specification/imported-built-in-types.md)),
+so authors can express the full set of refinement names from
+`%a{rigor:v1:…}` annotations and the analyzer projects them
+through method dispatch, acceptance, and the `argument-type-mismatch`
+check rule symmetrically.
+
+The `RBS::Extended` directive surface picks up `rigor:v1:param:`
+(both at the call boundary and inside the method body via
+`MethodParameterBinder`) and the existing `assert*` /
+`predicate-if-*` family now accepts refinement payloads on the
+right-hand side.
+
+The built-in catalog import pipeline gains four more classes
+(Hash / Range / Set / Time) plus a `tool/scaffold_builtin_catalog.rb`
+script that automates the mechanical 70 % of each new import.
+
+Test count: 1148 → 1250 examples (+102), RuboCop clean,
+`bundle exec exe/rigor check lib` reports 0 diagnostics.
 
 ### Added
 
-#### `Type::Refined` carrier and the predicate catalogue
+#### OQ3 refinement carriers
 
-- **`Type::Refined` carrier (OQ3 predicate-subset half).** Sibling
-  of `Type::Difference`, wraps `(base, predicate_id)` where
-  `predicate_id` is a Symbol drawn from `Type::Refined::PREDICATES`.
-  Construction goes through `Type::Combinator.refined(base,
-  predicate_id)` and the per-name factories listed below. RBS
-  erasure folds the carrier back to its base nominal so the
-  round-trip to ordinary RBS is unaffected.
-- **Six imported built-in predicate refinements.** `lowercase-string`,
-  `uppercase-string`, `numeric-string`, `decimal-int-string`,
-  `octal-int-string`, and `hex-int-string` ship with the carrier.
-  `:numeric` matches plain decimal integer or fraction strings;
-  `:decimal_int` matches one or more decimal digits with an optional
-  leading sign; `:octal_int` and `:hex_int` REQUIRE their
-  conventional prefix (`0o` / `0O` / leading `0`; `0x` / `0X`),
-  so they are disjoint from `:decimal_int` — a bare `"755"` is a
-  decimal-int-string, not an octal-int-string. Each name is
-  resolvable through `Type::Combinator.<name>_string` and through
-  `Builtins::ImportedRefinements`.
-- **`Builtins::ImportedRefinements` knows the predicate-subset
-  shapes.** All six kebab-case names resolve through the same
-  registry the point-removal half uses, so `RBS::Extended`'s
-  `rigor:v1:return: lowercase-string` directive tightens a method's
-  RBS-declared `String` return to the precise refinement at every
-  call site.
-- **Catalog-tier projections over a `Refined[String, …]` receiver.**
+- **`Type::Refined` carrier (predicate-subset half).** Sibling
+  of `Type::Difference`. Wraps `(base, predicate_id)` where
+  `predicate_id` is a Symbol drawn from
+  `Type::Refined::PREDICATES`. Construction goes through
+  `Type::Combinator.refined(base, predicate_id)` and the
+  per-name factories listed below. RBS erasure folds the carrier
+  back to its base nominal. Gradual-mode acceptance mirrors the
+  conservative `accepts_difference` policy — same-predicate
+  `Refined` plus recognised `Constant` values get `:yes`, every
+  other shape gets `:no`.
+- **`Type::Intersection` carrier — composed refinement names.**
+  Closes the OQ3 carrier strategy by adding the Intersection
+  peer alongside `Union` / `Difference` / `Refined`. The carrier
+  represents the meet of its members' value sets. Construction
+  performs the deterministic normalisation in
+  `docs/type-specification/value-lattice.md` —
+  flatten / drop-Top / Bot-absorb / dedupe / sort / 0-1 collapse
+  — so two equal intersections compare equal regardless of
+  construction order. Acceptance is conjunctive on the LHS and
+  disjunctive on the RHS, plus a top-level structural-equality
+  short-circuit. `ShapeDispatch.dispatch_intersection` combines
+  per-member projections through an IntegerRange meet when every
+  result is bounded-integer, so `(non_empty_string ∩
+  lowercase_string).size` resolves to `positive-int` rather than
+  the looser `non-negative-int`.
+- **Fourteen imported built-in refinement names.** All resolvable
+  through `Builtins::ImportedRefinements` (and through the
+  per-name factories on `Type::Combinator`):
+  - **Point-removal** (already in v0.0.3): `non-empty-string`,
+    `non-zero-int`, `non-empty-array[T]`, `non-empty-hash[K, V]`.
+  - **IntegerRange aliases** (already in v0.0.3): `positive-int`,
+    `non-negative-int`, `negative-int`, `non-positive-int`.
+  - **Predicate** (new): `lowercase-string`, `uppercase-string`,
+    `numeric-string`, `decimal-int-string`, `octal-int-string`,
+    `hex-int-string`. The base-N int-string predicates are
+    disjoint by design — `:octal_int` and `:hex_int` REQUIRE
+    their conventional prefix (`0o` / `0O` / leading `0`;
+    `0x` / `0X`), so a bare `"755"` is `decimal-int-string`,
+    not `octal-int-string`.
+  - **Composed Intersection** (new):
+    `non-empty-lowercase-string`, `non-empty-uppercase-string`.
+- **Catalog-tier projections over `Refined[String, …]`.**
   `String#downcase` / `String#upcase` fold per predicate:
   case-fold idempotence for `:lowercase` / `:uppercase` /
-  `:numeric` and the three base-N int-string predicates, plus the
-  lift `lowercase ↔ uppercase` for the cross calls. Size-tier
+  `:numeric` and the three base-N int-string predicates, plus
+  the lift `lowercase ↔ uppercase` for the cross calls. Size-tier
   projections still apply through the predicate carrier so
-  `String#size` / `String#length` over a `Refined[String, *]`
-  tightens to `non-negative-int`.
-- **Acceptance rule for `Refined`.** Gradual mode mirrors the
-  conservative `accepts_difference` policy: a `Refined[base, p]`
-  accepts another `Refined` with the same predicate, a `Constant`
-  whose value the predicate's recogniser accepts, and rejects
-  every other shape. Each branch projects through to the right
-  base type before consulting the predicate, so the inner base
-  acceptance call sees Nominal-vs-Nominal (or Constant) instead of
-  hitting `accepts_nominal`'s default `else` arm.
-- **`spec/integration/fixtures/predicate_refinement/`.** Self-
-  asserting fixture mirroring `refinement_return_override/`,
-  proving the kebab-case display, the `RBS::Extended return:`
-  override route, and the case-fold projection pair end-to-end
-  for all six predicates.
+  `String#size` over a `Refined[String, *]` tightens to
+  `non-negative-int`.
+- **Self-asserting fixtures.** `predicate_refinement/`,
+  `intersection_refinement/`, `parameterised_refinement/`, plus
+  the existing `refinement_return_override/` from v0.0.3.
+
+#### `RBS::Extended` directive surface
+
+- **`rigor:v1:return:` accepts parameterised refinement payloads.**
+  In addition to the bare-name shapes, the directive now accepts
+  `non-empty-array[T]` / `non-empty-hash[K, V]` (type-arg payloads
+  where `T` / `K` / `V` may be a kebab-case refinement name or a
+  Capitalised RBS class name) and `int<min, max>` (bounded-integer
+  range with signed integer literals). Parsing lives in a new
+  `Builtins::ImportedRefinements::Parser` recursive-descent parser
+  exposed through `ImportedRefinements.parse(payload)`. Failure is
+  fail-soft — any parse miss returns nil and the directive site
+  falls back to the RBS-declared type.
+- **`rigor:v1:param: <name> [is] <refinement>` directive.**
+  Symmetric to the `return:` route landed in v0.0.3 and
+  feature-complete on both sides of the method boundary:
+  - **Call-site half.** `OverloadSelector` and the
+    `argument-type-mismatch` check rule consult
+    `RbsExtended.param_type_override_map(method_def)` and prefer
+    the override over the RBS-translated type so a too-wide call
+    site is flagged.
+  - **Body-side half.** `MethodParameterBinder` reads the same
+    override map and replaces the RBS-translated parameter
+    binding with the refinement, so projections through the
+    carrier (e.g. `id.size` resolving to `positive-int` over a
+    `non-empty-string` parameter) are observable inside the
+    method body during inference.
+
+  The optional `is` glue word matches the existing
+  `assert` / `predicate-if-*` surface; authors MAY write
+  `param: id non-empty-string` instead. End-to-end fixture:
+  `spec/integration/fixtures/param_extended/`.
+- **`rigor:v1:assert:` and `rigor:v1:predicate-if-*:` accept
+  refinement payloads.** The `<target> is <RHS>` right-hand side
+  now matches either a Capitalised class name (existing
+  behaviour) or a kebab-case refinement payload. Both
+  `AssertEffect` and `PredicateEffect` gain a `refinement_type`
+  field; the narrowing tier substitutes the carrier when
+  present, keeping the legacy `narrow_class` path for class-name
+  directives. Refinement-form directives do not yet support
+  `~T` negation — that would require a
+  difference-against-refinement algebra and is reserved for a
+  future slice.
+
+#### CLI / display
+
+- **CLI `type-of` confirms the kebab-case canonical-name
+  contract.** New regression specs in `spec/rigor/cli_spec.rb`
+  drive `bundle exec exe/rigor type-of` through the harness over
+  both a `Difference`-backed refinement (`non-empty-string`) and
+  `Refined`-backed refinements (`lowercase-string`,
+  `numeric-string`), and assert that human-readable text and
+  `--format=json` output both render the refinement in its
+  kebab-case spelling while erasure folds back to the base
+  nominal.
 
 #### Built-in catalog imports
 
-- **`Hash` joins the catalog-driven inference pipeline.** A new
+- **`Hash` joins the catalog-driven inference pipeline.**
   `data/builtins/ruby_core/hash.yml` is generated from
-  `references/ruby/hash.c` by `tool/extract_builtin_catalog.rb`
-  and consumed by `Builtins::HASH_CATALOG`, which the constant-
-  fold dispatcher now consults for `Hash` receivers. Pure readers
-  (`size` / `length` / `[]` / `include?` / `dig` / `invert` /
-  `compact` / `<=` / `<` / `>=` / `>` / …) clear the catalog
-  tier; block-yielding leaves the C-body classifier marked
-  `:leaf` despite dispatching through `rb_hash_foreach` (`each` /
-  `each_pair` / `each_key` / `each_value` / `select` / `filter` /
-  `reject` / `transform_values` / `merge`) are blocklisted so a
-  `Constant<Hash>` carrier cannot fold through them. Self-
-  asserting fixture: `spec/integration/fixtures/hash_catalog.rb`.
+  `references/ruby/hash.c`. `Builtins::HASH_CATALOG` consumes
+  it; the constant-fold dispatcher routes Hash receivers
+  through it. Pure readers (`size` / `[]` / `include?` /
+  `dig` / `invert` / `compact` / …) clear the catalog tier;
+  block-yielding helpers that the C-body classifier mis-flags
+  as `:leaf` (`each` / `select` / `transform_values` / `merge`,
+  …) are blocklisted.
 - **`Range` joins the catalog-driven inference pipeline.**
-  `Init_Range` is extracted into `data/builtins/ruby_core/range.yml`
-  (30 instance methods); `Builtins::RANGE_CATALOG` consumes it and
-  the constant-fold dispatcher routes `Constant<Range>` receivers
-  through it. Methods that fold today on a `(begin..end)` literal
-  include `#begin`, `#end`, `#size`, `#exclude_end?`, `#include?`,
-  `#cover?`, and `#member?`. `#==`, `#eql?`, `#last`, and
-  `#bsearch` stay catalog-classified `dispatch` because their C
-  bodies route through user-redefinable `==` / `<=>`. The
-  block-iterating surface (`#each`, `#step`, `#first`, `#min`,
-  `#max`, `#minmax`, `#count`) classifies as `block_dependent`
-  and is blocked by the foldable-purity check; `#reverse_each` and
-  `#%` are blocklisted explicitly because the C-body classifier
-  mis-flags them as `:leaf`. `Range#size` on a `Nominal[Range]`
-  receiver continues to tighten to `non-negative-int` via
-  `SIZE_RETURNING_NOMINALS`.
-- **`Set` joins the catalog-driven inference pipeline.** A new
-  `data/builtins/ruby_core/set.yml` is generated from `Init_Set`
-  in `references/ruby/set.c` (Set was rewritten in C and folded
-  into CRuby for Ruby 3.2+, so the catalog reads the same way as
-  String / Array). `MethodDispatcher::ConstantFolding#catalog_for`
-  now routes `Set` receivers through `Builtins::SET_CATALOG`.
-  The per-class blocklist drops false-positive `:leaf`
-  classifications for the indirect mutators (`initialize_copy`,
-  `compare_by_identity`, `reset`), the block-yielding helpers
-  (`each`, `classify`, `divide`), and `disjoint?` (which
-  delegates through `set_i_intersect`'s user-redefinable
-  dispatch path). `Set#size` / `#length` / `#count` keep
-  tightening through the existing `SIZE_RETURNING_NOMINALS`
-  projection.
-- **`Time` joins the catalog-driven inference pipeline.** A new
+  `data/builtins/ruby_core/range.yml` covers 30 instance
+  methods. Methods that fold today on a `(begin..end)` literal
+  include `#begin`, `#end`, `#size`, `#exclude_end?`,
+  `#include?`, `#cover?`, `#member?`. The block-iterating
+  surface (`#each`, `#step`, `#first`, `#min`, `#max`,
+  `#minmax`, `#count`) classifies as `block_dependent` and is
+  blocked by the foldable-purity check. The Range slice also
+  taught `tool/extract_builtin_catalog.rb` to recognise
+  `rb_struct_define_without_accessor` so future struct-defined
+  topics become drop-in additions.
+- **`Set` joins the catalog-driven inference pipeline.**
+  `data/builtins/ruby_core/set.yml` is generated from
+  `Init_Set` in `references/ruby/set.c` (Set was rewritten in
+  C and folded into CRuby for Ruby 3.2+). Per-class blocklist
+  drops false-positive `:leaf` classifications for the
+  indirect mutators (`initialize_copy`, `compare_by_identity`,
+  `reset`), the block-yielding helpers (`each`, `classify`,
+  `divide`), and `disjoint?`.
+- **`Time` joins the catalog-driven inference pipeline.**
   `data/builtins/ruby_core/time.yml` is generated from
   `Init_Time` in `references/ruby/time.c` plus the
   `references/ruby/timev.rb` prelude (compiled into
   `timev.rbinc` and `#include`d at the bottom of `time.c`); the
-  prelude path is what carries `Time.now`, `Time.at`, and
-  `Time.new` into the singleton-method bucket. The catalog
-  records 58 instance methods (48 `:leaf`, 8 `:dispatch`, 3
-  `:mutates_self`, 3 `:unknown`), 4 singleton methods, and the
-  `iso8601` ↔ `xmlschema` alias.
-  `MethodDispatcher::ConstantFolding#catalog_for` now routes
-  `Time` receivers through `Builtins::TIME_CATALOG`. The
-  per-class blocklist drops three false-positive `:leaf`
-  classifications: `localtime`, `gmtime`, and `utc` all call
-  `time_modify(time)` to mark the receiver mutable before
-  rewriting their `vtm` cache (the in-place sibling of
-  `getlocal` / `getgm` / `getutc`), but `time_modify` is not
-  in the C-body classifier's mutator regex, so the blocklist
-  catches them. `initialize_copy` is blocked for symmetry with
-  the other class catalogs. The reader surface (`#year`,
-  `#month`, `#day`, `#hour`, `#min`, `#sec`, `#wday`,
-  `#utc_offset`, the `#sunday?`-`#saturday?` predicate family,
-  `#utc?` / `#dst?`, `#strftime`, …) routes through the catalog
-  cleanly. `Time` does not gain an entry in
-  `SIZE_RETURNING_NOMINALS` — the reader methods preserve their
-  RBS-declared `Integer` return because the per-method ranges
-  (`Time#month` is in `1..12`, `Time#wday` is in `0..6`, …)
-  would need a parameterised `int<a, b>` overlay that is out
-  of scope for this slice. Self-asserting fixture:
-  `spec/integration/fixtures/time_catalog.rb`.
-- **`tool/extract_builtin_catalog.rb` recognises
-  `rb_struct_define_without_accessor`.** The init-region scanner
-  now joins multi-line statements before regex matching, and a
-  new `STRUCT_DEFINE_RE` registers the host class. Range was the
-  motivating case; future struct-defined topics (e.g. Process
-  status objects) become drop-in additions.
+  prelude path carries `Time.now` / `Time.at` / `Time.new` into
+  the singleton-method bucket. The catalog records 58 instance
+  methods (48 `:leaf`, 8 `:dispatch`, 3 `:mutates_self`, 3
+  `:unknown`), 4 singleton methods, and the
+  `iso8601` ↔ `xmlschema` alias. Per-class blocklist catches
+  `localtime` / `gmtime` / `utc` (all call `time_modify(time)` to
+  mark the receiver mutable but the C-body classifier mis-flags
+  them `:leaf`).
 
-- **CLI `type-of` confirms the kebab-case canonical-name
-  contract.** New regression specs in
-  `spec/rigor/cli_spec.rb` invoke `bundle exec exe/rigor type-of`
-  through the harness over both a `Difference`-backed refinement
-  (`non-empty-string`) and a `Refined`-backed refinement
-  (`lowercase-string`, `numeric-string`), and assert that
-  human-readable text and `--format=json` output both render the
-  refinement in its kebab-case spelling while erasure folds back
-  to the base nominal. No production code changes were needed —
-  the renderer already routes through `Type#describe` and
-  `erase_to_rbs` — but the regression coverage now binds the
-  contract.
-- **`rigor:v1:param: <name> <refinement>` directive.** Symmetric
-  to the `rigor:v1:return:` route landed in v0.0.3. The new
-  directive lets a sig file tighten an RBS-declared parameter
-  type to one of the imported-built-in refinements:
+#### Enumerable-aware projections
 
-  ```rbs
-  class Slug
-    %a{rigor:v1:param: id is non-empty-string}
-    def normalise: (::String id) -> String
-  end
-  ```
+- **`#each_with_index` block-parameter typing.**
+  `IteratorDispatch` generalises beyond Integer iteration to
+  project the element type per receiver shape (Array / Set /
+  Range nominals, Tuple, HashShape, Hash nominal,
+  Constant<Array>, Constant<Range>) and tightens the index slot
+  to `non-negative-int` over the RBS-declared `Integer`.
+  Self-asserting fixture: `spec/integration/fixtures/each_with_index.rb`.
 
-  At overload selection (`OverloadSelector`) and at the
-  `argument-type-mismatch` check rule, the override replaces the
-  RBS-translated parameter type so a too-wide call site is
-  flagged. The trailing payload supports the full refinement
-  grammar in `Builtins::ImportedRefinements::Parser` (bare
-  kebab-case names plus parameterised forms like
-  `non-empty-array[Integer]`, `non-empty-hash[Symbol, Integer]`,
-  and `int<a, b>`). The optional `is` glue word matches the
-  existing surface on `assert` and `predicate-if-*` directives;
-  authors MAY write `param: id non-empty-string` instead.
-  Failure stays fail-soft: an unparseable payload, an unknown
-  refinement, or a non-`param:` directive returns `nil` from
-  `parse_param_annotation` and is dropped from the override
-  list, so the call site keeps the RBS-declared type.
-  End-to-end fixture: `spec/integration/fixtures/param_extended/`.
-- **`rigor:v1:assert:` and `rigor:v1:predicate-if-*:` accept
-  refinement payloads.** The `<target> is <RHS>` right-hand side
-  now matches either a Capitalised class name (existing
-  behaviour) or a kebab-case refinement payload routed through
-  `Builtins::ImportedRefinements::Parser`. Both `AssertEffect`
-  and `PredicateEffect` gain a `refinement_type` field; the
-  narrowing tier substitutes the carrier when present, keeping
-  the legacy `narrow_class` path for class-name directives.
-  Refinement-form directives do not yet support `~T` negation
-  (would require a difference-against-refinement algebra).
-  End-to-end fixture:
-  `spec/integration/fixtures/assert_refinement/`.
-- **Enumerable-aware `#each_with_index` block-parameter
-  typing.** `IteratorDispatch` generalises beyond Integer
-  iteration to project the element type per receiver shape
-  (Array / Set / Range nominals, Tuple, HashShape, Hash
-  nominal, Constant<Array>, Constant<Range>) and tightens the
-  index slot to `non-negative-int` over the RBS-declared
-  `Integer`. End-to-end fixture:
-  `spec/integration/fixtures/each_with_index.rb`. Other
-  Enumerable methods (`#each`, `#map`, `#select`, `#reduce`,
-  …) already pass through RBS dispatch with sound element
-  types via the existing Tuple/HashShape projection; this
-  slice deliberately scopes itself to the index-tightening
-  case where RBS widens.
-- **`rigor:v1:param:` body-side narrowing.**
-  `MethodParameterBinder` now reads the same override map and
-  replaces the RBS-translated parameter binding with the
-  refinement when present. Combined with the call-site half
-  shipped above, the directive flows symmetrically through both
-  sides of the boundary: a call site with a too-wide argument is
-  flagged, AND the body sees the tightened parameter during
-  inference (so projections through the refinement — e.g.
-  `id.size` resolving to `positive-int` over a `non-empty-string`
-  parameter — are observable inside the method body). The
-  override is used verbatim with no `:rest_*` re-wrapping, so
-  tightening a `*rest` parameter to `non-empty-array[Integer]`
-  describes the parameter binding directly.
-- **`Type::Intersection` carrier — composed refinement names.**
-  Closes the OQ3 carrier strategy (ADR-3) by adding the
-  Intersection peer alongside `Union` / `Difference` /
-  `Refined`. The carrier represents the meet of its members'
-  value sets and ships with the catalogued composites
-  `non-empty-lowercase-string` (`Difference[String, ""] &
-  Refined[String, :lowercase]`) and `non-empty-uppercase-string`,
-  both resolvable through `Builtins::ImportedRefinements` and
-  through `Type::Combinator.non_empty_lowercase_string` /
-  `non_empty_uppercase_string` (plus the raw
-  `Combinator.intersection(*members)`). Construction performs
-  the deterministic normalisation in `value-lattice.md` —
-  flatten / drop-Top / Bot-absorb / dedupe / sort / 0-1
-  collapse — so two equal intersections compare equal
-  regardless of construction order. RBS erasure folds the
-  carrier back to its base nominal. Acceptance is conjunctive
-  on the LHS and disjunctive on the RHS, plus a top-level
-  structural-equality short-circuit that covers the equal-but-
-  narrow case the disjunction rule alone would reject.
-  ShapeDispatch's `dispatch_intersection` collects per-member
-  projections and combines them through an IntegerRange meet
-  when every result is bounded-integer, so
-  `(non_empty_string ∩ lowercase_string).size` resolves to
-  `positive-int` rather than the looser `non-negative-int`.
-  End-to-end fixture:
-  `spec/integration/fixtures/intersection_refinement/`.
-- **Parameterised refinement payloads in `RBS::Extended`.** The
-  `rigor:v1:return:` directive now accepts the three documented
-  parameterised forms in addition to the bare-name shapes:
-  `non-empty-array[T]` and `non-empty-hash[K, V]` (type-arg
-  payloads — `T`, `K`, `V` may be a kebab-case refinement name
-  or a Capitalized RBS class name), and `int<min, max>` (bounded
-  integer range with signed integer literals). Parsing lives in
-  a new `Builtins::ImportedRefinements::Parser` recursive-descent
-  parser exposed through `ImportedRefinements.parse(payload)`;
-  the existing `lookup(name)` is unchanged so no-arg call sites
-  keep their contract. Failure remains fail-soft — any parse
-  miss (arity mismatch, unknown head, malformed bracket / angle
-  pairing, trailing characters) returns `nil` so the directive
-  site falls back to the RBS-declared type. End-to-end fixture:
-  `spec/integration/fixtures/parameterised_refinement/`.
+#### Tooling
+
+- **`tool/scaffold_builtin_catalog.rb`.** Automates the
+  mechanical 70 % of a new built-in catalog import: writes the
+  TOPICS entry, the optional `BASE_CLASS_VARS` row, the loader
+  file with a TODO blocklist marker, the `CATALOG_BY_CLASS` row
+  + `require_relative`, the integration fixture stub, and the
+  describe block. Manual follow-ups (blocklist curation,
+  fixture body, CHANGELOG bullet) are printed as a checklist on
+  exit. `--dry-run` previews the planned edits;
+  `--init-fn` / `--rbs` / `--rb-prelude` override defaults for
+  upstream layouts that diverge. Documented as Stage 0 of the
+  `rigor-builtin-import` skill.
 
 ### Changed
 
@@ -278,6 +222,23 @@ In-progress v0.0.4 surfaces. Two themes so far:
   one-line addition rather than another `when` arm, and the
   dispatcher's cyclomatic complexity stays bounded as the
   catalogue grows.
+
+### Fixed
+
+- **`accepts_nominal` projects refinement carriers to base.** A
+  Nominal accepting a `Difference` or `Refined` previously fell
+  through to `:no` because `accepts_nominal`'s case statement had
+  no branch for refinement kinds. The carrier's value set is
+  contained in its base nominal's, so projecting to `other.base`
+  and re-running acceptance is sound — a latent bug surfaced
+  while wiring the Intersection conjunction.
+- **`provably_disjoint_from_removed?` for nested Difference.**
+  `Difference[A, R].accepts(Difference[B, R])` previously
+  required the inner difference's BASE to be provably disjoint
+  from `R`, which never holds (a Nominal base contains the
+  removed value by construction). Same-`removed` now suffices
+  because the disjointness is exhibited at the inner difference
+  layer.
 
 ## [0.0.3] - 2026-05-02
 
@@ -807,7 +768,8 @@ The gem is published to RubyGems as **`rigortype`** (the
   reserved for `dump_type`); per-rule configuration and
   suppression comments are deferred.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/rigortype/rigor/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/rigortype/rigor/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/rigortype/rigor/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/rigortype/rigor/releases/tag/v0.0.1

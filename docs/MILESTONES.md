@@ -23,25 +23,30 @@ Major surfaces landed:
 - `File` path-manipulation folding gated behind `fold_platform_specific_paths` config (default off, platform-agnostic).
 - ADR-5 (robustness principle) and the OQ1 / OQ2 / OQ3 working decisions in ADR-3.
 
-## v0.0.4 — Next Preview (in progress)
+## v0.0.4 — Released 2026-05-02
 
-Theme: **finish the refinement carrier system and broaden built-in coverage**. The OQ3 second-half slice plus the next wave of CRuby class imports.
+The fourth preview. Theme: **finish the OQ3 refinement-carrier strategy and broaden the RBS::Extended directive surface**. See `CHANGELOG.md`'s `[0.0.4]` section for the full added/changed/fixed list.
 
-Landed so far (see `CHANGELOG.md` `[Unreleased]` for the full bullet list):
+Major surfaces landed:
 
-- ✅ **`Type::Refined` carrier (OQ3 predicate-subset half).** Six imported built-in predicate refinements ship with the carrier — `lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`. Predicate registry (`Type::Refined::PREDICATES`), canonical-name registry, per-predicate fold rules, and gradual-mode acceptance all in place. Plugin extension surface (ADR-2) stays deferred to v0.1.0.
-- ✅ **Hash / Range / Set built-in catalog imports.** The constant-fold dispatcher routes through `HASH_CATALOG` / `RANGE_CATALOG` / `SET_CATALOG`. The extractor learned `rb_struct_define_without_accessor` along the way; `MethodDispatcher::ConstantFolding#catalog_for` is now table-driven so further imports cost one row.
+- `Type::Refined` carrier (OQ3 predicate-subset half) and `Type::Intersection` carrier (composed refinement names) — together with `Type::Difference` from v0.0.3, the OQ3 carrier triple is feature-complete.
+- Fourteen imported built-in refinement names resolvable through `Builtins::ImportedRefinements`: the v0.0.3 point-removal four, the v0.0.3 IntegerRange-aliased four, the new predicate six (`lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`), and the new composed two (`non-empty-lowercase-string`, `non-empty-uppercase-string`).
+- `RBS::Extended` directive surface complete on both sides of the boundary: `rigor:v1:return:` (now accepts parameterised payloads), `rigor:v1:param:` (call-site argument-type-mismatch rule + body-side `MethodParameterBinder` narrowing), `rigor:v1:assert:` and `rigor:v1:predicate-if-*:` (now accept refinement payloads in addition to class names).
+- Hash / Range / Set / Time built-in catalog imports through `tool/extract_builtin_catalog.rb`. `MethodDispatcher::ConstantFolding#catalog_for` is now table-driven (`CATALOG_BY_CLASS`) so further imports cost one row.
+- Enumerable-aware `#each_with_index` block-parameter typing in `IteratorDispatch` — element type is projected per receiver shape, index slot tightens to `non-negative-int`.
+- `tool/scaffold_builtin_catalog.rb` automates the mechanical 70 % of new built-in catalog imports (Stage 0 of the `rigor-builtin-import` skill).
+- CLI `type-of` regression specs binding the kebab-case canonical-name display contract for refinement-bearing types in both human-readable and `--format=json` output.
 
-Also landed:
+## v0.0.5 — Next Preview (planned)
 
-- ✅ **`type-of` CLI canonical-name display contract.** Regression specs in `spec/rigor/cli_spec.rb` confirm `bundle exec exe/rigor type-of …` renders refinement-bearing types in their kebab-case spelling in both human-readable text and `--format=json` output.
-- ✅ **Parameterised refinement tokeniser.** `RBS::Extended`'s `rigor:v1:return:` directive now accepts `non-empty-array[T]`, `non-empty-hash[K, V]`, and `int<min, max>` payloads. Parsing lives in `Builtins::ImportedRefinements::Parser`.
-- ✅ **`Type::Intersection` for composed refinement names.** Closes the OQ3 carrier strategy. `non-empty-lowercase-string` / `non-empty-uppercase-string` resolve end-to-end; conjunction / disjunction acceptance plus an IntegerRange-meet ShapeDispatch projection keep size-tier answers tight.
-- ✅ **`rigor:v1:param:` directive (both halves).** Tightens RBS-declared parameter types at overload selection, the `argument-type-mismatch` rule, AND inside the method body via `MethodParameterBinder`.
-- ✅ **`rigor:v1:assert:` and `predicate-if-*:` against refinement carriers.** Both directives accept kebab-case refinement payloads on the right-hand side; the narrowing tier substitutes the carrier when present.
-- ✅ **Enumerable-aware `#each_with_index` block-parameter typing.** `IteratorDispatch` projects the element from Array/Set/Range/Tuple/HashShape/Hash/Constant<Range> receivers and tightens the index to `non-negative-int`.
-- **Further built-in catalog imports** (Time, Date, DateTime; module-shaped Comparable / Enumerable need a different topic shape than concrete classes). Each follows the nine-stage flow in [`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md).
-- **More Enumerable methods.** `#each_with_index` landed; `#each_with_object`, `#inject`/`#reduce`, and IO line iteration are the natural follow-ups when a concrete slice needs them.
+Theme: **continue catalog coverage and broaden the Enumerable-aware projections**. None of the items below are commitments yet; this is the active candidate pool for the next slice.
+
+- More Enumerable methods. `#each_with_object`, `#inject` / `#reduce` (memo-typed), `#group_by` / `#partition` (returning shaped containers), IO line iteration.
+- Refinement negation in `assert:` / `predicate-if-*:` directives. Refinement-form directives currently reject `~T` payloads; landing them needs a difference-against-refinement algebra.
+- Date / DateTime catalog imports (stdlib gems under `references/ruby/ext/date/`).
+- Comparable / Enumerable module imports — `tool/scaffold_builtin_catalog.rb` may grow a `--module` mode for these.
+- C-body classifier upgrades — track indirect mutator helpers transitively so per-class blocklists shrink.
+- `make catalog-diff` between two extractor runs.
 
 Stretch surfaces (land if cheap, defer if expensive):
 

@@ -88,15 +88,25 @@ module Rigor
 
         # @return [Rigor::Type, nil] the precise element/value type, or
         #   `nil` to defer to the next dispatcher tier.
+        # Per-carrier dispatch table. Adding a new carrier here
+        # is a one-row change; the helper methods stay private.
+        # Anonymous Type subclasses are not expected.
+        RECEIVER_HANDLERS = {
+          Type::Tuple => :dispatch_tuple,
+          Type::HashShape => :dispatch_hash_shape,
+          Type::Nominal => :dispatch_nominal_size,
+          Type::Difference => :dispatch_difference,
+          Type::Refined => :dispatch_refined,
+          Type::Intersection => :dispatch_intersection
+        }.freeze
+        private_constant :RECEIVER_HANDLERS
+
         def try_dispatch(receiver:, method_name:, args:)
           args ||= []
-          case receiver
-          when Type::Tuple then dispatch_tuple(receiver, method_name, args)
-          when Type::HashShape then dispatch_hash_shape(receiver, method_name, args)
-          when Type::Nominal then dispatch_nominal_size(receiver, method_name, args)
-          when Type::Difference then dispatch_difference(receiver, method_name, args)
-          when Type::Refined then dispatch_refined(receiver, method_name, args)
-          end
+          handler = RECEIVER_HANDLERS[receiver.class]
+          return nil unless handler
+
+          send(handler, receiver, method_name, args)
         end
 
         # Tightens `Array#size` / `Array#length` / `String#length` /
@@ -279,6 +289,64 @@ module Rigor
             when :uppercase_string then Type::Combinator.uppercase_string
             when :lowercase_string then Type::Combinator.lowercase_string
             end
+          end
+
+          # Projects a method call over an `Intersection[M1, …]`
+          # receiver by collecting each member's projection and
+          # combining the results. The set-theoretic identity is
+          # `M(A ∩ B) ⊆ M(A) ∩ M(B)`, so the meet of the per-member
+          # projections is sound. Combining is best-effort:
+          #
+          # - If every result is a `Type::IntegerRange`, return
+          #   their bounded-integer meet (max of lower bounds, min
+          #   of upper bounds). This catches the common
+          #   `(non_empty_string ∩ lowercase_string).size`
+          #   pattern where one member projects to `positive-int`
+          #   and the other to `non-negative-int`; the meet is
+          #   `positive-int`.
+          # - Otherwise return the first non-nil result. A richer
+          #   meet (e.g. of Difference + Refined results when both
+          #   project) is left for a future slice; the carrier
+          #   stays sound because every member's projection is
+          #   already a superset of the true intersection.
+          #
+          # Returns nil when no member projects, so the caller
+          # falls through to the next dispatcher tier.
+          def dispatch_intersection(intersection, method_name, args)
+            results = intersection.members.filter_map do |member|
+              ShapeDispatch.try_dispatch(receiver: member, method_name: method_name, args: args)
+            end
+
+            case results.size
+            when 0 then nil
+            when 1 then results.first
+            else combine_intersection_results(results)
+            end
+          end
+
+          def combine_intersection_results(results)
+            return narrow_integer_ranges(results) if results.all?(Type::IntegerRange)
+
+            results.first
+          end
+
+          # Compute the bounded-integer meet of two or more
+          # `IntegerRange` carriers. We compare via the numeric
+          # `lower` / `upper` accessors (`-Float::INFINITY` /
+          # `Float::INFINITY` for the symbolic ends), then map
+          # back to the symbolic-bound representation
+          # `IntegerRange.new` expects. The disjoint-meet case
+          # cannot arise from sound member-wise projections in
+          # v0.0.4 but is guarded defensively to keep the
+          # carrier total.
+          def narrow_integer_ranges(ranges)
+            numeric_low = ranges.map(&:lower).max
+            numeric_high = ranges.map(&:upper).min
+            return Type::Combinator.bot if numeric_low > numeric_high
+
+            min = numeric_low == -Float::INFINITY ? Type::IntegerRange::NEG_INFINITY : numeric_low.to_i
+            max = numeric_high == Float::INFINITY ? Type::IntegerRange::POS_INFINITY : numeric_high.to_i
+            Type::Combinator.integer_range(min, max)
           end
 
           def tuple_first(tuple, _method_name, args)

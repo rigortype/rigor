@@ -121,6 +121,16 @@ TOPICS = {
     c_index_paths: %w[references/ruby/array.c],
     output_path: "data/builtins/ruby_core/array.yml"
   },
+  "hash" => {
+    init_function: "Init_Hash",
+    ruby_c_path: "references/ruby/hash.c",
+    ruby_prelude_path: "references/ruby/hash.rb",
+    rbs_paths: {
+      "Hash" => "references/rbs/core/hash.rbs"
+    },
+    c_index_paths: %w[references/ruby/hash.c],
+    output_path: "data/builtins/ruby_core/hash.yml"
+  },
   "io" => {
     init_function: "Init_IO",
     ruby_c_path: "references/ruby/io.c",

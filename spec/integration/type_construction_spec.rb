@@ -384,6 +384,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/enumerable_memo.rb — each_with_object / inject / reduce" do
+    let(:harness) { harness_for("enumerable_memo") }
+
+    it "self-asserts memo-typed block parameters across each_with_object, inject (with + without seed), and reduce" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/union_arithmetic.rb — cartesian fold over Union[Constant…]" do
     let(:harness) { harness_for("union_arithmetic") }
 

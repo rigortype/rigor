@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Type::Refined` carrier (OQ3 predicate-subset half).** Sibling
+  of `Type::Difference`, wraps `(base, predicate_id)` where
+  `predicate_id` is a Symbol drawn from `Type::Refined::PREDICATES`.
+  The first three imported built-in predicate refinements ship with
+  the carrier: `lowercase-string`, `uppercase-string`, and
+  `numeric-string`. Construction goes through
+  `Type::Combinator.lowercase_string` /
+  `Combinator.uppercase_string` / `Combinator.numeric_string` /
+  `Combinator.refined(base, predicate_id)`. RBS erasure folds the
+  carrier back to its base nominal so the round-trip to ordinary
+  RBS is unaffected.
+- **`Builtins::ImportedRefinements` knows the predicate-subset
+  shapes.** `lowercase-string`, `uppercase-string`, and
+  `numeric-string` resolve through the same registry the
+  point-removal half uses, so `RBS::Extended`'s
+  `rigor:v1:return: lowercase-string` directive tightens a method's
+  RBS-declared `String` return to the precise refinement at every
+  call site.
+- **Catalog-tier projections for case-fold idempotence.**
+  `String#downcase` over `Refined[String, :lowercase]` folds to the
+  same carrier; `String#upcase` lifts a `lowercase-string` to
+  `uppercase-string` (and the symmetric pair). `numeric-string`
+  preserves itself across both `#downcase` and `#upcase` (digits
+  are case-invariant). Size-tier projections still apply through
+  the predicate carrier so `String#size` / `String#length` over a
+  `Refined[String, *]` tightens to `non-negative-int`.
+- **Acceptance rule for `Refined`.** Gradual mode mirrors the
+  conservative `accepts_difference` policy: a `Refined[base, p]`
+  accepts another `Refined` with the same predicate, a `Constant`
+  whose value the predicate's recogniser accepts, and rejects every
+  other shape. Rejection diagnostics name the predicate so debug
+  output is readable.
+- **`spec/integration/fixtures/predicate_refinement/`.** Self-
+  asserting fixture mirroring `refinement_return_override/`,
+  proving the kebab-case display, the `RBS::Extended return:`
+  override route, and the case-fold projection pair end-to-end.
+
 ## [0.0.3] - 2026-05-02
 
 The third preview. v0.0.3 makes the inference engine "see literal

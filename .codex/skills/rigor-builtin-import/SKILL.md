@@ -188,8 +188,15 @@ When in doubt, blocklist. The cost of a missed fold is one method's loss; the co
 ### When to introduce a new refinement carrier
 
 - The new shape is already in `imported-built-in-types.md` — implement it.
-- The new shape is a **point-removal** — use `Type::Difference` and add a `Combinator.<name>` factory plus a `Builtins::ImportedRefinements` registry entry.
-- The new shape is a **predicate-subset** (e.g. `lowercase-string`, `numeric-string`) — use `Type::Refined` (slated for v0.0.4); the registry entry maps to `Refined[base, predicate_id]`.
+- The new shape is a **point-removal** (e.g. `non-empty-string`, `non-zero-int`) — use `Type::Difference` and add a `Combinator.<name>` factory plus a `Builtins::ImportedRefinements` registry entry. The carrier landed in v0.0.3.
+- The new shape is a **predicate-subset** (e.g. `lowercase-string`, `numeric-string`, `decimal-int-string`) — use `Type::Refined`. The carrier landed in v0.0.4. Concrete steps:
+  1. Pick a `predicate_id` Symbol (kebab-case → snake_case, e.g. `numeric-string` → `:numeric`).
+  2. Add an entry to `Type::Refined::PREDICATES` whose recogniser MUST be total over arbitrary input (return `false` rather than raise on non-base values). The recogniser is invoked at constant-fold and acceptance time over `Constant<base>` values.
+  3. Add an entry to `Type::Refined::CANONICAL_NAMES` keyed on `[base_class_name, predicate_id]` so `describe` prints the kebab-case spelling.
+  4. Add a `Combinator.<snake_case_name>` factory that returns `Refined.new(nominal_of(base), predicate_id)`, plus the matching `sig/rigor/type.rbs` entry under the `Combinator` module so the self-check accepts call sites.
+  5. Add a `Builtins::ImportedRefinements::REGISTRY` entry mapping the kebab-case name to the new factory.
+  6. Add catalog-tier projections in `MethodDispatcher::ShapeDispatch#dispatch_refined` for any methods whose answer is determined by the refinement (e.g. case-fold idempotence). Methods without a specific projection delegate to the base nominal so size-tier projections still apply.
+  7. Add a self-asserting fixture under `spec/integration/fixtures/<name>/` (`demo.rb` + `sig/`) and wire it into `spec/integration/type_construction_spec.rb`.
 - The new shape is an **Enumerable-aware projection** (e.g. `Enumerable[T]` block parameter typing across Array / Set / Range) — that is a v0.0.4 architecture slice, not a per-class import.
 
 ### When to update ADR-3 / ADR-5 / spec docs
@@ -216,7 +223,7 @@ Before declaring an import done:
 
 The procedure above is correct but not yet optimal. Known optimisation candidates are tracked here so future passes have a single place to look:
 
-- **Predicate-subset refinements (`Type::Refined`).** Land the OQ3 second-half slice so `lowercase-string`, `numeric-string`, `decimal-int-string`, `hex-int-string`, `octal-int-string` become first-class — extends `Builtins::ImportedRefinements` and the canonical-name registry.
+- **More predicate-subset refinements.** `Type::Refined` landed in v0.0.4 with `lowercase-string`, `uppercase-string`, and `numeric-string`. The remaining catalogued predicates — `decimal-int-string`, `hex-int-string`, `octal-int-string`, `non-empty-lowercase-string`, `non-empty-uppercase-string` (the last two compose with `Difference` via `Intersection`) — slot in by adding registry entries plus per-`String` recognisers; the carrier itself does not need new infrastructure.
 - **Parameterised refinement parser.** `non-empty-array[Integer]`, `int<5, 10>`, `non-empty-hash[Symbol, Integer]` should be readable from `RBS::Extended` annotations; today only the no-arg forms work.
 - **`param:` and `assert:` directive routes.** The annotation parser already accepts the syntax surface; the dispatcher tier needs a wiring slice symmetric to the `return:` route landed in v0.0.3.
 - **Enumerable-generic projection.** `each` / `map` / `select` / `reduce` block parameters across Array / Set / Range / IO line iteration via a single Enumerable-aware tier instead of per-class hardcoded rules.

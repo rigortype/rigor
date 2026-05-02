@@ -12,22 +12,13 @@ The summary of what shipped in v0.0.3 is in `CHANGELOG.md`'s `[0.0.3] - 2026-05-
 
 The next preview is **v0.0.4**. The full planned surface is in [`docs/MILESTONES.md`](MILESTONES.md); the items below are the operational entry points for restarting work, not a re-statement of the milestone.
 
-### Highest-leverage immediate slice
+### Just-landed slice
 
-**`Type::Refined` carrier (OQ3 predicate-subset half).** The point-removal half (`Type::Difference`) shipped in v0.0.3; v0.0.4 needs the predicate-subset peer. The first refinement to land end-to-end is `lowercase-string` because:
+**`Type::Refined` carrier (OQ3 predicate-subset half).** Landed. The carrier is at [`lib/rigor/type/refined.rb`](../lib/rigor/type/refined.rb), the per-name factories sit under `Type::Combinator` (`lowercase_string`, `uppercase_string`, `numeric_string`, plus the raw `refined(base, predicate_id)`), and `Builtins::ImportedRefinements` resolves `lowercase-string` / `uppercase-string` / `numeric-string` from `RBS::Extended`'s `rigor:v1:return:` payload. Catalog-tier projections in [`lib/rigor/inference/method_dispatcher/shape_dispatch.rb`](../lib/rigor/inference/method_dispatcher/shape_dispatch.rb) project `String#downcase` / `String#upcase` over a `Refined[String, …]` receiver into the matching refinement (case-fold idempotence for `:lowercase` / `:uppercase` / `:numeric`, plus a lift `lowercase ↔ uppercase` for the cross calls). `Inference::Acceptance.accepts_refined` is the conservative analogue of `accepts_difference` — same-predicate `Refined` plus recognised `Constant` values get `:yes`, every other shape gets `:no`. Self-asserting fixture: [`spec/integration/fixtures/predicate_refinement/`](../spec/integration/fixtures/predicate_refinement/). The skill ([`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md) "When to introduce a new refinement carrier") records the seven-step procedure for adding the next predicate.
 
-- it stresses every part of the predicate-subset machinery (predicate registry, fold rules, canonical-name display) without needing a tokeniser for parameters,
-- it has obvious projection rules (`String#downcase` over a `lowercase-string` receiver folds to `self`; `String#upcase` returns `uppercase-string`),
-- the fixture (`spec/integration/fixtures/refinement_return_override/`) already demonstrates the `Difference` route end-to-end, so the new `Refined` route can mirror its structure.
+### Highest-leverage next slice
 
-ADR-3 OQ3 records the design; the implementation steps the slice should follow:
-
-1. `lib/rigor/type/refined.rb` — sibling of `Difference`. Wraps `(base, predicate_id)` where `predicate_id` is a Symbol drawn from a registered predicate table. Erases to base.
-2. `Builtins::ImportedRefinements` registry entries for `lowercase-string`, `uppercase-string`, `numeric-string`. The lookup returns `Refined[Nominal[String], :lowercase]` etc.
-3. Catalog-tier projections in `MethodDispatcher::ShapeDispatch` (or a new `RefinedDispatch` module): `String#downcase` over `Refined[String, :lowercase]` → self; `String#upcase` over `Refined[String, :lowercase]` → `Refined[String, :uppercase]`.
-4. `Acceptance.accepts_refined` — the conservative analogue of `accepts_difference`. Predicate-subset acceptance is hard in general; gradual mode should accept only `Refined` candidates with the same predicate, plus `Constant` candidates whose value satisfies the predicate at construction time (when the predicate has a runtime recogniser).
-5. Self-asserting fixture under `spec/integration/fixtures/predicate_refinement/` paralleling `refinement_return_override/`.
-6. Update [`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md) section "When to introduce a new refinement carrier" with the now-decided predicate-subset case.
+**Round out the predicate catalogue.** The carrier infrastructure is in place; the remaining catalogued predicate names from [`docs/type-specification/imported-built-in-types.md`](type-specification/imported-built-in-types.md) — `decimal-int-string`, `octal-int-string`, `hex-int-string`, plus the composed `non-empty-lowercase-string` / `non-empty-uppercase-string` (which require an `Intersection` carrier or a small composition rule against `Difference`) — slot in by extending `Type::Refined::PREDICATES`, `CANONICAL_NAMES`, and the `ImportedRefinements` registry per the SKILL procedure. The `Intersection` composition for the non-empty-cased shapes is the one piece of new algebra needed; everything else is registry data.
 
 ### Other v0.0.4 entry points (parallel-safe)
 

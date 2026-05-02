@@ -112,5 +112,55 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
 
       expect(result).to be_empty
     end
+
+    describe "rigor:v1:param: body-side overrides (v0.0.4)" do
+      def with_param_demo(rbs_body)
+        Dir.mktmpdir do |dir|
+          FileUtils.mkdir_p(File.join(dir, "sig"))
+          File.write(File.join(dir, "sig/normaliser.rbs"), <<~RBS)
+            class ParamBindDemo
+              #{rbs_body}
+            end
+          RBS
+          project_env = Rigor::Environment.for_project(root: dir)
+          binder = described_class.new(environment: project_env, class_path: "ParamBindDemo", singleton: false)
+          yield binder
+        end
+      end
+
+      it "tightens an RBS-declared parameter to the refinement when the directive matches" do
+        with_param_demo(<<~RBS) do |binder|
+          %a{rigor:v1:param: id is non-empty-string}
+          def normalise: (::String id) -> String
+        RBS
+          result = binder.bind(def_node("def normalise(id); id; end"))
+          expect(result[:id]).to eq(Rigor::Type::Combinator.non_empty_string)
+        end
+      end
+
+      it "applies parameterised refinement payloads through the override path" do
+        with_param_demo(<<~RBS) do |binder|
+          %a{rigor:v1:param: ids is non-empty-array[Integer]}
+          def normalise: (::Array[::Integer] ids) -> Array[Integer]
+        RBS
+          result = binder.bind(def_node("def normalise(ids); ids; end"))
+          expect(result[:ids]).to eq(
+            Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("Integer"))
+          )
+        end
+      end
+
+      it "leaves slots without an override at the RBS-translated type" do
+        with_param_demo(<<~RBS) do |binder|
+          %a{rigor:v1:param: id is non-empty-string}
+          def normalise: (::String id, ::Integer count) -> String
+        RBS
+          result = binder.bind(def_node("def normalise(id, count); id; end"))
+          expect(result[:id]).to eq(Rigor::Type::Combinator.non_empty_string)
+          expect(result[:count]).to be_a(Rigor::Type::Nominal)
+          expect(result[:count].class_name).to eq("Integer")
+        end
+      end
+    end
   end
 end

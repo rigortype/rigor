@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../type"
+require_relative "../rbs_extended"
 require_relative "rbs_type_translator"
 
 module Rigor
@@ -59,10 +60,13 @@ module Rigor
         rbs_method = lookup_rbs_method(def_node)
         return types unless rbs_method
 
-        method_types = rbs_method.method_types
-        return types if method_types.empty?
-
-        apply_rbs_overloads(types, slots, method_types)
+        apply_rbs_overloads(types, slots, rbs_method.method_types) unless rbs_method.method_types.empty?
+        # `rigor:v1:param: <name> <refinement>` annotations
+        # tighten the bound type for matching slots. Applied
+        # after the RBS-overload pass so the override is the
+        # authoritative answer regardless of what the RBS
+        # signature declared.
+        apply_param_overrides(types, slots, rbs_method)
         types
       end
 
@@ -162,6 +166,27 @@ module Rigor
           next if translated.empty?
 
           types[slot.name] = build_slot_type(translated, slot.kind)
+        end
+      end
+
+      # Reads the override map off the method's annotations and
+      # replaces the binding for any slot whose name appears in
+      # the map. Anonymous slots are skipped (no name to match).
+      # The override is used verbatim — no `:rest_*` re-wrapping —
+      # so authors who tighten a `*rest` parameter to e.g.
+      # `non-empty-array[Integer]` describe the parameter binding
+      # they actually want, not its element type.
+      def apply_param_overrides(types, slots, rbs_method)
+        override_map = RbsExtended.param_type_override_map(rbs_method)
+        return if override_map.empty?
+
+        slots.each do |slot|
+          next if slot.name.nil?
+
+          override = override_map[slot.name]
+          next if override.nil?
+
+          types[slot.name] = override
         end
       end
 

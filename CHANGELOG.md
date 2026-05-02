@@ -64,6 +64,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registrations (`FileTest` in Init_File, `UnicodeNormalize`
   in Init_String) now surface as empty-bucket class entries
   in their respective YAMLs.
+- **`~refinement` negation extends to IntegerRange and
+  Intersection.** `Narrowing.narrow_not_refinement` previously
+  only handled `Difference[base, Constant[v]]`; the algebra
+  now covers two more carrier kinds:
+  - `Type::IntegerRange[a, b]` — complement is the two open
+    halves `int<min, a-1>` and `int<b+1, max>`, each
+    intersected with the integer-domain parts of
+    `current_type`. Non-integer parts of a Union receiver
+    survive unchanged. `assert n is ~int<5, 10>` over
+    `n: Integer` narrows to `int<11, max> | int<min, 4>`.
+    End-to-end fixture:
+    `spec/integration/fixtures/assert_negation_integer_range/`.
+  - `Type::Intersection[M1, M2, …]` — De Morgan: `D \ (M1 ∩
+    M2) = (D \ M1) ∪ (D \ M2)`. Each member's complement is
+    computed independently and unioned; members the algebra
+    cannot complement (Refined, non-Constant Difference)
+    contribute `current_type` itself, so the union may widen.
+    `~non-empty-lowercase-string` over `String` therefore
+    yields `Constant[""] | Nominal[String]` rather than the
+    tighter `Constant[""]` we'd get with predicate-aware
+    complement. `Refined[base, predicate]` keeps its
+    conservative `current_type` answer (predicate complements
+    are not finite-carrier-expressible).
 - **`~refinement` negation in `assert:` / `predicate-if-*:`
   directives.** The `<target> is <RHS>` right-hand side now
   accepts the `~T` negation prefix on the refinement arm in

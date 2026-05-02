@@ -259,6 +259,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/parameterised_refinement/ — RBS::Extended parameterised return payload" do
+    let(:harness) { harness_for("parameterised_refinement") }
+
+    it "self-asserts non-empty-array[T], non-empty-hash[K, V], and int<a, b> return overrides" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/string_array_catalog.rb — String/Symbol/Array catalog-driven folding" do
     let(:harness) { harness_for("string_array_catalog") }
 

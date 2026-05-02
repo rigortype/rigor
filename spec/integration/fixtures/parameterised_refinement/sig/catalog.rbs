@@ -1,0 +1,10 @@
+class Catalog
+  %a{rigor:v1:return: non-empty-array[Integer]}
+  def positive_ids: () -> Array[Integer]
+
+  %a{rigor:v1:return: non-empty-hash[Symbol, Integer]}
+  def attributes: () -> Hash[Symbol, Integer]
+
+  %a{rigor:v1:return: int<5, 10>}
+  def small_index: () -> Integer
+end

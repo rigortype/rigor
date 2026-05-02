@@ -35,6 +35,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   predicate-complement and bounded-range complement are
   follow-up slices. End-to-end fixture:
   `spec/integration/fixtures/assert_negation_refinement/`.
+- **`group_by` / `partition` / `each_slice` / `each_cons`
+  block-parameter projections (placeholder; future plugin).**
+  RBS already binds these methods correctly for plain
+  `Array[T]` / `Set[T]` / `Range[T]` receivers via generic
+  substitution; the new IteratorDispatch arms exist so Tuple-
+  and HashShape-shaped receivers reach the block body with the
+  precise per-position element union (or `Tuple[K, V]` pair)
+  rather than the projected `Array[union]` widening.
+  `group_by` / `partition` yield a single element; `each_slice`
+  and `each_cons` yield `Array[element]` (the slice-size
+  argument is ignored at the dispatcher tier — a tighter
+  Tuple-of-`n` carrier is reserved for the plugin tier). The
+  scope is intentionally narrow — the longer-term direction is
+  to move Enumerable-aware projections into a plugin tier
+  modelled after PHPStan's extension API (ADR-2). The
+  placeholder rules will be reimplemented and removed once the
+  plugin surface ships. Self-asserting fixture:
+  `spec/integration/fixtures/enumerable_collect.rb`.
 - **Memo-typed Enumerable block-parameter projections.**
   `IteratorDispatch` covers `#each_with_object` (yields
   `(element, memo)` where the memo type follows the second

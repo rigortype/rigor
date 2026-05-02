@@ -26,6 +26,18 @@ class Username
   def code
     "42"
   end
+
+  def decimal_id
+    "1024"
+  end
+
+  def octal_mode
+    "0o755"
+  end
+
+  def hex_color
+    "0xff"
+  end
 end
 
 user = Username.new
@@ -51,3 +63,22 @@ assert_type("numeric-string", n)
 # numeric-string predicate.
 assert_type("numeric-string", n.downcase)
 assert_type("numeric-string", n.upcase)
+
+# The base-N int-string predicate refinements are case-invariant
+# under the case-fold pair: digit-only strings are unchanged and
+# the `0o` / `0x` prefix letters round-trip through the predicate
+# in either case.
+d = user.decimal_id
+assert_type("decimal-int-string", d)
+assert_type("decimal-int-string", d.downcase)
+assert_type("decimal-int-string", d.upcase)
+
+o = user.octal_mode
+assert_type("octal-int-string", o)
+assert_type("octal-int-string", o.downcase)
+assert_type("octal-int-string", o.upcase)
+
+h = user.hex_color
+assert_type("hex-int-string", h)
+assert_type("hex-int-string", h.downcase)
+assert_type("hex-int-string", h.upcase)

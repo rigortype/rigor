@@ -243,7 +243,18 @@ module Rigor
             %i[uppercase upcase] => :refined_self,
             %i[uppercase downcase] => :lowercase_string,
             %i[numeric downcase] => :refined_self,
-            %i[numeric upcase] => :refined_self
+            %i[numeric upcase] => :refined_self,
+            # Digit-only strings are case-invariant; the prefix
+            # letters in `0o…` / `0x…` are accepted by the
+            # predicate in either case so the predicate-subset
+            # is preserved across `#downcase` / `#upcase` even
+            # though the value-set element changes.
+            %i[decimal_int downcase] => :refined_self,
+            %i[decimal_int upcase] => :refined_self,
+            %i[octal_int downcase] => :refined_self,
+            %i[octal_int upcase] => :refined_self,
+            %i[hex_int downcase] => :refined_self,
+            %i[hex_int upcase] => :refined_self
           }.freeze
           private_constant :REFINED_STRING_PROJECTIONS
 

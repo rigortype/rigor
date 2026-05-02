@@ -7,4 +7,13 @@ class Username
 
   %a{rigor:v1:return: numeric-string}
   def code: () -> String
+
+  %a{rigor:v1:return: decimal-int-string}
+  def decimal_id: () -> String
+
+  %a{rigor:v1:return: octal-int-string}
+  def octal_mode: () -> String
+
+  %a{rigor:v1:return: hex-int-string}
+  def hex_color: () -> String
 end

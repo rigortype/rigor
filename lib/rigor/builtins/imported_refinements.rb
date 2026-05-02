@@ -50,7 +50,10 @@ module Rigor
         "non-positive-int" => -> { Type::Combinator.non_positive_int },
         "lowercase-string" => -> { Type::Combinator.lowercase_string },
         "uppercase-string" => -> { Type::Combinator.uppercase_string },
-        "numeric-string" => -> { Type::Combinator.numeric_string }
+        "numeric-string" => -> { Type::Combinator.numeric_string },
+        "decimal-int-string" => -> { Type::Combinator.decimal_int_string },
+        "octal-int-string" => -> { Type::Combinator.octal_int_string },
+        "hex-int-string" => -> { Type::Combinator.hex_int_string }
       }.freeze
       private_constant :REGISTRY
 

@@ -35,6 +35,15 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         .to eq(Rigor::Type::Combinator.numeric_string)
     end
 
+    it "resolves the base-N int-string predicate refinements" do
+      expect(described_class.lookup("decimal-int-string"))
+        .to eq(Rigor::Type::Combinator.decimal_int_string)
+      expect(described_class.lookup("octal-int-string"))
+        .to eq(Rigor::Type::Combinator.octal_int_string)
+      expect(described_class.lookup("hex-int-string"))
+        .to eq(Rigor::Type::Combinator.hex_int_string)
+    end
+
     it "returns nil for an unknown name" do
       expect(described_class.lookup("frobinator-string")).to be_nil
       expect(described_class.lookup("")).to be_nil
@@ -57,7 +66,8 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         "non-empty-string", "non-zero-int", "non-empty-array",
         "non-empty-hash", "positive-int", "non-negative-int",
         "negative-int", "non-positive-int",
-        "lowercase-string", "uppercase-string", "numeric-string"
+        "lowercase-string", "uppercase-string", "numeric-string",
+        "decimal-int-string", "octal-int-string", "hex-int-string"
       )
     end
   end

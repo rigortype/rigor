@@ -238,11 +238,20 @@ module Rigor
       nil
     end
 
+    # The trailing payload supports the full refinement
+    # grammar in `Builtins::ImportedRefinements::Parser` —
+    # bare kebab-case names plus parameterised forms like
+    # `non-empty-array[Integer]`, `non-empty-hash[Symbol,
+    # Integer]`, and `int<5, 10>`. The directive head is
+    # consumed by the regex; the rest is forwarded to the
+    # refinement parser. Anything the parser cannot resolve
+    # falls back to nil so the call site keeps the
+    # RBS-declared return type.
     RETURN_DIRECTIVE_PATTERN = /
       \A
       rigor:v1:return:
       \s+
-      (?<refinement>[a-z][a-z0-9-]*)
+      (?<payload>\S(?:.*\S)?)
       \s*
       \z
     /x
@@ -252,7 +261,7 @@ module Rigor
       match = RETURN_DIRECTIVE_PATTERN.match(string)
       return nil if match.nil?
 
-      Builtins::ImportedRefinements.lookup(match[:refinement])
+      Builtins::ImportedRefinements.parse(match[:payload])
     end
   end
 end

@@ -202,5 +202,22 @@ RSpec.describe Rigor::RbsExtended do
       type = described_class.parse_return_type_override("rigor:v1:return:    non-empty-string   ")
       expect(type).to eq(Rigor::Type::Combinator.non_empty_string)
     end
+
+    it "resolves parameterised refinements through the new tokeniser" do
+      expect(described_class.parse_return_type_override("rigor:v1:return: non-empty-array[Integer]"))
+        .to eq(Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("Integer")))
+      expect(described_class.parse_return_type_override("rigor:v1:return: non-empty-hash[Symbol, Integer]"))
+        .to eq(Rigor::Type::Combinator.non_empty_hash(
+                 Rigor::Type::Combinator.nominal_of("Symbol"),
+                 Rigor::Type::Combinator.nominal_of("Integer")
+               ))
+      expect(described_class.parse_return_type_override("rigor:v1:return: int<5, 10>"))
+        .to eq(Rigor::Type::Combinator.integer_range(5, 10))
+    end
+
+    it "returns nil for malformed parameterised payloads" do
+      expect(described_class.parse_return_type_override("rigor:v1:return: non-empty-array[")).to be_nil
+      expect(described_class.parse_return_type_override("rigor:v1:return: int<5, 10")).to be_nil
+    end
   end
 end

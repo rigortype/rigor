@@ -141,6 +141,16 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/file.c],
     output_path: "data/builtins/ruby_core/file.yml"
+  },
+  "range" => {
+    init_function: "Init_Range",
+    ruby_c_path: "references/ruby/range.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Range" => "references/rbs/core/range.rbs"
+    },
+    c_index_paths: %w[references/ruby/range.c],
+    output_path: "data/builtins/ruby_core/range.yml"
   }
 }.freeze
 
@@ -150,6 +160,12 @@ TOPICS = {
 
 class CInitParser
   CLASS_DEFINE_RE = /^\s*(\w+)\s*=\s*rb_define_class\(\s*"([^"]+)"\s*,\s*(\w+)\s*\)\s*;/
+  # Range/Struct-style class registration. The first arg is the class name,
+  # the second is the parent (a `rb_c*` global), the rest are the struct
+  # accessor names which we ignore. Multi-line forms are joined into a
+  # single logical line by `init_region` before the regex runs.
+  STRUCT_DEFINE_RE =
+    /^\s*(\w+)\s*=\s*rb_struct_define_without_accessor\(\s*"([^"]+)"\s*,\s*(\w+)\s*,.*?\)\s*;/
   DEFINE_METHOD_RE = /^\s*rb_define_method\(\s*(\w+)\s*,\s*"([^"]+)"\s*,\s*(\w+)\s*,\s*(-?\d+)\s*\)\s*;/
   DEFINE_SINGLETON_RE = /^\s*rb_define_singleton_method\(\s*(\w+)\s*,\s*"([^"]+)"\s*,\s*(\w+)\s*,\s*(-?\d+)\s*\)\s*;/
   DEFINE_ALIAS_RE = /^\s*rb_define_alias\(\s*(\w+)\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)\s*;/
@@ -180,6 +196,7 @@ class CInitParser
 
     region.each do |lineno, line|
       next if class_definition(line, lineno, var_to_class, classes)
+      next if struct_definition(line, lineno, var_to_class, classes)
       next if method_definition(line, lineno, var_to_class, methods)
       next if singleton_definition(line, lineno, var_to_class, methods)
       next if alias_definition(line, lineno, var_to_class, aliases)
@@ -206,16 +223,47 @@ class CInitParser
 
     body_start = start_idx + open_idx + 1
     depth = 1
-    out = []
+    raw = []
     (body_start...@lines.length).each do |i|
       line = @lines[i]
       depth += line.count("{")
       depth -= line.count("}")
       break if depth <= 0
 
-      out << [i + 1, line]
+      raw << [i + 1, line]
     end
+    join_continuations(raw)
+  end
+
+  # Joins consecutive lines whose paren depth has not yet returned to
+  # zero into a single logical line, keyed by the first line's number.
+  # This lets the per-statement regexes recognise multi-line forms
+  # like `rb_struct_define_without_accessor( … , "begin", "end", NULL);`
+  # without each regex having to deal with newlines.
+  def join_continuations(raw)
+    out = []
+    buffer = nil
+    paren_depth = 0
+    raw.each do |lineno, line|
+      stripped = strip_line_comments(line)
+      paren_depth += stripped.count("(") - stripped.count(")")
+      if buffer
+        buffer[1] = "#{buffer[1].chomp.rstrip} #{line.lstrip}"
+      else
+        buffer = [lineno, line]
+      end
+      if paren_depth <= 0
+        out << buffer
+        buffer = nil
+        paren_depth = 0
+      end
+    end
+    out << buffer if buffer
     out
+  end
+
+  def strip_line_comments(line)
+    line.gsub(%r{/\*.*?\*/}, "").gsub(%r{//[^\n]*}, "")
   end
 
   def loc(lineno)
@@ -224,6 +272,19 @@ class CInitParser
 
   def class_definition(line, lineno, var_to_class, classes)
     return false unless (m = line.match(CLASS_DEFINE_RE))
+
+    var, name, parent_var = m.captures
+    var_to_class[var] = name
+    classes[name] = { "parent" => var_to_class.fetch(parent_var, parent_var), "defined_at" => loc(lineno) }
+    true
+  end
+
+  # Range registers itself with `rb_struct_define_without_accessor`
+  # (see `Init_Range` in references/ruby/range.c). Treat it as a
+  # plain class declaration so downstream method/include definitions
+  # land in the right bucket.
+  def struct_definition(line, lineno, var_to_class, classes)
+    return false unless (m = line.match(STRUCT_DEFINE_RE))
 
     var, name, parent_var = m.captures
     var_to_class[var] = name

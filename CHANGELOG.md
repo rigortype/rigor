@@ -45,6 +45,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asserting fixture mirroring `refinement_return_override/`,
   proving the kebab-case display, the `RBS::Extended return:`
   override route, and the case-fold projection pair end-to-end.
+- **`Range` joins the catalog-driven inference pipeline.**
+  `Init_Range` is now extracted into
+  `data/builtins/ruby_core/range.yml` (30 instance methods);
+  `Builtins::RANGE_CATALOG` consumes it and the constant-fold
+  dispatcher routes `Constant<Range>` receivers through it.
+  Methods that fold today on a `(begin..end)` literal include
+  `#begin`, `#end`, `#size`, `#exclude_end?`, `#include?`,
+  `#cover?`, and `#member?`. `#==`, `#eql?`, `#last`, and
+  `#bsearch` stay catalog-classified `dispatch` because their C
+  bodies route through user-redefinable `==` / `<=>`. The block-
+  iterating surface (`#each`, `#step`, `#first`, `#min`, `#max`,
+  `#minmax`, `#count`) classifies as `block_dependent` and is
+  blocked by the foldable-purity check; `#reverse_each` and `#%`
+  are blocklisted explicitly because the C-body classifier mis-
+  flags them as `:leaf`. `Range#size` on a `Nominal[Range]`
+  receiver continues to tighten to `non-negative-int` via
+  `SIZE_RETURNING_NOMINALS`.
+- **`tool/extract_builtin_catalog.rb` recognises
+  `rb_struct_define_without_accessor`.** The init-region scanner
+  now joins multi-line statements before regex matching, and a
+  new `STRUCT_DEFINE_RE` registers the host class. Range was the
+  motivating case; future struct-defined topics (e.g. Process
+  status objects) become drop-in additions.
 
 ## [0.0.3] - 2026-05-02
 

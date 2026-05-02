@@ -1040,20 +1040,77 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(described_class.narrow_not_refinement(nominal("Integer"), nes)).to eq(nominal("Integer"))
     end
 
-    it "is conservative on Refined / Intersection / IntegerRange — returns current_type unchanged" do
-      [
-        Rigor::Type::Combinator.lowercase_string,
-        Rigor::Type::Combinator.non_empty_lowercase_string,
-        Rigor::Type::Combinator.positive_int
-      ].each do |refinement|
-        expect(described_class.narrow_not_refinement(nominal("String"), refinement)).to eq(nominal("String"))
-      end
+    it "is conservative on Refined — returns current_type unchanged" do
+      lc = Rigor::Type::Combinator.lowercase_string
+      expect(described_class.narrow_not_refinement(nominal("String"), lc)).to eq(nominal("String"))
     end
 
     it "is conservative when the Difference's removed value is not a Constant" do
       array_difference = Rigor::Type::Combinator.non_empty_array(nominal("Integer"))
       array_nominal = nominal("Array", type_args: [nominal("Integer")])
       expect(described_class.narrow_not_refinement(array_nominal, array_difference)).to eq(array_nominal)
+    end
+
+    describe "IntegerRange complement" do
+      def positive_int = Rigor::Type::Combinator.positive_int
+      def integer_range(min, max) = Rigor::Type::Combinator.integer_range(min, max)
+      def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
+
+      it "splits a finite range complement into two open halves over Nominal[Integer]" do
+        # ~int<5, 10> within Integer = int<min, 4> | int<11, max>
+        result = described_class.narrow_not_refinement(nominal("Integer"), integer_range(5, 10))
+        expect(result).to be_a(Rigor::Type::Union)
+        expect(result.members).to contain_exactly(
+          integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 4),
+          integer_range(11, Rigor::Type::IntegerRange::POS_INFINITY)
+        )
+      end
+
+      it "drops the right half when the range extends to +∞ (positive-int)" do
+        # ~positive-int (= int<1, +∞>) within Integer = int<-∞, 0> = non-positive-int
+        result = described_class.narrow_not_refinement(nominal("Integer"), positive_int)
+        expect(result).to eq(integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 0))
+      end
+
+      it "preserves non-integer parts of a Union receiver" do
+        union = Rigor::Type::Combinator.union(nominal("Integer"), nominal("NilClass"))
+        result = described_class.narrow_not_refinement(union, integer_range(5, 10))
+        expect(result).to be_a(Rigor::Type::Union)
+        expect(result.members).to include(nominal("NilClass"))
+        expect(result.members).to include(integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 4))
+        expect(result.members).to include(integer_range(11, Rigor::Type::IntegerRange::POS_INFINITY))
+      end
+
+      it "narrows an existing IntegerRange to its meet with the complement halves" do
+        # current = int<0, 20>, refinement = int<5, 10>
+        # ~int<5, 10> ∩ int<0, 20> = int<0, 4> | int<11, 20>
+        result = described_class.narrow_not_refinement(integer_range(0, 20), integer_range(5, 10))
+        expect(result).to be_a(Rigor::Type::Union)
+        expect(result.members).to contain_exactly(integer_range(0, 4), integer_range(11, 20))
+      end
+
+      it "drops a Constant[Integer] outside both complement halves" do
+        # current = Constant[7], refinement = int<5, 10>; 7 is in [5,10]
+        # so its complement against [5,10] is empty — return current_type unchanged.
+        result = described_class.narrow_not_refinement(constant_of(7), integer_range(5, 10))
+        expect(result).to eq(constant_of(7))
+      end
+    end
+
+    describe "Intersection complement (De Morgan)" do
+      it "unions per-member complements within the current type" do
+        # ~(non-empty-string ∩ lowercase-string) within String =
+        #   (~non-empty-string within String) ∪ (~lowercase-string within String)
+        # = Constant[""] ∪ String (Refined isn't complement-narrowed,
+        #   so its complement falls back to current_type unchanged).
+        # The Union does NOT subsume `Constant[""]` into `String`
+        # automatically — Combinator.union deduplicates structurally
+        # but does not eliminate subsumed elements.
+        composite = Rigor::Type::Combinator.non_empty_lowercase_string
+        result = described_class.narrow_not_refinement(nominal("String"), composite)
+        expect(result).to be_a(Rigor::Type::Union)
+        expect(result.members).to contain_exactly(empty_string, nominal("String"))
+      end
     end
   end
 end

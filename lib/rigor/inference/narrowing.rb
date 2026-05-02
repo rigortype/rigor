@@ -242,33 +242,52 @@ module Rigor
       end
 
       # Negation pair for `assert_value is ~refinement` /
-      # `predicate-if-* … is ~refinement` directives (v0.0.5).
-      # Computes the complement of `refinement` within the
-      # current local's domain `current_type`.
+      # `predicate-if-* … is ~refinement` directives. Computes
+      # the complement of `refinement` within the current
+      # local's domain `current_type`.
       #
-      # Today's algebra is deliberately narrow:
+      # Carrier-by-carrier rules:
       #
-      # - `Difference[base, Constant[v]]`. The complement of
-      #   `base \ {v}` within `current_type` is
-      #   `(current_type \ base) ∪ ({v} ∩ current_type)`. The
-      #   helper walks `current_type`'s union members and
-      #   re-unions the parts disjoint from `base` plus the
-      #   `Constant[v]` itself when `current_type` covers it.
-      #   `assert s is ~non-empty-string` over `s: String | nil`
-      #   therefore narrows to `Constant[""] | NilClass`, the
-      #   only inhabitants of the original type that are NOT
-      #   non-empty strings.
-      # - Other refinement carriers (`Refined`, `Intersection`,
-      #   `IntegerRange`) — `current_type` is returned unchanged.
-      #   The complement of a predicate-defined refinement (or a
-      #   non-Constant difference) is not reducible to a finite
-      #   shape without a richer carrier; preserving the original
-      #   bound is the safe answer.
+      # - `Difference[base, Constant[v]]`. Complement of
+      #   `base \ {v}` within `current_type`. Walk the current
+      #   type's union members, keep each part disjoint from
+      #   `base`, and add the removed-value Constant once when
+      #   any current member covers it. `assert s is
+      #   ~non-empty-string` over `s: String | nil` narrows to
+      #   `Constant[""] | NilClass`.
+      # - `IntegerRange[a, b]` (v0.0.5+ slice). Complement is
+      #   the two open halves `int<min, a-1>` and
+      #   `int<b+1, max>`, each intersected with the
+      #   integer-domain parts of `current_type`. Non-integer
+      #   parts (nil, String, …) of a Union receiver survive
+      #   unchanged. `assert n is ~int<5, 10>` over `n:
+      #   Integer | nil` narrows to `int<min, 4> | int<11,
+      #   max> | NilClass`.
+      # - `Type::Intersection[M1, M2, …]` (v0.0.5+ slice). De
+      #   Morgan: `D \ (M1 ∩ M2) = (D \ M1) ∪ (D \ M2)`. Each
+      #   member's complement is computed independently within
+      #   `current_type` and the results are unioned. Members
+      #   the algebra cannot complement (Refined, non-Constant
+      #   Difference, …) contribute `current_type` itself, so
+      #   the union widens the answer to `current_type` —
+      #   sound but imprecise.
+      # - `Refined[base, predicate]`. Predicate complements are
+      #   not reducible to a finite carrier without a richer
+      #   shape (e.g. `~lowercase-string` is "uppercase OR
+      #   mixed-case"); `current_type` is returned unchanged.
       def narrow_not_refinement(current_type, refinement_type)
-        return current_type unless refinement_type.is_a?(Type::Difference)
-        return current_type unless refinement_type.removed.is_a?(Type::Constant)
+        case refinement_type
+        when Type::Difference
+          return current_type unless refinement_type.removed.is_a?(Type::Constant)
 
-        complement_difference(current_type, refinement_type)
+          complement_difference(current_type, refinement_type)
+        when Type::IntegerRange
+          complement_integer_range(current_type, refinement_type)
+        when Type::Intersection
+          complement_intersection(current_type, refinement_type)
+        else
+          current_type
+        end
       end
 
       # Public predicate analyser. Returns `[truthy_scope, falsey_scope]`,
@@ -388,6 +407,123 @@ module Rigor
         def part_covers_constant?(part, constant)
           result = part.accepts(constant, mode: :gradual)
           result.yes? || result.maybe?
+        end
+
+        # Complement of an `IntegerRange[a, b]` within
+        # `current_type`. Splits the range complement into the
+        # two open halves `int<min, a-1>` and `int<b+1, max>`
+        # (skipping a half when its bound is infinity), then
+        # intersects each half with the integer-domain parts of
+        # `current_type`. Non-integer parts of a Union receiver
+        # (nil, String, …) survive unchanged.
+        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def complement_integer_range(current_type, range)
+          halves = integer_range_complement_halves(range)
+          parts = current_type.is_a?(Type::Union) ? current_type.members : [current_type]
+
+          survivors = []
+          parts.each do |part|
+            if integer_member?(part)
+              halves.each do |half|
+                meet = intersect_integer_part(part, half)
+                survivors << meet unless meet.nil? || meet.is_a?(Type::Bot)
+              end
+            else
+              survivors << part
+            end
+          end
+
+          return current_type if survivors.empty?
+
+          Type::Combinator.union(*survivors)
+        end
+        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+
+        # Returns the two open halves of an IntegerRange's
+        # complement: the left half `int<-∞, a-1>` (when `a` is
+        # finite) and the right half `int<b+1, ∞>` (when `b` is
+        # finite). Universal ranges (both bounds infinite) yield
+        # an empty array — the complement is empty.
+        def integer_range_complement_halves(range)
+          halves = []
+          left_max = range.min
+          right_min = range.max
+
+          if left_max.is_a?(Integer)
+            halves << Type::Combinator.integer_range(Type::IntegerRange::NEG_INFINITY, left_max - 1)
+          end
+          if right_min.is_a?(Integer)
+            halves << Type::Combinator.integer_range(right_min + 1, Type::IntegerRange::POS_INFINITY)
+          end
+          halves
+        end
+
+        def integer_member?(part)
+          case part
+          when Type::Constant then part.value.is_a?(Integer)
+          when Type::IntegerRange then true
+          when Type::Nominal then part.class_name == "Integer"
+          else false
+          end
+        end
+
+        # Intersect an integer-domain part with a complement
+        # half-range. For a Nominal[Integer] receiver the meet
+        # is the half itself; for an existing IntegerRange the
+        # meet narrows both bounds; for a Constant[Integer] the
+        # meet is the constant when the half covers it,
+        # otherwise nil.
+        def intersect_integer_part(part, half)
+          case part
+          when Type::Nominal
+            half
+          when Type::IntegerRange
+            integer_range_meet(part, half)
+          when Type::Constant
+            half.covers?(part.value) ? part : nil
+          end
+        end
+
+        def integer_range_meet(left, right)
+          low = numeric_to_bound([integer_bound_value(left.min), integer_bound_value(right.min)].max)
+          high = numeric_to_bound([integer_bound_value(left.max), integer_bound_value(right.max)].min)
+          return nil if integer_range_disjoint?(low, high)
+
+          Type::Combinator.integer_range(low, high)
+        end
+
+        def integer_bound_value(bound)
+          return -Float::INFINITY if bound == Type::IntegerRange::NEG_INFINITY
+          return Float::INFINITY if bound == Type::IntegerRange::POS_INFINITY
+
+          bound
+        end
+
+        def numeric_to_bound(value)
+          return Type::IntegerRange::NEG_INFINITY if value == -Float::INFINITY
+          return Type::IntegerRange::POS_INFINITY if value == Float::INFINITY
+
+          value.to_i
+        end
+
+        def integer_range_disjoint?(low, high)
+          return false if low == Type::IntegerRange::NEG_INFINITY
+          return false if high == Type::IntegerRange::POS_INFINITY
+
+          low > high
+        end
+
+        # De Morgan: `D \ (M1 ∩ M2 ∩ …) = (D \ M1) ∪ (D \ M2) ∪
+        # …`. Each member's complement is computed independently
+        # within `current_type` and the results are unioned.
+        # Members the algebra cannot complement contribute
+        # `current_type` itself, so the union widens to
+        # `current_type` overall — sound but imprecise.
+        def complement_intersection(current_type, intersection)
+          per_member = intersection.members.map do |member|
+            Narrowing.narrow_not_refinement(current_type, member)
+          end
+          Type::Combinator.union(*per_member)
         end
 
         def falsey_value?(value)

@@ -66,6 +66,7 @@ module Rigor
         Type::Constant => :accepts_constant,
         Type::IntegerRange => :accepts_integer_range,
         Type::Difference => :accepts_difference,
+        Type::Refined => :accepts_refined,
         Type::Tuple => :accepts_tuple,
         Type::HashShape => :accepts_hash_shape
       }.freeze
@@ -491,6 +492,82 @@ module Rigor
             # forward to the base.
             other_type.removed == removed && provably_disjoint_from_removed?(other_type.base, removed)
           end
+        end
+
+        # `Refined[base, predicate]` accepts another type X when
+        # the base accepts the *base* of X *and* X is provably
+        # contained in the predicate's value set. The base
+        # check is delegated to `accepts(self.base, X.base)`
+        # so handlers like `accepts_nominal` see Nominal-vs-
+        # Nominal and return their normal answer (the inner
+        # `accepts_nominal` does not register `Refined` /
+        # `Difference` as direct other-shapes — projecting to
+        # the base is what makes the comparison meaningful).
+        #
+        # Provability rules in gradual mode (the conservative
+        # analogue of `accepts_difference`):
+        #
+        # - X is a `Refined` with the *same* predicate_id —
+        #   exact predicate match, accept.
+        # - X is a `Constant` whose value the predicate's
+        #   recogniser accepts — the value is statically
+        #   contained, accept. A recognised non-match is `:no`.
+        # - Anything else (Nominal, Union, IntegerRange,
+        #   Difference) — predicate-subset cannot be proven
+        #   without a runtime test, so reject under gradual
+        #   mode rather than degrade to `:maybe`. Mirrors the
+        #   `accepts_difference` policy.
+        def accepts_refined(self_type, other_type, mode)
+          case other_type
+          when Type::Refined then accepts_refined_from_refined(self_type, other_type, mode)
+          when Type::Constant then accepts_refined_from_constant(self_type, other_type, mode)
+          else accepts_refined_other_shape(self_type, other_type, mode)
+          end
+        end
+
+        def accepts_refined_from_refined(self_type, other_type, mode)
+          base_result = accepts(self_type.base, other_type.base, mode: mode)
+          return base_result if base_result.no?
+
+          if other_type.predicate_id == self_type.predicate_id
+            base_result.with_reason("matching predicate :#{self_type.predicate_id}")
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "predicate mismatch: :#{self_type.predicate_id} vs :#{other_type.predicate_id}"
+            )
+          end
+        end
+
+        def accepts_refined_from_constant(self_type, constant, mode)
+          base_result = accepts(self_type.base, constant, mode: mode)
+          return base_result if base_result.no?
+
+          case self_type.matches?(constant.value)
+          when true
+            base_result.with_reason("Constant value satisfies :#{self_type.predicate_id}")
+          when false
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Constant value fails :#{self_type.predicate_id}"
+            )
+          else
+            Type::AcceptsResult.maybe(
+              mode: mode,
+              reasons: "predicate :#{self_type.predicate_id} not in registry"
+            )
+          end
+        end
+
+        def accepts_refined_other_shape(self_type, other_type, mode)
+          base_result = accepts(self_type.base, other_type, mode: mode)
+          return base_result if base_result.no?
+
+          Type::AcceptsResult.no(
+            mode: mode,
+            reasons: "#{self_type.describe} cannot prove #{other_type.class} satisfies " \
+                     ":#{self_type.predicate_id}"
+          )
         end
 
         # Constant[v] accepts only Constant[v'] with structurally equal

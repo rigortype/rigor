@@ -140,6 +140,22 @@ module Rigor
       def inspect: () -> String
     end
 
+    class Refined
+      attr_reader base: Type::t
+      attr_reader predicate_id: Symbol
+      def initialize: (Type::t base, Symbol predicate_id) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def matches?: (untyped value) -> bool?
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
     class Tuple
       attr_reader elements: Array[Type::t]
       def initialize: (Array[Type::t] elements) -> void
@@ -207,6 +223,10 @@ module Rigor
       def self?.non_zero_int: () -> Difference
       def self?.non_empty_array: (?Type::t element) -> Difference
       def self?.non_empty_hash: (?Type::t key, ?Type::t value) -> Difference
+      def self?.refined: (Type::t base, Symbol predicate_id) -> Refined
+      def self?.lowercase_string: () -> Refined
+      def self?.uppercase_string: () -> Refined
+      def self?.numeric_string: () -> Refined
       def self?.integer_range: ((Integer | Symbol) min, (Integer | Symbol) max) -> IntegerRange
       def self?.positive_int: () -> IntegerRange
       def self?.non_negative_int: () -> IntegerRange

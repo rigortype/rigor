@@ -11,6 +11,7 @@ require_relative "tuple"
 require_relative "hash_shape"
 require_relative "union"
 require_relative "difference"
+require_relative "refined"
 
 module Rigor
   module Type
@@ -131,6 +132,28 @@ module Rigor
           nominal_of("Hash", type_args: [key, value]),
           hash_shape_of({})
         )
+      end
+
+      # Predicate-subset refinement carrier (ADR-3 OQ3 Option C,
+      # second half). Use `lowercase_string` /
+      # `uppercase_string` / `numeric_string` for the imported
+      # built-in shapes; raw `refined(base, predicate_id)` for
+      # ad-hoc refinements introduced by an `RBS::Extended`
+      # annotation or a plugin-contributed predicate.
+      def refined(base, predicate_id)
+        Refined.new(base, predicate_id)
+      end
+
+      def lowercase_string
+        Refined.new(nominal_of("String"), :lowercase)
+      end
+
+      def uppercase_string
+        Refined.new(nominal_of("String"), :uppercase)
+      end
+
+      def numeric_string
+        Refined.new(nominal_of("String"), :numeric)
       end
 
       # Constructs a heterogeneous, fixed-arity Tuple from positional

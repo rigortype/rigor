@@ -402,6 +402,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/enumerable_collect.rb — group_by / partition / each_slice / each_cons" do
+    let(:harness) { harness_for("enumerable_collect") }
+
+    it "self-asserts the precise per-position element union for Tuple-shaped receivers" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/union_arithmetic.rb — cartesian fold over Union[Constant…]" do
     let(:harness) { harness_for("union_arithmetic") }
 

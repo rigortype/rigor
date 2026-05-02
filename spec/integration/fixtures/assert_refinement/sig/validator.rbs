@@ -1,0 +1,4 @@
+class Validator
+  %a{rigor:v1:assert value is non-empty-string}
+  def assert_present!: (::String value) -> void
+end

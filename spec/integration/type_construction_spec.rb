@@ -277,6 +277,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/assert_refinement/ — RBS::Extended assert against a refinement" do
+    let(:harness) { harness_for("assert_refinement") }
+
+    it "substitutes the refinement carrier for the target's bound type after the call" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/param_extended/ — RBS::Extended rigor:v1:param: directive" do
     let(:harness) { harness_for("param_extended") }
 

@@ -45,6 +45,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asserting fixture mirroring `refinement_return_override/`,
   proving the kebab-case display, the `RBS::Extended return:`
   override route, and the case-fold projection pair end-to-end.
+- **Base-N int-string predicate refinements.** `decimal-int-string`,
+  `octal-int-string`, and `hex-int-string` join the predicate
+  catalogue. `:decimal_int` accepts one or more decimal digits with
+  an optional leading sign; `:octal_int` and `:hex_int` REQUIRE
+  their conventional prefix (`0o` / `0O` / leading `0` for octal;
+  `0x` / `0X` for hex), so the predicates are disjoint from
+  `decimal-int-string` — a bare `"755"` is a decimal-int-string,
+  not an octal-int-string. Each predicate is resolvable through
+  `Builtins::ImportedRefinements` and through
+  `Type::Combinator.decimal_int_string` / `.octal_int_string` /
+  `.hex_int_string`. The case-fold projection pair preserves all
+  three predicates over `String#downcase` / `String#upcase`.
 
 ## [0.0.3] - 2026-05-02
 

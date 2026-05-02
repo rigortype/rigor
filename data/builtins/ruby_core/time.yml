@@ -125,8 +125,9 @@ classes:
         arity: 0
         defined_at: references/ruby/time.c:5997
         c_body_at: references/ruby/time.c:4196
-        c_effects: []
-        purity: leaf
+        c_effects:
+        - mutate
+        purity: mutates_self
         rbs:
         - "() -> Time"
         rbs_at: references/rbs/core/time.rbs:1037
@@ -136,8 +137,9 @@ classes:
         arity: 0
         defined_at: references/ruby/time.c:5998
         c_body_at: references/ruby/time.c:4196
-        c_effects: []
-        purity: leaf
+        c_effects:
+        - mutate
+        purity: mutates_self
         rbs:
         - "() -> Time"
         rbs_at: references/rbs/core/time.rbs:1573

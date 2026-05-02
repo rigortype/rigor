@@ -533,12 +533,60 @@ class CBodyIndex
     @bodies[target]
   end
 
+  # Returns the set of cfunc names whose bodies are pure
+  # `rb_check_frozen(self)` wrappers — the per-class
+  # mutation-gate helpers (`time_modify`, `str_modifiable`, …)
+  # that the C-body classifier MUST treat the same way as
+  # `rb_check_frozen` itself. Naive transitive propagation
+  # (every function that calls a mutator helper) over-flags
+  # legitimate non-mutators like `Array#to_a` whose internal
+  # helpers touch a freshly-allocated array, so the helper set
+  # is restricted to bodies that ONLY consist of one or more
+  # `rb_check_frozen` calls (with no other content). Cross-
+  # source helpers and complex wrappers continue to need a
+  # per-class blocklist entry.
+  def mutator_helpers
+    @mutator_helpers ||= compute_mutator_helpers
+  end
+
   private
 
   def build
     bodies = {}
     @paths.each { |path| index_file(path, bodies) }
     bodies
+  end
+
+  # A body counts as a mutation-gate wrapper iff its text after
+  # stripping comments contains exactly `rb_check_frozen(...)`
+  # and no other tokens that would smell like real work
+  # (assignments, control flow, function calls other than
+  # `rb_check_frozen`). Bodies that just forward to
+  # `rb_check_frozen` are safe to treat as mutators because
+  # their callers are by definition about to mutate the same
+  # receiver — the wrapper exists only to centralise the
+  # frozen-check call pattern.
+  def compute_mutator_helpers
+    @bodies ||= build
+    helpers = Set.new
+
+    @bodies.each do |name, body|
+      stripped = CBodyClassifier.strip_comments(body.text)
+      helpers << name if pure_frozen_check_wrapper?(stripped)
+    end
+
+    helpers
+  end
+
+  PURE_FROZEN_CHECK_RE = /\A
+    \s*\{\s*
+    (?:rb_check_frozen\(\s*\w+\s*\)\s*;\s*)+
+    \}\s*
+  \z/x
+  private_constant :PURE_FROZEN_CHECK_RE
+
+  def pure_frozen_check_wrapper?(text)
+    PURE_FROZEN_CHECK_RE.match?(text)
   end
 
   def collect_macro_alias(line)
@@ -643,16 +691,24 @@ module CBodyClassifier
   /x
   RAISE_RE = /\b(?:rb_raise\w*|rb_num_zerodiv|rb_cmperr\w*|rb_name_error\w*|rb_bug)\b/
 
-  def classify(body_text)
+  def classify(body_text, mutator_helpers: nil)
     text = strip_comments(body_text)
 
     {
       block: text =~ BLOCK_RE ? true : false,
-      mutate: text =~ MUTATE_RE ? true : false,
+      mutate: mutates?(text, mutator_helpers),
       coerce_fallback: text =~ COERCE_FALLBACK_RE ? true : false,
       dispatch: text =~ DISPATCH_RE ? true : false,
       raises: text =~ RAISE_RE ? true : false
     }
+  end
+
+  def mutates?(text, mutator_helpers)
+    return true if text =~ MUTATE_RE
+    return false if mutator_helpers.nil? || mutator_helpers.empty?
+
+    pattern = Regexp.union(*mutator_helpers.to_a.map { |h| /\b#{Regexp.escape(h)}\b/ })
+    text =~ pattern ? true : false
   end
 
   def strip_comments(text)
@@ -954,7 +1010,7 @@ class CatalogBuilder # rubocop:disable Metrics/ClassLength
     end
 
     record["c_body_at"] = "#{body.path}:#{body.start_line}"
-    effects = CBodyClassifier.classify(body.text)
+    effects = CBodyClassifier.classify(body.text, mutator_helpers: @c_bodies.mutator_helpers)
     record["c_effects"] = effects.select { |_, v| v }.keys.map(&:to_s)
     record["purity"] = c_purity_from_effects(effects)
   end

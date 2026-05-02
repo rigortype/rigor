@@ -147,6 +147,58 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
     end
   end
 
+  describe ".each_with_object" do
+    def nominal(name, type_args: []) = Rigor::Type::Combinator.nominal_of(name, type_args: type_args)
+    def tuple(*elements) = Rigor::Type::Combinator.tuple_of(*elements)
+
+    it "yields (element, memo) where memo is the second-argument type" do
+      receiver = nominal("Array", type_args: [nominal("Integer")])
+      memo = tuple
+      expect(block_params(receiver, :each_with_object, [memo])).to eq([nominal("Integer"), memo])
+    end
+
+    it "preserves per-position precision for a heterogeneous Tuple receiver" do
+      receiver = Rigor::Type::Combinator.tuple_of(constant_of(1), constant_of("a"))
+      memo = nominal("Hash")
+      element_union = Rigor::Type::Combinator.union(constant_of(1), constant_of("a"))
+      expect(block_params(receiver, :each_with_object, [memo])).to eq([element_union, memo])
+    end
+
+    it "declines when the memo arg is missing" do
+      receiver = nominal("Array", type_args: [nominal("Integer")])
+      expect(block_params(receiver, :each_with_object, [])).to be_nil
+    end
+  end
+
+  describe ".inject / .reduce" do
+    def nominal(name, type_args: []) = Rigor::Type::Combinator.nominal_of(name, type_args: type_args)
+
+    let(:int_array) { nominal("Array", type_args: [nominal("Integer")]) }
+
+    it "with a seed argument: yields (seed, element)" do
+      seed = constant_of(0)
+      expect(block_params(int_array, :inject, [seed])).to eq([seed, nominal("Integer")])
+      expect(block_params(int_array, :reduce, [seed])).to eq([seed, nominal("Integer")])
+    end
+
+    it "with no arguments: memo and element both bind to the receiver's element type" do
+      expect(block_params(int_array, :inject, [])).to eq([nominal("Integer"), nominal("Integer")])
+    end
+
+    it "declines on the Symbol-call form `inject(:+)` (no block)" do
+      expect(block_params(int_array, :inject, [constant_of(:+)])).to be_nil
+    end
+
+    it "declines on the seed + Symbol form `inject(0, :+)` (no block)" do
+      expect(block_params(int_array, :inject, [constant_of(0), constant_of(:+)])).to be_nil
+    end
+
+    it "preserves the seed type even when wider than the element" do
+      seed = nominal("String")
+      expect(block_params(int_array, :inject, [seed])).to eq([seed, nominal("Integer")])
+    end
+  end
+
   describe "non-iterator methods" do
     it "declines and lets RBS answer" do
       expect(block_params(constant_of(1), :+, [constant_of(2)])).to be_nil

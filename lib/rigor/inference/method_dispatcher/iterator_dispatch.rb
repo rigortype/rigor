@@ -38,6 +38,8 @@ module Rigor
           when :upto  then upto_block_params(receiver, args.first)
           when :downto then downto_block_params(receiver, args.first)
           when :each_with_index then each_with_index_block_params(receiver)
+          when :each_with_object then each_with_object_block_params(receiver, args.first)
+          when :inject, :reduce then inject_block_params(receiver, args)
           end
         end
 
@@ -86,6 +88,61 @@ module Rigor
           return nil if element.nil?
 
           [element, Type::Combinator.non_negative_int]
+        end
+
+        # `each_with_object(memo) { |elem, memo_inner| … }` yields
+        # `(element, memo)` where `memo` is the second argument's
+        # type (passed by reference and threaded across iterations
+        # at runtime — Rigor reflects that by binding the block's
+        # second parameter to whatever the call site supplied).
+        # When the call has no memo argument the dispatcher
+        # declines so the user's RBS / overload selector decides.
+        def each_with_object_block_params(receiver, memo_arg)
+          return nil if memo_arg.nil?
+
+          element = element_type_of(receiver)
+          return nil if element.nil?
+
+          [element, memo_arg]
+        end
+
+        # `inject(seed) { |memo, elem| … }` and `reduce` accept
+        # three call shapes:
+        #
+        # - `(seed) { |memo, elem| … }` — block params `[seed, element]`.
+        #   The memo's static type is the seed's; we cannot prove the
+        #   block return type here without round-tripping through the
+        #   block analyser, so the binding is the seed's type and
+        #   downstream inference widens as needed.
+        # - `() { |memo, elem| … }` — the first iteration uses the
+        #   first element as the memo, so `[element, element]` is the
+        #   sound binding.
+        # - `(seed, :sym)` / `(:sym)` — Symbol method-name forms have
+        #   no block. `inject` with a Symbol final arg is recognised
+        #   and declined (returns nil) so the dispatcher does not
+        #   pretend a block existed.
+        def inject_block_params(receiver, args)
+          element = element_type_of(receiver)
+          return nil if element.nil?
+
+          case args.size
+          when 0
+            [element, element]
+          when 1
+            seed = args.first
+            return nil if symbol_constant?(seed)
+
+            [seed, element]
+          when 2
+            # `inject(seed, :sym)` — Symbol-call form, no block.
+            return nil if symbol_constant?(args[1])
+
+            [args[0], element]
+          end
+        end
+
+        def symbol_constant?(type)
+          type.is_a?(Type::Constant) && type.value.is_a?(Symbol)
         end
 
         ELEMENT_BY_NOMINAL = {

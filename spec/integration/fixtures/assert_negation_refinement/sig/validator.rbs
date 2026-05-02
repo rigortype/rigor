@@ -1,0 +1,8 @@
+class Validator
+  %a{rigor:v1:assert value is ~non-empty-string}
+  def assert_empty!: (::String value) -> void
+end
+
+class StringSink
+  def visit: (::String name) -> void
+end

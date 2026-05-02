@@ -26,9 +26,9 @@ The `A → G → C` thread from the working agreement is now fully landed:
 - **G. `type-of` CLI canonical-name display contract** → three regression specs in `spec/rigor/cli_spec.rb` confirming kebab-case display in both human-readable and `--format=json` output.
 - **C. Parameterised refinement tokeniser** → `Builtins::ImportedRefinements::Parser` plus `parse(payload)`, wired through `RBS::Extended.parse_return_type_override`. Accepts `non-empty-array[Integer]`, `non-empty-hash[Symbol, Integer]`, `int<5, 10>`, and the recursive forms; fail-soft on every parse miss. End-to-end fixture: [`spec/integration/fixtures/parameterised_refinement/`](../spec/integration/fixtures/parameterised_refinement/).
 
-### Highest-leverage further slice
+### Just-landed: Type::Intersection (composed refinement names)
 
-**`Type::Intersection` for composed refinement names.** The remaining catalogued names from [`docs/type-specification/imported-built-in-types.md`](type-specification/imported-built-in-types.md) — `non-empty-lowercase-string`, `non-empty-uppercase-string` — combine a point-removal (`Difference[String, ""]`) with a predicate (`Refined[String, :lowercase]`). Landing them requires the smallest sound `Intersection` algebra that lets `accepts_intersection`, `describe`, and `erase_to_rbs` answer the obvious questions: same-base intersection of `Difference` + `Refined` over `String`. Once this lands, the remaining names plug in as registry data without new carrier code.
+`Type::Intersection` is the OQ3 closing carrier — sibling of `Union` / `Difference` / `Refined`. Catalogued composites `non-empty-lowercase-string` and `non-empty-uppercase-string` resolve through the same `ImportedRefinements` registry the simpler shapes use; `accepts_intersection` is conjunctive on LHS, disjunctive on RHS, plus a top-level structural-equality short-circuit; `ShapeDispatch.dispatch_intersection` collects each member's projection and narrows IntegerRange results to the meet so size-tier projections preserve their tighter answer. End-to-end fixture: [`spec/integration/fixtures/intersection_refinement/`](../spec/integration/fixtures/intersection_refinement/).
 
 ### Other v0.0.4 entry points (parallel-safe)
 

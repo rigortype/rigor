@@ -131,6 +131,32 @@ In-progress v0.0.4 surfaces. Two themes so far:
   the renderer already routes through `Type#describe` and
   `erase_to_rbs` — but the regression coverage now binds the
   contract.
+- **`Type::Intersection` carrier — composed refinement names.**
+  Closes the OQ3 carrier strategy (ADR-3) by adding the
+  Intersection peer alongside `Union` / `Difference` /
+  `Refined`. The carrier represents the meet of its members'
+  value sets and ships with the catalogued composites
+  `non-empty-lowercase-string` (`Difference[String, ""] &
+  Refined[String, :lowercase]`) and `non-empty-uppercase-string`,
+  both resolvable through `Builtins::ImportedRefinements` and
+  through `Type::Combinator.non_empty_lowercase_string` /
+  `non_empty_uppercase_string` (plus the raw
+  `Combinator.intersection(*members)`). Construction performs
+  the deterministic normalisation in `value-lattice.md` —
+  flatten / drop-Top / Bot-absorb / dedupe / sort / 0-1
+  collapse — so two equal intersections compare equal
+  regardless of construction order. RBS erasure folds the
+  carrier back to its base nominal. Acceptance is conjunctive
+  on the LHS and disjunctive on the RHS, plus a top-level
+  structural-equality short-circuit that covers the equal-but-
+  narrow case the disjunction rule alone would reject.
+  ShapeDispatch's `dispatch_intersection` collects per-member
+  projections and combines them through an IntegerRange meet
+  when every result is bounded-integer, so
+  `(non_empty_string ∩ lowercase_string).size` resolves to
+  `positive-int` rather than the looser `non-negative-int`.
+  End-to-end fixture:
+  `spec/integration/fixtures/intersection_refinement/`.
 - **Parameterised refinement payloads in `RBS::Extended`.** The
   `rigor:v1:return:` directive now accepts the three documented
   parameterised forms in addition to the bare-name shapes:

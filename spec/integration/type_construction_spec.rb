@@ -288,6 +288,16 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       arg_errors = harness.errors.select { |d| d.message.start_with?("argument type mismatch") }
       expect(arg_errors).to be_empty
     end
+
+    it "applies the override inside the method body via MethodParameterBinder" do
+      # `assert_type` calls inside `normalise(id)` exercise the
+      # body-side narrowing: the binder must read the same
+      # override map and bind `id` to `non-empty-string` rather
+      # than the RBS-declared `String`. A miss surfaces as an
+      # `assert_type mismatch` diagnostic.
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
   end
 
   describe "fixtures/string_array_catalog.rb — String/Symbol/Array catalog-driven folding" do

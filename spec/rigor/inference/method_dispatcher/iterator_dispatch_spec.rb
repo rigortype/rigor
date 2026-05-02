@@ -199,6 +199,58 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
     end
   end
 
+  describe ".group_by / .partition (single-element-yield placeholders)" do
+    def nominal(name, type_args: []) = Rigor::Type::Combinator.nominal_of(name, type_args: type_args)
+    def tuple(*elements) = Rigor::Type::Combinator.tuple_of(*elements)
+
+    it "yields the receiver's element type as the only block param" do
+      receiver = nominal("Array", type_args: [nominal("Integer")])
+      expect(block_params(receiver, :group_by)).to eq([nominal("Integer")])
+      expect(block_params(receiver, :partition)).to eq([nominal("Integer")])
+    end
+
+    it "preserves per-position precision for a Tuple receiver" do
+      receiver = tuple(constant_of(:a), constant_of(:b))
+      union = Rigor::Type::Combinator.union(constant_of(:a), constant_of(:b))
+      expect(block_params(receiver, :group_by)).to eq([union])
+      expect(block_params(receiver, :partition)).to eq([union])
+    end
+
+    it "yields Tuple[K, V] for a Hash receiver" do
+      receiver = nominal("Hash", type_args: [nominal("Symbol"), nominal("Integer")])
+      expect(block_params(receiver, :group_by))
+        .to eq([tuple(nominal("Symbol"), nominal("Integer"))])
+    end
+
+    it "declines for receivers IteratorDispatch cannot project" do
+      expect(block_params(Rigor::Type::Combinator.untyped, :group_by)).to be_nil
+      expect(block_params(nominal("Array"), :partition)).to be_nil
+    end
+  end
+
+  describe ".each_slice / .each_cons (Array-yielding placeholders)" do
+    def nominal(name, type_args: []) = Rigor::Type::Combinator.nominal_of(name, type_args: type_args)
+    def tuple(*elements) = Rigor::Type::Combinator.tuple_of(*elements)
+
+    it "wraps the element type in Array[element] (slice arg ignored)" do
+      receiver = nominal("Array", type_args: [nominal("Integer")])
+      array_of_integer = nominal("Array", type_args: [nominal("Integer")])
+      expect(block_params(receiver, :each_slice, [constant_of(2)])).to eq([array_of_integer])
+      expect(block_params(receiver, :each_cons, [constant_of(3)])).to eq([array_of_integer])
+    end
+
+    it "preserves per-position precision for a Tuple receiver" do
+      receiver = tuple(constant_of(1), constant_of(2), constant_of(3))
+      union = Rigor::Type::Combinator.union(constant_of(1), constant_of(2), constant_of(3))
+      array_of_union = nominal("Array", type_args: [union])
+      expect(block_params(receiver, :each_slice, [constant_of(2)])).to eq([array_of_union])
+    end
+
+    it "declines for receivers IteratorDispatch cannot project" do
+      expect(block_params(nominal("Array"), :each_slice, [constant_of(2)])).to be_nil
+    end
+  end
+
   describe "non-iterator methods" do
     it "declines and lets RBS answer" do
       expect(block_params(constant_of(1), :+, [constant_of(2)])).to be_nil

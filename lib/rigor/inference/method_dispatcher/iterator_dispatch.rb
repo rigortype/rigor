@@ -32,6 +32,7 @@ module Rigor
 
         # @return [Array<Rigor::Type>, nil] block-param types, or
         #   nil to fall through to the next tier.
+        # rubocop:disable Metrics/CyclomaticComplexity
         def block_param_types(receiver:, method_name:, args:)
           case method_name
           when :times then times_block_params(receiver)
@@ -40,8 +41,11 @@ module Rigor
           when :each_with_index then each_with_index_block_params(receiver)
           when :each_with_object then each_with_object_block_params(receiver, args.first)
           when :inject, :reduce then inject_block_params(receiver, args)
+          when :group_by, :partition then single_element_block_params(receiver)
+          when :each_slice, :each_cons then slice_block_params(receiver)
           end
         end
+        # rubocop:enable Metrics/CyclomaticComplexity
 
         def times_block_params(receiver)
           return nil unless integer_rooted?(receiver)
@@ -143,6 +147,44 @@ module Rigor
 
         def symbol_constant?(type)
           type.is_a?(Type::Constant) && type.value.is_a?(Symbol)
+        end
+
+        # Element-yielding Enumerable methods covered as a v0.0.5
+        # placeholder. RBS already binds the block parameter
+        # correctly for plain `Array[T]` / `Set[T]` / `Range[T]`
+        # receivers via generic substitution; this tier exists so
+        # Tuple- and HashShape-shaped receivers reach the block
+        # body with the precise per-position element union /
+        # `Tuple[K, V]` pair rather than the projected
+        # `Array[union]` / `Hash[K, V]` widening.
+        #
+        # NOTE (v0.0.5): the per-method coverage here (group_by,
+        # partition, each_slice, each_cons) is intentionally
+        # narrow. The longer-term direction is to move
+        # Enumerable-aware projections into a plugin tier modelled
+        # after PHPStan's extension API (ADR-2). The placeholders
+        # below stay until the plugin surface is in place; once it
+        # ships, this dispatcher loses these arms and the
+        # equivalent rules move into a built-in plugin loaded at
+        # boot.
+        def single_element_block_params(receiver)
+          element = element_type_of(receiver)
+          return nil if element.nil?
+
+          [element]
+        end
+
+        # `each_slice(n) { |slice| … }` and `each_cons(n) { |window| … }`
+        # both yield an `Array[element]` once per iteration. The
+        # tier ignores the slice-size argument (a Constant<Integer>
+        # `n` could in principle bound the slice's length, but a
+        # tighter Tuple-of-`n` carrier is reserved for the plugin
+        # tier per the NOTE above).
+        def slice_block_params(receiver)
+          element = element_type_of(receiver)
+          return nil if element.nil?
+
+          [Type::Combinator.nominal_of("Array", type_args: [element])]
         end
 
         ELEMENT_BY_NOMINAL = {

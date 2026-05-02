@@ -366,6 +366,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/each_with_index.rb — Enumerable-aware block-parameter typing" do
+    let(:harness) { harness_for("each_with_index") }
+
+    it "self-asserts the element + non-negative-int index for Array / Hash / Range receivers" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/union_arithmetic.rb — cartesian fold over Union[Constant…]" do
     let(:harness) { harness_for("union_arithmetic") }
 

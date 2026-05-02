@@ -5,6 +5,7 @@ require_relative "../builtins/numeric_catalog"
 require_relative "../builtins/string_catalog"
 require_relative "../builtins/array_catalog"
 require_relative "../builtins/hash_catalog"
+require_relative "../builtins/range_catalog"
 
 module Rigor
   module Inference
@@ -627,18 +628,31 @@ module Rigor
           catalog.safe_for_folding?(class_name, method_name)
         end
 
+        # `(catalog, class_name)` per receiver class. The class_name
+        # is what each catalog's RBS-rooted entries are keyed by.
+        # `catalog_for` walks this table in declaration order so
+        # subclasses (Symbol < String) hit their dedicated entry
+        # before any base-class fallback would, and adding a new
+        # class is a one-line addition rather than another `when`
+        # arm on a growing case statement.
+        CATALOG_BY_CLASS = [
+          [Integer, [Builtins::NumericCatalog, "Integer"]],
+          [Float,   [Builtins::NumericCatalog, "Float"]],
+          [String,  [Builtins::STRING_CATALOG, "String"]],
+          [Symbol,  [Builtins::STRING_CATALOG, "Symbol"]],
+          [Array,   [Builtins::ARRAY_CATALOG,  "Array"]],
+          [Hash,    [Builtins::HASH_CATALOG,   "Hash"]],
+          [Range,   [Builtins::RANGE_CATALOG,  "Range"]]
+        ].freeze
+        private_constant :CATALOG_BY_CLASS
+
         # Returns `[catalog, class_name]` for receivers we have a
-        # catalog for; nil otherwise. The class_name is what the
-        # catalog's RBS-rooted entries are keyed by.
+        # catalog for; nil otherwise.
         def catalog_for(receiver_value)
-          case receiver_value
-          when Integer then [Builtins::NumericCatalog, "Integer"]
-          when Float   then [Builtins::NumericCatalog, "Float"]
-          when String  then [Builtins::STRING_CATALOG, "String"]
-          when Symbol  then [Builtins::STRING_CATALOG, "Symbol"]
-          when Array   then [Builtins::ARRAY_CATALOG,  "Array"]
-          when Hash    then [Builtins::HASH_CATALOG,   "Hash"]
+          CATALOG_BY_CLASS.each do |klass, entry|
+            return entry if receiver_value.is_a?(klass)
           end
+          nil
         end
 
         def unary_ops_for(receiver_value)

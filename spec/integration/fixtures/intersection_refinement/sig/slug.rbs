@@ -1,0 +1,7 @@
+class Slug
+  %a{rigor:v1:return: non-empty-lowercase-string}
+  def lower: () -> String
+
+  %a{rigor:v1:return: non-empty-uppercase-string}
+  def upper: () -> String
+end

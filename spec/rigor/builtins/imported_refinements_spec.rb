@@ -44,6 +44,13 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         .to eq(Rigor::Type::Combinator.hex_int_string)
     end
 
+    it "resolves composite Intersection-backed refinements" do
+      expect(described_class.lookup("non-empty-lowercase-string"))
+        .to eq(Rigor::Type::Combinator.non_empty_lowercase_string)
+      expect(described_class.lookup("non-empty-uppercase-string"))
+        .to eq(Rigor::Type::Combinator.non_empty_uppercase_string)
+    end
+
     it "returns nil for an unknown name" do
       expect(described_class.lookup("frobinator-string")).to be_nil
       expect(described_class.lookup("")).to be_nil
@@ -70,6 +77,7 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         "negative-int", "non-positive-int",
         "lowercase-string", "uppercase-string", "numeric-string",
         "decimal-int-string", "octal-int-string", "hex-int-string",
+        "non-empty-lowercase-string", "non-empty-uppercase-string",
         "int"
       )
     end

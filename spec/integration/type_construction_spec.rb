@@ -268,6 +268,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/intersection_refinement/ — composite Intersection-backed refinements" do
+    let(:harness) { harness_for("intersection_refinement") }
+
+    it "self-asserts non-empty-lowercase-string and non-empty-uppercase-string + size projection" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/string_array_catalog.rb — String/Symbol/Array catalog-driven folding" do
     let(:harness) { harness_for("string_array_catalog") }
 

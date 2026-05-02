@@ -58,7 +58,9 @@ module Rigor
         "numeric-string" => -> { Type::Combinator.numeric_string },
         "decimal-int-string" => -> { Type::Combinator.decimal_int_string },
         "octal-int-string" => -> { Type::Combinator.octal_int_string },
-        "hex-int-string" => -> { Type::Combinator.hex_int_string }
+        "hex-int-string" => -> { Type::Combinator.hex_int_string },
+        "non-empty-lowercase-string" => -> { Type::Combinator.non_empty_lowercase_string },
+        "non-empty-uppercase-string" => -> { Type::Combinator.non_empty_uppercase_string }
       }.freeze
       private_constant :REGISTRY
 

@@ -97,6 +97,56 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
     end
   end
 
+  describe ".each_with_index" do
+    def nominal(name, type_args: []) = Rigor::Type::Combinator.nominal_of(name, type_args: type_args)
+    def tuple(*elements) = Rigor::Type::Combinator.tuple_of(*elements)
+    def hash_shape(pairs) = Rigor::Type::Combinator.hash_shape_of(pairs)
+    def union_of(*members) = Rigor::Type::Combinator.union(*members)
+
+    it "yields (element, non_negative_int) for Array[T]" do
+      receiver = nominal("Array", type_args: [nominal("Integer")])
+      expect(block_params(receiver, :each_with_index)).to eq([nominal("Integer"), non_negative_int])
+    end
+
+    it "yields (element, non_negative_int) for Set[T]" do
+      receiver = nominal("Set", type_args: [nominal("Symbol")])
+      expect(block_params(receiver, :each_with_index)).to eq([nominal("Symbol"), non_negative_int])
+    end
+
+    it "yields (element, non_negative_int) for Range[T]" do
+      receiver = nominal("Range", type_args: [nominal("Integer")])
+      expect(block_params(receiver, :each_with_index)).to eq([nominal("Integer"), non_negative_int])
+    end
+
+    it "yields (Tuple[K, V], non_negative_int) for Hash[K, V]" do
+      receiver = nominal("Hash", type_args: [nominal("Symbol"), nominal("Integer")])
+      expect(block_params(receiver, :each_with_index))
+        .to eq([tuple(nominal("Symbol"), nominal("Integer")), non_negative_int])
+    end
+
+    it "preserves per-position precision for a heterogeneous Tuple" do
+      receiver = tuple(constant_of(1), constant_of("a"))
+      expect(block_params(receiver, :each_with_index))
+        .to eq([union_of(constant_of(1), constant_of("a")), non_negative_int])
+    end
+
+    it "yields (Tuple[K, V], non_negative_int) for HashShape" do
+      receiver = hash_shape(name: nominal("String"))
+      expect(block_params(receiver, :each_with_index))
+        .to eq([tuple(constant_of(:name), nominal("String")), non_negative_int])
+    end
+
+    it "yields the Constant<Range>'s precise integer-range element" do
+      receiver = constant_of(1..5)
+      expect(block_params(receiver, :each_with_index)).to eq([integer_range(1, 5), non_negative_int])
+    end
+
+    it "declines on receivers it cannot project (Top, Dynamic, raw nominals without type_args)" do
+      expect(block_params(Rigor::Type::Combinator.untyped, :each_with_index)).to be_nil
+      expect(block_params(nominal("Array"), :each_with_index)).to be_nil
+    end
+  end
+
   describe "non-iterator methods" do
     it "declines and lets RBS answer" do
       expect(block_params(constant_of(1), :+, [constant_of(2)])).to be_nil

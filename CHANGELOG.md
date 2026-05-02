@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`~refinement` negation in `assert:` / `predicate-if-*:`
+  directives.** The `<target> is <RHS>` right-hand side now
+  accepts the `~T` negation prefix on the refinement arm in
+  addition to the existing class-name arm. The narrowing tier
+  introduces `Narrowing.narrow_not_refinement` for the
+  Difference + Constant-removed shape: it walks the current
+  type's union members, keeps each part disjoint from the
+  refinement's base, and adds the removed-value Constant
+  exactly once when any current member covers it.
+
+  ```rbs
+  class Validator
+    %a{rigor:v1:assert value is ~non-empty-string}
+    def assert_empty!: (::String value) -> void
+  end
+  ```
+
+  After `v.assert_empty!(name)` over `name: String | nil`, the
+  narrowed type is `Constant[""] | NilClass` — the only
+  inhabitants of the original union that are NOT non-empty
+  strings. Other refinement carriers (`Refined`, `Intersection`,
+  `IntegerRange`, and `Difference` whose removed is not a
+  Constant) return `current_type` unchanged for now;
+  predicate-complement and bounded-range complement are
+  follow-up slices. End-to-end fixture:
+  `spec/integration/fixtures/assert_negation_refinement/`.
 - **Memo-typed Enumerable block-parameter projections.**
   `IteratorDispatch` covers `#each_with_object` (yields
   `(element, memo)` where the memo type follows the second

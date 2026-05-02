@@ -241,6 +241,36 @@ module Rigor
         narrow_class_dispatch(type, class_name, context)
       end
 
+      # Negation pair for `assert_value is ~refinement` /
+      # `predicate-if-* … is ~refinement` directives (v0.0.5).
+      # Computes the complement of `refinement` within the
+      # current local's domain `current_type`.
+      #
+      # Today's algebra is deliberately narrow:
+      #
+      # - `Difference[base, Constant[v]]`. The complement of
+      #   `base \ {v}` within `current_type` is
+      #   `(current_type \ base) ∪ ({v} ∩ current_type)`. The
+      #   helper walks `current_type`'s union members and
+      #   re-unions the parts disjoint from `base` plus the
+      #   `Constant[v]` itself when `current_type` covers it.
+      #   `assert s is ~non-empty-string` over `s: String | nil`
+      #   therefore narrows to `Constant[""] | NilClass`, the
+      #   only inhabitants of the original type that are NOT
+      #   non-empty strings.
+      # - Other refinement carriers (`Refined`, `Intersection`,
+      #   `IntegerRange`) — `current_type` is returned unchanged.
+      #   The complement of a predicate-defined refinement (or a
+      #   non-Constant difference) is not reducible to a finite
+      #   shape without a richer carrier; preserving the original
+      #   bound is the safe answer.
+      def narrow_not_refinement(current_type, refinement_type)
+        return current_type unless refinement_type.is_a?(Type::Difference)
+        return current_type unless refinement_type.removed.is_a?(Type::Constant)
+
+        complement_difference(current_type, refinement_type)
+      end
+
       # Public predicate analyser. Returns `[truthy_scope, falsey_scope]`,
       # always; when no narrowing rule matches the predicate node both
       # entries are the receiver scope unchanged.
@@ -320,6 +350,45 @@ module Rigor
       # rubocop:disable Metrics/ClassLength
       class << self
         private
+
+        # Complement of `Difference[base, Constant[v]]` within
+        # `current_type`. Walks the current type's union members,
+        # keeps each member disjoint from `base` (those values
+        # were never in the refinement to begin with), and adds
+        # the removed-value `Constant[v]` exactly once when any
+        # current member covers it. Members that are fully
+        # contained in the refinement (i.e. inside `base` and
+        # NOT equal to the removed value) are dropped — they are
+        # exactly the values the negation excludes.
+        def complement_difference(current_type, difference)
+          base = difference.base
+          removed = difference.removed
+          parts = current_type.is_a?(Type::Union) ? current_type.members : [current_type]
+
+          survivors = []
+          add_removed = false
+          parts.each do |part|
+            if base_disjoint?(base, part)
+              survivors << part
+            elsif part_covers_constant?(part, removed)
+              add_removed = true
+            end
+          end
+          survivors << removed if add_removed
+
+          return current_type if survivors.empty?
+
+          Type::Combinator.union(*survivors)
+        end
+
+        def base_disjoint?(base, part)
+          base.accepts(part, mode: :gradual).no?
+        end
+
+        def part_covers_constant?(part, constant)
+          result = part.accepts(constant, mode: :gradual)
+          result.yes? || result.maybe?
+        end
 
         def falsey_value?(value)
           value.nil? || value == false
@@ -1029,7 +1098,11 @@ module Rigor
         # the effect's `negative?` flag. Shared between
         # predicate-if-* and assert-if-* application paths.
         def narrow_for_effect(current, effect, environment)
-          return effect.refinement_type if effect.respond_to?(:refinement?) && effect.refinement?
+          if effect.respond_to?(:refinement?) && effect.refinement?
+            return narrow_not_refinement(current, effect.refinement_type) if effect.negative?
+
+            return effect.refinement_type
+          end
 
           if effect.negative?
             narrow_not_class(current, effect.class_name, exact: false, environment: environment)

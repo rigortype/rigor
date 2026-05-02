@@ -85,6 +85,7 @@ module Rigor
       def self?.narrow_not_equal: (Type::t type, untyped literal) -> Type::t
       def self?.narrow_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment) -> Type::t
       def self?.narrow_not_class: (Type::t type, String class_name, ?exact: bool, ?environment: Environment) -> Type::t
+      def self?.narrow_not_refinement: (Type::t current_type, Type::t refinement_type) -> Type::t
       def self?.predicate_scopes: (untyped node, Scope scope) -> [Scope, Scope]
       def self?.case_when_scopes: (untyped subject, Array[untyped] conditions, Scope scope) -> [Scope, Scope]
       def self?.analyse: (untyped node, Scope scope) -> untyped

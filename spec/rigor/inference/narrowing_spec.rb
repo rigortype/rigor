@@ -1019,4 +1019,41 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey).to eq(bound)
     end
   end
+
+  describe ".narrow_not_refinement (v0.0.5)" do
+    def nes = Rigor::Type::Combinator.non_empty_string
+    def nominal(name, type_args: []) = Rigor::Type::Combinator.nominal_of(name, type_args: type_args)
+    def empty_string = Rigor::Type::Combinator.constant_of("")
+
+    it "narrows String to Constant[\"\"] under ~non-empty-string" do
+      expect(described_class.narrow_not_refinement(nominal("String"), nes)).to eq(empty_string)
+    end
+
+    it "narrows String | nil to Constant[\"\"] | NilClass — preserving the part disjoint from String" do
+      union = Rigor::Type::Combinator.union(nominal("String"), nominal("NilClass"))
+      result = described_class.narrow_not_refinement(union, nes)
+      expect(result).to be_a(Rigor::Type::Union)
+      expect(result.members).to contain_exactly(empty_string, nominal("NilClass"))
+    end
+
+    it "leaves an Integer-only domain unchanged (the refinement was never reachable)" do
+      expect(described_class.narrow_not_refinement(nominal("Integer"), nes)).to eq(nominal("Integer"))
+    end
+
+    it "is conservative on Refined / Intersection / IntegerRange — returns current_type unchanged" do
+      [
+        Rigor::Type::Combinator.lowercase_string,
+        Rigor::Type::Combinator.non_empty_lowercase_string,
+        Rigor::Type::Combinator.positive_int
+      ].each do |refinement|
+        expect(described_class.narrow_not_refinement(nominal("String"), refinement)).to eq(nominal("String"))
+      end
+    end
+
+    it "is conservative when the Difference's removed value is not a Constant" do
+      array_difference = Rigor::Type::Combinator.non_empty_array(nominal("Integer"))
+      array_nominal = nominal("Array", type_args: [nominal("Integer")])
+      expect(described_class.narrow_not_refinement(array_nominal, array_difference)).to eq(array_nominal)
+    end
+  end
 end

@@ -1,0 +1,10 @@
+class Username
+  %a{rigor:v1:return: lowercase-string}
+  def slug: () -> String
+
+  %a{rigor:v1:return: uppercase-string}
+  def shout: () -> String
+
+  %a{rigor:v1:return: numeric-string}
+  def code: () -> String
+end

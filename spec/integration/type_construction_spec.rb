@@ -250,6 +250,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/predicate_refinement/ — RBS::Extended predicate-subset return refinement" do
+    let(:harness) { harness_for("predicate_refinement") }
+
+    it "self-asserts lowercase/uppercase/numeric-string return overrides plus the case-fold projection pair" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/string_array_catalog.rb — String/Symbol/Array catalog-driven folding" do
     let(:harness) { harness_for("string_array_catalog") }
 

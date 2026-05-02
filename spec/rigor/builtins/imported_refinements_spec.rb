@@ -26,6 +26,15 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         .to eq(Rigor::Type::Combinator.non_positive_int)
     end
 
+    it "resolves the predicate-subset refinements to their Refined shape" do
+      expect(described_class.lookup("lowercase-string"))
+        .to eq(Rigor::Type::Combinator.lowercase_string)
+      expect(described_class.lookup("uppercase-string"))
+        .to eq(Rigor::Type::Combinator.uppercase_string)
+      expect(described_class.lookup("numeric-string"))
+        .to eq(Rigor::Type::Combinator.numeric_string)
+    end
+
     it "returns nil for an unknown name" do
       expect(described_class.lookup("frobinator-string")).to be_nil
       expect(described_class.lookup("")).to be_nil
@@ -47,7 +56,8 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
       expect(described_class.known_names).to include(
         "non-empty-string", "non-zero-int", "non-empty-array",
         "non-empty-hash", "positive-int", "non-negative-int",
-        "negative-int", "non-positive-int"
+        "negative-int", "non-positive-int",
+        "lowercase-string", "uppercase-string", "numeric-string"
       )
     end
   end

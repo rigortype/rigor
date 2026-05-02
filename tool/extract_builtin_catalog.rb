@@ -86,7 +86,9 @@ BASE_CLASS_VARS = {
   "rb_cEncoding" => "Encoding",
   "rb_cMatchData" => "MatchData",
   "rb_cSet" => "Set",
-  "rb_cTime" => "Time"
+  "rb_cTime" => "Time",
+  "rb_cDate" => "Date",
+  "rb_cDateTime" => "DateTime"
 }.freeze
 
 TOPICS = {
@@ -194,6 +196,24 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/time.c],
     output_path: "data/builtins/ruby_core/time.yml"
+  },
+  "date" => {
+    # Date is a stdlib gem (date_core.c) bundled with CRuby. The
+    # single Init function `Init_date_core` registers BOTH `Date`
+    # and `DateTime` (the latter inheriting from the former), so a
+    # single topic suffices — `rbs_paths` carries one entry per
+    # class. The Ruby-side prelude (`lib/date.rb`) only contributes
+    # `Date#infinite?` and the nested `Date::Infinity` class; the
+    # bulk of the surface is in C.
+    init_function: "Init_date_core",
+    ruby_c_path: "references/ruby/ext/date/date_core.c",
+    ruby_prelude_path: "references/ruby/ext/date/lib/date.rb",
+    rbs_paths: {
+      "Date" => "references/rbs/stdlib/date/0/date.rbs",
+      "DateTime" => "references/rbs/stdlib/date/0/date_time.rbs"
+    },
+    c_index_paths: %w[references/ruby/ext/date/date_core.c],
+    output_path: "data/builtins/ruby_core/date.yml"
   }
 }.freeze
 

@@ -693,14 +693,16 @@ module Rigor
           return nil if method_def.nil? || method_def == true
           return nil unless method_def.method_types.size == 1
 
-          mismatch = first_argument_mismatch(method_def.method_types.first, call_node, scope)
+          param_overrides = Rigor::RbsExtended.param_type_override_map(method_def)
+          mismatch = first_argument_mismatch(method_def.method_types.first, call_node, scope, param_overrides)
           return nil if mismatch.nil?
 
           build_argument_type_diagnostic(path, call_node, class_name, mismatch)
         end
         # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
 
-        def first_argument_mismatch(method_type, call_node, scope) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
+        def first_argument_mismatch(method_type, call_node, scope, param_overrides)
           function = method_type.type
           return nil unless argument_check_eligible?(function)
 
@@ -710,7 +712,12 @@ module Rigor
             param = params[index]
             next if param.nil? # arity mismatch is the wrong-arity rule's concern.
 
-            param_type = translate_param_type(param.type, scope.environment)
+            # `rigor:v1:param: <name> <refinement>` annotations
+            # tighten the RBS-declared parameter type. The
+            # override is the authoritative contract when
+            # present; otherwise we translate the RBS type as
+            # before.
+            param_type = param_overrides[param.name] || translate_param_type(param.type, scope.environment)
             next if param_type.is_a?(Type::Dynamic) || param_type.is_a?(Type::Top)
 
             arg_type = scope.type_of(arg)
@@ -721,6 +728,7 @@ module Rigor
           end
           nil
         end
+        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
 
         def argument_check_eligible?(function)
           # See `arity_eligible?`: `UntypedFunction` lacks

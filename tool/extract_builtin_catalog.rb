@@ -86,7 +86,9 @@ BASE_CLASS_VARS = {
   "rb_cEncoding" => "Encoding",
   "rb_cMatchData" => "MatchData",
   "rb_cSet" => "Set",
-  "rb_cTime" => "Time"
+  "rb_cTime" => "Time",
+  "rb_cDate" => "Date",
+  "rb_cDateTime" => "DateTime"
 }.freeze
 
 TOPICS = {
@@ -194,6 +196,24 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/time.c],
     output_path: "data/builtins/ruby_core/time.yml"
+  },
+  "date" => {
+    # Date is a stdlib gem (date_core.c) bundled with CRuby. The
+    # single Init function `Init_date_core` registers BOTH `Date`
+    # and `DateTime` (the latter inheriting from the former), so a
+    # single topic suffices — `rbs_paths` carries one entry per
+    # class. The Ruby-side prelude (`lib/date.rb`) only contributes
+    # `Date#infinite?` and the nested `Date::Infinity` class; the
+    # bulk of the surface is in C.
+    init_function: "Init_date_core",
+    ruby_c_path: "references/ruby/ext/date/date_core.c",
+    ruby_prelude_path: "references/ruby/ext/date/lib/date.rb",
+    rbs_paths: {
+      "Date" => "references/rbs/stdlib/date/0/date.rbs",
+      "DateTime" => "references/rbs/stdlib/date/0/date_time.rbs"
+    },
+    c_index_paths: %w[references/ruby/ext/date/date_core.c],
+    output_path: "data/builtins/ruby_core/date.yml"
   }
 }.freeze
 
@@ -223,7 +243,13 @@ class CInitParser
     @init_function = init_function
     @class_var_map = class_var_map
     @relative_path = path.sub("#{ROOT}/", "")
-    @lines = File.readlines(path)
+    # Pre-strip block comments from the source so multi-line
+    # `/* ... */` rdoc blocks (very common right above a class
+    # registration) do not leak unbalanced parens into
+    # `join_continuations`'s state machine. Line numbers MUST be
+    # preserved — we replace comment characters with spaces and
+    # keep newlines intact rather than collapsing the file.
+    @lines = strip_block_comments(File.read(path, encoding: "UTF-8")).each_line.to_a
   end
 
   def parse
@@ -307,6 +333,41 @@ class CInitParser
 
   def strip_line_comments(line)
     line.gsub(%r{/\*.*?\*/}, "").gsub(%r{//[^\n]*}, "")
+  end
+
+  # Replaces `/* ... */` block-comment contents with spaces while
+  # preserving newlines so per-line indexing stays valid. Without
+  # this, multi-line rdoc blocks (e.g. the long `/* ... */` above
+  # `cDateTime = rb_define_class(...)` in `date_core.c`) leak
+  # unbalanced parens into `join_continuations`, which then merges
+  # the next code line into the comment buffer and prevents the
+  # class-registration regex from matching.
+  def strip_block_comments(text)
+    out = +""
+    i = 0
+    in_comment = false
+    while i < text.length
+      ch = text[i]
+      next2 = text[i, 2]
+      if in_comment
+        if next2 == "*/"
+          out << "  "
+          i += 2
+          in_comment = false
+        else
+          out << (ch == "\n" ? "\n" : " ")
+          i += 1
+        end
+      elsif next2 == "/*"
+        in_comment = true
+        out << "  "
+        i += 2
+      else
+        out << ch
+        i += 1
+      end
+    end
+    out
   end
 
   def loc(lineno)

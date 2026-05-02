@@ -23,6 +23,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     no block; the dispatcher recognises and declines.
 
   Self-asserting fixture: `spec/integration/fixtures/enumerable_memo.rb`.
+- **Date / DateTime catalog import.** New `data/builtins/ruby_core/date.yml`
+  generated from `Init_date_core` in
+  `references/ruby/ext/date/date_core.c` plus the `lib/date.rb`
+  prelude. Both classes land in a single topic — DateTime
+  inherits from Date and the same Init function registers both,
+  so `tool/extract_builtin_catalog.rb` carries one entry with two
+  RBS bindings (`date.rbs`, `date_time.rbs`). Catalog stats:
+  2 classes, 96 instance methods, 60 singleton methods,
+  149 `:leaf` / 2 `:mutates_self` / 3 `:block_dependent`
+  classifications. The blocklist in
+  `lib/rigor/inference/builtins/date_catalog.rb` covers
+  `:initialize_copy` (defensive symmetry with String / Array /
+  Range / Set / Time) and Date's `#ifndef NDEBUG`-only `:fill`
+  helper, plus a mirrored `:initialize_copy` entry for the
+  DateTime side. `MethodDispatcher::ConstantFolding` routes
+  `Date` and `DateTime` receivers through the new
+  `DATE_CATALOG`; the DateTime row precedes Date in
+  `CATALOG_BY_CLASS` so subclass receivers hit their dedicated
+  entry first. Self-asserting fixture
+  `spec/integration/fixtures/date_catalog/` exercises the
+  Integer-typed reader surface (`#year` / `#month` / `#day` /
+  `#wday` / `#hour` / `#min` / `#sec`), the boolean predicate
+  surface (`#leap?` / `#julian?` / `#sunday?`), the String-typed
+  formatters (`#to_s` / `#iso8601` / `#strftime`), and the
+  navigation methods (`#next_day` / `#prev_day` / `#next_month` /
+  `#prev_year` / `#succ` / `#>>` / `#<<`) that return brand-new
+  Date objects rather than mutating the receiver. No
+  `RBS::Extended rigor:v1:return:` overrides this slice — the
+  reader surface is in the same situation as Time, where
+  per-method ranges (`#month` ∈ `int<1, 12>`) would need a
+  parameterised IntegerRange overlay that's out of scope.
+
+### Fixed
+
+- **Cross-line block comments in `tool/extract_builtin_catalog.rb`.**
+  `CInitParser#join_continuations` walks the Init function body
+  line by line and tracks paren depth to merge multi-line
+  registration macros into a single logical line. The previous
+  `strip_line_comments` helper only stripped `/* … */` runs that
+  fit on one line, so multi-line rdoc blocks (very common above a
+  `rb_define_class` call — `cDateTime = rb_define_class("DateTime", cDate);`
+  in `date_core.c` is preceded by a 200-line `/* … */` block)
+  contributed unbalanced parens to the depth counter and made the
+  next code line merge into a comment buffer. The fix
+  pre-strips block comments from the entire C source while
+  preserving newlines so per-line indexing remains valid. Without
+  the fix DateTime's class-registration line was silently dropped
+  and the catalog only saw `Date`.
 
 ## [0.0.4] - 2026-05-02
 

@@ -8,6 +8,7 @@ require_relative "../builtins/hash_catalog"
 require_relative "../builtins/range_catalog"
 require_relative "../builtins/set_catalog"
 require_relative "../builtins/time_catalog"
+require_relative "../builtins/date_catalog"
 
 module Rigor
   module Inference
@@ -637,16 +638,23 @@ module Rigor
         # before any base-class fallback would, and adding a new
         # class is a one-line addition rather than another `when`
         # arm on a growing case statement.
+        # Subclass-before-superclass ordering: `DateTime < Date`,
+        # so the `DateTime` row MUST come before the `Date` row.
+        # Otherwise a `DateTime` receiver would match the `Date`
+        # arm first and the catalog would consult the Date entry
+        # in `DATE_CATALOG` for the wrong class.
         CATALOG_BY_CLASS = [
-          [Integer, [Builtins::NumericCatalog, "Integer"]],
-          [Float,   [Builtins::NumericCatalog, "Float"]],
-          [String,  [Builtins::STRING_CATALOG, "String"]],
-          [Symbol,  [Builtins::STRING_CATALOG, "Symbol"]],
-          [Array,   [Builtins::ARRAY_CATALOG,  "Array"]],
-          [Hash,    [Builtins::HASH_CATALOG,   "Hash"]],
-          [Range,   [Builtins::RANGE_CATALOG,  "Range"]],
-          [::Set,   [Builtins::SET_CATALOG,    "Set"]],
-          [Time,    [Builtins::TIME_CATALOG,   "Time"]]
+          [Integer,  [Builtins::NumericCatalog, "Integer"]],
+          [Float,    [Builtins::NumericCatalog, "Float"]],
+          [String,   [Builtins::STRING_CATALOG, "String"]],
+          [Symbol,   [Builtins::STRING_CATALOG, "Symbol"]],
+          [Array,    [Builtins::ARRAY_CATALOG,  "Array"]],
+          [Hash,     [Builtins::HASH_CATALOG,   "Hash"]],
+          [Range,    [Builtins::RANGE_CATALOG,  "Range"]],
+          [::Set,    [Builtins::SET_CATALOG,    "Set"]],
+          [Time,     [Builtins::TIME_CATALOG,   "Time"]],
+          [DateTime, [Builtins::DATE_CATALOG,   "DateTime"]],
+          [Date,     [Builtins::DATE_CATALOG,   "Date"]]
         ].freeze
         private_constant :CATALOG_BY_CLASS
 

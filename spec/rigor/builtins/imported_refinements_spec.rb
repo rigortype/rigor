@@ -56,8 +56,10 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
   end
 
   describe ".known? / .known_names" do
-    it "answers .known? truthfully" do
+    it "answers .known? truthfully for both bare and parameterised names" do
       expect(described_class.known?("non-empty-string")).to be(true)
+      expect(described_class.known?("non-empty-array")).to be(true) # bare alias too
+      expect(described_class.known?("int")).to be(true) # parameterised-only
       expect(described_class.known?("frobinator-string")).to be(false)
     end
 
@@ -67,8 +69,75 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         "non-empty-hash", "positive-int", "non-negative-int",
         "negative-int", "non-positive-int",
         "lowercase-string", "uppercase-string", "numeric-string",
-        "decimal-int-string", "octal-int-string", "hex-int-string"
+        "decimal-int-string", "octal-int-string", "hex-int-string",
+        "int"
       )
+    end
+  end
+
+  describe ".parse" do
+    it "resolves bare kebab-case names just like .lookup" do
+      expect(described_class.parse("non-empty-string"))
+        .to eq(Rigor::Type::Combinator.non_empty_string)
+      expect(described_class.parse("lowercase-string"))
+        .to eq(Rigor::Type::Combinator.lowercase_string)
+    end
+
+    it "tolerates leading and trailing whitespace" do
+      expect(described_class.parse("  non-empty-string  "))
+        .to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "parses non-empty-array[T] with an RBS class type-arg" do
+      expect(described_class.parse("non-empty-array[Integer]"))
+        .to eq(Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("Integer")))
+    end
+
+    it "parses non-empty-array[T] with a refinement type-arg" do
+      expect(described_class.parse("non-empty-array[non-empty-string]"))
+        .to eq(Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.non_empty_string))
+    end
+
+    it "parses non-empty-hash[K, V] with two type-args" do
+      expect(described_class.parse("non-empty-hash[Symbol, Integer]"))
+        .to eq(Rigor::Type::Combinator.non_empty_hash(
+                 Rigor::Type::Combinator.nominal_of("Symbol"),
+                 Rigor::Type::Combinator.nominal_of("Integer")
+               ))
+    end
+
+    it "tolerates whitespace inside bracketed lists" do
+      expect(described_class.parse("non-empty-hash[ Symbol , Integer ]"))
+        .to eq(Rigor::Type::Combinator.non_empty_hash(
+                 Rigor::Type::Combinator.nominal_of("Symbol"),
+                 Rigor::Type::Combinator.nominal_of("Integer")
+               ))
+    end
+
+    it "parses int<min, max> with signed integer bounds" do
+      expect(described_class.parse("int<5, 10>"))
+        .to eq(Rigor::Type::Combinator.integer_range(5, 10))
+      expect(described_class.parse("int<-3, 7>"))
+        .to eq(Rigor::Type::Combinator.integer_range(-3, 7))
+    end
+
+    it "returns nil for arity mismatches in parameterised forms" do
+      expect(described_class.parse("non-empty-array[Integer, String]")).to be_nil
+      expect(described_class.parse("non-empty-hash[Symbol]")).to be_nil
+      expect(described_class.parse("int<5>")).to be_nil
+    end
+
+    it "returns nil for unknown head names even when bracketed" do
+      expect(described_class.parse("frobinator[Integer]")).to be_nil
+      expect(described_class.parse("uint<0, 10>")).to be_nil
+    end
+
+    it "returns nil for malformed payloads" do
+      expect(described_class.parse("non-empty-array[")).to be_nil
+      expect(described_class.parse("int<5, 10")).to be_nil
+      expect(described_class.parse("non-empty-array[Integer")).to be_nil
+      expect(described_class.parse("non-empty-array[Integer]extra")).to be_nil
+      expect(described_class.parse("")).to be_nil
     end
   end
 end

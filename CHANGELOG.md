@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Memo-typed Enumerable block-parameter projections.**
+  `IteratorDispatch` covers `#each_with_object` (yields
+  `(element, memo)` where the memo type follows the second
+  argument's actual type) and `#inject` / `#reduce` (yields
+  `(memo, element)`). The inject family handles three call
+  shapes:
+  - `inject(seed) { |memo, elem| … }` — `[seed_type, element_type]`.
+  - `inject { |memo, elem| … }` — both block params bind to the
+    receiver's element type (Ruby's first-element-as-memo
+    semantics).
+  - `inject(:+)` / `inject(seed, :+)` — Symbol-call forms have
+    no block; the dispatcher recognises and declines.
+
+  Self-asserting fixture: `spec/integration/fixtures/enumerable_memo.rb`.
+
 ## [0.0.4] - 2026-05-02
 
 The fourth preview. Theme: **finish the OQ3 refinement-carrier

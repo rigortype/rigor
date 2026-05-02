@@ -156,6 +156,20 @@ module Rigor
       def inspect: () -> String
     end
 
+    class Intersection
+      attr_reader members: Array[Type::t]
+      def initialize: (Array[Type::t] members) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Top
+      def bot: () -> Bot
+      def dynamic: () -> Dynamic
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
     class Tuple
       attr_reader elements: Array[Type::t]
       def initialize: (Array[Type::t] elements) -> void
@@ -230,6 +244,9 @@ module Rigor
       def self?.decimal_int_string: () -> Refined
       def self?.octal_int_string: () -> Refined
       def self?.hex_int_string: () -> Refined
+      def self?.intersection: (*Type::t members) -> Type::t
+      def self?.non_empty_lowercase_string: () -> Type::t
+      def self?.non_empty_uppercase_string: () -> Type::t
       def self?.integer_range: ((Integer | Symbol) min, (Integer | Symbol) max) -> IntegerRange
       def self?.positive_int: () -> IntegerRange
       def self?.non_negative_int: () -> IntegerRange

@@ -12,6 +12,7 @@ require_relative "hash_shape"
 require_relative "union"
 require_relative "difference"
 require_relative "refined"
+require_relative "intersection"
 
 module Rigor
   module Type
@@ -168,6 +169,31 @@ module Rigor
         Refined.new(nominal_of("String"), :hex_int)
       end
 
+      # Normalised intersection. Flattens nested Intersections,
+      # drops `Top` members, collapses to `Bot` if any member is
+      # `Bot`, deduplicates structurally-equal members, sorts the
+      # survivors by `describe(:short)`, and collapses 0-/1-member
+      # results so a degenerate intersection never reaches the
+      # carrier. See ADR-3 OQ3 for the rationale; the lattice
+      # algebra is in
+      # [`value-lattice.md`](docs/type-specification/value-lattice.md).
+      def intersection(*members)
+        collapse_intersection(normalised_intersection_members(members))
+      end
+
+      # `non-empty-lowercase-string` = non-empty-string ∩
+      # lowercase-string. Composes the point-removal half
+      # (`Difference[String, ""]`) with the predicate-subset half
+      # (`Refined[String, :lowercase]`). Both members erase to
+      # `String` so the carrier's RBS erasure is unambiguous.
+      def non_empty_lowercase_string
+        intersection(non_empty_string, lowercase_string)
+      end
+
+      def non_empty_uppercase_string
+        intersection(non_empty_string, uppercase_string)
+      end
+
       # Constructs a heterogeneous, fixed-arity Tuple from positional
       # element types. `tuple_of()` produces the empty tuple `Tuple[]`,
       # which is structurally distinct from the raw `Nominal[Array]`.
@@ -217,6 +243,35 @@ module Rigor
           when 0 then bot
           when 1 then types.first
           else Union.new(sort_members(types))
+          end
+        end
+
+        # Symmetric counterparts to the Union normalisers. The
+        # absorbing element is `Bot` (anything intersected with
+        # nothing is nothing) and the identity element is `Top`
+        # (intersecting with the universal type is a no-op).
+        def normalised_intersection_members(types)
+          flattened = []
+          types.each { |t| flatten_intersection_into(flattened, t) }
+          return [bot] if flattened.any?(Bot)
+
+          flattened.reject! { |t| t.is_a?(Top) }
+          unique_members(flattened)
+        end
+
+        def collapse_intersection(types)
+          case types.size
+          when 0 then top
+          when 1 then types.first
+          else Intersection.new(sort_members(types))
+          end
+        end
+
+        def flatten_intersection_into(acc, type)
+          if type.is_a?(Intersection)
+            type.members.each { |m| flatten_intersection_into(acc, m) }
+          else
+            acc << type
           end
         end
 

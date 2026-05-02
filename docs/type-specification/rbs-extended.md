@@ -9,16 +9,21 @@ These annotations let users and plugin authors describe types that exceed standa
 ## Worked examples
 
 ```rbs
-%a{rigor:v1:return String where non_empty}
+%a{rigor:v1:return: non-empty-string}
 def read_name: () -> String
 
-%a{rigor:v1:param value: String - ""}
+%a{rigor:v1:param: value is non-empty-string}
 def normalize: (String value) -> String
+
+%a{rigor:v1:assert value is non-empty-string}
+def assert_present!: (String value) -> void
 
 %a{rigor:v1:assert-if-true value is "foo"}
 %a{rigor:v1:assert-if-false value is ~"foo"}
 def check: (untyped value) -> bool
 ```
+
+The right-hand side of `return:`, `param:`, `assert*`, and `predicate-if-*` accepts either an RBS-style class name (`String`, `::Foo::Bar`) or a kebab-case refinement payload from the imported-built-in catalogue ([`imported-built-in-types.md`](imported-built-in-types.md)). The refinement payload supports the parameterised forms `non-empty-array[Integer]`, `non-empty-hash[Symbol, Integer]`, and `int<min, max>` through `Builtins::ImportedRefinements::Parser`. Class-name directives MAY use `~T` negation; refinement-form directives currently MUST NOT (the difference-against-refinement algebra is reserved for a future slice).
 
 ## Authoring rules
 
@@ -66,6 +71,8 @@ def valid_string?: (untyped value) -> bool
 
 | Directive | Effect |
 | --- | --- |
+| `rigor:v1:return: T` | Overrides the RBS-declared return type with `T` at every call site. |
+| `rigor:v1:param: name [is] T` | Tightens the RBS-declared type of parameter `name` to `T`, both at overload selection / argument-type checks AND inside the method body during inference. The `is` glue word is optional. |
 | `rigor:v1:predicate-if-true target is T` | Refines `target` to `T` on the **true** branch of a call used as a condition. |
 | `rigor:v1:predicate-if-false target is T` | Refines `target` to `T` on the **false** branch. |
 | `rigor:v1:assert target is T` | Refines `target` after the method returns normally. |

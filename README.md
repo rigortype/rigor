@@ -12,13 +12,20 @@ catalogue.
 
 ## Status
 
-The current branch (`impl/scope-type-of`) is a **first preview**.
-The engine recognises the bulk of canonical Ruby surface — local
-variables, ivars / cvars / globals (intra- and cross-method), self
-typing, lexical constant lookup, predicate narrowing
+`master` is at the **fourth preview** (`v0.0.4`). The engine
+recognises the bulk of canonical Ruby surface — local variables,
+ivars / cvars / globals (intra- and cross-method), self typing,
+lexical constant lookup, predicate narrowing
 (`is_a?` / `==` / `===` / `case`-`when`), block parameter binding,
-closure escape, Tuple / HashShape carriers, and more. See
-[docs/CURRENT_WORK.md](docs/CURRENT_WORK.md) for the full slice
+closure escape, Tuple / HashShape carriers — plus the v0.0.3
+constant-folding surface and the v0.0.4 refinement-carrier
+catalogue (`Type::Difference` / `Type::Refined` / `Type::Intersection`,
+14 imported built-in refinement names through
+`Builtins::ImportedRefinements`, and the symmetric
+`rigor:v1:return:` / `rigor:v1:param:` / `rigor:v1:assert:`
+RBS::Extended directive routes). See [CHANGELOG.md](CHANGELOG.md)
+for the per-release surface and
+[docs/CURRENT_WORK.md](docs/CURRENT_WORK.md) for the live slice
 trail.
 
 ## Requirements
@@ -116,6 +123,16 @@ The first preview engine resolves:
   typed receiver, wrong number of positional arguments. Both
   consult RBS plus in-source `def` / `define_method` discovery so
   reopened classes do not produce false positives.
+- **`RBS::Extended` annotation routes** —
+  `rigor:v1:return: <refinement>` overrides a method's RBS-declared
+  return; `rigor:v1:param: <name> [is] <refinement>` tightens a
+  parameter at both the call boundary and inside the method body;
+  `rigor:v1:assert <name> is <refinement>` substitutes the
+  refinement carrier at the post-call scope. The right-hand side
+  accepts any Capitalised class name OR a kebab-case refinement
+  payload from the imported-built-in catalogue (including
+  parameterised forms `non-empty-array[Integer]` and bounded
+  ranges `int<5, 10>`).
 
 See [docs/CURRENT_WORK.md](docs/CURRENT_WORK.md) for the canonical
 status snapshot, [docs/internal-spec/inference-engine.md](docs/internal-spec/inference-engine.md)
@@ -130,7 +147,7 @@ decision records.
 - `lib/rigor/inference` — `Scope`-driven typers, dispatchers, and
   narrowing.
 - `sig` — RBS signatures for Rigor itself.
-- `spec` — RSpec test suite (830+ examples).
+- `spec` — RSpec test suite (1250+ examples).
 - `docs/adr` — architecture decision records.
 - `docs/internal-spec` — engine contracts.
 - `docs/type-specification` — type-language semantics.

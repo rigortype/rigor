@@ -125,7 +125,7 @@ The first implementation slice will land `non-empty-string` end to end:
 - add a `String#empty?` rule that returns `Constant[false]` for a non-empty-string receiver directly;
 - add the canonical-name registry with the bidirectional `non-empty-string` ↔ `String - ""` mapping.
 
-`Type::Refined` is added in a follow-up slice when the first predicate-subset refinement (likely `lowercase-string` or `numeric-string`) needs it. Until then the registry only knows Difference shapes; plugin contribution of `Refined` predicates is gated on the carrier landing.
+**Status (post-v0.0.4):** Both halves and the composed Intersection carrier shipped in v0.0.4 (CHANGELOG `[0.0.4]`). `Type::Difference` lives at [`lib/rigor/type/difference.rb`](../../lib/rigor/type/difference.rb), `Type::Refined` at [`lib/rigor/type/refined.rb`](../../lib/rigor/type/refined.rb), and `Type::Intersection` at [`lib/rigor/type/intersection.rb`](../../lib/rigor/type/intersection.rb). The `Builtins::ImportedRefinements` registry resolves `non-empty-string`, `non-zero-int`, `non-empty-array[T]`, `non-empty-hash[K, V]`, the IntegerRange aliases (`positive-int`, `non-negative-int`, `negative-int`, `non-positive-int`), the predicate refinements (`lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`), and the composed names (`non-empty-lowercase-string`, `non-empty-uppercase-string`). Plugin-contributed predicate refinements (ADR-2) are still gated on the plugin API; the carrier itself is in place.
 
 **Rationale for choosing C over A and B.**
 
@@ -194,6 +194,8 @@ The next slice resolves OQ3 by landing the point-removal half of Option C:
    - Symmetric rules for `Array#size` / `Array#empty?`, `Hash#size` / `Hash#empty?`, `Integer#zero?`.
 4. Add the canonical-name registry: `non-empty-string` ↔ `Difference[String, ""]`, `non-zero-int` ↔ `Difference[Integer, 0]`, etc. Display routes through it; RBS::Extended parsing recognises both forms.
 5. Add a self-asserting integration fixture (`spec/integration/fixtures/non_empty_string.rb`) that demonstrates the chained projection and the canonical-name display.
+
+**Status (post-v0.0.4):** Both follow-up slices shipped. `Type::Refined[base, predicate_id]` (with the predicate registry, the canonical-name table, and the catalog-tier projection rules) and `Type::Intersection` (for the composed `non-empty-lowercase-string` / `non-empty-uppercase-string` names) all landed; six predicate refinements are catalogued (`lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`). The historical priority order below is preserved as design rationale.
 
 A follow-up slice lands the predicate-subset half (`Type::Refined[base, predicate]`) when the first predicate-defined refinement is needed. Likely candidates in priority order:
 

@@ -45,6 +45,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asserting fixture mirroring `refinement_return_override/`,
   proving the kebab-case display, the `RBS::Extended return:`
   override route, and the case-fold projection pair end-to-end.
+- **`Set` joins the catalog-driven inference pipeline.** A new
+  `data/builtins/ruby_core/set.yml` is generated from `Init_Set`
+  in `references/ruby/set.c` (Set was rewritten in C and folded
+  into CRuby for Ruby 3.2+, so the catalog reads the same way as
+  String / Array). `MethodDispatcher::ConstantFolding#catalog_for`
+  now routes `Set` receivers through `Builtins::SET_CATALOG`. The
+  per-class blocklist drops false-positive `:leaf` classifications
+  for the indirect mutators (`initialize_copy`,
+  `compare_by_identity`, `reset`), the block-yielding helpers
+  (`each`, `classify`, `divide`), and `disjoint?` (which delegates
+  through `set_i_intersect`'s user-redefinable dispatch path).
+  `Set#size` / `#length` / `#count` keep tightening through the
+  existing `SIZE_RETURNING_NOMINALS` projection.
 
 ## [0.0.3] - 2026-05-02
 

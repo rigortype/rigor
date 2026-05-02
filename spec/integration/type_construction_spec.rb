@@ -268,6 +268,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/set_catalog.rb — Set catalog-driven folding" do
+    let(:harness) { harness_for("set_catalog") }
+
+    it "self-asserts the Set#size projection plus blocklisted mutators" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/always_raises/ — division-by-zero diagnostic" do
     let(:harness) { harness_for("always_raises") }
 

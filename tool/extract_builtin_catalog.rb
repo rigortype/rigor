@@ -85,7 +85,8 @@ BASE_CLASS_VARS = {
   "rb_cRange" => "Range",
   "rb_cEncoding" => "Encoding",
   "rb_cMatchData" => "MatchData",
-  "rb_cSet" => "Set"
+  "rb_cSet" => "Set",
+  "rb_cTime" => "Time"
 }.freeze
 
 TOPICS = {
@@ -177,6 +178,22 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/set.c],
     output_path: "data/builtins/ruby_core/set.yml"
+  },
+  "time" => {
+    # Time is a pure-C built-in: `Init_Time` registers the class
+    # body, and the Ruby-side prelude lives in `timev.rb` (compiled
+    # to `timev.rbinc` and `#include`d at the bottom of `time.c`).
+    # The prelude carries the class-side surface (`Time.now`,
+    # `Time.at`, `Time.new`) through Primitive cexpr stubs, so it
+    # MUST be parsed for the catalog to capture those entries.
+    init_function: "Init_Time",
+    ruby_c_path: "references/ruby/time.c",
+    ruby_prelude_path: "references/ruby/timev.rb",
+    rbs_paths: {
+      "Time" => "references/rbs/core/time.rbs"
+    },
+    c_index_paths: %w[references/ruby/time.c],
+    output_path: "data/builtins/ruby_core/time.yml"
   }
 }.freeze
 

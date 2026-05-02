@@ -84,7 +84,8 @@ BASE_CLASS_VARS = {
   "rb_cRegexp" => "Regexp",
   "rb_cRange" => "Range",
   "rb_cEncoding" => "Encoding",
-  "rb_cMatchData" => "MatchData"
+  "rb_cMatchData" => "MatchData",
+  "rb_cSet" => "Set"
 }.freeze
 
 TOPICS = {
@@ -141,6 +142,21 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/file.c],
     output_path: "data/builtins/ruby_core/file.yml"
+  },
+  "set" => {
+    # Set was rewritten in C and folded into CRuby for Ruby 3.2+.
+    # On the `ruby_4_0` reference branch the Init function lives
+    # in `set.c`; there is no `set.rb` prelude (the C side calls
+    # `rb_provide("set.rb")` at the end of Init_Set so a top-level
+    # `require "set"` is a no-op against the built-in).
+    init_function: "Init_Set",
+    ruby_c_path: "references/ruby/set.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Set" => "references/rbs/core/set.rbs"
+    },
+    c_index_paths: %w[references/ruby/set.c],
+    output_path: "data/builtins/ruby_core/set.yml"
   }
 }.freeze
 

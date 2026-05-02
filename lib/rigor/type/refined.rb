@@ -111,20 +111,41 @@ module Rigor
       #
       # Plugin-contributed predicates land here once ADR-2 is
       # in flight; today the table is closed over the v0.0.4
-      # built-in catalogue. The recogniser for `:numeric` is
-      # deliberately conservative — only decimal integer and
-      # plain-decimal-fraction strings are recognised, mirroring
-      # `imported-built-in-types.md`'s "Rigor's numeric-string
-      # predicate" wording. Looser forms (scientific, hex,
-      # rational) MAY join the recogniser later without breaking
-      # the registry contract.
+      # built-in catalogue.
+      #
+      # Recogniser policy:
+      #
+      # - `:numeric` is deliberately conservative — only decimal
+      #   integer and plain-decimal-fraction strings are
+      #   recognised, mirroring `imported-built-in-types.md`'s
+      #   "Rigor's numeric-string predicate" wording. Looser
+      #   forms (scientific, hex, rational) MAY join later
+      #   without breaking the registry contract.
+      # - `:decimal_int` is "what `Integer(s, 10)` would parse
+      #   without remainder" — one or more decimal digits,
+      #   optional leading sign, no whitespace, no fractional
+      #   tail.
+      # - `:octal_int` and `:hex_int` REQUIRE their conventional
+      #   prefix (`0o` / `0O` / leading `0` for octal; `0x` /
+      #   `0X` for hex) so the predicate is disjoint from
+      #   `:decimal_int`. A bare `"755"` is decimal-int-string,
+      #   not octal-int-string. This matches the typical user
+      #   intent — a refinement marks a string that "looks like
+      #   octal", not "happens to be base-8 valid".
       NUMERIC_STRING_PATTERN = /\A-?\d+(?:\.\d+)?\z/
-      private_constant :NUMERIC_STRING_PATTERN
+      DECIMAL_INT_STRING_PATTERN = /\A-?\d+\z/
+      OCTAL_INT_STRING_PATTERN = /\A-?(?:0[oO][0-7]+|0[0-7]+)\z/
+      HEX_INT_STRING_PATTERN = /\A-?0[xX][0-9a-fA-F]+\z/
+      private_constant :NUMERIC_STRING_PATTERN, :DECIMAL_INT_STRING_PATTERN,
+                       :OCTAL_INT_STRING_PATTERN, :HEX_INT_STRING_PATTERN
 
       PREDICATES = {
         lowercase: ->(v) { v.is_a?(String) && v == v.downcase },
         uppercase: ->(v) { v.is_a?(String) && v == v.upcase },
-        numeric: ->(v) { v.is_a?(String) && NUMERIC_STRING_PATTERN.match?(v) }
+        numeric: ->(v) { v.is_a?(String) && NUMERIC_STRING_PATTERN.match?(v) },
+        decimal_int: ->(v) { v.is_a?(String) && DECIMAL_INT_STRING_PATTERN.match?(v) },
+        octal_int: ->(v) { v.is_a?(String) && OCTAL_INT_STRING_PATTERN.match?(v) },
+        hex_int: ->(v) { v.is_a?(String) && HEX_INT_STRING_PATTERN.match?(v) }
       }.freeze
 
       # Maps `[base_class_name, predicate_id]` pairs to their
@@ -134,7 +155,10 @@ module Rigor
       CANONICAL_NAMES = {
         ["String", :lowercase] => "lowercase-string",
         ["String", :uppercase] => "uppercase-string",
-        ["String", :numeric] => "numeric-string"
+        ["String", :numeric] => "numeric-string",
+        ["String", :decimal_int] => "decimal-int-string",
+        ["String", :octal_int] => "octal-int-string",
+        ["String", :hex_int] => "hex-int-string"
       }.freeze
       private_constant :CANONICAL_NAMES
 

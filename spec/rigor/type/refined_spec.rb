@@ -44,6 +44,12 @@ RSpec.describe Rigor::Type::Refined do
       expect(Rigor::Type::Combinator.numeric_string.describe).to eq("numeric-string")
     end
 
+    it "renders the base-N int-string names for the integer-parse predicates" do
+      expect(Rigor::Type::Combinator.decimal_int_string.describe).to eq("decimal-int-string")
+      expect(Rigor::Type::Combinator.octal_int_string.describe).to eq("octal-int-string")
+      expect(Rigor::Type::Combinator.hex_int_string.describe).to eq("hex-int-string")
+    end
+
     it "falls back to base & predicate? for unrecognised shapes" do
       r = described_class.new(nominal_of("String"), :rare_predicate)
       expect(r.describe).to eq("String & rare_predicate?")
@@ -55,6 +61,9 @@ RSpec.describe Rigor::Type::Refined do
       expect(Rigor::Type::Combinator.lowercase_string.erase_to_rbs).to eq("String")
       expect(Rigor::Type::Combinator.uppercase_string.erase_to_rbs).to eq("String")
       expect(Rigor::Type::Combinator.numeric_string.erase_to_rbs).to eq("String")
+      expect(Rigor::Type::Combinator.decimal_int_string.erase_to_rbs).to eq("String")
+      expect(Rigor::Type::Combinator.octal_int_string.erase_to_rbs).to eq("String")
+      expect(Rigor::Type::Combinator.hex_int_string.erase_to_rbs).to eq("String")
     end
   end
 
@@ -78,6 +87,36 @@ RSpec.describe Rigor::Type::Refined do
       expect(r.matches?("-3.14")).to be(true)
       expect(r.matches?("0xff")).to be(false)
       expect(r.matches?("forty-two")).to be(false)
+    end
+
+    it "recognises decimal-int-string with optional sign and no fractional tail" do
+      r = Rigor::Type::Combinator.decimal_int_string
+      expect(r.matches?("0")).to be(true)
+      expect(r.matches?("42")).to be(true)
+      expect(r.matches?("-7")).to be(true)
+      expect(r.matches?("3.14")).to be(false) # numeric-string but not decimal-int-string
+      expect(r.matches?("0xff")).to be(false)
+      expect(r.matches?("")).to be(false)
+    end
+
+    it "recognises octal-int-string only when the conventional prefix is present" do
+      r = Rigor::Type::Combinator.octal_int_string
+      expect(r.matches?("0o755")).to be(true)
+      expect(r.matches?("0O755")).to be(true)
+      expect(r.matches?("0755")).to be(true)
+      expect(r.matches?("-0o7")).to be(true)
+      expect(r.matches?("755")).to be(false) # bare digits are decimal, not octal
+      expect(r.matches?("0o9")).to be(false)
+      expect(r.matches?("0xff")).to be(false)
+    end
+
+    it "recognises hex-int-string only with the 0x / 0X prefix" do
+      r = Rigor::Type::Combinator.hex_int_string
+      expect(r.matches?("0xff")).to be(true)
+      expect(r.matches?("0XFF")).to be(true)
+      expect(r.matches?("-0xCAFE")).to be(true)
+      expect(r.matches?("ff")).to be(false)
+      expect(r.matches?("0o755")).to be(false)
     end
 
     it "returns false for non-String values regardless of predicate" do

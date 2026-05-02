@@ -156,6 +156,18 @@ module Rigor
         Refined.new(nominal_of("String"), :numeric)
       end
 
+      def decimal_int_string
+        Refined.new(nominal_of("String"), :decimal_int)
+      end
+
+      def octal_int_string
+        Refined.new(nominal_of("String"), :octal_int)
+      end
+
+      def hex_int_string
+        Refined.new(nominal_of("String"), :hex_int)
+      end
+
       # Constructs a heterogeneous, fixed-arity Tuple from positional
       # element types. `tuple_of()` produces the empty tuple `Tuple[]`,
       # which is structurally distinct from the raw `Nominal[Array]`.

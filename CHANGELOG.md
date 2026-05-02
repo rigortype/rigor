@@ -131,6 +131,36 @@ In-progress v0.0.4 surfaces. Two themes so far:
   the renderer already routes through `Type#describe` and
   `erase_to_rbs` — but the regression coverage now binds the
   contract.
+- **`rigor:v1:param: <name> <refinement>` directive.** Symmetric
+  to the `rigor:v1:return:` route landed in v0.0.3. The new
+  directive lets a sig file tighten an RBS-declared parameter
+  type to one of the imported-built-in refinements:
+
+  ```rbs
+  class Slug
+    %a{rigor:v1:param: id is non-empty-string}
+    def normalise: (::String id) -> String
+  end
+  ```
+
+  At overload selection (`OverloadSelector`) and at the
+  `argument-type-mismatch` check rule, the override replaces the
+  RBS-translated parameter type so a too-wide call site is
+  flagged. The trailing payload supports the full refinement
+  grammar in `Builtins::ImportedRefinements::Parser` (bare
+  kebab-case names plus parameterised forms like
+  `non-empty-array[Integer]`, `non-empty-hash[Symbol, Integer]`,
+  and `int<a, b>`). The optional `is` glue word matches the
+  existing surface on `assert` and `predicate-if-*` directives;
+  authors MAY write `param: id non-empty-string` instead.
+  Failure stays fail-soft: an unparseable payload, an unknown
+  refinement, or a non-`param:` directive returns `nil` from
+  `parse_param_annotation` and is dropped from the override
+  list, so the call site keeps the RBS-declared type.
+  End-to-end fixture: `spec/integration/fixtures/param_extended/`.
+  Method-body narrowing through param overrides (so the body
+  sees the tighter parameter type during inference) stays on
+  the v0.0.4 roadmap as a follow-up.
 - **`Type::Intersection` carrier — composed refinement names.**
   Closes the OQ3 carrier strategy (ADR-3) by adding the
   Intersection peer alongside `Union` / `Difference` /

@@ -30,9 +30,14 @@ The `A → G → C` thread from the working agreement is now fully landed:
 
 `Type::Intersection` is the OQ3 closing carrier — sibling of `Union` / `Difference` / `Refined`. Catalogued composites `non-empty-lowercase-string` and `non-empty-uppercase-string` resolve through the same `ImportedRefinements` registry the simpler shapes use; `accepts_intersection` is conjunctive on LHS, disjunctive on RHS, plus a top-level structural-equality short-circuit; `ShapeDispatch.dispatch_intersection` collects each member's projection and narrows IntegerRange results to the meet so size-tier projections preserve their tighter answer. End-to-end fixture: [`spec/integration/fixtures/intersection_refinement/`](../spec/integration/fixtures/intersection_refinement/).
 
+### Just-landed: rigor:v1:param: directive (call-site half)
+
+Symmetric to the `rigor:v1:return:` route landed in v0.0.3. The new directive tightens an RBS-declared parameter type to one of the imported-built-in refinements at the call boundary; `OverloadSelector` and the `argument-type-mismatch` check rule both consult `RbsExtended.param_type_override_map(method_def)` and prefer the override over the RBS-translated type. End-to-end fixture: [`spec/integration/fixtures/param_extended/`](../spec/integration/fixtures/param_extended/). Method-body narrowing through param overrides (so the body sees the tighter parameter type during inference) is the natural follow-up — the call-site half is in place, but `MethodParameterBinder` does not yet consult the same override map.
+
 ### Other v0.0.4 entry points (parallel-safe)
 
-- **`rigor:v1:param:` / `rigor:v1:assert:` directive wiring.** The annotation grammar surface exists; the dispatcher tier needs the symmetric routes to the `return:` path landed in `lib/rigor/inference/method_dispatcher/rbs_dispatch.rb`.
+- **`rigor:v1:param:` body-narrowing half.** The call-site route landed (see "Just-landed" above); the symmetric inside-body route — where `MethodParameterBinder` reads the same override map and binds the parameter to the refinement during body inference — is the remaining half. Touches `lib/rigor/inference/method_parameter_binder.rb`.
+- **`rigor:v1:assert:` already partly works** through `parse_assert_annotation` and `read_predicate_effects`; gaps to audit are dispatcher-tier wiring for the assert-then-narrow path against refinement carriers (today the assert / predicate machinery only narrows by class name, not by refinement).
 - **Enumerable-aware block-parameter typing.** Architecture sketch: a single dispatcher tier that knows `Enumerable` block-yield rules (Array/Hash/Range/Set/IO) and projects element types per receiver shape. Replaces the hardcoded Integer-only `IteratorDispatch` from v0.0.3.
 
 ### Out of v0.0.4 scope (intentional)

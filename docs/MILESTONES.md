@@ -37,10 +37,12 @@ Also landed:
 - ✅ **`type-of` CLI canonical-name display contract.** Regression specs in `spec/rigor/cli_spec.rb` confirm `bundle exec exe/rigor type-of …` renders refinement-bearing types in their kebab-case spelling in both human-readable text and `--format=json` output.
 - ✅ **Parameterised refinement tokeniser.** `RBS::Extended`'s `rigor:v1:return:` directive now accepts `non-empty-array[T]`, `non-empty-hash[K, V]`, and `int<min, max>` payloads. Parsing lives in `Builtins::ImportedRefinements::Parser`.
 - ✅ **`Type::Intersection` for composed refinement names.** Closes the OQ3 carrier strategy. `non-empty-lowercase-string` / `non-empty-uppercase-string` resolve end-to-end; conjunction / disjunction acceptance plus an IntegerRange-meet ShapeDispatch projection keep size-tier answers tight.
+- ✅ **`rigor:v1:param:` directive — call-site half.** The new directive tightens an RBS-declared parameter at overload selection and the `argument-type-mismatch` rule. Method-body narrowing (so the body sees the refinement during inference) stays planned.
 
 Still planned:
 
-- **`rigor:v1:param:` and `rigor:v1:assert:` directives.** The annotation parser already accepts the syntax surface; v0.0.4 adds the dispatcher tier wiring symmetric to the `return:` route landed in v0.0.3.
+- **`rigor:v1:param:` body-narrowing half.** Read the override map in `MethodParameterBinder` so the method body sees the tightened parameter type during inference.
+- **`rigor:v1:assert:` against refinement carriers.** The assert / predicate parser already accepts the syntax; the narrowing tier needs to recognise refinement names in the right-hand side, not just class names.
 - **Further built-in catalog imports.** Enumerable, Comparable, Time, Date, DateTime follow the same nine-stage flow recorded in [`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md).
 - **Enumerable-aware block-parameter typing.** A single tier that knows `each` / `map` / `select` / `reduce` / `each_with_index` etc. yield element types over Array / Hash / Range / Set / IO line iteration. Today's iterator dispatch is Integer-only and hardcoded; v0.0.4 generalises through the new mechanism.
 

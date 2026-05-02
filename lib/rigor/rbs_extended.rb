@@ -50,10 +50,19 @@ module Rigor
     # when the directive uses the `~ClassName` form, in
     # which case the engine narrows AWAY from `class_name`
     # (`Narrowing.narrow_not_class`) instead of toward it.
-    PredicateEffect = Data.define(:edge, :target_kind, :target_name, :class_name, :negative) do
+    #
+    # `refinement_type` is non-nil when the right-hand side is
+    # a kebab-case refinement name (`non-empty-string`,
+    # `lowercase-string`, …) instead of a Capitalised class
+    # name. The narrowing tier substitutes the carrier for the
+    # current local type; `class_name` is then nil and
+    # `negative` is false (refinement-form directives do not
+    # support `~T` negation in v0.0.4).
+    PredicateEffect = Data.define(:edge, :target_kind, :target_name, :class_name, :negative, :refinement_type) do
       def truthy_only? = edge == :truthy_only
       def falsey_only? = edge == :falsey_only
       def negative? = negative == true
+      def refinement? = !refinement_type.nil?
     end
 
     # Returned for `assert` / `assert-if-true` /
@@ -71,11 +80,12 @@ module Rigor
     #
     # `negative` mirrors `PredicateEffect`: true when the
     # directive uses `~ClassName` syntax.
-    AssertEffect = Data.define(:condition, :target_kind, :target_name, :class_name, :negative) do
+    AssertEffect = Data.define(:condition, :target_kind, :target_name, :class_name, :negative, :refinement_type) do
       def always? = condition == :always
       def if_truthy_return? = condition == :if_truthy_return
       def if_falsey_return? = condition == :if_falsey_return
       def negative? = negative == true
+      def refinement? = !refinement_type.nil?
     end
 
     module_function
@@ -100,14 +110,26 @@ module Rigor
       effects.uniq
     end
 
+    # The right-hand side accepts either a Capitalised class
+    # name (with optional `~` negation, optional `::` prefix,
+    # qualified names) OR a kebab-case refinement payload
+    # routed through `Builtins::ImportedRefinements::Parser`
+    # (bare names, `name[T]`, `name<min, max>`). The two arms
+    # share the same overall directive shape; the parser
+    # detects which form matched by looking at the `class_name`
+    # vs `refinement` capture groups.
     PREDICATE_DIRECTIVE_PATTERN = /
       \A
       rigor:v1:(?<directive>predicate-if-(?:true|false))
       \s+
       (?<target>self|[a-z_][a-zA-Z0-9_]*)
       \s+is\s+
-      (?<negation>~?)
-      (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
+      (?:
+        (?<negation>~?)
+        (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
+        |
+        (?<refinement>[a-z][a-z0-9-]*(?:[\[<][^\]>]*[\]>])?)
+      )
       \s*
       \z
     /x
@@ -119,16 +141,18 @@ module Rigor
 
       directive = match[:directive].to_s
       target = match[:target].to_s
-      class_name = match[:class_name].to_s.sub(/\A::/, "")
       edge = directive == "predicate-if-true" ? :truthy_only : :falsey_only
-      target_kind = target == "self" ? :self : :parameter
-      target_name = target == "self" ? :self : target.to_sym
+      target_kind, target_name = target_fields(target)
+      class_name, refinement_type, negative = resolve_directive_rhs(match)
+      return nil if class_name.nil? && refinement_type.nil?
+
       PredicateEffect.new(
         edge: edge,
         target_kind: target_kind,
         target_name: target_name,
         class_name: class_name,
-        negative: match[:negation].to_s == "~"
+        negative: negative,
+        refinement_type: refinement_type
       )
     end
 
@@ -157,8 +181,12 @@ module Rigor
       \s+
       (?<target>self|[a-z_][a-zA-Z0-9_]*)
       \s+is\s+
-      (?<negation>~?)
-      (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
+      (?:
+        (?<negation>~?)
+        (?<class_name>(?:::)?[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)
+        |
+        (?<refinement>[a-z][a-z0-9-]*(?:[\[<][^\]>]*[\]>])?)
+      )
       \s*
       \z
     /x
@@ -180,16 +208,53 @@ module Rigor
       return nil if condition.nil?
 
       target = match[:target].to_s
-      class_name = match[:class_name].to_s.sub(/\A::/, "")
-      target_kind = target == "self" ? :self : :parameter
-      target_name = target == "self" ? :self : target.to_sym
+      target_kind, target_name = target_fields(target)
+      class_name, refinement_type, negative = resolve_directive_rhs(match)
+      return nil if class_name.nil? && refinement_type.nil?
+
       AssertEffect.new(
         condition: condition,
         target_kind: target_kind,
         target_name: target_name,
         class_name: class_name,
-        negative: match[:negation].to_s == "~"
+        negative: negative,
+        refinement_type: refinement_type
       )
+    end
+
+    # Resolves the `class_name` / `refinement` alternation in
+    # the assert / predicate directive patterns. Returns
+    # `[class_name, refinement_type, negative]`:
+    #
+    # - Class-name arm matched: `class_name` is the resolved
+    #   string (leading `::` stripped), `refinement_type` is
+    #   nil, `negative` reflects the optional `~` prefix.
+    # - Refinement arm matched: `class_name` is nil,
+    #   `refinement_type` is the resolved `Rigor::Type`,
+    #   `negative` is `false` (refinement-form directives do
+    #   not support `~` negation in v0.0.4).
+    # - Refinement payload unparseable: returns
+    #   `[nil, nil, false]` so callers can drop the directive
+    #   silently (fail-soft policy).
+    def resolve_directive_rhs(match)
+      class_capture = match[:class_name]
+      return [class_capture.to_s.sub(/\A::/, ""), nil, match[:negation].to_s == "~"] if class_capture
+
+      refinement_capture = match[:refinement]
+      return [nil, nil, false] if refinement_capture.nil?
+
+      type = Builtins::ImportedRefinements.parse(refinement_capture)
+      return [nil, nil, false] if type.nil?
+
+      [nil, type, false]
+    end
+
+    def target_fields(target)
+      if target == "self"
+        %i[self self]
+      else
+        [:parameter, target.to_sym]
+      end
     end
 
     # Reads the `rigor:v1:return: <kebab-name>` directive off

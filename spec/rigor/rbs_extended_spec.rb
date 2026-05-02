@@ -266,6 +266,42 @@ RSpec.describe Rigor::RbsExtended do
     end
   end
 
+  describe "refinement payloads on assert / predicate-if-* (v0.0.4)" do
+    it "parses an assert directive with a kebab-case refinement payload" do
+      effect = described_class.parse_assert_annotation("rigor:v1:assert value is non-empty-string")
+      expect(effect.refinement?).to be(true)
+      expect(effect.refinement_type).to eq(Rigor::Type::Combinator.non_empty_string)
+      expect(effect.class_name).to be_nil
+      expect(effect).not_to be_negative
+    end
+
+    it "parses an assert-if-true directive with a parameterised payload" do
+      effect = described_class.parse_assert_annotation("rigor:v1:assert-if-true ids is non-empty-array[Integer]")
+      expect(effect.condition).to eq(:if_truthy_return)
+      expect(effect.refinement_type).to eq(
+        Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("Integer"))
+      )
+    end
+
+    it "parses a predicate-if-true directive with a refinement payload" do
+      effect = described_class.parse_predicate_annotation("rigor:v1:predicate-if-true s is lowercase-string")
+      expect(effect.refinement?).to be(true)
+      expect(effect.refinement_type).to eq(Rigor::Type::Combinator.lowercase_string)
+    end
+
+    it "preserves the class-name path for Capitalised RHSes" do
+      effect = described_class.parse_assert_annotation("rigor:v1:assert value is String")
+      expect(effect.refinement?).to be(false)
+      expect(effect.refinement_type).to be_nil
+      expect(effect.class_name).to eq("String")
+    end
+
+    it "drops directives whose refinement payload is unparseable" do
+      expect(described_class.parse_assert_annotation("rigor:v1:assert value is frobinator-string")).to be_nil
+      expect(described_class.parse_predicate_annotation("rigor:v1:predicate-if-true v is uint<0, 5>")).to be_nil
+    end
+  end
+
   describe ".read_param_type_overrides + .param_type_override_map" do
     def with_param_demo
       Dir.mktmpdir do |dir|

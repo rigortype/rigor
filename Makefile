@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json extract-builtin-catalogs
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json extract-builtin-catalogs catalog-diff
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -79,3 +79,13 @@ verify: test lint check
 
 extract-builtin-catalogs:
 	bundle exec ruby tool/extract_builtin_catalog.rb
+
+# Compares two snapshots of a catalog YAML and prints the
+# surface-level diff (added / removed / purity-changed /
+# cfunc-renamed / arity-changed entries). Override BEFORE / AFTER
+# to point at any two YAML files; the defaults assume the operator
+# has stashed a baseline copy at /tmp/before.yml.
+#
+#   make catalog-diff BEFORE=/tmp/before.yml AFTER=data/builtins/ruby_core/time.yml
+catalog-diff:
+	@bundle exec ruby tool/catalog_diff.rb $(BEFORE) $(AFTER)

@@ -7,6 +7,7 @@ require_relative "../builtins/array_catalog"
 require_relative "../builtins/hash_catalog"
 require_relative "../builtins/range_catalog"
 require_relative "../builtins/set_catalog"
+require_relative "../builtins/time_catalog"
 
 module Rigor
   module Inference
@@ -644,7 +645,8 @@ module Rigor
           [Array,   [Builtins::ARRAY_CATALOG,  "Array"]],
           [Hash,    [Builtins::HASH_CATALOG,   "Hash"]],
           [Range,   [Builtins::RANGE_CATALOG,  "Range"]],
-          [::Set,   [Builtins::SET_CATALOG,    "Set"]]
+          [::Set,   [Builtins::SET_CATALOG,    "Set"]],
+          [Time,    [Builtins::TIME_CATALOG,   "Time"]]
         ].freeze
         private_constant :CATALOG_BY_CLASS
 

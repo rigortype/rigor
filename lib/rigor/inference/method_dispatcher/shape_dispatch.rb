@@ -95,6 +95,7 @@ module Rigor
           when Type::HashShape then dispatch_hash_shape(receiver, method_name, args)
           when Type::Nominal then dispatch_nominal_size(receiver, method_name, args)
           when Type::Difference then dispatch_difference(receiver, method_name, args)
+          when Type::Refined then dispatch_refined(receiver, method_name, args)
           end
         end
 
@@ -218,6 +219,55 @@ module Rigor
             return nil unless selectors&.include?(method_name)
 
             Type::Combinator.positive_int
+          end
+
+          # Predicate-subset projections over a `Refined[base,
+          # predicate]` receiver. Today the catalogue is the
+          # String case-normalisation pair: `s.downcase` over a
+          # `lowercase-string` receiver folds to the same
+          # carrier (already lowercase), and `s.upcase` lifts a
+          # `lowercase-string` to `uppercase-string`. Symmetric
+          # rules apply with the predicates swapped. Numeric-
+          # string idempotence over `#downcase` / `#upcase` is
+          # also recognised because a numeric string equals its
+          # own case-normalisation.
+          #
+          # For methods this tier does not have a refinement-
+          # specific rule for, projection delegates to
+          # `dispatch_nominal_size` so size-returning calls on
+          # a `Refined[String, *]` still tighten to
+          # `non_negative_int`.
+          REFINED_STRING_PROJECTIONS = {
+            %i[lowercase downcase] => :refined_self,
+            %i[lowercase upcase] => :uppercase_string,
+            %i[uppercase upcase] => :refined_self,
+            %i[uppercase downcase] => :lowercase_string,
+            %i[numeric downcase] => :refined_self,
+            %i[numeric upcase] => :refined_self
+          }.freeze
+          private_constant :REFINED_STRING_PROJECTIONS
+
+          def dispatch_refined(refined, method_name, args)
+            base = refined.base
+            return nil unless base.is_a?(Type::Nominal)
+
+            if base.class_name == "String" && args.empty?
+              precise = refined_string_projection(refined, method_name)
+              return precise if precise
+            end
+
+            dispatch_nominal_size(base, method_name, args)
+          end
+
+          def refined_string_projection(refined, method_name)
+            handler = REFINED_STRING_PROJECTIONS[[refined.predicate_id, method_name]]
+            return nil unless handler
+
+            case handler
+            when :refined_self then refined
+            when :uppercase_string then Type::Combinator.uppercase_string
+            when :lowercase_string then Type::Combinator.lowercase_string
+            end
           end
 
           def tuple_first(tuple, _method_name, args)

@@ -180,6 +180,66 @@ RSpec.describe Rigor::CLI do
         expect(out).to include("type:    singleton(CliRbsDemoFixture)")
       end
     end
+
+    # v0.0.4: refinement-bearing types render in their kebab-case
+    # canonical spelling (`non-empty-string`, `lowercase-string`,
+    # …) rather than the raw operator form (`String - ""`,
+    # `String & lowercase?`). RBS erasure folds the carrier back to
+    # its base nominal so the round-trip to ordinary RBS stays
+    # observable in the CLI output.
+    # `write_refined_fixture` writes a sig + source pair that
+    # tightens `Klass#method` via a `rigor:v1:return:` annotation.
+    # The source binds the call to a local on line 1 and reads it
+    # on line 2 so type-of can point at the local (whose type the
+    # rvalue has already supplied) — pointing at the call directly
+    # is fragile because the node-locator picks the innermost
+    # enclosing node.
+    def write_refined_fixture(klass:, method:, refinement:)
+      FileUtils.mkdir_p("sig")
+      File.write("sig/refined.rbs", <<~RBS)
+        class #{klass}
+          %a{rigor:v1:return: #{refinement}}
+          def #{method}: () -> ::String
+        end
+      RBS
+      File.write("source.rb", "result = #{klass}.new.#{method}\nresult\n")
+    end
+
+    it "renders Difference carriers in their kebab-case canonical name" do
+      Dir.chdir(tmpdir) do
+        write_refined_fixture(klass: "CliDifferenceDemo", method: "name", refinement: "non-empty-string")
+        status, out, err = run_cli("type-of", "source.rb:2:1")
+
+        expect(err).to eq("")
+        expect(status).to eq(0)
+        expect(out).to include("type:    non-empty-string")
+        expect(out).to include("erased:  String")
+      end
+    end
+
+    it "renders Refined carriers in their kebab-case canonical name" do
+      Dir.chdir(tmpdir) do
+        write_refined_fixture(klass: "CliRefinedDemo", method: "slug", refinement: "lowercase-string")
+        status, out, err = run_cli("type-of", "source.rb:2:1")
+
+        expect(err).to eq("")
+        expect(status).to eq(0)
+        expect(out).to include("type:    lowercase-string")
+        expect(out).to include("erased:  String")
+      end
+    end
+
+    it "carries the kebab-case name through --format=json" do
+      Dir.chdir(tmpdir) do
+        write_refined_fixture(klass: "CliRefinedJsonDemo", method: "code", refinement: "numeric-string")
+        status, out, _err = run_cli("type-of", "--format=json", "source.rb:2:1")
+
+        expect(status).to eq(0)
+        payload = JSON.parse(out)
+        expect(payload["type"]).to eq("numeric-string")
+        expect(payload["erased"]).to eq("String")
+      end
+    end
   end
 
   describe "type-scan" do

@@ -119,6 +119,19 @@ In-progress v0.0.4 surfaces. Two themes so far:
   motivating case; future struct-defined topics (e.g. Process
   status objects) become drop-in additions.
 
+- **CLI `type-of` confirms the kebab-case canonical-name
+  contract.** New regression specs in
+  `spec/rigor/cli_spec.rb` invoke `bundle exec exe/rigor type-of`
+  through the harness over both a `Difference`-backed refinement
+  (`non-empty-string`) and a `Refined`-backed refinement
+  (`lowercase-string`, `numeric-string`), and assert that
+  human-readable text and `--format=json` output both render the
+  refinement in its kebab-case spelling while erasure folds back
+  to the base nominal. No production code changes were needed —
+  the renderer already routes through `Type#describe` and
+  `erase_to_rbs` — but the regression coverage now binds the
+  contract.
+
 ### Changed
 
 - **`MethodDispatcher::ConstantFolding#catalog_for` is table-

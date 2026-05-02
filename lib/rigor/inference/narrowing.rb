@@ -1029,6 +1029,8 @@ module Rigor
         # the effect's `negative?` flag. Shared between
         # predicate-if-* and assert-if-* application paths.
         def narrow_for_effect(current, effect, environment)
+          return effect.refinement_type if effect.respond_to?(:refinement?) && effect.refinement?
+
           if effect.negative?
             narrow_not_class(current, effect.class_name, exact: false, environment: environment)
           else

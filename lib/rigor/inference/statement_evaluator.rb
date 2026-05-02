@@ -894,6 +894,8 @@ module Rigor
       end
 
       def narrow_for_assert_effect(current_type, effect, environment)
+        return effect.refinement_type if effect.refinement?
+
         if effect.negative?
           Narrowing.narrow_not_class(current_type, effect.class_name, exact: false, environment: environment)
         else

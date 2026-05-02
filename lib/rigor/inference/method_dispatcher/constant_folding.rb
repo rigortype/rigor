@@ -9,6 +9,8 @@ require_relative "../builtins/range_catalog"
 require_relative "../builtins/set_catalog"
 require_relative "../builtins/time_catalog"
 require_relative "../builtins/date_catalog"
+require_relative "../builtins/comparable_catalog"
+require_relative "../builtins/enumerable_catalog"
 
 module Rigor
   module Inference

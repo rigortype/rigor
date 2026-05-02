@@ -1556,6 +1556,15 @@ classes:
         - "(untyped object) -> String?"
         rbs_at: references/rbs/core/string.rbs:980
     undefined: []
+  UnicodeNormalize:
+    parent: Module
+    defined_at: references/ruby/string.c:12943
+    includes: []
+    constants: {}
+    aliases: {}
+    instance_methods: {}
+    singleton_methods: {}
+    undefined: []
   Symbol:
     parent: Object
     defined_at: references/ruby/string.c:12956

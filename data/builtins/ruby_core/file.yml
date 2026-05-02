@@ -19,6 +19,15 @@ purity_levels:
     num_funcall*, etc).
   unknown: C body not located in indexed C files.
 classes:
+  FileTest:
+    parent: Module
+    defined_at: references/ruby/file.c:7511
+    includes: []
+    constants: {}
+    aliases: {}
+    instance_methods: {}
+    singleton_methods: {}
+    undefined: []
   File:
     parent: rb_cIO
     defined_at: references/ruby/file.c:7512

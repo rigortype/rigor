@@ -23,18 +23,23 @@ Major surfaces landed:
 - `File` path-manipulation folding gated behind `fold_platform_specific_paths` config (default off, platform-agnostic).
 - ADR-5 (robustness principle) and the OQ1 / OQ2 / OQ3 working decisions in ADR-3.
 
-## v0.0.4 — Next Preview (planned)
+## v0.0.4 — Next Preview (in progress)
 
 Theme: **finish the refinement carrier system and broaden built-in coverage**. The OQ3 second-half slice plus the next wave of CRuby class imports.
 
-Planned surfaces:
+Landed so far (see `CHANGELOG.md` `[Unreleased]` for the full bullet list):
 
-- **`Type::Refined` carrier (OQ3 predicate-subset half).** Predicate-defined refinements (`lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`). Predicate registry, plugin extension surface (ADR-2), canonical-name registry entries, fold rules per predicate.
+- ✅ **`Type::Refined` carrier (OQ3 predicate-subset half).** Six imported built-in predicate refinements ship with the carrier — `lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`. Predicate registry (`Type::Refined::PREDICATES`), canonical-name registry, per-predicate fold rules, and gradual-mode acceptance all in place. Plugin extension surface (ADR-2) stays deferred to v0.1.0.
+- ✅ **Hash / Range / Set built-in catalog imports.** The constant-fold dispatcher routes through `HASH_CATALOG` / `RANGE_CATALOG` / `SET_CATALOG`. The extractor learned `rb_struct_define_without_accessor` along the way; `MethodDispatcher::ConstantFolding#catalog_for` is now table-driven so further imports cost one row.
+
+Still planned:
+
+- **`type-of` CLI canonical-name display verification.** Confirm `bundle exec exe/rigor type-of …` renders refinement-bearing types in their kebab-case spelling (`non-empty-string`, `lowercase-string`, …) rather than the raw operator form.
 - **Parameterised refinement tokeniser.** Read `non-empty-array[Integer]`, `int<5, 10>`, `non-empty-hash[Symbol, Integer]` from `RBS::Extended` annotations.
 - **`rigor:v1:param:` and `rigor:v1:assert:` directives.** The annotation parser already accepts the syntax surface; v0.0.4 adds the dispatcher tier wiring symmetric to the `return:` route landed in v0.0.3.
-- **Built-in catalog imports for the next wave of core classes.** Hash, Range, Set, Enumerable, Comparable, Time, Date, DateTime. The procedure is recorded in [`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md) — each new class follows the same nine-stage flow.
+- **`Type::Intersection` for composed refinement names** (`non-empty-lowercase-string`, `non-empty-uppercase-string`). Smallest sound algebra over same-base `Difference` + `Refined`.
+- **Further built-in catalog imports.** Enumerable, Comparable, Time, Date, DateTime follow the same nine-stage flow recorded in [`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md).
 - **Enumerable-aware block-parameter typing.** A single tier that knows `each` / `map` / `select` / `reduce` / `each_with_index` etc. yield element types over Array / Hash / Range / Set / IO line iteration. Today's iterator dispatch is Integer-only and hardcoded; v0.0.4 generalises through the new mechanism.
-- **`type-of` CLI canonical-name display.** Confirm `bundle exec exe/rigor type-of …` renders refinement-bearing types in their kebab-case spelling (`non-empty-string`, not `String - ""`).
 
 Stretch surfaces (land if cheap, defer if expensive):
 

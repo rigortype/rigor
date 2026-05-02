@@ -7,57 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+In-progress v0.0.4 surfaces. Two themes so far:
+
+1. **OQ3 predicate-subset refinements.** `Type::Refined` carrier
+   plus the first six imported built-in predicate names, end-to-end
+   with `RBS::Extended`'s `rigor:v1:return:` directive, the
+   acceptance tier, and the case-fold projection pair.
+2. **Hash / Range / Set built-in catalog imports.** Three more core
+   classes feed the constant-fold dispatcher; the extractor learned
+   to recognise struct-defined registrations along the way.
+
 ### Added
+
+#### `Type::Refined` carrier and the predicate catalogue
 
 - **`Type::Refined` carrier (OQ3 predicate-subset half).** Sibling
   of `Type::Difference`, wraps `(base, predicate_id)` where
   `predicate_id` is a Symbol drawn from `Type::Refined::PREDICATES`.
-  The first three imported built-in predicate refinements ship with
-  the carrier: `lowercase-string`, `uppercase-string`, and
-  `numeric-string`. Construction goes through
-  `Type::Combinator.lowercase_string` /
-  `Combinator.uppercase_string` / `Combinator.numeric_string` /
-  `Combinator.refined(base, predicate_id)`. RBS erasure folds the
-  carrier back to its base nominal so the round-trip to ordinary
-  RBS is unaffected.
+  Construction goes through `Type::Combinator.refined(base,
+  predicate_id)` and the per-name factories listed below. RBS
+  erasure folds the carrier back to its base nominal so the
+  round-trip to ordinary RBS is unaffected.
+- **Six imported built-in predicate refinements.** `lowercase-string`,
+  `uppercase-string`, `numeric-string`, `decimal-int-string`,
+  `octal-int-string`, and `hex-int-string` ship with the carrier.
+  `:numeric` matches plain decimal integer or fraction strings;
+  `:decimal_int` matches one or more decimal digits with an optional
+  leading sign; `:octal_int` and `:hex_int` REQUIRE their
+  conventional prefix (`0o` / `0O` / leading `0`; `0x` / `0X`),
+  so they are disjoint from `:decimal_int` — a bare `"755"` is a
+  decimal-int-string, not an octal-int-string. Each name is
+  resolvable through `Type::Combinator.<name>_string` and through
+  `Builtins::ImportedRefinements`.
 - **`Builtins::ImportedRefinements` knows the predicate-subset
-  shapes.** `lowercase-string`, `uppercase-string`, and
-  `numeric-string` resolve through the same registry the
-  point-removal half uses, so `RBS::Extended`'s
+  shapes.** All six kebab-case names resolve through the same
+  registry the point-removal half uses, so `RBS::Extended`'s
   `rigor:v1:return: lowercase-string` directive tightens a method's
   RBS-declared `String` return to the precise refinement at every
   call site.
-- **Catalog-tier projections for case-fold idempotence.**
-  `String#downcase` over `Refined[String, :lowercase]` folds to the
-  same carrier; `String#upcase` lifts a `lowercase-string` to
-  `uppercase-string` (and the symmetric pair). `numeric-string`
-  preserves itself across both `#downcase` and `#upcase` (digits
-  are case-invariant). Size-tier projections still apply through
-  the predicate carrier so `String#size` / `String#length` over a
-  `Refined[String, *]` tightens to `non-negative-int`.
+- **Catalog-tier projections over a `Refined[String, …]` receiver.**
+  `String#downcase` / `String#upcase` fold per predicate:
+  case-fold idempotence for `:lowercase` / `:uppercase` /
+  `:numeric` and the three base-N int-string predicates, plus the
+  lift `lowercase ↔ uppercase` for the cross calls. Size-tier
+  projections still apply through the predicate carrier so
+  `String#size` / `String#length` over a `Refined[String, *]`
+  tightens to `non-negative-int`.
 - **Acceptance rule for `Refined`.** Gradual mode mirrors the
   conservative `accepts_difference` policy: a `Refined[base, p]`
   accepts another `Refined` with the same predicate, a `Constant`
-  whose value the predicate's recogniser accepts, and rejects every
-  other shape. Rejection diagnostics name the predicate so debug
-  output is readable.
+  whose value the predicate's recogniser accepts, and rejects
+  every other shape. Each branch projects through to the right
+  base type before consulting the predicate, so the inner base
+  acceptance call sees Nominal-vs-Nominal (or Constant) instead of
+  hitting `accepts_nominal`'s default `else` arm.
 - **`spec/integration/fixtures/predicate_refinement/`.** Self-
   asserting fixture mirroring `refinement_return_override/`,
   proving the kebab-case display, the `RBS::Extended return:`
-  override route, and the case-fold projection pair end-to-end.
-- **Base-N int-string predicate refinements.** `decimal-int-string`,
-  `octal-int-string`, and `hex-int-string` join the predicate
-  catalogue. `:decimal_int` accepts one or more decimal digits with
-  an optional leading sign; `:octal_int` and `:hex_int` REQUIRE
-  their conventional prefix (`0o` / `0O` / leading `0` for octal;
-  `0x` / `0X` for hex), so the predicates are disjoint from
-  `decimal-int-string` — a bare `"755"` is a decimal-int-string,
-  not an octal-int-string. Each predicate is resolvable through
-  `Builtins::ImportedRefinements` and through
-  `Type::Combinator.decimal_int_string` / `.octal_int_string` /
-  `.hex_int_string`. The case-fold projection pair preserves all
-  three predicates over `String#downcase` / `String#upcase`.
-- **`Hash` built-in catalog imported from `Init_Hash`.** A new
+  override route, and the case-fold projection pair end-to-end
+  for all six predicates.
+
+#### Built-in catalog imports
+
+- **`Hash` joins the catalog-driven inference pipeline.** A new
   `data/builtins/ruby_core/hash.yml` is generated from
   `references/ruby/hash.c` by `tool/extract_builtin_catalog.rb`
   and consumed by `Builtins::HASH_CATALOG`, which the constant-
@@ -68,49 +80,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:leaf` despite dispatching through `rb_hash_foreach` (`each` /
   `each_pair` / `each_key` / `each_value` / `select` / `filter` /
   `reject` / `transform_values` / `merge`) are blocklisted so a
-  `Constant<Hash>` carrier cannot fold through them.
-- **`spec/integration/fixtures/hash_catalog.rb`.** Self-
-  asserting fixture covering the `HashShape` literal lookup
-  path, the `Nominal[Hash]` size-projection tier (`size` /
-  `length` → `non-negative-int`), and a Hash mutator path that
-  RBS-widens correctly without materialising a phantom
-  `Constant<Hash>`.
+  `Constant<Hash>` carrier cannot fold through them. Self-
+  asserting fixture: `spec/integration/fixtures/hash_catalog.rb`.
 - **`Range` joins the catalog-driven inference pipeline.**
-  `Init_Range` is now extracted into
-  `data/builtins/ruby_core/range.yml` (30 instance methods);
-  `Builtins::RANGE_CATALOG` consumes it and the constant-fold
-  dispatcher routes `Constant<Range>` receivers through it.
-  Methods that fold today on a `(begin..end)` literal include
-  `#begin`, `#end`, `#size`, `#exclude_end?`, `#include?`,
+  `Init_Range` is extracted into `data/builtins/ruby_core/range.yml`
+  (30 instance methods); `Builtins::RANGE_CATALOG` consumes it and
+  the constant-fold dispatcher routes `Constant<Range>` receivers
+  through it. Methods that fold today on a `(begin..end)` literal
+  include `#begin`, `#end`, `#size`, `#exclude_end?`, `#include?`,
   `#cover?`, and `#member?`. `#==`, `#eql?`, `#last`, and
   `#bsearch` stay catalog-classified `dispatch` because their C
-  bodies route through user-redefinable `==` / `<=>`. The block-
-  iterating surface (`#each`, `#step`, `#first`, `#min`, `#max`,
-  `#minmax`, `#count`) classifies as `block_dependent` and is
-  blocked by the foldable-purity check; `#reverse_each` and `#%`
-  are blocklisted explicitly because the C-body classifier mis-
-  flags them as `:leaf`. `Range#size` on a `Nominal[Range]`
+  bodies route through user-redefinable `==` / `<=>`. The
+  block-iterating surface (`#each`, `#step`, `#first`, `#min`,
+  `#max`, `#minmax`, `#count`) classifies as `block_dependent`
+  and is blocked by the foldable-purity check; `#reverse_each` and
+  `#%` are blocklisted explicitly because the C-body classifier
+  mis-flags them as `:leaf`. `Range#size` on a `Nominal[Range]`
   receiver continues to tighten to `non-negative-int` via
   `SIZE_RETURNING_NOMINALS`.
+- **`Set` joins the catalog-driven inference pipeline.** A new
+  `data/builtins/ruby_core/set.yml` is generated from `Init_Set`
+  in `references/ruby/set.c` (Set was rewritten in C and folded
+  into CRuby for Ruby 3.2+, so the catalog reads the same way as
+  String / Array). `MethodDispatcher::ConstantFolding#catalog_for`
+  now routes `Set` receivers through `Builtins::SET_CATALOG`.
+  The per-class blocklist drops false-positive `:leaf`
+  classifications for the indirect mutators (`initialize_copy`,
+  `compare_by_identity`, `reset`), the block-yielding helpers
+  (`each`, `classify`, `divide`), and `disjoint?` (which
+  delegates through `set_i_intersect`'s user-redefinable
+  dispatch path). `Set#size` / `#length` / `#count` keep
+  tightening through the existing `SIZE_RETURNING_NOMINALS`
+  projection.
 - **`tool/extract_builtin_catalog.rb` recognises
   `rb_struct_define_without_accessor`.** The init-region scanner
   now joins multi-line statements before regex matching, and a
   new `STRUCT_DEFINE_RE` registers the host class. Range was the
   motivating case; future struct-defined topics (e.g. Process
   status objects) become drop-in additions.
-- **`Set` joins the catalog-driven inference pipeline.** A new
-  `data/builtins/ruby_core/set.yml` is generated from `Init_Set`
-  in `references/ruby/set.c` (Set was rewritten in C and folded
-  into CRuby for Ruby 3.2+, so the catalog reads the same way as
-  String / Array). `MethodDispatcher::ConstantFolding#catalog_for`
-  now routes `Set` receivers through `Builtins::SET_CATALOG`. The
-  per-class blocklist drops false-positive `:leaf` classifications
-  for the indirect mutators (`initialize_copy`,
-  `compare_by_identity`, `reset`), the block-yielding helpers
-  (`each`, `classify`, `divide`), and `disjoint?` (which delegates
-  through `set_i_intersect`'s user-redefinable dispatch path).
-  `Set#size` / `#length` / `#count` keep tightening through the
-  existing `SIZE_RETURNING_NOMINALS` projection.
+
+### Changed
+
+- **`MethodDispatcher::ConstantFolding#catalog_for` is table-
+  driven.** A `CATALOG_BY_CLASS` array of
+  `(receiver_class, [catalog, class_name])` pairs replaces the
+  growing `case` statement. Adding a class catalog is now a
+  one-line addition rather than another `when` arm, and the
+  dispatcher's cyclomatic complexity stays bounded as the
+  catalogue grows.
 
 ## [0.0.3] - 2026-05-02
 

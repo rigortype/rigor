@@ -38,6 +38,31 @@ RSpec.describe Rigor::Inference::Builtins::MethodCatalog do
         expect(catalog.safe_for_folding?("Array", sel)).to be(false)
       end
     end
+
+    it "HASH_CATALOG approves pure Hash readers (size, [], include?, dig, …)" do
+      catalog = Rigor::Inference::Builtins::HASH_CATALOG
+      %i[size length empty? [] include? has_key? has_value? dig invert compact].each do |sel|
+        expect(catalog.safe_for_folding?("Hash", sel)).to be(true)
+      end
+    end
+
+    it "HASH_CATALOG blocks block-yielding leaves classified as :leaf by the C-body heuristic" do
+      catalog = Rigor::Inference::Builtins::HASH_CATALOG
+      # `each*` / `select` / `filter` / `reject` / `transform_values` /
+      # `merge` all dispatch through `rb_hash_foreach` (or yield via a
+      # static callback) — the regex-based classifier marks them as
+      # `:leaf` despite being block-dependent.
+      %i[each each_pair each_key each_value select filter reject transform_values merge].each do |sel|
+        expect(catalog.safe_for_folding?("Hash", sel)).to be(false)
+      end
+    end
+
+    it "HASH_CATALOG blocks bang-suffixed mutators (compact!, select!, merge!, …)" do
+      catalog = Rigor::Inference::Builtins::HASH_CATALOG
+      %i[compact! select! reject! filter! transform_keys! transform_values! merge!].each do |sel|
+        expect(catalog.safe_for_folding?("Hash", sel)).to be(false)
+      end
+    end
   end
 
   describe "blocklist semantics" do

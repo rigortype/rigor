@@ -57,6 +57,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Type::Combinator.decimal_int_string` / `.octal_int_string` /
   `.hex_int_string`. The case-fold projection pair preserves all
   three predicates over `String#downcase` / `String#upcase`.
+- **`Hash` built-in catalog imported from `Init_Hash`.** A new
+  `data/builtins/ruby_core/hash.yml` is generated from
+  `references/ruby/hash.c` by `tool/extract_builtin_catalog.rb`
+  and consumed by `Builtins::HASH_CATALOG`, which the constant-
+  fold dispatcher now consults for `Hash` receivers. Pure readers
+  (`size` / `length` / `[]` / `include?` / `dig` / `invert` /
+  `compact` / `<=` / `<` / `>=` / `>` / …) clear the catalog
+  tier; block-yielding leaves the C-body classifier marked
+  `:leaf` despite dispatching through `rb_hash_foreach` (`each` /
+  `each_pair` / `each_key` / `each_value` / `select` / `filter` /
+  `reject` / `transform_values` / `merge`) are blocklisted so a
+  `Constant<Hash>` carrier cannot fold through them.
+- **`spec/integration/fixtures/hash_catalog.rb`.** Self-
+  asserting fixture covering the `HashShape` literal lookup
+  path, the `Nominal[Hash]` size-projection tier (`size` /
+  `length` → `non-negative-int`), and a Hash mutator path that
+  RBS-widens correctly without materialising a phantom
+  `Constant<Hash>`.
 
 ## [0.0.3] - 2026-05-02
 

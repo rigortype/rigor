@@ -393,6 +393,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/date_catalog/ — Date / DateTime catalog-driven folding" do
+    let(:harness) { harness_for("date_catalog") }
+
+    it "self-asserts the Date / DateTime reader and navigation surface" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   # The fixtures below carry both an `assert_type` self-check
   # (so the file is readable as documentation) and the
   # finer-grained `harness.local` assertions above. The shared

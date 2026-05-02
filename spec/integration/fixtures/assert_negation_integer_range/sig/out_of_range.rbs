@@ -1,0 +1,8 @@
+class OutOfRange
+  %a{rigor:v1:assert n is ~int<5, 10>}
+  def assert_outside!: (::Integer n) -> void
+end
+
+class IntSink
+  def visit: (::Integer n) -> void
+end

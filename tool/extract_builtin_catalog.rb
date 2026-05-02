@@ -214,6 +214,26 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/ext/date/date_core.c],
     output_path: "data/builtins/ruby_core/date.yml"
+  },
+  "comparable" => {
+    init_function: "Init_Comparable",
+    ruby_c_path: "references/ruby/compar.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Comparable" => "references/rbs/core/comparable.rbs"
+    },
+    c_index_paths: %w[references/ruby/compar.c],
+    output_path: "data/builtins/ruby_core/comparable.yml"
+  },
+  "enumerable" => {
+    init_function: "Init_Enumerable",
+    ruby_c_path: "references/ruby/enum.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Enumerable" => "references/rbs/core/enumerable.rbs"
+    },
+    c_index_paths: %w[references/ruby/enum.c],
+    output_path: "data/builtins/ruby_core/enumerable.yml"
   }
 }.freeze
 
@@ -223,6 +243,11 @@ TOPICS = {
 
 class CInitParser
   CLASS_DEFINE_RE = /^\s*(\w+)\s*=\s*rb_define_class\(\s*"([^"]+)"\s*,\s*(\w+)\s*\)\s*;/
+  # `rb_mFoo = rb_define_module("Foo");` — module registration. Modules
+  # have no parent class, so the captured field reduces to a one-arg
+  # form. Recorded with `parent: "Module"` so downstream tools that
+  # iterate `classes` get a stable parent slot.
+  MODULE_DEFINE_RE = /^\s*(\w+)\s*=\s*rb_define_module\(\s*"([^"]+)"\s*\)\s*;/
   # Range/Struct-style class registration. The first arg is the class name,
   # the second is the parent (a `rb_c*` global), the rest are the struct
   # accessor names which we ignore. Multi-line forms are joined into a
@@ -265,6 +290,7 @@ class CInitParser
 
     region.each do |lineno, line|
       next if class_definition(line, lineno, var_to_class, classes)
+      next if module_definition(line, lineno, var_to_class, classes)
       next if struct_definition(line, lineno, var_to_class, classes)
       next if method_definition(line, lineno, var_to_class, methods)
       next if singleton_definition(line, lineno, var_to_class, methods)
@@ -380,6 +406,20 @@ class CInitParser
     var, name, parent_var = m.captures
     var_to_class[var] = name
     classes[name] = { "parent" => var_to_class.fetch(parent_var, parent_var), "defined_at" => loc(lineno) }
+    true
+  end
+
+  # `rb_mFoo = rb_define_module("Foo")` — Comparable / Enumerable
+  # / Kernel / etc. live here. Modules have no class parent;
+  # downstream readers that iterate `classes` get `"Module"` as
+  # the stable parent slot so the per-class shape stays uniform
+  # with class entries.
+  def module_definition(line, lineno, var_to_class, classes)
+    return false unless (m = line.match(MODULE_DEFINE_RE))
+
+    var, name = m.captures
+    var_to_class[var] = name
+    classes[name] = { "parent" => "Module", "defined_at" => loc(lineno) }
     true
   end
 

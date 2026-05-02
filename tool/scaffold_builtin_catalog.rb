@@ -33,6 +33,10 @@
 #   --rbs PATH          RBS sig file (default: references/rbs/core/<topic>.rbs)
 #   --init-fn NAME      Init function name (default: "Init_<ClassName>")
 #   --rb-global SYM     `rb_c*` / `rb_m*` global to register in BASE_CLASS_VARS
+#   --module            CLASS_NAME is a module (Comparable, Enumerable, …)
+#                       — skip the `CATALOG_BY_CLASS` row (modules are not
+#                       receiver classes the dispatcher routes through)
+#                       and emit a different placeholder fixture banner.
 #   --extract           Run `make extract-builtin-catalogs` after scaffolding
 #   --dry-run           Print planned actions without writing
 #   -h / --help         Show this banner
@@ -52,6 +56,7 @@ options = {
   rbs_path: nil,
   init_fn: nil,
   rb_global: nil,
+  module_kind: false,
   extract: false,
   dry_run: false
 }
@@ -63,6 +68,7 @@ parser = OptionParser.new do |opts|
   opts.on("--rbs PATH") { |v| options[:rbs_path] = v }
   opts.on("--init-fn NAME") { |v| options[:init_fn] = v }
   opts.on("--rb-global SYM") { |v| options[:rb_global] = v }
+  opts.on("--module") { options[:module_kind] = true }
   opts.on("--extract") { options[:extract] = true }
   opts.on("--dry-run") { options[:dry_run] = true }
   opts.on("-h", "--help") do
@@ -179,43 +185,80 @@ ENTRY
 
 base_class_vars_row = rb_global ? %(  "#{rb_global}" => "#{class_name}") : nil
 
-loader_template = <<~RUBY
-  # frozen_string_literal: true
-
-  require_relative "method_catalog"
-
-  module Rigor
-    module Inference
-      module Builtins
-        # `#{class_name}` catalog. Singleton — load once, consult during
-        # dispatch.
-        #
-        # TODO(blocklist curation): read
-        # `data/builtins/ruby_core/#{topic}.yml` and add per-method
-        # blocklist entries for any `:leaf` classifications that are
-        # actually mutators or otherwise unsafe to fold. Each entry
-        # SHOULD carry a one-line comment naming the indirect mutator
-        # helper that triggered the false positive (see
-        # `string_catalog.rb`, `array_catalog.rb`, `time_catalog.rb`
-        # for the canonical shape).
-        #{class_name.upcase}_CATALOG = MethodCatalog.new(
-          path: File.expand_path(
-            "../../../../data/builtins/ruby_core/#{topic}.yml",
-            __dir__
-          ),
-          mutating_selectors: {
-            "#{class_name}" => Set[
-              # initialize_copy is blocklisted by convention so a
-              # hypothetical future `Constant<#{class_name}>` carrier
-              # cannot fold an aliasing copy through the catalog.
-              :initialize_copy
-            ]
-          }
-        )
-      end
-    end
+loader_header_lines =
+  if options[:module_kind]
+    [
+      "      # `#{class_name}` module catalog. Singleton — load once.",
+      "      #",
+      "      # `#{class_name}` is a Ruby module, not a class, so the",
+      "      # catalog is NOT routed through",
+      "      # `MethodDispatcher::ConstantFolding::CATALOG_BY_CLASS`",
+      "      # (which dispatches on the receiver's concrete class).",
+      "      # The data is consumed by future include-aware lookup —",
+      "      # see `docs/CURRENT_WORK.md` for the planned slice."
+    ]
+  else
+    [
+      "      # `#{class_name}` catalog. Singleton — load once, consult during",
+      "      # dispatch.",
+      "      #",
+      "      # TODO(blocklist curation): read",
+      "      # `data/builtins/ruby_core/#{topic}.yml` and add per-method",
+      "      # blocklist entries for any `:leaf` classifications that are",
+      "      # actually mutators or otherwise unsafe to fold. Each entry",
+      "      # SHOULD carry a one-line comment naming the indirect mutator",
+      "      # helper that triggered the false positive (see",
+      "      # `string_catalog.rb`, `array_catalog.rb`, `time_catalog.rb`",
+      "      # for the canonical shape)."
+    ]
   end
-RUBY
+
+blocklist_inner_lines =
+  if options[:module_kind]
+    []
+  else
+    [
+      "          # initialize_copy is blocklisted by convention so a",
+      "          # hypothetical future `Constant<#{class_name}>` carrier",
+      "          # cannot fold an aliasing copy through the catalog.",
+      "          :initialize_copy"
+    ]
+  end
+
+blocklist_block_lines =
+  if blocklist_inner_lines.empty?
+    ["          \"#{class_name}\" => Set[]"]
+  else
+    [
+      "          \"#{class_name}\" => Set[",
+      *blocklist_inner_lines,
+      "          ]"
+    ]
+  end
+
+loader_template = ([
+  "# frozen_string_literal: true",
+  "",
+  "require_relative \"method_catalog\"",
+  "",
+  "module Rigor",
+  "  module Inference",
+  "    module Builtins"
+] + loader_header_lines + [
+  "      #{class_name.upcase}_CATALOG = MethodCatalog.new(",
+  "        path: File.expand_path(",
+  "          \"../../../../data/builtins/ruby_core/#{topic}.yml\",",
+  "          __dir__",
+  "        ),",
+  "        mutating_selectors: {",
+  *blocklist_block_lines,
+  "        }",
+  "      )",
+  "    end",
+  "  end",
+  "end",
+  ""
+]).join("\n")
 
 fixture_template = <<~RUBY
   require "rigor/testing"
@@ -278,15 +321,23 @@ end
 # 2. Loader file
 write_file!(LOADER_PATH, loader_template, dry_run: dry_run)
 
-# 3. require_relative + CATALOG_BY_CLASS row
+# 3. require_relative + (when --module is NOT set) CATALOG_BY_CLASS row
 edit_file!(DISPATCHER_PATH, dry_run: dry_run) do |body|
   next body if body.include?("Builtins::#{CATALOG_CONST}")
 
-  # Add the require_relative line next to the others.
+  # Add the require_relative line next to the others. Both class
+  # and module catalogs need this so the constant exists at boot.
   body = body.sub(
     /(require_relative "\.\.\/builtins\/[a-z_]+_catalog"\n)(?!require_relative "\.\.\/builtins\/[a-z_])/,
     "\\1require_relative \"../builtins/#{topic}_catalog\"\n"
   )
+
+  # Module catalogs (`--module`) are not receiver classes, so the
+  # constant-fold dispatcher does not route through them today.
+  # The require_relative above keeps the singleton reachable for
+  # future include-aware lookup; the CATALOG_BY_CLASS row stays
+  # absent.
+  next body if options[:module_kind]
 
   # Append the CATALOG_BY_CLASS row before the closing bracket.
   # The exact column padding inside each row is hand-aligned;
@@ -298,15 +349,21 @@ edit_file!(DISPATCHER_PATH, dry_run: dry_run) do |body|
   end
 end
 
-# 4. Fixture file
-write_file!(FIXTURE_PATH, fixture_template, dry_run: dry_run)
+# 4. Fixture file (skipped under --module — module catalogs are
+#    not currently dispatched through, so a fixture would have
+#    no observable behaviour to assert against).
+unless options[:module_kind]
+  write_file!(FIXTURE_PATH, fixture_template, dry_run: dry_run)
+end
 
 # 5. Integration describe block — append before the last `end` of the
-#    outer RSpec.describe.
-edit_file!(INTEGRATION_SPEC_PATH, dry_run: dry_run) do |body|
-  next body if body.include?("fixtures/#{topic}_catalog.rb")
+#    outer RSpec.describe. Skipped under --module for the same reason.
+unless options[:module_kind]
+  edit_file!(INTEGRATION_SPEC_PATH, dry_run: dry_run) do |body|
+    next body if body.include?("fixtures/#{topic}_catalog.rb")
 
-  body.sub(/(\n  end\nend\n)\z/) { "\n#{integration_describe}#{::Regexp.last_match(1)}" }
+    body.sub(/(\n  end\nend\n)\z/) { "\n#{integration_describe}#{::Regexp.last_match(1)}" }
+  end
 end
 
 # 6. Optionally run the extractor for the new topic.
@@ -323,19 +380,38 @@ end
 # Final checklist
 # ---------------------------------------------------------------------
 
-puts <<~CHECKLIST
+if options[:module_kind]
+  puts <<~CHECKLIST
 
-  Done.#{" Now run the manual follow-ups:" unless options[:extract]}
+    Done (module mode).
 
-    1. #{options[:extract] ? "Inspect data/builtins/ruby_core/#{topic}.yml — read the classifications and curate" : "Run `make extract-builtin-catalogs` to generate data/builtins/ruby_core/#{topic}.yml, then curate"}
-       the blocklist in #{LOADER_PATH} (mark
-       any false-positive `:leaf` classifications with a one-line
-       comment naming the indirect mutator helper).
-    2. Replace the placeholder `assert_type` lines in
-       #{FIXTURE_PATH} with receiver-specific
-       projections that exercise the new catalog.
-    3. Add a [Unreleased] bullet to CHANGELOG.md describing the
-       user-visible additions (mirror the Hash / Range / Set / Time
-       bullet shape).
-    4. Run `make verify` and commit.
-CHECKLIST
+      1. #{options[:extract] ? "Inspect data/builtins/ruby_core/#{topic}.yml — verify" : "Run `make extract-builtin-catalogs` to generate data/builtins/ruby_core/#{topic}.yml, then verify"}
+         the method classifications. Module catalogs do not feed
+         `MethodDispatcher::ConstantFolding::CATALOG_BY_CLASS`
+         today; the data is loaded as a singleton via
+         `require_relative` so a future include-aware lookup can
+         consult it.
+      2. Add a [Unreleased] bullet to CHANGELOG.md describing
+         the catalog import (e.g. "X imported built-in module
+         catalog landed; YAML is consumed by the future
+         include-aware dispatcher").
+      3. Run `make verify` and commit.
+  CHECKLIST
+else
+  puts <<~CHECKLIST
+
+    Done.#{" Now run the manual follow-ups:" unless options[:extract]}
+
+      1. #{options[:extract] ? "Inspect data/builtins/ruby_core/#{topic}.yml — read the classifications and curate" : "Run `make extract-builtin-catalogs` to generate data/builtins/ruby_core/#{topic}.yml, then curate"}
+         the blocklist in #{LOADER_PATH} (mark
+         any false-positive `:leaf` classifications with a one-line
+         comment naming the indirect mutator helper).
+      2. Replace the placeholder `assert_type` lines in
+         #{FIXTURE_PATH} with receiver-specific
+         projections that exercise the new catalog.
+      3. Add a [Unreleased] bullet to CHANGELOG.md describing the
+         user-visible additions (mirror the Hash / Range / Set / Time
+         bullet shape).
+      4. Run `make verify` and commit.
+  CHECKLIST
+end

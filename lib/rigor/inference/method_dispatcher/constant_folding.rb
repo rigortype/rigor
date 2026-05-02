@@ -4,6 +4,7 @@ require_relative "../../type"
 require_relative "../builtins/numeric_catalog"
 require_relative "../builtins/string_catalog"
 require_relative "../builtins/array_catalog"
+require_relative "../builtins/set_catalog"
 
 module Rigor
   module Inference
@@ -636,6 +637,7 @@ module Rigor
           when String  then [Builtins::STRING_CATALOG, "String"]
           when Symbol  then [Builtins::STRING_CATALOG, "Symbol"]
           when Array   then [Builtins::ARRAY_CATALOG,  "Array"]
+          when ::Set   then [Builtins::SET_CATALOG,    "Set"]
           end
         end
 

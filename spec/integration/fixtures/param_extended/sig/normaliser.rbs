@@ -1,0 +1,4 @@
+class Normaliser
+  %a{rigor:v1:param: id is non-empty-string}
+  def normalise: (::String id) -> String
+end

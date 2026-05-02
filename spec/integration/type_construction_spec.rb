@@ -277,6 +277,19 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/param_extended/ — RBS::Extended rigor:v1:param: directive" do
+    let(:harness) { harness_for("param_extended") }
+
+    it "flags exactly the call site whose argument fails the refinement (suppression verifies identification)" do
+      # The fixture uses `# rigor:disable argument-type-mismatch`
+      # on the offending call, so a clean run proves both that
+      # the rule fired against the override AND that the
+      # suppression-comment matches.
+      arg_errors = harness.errors.select { |d| d.message.start_with?("argument type mismatch") }
+      expect(arg_errors).to be_empty
+    end
+  end
+
   describe "fixtures/string_array_catalog.rb — String/Symbol/Array catalog-driven folding" do
     let(:harness) { harness_for("string_array_catalog") }
 

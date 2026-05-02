@@ -42,5 +42,16 @@ module Rigor
 
     def self?.read_return_type_override: (untyped method_def) -> Type::t?
     def self?.parse_return_type_override: (String string) -> Type::t?
+
+    class ParamOverride
+      attr_reader param_name: Symbol
+      attr_reader type: Type::t
+
+      def self.new: (param_name: Symbol, type: Type::t) -> ParamOverride
+    end
+
+    def self?.read_param_type_overrides: (untyped method_def) -> Array[ParamOverride]
+    def self?.param_type_override_map: (untyped method_def) -> Hash[Symbol, Type::t]
+    def self?.parse_param_annotation: (String string) -> ParamOverride?
   end
 end

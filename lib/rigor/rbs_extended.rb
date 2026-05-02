@@ -263,5 +263,82 @@ module Rigor
 
       Builtins::ImportedRefinements.parse(match[:payload])
     end
+
+    # Returned for `rigor:v1:param: <name> <refinement>`. The
+    # parameter name is a Ruby identifier (Symbol); the type
+    # is any `Rigor::Type` the refinement parser resolves
+    # (bare kebab-case name, parameterised form, or `int<...>`
+    # range — the same grammar the `return:` directive
+    # accepts).
+    ParamOverride = Data.define(:param_name, :type)
+
+    # Reads every `rigor:v1:param: <name> <refinement>`
+    # directive off `RBS::Definition::Method#annotations` and
+    # returns the resolved `ParamOverride` list. Annotations
+    # the parser cannot resolve (typo, unknown refinement, no
+    # `param:` directive at all) are silently dropped — the
+    # call site keeps the RBS-declared parameter type for
+    # those parameters. The reader accepts a nil method
+    # definition so call sites can pass through optional
+    # method lookups without a guard.
+    #
+    # Example annotation in an RBS file:
+    #
+    #   class Slug
+    #     %a{rigor:v1:param: id is non-empty-string}
+    #     def normalise: (::String id) -> String
+    #   end
+    #
+    # The RBS-declared type of `id` is `String`. The override
+    # tightens it to `non-empty-string` for argument-check
+    # purposes; passing a too-wide `Nominal[String]` argument
+    # is flagged as an argument-type mismatch at the call
+    # site.
+    def read_param_type_overrides(method_def)
+      return [] if method_def.nil?
+
+      annotations = method_def.annotations
+      return [] if annotations.nil? || annotations.empty?
+
+      annotations.filter_map { |annotation| parse_param_annotation(annotation.string) }
+    end
+
+    # Convenience reader for call sites that want to look up
+    # a single override by parameter name. Returns a frozen
+    # Hash<Symbol, Rigor::Type>; missing keys mean "use the
+    # RBS-declared type". Callers MUST treat the hash as
+    # read-only.
+    def param_type_override_map(method_def)
+      read_param_type_overrides(method_def).to_h { |o| [o.param_name, o.type] }.freeze
+    end
+
+    # The `is` glue word is optional so authors can write
+    # either `param: id is non-empty-string` (consistent with
+    # the existing `assert` / `predicate-if-*` directives) or
+    # the terser `param: id non-empty-string`. The trailing
+    # payload accepts the full refinement grammar in
+    # `Builtins::ImportedRefinements::Parser`.
+    PARAM_DIRECTIVE_PATTERN = /
+      \A
+      rigor:v1:param:
+      \s+
+      (?<param>[a-z_][a-zA-Z0-9_]*)
+      \s+
+      (?:is\s+)?
+      (?<payload>\S(?:.*\S)?)
+      \s*
+      \z
+    /x
+    private_constant :PARAM_DIRECTIVE_PATTERN
+
+    def parse_param_annotation(string)
+      match = PARAM_DIRECTIVE_PATTERN.match(string)
+      return nil if match.nil?
+
+      type = Builtins::ImportedRefinements.parse(match[:payload])
+      return nil if type.nil?
+
+      ParamOverride.new(param_name: match[:param].to_sym, type: type)
+    end
   end
 end

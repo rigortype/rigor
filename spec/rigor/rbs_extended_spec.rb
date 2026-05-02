@@ -220,4 +220,93 @@ RSpec.describe Rigor::RbsExtended do
       expect(described_class.parse_return_type_override("rigor:v1:return: int<5, 10")).to be_nil
     end
   end
+
+  describe ".parse_param_annotation" do
+    it "parses a bare kebab-case payload" do
+      override = described_class.parse_param_annotation("rigor:v1:param: id is non-empty-string")
+      expect(override).to be_a(Rigor::RbsExtended::ParamOverride)
+      expect(override.param_name).to eq(:id)
+      expect(override.type).to eq(Rigor::Type::Combinator.non_empty_string)
+    end
+
+    it "tolerates the `is` glue word being absent" do
+      # The grammar is `param: <name> <payload>`; the existing
+      # surface in the codebase keeps `<name> <payload>` rather
+      # than requiring a dedicated `is` keyword. Accept either.
+      expect(described_class.parse_param_annotation("rigor:v1:param: id non-empty-string"))
+        .to be_a(Rigor::RbsExtended::ParamOverride)
+    end
+
+    it "parses parameterised payloads through the refinement parser" do
+      override = described_class.parse_param_annotation("rigor:v1:param: ids non-empty-array[Integer]")
+      expect(override.param_name).to eq(:ids)
+      expect(override.type).to eq(
+        Rigor::Type::Combinator.non_empty_array(Rigor::Type::Combinator.nominal_of("Integer"))
+      )
+    end
+
+    it "parses int<min, max> parameterised payloads" do
+      override = described_class.parse_param_annotation("rigor:v1:param: idx int<5, 10>")
+      expect(override.type).to eq(Rigor::Type::Combinator.integer_range(5, 10))
+    end
+
+    it "returns nil for non-`param:` directives" do
+      expect(described_class.parse_param_annotation("rigor:v1:return: non-empty-string")).to be_nil
+      expect(described_class.parse_param_annotation("rigor:v1:assert id is String")).to be_nil
+      expect(described_class.parse_param_annotation("steep:foo:bar")).to be_nil
+    end
+
+    it "returns nil for unknown refinement names" do
+      expect(described_class.parse_param_annotation("rigor:v1:param: id frobinator-string")).to be_nil
+    end
+
+    it "returns nil for malformed payloads" do
+      expect(described_class.parse_param_annotation("rigor:v1:param:")).to be_nil
+      expect(described_class.parse_param_annotation("rigor:v1:param: id")).to be_nil
+    end
+  end
+
+  describe ".read_param_type_overrides + .param_type_override_map" do
+    def with_param_demo
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        File.write(File.join(dir, "sig/normaliser.rbs"), <<~RBS)
+          class ParamDemo
+            %a{rigor:v1:param: id is non-empty-string}
+            %a{rigor:v1:param: count is positive-int}
+            def normalise: (::String id, ::Integer count) -> String
+          end
+        RBS
+        env = Rigor::Environment.for_project(root: dir)
+        method_def = env.rbs_loader.instance_method(class_name: "ParamDemo", method_name: :normalise)
+        yield method_def
+      end
+    end
+
+    it "returns one ParamOverride per recognised annotation" do
+      with_param_demo do |method_def|
+        overrides = described_class.read_param_type_overrides(method_def)
+        expect(overrides.map(&:param_name)).to contain_exactly(:id, :count)
+        expect(overrides.map(&:type)).to contain_exactly(
+          Rigor::Type::Combinator.non_empty_string,
+          Rigor::Type::Combinator.positive_int
+        )
+      end
+    end
+
+    it "exposes the overrides as a name → type Hash via param_type_override_map" do
+      with_param_demo do |method_def|
+        map = described_class.param_type_override_map(method_def)
+        expect(map[:id]).to eq(Rigor::Type::Combinator.non_empty_string)
+        expect(map[:count]).to eq(Rigor::Type::Combinator.positive_int)
+        expect(map[:other]).to be_nil
+        expect(map).to be_frozen
+      end
+    end
+
+    it "returns [] / {} for a nil method def" do
+      expect(described_class.read_param_type_overrides(nil)).to eq([])
+      expect(described_class.param_type_override_map(nil)).to eq({})
+    end
+  end
 end

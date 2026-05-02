@@ -28,6 +28,40 @@ Read those before extending the catalogue if you have not already; the decision 
 
 The flow has six stages. The first four are mechanical; the last two are decision-heavy.
 
+### Stage 0 — Run the scaffold script (recommended)
+
+`tool/scaffold_builtin_catalog.rb` automates the mechanical 70 % of stages 1–4 and 7. Run it once and the manual work that remains is just the per-class judgement calls — blocklist curation, fixture body, and the `[Unreleased]` bullet.
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' develop --command \
+  bundle exec ruby tool/scaffold_builtin_catalog.rb <topic> <ClassName> \
+    --c-path references/ruby/<topic>.c \
+    --rb-prelude references/ruby/<topic>.rb \
+    --rb-global rb_c<ClassName> \
+    --extract
+```
+
+What the script writes for you:
+
+- a `TOPICS` entry in `tool/extract_builtin_catalog.rb` (matching the existing two-space indentation);
+- a `BASE_CLASS_VARS` row when `--rb-global` is given;
+- `lib/rigor/inference/builtins/<topic>_catalog.rb` (loader stub with a `TODO(blocklist curation)` marker);
+- a `CATALOG_BY_CLASS` row plus the `require_relative` line in `constant_folding.rb`;
+- `spec/integration/fixtures/<topic>_catalog.rb` (fixture stub with a `TODO(scaffold)` marker);
+- a `describe` block in `spec/integration/type_construction_spec.rb`;
+- with `--extract`, runs `bundle exec ruby tool/extract_builtin_catalog.rb <topic>` so the YAML is in place by the time you start curating.
+
+What you still do by hand (the script prints this checklist on exit):
+
+1. Read `data/builtins/ruby_core/<topic>.yml` and curate the blocklist in the loader file (Stage 5).
+2. Replace the placeholder `assert_type` lines in the fixture with the receiver-specific projections (Stage 7).
+3. Add a `[Unreleased]` bullet to `CHANGELOG.md` (Stage 9).
+4. Run `make verify` and commit (Stage 8).
+
+Pass `--dry-run` to preview the planned edits without writing. Pass `--init-fn` / `--rbs` to override the defaults when the upstream layout differs (e.g. `Init_DateCore` instead of `Init_Date`, or a multi-class RBS).
+
+The remaining stages below describe the underlying procedure for cases the script cannot handle (modules with `rb_m*` mixins, multi-class topics like Numeric where `Init_Numeric` defines Integer + Float + Numeric simultaneously, prelude paths whose name does not match the topic — like Time's `timev.rb`).
+
 ### Stage 1 — Locate the upstream sources
 
 Confirm every source the extractor needs is in `references/`:
@@ -219,15 +253,15 @@ Before declaring an import done:
 - [ ] `CHANGELOG.md` `[Unreleased]` records the user-visible additions.
 - [ ] If a new refinement / directive lands, the matching ADR / spec doc is updated.
 
-## Future Optimisation Surface (v0.0.4+ candidates)
+## Future Optimisation Surface
 
-The procedure above is correct but not yet optimal. Known optimisation candidates are tracked here so future passes have a single place to look:
+The procedure above is correct but not yet optimal. Known optimisation candidates are tracked here so future passes have a single place to look. Items that landed in v0.0.4 (`Type::Refined`, the parameterised refinement parser, the `param:` / `assert:` directive routes, the predicate catalogue, the `each_with_index` Enumerable tier, the `tool/scaffold_builtin_catalog.rb` automation) have moved to `CHANGELOG.md`'s `[Unreleased]` section and out of this list.
 
-- **More predicate-subset refinements.** `Type::Refined` landed in v0.0.4 with `lowercase-string`, `uppercase-string`, `numeric-string`, plus the base-N int-string predicates (`decimal-int-string`, `octal-int-string`, `hex-int-string`). The composed `non-empty-lowercase-string` / `non-empty-uppercase-string` shapes (which compose with `Difference` via `Intersection`) still need a small Intersection algebra against `Difference`; everything else in the catalogue slots in by adding registry entries plus per-`String` recognisers without new carrier infrastructure.
-- **Parameterised refinement parser.** `non-empty-array[Integer]`, `int<5, 10>`, `non-empty-hash[Symbol, Integer]` should be readable from `RBS::Extended` annotations; today only the no-arg forms work.
-- **`param:` and `assert:` directive routes.** The annotation parser already accepts the syntax surface; the dispatcher tier needs a wiring slice symmetric to the `return:` route landed in v0.0.3.
-- **Enumerable-generic projection.** `each` / `map` / `select` / `reduce` block parameters across Array / Set / Range / IO line iteration via a single Enumerable-aware tier instead of per-class hardcoded rules.
-- **C-body classifier upgrades.** Track indirect mutators (`str_modifiable`, `ary_resize`, …) so the blocklists shrink. Long-term: the YAML's `:leaf` set should match a hand-curated set with high precision so blocklists become the exception.
+- **Composed predicate refinements** (e.g. `non-empty-lowercase-string` is already in via `Type::Intersection`). Further composites — `non-empty-hex-int-string`, locale-restricted variants — slot in as registry data plus per-`String` recognisers.
+- **C-body classifier upgrades.** Track indirect mutators (`str_modifiable`, `ary_resize`, `time_modify`, `set_compare_by_identity`, …) so the blocklists shrink. Each new class import currently adds its own blocklist for the helpers the regex misses; long-term, the YAML's `:leaf` set should match a hand-curated set with high precision so blocklists become the exception.
+- **More Enumerable methods.** `#each_with_index` landed; `#each_with_object`, `#inject` / `#reduce` (memo-typed), `#group_by` / `#partition` (returning shaped containers), and IO line iteration are the natural follow-ups when a concrete slice needs them.
+- **Refinement negation in `assert:` / `predicate-if-*:`.** Refinement-form directives currently reject `~T` payloads. A future slice could land a difference-against-refinement algebra so `assert value is ~non-empty-string` means `Constant[""]`.
+- **Module imports** (`Comparable`, `Enumerable`). The scaffold script targets concrete classes today; modules need a slightly different topic shape (no `rb_c*` global, methods mixed into many classes). A `--module` mode or a sibling `tool/scaffold_builtin_module.rb` would close the gap.
 - **Cross-source consistency check.** A CI step that fails when the catalogue references a cfunc not present in any `c_index_paths` file or an RBS class not present in the matching `.rbs` would catch regressions when CRuby or RBS gem upgrades shift symbol names.
 - **Catalogue diff tooling.** A `make catalog-diff` that prints the (additions, removals, purity-changes) between two extractor runs so reviewers can audit a CRuby submodule bump in seconds.
 

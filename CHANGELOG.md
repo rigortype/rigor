@@ -158,9 +158,19 @@ In-progress v0.0.4 surfaces. Two themes so far:
   `parse_param_annotation` and is dropped from the override
   list, so the call site keeps the RBS-declared type.
   End-to-end fixture: `spec/integration/fixtures/param_extended/`.
-  Method-body narrowing through param overrides (so the body
-  sees the tighter parameter type during inference) stays on
-  the v0.0.4 roadmap as a follow-up.
+- **`rigor:v1:param:` body-side narrowing.**
+  `MethodParameterBinder` now reads the same override map and
+  replaces the RBS-translated parameter binding with the
+  refinement when present. Combined with the call-site half
+  shipped above, the directive flows symmetrically through both
+  sides of the boundary: a call site with a too-wide argument is
+  flagged, AND the body sees the tightened parameter during
+  inference (so projections through the refinement — e.g.
+  `id.size` resolving to `positive-int` over a `non-empty-string`
+  parameter — are observable inside the method body). The
+  override is used verbatim with no `:rest_*` re-wrapping, so
+  tightening a `*rest` parameter to `non-empty-array[Integer]`
+  describes the parameter binding directly.
 - **`Type::Intersection` carrier — composed refinement names.**
   Closes the OQ3 carrier strategy (ADR-3) by adding the
   Intersection peer alongside `Union` / `Difference` /

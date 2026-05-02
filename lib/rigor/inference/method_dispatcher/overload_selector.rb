@@ -53,13 +53,22 @@ module Rigor
           overloads = method_definition.method_types
           return nil if overloads.empty?
 
+          # `rigor:v1:param: <name> <refinement>` annotations on
+          # this method override the RBS-declared parameter type
+          # at the matching name. The map is consumed inside
+          # `accepts_param?` so overload selection sees the
+          # tighter type when filtering candidates by argument
+          # compatibility.
+          param_overrides = RbsExtended.param_type_override_map(method_definition)
+
           match = find_matching_overload(
             overloads,
             arg_types: arg_types,
             self_type: self_type,
             instance_type: instance_type,
             type_vars: type_vars,
-            block_required: block_required
+            block_required: block_required,
+            param_overrides: param_overrides
           )
           return match if match
           return overloads.find { |mt| overload_has_block?(mt) } if block_required
@@ -76,7 +85,8 @@ module Rigor
           private
 
           # rubocop:disable Metrics/ParameterLists
-          def find_matching_overload(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:)
+          def find_matching_overload(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:,
+                                     param_overrides:)
             overloads.find do |method_type|
               next false if block_required && !OverloadSelector.overload_has_block?(method_type)
 
@@ -85,13 +95,15 @@ module Rigor
                 arg_types,
                 self_type: self_type,
                 instance_type: instance_type,
-                type_vars: type_vars
+                type_vars: type_vars,
+                param_overrides: param_overrides
               )
             end
           end
           # rubocop:enable Metrics/ParameterLists
 
-          def matches?(method_type, arg_types, self_type:, instance_type:, type_vars:)
+          # rubocop:disable Metrics/ParameterLists
+          def matches?(method_type, arg_types, self_type:, instance_type:, type_vars:, param_overrides:)
             return false if method_type.respond_to?(:type_params) && rejects_keyword_required?(method_type)
 
             fun = method_type.type
@@ -104,10 +116,12 @@ module Rigor
                 arg,
                 self_type: self_type,
                 instance_type: instance_type,
-                type_vars: type_vars
+                type_vars: type_vars,
+                param_overrides: param_overrides
               )
             end
           end
+          # rubocop:enable Metrics/ParameterLists
 
           # Slice 4 phase 2c does not pass keyword arguments through the
           # call site (caller passes only positional `arg_types`). An
@@ -152,8 +166,9 @@ module Rigor
             head
           end
 
-          def accepts_param?(param, arg, self_type:, instance_type:, type_vars:)
-            param_type = RbsTypeTranslator.translate(
+          # rubocop:disable Metrics/ParameterLists
+          def accepts_param?(param, arg, self_type:, instance_type:, type_vars:, param_overrides:)
+            param_type = param_overrides[param.name] || RbsTypeTranslator.translate(
               param.type,
               self_type: self_type,
               instance_type: instance_type,
@@ -162,6 +177,7 @@ module Rigor
             result = param_type.accepts(arg, mode: :gradual)
             result.yes? || result.maybe?
           end
+          # rubocop:enable Metrics/ParameterLists
         end
       end
     end

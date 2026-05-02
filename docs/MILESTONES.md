@@ -32,10 +32,13 @@ Landed so far (see `CHANGELOG.md` `[Unreleased]` for the full bullet list):
 - ✅ **`Type::Refined` carrier (OQ3 predicate-subset half).** Six imported built-in predicate refinements ship with the carrier — `lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`. Predicate registry (`Type::Refined::PREDICATES`), canonical-name registry, per-predicate fold rules, and gradual-mode acceptance all in place. Plugin extension surface (ADR-2) stays deferred to v0.1.0.
 - ✅ **Hash / Range / Set built-in catalog imports.** The constant-fold dispatcher routes through `HASH_CATALOG` / `RANGE_CATALOG` / `SET_CATALOG`. The extractor learned `rb_struct_define_without_accessor` along the way; `MethodDispatcher::ConstantFolding#catalog_for` is now table-driven so further imports cost one row.
 
+Also landed:
+
+- ✅ **`type-of` CLI canonical-name display contract.** Regression specs in `spec/rigor/cli_spec.rb` confirm `bundle exec exe/rigor type-of …` renders refinement-bearing types in their kebab-case spelling in both human-readable text and `--format=json` output.
+- ✅ **Parameterised refinement tokeniser.** `RBS::Extended`'s `rigor:v1:return:` directive now accepts `non-empty-array[T]`, `non-empty-hash[K, V]`, and `int<min, max>` payloads. Parsing lives in `Builtins::ImportedRefinements::Parser`.
+
 Still planned:
 
-- **`type-of` CLI canonical-name display verification.** Confirm `bundle exec exe/rigor type-of …` renders refinement-bearing types in their kebab-case spelling (`non-empty-string`, `lowercase-string`, …) rather than the raw operator form.
-- **Parameterised refinement tokeniser.** Read `non-empty-array[Integer]`, `int<5, 10>`, `non-empty-hash[Symbol, Integer]` from `RBS::Extended` annotations.
 - **`rigor:v1:param:` and `rigor:v1:assert:` directives.** The annotation parser already accepts the syntax surface; v0.0.4 adds the dispatcher tier wiring symmetric to the `return:` route landed in v0.0.3.
 - **`Type::Intersection` for composed refinement names** (`non-empty-lowercase-string`, `non-empty-uppercase-string`). Smallest sound algebra over same-base `Difference` + `Refined`.
 - **Further built-in catalog imports.** Enumerable, Comparable, Time, Date, DateTime follow the same nine-stage flow recorded in [`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md).

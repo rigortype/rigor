@@ -131,6 +131,21 @@ In-progress v0.0.4 surfaces. Two themes so far:
   the renderer already routes through `Type#describe` and
   `erase_to_rbs` — but the regression coverage now binds the
   contract.
+- **Parameterised refinement payloads in `RBS::Extended`.** The
+  `rigor:v1:return:` directive now accepts the three documented
+  parameterised forms in addition to the bare-name shapes:
+  `non-empty-array[T]` and `non-empty-hash[K, V]` (type-arg
+  payloads — `T`, `K`, `V` may be a kebab-case refinement name
+  or a Capitalized RBS class name), and `int<min, max>` (bounded
+  integer range with signed integer literals). Parsing lives in
+  a new `Builtins::ImportedRefinements::Parser` recursive-descent
+  parser exposed through `ImportedRefinements.parse(payload)`;
+  the existing `lookup(name)` is unchanged so no-arg call sites
+  keep their contract. Failure remains fail-soft — any parse
+  miss (arity mismatch, unknown head, malformed bracket / angle
+  pairing, trailing characters) returns `nil` so the directive
+  site falls back to the RBS-declared type. End-to-end fixture:
+  `spec/integration/fixtures/parameterised_refinement/`.
 
 ### Changed
 

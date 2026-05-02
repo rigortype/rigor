@@ -20,13 +20,13 @@ The next preview is **v0.0.4**. The full planned surface is in [`docs/MILESTONES
 
 ### Where the work resumes
 
-The `A → G → C` thread from the working agreement: A landed as the base-N int-string predicates above; G and C are the next two operational entry points.
+The `A → G → C` thread from the working agreement is now fully landed:
 
-**G. `type-of` CLI canonical-name display verification.** The `Refined` and `Difference` carriers already render in their kebab-case spelling through `Type#describe`; v0.0.4 just needs an end-to-end check that `bundle exec exe/rigor type-of …` over a refinement-bearing expression prints `lowercase-string` (etc.) rather than the raw operator form. Likely a small fixture or CLI integration spec under [`spec/`](../spec/), and a docs paragraph confirming the contract.
+- **A. Base-N int-string predicates** (`decimal-int-string` / `octal-int-string` / `hex-int-string`) → `Type::Refined::PREDICATES`, the `Combinator.<name>_string` factories, the registry, and the `predicate_refinement` integration fixture.
+- **G. `type-of` CLI canonical-name display contract** → three regression specs in `spec/rigor/cli_spec.rb` confirming kebab-case display in both human-readable and `--format=json` output.
+- **C. Parameterised refinement tokeniser** → `Builtins::ImportedRefinements::Parser` plus `parse(payload)`, wired through `RBS::Extended.parse_return_type_override`. Accepts `non-empty-array[Integer]`, `non-empty-hash[Symbol, Integer]`, `int<5, 10>`, and the recursive forms; fail-soft on every parse miss. End-to-end fixture: [`spec/integration/fixtures/parameterised_refinement/`](../spec/integration/fixtures/parameterised_refinement/).
 
-**C. Parameterised refinement tokeniser.** Read `non-empty-array[Integer]`, `int<5, 10>`, `non-empty-hash[Symbol, Integer]` from `RBS::Extended` annotations. Today `Builtins::ImportedRefinements.lookup` is string-indexed against fixed kebab-case keys; the slice extends it (and the parsers in [`lib/rigor/rbs_extended.rb`](../lib/rigor/rbs_extended.rb)) to a small AST that resolves per-name refinement constructors, then the existing carrier factories accept the parsed type-args.
-
-### Highest-leverage further slice (after G + C)
+### Highest-leverage further slice
 
 **`Type::Intersection` for composed refinement names.** The remaining catalogued names from [`docs/type-specification/imported-built-in-types.md`](type-specification/imported-built-in-types.md) — `non-empty-lowercase-string`, `non-empty-uppercase-string` — combine a point-removal (`Difference[String, ""]`) with a predicate (`Refined[String, :lowercase]`). Landing them requires the smallest sound `Intersection` algebra that lets `accepts_intersection`, `describe`, and `erase_to_rbs` answer the obvious questions: same-base intersection of `Difference` + `Refined` over `String`. Once this lands, the remaining names plug in as registry data without new carrier code.
 

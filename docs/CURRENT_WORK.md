@@ -30,6 +30,14 @@ The `A → G → C` thread from the working agreement is now fully landed:
 
 `Type::Intersection` is the OQ3 closing carrier — sibling of `Union` / `Difference` / `Refined`. Catalogued composites `non-empty-lowercase-string` and `non-empty-uppercase-string` resolve through the same `ImportedRefinements` registry the simpler shapes use; `accepts_intersection` is conjunctive on LHS, disjunctive on RHS, plus a top-level structural-equality short-circuit; `ShapeDispatch.dispatch_intersection` collects each member's projection and narrows IntegerRange results to the meet so size-tier projections preserve their tighter answer. End-to-end fixture: [`spec/integration/fixtures/intersection_refinement/`](../spec/integration/fixtures/intersection_refinement/).
 
+### Just-landed: rigor:v1:assert: and predicate-if-* against refinement carriers
+
+The `<target> is <RHS>` RHS now matches either a Capitalised class name (existing behaviour) or a kebab-case refinement payload via `Builtins::ImportedRefinements::Parser`. `AssertEffect` and `PredicateEffect` gain a `refinement_type` field; the narrowing tier substitutes the carrier when present. Refinement-form directives don't yet support `~T` negation (would need a difference-against-refinement algebra). Fixture: [`spec/integration/fixtures/assert_refinement/`](../spec/integration/fixtures/assert_refinement/).
+
+### Just-landed: Enumerable-aware each_with_index block-parameter typing
+
+`IteratorDispatch` generalises beyond Integer iteration: `#each_with_index` over Array/Set/Range/Tuple/HashShape/Hash/Constant<Range> receivers now yields `(element, non-negative-int)` instead of widening the index to plain `Integer`. Fixture: [`spec/integration/fixtures/each_with_index.rb`](../spec/integration/fixtures/each_with_index.rb).
+
 ### Just-landed: rigor:v1:param: directive (both halves)
 
 Symmetric to the `rigor:v1:return:` route landed in v0.0.3 and now feature-complete on both sides of the method boundary:
@@ -41,8 +49,9 @@ End-to-end fixture: [`spec/integration/fixtures/param_extended/`](../spec/integr
 
 ### Other v0.0.4 entry points (parallel-safe)
 
-- **`rigor:v1:assert:` already partly works** through `parse_assert_annotation` and `read_predicate_effects`; gaps to audit are dispatcher-tier wiring for the assert-then-narrow path against refinement carriers (today the assert / predicate machinery only narrows by class name, not by refinement).
-- **Enumerable-aware block-parameter typing.** Architecture sketch: a single dispatcher tier that knows `Enumerable` block-yield rules (Array/Hash/Range/Set/IO) and projects element types per receiver shape. Replaces the hardcoded Integer-only `IteratorDispatch` from v0.0.3.
+- **More Enumerable methods.** `#each_with_index` lands above; `#each_with_object`, `#inject`/`#reduce` (memo-typed), and IO line iteration are the natural follow-ups when a concrete v0.0.x slice needs them.
+- **Refinement negation in assert / predicate directives.** Refinement-form directives currently reject `~T` payloads. A future slice could land a difference-against-refinement algebra so `assert value is ~non-empty-string` means "value is `Constant[""]`".
+- **Further built-in catalog imports** (Time / Date / DateTime / Comparable / Enumerable). Each follows the nine-stage flow in [`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md). Comparable / Enumerable are modules and may need a different topic shape than the existing concrete-class imports.
 
 ### Out of v0.0.4 scope (intentional)
 

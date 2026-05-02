@@ -158,6 +158,31 @@ In-progress v0.0.4 surfaces. Two themes so far:
   `parse_param_annotation` and is dropped from the override
   list, so the call site keeps the RBS-declared type.
   End-to-end fixture: `spec/integration/fixtures/param_extended/`.
+- **`rigor:v1:assert:` and `rigor:v1:predicate-if-*:` accept
+  refinement payloads.** The `<target> is <RHS>` right-hand side
+  now matches either a Capitalised class name (existing
+  behaviour) or a kebab-case refinement payload routed through
+  `Builtins::ImportedRefinements::Parser`. Both `AssertEffect`
+  and `PredicateEffect` gain a `refinement_type` field; the
+  narrowing tier substitutes the carrier when present, keeping
+  the legacy `narrow_class` path for class-name directives.
+  Refinement-form directives do not yet support `~T` negation
+  (would require a difference-against-refinement algebra).
+  End-to-end fixture:
+  `spec/integration/fixtures/assert_refinement/`.
+- **Enumerable-aware `#each_with_index` block-parameter
+  typing.** `IteratorDispatch` generalises beyond Integer
+  iteration to project the element type per receiver shape
+  (Array / Set / Range nominals, Tuple, HashShape, Hash
+  nominal, Constant<Array>, Constant<Range>) and tightens the
+  index slot to `non-negative-int` over the RBS-declared
+  `Integer`. End-to-end fixture:
+  `spec/integration/fixtures/each_with_index.rb`. Other
+  Enumerable methods (`#each`, `#map`, `#select`, `#reduce`,
+  …) already pass through RBS dispatch with sound element
+  types via the existing Tuple/HashShape projection; this
+  slice deliberately scopes itself to the index-tightening
+  case where RBS widens.
 - **`rigor:v1:param:` body-side narrowing.**
   `MethodParameterBinder` now reads the same override map and
   replaces the RBS-translated parameter binding with the

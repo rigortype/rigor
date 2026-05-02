@@ -38,12 +38,10 @@ Also landed:
 - ✅ **Parameterised refinement tokeniser.** `RBS::Extended`'s `rigor:v1:return:` directive now accepts `non-empty-array[T]`, `non-empty-hash[K, V]`, and `int<min, max>` payloads. Parsing lives in `Builtins::ImportedRefinements::Parser`.
 - ✅ **`Type::Intersection` for composed refinement names.** Closes the OQ3 carrier strategy. `non-empty-lowercase-string` / `non-empty-uppercase-string` resolve end-to-end; conjunction / disjunction acceptance plus an IntegerRange-meet ShapeDispatch projection keep size-tier answers tight.
 - ✅ **`rigor:v1:param:` directive (both halves).** Tightens RBS-declared parameter types at overload selection, the `argument-type-mismatch` rule, AND inside the method body via `MethodParameterBinder`.
-
-Still planned:
-
-- **`rigor:v1:assert:` against refinement carriers.** The assert / predicate parser already accepts the syntax; the narrowing tier needs to recognise refinement names in the right-hand side, not just class names.
-- **Further built-in catalog imports.** Enumerable, Comparable, Time, Date, DateTime follow the same nine-stage flow recorded in [`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md).
-- **Enumerable-aware block-parameter typing.** A single tier that knows `each` / `map` / `select` / `reduce` / `each_with_index` etc. yield element types over Array / Hash / Range / Set / IO line iteration. Today's iterator dispatch is Integer-only and hardcoded; v0.0.4 generalises through the new mechanism.
+- ✅ **`rigor:v1:assert:` and `predicate-if-*:` against refinement carriers.** Both directives accept kebab-case refinement payloads on the right-hand side; the narrowing tier substitutes the carrier when present.
+- ✅ **Enumerable-aware `#each_with_index` block-parameter typing.** `IteratorDispatch` projects the element from Array/Set/Range/Tuple/HashShape/Hash/Constant<Range> receivers and tightens the index to `non-negative-int`.
+- **Further built-in catalog imports** (Time, Date, DateTime; module-shaped Comparable / Enumerable need a different topic shape than concrete classes). Each follows the nine-stage flow in [`.codex/skills/rigor-builtin-import/SKILL.md`](../.codex/skills/rigor-builtin-import/SKILL.md).
+- **More Enumerable methods.** `#each_with_index` landed; `#each_with_object`, `#inject`/`#reduce`, and IO line iteration are the natural follow-ups when a concrete slice needs them.
 
 Stretch surfaces (land if cheap, defer if expensive):
 

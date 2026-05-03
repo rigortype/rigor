@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Const = Data.define(*Symbol)` discovery.**
+  `Inference::ScopeIndexer.record_declarations` now
+  registers `Const` (qualified by the surrounding class /
+  module path) as a discovered class whose constant resolves
+  to `Singleton[<qualified-name>]`. Previously
+  `Const.new(...)` returned the un-narrowed `Dynamic[top]`
+  envelope; with the constant registered, `meta_new` resolves
+  it to a fresh `Nominal[<qualified-name>]`, and member
+  accessors flow through the user-class fallback without
+  false-positives. Both the bare form `Data.define(:x, :y)`
+  and the block-override form
+  `Data.define(:x, :y) do; def initialize(x:, y:); …; end end`
+  are recognised; non-symbol arguments and non-`Data`
+  receivers are rejected. Worked example: `Target` and
+  `Fact` in `lib/rigor/analysis/fact_store.rb` now type as
+  `singleton(Rigor::Analysis::FactStore::Target)` and
+  `singleton(Rigor::Analysis::FactStore::Fact)` respectively.
 - **`Kernel#Array` precision tier
   (`MethodDispatcher::KernelDispatch`).** A new
   precision-tier dispatcher folds `Array(arg)` into a precise

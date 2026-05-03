@@ -88,7 +88,9 @@ BASE_CLASS_VARS = {
   "rb_cSet" => "Set",
   "rb_cTime" => "Time",
   "rb_cDate" => "Date",
-  "rb_cDateTime" => "DateTime"
+  "rb_cDateTime" => "DateTime",
+  "rb_cRational" => "Rational",
+  "rb_cComplex" => "Complex"
 }.freeze
 
 TOPICS = {
@@ -234,6 +236,26 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/enum.c],
     output_path: "data/builtins/ruby_core/enumerable.yml"
+  },
+  "rational" => {
+    init_function: "Init_Rational",
+    ruby_c_path: "references/ruby/rational.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Rational" => "references/rbs/core/rational.rbs"
+    },
+    c_index_paths: %w[references/ruby/rational.c],
+    output_path: "data/builtins/ruby_core/rational.yml"
+  },
+  "complex" => {
+    init_function: "Init_Complex",
+    ruby_c_path: "references/ruby/complex.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Complex" => "references/rbs/core/complex.rbs"
+    },
+    c_index_paths: %w[references/ruby/complex.c],
+    output_path: "data/builtins/ruby_core/complex.yml"
   }
 }.freeze
 

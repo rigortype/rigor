@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rational and Complex built-in catalog imports.** New
+  loaders `RATIONAL_CATALOG` and `COMPLEX_CATALOG` join the
+  `CATALOG_BY_CLASS` table; the corresponding YAMLs under
+  `data/builtins/ruby_core/{rational,complex}.yml` are
+  generated from `references/ruby/{rational,complex}.c` via
+  `tool/extract_builtin_catalog.rb`. Both classes are fully
+  immutable in Ruby, so the per-class `mutating_selectors`
+  blocklists carry only the conventional defence-in-depth
+  `:initialize_copy` entry. Rigor today has no
+  `Constant<Rational>` / `Constant<Complex>` literal lift
+  (`Prism::ImaginaryNode` and `Rational(...)` /
+  `Complex(...)` Kernel-call folding stay deferred), so the
+  catalog wiring is currently a defensive surface — every
+  fixture assertion goes through the RBS-tier projection on a
+  `Nominal[<class>]` receiver. The blocklist becomes
+  load-bearing once a future slice teaches the typer to lift
+  these literals into `Constant<…>`.
 - **`Const = Data.define(*Symbol)` discovery.**
   `Inference::ScopeIndexer.record_declarations` now
   registers `Const` (qualified by the surrounding class /

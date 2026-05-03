@@ -11,6 +11,8 @@ require_relative "../builtins/time_catalog"
 require_relative "../builtins/date_catalog"
 require_relative "../builtins/comparable_catalog"
 require_relative "../builtins/enumerable_catalog"
+require_relative "../builtins/rational_catalog"
+require_relative "../builtins/complex_catalog"
 
 module Rigor
   module Inference
@@ -756,7 +758,9 @@ module Rigor
           [::Set,    [Builtins::SET_CATALOG,    "Set"]],
           [Time,     [Builtins::TIME_CATALOG,   "Time"]],
           [DateTime, [Builtins::DATE_CATALOG,   "DateTime"]],
-          [Date,     [Builtins::DATE_CATALOG,   "Date"]]
+          [Date,     [Builtins::DATE_CATALOG,   "Date"]],
+          [Rational, [Builtins::RATIONAL_CATALOG, "Rational"]],
+          [Complex,  [Builtins::COMPLEX_CATALOG,  "Complex"]]
         ].freeze
         private_constant :CATALOG_BY_CLASS
 

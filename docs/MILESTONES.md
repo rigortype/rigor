@@ -54,6 +54,26 @@ Stretch surfaces (land if cheap, defer if expensive):
 - `String#%` format-string parsing for catalog-aware fold over `Constant<String>` template + `Constant<…>` values.
 - `numeric-string` recogniser that classifies `String#match?(/\A\d+\z/)` as a `Refined[String, :numeric]` narrowing.
 
+### v0.0.5 progress checkpoint (work-in-progress, not yet released)
+
+Snapshot of `[Unreleased]` accumulation as of the last checkpoint. The branch is 14 commits ahead of `origin/master`; `[0.0.5]` will only freeze when the version bump commit lands. The release-row of this table will be filled in at that point; until then, items below are landed-but-still-mutable surfaces:
+
+- Comparable / Enumerable module catalog imports + the matching `tool/scaffold_builtin_catalog.rb --module` mode.
+- C-body classifier — pure `rb_check_frozen` wrapper detection (Time#gmtime / Time#utc reclassified `:mutates_self`; every other catalog byte-identical).
+- `tool/catalog_diff.rb` + `make catalog-diff` target.
+- Date / DateTime catalog imports (separate slice, landed earlier in the v0.0.5 thread).
+- `narrow_not_refinement` extended to IntegerRange + Intersection (De Morgan).
+- Refinement negation in `assert` / `predicate-if-*` directives (refinement payloads now accept `~T` forms).
+- Include-aware module-catalog fallthrough in `MethodDispatcher::ConstantFolding#catalog_allows?` — activates the Comparable / Enumerable imports.
+- 2-argument fold dispatch (`try_fold_ternary`) — `Comparable#between?(min, max)`, `Comparable#clamp(min, max)`, `Integer#pow(exp, mod)` now fold through the catalog tier.
+
+Open candidates remaining in the v0.0.5 pool (see [`docs/CURRENT_WORK.md`](CURRENT_WORK.md) for entry points):
+
+- Predicate-complement narrowing for `Refined[base, predicate]` — the only branch of `narrow_not_refinement` still bailing.
+- Block-shaped fold dispatch — block-parameter *typing* already works via `IteratorDispatch`; the open work is folding the block's *return* into a precise carrier (and IntegerRange operands on the now-landed 2-arg path).
+- Further catalog imports — Rational, Complex, URI, Pathname (already partial), Kernel (rb_mKernel), ObjectSpace.
+- C-body classifier — wider transitive mutator scan that does not over-flag legitimate non-mutators (the `Array#to_a` regression that gated the conservative v0.0.5 fix).
+
 ## v0.1.0 — Long Horizon (architecture commitments deferred)
 
 Theme: **infrastructure**. The earlier comment in this thread reserved v0.1.0 for the cross-cutting machinery that should not be retro-fitted later:

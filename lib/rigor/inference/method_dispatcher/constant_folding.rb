@@ -112,9 +112,14 @@ module Rigor
           arg_sets = args.map { |a| numeric_set_of(a) }
           return nil if arg_sets.any?(&:nil?)
 
-          case args.size
+          dispatch_by_arity(receiver_set, method_name, arg_sets)
+        end
+
+        def dispatch_by_arity(receiver_set, method_name, arg_sets)
+          case arg_sets.size
           when 0 then try_fold_unary(receiver_set, method_name)
           when 1 then try_fold_binary(receiver_set, method_name, arg_sets.first)
+          when 2 then try_fold_ternary(receiver_set, method_name, arg_sets)
           end
         end
 
@@ -223,6 +228,38 @@ module Rigor
           build_constant_type(results, source: receiver_values + arg_values)
         end
 
+        # 2-arg fold dispatch. Used by `Comparable#between?(min, max)`,
+        # `Comparable#clamp(min, max)`, and `Integer#pow(exp, mod)` —
+        # methods the catalog classifies `:leaf` but that the prior
+        # 0/1-arg switch could not reach. Range receivers/args are
+        # held back: a precise 2-arg range fold (e.g.
+        # `int<0,10>.between?(0, 10)` → `Constant[true]`) is a
+        # follow-up; for now any IntegerRange operand bails to the
+        # RBS tier.
+        def try_fold_ternary(receiver_set, method_name, arg_sets)
+          return nil if receiver_set.is_a?(Type::IntegerRange)
+          return nil if arg_sets.any?(Type::IntegerRange)
+
+          try_fold_ternary_set(receiver_set, method_name, arg_sets)
+        end
+
+        def try_fold_ternary_set(receiver_values, method_name, arg_sets)
+          total = receiver_values.size * arg_sets[0].size * arg_sets[1].size
+          return nil if total > UNION_FOLD_INPUT_LIMIT
+          return nil unless receiver_values.all? { |rv| ternary_method_allowed?(rv, method_name) }
+
+          results = ternary_cartesian(receiver_values, method_name, arg_sets)
+          build_constant_type(results, source: receiver_values + arg_sets.flatten)
+        end
+
+        def ternary_cartesian(receiver_values, method_name, arg_sets)
+          receiver_values.flat_map do |rv|
+            arg_sets[0].flat_map do |av0|
+              arg_sets[1].flat_map { |av1| invoke_ternary(rv, method_name, av0, av1) || [] }
+            end
+          end
+        end
+
         def unary_method_allowed?(receiver_value, method_name)
           unary_ops_for(receiver_value).include?(method_name) ||
             catalog_allows?(receiver_value, method_name)
@@ -231,6 +268,13 @@ module Rigor
         def binary_method_allowed?(receiver_value, method_name)
           ops_for(receiver_value).include?(method_name) ||
             catalog_allows?(receiver_value, method_name)
+        end
+
+        # 2-arg methods have no hand-rolled allow list; the catalog
+        # is the sole gate. Adding a per-class arity-2 set is reserved
+        # for future cases that need it.
+        def ternary_method_allowed?(receiver_value, method_name)
+          catalog_allows?(receiver_value, method_name)
         end
 
         # Builds a Constant or Union[Constant…] from a flat list of
@@ -596,6 +640,19 @@ module Rigor
           return nil unless safe?(receiver_value, method_name, arg_value)
 
           result = receiver_value.public_send(method_name, arg_value)
+          foldable_constant_value?(result) ? [result] : nil
+        rescue StandardError
+          nil
+        end
+
+        # Returns `[value]` on success, `nil` to signal "skip this triple".
+        # Mirrors `invoke_binary` but for the 2-argument shape; the wrap
+        # convention lets callers `flat_map` without losing
+        # legitimate `false`/`nil` folds.
+        def invoke_ternary(receiver_value, method_name, av0, av1)
+          return nil unless ternary_method_allowed?(receiver_value, method_name)
+
+          result = receiver_value.public_send(method_name, av0, av1)
           foldable_constant_value?(result) ? [result] : nil
         rescue StandardError
           nil

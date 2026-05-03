@@ -429,6 +429,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/two_arg_fold.rb — 2-arg constant folding (between?/clamp/pow)" do
+    let(:harness) { harness_for("two_arg_fold") }
+
+    it "folds Comparable#between?, Comparable#clamp(min, max), and Integer#pow(exp, mod)" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/union_arithmetic.rb — cartesian fold over Union[Constant…]" do
     let(:harness) { harness_for("union_arithmetic") }
 

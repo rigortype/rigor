@@ -654,4 +654,58 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(result).to eq(constant_of(10))
     end
   end
+
+  describe "two-argument fold dispatch (v0.0.5+)" do
+    def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
+
+    def fold_types(receiver, method_name, args = [])
+      described_class.try_fold(
+        receiver: receiver,
+        method_name: method_name,
+        args: args
+      )
+    end
+
+    it "folds Comparable#between? to Constant[true] when receiver is in range" do
+      result = fold_types(constant_of(5), :between?, [constant_of(0), constant_of(10)])
+      expect(result).to eq(constant_of(true))
+    end
+
+    it "folds Comparable#between? to Constant[false] when receiver is out of range" do
+      result = fold_types(constant_of(100), :between?, [constant_of(0), constant_of(10)])
+      expect(result).to eq(constant_of(false))
+    end
+
+    it "folds Comparable#clamp(min, max) to the lower bound when below the range" do
+      result = fold_types(constant_of(-5), :clamp, [constant_of(0), constant_of(10)])
+      expect(result).to eq(constant_of(0))
+    end
+
+    it "folds Comparable#clamp(min, max) to the upper bound when above the range" do
+      result = fold_types(constant_of(100), :clamp, [constant_of(0), constant_of(10)])
+      expect(result).to eq(constant_of(10))
+    end
+
+    it "folds Integer#pow(exp, mod) via the catalog" do
+      # Modular exponentiation: `100.pow(50, 17) #=> 4`.
+      result = fold_types(constant_of(100), :pow, [constant_of(50), constant_of(17)])
+      expect(result).to eq(constant_of(4))
+    end
+
+    it "widens between? to a Union over a Constant union of receivers" do
+      receivers = Rigor::Type::Combinator.union(constant_of(5), constant_of(100))
+      result = fold_types(receivers, :between?, [constant_of(0), constant_of(10)])
+      expect(result).to eq(
+        Rigor::Type::Combinator.union(constant_of(true), constant_of(false))
+      )
+    end
+
+    it "bails when an IntegerRange operand reaches the 2-arg path" do
+      # IntegerRange args are reserved for a follow-up slice; the
+      # current ternary dispatch returns nil so the RBS tier answers.
+      receiver = constant_of(5)
+      range_arg = Rigor::Type::Combinator.integer_range(0, 10)
+      expect(fold_types(receiver, :between?, [range_arg, constant_of(20)])).to be_nil
+    end
+  end
 end

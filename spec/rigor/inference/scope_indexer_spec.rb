@@ -92,6 +92,39 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(idx[after_if].local(:x).members.map(&:value)).to contain_exactly(1, nil)
     end
 
+    # Returns the index built for the canonical "expression-position
+    # conditional with a previously-bound x" shape, plus the
+    # LocalVariableReadNode for `x` extracted by `branch_path`. Pre-binding
+    # `x = nil` makes Prism parse the inner `x` as a local read; the
+    # surrounding `[]=` CallNode hides the conditional from
+    # StatementEvaluator's eval_if path.
+    def index_and_x_read_for(conditional, branch_path)
+      program = parse("x = nil; cache[:k] = #{conditional}")
+      assignment = program.statements.body[1]
+      cond_node = assignment.arguments.arguments.last
+      x_read = branch_path.call(cond_node).receiver
+      [described_class.index(program, default_scope: default_scope), x_read]
+    end
+
+    it "narrows IfNode branches when the conditional sits in expression position" do
+      # `x = nil` makes x's entry type Constant[nil]; narrow_truthy collapses
+      # it to Bot. Without branch-aware propagation x would still read as
+      # Constant[nil] inside the truthy branch.
+      idx, x_read = index_and_x_read_for("if x; x.foo; else; default; end",
+                                         ->(n) { n.statements.body.first })
+      expect(x_read).to be_a(Prism::LocalVariableReadNode)
+      expect(idx[x_read].local(:x)).to be_a(Rigor::Type::Bot)
+    end
+
+    it "narrows UnlessNode branches in expression position (mirror of IfNode)" do
+      # `unless x` runs the body when x is falsey; the else branch is the
+      # truthy edge, so x narrows away from Constant[nil] (collapsing to Bot).
+      idx, x_read = index_and_x_read_for("unless x; default; else; x.foo; end",
+                                         ->(n) { n.else_clause.statements.body.first })
+      expect(x_read).to be_a(Prism::LocalVariableReadNode)
+      expect(idx[x_read].local(:x)).to be_a(Rigor::Type::Bot)
+    end
+
     it "honors propagation order so visited entries are not overwritten" do
       # `(x = 1; x)` : the parens visit the inner StatementsNode and the
       # local-variable read; after StatementEvaluator runs, propagate

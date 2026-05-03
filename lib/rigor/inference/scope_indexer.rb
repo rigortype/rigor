@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../scope"
 require_relative "../type"
+require_relative "narrowing"
 require_relative "statement_evaluator"
 
 module Rigor
@@ -515,6 +516,13 @@ module Rigor
       # Prism node the StatementEvaluator did not visit (i.e. expression-
       # interior nodes like the receiver/args of a CallNode). Those
       # nodes inherit their nearest recorded ancestor's scope.
+      #
+      # `IfNode` / `UnlessNode` are special-cased: the truthy and falsey
+      # branches each get their predicate's narrowed scope before
+      # recursing. This handles expression-position conditionals
+      # (e.g. `cache[k] = if cond; t; else; e; end` and conditionals
+      # nested as call arguments) which are typed by ExpressionTyper
+      # without going through `eval_if`'s narrowing path.
       def propagate(node, table, parent_scope)
         return unless node.is_a?(Prism::Node)
 
@@ -526,7 +534,28 @@ module Rigor
             parent_scope
           end
 
-        node.compact_child_nodes.each { |child| propagate(child, table, current_scope) }
+        case node
+        when Prism::IfNode
+          propagate_if_branches(node, table, current_scope)
+        when Prism::UnlessNode
+          propagate_unless_branches(node, table, current_scope)
+        else
+          node.compact_child_nodes.each { |child| propagate(child, table, current_scope) }
+        end
+      end
+
+      def propagate_if_branches(node, table, current_scope)
+        truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, current_scope)
+        propagate(node.predicate, table, current_scope) if node.predicate
+        propagate(node.statements, table, truthy_scope) if node.statements
+        propagate(node.subsequent, table, falsey_scope) if node.subsequent
+      end
+
+      def propagate_unless_branches(node, table, current_scope)
+        truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, current_scope)
+        propagate(node.predicate, table, current_scope) if node.predicate
+        propagate(node.statements, table, falsey_scope) if node.statements
+        propagate(node.else_clause, table, truthy_scope) if node.else_clause
       end
     end
     # rubocop:enable Metrics/ModuleLength

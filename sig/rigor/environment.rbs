@@ -38,10 +38,10 @@ module Rigor
 
       def initialize: (?libraries: Array[String], ?signature_paths: Array[String | _ToPath]) -> void
       def class_known?: (String | Symbol name) -> bool
-      def instance_definition: (String | Symbol class_name) -> untyped
-      def instance_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped
-      def singleton_definition: (String | Symbol class_name) -> untyped
-      def singleton_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped
+      def instance_definition: (String | Symbol class_name) -> untyped?
+      def instance_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped?
+      def singleton_definition: (String | Symbol class_name) -> untyped?
+      def singleton_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped?
       def class_type_param_names: (String | Symbol class_name) -> Array[Symbol]
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
       def constant_type: (String name) -> Type::t?

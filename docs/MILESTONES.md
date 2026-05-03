@@ -66,12 +66,14 @@ Snapshot of `[Unreleased]` accumulation as of the last checkpoint. The branch is
 - Refinement negation in `assert` / `predicate-if-*` directives (refinement payloads now accept `~T` forms).
 - Include-aware module-catalog fallthrough in `MethodDispatcher::ConstantFolding#catalog_allows?` — activates the Comparable / Enumerable imports.
 - 2-argument fold dispatch (`try_fold_ternary`) — `Comparable#between?(min, max)`, `Comparable#clamp(min, max)`, `Integer#pow(exp, mod)` now fold through the catalog tier.
+- Cross-checker triage follow-ups — see the dedicated sub-section below for details. Branch-aware scope propagation (IfNode / UnlessNode in expression position), `Kernel#Array` union-distributing precision tier, and `Const = Data.define(*Symbol)` discovery all landed; the `Trinary` return-type-contract rule is deferred per [`docs/CURRENT_WORK.md`](CURRENT_WORK.md).
+- Rational and Complex catalog imports via parallel worktree-isolated agents.
 
 Open candidates remaining in the v0.0.5 pool (see [`docs/CURRENT_WORK.md`](CURRENT_WORK.md) for entry points):
 
 - Predicate-complement narrowing for `Refined[base, predicate]` — the only branch of `narrow_not_refinement` still bailing.
 - Block-shaped fold dispatch — block-parameter *typing* already works via `IteratorDispatch`; the open work is folding the block's *return* into a precise carrier (and IntegerRange operands on the now-landed 2-arg path).
-- Further catalog imports — Rational, Complex, URI, Pathname (already partial), Kernel (rb_mKernel), ObjectSpace.
+- Further catalog imports — Rational and Complex landed via parallel worktree-isolated agents; URI and Kernel are deferred because they fall outside the standard import skill's premise (Kernel methods are scattered across 20+ C files with no single Init function; URI is a pure-Ruby stdlib gem and the extractor is C-focused). Both need a hand-rolled or custom-scaffold approach. Pathname (already partial) and ObjectSpace remain in the candidate pool.
 - C-body classifier — wider transitive mutator scan that does not over-flag legitimate non-mutators (the `Array#to_a` regression that gated the conservative v0.0.5 fix).
 
 #### Cross-checker triage follow-ups (Steep 2.0 cross-check)

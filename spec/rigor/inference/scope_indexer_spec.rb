@@ -106,6 +106,57 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       [described_class.index(program, default_scope: default_scope), x_read]
     end
 
+    it "registers Const = Data.define(*sym) as a discovered class" do
+      program = parse(<<~RUBY)
+        Foo = Data.define(:x, :y)
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      foo_constant = program.statements.body.first
+      foo_singleton = idx[foo_constant].discovered_classes["Foo"]
+
+      expect(foo_singleton).to eq(Rigor::Type::Combinator.singleton_of("Foo"))
+    end
+
+    it "qualifies Data.define constants with the surrounding class path" do
+      program = parse(<<~RUBY)
+        class Container
+          Inner = Data.define(:k, :v)
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      class_node = program.statements.body.first
+
+      expect(idx[class_node].discovered_classes["Container::Inner"]).to(
+        eq(Rigor::Type::Combinator.singleton_of("Container::Inner"))
+      )
+    end
+
+    it "ignores Data.define-style calls with non-symbol arguments" do
+      program = parse(<<~RUBY)
+        Foo = Data.define(:x, "not_a_symbol")
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      foo_constant = program.statements.body.first
+
+      expect(idx[foo_constant].discovered_classes).not_to have_key("Foo")
+    end
+
+    it "recognises Data.define with a block-form override" do
+      program = parse(<<~RUBY)
+        Foo = Data.define(:x) do
+          def initialize(x:)
+            super(x: x.to_s)
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      foo_constant = program.statements.body.first
+
+      expect(idx[foo_constant].discovered_classes["Foo"]).to(
+        eq(Rigor::Type::Combinator.singleton_of("Foo"))
+      )
+    end
+
     it "narrows IfNode branches when the conditional sits in expression position" do
       # `x = nil` makes x's entry type Constant[nil]; narrow_truthy collapses
       # it to Bot. Without branch-aware propagation x would still read as

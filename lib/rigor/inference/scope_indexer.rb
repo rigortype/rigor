@@ -476,20 +476,67 @@ module Rigor
 
         case node
         when Prism::ModuleNode, Prism::ClassNode
-          name = qualified_name_for(node.constant_path)
-          if name
-            full = (qualified_prefix + [name]).join("::")
-            singleton = Type::Combinator.singleton_of(full)
-            identity_table[node.constant_path] = singleton
-            discovered[full] = singleton
-            child_prefix = qualified_prefix + [name]
-            record_declarations(node.body, child_prefix, identity_table, discovered) if node.body
-            return
-          end
+          return if record_class_or_module?(node, qualified_prefix, identity_table, discovered)
+        when Prism::ConstantWriteNode
+          return if record_data_define_constant?(node, qualified_prefix, identity_table, discovered)
         end
 
         node.compact_child_nodes.each do |child|
           record_declarations(child, qualified_prefix, identity_table, discovered)
+        end
+      end
+
+      def record_class_or_module?(node, qualified_prefix, identity_table, discovered)
+        name = qualified_name_for(node.constant_path)
+        return false unless name
+
+        full = (qualified_prefix + [name]).join("::")
+        singleton = Type::Combinator.singleton_of(full)
+        identity_table[node.constant_path] = singleton
+        discovered[full] = singleton
+        child_prefix = qualified_prefix + [name]
+        record_declarations(node.body, child_prefix, identity_table, discovered) if node.body
+        true
+      end
+
+      # Recognises `Const = Data.define(*Symbol) [do ... end]` and registers
+      # `Const` (qualified by the surrounding class/module path) as a
+      # discovered class. `Const.new(...)` then resolves to a fresh
+      # `Nominal[Const]` via `meta_new`, instead of the un-narrowed
+      # `Dynamic[top]` returned by the default `Class#new` envelope.
+      #
+      # The Data.define block body, if present, is recursed into so any
+      # nested class/module declarations in the override block (rare but
+      # legal) still feed the discovered table.
+      def record_data_define_constant?(node, qualified_prefix, identity_table, discovered)
+        return false unless data_define_call?(node.value)
+
+        full = (qualified_prefix + [node.name.to_s]).join("::")
+        discovered[full] = Type::Combinator.singleton_of(full)
+        record_declarations(node.value, qualified_prefix, identity_table, discovered)
+        true
+      end
+
+      # Recognises `Data.define(*Symbol)` and `Data.define(*Symbol) do ... end`
+      # at constant-write rvalue position. The receiver MUST be the bare
+      # `Data` constant (or `::Data`); other receivers (a local variable, a
+      # method call return) are rejected because their identity is not
+      # statically known.
+      def data_define_call?(node)
+        return false unless node.is_a?(Prism::CallNode)
+        return false unless node.name == :define
+        return false unless data_constant_receiver?(node.receiver)
+
+        args = node.arguments&.arguments || []
+        args.all?(Prism::SymbolNode)
+      end
+
+      def data_constant_receiver?(node)
+        case node
+        when Prism::ConstantReadNode
+          node.name == :Data
+        when Prism::ConstantPathNode
+          node.parent.nil? && node.name == :Data
         end
       end
 

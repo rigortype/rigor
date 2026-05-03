@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Branch-aware scope propagation for expression-position
+  conditionals.** `Inference::ScopeIndexer.propagate` now
+  special-cases `Prism::IfNode` and `Prism::UnlessNode`,
+  threading the predicate's narrowed truthy / falsey scopes
+  into the corresponding branch subtrees. Previously, when
+  an `if` / `unless` sat in expression position (e.g. as a
+  call argument or the RHS of an `[]=`), the indexer never
+  routed it through `eval_if`'s narrowing path, so inner
+  nodes inherited the un-narrowed entry scope and downstream
+  rules (`possible-nil-receiver`, type-of probes) saw
+  spurious `T | nil`. Worked example:
+  `cache[k] = if x; x.foo; else; default; end` now sees `x`
+  narrowed to its non-nil fragment inside the truthy branch,
+  matching the behaviour for the statement-level form
+  `if x; cache[k] = x.foo; else; cache[k] = default; end`.
+  Specs at
+  `spec/rigor/inference/scope_indexer_spec.rb#narrows IfNode
+  branches when the conditional sits in expression position`
+  (and the `UnlessNode` mirror) bind both shapes.
+- **`RbsLoader#instance_definition` /
+  `#singleton_definition` now declared as `untyped?`.** The
+  earlier sig form (`untyped`) was a workaround for the
+  truthy-narrowing gap above; with that gap closed, the sig
+  can faithfully reflect the impl's `nil`-on-unknown-class
+  return contract.
 - **Two-argument constant-fold dispatch.**
   `MethodDispatcher::ConstantFolding#try_fold` previously
   switched on `args.size` and only handled the 0- and 1-arg

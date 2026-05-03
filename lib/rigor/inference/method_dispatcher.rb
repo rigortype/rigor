@@ -6,6 +6,7 @@ require_relative "method_dispatcher/shape_dispatch"
 require_relative "method_dispatcher/rbs_dispatch"
 require_relative "method_dispatcher/iterator_dispatch"
 require_relative "method_dispatcher/file_folding"
+require_relative "method_dispatcher/kernel_dispatch"
 
 module Rigor
   module Inference
@@ -93,7 +94,8 @@ module Rigor
 
         ConstantFolding.try_fold(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           ShapeDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types)
+          FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          KernelDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types)
       end
 
       def try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type)

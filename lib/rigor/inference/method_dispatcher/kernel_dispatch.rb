@@ -1,0 +1,95 @@
+# frozen_string_literal: true
+
+require_relative "../../type"
+
+module Rigor
+  module Inference
+    module MethodDispatcher
+      # Kernel intrinsic shape-folding — precision tier for the
+      # `Kernel` module-functions whose return type is a function
+      # of the argument's *shape*, not just its class.
+      #
+      # Today the only catalogued intrinsic is `Kernel#Array`. The
+      # default RBS sig is `Array(untyped) -> Array[untyped]`, which
+      # collapses to `Array[Dynamic[top]]` for every caller. This
+      # tier short-circuits with a precise answer when the argument's
+      # type lattice tells us what the result element type MUST be:
+      #
+      #   Array(Constant[nil])         -> Array[bot]      # `[]`
+      #   Array(Nominal["Array",[E]])  -> Array[E]        # already an Array
+      #   Array(Tuple[T1,T2,…])        -> Array[T1|T2|…]
+      #   Array(Union[A,B,…])          -> distribute, then unify
+      #   Array(other Nominal[T])      -> Array[Nominal[T]]
+      #
+      # For receiver shapes we cannot prove (`Top`, `Dynamic`, …)
+      # the tier returns nil and the RBS tier answers with the
+      # generic `Array[untyped]` envelope.
+      #
+      # See `docs/type-specification/value-lattice.md` for the
+      # union-distribution contract this tier mirrors.
+      module KernelDispatch
+        module_function
+
+        def try_dispatch(receiver:, method_name:, args:)
+          return nil unless method_name == :Array
+          return nil if args.length != 1
+          return nil if receiver.nil?
+
+          arg = args.first
+          element = element_type_of(arg)
+          return nil if element.nil?
+
+          Type::Combinator.nominal_of("Array", type_args: [element])
+        end
+
+        # Computes the element type the argument contributes to the
+        # `Array(arg)` result, mirroring Ruby's coercion contract:
+        #
+        # - `nil` becomes `[]` (element type Bot — the empty array
+        #   contributes no inhabitants).
+        # - An existing `Array[E]` is returned as-is, so its element
+        #   type is `E`.
+        # - A `Tuple[T1, T2, …]` is materialised as `Array[T1|T2|…]`
+        #   (every tuple inhabitant is a tuple, hence Array-like).
+        # - Any other value `v` becomes `[v]`, so the element type
+        #   is the value's own type.
+        #
+        # Returns nil for receiver shapes the tier cannot prove
+        # (Top, Dynamic, Bot in pre-coercion position) so the
+        # caller falls back to the RBS-tier envelope.
+        def element_type_of(type)
+          case type
+          when Type::Union
+            distribute_over_union(type)
+          when Type::Constant
+            type.value.nil? ? Type::Combinator.bot : type
+          when Type::Nominal
+            array_element_or_self(type)
+          when Type::Tuple
+            tuple_element_union(type)
+          end
+        end
+
+        def distribute_over_union(union)
+          contributions = union.members.map { |member| element_type_of(member) }
+          return nil if contributions.any?(&:nil?)
+
+          Type::Combinator.union(*contributions)
+        end
+
+        def array_element_or_self(nominal)
+          return nominal unless nominal.class_name == "Array"
+          return Type::Combinator.untyped if nominal.type_args.empty?
+
+          Type::Combinator.union(*nominal.type_args)
+        end
+
+        def tuple_element_union(tuple)
+          return Type::Combinator.bot if tuple.elements.empty?
+
+          Type::Combinator.union(*tuple.elements)
+        end
+      end
+    end
+  end
+end

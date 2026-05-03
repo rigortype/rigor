@@ -8,9 +8,9 @@ module Rigor
       def self.instance: () -> Top
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -21,9 +21,9 @@ module Rigor
       def self.instance: () -> Bot
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -35,9 +35,9 @@ module Rigor
       def initialize: (Type::t static_facet) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -49,9 +49,9 @@ module Rigor
       def initialize: (untyped value) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -68,14 +68,14 @@ module Rigor
       def finite?: () -> bool
       def cardinality: () -> (Integer | Float)
       def covers?: (untyped value) -> bool
-      def lower: () -> Numeric
-      def upper: () -> Numeric
+      def lower: () -> (Integer | Float)
+      def upper: () -> (Integer | Float)
       def describe: (?Symbol verbosity) -> String
       def generic_description: () -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -88,9 +88,9 @@ module Rigor
       def initialize: (String class_name, ?Array[Type::t] type_args) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -102,9 +102,9 @@ module Rigor
       def initialize: (String class_name) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -116,9 +116,9 @@ module Rigor
       def initialize: (Array[Type::t] members) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -131,9 +131,9 @@ module Rigor
       def initialize: (Type::t base, Type::t removed) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -146,9 +146,9 @@ module Rigor
       def initialize: (Type::t base, Symbol predicate_id) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def matches?: (untyped value) -> bool?
       def ==: (untyped other) -> bool
@@ -161,9 +161,9 @@ module Rigor
       def initialize: (Array[Type::t] members) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -175,9 +175,9 @@ module Rigor
       def initialize: (Array[Type::t] elements) -> void
       def describe: (?Symbol verbosity) -> String
       def erase_to_rbs: () -> String
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
@@ -198,9 +198,9 @@ module Rigor
       def required_key?: (untyped key) -> bool
       def optional_key?: (untyped key) -> bool
       def read_only_key?: (untyped key) -> bool
-      def top: () -> Top
-      def bot: () -> Bot
-      def dynamic: () -> Dynamic
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer

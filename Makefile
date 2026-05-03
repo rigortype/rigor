@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json extract-builtin-catalogs catalog-diff
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -89,3 +89,20 @@ extract-builtin-catalogs:
 #   make catalog-diff BEFORE=/tmp/before.yml AFTER=data/builtins/ruby_core/time.yml
 catalog-diff:
 	@bundle exec ruby tool/catalog_diff.rb $(BEFORE) $(AFTER)
+
+# Steep is installed under tool/steep/ as a separate Bundler so its
+# dependency tree (rbs, prism, ...) cannot bleed into Rigor's own
+# Gemfile.lock. Always invoke through BUNDLE_GEMFILE so bundler picks
+# up tool/steep/.bundle/config (BUNDLE_PATH=vendor/bundle) instead of
+# the root config.
+STEEP_BUNDLE := BUNDLE_GEMFILE=tool/steep/Gemfile bundle
+
+steep-install:
+	$(STEEP_BUNDLE) install
+
+steep-check:
+	$(STEEP_BUNDLE) exec steep check
+
+# Pass-through wrapper: `make steep ARGS="check --severity-level=error"`.
+steep:
+	$(STEEP_BUNDLE) exec steep $(ARGS)

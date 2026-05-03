@@ -5,4 +5,5 @@
 /pkg/
 /tmp/
 /vendor/bundle/
+/tool/*/vendor/bundle/
 /result

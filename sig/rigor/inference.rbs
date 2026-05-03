@@ -132,7 +132,7 @@ module Rigor
     module ScopeIndexer
       def self?.index: (untyped root, default_scope: Scope) -> Hash[untyped, Scope]
       def self?.build_declaration_overrides: (untyped root) -> Hash[untyped, Type::t]
-      def self?.record_declarations: (untyped node, Array[String] qualified_prefix, Hash[untyped, Type::t] table) -> void
+      def self?.record_declarations: (untyped node, Array[String] qualified_prefix, Hash[untyped, Type::t] identity_table, Hash[String, Type::t] discovered) -> void
       def self?.qualified_name_for: (untyped constant_path_node) -> String?
       def self?.render_constant_path: (untyped node) -> String
       def self?.propagate: (untyped node, Hash[untyped, Scope] table, Scope parent_scope) -> void

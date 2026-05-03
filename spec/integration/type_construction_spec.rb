@@ -420,6 +420,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/include_aware_clamp.rb — Integer#clamp via Comparable's catalog" do
+    let(:harness) { harness_for("include_aware_clamp") }
+
+    it "folds Integer#clamp through the include-aware module-catalog fallthrough" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/union_arithmetic.rb — cartesian fold over Union[Constant…]" do
     let(:harness) { harness_for("union_arithmetic") }
 

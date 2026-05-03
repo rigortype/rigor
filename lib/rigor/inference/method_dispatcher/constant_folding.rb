@@ -626,11 +626,54 @@ module Rigor
         # implementation does not call back into user-redefinable
         # Ruby methods, so executing them on a literal Integer/Float
         # is safe regardless of monkey-patching.
+        #
+        # Resolution order:
+        #
+        # 1. Primary class catalog (e.g. NumericCatalog for an
+        #    Integer receiver). When the catalog has an entry —
+        #    even one classified `:dispatch` — that answer wins.
+        #    The class's direct `rb_define_method` registration is
+        #    authoritative; we MUST NOT fall through to a module
+        #    catalog and risk over-folding.
+        # 2. Module catalogs (Comparable, Enumerable, …) that the
+        #    receiver's class includes by ancestry. Reached only
+        #    when the primary catalog has NO entry for the method
+        #    — typically because the method is inherited purely
+        #    through `include Comparable` / `include Enumerable`
+        #    (e.g. `Integer#between?` / `Integer#clamp` are not in
+        #    numeric.yml because the Init block does not
+        #    `rb_define_method` them on Integer).
         def catalog_allows?(receiver_value, method_name)
           catalog, class_name = catalog_for(receiver_value)
-          return false unless catalog
+          return catalog.safe_for_folding?(class_name, method_name) if catalog&.method_entry(class_name, method_name)
 
-          catalog.safe_for_folding?(class_name, method_name)
+          module_catalogs_for(receiver_value).any? do |mod_catalog, mod_name|
+            mod_catalog.method_entry(mod_name, method_name) &&
+              mod_catalog.safe_for_folding?(mod_name, method_name)
+          end
+        end
+
+        # `(Module, catalog, class_name)` triples consulted as a
+        # fallthrough when the primary class catalog has no entry.
+        # Each triple's Module is matched against the receiver
+        # class's ancestor chain at lookup time; the catalog
+        # corresponds to the module-mode YAML at
+        # `data/builtins/ruby_core/<topic>.yml`.
+        MODULE_CATALOGS = [
+          [Comparable, Builtins::COMPARABLE_CATALOG, "Comparable"],
+          [Enumerable, Builtins::ENUMERABLE_CATALOG, "Enumerable"]
+        ].freeze
+        private_constant :MODULE_CATALOGS
+
+        # Returns the `(catalog, class_name)` pairs for every
+        # registered module that is in the receiver's ancestor
+        # chain. The receiver's class's `Module#ancestors` is
+        # cached by Ruby; the `Set` membership check is cheap.
+        def module_catalogs_for(receiver_value)
+          ancestors = Set.new(receiver_value.class.ancestors)
+          MODULE_CATALOGS.filter_map do |mod, catalog, class_name|
+            [catalog, class_name] if ancestors.include?(mod)
+          end
         end
 
         # `(catalog, class_name)` per receiver class. The class_name

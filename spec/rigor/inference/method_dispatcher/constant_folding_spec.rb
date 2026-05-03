@@ -624,4 +624,34 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
     end
   end
+
+  describe "include-aware module-catalog fallthrough (v0.0.5+)" do
+    def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
+
+    def fold_types(receiver, method_name, args = [])
+      described_class.try_fold(
+        receiver: receiver,
+        method_name: method_name,
+        args: args
+      )
+    end
+
+    it "folds Integer#clamp through Comparable's catalog when Numeric has no entry" do
+      # `Integer#clamp(0..10)` is provided by the included
+      # Comparable module — it is NOT registered directly on
+      # Integer in `Init_Numeric`, so numeric.yml has no entry.
+      # The include-aware fallthrough consults
+      # `COMPARABLE_CATALOG`, which classifies `clamp` as
+      # `:leaf`, and the fold materialises through the Ruby
+      # invocation `5.clamp(0..10) #=> 5`.
+      result = fold_types(constant_of(5), :clamp, [constant_of(0..10)])
+      expect(result).to eq(constant_of(5))
+    end
+
+    it "folds the wider half of clamp(0..10) for Constant[100]" do
+      # `100.clamp(0..10) #=> 10`.
+      result = fold_types(constant_of(100), :clamp, [constant_of(0..10)])
+      expect(result).to eq(constant_of(10))
+    end
+  end
 end

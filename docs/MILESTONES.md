@@ -37,54 +37,40 @@ Major surfaces landed:
 - `tool/scaffold_builtin_catalog.rb` automates the mechanical 70 % of new built-in catalog imports (Stage 0 of the `rigor-builtin-import` skill).
 - CLI `type-of` regression specs binding the kebab-case canonical-name display contract for refinement-bearing types in both human-readable and `--format=json` output.
 
-## v0.0.5 — Next Preview (planned)
+## v0.0.5 — Released 2026-05-03
 
-Theme: **continue catalog coverage and broaden the Enumerable-aware projections**. None of the items below are commitments yet; this is the active candidate pool for the next slice.
+Theme: **continue catalog coverage, broaden the Enumerable-aware projections, and absorb the Steep cross-checker triage follow-ups**. See `CHANGELOG.md`'s `[0.0.5]` section for the full added/changed list.
 
-- More Enumerable methods. `#each_with_object`, `#inject` / `#reduce` (memo-typed), `#group_by` / `#partition` (returning shaped containers), IO line iteration.
-- Refinement negation in `assert:` / `predicate-if-*:` directives. Refinement-form directives currently reject `~T` payloads; landing them needs a difference-against-refinement algebra.
+Major surfaces landed:
+
+- Comparable / Enumerable module catalog imports + `tool/scaffold_builtin_catalog.rb --module` mode.
 - Date / DateTime catalog imports (stdlib gems under `references/ruby/ext/date/`).
-- Comparable / Enumerable module imports — `tool/scaffold_builtin_catalog.rb` may grow a `--module` mode for these.
-- C-body classifier upgrades — track indirect mutator helpers transitively so per-class blocklists shrink.
-- `make catalog-diff` between two extractor runs.
+- Rational and Complex catalog imports — landed via parallel worktree-isolated agents.
+- Include-aware module-catalog fallthrough in `MethodDispatcher::ConstantFolding#catalog_allows?` activates the Comparable / Enumerable imports for direct (non-redefined) callers.
+- 2-argument constant-fold dispatch (`try_fold_ternary`) folds `Comparable#between?(min, max)`, `Comparable#clamp(min, max)`, `Integer#pow(exp, mod)`.
+- `narrow_not_refinement` extended to IntegerRange (paired-bound complement) and Intersection (De Morgan); refinement negation (`~T`) now accepted as the RHS of `assert` / `predicate-if-*` directives.
+- C-body classifier — pure `rb_check_frozen` wrapper detection reclassifies `Time#gmtime` / `Time#utc` from `:leaf` to `:mutates_self`.
+- `tool/catalog_diff.rb` + `make catalog-diff` target for surface-level diffs between two YAML snapshots.
+- **Steep cross-checker scaffolding.** `tool/steep/` ships Steep 2.0 as an isolated sibling Bundler (`make steep-check`) for sig / impl drift detection. Triage report and category breakdown in [`docs/notes/20260503-steep-cross-check-triage.md`](notes/20260503-steep-cross-check-triage.md). The triage's mechanical fixes (A-1 through A-5: predicate sigs, IntegerRange narrowing, scope_indexer arity, env duplication, CLI kwarg defaults) all landed.
+- **Branch-aware scope propagation for expression-position conditionals.** `Inference::ScopeIndexer.propagate` now routes IfNode / UnlessNode branches through `Narrowing.predicate_scopes`, fixing a class of false-positives where an `if` / `unless` buried inside a CallNode argument or `[]=` RHS never reached `eval_if`'s narrowing path.
+- **`Kernel#Array` precision tier (`MethodDispatcher::KernelDispatch`).** Folds `Array(arg)` into a precise `Array[E]` whenever the argument's value-lattice shape lets us prove the element type. Distributes element-wise over unions and unifies.
+- **`Const = Data.define(*Symbol)` discovery.** `Inference::ScopeIndexer.record_declarations` registers `Const` (qualified by the surrounding path) as a discovered class so `Const.new(...)` resolves to `Nominal[<qualified>]` via `meta_new`. Override-aware initializer-signature dispatch (using the block's `def initialize(...)` as the canonical sig) remains open as a follow-up.
 
-Stretch surfaces (land if cheap, defer if expensive):
+Deferred from v0.0.5 (carried forward):
+
+- Predicate-complement narrowing for `Refined[base, predicate]` — needs either a new mixed-case carrier or per-predicate paired-complement registry entries.
+- Block-shaped fold dispatch — folding the block's *return* into a precise carrier on top of the existing `IteratorDispatch` block-parameter typing; IntegerRange operands on the 2-arg path are also still held back.
+- Further catalog imports — URI and Kernel fall outside the standard import skill's premise (Kernel methods scatter across 20+ C files with no single Init function; URI is a pure-Ruby stdlib gem with no C surface). Both need a hand-rolled or custom-scaffold approach. Pathname (already partial) and ObjectSpace remain in the candidate pool.
+- C-body classifier — wider transitive mutator scan that does not over-flag legitimate non-mutators (the `Array#to_a` regression that gated the conservative v0.0.5 fix).
+- `Data.define` override-aware initializer dispatch — block-body `def initialize(...)` as the canonical sig for `Const.new` (today the auto-generated kw shape wins).
+- `Trinary` return-type contract on type-carrier predicate methods — closing the strict-on-returns gap requires a new CheckRules rule family (`return-type-mismatch`), explicitly deferred by [`docs/CURRENT_WORK.md`](CURRENT_WORK.md) until the inference surface is sturdy enough to avoid false-positive churn.
+- Cross-checker runner integration — `make steep-check` stays out-of-band; the Steep residual (6 warnings, all in `fact_store.rb` and rooted in Steep-side limitations Rigor closes natively) is the steady-state floor.
+
+Stretch surfaces (carried forward unchanged):
 
 - Pathname / URI delegation rules so `Pathname#exist?` etc routes through `File.exist?` projections.
 - `String#%` format-string parsing for catalog-aware fold over `Constant<String>` template + `Constant<…>` values.
 - `numeric-string` recogniser that classifies `String#match?(/\A\d+\z/)` as a `Refined[String, :numeric]` narrowing.
-
-### v0.0.5 progress checkpoint (work-in-progress, not yet released)
-
-Snapshot of `[Unreleased]` accumulation as of the last checkpoint. The branch is 14 commits ahead of `origin/master`; `[0.0.5]` will only freeze when the version bump commit lands. The release-row of this table will be filled in at that point; until then, items below are landed-but-still-mutable surfaces:
-
-- Comparable / Enumerable module catalog imports + the matching `tool/scaffold_builtin_catalog.rb --module` mode.
-- C-body classifier — pure `rb_check_frozen` wrapper detection (Time#gmtime / Time#utc reclassified `:mutates_self`; every other catalog byte-identical).
-- `tool/catalog_diff.rb` + `make catalog-diff` target.
-- Date / DateTime catalog imports (separate slice, landed earlier in the v0.0.5 thread).
-- `narrow_not_refinement` extended to IntegerRange + Intersection (De Morgan).
-- Refinement negation in `assert` / `predicate-if-*` directives (refinement payloads now accept `~T` forms).
-- Include-aware module-catalog fallthrough in `MethodDispatcher::ConstantFolding#catalog_allows?` — activates the Comparable / Enumerable imports.
-- 2-argument fold dispatch (`try_fold_ternary`) — `Comparable#between?(min, max)`, `Comparable#clamp(min, max)`, `Integer#pow(exp, mod)` now fold through the catalog tier.
-- Cross-checker triage follow-ups — see the dedicated sub-section below for details. Branch-aware scope propagation (IfNode / UnlessNode in expression position), `Kernel#Array` union-distributing precision tier, and `Const = Data.define(*Symbol)` discovery all landed; the `Trinary` return-type-contract rule is deferred per [`docs/CURRENT_WORK.md`](CURRENT_WORK.md).
-- Rational and Complex catalog imports via parallel worktree-isolated agents.
-
-Open candidates remaining in the v0.0.5 pool (see [`docs/CURRENT_WORK.md`](CURRENT_WORK.md) for entry points):
-
-- Predicate-complement narrowing for `Refined[base, predicate]` — the only branch of `narrow_not_refinement` still bailing.
-- Block-shaped fold dispatch — block-parameter *typing* already works via `IteratorDispatch`; the open work is folding the block's *return* into a precise carrier (and IntegerRange operands on the now-landed 2-arg path).
-- Further catalog imports — Rational and Complex landed via parallel worktree-isolated agents; URI and Kernel are deferred because they fall outside the standard import skill's premise (Kernel methods are scattered across 20+ C files with no single Init function; URI is a pure-Ruby stdlib gem and the extractor is C-focused). Both need a hand-rolled or custom-scaffold approach. Pathname (already partial) and ObjectSpace remain in the candidate pool.
-- C-body classifier — wider transitive mutator scan that does not over-flag legitimate non-mutators (the `Array#to_a` regression that gated the conservative v0.0.5 fix).
-
-#### Cross-checker triage follow-ups (Steep 2.0 cross-check)
-
-Identified by running Steep 2.0 (installed under `tool/steep/` as a separate Bundler — see [`docs/notes/20260503-steep-cross-check-triage.md`](notes/20260503-steep-cross-check-triage.md) for the full report). The mechanical sig / impl drift fixes have already landed (A-1 through A-5 in the triage); the items below are the **Rigor-detection-side** follow-ups, i.e. capabilities Rigor's analyzer should grow so that the same class of warning is caught natively without needing the Steep cross-check.
-
-- **`Trinary` return-type contract on type-carrier predicate methods.** **Deferred — out of v0.0.x scope.** Every `Type::*` carrier exposes `top` / `bot` / `dynamic` returning `Trinary`. The 39-warning batch from the Steep cross-check landed because `sig/rigor/type.rbs` had drifted to declare those as returning the queried type itself. Rigor's own check did not flag this because the analyzer does not yet enforce explicit return-type signatures against method bodies. Closing the gap requires a new CheckRules rule family (`return-type-mismatch`), which [`docs/CURRENT_WORK.md`](CURRENT_WORK.md)'s "Out of v0.0.5 / v0.0.x scope" note explicitly defers until "the inference surface they depend on is sturdy" — same bucket as type-incompatible writes and unreachable branches. Tracked here so the design context is preserved; revisit alongside the broader CheckRules-rule-family work.
-- ~~**`untyped?` truthy-narrowing.**~~ **Landed**. The original diagnosis ("`narrow_truthy` does not strip nil out of `untyped?`") was wrong — `Inference::Narrowing.narrow_truthy` already collapses `Union[Dynamic, Constant[nil]]` to `Dynamic` correctly. The actual gap was in `Inference::ScopeIndexer.propagate`: when an `IfNode` / `UnlessNode` sat in expression position (as a call argument or the RHS of an `[]=`), the indexer never ran `eval_if`'s narrowing path, so the truthy / falsey scopes never reached the inner subtree. Fixed by branch-aware propagation in `propagate` itself, which routes each branch through `Narrowing.predicate_scopes`. The `RbsLoader` instance/singleton-definition sigs are now declared as `untyped?` again.
-- ~~**`Kernel#Array` union-distributing return shape.**~~ **Landed**. `MethodDispatcher::KernelDispatch` now folds `Array(arg)` into a precise `Array[E]` based on the argument's value-lattice shape (Nominal / Constant[nil] / Tuple / Union with element-wise distribution). The previously-flagged `lib/rigor/analysis/fact_store.rb#fact_targets` site over `Target | Array[Target]` now resolves to `Array[Target]` instead of the RBS envelope `Array[Dynamic[top]]`. Steep's own warning at the same site persists because Steep does not distribute Array() over unions; that is a Steep-side limitation Rigor's analyzer now closes natively.
-- ~~**`Data.define` override-aware initializer dispatch.**~~ **Partially landed**. `Inference::ScopeIndexer.record_declarations` now recognises `Const = Data.define(*Symbol) [do ... end]` and registers `Const` (qualified by the surrounding path) as a discovered class. `Const.new(...)` resolves to `Nominal[<qualified>]` via `meta_new`, replacing the previous `Dynamic[top]` envelope. Member accessors fall through to the user-class fallback without false-positives. The override-aware initializer-signature path — using the block's `def initialize(...)` parameter list as the canonical sig for `Const.new` — is still open; today the auto-generated kw shape (members as required keywords) is what callers see through dispatch. Steep's own warnings on `lib/rigor/analysis/fact_store.rb` (Target / Fact) persist because Steep conflates the Data.define block scope with the outer FactStore scope; that gap is upstream.
-- **Cross-checker runner integration.** Keep `make steep-check` as an out-of-band sibling check for now (not chained into `make verify`). Three of the four detection items above have landed; the remaining `return-type-mismatch` rule is deferred per CURRENT_WORK, so the Steep residual (today: 6 warnings, all in `fact_store.rb` and rooted in Steep-side limitations Rigor now closes natively) stays the steady-state floor for the cross-check.
 
 ## v0.1.0 — Long Horizon (architecture commitments deferred)
 

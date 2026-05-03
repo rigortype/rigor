@@ -65,11 +65,13 @@ module Rigor
       # `:neg_infinity`). Use this in arithmetic comparisons; never compare
       # `:neg_infinity` directly with an `Integer`.
       def lower
-        min == NEG_INFINITY ? -Float::INFINITY : min
+        m = min
+        m.is_a?(Symbol) ? -Float::INFINITY : m
       end
 
       def upper
-        max == POS_INFINITY ? Float::INFINITY : max
+        m = max
+        m.is_a?(Symbol) ? Float::INFINITY : m
       end
 
       ALIAS_NAMES = {

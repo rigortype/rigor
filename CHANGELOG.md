@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Two-argument constant-fold dispatch.**
+  `MethodDispatcher::ConstantFolding#try_fold` previously
+  switched on `args.size` and only handled the 0- and 1-arg
+  shapes; 2-arg leaf methods like `Comparable#between?(min,
+  max)`, the explicit-bounds form of `Comparable#clamp(min,
+  max)`, and `Integer#pow(exp, mod)` all bailed to the
+  RBS-widened tier. The dispatch now grows a `when 2` arm
+  routed through `try_fold_ternary`, which folds the cartesian
+  product of receiver × arg0 × arg1 when every operand is a
+  `Constant` (or `Union[Constant…]`) and the catalog
+  classifies the method `:leaf` / `:trivial`. The same
+  `UNION_FOLD_INPUT_LIMIT` cap that gates the binary path
+  guards the cartesian explosion. IntegerRange operands are
+  reserved for a follow-up — any range receiver or arg short-
+  circuits the ternary path so the RBS tier still answers.
+  Worked examples: `5.between?(0, 10)` folds to
+  `Constant[true]`, `100.clamp(0, 10)` folds to
+  `Constant[10]`, `100.pow(50, 17)` folds to `Constant[4]`.
+  Direct payoff for the just-landed include-aware lookup:
+  `between?` was the canonical 2-arg method blocked by the
+  arity gate. End-to-end fixture:
+  `spec/integration/fixtures/two_arg_fold.rb`.
 - **`tool/catalog_diff.rb` + `make catalog-diff`.** Prints the
   surface-level diff between two
   `data/builtins/ruby_core/<topic>.yml` snapshots — per-class

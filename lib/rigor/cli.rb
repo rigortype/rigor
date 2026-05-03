@@ -28,7 +28,7 @@ module Rigor
       new(argv.dup, out: out, err: err).run
     end
 
-    def initialize(argv, out:, err:)
+    def initialize(argv = ARGV.dup, out: $stdout, err: $stderr)
       @argv = argv
       @out = out
       @err = err

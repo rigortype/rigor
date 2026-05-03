@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Kernel#Array` precision tier
+  (`MethodDispatcher::KernelDispatch`).** A new
+  precision-tier dispatcher folds `Array(arg)` into a precise
+  `Array[E]` whenever the argument's value-lattice shape lets
+  us prove the element type. The rules mirror Ruby's coercion
+  contract — `Array(nil) -> []`, an existing `Array[E]`
+  preserves its element, a Tuple materialises to
+  `Array[T1|T2|…]`, and a Union distributes element-wise and
+  unifies. Opaque shapes (Top / Dynamic / Bot) fall through to
+  the existing RBS-tier envelope. Worked example: in
+  `lib/rigor/analysis/fact_store.rb#fact_targets`,
+  `Array(fact.target)` over `fact.target: Target |
+  Array[Target]` previously typed as `Array[Dynamic[top]]`;
+  it now types as `Array[Target]`.
 - **Branch-aware scope propagation for expression-position
   conditionals.** `Inference::ScopeIndexer.propagate` now
   special-cases `Prism::IfNode` and `Prism::UnlessNode`,

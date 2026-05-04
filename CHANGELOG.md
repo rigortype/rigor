@@ -57,6 +57,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receiver is not a Tuple, the call has no block, the
   Tuple is empty) leaves the dispatch chain untouched.
 
+- **`&&` / `||` short-circuit elision on Constant-shaped left
+  operands.** `ExpressionTyper#type_of_and_or` now mirrors
+  Ruby's actual short-circuit semantics when the left
+  operand folds to a `Type::Constant`:
+  - `Constant[truthy] && rhs` → typed as the right operand.
+  - `Constant[falsey] && rhs` → typed as the left operand
+    (the right is never evaluated).
+  - `Constant[truthy] || rhs` → typed as the left operand.
+  - `Constant[falsey] || rhs` → typed as the right operand.
+  Non-Constant left operands keep the existing
+  union-of-both-operands fallback.
+
 - **Branch elision for expression-position conditionals.**
   `ExpressionTyper#type_of_if` and `#type_of_unless` now
   consult the predicate's typed value: when it folds to a

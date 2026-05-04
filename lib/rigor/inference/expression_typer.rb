@@ -559,11 +559,40 @@ module Rigor
         statements_or_nil(node.statements)
       end
 
-      # `a && b` and `a || b` short-circuit. Without a truthy/falsy
-      # narrowing model (Slice 6), the result of either side is reachable
-      # so the type is the union of the operand types.
+      # `a && b` and `a || b` short-circuit at the value level:
+      # `a && b` returns `a` when `a` is falsey, else `b`.
+      # `a || b` returns `a` when `a` is truthy,  else `b`.
+      #
+      # v0.0.6 — when the left operand folds to a `Type::Constant`,
+      # we know which side actually flows through, so the result
+      # is one operand's type instead of a union. Otherwise the
+      # union-of-both-operands fallback is preserved.
       def type_of_and_or(node)
-        Type::Combinator.union(type_of(node.left), type_of(node.right))
+        left_type = type_of(node.left)
+        polarity = constant_value_polarity(left_type)
+        return short_circuit_for(node, left_type, polarity) if polarity
+
+        Type::Combinator.union(left_type, type_of(node.right))
+      end
+
+      def short_circuit_for(node, left_type, polarity)
+        and_node = node.is_a?(Prism::AndNode)
+        if polarity == :truthy
+          and_node ? type_of(node.right) : left_type
+        else
+          and_node ? left_type : type_of(node.right)
+        end
+      end
+
+      # Returns `:truthy` / `:falsey` for a `Type::Constant`,
+      # nil otherwise. Mirrors `constant_predicate_polarity` but
+      # operates on a typed value (already-type-of'd) rather
+      # than a Prism node, so the same predicate analysis can
+      # be reused in both contexts.
+      def constant_value_polarity(type)
+        return nil unless type.is_a?(Type::Constant)
+
+        type.value ? :truthy : :falsey
       end
 
       def type_of_case(node)

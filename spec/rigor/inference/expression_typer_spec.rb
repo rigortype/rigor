@@ -889,24 +889,21 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type).to eq(expected)
     end
 
-    it "types AndNode as the union of its operands" do
+    it "short-circuits AndNode on a Constant-truthy left to the right operand (v0.0.6)" do
+      # `1 && 2` — `1` is truthy, so the value of the expression is `2`.
       type = scope.type_of(parse_expression("1 && 2"))
-      expected = Rigor::Type::Combinator.union(
-        Rigor::Type::Combinator.constant_of(1),
-        Rigor::Type::Combinator.constant_of(2)
-      )
-
-      expect(type).to eq(expected)
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(2))
     end
 
-    it "types OrNode as the union of its operands" do
+    it "short-circuits OrNode on a Constant-truthy left to the left operand (v0.0.6)" do
+      # `1 || 2` — `1` is truthy, so `||` returns `1`.
       type = scope.type_of(parse_expression("1 || 2"))
-      expected = Rigor::Type::Combinator.union(
-        Rigor::Type::Combinator.constant_of(1),
-        Rigor::Type::Combinator.constant_of(2)
-      )
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
 
-      expect(type).to eq(expected)
+    it "still unions both operands when the AndNode left is non-Constant" do
+      type = scope.type_of(parse_expression("x && 2"))
+      expect(type).to be_a(Rigor::Type::Union)
     end
 
     it "types CaseNode as the union of every when body and the else clause" do

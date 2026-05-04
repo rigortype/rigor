@@ -1111,6 +1111,13 @@ module Rigor
       # `Tuple[A, B, …]`        → [A, B, …]
       # `Constant<a..b>`        → [Constant[a], …, Constant[b]]
       # everything else         → nil
+      #
+      # Note: `Type::IntegerRange` is the bounded-Integer
+      # carrier (`int<a, b>` represents "an Integer between
+      # a and b"), not a Range value. Calls like `.map` /
+      # `.find` on an `IntegerRange` receiver would resolve
+      # to `Integer#map` / `Integer#find` — neither exists —
+      # so IntegerRange does NOT participate in this fold.
       def per_element_elements_of(receiver_type)
         case receiver_type
         when Type::Tuple then receiver_type.elements

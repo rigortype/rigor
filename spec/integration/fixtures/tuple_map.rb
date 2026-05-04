@@ -37,3 +37,13 @@ assert_type('["1", "2", "3"]', filter_mapped_keep)
 # All positions drop → empty Tuple.
 filter_mapped_drop = [1, 2, 3].filter_map { |_n| nil }
 assert_type("[]", filter_mapped_drop)
+
+# v0.0.6 — branch elision for expression-position
+# conditionals on Constant predicates composes with the
+# Phase 2 per-element fold and the `:filter_map` extension:
+# at each Tuple position, `n.even?` folds to a precise
+# `Constant[bool]`, the ternary's unreachable branch is
+# elided, and the surviving Constant feeds the per-position
+# drop step.
+filter_mapped_evens = [1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }
+assert_type('["2"]', filter_mapped_evens)

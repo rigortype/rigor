@@ -57,6 +57,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receiver is not a Tuple, the call has no block, the
   Tuple is empty) leaves the dispatch chain untouched.
 
+- **Branch elision for expression-position conditionals.**
+  `ExpressionTyper#type_of_if` and `#type_of_unless` now
+  consult the predicate's typed value: when it folds to a
+  `Type::Constant` whose value is Ruby-truthy (resp.
+  Ruby-falsey), the unreachable branch is dropped and the
+  if-expression's type is the live branch alone. Statement-
+  level branch elision (introduced in v0.0.3) covered
+  `if`/`unless` reached through `eval_if`; this slice covers
+  the expression-position ternary form (`a ? b : c`) and any
+  if-expression used as a value. Composes directly with the
+  Phase 2 `:map` / `:filter_map` per-element fold:
+  `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }`
+  now resolves to `Tuple[Constant["2"]]` instead of widening
+  to `Array[Dynamic[Top]]`.
+
 - **Per-element block fold extension — `:filter_map`.**
   `ExpressionTyper#try_per_element_block_fold` accepts
   `:filter_map` alongside `:map` / `:collect`, with a

@@ -120,6 +120,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       expect(filter_mapped_drop).to be_a(Rigor::Type::Tuple)
       expect(filter_mapped_drop.elements).to be_empty
     end
+
+    it "composes Phase 2 + filter_map + ternary branch elision into a precise survivor Tuple" do
+      # `[1,2,3].filter_map { |n| n.even? ? n.to_s : nil }`
+      # — only n=2 survives the per-position fold, so the
+      # answer is `Tuple[Constant["2"]]`.
+      filter_mapped_evens = harness.local(:filter_mapped_evens)
+      expect(filter_mapped_evens).to be_a(Rigor::Type::Tuple)
+      expect(filter_mapped_evens.elements.map(&:value)).to eq(["2"])
+    end
   end
 
   describe "fixtures/block_filter.rb — BlockFolding for select/all?/any?" do

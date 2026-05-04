@@ -1004,4 +1004,34 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Regexp")
     end
   end
+
+  describe "branch elision for expression-position conditionals (v0.0.6)" do
+    it "elides the else branch of a ternary on a Constant-truthy predicate" do
+      type = scope.type_of(parse_expression('true ? "yes" : nil'))
+      expect(type).to eq(Rigor::Type::Combinator.constant_of("yes"))
+    end
+
+    it "elides the then branch of a ternary on a Constant-falsey predicate" do
+      type = scope.type_of(parse_expression('false ? "yes" : "no"'))
+      expect(type).to eq(Rigor::Type::Combinator.constant_of("no"))
+    end
+
+    it "elides through a constant-fold predicate (1.even? -> Constant[false])" do
+      type = scope.type_of(parse_expression('1.even? ? "even" : "odd"'))
+      expect(type).to eq(Rigor::Type::Combinator.constant_of("odd"))
+    end
+
+    it "elides the unreachable branch of `unless` on a Constant predicate" do
+      type = scope.type_of(parse_expression('"x" unless true'))
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(nil))
+    end
+
+    it "still unions both branches when the predicate is non-Constant" do
+      # `x` is unbound so its type is `Dynamic[Top]`; both branches
+      # remain live and the result is the union.
+      type = scope.type_of(parse_expression('x ? "yes" : "no"'))
+      members = type.members.map(&:value)
+      expect(members).to contain_exactly("yes", "no")
+    end
+  end
 end

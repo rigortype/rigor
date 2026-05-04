@@ -500,28 +500,59 @@ module Rigor
       # rebinding is the StatementEvaluator's job (Slice 3 phase 2).
       # Without an else clause the branch's implicit value is nil, which
       # is included in the union.
+      #
+      # v0.0.6 — when the predicate folds to a `Type::Constant` whose
+      # value is Ruby-truthy (resp. Ruby-falsey), the unreachable
+      # branch is elided so the if-expression's type is the live
+      # branch alone. Statement-level branch elision lives in
+      # `StatementEvaluator#eval_if`; this handler covers the
+      # expression-position ternary form (`a ? b : c`) and any
+      # `if`/`unless` reached through `type_of`.
       def type_of_if(node)
         then_type = statements_or_nil(node.statements)
-        else_type =
-          if node.subsequent
-            type_of(node.subsequent)
-          else
-            Type::Combinator.constant_of(nil)
-          end
-        Type::Combinator.union(then_type, else_type)
+        else_type = if_else_type(node.subsequent)
+        elide_or_union(node.predicate, then_type, else_type)
       end
 
       # `unless c; t; else; e; end`. Prism uses `else_clause` here (no
-      # `elsif` chain).
+      # `elsif` chain). Branch-elision logic mirrors `type_of_if`,
+      # inverted: a truthy predicate selects the else branch.
       def type_of_unless(node)
         then_type = statements_or_nil(node.statements)
-        else_type =
-          if node.else_clause
-            type_of(node.else_clause)
-          else
-            Type::Combinator.constant_of(nil)
-          end
-        Type::Combinator.union(then_type, else_type)
+        else_type = if_else_type(node.else_clause)
+        elide_or_union(node.predicate, else_type, then_type)
+      end
+
+      def if_else_type(subsequent)
+        return Type::Combinator.constant_of(nil) if subsequent.nil?
+
+        type_of(subsequent)
+      end
+
+      # Routes the predicate's typed value through branch elision.
+      # `live_when_truthy` and `live_when_falsey` are the branch
+      # types selected by the predicate's polarity; the names
+      # match `IfNode` semantics directly and invert at the
+      # `type_of_unless` call site.
+      def elide_or_union(predicate, live_when_truthy, live_when_falsey)
+        case constant_predicate_polarity(predicate)
+        when :truthy then live_when_truthy
+        when :falsey then live_when_falsey
+        else Type::Combinator.union(live_when_truthy, live_when_falsey)
+        end
+      end
+
+      # Returns `:truthy`, `:falsey`, or `nil` for an arbitrary
+      # predicate expression. Only `Type::Constant` answers
+      # decisively — `Union[true, false]`, `Nominal[bool]`, and
+      # `Dynamic[T]` keep both branches live.
+      def constant_predicate_polarity(predicate)
+        return nil if predicate.nil?
+
+        type = type_of(predicate)
+        return nil unless type.is_a?(Type::Constant)
+
+        type.value ? :truthy : :falsey
       end
 
       def type_of_else(node)

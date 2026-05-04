@@ -6,20 +6,22 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.0.6 released 2026-05-05.** The full release summary is in `CHANGELOG.md`'s `[0.0.6] - 2026-05-05` section and the v0.0.6 row of [`docs/MILESTONES.md`](MILESTONES.md).
 
-**v0.0.7 in progress on `master`** — the pre-plugin coverage push. Seven slices since `v0.0.6`:
-1. `02f369f` — `key_of[T]` / `value_of[T]` type functions (parser registry + Combinator factories + `lower_snake` head support + nested type-args on class arguments).
-2. `1366f9f` — `int_mask[…]` / `int_mask_of[T]` type functions (bitwise-OR closure with cardinality cap; integer-literal arguments now accepted in `[…]` payloads).
-3. `5703ca8` — `Constant<Range>` unary precision (`to_a` lift to Tuple; `first`/`last`/`min`/`max`/`count`/`size`/`length` no-arg folds).
-4. `6102b7f` — `Rational` / `Complex` literal lift (`Prism::ImaginaryNode` / `Prism::RationalNode` + `Kernel#Rational(...)` / `Kernel#Complex(...)` Kernel-call folding; `foldable_constant_value?` widened to match `Type::Constant::SCALAR_CLASSES`).
-5. `6a10ac3` — `~Refined[base, predicate]` narrowing through `Difference[base, refined]` (replaces the conservative "current_type unchanged" fallback).
-6. `c85382d` — `T[K]` indexed-access type operator (Combinator factory + parser trailing `[K]` chain + class-name-headed top-level types).
-7. `acc83ea` — HashShape projections `keys` / `values` / `count` / `empty?` / `any?` for closed shapes with no optional keys.
+**v0.0.7 in progress on `master`** — the pre-plugin coverage push. Nine slices since `v0.0.6`:
+1. `02f369f` — `key_of[T]` / `value_of[T]` type functions.
+2. `1366f9f` — `int_mask[…]` / `int_mask_of[T]` type functions.
+3. `5703ca8` — `Constant<Range>` unary precision (`to_a`, `first`, `last`, `min`, `max`, `count`, `size`, `length`).
+4. `6102b7f` — `Rational` / `Complex` literal lift.
+5. `6a10ac3` — `~Refined[base, predicate]` narrowing through `Difference[base, refined]`.
+6. `c85382d` — `T[K]` indexed-access type operator.
+7. `acc83ea` — HashShape projections `keys` / `values` / `count` / `empty?` / `any?` for closed shapes.
+8. `a4b4df1` — Tuple unary precision (`empty?`, `any?`, `all?`, `none?`, `include?`, `sum`, `min`, `max`, `sort`, `reverse`, `to_a`).
+9. `b38eee0` — `String#%` format-string fold over `Tuple` and `HashShape` arguments.
 
-(Plus `035057a` — the v0.0.7 scope plan commit and `b50959d` — the mid-batch checkpoint refresh.)
+(Plus `035057a` — the v0.0.7 scope plan commit, `b50959d` and `2a8fb44` — incremental CURRENT_WORK refreshes.)
 
-Working state: 1470 RSpec examples / 0 failures, RuboCop 138 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.6` until the v0.0.7 surface is locked in.
+Working state: 1489 RSpec examples / 0 failures, RuboCop 138 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.6` until the v0.0.7 surface is locked in.
 
-Slice 4 of the original plan — the `rigor:v1:conforms-to` directive — was deferred because landing it without a real structural-conformance check would just add a no-op directive parser. The check is bigger than v0.0.7 wants; it stays in the deferral list.
+Slice 4 of the original plan — the `rigor:v1:conforms-to` directive — was deferred because landing it without a real structural-conformance check would just add a no-op directive parser.
 
 Composite payoff:
 - `Rational(3, 4)` → `Constant<Rational(3, 4)>`; `r.numerator` folds to `Constant[3]`; `r + Rational(1, 2)` folds to `Constant<Rational(5, 4)>`.
@@ -28,6 +30,8 @@ Composite payoff:
 - `assert value is ~lowercase-string` narrows `String` to `Difference[String, lowercase-string]`.
 - `key_of[Hash[Symbol, Integer]]` parses to `Symbol`; `int_mask[1, 2, 4]` parses to `Constant[0] | … | Constant[7]`; `Hash[Symbol, Integer][Symbol]` parses to `Integer`.
 - `{a: 1, b: "two"}.keys` folds to `Tuple[Constant[:a], Constant[:b]]`; `{}.empty?` folds to `Constant[true]`.
+- `[1, 2, 3].sum` folds to `Constant[6]`; `[1, 2, 3].include?(2)` folds to `Constant[true]`; `[3, 1, 2].sort` folds to `[1, 2, 3]`.
+- `"%d / %d" % [1, 2]` folds to `Constant<"1 / 2">`.
 
 ## Where the Work Resumes
 

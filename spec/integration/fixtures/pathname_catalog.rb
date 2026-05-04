@@ -2,41 +2,50 @@ require "pathname"
 require "rigor/testing"
 include Rigor::Testing
 
-# v0.0.6 — Pathname catalog import. Pathname is a thin
-# wrapper that mostly delegates to File / Dir / FileTest,
-# so the catalog's payoff is narrower than the Numeric or
-# String imports: most methods classify `:dispatch` and
-# their precision still flows through the RBS tier. What
-# the import buys us is:
+# v0.0.7 — Pathname delegation. The v0.0.6 catalog import
+# wired receiver-class recognition for `Pathname.new(...)`;
+# v0.0.7 adds:
 #
-# 1. `Pathname.new(...)` resolves to `Nominal[Pathname]`
-#    so downstream method dispatch knows the receiver class.
-# 2. The blocklist defensively covers the conventional
-#    `:initialize_copy` so a hypothetical future
-#    `Constant<Pathname>` carrier cannot fold an aliasing
-#    copy through the catalog.
-# 3. The lone `:leaf` method (`<=>`) is now catalog-folded
-#    rather than punted to RBS.
+# 1. `Pathname` to `Type::Constant::SCALAR_CLASSES`, so
+#    `Pathname.new(Constant<String>)` lifts via `meta_new`'s
+#    constant-constructor table to a `Constant<Pathname>`
+#    carrier.
+# 2. A curated set of pure path-manipulation methods on
+#    `Constant<Pathname>` receivers folds through dedicated
+#    `try_fold_pathname_unary` / `try_fold_pathname_binary`
+#    arms in `MethodDispatcher::ConstantFolding`. These bypass
+#    the catalog's `:dispatch` classification (the Pathname
+#    Ruby prelude routes most methods through File / Dir, so
+#    static catalog purity says "dispatch") and fold directly
+#    via the host Ruby Pathname implementation.
+# 3. Filesystem-touching methods (`exist?`, `file?`, `read`,
+#    …) are intentionally NOT folded — they depend on the
+#    analysis machine's filesystem, which is neither stable
+#    nor relevant to the analyzed program.
 
 p1 = Pathname.new("/usr/bin/ruby")
-assert_type("Pathname", p1)
+assert_type("#<Pathname:/usr/bin/ruby>", p1)
 
-# `Pathname#basename` returns a Pathname (via File.basename
-# wrapped in Pathname.new); RBS knows the return type.
-basename = p1.basename
-assert_type("Pathname", basename)
+# Pure path-manipulation unary folds.
+assert_type("#<Pathname:ruby>", p1.basename)
+assert_type("#<Pathname:/usr/bin>", p1.dirname)
+assert_type('""', p1.extname)
+assert_type('"/usr/bin/ruby"', p1.to_s)
+assert_type("true", p1.absolute?)
+assert_type("false", p1.relative?)
 
-# `Pathname#extname` returns the string extension.
-extname = p1.extname
-assert_type("String", extname)
+# Pure path-manipulation binary folds.
+assert_type("#<Pathname:/usr/bin/ruby/lib>", p1 + "lib")
+assert_type("#<Pathname:/usr/bin/ruby.rbx>", p1.sub_ext(".rbx"))
+assert_type("#<Pathname:/usr/bin>", p1.join(".."))
 
-# `Pathname#to_s` returns the underlying String.
-str = p1.to_s
-assert_type("String", str)
+# Comparable folds.
+assert_type("0", p1 <=> Pathname.new("/usr/bin/ruby"))
+assert_type("true", p1 == Pathname.new("/usr/bin/ruby"))
 
-# `<=>` is catalog-classified `:leaf` and reaches the
-# catalog tier; the RBS tier widens the return to
-# `Integer | nil`, which Rigor describes as `Integer`
-# under the `:short` verbosity.
-cmp = p1 <=> Pathname.new("/usr/bin/ruby")
-assert_type("Integer", cmp)
+# Filesystem-dependent calls are NOT folded — the catalog tier
+# declines and the answer flows through RBS dispatch on the
+# `Constant<Pathname>` receiver. The `nominal_for_name`
+# fallback path resolves them to the RBS-declared return type.
+exists = p1.exist?
+assert_type("false | true", exists)

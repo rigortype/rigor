@@ -23,6 +23,7 @@ module Rigor
         Rational,
         Complex,
         Regexp,
+        Pathname,
         TrueClass,
         FalseClass,
         NilClass

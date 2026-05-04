@@ -269,12 +269,16 @@ module Rigor
           [result]
         end
 
+        # rubocop:disable Metrics/CyclomaticComplexity
         def try_fold_unary_set(receiver_values, method_name)
           range_lift = try_fold_range_constant_unary(receiver_values, method_name)
           return range_lift if range_lift
 
           string_lift = try_fold_string_array_unary(receiver_values, method_name)
           return string_lift if string_lift
+
+          pathname_lift = try_fold_pathname_unary(receiver_values, method_name)
+          return pathname_lift if pathname_lift
 
           # Type-level allow check on every receiver. If one member's
           # type does not have the method in its allow list (e.g.
@@ -289,6 +293,7 @@ module Rigor
           end
           build_constant_type(results, source: receiver_values)
         end
+        # rubocop:enable Metrics/CyclomaticComplexity
 
         # v0.0.7 — `Constant<Range>#to_a` and the no-arg
         # `first` / `last` / `min` / `max` short-circuit through a
@@ -342,10 +347,13 @@ module Rigor
           Type::Combinator.constant_of(edge == :first ? values.first : values.last)
         end
 
-        # rubocop:disable Metrics/CyclomaticComplexity
+        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         def try_fold_binary_set(receiver_values, method_name, arg_values)
           string_lift = try_fold_string_array_binary(receiver_values, method_name, arg_values)
           return string_lift if string_lift
+
+          pathname_lift = try_fold_pathname_binary(receiver_values, method_name, arg_values)
+          return pathname_lift if pathname_lift
 
           return nil if receiver_values.size * arg_values.size > UNION_FOLD_INPUT_LIMIT
           return nil unless receiver_values.all? { |rv| binary_method_allowed?(rv, method_name) }
@@ -355,7 +363,7 @@ module Rigor
           end
           build_constant_type(results, source: receiver_values + arg_values)
         end
-        # rubocop:enable Metrics/CyclomaticComplexity
+        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
         # v0.0.7 — `Constant<String>#chars` / `bytes` / `lines` /
         # `split` (no-arg) return a Ruby Array of foldable
@@ -370,6 +378,65 @@ module Rigor
         private_constant :STRING_ARRAY_UNARY_METHODS,
                          :STRING_ARRAY_BINARY_METHODS,
                          :STRING_ARRAY_LIFT_LIMIT
+
+        # v0.0.7 — `Constant<Pathname>` delegates to a curated set
+        # of pure path-manipulation methods. Pathname is immutable
+        # in Ruby (per its docstring) and the catalog classifies
+        # most methods `:dispatch` because the C body delegates to
+        # File / Dir / FileTest. The methods listed here are
+        # filesystem-independent — they read only `@path` — so
+        # invoking them at fold time produces a deterministic
+        # result regardless of the host filesystem state.
+        #
+        # Filesystem-touching methods (`exist?`, `file?`, `read`,
+        # `stat`, …) are intentionally NOT folded: their answer
+        # depends on the analysis machine's filesystem, which is
+        # neither stable nor relevant to the analyzed program.
+        PATHNAME_PURE_UNARY = Set[
+          :to_s, :to_path, :to_str,
+          :basename, :dirname, :extname, :cleanpath,
+          :parent, :sub_ext, :root?, :absolute?, :relative?,
+          :hash, :inspect
+        ].freeze
+        PATHNAME_PURE_BINARY = Set[
+          :+, :join, :sub_ext, :<=>, :==, :eql?, :===,
+          :relative_path_from
+        ].freeze
+        private_constant :PATHNAME_PURE_UNARY, :PATHNAME_PURE_BINARY
+
+        def try_fold_pathname_unary(receiver_values, method_name)
+          return nil unless PATHNAME_PURE_UNARY.include?(method_name)
+          return nil unless receiver_values.size == 1
+
+          receiver = receiver_values.first
+          return nil unless receiver.is_a?(Pathname)
+
+          result = receiver.public_send(method_name)
+          return nil unless foldable_constant_value?(result)
+
+          Type::Combinator.constant_of(result)
+        rescue StandardError
+          nil
+        end
+
+        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def try_fold_pathname_binary(receiver_values, method_name, arg_values)
+          return nil unless PATHNAME_PURE_BINARY.include?(method_name)
+          return nil unless receiver_values.size == 1 && arg_values.size == 1
+
+          receiver = receiver_values.first
+          arg = arg_values.first
+          return nil unless receiver.is_a?(Pathname)
+          return nil unless arg.is_a?(Pathname) || arg.is_a?(String)
+
+          result = receiver.public_send(method_name, arg)
+          return nil unless foldable_constant_value?(result)
+
+          Type::Combinator.constant_of(result)
+        rescue StandardError
+          nil
+        end
+        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
         def try_fold_string_array_unary(receiver_values, method_name)
           return nil unless STRING_ARRAY_UNARY_METHODS.include?(method_name)
@@ -1058,7 +1125,7 @@ module Rigor
         # round-trip through `Type::Combinator.constant_of`".
         def foldable_constant_value?(value)
           case value
-          when Integer, Float, Rational, Complex, String, Symbol, Regexp, true, false, nil then true
+          when Integer, Float, Rational, Complex, String, Symbol, Regexp, Pathname, true, false, nil then true
           else false
           end
         end

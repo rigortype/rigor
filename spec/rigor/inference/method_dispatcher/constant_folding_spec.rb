@@ -810,6 +810,45 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
     end
 
+    describe "Constant<Pathname> delegation (v0.0.7)" do
+      def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
+
+      let(:p) { constant_of(Pathname.new("/usr/bin/ruby")) }
+
+      it "folds to_s to the underlying string" do
+        expect(fold_types(p, :to_s)).to eq(constant_of("/usr/bin/ruby"))
+      end
+
+      it "folds basename / dirname / extname to Pathname / String constants" do
+        expect(fold_types(p, :basename)).to eq(constant_of(Pathname.new("ruby")))
+        expect(fold_types(p, :dirname)).to eq(constant_of(Pathname.new("/usr/bin")))
+        expect(fold_types(p, :extname)).to eq(constant_of(""))
+      end
+
+      it "folds the absolute? / relative? / root? path predicates" do
+        expect(fold_types(p, :absolute?)).to eq(constant_of(true))
+        expect(fold_types(p, :relative?)).to eq(constant_of(false))
+        expect(fold_types(p, :root?)).to eq(constant_of(false))
+      end
+
+      it "folds + with a String operand to a concatenated Pathname" do
+        expect(fold_types(p, :+, [constant_of("lib")]))
+          .to eq(constant_of(Pathname.new("/usr/bin/ruby/lib")))
+      end
+
+      it "folds <=> against another Constant<Pathname>" do
+        expect(fold_types(p, :<=>, [constant_of(Pathname.new("/usr/bin/ruby"))]))
+          .to eq(constant_of(0))
+      end
+
+      it "declines on filesystem-touching methods (e.g. exist?)" do
+        # `exist?` reads the host filesystem. Even on a Constant<Pathname>
+        # receiver the answer depends on the analysis machine, so the
+        # fold tier MUST decline so the RBS tier widens to bool.
+        expect(fold_types(p, :exist?)).to be_nil
+      end
+    end
+
     describe "Constant<String> array-returning method lift (v0.0.7)" do
       def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
       def tuple_of(*elems) = Rigor::Type::Combinator.tuple_of(*elems)

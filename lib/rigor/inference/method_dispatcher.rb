@@ -41,7 +41,7 @@ module Rigor
     # The dispatcher's public signature reserves space for `block_type:`
     # and ADR-2 plugin extensions (later slices), so call sites added
     # now do not have to be rewritten when those tiers arrive.
-    module MethodDispatcher
+    module MethodDispatcher # rubocop:disable Metrics/ModuleLength
       module_function
 
       # @param receiver_type [Rigor::Type, nil] type of the receiver expression, or
@@ -96,7 +96,7 @@ module Rigor
       # arity-based fold tiers above it filter out the common
       # cases first. When `block_type` is nil the tier is a no-op.
       def dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type = nil)
-        meta_result = try_meta_introspection(receiver_type, method_name)
+        meta_result = try_meta_introspection(receiver_type, method_name, arg_types)
         return meta_result if meta_result
 
         ConstantFolding.try_fold(receiver: receiver_type, method_name: method_name, args: arg_types) ||
@@ -151,10 +151,10 @@ module Rigor
       # adjacent calls and the trivial `instance_of?(self)`
       # later as the rule catalogue grows; for now only `class`
       # is handled.
-      def try_meta_introspection(receiver_type, method_name)
+      def try_meta_introspection(receiver_type, method_name, arg_types = [])
         case method_name
         when :class then meta_class(receiver_type)
-        when :new then meta_new(receiver_type)
+        when :new then meta_new(receiver_type, arg_types)
         end
       end
 
@@ -171,10 +171,38 @@ module Rigor
       # plumbing for user classes, so a discovered-class
       # `ScanAccumulator.new` types as `Nominal[ScanAccumulator]`
       # rather than `Class`.
-      def meta_new(receiver_type)
+      #
+      # v0.0.7 — for the curated set of immutable scalar-shaped
+      # classes that `Type::Constant::SCALAR_CLASSES` accepts
+      # (today: `Pathname`), `.new(Constant<…>)` lifts to a
+      # `Constant<…>` carrier so downstream method calls fold
+      # through the standard catalog tier.
+      def meta_new(receiver_type, arg_types = [])
         return nil unless receiver_type.is_a?(Type::Singleton)
 
+        constant_lift = constant_constructor_lift(receiver_type.class_name, arg_types)
+        return constant_lift if constant_lift
+
         Type::Combinator.nominal_of(receiver_type.class_name)
+      end
+
+      CONSTANT_CONSTRUCTORS = {
+        "Pathname" => ->(arg) { Pathname.new(arg) }
+      }.freeze
+      private_constant :CONSTANT_CONSTRUCTORS
+
+      def constant_constructor_lift(class_name, arg_types)
+        builder = CONSTANT_CONSTRUCTORS[class_name]
+        return nil if builder.nil?
+        return nil unless arg_types.size == 1
+
+        arg = arg_types.first
+        return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(String)
+
+        result = builder.call(arg.value)
+        Type::Combinator.constant_of(result)
+      rescue StandardError
+        nil
       end
 
       CONSTANT_METACLASSES = {

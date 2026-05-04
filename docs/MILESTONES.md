@@ -134,6 +134,29 @@ Deferred from v0.0.7 (carried forward):
 - `rigor:v1:conforms-to` directive — needs a real structural-conformance checker beyond the v0.0.7 envelope.
 - Caches and the plugin API — reserved for v0.1.0. The cache slice taxonomy design doc is the contract; the persistence layer is the next pre-v0.1.0 slice (and the first cache-related code).
 
+## v0.0.8 — Planned
+
+Theme: **first cache-related code slice**. Land the persistence layer the v0.0.7 cache slice taxonomy design doc ([`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md)) commits to, with the **RBS environment loader** as the first real producer wired through the cache. Backend choice is fixed by [ADR-6](adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, zero new gem dependencies.
+
+Planned surfaces (operational slice order):
+
+1. **`Rigor::Cache::Descriptor` value object.** The taxonomy doc's typed-slot schema as Ruby (`FileEntry`, `GemEntry`, `PluginEntry`, `ConfigEntry`); composition (`union-by-key`, stricter-comparator-wins for `files`, conflict detection); canonical serialisation. Pure value object; spec-tested in isolation.
+2. **`Rigor::Cache::Store` filesystem backend.** `.rigor/cache/<producer-id>/<key-prefix>/<key-suffix>.entry` layout per ADR-6; rename-into-place atomicity; per-file `flock`; trailing SHA-256 integrity check; schema-version directory marker.
+3. **RBS environment loader as the first cached producer.** The single biggest cost in a cold `rigor check` run. The RBS loader's `build_env` step caches its result keyed by `signature_paths` digests + libraries list + `rbs` gem version. Warm runs skip the RBS parse entirely.
+4. **`rigor check --cache-stats` CLI flag.** Reports hit/miss counts per producer at the end of the run. Only observability; no policy yet.
+5. **`rigor check --clear-cache` CLI flag.** `rm -rf .rigor/cache` equivalent.
+6. **Diagnostic provenance prefix.** Small companion slice: `Rigor::Analysis::Diagnostic` gains a `source_family` field defaulting to `:builtin`; the formatter optionally prepends the source-family prefix to the rule id (`plugin.<id>.<rule>`, `rbs_extended.<rule>`, etc.). Prepares ADR-2's plugin-observability story without committing to the plugin API itself.
+
+Deferred from v0.0.8 (carried forward) — these are part of v0.1.0 or later:
+
+- Eviction / LRU / size cap. v0.0.8 ships unbounded; users run `--clear-cache` if needed.
+- Concurrent multi-process writes beyond the per-file `flock` model.
+- LSP / long-running-daemon cache mode.
+- Cross-machine cache sharing.
+- Plugin-side cache producers — gated on the plugin API itself, which lands in v0.1.0.
+- Inference / catalog / scope-index caches beyond the RBS environment loader. The architecture supports them; the implementation work is per-producer and naturally fans out into v0.0.9+.
+- `Rigor::FlowContribution` bundle struct — the next pre-v0.1.0 substrate slice after the cache layer.
+
 ## v0.1.0 — Long Horizon (architecture commitments deferred)
 
 Theme: **infrastructure**. v0.1.0 reserves two cross-cutting machinery surfaces that should not be retro-fitted later:

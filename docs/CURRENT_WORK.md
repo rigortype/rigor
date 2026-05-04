@@ -4,11 +4,19 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 ## Status
 
-**v0.0.7 released 2026-05-05.** The branch is at a clean shipping state: 1540 RSpec examples / 0 failures, RuboCop 140 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics, `gem build rigortype.gemspec` produces `rigortype-0.0.7.gem` cleanly. `lib/rigor/version.rb`, `Gemfile.lock`, and `CHANGELOG.md`'s `[0.0.7]` heading agree on the release version.
+**v0.0.7 released 2026-05-05.** The full release summary is in `CHANGELOG.md`'s `[0.0.7] - 2026-05-05` section and the v0.0.7 row of [`docs/MILESTONES.md`](MILESTONES.md). The composite payoff: sixteen feature slices closing the spec ↔ implementation gap, plus three pre-v0.1.0 substrate slices (`Rigor::Reflection` facade + consumer migration; v0.1.0 readiness and cache slice taxonomy design docs).
 
-The summary of what shipped in v0.0.7 is in `CHANGELOG.md`'s `[0.0.7] - 2026-05-05` section and the v0.0.7 row of [`docs/MILESTONES.md`](MILESTONES.md). Not duplicated here.
+**v0.0.8 in planning on `master`** — the **first cache-related code slice**. Theme: land the persistence layer that v0.0.7's cache slice taxonomy design doc ([`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md)) commits to, with the RBS environment loader as the first real producer. Backend choice is fixed by [ADR-6](adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies** (the `rigortype` gem stays at the current `(prism, rbs)` runtime surface).
 
-The composite payoff: sixteen feature slices closing the spec ↔ implementation gap (type-language type functions, expanded Constant carriers, Tuple / HashShape / String precision, refinement narrowing, empty literal carriers) plus three pre-v0.1.0 substrate slices (`Rigor::Reflection` facade + consumer migration; v0.1.0 readiness and cache slice taxonomy design docs).
+Planned slice order — see the v0.0.8 row of [`docs/MILESTONES.md`](MILESTONES.md) for the full list:
+
+1. `Rigor::Cache::Descriptor` value object (pure-value composition + canonical serialisation).
+2. `Rigor::Cache::Store` filesystem backend (sharded directory, atomic rename, per-file flock, SHA-256 integrity).
+3. RBS environment loader as the first cached producer (the single biggest cost in a cold `rigor check` run).
+4. `rigor check --cache-stats` (hit/miss observability) and `--clear-cache` (manual eviction).
+5. Diagnostic provenance prefix (small companion slice — `source_family` field on `Diagnostic`).
+
+Working state at the v0.0.8 entry point: 1540 RSpec examples / 0 failures, RuboCop 140 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. Version stays at `0.0.7` until the v0.0.8 surface is locked in.
 
 ## Where the Work Resumes
 

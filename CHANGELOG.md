@@ -57,6 +57,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receiver is not a Tuple, the call has no block, the
   Tuple is empty) leaves the dispatch chain untouched.
 
+- **BlockFolding extension — `find` / `detect` / `find_index`
+  / `index` / `count`.** Four short-circuit folds join the
+  Phase 1 surface:
+  - `find { false }` / `detect { false }` /
+    `find_index { false }` / `index { false }` (block-form
+    only — the value-search forms `index(value)` and
+    `count(value)` decline so the RBS tier still answers)
+    fold to `Constant[nil]`.
+  - `count { false }` folds to `Constant[0]` regardless of
+    receiver shape.
+  - `count { true }` folds to `Constant[size]` when the
+    receiver pins a finite size — Tuple, HashShape, or
+    `Constant<Range>` with finite integer endpoints.
+  The truthy-block side of `find` / `find_index` stays
+  deferred because the answer depends on which Tuple
+  position evaluates to truthy, which requires per-position
+  block re-typing analogous to the Phase 2 `:map` path.
+
 ## [0.0.5] - 2026-05-03
 
 ### Added

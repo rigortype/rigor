@@ -45,6 +45,23 @@ module Rigor
 
         PREDICATE_METHODS = Set[:all?, :any?, :none?].freeze
 
+        # Methods whose answer is `nil` when the block always
+        # returns Ruby-falsey — `find` / `detect` short-circuit
+        # to nil when nothing matches, `find_index` / `index`
+        # likewise. These methods only fold on the falsey side
+        # for now; the truthy-block side requires per-position
+        # analysis (the index of the first kept element, or the
+        # element itself, depend on the receiver's shape and on
+        # which positions actually evaluate to truthy).
+        FALSEY_BLOCK_NIL_METHODS = Set[:find, :detect, :find_index, :index].freeze
+
+        # Block-taking `count` returns the number of elements
+        # for which the block is truthy. With a Constant-falsey
+        # block the answer is unconditionally `Constant[0]`;
+        # with a Constant-truthy block on a finitely-sized
+        # receiver it is `Constant[size]`.
+        COUNT_METHOD = :count
+
         # @param receiver    [Rigor::Type, nil]
         # @param method_name [Symbol]
         # @param args        [Array<Rigor::Type>]
@@ -52,7 +69,8 @@ module Rigor
         #   the call's block. `nil` means "no block at the call site"
         #   and disqualifies every rule here.
         # @return [Rigor::Type, nil]
-        def try_fold(receiver:, method_name:, args:, block_type:) # rubocop:disable Lint/UnusedMethodArgument
+        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def try_fold(receiver:, method_name:, args:, block_type:)
           return nil if receiver.nil? || block_type.nil?
 
           truthiness = constant_truthiness(block_type)
@@ -62,8 +80,13 @@ module Rigor
             fold_predicate(receiver, method_name, truthiness)
           elsif filter_method?(method_name)
             fold_filter(receiver, method_name, truthiness)
+          elsif FALSEY_BLOCK_NIL_METHODS.include?(method_name)
+            fold_falsey_nil_short_circuit(method_name, truthiness, args)
+          elsif method_name == COUNT_METHOD
+            fold_count(receiver, truthiness, args)
           end
         end
+        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
         def filter_method?(method_name)
           FILTER_KEEP_ON_TRUTHY.include?(method_name) ||
@@ -180,11 +203,15 @@ module Rigor
         end
 
         def constant_emptiness(value)
-          case value
-          when Array, Hash, String then value.empty? ? :empty : :non_empty
-          when Range then range_emptiness(value)
-          else :unknown
-          end
+          # Only `Range` constants reach these folds: `Type::Constant`
+          # rejects Array / Hash literals (they become `Tuple` /
+          # `HashShape` carriers), and the remaining scalar
+          # constants (Integer / Float / Symbol / String / …)
+          # are not Enumerable receivers for the filter or
+          # predicate methods folded here.
+          return range_emptiness(value) if value.is_a?(Range)
+
+          :unknown
         end
 
         def range_emptiness(range)
@@ -229,6 +256,65 @@ module Rigor
           when Type::Nominal then %w[Array Hash Set Range].include?(receiver.class_name)
           else false
           end
+        end
+
+        # `find` / `detect` / `find_index` / `index` (block form)
+        # short-circuit to nil when the block is provably falsey.
+        # `index` and `find_index` also accept a non-block argument
+        # form (`arr.index(value)`); we decline whenever the call
+        # carries a positional argument so the RBS tier still
+        # answers the value-search variant correctly.
+        def fold_falsey_nil_short_circuit(_method_name, truthiness, args)
+          return nil unless args.empty?
+          return nil unless truthiness == :falsey
+
+          Type::Combinator.constant_of(nil)
+        end
+
+        # `count` with a block returns the count of elements
+        # for which the block is truthy. The non-block forms
+        # (`count` / `count(value)`) carry positional arguments
+        # and are handled by the RBS tier; this fold only fires
+        # when the block is the sole source of selection.
+        def fold_count(receiver, truthiness, args)
+          return nil unless args.empty?
+          return Type::Combinator.constant_of(0) if truthiness == :falsey
+
+          fold_count_truthy(receiver)
+        end
+
+        def fold_count_truthy(receiver)
+          size = finite_size(receiver)
+          return nil if size.nil?
+
+          Type::Combinator.constant_of(size)
+        end
+
+        # Returns the receiver's known finite element count, or
+        # nil when the carrier does not pin a size. Tuple and
+        # HashShape are pinned by construction; `Constant<…>`
+        # exposes the literal's `.size`. Other shapes (Array[T],
+        # Range[T], Nominal) decline so the RBS tier widens.
+        def finite_size(receiver)
+          case receiver
+          when Type::Tuple then receiver.elements.size
+          when Type::HashShape then receiver.pairs.size
+          when Type::Constant then constant_size(receiver.value)
+          end
+        end
+
+        def constant_size(value)
+          # Mirrors `constant_emptiness` — only `Range` produces
+          # a meaningful finite size for the methods folded here.
+          range_size(value) if value.is_a?(Range)
+        end
+
+        def range_size(range)
+          beg = range.begin
+          en  = range.end
+          return nil unless beg.is_a?(Integer) && en.is_a?(Integer)
+
+          range.exclude_end? ? [en - beg, 0].max : [en - beg + 1, 0].max
         end
       end
     end

@@ -143,6 +143,61 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
     end
   end
 
+  describe "find/detect/find_index/index falsey-block short-circuit" do
+    %i[find detect find_index index].each do |method|
+      it "folds `#{method} { false }` to Constant[nil]" do
+        result = fold(receiver: array_of(integer_nominal), method: method, block: false_const)
+        expect(result).to eq(constant_of(nil))
+      end
+
+      it "declines on the truthy side (per-position analysis is a future slice)" do
+        result = fold(receiver: array_of(integer_nominal), method: method, block: true_const)
+        expect(result).to be_nil
+      end
+
+      it "declines when called with a positional argument (value-search form)" do
+        result = fold(receiver: array_of(integer_nominal), method: method, block: false_const,
+                      args: [constant_of(0)])
+        expect(result).to be_nil
+      end
+    end
+  end
+
+  describe "count with a block" do
+    it "folds count { false } to Constant[0] regardless of receiver shape" do
+      expect(fold(receiver: array_of(integer_nominal), method: :count, block: false_const))
+        .to eq(constant_of(0))
+      expect(fold(receiver: tuple_of(integer_nominal, integer_nominal), method: :count, block: false_const))
+        .to eq(constant_of(0))
+    end
+
+    it "folds count { true } to Constant[size] on a Tuple receiver" do
+      tup = tuple_of(integer_nominal, string_nominal, integer_nominal)
+      expect(fold(receiver: tup, method: :count, block: true_const)).to eq(constant_of(3))
+    end
+
+    it "folds count { true } to Constant[0] on the empty Tuple" do
+      expect(fold(receiver: tuple_of, method: :count, block: true_const)).to eq(constant_of(0))
+    end
+
+    it "folds count { true } over a finite-bound Range constant" do
+      # `(1..5).count { true }` — the inclusive integer range
+      # has 5 elements, so the truthy block sees all of them.
+      const_range = constant_of(1..5)
+      expect(fold(receiver: const_range, method: :count, block: true_const)).to eq(constant_of(5))
+    end
+
+    it "declines count { true } when receiver size is unknown (Array[T])" do
+      expect(fold(receiver: array_of(integer_nominal), method: :count, block: true_const))
+        .to be_nil
+    end
+
+    it "declines when count carries a positional argument (value-count form)" do
+      expect(fold(receiver: array_of(integer_nominal), method: :count, block: false_const,
+                  args: [constant_of(0)])).to be_nil
+    end
+  end
+
   describe "decline cases (return nil so RBS / iterator tier answers)" do
     it "declines when block_type is nil (no block at the call site)" do
       expect(fold(receiver: array_of(integer_nominal), method: :select, block: nil)).to be_nil

@@ -8,6 +8,13 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 The summary of what shipped in v0.0.5 is in `CHANGELOG.md`'s `[0.0.5] - 2026-05-03` section and the v0.0.5 row of [`docs/MILESTONES.md`](MILESTONES.md). Not duplicated here.
 
+**v0.0.6 in progress on `master`.** Three commits since `v0.0.5`:
+1. `edfc197` — BlockFolding Phase 1: constant-block predicates and filters (`select` / `filter` / `reject` / `take_while` / `drop_while` / `all?` / `any?` / `none?`).
+2. `8035204` — BlockFolding Phase 2: per-position Tuple element-wise re-typing for `:map` / `:collect`.
+3. `37512fc` — BlockFolding extension: `find` / `detect` / `find_index` / `index` / `count` short-circuit folds.
+
+Working state: 1366 RSpec examples / 0 failures, RuboCop 137 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.5` until the v0.0.6 surface is locked in.
+
 ## Where the Work Resumes
 
 The next preview is **v0.0.6** (or whichever version captures the next slice — bump deferred until that scope is decided). The full planned surface — including the items deferred from v0.0.5 — lives in [`docs/MILESTONES.md`](MILESTONES.md); the items below are the operational entry points for restarting work, not a re-statement of the milestone.
@@ -15,7 +22,10 @@ The next preview is **v0.0.6** (or whichever version captures the next slice —
 ### Highest-leverage next slices
 
 - **Predicate-complement narrowing.** `narrow_not_refinement` covers Difference, IntegerRange, and Intersection (via De Morgan) but punts on `Refined[base, predicate]`. `~lowercase-string` could in principle narrow to `uppercase-string | mixed-case-string`, but mixed-case strings have no carrier today; landing the predicate-complement requires either a new carrier or per-predicate paired-complement registry entries.
-- **Block-shaped fold dispatch.** Two-arg dispatch landed in v0.0.5 and unlocks `Comparable#between?(min, max)` and the explicit-bounds form of `Comparable#clamp(min, max)`. The remaining gap is block-taking methods: Enumerable's `select { |x| … }`, `inject(seed) { |memo, x| … }`, `min_by { … }`, etc. all need the constant-folding tier to grow a block-parameter path that synthesises the block's body type from the receiver's element type. (Block-parameter *typing* — what each yielded variable binds to — already works for `each_with_index` / `each_with_object` / `inject` / `reduce` / `group_by` / `partition` / `each_slice` / `each_cons` via `IteratorDispatch`; the open work is folding the block's *return* into a precise carrier.) Range operands on the existing 2-arg path are also still held back — `int<0,10>.between?(0, 10)` could fold to `Constant[true]` once `try_fold_ternary` learns IntegerRange semantics.
+- **Block-shaped fold dispatch — remaining gaps.** Phases 1 / 2 and the find-family extension all landed in v0.0.6 (see Status above). The remaining open surface within this slice family:
+  - Truthy-block side of `find` / `detect` / `find_index` / `index` — needs per-position block re-typing analogous to the `:map` path so the dispatcher can pick out the first Tuple position whose evaluated block body folds to a Ruby-truthy value (and the corresponding element / index).
+  - Per-element block fold for `:filter_map` / `:flat_map` — extension of the Phase 2 `:map` / `:collect` machinery. `:filter_map` requires per-position `Constant[nil]` / `Constant[false]` filtering before assembling the Tuple, and `:flat_map` requires per-position Tuple-or-Array unification.
+  - Range operands on the existing 2-arg path: `int<0,10>.between?(0, 10)` could fold to `Constant[true]` once `try_fold_ternary` learns IntegerRange semantics.
 - **More catalog imports.** Concrete classes still in the queue: Date / DateTime imports landed in v0.0.5; remaining stdlib candidates include URI, Pathname (already partial), Rational, Complex. Module candidates beyond Comparable / Enumerable: Kernel (already in BASE_CLASS_VARS as `rb_mKernel`), ObjectSpace.
 - **C-body classifier upgrades.** Track indirect mutator helpers (`str_modifiable`, `ary_resize`, `time_modify`, `set_compare_by_identity`, …) so per-class blocklists shrink. The pure-`rb_check_frozen`-wrapper detection landed in v0.0.5 covers the narrowest case; the next step is a wider transitive scan that does not over-flag legitimate non-mutators like `Array#to_a`.
 

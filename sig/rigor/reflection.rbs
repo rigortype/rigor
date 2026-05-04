@@ -1,0 +1,13 @@
+module Rigor
+  module Reflection
+    def self?.class_known?: (String | Symbol class_name, ?scope: Scope) -> bool
+    def self?.class_ordering: (String | Symbol lhs, String | Symbol rhs, ?scope: Scope) -> Symbol
+    def self?.nominal_for_name: (String | Symbol class_name, ?scope: Scope) -> Type::Nominal?
+    def self?.singleton_for_name: (String | Symbol class_name, ?scope: Scope) -> Type::Singleton?
+    def self?.constant_type_for: (String | Symbol constant_name, ?scope: Scope) -> Type::t?
+    def self?.instance_method_definition: (String | Symbol class_name, String | Symbol method_name, ?scope: Scope) -> untyped
+    def self?.singleton_method_definition: (String | Symbol class_name, String | Symbol method_name, ?scope: Scope) -> untyped
+    def self?.discovered_class?: (String | Symbol class_name, ?scope: Scope) -> bool
+    def self?.discovered_method?: (String | Symbol class_name, String | Symbol method_name, ?kind: Symbol, ?scope: Scope) -> bool
+  end
+end

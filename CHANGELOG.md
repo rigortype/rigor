@@ -84,6 +84,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now resolves to `Tuple[Constant["2"]]` instead of widening
   to `Array[Dynamic[Top]]`.
 
+- **IntegerRange-aware ternary fold — `Comparable#between?`
+  / `Comparable#clamp`.** `MethodDispatcher::ConstantFolding`'s
+  2-arg fold path now accepts an `IntegerRange` receiver paired
+  with two scalar `Constant<Integer>` args:
+  - `int<a, b>.between?(min, max)` decides
+    `Constant[true]` when `[a, b] ⊆ [min, max]` and the range
+    is finite, `Constant[false]` when the bracket is disjoint
+    from the range, and the bool union otherwise.
+  - `int<a, b>.clamp(min, max)` returns the intersected
+    `IntegerRange` (collapsing to a `Constant` when the result
+    pins a single point); when the bracket is entirely
+    disjoint from the range — every receiver value would snap
+    to the nearer bracket bound — the fold declines so the
+    RBS tier widens rather than the dispatcher inventing the
+    snap point.
+  IntegerRange-shaped *arguments* on the 2-arg path still
+  decline; only IntegerRange receivers participate.
+
 - **Empty array literal carrier — `[]` → `Tuple[]`.**
   `ExpressionTyper#array_type_for` previously emitted
   `Nominal[Array]` for the empty literal `[]` (no

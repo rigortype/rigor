@@ -233,16 +233,85 @@ module Rigor
         # 2-arg fold dispatch. Used by `Comparable#between?(min, max)`,
         # `Comparable#clamp(min, max)`, and `Integer#pow(exp, mod)` —
         # methods the catalog classifies `:leaf` but that the prior
-        # 0/1-arg switch could not reach. Range receivers/args are
-        # held back: a precise 2-arg range fold (e.g.
-        # `int<0,10>.between?(0, 10)` → `Constant[true]`) is a
-        # follow-up; for now any IntegerRange operand bails to the
-        # RBS tier.
+        # 0/1-arg switch could not reach.
+        #
+        # v0.0.6 — IntegerRange-shaped receivers participate in
+        # `Comparable#between?` and `Comparable#clamp` folds.
+        # `int<a,b>.between?(min, max)` decides three-valued via
+        # the receiver's bounds against scalar args; `int<a,b>.clamp`
+        # narrows the receiver's bounds against the bracket. Other
+        # ternary methods over IntegerRange operands still decline.
         def try_fold_ternary(receiver_set, method_name, arg_sets)
-          return nil if receiver_set.is_a?(Type::IntegerRange)
+          return try_fold_ternary_range(receiver_set, method_name, arg_sets) if receiver_set.is_a?(Type::IntegerRange)
           return nil if arg_sets.any?(Type::IntegerRange)
 
           try_fold_ternary_set(receiver_set, method_name, arg_sets)
+        end
+
+        # Receiver IntegerRange + two scalar `Constant<Integer>`
+        # args — the only IntegerRange-aware ternary fold today.
+        # `between?` returns Trinary truthiness over the bracket;
+        # `clamp` returns the intersected IntegerRange (or a
+        # collapsed Constant if the result pins a single point).
+        def try_fold_ternary_range(range, method_name, arg_sets)
+          return nil unless arg_sets.all?(Array)
+
+          min_arg = single_integer_arg(arg_sets[0])
+          max_arg = single_integer_arg(arg_sets[1])
+          return nil if min_arg.nil? || max_arg.nil?
+          return nil if min_arg > max_arg
+
+          case method_name
+          when :between? then range_between(range, min_arg, max_arg)
+          when :clamp then range_clamp(range, min_arg, max_arg)
+          end
+        end
+
+        def single_integer_arg(values)
+          return nil unless values.is_a?(Array) && values.size == 1
+
+          v = values.first
+          v.is_a?(Integer) ? v : nil
+        end
+
+        # `int<a,b>.between?(min, max)`:
+        # - Constant[true] when [a,b] ⊆ [min,max] (and finite).
+        # - Constant[false] when [a,b] ∩ [min,max] is empty.
+        # - bool union otherwise.
+        def range_between(range, min_arg, max_arg)
+          return Type::Combinator.constant_of(false) if range.upper < min_arg || range.lower > max_arg
+
+          return Type::Combinator.constant_of(true) if range.finite? && range.min >= min_arg && range.max <= max_arg
+
+          bool_union
+        end
+
+        # `int<a,b>.clamp(min, max)`:
+        # - new_lower = max(a, min), new_upper = min(b, max).
+        # - When new_lower > new_upper the bracket excluded the
+        #   range entirely; the call still returns one of the
+        #   bracket bounds at runtime, but Rigor is strictly less
+        #   precise here than Ruby — decline so the RBS tier
+        #   widens to plain Integer rather than the dispatcher
+        #   inventing a value.
+        def range_clamp(range, min_arg, max_arg)
+          new_lower = clamp_lower_bound(range.lower, min_arg)
+          new_upper = clamp_upper_bound(range.upper, max_arg)
+          return nil if new_lower.is_a?(Integer) && new_upper.is_a?(Integer) && new_lower > new_upper
+
+          build_integer_range(new_lower, new_upper)
+        end
+
+        def clamp_lower_bound(range_lower, bracket_min)
+          return bracket_min if range_lower == -Float::INFINITY
+
+          [range_lower, bracket_min].max
+        end
+
+        def clamp_upper_bound(range_upper, bracket_max)
+          return bracket_max if range_upper == Float::INFINITY
+
+          [range_upper, bracket_max].min
         end
 
         def try_fold_ternary_set(receiver_values, method_name, arg_sets)

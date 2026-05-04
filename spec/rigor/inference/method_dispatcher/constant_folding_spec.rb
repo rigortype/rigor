@@ -700,12 +700,69 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       )
     end
 
-    it "bails when an IntegerRange operand reaches the 2-arg path" do
-      # IntegerRange args are reserved for a follow-up slice; the
-      # current ternary dispatch returns nil so the RBS tier answers.
+    it "bails when an IntegerRange argument reaches the 2-arg path" do
+      # IntegerRange args (vs IntegerRange receivers) still
+      # decline; the v0.0.6 IntegerRange-aware ternary fold
+      # only triggers for IntegerRange receivers paired with
+      # scalar Constant args.
       receiver = constant_of(5)
       range_arg = Rigor::Type::Combinator.integer_range(0, 10)
       expect(fold_types(receiver, :between?, [range_arg, constant_of(20)])).to be_nil
+    end
+
+    describe "IntegerRange receiver — v0.0.6 ternary fold" do
+      def integer_range(min, max) = Rigor::Type::Combinator.integer_range(min, max)
+
+      it "folds int<3, 7>.between?(0, 10) to Constant[true] when fully inside" do
+        result = fold_types(integer_range(3, 7), :between?, [constant_of(0), constant_of(10)])
+        expect(result).to eq(constant_of(true))
+      end
+
+      it "folds int<20, 30>.between?(0, 10) to Constant[false] when fully outside" do
+        result = fold_types(integer_range(20, 30), :between?, [constant_of(0), constant_of(10)])
+        expect(result).to eq(constant_of(false))
+      end
+
+      it "widens int<3, 15>.between?(0, 10) to bool when partially overlapping" do
+        result = fold_types(integer_range(3, 15), :between?, [constant_of(0), constant_of(10)])
+        expect(result).to eq(
+          Rigor::Type::Combinator.union(constant_of(true), constant_of(false))
+        )
+      end
+
+      it "folds int<3, 7>.clamp(0, 10) to the same range (bracket contains range)" do
+        result = fold_types(integer_range(3, 7), :clamp, [constant_of(0), constant_of(10)])
+        expect(result).to eq(integer_range(3, 7))
+      end
+
+      it "folds int<3, 7>.clamp(4, 6) to int<4, 6> (intersection)" do
+        result = fold_types(integer_range(3, 7), :clamp, [constant_of(4), constant_of(6)])
+        expect(result).to eq(integer_range(4, 6))
+      end
+
+      it "collapses single-point clamp to a Constant" do
+        result = fold_types(integer_range(3, 7), :clamp, [constant_of(5), constant_of(5)])
+        expect(result).to eq(constant_of(5))
+      end
+
+      it "declines clamp when bracket excludes the range entirely" do
+        # int<10, 20>.clamp(0, 5) — the bracket is fully below
+        # the range, so every receiver value snaps to 5; the
+        # fold declines so the RBS tier widens rather than the
+        # dispatcher inventing the snap point.
+        result = fold_types(integer_range(10, 20), :clamp, [constant_of(0), constant_of(5)])
+        expect(result).to be_nil
+      end
+
+      it "declines when min > max in the bracket arguments" do
+        result = fold_types(integer_range(3, 7), :between?, [constant_of(10), constant_of(0)])
+        expect(result).to be_nil
+      end
+
+      it "still declines when an IntegerRange argument is passed alongside the range receiver" do
+        result = fold_types(integer_range(3, 7), :between?, [integer_range(0, 5), constant_of(10)])
+        expect(result).to be_nil
+      end
     end
   end
 end

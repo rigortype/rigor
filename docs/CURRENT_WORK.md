@@ -8,7 +8,7 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 The summary of what shipped in v0.0.5 is in `CHANGELOG.md`'s `[0.0.5] - 2026-05-03` section and the v0.0.5 row of [`docs/MILESTONES.md`](MILESTONES.md). Not duplicated here.
 
-**v0.0.6 in progress on `master`.** Thirteen commits since `v0.0.5`:
+**v0.0.6 in progress on `master`.** Fourteen commits since `v0.0.5`:
 1. `edfc197` — BlockFolding Phase 1: constant-block predicates and filters (`select` / `filter` / `reject` / `take_while` / `drop_while` / `all?` / `any?` / `none?`).
 2. `8035204` — BlockFolding Phase 2: per-position Tuple element-wise re-typing for `:map` / `:collect`.
 3. `37512fc` — BlockFolding extension: `find` / `detect` / `find_index` / `index` / `count` short-circuit folds.
@@ -21,10 +21,11 @@ The summary of what shipped in v0.0.5 is in `CHANGELOG.md`'s `[0.0.5] - 2026-05-
 10. `5b47960` — Empty array literal `[]` resolves to the empty `Tuple[]` carrier.
 11. `1c8e760` — IntegerRange-aware ternary fold for `Comparable#between?` / `Comparable#clamp` through `try_fold_ternary`.
 12. `0b44f34` — Pathname catalog import + extractor `BeginNode`-bodied-`def` classifier fix (rescue-on-def idiom support).
+13. `2c33d6d` — Per-element block fold accepts finite-bound `Constant<Range>` receivers (cardinality-capped at 8).
 
-(Plus `cdbeade`, `d8dab79`, and `e6a148c` — incremental CURRENT_WORK refreshes.)
+(Plus `cdbeade`, `d8dab79`, `e6a148c`, and `f3af880` — incremental CURRENT_WORK refreshes.)
 
-Working state: 1393 RSpec examples / 0 failures, RuboCop 138 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.5` until the v0.0.6 surface is locked in.
+Working state: 1396 RSpec examples / 0 failures, RuboCop 138 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.5` until the v0.0.6 surface is locked in.
 
 The composite payoff: `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }` now resolves to `Tuple[Constant["2"]]` (Phase 2 element-wise re-typing + per-position `:filter_map` fold + ternary elision composing through three layers); `[1, 2, 3, 4].find { |n| n.even? }` resolves to `Constant[2]`; `int<3, 7>.between?(0, 10)` folds to `Constant[true]`.
 
@@ -35,9 +36,9 @@ The next preview is **v0.0.6** (or whichever version captures the next slice —
 ### Highest-leverage next slices
 
 - **Predicate-complement narrowing.** `narrow_not_refinement` covers Difference, IntegerRange, and Intersection (via De Morgan) but punts on `Refined[base, predicate]`. `~lowercase-string` could in principle narrow to `uppercase-string | mixed-case-string`, but mixed-case strings have no carrier today; landing the predicate-complement requires either a new carrier or per-predicate paired-complement registry entries.
-- **Block-shaped fold dispatch — remaining gaps.** The slice family's big surfaces all landed in v0.0.6 (see Status above): Phase 1, Phase 2, the find-family extensions on both sides, `:filter_map`, `:flat_map` (initial + mixed-shape tightening), if/unless/&&/|| Constant elision, the empty-array carrier change, and the IntegerRange ternary fold. The next tightening levers within this family are now narrower:
+- **Block-shaped fold dispatch — remaining gaps.** Most of the slice family is now closed (Phase 1, Phase 2 + Range, both find-family sides, `:filter_map`, `:flat_map` initial + mixed-shape, if/unless/&&/|| elision, empty-array carrier, IntegerRange ternary fold). The narrower remaining levers:
   - `:flat_map` over `Nominal[Array[T]]` per-position results — the current fold treats those as opaque and declines. A "flatten one level into T" rule for that carrier specifically would catch the `arr.flat_map { |x| x.split(",") }` shape.
-  - Predicate-shaped folds in `BlockFolding` over `Range`-receiver Tuples — `(1..n).find { |i| … }` etc. Per-element re-typing already works for finite-range Constants via `IteratorDispatch`'s element projection; threading that through BlockFolding's truthy-side find is a small bridge.
+  - `IntegerRange` receiver per-element fold — today only `Constant<Range>` participates; an `IntegerRange[a, b]` carrier with finite bounds (e.g. via `1.upto(n)` block-param typing) could iterate the same per-element loop with a slightly larger cap.
   - Range-shaped *arguments* on the 2-arg ternary path — `5.between?(int<0, 10>, int<5, 15>)` could decide via the bounds, but the call shape is unusual and the marginal value low; left explicitly out of scope for v0.0.6.
 - **More catalog imports.** Concrete classes still in the queue: Date / DateTime / Rational / Complex / Pathname imports all landed (the latter through the v0.0.6 BeginNode-rescue extractor fix). Remaining stdlib candidates: URI (pure-Ruby stdlib gem, no C surface — needs hand-rolled or custom-scaffold approach per [`docs/MILESTONES.md`](MILESTONES.md)). Module candidates beyond Comparable / Enumerable: Kernel (already in BASE_CLASS_VARS as `rb_mKernel`), ObjectSpace.
 - **C-body classifier upgrades.** Track indirect mutator helpers (`str_modifiable`, `ary_resize`, `time_modify`, `set_compare_by_identity`, …) so per-class blocklists shrink. The pure-`rb_check_frozen`-wrapper detection landed in v0.0.5 covers the narrowest case; the next step is a wider transitive scan that does not over-flag legitimate non-mutators like `Array#to_a`.

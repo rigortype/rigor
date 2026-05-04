@@ -1040,9 +1040,32 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(described_class.narrow_not_refinement(nominal("Integer"), nes)).to eq(nominal("Integer"))
     end
 
-    it "is conservative on Refined — returns current_type unchanged" do
+    it "narrows Nominal[String] under ~lowercase-string to Difference[String, lowercase-string] (v0.0.7)" do
       lc = Rigor::Type::Combinator.lowercase_string
-      expect(described_class.narrow_not_refinement(nominal("String"), lc)).to eq(nominal("String"))
+      result = described_class.narrow_not_refinement(nominal("String"), lc)
+      expect(result).to eq(Rigor::Type::Combinator.difference(nominal("String"), lc))
+    end
+
+    it "drops the negated refinement itself from a union" do
+      lc = Rigor::Type::Combinator.lowercase_string
+      union = Rigor::Type::Combinator.union(lc, nominal("Integer"))
+      # ~lowercase-string within (lowercase-string | Integer) = Integer
+      # (Integer is disjoint from String; the lowercase-string member
+      # is the exact negated subset and drops).
+      expect(described_class.narrow_not_refinement(union, lc)).to eq(nominal("Integer"))
+    end
+
+    it "keeps disjoint union members under ~Refined" do
+      lc = Rigor::Type::Combinator.lowercase_string
+      union = Rigor::Type::Combinator.union(nominal("String"), nominal("Integer"))
+      result = described_class.narrow_not_refinement(union, lc)
+      expect(result).to be_a(Rigor::Type::Union)
+      # The Integer member is disjoint from String and survives;
+      # the String member becomes Difference[String, lowercase-string].
+      expect(result.members).to contain_exactly(
+        nominal("Integer"),
+        Rigor::Type::Combinator.difference(nominal("String"), lc)
+      )
     end
 
     it "is conservative when the Difference's removed value is not a Constant" do
@@ -1101,15 +1124,19 @@ RSpec.describe Rigor::Inference::Narrowing do
       it "unions per-member complements within the current type" do
         # ~(non-empty-string ∩ lowercase-string) within String =
         #   (~non-empty-string within String) ∪ (~lowercase-string within String)
-        # = Constant[""] ∪ String (Refined isn't complement-narrowed,
-        #   so its complement falls back to current_type unchanged).
-        # The Union does NOT subsume `Constant[""]` into `String`
-        # automatically — Combinator.union deduplicates structurally
-        # but does not eliminate subsumed elements.
+        # = Constant[""] ∪ Difference[String, lowercase-string].
+        # The v0.0.7 Refined complement gives the second arm a
+        # carrier rather than falling back to `current_type`.
         composite = Rigor::Type::Combinator.non_empty_lowercase_string
         result = described_class.narrow_not_refinement(nominal("String"), composite)
         expect(result).to be_a(Rigor::Type::Union)
-        expect(result.members).to contain_exactly(empty_string, nominal("String"))
+        expect(result.members).to contain_exactly(
+          empty_string,
+          Rigor::Type::Combinator.difference(
+            nominal("String"),
+            Rigor::Type::Combinator.lowercase_string
+          )
+        )
       end
     end
   end

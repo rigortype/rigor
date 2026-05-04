@@ -285,6 +285,8 @@ module Rigor
           complement_integer_range(current_type, refinement_type)
         when Type::Intersection
           complement_intersection(current_type, refinement_type)
+        when Type::Refined
+          complement_refined(current_type, refinement_type)
         else
           current_type
         end
@@ -524,6 +526,38 @@ module Rigor
             Narrowing.narrow_not_refinement(current_type, member)
           end
           Type::Combinator.union(*per_member)
+        end
+
+        # v0.0.7 — complement of a `Refined[base, predicate]`
+        # refinement within `current_type`. Walks the current
+        # type's union members; parts that are disjoint from
+        # the refinement's base survive unchanged; parts equal
+        # to the refinement itself drop entirely (they were
+        # exactly the negated subset); parts that overlap the
+        # base contribute `Difference[part, refined]` so
+        # downstream narrowing knows the refinement subset is
+        # excluded.
+        #
+        # The result is sound but imprecise: without a
+        # complementary carrier (e.g. `mixed-case-string` for
+        # `~lowercase-string`) we cannot enumerate the surviving
+        # values. Difference is the carrier-of-last-resort, and
+        # the existing `Type::Difference` consumers already
+        # treat it correctly.
+        def complement_refined(current_type, refined)
+          base = refined.base
+          parts = current_type.is_a?(Type::Union) ? current_type.members : [current_type]
+
+          survivors = parts.map do |part|
+            next nil if part == refined
+            next part if base_disjoint?(base, part)
+
+            Type::Combinator.difference(part, refined)
+          end.compact
+
+          return current_type if survivors.empty?
+
+          Type::Combinator.union(*survivors)
         end
 
         def falsey_value?(value)

@@ -84,7 +84,7 @@ Each slice is independent enough to ship as its own commit. The release converge
 
 ### Out of v0.0.x scope (architectural)
 
-- Caches and the plugin API (ADR-2) are reserved for v0.1.0. See [`docs/MILESTONES.md`](MILESTONES.md).
+- Caches and the plugin API (ADR-2) are reserved for v0.1.0. See [`docs/MILESTONES.md`](MILESTONES.md). The v0.1.0 readiness analysis — what the v0.0.x substrate already provides, what still needs pre-work, and the recommended next slice for a cold-start implementer — lives in [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md).
 - New CheckRules rule families beyond the v0.0.3 `always-raises` line. Type-incompatible writes, return-type mismatch, unreachable branches stay deferred until the inference surface they depend on is sturdy.
 
 ## Open Engineering Items

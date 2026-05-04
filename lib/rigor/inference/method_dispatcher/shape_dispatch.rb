@@ -80,6 +80,11 @@ module Rigor
         HASH_SHAPE_HANDLERS = {
           size: :hash_size,
           length: :hash_size,
+          count: :hash_size,
+          empty?: :hash_empty?,
+          any?: :hash_any?,
+          keys: :hash_keys,
+          values: :hash_values,
           :[] => :hash_lookup,
           fetch: :hash_lookup,
           dig: :hash_dig,
@@ -461,6 +466,57 @@ module Rigor
             return nil unless shape.optional_keys.empty?
 
             Type::Combinator.constant_of(shape.pairs.size)
+          end
+
+          # `shape.empty?` — folds to a precise bool when the
+          # shape's emptiness is statically known. Closed shapes
+          # with no optional keys have a fixed size, so empty?
+          # is `Constant[shape.pairs.empty?]`. The handler returns
+          # `Type::t | nil` (nil signals "no rule, defer to next
+          # tier") so the standard predicate-return rubocop rule
+          # does not apply.
+          # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
+          def hash_empty?(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            Type::Combinator.constant_of(shape.pairs.empty?)
+          end
+
+          # `shape.any?` (no block, no arg) — opposite of
+          # `empty?`. The block / arg forms are answered by the
+          # RBS / BlockFolding tier.
+          def hash_any?(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            Type::Combinator.constant_of(!shape.pairs.empty?)
+          end
+          # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
+
+          # `shape.keys` — returns a `Tuple[Constant<k>…]` for a
+          # closed shape with no optional keys; the Tuple's
+          # arity matches the shape's per-key declaration order
+          # so downstream `tuple[i]` projections stay precise.
+          def hash_keys(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            Type::Combinator.tuple_of(*shape.pairs.keys.map { |k| Type::Combinator.constant_of(k) })
+          end
+
+          # `shape.values` — returns a `Tuple[V_1, …, V_n]` for a
+          # closed shape with no optional keys, the Tuple's arity
+          # matching the shape's per-key value order.
+          def hash_values(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            Type::Combinator.tuple_of(*shape.pairs.values)
           end
 
           # `shape[k]` and `shape.fetch(k)` for a static symbol/string

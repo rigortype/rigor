@@ -176,8 +176,35 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: shape, method_name: :dig, args: [constant(:a), constant(:b)])).to be_nil
     end
 
-    it "falls through for methods outside the catalogue" do
-      expect(dispatch(receiver: shape, method_name: :keys)).to be_nil
+    it "folds keys to a Tuple of Constant<Symbol> for a closed shape (v0.0.7)" do
+      expect(dispatch(receiver: shape, method_name: :keys))
+        .to eq(Rigor::Type::Combinator.tuple_of(constant(:a), constant(:b)))
+    end
+
+    it "folds values to a Tuple of per-key entry types for a closed shape (v0.0.7)" do
+      expect(dispatch(receiver: shape, method_name: :values))
+        .to eq(Rigor::Type::Combinator.tuple_of(constant(1), constant("two")))
+    end
+
+    it "folds count to Constant<size> for a closed shape (v0.0.7)" do
+      expect(dispatch(receiver: shape, method_name: :count)).to eq(constant(2))
+    end
+
+    it "folds empty? to Constant<false> for a non-empty closed shape (v0.0.7)" do
+      expect(dispatch(receiver: shape, method_name: :empty?)).to eq(constant(false))
+    end
+
+    it "folds empty? to Constant<true> for an empty closed shape (v0.0.7)" do
+      empty_shape = Rigor::Type::Combinator.hash_shape_of({})
+      expect(dispatch(receiver: empty_shape, method_name: :empty?)).to eq(constant(true))
+    end
+
+    it "folds any? to Constant<true> for a non-empty closed shape (v0.0.7)" do
+      expect(dispatch(receiver: shape, method_name: :any?)).to eq(constant(true))
+    end
+
+    it "falls through for unrecognised method names" do
+      expect(dispatch(receiver: shape, method_name: :weird_method)).to be_nil
     end
   end
 

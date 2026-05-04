@@ -99,6 +99,32 @@ Stretch surfaces (carried forward unchanged):
 - `String#%` format-string parsing for catalog-aware fold over `Constant<String>` template + `Constant<…>` values.
 - `numeric-string` recogniser that classifies `String#match?(/\A\d+\z/)` as a `Refined[String, :numeric]` narrowing.
 
+## v0.0.7 — Planned
+
+Theme: **pre-plugin coverage push**. Close the gap between what the type-language and built-in-coverage specs already commit to and what the analyzer actually implements, so the plugin API designed against this surface in v0.1.0 has a complete substrate to attach to. Breadth-over-depth: many small fills, no architecture changes.
+
+Planned surfaces (operational slice order):
+
+1. **`key_of[T]` / `value_of[T]` type functions.** Listed in the "Initial type functions" table of [`imported-built-in-types.md`](type-specification/imported-built-in-types.md) but unimplemented. Project a `HashShape` / `Tuple` / `Hash[K, V]` into the type-level set of keys (resp. values). Parser registry entries plus projection rules.
+2. **`int_mask[…]` / `int_mask_of[T]`.** Same shape — set of integers reachable by bitwise OR over a finite literal set.
+3. **`Constant<Range>#to_a` / `#first` / `#last` / `#min` / `#max` precision.** `to_a` is catalog-classified `:leaf` but its Array result fails `foldable_constant_value?`; `first`/`last`/`min`/`max` are `:block_dependent` because of optional-block forms. Slice with a Range-specific no-arg allow list and an Array-result lift to `Tuple[…]` for `to_a`.
+4. **`rigor:v1:conforms-to` directive.** Spec-defined in [`rbs-extended.md`](type-specification/rbs-extended.md) but the parser-and-checker has not landed. Add the parser entry plus a CheckRules rule that reports unsatisfied structural-interface conformance.
+5. **`Constant<Rational>` / `Constant<Complex>` literal lift.** `Prism::ImaginaryNode` (`1i`) typing and `Rational(...)` / `Complex(...)` Kernel-call folding for the unary forms. The catalogs already exist; the typer side is unwired.
+6. **Refinement-form `~T` negation in `assert` / `predicate-if-*`.** A narrow attempt at the difference-against-refinement algebra (Refined-only base; declines outside that envelope). Marked deferred in the v1 RBS::Extended spec, but the narrow case is achievable.
+
+Deferred from v0.0.7 (carried forward) — see [`docs/CURRENT_WORK.md`](CURRENT_WORK.md) for rationale on each:
+
+- `literal-string` / `non-empty-literal-string` (needs flow tracking).
+- Predicate-complement narrowing for `Refined[base, predicate]` (needs mixed-case carriers or paired-complement registry).
+- C-body classifier wider transitive mutator scan.
+- `Data.define` override-aware initializer dispatch.
+- ObjectSpace / URI catalog imports — thin or pure-Ruby; outside the standard import skill's premise.
+- Pathname / URI delegation rules.
+- `String#%` format-string parsing.
+- `numeric-string` regex-pattern recogniser.
+- `self`-narrowing in `predicate-if-*` (no `self`-narrowing surface in the engine yet).
+- Caches, plugin API — reserved for v0.1.0.
+
 ## v0.1.0 — Long Horizon (architecture commitments deferred)
 
 Theme: **infrastructure**. The earlier comment in this thread reserved v0.1.0 for the cross-cutting machinery that should not be retro-fitted later:

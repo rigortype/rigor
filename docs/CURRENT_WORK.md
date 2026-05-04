@@ -12,20 +12,48 @@ The composite payoff: `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }` reso
 
 ## Where the Work Resumes
 
-The next preview is **v0.0.7** (or whichever version captures the next slice — bump deferred until that scope is decided). The full planned surface — including the items deferred from v0.0.6 — lives in [`docs/MILESTONES.md`](MILESTONES.md); the items below are the operational entry points for restarting work, not a re-statement of the milestone.
+**v0.0.7 — pre-plugin coverage push.** Theme: close the gap between the type-language / built-in-coverage surface that the v0.0.x specs already commit to and what the analyzer actually implements, so the plugin API designed against this surface in v0.1.0 has a complete substrate to attach to. The release is deliberately **breadth-over-depth**: many small fills, no architecture changes.
 
-### Highest-leverage next slices
+The full planned surface — including items deferred from v0.0.6 — lives in [`docs/MILESTONES.md`](MILESTONES.md). The items below are the operational entry points for restarting work, not a re-statement of the milestone.
 
-- **Predicate-complement narrowing.** `narrow_not_refinement` covers Difference, IntegerRange, and Intersection (via De Morgan) but punts on `Refined[base, predicate]`. `~lowercase-string` could in principle narrow to `uppercase-string | mixed-case-string`, but mixed-case strings have no carrier today; landing the predicate-complement requires either a new carrier or per-predicate paired-complement registry entries.
-- **Block-shaped fold dispatch — remaining gaps.** Most of the slice family is now closed (Phase 1, Phase 2 + Range, both find-family sides, `:filter_map`, `:flat_map` initial + mixed-shape, if/unless/&&/|| elision, empty-array carrier, IntegerRange ternary fold). The narrower remaining levers:
-  - `:flat_map` over `Nominal[Array[T]]` per-position results — the current fold treats those as opaque and declines. The RBS tier already substitutes `U` for the block return's element type so the user-visible answer is `Array[U]` either way; the only win would be over `Tuple[T_1, T_2]` per-position results that today fold to `Tuple[…]` already. So this lever is largely subsumed and not worth a dedicated slice.
-  - Range-shaped *arguments* on the 2-arg ternary path — `5.between?(int<0, 10>, int<5, 15>)` could decide via the bounds, but the call shape is unusual and the marginal value low; left explicitly out of scope for v0.0.6.
+### Spec ↔ implementation gaps surveyed for v0.0.7
 
-  *Retracted:* the earlier "IntegerRange receiver per-element fold" lever was misanalyzed — `Type::IntegerRange` is the bounded-Integer carrier (`int<a, b>` represents "an Integer between a and b"), not a Range value. `.map` / `.find` on such a receiver would resolve to `Integer#map` / `Integer#find`, neither of which exists. The `per_element_elements_of` helper documents this inline.
-- **More catalog imports.** Concrete classes still in the queue: Date / DateTime / Rational / Complex / Pathname imports all landed (the latter through the v0.0.6 BeginNode-rescue extractor fix). Remaining stdlib candidates: URI (pure-Ruby stdlib gem, no C surface — needs hand-rolled or custom-scaffold approach per [`docs/MILESTONES.md`](MILESTONES.md)). Module candidates beyond Comparable / Enumerable: Kernel (already in BASE_CLASS_VARS as `rb_mKernel`), ObjectSpace.
-- **C-body classifier upgrades.** Track indirect mutator helpers (`str_modifiable`, `ary_resize`, `time_modify`, `set_compare_by_identity`, …) so per-class blocklists shrink. The pure-`rb_check_frozen`-wrapper detection landed in v0.0.5 covers the narrowest case; the next step is a wider transitive scan that does not over-flag legitimate non-mutators like `Array#to_a`.
+| Surface | Spec reference | Status | Notes |
+| --- | --- | --- | --- |
+| `key_of[T]` / `value_of[T]` type functions | [`imported-built-in-types.md`](type-specification/imported-built-in-types.md) "Initial type functions" | **missing** | Parser registry entry + projection over `HashShape` / `Tuple` / `Hash[K, V]`. |
+| `int_mask[…]` / `int_mask_of[T]` | same | **missing** | Set-of-integers carrier; project a finite Constant<Integer> union into the bitwise closure. |
+| `literal-string` / `non-empty-literal-string` | "Initial scalar refinements" table | **missing — needs flow tracking** | "String composed only of literals" is a flow property, not a value-domain refinement. Needs a `Literal` flow flag, which is bigger than the v0.0.7 envelope; deferred unless a tighter scope shows up. |
+| `Constant<Range>#to_a`/`first`/`last`/`min`/`max` precision | n/a — implementation gap | catalog-blocked | `to_a` is `:leaf` but the Array result fails `foldable_constant_value?`; `first`/`last`/`min`/`max` are `:block_dependent` because of optional-block forms. Slice them with a Range-specific no-arg allow list and a Tuple-lift for `to_a`. |
+| `Constant<Rational>` / `Constant<Complex>` literal lift | v0.0.5 deferral note | **missing** | `Prism::ImaginaryNode` (`1i`) and `Rational(…)` / `Complex(…)` Kernel-call folding. The catalog already exists; the typer side is unwired. |
+| `rigor:v1:conforms-to` directive | [`rbs-extended.md`](type-specification/rbs-extended.md) | **deferred — parser-and-checker missing** | RBS::Extended says it's accepted; the implementation skeleton in `rbs_extended.rb` has not yet landed it. Needs parser + a CheckRules rule that reports unsatisfied conformance. |
+| Refinement-form `~T` negation in `assert` / `predicate-if-*` | [`rbs-extended.md`](type-specification/rbs-extended.md) "MUST NOT" carrier-side | **deferred** | Difference-against-refinement algebra. Spec marks it deferred; v0.0.7 may attempt a narrow case (Refined-only base; difference produces a `Difference[base, Refined]`). |
+| `self`-narrowing in `predicate-if-*` | [`rbs-extended.md`](type-specification/rbs-extended.md) Target grammar | **parsed but no scope edits** | The directive accepts `self` but the engine has no `self`-narrowing surface yet. Out of scope for v0.0.7 unless a small contained slice appears. |
+| ObjectSpace catalog import | MILESTONES candidate pool | **out of scope for v0.0.7** | Thin module (5 module functions defined under `Init_GC`); user-visible payoff is small. |
+| Pathname / URI delegation rules | MILESTONES stretch surfaces | **out of scope for v0.0.7** | Wider refactor needed — Pathname facade routing through File projections — and URI is a pure-Ruby stdlib gem with no C surface (custom-scaffold path). |
+| `String#%` format-string parsing | MILESTONES stretch surfaces | **out of scope for v0.0.7** | Catalog-aware fold over Constant<String> templates with Constant<…> values. Self-contained but lower priority than the type-function gaps. |
+| `numeric-string` recogniser via `String#match?(/\A\d+\z/)` | MILESTONES stretch surfaces | **out of scope for v0.0.7** | Pattern-recognition for regex literals in narrowing context. |
 
-### Out of v0.0.5 / v0.0.x scope (intentional)
+### Slice order (operational)
+
+1. **`key_of[T]` / `value_of[T]`** — register parameterised type-function builders, define projection rules, ship parser support, refresh fixtures.
+2. **`int_mask[…]` / `int_mask_of[T]`** — same shape, integer set computation.
+3. **`Constant<Range>#to_a/first/last/min/max` precision** — Range-specific no-arg allow list in `ConstantFolding`, Array-result lift to Tuple for `to_a`.
+4. **`rigor:v1:conforms-to`** — parser entry + CheckRules rule; structural-interface conformance check.
+5. **`Constant<Rational>` / `Constant<Complex>` literal lift** — `Prism::ImaginaryNode` typing + Kernel-call folding for the unary forms.
+6. **Refinement-form `~T` negation** — narrow attempt (Refined base only); declines outside that envelope.
+
+Each slice is independent enough to ship as its own commit. The release converges on "every spec-listed initial-built-in / refinement / directive that does not require flow tracking is implemented end-to-end".
+
+### Items intentionally deferred past v0.0.7
+
+- **`literal-string` / `non-empty-literal-string`.** Need a flow-tracking infrastructure (Literal flag propagating through `+` / `<<` / interpolation), not a value-domain refinement. Reserved for after the plugin API in v0.1.0 because the plugin surface should be the place flow flags get registered.
+- **Predicate-complement narrowing for `Refined[base, predicate]`.** `narrow_not_refinement` covers Difference, IntegerRange, and Intersection (via De Morgan) but punts on `Refined[base, predicate]`. The "negate a predicate" surface needs either a mixed-case carrier (e.g. `mixed-case-string` for `~lowercase-string`) or per-predicate paired-complement registry entries — both are larger architecture decisions than v0.0.7 wants to commit.
+- **C-body classifier wider transitive mutator scan.** The pure-`rb_check_frozen`-wrapper detection from v0.0.5 narrows the gap; broader transitive scanning needs careful guards against the `Array#to_a` regression that originally gated the v0.0.5 fix.
+- **`Data.define` override-aware initializer dispatch.** Block-body `def initialize(...)` as the canonical sig for `Const.new`. Architecturally a discovery-side change; deferred until the plugin API discussion is closer.
+- **Pathname / URI delegation rules.** Wider refactor — Pathname facade routing through File projections — and URI is a pure-Ruby stdlib gem with no C surface (custom-scaffold path).
+- **`String#%` format-string parsing** and **`numeric-string` regex-pattern recogniser.** Self-contained but lower-priority than the type-function gaps the v0.0.7 push targets.
+
+### Out of v0.0.x scope (architectural)
 
 - Caches and the plugin API (ADR-2) are reserved for v0.1.0. See [`docs/MILESTONES.md`](MILESTONES.md).
 - New CheckRules rule families beyond the v0.0.3 `always-raises` line. Type-incompatible writes, return-type mismatch, unreachable branches stay deferred until the inference surface they depend on is sturdy.

@@ -96,8 +96,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
 
     it "falls through for methods outside the catalogue" do
+      # `:map` is not handled by ShapeDispatch — element-wise
+      # block re-evaluation lives in `ExpressionTyper` (v0.0.6
+      # phase 2). `:reverse` IS handled by ShapeDispatch as of
+      # v0.0.7, so the existing assertion shifts to a method that
+      # has not been catalogued.
       expect(dispatch(receiver: t, method_name: :map)).to be_nil
-      expect(dispatch(receiver: t, method_name: :reverse)).to be_nil
+      expect(dispatch(receiver: t, method_name: :weird_method)).to be_nil
     end
 
     it "ignores arity mismatches by returning nil" do
@@ -105,6 +110,78 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       # handle it through the projection so the precise tier doesn't
       # accidentally claim ownership.
       expect(dispatch(receiver: t, method_name: :first, args: [constant(2)])).to be_nil
+    end
+
+    describe "Tuple unary precision (v0.0.7)" do
+      let(:numeric_t) { tuple(constant(1), constant(2), constant(3)) }
+      let(:mixed_t) { tuple(constant(1), constant("x"), constant(:foo)) }
+
+      it "folds empty? per the tuple's known arity" do
+        expect(dispatch(receiver: tuple, method_name: :empty?)).to eq(constant(true))
+        expect(dispatch(receiver: numeric_t, method_name: :empty?)).to eq(constant(false))
+      end
+
+      it "folds any? for an empty / non-empty tuple" do
+        expect(dispatch(receiver: tuple, method_name: :any?)).to eq(constant(false))
+        expect(dispatch(receiver: numeric_t, method_name: :any?)).to eq(constant(true))
+      end
+
+      it "folds all? to true on a tuple whose every element is provably truthy" do
+        expect(dispatch(receiver: numeric_t, method_name: :all?)).to eq(constant(true))
+        expect(dispatch(receiver: tuple, method_name: :all?)).to eq(constant(true))
+      end
+
+      it "folds all? to false when any element is provably falsey" do
+        falsey = tuple(constant(1), constant(nil), constant(2))
+        expect(dispatch(receiver: falsey, method_name: :all?)).to eq(constant(false))
+      end
+
+      it "folds none? to true when every element is provably falsey" do
+        all_falsey = tuple(constant(nil), constant(false))
+        expect(dispatch(receiver: all_falsey, method_name: :none?)).to eq(constant(true))
+        expect(dispatch(receiver: tuple, method_name: :none?)).to eq(constant(true))
+      end
+
+      it "folds include?(needle) to a precise bool when comparable to Constants" do
+        expect(dispatch(receiver: numeric_t, method_name: :include?, args: [constant(2)]))
+          .to eq(constant(true))
+        expect(dispatch(receiver: numeric_t, method_name: :include?, args: [constant(99)]))
+          .to eq(constant(false))
+      end
+
+      it "folds sum across numeric Constant elements" do
+        expect(dispatch(receiver: numeric_t, method_name: :sum)).to eq(constant(6))
+        expect(dispatch(receiver: tuple, method_name: :sum)).to eq(constant(0))
+      end
+
+      it "declines sum when an element is non-numeric" do
+        expect(dispatch(receiver: mixed_t, method_name: :sum)).to be_nil
+      end
+
+      it "folds min / max on comparable Constant elements" do
+        expect(dispatch(receiver: numeric_t, method_name: :min)).to eq(constant(1))
+        expect(dispatch(receiver: numeric_t, method_name: :max)).to eq(constant(3))
+      end
+
+      it "folds min / max to Constant[nil] on the empty tuple" do
+        expect(dispatch(receiver: tuple, method_name: :min)).to eq(constant(nil))
+        expect(dispatch(receiver: tuple, method_name: :max)).to eq(constant(nil))
+      end
+
+      it "folds sort to a per-position Tuple of sorted Constants" do
+        unsorted = tuple(constant(3), constant(1), constant(2))
+        expect(dispatch(receiver: unsorted, method_name: :sort))
+          .to eq(Rigor::Type::Combinator.tuple_of(constant(1), constant(2), constant(3)))
+      end
+
+      it "folds reverse to a per-position Tuple in reversed order" do
+        expect(dispatch(receiver: numeric_t, method_name: :reverse))
+          .to eq(Rigor::Type::Combinator.tuple_of(constant(3), constant(2), constant(1)))
+      end
+
+      it "folds to_a to the tuple itself" do
+        expect(dispatch(receiver: numeric_t, method_name: :to_a)).to eq(numeric_t)
+      end
     end
   end
 

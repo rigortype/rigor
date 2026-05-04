@@ -72,6 +72,17 @@ module Rigor
           size: :tuple_size,
           length: :tuple_size,
           count: :tuple_size,
+          empty?: :tuple_empty?,
+          any?: :tuple_any?,
+          all?: :tuple_all?,
+          none?: :tuple_none?,
+          include?: :tuple_include?,
+          sum: :tuple_sum,
+          min: :tuple_min,
+          max: :tuple_max,
+          sort: :tuple_sort,
+          reverse: :tuple_reverse,
+          to_a: :tuple_to_a,
           :[] => :tuple_index,
           fetch: :tuple_index,
           dig: :tuple_dig
@@ -372,6 +383,186 @@ module Rigor
             return nil unless args.empty?
 
             Type::Combinator.constant_of(tuple.elements.size)
+          end
+
+          # `tuple.empty?` — folds to a precise bool from the
+          # tuple's known arity.
+          # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
+          def tuple_empty?(tuple, _method_name, args)
+            return nil unless args.empty?
+
+            Type::Combinator.constant_of(tuple.elements.empty?)
+          end
+
+          # `tuple.any?` (no-arg, no-block) — empty tuple → false,
+          # non-empty → true. The block / arg forms flow through
+          # `BlockFolding` and the RBS tier.
+          def tuple_any?(tuple, _method_name, args)
+            return nil unless args.empty?
+
+            Type::Combinator.constant_of(!tuple.elements.empty?)
+          end
+
+          # `tuple.all?` (no-arg, no-block) — true for empty
+          # tuple (vacuous truth) AND for non-empty tuples whose
+          # every element is provably truthy. Mixed / unknown
+          # element truthiness declines so the RBS / BlockFolding
+          # tiers can still answer.
+          def tuple_all?(tuple, _method_name, args)
+            return nil unless args.empty?
+            return Type::Combinator.constant_of(true) if tuple.elements.empty?
+
+            decision = tuple_predicate_truthiness(tuple, all: true)
+            return nil if decision.nil?
+
+            Type::Combinator.constant_of(decision)
+          end
+
+          # `tuple.none?` (no-arg, no-block) — true when every
+          # element is provably falsey, false when any element is
+          # provably truthy. Empty tuple folds to true (vacuous).
+          def tuple_none?(tuple, _method_name, args)
+            return nil unless args.empty?
+            return Type::Combinator.constant_of(true) if tuple.elements.empty?
+
+            decision = tuple_predicate_truthiness(tuple, all: false)
+            return nil if decision.nil?
+
+            Type::Combinator.constant_of(decision)
+          end
+
+          # `tuple.include?(needle)` — folds to a precise bool when
+          # the needle is a `Constant` and the tuple's elements
+          # are all `Constant` (so disjointness is checkable).
+          # If any element matches the needle's value the answer
+          # is `Constant[true]`; if every element is a Constant
+          # whose value is structurally distinct from the needle
+          # the answer is `Constant[false]`.
+          def tuple_include?(tuple, _method_name, args)
+            return nil unless args.size == 1
+
+            needle = args.first
+            return nil unless needle.is_a?(Type::Constant)
+            return Type::Combinator.constant_of(false) if tuple.elements.empty?
+
+            return Type::Combinator.constant_of(true) if any_element_matches?(tuple.elements, needle.value)
+            return Type::Combinator.constant_of(false) if tuple.elements.all?(Type::Constant)
+
+            nil
+          end
+          # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
+
+          # `tuple.sum` — when every element is a numeric Constant,
+          # fold to `Constant[sum]`. Mixed / non-numeric elements
+          # decline so RBS widens.
+          def tuple_sum(tuple, _method_name, args)
+            return nil unless args.empty?
+            return Type::Combinator.constant_of(0) if tuple.elements.empty?
+
+            values = constant_numeric_values(tuple.elements)
+            return nil if values.nil?
+
+            Type::Combinator.constant_of(values.sum)
+          end
+
+          # `tuple.min` / `tuple.max` — fold when every element is
+          # a `Constant` whose values share a Ruby-comparable
+          # domain. Empty tuples fold to `Constant[nil]`.
+          def tuple_min(tuple, _method_name, args)
+            tuple_minmax(tuple, args, :min)
+          end
+
+          def tuple_max(tuple, _method_name, args)
+            tuple_minmax(tuple, args, :max)
+          end
+
+          def tuple_minmax(tuple, args, edge)
+            return nil unless args.empty?
+            return Type::Combinator.constant_of(nil) if tuple.elements.empty?
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            result = values.public_send(edge)
+            Type::Combinator.constant_of(result)
+          rescue StandardError
+            nil
+          end
+
+          # `tuple.sort` — every element must be a `Constant` and
+          # the values must Ruby-compare. The result is a Tuple
+          # with the same elements in sorted order. Comparison
+          # failures (mixed-class incomparable values) decline.
+          def tuple_sort(tuple, _method_name, args)
+            return nil unless args.empty?
+            return tuple if tuple.elements.size <= 1
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            sorted = values.sort
+            Type::Combinator.tuple_of(*sorted.map { |v| Type::Combinator.constant_of(v) })
+          rescue StandardError
+            nil
+          end
+
+          # `tuple.reverse` — independent of element shape; a
+          # tuple-precise reversed Tuple.
+          def tuple_reverse(tuple, _method_name, args)
+            return nil unless args.empty?
+
+            Type::Combinator.tuple_of(*tuple.elements.reverse)
+          end
+
+          # `tuple.to_a` — Tuple is structurally identical to its
+          # to_a (Ruby returns the receiver itself for an Array).
+          def tuple_to_a(tuple, _method_name, args)
+            return nil unless args.empty?
+
+            tuple
+          end
+
+          # Returns `true` / `false` if every element's truthiness
+          # agrees, nil for mixed-or-unknown shapes. `all: true`
+          # checks every element is truthy; `all: false` checks
+          # every element is falsey.
+          def tuple_predicate_truthiness(tuple, all:)
+            samples = tuple.elements.map { |e| element_truthiness(e) }
+            return nil if samples.any?(:unknown)
+
+            if all
+              samples.all?(:truthy)
+            else
+              samples.all?(:falsey)
+            end
+          end
+
+          def element_truthiness(type)
+            return :unknown unless type.is_a?(Type::Constant)
+
+            falsey = type.value.nil? || type.value == false
+            falsey ? :falsey : :truthy
+          end
+
+          def any_element_matches?(elements, value)
+            elements.any? { |e| e.is_a?(Type::Constant) && e.value == value }
+          end
+
+          # Per-element Constant value extraction. Returns nil
+          # when any element is non-Constant, so the caller can
+          # decline.
+          def constant_values(elements)
+            return nil unless elements.all?(Type::Constant)
+
+            elements.map(&:value)
+          end
+
+          def constant_numeric_values(elements)
+            values = constant_values(elements)
+            return nil if values.nil?
+            return nil unless values.all?(Numeric)
+
+            values
           end
 
           # `tuple[i]`, `tuple[range]`, `tuple[start, length]`, and

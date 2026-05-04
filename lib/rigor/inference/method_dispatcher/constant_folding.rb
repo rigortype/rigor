@@ -207,6 +207,9 @@ module Rigor
         end
 
         def try_fold_unary_set(receiver_values, method_name)
+          range_lift = try_fold_range_constant_unary(receiver_values, method_name)
+          return range_lift if range_lift
+
           # Type-level allow check on every receiver. If one member's
           # type does not have the method in its allow list (e.g.
           # `Union[String, nil].nil?` — `:nil?` is not in
@@ -219,6 +222,58 @@ module Rigor
             invoke_unary(rv, method_name) || []
           end
           build_constant_type(results, source: receiver_values)
+        end
+
+        # v0.0.7 — `Constant<Range>#to_a` and the no-arg
+        # `first` / `last` / `min` / `max` short-circuit through a
+        # Range-specific arm that catalog dispatch cannot reach:
+        # - `to_a` returns an Array (not foldable through
+        #   `foldable_constant_value?`) — lift to `Tuple[Constant…]`
+        #   when the cardinality fits within `RANGE_TO_A_LIMIT`.
+        # - `first` / `last` / `min` / `max` are catalog-classified
+        #   `:block_dependent` because of the optional-block forms,
+        #   but the no-arg form is pure for finite integer ranges.
+        #
+        # Only fires on a single-receiver Range with finite integer
+        # endpoints; mixed unions fall through so the existing
+        # union-of-Constants path keeps the rest of the arms.
+        RANGE_FOLD_METHODS = Set[:to_a, :first, :last, :min, :max, :count, :size, :length].freeze
+        RANGE_TO_A_LIMIT = 16
+        private_constant :RANGE_FOLD_METHODS, :RANGE_TO_A_LIMIT
+
+        def try_fold_range_constant_unary(receiver_values, method_name)
+          return nil unless RANGE_FOLD_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1
+
+          range = receiver_values.first
+          return nil unless range.is_a?(Range)
+          return nil unless range.begin.is_a?(Integer) && range.end.is_a?(Integer)
+
+          range_constant_unary(range, method_name)
+        end
+
+        def range_constant_unary(range, method_name)
+          case method_name
+          when :to_a then range_to_a_tuple(range)
+          when :first, :min then range_endpoint_constant(range, :first)
+          when :last, :max then range_endpoint_constant(range, :last)
+          when :count, :size, :length then Type::Combinator.constant_of(range.to_a.size)
+          end
+        end
+
+        def range_to_a_tuple(range)
+          values = range.to_a
+          return Type::Combinator.tuple_of if values.empty?
+          return nil if values.size > RANGE_TO_A_LIMIT
+
+          Type::Combinator.tuple_of(*values.map { |v| Type::Combinator.constant_of(v) })
+        end
+
+        def range_endpoint_constant(range, edge)
+          values = range.to_a
+          return Type::Combinator.constant_of(nil) if values.empty?
+
+          Type::Combinator.constant_of(edge == :first ? values.first : values.last)
         end
 
         def try_fold_binary_set(receiver_values, method_name, arg_values)

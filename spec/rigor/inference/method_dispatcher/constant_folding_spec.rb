@@ -764,5 +764,62 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         expect(result).to be_nil
       end
     end
+
+    describe "Constant<Range> unary precision (v0.0.7)" do
+      def tuple_of(*elems) = Rigor::Type::Combinator.tuple_of(*elems)
+
+      it "lifts (1..3).to_a to a per-position Tuple" do
+        result = fold_types(constant_of(1..3), :to_a)
+        expect(result).to eq(tuple_of(constant_of(1), constant_of(2), constant_of(3)))
+      end
+
+      it "lifts (1...4).to_a to the same Tuple (exclusive end)" do
+        result = fold_types(constant_of(1...4), :to_a)
+        expect(result).to eq(tuple_of(constant_of(1), constant_of(2), constant_of(3)))
+      end
+
+      it "declines (1..100).to_a when the cardinality exceeds RANGE_TO_A_LIMIT" do
+        # The fold returns nil so RBS widens to `Array[Integer]`.
+        expect(fold_types(constant_of(1..100), :to_a)).to be_nil
+      end
+
+      it "lifts (1..5).first to Constant[1]" do
+        expect(fold_types(constant_of(1..5), :first)).to eq(constant_of(1))
+      end
+
+      it "lifts (1..5).last to Constant[5]" do
+        expect(fold_types(constant_of(1..5), :last)).to eq(constant_of(5))
+      end
+
+      it "lifts (1..5).min to Constant[1]" do
+        expect(fold_types(constant_of(1..5), :min)).to eq(constant_of(1))
+      end
+
+      it "lifts (1..5).max to Constant[5]" do
+        expect(fold_types(constant_of(1..5), :max)).to eq(constant_of(5))
+      end
+
+      it "lifts (1..5).count / .size / .length to Constant[5]" do
+        %i[count size length].each do |m|
+          expect(fold_types(constant_of(1..5), m)).to eq(constant_of(5))
+        end
+      end
+
+      it "yields Constant[nil] for an empty range's first/last/min/max" do
+        empty = constant_of(5...5)
+        expect(fold_types(empty, :first)).to eq(constant_of(nil))
+        expect(fold_types(empty, :last)).to eq(constant_of(nil))
+      end
+
+      it "yields the empty Tuple for an empty range's to_a" do
+        expect(fold_types(constant_of(5...5), :to_a)).to eq(tuple_of)
+      end
+
+      it "still declines for non-integer-bounded ranges" do
+        # Float ranges decline because the elements would not be a
+        # finite enumerable; RBS tier widens.
+        expect(fold_types(constant_of(1.0..2.0), :to_a)).to be_nil
+      end
+    end
   end
 end

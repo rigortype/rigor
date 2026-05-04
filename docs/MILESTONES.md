@@ -99,31 +99,40 @@ Stretch surfaces (carried forward unchanged):
 - `String#%` format-string parsing for catalog-aware fold over `Constant<String>` template + `Constant<…>` values.
 - `numeric-string` recogniser that classifies `String#match?(/\A\d+\z/)` as a `Refined[String, :numeric]` narrowing.
 
-## v0.0.7 — Planned
+## v0.0.7 — Released 2026-05-05
 
-Theme: **pre-plugin coverage push**. Close the gap between what the type-language and built-in-coverage specs already commit to and what the analyzer actually implements, so the plugin API designed against this surface in v0.1.0 has a complete substrate to attach to. Breadth-over-depth: many small fills, no architecture changes.
+Theme: **pre-plugin coverage push**. Close the gap between what the type-language and built-in-coverage specs already commit to and what the analyzer actually implements, so the plugin API designed against this surface in v0.1.0 has a complete substrate to attach to. Breadth-over-depth: sixteen feature slices plus three pre-v0.1.0 substrate slices (Reflection facade, consumer migration, two design docs).
 
-Planned surfaces (operational slice order):
+See `CHANGELOG.md`'s `[0.0.7]` section for the full added list. Major surfaces landed:
 
-1. **`key_of[T]` / `value_of[T]` type functions.** Listed in the "Initial type functions" table of [`imported-built-in-types.md`](type-specification/imported-built-in-types.md) but unimplemented. Project a `HashShape` / `Tuple` / `Hash[K, V]` into the type-level set of keys (resp. values). Parser registry entries plus projection rules.
-2. **`int_mask[…]` / `int_mask_of[T]`.** Same shape — set of integers reachable by bitwise OR over a finite literal set.
-3. **`Constant<Range>#to_a` / `#first` / `#last` / `#min` / `#max` precision.** `to_a` is catalog-classified `:leaf` but its Array result fails `foldable_constant_value?`; `first`/`last`/`min`/`max` are `:block_dependent` because of optional-block forms. Slice with a Range-specific no-arg allow list and an Array-result lift to `Tuple[…]` for `to_a`.
-4. **`rigor:v1:conforms-to` directive.** Spec-defined in [`rbs-extended.md`](type-specification/rbs-extended.md) but the parser-and-checker has not landed. Add the parser entry plus a CheckRules rule that reports unsatisfied structural-interface conformance.
-5. **`Constant<Rational>` / `Constant<Complex>` literal lift.** `Prism::ImaginaryNode` (`1i`) typing and `Rational(...)` / `Complex(...)` Kernel-call folding for the unary forms. The catalogs already exist; the typer side is unwired.
-6. **Refinement-form `~T` negation in `assert` / `predicate-if-*`.** A narrow attempt at the difference-against-refinement algebra (Refined-only base; declines outside that envelope). Marked deferred in the v1 RBS::Extended spec, but the narrow case is achievable.
+- **Type-language type functions.** `key_of[T]` / `value_of[T]`, `int_mask[…]` / `int_mask_of[T]`, and the `T[K]` indexed-access operator — all spec-listed but previously unimplemented. Reachable from RBS::Extended directive payloads; the parser accepts integer-literal arguments and class-name-headed types directly.
+- **Constant carriers expanded.** `Rational` / `Complex` (literal nodes + Kernel-call folds), `Regexp` (non-interpolated literal lift), and `Pathname` (constructor lift + 14-method unary / 8-method binary fold table covering pure path manipulation; filesystem-touching methods stay declined).
+- **`Constant<Range>` unary precision.** `to_a` lifts to per-position Tuple (capped at 16); `first` / `last` / `min` / `max` / `count` / `size` / `length` fold to precise constants.
+- **Tuple precision (eleven new handlers).** `empty?`, `any?`, `all?`, `none?`, `include?`, `sum`, `min`, `max`, `sort`, `reverse`, `to_a`, `zip`. Per-position semantics preserved; non-Constant elements decline.
+- **HashShape projections.** `keys`, `values`, `count`, `length`, `empty?`, `any?`, `first`, `flatten`, `compact`, plus the Tuple ↔ HashShape conversion folds (`to_h`, `to_a`, `invert`, `merge`).
+- **String precision.** `String#%` over Tuple / HashShape arguments; `Constant<String>#chars` / `#bytes` / `#lines` / `#split` / `#scan` lift Array results to per-position Tuples.
+- **Refinement narrowing.** `~Refined[base, predicate]` narrows through `Difference[base, refined]` instead of falling back to `current_type` unchanged.
+- **Empty literal carriers.** `{}` resolves to `HashShape{}`; `Array.new(n)` / `Array.new(n, value)` lift to per-position Tuples.
 
-Deferred from v0.0.7 (carried forward) — see [`docs/CURRENT_WORK.md`](CURRENT_WORK.md) for rationale on each:
+Pre-v0.1.0 substrate that landed in the v0.0.7 cycle:
 
-- `literal-string` / `non-empty-literal-string` (needs flow tracking).
-- Predicate-complement narrowing for `Refined[base, predicate]` (needs mixed-case carriers or paired-complement registry).
+- **`Rigor::Reflection` facade** — unified read API over `ClassRegistry` + `RbsLoader` + `Scope` discovered facts. Public read shape for v0.1.0 plugin-API readiness; spec at [`docs/internal-spec/reflection.md`](internal-spec/reflection.md).
+- **Engine-internal consumer migration** to the facade. Mechanical refactor; no behaviour change.
+- **v0.1.0 readiness design doc** at [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md).
+- **Cache slice taxonomy design doc** at [`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md).
+
+Deferred from v0.0.7 (carried forward):
+
+- `literal-string` / `non-empty-literal-string` — needs flow tracking, not a value-domain refinement.
+- Predicate-complement narrowing for `Refined[base, predicate]` requires either a mixed-case carrier or a paired-complement registry (architectural decision).
 - C-body classifier wider transitive mutator scan.
 - `Data.define` override-aware initializer dispatch.
-- ObjectSpace / URI catalog imports — thin or pure-Ruby; outside the standard import skill's premise.
-- Pathname / URI delegation rules.
-- `String#%` format-string parsing.
+- ObjectSpace catalog import — needs singleton-module dispatch, which the catalog tier does not yet provide.
+- URI catalog import — pure-Ruby stdlib gem with no C surface; outside the standard import skill's premise.
 - `numeric-string` regex-pattern recogniser.
-- `self`-narrowing in `predicate-if-*` (no `self`-narrowing surface in the engine yet).
-- Caches, plugin API — reserved for v0.1.0.
+- `self`-narrowing in `predicate-if-*` — no `self`-narrowing surface in the engine yet.
+- `rigor:v1:conforms-to` directive — needs a real structural-conformance checker beyond the v0.0.7 envelope.
+- Caches and the plugin API — reserved for v0.1.0. The cache slice taxonomy design doc is the contract; the persistence layer is the next pre-v0.1.0 slice (and the first cache-related code).
 
 ## v0.1.0 — Long Horizon (architecture commitments deferred)
 

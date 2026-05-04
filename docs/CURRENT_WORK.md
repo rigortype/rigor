@@ -4,91 +4,37 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 ## Status
 
-**v0.0.6 released 2026-05-05.** The full release summary is in `CHANGELOG.md`'s `[0.0.6] - 2026-05-05` section and the v0.0.6 row of [`docs/MILESTONES.md`](MILESTONES.md).
+**v0.0.7 released 2026-05-05.** The branch is at a clean shipping state: 1540 RSpec examples / 0 failures, RuboCop 140 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics, `gem build rigortype.gemspec` produces `rigortype-0.0.7.gem` cleanly. `lib/rigor/version.rb`, `Gemfile.lock`, and `CHANGELOG.md`'s `[0.0.7]` heading agree on the release version.
 
-**v0.0.7 in progress on `master`** — the pre-plugin coverage push. Seventeen slices since `v0.0.6`:
-1. `02f369f` — `key_of[T]` / `value_of[T]` type functions.
-2. `1366f9f` — `int_mask[…]` / `int_mask_of[T]` type functions.
-3. `5703ca8` — `Constant<Range>` unary precision (`to_a`, `first`, `last`, `min`, `max`, `count`, `size`, `length`).
-4. `6102b7f` — `Rational` / `Complex` literal lift.
-5. `6a10ac3` — `~Refined[base, predicate]` narrowing through `Difference[base, refined]`.
-6. `c85382d` — `T[K]` indexed-access type operator.
-7. `acc83ea` — HashShape projections `keys` / `values` / `count` / `empty?` / `any?` for closed shapes.
-8. `a4b4df1` — Tuple unary precision (`empty?`, `any?`, `all?`, `none?`, `include?`, `sum`, `min`, `max`, `sort`, `reverse`, `to_a`).
-9. `b38eee0` — `String#%` format-string fold over `Tuple` and `HashShape` arguments.
-10. `154ed0f` — `Constant<String>` array-returning method lift (`chars`, `bytes`, `lines`, `split`, `scan`).
-11. `704de49` — Regexp literal lift to `Constant<Regexp>` (`/foo/`, `/Foo/i`).
-12. `c8a50ef` — Tuple ↔ HashShape conversion folds (`to_h`, `to_a`, `invert`, `merge`).
-13. `0200018` — Pathname delegation (`Constant<Pathname>` + `meta_new` constructor lift + 14-method unary / 8-method binary fold table).
-14. `5eec5a2` — Tuple#zip per-position fold + HashShape projections (`first`, `flatten`, `compact`) + empty `{}` literal carrier (`HashShape{}`) + `Array.new(n)` constant lift.
-15. `49dd323` — `Rigor::Reflection` read-side facade (pre-v0.1.0 cold-start slice — joins `ClassRegistry` + `RbsLoader` + `Scope` discovered facts under one read API).
-16. `7b780f5` — Engine-internal reflection consumers migrate to `Rigor::Reflection` (pre-v0.1.0 sub-slice — mechanical refactor; no behaviour change).
-17. `fd41036` — Cache slice taxonomy design doc (pre-v0.1.0 sub-slice — design output, no code).
+The summary of what shipped in v0.0.7 is in `CHANGELOG.md`'s `[0.0.7] - 2026-05-05` section and the v0.0.7 row of [`docs/MILESTONES.md`](MILESTONES.md). Not duplicated here.
 
-(Plus `035057a` — the v0.0.7 scope plan commit; `b50959d`, `2a8fb44`, `d37fec2`, `74131ac`, `71dd31c`, `3683978`, `9dbe54e`, `fad9563` — incremental CURRENT_WORK refreshes; `fca727f` and `07a1ab9` — v0.1.0 readiness design doc and pointer.)
-
-Working state: 1540 RSpec examples / 0 failures, RuboCop 140 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.6` until the v0.0.7 surface is locked in.
-
-The original plan's `rigor:v1:conforms-to` directive (Slice 4) and the survey's ObjectSpace catalog import were both deferred. The `conforms-to` directive needs a real structural-conformance checker beyond v0.0.7's envelope; ObjectSpace needs a singleton-module dispatch path that the catalog tier does not yet provide (the existing `MODULE_CATALOGS` fallthrough is for instance methods inherited via `include Comparable`, not for module functions on a `Singleton[Module]` receiver).
-
-Composite payoff:
-- `Rational(3, 4)` → `Constant<Rational(3, 4)>`; `r.numerator` folds to `Constant[3]`; `r + Rational(1, 2)` folds to `Constant<Rational(5, 4)>`.
-- `Complex(3, 4)` → `Constant<Complex(3, 4)>`; `c.abs` folds to `Constant[5.0]`.
-- `(1..3).to_a` folds to `Tuple[Constant[1], Constant[2], Constant[3]]`; `(1..5).count` folds to `Constant[5]`.
-- `assert value is ~lowercase-string` narrows `String` to `Difference[String, lowercase-string]`.
-- `key_of[Hash[Symbol, Integer]]` parses to `Symbol`; `int_mask[1, 2, 4]` parses to `Constant[0] | … | Constant[7]`; `Hash[Symbol, Integer][Symbol]` parses to `Integer`.
-- `{a: 1, b: "two"}.keys` folds to `Tuple[Constant[:a], Constant[:b]]`; `{}.empty?` folds to `Constant[true]`.
-- `[1, 2, 3].sum` folds to `Constant[6]`; `[1, 2, 3].include?(2)` folds to `Constant[true]`; `[3, 1, 2].sort` folds to `[1, 2, 3]`.
-- `"%d / %d" % [1, 2]` folds to `Constant<"1 / 2">`.
-- `"a,b,c".split(",")` folds to `["a", "b", "c"]`; `"abc".chars` folds to `["a", "b", "c"]`.
-- `/foo/i` types as `Constant<Regexp>`; `"hello,world".scan(/o/)` folds to `["o", "o"]`.
-- `[[:a, 1], [:b, 2]].to_h` folds to `HashShape{a: 1, b: 2}`; `{a: 1}.merge(b: 2)` folds to `HashShape{a: 1, b: 2}`.
-- `Pathname.new("/usr/bin/ruby")` types as `Constant<Pathname:/usr/bin/ruby>`; `.basename` folds to `Constant<Pathname:ruby>`; `.to_s` folds to `Constant["/usr/bin/ruby"]`; `+ "lib"` folds to `Constant<Pathname:/usr/bin/ruby/lib>`.
-- `[1, 2, 3].zip([4, 5, 6])` folds to `[[1, 4], [2, 5], [3, 6]]`; `{a: 1, b: 2}.first` folds to `[:a, 1]`; `Array.new(3, 0)` folds to `[0, 0, 0]`; `{}` types as the empty `HashShape{}` so `{}.empty?` folds to `Constant[true]`.
-- `Rigor::Reflection.class_known?("MyClass", scope: scope)` joins source-discovered classes and RBS-known classes through one read API; `Rigor::Reflection.constant_type_for("Foo", scope: scope)` prefers in-source constants over RBS constants on collision.
+The composite payoff: sixteen feature slices closing the spec ↔ implementation gap (type-language type functions, expanded Constant carriers, Tuple / HashShape / String precision, refinement narrowing, empty literal carriers) plus three pre-v0.1.0 substrate slices (`Rigor::Reflection` facade + consumer migration; v0.1.0 readiness and cache slice taxonomy design docs).
 
 ## Where the Work Resumes
 
-**v0.0.7 — pre-plugin coverage push.** Theme: close the gap between the type-language / built-in-coverage surface that the v0.0.x specs already commit to and what the analyzer actually implements, so the plugin API designed against this surface in v0.1.0 has a complete substrate to attach to. The release is deliberately **breadth-over-depth**: many small fills, no architecture changes.
+### Highest-leverage next slices
 
-The full planned surface — including items deferred from v0.0.6 — lives in [`docs/MILESTONES.md`](MILESTONES.md). The items below are the operational entry points for restarting work, not a re-statement of the milestone.
+The next preview is **v0.0.8 / pre-v0.1.0** (or whichever version captures the next slice — bump deferred until that scope is decided). The v0.0.7 work closed the spec ↔ implementation gap on the type-language and built-in-coverage axes; the remaining levers are mostly pre-v0.1.0 substrate or low-leverage tail.
 
-### Spec ↔ implementation gaps surveyed for v0.0.7
-
-| Surface | Spec reference | Status | Notes |
-| --- | --- | --- | --- |
-| `key_of[T]` / `value_of[T]` type functions | [`imported-built-in-types.md`](type-specification/imported-built-in-types.md) "Initial type functions" | **missing** | Parser registry entry + projection over `HashShape` / `Tuple` / `Hash[K, V]`. |
-| `int_mask[…]` / `int_mask_of[T]` | same | **missing** | Set-of-integers carrier; project a finite Constant<Integer> union into the bitwise closure. |
-| `literal-string` / `non-empty-literal-string` | "Initial scalar refinements" table | **missing — needs flow tracking** | "String composed only of literals" is a flow property, not a value-domain refinement. Needs a `Literal` flow flag, which is bigger than the v0.0.7 envelope; deferred unless a tighter scope shows up. |
-| `Constant<Range>#to_a`/`first`/`last`/`min`/`max` precision | n/a — implementation gap | catalog-blocked | `to_a` is `:leaf` but the Array result fails `foldable_constant_value?`; `first`/`last`/`min`/`max` are `:block_dependent` because of optional-block forms. Slice them with a Range-specific no-arg allow list and a Tuple-lift for `to_a`. |
-| `Constant<Rational>` / `Constant<Complex>` literal lift | v0.0.5 deferral note | **missing** | `Prism::ImaginaryNode` (`1i`) and `Rational(…)` / `Complex(…)` Kernel-call folding. The catalog already exists; the typer side is unwired. |
-| `rigor:v1:conforms-to` directive | [`rbs-extended.md`](type-specification/rbs-extended.md) | **deferred — parser-and-checker missing** | RBS::Extended says it's accepted; the implementation skeleton in `rbs_extended.rb` has not yet landed it. Needs parser + a CheckRules rule that reports unsatisfied conformance. |
-| Refinement-form `~T` negation in `assert` / `predicate-if-*` | [`rbs-extended.md`](type-specification/rbs-extended.md) "MUST NOT" carrier-side | **deferred** | Difference-against-refinement algebra. Spec marks it deferred; v0.0.7 may attempt a narrow case (Refined-only base; difference produces a `Difference[base, Refined]`). |
-| `self`-narrowing in `predicate-if-*` | [`rbs-extended.md`](type-specification/rbs-extended.md) Target grammar | **parsed but no scope edits** | The directive accepts `self` but the engine has no `self`-narrowing surface yet. Out of scope for v0.0.7 unless a small contained slice appears. |
-| ObjectSpace catalog import | MILESTONES candidate pool | **out of scope for v0.0.7** | Thin module (5 module functions defined under `Init_GC`); user-visible payoff is small. |
-| Pathname / URI delegation rules | MILESTONES stretch surfaces | **out of scope for v0.0.7** | Wider refactor needed — Pathname facade routing through File projections — and URI is a pure-Ruby stdlib gem with no C surface (custom-scaffold path). |
-| `String#%` format-string parsing | MILESTONES stretch surfaces | **out of scope for v0.0.7** | Catalog-aware fold over Constant<String> templates with Constant<…> values. Self-contained but lower priority than the type-function gaps. |
-| `numeric-string` recogniser via `String#match?(/\A\d+\z/)` | MILESTONES stretch surfaces | **out of scope for v0.0.7** | Pattern-recognition for regex literals in narrowing context. |
-
-### Slice order (operational)
-
-1. **`key_of[T]` / `value_of[T]`** — register parameterised type-function builders, define projection rules, ship parser support, refresh fixtures.
-2. **`int_mask[…]` / `int_mask_of[T]`** — same shape, integer set computation.
-3. **`Constant<Range>#to_a/first/last/min/max` precision** — Range-specific no-arg allow list in `ConstantFolding`, Array-result lift to Tuple for `to_a`.
-4. **`rigor:v1:conforms-to`** — parser entry + CheckRules rule; structural-interface conformance check.
-5. **`Constant<Rational>` / `Constant<Complex>` literal lift** — `Prism::ImaginaryNode` typing + Kernel-call folding for the unary forms.
-6. **Refinement-form `~T` negation** — narrow attempt (Refined base only); declines outside that envelope.
-
-Each slice is independent enough to ship as its own commit. The release converges on "every spec-listed initial-built-in / refinement / directive that does not require flow tracking is implemented end-to-end".
+- **Cache persistence layer.** The cache slice taxonomy design doc ([`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md)) fixed the schema; the next pre-v0.1.0 slice is the storage backend, locking model, and eviction policy. First cache-related code slice. Per the v0.1.0 readiness sequencing in [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md), this is the natural successor to the v0.0.7 design output.
+- **Flow-contribution bundle struct.** ADR-2 § "Flow Contribution Bundle" specifies the eight-slot shape plugins return. The internal `PredicateEffect` etc. structs convert into bundles at the `RbsExtended` / `Narrowing` boundary; built-in rules produce bundles too. Plugin authors then return bundles. Modest implementation; unblocks the dynamic-return / type-specifying / dynamic-reflection extension protocols.
+- **Diagnostic provenance prefix.** `Rigor::Analysis::Diagnostic` gains a `source_family` field; the formatter publishes `plugin.<id>.<rule>` style identifiers per ADR-2 § "Plugin Diagnostic Provenance". Small surface, prepares the v0.1.0 plugin observability story.
+- **Public-API declaration for `Rigor::Scope`, `Rigor::Type`, `Rigor::Environment`.** Namespace policy + drift tests. No new code, just contract declaration. Catches accidental signature changes before plugin authors notice.
+- **Predicate-complement narrowing for `Refined[base, predicate]`.** Architectural — needs either a mixed-case carrier (e.g. `mixed-case-string` for `~lowercase-string`) or a paired-complement registry. Not strictly pre-v0.1.0 but unblocks the `~T` symmetry the spec promises.
+- **`literal-string` / `non-empty-literal-string` flow-tracking.** Needs the `Literal` flow flag propagated through `+` / `<<` / interpolation; bigger than a single slice and naturally lives alongside the plugin flow-effect bundle work.
 
 ### Items intentionally deferred past v0.0.7
 
-- **`literal-string` / `non-empty-literal-string`.** Need a flow-tracking infrastructure (Literal flag propagating through `+` / `<<` / interpolation), not a value-domain refinement. Reserved for after the plugin API in v0.1.0 because the plugin surface should be the place flow flags get registered.
-- **Predicate-complement narrowing for `Refined[base, predicate]`.** `narrow_not_refinement` covers Difference, IntegerRange, and Intersection (via De Morgan) but punts on `Refined[base, predicate]`. The "negate a predicate" surface needs either a mixed-case carrier (e.g. `mixed-case-string` for `~lowercase-string`) or per-predicate paired-complement registry entries — both are larger architecture decisions than v0.0.7 wants to commit.
-- **C-body classifier wider transitive mutator scan.** The pure-`rb_check_frozen`-wrapper detection from v0.0.5 narrows the gap; broader transitive scanning needs careful guards against the `Array#to_a` regression that originally gated the v0.0.5 fix.
-- **`Data.define` override-aware initializer dispatch.** Block-body `def initialize(...)` as the canonical sig for `Const.new`. Architecturally a discovery-side change; deferred until the plugin API discussion is closer.
-- **Pathname / URI delegation rules.** Wider refactor — Pathname facade routing through File projections — and URI is a pure-Ruby stdlib gem with no C surface (custom-scaffold path).
-- **`String#%` format-string parsing** and **`numeric-string` regex-pattern recogniser.** Self-contained but lower-priority than the type-function gaps the v0.0.7 push targets.
+- `literal-string` / `non-empty-literal-string` (see above; needs flow tracking).
+- Predicate-complement narrowing for `Refined[base, predicate]` (see above).
+- C-body classifier wider transitive mutator scan — guards against the `Array#to_a` regression that gated the v0.0.5 fix.
+- `Data.define` override-aware initializer dispatch — block-body `def initialize(...)` as the canonical sig for `Const.new`.
+- ObjectSpace catalog import — needs a singleton-module dispatch path the catalog tier does not yet provide.
+- URI catalog import — pure-Ruby stdlib gem with no C surface; outside the standard import skill's premise.
+- Pathname / URI delegation rules — wider refactor (Pathname facade routing through File projections).
+- `numeric-string` regex-pattern recogniser.
+- `self`-narrowing in `predicate-if-*` — no `self`-narrowing surface in the engine yet.
+- `rigor:v1:conforms-to` directive — needs a structural-conformance checker.
 
 ### Out of v0.0.x scope (architectural)
 

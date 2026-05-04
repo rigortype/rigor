@@ -89,6 +89,27 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/block_filter.rb — BlockFolding for select/all?/any?" do
+    let(:harness) { harness_for("block_filter") }
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "folds `[10, 20].any? { |x| x > 0 }` to Constant[true]" do
+      expect(harness.local(:non_empty_any)).to eq(constant(true))
+    end
+
+    it "folds `[1,2,3].select { false }` to the empty tuple" do
+      expect(harness.local(:empty_select)).to eq(Rigor::Type::Combinator.tuple_of)
+    end
+
+    it "folds `[1,2,3].all? { true }` to Constant[true]" do
+      expect(harness.local(:all_truthy)).to eq(constant(true))
+    end
+  end
+
   describe "fixtures/block_map.rb — block-return type uplift on Array#map" do
     let(:harness) { harness_for("block_map") }
 
@@ -481,7 +502,7 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
   # specific assertions for each fixture live in their own
   # `describe` block.
   describe "self-asserting `assert_type` calls in converted fixtures" do
-    %w[parity case_when compound_writes tuple_access hash_shape block_map].each do |name|
+    %w[parity case_when compound_writes tuple_access hash_shape block_map block_filter].each do |name|
       it "produces no assert_type mismatches in fixtures/#{name}.rb" do
         harness = harness_for(name)
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }

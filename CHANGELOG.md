@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Block-shaped fold dispatch — phase 1.**
+  `MethodDispatcher::BlockFolding` joins the precision-tier
+  chain inside `MethodDispatcher.dispatch_precise_tiers`,
+  consuming the `block_type:` already threaded by
+  `ExpressionTyper#block_return_type_for`. When the block's
+  inferred return type is a `Type::Constant` whose value is
+  Ruby-truthy or Ruby-falsey, the dispatcher folds:
+  - `Enumerable#select` / `#filter` / `#reject` /
+    `#take_while` / `#drop_while` to either the receiver
+    shape (the all-kept endpoint) or `Tuple[]` (the
+    all-dropped endpoint). Tuple-shaped receivers widen to
+    `Array[union]` on the all-kept side because per-position
+    semantics do not survive filtering.
+  - `Enumerable#all?` / `#any?` / `#none?` to a precise
+    `Constant[bool]` whenever the receiver-emptiness ×
+    block-truthiness combination collapses Ruby's actual
+    semantics — including the vacuous-truth empty-receiver
+    cases (`[].all? { false }` → `Constant[true]`,
+    `[].any? { _ }` → `Constant[false]`,
+    `[].none? { _ }` → `Constant[true]`).
+  Receiver-emptiness is resolved against `Tuple` /
+  `HashShape` / `Constant<Array|Hash|String|Range>` /
+  `Difference[Array|Hash|Set, Tuple[]]` (the imported
+  `non-empty-array[T]` carrier); other receivers stay
+  `:unknown` and the predicate folds widen to `bool` only on
+  the truthiness axis where the answer is determinate.
+  Element-wise block re-evaluation against `Constant<Array>`
+  receivers (the `map` / `filter_map` / `flat_map` precision
+  tier) stays deferred to phase 2.
+
 ## [0.0.5] - 2026-05-03
 
 ### Added

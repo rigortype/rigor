@@ -5,6 +5,7 @@ require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/shape_dispatch"
 require_relative "method_dispatcher/rbs_dispatch"
 require_relative "method_dispatcher/iterator_dispatch"
+require_relative "method_dispatcher/block_folding"
 require_relative "method_dispatcher/file_folding"
 require_relative "method_dispatcher/kernel_dispatch"
 
@@ -59,7 +60,7 @@ module Rigor
       def dispatch(receiver_type:, method_name:, arg_types:, block_type: nil, environment: nil)
         return nil if receiver_type.nil?
 
-        precise = dispatch_precise_tiers(receiver_type, method_name, arg_types)
+        precise = dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type)
         return precise if precise
 
         rbs_result = RbsDispatch.try_dispatch(
@@ -83,19 +84,28 @@ module Rigor
       end
 
       # Runs the precision tiers (constant fold, shape dispatch,
-      # file-path fold) in order and returns the first non-nil
-      # answer. Each tier owns its own receiver/argument shape
-      # checks; a tier that does not recognise the receiver returns
-      # nil so the next tier can try. The RBS tier sits below this
-      # chain and is invoked by the outer `dispatch` method.
-      def dispatch_precise_tiers(receiver_type, method_name, arg_types)
+      # file-path fold, block fold) in order and returns the first
+      # non-nil answer. Each tier owns its own receiver/argument
+      # shape checks; a tier that does not recognise the receiver
+      # returns nil so the next tier can try. The RBS tier sits
+      # below this chain and is invoked by the outer `dispatch`
+      # method.
+      #
+      # `BlockFolding` runs last among the precision tiers because
+      # its rules apply only to block-taking calls, so the cheaper
+      # arity-based fold tiers above it filter out the common
+      # cases first. When `block_type` is nil the tier is a no-op.
+      def dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type = nil)
         meta_result = try_meta_introspection(receiver_type, method_name)
         return meta_result if meta_result
 
         ConstantFolding.try_fold(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           ShapeDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          KernelDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types)
+          KernelDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          BlockFolding.try_fold(
+            receiver: receiver_type, method_name: method_name, args: arg_types, block_type: block_type
+          )
       end
 
       def try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type)

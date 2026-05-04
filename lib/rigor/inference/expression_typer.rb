@@ -1064,7 +1064,7 @@ module Rigor
       # supported set, when block typing raises mid-loop, or
       # when the block has no body. The decline path leaves
       # the dispatch chain untouched.
-      PER_ELEMENT_TUPLE_METHODS = Set[:map, :collect, :filter_map].freeze
+      PER_ELEMENT_TUPLE_METHODS = Set[:map, :collect, :filter_map, :flat_map].freeze
       private_constant :PER_ELEMENT_TUPLE_METHODS
 
       # rubocop:disable Metrics/CyclomaticComplexity
@@ -1089,6 +1089,7 @@ module Rigor
         case method_name
         when :map, :collect then Type::Combinator.tuple_of(*per_position)
         when :filter_map then assemble_filter_map_result(per_position)
+        when :flat_map then assemble_flat_map_result(per_position)
         end
       end
 
@@ -1103,6 +1104,20 @@ module Rigor
 
         kept = per_position.reject { |type| type.value.nil? || type.value == false }
         Type::Combinator.tuple_of(*kept)
+      end
+
+      # `flat_map` flattens a single level: if the per-position
+      # result is a `Tuple`, its elements are concatenated; if
+      # it's a non-Array carrier (Constant scalar, Nominal[non-
+      # Array], …) it contributes one element. We fold tightly
+      # only when every per-position result is a `Type::Tuple`
+      # — that gives a deterministic concatenation. Mixed-shape
+      # per-position results decline so the RBS tier widens.
+      def assemble_flat_map_result(per_position)
+        return nil unless per_position.all?(Type::Tuple)
+
+        concatenated = per_position.flat_map(&:elements)
+        Type::Combinator.tuple_of(*concatenated)
       end
 
       def type_block_body_with_param(block_node, expected_param_types)

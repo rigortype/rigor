@@ -129,6 +129,18 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       expect(filter_mapped_evens).to be_a(Rigor::Type::Tuple)
       expect(filter_mapped_evens.elements.map(&:value)).to eq(["2"])
     end
+
+    it "folds Tuple#flat_map by concatenating per-position Tuples" do
+      flat_pairs = harness.local(:flat_pairs)
+      expect(flat_pairs).to be_a(Rigor::Type::Tuple)
+      expect(flat_pairs.elements.map(&:value)).to eq([1, 10, 2, 20, 3, 30])
+    end
+
+    it "concatenates heterogeneous-arity per-position Tuples in flat_map" do
+      flat_varied = harness.local(:flat_varied)
+      expect(flat_varied).to be_a(Rigor::Type::Tuple)
+      expect(flat_varied.elements.map(&:value)).to eq([1, 2, 2])
+    end
   end
 
   describe "fixtures/block_filter.rb — BlockFolding for select/all?/any?" do

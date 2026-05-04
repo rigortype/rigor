@@ -47,3 +47,14 @@ assert_type("[]", filter_mapped_drop)
 # drop step.
 filter_mapped_evens = [1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }
 assert_type('["2"]', filter_mapped_evens)
+
+# `:flat_map` participates when every per-position result is
+# itself a Tuple. The Tuples concatenate in declaration order
+# into the final Tuple.
+flat_pairs = [1, 2, 3].flat_map { |n| [n, n * 10] }
+assert_type("[1, 10, 2, 20, 3, 30]", flat_pairs)
+
+# Heterogeneous Tuple sizes (with branch elision deciding the
+# Tuple size per position).
+flat_varied = [1, 2].flat_map { |n| n.even? ? [n, n] : [n] }
+assert_type("[1, 2, 2]", flat_varied)

@@ -7,215 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-05-05
+
+The sixth preview. Theme: **fold block-taking Enumerable methods through the constant-folding tier** so iterator-shaped expressions over literal collections produce precise carriers instead of widening through RBS.
+
 ### Added
 
-- **Block-shaped fold dispatch — phase 1.**
-  `MethodDispatcher::BlockFolding` joins the precision-tier
-  chain inside `MethodDispatcher.dispatch_precise_tiers`,
-  consuming the `block_type:` already threaded by
-  `ExpressionTyper#block_return_type_for`. When the block's
-  inferred return type is a `Type::Constant` whose value is
-  Ruby-truthy or Ruby-falsey, the dispatcher folds:
-  - `Enumerable#select` / `#filter` / `#reject` /
-    `#take_while` / `#drop_while` to either the receiver
-    shape (the all-kept endpoint) or `Tuple[]` (the
-    all-dropped endpoint). Tuple-shaped receivers widen to
-    `Array[union]` on the all-kept side because per-position
-    semantics do not survive filtering.
-  - `Enumerable#all?` / `#any?` / `#none?` to a precise
-    `Constant[bool]` whenever the receiver-emptiness ×
-    block-truthiness combination collapses Ruby's actual
-    semantics — including the vacuous-truth empty-receiver
-    cases (`[].all? { false }` → `Constant[true]`,
-    `[].any? { _ }` → `Constant[false]`,
-    `[].none? { _ }` → `Constant[true]`).
-  Receiver-emptiness is resolved against `Tuple` /
-  `HashShape` / `Constant<Array|Hash|String|Range>` /
-  `Difference[Array|Hash|Set, Tuple[]]` (the imported
-  `non-empty-array[T]` carrier); other receivers stay
-  `:unknown` and the predicate folds widen to `bool` only on
-  the truthiness axis where the answer is determinate.
-  Element-wise block re-evaluation against `Constant<Array>`
-  receivers (the `map` / `filter_map` / `flat_map` precision
-  tier) stays deferred to phase 2.
+- **Block-shaped fold dispatch over constant-block predicates and filters.** Calls like `[1, 2, 3].select { false }`, `arr.all? { true }`, or `arr.any? { false }` collapse to the precise endpoint when the block's inferred return type is a Ruby-truthy or Ruby-falsey `Constant`. Filter methods (`select` / `filter` / `reject` / `take_while` / `drop_while`) fold to either the receiver or `Tuple[]`; predicate methods (`all?` / `any?` / `none?`) fold to `Constant[true]` / `Constant[false]` whenever the receiver-emptiness × block-truthiness combination is unconditional in Ruby's semantics, including the vacuous-truth empty-receiver cases. Receiver-emptiness is recognised against `Tuple`, `HashShape`, `Constant<Array|Hash|String|Range>`, and the imported `non-empty-array[T]` carrier (`Difference[Array, Tuple[]]`).
+- **Per-position block re-evaluation over Tuple receivers** for `map` / `collect` / `filter_map` / `flat_map` / `find` / `detect` / `find_index` / `index`. The block body is type-checked once per Tuple position with the corresponding element bound to the block parameter, then assembled per-method:
+  - `map` / `collect` produce `Tuple[U_1..U_n]`. `[1, 2, 3].map { |n| n.to_s }` resolves to `["1", "2", "3"]` instead of `Array["1" | "2" | "3"]`.
+  - `filter_map` drops `Constant[nil]` / `Constant[false]` positions and concatenates the survivors into a Tuple.
+  - `flat_map` concatenates per-position `Tuple` results, treating per-position `Constant` scalars as single-element contributions and declining on opaque carriers.
+  - `find` / `detect` return the receiver element at the first truthy position (or `Constant[nil]` when every position is falsey).
+  - `find_index` / `index` return the index of the first truthy position (or `Constant[nil]`). The value-search forms `index(value)` / `find_index(value)` decline so the RBS tier still owns those.
+- **Per-position block fold over short `Constant<Range>` receivers** up to a cardinality cap of 8 elements. Each integer in the range re-types the block body once with the corresponding `Constant<Integer>` bound to the parameter, so `(1..3).map { |n| n.to_s }` resolves to `["1", "2", "3"]` and `(1..5).find { |n| n.even? }` resolves to `Constant[2]`. Larger ranges decline so the RBS tier widens, keeping block-typing cost bounded.
+- **Branch elision for expression-position conditionals.** `if` / `unless` / ternary expressions whose predicate folds to a `Type::Constant` drop the unreachable branch and adopt the live branch's type. Statement-level branch elision was already present from v0.0.3; this slice covers expression-position uses (e.g. the right-hand side of an assignment, an argument expression, or a block body). Composes directly with the per-position fold, so `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }` resolves to `Tuple[Constant["2"]]`.
+- **`&&` / `||` short-circuit elision on Constant-shaped left operands.** When the left operand of `&&` / `||` folds to a `Type::Constant`, the result type follows Ruby's actual short-circuit semantics: `Constant[truthy] && rhs` is the right operand's type, `Constant[falsey] && rhs` keeps the left, and the dual rule applies for `||`. Non-Constant left operands keep the previous union-of-both-operands behaviour.
+- **`find { false }` / `detect { false }` / `find_index { false }` / `index { false }` / `count { … }` short-circuit folds.** The block-form falsey side of the find-family folds to `Constant[nil]`; `count { false }` folds to `Constant[0]`; `count { true }` folds to `Constant[size]` when the receiver pins a finite size (Tuple, HashShape, or `Constant<Range>` with finite integer endpoints). The value-search forms `index(value)` / `count(value)` carry a positional argument and decline so the RBS tier still answers them.
+- **IntegerRange-aware ternary fold — `Comparable#between?` / `Comparable#clamp`.** The 2-arg `try_fold_ternary` path now accepts an `IntegerRange` receiver paired with two scalar `Constant<Integer>` args. `int<3, 7>.between?(0, 10)` folds to `Constant[true]`; `int<3, 7>.clamp(4, 6)` folds to `int<4, 6>` (collapsing to a `Constant` when the intersection pins a single point). When the bracket is fully disjoint from the range — every receiver value would snap to one bracket bound — the fold declines so the RBS tier widens rather than the dispatcher inventing the snap point.
+- **Empty array literal carrier — `[]` resolves to `Tuple[]`.** The empty array literal previously typed as `Nominal[Array]`; v0.0.6 switches it to the empty `Tuple[]` carrier so the per-element block fold can concatenate cleanly across all-empty positions like `[1, 2, 3].flat_map { |_| [] }` (now folds to `Tuple[]`). Both carriers erase to plain `Array` on the RBS-interop path.
+- **Pathname catalog import.** `data/builtins/ruby_core/pathname.yml` (102 instance methods, 2 singletons, 5 aliases) and the matching `Builtins::PATHNAME_CATALOG` join the catalog tier. Pathname is a thin wrapper that mostly delegates to `File` / `Dir` / `FileTest`, so the user-visible payoff is narrower than Numeric or String — the import buys receiver-class recognition for `Pathname.new(...)`, a defensive `:initialize_copy` blocklist entry, and catalog folding for the lone `:leaf` method (`<=>`).
 
-- **Block-shaped fold dispatch — phase 2.**
-  `ExpressionTyper#try_per_element_block_fold` runs ahead of
-  `MethodDispatcher.dispatch` and, when the receiver is a
-  `Type::Tuple` carrier with at least one element and the
-  call is `:map` or its alias `:collect` carrying a
-  `Prism::BlockNode`, re-types the block body once per Tuple
-  position with the corresponding element type bound to the
-  block parameter. The per-position results assemble into a
-  `Tuple[U_1..U_n]`, strictly tighter than the
-  RBS-projected `Array[union]` answer that the previous
-  block-return uplift produced. Numbered parameters
-  (`_1`) participate, and the existing `block_map` fixture's
-  expected type accordingly tightens from
-  `Array["1" | "2" | "3"]` to `["1", "2", "3"]`. The
-  decline path (any element raises during typing, the
-  receiver is not a Tuple, the call has no block, the
-  Tuple is empty) leaves the dispatch chain untouched.
+### Fixed
 
-- **`&&` / `||` short-circuit elision on Constant-shaped left
-  operands.** `ExpressionTyper#type_of_and_or` now mirrors
-  Ruby's actual short-circuit semantics when the left
-  operand folds to a `Type::Constant`:
-  - `Constant[truthy] && rhs` → typed as the right operand.
-  - `Constant[falsey] && rhs` → typed as the left operand
-    (the right is never evaluated).
-  - `Constant[truthy] || rhs` → typed as the left operand.
-  - `Constant[falsey] || rhs` → typed as the right operand.
-  Non-Constant left operands keep the existing
-  union-of-both-operands fallback.
-
-- **Branch elision for expression-position conditionals.**
-  `ExpressionTyper#type_of_if` and `#type_of_unless` now
-  consult the predicate's typed value: when it folds to a
-  `Type::Constant` whose value is Ruby-truthy (resp.
-  Ruby-falsey), the unreachable branch is dropped and the
-  if-expression's type is the live branch alone. Statement-
-  level branch elision (introduced in v0.0.3) covered
-  `if`/`unless` reached through `eval_if`; this slice covers
-  the expression-position ternary form (`a ? b : c`) and any
-  if-expression used as a value. Composes directly with the
-  Phase 2 `:map` / `:filter_map` per-element fold:
-  `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }`
-  now resolves to `Tuple[Constant["2"]]` instead of widening
-  to `Array[Dynamic[Top]]`.
-
-- **Per-element block fold extension —
-  `Constant<Range>` receivers.**
-  `ExpressionTyper#try_per_element_block_fold` now accepts
-  finite-bound `Constant<Range>` receivers alongside
-  Tuple-shaped ones, up to a `PER_ELEMENT_RANGE_LIMIT`
-  cardinality cap (8 elements). Each integer in the range
-  re-types the block body once with the corresponding
-  `Constant<Integer>` bound to the parameter, so
-  `(1..3).map { |n| n.to_s }` resolves to
-  `Tuple[Constant["1"], Constant["2"], Constant["3"]]` and
-  `(1..5).find { |n| n.even? }` resolves to `Constant[2]`.
-  Larger ranges decline so the RBS tier widens, keeping
-  block-typing cost bounded.
-
-- **Pathname catalog import.** `tool/scaffold_builtin_catalog.rb`
-  with `--init-fn InitVM_pathname` writes
-  `data/builtins/ruby_core/pathname.yml` (102 instance methods,
-  2 singletons, 5 aliases) and the matching
-  `Builtins::PATHNAME_CATALOG` loader. Pathname is the
-  thinnest catalog import in the queue: most methods classify
-  `:dispatch` because the prelude delegates to `File` / `Dir`
-  / `FileTest`, so the user-visible payoff is narrower than
-  the Numeric or String imports. What the import buys is
-  defensive — the dispatcher knows the receiver class for
-  `Pathname.new(...)`, the per-class blocklist defends the
-  conventional `:initialize_copy` against future `Constant<Pathname>`
-  carriers, and the lone `:leaf` method (`<=>`) folds through
-  the catalog tier rather than punting to RBS.
-
-- **`extract_builtin_catalog.rb` BeginNode-bodied `def`
-  classifier fix.** `PreludeParser#analyse_body` previously
-  blew up on the rescue-on-def idiom (`def foo; …; rescue; …; end`)
-  because Prism wraps the body in a `BeginNode` rather than a
-  `StatementsNode`. The classifier now descends into the
-  begin-block's `statements` for that case. The bug surfaced
-  importing Pathname (`def initialize(path); @path = …; rescue
-  TypeError; …; end`); every catalog regenerates cleanly under
-  `make extract-builtin-catalogs`.
-
-- **IntegerRange-aware ternary fold — `Comparable#between?`
-  / `Comparable#clamp`.** `MethodDispatcher::ConstantFolding`'s
-  2-arg fold path now accepts an `IntegerRange` receiver paired
-  with two scalar `Constant<Integer>` args:
-  - `int<a, b>.between?(min, max)` decides
-    `Constant[true]` when `[a, b] ⊆ [min, max]` and the range
-    is finite, `Constant[false]` when the bracket is disjoint
-    from the range, and the bool union otherwise.
-  - `int<a, b>.clamp(min, max)` returns the intersected
-    `IntegerRange` (collapsing to a `Constant` when the result
-    pins a single point); when the bracket is entirely
-    disjoint from the range — every receiver value would snap
-    to the nearer bracket bound — the fold declines so the
-    RBS tier widens rather than the dispatcher inventing the
-    snap point.
-  IntegerRange-shaped *arguments* on the 2-arg path still
-  decline; only IntegerRange receivers participate.
-
-- **Empty array literal carrier — `[]` → `Tuple[]`.**
-  `ExpressionTyper#array_type_for` previously emitted
-  `Nominal[Array]` for the empty literal `[]` (no
-  type-args, no element evidence). v0.0.6 switches the
-  empty case to the empty `Tuple[]` carrier. Both forms
-  carry no element evidence and erase to plain `Array` on
-  the RBS-interop path, but `Tuple[]` pins the literal's
-  known arity (zero), which lets the per-element block fold
-  concatenate cleanly across all-empty positions like
-  `[1, 2, 3].flat_map { |_| [] }` (now folds to `Tuple[]`).
-
-- **Per-element block fold extension — find-family
-  truthy side.** `ExpressionTyper#try_per_element_block_fold`
-  now also folds `:find` / `:detect` / `:find_index` /
-  `:index` (block form) over Tuple receivers when every
-  per-position block result is a `Type::Constant`. The
-  dispatcher walks the Tuple and:
-  - For `:find` / `:detect` returns the receiver element at
-    the first truthy index, or `Constant[nil]` when every
-    position folds to falsey.
-  - For `:find_index` / `:index` returns `Constant[<index>]`
-    of the first truthy position, or `Constant[nil]` when
-    every position folds to falsey.
-  The value-search forms `index(value)` / `find_index(value)`
-  carry a positional argument and decline so the RBS tier
-  still owns those forms. Composes with the v0.0.6 ternary
-  branch elision: `[1, 2, 3, 4].find { |n| n.even? }` now
-  resolves to `Constant[2]`.
-
-- **Per-element block fold extension — `:flat_map`.**
-  `ExpressionTyper#try_per_element_block_fold` accepts
-  `:flat_map` alongside `:map` / `:collect` / `:filter_map`.
-  When every per-position result is recognisable — either a
-  `Type::Tuple` (its elements concatenate into the assembled
-  Tuple) or a `Type::Constant` scalar (contributes one
-  element) — the dispatcher concatenates the per-position
-  contributions in declaration order and wraps the survivors
-  in `Tuple[…]`. Other shapes (`Nominal[Array[T]]`, `Union`,
-  …) decline so the RBS tier widens to `Array[U]`. Composes
-  with the v0.0.6 ternary branch elision:
-  `[1, 2].flat_map { |n| n.even? ? [n, n] : [n] }` resolves
-  to `Tuple[Constant[1], Constant[2], Constant[2]]`, and
-  `[1, 2, 3].flat_map { |n| n.to_s }` resolves to
-  `Tuple[Constant["1"], Constant["2"], Constant["3"]]`.
-
-- **Per-element block fold extension — `:filter_map`.**
-  `ExpressionTyper#try_per_element_block_fold` accepts
-  `:filter_map` alongside `:map` / `:collect`, with a
-  per-position drop step: positions whose block result is
-  `Constant[nil]` or `Constant[false]` are removed, the rest
-  survive in declaration order, and the assembled answer is
-  the per-position `Tuple[…]`. Folds tightly only when every
-  per-position result is itself a `Constant`; mixed-shape
-  per-position results (e.g. `Union[Constant[A], Constant[nil]]`
-  produced by ternary block bodies whose predicate has not
-  been branch-elided) decline so the RBS tier widens to
-  `Array[U]`.
-
-- **BlockFolding extension — `find` / `detect` / `find_index`
-  / `index` / `count`.** Four short-circuit folds join the
-  Phase 1 surface:
-  - `find { false }` / `detect { false }` /
-    `find_index { false }` / `index { false }` (block-form
-    only — the value-search forms `index(value)` and
-    `count(value)` decline so the RBS tier still answers)
-    fold to `Constant[nil]`.
-  - `count { false }` folds to `Constant[0]` regardless of
-    receiver shape.
-  - `count { true }` folds to `Constant[size]` when the
-    receiver pins a finite size — Tuple, HashShape, or
-    `Constant<Range>` with finite integer endpoints.
-  The truthy-block side of `find` / `find_index` stays
-  deferred because the answer depends on which Tuple
-  position evaluates to truthy, which requires per-position
-  block re-typing analogous to the Phase 2 `:map` path.
+- **`tool/extract_builtin_catalog.rb` rescue-on-def classifier crash.** `PreludeParser#analyse_body` previously raised `NoMethodError` on Ruby methods written with the rescue-on-def idiom (`def foo; …; rescue; …; end`) because Prism wraps the body in a `BeginNode` rather than a `StatementsNode`. The classifier now descends into the begin-block's `statements` for that case. The bug surfaced importing Pathname (whose prelude has `def initialize(path); @path = …; rescue TypeError; …; end`); every catalog regenerates cleanly under `make extract-builtin-catalogs`.
 
 ## [0.0.5] - 2026-05-03
 
@@ -1281,7 +1096,8 @@ The gem is published to RubyGems as **`rigortype`** (the
   reserved for `dump_type`); per-rule configuration and
   suppression comments are deferred.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/rigortype/rigor/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/rigortype/rigor/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/rigortype/rigor/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/rigortype/rigor/compare/v0.0.2...v0.0.3

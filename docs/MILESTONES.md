@@ -66,6 +66,33 @@ Deferred from v0.0.5 (carried forward):
 - `Trinary` return-type contract on type-carrier predicate methods — closing the strict-on-returns gap requires a new CheckRules rule family (`return-type-mismatch`), explicitly deferred by [`docs/CURRENT_WORK.md`](CURRENT_WORK.md) until the inference surface is sturdy enough to avoid false-positive churn.
 - Cross-checker runner integration — `make steep-check` stays out-of-band; the Steep residual (6 warnings, all in `fact_store.rb` and rooted in Steep-side limitations Rigor closes natively) is the steady-state floor.
 
+(Stretch surfaces carry forward into the v0.0.6 row below.)
+
+## v0.0.6 — Released 2026-05-05
+
+The sixth preview. Theme: **fold block-taking Enumerable methods through the constant-folding tier** so iterator-shaped expressions over literal collections produce precise carriers instead of widening through RBS. See `CHANGELOG.md`'s `[0.0.6]` section for the full added / fixed list.
+
+Major surfaces landed:
+
+- **`MethodDispatcher::BlockFolding` precision tier.** `dispatch_precise_tiers` consumes the existing `block_type:` and folds the constant-block side of `select` / `filter` / `reject` / `take_while` / `drop_while` / `all?` / `any?` / `none?` / `find` / `detect` / `find_index` / `index` / `count`. Filter methods collapse to either the receiver or `Tuple[]`; predicate methods produce `Constant[bool]` whenever the receiver-emptiness × block-truthiness combination is unconditional in Ruby's semantics; find-family methods fold to `Constant[nil]` on the falsey side and to `Constant[size]` / `Constant[0]` for `count`.
+- **`ExpressionTyper#try_per_element_block_fold` over Tuple receivers** for `map` / `collect` / `filter_map` / `flat_map` / `find` / `detect` / `find_index` / `index`. The block body is type-checked once per Tuple position, then assembled per-method into a precise Tuple. Numbered parameters (`_1`) participate identically.
+- **Per-element fold over short `Constant<Range>` receivers**, capped at 8 elements so `(1..3).map { |n| n.to_s }` resolves to `["1", "2", "3"]` without exploding for million-element ranges.
+- **Branch elision for expression-position conditionals.** `if` / `unless` / ternary expressions whose predicate folds to a `Type::Constant` drop the unreachable branch. `&&` / `||` short-circuit on Constant-shaped left operands following Ruby's actual semantics. Composes through three layers so `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }` resolves to `Tuple[Constant["2"]]`.
+- **IntegerRange-aware ternary fold.** The 2-arg `try_fold_ternary` path accepts `IntegerRange` receivers paired with scalar `Constant<Integer>` args for `Comparable#between?` / `Comparable#clamp`. `int<3, 7>.between?(0, 10)` folds to `Constant[true]`; `int<3, 7>.clamp(4, 6)` folds to `int<4, 6>`.
+- **Empty array literal carrier — `[]` → `Tuple[]`.** Pins the literal's known arity so `:flat_map` can concatenate cleanly across all-empty per-position results.
+- **Pathname catalog import** (102 instance methods, 2 singletons, 5 aliases) via `tool/scaffold_builtin_catalog.rb --init-fn InitVM_pathname`. Pathname is a thin wrapper that mostly delegates to File / Dir / FileTest, so the user-visible payoff is narrower than Numeric or String — the import buys receiver-class recognition, a defensive `:initialize_copy` blocklist entry, and `:leaf` folding for `<=>`.
+- **Extractor BeginNode-bodied-`def` classifier fix.** `PreludeParser#analyse_body` previously raised on the rescue-on-def idiom (`def foo; …; rescue; …; end`). The classifier now descends into the begin-block's `statements`. Surfaced importing Pathname; every catalog regenerates cleanly under `make extract-builtin-catalogs`.
+
+Deferred from v0.0.6 (carried forward):
+
+- Predicate-complement narrowing for `Refined[base, predicate]` — still needs either a new mixed-case carrier or per-predicate paired-complement registry entries.
+- C-body classifier wider transitive mutator scan that does not over-flag legitimate non-mutators.
+- `Data.define` override-aware initializer dispatch — block-body `def initialize(...)` as the canonical sig for `Const.new`.
+- `Trinary` return-type contract on type-carrier predicate methods — still deferred until the inference surface is sturdy enough to avoid false-positive churn.
+- Cross-checker runner integration — `make steep-check` stays out-of-band.
+- Further catalog imports — URI and Kernel still fall outside the standard import skill's premise. ObjectSpace is in the candidate pool but is a thin module (5 module functions defined under `Init_GC`); the user-visible payoff is small.
+- `:flat_map` over `Nominal[Array[T]]` per-position results — largely subsumed by the existing RBS substitution; not worth a dedicated slice.
+
 Stretch surfaces (carried forward unchanged):
 
 - Pathname / URI delegation rules so `Pathname#exist?` etc routes through `File.exist?` projections.

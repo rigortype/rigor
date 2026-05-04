@@ -4,34 +4,15 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 ## Status
 
-**v0.0.5 released 2026-05-03.** The branch is at a clean shipping state: 1313 RSpec examples / 0 failures, RuboCop 135 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics, `gem build rigortype.gemspec` produces `rigortype-0.0.5.gem` cleanly. `lib/rigor/version.rb`, `Gemfile.lock`, and `CHANGELOG.md`'s `[0.0.5]` heading agree on the release version. `v0.0.5` tag pushed to `origin`; gem published to RubyGems.
+**v0.0.6 released 2026-05-05.** The branch is at a clean shipping state: 1396 RSpec examples / 0 failures, RuboCop 138 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics, `gem build rigortype.gemspec` produces `rigortype-0.0.6.gem` cleanly. `lib/rigor/version.rb`, `Gemfile.lock`, and `CHANGELOG.md`'s `[0.0.6]` heading agree on the release version.
 
-The summary of what shipped in v0.0.5 is in `CHANGELOG.md`'s `[0.0.5] - 2026-05-03` section and the v0.0.5 row of [`docs/MILESTONES.md`](MILESTONES.md). Not duplicated here.
+The summary of what shipped in v0.0.6 is in `CHANGELOG.md`'s `[0.0.6] - 2026-05-05` section and the v0.0.6 row of [`docs/MILESTONES.md`](MILESTONES.md). Not duplicated here.
 
-**v0.0.6 in progress on `master`.** Fourteen commits since `v0.0.5`:
-1. `edfc197` — BlockFolding Phase 1: constant-block predicates and filters (`select` / `filter` / `reject` / `take_while` / `drop_while` / `all?` / `any?` / `none?`).
-2. `8035204` — BlockFolding Phase 2: per-position Tuple element-wise re-typing for `:map` / `:collect`.
-3. `37512fc` — BlockFolding extension: `find` / `detect` / `find_index` / `index` / `count` short-circuit folds.
-4. `6335574` — Per-element block fold for `:filter_map` (drops `Constant[nil]` / `Constant[false]` positions).
-5. `6b84a74` — Branch elision for expression-position `if` / `unless` on `Type::Constant` predicates.
-6. `05d4c29` — `&&` / `||` short-circuit elision on Constant-shaped left operands.
-7. `08a9ab0` — Per-element block fold for `:flat_map` (concatenates Tuple-shaped per-position results).
-8. `5b40e2b` — Truthy-block side of `:find` / `:detect` / `:find_index` / `:index` per-position over Tuple receivers.
-9. `1c2a733` — Mixed-shape `:flat_map` tightening: `Type::Constant` per-position results contribute single elements.
-10. `5b47960` — Empty array literal `[]` resolves to the empty `Tuple[]` carrier.
-11. `1c8e760` — IntegerRange-aware ternary fold for `Comparable#between?` / `Comparable#clamp` through `try_fold_ternary`.
-12. `0b44f34` — Pathname catalog import + extractor `BeginNode`-bodied-`def` classifier fix (rescue-on-def idiom support).
-13. `2c33d6d` — Per-element block fold accepts finite-bound `Constant<Range>` receivers (cardinality-capped at 8).
-
-(Plus `cdbeade`, `d8dab79`, `e6a148c`, and `f3af880` — incremental CURRENT_WORK refreshes.)
-
-Working state: 1396 RSpec examples / 0 failures, RuboCop 138 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.5` until the v0.0.6 surface is locked in.
-
-The composite payoff: `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }` now resolves to `Tuple[Constant["2"]]` (Phase 2 element-wise re-typing + per-position `:filter_map` fold + ternary elision composing through three layers); `[1, 2, 3, 4].find { |n| n.even? }` resolves to `Constant[2]`; `int<3, 7>.between?(0, 10)` folds to `Constant[true]`.
+The composite payoff: `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }` resolves to `Tuple[Constant["2"]]` (per-position `:filter_map` fold + ternary elision composing through three layers); `[1, 2, 3, 4].find { |n| n.even? }` resolves to `Constant[2]`; `int<3, 7>.between?(0, 10)` folds to `Constant[true]`.
 
 ## Where the Work Resumes
 
-The next preview is **v0.0.6** (or whichever version captures the next slice — bump deferred until that scope is decided). The full planned surface — including the items deferred from v0.0.5 — lives in [`docs/MILESTONES.md`](MILESTONES.md); the items below are the operational entry points for restarting work, not a re-statement of the milestone.
+The next preview is **v0.0.7** (or whichever version captures the next slice — bump deferred until that scope is decided). The full planned surface — including the items deferred from v0.0.6 — lives in [`docs/MILESTONES.md`](MILESTONES.md); the items below are the operational entry points for restarting work, not a re-statement of the milestone.
 
 ### Highest-leverage next slices
 

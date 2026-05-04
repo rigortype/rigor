@@ -183,6 +183,9 @@ module Rigor
         constant_lift = constant_constructor_lift(receiver_type.class_name, arg_types)
         return constant_lift if constant_lift
 
+        array_lift = array_new_lift(receiver_type.class_name, arg_types)
+        return array_lift if array_lift
+
         Type::Combinator.nominal_of(receiver_type.class_name)
       end
 
@@ -203,6 +206,37 @@ module Rigor
         Type::Combinator.constant_of(result)
       rescue StandardError
         nil
+      end
+
+      # `Array.new(n, value)` and `Array.new(n)` (no value, default
+      # `nil`) lift to a per-position `Tuple[…]` when `n` is a
+      # small `Constant<Integer>`. Cap at `ARRAY_NEW_TUPLE_LIMIT`
+      # (16) so a `Array.new(1_000_000)` does not balloon the
+      # carrier; oversize calls fall back to `Nominal[Array]`.
+      ARRAY_NEW_TUPLE_LIMIT = 16
+      private_constant :ARRAY_NEW_TUPLE_LIMIT
+
+      def array_new_lift(class_name, arg_types)
+        return nil unless class_name == "Array"
+        return nil if arg_types.empty? || arg_types.size > 2
+
+        size = array_new_size(arg_types.first)
+        return nil if size.nil? || size.negative? || size > ARRAY_NEW_TUPLE_LIMIT
+
+        fill = array_new_fill(arg_types[1])
+        Type::Combinator.tuple_of(*Array.new(size, fill))
+      end
+
+      def array_new_size(type)
+        return nil unless type.is_a?(Type::Constant) && type.value.is_a?(Integer)
+
+        type.value
+      end
+
+      def array_new_fill(type)
+        return Type::Combinator.constant_of(nil) if type.nil?
+
+        type
       end
 
       CONSTANT_METACLASSES = {

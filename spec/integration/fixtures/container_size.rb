@@ -24,8 +24,11 @@ text = rand(100).to_s
 assert_type("non-negative-int", text.length)
 assert_type("non-negative-int", text.bytesize)
 
-# Hash on a non-shape carrier (mutated after construction)
-acc = {}
+# Hash on a non-shape carrier — `Hash.new` returns
+# `Nominal[Hash]` rather than the v0.0.7 empty-literal
+# `HashShape{}` carrier, so the SIZE_RETURNING_NOMINALS
+# tightening (Integer -> non-negative-int) applies.
+acc = Hash.new
 acc[:a] = 1 if rand < 0.5
 assert_type("non-negative-int", acc.size)
 

@@ -589,8 +589,19 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Integer")
     end
 
-    it "resolves Array.new(3) as Nominal[Array] via singleton dispatch" do
+    it "resolves Array.new(3) as Tuple[nil, nil, nil] via singleton dispatch (v0.0.7)" do
+      # v0.0.7 — `Array.new(n)` lifts to a per-position
+      # `Tuple[Constant[nil] * n]` carrier when `n` is a small
+      # `Constant<Integer>`. Oversize `n` falls back to
+      # `Nominal[Array]`.
       type = scope.type_of(parse_expression("Array.new(3)"))
+
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements).to eq([Rigor::Type::Combinator.constant_of(nil)] * 3)
+    end
+
+    it "falls back to Nominal[Array] for an oversize Array.new(n)" do
+      type = scope.type_of(parse_expression("Array.new(1000)"))
 
       expect(type).to be_a(Rigor::Type::Nominal)
       expect(type.class_name).to eq("Array")
@@ -697,11 +708,15 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.pairs.keys).to eq(%i[a b])
     end
 
-    it "types empty HashNode as raw Nominal[Hash]" do
+    it "types empty HashNode as the empty HashShape{} carrier (v0.0.7)" do
+      # v0.0.7 — `{}` resolves to `HashShape{}` (closed, no
+      # pairs) so HashShape projections (`empty?`, `count`,
+      # `first`, `keys`, `values`) fold against it. Both
+      # carriers erase to plain `Hash` for RBS interop.
       type = scope.type_of(parse_expression("{}"))
 
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("Hash")
+      expect(type).to be_a(Rigor::Type::HashShape)
+      expect(type.pairs).to eq({})
     end
 
     it "types InterpolatedStringNode as Nominal[String]" do

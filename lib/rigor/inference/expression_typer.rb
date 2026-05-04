@@ -407,7 +407,13 @@ module Rigor
       # so callers stay backward compatible.
       def type_of_hash(node)
         elements = node.respond_to?(:elements) ? node.elements : []
-        return Type::Combinator.nominal_of(Hash) if elements.empty?
+        # v0.0.7 — `{}` resolves to the empty `HashShape{}` carrier
+        # rather than `Nominal[Hash]`, mirroring the v0.0.6 empty-
+        # array literal change. Both forms erase to plain `Hash`,
+        # but `HashShape{}` pins the literal's known size (zero)
+        # so HashShape projections (`empty?`, `first`, `count`,
+        # …) fold against it.
+        return Type::Combinator.hash_shape_of({}) if elements.empty?
 
         shape = static_hash_shape_for(elements)
         return shape if shape

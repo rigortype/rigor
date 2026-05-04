@@ -184,6 +184,39 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       end
     end
 
+    describe "Tuple#zip per-position fold (v0.0.7)" do
+      it "pairs receiver and other-Tuple per position" do
+        a = tuple(constant(1), constant(2), constant(3))
+        b = Rigor::Type::Combinator.tuple_of(constant(4), constant(5), constant(6))
+        result = dispatch(receiver: a, method_name: :zip, args: [b])
+        expect(result).to be_a(Rigor::Type::Tuple)
+        expect(result.elements.map { |e| e.elements.map(&:value) })
+          .to eq([[1, 4], [2, 5], [3, 6]])
+      end
+
+      it "pads short other Tuples with Constant[nil]" do
+        a = tuple(constant(1), constant(2), constant(3))
+        b = Rigor::Type::Combinator.tuple_of(constant(4), constant(5))
+        result = dispatch(receiver: a, method_name: :zip, args: [b])
+        expect(result.elements.last.elements.last).to eq(constant(nil))
+      end
+
+      it "supports multi-arg zip (3-tuple positions)" do
+        a = tuple(constant(1), constant(2))
+        b = Rigor::Type::Combinator.tuple_of(constant(10), constant(20))
+        c = Rigor::Type::Combinator.tuple_of(constant(100), constant(200))
+        result = dispatch(receiver: a, method_name: :zip, args: [b, c])
+        expect(result.elements.map { |e| e.elements.map(&:value) })
+          .to eq([[1, 10, 100], [2, 20, 200]])
+      end
+
+      it "declines when an arg is not a Tuple" do
+        a = tuple(constant(1), constant(2))
+        nominal_arr = Rigor::Type::Combinator.nominal_of("Array", type_args: [constant(0)])
+        expect(dispatch(receiver: a, method_name: :zip, args: [nominal_arr])).to be_nil
+      end
+    end
+
     describe "Tuple#to_h shape conversion (v0.0.7)" do
       it "folds a Tuple of 2-Tuples whose first element is a Constant to a HashShape" do
         pair_a = Rigor::Type::Combinator.tuple_of(constant(:a), constant(1))
@@ -320,6 +353,32 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
 
     it "folds to_h to the receiver shape itself" do
       expect(dispatch(receiver: shape, method_name: :to_h)).to eq(shape)
+    end
+
+    it "folds first to a 2-Tuple of (first key, first value) (v0.0.7)" do
+      expect(dispatch(receiver: shape, method_name: :first))
+        .to eq(Rigor::Type::Combinator.tuple_of(constant(:a), constant(1)))
+    end
+
+    it "folds first to Constant[nil] for an empty closed shape (v0.0.7)" do
+      empty = Rigor::Type::Combinator.hash_shape_of({})
+      expect(dispatch(receiver: empty, method_name: :first)).to eq(constant(nil))
+    end
+
+    it "folds flatten to a per-position [k_1, v_1, k_2, v_2, …] Tuple (v0.0.7)" do
+      expect(dispatch(receiver: shape, method_name: :flatten))
+        .to eq(Rigor::Type::Combinator.tuple_of(constant(:a), constant(1), constant(:b), constant("two")))
+    end
+
+    it "folds compact to drop Constant[nil] entries (v0.0.7)" do
+      with_nil = hash_shape(a: constant(1), b: constant(nil), c: constant(3))
+      expect(dispatch(receiver: with_nil, method_name: :compact))
+        .to eq(hash_shape(a: constant(1), c: constant(3)))
+    end
+
+    it "declines compact when a value is non-Constant (no decidable nil set)" do
+      mixed = hash_shape(a: constant(1), b: Rigor::Type::Combinator.nominal_of("Integer"))
+      expect(dispatch(receiver: mixed, method_name: :compact)).to be_nil
     end
 
     it "folds invert to a HashShape with values as keys when values are Symbols" do

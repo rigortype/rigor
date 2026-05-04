@@ -84,6 +84,7 @@ module Rigor
           reverse: :tuple_reverse,
           to_a: :tuple_to_a,
           to_h: :tuple_to_h,
+          zip: :tuple_zip,
           :[] => :tuple_index,
           fetch: :tuple_index,
           dig: :tuple_dig
@@ -97,6 +98,9 @@ module Rigor
           any?: :hash_any?,
           keys: :hash_keys,
           values: :hash_values,
+          first: :hash_first,
+          flatten: :hash_flatten,
+          compact: :hash_compact,
           to_a: :hash_to_a,
           to_h: :hash_to_h,
           invert: :hash_invert,
@@ -527,6 +531,30 @@ module Rigor
             tuple
           end
 
+          # `tuple.zip(other_1, other_2, …)` — pairs the receiver's
+          # per-position elements with the per-position elements of
+          # each other Tuple-shaped argument. The result is a Tuple
+          # of Tuples whose arity matches the receiver: position
+          # `i` is `Tuple[receiver[i], other_1[i], other_2[i], …]`.
+          # Out-of-range positions in any `other_k` contribute
+          # `Constant[nil]` (matching Ruby's runtime semantics).
+          # Declines when any `other_k` is not a Tuple, since the
+          # arity is then unknown and the result would be
+          # `Array[Array[…]]` — RBS already gives that answer.
+          def tuple_zip(tuple, _method_name, args)
+            return nil if args.empty? || args.size > MAX_ZIP_ARITY
+            return nil unless args.all?(Type::Tuple)
+
+            zipped = tuple.elements.each_with_index.map do |elem, i|
+              positions = [elem] + args.map { |other| other.elements[i] || Type::Combinator.constant_of(nil) }
+              Type::Combinator.tuple_of(*positions)
+            end
+            Type::Combinator.tuple_of(*zipped)
+          end
+
+          MAX_ZIP_ARITY = 8
+          private_constant :MAX_ZIP_ARITY
+
           # `tuple.to_h` — folds when every Tuple element is itself
           # a 2-element Tuple whose first element is a `Constant`
           # (so it can serve as a Hash key). Produces a closed
@@ -787,6 +815,46 @@ module Rigor
             Type::Combinator.hash_shape_of(inverted)
           end
           # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+
+          # `shape.first` — returns the first `[k, v]` pair as a
+          # 2-Tuple, or `Constant[nil]` when the shape is empty.
+          # Folds only on closed shapes with no optional keys
+          # (open shapes might contribute extra keys at runtime).
+          def hash_first(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+            return Type::Combinator.constant_of(nil) if shape.pairs.empty?
+
+            key, value = shape.pairs.first
+            Type::Combinator.tuple_of(Type::Combinator.constant_of(key), value)
+          end
+
+          # `shape.flatten` — flattens to `[k_1, v_1, k_2, v_2, …]`
+          # at depth 1. Closed shapes only; element order matches
+          # the per-key declaration order.
+          def hash_flatten(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            elements = shape.pairs.flat_map { |k, v| [Type::Combinator.constant_of(k), v] }
+            Type::Combinator.tuple_of(*elements)
+          end
+
+          # `shape.compact` — drops every entry whose value is
+          # `Constant[nil]`. Folds only when every value is a
+          # `Constant` (so the drop set is decidable). Mixed-shape
+          # values decline so the RBS tier widens.
+          def hash_compact(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+            return nil unless shape.pairs.values.all?(Type::Constant)
+
+            kept = shape.pairs.reject { |_k, v| v.value.nil? }
+            Type::Combinator.hash_shape_of(kept)
+          end
 
           # `shape.merge(other)` — when both sides are closed
           # HashShape with no optional keys, fold to the merged

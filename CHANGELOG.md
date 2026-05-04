@@ -84,6 +84,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now resolves to `Tuple[Constant["2"]]` instead of widening
   to `Array[Dynamic[Top]]`.
 
+- **Pathname catalog import.** `tool/scaffold_builtin_catalog.rb`
+  with `--init-fn InitVM_pathname` writes
+  `data/builtins/ruby_core/pathname.yml` (102 instance methods,
+  2 singletons, 5 aliases) and the matching
+  `Builtins::PATHNAME_CATALOG` loader. Pathname is the
+  thinnest catalog import in the queue: most methods classify
+  `:dispatch` because the prelude delegates to `File` / `Dir`
+  / `FileTest`, so the user-visible payoff is narrower than
+  the Numeric or String imports. What the import buys is
+  defensive — the dispatcher knows the receiver class for
+  `Pathname.new(...)`, the per-class blocklist defends the
+  conventional `:initialize_copy` against future `Constant<Pathname>`
+  carriers, and the lone `:leaf` method (`<=>`) folds through
+  the catalog tier rather than punting to RBS.
+
+- **`extract_builtin_catalog.rb` BeginNode-bodied `def`
+  classifier fix.** `PreludeParser#analyse_body` previously
+  blew up on the rescue-on-def idiom (`def foo; …; rescue; …; end`)
+  because Prism wraps the body in a `BeginNode` rather than a
+  `StatementsNode`. The classifier now descends into the
+  begin-block's `statements` for that case. The bug surfaced
+  importing Pathname (`def initialize(path); @path = …; rescue
+  TypeError; …; end`); every catalog regenerates cleanly under
+  `make extract-builtin-catalogs`.
+
 - **IntegerRange-aware ternary fold — `Comparable#between?`
   / `Comparable#clamp`.** `MethodDispatcher::ConstantFolding`'s
   2-arg fold path now accepts an `IntegerRange` receiver paired

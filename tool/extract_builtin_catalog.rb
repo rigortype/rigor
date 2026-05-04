@@ -90,7 +90,8 @@ BASE_CLASS_VARS = {
   "rb_cDate" => "Date",
   "rb_cDateTime" => "DateTime",
   "rb_cRational" => "Rational",
-  "rb_cComplex" => "Complex"
+  "rb_cComplex" => "Complex",
+  "rb_cPathname" => "Pathname"
 }.freeze
 
 TOPICS = {
@@ -256,6 +257,16 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/complex.c],
     output_path: "data/builtins/ruby_core/complex.yml"
+  },
+  "pathname" => {
+    init_function: "InitVM_pathname",
+    ruby_c_path: "references/ruby/pathname.c",
+    ruby_prelude_path: "references/ruby/pathname_builtin.rb",
+    rbs_paths: {
+      "Pathname" => "references/rbs/stdlib/pathname/0/pathname.rbs"
+    },
+    c_index_paths: %w[references/ruby/pathname.c],
+    output_path: "data/builtins/ruby_core/pathname.yml"
   }
 }.freeze
 
@@ -815,7 +826,15 @@ class PreludeParser
   def analyse_body(body)
     return [[], "empty", nil] unless body
 
-    statements = body.body
+    # `def foo; …; rescue; …; end` gives a `Prism::BeginNode`
+    # body wrapping the actual statements. The classifier
+    # only inspects the top-level statement list, so we descend
+    # into the begin-block's `statements` for the rescue-on-def
+    # idiom (used widely in `pathname_builtin.rb`).
+    statements_node = body.is_a?(Prism::BeginNode) ? body.statements : body
+    return [[], "empty", nil] if statements_node.nil?
+
+    statements = statements_node.body
     attrs = []
     cexpr_target = nil
     other_statements = []

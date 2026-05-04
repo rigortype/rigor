@@ -8,12 +8,18 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 The summary of what shipped in v0.0.5 is in `CHANGELOG.md`'s `[0.0.5] - 2026-05-03` section and the v0.0.5 row of [`docs/MILESTONES.md`](MILESTONES.md). Not duplicated here.
 
-**v0.0.6 in progress on `master`.** Three commits since `v0.0.5`:
+**v0.0.6 in progress on `master`.** Seven commits since `v0.0.5`:
 1. `edfc197` — BlockFolding Phase 1: constant-block predicates and filters (`select` / `filter` / `reject` / `take_while` / `drop_while` / `all?` / `any?` / `none?`).
 2. `8035204` — BlockFolding Phase 2: per-position Tuple element-wise re-typing for `:map` / `:collect`.
 3. `37512fc` — BlockFolding extension: `find` / `detect` / `find_index` / `index` / `count` short-circuit folds.
+4. `6335574` — Per-element block fold for `:filter_map` (drops `Constant[nil]` / `Constant[false]` positions).
+5. `6b84a74` — Branch elision for expression-position `if` / `unless` on `Type::Constant` predicates.
+6. `05d4c29` — `&&` / `||` short-circuit elision on Constant-shaped left operands.
+7. `08a9ab0` — Per-element block fold for `:flat_map` (concatenates Tuple-shaped per-position results).
 
-Working state: 1366 RSpec examples / 0 failures, RuboCop 137 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.5` until the v0.0.6 surface is locked in.
+Working state: 1377 RSpec examples / 0 failures, RuboCop 137 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.5` until the v0.0.6 surface is locked in.
+
+The composite payoff: `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }` now resolves to `Tuple[Constant["2"]]` (Phase 2 element-wise re-typing + per-position `:filter_map` fold + ternary elision composing through three layers).
 
 ## Where the Work Resumes
 
@@ -22,9 +28,10 @@ The next preview is **v0.0.6** (or whichever version captures the next slice —
 ### Highest-leverage next slices
 
 - **Predicate-complement narrowing.** `narrow_not_refinement` covers Difference, IntegerRange, and Intersection (via De Morgan) but punts on `Refined[base, predicate]`. `~lowercase-string` could in principle narrow to `uppercase-string | mixed-case-string`, but mixed-case strings have no carrier today; landing the predicate-complement requires either a new carrier or per-predicate paired-complement registry entries.
-- **Block-shaped fold dispatch — remaining gaps.** Phases 1 / 2 and the find-family extension all landed in v0.0.6 (see Status above). The remaining open surface within this slice family:
+- **Block-shaped fold dispatch — remaining gaps.** Phases 1 / 2, the find-family extension, the `:filter_map` and `:flat_map` extensions, and the if/unless/&&/|| Constant elision pieces all landed in v0.0.6 (see Status above). The remaining open surface within this slice family:
   - Truthy-block side of `find` / `detect` / `find_index` / `index` — needs per-position block re-typing analogous to the `:map` path so the dispatcher can pick out the first Tuple position whose evaluated block body folds to a Ruby-truthy value (and the corresponding element / index).
-  - Per-element block fold for `:filter_map` / `:flat_map` — extension of the Phase 2 `:map` / `:collect` machinery. `:filter_map` requires per-position `Constant[nil]` / `Constant[false]` filtering before assembling the Tuple, and `:flat_map` requires per-position Tuple-or-Array unification.
+  - Mixed-shape `:flat_map` — the current fold declines whenever any per-position result is non-Tuple. A more permissive policy (treat `Constant<scalar>` and `Nominal[non-Array]` as one-element contributions; flatten `Nominal[Array[T]]` to `T` per element; decline only on opaque carriers) is the next tightening lever.
+  - Empty-array literal carrier — `[]` literals resolve to `Nominal[Array]` in `array_type_for`, which prevents the `:flat_map` fold from concatenating across all-empty positions like `[1, 2].flat_map { |_| [] }`. Switching the empty case to `Tuple[]` would close this without affecting type-args-bearing carriers, but needs a careful audit of downstream `Type::Tuple` consumers.
   - Range operands on the existing 2-arg path: `int<0,10>.between?(0, 10)` could fold to `Constant[true]` once `try_fold_ternary` learns IntegerRange semantics.
 - **More catalog imports.** Concrete classes still in the queue: Date / DateTime imports landed in v0.0.5; remaining stdlib candidates include URI, Pathname (already partial), Rational, Complex. Module candidates beyond Comparable / Enumerable: Kernel (already in BASE_CLASS_VARS as `rb_mKernel`), ObjectSpace.
 - **C-body classifier upgrades.** Track indirect mutator helpers (`str_modifiable`, `ary_resize`, `time_modify`, `set_compare_by_identity`, …) so per-class blocklists shrink. The pure-`rb_check_frozen`-wrapper detection landed in v0.0.5 covers the narrowest case; the next step is a wider transitive scan that does not over-flag legitimate non-mutators like `Array#to_a`.

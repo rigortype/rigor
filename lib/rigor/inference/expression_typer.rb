@@ -1124,16 +1124,29 @@ module Rigor
 
       # `flat_map` flattens a single level: if the per-position
       # result is a `Tuple`, its elements are concatenated; if
-      # it's a non-Array carrier (Constant scalar, Nominal[non-
-      # Array], …) it contributes one element. We fold tightly
-      # only when every per-position result is a `Type::Tuple`
-      # — that gives a deterministic concatenation. Mixed-shape
-      # per-position results decline so the RBS tier widens.
+      # it's a non-Array scalar carrier (`Constant<…>` over a
+      # non-Array literal) it contributes one element. We fold
+      # tightly only when every per-position result is one of
+      # those two recognisable shapes — `Nominal[Array[T]]`,
+      # `Union[…]`, and other opaque carriers decline so the
+      # RBS tier widens to `Array[U]`.
+      #
+      # `Type::Constant` only ever holds non-Array scalars (the
+      # carrier rejects Array literals), so a single `Constant`
+      # safely contributes itself as a single Tuple element.
       def assemble_flat_map_result(per_position)
-        return nil unless per_position.all?(Type::Tuple)
+        flattened = per_position.flat_map { |type| flat_map_contribution(type) }
+        return nil if flattened.nil? || flattened.any?(&:nil?)
 
-        concatenated = per_position.flat_map(&:elements)
-        Type::Combinator.tuple_of(*concatenated)
+        Type::Combinator.tuple_of(*flattened)
+      end
+
+      def flat_map_contribution(type)
+        case type
+        when Type::Tuple then type.elements
+        when Type::Constant then [type]
+        else [nil]
+        end
       end
 
       # `find` / `detect`: returns the first receiver element

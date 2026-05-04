@@ -59,6 +59,13 @@ assert_type("[1, 10, 2, 20, 3, 30]", flat_pairs)
 flat_varied = [1, 2].flat_map { |n| n.even? ? [n, n] : [n] }
 assert_type("[1, 2, 2]", flat_varied)
 
+# v0.0.6 — mixed-shape flat_map. A `Constant` per-position
+# result (non-Array scalar) contributes one element; the
+# overall fold concatenates Tuples and singletons in
+# declaration order.
+flat_scalar = [1, 2, 3].flat_map { |n| n.to_s }
+assert_type('["1", "2", "3"]', flat_scalar)
+
 # `:find` / `:detect` truthy-block side: every per-position
 # block result folds to a Constant, so the dispatcher walks
 # the Tuple and returns the receiver element at the first

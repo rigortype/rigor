@@ -105,14 +105,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Per-element block fold extension — `:flat_map`.**
   `ExpressionTyper#try_per_element_block_fold` accepts
   `:flat_map` alongside `:map` / `:collect` / `:filter_map`.
-  When every per-position result is itself a `Type::Tuple`,
-  the dispatcher concatenates their elements in declaration
-  order and wraps the result in `Tuple[…]`. Mixed-shape
-  per-position results (e.g. one position returns a Tuple,
-  another returns a `Constant<Integer>`) decline so the RBS
-  tier widens to `Array[U]`. Composes with the v0.0.6
-  ternary branch elision: `[1, 2].flat_map { |n| n.even? ? [n, n] : [n] }`
-  resolves to `Tuple[Constant[1], Constant[2], Constant[2]]`.
+  When every per-position result is recognisable — either a
+  `Type::Tuple` (its elements concatenate into the assembled
+  Tuple) or a `Type::Constant` scalar (contributes one
+  element) — the dispatcher concatenates the per-position
+  contributions in declaration order and wraps the survivors
+  in `Tuple[…]`. Other shapes (`Nominal[Array[T]]`, `Union`,
+  …) decline so the RBS tier widens to `Array[U]`. Composes
+  with the v0.0.6 ternary branch elision:
+  `[1, 2].flat_map { |n| n.even? ? [n, n] : [n] }` resolves
+  to `Tuple[Constant[1], Constant[2], Constant[2]]`, and
+  `[1, 2, 3].flat_map { |n| n.to_s }` resolves to
+  `Tuple[Constant["1"], Constant["2"], Constant["3"]]`.
 
 - **Per-element block fold extension — `:filter_map`.**
   `ExpressionTyper#try_per_element_block_fold` accepts

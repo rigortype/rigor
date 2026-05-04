@@ -142,6 +142,15 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       expect(flat_varied.elements.map(&:value)).to eq([1, 2, 2])
     end
 
+    it "treats per-position Constant scalars as single-element contributions in flat_map" do
+      # `[1, 2, 3].flat_map { |n| n.to_s }` — each per-position
+      # result is a `Constant<String>`, which contributes one
+      # element to the assembled Tuple.
+      flat_scalar = harness.local(:flat_scalar)
+      expect(flat_scalar).to be_a(Rigor::Type::Tuple)
+      expect(flat_scalar.elements.map(&:value)).to eq(%w[1 2 3])
+    end
+
     it "folds Tuple#find to the first truthy-position element" do
       first_even = harness.local(:first_even)
       expect(first_even).to eq(Rigor::Type::Combinator.constant_of(2))

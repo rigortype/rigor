@@ -1000,10 +1000,16 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Range")
     end
 
-    it "types RegularExpressionNode as Nominal[Regexp]" do
+    it "types non-interpolated RegularExpressionNode as Constant<Regexp> (v0.0.7)" do
       type = scope.type_of(parse_expression("/foo/"))
 
-      expect(type.class_name).to eq("Regexp")
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(/foo/))
+    end
+
+    it "preserves Regexp options on the lifted Constant (v0.0.7)" do
+      type = scope.type_of(parse_expression("/Foo/i"))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(/Foo/i))
     end
   end
 

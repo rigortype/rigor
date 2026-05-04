@@ -697,7 +697,18 @@ module Rigor
         Type::Combinator.constant_of(Range.new(left, right, node.exclude_end?))
       end
 
-      def type_of_regexp(_node)
+      # v0.0.7 — non-interpolated regex literals lift to
+      # `Constant<Regexp>` so `Constant<String>#scan(/regex/)`
+      # / `#match(/regex/)` etc. can fold through the catalog
+      # tier. Interpolated regexes (`/foo#{x}/`) reach the
+      # second `Prism::InterpolatedRegularExpressionNode` arm
+      # which keeps the conservative `Nominal[Regexp]` answer.
+      def type_of_regexp(node)
+        return Type::Combinator.nominal_of(Regexp) unless node.is_a?(Prism::RegularExpressionNode)
+
+        regex = Regexp.new(node.unescaped, node.options)
+        Type::Combinator.constant_of(regex)
+      rescue StandardError
         Type::Combinator.nominal_of(Regexp)
       end
 

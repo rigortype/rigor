@@ -22,6 +22,7 @@ module Rigor
         Range,
         Rational,
         Complex,
+        Regexp,
         TrueClass,
         FalseClass,
         NilClass

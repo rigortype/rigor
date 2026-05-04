@@ -127,9 +127,19 @@ Deferred from v0.0.7 (carried forward) — see [`docs/CURRENT_WORK.md`](CURRENT_
 
 ## v0.1.0 — Long Horizon (architecture commitments deferred)
 
-Theme: **infrastructure**. The earlier comment in this thread reserved v0.1.0 for the cross-cutting machinery that should not be retro-fitted later:
+Theme: **infrastructure**. v0.1.0 reserves two cross-cutting machinery surfaces that should not be retro-fitted later:
 
 - **Caches.** A persistent on-disk cache for parsed RBS environments, scope indexes, and catalog data so warm runs are fast.
 - **Plugin API (ADR-2).** The capability-role / fact-contribution / mutation-summary surface plugin authors will attach to.
 
-These are explicitly out of scope for v0.0.x. The pre-v0.1.0 work is the type-language and inference-engine surface that the plugin API has to be designed against.
+These are explicitly out of scope for v0.0.x. The pre-v0.1.0 work is the type-language and inference-engine surface that the plugin API has to be designed against; v0.0.3 → v0.0.7 closed the substrate gaps that ADR-2 would otherwise stumble on.
+
+Pre-v0.1.0 surfaces that can land independently as v0.0.x dot releases (see [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md) for the full breakdown):
+
+- **Public-API declaration of `Rigor::Scope`, `Rigor::Type`, `Rigor::Environment`** — namespace policy + drift tests. No new code, just contract declaration.
+- **Reflection facade** — a unified `Rigor::Reflection` read-side over `ClassRegistry` + `RbsLoader` + `Builtins::*_CATALOG`. Highest-leverage pre-v0.1.0 slice; every plugin protocol that asks "what does class X look like?" needs this.
+- **Cache slice taxonomy** — design doc fixing the `files` / `gems` / `plugins` / `configs` slot shapes, comparator semantics, and per-slice cache-key derivation. Prerequisite for the persistence layer.
+- **Flow-contribution bundle struct** — a `Rigor::FlowContribution` with the eight ADR-2 slots (`return_type`, `truthy_facts`, `falsey_facts`, `post_return_facts`, `mutations`, `invalidations`, `exceptional`, `role_conformance`). Internal effect structs convert into bundles at the boundary.
+- **Diagnostic provenance prefix** — `Diagnostic` gains a `source_family` field; formatter publishes `plugin.<id>.<rule>` style identifiers.
+
+These do not block v0.0.x release cadence; they are the operational milestones that make v0.1.0 a finite assembly job rather than an open architectural exercise.

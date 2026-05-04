@@ -57,6 +57,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receiver is not a Tuple, the call has no block, the
   Tuple is empty) leaves the dispatch chain untouched.
 
+- **Per-element block fold extension — `:filter_map`.**
+  `ExpressionTyper#try_per_element_block_fold` accepts
+  `:filter_map` alongside `:map` / `:collect`, with a
+  per-position drop step: positions whose block result is
+  `Constant[nil]` or `Constant[false]` are removed, the rest
+  survive in declaration order, and the assembled answer is
+  the per-position `Tuple[…]`. Folds tightly only when every
+  per-position result is itself a `Constant`; mixed-shape
+  per-position results (e.g. `Union[Constant[A], Constant[nil]]`
+  produced by ternary block bodies whose predicate has not
+  been branch-elided) decline so the RBS tier widens to
+  `Array[U]`.
+
 - **BlockFolding extension — `find` / `detect` / `find_index`
   / `index` / `count`.** Four short-circuit folds join the
   Phase 1 surface:

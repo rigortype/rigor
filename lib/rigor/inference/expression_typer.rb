@@ -1004,7 +1004,7 @@ module Rigor
       # supported set, when block typing raises mid-loop, or
       # when the block has no body. The decline path leaves
       # the dispatch chain untouched.
-      PER_ELEMENT_TUPLE_METHODS = Set[:map, :collect].freeze
+      PER_ELEMENT_TUPLE_METHODS = Set[:map, :collect, :filter_map].freeze
       private_constant :PER_ELEMENT_TUPLE_METHODS
 
       # rubocop:disable Metrics/CyclomaticComplexity
@@ -1021,9 +1021,29 @@ module Rigor
         end
         return nil if per_position.any?(&:nil?)
 
-        Type::Combinator.tuple_of(*per_position)
+        assemble_per_element_result(call_node.name, per_position)
       end
       # rubocop:enable Metrics/CyclomaticComplexity
+
+      def assemble_per_element_result(method_name, per_position)
+        case method_name
+        when :map, :collect then Type::Combinator.tuple_of(*per_position)
+        when :filter_map then assemble_filter_map_result(per_position)
+        end
+      end
+
+      # `filter_map` folds tightly only when every per-position
+      # result is a `Constant`: positions whose value is `nil`
+      # or `false` drop, the rest survive in declaration order.
+      # When any position is non-Constant the dispatcher
+      # declines (returns nil) so the RBS tier widens to
+      # `Array[U]`.
+      def assemble_filter_map_result(per_position)
+        return nil unless per_position.all?(Type::Constant)
+
+        kept = per_position.reject { |type| type.value.nil? || type.value == false }
+        Type::Combinator.tuple_of(*kept)
+      end
 
       def type_block_body_with_param(block_node, expected_param_types)
         bindings = BlockParameterBinder.new(expected_param_types: expected_param_types).bind(block_node)

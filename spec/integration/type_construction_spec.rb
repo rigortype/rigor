@@ -108,6 +108,18 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       expect(collected).to be_a(Rigor::Type::Tuple)
       expect(collected.elements.map(&:value)).to eq([15, 25])
     end
+
+    it "folds Tuple#filter_map all-keep into per-position Tuple" do
+      filter_mapped_keep = harness.local(:filter_mapped_keep)
+      expect(filter_mapped_keep).to be_a(Rigor::Type::Tuple)
+      expect(filter_mapped_keep.elements.map(&:value)).to eq(%w[1 2 3])
+    end
+
+    it "folds Tuple#filter_map all-drop into the empty Tuple" do
+      filter_mapped_drop = harness.local(:filter_mapped_drop)
+      expect(filter_mapped_drop).to be_a(Rigor::Type::Tuple)
+      expect(filter_mapped_drop.elements).to be_empty
+    end
   end
 
   describe "fixtures/block_filter.rb — BlockFolding for select/all?/any?" do

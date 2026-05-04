@@ -27,3 +27,13 @@ assert_type("[10, 20, 30]", shifts)
 # Numbered parameters work the same way.
 numbered = [1, 2, 3].map { _1 + 1 }
 assert_type("[2, 3, 4]", numbered)
+
+# `:filter_map` participates when every per-position result
+# is a `Constant`. nil / false positions drop, the rest
+# survive in declaration order.
+filter_mapped_keep = [1, 2, 3].filter_map { |n| n.to_s }
+assert_type('["1", "2", "3"]', filter_mapped_keep)
+
+# All positions drop → empty Tuple.
+filter_mapped_drop = [1, 2, 3].filter_map { |_n| nil }
+assert_type("[]", filter_mapped_drop)

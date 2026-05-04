@@ -178,6 +178,47 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         expect(described_class.parse("key_of[Hash, Symbol]")).to be_nil
         expect(described_class.parse("key_of[]")).to be_nil
       end
+
+      describe "int_mask / int_mask_of" do # rubocop:disable RSpec/NestedGroups
+        it "parses int_mask[1, 2] to the closure {0, 1, 2, 3}" do
+          result = described_class.parse("int_mask[1, 2]")
+          expect(result).to be_a(Rigor::Type::Union)
+          expect(result.members.map(&:value).sort).to eq([0, 1, 2, 3])
+        end
+
+        it "parses int_mask[1, 2, 4] to the closure {0..7}" do
+          result = described_class.parse("int_mask[1, 2, 4]")
+          expect(result).to be_a(Rigor::Type::Union)
+          expect(result.members.map(&:value).sort).to eq([0, 1, 2, 3, 4, 5, 6, 7])
+        end
+
+        it "parses int_mask[1, 4] to the non-contiguous closure {0, 1, 4, 5}" do
+          result = described_class.parse("int_mask[1, 4]")
+          expect(result.members.map(&:value).sort).to eq([0, 1, 4, 5])
+        end
+
+        it "declines int_mask with non-integer args" do
+          expect(described_class.parse("int_mask[Symbol, Integer]")).to be_nil
+        end
+
+        it "declines int_mask with negative flags" do
+          expect(described_class.parse("int_mask[-1, 2]")).to be_nil
+        end
+
+        it "parses int_mask_of[Constant union]" do
+          # int_mask_of expects a single type arg; the parser
+          # accepts the resolved type. We use raw Combinator
+          # construction here because the parser grammar does
+          # not have a direct surface for ad-hoc Constant
+          # unions yet.
+          flags = Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.constant_of(1),
+            Rigor::Type::Combinator.constant_of(2)
+          )
+          expect(Rigor::Type::Combinator.int_mask_of(flags).members.map(&:value).sort)
+            .to eq([0, 1, 2, 3])
+        end
+      end
     end
   end
 end

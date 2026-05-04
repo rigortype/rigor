@@ -258,6 +258,8 @@ module Rigor
       def self?.union: (*Type::t types) -> Type::t
       def self?.key_of: (Type::t type) -> Type::t
       def self?.value_of: (Type::t type) -> Type::t
+      def self?.int_mask: (Array[Integer] flags) -> Type::t?
+      def self?.int_mask_of: (Type::t type) -> Type::t?
     end
   end
 end

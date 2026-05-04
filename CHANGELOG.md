@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`int_mask[1, 2, 4]` / `int_mask_of[T]` type functions.** `Type::Combinator.int_mask(flags)` computes the bitwise-OR closure over a list of non-negative integer flags (returning a `Union[Constant<Integer>…]` for small closures and a covering `IntegerRange` once the closure exceeds `INT_MASK_UNION_LIMIT`); `Type::Combinator.int_mask_of(type)` extracts a finite integer literal set from a `Constant<Integer>` or `Union[Constant<Integer>…]` type and runs the same closure. Reachable through `RBS::Extended` directive payloads as `int_mask[1, 2, 4]` (integer-literal arguments are now accepted alongside types and class names) and `int_mask_of[T]`. Caps at `INT_MASK_FLAG_LIMIT = 6` flags so the 2^N closure cost stays bounded; declines on negative flags or non-integer arguments.
+
 - **`key_of[T]` / `value_of[T]` type functions.** `Type::Combinator.key_of` and `value_of` project the type-level union of known keys (resp. values) for `HashShape`, `Tuple`, `Nominal[Hash, [K, V]]`, `Nominal[Array, [E]]`, and finite-bound `Constant<Range>`; other shapes (`Top`, `Dynamic`, untyped Nominals, `Union`, `Refined`, `Difference`, `Intersection`) project to `Top`. Both functions are reachable through the `RBS::Extended` directive payload parser as `key_of[…]` / `value_of[…]`, which now accepts `lower_snake` heads alongside `kebab-case` refinement names and lets nominal arguments carry their own type-args (`key_of[Hash[Symbol, Integer]]` parses to `Symbol`).
 
 ## [0.0.6] - 2026-05-05

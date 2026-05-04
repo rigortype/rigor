@@ -344,4 +344,63 @@ RSpec.describe Rigor::Type::Combinator do
       end
     end
   end
+
+  describe ".int_mask / .int_mask_of (v0.0.7 type functions)" do
+    it "computes the bitwise-OR closure of [1, 2] as {0, 1, 2, 3}" do
+      result = described_class.int_mask([1, 2])
+      expect(result.members.map(&:value).sort).to eq([0, 1, 2, 3])
+    end
+
+    it "computes the closure of [1, 2, 4] as {0..7}" do
+      result = described_class.int_mask([1, 2, 4])
+      expect(result.members.map(&:value).sort).to eq([0, 1, 2, 3, 4, 5, 6, 7])
+    end
+
+    it "computes the closure of disjoint flags [1, 8] as {0, 1, 8, 9}" do
+      result = described_class.int_mask([1, 8])
+      expect(result.members.map(&:value).sort).to eq([0, 1, 8, 9])
+    end
+
+    it "deduplicates duplicate flags" do
+      result = described_class.int_mask([1, 1, 2])
+      expect(result.members.map(&:value).sort).to eq([0, 1, 2, 3])
+    end
+
+    it "returns nil for non-integer flags" do
+      expect(described_class.int_mask([1, "x"])).to be_nil
+    end
+
+    it "returns nil for negative flags" do
+      expect(described_class.int_mask([1, -2])).to be_nil
+    end
+
+    it "returns nil when too many flags would explode the closure" do
+      expect(described_class.int_mask([1, 2, 4, 8, 16, 32, 64])).to be_nil
+    end
+
+    describe "int_mask_of" do
+      it "extracts flags from a Union[Constant<Integer>…]" do
+        flags = described_class.union(
+          described_class.constant_of(1),
+          described_class.constant_of(2),
+          described_class.constant_of(4)
+        )
+        expect(described_class.int_mask_of(flags).members.map(&:value).sort)
+          .to eq([0, 1, 2, 3, 4, 5, 6, 7])
+      end
+
+      it "accepts a single Constant<Integer> as a single flag" do
+        expect(described_class.int_mask_of(described_class.constant_of(2)).members.map(&:value).sort)
+          .to eq([0, 2])
+      end
+
+      it "returns nil for non-integer Constants" do
+        expect(described_class.int_mask_of(described_class.constant_of("x"))).to be_nil
+      end
+
+      it "returns nil for IntegerRange (not a finite literal set)" do
+        expect(described_class.int_mask_of(described_class.integer_range(0, 4))).to be_nil
+      end
+    end
+  end
 end

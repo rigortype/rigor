@@ -94,6 +94,25 @@ module Rigor
           return nil unless args.size == 1
 
           Type::Combinator.value_of(args.first)
+        },
+        # `int_mask[1, 2, 4]` — every integer representable by
+        # a bitwise OR over the listed flags. Each arg must be a
+        # `Constant<Integer>`; the parser wraps integer literals
+        # for this purpose. Builder declines on any non-integer
+        # arg.
+        "int_mask" => lambda { |args|
+          flags = args.map { |arg| arg.is_a?(Type::Constant) && arg.value.is_a?(Integer) ? arg.value : nil }
+          return nil if flags.any?(&:nil?)
+
+          Type::Combinator.int_mask(flags)
+        },
+        # `int_mask_of[T]` — derives the closure from a finite
+        # integer literal type (single Constant<Integer> or a
+        # Union of them).
+        "int_mask_of" => lambda { |args|
+          return nil unless args.size == 1
+
+          Type::Combinator.int_mask_of(args.first)
         }
       }.freeze
       private_constant :PARAMETERISED_TYPE_BUILDERS
@@ -249,6 +268,11 @@ module Rigor
           skip_ws
           if (class_name = @scanner.scan(CLASS_NAME))
             parse_class_arg_tail(class_name)
+          elsif (literal = @scanner.scan(SIGNED_INT))
+            # Integer-literal arg, used by `int_mask[1, 2, 4]`.
+            # Wrapped as `Constant<Integer>` so type-arg builders
+            # see a uniform `Array<Type::t>`.
+            Type::Combinator.constant_of(Integer(literal))
           else
             parse_type
           end

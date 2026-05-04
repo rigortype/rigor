@@ -262,6 +262,49 @@ module Rigor
         end
       end
 
+      # `int_mask[1, 2, 4]` type function — every Integer
+      # representable by a bitwise OR over the listed flags,
+      # including 0. The closure of `[1, 2, 4]` is
+      # `{0, 1, 2, 3, 4, 5, 6, 7}`. Returns a `Union[Constant…]`
+      # for small closures and a covering `IntegerRange` once
+      # the cardinality exceeds `INT_MASK_UNION_LIMIT`. Returns
+      # `nil` when the input is malformed (non-integer flag,
+      # negative flag, or too many flags to compute the closure
+      # cheaply).
+      INT_MASK_FLAG_LIMIT = 6
+      INT_MASK_UNION_LIMIT = 16
+      private_constant :INT_MASK_FLAG_LIMIT, :INT_MASK_UNION_LIMIT
+
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def int_mask(flags)
+        return nil unless flags.is_a?(Array) && flags.all?(Integer)
+        return nil if flags.any?(&:negative?)
+        return nil if flags.size > INT_MASK_FLAG_LIMIT
+
+        values = compute_int_mask_closure(flags)
+        return nil if values.nil?
+
+        if values.size <= INT_MASK_UNION_LIMIT
+          union(*values.map { |v| constant_of(v) })
+        else
+          integer_range(values.min, values.max)
+        end
+      end
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+
+      # `int_mask_of[T]` — derives the int_mask closure from
+      # a finite integer-literal type:
+      # `Constant<n>` (single flag), `Union[Constant…]` (every
+      # member must be a `Constant<Integer>`). Returns nil for
+      # incompatible inputs (Top, Dynamic, IntegerRange, mixed
+      # member shapes).
+      def int_mask_of(type)
+        flags = extract_constant_int_set(type)
+        return nil if flags.nil?
+
+        int_mask(flags)
+      end
+
       class << self # rubocop:disable Metrics/ClassLength
         private
 
@@ -317,6 +360,30 @@ module Rigor
         # Tuple / HashShape carriers earlier in the typer. Range
         # is the only scalar with meaningful key/value
         # projections.
+        def compute_int_mask_closure(flags)
+          unique = flags.uniq
+          return [0] if unique.empty?
+
+          # Closure under bitwise OR over a set of non-negative
+          # integers is `0..(max_or_value)` only when the flags
+          # are bit-disjoint; otherwise it's a strict subset.
+          # Enumerate every subset's OR.
+          closure = Set.new([0])
+          unique.each do |flag|
+            closure |= closure.map { |c| c | flag }
+          end
+          closure.to_a.sort
+        end
+
+        def extract_constant_int_set(type)
+          case type
+          when Constant
+            type.value.is_a?(Integer) ? [type.value] : nil
+          when Union
+            type.members.all?(Constant) ? type.members.map(&:value).grep(Integer) : nil
+          end
+        end
+
         def constant_keys(value)
           return non_negative_int if value.is_a?(Range) && value.begin.is_a?(Integer)
 

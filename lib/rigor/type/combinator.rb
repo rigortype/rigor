@@ -305,6 +305,30 @@ module Rigor
         int_mask(flags)
       end
 
+      # `T[K]` indexed-access type operator — extracts the type
+      # at index / key `K` from a structured `T`:
+      #
+      # - `Tuple[A, B, C][Constant<i>]` → `A` / `B` / `C` (out-of-
+      #   range indices return `Top` for safety).
+      # - `HashShape{a: A, b: B}[Constant<:a>]` → `A`.
+      # - `Nominal[Hash, [K, V]][_]` → `V` (untyped if absent).
+      # - `Nominal[Array, [E]][_]` → `E` (untyped if absent).
+      #
+      # Other shapes (`Top`, `Dynamic`, untyped Nominals,
+      # `Union`, `Refined`, `Difference`, `Intersection`)
+      # project to `Top`. The key argument is itself a
+      # `Type::t`; only `Type::Constant` keys produce a precise
+      # answer.
+      def indexed_access(type, key)
+        case type
+        when Tuple then tuple_indexed_access(type, key)
+        when HashShape then hash_shape_indexed_access(type, key)
+        when Nominal then nominal_indexed_access(type)
+        when Constant then constant_indexed_access(type.value, key)
+        else top
+        end
+      end
+
       class << self # rubocop:disable Metrics/ClassLength
         private
 
@@ -382,6 +406,40 @@ module Rigor
           when Union
             type.members.all?(Constant) ? type.members.map(&:value).grep(Integer) : nil
           end
+        end
+
+        def tuple_indexed_access(tuple, key)
+          return top unless key.is_a?(Constant) && key.value.is_a?(Integer)
+
+          index = key.value
+          return top if index.negative? || index >= tuple.elements.size
+
+          tuple.elements[index]
+        end
+
+        def hash_shape_indexed_access(shape, key)
+          return top unless key.is_a?(Constant)
+
+          shape.pairs[key.value] || top
+        end
+
+        def nominal_indexed_access(nominal)
+          case nominal.class_name
+          when "Hash" then nominal.type_args[1] || untyped
+          when "Array" then nominal.type_args.first || untyped
+          else top
+          end
+        end
+
+        def constant_indexed_access(value, key)
+          return top unless key.is_a?(Constant)
+
+          if value.is_a?(Range) && key.value.is_a?(Integer)
+            element = value.to_a[key.value]
+            return constant_of(element) unless element.nil?
+          end
+
+          top
         end
 
         def constant_keys(value)

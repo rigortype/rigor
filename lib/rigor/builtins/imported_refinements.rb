@@ -180,13 +180,19 @@ module Rigor
       # soft (returns `nil` from `parse`) on any deviation so the
       # `RBS::Extended` directive site can fall back to the
       # RBS-declared type rather than crash on a typo.
-      class Parser
+      class Parser # rubocop:disable Metrics/ClassLength
         def initialize(input)
           @scanner = StringScanner.new(input.strip)
         end
 
         def parse
           type = parse_type
+          return nil if type.nil?
+
+          # v0.0.7 — trailing `[K]` indexed-access projects
+          # into the parsed type. Multiple `[K]` segments
+          # chain (`Tuple[A, B, C][1][0]`).
+          type = parse_indexed_access_chain(type)
           return nil if type.nil?
           return nil unless @scanner.eos?
 
@@ -206,6 +212,10 @@ module Rigor
         private_constant :SIMPLE_NAME, :CLASS_NAME, :SIGNED_INT
 
         def parse_type
+          if (class_name = @scanner.scan(CLASS_NAME))
+            return parse_class_arg_tail(class_name)
+          end
+
           name = @scanner.scan(SIMPLE_NAME)
           return nil if name.nil?
 
@@ -214,6 +224,25 @@ module Rigor
           when "<" then parse_parametric_int_bounds(name)
           else          ImportedRefinements.lookup(name)
           end
+        end
+
+        # `T[K]` — keep applying `[K]` indexes until no more
+        # opening brackets are present. Each index consumes one
+        # type argument; multi-arg `[K1, K2]` fails (the spec
+        # specifies a single key).
+        def parse_indexed_access_chain(type)
+          loop do
+            skip_ws
+            break unless @scanner.peek(1) == "["
+
+            @scanner.getch
+            args = parse_type_arg_list
+            return nil if args.nil? || args.size != 1
+            return nil unless @scanner.getch == "]"
+
+            type = Type::Combinator.indexed_access(type, args.first)
+          end
+          type
         end
 
         def parse_parametric_type_args(name)

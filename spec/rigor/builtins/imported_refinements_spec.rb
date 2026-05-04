@@ -179,6 +179,30 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         expect(described_class.parse("key_of[]")).to be_nil
       end
 
+      describe "T[K] indexed-access (v0.0.7)" do # rubocop:disable RSpec/NestedGroups
+        it "parses Hash[Symbol, Integer][Symbol] to Integer" do
+          expect(described_class.parse("Hash[Symbol, Integer][Symbol]"))
+            .to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+        end
+
+        it "parses Array[String][Integer] to String" do
+          expect(described_class.parse("Array[String][Integer]"))
+            .to eq(Rigor::Type::Combinator.nominal_of("String"))
+        end
+
+        it "parses key_of[Hash[Symbol, Integer]][Symbol] (chained)" do
+          # key_of[Hash[Symbol, Integer]] = Symbol; Symbol[…] is Top
+          # because Symbol is not an indexable shape. The chain still
+          # parses without error.
+          result = described_class.parse("key_of[Hash[Symbol, Integer]][Symbol]")
+          expect(result).to be_a(Rigor::Type::Top)
+        end
+
+        it "rejects multi-arg index forms" do
+          expect(described_class.parse("Hash[Symbol, Integer][Symbol, Integer]")).to be_nil
+        end
+      end
+
       describe "int_mask / int_mask_of" do # rubocop:disable RSpec/NestedGroups
         it "parses int_mask[1, 2] to the closure {0, 1, 2, 3}" do
           result = described_class.parse("int_mask[1, 2]")

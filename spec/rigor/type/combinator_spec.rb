@@ -403,4 +403,86 @@ RSpec.describe Rigor::Type::Combinator do
       end
     end
   end
+
+  describe ".indexed_access (v0.0.7 T[K] type operator)" do
+    let(:int) { described_class.nominal_of("Integer") }
+    let(:str) { described_class.nominal_of("String") }
+    let(:sym) { described_class.nominal_of("Symbol") }
+
+    describe "Tuple" do
+      let(:tuple) { described_class.tuple_of(str, int, sym) }
+
+      it "indexes into a Tuple by Constant<Integer>" do
+        expect(described_class.indexed_access(tuple, described_class.constant_of(0))).to eq(str)
+        expect(described_class.indexed_access(tuple, described_class.constant_of(1))).to eq(int)
+        expect(described_class.indexed_access(tuple, described_class.constant_of(2))).to eq(sym)
+      end
+
+      it "returns Top for out-of-range indices" do
+        expect(described_class.indexed_access(tuple, described_class.constant_of(3)))
+          .to be_a(Rigor::Type::Top)
+        expect(described_class.indexed_access(tuple, described_class.constant_of(-1)))
+          .to be_a(Rigor::Type::Top)
+      end
+
+      it "returns Top for non-Constant keys" do
+        expect(described_class.indexed_access(tuple, int)).to be_a(Rigor::Type::Top)
+      end
+    end
+
+    describe "HashShape" do
+      let(:shape) { described_class.hash_shape_of(name: str, age: int) }
+
+      it "indexes into a HashShape by Constant<Symbol>" do
+        expect(described_class.indexed_access(shape, described_class.constant_of(:name))).to eq(str)
+        expect(described_class.indexed_access(shape, described_class.constant_of(:age))).to eq(int)
+      end
+
+      it "returns Top for missing keys" do
+        expect(described_class.indexed_access(shape, described_class.constant_of(:missing)))
+          .to be_a(Rigor::Type::Top)
+      end
+    end
+
+    describe "Nominal[Hash, [K, V]] / Nominal[Array, [E]]" do
+      it "Hash[K, V][_] returns V" do
+        h = described_class.nominal_of("Hash", type_args: [sym, int])
+        expect(described_class.indexed_access(h, described_class.constant_of(:foo))).to eq(int)
+      end
+
+      it "Array[E][_] returns E" do
+        a = described_class.nominal_of("Array", type_args: [str])
+        expect(described_class.indexed_access(a, described_class.constant_of(0))).to eq(str)
+      end
+
+      it "untyped Hash falls back to untyped" do
+        h = described_class.nominal_of("Hash")
+        expect(described_class.indexed_access(h, described_class.constant_of(:foo)))
+          .to eq(described_class.untyped)
+      end
+    end
+
+    describe "Constant<Range>" do
+      it "indexes into a finite range like (1..5)[2] -> Constant[3]" do
+        r = described_class.constant_of(1..5)
+        expect(described_class.indexed_access(r, described_class.constant_of(2))).to eq(described_class.constant_of(3))
+      end
+
+      it "returns Top for out-of-range indices on a Constant<Range>" do
+        r = described_class.constant_of(1..5)
+        expect(described_class.indexed_access(r, described_class.constant_of(99)))
+          .to be_a(Rigor::Type::Top)
+      end
+    end
+
+    describe "fallback" do
+      it "returns Top for Top / Union / Refined" do
+        expect(described_class.indexed_access(described_class.top, described_class.constant_of(0)))
+          .to be_a(Rigor::Type::Top)
+        u = described_class.union(int, str)
+        expect(described_class.indexed_access(u, described_class.constant_of(0)))
+          .to be_a(Rigor::Type::Top)
+      end
+    end
+  end
 end

@@ -260,6 +260,7 @@ module Rigor
       def self?.value_of: (Type::t type) -> Type::t
       def self?.int_mask: (Array[Integer] flags) -> Type::t?
       def self?.int_mask_of: (Type::t type) -> Type::t?
+      def self?.indexed_access: (Type::t type, Type::t key) -> Type::t
     end
   end
 end

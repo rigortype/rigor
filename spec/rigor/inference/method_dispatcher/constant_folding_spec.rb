@@ -765,6 +765,51 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
     end
 
+    describe "String#% format-string fold (v0.0.7)" do
+      def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
+      def tuple_of(*elems) = Rigor::Type::Combinator.tuple_of(*elems)
+      def hash_shape_of(pairs) = Rigor::Type::Combinator.hash_shape_of(pairs)
+
+      it "folds Constant<String> % Tuple of Constants to a precise String" do
+        result = fold_types(constant_of("%d / %d"), :%, [tuple_of(constant_of(1), constant_of(2))])
+        expect(result).to eq(constant_of("1 / 2"))
+      end
+
+      it "folds Constant<String> % HashShape of Constants for hash format specs" do
+        shape = hash_shape_of(name: constant_of("Alice"), age: constant_of(30))
+        # The format template uses Ruby's `%{key}` hash-format
+        # spec. Build it from String#new to keep the rubocop
+        # FormatStringToken cop quiet (the cop only inspects
+        # interpolated string literals).
+        template = String.new("%") << "{name} is " << "%" << "{age}"
+        result = fold_types(constant_of(template), :%, [shape])
+        expect(result).to eq(constant_of("Alice is 30"))
+      end
+
+      it "still folds the single-Constant arg case via the standard binary path" do
+        result = fold_types(constant_of("hi %s"), :%, [constant_of("world")])
+        expect(result).to eq(constant_of("hi world"))
+      end
+
+      it "declines when a Tuple element is non-Constant" do
+        tup = tuple_of(constant_of(1), Rigor::Type::Combinator.nominal_of("Integer"))
+        expect(fold_types(constant_of("%d / %d"), :%, [tup])).to be_nil
+      end
+
+      it "declines on a malformed format spec (no crash)" do
+        # `%q` is not a recognised String#% conversion; Ruby raises
+        # `ArgumentError`. The fold catches the exception and falls
+        # through.
+        expect(fold_types(constant_of("%q"), :%, [tuple_of(constant_of(1))])).to be_nil
+      end
+
+      it "declines for non-String receivers" do
+        # Sanity: `Constant<Integer> % Constant<Integer>` still flows
+        # through the standard numeric binary path (modulo).
+        expect(fold_types(constant_of(7), :%, [constant_of(3)])).to eq(constant_of(1))
+      end
+    end
+
     describe "Constant<Range> unary precision (v0.0.7)" do
       def tuple_of(*elems) = Rigor::Type::Combinator.tuple_of(*elems)
 

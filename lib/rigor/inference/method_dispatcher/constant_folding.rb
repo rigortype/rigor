@@ -109,6 +109,16 @@ module Rigor
 
         # @return [Rigor::Type::Constant, Rigor::Type::Union, Rigor::Type::IntegerRange, nil]
         def try_fold(receiver:, method_name:, args:)
+          # v0.0.7 — `String#%` against a `Tuple` / `HashShape`
+          # argument runs Ruby's format-string engine when both
+          # sides are statically constant. The standard
+          # `numeric_set_of` path bails on Tuple / HashShape
+          # arguments because they are not scalar-Constant
+          # carriers, so the special-case sits ahead of the
+          # numeric path.
+          format_lift = try_fold_string_format(receiver, method_name, args)
+          return format_lift if format_lift
+
           receiver_set = numeric_set_of(receiver)
           return nil unless receiver_set
 
@@ -116,6 +126,59 @@ module Rigor
           return nil if arg_sets.any?(&:nil?)
 
           dispatch_by_arity(receiver_set, method_name, arg_sets)
+        end
+
+        # `Constant<String> % …` — runs the actual `String#%`
+        # operation when both sides are statically known. The
+        # argument may be:
+        # - A `Type::Constant` whose value is a scalar (Integer
+        #   / Float / String / Symbol). Already handled by the
+        #   numeric path; this method declines so the standard
+        #   binary path picks it up.
+        # - A `Type::Tuple` whose elements are all `Constant`.
+        #   Materialises the elements as a Ruby Array and runs
+        #   the format.
+        # - A `Type::HashShape` with no optional keys whose
+        #   values are all `Constant`. Materialises a Ruby Hash
+        #   and runs the format. Symbol keys are kept as
+        #   Symbols (matching Ruby's `%{key}` resolution).
+        # Anything else declines so the RBS tier widens.
+        # rubocop:disable Metrics/CyclomaticComplexity
+        def try_fold_string_format(receiver, method_name, args)
+          return nil unless method_name == :%
+          return nil unless args.size == 1
+          return nil unless receiver.is_a?(Type::Constant) && receiver.value.is_a?(String)
+
+          arg = args.first
+          ruby_arg = format_argument_value(arg)
+          return nil if ruby_arg.nil?
+
+          result = receiver.value % ruby_arg
+          return nil unless foldable_constant_value?(result)
+
+          Type::Combinator.constant_of(result)
+        rescue StandardError
+          nil
+        end
+        # rubocop:enable Metrics/CyclomaticComplexity
+
+        def format_argument_value(arg)
+          case arg
+          when Type::Tuple
+            return nil unless arg.elements.all?(Type::Constant)
+
+            arg.elements.map(&:value)
+          when Type::HashShape
+            hash_shape_format_value(arg)
+          end
+        end
+
+        def hash_shape_format_value(shape)
+          return nil unless shape.closed?
+          return nil unless shape.optional_keys.empty?
+          return nil unless shape.pairs.values.all?(Type::Constant)
+
+          shape.pairs.transform_values(&:value)
         end
 
         def dispatch_by_arity(receiver_set, method_name, arg_sets)

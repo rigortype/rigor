@@ -6,7 +6,7 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.0.6 released 2026-05-05.** The full release summary is in `CHANGELOG.md`'s `[0.0.6] - 2026-05-05` section and the v0.0.6 row of [`docs/MILESTONES.md`](MILESTONES.md).
 
-**v0.0.7 in progress on `master`** — the pre-plugin coverage push. Twelve slices since `v0.0.6`:
+**v0.0.7 in progress on `master`** — the pre-plugin coverage push. Thirteen slices since `v0.0.6`:
 1. `02f369f` — `key_of[T]` / `value_of[T]` type functions.
 2. `1366f9f` — `int_mask[…]` / `int_mask_of[T]` type functions.
 3. `5703ca8` — `Constant<Range>` unary precision (`to_a`, `first`, `last`, `min`, `max`, `count`, `size`, `length`).
@@ -19,10 +19,11 @@ This is a transient bookmark used to break a long implementation thread into rev
 10. `154ed0f` — `Constant<String>` array-returning method lift (`chars`, `bytes`, `lines`, `split`, `scan`).
 11. `704de49` — Regexp literal lift to `Constant<Regexp>` (`/foo/`, `/Foo/i`).
 12. `c8a50ef` — Tuple ↔ HashShape conversion folds (`to_h`, `to_a`, `invert`, `merge`).
+13. `0200018` — Pathname delegation (`Constant<Pathname>` + `meta_new` constructor lift + 14-method unary / 8-method binary fold table).
 
-(Plus `035057a` — the v0.0.7 scope plan commit, `b50959d`, `2a8fb44`, and `d37fec2` — incremental CURRENT_WORK refreshes.)
+(Plus `035057a` — the v0.0.7 scope plan commit; `b50959d`, `2a8fb44`, `d37fec2`, `74131ac` — incremental CURRENT_WORK refreshes; `fca727f` and `07a1ab9` — v0.1.0 readiness design doc and pointer.)
 
-Working state: 1509 RSpec examples / 0 failures, RuboCop 138 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.6` until the v0.0.7 surface is locked in.
+Working state: 1515 RSpec examples / 0 failures, RuboCop 138 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.6` until the v0.0.7 surface is locked in.
 
 The original plan's `rigor:v1:conforms-to` directive (Slice 4) and the survey's ObjectSpace catalog import were both deferred. The `conforms-to` directive needs a real structural-conformance checker beyond v0.0.7's envelope; ObjectSpace needs a singleton-module dispatch path that the catalog tier does not yet provide (the existing `MODULE_CATALOGS` fallthrough is for instance methods inherited via `include Comparable`, not for module functions on a `Singleton[Module]` receiver).
 
@@ -38,6 +39,7 @@ Composite payoff:
 - `"a,b,c".split(",")` folds to `["a", "b", "c"]`; `"abc".chars` folds to `["a", "b", "c"]`.
 - `/foo/i` types as `Constant<Regexp>`; `"hello,world".scan(/o/)` folds to `["o", "o"]`.
 - `[[:a, 1], [:b, 2]].to_h` folds to `HashShape{a: 1, b: 2}`; `{a: 1}.merge(b: 2)` folds to `HashShape{a: 1, b: 2}`.
+- `Pathname.new("/usr/bin/ruby")` types as `Constant<Pathname:/usr/bin/ruby>`; `.basename` folds to `Constant<Pathname:ruby>`; `.to_s` folds to `Constant["/usr/bin/ruby"]`; `+ "lib"` folds to `Constant<Pathname:/usr/bin/ruby/lib>`.
 
 ## Where the Work Resumes
 

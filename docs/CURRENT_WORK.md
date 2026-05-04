@@ -6,7 +6,7 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.0.6 released 2026-05-05.** The full release summary is in `CHANGELOG.md`'s `[0.0.6] - 2026-05-05` section and the v0.0.6 row of [`docs/MILESTONES.md`](MILESTONES.md).
 
-**v0.0.7 in progress on `master`** — the pre-plugin coverage push. Sixteen slices since `v0.0.6`:
+**v0.0.7 in progress on `master`** — the pre-plugin coverage push. Seventeen slices since `v0.0.6`:
 1. `02f369f` — `key_of[T]` / `value_of[T]` type functions.
 2. `1366f9f` — `int_mask[…]` / `int_mask_of[T]` type functions.
 3. `5703ca8` — `Constant<Range>` unary precision (`to_a`, `first`, `last`, `min`, `max`, `count`, `size`, `length`).
@@ -23,8 +23,9 @@ This is a transient bookmark used to break a long implementation thread into rev
 14. `5eec5a2` — Tuple#zip per-position fold + HashShape projections (`first`, `flatten`, `compact`) + empty `{}` literal carrier (`HashShape{}`) + `Array.new(n)` constant lift.
 15. `49dd323` — `Rigor::Reflection` read-side facade (pre-v0.1.0 cold-start slice — joins `ClassRegistry` + `RbsLoader` + `Scope` discovered facts under one read API).
 16. `7b780f5` — Engine-internal reflection consumers migrate to `Rigor::Reflection` (pre-v0.1.0 sub-slice — mechanical refactor; no behaviour change).
+17. (next commit) — Cache slice taxonomy design doc (pre-v0.1.0 sub-slice — design output, no code).
 
-(Plus `035057a` — the v0.0.7 scope plan commit; `b50959d`, `2a8fb44`, `d37fec2`, `74131ac`, `71dd31c`, `3683978`, `9dbe54e` — incremental CURRENT_WORK refreshes; `fca727f` and `07a1ab9` — v0.1.0 readiness design doc and pointer.)
+(Plus `035057a` — the v0.0.7 scope plan commit; `b50959d`, `2a8fb44`, `d37fec2`, `74131ac`, `71dd31c`, `3683978`, `9dbe54e`, `fad9563` — incremental CURRENT_WORK refreshes; `fca727f` and `07a1ab9` — v0.1.0 readiness design doc and pointer.)
 
 Working state: 1540 RSpec examples / 0 failures, RuboCop 140 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.6` until the v0.0.7 surface is locked in.
 

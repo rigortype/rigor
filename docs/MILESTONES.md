@@ -138,7 +138,7 @@ Pre-v0.1.0 surfaces that can land independently as v0.0.x dot releases (see [`do
 
 - **Public-API declaration of `Rigor::Scope`, `Rigor::Type`, `Rigor::Environment`** — namespace policy + drift tests. No new code, just contract declaration.
 - **Reflection facade** — a unified `Rigor::Reflection` read-side over `ClassRegistry` + `RbsLoader` + `Builtins::*_CATALOG`. Highest-leverage pre-v0.1.0 slice; every plugin protocol that asks "what does class X look like?" needs this.
-- **Cache slice taxonomy** — design doc fixing the `files` / `gems` / `plugins` / `configs` slot shapes, comparator semantics, and per-slice cache-key derivation. Prerequisite for the persistence layer.
+- **Cache slice taxonomy** — design doc landed at [`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md). Fixes the per-slot entry shapes (`FileEntry`, `GemEntry`, `PluginEntry`, `ConfigEntry`), comparator semantics, composition rules, cache-key derivation, granularity guidance, and the schema-versioning policy. The persistence layer it describes ships in v0.1.0; the design doc is the prerequisite contract.
 - **Flow-contribution bundle struct** — a `Rigor::FlowContribution` with the eight ADR-2 slots (`return_type`, `truthy_facts`, `falsey_facts`, `post_return_facts`, `mutations`, `invalidations`, `exceptional`, `role_conformance`). Internal effect structs convert into bundles at the boundary.
 - **Diagnostic provenance prefix** — `Diagnostic` gains a `source_family` field; formatter publishes `plugin.<id>.<rule>` style identifiers.
 

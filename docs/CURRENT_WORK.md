@@ -8,7 +8,7 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 The summary of what shipped in v0.0.5 is in `CHANGELOG.md`'s `[0.0.5] - 2026-05-03` section and the v0.0.5 row of [`docs/MILESTONES.md`](MILESTONES.md). Not duplicated here.
 
-**v0.0.6 in progress on `master`.** Twelve commits since `v0.0.5`:
+**v0.0.6 in progress on `master`.** Thirteen commits since `v0.0.5`:
 1. `edfc197` — BlockFolding Phase 1: constant-block predicates and filters (`select` / `filter` / `reject` / `take_while` / `drop_while` / `all?` / `any?` / `none?`).
 2. `8035204` — BlockFolding Phase 2: per-position Tuple element-wise re-typing for `:map` / `:collect`.
 3. `37512fc` — BlockFolding extension: `find` / `detect` / `find_index` / `index` / `count` short-circuit folds.
@@ -20,10 +20,11 @@ The summary of what shipped in v0.0.5 is in `CHANGELOG.md`'s `[0.0.5] - 2026-05-
 9. `1c2a733` — Mixed-shape `:flat_map` tightening: `Type::Constant` per-position results contribute single elements.
 10. `5b47960` — Empty array literal `[]` resolves to the empty `Tuple[]` carrier.
 11. `1c8e760` — IntegerRange-aware ternary fold for `Comparable#between?` / `Comparable#clamp` through `try_fold_ternary`.
+12. `0b44f34` — Pathname catalog import + extractor `BeginNode`-bodied-`def` classifier fix (rescue-on-def idiom support).
 
-(Plus `cdbeade` and `d8dab79` — incremental CURRENT_WORK refreshes.)
+(Plus `cdbeade`, `d8dab79`, and `e6a148c` — incremental CURRENT_WORK refreshes.)
 
-Working state: 1392 RSpec examples / 0 failures, RuboCop 137 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.5` until the v0.0.6 surface is locked in.
+Working state: 1393 RSpec examples / 0 failures, RuboCop 138 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. No version bump yet — version stays at `0.0.5` until the v0.0.6 surface is locked in.
 
 The composite payoff: `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }` now resolves to `Tuple[Constant["2"]]` (Phase 2 element-wise re-typing + per-position `:filter_map` fold + ternary elision composing through three layers); `[1, 2, 3, 4].find { |n| n.even? }` resolves to `Constant[2]`; `int<3, 7>.between?(0, 10)` folds to `Constant[true]`.
 
@@ -38,7 +39,7 @@ The next preview is **v0.0.6** (or whichever version captures the next slice —
   - `:flat_map` over `Nominal[Array[T]]` per-position results — the current fold treats those as opaque and declines. A "flatten one level into T" rule for that carrier specifically would catch the `arr.flat_map { |x| x.split(",") }` shape.
   - Predicate-shaped folds in `BlockFolding` over `Range`-receiver Tuples — `(1..n).find { |i| … }` etc. Per-element re-typing already works for finite-range Constants via `IteratorDispatch`'s element projection; threading that through BlockFolding's truthy-side find is a small bridge.
   - Range-shaped *arguments* on the 2-arg ternary path — `5.between?(int<0, 10>, int<5, 15>)` could decide via the bounds, but the call shape is unusual and the marginal value low; left explicitly out of scope for v0.0.6.
-- **More catalog imports.** Concrete classes still in the queue: Date / DateTime imports landed in v0.0.5; remaining stdlib candidates include URI, Pathname (already partial), Rational, Complex. Module candidates beyond Comparable / Enumerable: Kernel (already in BASE_CLASS_VARS as `rb_mKernel`), ObjectSpace.
+- **More catalog imports.** Concrete classes still in the queue: Date / DateTime / Rational / Complex / Pathname imports all landed (the latter through the v0.0.6 BeginNode-rescue extractor fix). Remaining stdlib candidates: URI (pure-Ruby stdlib gem, no C surface — needs hand-rolled or custom-scaffold approach per [`docs/MILESTONES.md`](MILESTONES.md)). Module candidates beyond Comparable / Enumerable: Kernel (already in BASE_CLASS_VARS as `rb_mKernel`), ObjectSpace.
 - **C-body classifier upgrades.** Track indirect mutator helpers (`str_modifiable`, `ary_resize`, `time_modify`, `set_compare_by_identity`, …) so per-class blocklists shrink. The pure-`rb_check_frozen`-wrapper detection landed in v0.0.5 covers the narrowest case; the next step is a wider transitive scan that does not over-flag legitimate non-mutators like `Array#to_a`.
 
 ### Out of v0.0.5 / v0.0.x scope (intentional)

@@ -825,30 +825,26 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
   end
 
   describe "block return type uplift (Slice 6 phase C sub-phase 2)" do
-    it "infers a precise constant union from `[1, 2, 3].map { |n| n.to_s }`" do
-      # Union-fold (`Union[Constant[1], Constant[2], Constant[3]].to_s`)
-      # produces `Union[Constant["1"], Constant["2"], Constant["3"]]`,
-      # which is strictly more precise than `Nominal[String]`. Array#map
-      # threads this through the `U` binding.
+    it "infers a per-position Tuple from `[1, 2, 3].map { |n| n.to_s }`" do
+      # v0.0.6 phase 2 — per-element block re-evaluation over a
+      # Tuple-shaped receiver. Each position binds its own constant
+      # to the block parameter, the body folds to the corresponding
+      # `Constant[String]`, and the assembled answer is
+      # `Tuple[Constant["1"], Constant["2"], Constant["3"]]` —
+      # strictly tighter than the previous `Array[union]` projection.
       type, _post = evaluate("[1, 2, 3].map { |n| n.to_s }")
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("Array")
-      expect(type.type_args.size).to eq(1)
-      element = type.type_args.first
-      expect(element).to be_a(Rigor::Type::Union)
-      expect(element.members.map(&:value).sort).to eq(%w[1 2 3])
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements.map(&:value)).to eq(%w[1 2 3])
     end
 
     it "binds numbered-parameter receivers and threads the block return type" do
+      # `_1 + 1` folds element-wise to
+      # `Tuple[Constant[2], Constant[3], Constant[4]]` via the
+      # Phase 2 per-element uplift. Strictly tighter than the
+      # earlier `Array[Constant[2] | Constant[3] | Constant[4]]`.
       type, _post = evaluate("[1, 2, 3].map { _1 + 1 }")
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("Array")
-      # `_1 + 1` folds element-wise to `Union[Constant[2], Constant[3], Constant[4]]`,
-      # threaded through Array#map's `U` binding. Strictly more precise
-      # than the previous `Nominal[Integer]`.
-      element = type.type_args.first
-      expect(element).to be_a(Rigor::Type::Union)
-      expect(element.members.map(&:value).sort).to eq([2, 3, 4])
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements.map(&:value)).to eq([2, 3, 4])
     end
 
     it "does not raise when the receiver is unknown and the block has named parameters" do

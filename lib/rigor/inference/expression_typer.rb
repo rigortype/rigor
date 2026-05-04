@@ -739,6 +739,7 @@ module Rigor
       # for the CallNode itself (the inner type_of calls already record
       # their own fallbacks for unrecognised receivers/args, so the tracer
       # captures both the immediate dispatch miss and the deeper cause).
+      # rubocop:disable Metrics/CyclomaticComplexity
       def call_type_for(node)
         receiver = call_receiver_type_for(node)
         arg_types = call_arg_types(node)
@@ -771,6 +772,18 @@ module Rigor
           return dynamic_top
         end
 
+        # v0.0.6 phase 2 — per-element block fold for Tuple
+        # receivers. When `[a, b, c].map { |x| f(x) }` and the
+        # receiver is a `Tuple` carrier with finite elements,
+        # type the block body once per position with the
+        # corresponding element bound to the block parameter
+        # and assemble the results into a `Tuple[U_1..U_n]`.
+        # This sits ahead of `MethodDispatcher.dispatch` so
+        # the RBS tier does not re-widen the answer back to
+        # `Array[union]`.
+        per_element = try_per_element_block_fold(node, receiver)
+        return per_element if per_element
+
         result = MethodDispatcher.dispatch(
           receiver_type: receiver,
           method_name: node.name,
@@ -797,6 +810,7 @@ module Rigor
 
         fallback_for(node, family: :prism)
       end
+      # rubocop:enable Metrics/CyclomaticComplexity
 
       # v0.0.2 #5 — re-types the body of a user-defined
       # instance method with the call site's argument types
@@ -975,6 +989,48 @@ module Rigor
         return Type::Combinator.constant_of(nil) if body.nil?
 
         block_scope.type_of(body)
+      end
+
+      # v0.0.6 phase 2 — per-element block fold for Tuple
+      # receivers under `:map` / `:collect`. Walks every Tuple
+      # position, binds the block parameter to that element's
+      # type, and re-types the block body. The per-position
+      # results are assembled into `Tuple[U_1..U_n]`, strictly
+      # tighter than the RBS-projected `Array[union]`.
+      #
+      # Declines (returns nil) when the receiver is not a
+      # `Tuple` with at least one element, when the call has
+      # no `Prism::BlockNode`, when the method is outside the
+      # supported set, when block typing raises mid-loop, or
+      # when the block has no body. The decline path leaves
+      # the dispatch chain untouched.
+      PER_ELEMENT_TUPLE_METHODS = Set[:map, :collect].freeze
+      private_constant :PER_ELEMENT_TUPLE_METHODS
+
+      # rubocop:disable Metrics/CyclomaticComplexity
+      def try_per_element_block_fold(call_node, receiver_type)
+        return nil unless PER_ELEMENT_TUPLE_METHODS.include?(call_node.name)
+        return nil unless receiver_type.is_a?(Type::Tuple)
+        return nil if receiver_type.elements.empty?
+
+        block_node = call_node.block
+        return nil unless block_node.is_a?(Prism::BlockNode)
+
+        per_position = receiver_type.elements.map do |element_type|
+          type_block_body_with_param(block_node, [element_type])
+        end
+        return nil if per_position.any?(&:nil?)
+
+        Type::Combinator.tuple_of(*per_position)
+      end
+      # rubocop:enable Metrics/CyclomaticComplexity
+
+      def type_block_body_with_param(block_node, expected_param_types)
+        bindings = BlockParameterBinder.new(expected_param_types: expected_param_types).bind(block_node)
+        block_scope = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        type_block_body(block_node, block_scope)
+      rescue StandardError
+        nil
       end
     end
     # rubocop:enable Metrics/ClassLength

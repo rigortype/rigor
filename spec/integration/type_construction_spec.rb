@@ -89,6 +89,27 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
+  describe "fixtures/tuple_map.rb — per-element block fold for :map / :collect on Tuple" do
+    let(:harness) { harness_for("tuple_map") }
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "folds heterogeneous Tuple#map into per-position Tuple of stringified constants" do
+      mixed = harness.local(:mixed)
+      expect(mixed).to be_a(Rigor::Type::Tuple)
+      expect(mixed.elements.map(&:value)).to eq(%w[1 two three])
+    end
+
+    it "folds Tuple#collect (the :map alias) the same way" do
+      collected = harness.local(:collected)
+      expect(collected).to be_a(Rigor::Type::Tuple)
+      expect(collected.elements.map(&:value)).to eq([15, 25])
+    end
+  end
+
   describe "fixtures/block_filter.rb — BlockFolding for select/all?/any?" do
     let(:harness) { harness_for("block_filter") }
 
@@ -110,21 +131,18 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
     end
   end
 
-  describe "fixtures/block_map.rb — block-return type uplift on Array#map" do
+  describe "fixtures/block_map.rb — per-position Tuple uplift on Array#map" do
     let(:harness) { harness_for("block_map") }
 
-    it "binds `strings` to a precise constant union of stringified literals" do
-      # Union-fold lifts `[1,2,3].map { |n| n.to_s }` to
-      # `Array[Union[Constant["1"], Constant["2"], Constant["3"]]]` —
-      # strictly more precise than the previous `Array[String]`.
+    it "binds `strings` to a per-position Tuple of stringified literals" do
+      # v0.0.6 phase 2 — `[1,2,3].map { |n| n.to_s }` folds to
+      # `Tuple[Constant["1"], Constant["2"], Constant["3"]]`,
+      # strictly tighter than the previous Array[union] projection.
       # Wider receivers (e.g. `Nominal[Integer]`) still widen back
       # to `Array[String]` via the RBS tier.
       strings = harness.local(:strings)
-      expect(strings).to be_a(Rigor::Type::Nominal)
-      expect(strings.class_name).to eq("Array")
-      element = strings.type_args.first
-      expect(element).to be_a(Rigor::Type::Union)
-      expect(element.members.map(&:value).sort).to eq(%w[1 2 3])
+      expect(strings).to be_a(Rigor::Type::Tuple)
+      expect(strings.elements.map(&:value)).to eq(%w[1 2 3])
     end
   end
 
@@ -502,7 +520,7 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
   # specific assertions for each fixture live in their own
   # `describe` block.
   describe "self-asserting `assert_type` calls in converted fixtures" do
-    %w[parity case_when compound_writes tuple_access hash_shape block_map block_filter].each do |name|
+    %w[parity case_when compound_writes tuple_access hash_shape block_map block_filter tuple_map].each do |name|
       it "produces no assert_type mismatches in fixtures/#{name}.rb" do
         harness = harness_for(name)
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }

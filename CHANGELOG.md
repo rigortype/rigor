@@ -39,6 +39,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receivers (the `map` / `filter_map` / `flat_map` precision
   tier) stays deferred to phase 2.
 
+- **Block-shaped fold dispatch — phase 2.**
+  `ExpressionTyper#try_per_element_block_fold` runs ahead of
+  `MethodDispatcher.dispatch` and, when the receiver is a
+  `Type::Tuple` carrier with at least one element and the
+  call is `:map` or its alias `:collect` carrying a
+  `Prism::BlockNode`, re-types the block body once per Tuple
+  position with the corresponding element type bound to the
+  block parameter. The per-position results assemble into a
+  `Tuple[U_1..U_n]`, strictly tighter than the
+  RBS-projected `Array[union]` answer that the previous
+  block-return uplift produced. Numbered parameters
+  (`_1`) participate, and the existing `block_map` fixture's
+  expected type accordingly tightens from
+  `Array["1" | "2" | "3"]` to `["1", "2", "3"]`. The
+  decline path (any element raises during typing, the
+  receiver is not a Tuple, the call has no block, the
+  Tuple is empty) leaves the dispatch chain untouched.
+
 ## [0.0.5] - 2026-05-03
 
 ### Added

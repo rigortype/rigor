@@ -181,6 +181,22 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       idx_alias = harness.local(:idx_alias)
       expect(idx_alias).to eq(Rigor::Type::Combinator.constant_of(1))
     end
+
+    it "folds Constant<Range>#map for short ranges via per-element re-typing" do
+      range_mapped = harness.local(:range_mapped)
+      expect(range_mapped).to be_a(Rigor::Type::Tuple)
+      expect(range_mapped.elements.map(&:value)).to eq(%w[1 2 3])
+    end
+
+    it "folds Constant<Range>#find truthy-block to the first matching integer" do
+      range_first_even = harness.local(:range_first_even)
+      expect(range_first_even).to eq(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "folds Constant<Range>#find_index truthy-block to the matching index" do
+      range_first_idx = harness.local(:range_first_idx)
+      expect(range_first_idx).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
   end
 
   describe "fixtures/block_filter.rb — BlockFolding for select/all?/any?" do

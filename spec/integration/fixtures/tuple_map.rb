@@ -91,3 +91,15 @@ assert_type("1", idx_first_even)
 # `:index` (block form) is an alias of find_index.
 idx_alias = [1, 2, 3, 4].index { |n| n.even? }
 assert_type("1", idx_alias)
+
+# v0.0.6 — finite-bound `Constant<Range>` receivers also
+# participate in the per-element block fold, up to the
+# `PER_ELEMENT_RANGE_LIMIT` cardinality cap.
+range_mapped = (1..3).map { |n| n.to_s }
+assert_type('["1", "2", "3"]', range_mapped)
+
+range_first_even = (1..5).find { |n| n.even? }
+assert_type("2", range_first_even)
+
+range_first_idx = (1..5).find_index { |n| n.even? }
+assert_type("1", range_first_idx)

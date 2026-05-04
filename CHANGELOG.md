@@ -84,6 +84,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now resolves to `Tuple[Constant["2"]]` instead of widening
   to `Array[Dynamic[Top]]`.
 
+- **Per-element block fold extension —
+  `Constant<Range>` receivers.**
+  `ExpressionTyper#try_per_element_block_fold` now accepts
+  finite-bound `Constant<Range>` receivers alongside
+  Tuple-shaped ones, up to a `PER_ELEMENT_RANGE_LIMIT`
+  cardinality cap (8 elements). Each integer in the range
+  re-types the block body once with the corresponding
+  `Constant<Integer>` bound to the parameter, so
+  `(1..3).map { |n| n.to_s }` resolves to
+  `Tuple[Constant["1"], Constant["2"], Constant["3"]]` and
+  `(1..5).find { |n| n.even? }` resolves to `Constant[2]`.
+  Larger ranges decline so the RBS tier widens, keeping
+  block-typing cost bounded.
+
 - **Pathname catalog import.** `tool/scaffold_builtin_catalog.rb`
   with `--init-fn InitVM_pathname` writes
   `data/builtins/ruby_core/pathname.yml` (102 instance methods,

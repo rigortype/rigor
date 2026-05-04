@@ -1075,24 +1075,60 @@ module Rigor
       ].freeze
       private_constant :PER_ELEMENT_TUPLE_METHODS
 
+      # Cardinality cap for per-element block fold over
+      # finite-bound `Constant<Range>` receivers. Walking
+      # `(1..1_000_000).map { … }` element-wise would balloon
+      # block-typing cost and explode the resulting Tuple, so
+      # only short ranges expand into per-position folds.
+      # Larger ranges decline so the RBS tier widens.
+      PER_ELEMENT_RANGE_LIMIT = 8
+      private_constant :PER_ELEMENT_RANGE_LIMIT
+
       # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       def try_per_element_block_fold(call_node, receiver_type)
         return nil unless PER_ELEMENT_TUPLE_METHODS.include?(call_node.name)
-        return nil unless receiver_type.is_a?(Type::Tuple)
-        return nil if receiver_type.elements.empty?
         return nil if find_family_with_args?(call_node)
+
+        element_types = per_element_elements_of(receiver_type)
+        return nil if element_types.nil? || element_types.empty?
 
         block_node = call_node.block
         return nil unless block_node.is_a?(Prism::BlockNode)
 
-        per_position = receiver_type.elements.map do |element_type|
+        per_position = element_types.map do |element_type|
           type_block_body_with_param(block_node, [element_type])
         end
         return nil if per_position.any?(&:nil?)
 
-        assemble_per_element_result(call_node.name, per_position, receiver_type)
+        assemble_per_element_result(call_node.name, per_position, element_types)
       end
       # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+
+      # Returns the per-position element types for a finite,
+      # statically-known receiver shape — or nil when the
+      # receiver does not pin a finite element list.
+      #
+      # `Tuple[A, B, …]`        → [A, B, …]
+      # `Constant<a..b>`        → [Constant[a], …, Constant[b]]
+      # everything else         → nil
+      def per_element_elements_of(receiver_type)
+        case receiver_type
+        when Type::Tuple then receiver_type.elements
+        when Type::Constant then constant_range_elements(receiver_type.value)
+        end
+      end
+
+      # rubocop:disable Metrics/CyclomaticComplexity
+      def constant_range_elements(value)
+        return nil unless value.is_a?(Range)
+        return nil unless value.begin.is_a?(Integer) && value.end.is_a?(Integer)
+
+        cardinality = value.exclude_end? ? value.end - value.begin : value.end - value.begin + 1
+        return nil if cardinality <= 0 || cardinality > PER_ELEMENT_RANGE_LIMIT
+
+        value.to_a.map { |v| Type::Combinator.constant_of(v) }
+      end
+      # rubocop:enable Metrics/CyclomaticComplexity
 
       # `index(value)` and `find_index(value)` carry a positional
       # argument and search by `==` rather than running the block.
@@ -1104,12 +1140,12 @@ module Rigor
         !args.nil? && !args.arguments.empty?
       end
 
-      def assemble_per_element_result(method_name, per_position, receiver_type)
+      def assemble_per_element_result(method_name, per_position, element_types)
         case method_name
         when :map, :collect then Type::Combinator.tuple_of(*per_position)
         when :filter_map then assemble_filter_map_result(per_position)
         when :flat_map then assemble_flat_map_result(per_position)
-        when :find, :detect then assemble_find_result(per_position, receiver_type)
+        when :find, :detect then assemble_find_result(per_position, element_types)
         when :find_index, :index then assemble_find_index_result(per_position)
         end
       end
@@ -1164,13 +1200,13 @@ module Rigor
       # first decisive truthy position is found, the answer is
       # the corresponding receiver element. When every position
       # folds to falsey, the answer is `Constant[nil]`.
-      def assemble_find_result(per_position, receiver_type)
+      def assemble_find_result(per_position, element_types)
         return nil unless per_position.all?(Type::Constant)
 
         first_truthy_index = per_position.index { |type| truthy_constant?(type) }
         return Type::Combinator.constant_of(nil) if first_truthy_index.nil?
 
-        receiver_type.elements[first_truthy_index]
+        element_types[first_truthy_index]
       end
 
       # `find_index` / `index`: returns the index of the first

@@ -934,7 +934,7 @@ module Rigor
         # round-trip through `Type::Combinator.constant_of`".
         def foldable_constant_value?(value)
           case value
-          when Integer, Float, String, Symbol, true, false, nil then true
+          when Integer, Float, Rational, Complex, String, Symbol, true, false, nil then true
           else false
           end
         end

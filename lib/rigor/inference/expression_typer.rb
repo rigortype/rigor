@@ -52,6 +52,12 @@ module Rigor
         # Literals
         Prism::IntegerNode => :type_of_literal_value,
         Prism::FloatNode => :type_of_literal_value,
+        # `1i` / `2.5ri` lift via `node.value` which is already a
+        # `Complex` Ruby value; same for `1r` / `1.5r` whose
+        # value is a `Rational`. `Type::Constant` accepts both
+        # via `SCALAR_CLASSES`.
+        Prism::ImaginaryNode => :type_of_literal_value,
+        Prism::RationalNode => :type_of_literal_value,
         Prism::SymbolNode => :symbol_type_for,
         Prism::StringNode => :string_type_for,
         Prism::TrueNode => :type_of_true,

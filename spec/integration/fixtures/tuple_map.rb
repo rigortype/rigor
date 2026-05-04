@@ -58,3 +58,23 @@ assert_type("[1, 10, 2, 20, 3, 30]", flat_pairs)
 # Tuple size per position).
 flat_varied = [1, 2].flat_map { |n| n.even? ? [n, n] : [n] }
 assert_type("[1, 2, 2]", flat_varied)
+
+# `:find` / `:detect` truthy-block side: every per-position
+# block result folds to a Constant, so the dispatcher walks
+# the Tuple and returns the receiver element at the first
+# truthy index.
+first_even = [1, 2, 3, 4].find { |n| n.even? }
+assert_type("2", first_even)
+
+# All positions fold to Constant[false]: result is
+# Constant[nil].
+no_match = [1, 3, 5].find { |n| n.even? }
+assert_type("nil", no_match)
+
+# `:find_index` returns the index of the first truthy match.
+idx_first_even = [1, 2, 3, 4].find_index { |n| n.even? }
+assert_type("1", idx_first_even)
+
+# `:index` (block form) is an alias of find_index.
+idx_alias = [1, 2, 3, 4].index { |n| n.even? }
+assert_type("1", idx_alias)

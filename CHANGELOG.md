@@ -84,6 +84,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now resolves to `Tuple[Constant["2"]]` instead of widening
   to `Array[Dynamic[Top]]`.
 
+- **Per-element block fold extension — find-family
+  truthy side.** `ExpressionTyper#try_per_element_block_fold`
+  now also folds `:find` / `:detect` / `:find_index` /
+  `:index` (block form) over Tuple receivers when every
+  per-position block result is a `Type::Constant`. The
+  dispatcher walks the Tuple and:
+  - For `:find` / `:detect` returns the receiver element at
+    the first truthy index, or `Constant[nil]` when every
+    position folds to falsey.
+  - For `:find_index` / `:index` returns `Constant[<index>]`
+    of the first truthy position, or `Constant[nil]` when
+    every position folds to falsey.
+  The value-search forms `index(value)` / `find_index(value)`
+  carry a positional argument and decline so the RBS tier
+  still owns those forms. Composes with the v0.0.6 ternary
+  branch elision: `[1, 2, 3, 4].find { |n| n.even? }` now
+  resolves to `Constant[2]`.
+
 - **Per-element block fold extension — `:flat_map`.**
   `ExpressionTyper#try_per_element_block_fold` accepts
   `:flat_map` alongside `:map` / `:collect` / `:filter_map`.

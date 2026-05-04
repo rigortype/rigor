@@ -1064,14 +1064,18 @@ module Rigor
       # supported set, when block typing raises mid-loop, or
       # when the block has no body. The decline path leaves
       # the dispatch chain untouched.
-      PER_ELEMENT_TUPLE_METHODS = Set[:map, :collect, :filter_map, :flat_map].freeze
+      PER_ELEMENT_TUPLE_METHODS = Set[
+        :map, :collect, :filter_map, :flat_map,
+        :find, :detect, :find_index, :index
+      ].freeze
       private_constant :PER_ELEMENT_TUPLE_METHODS
 
-      # rubocop:disable Metrics/CyclomaticComplexity
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       def try_per_element_block_fold(call_node, receiver_type)
         return nil unless PER_ELEMENT_TUPLE_METHODS.include?(call_node.name)
         return nil unless receiver_type.is_a?(Type::Tuple)
         return nil if receiver_type.elements.empty?
+        return nil if find_family_with_args?(call_node)
 
         block_node = call_node.block
         return nil unless block_node.is_a?(Prism::BlockNode)
@@ -1081,15 +1085,27 @@ module Rigor
         end
         return nil if per_position.any?(&:nil?)
 
-        assemble_per_element_result(call_node.name, per_position)
+        assemble_per_element_result(call_node.name, per_position, receiver_type)
       end
-      # rubocop:enable Metrics/CyclomaticComplexity
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
-      def assemble_per_element_result(method_name, per_position)
+      # `index(value)` and `find_index(value)` carry a positional
+      # argument and search by `==` rather than running the block.
+      # Decline so the RBS tier owns those forms.
+      def find_family_with_args?(call_node)
+        return false unless %i[find_index index].include?(call_node.name)
+
+        args = call_node.arguments
+        !args.nil? && !args.arguments.empty?
+      end
+
+      def assemble_per_element_result(method_name, per_position, receiver_type)
         case method_name
         when :map, :collect then Type::Combinator.tuple_of(*per_position)
         when :filter_map then assemble_filter_map_result(per_position)
         when :flat_map then assemble_flat_map_result(per_position)
+        when :find, :detect then assemble_find_result(per_position, receiver_type)
+        when :find_index, :index then assemble_find_index_result(per_position)
         end
       end
 
@@ -1118,6 +1134,40 @@ module Rigor
 
         concatenated = per_position.flat_map(&:elements)
         Type::Combinator.tuple_of(*concatenated)
+      end
+
+      # `find` / `detect`: returns the first receiver element
+      # whose block result is Ruby-truthy, or `nil` when no
+      # position folds to truthy.
+      #
+      # Folds tightly only when every per-position block result
+      # is a `Type::Constant` — otherwise we cannot decide which
+      # position (if any) is "the first matching one". When the
+      # first decisive truthy position is found, the answer is
+      # the corresponding receiver element. When every position
+      # folds to falsey, the answer is `Constant[nil]`.
+      def assemble_find_result(per_position, receiver_type)
+        return nil unless per_position.all?(Type::Constant)
+
+        first_truthy_index = per_position.index { |type| truthy_constant?(type) }
+        return Type::Combinator.constant_of(nil) if first_truthy_index.nil?
+
+        receiver_type.elements[first_truthy_index]
+      end
+
+      # `find_index` / `index`: returns the index of the first
+      # truthy position, or `Constant[nil]` when nothing matches.
+      def assemble_find_index_result(per_position)
+        return nil unless per_position.all?(Type::Constant)
+
+        first_truthy_index = per_position.index { |type| truthy_constant?(type) }
+        return Type::Combinator.constant_of(nil) if first_truthy_index.nil?
+
+        Type::Combinator.constant_of(first_truthy_index)
+      end
+
+      def truthy_constant?(type)
+        type.is_a?(Type::Constant) && type.value && type.value != false
       end
 
       def type_block_body_with_param(block_node, expected_param_types)

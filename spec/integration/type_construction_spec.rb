@@ -141,6 +141,26 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       expect(flat_varied).to be_a(Rigor::Type::Tuple)
       expect(flat_varied.elements.map(&:value)).to eq([1, 2, 2])
     end
+
+    it "folds Tuple#find to the first truthy-position element" do
+      first_even = harness.local(:first_even)
+      expect(first_even).to eq(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "folds Tuple#find to Constant[nil] when every position is falsey" do
+      no_match = harness.local(:no_match)
+      expect(no_match).to eq(Rigor::Type::Combinator.constant_of(nil))
+    end
+
+    it "folds Tuple#find_index to the first truthy-position index" do
+      idx_first_even = harness.local(:idx_first_even)
+      expect(idx_first_even).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "folds Tuple#index (block form) the same as find_index" do
+      idx_alias = harness.local(:idx_alias)
+      expect(idx_alias).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
   end
 
   describe "fixtures/block_filter.rb — BlockFolding for select/all?/any?" do

@@ -219,8 +219,126 @@ module Rigor
         collapse_union(normalized_union_members(types))
       end
 
-      class << self
+      # `key_of[T]` type function — projects the type-level
+      # union of `T`'s known keys. Recognised shapes:
+      #
+      # - `Type::HashShape{a: A, b: B}` → `Constant<:a> | Constant<:b>`.
+      # - `Type::Tuple[A, B, C]` → `Constant<0> | Constant<1> | Constant<2>`.
+      # - `Type::Nominal["Hash", [K, V]]` → `K` (untyped if absent).
+      # - `Type::Nominal["Array", [E]]` → `non-negative-int`.
+      # - `Type::Constant` whose value is a Hash / Array / Range —
+      #   project through the literal's per-element keys.
+      #
+      # Other inputs (`Top`, `Dynamic`, untyped Nominals, `Union`,
+      # `Refined`, `Difference`, `Intersection`) project to `top`
+      # so the type function always returns a value — callers may
+      # narrow further when they know more.
+      def key_of(type)
+        case type
+        when HashShape then hash_shape_keys(type)
+        when Tuple then tuple_indices(type)
+        when Nominal then nominal_keys(type)
+        when Constant then constant_keys(type.value)
+        else top
+        end
+      end
+
+      # `value_of[T]` type function — projects the type-level
+      # union of `T`'s known values. Mirror of `key_of`:
+      #
+      # - `Type::HashShape{a: A, b: B}` → `A | B`.
+      # - `Type::Tuple[A, B, C]` → `A | B | C`.
+      # - `Type::Nominal["Hash", [K, V]]` → `V` (untyped if absent).
+      # - `Type::Nominal["Array", [E]]` → `E` (untyped if absent).
+      # - `Type::Constant` whose value is a Hash / Array / Range —
+      #   union of `Constant<…>` for each element.
+      def value_of(type)
+        case type
+        when HashShape then hash_shape_values(type)
+        when Tuple then tuple_values(type)
+        when Nominal then nominal_values(type)
+        when Constant then constant_values(type.value)
+        else top
+        end
+      end
+
+      class << self # rubocop:disable Metrics/ClassLength
         private
+
+        def hash_shape_keys(shape)
+          return Bot.instance if shape.pairs.empty?
+
+          union(*shape.pairs.keys.map { |k| constant_of(k) })
+        end
+
+        def hash_shape_values(shape)
+          return Bot.instance if shape.pairs.empty?
+
+          union(*shape.pairs.values)
+        end
+
+        def tuple_indices(tuple)
+          return Bot.instance if tuple.elements.empty?
+
+          union(*tuple.elements.each_index.map { |i| constant_of(i) })
+        end
+
+        def tuple_values(tuple)
+          return Bot.instance if tuple.elements.empty?
+
+          union(*tuple.elements)
+        end
+
+        def nominal_keys(nominal)
+          case nominal.class_name
+          when "Hash"
+            nominal.type_args.first || untyped
+          when "Array"
+            non_negative_int
+          else
+            top
+          end
+        end
+
+        def nominal_values(nominal)
+          case nominal.class_name
+          when "Hash"
+            nominal.type_args[1] || untyped
+          when "Array"
+            nominal.type_args.first || untyped
+          else
+            top
+          end
+        end
+
+        # `Type::Constant` only carries scalar literals (Integer
+        # / Float / String / Symbol / Range / Rational / Complex
+        # / true / false / nil); Array and Hash literals become
+        # Tuple / HashShape carriers earlier in the typer. Range
+        # is the only scalar with meaningful key/value
+        # projections.
+        def constant_keys(value)
+          return non_negative_int if value.is_a?(Range) && value.begin.is_a?(Integer)
+
+          top
+        end
+
+        def constant_values(value)
+          return range_value_of(value) if value.is_a?(Range)
+
+          top
+        end
+
+        def range_value_of(range)
+          beg = range.begin
+          en  = range.end
+          return top unless beg.is_a?(Integer) && en.is_a?(Integer)
+
+          upper = range.exclude_end? ? en - 1 : en
+          return Bot.instance if upper < beg
+
+          integer_range(beg, upper)
+        end
 
         def normalized_union_members(types)
           flattened = []

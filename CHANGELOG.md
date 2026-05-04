@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`key_of[T]` / `value_of[T]` type functions.** `Type::Combinator.key_of` and `value_of` project the type-level union of known keys (resp. values) for `HashShape`, `Tuple`, `Nominal[Hash, [K, V]]`, `Nominal[Array, [E]]`, and finite-bound `Constant<Range>`; other shapes (`Top`, `Dynamic`, untyped Nominals, `Union`, `Refined`, `Difference`, `Intersection`) project to `Top`. Both functions are reachable through the `RBS::Extended` directive payload parser as `key_of[…]` / `value_of[…]`, which now accepts `lower_snake` heads alongside `kebab-case` refinement names and lets nominal arguments carry their own type-args (`key_of[Hash[Symbol, Integer]]` parses to `Symbol`).
+
 ## [0.0.6] - 2026-05-05
 
 The sixth preview. Theme: **fold block-taking Enumerable methods through the constant-folding tier** so iterator-shaped expressions over literal collections produce precise carriers instead of widening through RBS.

@@ -232,4 +232,116 @@ RSpec.describe Rigor::Type::Combinator do
       expect(a).to eq(b)
     end
   end
+
+  describe ".key_of / .value_of (v0.0.7 type functions)" do
+    let(:int) { described_class.nominal_of("Integer") }
+    let(:str) { described_class.nominal_of("String") }
+    let(:sym) { described_class.nominal_of("Symbol") }
+
+    describe "HashShape" do
+      let(:shape) do
+        described_class.hash_shape_of(name: str, age: int)
+      end
+
+      it "key_of projects to a union of Constant<Symbol> for each key" do
+        result = described_class.key_of(shape)
+        expect(result).to be_a(Rigor::Type::Union)
+        expect(result.members.map(&:value).sort).to eq(%i[age name])
+      end
+
+      it "value_of projects to a union of the entry types" do
+        result = described_class.value_of(shape)
+        expect(result).to eq(described_class.union(str, int))
+      end
+
+      it "collapses to bot for an empty HashShape" do
+        empty = described_class.hash_shape_of({})
+        expect(described_class.key_of(empty)).to be_a(Rigor::Type::Bot)
+        expect(described_class.value_of(empty)).to be_a(Rigor::Type::Bot)
+      end
+    end
+
+    describe "Tuple" do
+      let(:tuple) { described_class.tuple_of(str, int, sym) }
+
+      it "key_of projects to a union of Constant<Integer> indices" do
+        result = described_class.key_of(tuple)
+        expect(result.members.map(&:value).sort).to eq([0, 1, 2])
+      end
+
+      it "value_of projects to a union of the per-position types" do
+        result = described_class.value_of(tuple)
+        expect(result).to eq(described_class.union(str, int, sym))
+      end
+
+      it "collapses to bot for an empty Tuple" do
+        empty = described_class.tuple_of
+        expect(described_class.key_of(empty)).to be_a(Rigor::Type::Bot)
+        expect(described_class.value_of(empty)).to be_a(Rigor::Type::Bot)
+      end
+    end
+
+    describe "Nominal[Hash, [K, V]] / Nominal[Array, [E]]" do
+      it "key_of(Hash[Symbol, Integer]) is Symbol" do
+        h = described_class.nominal_of("Hash", type_args: [sym, int])
+        expect(described_class.key_of(h)).to eq(sym)
+      end
+
+      it "value_of(Hash[Symbol, Integer]) is Integer" do
+        h = described_class.nominal_of("Hash", type_args: [sym, int])
+        expect(described_class.value_of(h)).to eq(int)
+      end
+
+      it "key_of(Array[String]) is non-negative-int" do
+        a = described_class.nominal_of("Array", type_args: [str])
+        expect(described_class.key_of(a)).to eq(described_class.non_negative_int)
+      end
+
+      it "value_of(Array[String]) is String" do
+        a = described_class.nominal_of("Array", type_args: [str])
+        expect(described_class.value_of(a)).to eq(str)
+      end
+
+      it "untyped Hash / Array fall back to untyped" do
+        h = described_class.nominal_of("Hash")
+        expect(described_class.key_of(h)).to eq(described_class.untyped)
+        expect(described_class.value_of(h)).to eq(described_class.untyped)
+      end
+
+      it "other nominal classes project to top" do
+        klass = described_class.nominal_of("MyClass")
+        expect(described_class.key_of(klass)).to be_a(Rigor::Type::Top)
+        expect(described_class.value_of(klass)).to be_a(Rigor::Type::Top)
+      end
+    end
+
+    describe "Constant scalars" do
+      it "key_of(Constant<Range>) projects to non-negative-int for integer ranges" do
+        r = described_class.constant_of(1..5)
+        expect(described_class.key_of(r)).to eq(described_class.non_negative_int)
+      end
+
+      it "value_of(Constant<Range>) projects to the integer range" do
+        r = described_class.constant_of(1..5)
+        expect(described_class.value_of(r)).to eq(described_class.integer_range(1, 5))
+      end
+
+      it "value_of(Constant<Range>) handles exclusive endpoints" do
+        r = described_class.constant_of(1...5)
+        expect(described_class.value_of(r)).to eq(described_class.integer_range(1, 4))
+      end
+    end
+
+    describe "Top / Union fallback" do
+      it "Top falls through unchanged" do
+        expect(described_class.key_of(described_class.top)).to be_a(Rigor::Type::Top)
+        expect(described_class.value_of(described_class.top)).to be_a(Rigor::Type::Top)
+      end
+
+      it "Union projects to top (no per-member projection in v0.0.7)" do
+        u = described_class.union(int, str)
+        expect(described_class.key_of(u)).to be_a(Rigor::Type::Top)
+      end
+    end
+  end
 end

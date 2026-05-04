@@ -147,5 +147,37 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
       expect(described_class.parse("non-empty-array[Integer]extra")).to be_nil
       expect(described_class.parse("")).to be_nil
     end
+
+    describe "type-function payloads (v0.0.7)" do
+      it "parses key_of[Hash[Symbol, Integer]] to Symbol" do
+        expect(described_class.parse("key_of[Hash[Symbol, Integer]]"))
+          .to eq(Rigor::Type::Combinator.nominal_of("Symbol"))
+      end
+
+      it "parses value_of[Hash[Symbol, Integer]] to Integer" do
+        expect(described_class.parse("value_of[Hash[Symbol, Integer]]"))
+          .to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+      end
+
+      it "parses key_of[Array[String]] to non-negative-int" do
+        expect(described_class.parse("key_of[Array[String]]"))
+          .to eq(Rigor::Type::Combinator.non_negative_int)
+      end
+
+      it "parses value_of[Array[String]] to String" do
+        expect(described_class.parse("value_of[Array[String]]"))
+          .to eq(Rigor::Type::Combinator.nominal_of("String"))
+      end
+
+      it "parses key_of[Hash] (no element types) to untyped" do
+        expect(described_class.parse("key_of[Hash]"))
+          .to eq(Rigor::Type::Combinator.untyped)
+      end
+
+      it "rejects key_of arity mismatch" do
+        expect(described_class.parse("key_of[Hash, Symbol]")).to be_nil
+        expect(described_class.parse("key_of[]")).to be_nil
+      end
+    end
   end
 end

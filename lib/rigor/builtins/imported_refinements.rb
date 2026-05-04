@@ -78,6 +78,22 @@ module Rigor
           return nil unless args.size == 2
 
           Type::Combinator.non_empty_hash(args[0], args[1])
+        },
+        # v0.0.7 — `key_of[T]` and `value_of[T]` type functions.
+        # Each takes a single type argument and projects the
+        # known-keys (resp. known-values) union out of `T`. See
+        # `Type::Combinator.key_of` for the per-shape projection
+        # rules. Use `lower_snake` per the
+        # imported-built-in-types.md type-function naming rule.
+        "key_of" => lambda { |args|
+          return nil unless args.size == 1
+
+          Type::Combinator.key_of(args.first)
+        },
+        "value_of" => lambda { |args|
+          return nil unless args.size == 1
+
+          Type::Combinator.value_of(args.first)
         }
       }.freeze
       private_constant :PARAMETERISED_TYPE_BUILDERS
@@ -160,7 +176,12 @@ module Rigor
 
         private
 
-        SIMPLE_NAME = /[a-z][a-z0-9-]*/
+        # Refinement names use kebab-case (`non-empty-string`),
+        # type-function names use lower_snake (`key_of`,
+        # `value_of`, `int_mask`). The regex accepts both shapes;
+        # the registry lookup decides which family the name
+        # belongs to.
+        SIMPLE_NAME = /[a-z][a-z0-9_-]*/
         CLASS_NAME = /[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*/
         SIGNED_INT = /-?\d+/
         private_constant :SIMPLE_NAME, :CLASS_NAME, :SIGNED_INT
@@ -227,10 +248,26 @@ module Rigor
         def parse_type_arg
           skip_ws
           if (class_name = @scanner.scan(CLASS_NAME))
-            Type::Combinator.nominal_of(class_name)
+            parse_class_arg_tail(class_name)
           else
             parse_type
           end
+        end
+
+        # Class-name-headed type argument with optional `[T_1,
+        # …]` type-args tail. Used so `key_of[Hash[Symbol,
+        # Integer]]` parses as the projection of a parameterised
+        # nominal carrier rather than rejecting the inner
+        # brackets.
+        def parse_class_arg_tail(class_name)
+          return Type::Combinator.nominal_of(class_name) unless @scanner.peek(1) == "["
+
+          @scanner.getch # consume '['
+          args = parse_type_arg_list
+          return nil if args.nil?
+          return nil unless @scanner.getch == "]"
+
+          Type::Combinator.nominal_of(class_name, type_args: args)
         end
 
         def parse_int_bound

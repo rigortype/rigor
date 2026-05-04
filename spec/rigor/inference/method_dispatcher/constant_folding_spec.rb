@@ -810,6 +810,48 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
     end
 
+    describe "Constant<String> array-returning method lift (v0.0.7)" do
+      def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
+      def tuple_of(*elems) = Rigor::Type::Combinator.tuple_of(*elems)
+
+      it "lifts (s).chars to a per-position Tuple of single-char Constants" do
+        result = fold_types(constant_of("abc"), :chars)
+        expect(result).to eq(tuple_of(constant_of("a"), constant_of("b"), constant_of("c")))
+      end
+
+      it "lifts (s).bytes to a per-position Tuple of byte Constants" do
+        result = fold_types(constant_of("ab"), :bytes)
+        expect(result).to eq(tuple_of(constant_of(97), constant_of(98)))
+      end
+
+      it "lifts (s).lines to a per-position Tuple of line Constants" do
+        result = fold_types(constant_of("a\nb\nc"), :lines)
+        expect(result).to eq(tuple_of(constant_of("a\n"), constant_of("b\n"), constant_of("c")))
+      end
+
+      it "lifts (s).split with no arg" do
+        result = fold_types(constant_of("a b c"), :split)
+        expect(result).to eq(tuple_of(constant_of("a"), constant_of("b"), constant_of("c")))
+      end
+
+      it "lifts (s).split(arg) with a String separator" do
+        result = fold_types(constant_of("a,b,c"), :split, [constant_of(",")])
+        expect(result).to eq(tuple_of(constant_of("a"), constant_of("b"), constant_of("c")))
+      end
+
+      it "declines when the result cardinality exceeds STRING_ARRAY_LIFT_LIMIT" do
+        # 33 single-char elements > 32 cap.
+        big = "a" * 33
+        expect(fold_types(constant_of(big), :chars)).to be_nil
+      end
+
+      it "declines on a malformed split argument (no crash)" do
+        # `split(nil)` raises TypeError on most String forms; the
+        # rescue catches it and the fold falls through.
+        expect(fold_types(constant_of("a,b"), :split, [constant_of(nil)])).to be_nil
+      end
+    end
+
     describe "Constant<Range> unary precision (v0.0.7)" do
       def tuple_of(*elems) = Rigor::Type::Combinator.tuple_of(*elems)
 

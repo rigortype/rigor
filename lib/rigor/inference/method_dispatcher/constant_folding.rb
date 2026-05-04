@@ -273,6 +273,9 @@ module Rigor
           range_lift = try_fold_range_constant_unary(receiver_values, method_name)
           return range_lift if range_lift
 
+          string_lift = try_fold_string_array_unary(receiver_values, method_name)
+          return string_lift if string_lift
+
           # Type-level allow check on every receiver. If one member's
           # type does not have the method in its allow list (e.g.
           # `Union[String, nil].nil?` — `:nil?` is not in
@@ -339,7 +342,11 @@ module Rigor
           Type::Combinator.constant_of(edge == :first ? values.first : values.last)
         end
 
+        # rubocop:disable Metrics/CyclomaticComplexity
         def try_fold_binary_set(receiver_values, method_name, arg_values)
+          string_lift = try_fold_string_array_binary(receiver_values, method_name, arg_values)
+          return string_lift if string_lift
+
           return nil if receiver_values.size * arg_values.size > UNION_FOLD_INPUT_LIMIT
           return nil unless receiver_values.all? { |rv| binary_method_allowed?(rv, method_name) }
 
@@ -347,6 +354,60 @@ module Rigor
             arg_values.flat_map { |av| invoke_binary(rv, method_name, av) || [] }
           end
           build_constant_type(results, source: receiver_values + arg_values)
+        end
+        # rubocop:enable Metrics/CyclomaticComplexity
+
+        # v0.0.7 — `Constant<String>#chars` / `bytes` / `lines` /
+        # `split` (no-arg) return a Ruby Array of foldable
+        # scalars; `foldable_constant_value?` rejects Array
+        # results, so the standard unary path declines. Lift the
+        # Array to a per-position `Tuple[Constant…]` directly,
+        # capped at `STRING_ARRAY_LIFT_LIMIT` to keep the result
+        # bounded for long strings.
+        STRING_ARRAY_UNARY_METHODS = Set[:chars, :bytes, :lines, :split].freeze
+        STRING_ARRAY_BINARY_METHODS = Set[:split, :scan].freeze
+        STRING_ARRAY_LIFT_LIMIT = 32
+        private_constant :STRING_ARRAY_UNARY_METHODS,
+                         :STRING_ARRAY_BINARY_METHODS,
+                         :STRING_ARRAY_LIFT_LIMIT
+
+        def try_fold_string_array_unary(receiver_values, method_name)
+          return nil unless STRING_ARRAY_UNARY_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1
+
+          receiver = receiver_values.first
+          return nil unless receiver.is_a?(String)
+
+          lift_array_result(receiver.public_send(method_name))
+        rescue StandardError
+          nil
+        end
+
+        # `Constant<String>#split(arg)` / `#scan(arg)` — lift the
+        # Array result to a Tuple when both sides are statically
+        # known and the cardinality fits.
+        # rubocop:disable Metrics/CyclomaticComplexity
+        def try_fold_string_array_binary(receiver_values, method_name, arg_values)
+          return nil unless STRING_ARRAY_BINARY_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1 && arg_values.size == 1
+
+          receiver = receiver_values.first
+          arg = arg_values.first
+          return nil unless receiver.is_a?(String)
+          return nil unless arg.is_a?(String) || arg.is_a?(Regexp)
+
+          lift_array_result(receiver.public_send(method_name, arg))
+        rescue StandardError
+          nil
+        end
+        # rubocop:enable Metrics/CyclomaticComplexity
+
+        def lift_array_result(result)
+          return nil unless result.is_a?(Array)
+          return nil if result.size > STRING_ARRAY_LIFT_LIMIT
+          return nil unless result.all? { |v| foldable_constant_value?(v) }
+
+          Type::Combinator.tuple_of(*result.map { |v| Type::Combinator.constant_of(v) })
         end
 
         # 2-arg fold dispatch. Used by `Comparable#between?(min, max)`,

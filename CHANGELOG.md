@@ -84,6 +84,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now resolves to `Tuple[Constant["2"]]` instead of widening
   to `Array[Dynamic[Top]]`.
 
+- **Empty array literal carrier — `[]` → `Tuple[]`.**
+  `ExpressionTyper#array_type_for` previously emitted
+  `Nominal[Array]` for the empty literal `[]` (no
+  type-args, no element evidence). v0.0.6 switches the
+  empty case to the empty `Tuple[]` carrier. Both forms
+  carry no element evidence and erase to plain `Array` on
+  the RBS-interop path, but `Tuple[]` pins the literal's
+  known arity (zero), which lets the per-element block fold
+  concatenate cleanly across all-empty positions like
+  `[1, 2, 3].flat_map { |_| [] }` (now folds to `Tuple[]`).
+
 - **Per-element block fold extension — find-family
   truthy side.** `ExpressionTyper#try_per_element_block_fold`
   now also folds `:find` / `:detect` / `:find_index` /

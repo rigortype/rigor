@@ -68,11 +68,16 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
   end
 
   describe "shallow array literals" do
-    it "types empty arrays as raw Array (no element evidence to carry)" do
+    it "types empty arrays as the empty Tuple[] carrier (v0.0.6)" do
+      # v0.0.6 — `[]` resolves to `Tuple[]` so the per-element
+      # block fold can concatenate across all-empty positions
+      # like `[1, 2].flat_map { |_| [] }`. The empty tuple
+      # erases to the RBS tuple form `[]` (a valid RBS literal
+      # for the empty-tuple type); use `Tuple#describe` rather
+      # than the erasure form for round-trip checks.
       type = scope.type_of(parse_expression("[]"))
-      expect(type.describe).to eq("Array")
-      expect(type.erase_to_rbs).to eq("Array")
-      expect(type.type_args).to eq([])
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements).to eq([])
     end
 
     it "types non-empty arrays as Tuple[T1, T2, ...] (Slice 5 phase 1)" do

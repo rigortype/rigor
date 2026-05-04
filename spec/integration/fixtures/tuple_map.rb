@@ -66,6 +66,12 @@ assert_type("[1, 2, 2]", flat_varied)
 flat_scalar = [1, 2, 3].flat_map { |n| n.to_s }
 assert_type('["1", "2", "3"]', flat_scalar)
 
+# v0.0.6 — `[]` literal resolves to `Tuple[]`, which lets
+# `:flat_map` concatenate cleanly across all-empty per-position
+# results.
+flat_all_empty = [1, 2, 3].flat_map { |_n| [] }
+assert_type("[]", flat_all_empty)
+
 # `:find` / `:detect` truthy-block side: every per-position
 # block result folds to a Constant, so the dispatcher walks
 # the Tuple and returns the receiver element at the first

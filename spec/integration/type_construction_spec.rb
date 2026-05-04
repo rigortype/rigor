@@ -151,6 +151,17 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       expect(flat_scalar.elements.map(&:value)).to eq(%w[1 2 3])
     end
 
+    it "concatenates all-empty per-position Tuples into the empty Tuple" do
+      # `[1, 2, 3].flat_map { |_n| [] }` — every per-position
+      # result is `Tuple[]`, so the assembled answer is also
+      # `Tuple[]`. Requires the v0.0.6 empty-array literal
+      # carrier change (`[]` resolves to `Tuple[]` instead of
+      # `Nominal[Array]`).
+      flat_all_empty = harness.local(:flat_all_empty)
+      expect(flat_all_empty).to be_a(Rigor::Type::Tuple)
+      expect(flat_all_empty.elements).to be_empty
+    end
+
     it "folds Tuple#find to the first truthy-position element" do
       first_even = harness.local(:first_even)
       expect(first_even).to eq(Rigor::Type::Combinator.constant_of(2))

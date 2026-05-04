@@ -761,12 +761,17 @@ module Rigor
       # when every element is a non-splat value. Splatted entries
       # (`[*xs, 1]`) preserve the Slice 4 phase 2d behavior: we union
       # the contributed element types and emit
-      # `Nominal[Array, [union]]`. An empty literal stays as the raw
-      # `Array` (no element evidence to lock either an arity or an
-      # element type).
+      # `Nominal[Array, [union]]`.
+      #
+      # v0.0.6 — the empty literal `[]` resolves to the empty
+      # `Tuple[]` carrier rather than the raw `Nominal[Array]`.
+      # Both carriers erase to RBS `Array`, but `Tuple[]` pins
+      # the literal's known arity (zero), which lets the
+      # per-element block fold concatenate across all-empty
+      # positions like `[1, 2].flat_map { |_| [] }`.
       def array_type_for(node)
         elements = node.elements
-        return Type::Combinator.nominal_of(Array) if elements.empty?
+        return Type::Combinator.tuple_of if elements.empty?
 
         if elements.any?(Prism::SplatNode)
           element_types = elements.map { |e| type_of(e) }

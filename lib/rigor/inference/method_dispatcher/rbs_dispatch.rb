@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "../../reflection"
 require_relative "../../type"
 require_relative "../../rbs_extended"
 require_relative "../rbs_type_translator"
@@ -218,15 +219,9 @@ module Rigor
           def lookup_method(environment, class_name, kind, method_name)
             case kind
             when :instance
-              environment.rbs_loader.instance_method(
-                class_name: class_name,
-                method_name: method_name
-              )
+              Rigor::Reflection.instance_method_definition(class_name, method_name, environment: environment)
             when :singleton
-              environment.rbs_loader.singleton_method(
-                class_name: class_name,
-                method_name: method_name
-              )
+              Rigor::Reflection.singleton_method_definition(class_name, method_name, environment: environment)
             end
           end
 
@@ -239,7 +234,7 @@ module Rigor
           def build_type_vars(environment, class_name, receiver_args)
             return {} if receiver_args.empty?
 
-            param_names = environment.rbs_loader.class_type_param_names(class_name)
+            param_names = Rigor::Reflection.class_type_param_names(class_name, environment: environment)
             return {} if param_names.empty?
             return {} if param_names.size != receiver_args.size
 

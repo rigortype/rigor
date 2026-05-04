@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "../reflection"
 require_relative "../type"
 require_relative "../environment"
 require_relative "../rbs_extended"
@@ -1282,18 +1283,15 @@ module Rigor
         end
 
         def resolve_rbs_extended_method(node, scope)
-          loader = scope.environment.rbs_loader
-          return nil if loader.nil?
-
           receiver_type = scope.type_of(node.receiver)
           class_name = rbs_extended_class_name(receiver_type)
           return nil if class_name.nil?
-          return nil unless loader.class_known?(class_name)
+          return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
 
           if receiver_type.is_a?(Type::Singleton)
-            loader.singleton_method(class_name: class_name, method_name: node.name)
+            Rigor::Reflection.singleton_method_definition(class_name, node.name, scope: scope)
           else
-            loader.instance_method(class_name: class_name, method_name: node.name)
+            Rigor::Reflection.instance_method_definition(class_name, node.name, scope: scope)
           end
         rescue StandardError
           nil

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "../reflection"
 require_relative "../type"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/shape_dispatch"
@@ -124,16 +125,13 @@ module Rigor
       end
 
       def user_class_fallback_receiver(receiver_type, environment)
-        loader = environment.rbs_loader
-        return nil if loader.nil?
-
         case receiver_type
         when Type::Nominal
-          return nil if loader.class_known?(receiver_type.class_name)
+          return nil if Rigor::Reflection.rbs_class_known?(receiver_type.class_name, environment: environment)
 
           environment.nominal_for_name("Object")
         when Type::Singleton
-          return nil if loader.class_known?(receiver_type.class_name)
+          return nil if Rigor::Reflection.rbs_class_known?(receiver_type.class_name, environment: environment)
 
           environment.singleton_for_name("Class")
         end

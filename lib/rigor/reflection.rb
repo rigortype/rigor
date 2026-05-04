@@ -66,6 +66,26 @@ module Rigor
       scope.environment.class_known?(class_name)
     end
 
+    # RBS-only variant of {.class_known?}. Use when the caller
+    # needs to know specifically whether RBS has a definition
+    # for the class, independent of any source-discovered
+    # `class Foo; end` declarations. The diagnostic-rule code
+    # paths that walk RBS method tables to decide whether to
+    # flag a missing method use this variant; otherwise the
+    # source-discovered class would suppress the rule even
+    # when no RBS sig actually proves the method exists.
+    #
+    # The kwarg accepts either `scope:` or `environment:`. The
+    # latter is for call sites that don't carry a `Scope`
+    # (most are bottom-half dispatcher code paths called with
+    # only an environment).
+    def rbs_class_known?(class_name, scope: nil, environment: nil)
+      loader = rbs_loader_for(scope, environment)
+      return false if loader.nil?
+
+      loader.class_known?(class_name)
+    end
+
     # @return [Symbol] one of `:equal`, `:subclass`, `:superclass`,
     #   `:disjoint`, `:unknown`.
     def class_ordering(lhs, rhs, scope: Scope.empty)
@@ -101,8 +121,8 @@ module Rigor
     # source-side discovered-method facts are reachable through
     # {.discovered_method?}; a future slice will unify the two
     # under a `MethodDefinition` carrier.
-    def instance_method_definition(class_name, method_name, scope: Scope.empty)
-      loader = scope.environment.rbs_loader
+    def instance_method_definition(class_name, method_name, scope: nil, environment: nil)
+      loader = rbs_loader_for(scope, environment)
       return nil if loader.nil?
 
       loader.instance_method(class_name: class_name.to_s, method_name: method_name.to_sym)
@@ -110,12 +130,60 @@ module Rigor
 
     # Returns the RBS `RBS::Definition::Method` for the singleton
     # (class-side) method, or nil.
-    def singleton_method_definition(class_name, method_name, scope: Scope.empty)
-      loader = scope.environment.rbs_loader
+    def singleton_method_definition(class_name, method_name, scope: nil, environment: nil)
+      loader = rbs_loader_for(scope, environment)
       return nil if loader.nil?
 
       loader.singleton_method(class_name: class_name.to_s, method_name: method_name.to_sym)
     end
+
+    # Returns the full RBS instance-side class definition
+    # (`RBS::Definition`), used by callers that walk the method
+    # table or member list. Returns nil when the class is not in
+    # RBS or when the loader cannot build a definition (e.g.
+    # constant aliases, malformed signatures).
+    def instance_definition(class_name, scope: nil, environment: nil)
+      loader = rbs_loader_for(scope, environment)
+      return nil if loader.nil?
+
+      loader.instance_definition(class_name.to_s)
+    rescue StandardError
+      nil
+    end
+
+    # Returns the full RBS singleton-side class definition.
+    def singleton_definition(class_name, scope: nil, environment: nil)
+      loader = rbs_loader_for(scope, environment)
+      return nil if loader.nil?
+
+      loader.singleton_definition(class_name.to_s)
+    rescue StandardError
+      nil
+    end
+
+    # Returns the RBS-declared type parameter names for the
+    # class (e.g. `[:A]` for `Array[A]`), or `[]` when the class
+    # is non-generic / not in RBS. Used by the dispatcher when
+    # binding generic method types to a concrete receiver.
+    def class_type_param_names(class_name, scope: nil, environment: nil)
+      loader = rbs_loader_for(scope, environment)
+      return [] if loader.nil?
+
+      loader.class_type_param_names(class_name.to_s)
+    end
+
+    # Internal helper — resolves the RBS loader from either the
+    # `scope:` or the `environment:` kwarg, defaulting to the
+    # empty scope's environment when neither is given. Public
+    # methods document both spellings; the helper centralises
+    # the dispatch.
+    def rbs_loader_for(scope, environment)
+      return environment.rbs_loader if environment
+      return scope.environment.rbs_loader if scope
+
+      Scope.empty.environment.rbs_loader
+    end
+    private_class_method :rbs_loader_for
 
     # @return [Boolean] true when the analyzed source contains a
     #   class / module declaration for the given name. Does NOT

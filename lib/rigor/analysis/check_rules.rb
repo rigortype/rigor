@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "../reflection"
 require_relative "../source/node_walker"
 require_relative "../type"
 require_relative "diagnostic"
@@ -172,9 +173,7 @@ module Rigor
           kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
           return nil if scope.discovered_method?(class_name, call_node.name, kind)
 
-          loader = scope.environment.rbs_loader
-          return nil if loader.nil?
-          return nil unless loader.class_known?(class_name)
+          return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
 
           # When the loader cannot build a class definition for a
           # name it nominally knows (constant-decl aliases such
@@ -182,9 +181,9 @@ module Rigor
           # malformed signatures), we cannot enumerate methods
           # so we MUST NOT emit a false positive. Skip the rule
           # in that case.
-          return nil unless definition_available?(loader, receiver_type, class_name)
+          return nil unless definition_available?(receiver_type, class_name, scope)
 
-          method_def = lookup_method(loader, receiver_type, class_name, call_node.name)
+          method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
           return nil if method_def
 
           build_undefined_method_diagnostic(path, call_node, receiver_type)
@@ -219,27 +218,29 @@ module Rigor
           nil
         end
 
-        def definition_available?(loader, receiver_type, class_name)
+        def definition_available?(receiver_type, class_name, scope)
           if receiver_type.is_a?(Type::Singleton)
-            !loader.singleton_definition(class_name).nil?
+            !Rigor::Reflection.singleton_definition(class_name, scope: scope).nil?
           else
-            !loader.instance_definition(class_name).nil?
+            !Rigor::Reflection.instance_definition(class_name, scope: scope).nil?
           end
-        rescue StandardError
-          false
         end
 
-        def lookup_method(loader, receiver_type, class_name, method_name)
+        def lookup_method(receiver_type, class_name, method_name, scope)
           if receiver_type.is_a?(Type::Singleton)
-            loader.singleton_method(class_name: class_name, method_name: method_name)
+            Rigor::Reflection.singleton_method_definition(class_name, method_name, scope: scope)
           else
-            loader.instance_method(class_name: class_name, method_name: method_name)
+            Rigor::Reflection.instance_method_definition(class_name, method_name, scope: scope)
           end
         rescue StandardError
-          # The loader is best-effort and may raise on malformed
-          # RBS. Treat any failure as "method exists" so we do
-          # NOT emit a false positive when our knowledge of the
-          # receiver class is structurally incomplete.
+          # The Reflection facade catches loader exceptions and
+          # returns nil. The wrapper here treats failures as
+          # "method exists" so we do NOT emit a false positive
+          # when our knowledge of the receiver class is
+          # structurally incomplete (Reflection's own rescue
+          # already returns nil; this catch is a defensive
+          # double-net for any future call shape that might
+          # raise).
           true
         end
 
@@ -271,12 +272,10 @@ module Rigor
           kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
           return nil if scope.discovered_method?(class_name, call_node.name, kind)
 
-          loader = scope.environment.rbs_loader
-          return nil if loader.nil?
-          return nil unless loader.class_known?(class_name)
-          return nil unless definition_available?(loader, receiver_type, class_name)
+          return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+          return nil unless definition_available?(receiver_type, class_name, scope)
 
-          method_def = lookup_method(loader, receiver_type, class_name, call_node.name)
+          method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
           return nil if method_def.nil? || method_def == true
 
           arity_envelope = compute_arity_envelope(method_def)
@@ -383,12 +382,14 @@ module Rigor
           receiver_type = scope.type_of(call_node.receiver)
           return nil unless receiver_type.is_a?(Type::Union)
 
-          loader = scope.environment.rbs_loader
-          return nil if loader.nil?
+          # The rule only fires when the analyzer has access to
+          # an RBS loader; without it, the per-member method-
+          # presence checks below cannot rule out a sound call.
+          return nil unless Rigor::Reflection.rbs_class_known?("NilClass", scope: scope)
 
           return nil unless union_contains_nil?(receiver_type)
-          return nil unless union_method_present_on_non_nil?(receiver_type, call_node.name, loader, scope)
-          return nil if nil_class_has_method?(call_node.name, loader)
+          return nil unless union_method_present_on_non_nil?(receiver_type, call_node.name, scope)
+          return nil if nil_class_has_method?(call_node.name, scope)
 
           build_nil_receiver_diagnostic(path, call_node)
         end
@@ -409,27 +410,25 @@ module Rigor
         # that are unsound on the non-nil branch — that is the
         # `undefined_method_diagnostic` rule's job, and we want
         # exactly one diagnostic per offending call site.
-        def union_method_present_on_non_nil?(union, method_name, loader, scope)
+        def union_method_present_on_non_nil?(union, method_name, scope)
           non_nil_members = union.members.reject { |m| nil_member?(m) }
           return false if non_nil_members.empty?
 
-          non_nil_members.all? { |m| method_present_anywhere?(m, method_name, loader, scope) }
+          non_nil_members.all? { |m| method_present_anywhere?(m, method_name, scope) }
         end
 
-        def method_present_anywhere?(member, method_name, loader, scope)
+        def method_present_anywhere?(member, method_name, scope)
           class_name = concrete_class_name(member)
           return true if class_name.nil? # Dynamic / Top / Bot — be permissive.
           return true if scope.discovered_method?(class_name, method_name, :instance)
-          return true unless loader.class_known?(class_name)
-          return true unless definition_available?(loader, member, class_name)
+          return true unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+          return true unless definition_available?(member, class_name, scope)
 
-          !lookup_method(loader, member, class_name, method_name).nil?
+          !lookup_method(member, class_name, method_name, scope).nil?
         end
 
-        def nil_class_has_method?(method_name, loader)
-          return false unless loader.class_known?("NilClass")
-
-          definition = loader.instance_definition("NilClass")
+        def nil_class_has_method?(method_name, scope)
+          definition = Rigor::Reflection.instance_definition("NilClass", scope: scope)
           return false if definition.nil?
 
           !definition.methods[method_name.to_sym].nil?
@@ -684,12 +683,10 @@ module Rigor
           # supplies BOTH a `def` and an RBS sig, the sig is
           # the authoritative parameter contract and we
           # should validate calls against it.
-          loader = scope.environment.rbs_loader
-          return nil if loader.nil?
-          return nil unless loader.class_known?(class_name)
-          return nil unless definition_available?(loader, receiver_type, class_name)
+          return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+          return nil unless definition_available?(receiver_type, class_name, scope)
 
-          method_def = lookup_method(loader, receiver_type, class_name, call_node.name)
+          method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
           return nil if method_def.nil? || method_def == true
           return nil unless method_def.method_types.size == 1
 

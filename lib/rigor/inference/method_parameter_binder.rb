@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "../reflection"
 require_relative "../type"
 require_relative "../rbs_extended"
 require_relative "rbs_type_translator"
@@ -136,18 +137,15 @@ module Rigor
       def lookup_rbs_method(def_node)
         return nil if @class_path.nil?
 
-        loader = @environment.rbs_loader
-        return nil if loader.nil?
-
         method_name = def_node.name
         # `def self.foo` always means a singleton method on the
         # immediate enclosing class. `def foo` inside `class << self`
         # is also a singleton method (the StatementEvaluator threads
         # the `singleton:` flag through this case).
         if def_node.receiver.is_a?(Prism::SelfNode) || @singleton
-          loader.singleton_method(class_name: @class_path, method_name: method_name)
+          Rigor::Reflection.singleton_method_definition(@class_path, method_name, environment: @environment)
         else
-          loader.instance_method(class_name: @class_path, method_name: method_name)
+          Rigor::Reflection.instance_method_definition(@class_path, method_name, environment: @environment)
         end
       end
 

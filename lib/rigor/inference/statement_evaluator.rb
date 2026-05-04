@@ -2,6 +2,7 @@
 
 require "prism"
 
+require_relative "../reflection"
 require_relative "../type"
 require_relative "../analysis/fact_store"
 require_relative "../source/node_walker"
@@ -838,7 +839,7 @@ module Rigor
         end
       end
 
-      def resolve_call_method(call_node, current_scope) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def resolve_call_method(call_node, current_scope) # rubocop:disable Metrics/PerceivedComplexity
         receiver_node = call_node.receiver
         receiver_type =
           if receiver_node
@@ -848,17 +849,14 @@ module Rigor
           end
         return nil if receiver_type.nil?
 
-        loader = current_scope.environment.rbs_loader
-        return nil if loader.nil?
-
         class_name = assertion_class_name(receiver_type)
         return nil if class_name.nil?
-        return nil unless loader.class_known?(class_name)
+        return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: current_scope)
 
         if receiver_type.is_a?(Type::Singleton)
-          loader.singleton_method(class_name: class_name, method_name: call_node.name)
+          Rigor::Reflection.singleton_method_definition(class_name, call_node.name, scope: current_scope)
         else
-          loader.instance_method(class_name: class_name, method_name: call_node.name)
+          Rigor::Reflection.instance_method_definition(class_name, call_node.name, scope: current_scope)
         end
       rescue StandardError
         nil

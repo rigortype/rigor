@@ -183,6 +183,37 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         expect(dispatch(receiver: numeric_t, method_name: :to_a)).to eq(numeric_t)
       end
     end
+
+    describe "Tuple#to_h shape conversion (v0.0.7)" do
+      it "folds a Tuple of 2-Tuples whose first element is a Constant to a HashShape" do
+        pair_a = Rigor::Type::Combinator.tuple_of(constant(:a), constant(1))
+        pair_b = Rigor::Type::Combinator.tuple_of(constant(:b), constant(2))
+        result = dispatch(receiver: tuple(pair_a, pair_b), method_name: :to_h)
+        expect(result).to eq(Rigor::Type::Combinator.hash_shape_of(a: constant(1), b: constant(2)))
+      end
+
+      it "folds an empty Tuple to the empty HashShape" do
+        expect(dispatch(receiver: tuple, method_name: :to_h))
+          .to eq(Rigor::Type::Combinator.hash_shape_of({}))
+      end
+
+      it "declines when an inner pair is not 2-element" do
+        bad = Rigor::Type::Combinator.tuple_of(constant(:a), constant(1), constant(2))
+        expect(dispatch(receiver: tuple(bad), method_name: :to_h)).to be_nil
+      end
+
+      it "declines when a pair's key is non-Constant" do
+        nominal_key = Rigor::Type::Combinator.nominal_of("Symbol")
+        bad = Rigor::Type::Combinator.tuple_of(nominal_key, constant(1))
+        expect(dispatch(receiver: tuple(bad), method_name: :to_h)).to be_nil
+      end
+
+      it "declines on duplicate keys" do
+        pair_a1 = Rigor::Type::Combinator.tuple_of(constant(:a), constant(1))
+        pair_a2 = Rigor::Type::Combinator.tuple_of(constant(:a), constant(2))
+        expect(dispatch(receiver: tuple(pair_a1, pair_a2), method_name: :to_h)).to be_nil
+      end
+    end
   end
 
   describe "HashShape element access" do
@@ -278,6 +309,44 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
 
     it "folds any? to Constant<true> for a non-empty closed shape (v0.0.7)" do
       expect(dispatch(receiver: shape, method_name: :any?)).to eq(constant(true))
+    end
+
+    it "folds to_a to a per-entry Tuple of 2-Tuples (v0.0.7)" do
+      result = dispatch(receiver: shape, method_name: :to_a)
+      expect(result).to be_a(Rigor::Type::Tuple)
+      expect(result.elements.map { |e| e.elements.map(&:value) })
+        .to eq([[:a, 1], [:b, "two"]])
+    end
+
+    it "folds to_h to the receiver shape itself" do
+      expect(dispatch(receiver: shape, method_name: :to_h)).to eq(shape)
+    end
+
+    it "folds invert to a HashShape with values as keys when values are Symbols" do
+      symbol_valued = hash_shape(a: constant(:one), b: constant(:two))
+      result = dispatch(receiver: symbol_valued, method_name: :invert)
+      expect(result).to eq(hash_shape(one: constant(:a), two: constant(:b)))
+    end
+
+    it "declines invert when values are Integers (HashShape keys must be Symbol or String)" do
+      expect(dispatch(receiver: shape, method_name: :invert)).to be_nil
+    end
+
+    it "declines invert on duplicate values" do
+      dup = hash_shape(a: constant(:x), b: constant(:x))
+      expect(dispatch(receiver: dup, method_name: :invert)).to be_nil
+    end
+
+    it "folds merge of two closed HashShapes" do
+      other = hash_shape(c: constant(true))
+      result = dispatch(receiver: shape, method_name: :merge, args: [other])
+      expect(result).to eq(hash_shape(a: constant(1), b: constant("two"), c: constant(true)))
+    end
+
+    it "right-hand entries override left-hand entries on key collision in merge" do
+      override = hash_shape(a: constant(99))
+      result = dispatch(receiver: shape, method_name: :merge, args: [override])
+      expect(result).to eq(hash_shape(a: constant(99), b: constant("two")))
     end
 
     it "falls through for unrecognised method names" do

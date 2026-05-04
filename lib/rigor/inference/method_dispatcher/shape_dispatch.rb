@@ -83,6 +83,7 @@ module Rigor
           sort: :tuple_sort,
           reverse: :tuple_reverse,
           to_a: :tuple_to_a,
+          to_h: :tuple_to_h,
           :[] => :tuple_index,
           fetch: :tuple_index,
           dig: :tuple_dig
@@ -96,6 +97,10 @@ module Rigor
           any?: :hash_any?,
           keys: :hash_keys,
           values: :hash_values,
+          to_a: :hash_to_a,
+          to_h: :hash_to_h,
+          invert: :hash_invert,
+          merge: :hash_merge,
           :[] => :hash_lookup,
           fetch: :hash_lookup,
           dig: :hash_dig,
@@ -522,6 +527,35 @@ module Rigor
             tuple
           end
 
+          # `tuple.to_h` — folds when every Tuple element is itself
+          # a 2-element Tuple whose first element is a `Constant`
+          # (so it can serve as a Hash key). Produces a closed
+          # `HashShape` whose entries mirror the per-position
+          # pairs. Empty Tuples fold to the empty HashShape.
+          # rubocop:disable Metrics/CyclomaticComplexity
+          def tuple_to_h(tuple, _method_name, args)
+            return nil unless args.empty?
+            return Type::Combinator.hash_shape_of({}) if tuple.elements.empty?
+
+            pairs = tuple.elements.map { |e| tuple_to_h_pair(e) }
+            return nil if pairs.any?(&:nil?)
+            return nil unless pairs.map(&:first).uniq.size == pairs.size
+
+            Type::Combinator.hash_shape_of(pairs.to_h)
+          end
+          # rubocop:enable Metrics/CyclomaticComplexity
+
+          def tuple_to_h_pair(element)
+            return nil unless element.is_a?(Type::Tuple)
+            return nil unless element.elements.size == 2
+
+            key = element.elements[0]
+            value = element.elements[1]
+            return nil unless key.is_a?(Type::Constant)
+
+            [key.value, value]
+          end
+
           # Returns `true` / `false` if every element's truthiness
           # agrees, nil for mixed-or-unknown shapes. `all: true`
           # checks every element is truthy; `all: false` checks
@@ -708,6 +742,66 @@ module Rigor
             return nil unless shape.optional_keys.empty?
 
             Type::Combinator.tuple_of(*shape.pairs.values)
+          end
+
+          # `shape.to_a` — returns a per-entry `Tuple[Tuple[K, V], …]`
+          # for a closed shape with no optional keys.
+          def hash_to_a(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            entries = shape.pairs.map do |k, v|
+              Type::Combinator.tuple_of(Type::Combinator.constant_of(k), v)
+            end
+            Type::Combinator.tuple_of(*entries)
+          end
+
+          # `shape.to_h` — Hash is structurally identical to its
+          # to_h (Ruby returns the receiver itself for a Hash).
+          def hash_to_h(shape, _method_name, args)
+            return nil unless args.empty?
+
+            shape
+          end
+
+          # `shape.invert` — swaps keys and values. Folds when
+          # every value is a `Constant` whose value is a Symbol
+          # or String (the only hashable types that
+          # `HashShape` accepts as keys). Duplicate values would
+          # alias under inversion, so Rigor declines on
+          # collisions rather than silently dropping entries.
+          # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+          def hash_invert(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+            return nil unless shape.pairs.values.all?(Type::Constant)
+            return nil unless shape.pairs.values.all? { |v| v.value.is_a?(Symbol) || v.value.is_a?(String) }
+
+            inverted = shape.pairs.each_with_object({}) do |(k, v), acc|
+              return nil if acc.key?(v.value)
+
+              acc[v.value] = Type::Combinator.constant_of(k)
+            end
+            Type::Combinator.hash_shape_of(inverted)
+          end
+          # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+
+          # `shape.merge(other)` — when both sides are closed
+          # HashShape with no optional keys, fold to the merged
+          # HashShape. Right-hand entries override left-hand
+          # entries on key collision (matching Ruby's runtime
+          # `Hash#merge`).
+          def hash_merge(shape, _method_name, args)
+            return nil unless args.size == 1
+            return nil unless shape.closed? && shape.optional_keys.empty?
+
+            other = args.first
+            return nil unless other.is_a?(Type::HashShape)
+            return nil unless other.closed? && other.optional_keys.empty?
+
+            Type::Combinator.hash_shape_of(shape.pairs.merge(other.pairs))
           end
 
           # `shape[k]` and `shape.fetch(k)` for a static symbol/string

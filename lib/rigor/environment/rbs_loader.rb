@@ -144,6 +144,17 @@ module Rigor
         @hierarchy.class_ordering(lhs, rhs)
       end
 
+      # @return [Array<String>] every RBS-declared constant name
+      #   (top-level prefixed, e.g., `"::Math::PI"`) currently loaded
+      #   into the environment. Used by the cache producer that
+      #   materialises the constant-type table; ordinary callers
+      #   should keep using {#constant_type} for point lookups.
+      def constant_names
+        env.constant_decls.keys.map(&:to_s)
+      rescue StandardError
+        []
+      end
+
       # Slice A constant-value lookup. Returns the translated
       # `Rigor::Type` for a non-class constant declaration
       # (`BUCKETS: Array[Symbol]`, `DEFAULT_PATH: String`, ...) or

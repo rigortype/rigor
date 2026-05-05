@@ -226,11 +226,52 @@ the byte layout, the latter the descriptor schema. Bumping the
 format version invalidates entries on the read path (header
 mismatch → cache miss).
 
-## RBS environment cache (v0.0.8 slice 3 — pending)
+## `Rigor::Cache::RbsConstantTable` (v0.0.8 slice 3)
 
-The first real cache producer. Caches the result of
-`RbsLoader#build_env` keyed by signature-path file digests, the
-`libraries:` list, and the `rbs` gem locked version.
+The first cached producer wired through {`Rigor::Cache::Store#fetch_or_compute`}.
+Producer id: `"rbs.constant_type_table"`.
+
+### Why the constant table and not `RbsLoader#build_env`
+
+`RBS::Environment` and its transitive AST nodes carry
+`RBS::Location` instances. `RBS::Location` is a C-extension class
+without `_dump_data`, so a naive `Marshal.dump(env)` raises
+`TypeError`. Caching `RBS::Environment` itself therefore requires
+either a custom-serialiser surface on the `Store` or a
+schema-stable intermediate that walks every relevant node into a
+Marshal-safe shape. Both options are out of scope for the v0.0.8
+slice budget — see [ADR-6 § 8 "RBS::Environment serialisation"](../adr/6-cache-persistence-backend.md).
+
+The v0.0.8 slice instead caches a **post-translation** artefact:
+the result of translating every RBS-declared constant to its
+`Rigor::Type` form. `Rigor::Type` values are plain frozen value
+objects with well-defined `Marshal` round-trips, so the cache
+machinery exercises the full read/write cycle on real data
+without blocking on the serialiser question.
+
+### `RbsConstantTable.fetch(loader:, store:) -> Hash{String => Rigor::Type}`
+
+Returns a hash mapping every canonical constant name (top-level-
+prefixed, e.g. `"::Math::PI"`) to its translated `Rigor::Type`.
+The producer block enumerates `loader.constant_names` and calls
+`loader.constant_type(name)` for each; entries whose translation
+returns `nil` are dropped from the table.
+
+### Descriptor shape
+
+- `gems`: `{ name: "rbs", requirement: ">= 0", locked: ::RBS::VERSION }`.
+  The bundled core + stdlib RBS signatures live inside the `rbs`
+  gem; a gem upgrade therefore invalidates the table.
+- `files`: a `:digest`-comparator entry for every `.rbs` file
+  reachable under the loader's `signature_paths` (the project's
+  own signature directories, which the gem-version entry cannot
+  cover).
+- `configs`: a single `rbs.libraries` entry whose `value_hash` is
+  the SHA-256 of the loader's sorted libraries list, so adding
+  or removing a stdlib library invalidates the table.
+
+The `params` argument is empty — every input the producer
+consumes is already encoded in the descriptor.
 
 ## CLI observability (v0.0.8 slice 4–5 — pending)
 

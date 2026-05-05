@@ -162,9 +162,36 @@ end
 - The block runs only on cache miss.
 
 The first producer wired through this API in v0.0.8 is the RBS
-environment loader — the single biggest cost in a cold `rigor
-check` run. Other producers (reflection, scope index, catalog
-loaders) follow in subsequent v0.0.8 slices or v0.0.9.
+**translated-constant table** — a `Hash<String, Rigor::Type>`
+keyed by every constant name declared in the loaded RBS
+environment, materialised once and reused. It is not the single
+largest cold-start cost (that is `RBS::EnvironmentLoader#build_env`
+itself), but it is the largest cost the cache machinery can
+consume **without a custom serialiser**: see § "RBS::Environment
+serialisation" below. Other producers (reflection, scope index,
+catalog loaders) follow in subsequent v0.0.8 slices or v0.0.9.
+
+### 8. RBS::Environment serialisation
+
+`RBS::Environment` and its transitive AST nodes carry
+`RBS::Location` instances. `RBS::Location` is a C-extension
+class without `_dump_data`/`_load_data`, so naive `Marshal.dump`
+fails with `TypeError`. Caching `RBS::Environment` itself
+therefore requires either:
+
+- A custom-serialiser surface on the cache `Store` (a producer
+  registers `dump`/`load` callables alongside `fetch_or_compute`),
+  plus a serialiser that strips and reconstructs `RBS::Location`
+  / `RBS::Buffer`; or
+- A schema-stable intermediate representation (every relevant RBS
+  node walked into a Marshal-safe shape).
+
+Both are substantial work and out of scope for the v0.0.8 slice
+budget. The v0.0.8 first producer therefore caches a
+**post-translation** artefact (`Rigor::Type` values, which are
+plain frozen value objects with well-defined `Marshal` round-
+trips). Subsequent slices reconsider the custom-serialiser route
+once a real cold-start regression motivates the work.
 
 ## Rejected and Deferred Candidate Decisions
 

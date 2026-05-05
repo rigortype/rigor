@@ -190,21 +190,38 @@ Deferred from v0.0.9 (carry forward to v0.1.0+):
 - **LSP / long-running-daemon cache mode.**
 - **LRU eviction / size cap.** Still unbounded; users run `--clear-cache` if needed.
 
-## v0.1.0 — Long Horizon (architecture commitments deferred)
+## v0.1.0 — In Development
 
-Theme: **infrastructure**. v0.1.0 reserves two cross-cutting machinery surfaces that should not be retro-fitted later:
+Theme: **first plugin contract**. ADR-2 § "Extension API" fixes the design surface; v0.1.0 ships the implementation. The pre-v0.1.0 substrate landed in v0.0.3 → v0.0.9 — type vocabulary, inference engine, persistent cache layer wired through `rigor check`, `Rigor::Reflection` facade, `Rigor::FlowContribution` bundle, public-API drift pins (`Scope` / `Environment` / `Type::Combinator` / `Reflection`), `Diagnostic#source_family`, RBS::Extended directive plumbing — leaving v0.1.0 as a finite assembly job rather than an open architectural exercise.
 
-- **Caches.** A persistent on-disk cache for parsed RBS environments, scope indexes, and catalog data so warm runs are fast.
-- **Plugin API (ADR-2).** The capability-role / fact-contribution / mutation-summary surface plugin authors will attach to.
+The public surface plugins attach to is documented in [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) and pinned by `spec/rigor/public_api_drift_spec.rb`. Slices that extend a pinned namespace update the drift spec in the same commit.
 
-These are explicitly out of scope for v0.0.x. The pre-v0.1.0 work is the type-language and inference-engine surface that the plugin API has to be designed against; v0.0.3 → v0.0.7 closed the substrate gaps that ADR-2 would otherwise stumble on.
+Slice plan (recommended order; each slice independently shippable behind a `Rigor::Plugin` namespace gate until the contract is exercised end-to-end):
 
-Pre-v0.1.0 surfaces that can land independently as v0.0.x dot releases (see [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md) for the full breakdown):
+1. **Plugin registration / loading.** Manifest discovery (gem metadata + project-local plugins), deterministic load ordering, dependency-injected analyzer services (`Reflection`, type factories, configuration readers). ADR-2 § "Registration, Configuration, and Caching". Smallest viable slice; no engine behaviour change yet, just the registry the rest of v0.1.0 attaches to.
+2. **Plugin trust / I/O policy.** ADR-2 § "Plugin Trust and I/O Policy". Trusted-gem model, network disabled by default during analysis, file reads scoped to project + dependency metadata. Lands alongside (1) so the loader has the policy to enforce.
+3. **Plugin contribution merger.** Consumes `FlowContribution` bundles per ADR-2 § "Plugin Contribution Merging". The analyzer-internal conversion (built-in narrowing rules + `RbsExtended.read_flow_contribution` from v0.0.9 group D) is the reference implementation; this slice routes plugin-emitted bundles through the same merger.
+4. **FlowContribution wiring through internal narrowing.** Internal-only refactor that turns the merger into the single point of integration. Carry-over from v0.0.9. No user-visible behaviour change, but de-risks (3) by exercising every conversion site under existing specs.
+5. **Plugin diagnostic provenance.** `Diagnostic#source_family` (shipped in v0.0.8) already publishes `plugin.<id>.<rule>` qualified rules; this slice wires plugin-emitted diagnostics through the formatter so the path is exercised end-to-end.
+6. **Plugin-side cache producers.** Plugins register `producer_id`s and ride the v0.0.9 `Store#fetch_or_compute(serialize:, deserialize:)` surface, with `PluginEntry` rows in the descriptor schema for invalidation. Bundles cleanly with the per-method Reflection cache re-attempt deferred from v0.0.9.
 
-- **Public-API declaration of `Rigor::Scope`, `Rigor::Type`, `Rigor::Environment`** — namespace policy + drift tests. No new code, just contract declaration.
-- **Reflection facade** — a unified `Rigor::Reflection` read-side over `ClassRegistry` + `RbsLoader` + `Builtins::*_CATALOG`. Highest-leverage pre-v0.1.0 slice; every plugin protocol that asks "what does class X look like?" needs this.
-- **Cache slice taxonomy** — design doc landed at [`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md). Fixes the per-slot entry shapes (`FileEntry`, `GemEntry`, `PluginEntry`, `ConfigEntry`), comparator semantics, composition rules, cache-key derivation, granularity guidance, and the schema-versioning policy. The persistence layer it describes ships in v0.1.0; the design doc is the prerequisite contract.
-- **Flow-contribution bundle struct** — a `Rigor::FlowContribution` with the eight ADR-2 slots (`return_type`, `truthy_facts`, `falsey_facts`, `post_return_facts`, `mutations`, `invalidations`, `exceptional`, `role_conformance`). Internal effect structs convert into bundles at the boundary.
-- **Diagnostic provenance prefix** — `Diagnostic` gains a `source_family` field; formatter publishes `plugin.<id>.<rule>` style identifiers.
+Carry-overs from v0.0.9 absorbed into v0.1.0 (independent of plugin loading; can land in parallel with the slices above):
 
-These do not block v0.0.x release cadence; they are the operational milestones that make v0.1.0 a finite assembly job rather than an open architectural exercise.
+- **Per-method Reflection caches** (`instance_method_definition`, `singleton_method_definition`, …). Marshal-clean since the v0.0.9 C2 patch. A v0.0.9 attempt at conditional cache wiring inside `RbsLoader` triggered an analyzer regression (`uninitialized constant Rigor::Cache::RbsDescriptor::Descriptor` on `rigor check lib`); root cause not isolated. Re-attempt belongs alongside (6) where the conditional-store discipline is unified.
+
+Out of scope for v0.1.0 (deferred to v0.1.x or beyond):
+
+- **LSP / long-running-daemon cache mode.** Requires concurrent multi-process safety beyond the per-file `flock` model.
+- **LRU eviction / size cap.** Cache stays unbounded; users run `--clear-cache` if needed.
+- **Cross-machine cache sharing.**
+- **ObjectSpace catalog import** — needs a singleton-module dispatch path the catalog tier does not yet provide.
+- **URI / Kernel catalog imports** — fall outside the standard import skill's premise.
+- **Pathname / URI delegation rules.**
+- **`numeric-string` regex-pattern recogniser.**
+- **`self`-narrowing in `predicate-if-*`.**
+- **`rigor:v1:conforms-to` directive** — needs a real structural-conformance checker.
+- **`Trinary` return-type contract on type-carrier predicate methods** — needs a new CheckRules rule family (`return-type-mismatch`).
+- **New CheckRules rule families** beyond `always-raises` (type-incompatible writes, return-type mismatch, unreachable branches).
+- **C-body classifier wider transitive mutator scan** — guards against the `Array#to_a` regression that gated the v0.0.5 fix.
+- **`Data.define` override-aware initializer dispatch.**
+- **Decimal / octal / hex `int-string` complement pairs.** Complement domains are too vague to warrant separate carriers.

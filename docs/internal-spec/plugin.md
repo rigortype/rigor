@@ -176,9 +176,12 @@ successfully still participate in later v0.1.0 slices.
 ## Slice-1 boundaries (intentionally NOT covered)
 
 - **Plugin contribution emission** (`FlowContribution` bundles,
-  capability roles, dynamic returns). Slice 3 wires the
-  contribution merger; protocols on `Rigor::Plugin::Base` arrive
-  alongside that work.
+  capability roles, dynamic returns). Slice 3 has shipped the
+  standalone {Rigor::FlowContribution::Merger}
+  ([`flow-contribution-merger.md`](flow-contribution-merger.md));
+  protocols on `Rigor::Plugin::Base` that produce bundles arrive
+  alongside slice 4 (FlowContribution wiring through internal
+  narrowing).
 - **Plugin diagnostic provenance** beyond the `:plugin_loader`
   family for load failures. Slice 5 routes plugin-emitted
   diagnostics through `Diagnostic#source_family` with

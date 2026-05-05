@@ -168,6 +168,45 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     read_file(req:path)
   ].freeze
 
+  FLOW_CONTRIBUTION_INSTANCE = %w[
+    ==(req:other)
+    empty?()
+    eql?(req:other)
+    exceptional()
+    falsey_facts()
+    hash()
+    invalidations()
+    mutations()
+    post_return_facts()
+    provenance()
+    return_type()
+    role_conformance()
+    to_element_list()
+    to_h()
+    truthy_facts()
+  ].freeze
+
+  FLOW_CONTRIBUTION_MERGE_RESULT_INSTANCE = %w[
+    conflict?()
+    conflicts()
+    empty?()
+    exceptional()
+    falsey_facts()
+    invalidations()
+    mutations()
+    post_return_facts()
+    provenances()
+    return_type()
+    role_conformance()
+    to_h()
+    truthy_facts()
+  ].freeze
+
+  FLOW_CONTRIBUTION_MERGER_SINGLETON = %w[
+    merge(req:contributions)
+    tier_for(req:provenance)
+  ].freeze
+
   COMBINATOR_SINGLETON = %w[
     bot()
     constant_of(req:value)
@@ -307,6 +346,30 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
     it "exposes the expected I/O surface" do
       expect(instance_signatures(Rigor::Plugin::IoBoundary)).to eq(
         PublicApiDriftSnapshots::PLUGIN_IO_BOUNDARY_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::FlowContribution" do
+    it "exposes the expected bundle surface" do
+      expect(instance_signatures(Rigor::FlowContribution)).to eq(
+        PublicApiDriftSnapshots::FLOW_CONTRIBUTION_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::FlowContribution::MergeResult" do
+    it "exposes the expected merge-result surface" do
+      expect(instance_signatures(Rigor::FlowContribution::MergeResult)).to eq(
+        PublicApiDriftSnapshots::FLOW_CONTRIBUTION_MERGE_RESULT_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::FlowContribution::Merger" do
+    it "exposes the expected merger entry-point surface" do
+      expect(singleton_signatures(Rigor::FlowContribution::Merger)).to eq(
+        PublicApiDriftSnapshots::FLOW_CONTRIBUTION_MERGER_SINGLETON
       )
     end
   end

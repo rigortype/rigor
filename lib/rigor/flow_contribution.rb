@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "flow_contribution/element"
+
 module Rigor
   # The public packaging of a flow contribution at a single call edge.
   # Plugins, `RBS::Extended` annotations, and built-in narrowing rules
@@ -101,6 +103,40 @@ module Rigor
       end
     end
 
+    # Flattens this bundle into a tagged element list keyed by
+    # `(target, edge, kind)`. The flattening is mechanical and
+    # round-trippable through {Merger.merge}: feeding the result
+    # back through the merger produces an equivalent bundle.
+    #
+    # Layout:
+    #
+    # | slot                | edge          | kind                | target                  |
+    # | --------------------|---------------|---------------------|-------------------------|
+    # | return_type         | normal        | return_type         | :return                 |
+    # | truthy_facts        | truthy        | truthy_fact         | (per-fact target)       |
+    # | falsey_facts        | falsey        | falsey_fact         | (per-fact target)       |
+    # | post_return_facts   | post_return   | post_return_fact    | (per-fact target)       |
+    # | mutations           | normal        | mutation            | (per-mutation target)   |
+    # | invalidations       | normal        | invalidation        | (per-fact target)       |
+    # | exceptional         | exceptional   | exception           | :raise                  |
+    # | role_conformance    | normal        | role                | (per-role target)       |
+    #
+    # @return [Array<Element>]
+    def to_element_list # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+      elements = []
+      elements << element_for(:return, :normal, :return_type, return_type) unless return_type.nil?
+      Array(truthy_facts).each { |fact| elements << element_for(fact_target(fact), :truthy, :truthy_fact, fact) }
+      Array(falsey_facts).each { |fact| elements << element_for(fact_target(fact), :falsey, :falsey_fact, fact) }
+      Array(post_return_facts).each do |fact|
+        elements << element_for(fact_target(fact), :post_return, :post_return_fact, fact)
+      end
+      Array(mutations).each { |m| elements << element_for(fact_target(m), :normal, :mutation, m) }
+      Array(invalidations).each { |i| elements << element_for(fact_target(i), :normal, :invalidation, i) }
+      elements << element_for(:raise, :exceptional, :exception, exceptional) unless exceptional.nil?
+      Array(role_conformance).each { |r| elements << element_for(fact_target(r), :normal, :role, r) }
+      elements.freeze
+    end
+
     def ==(other)
       other.is_a?(FlowContribution) && to_h == other.to_h
     end
@@ -111,6 +147,21 @@ module Rigor
     end
 
     private
+
+    def element_for(target, edge, kind, payload)
+      Element.new(target: target, edge: edge, kind: kind, payload: payload, provenance: provenance)
+    end
+
+    # Best-effort target extraction. Payloads that expose a
+    # `#target` accessor (typed-fact carriers, mutation effects)
+    # provide their own; everything else falls through with the
+    # payload itself as the merge key, which keeps deduplication
+    # well-defined for opaque entries.
+    def fact_target(payload)
+      return payload.target if payload.respond_to?(:target)
+
+      payload
+    end
 
     def freeze_collection(value)
       return nil if value.nil?

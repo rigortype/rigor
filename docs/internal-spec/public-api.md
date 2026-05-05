@@ -78,12 +78,15 @@ Any signature change on these methods has to update the matching
 ## What is intentionally NOT yet locked
 
 - **`Rigor::FlowContribution`** — the bundle struct shipped in
-  v0.0.9 (`c48f05f`) but the v0.1.0 plugin contribution merger may
-  refine the eight-slot shape (e.g. element-list flattening) before
-  freeze. Plugin authors should consume bundles via the public
-  reader / `to_h` form and avoid pinning the per-slot value
-  shapes (`PredicateEffect`, `AssertEffect`, …) directly until
-  v0.1.0 ratifies them.
+  v0.0.9 (`c48f05f`); slice 3 added `#to_element_list` and pinned
+  the bundle shape via the public-API drift spec. Plugin authors
+  should consume bundles via the public reader / `to_h` form and
+  avoid pinning the per-slot value shapes (`PredicateEffect`,
+  `AssertEffect`, …) directly until v0.1.0 ratifies them.
+- **`Rigor::FlowContribution::Element` / `MergeResult` / `Conflict` /
+  `Merger`** — slice 3 surface; pinned by the drift spec. The
+  flattening + merge policy is normative per
+  [`flow-contribution-merger.md`](flow-contribution-merger.md).
 - **`Rigor::Analysis::Diagnostic`** — `source_family` and
   `qualified_rule` were added in v0.0.8 (`ed9ae0a`) but the
   per-rule diagnostic identifiers are still in flux as the v0.1.0

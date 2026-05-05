@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — v0.1.0 slice 3: plugin contribution merger
+
+- **`Rigor::FlowContribution#to_element_list`.** Flattens a bundle into a tagged element list keyed by `(target, edge, kind)` per [ADR-2 § "Flow Contribution Bundle"](docs/adr/2-extension-api.md). Mechanical, deterministic, round-trippable through the merger; spec at [`docs/internal-spec/flow-contribution-merger.md`](docs/internal-spec/flow-contribution-merger.md).
+- **`Rigor::FlowContribution::Element`.** Frozen `Data` value object — `target` / `edge` / `kind` / `payload` / `provenance` + `#merge_key`. Edge / kind enums (`ELEMENT_VALID_EDGES` / `ELEMENT_VALID_KINDS`) validated at construction.
+- **`Rigor::FlowContribution::Conflict`.** Frozen `Data` value object reporting contradictions detected during merge. `reason` enum: `:return_type_collapse`, `:exceptional_disagreement`, `:lower_tier_contradiction`. Carries every contributing `Provenance` so the formatter / cache layer can attribute back to the source families.
+- **`Rigor::FlowContribution::MergeResult`.** Frozen value object with the eight slots from `FlowContribution` plus `provenances` (ordered list of contributing `Provenance` rows) and `conflicts`. `#conflict?` and `#empty?` predicates plus a serialisable `#to_h`.
+- **`Rigor::FlowContribution::Merger`.** Stateless module-level surface (`Merger.merge(contributions)` and `Merger.tier_for(provenance)`). Implements the ADR-2 authority tiers (`:builtin > :rbs_extended / :generated > :plugin > unknown`) with deterministic intra-tier ordering (provenance `plugin_id` alphabetical, original input position as final tie-break) and the composition rules: return-type intersection (collapse via mutual `accepts.no?`), edge-local fact accumulation with payload-equality dedupe, mutation / invalidation / role union, single-valued exceptional with disagreement detection, and lower-tier contradiction handling that preserves the higher-tier value while emitting a `Conflict`.
+- **Public-API drift snapshots** for `FlowContribution` (instance method set, including `to_element_list`), `MergeResult`, and `Merger` lock the slice-3 surface. Plugin authors can now write against the merger without depending on `RBS::Extended`'s internal effect carriers.
+
 ### Added — v0.1.0 slice 2: plugin trust / I/O policy
 
 - **`Rigor::Plugin::TrustPolicy` value object.** Per [ADR-2 § "Plugin Trust and I/O Policy"](docs/adr/2-extension-api.md). Frozen value object exposing `trusted_gems`, `allowed_read_roots`, `network_policy`, plus `#allow_read?(path)` / `#network_allowed?` / `#gem_trusted?(name)` predicates and `#to_h` for diagnostics. Slice 2 accepts only `network_policy: :disabled` — the only value `Configuration` permits today.

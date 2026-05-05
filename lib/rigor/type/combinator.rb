@@ -149,6 +149,16 @@ module Rigor
         Refined.new(nominal_of("String"), :lowercase)
       end
 
+      # Complement of `lowercase-string`: a `String` with at least
+      # one non-lowercase character (i.e. `v != v.downcase`).
+      # Registered as the paired complement of
+      # `:lowercase` in {Refined::COMPLEMENT_PAIRS} so
+      # `~lowercase-string` narrows to this carrier instead of
+      # falling back to `Difference[String, lowercase-string]`.
+      def non_lowercase_string
+        Refined.new(nominal_of("String"), :not_lowercase)
+      end
+
       def uppercase_string
         Refined.new(nominal_of("String"), :uppercase)
       end

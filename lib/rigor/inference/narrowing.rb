@@ -539,26 +539,41 @@ module Rigor
         # downstream narrowing knows the refinement subset is
         # excluded.
         #
-        # The result is sound but imprecise: without a
-        # complementary carrier (e.g. `mixed-case-string` for
-        # `~lowercase-string`) we cannot enumerate the surviving
-        # values. Difference is the carrier-of-last-resort, and
-        # the existing `Type::Difference` consumers already
-        # treat it correctly.
+        # v0.0.10 — when the predicate has a registered
+        # complement (see {Type::Refined::COMPLEMENT_PAIRS}) and
+        # the part is exactly the refinement's base, the
+        # narrowing returns `Refined[base, complement_predicate]`
+        # instead of `Difference[base, refined]`. This is the
+        # `~T` symmetry the spec promises: `~lowercase-string`
+        # narrows `String` to `non-lowercase-string` rather than
+        # `Difference[String, lowercase-string]`.
+        #
+        # Predicates without a registered complement still fall
+        # back to the imprecise but sound `Difference[part,
+        # refined]` carrier so behaviour is unchanged for
+        # untouched call sites.
         def complement_refined(current_type, refined)
-          base = refined.base
+          complement = registered_complement_for(refined)
           parts = current_type.is_a?(Type::Union) ? current_type.members : [current_type]
-
-          survivors = parts.map do |part|
-            next nil if part == refined
-            next part if base_disjoint?(base, part)
-
-            Type::Combinator.difference(part, refined)
-          end.compact
-
+          survivors = parts.filter_map { |part| complement_refined_part(part, refined, complement) }
           return current_type if survivors.empty?
 
           Type::Combinator.union(*survivors)
+        end
+
+        def complement_refined_part(part, refined, complement)
+          return nil if part == refined
+          return part if base_disjoint?(refined.base, part)
+          return complement if complement && part == refined.base
+
+          Type::Combinator.difference(part, refined)
+        end
+
+        def registered_complement_for(refined)
+          complement_id = refined.complement_predicate_id
+          return nil if complement_id.nil?
+
+          Type::Combinator.refined(refined.base, complement_id)
         end
 
         def falsey_value?(value)

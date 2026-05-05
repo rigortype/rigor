@@ -26,6 +26,7 @@ This document defines the reserved built-in **names** Rigor uses for refinements
 | `numeric-string` | String accepted by Rigor's Ruby numeric-string predicate | `String` |
 | `decimal-int-string` | String accepted by Rigor's Ruby decimal-integer-string predicate | `String` |
 | `lowercase-string` | String equal to its lowercase normalization | `String` |
+| `non-lowercase-string` | String NOT equal to its lowercase normalization (i.e. contains at least one non-lowercase character). Paired complement of `lowercase-string` under `~T` | `String` |
 | `uppercase-string` | String equal to its uppercase normalization | `String` |
 | `non-empty-lowercase-string` | `non-empty-string & lowercase-string` | `String` |
 | `non-empty-uppercase-string` | `non-empty-string & uppercase-string` | `String` |

@@ -141,6 +141,7 @@ module Rigor
 
       PREDICATES = {
         lowercase: ->(v) { v.is_a?(String) && v == v.downcase },
+        not_lowercase: ->(v) { v.is_a?(String) && v != v.downcase },
         uppercase: ->(v) { v.is_a?(String) && v == v.upcase },
         numeric: ->(v) { v.is_a?(String) && NUMERIC_STRING_PATTERN.match?(v) },
         decimal_int: ->(v) { v.is_a?(String) && DECIMAL_INT_STRING_PATTERN.match?(v) },
@@ -154,6 +155,7 @@ module Rigor
       # to the operator form.
       CANONICAL_NAMES = {
         ["String", :lowercase] => "lowercase-string",
+        ["String", :not_lowercase] => "non-lowercase-string",
         ["String", :uppercase] => "uppercase-string",
         ["String", :numeric] => "numeric-string",
         ["String", :decimal_int] => "decimal-int-string",
@@ -161,6 +163,33 @@ module Rigor
         ["String", :hex_int] => "hex-int-string"
       }.freeze
       private_constant :CANONICAL_NAMES
+
+      # Bidirectional `predicate_id ↔ complement_predicate_id`
+      # registry. `~Refined[base, p]` narrows to
+      # `Refined[base, COMPLEMENT_PAIRS[p]]` when the part is the
+      # refinement's base — the precise carrier the spec promises
+      # under the `~T` operator. Predicates without a registered
+      # complement fall back to the imprecise but sound
+      # `Difference[part, refined]` carrier from the existing
+      # narrowing rule.
+      #
+      # Adding a new pair here is an additive change: register the
+      # complement predicate in {PREDICATES}, give it a kebab-case
+      # canonical name in {CANONICAL_NAMES}, and add the bidirectional
+      # entry below. No call site needs to know about the new pair —
+      # `complement_refined` consults this map and routes through
+      # the registered complement automatically.
+      COMPLEMENT_PAIRS = {
+        lowercase: :not_lowercase,
+        not_lowercase: :lowercase
+      }.freeze
+      private_constant :COMPLEMENT_PAIRS
+
+      # @return [Symbol, nil] the registered complement predicate
+      #   id, or nil when no pair is registered for this predicate.
+      def complement_predicate_id
+        COMPLEMENT_PAIRS[predicate_id]
+      end
 
       private
 

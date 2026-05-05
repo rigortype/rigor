@@ -1040,10 +1040,24 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(described_class.narrow_not_refinement(nominal("Integer"), nes)).to eq(nominal("Integer"))
     end
 
-    it "narrows Nominal[String] under ~lowercase-string to Difference[String, lowercase-string] (v0.0.7)" do
+    it "narrows Nominal[String] under ~lowercase-string to non-lowercase-string (v0.0.10 paired complement)" do
       lc = Rigor::Type::Combinator.lowercase_string
       result = described_class.narrow_not_refinement(nominal("String"), lc)
-      expect(result).to eq(Rigor::Type::Combinator.difference(nominal("String"), lc))
+      expect(result).to eq(Rigor::Type::Combinator.non_lowercase_string)
+    end
+
+    it "narrows Nominal[String] under ~non-lowercase-string back to lowercase-string" do
+      not_lc = Rigor::Type::Combinator.non_lowercase_string
+      result = described_class.narrow_not_refinement(nominal("String"), not_lc)
+      expect(result).to eq(Rigor::Type::Combinator.lowercase_string)
+    end
+
+    it "falls back to Difference[String, refined] when no complement pair is registered" do
+      # numeric-string has no complement pair registered today, so the
+      # carrier-of-last-resort still applies.
+      ns = Rigor::Type::Combinator.numeric_string
+      result = described_class.narrow_not_refinement(nominal("String"), ns)
+      expect(result).to eq(Rigor::Type::Combinator.difference(nominal("String"), ns))
     end
 
     it "drops the negated refinement itself from a union" do
@@ -1055,16 +1069,17 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(described_class.narrow_not_refinement(union, lc)).to eq(nominal("Integer"))
     end
 
-    it "keeps disjoint union members under ~Refined" do
+    it "keeps disjoint union members under ~Refined and routes the base through the paired complement" do
       lc = Rigor::Type::Combinator.lowercase_string
       union = Rigor::Type::Combinator.union(nominal("String"), nominal("Integer"))
       result = described_class.narrow_not_refinement(union, lc)
       expect(result).to be_a(Rigor::Type::Union)
       # The Integer member is disjoint from String and survives;
-      # the String member becomes Difference[String, lowercase-string].
+      # the String member becomes non-lowercase-string via the
+      # paired-complement registry.
       expect(result.members).to contain_exactly(
         nominal("Integer"),
-        Rigor::Type::Combinator.difference(nominal("String"), lc)
+        Rigor::Type::Combinator.non_lowercase_string
       )
     end
 
@@ -1124,18 +1139,16 @@ RSpec.describe Rigor::Inference::Narrowing do
       it "unions per-member complements within the current type" do
         # ~(non-empty-string ∩ lowercase-string) within String =
         #   (~non-empty-string within String) ∪ (~lowercase-string within String)
-        # = Constant[""] ∪ Difference[String, lowercase-string].
-        # The v0.0.7 Refined complement gives the second arm a
-        # carrier rather than falling back to `current_type`.
+        # = Constant[""] ∪ non-lowercase-string.
+        # The v0.0.10 paired-complement registry routes the second
+        # arm through Refined[String, :not_lowercase] instead of the
+        # legacy Difference[String, lowercase-string] fallback.
         composite = Rigor::Type::Combinator.non_empty_lowercase_string
         result = described_class.narrow_not_refinement(nominal("String"), composite)
         expect(result).to be_a(Rigor::Type::Union)
         expect(result.members).to contain_exactly(
           empty_string,
-          Rigor::Type::Combinator.difference(
-            nominal("String"),
-            Rigor::Type::Combinator.lowercase_string
-          )
+          Rigor::Type::Combinator.non_lowercase_string
         )
       end
     end

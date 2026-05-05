@@ -161,4 +161,40 @@ RSpec.describe Rigor::Type::Refined do
       expect(lc.accepts(nominal_of("String")).no?).to be(true)
     end
   end
+
+  describe "#complement_predicate_id (v0.0.10 paired-complement registry)" do
+    it "returns the registered complement for :lowercase" do
+      lc = Rigor::Type::Combinator.lowercase_string
+      expect(lc.complement_predicate_id).to eq(:not_lowercase)
+    end
+
+    it "is bidirectional — :not_lowercase maps back to :lowercase" do
+      not_lc = Rigor::Type::Combinator.non_lowercase_string
+      expect(not_lc.complement_predicate_id).to eq(:lowercase)
+    end
+
+    it "returns nil for predicates without a registered complement" do
+      ns = Rigor::Type::Combinator.numeric_string
+      expect(ns.complement_predicate_id).to be_nil
+    end
+  end
+
+  describe ":not_lowercase predicate semantics" do
+    let(:not_lc) { Rigor::Type::Combinator.non_lowercase_string }
+
+    it "matches strings with at least one non-lowercase character" do
+      expect(not_lc.accepts(constant_of("Hi")).yes?).to be(true)
+      expect(not_lc.accepts(constant_of("ABC")).yes?).to be(true)
+    end
+
+    it "rejects all-lowercase strings (the existing :lowercase set)" do
+      expect(not_lc.accepts(constant_of("hi")).no?).to be(true)
+      expect(not_lc.accepts(constant_of("")).no?).to be(true)
+      expect(not_lc.accepts(constant_of("123")).no?).to be(true)
+    end
+
+    it "describes as `non-lowercase-string`" do
+      expect(not_lc.describe).to eq("non-lowercase-string")
+    end
+  end
 end

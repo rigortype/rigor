@@ -13,10 +13,10 @@ Planned slice order — see the v0.0.8 row of [`docs/MILESTONES.md`](MILESTONES.
 1. ✅ `Rigor::Cache::Descriptor` value object (pure-value composition + canonical serialisation). Landed at 50d864b.
 2. ✅ `Rigor::Cache::Store` filesystem backend (sharded directory, atomic rename, per-file flock, SHA-256 integrity). Landed at c7f8f94.
 3. ✅ First cached producer — `Rigor::Cache::RbsConstantTable` (Hash<String, Rigor::Type> for every RBS-declared constant). Landed at cc132ee. The slice plan originally named the RBS environment loader (`build_env`) as the first producer; implementation discovered `RBS::Environment` is not Marshal-clean (transitive `RBS::Location` lacks `_dump_data`), so Slice 3 caches a post-translation artefact instead. See [`docs/adr/6-cache-persistence-backend.md`](adr/6-cache-persistence-backend.md) § 8 and [`docs/internal-spec/cache.md`](internal-spec/cache.md) for the rationale and public read shape.
-4. `rigor check --cache-stats` (hit/miss observability) and `--clear-cache` (manual eviction). **← next.**
-5. Diagnostic provenance prefix (small companion slice — `source_family` field on `Diagnostic`).
+4. ✅ `rigor check --cache-stats` (on-disk inventory) and `--clear-cache` (manual eviction). Landed at fdb3743. Disk-oriented inventory only; per-run hit/miss counters deferred until a production caller wires the cache.
+5. Diagnostic provenance prefix (small companion slice — `source_family` field on `Diagnostic`). **← next.**
 
-Working state after slice 3: 1580 RSpec examples / 0 failures, RuboCop 146 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. Version stays at `0.0.7` until the v0.0.8 surface is locked in.
+Working state after slice 4: 1586 RSpec examples / 0 failures, RuboCop 146 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. Version stays at `0.0.7` until the v0.0.8 surface is locked in.
 
 ## Where the Work Resumes
 

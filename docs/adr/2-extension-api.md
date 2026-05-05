@@ -2,7 +2,10 @@
 
 ## Status
 
-Draft
+Draft. Working decisions for the in-flight v0.1.0 implementation
+slices (4 — FlowContribution wiring through internal narrowing,
+5 — plugin diagnostic emission protocol, 6 — plugin-side cache
+producers) are pinned in [ADR-7](7-v0.1.0-slice-decisions.md).
 
 ## Context
 

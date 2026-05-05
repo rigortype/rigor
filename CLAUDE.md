@@ -57,6 +57,8 @@ When a change touches type-language behaviour or analyzer-internal contracts, th
 | [`docs/adr/3-type-representation.md`](docs/adr/3-type-representation.md) | Internal type-object layout. Working decisions for OQ1 (Constant scalar shape — Hybrid), OQ2 (predicate naming — drop the `?`), OQ3 (refinement carrier — Difference + Refined). |
 | [`docs/adr/4-type-inference-engine.md`](docs/adr/4-type-inference-engine.md) | Inference-engine architecture. |
 | [`docs/adr/5-robustness-principle.md`](docs/adr/5-robustness-principle.md) | Design rationale for Postel's law. Companion to `docs/type-specification/robustness-principle.md`. |
+| [`docs/adr/6-cache-persistence-backend.md`](docs/adr/6-cache-persistence-backend.md) | Cache persistence backend choice (sharded directory of binary entries, per-file `flock` write atomicity, no eviction). |
+| [`docs/adr/7-v0.1.0-slice-decisions.md`](docs/adr/7-v0.1.0-slice-decisions.md) | Working decisions for v0.1.0 slices 4 – 6 (FlowContribution wiring through internal narrowing, plugin diagnostic emission protocol, plugin-side cache producers). |
 
 ## Skills available in this repository
 

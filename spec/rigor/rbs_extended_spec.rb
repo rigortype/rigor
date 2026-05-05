@@ -404,20 +404,21 @@ RSpec.describe Rigor::RbsExtended do
       ANNOT
         bundle = described_class.read_flow_contribution(method_def)
         expect(bundle).to be_a(Rigor::FlowContribution)
-        expect(bundle.truthy_facts.map(&:class_name)).to contain_exactly("String")
-        expect(bundle.falsey_facts.map(&:class_name)).to contain_exactly("NilClass")
+        expect(bundle.truthy_facts).to all(be_a(Rigor::FlowContribution::Fact))
+        expect(bundle.truthy_facts.map { |f| f.type.describe(:short) }).to contain_exactly("String")
+        expect(bundle.falsey_facts.map { |f| f.type.describe(:short) }).to contain_exactly("NilClass")
       end
     end
 
-    it "places assert / assert-if-* effects into post_return_facts" do
+    it "routes assert by condition: :always → post_return_facts; :if_truthy_return → truthy_facts" do
       with_method_def(<<~ANNOT) do |method_def|
         %a{rigor:v1:assert value is Numeric}
         %a{rigor:v1:assert-if-true value is Integer}
       ANNOT
         bundle = described_class.read_flow_contribution(method_def)
-        expect(bundle.post_return_facts.size).to eq(2)
-        expect(bundle.post_return_facts.map(&:class_name)).to contain_exactly("Numeric", "Integer")
-        expect(bundle.post_return_facts.map(&:condition)).to contain_exactly(:always, :if_truthy_return)
+        expect(bundle.post_return_facts).to all(be_a(Rigor::FlowContribution::Fact))
+        expect(bundle.post_return_facts.map { |f| f.type.describe(:short) }).to contain_exactly("Numeric")
+        expect(bundle.truthy_facts.map { |f| f.type.describe(:short) }).to contain_exactly("Integer")
       end
     end
 
@@ -451,6 +452,58 @@ RSpec.describe Rigor::RbsExtended do
         expect(bundle.truthy_facts).to be_nil
         expect(described_class.param_type_override_map(method_def)).to include(value: anything)
       end
+    end
+  end
+
+  describe "PredicateEffect#to_fact (ADR-7 § 'Slice 4-A')" do
+    it "lifts class-name predicate effects into a Nominal-typed Fact" do
+      effect = Rigor::RbsExtended::PredicateEffect.new(
+        edge: :truthy_only, target_kind: :parameter, target_name: :s,
+        class_name: "String", negative: false, refinement_type: nil
+      )
+      fact = effect.to_fact
+      expect(fact).to be_a(Rigor::FlowContribution::Fact)
+      expect(fact.target_kind).to eq(:parameter)
+      expect(fact.target_name).to eq(:s)
+      expect(fact.type.describe(:short)).to eq("String")
+      expect(fact.negative?).to be(false)
+    end
+
+    it "passes refinement-form predicate effects through directly" do
+      refined = Rigor::Type::Combinator.non_empty_string
+      effect = Rigor::RbsExtended::PredicateEffect.new(
+        edge: :truthy_only, target_kind: :parameter, target_name: :s,
+        class_name: nil, negative: false, refinement_type: refined
+      )
+      expect(effect.to_fact.type).to eq(refined)
+    end
+
+    it "preserves the negative flag from ~T forms" do
+      effect = Rigor::RbsExtended::PredicateEffect.new(
+        edge: :falsey_only, target_kind: :parameter, target_name: :n,
+        class_name: "Integer", negative: true, refinement_type: nil
+      )
+      expect(effect.to_fact.negative?).to be(true)
+    end
+  end
+
+  describe "AssertEffect#to_fact (ADR-7 § 'Slice 4-A')" do
+    it "lifts class-name assert effects into a Nominal-typed Fact" do
+      effect = Rigor::RbsExtended::AssertEffect.new(
+        condition: :always, target_kind: :parameter, target_name: :s,
+        class_name: "Numeric", negative: false, refinement_type: nil
+      )
+      fact = effect.to_fact
+      expect(fact).to be_a(Rigor::FlowContribution::Fact)
+      expect(fact.type.describe(:short)).to eq("Numeric")
+    end
+
+    it "drops the condition field — the slot the fact lands in encodes it" do
+      effect = Rigor::RbsExtended::AssertEffect.new(
+        condition: :if_truthy_return, target_kind: :self, target_name: :self,
+        class_name: "String", negative: false, refinement_type: nil
+      )
+      expect(effect.to_fact).not_to respond_to(:condition)
     end
   end
 end

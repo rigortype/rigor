@@ -95,6 +95,52 @@ Stateless module-level entry. Two surface methods:
 - `Merger.tier_for(provenance)` — exposes the tier mapping the
   merger uses internally (useful for diagnostic formatters).
 
+### `Rigor::FlowContribution::Fact` (slice 4-A)
+
+Canonical slot payload for the four edge-aware fact slots
+(`truthy_facts`, `falsey_facts`, `post_return_facts` plus the
+equivalent under future role / mutation Fact-shaped variants).
+Pinned by [ADR-7 § "Slice 4-A"](../adr/7-v0.1.0-slice-decisions.md);
+unifies four parallel contribution carriers into a single
+comparable shape so the merger's deduplication / intersection
+rules operate over a homogeneous payload type.
+
+| Field         | Purpose |
+| ------------- | --- |
+| `target_kind` | `:parameter` or `:self`. Future kinds (`:local`, `:ivar`, `:result`) attach without changing the merger. |
+| `target_name` | `Symbol` — declared parameter name, or the literal `:self`. Non-nil so `#target` is well-defined. |
+| `type`        | `Rigor::Type::*` — the type the target is narrowed toward (or away from when `negative` is true). |
+| `negative`    | `true` for the `~T` form (`predicate-if-true x is ~Integer`); `false` for the plain positive form. |
+
+`#target` returns `:self` for self-targeted facts, and
+`[:parameter, name]` otherwise. That value lands on
+`Element#target` and is the merge bucket key — two facts that
+narrow the same parameter from different contribution sources
+group together regardless of source family.
+
+### Translation boundaries
+
+The four parallel carriers translate to / from `Fact`:
+
+- **`Rigor::RbsExtended::PredicateEffect#to_fact`** — class-name
+  effects lift to `Nominal[<class>]`-typed facts; refinement-form
+  effects pass their `refinement_type` through directly. The
+  `edge` field doesn't survive — the slot the resulting fact
+  lands in (`truthy_facts` / `falsey_facts`) encodes that.
+- **`Rigor::RbsExtended::AssertEffect#to_fact`** — same shape;
+  the `condition` field (`:always` / `:if_truthy_return` /
+  `:if_falsey_return`) routes the slot at the
+  `read_flow_contribution` boundary (`:always` →
+  `post_return_facts`, `:if_truthy_return` → `truthy_facts`,
+  `:if_falsey_return` → `falsey_facts`) and does not surface on
+  the Fact itself.
+- **Built-in narrowing facts** — slice 4 implementer adds the
+  translation when wiring `Inference::Narrowing` through the
+  merger.
+- **Plugin contributions** — slice 5's emission protocol
+  returns `FlowContribution` bundles whose `truthy_facts` /
+  `falsey_facts` slots are already `Fact` arrays.
+
 ## Authority tiers
 
 | Tier | Source family            | Notes |

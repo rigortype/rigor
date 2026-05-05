@@ -64,6 +64,23 @@ module Rigor
       def falsey_only? = edge == :falsey_only
       def negative? = negative == true
       def refinement? = !refinement_type.nil?
+
+      # ADR-7 § "Slice 4-A" canonical translation. Lifts the
+      # parser-side carrier into a `Rigor::FlowContribution::Fact`
+      # that the merger and plugin contribution stream consume
+      # uniformly. `class_name` lifts to `Nominal[<class>]`;
+      # `refinement_type` is already a `Rigor::Type` and passes
+      # through. The `edge` field doesn't survive the conversion —
+      # the slot it lands in (truthy_facts / falsey_facts / ...)
+      # encodes that.
+      def to_fact
+        FlowContribution::Fact.new(
+          target_kind: target_kind,
+          target_name: target_name,
+          type: refinement_type || Rigor::Type::Combinator.nominal_of(class_name),
+          negative: negative == true
+        )
+      end
     end
 
     # Returned for `assert` / `assert-if-true` /
@@ -87,6 +104,21 @@ module Rigor
       def if_falsey_return? = condition == :if_falsey_return
       def negative? = negative == true
       def refinement? = !refinement_type.nil?
+
+      # ADR-7 § "Slice 4-A" canonical translation. Same shape as
+      # `PredicateEffect#to_fact`; the `condition` field
+      # (`:always` / `:if_truthy_return` / `:if_falsey_return`)
+      # routes which slot the resulting fact lands in at the
+      # `read_flow_contribution` boundary, but does not surface
+      # on the Fact itself.
+      def to_fact
+        FlowContribution::Fact.new(
+          target_kind: target_kind,
+          target_name: target_name,
+          type: refinement_type || Rigor::Type::Combinator.nominal_of(class_name),
+          negative: negative == true
+        )
+      end
     end
 
     module_function
@@ -425,12 +457,16 @@ module Rigor
     ).freeze
 
     # Rolls up every recognised RBS::Extended directive on
-    # `method_def` into a single {Rigor::FlowContribution}:
+    # `method_def` into a single {Rigor::FlowContribution} with
+    # the canonical {Rigor::FlowContribution::Fact} payload (see
+    # ADR-7 § "Slice 4-A"):
     #
-    # - `predicate-if-true`  → `truthy_facts` (`PredicateEffect`s)
-    # - `predicate-if-false` → `falsey_facts` (`PredicateEffect`s)
-    # - `assert*`            → `post_return_facts` (`AssertEffect`s)
-    # - `return:` override   → `return_type` (`Rigor::Type`)
+    # - `predicate-if-true`        → `truthy_facts`
+    # - `predicate-if-false`       → `falsey_facts`
+    # - `assert`                   → `post_return_facts`
+    # - `assert-if-true`           → `truthy_facts`
+    # - `assert-if-false`          → `falsey_facts`
+    # - `return:` override         → `return_type` (`Rigor::Type`)
     #
     # Param overrides are intentionally NOT included — they refine
     # the call's signature contract rather than its flow facts and
@@ -452,12 +488,24 @@ module Rigor
       build_flow_contribution(predicate_effects, assert_effects, return_override)
     end
 
-    def build_flow_contribution(predicate_effects, assert_effects, return_override)
+    def build_flow_contribution(predicate_effects, assert_effects, return_override) # rubocop:disable Metrics/CyclomaticComplexity
+      truthy = predicate_effects.select(&:truthy_only?).map(&:to_fact)
+      falsey = predicate_effects.select(&:falsey_only?).map(&:to_fact)
+      post_return = []
+
+      assert_effects.each do |effect|
+        case effect.condition
+        when :if_truthy_return then truthy << effect.to_fact
+        when :if_falsey_return then falsey << effect.to_fact
+        else post_return << effect.to_fact
+        end
+      end
+
       FlowContribution.new(
         return_type: return_override,
-        truthy_facts: nilable_slot(predicate_effects.select(&:truthy_only?)),
-        falsey_facts: nilable_slot(predicate_effects.select(&:falsey_only?)),
-        post_return_facts: nilable_slot(assert_effects),
+        truthy_facts: nilable_slot(truthy),
+        falsey_facts: nilable_slot(falsey),
+        post_return_facts: nilable_slot(post_return),
         provenance: RBS_EXTENDED_PROVENANCE
       )
     end

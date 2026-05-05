@@ -207,6 +207,15 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     tier_for(req:provenance)
   ].freeze
 
+  FLOW_CONTRIBUTION_FACT_INSTANCE = %w[
+    negative()
+    negative?()
+    target()
+    target_kind()
+    target_name()
+    type()
+  ].freeze
+
   COMBINATOR_SINGLETON = %w[
     bot()
     constant_of(req:value)
@@ -370,6 +379,14 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
     it "exposes the expected merger entry-point surface" do
       expect(singleton_signatures(Rigor::FlowContribution::Merger)).to eq(
         PublicApiDriftSnapshots::FLOW_CONTRIBUTION_MERGER_SINGLETON
+      )
+    end
+  end
+
+  describe "Rigor::FlowContribution::Fact" do
+    it "exposes the expected canonical-fact surface" do
+      expect(instance_signatures(Rigor::FlowContribution::Fact)).to eq(
+        PublicApiDriftSnapshots::FLOW_CONTRIBUTION_FACT_INSTANCE
       )
     end
   end

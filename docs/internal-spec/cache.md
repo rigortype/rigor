@@ -273,11 +273,59 @@ returns `nil` are dropped from the table.
 The `params` argument is empty — every input the producer
 consumes is already encoded in the descriptor.
 
-## CLI observability (v0.0.8 slice 4–5 — pending)
+## CLI observability (v0.0.8 slice 4)
 
-`rigor check --cache-stats` reports per-producer hit/miss counts
-at the end of the run. `rigor check --clear-cache` removes
-`.rigor/cache` entirely.
+The cache layer ships two CLI flags on `rigor check`:
+
+### `--clear-cache`
+
+Removes the `.rigor/cache` directory (resolved relative to the
+current working directory) before the analysis run. Prints
+`Cleared cache: .rigor/cache` when the directory existed and was
+removed, or `Cache already empty: .rigor/cache` when nothing was
+present. The check itself runs to completion regardless.
+
+### `--cache-stats`
+
+Prints an on-disk inventory at the end of the run, sourced from
+{Store.disk_inventory}. Output sample:
+
+```
+Cache (root: .rigor/cache)
+  schema_version: 1
+  3 entries, 12.4 KiB
+    rbs.constant_type_table: 1 entries, 11.0 KiB
+    reflection.instance_method_definition: 2 entries, 1.4 KiB
+```
+
+When the cache directory does not exist, `schema_version` reads
+`absent` and the body shows `(empty)`. The flag is intentionally
+disk-oriented for v0.0.8: per-run hit/miss counters require the
+analysis runner to share a Store instance with the producers,
+which is deferred until production code paths actually consult
+the cache (no production caller in v0.0.8 — the slice 3 producer
+exists as a working surface but is not yet wired into
+`rigor check`).
+
+### `Store.disk_inventory(root:)`
+
+Class method backing `--cache-stats`. Returns:
+
+```ruby
+{
+  root: String,                  # the cache root path
+  schema_version: String | nil,  # nil when the marker is absent
+  total_entries: Integer,
+  total_bytes: Integer,
+  producers: [
+    { id: String, entries: Integer, bytes: Integer },
+    ...
+  ]
+}
+```
+
+Producers are sorted by id. Empty producer subdirectories are
+omitted from the listing.
 
 ## Diagnostic provenance (v0.0.8 slice 6 — pending)
 

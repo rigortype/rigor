@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "json"
 require "optionparser"
 require "yaml"
@@ -65,27 +66,75 @@ module Rigor
 
     def run_check
       require_relative "analysis/runner"
+      require_relative "cache/store"
 
-      options = {
-        config: Configuration::DEFAULT_PATH,
-        format: "text",
-        explain: false
-      }
+      options = parse_check_options
 
-      parser = OptionParser.new do |opts|
-        opts.banner = "Usage: rigor check [options] [paths]"
-        opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
-        opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
-        opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
-      end
-      parser.parse!(@argv)
+      cache_root = ".rigor/cache"
+      handle_clear_cache(cache_root) if options.fetch(:clear_cache)
 
       configuration = Configuration.load(options.fetch(:config))
       paths = @argv.empty? ? configuration.paths : @argv
       result = Analysis::Runner.new(configuration: configuration, explain: options.fetch(:explain)).run(paths)
 
       write_result(result, options.fetch(:format))
+      write_cache_stats(cache_root) if options.fetch(:cache_stats)
       result.success? ? 0 : 1
+    end
+
+    def parse_check_options
+      options = {
+        config: Configuration::DEFAULT_PATH,
+        format: "text",
+        explain: false,
+        cache_stats: false,
+        clear_cache: false
+      }
+      parser = OptionParser.new do |opts|
+        opts.banner = "Usage: rigor check [options] [paths]"
+        opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+        opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
+        opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
+        opts.on("--cache-stats", "Print on-disk cache inventory at end of run") { options[:cache_stats] = true }
+        opts.on("--clear-cache", "Remove the .rigor/cache directory before running") { options[:clear_cache] = true }
+      end
+      parser.parse!(@argv)
+      options
+    end
+
+    def handle_clear_cache(cache_root)
+      if File.directory?(cache_root)
+        FileUtils.rm_rf(cache_root)
+        @out.puts("Cleared cache: #{cache_root}")
+      else
+        @out.puts("Cache already empty: #{cache_root}")
+      end
+    end
+
+    def write_cache_stats(cache_root)
+      inv = Cache::Store.disk_inventory(root: cache_root)
+
+      @out.puts("")
+      @out.puts("Cache (root: #{inv.fetch(:root)})")
+      schema = inv.fetch(:schema_version)
+      @out.puts("  schema_version: #{schema.nil? ? 'absent' : schema}")
+      if inv.fetch(:total_entries).zero?
+        @out.puts("  (empty)")
+        return
+      end
+
+      @out.puts("  #{inv.fetch(:total_entries)} entries, #{format_bytes(inv.fetch(:total_bytes))}")
+      inv.fetch(:producers).each do |producer|
+        bytes = format_bytes(producer.fetch(:bytes))
+        @out.puts("    #{producer.fetch(:id)}: #{producer.fetch(:entries)} entries, #{bytes}")
+      end
+    end
+
+    def format_bytes(bytes)
+      return "#{bytes} B" if bytes < 1024
+      return format("%.1f KiB", bytes / 1024.0) if bytes < 1024 * 1024
+
+      format("%.1f MiB", bytes / (1024.0 * 1024.0))
     end
 
     def run_init

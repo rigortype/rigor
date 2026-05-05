@@ -115,6 +115,31 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
+  describe ".disk_inventory" do
+    it "returns nil schema_version and an empty producer list when the root does not exist" do
+      inv = described_class.disk_inventory(root: cache_root)
+      expect(inv[:schema_version]).to be_nil
+      expect(inv[:producers]).to eq([])
+      expect(inv[:total_entries]).to eq(0)
+    end
+
+    it "reports per-producer entry counts after writes" do
+      store.fetch_or_compute(producer_id: "alpha", params: { x: 1 }, descriptor: descriptor) { :a }
+      store.fetch_or_compute(producer_id: "alpha", params: { x: 2 }, descriptor: descriptor) { :b }
+      store.fetch_or_compute(producer_id: "beta", params: {}, descriptor: descriptor) { :c }
+
+      inv = described_class.disk_inventory(root: cache_root)
+      expect(inv[:schema_version]).to eq(Rigor::Cache::Descriptor::SCHEMA_VERSION.to_s)
+      expect(inv[:total_entries]).to eq(3)
+      expect(inv[:total_bytes]).to be > 0
+      ids = inv[:producers].map { |p| p[:id] }
+      expect(ids).to contain_exactly("alpha", "beta")
+      alpha = inv[:producers].find { |p| p[:id] == "alpha" }
+      expect(alpha[:entries]).to eq(2)
+      expect(alpha[:bytes]).to be > 0
+    end
+  end
+
   describe "corruption tolerance" do # rubocop:disable RSpec/MultipleMemoizedHelpers
     let(:key) { descriptor.cache_key_for(producer_id: "p", params: {}) }
     let(:entry_path) { File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry") }

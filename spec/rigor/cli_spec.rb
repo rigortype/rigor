@@ -242,6 +242,69 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  describe "check --cache-stats / --clear-cache" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write_check_fixture(name, contents)
+      path = File.join(tmpdir, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      path
+    end
+
+    it "prints '(empty)' under --cache-stats when no cache directory exists" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        status, out, _err = run_cli("check", "--cache-stats", "a.rb")
+        expect(status).to eq(0)
+        expect(out).to include("Cache (root: .rigor/cache)")
+        expect(out).to include("schema_version: absent")
+        expect(out).to include("(empty)")
+      end
+    end
+
+    it "lists per-producer entry counts under --cache-stats when the cache has entries" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        cache_root = File.join(tmpdir, ".rigor", "cache")
+        store = Rigor::Cache::Store.new(root: cache_root)
+        descriptor = Rigor::Cache::Descriptor.new
+        store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) { :seed }
+
+        status, out, _err = run_cli("check", "--cache-stats", "a.rb")
+        expect(status).to eq(0)
+        expect(out).to include("Cache (root: .rigor/cache)")
+        expect(out).to match(/schema_version: \d+/)
+        expect(out).to include("demo: 1 entries")
+      end
+    end
+
+    it "removes the cache directory under --clear-cache" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        cache_root = File.join(tmpdir, ".rigor", "cache")
+        FileUtils.mkdir_p(cache_root)
+        File.write(File.join(cache_root, "schema_version.txt"), "1\n")
+
+        status, out, _err = run_cli("check", "--clear-cache", "a.rb")
+        expect(status).to eq(0)
+        expect(out).to include("Cleared cache: .rigor/cache")
+        expect(File.directory?(cache_root)).to be false
+      end
+    end
+
+    it "reports 'Cache already empty' under --clear-cache when no cache exists" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        status, out, _err = run_cli("check", "--clear-cache", "a.rb")
+        expect(status).to eq(0)
+        expect(out).to include("Cache already empty: .rigor/cache")
+      end
+    end
+  end
+
   describe "type-scan" do
     let(:tmpdir) { Dir.mktmpdir }
 

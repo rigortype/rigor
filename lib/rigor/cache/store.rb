@@ -34,6 +34,50 @@ module Rigor
 
       attr_reader :root
 
+      # Walks the on-disk cache rooted at `root` and reports a
+      # producer-level inventory. Used by `rigor check --cache-stats`
+      # to surface cache size and per-producer entry counts without
+      # depending on in-process counters (which only reflect the
+      # current run).
+      #
+      # @return [Hash] `{ root:, schema_version:, total_entries:,
+      #   total_bytes:, producers: [{ id:, entries:, bytes: }, ...] }`.
+      #   When the root does not exist or has no schema-version
+      #   marker, `schema_version` is nil and the producer list is
+      #   empty.
+      def self.disk_inventory(root:)
+        root_s = root.to_s
+        marker = File.join(root_s, "schema_version.txt")
+        schema = File.file?(marker) ? File.read(marker).strip : nil
+
+        producers = collect_producers(root_s)
+        total_entries = producers.sum { |p| p[:entries] }
+        total_bytes = producers.sum { |p| p[:bytes] }
+
+        {
+          root: root_s,
+          schema_version: schema,
+          total_entries: total_entries,
+          total_bytes: total_bytes,
+          producers: producers
+        }
+      end
+
+      def self.collect_producers(root)
+        return [] unless File.directory?(root)
+
+        Dir.children(root).sort.filter_map do |child|
+          subdir = File.join(root, child)
+          next nil unless File.directory?(subdir)
+
+          entries = Dir.glob(File.join(subdir, "**", "*.entry"))
+          next nil if entries.empty?
+
+          { id: child, entries: entries.size, bytes: entries.sum { |e| File.size(e) } }
+        end
+      end
+      private_class_method :collect_producers
+
       # @param producer_id [String] stable cache namespace; only
       #   `[a-z][a-z0-9._-]*` is accepted.
       # @param params [Hash] producer inputs; mixed into the cache key

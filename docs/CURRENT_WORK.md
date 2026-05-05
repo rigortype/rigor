@@ -10,13 +10,13 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 Planned slice order — see the v0.0.8 row of [`docs/MILESTONES.md`](MILESTONES.md) for the full list:
 
-1. ✅ `Rigor::Cache::Descriptor` value object (pure-value composition + canonical serialisation). Landed at 50d864b. See [`docs/internal-spec/cache.md`](internal-spec/cache.md) for the public read shape.
-2. `Rigor::Cache::Store` filesystem backend (sharded directory, atomic rename, per-file flock, SHA-256 integrity). **← next.**
-3. RBS environment loader as the first cached producer (the single biggest cost in a cold `rigor check` run).
+1. ✅ `Rigor::Cache::Descriptor` value object (pure-value composition + canonical serialisation). Landed at 50d864b.
+2. ✅ `Rigor::Cache::Store` filesystem backend (sharded directory, atomic rename, per-file flock, SHA-256 integrity). Landed at c7f8f94. See [`docs/internal-spec/cache.md`](internal-spec/cache.md) for the public read shape of slices 1-2.
+3. RBS environment loader as the first cached producer (the single biggest cost in a cold `rigor check` run). **← next.**
 4. `rigor check --cache-stats` (hit/miss observability) and `--clear-cache` (manual eviction).
 5. Diagnostic provenance prefix (small companion slice — `source_family` field on `Diagnostic`).
 
-Working state after slice 1: 1557 RSpec examples / 0 failures, RuboCop 142 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. Version stays at `0.0.7` until the v0.0.8 surface is locked in.
+Working state after slice 2: 1571 RSpec examples / 0 failures, RuboCop 144 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. Version stays at `0.0.7` until the v0.0.8 surface is locked in.
 
 ## Where the Work Resumes
 

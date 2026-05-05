@@ -90,6 +90,57 @@ Caching"](../adr/2-extension-api.md) and the
   collection. Provenance does NOT count toward emptiness — an
   empty bundle still carries source attribution.
 
+## Producers wired through the bundle
+
+Internal producers may surface their contributions as
+`FlowContribution`s alongside their typed-Data carriers. The
+typed carriers (`PredicateEffect`, `AssertEffect`, …) keep
+serving the analyzer-internal narrowing / dispatch machinery;
+the bundle is the public packaging for the v0.1.0 contribution
+merger and for diagnostic / documentation surfaces that want a
+single shape across producers.
+
+### `Rigor::RbsExtended.read_flow_contribution(method_def) -> FlowContribution | nil`
+
+Rolls up every recognised RBS::Extended directive on a single
+RBS method definition into one bundle:
+
+| Directive | Bundle slot |
+| --- | --- |
+| `rigor:v1:predicate-if-true ...`  | `truthy_facts` (each entry an `RbsExtended::PredicateEffect`) |
+| `rigor:v1:predicate-if-false ...` | `falsey_facts` (`PredicateEffect`s) |
+| `rigor:v1:assert ...`             | `post_return_facts` (each entry an `AssertEffect`) |
+| `rigor:v1:assert-if-true ...`     | `post_return_facts` (`AssertEffect` with `condition: :if_truthy_return`) |
+| `rigor:v1:assert-if-false ...`    | `post_return_facts` (`AssertEffect` with `condition: :if_falsey_return`) |
+| `rigor:v1:return: ...`            | `return_type` (a `Rigor::Type`) |
+
+Slots that have no contributions stay `nil` (rather than empty
+collections) so the bundle's `#empty?` rule applies cleanly.
+
+`provenance` is the shared
+`Rigor::RbsExtended::RBS_EXTENDED_PROVENANCE`:
+
+```ruby
+Rigor::FlowContribution::Provenance.new(
+  source_family: :rbs_extended,
+  plugin_id: nil,
+  node: nil,
+  descriptor: nil
+)
+```
+
+`source_family: :rbs_extended` lines up with the diagnostic-
+provenance prefix introduced in v0.0.8 slice 5, so a diagnostic
+sourced from an RBS::Extended directive can carry the same
+attribution string.
+
+`param: <name>` directives are intentionally NOT bundled — they
+refine the call's signature contract rather than its flow facts
+and do not fit ADR-2 § "Flow Contribution Bundle" slot
+semantics. Callers that care about parameter contracts keep
+using `RbsExtended.read_param_type_overrides` /
+`RbsExtended.param_type_override_map`.
+
 ## Element-list flattening (deferred)
 
 ADR-2 mentions an analyzer-internal flattening of each bundle

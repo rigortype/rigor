@@ -370,4 +370,87 @@ RSpec.describe Rigor::RbsExtended do
       expect(described_class.parse_assert_annotation("rigor:v1:assert v is ~frobinator-string")).to be_nil
     end
   end
+
+  describe ".read_flow_contribution (v0.0.10 group D — FlowContribution wiring)" do
+    def with_method_def(rbs_body)
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        File.write(File.join(dir, "sig/contrib.rbs"), <<~RBS)
+          class Contrib
+            #{rbs_body}
+            def check: (untyped value) -> bool
+          end
+        RBS
+        env = Rigor::Environment.for_project(root: dir)
+        method_def = env.rbs_loader.instance_method(class_name: "Contrib", method_name: :check)
+        yield method_def
+      end
+    end
+
+    it "returns nil for a nil method def" do
+      expect(described_class.read_flow_contribution(nil)).to be_nil
+    end
+
+    it "returns nil when the method carries no recognised directives" do
+      with_method_def("") do |method_def|
+        expect(described_class.read_flow_contribution(method_def)).to be_nil
+      end
+    end
+
+    it "splits predicate-if-true and predicate-if-false into truthy_facts / falsey_facts" do
+      with_method_def(<<~ANNOT) do |method_def|
+        %a{rigor:v1:predicate-if-true value is String}
+        %a{rigor:v1:predicate-if-false value is NilClass}
+      ANNOT
+        bundle = described_class.read_flow_contribution(method_def)
+        expect(bundle).to be_a(Rigor::FlowContribution)
+        expect(bundle.truthy_facts.map(&:class_name)).to contain_exactly("String")
+        expect(bundle.falsey_facts.map(&:class_name)).to contain_exactly("NilClass")
+      end
+    end
+
+    it "places assert / assert-if-* effects into post_return_facts" do
+      with_method_def(<<~ANNOT) do |method_def|
+        %a{rigor:v1:assert value is Numeric}
+        %a{rigor:v1:assert-if-true value is Integer}
+      ANNOT
+        bundle = described_class.read_flow_contribution(method_def)
+        expect(bundle.post_return_facts.size).to eq(2)
+        expect(bundle.post_return_facts.map(&:class_name)).to contain_exactly("Numeric", "Integer")
+        expect(bundle.post_return_facts.map(&:condition)).to contain_exactly(:always, :if_truthy_return)
+      end
+    end
+
+    it "lifts the rigor:v1:return: override into the return_type slot" do
+      with_method_def("%a{rigor:v1:return: non-empty-string}") do |method_def|
+        bundle = described_class.read_flow_contribution(method_def)
+        expect(bundle).not_to be_nil
+        expect(bundle.return_type).not_to be_nil
+        expect(bundle.return_type.class.name).to start_with("Rigor::Type::")
+      end
+    end
+
+    it "tags the bundle with the :rbs_extended source family" do
+      with_method_def("%a{rigor:v1:assert value is String}") do |method_def|
+        bundle = described_class.read_flow_contribution(method_def)
+        expect(bundle.provenance.source_family).to eq(:rbs_extended)
+        expect(bundle.provenance.plugin_id).to be_nil
+      end
+    end
+
+    it "leaves param overrides outside the bundle" do
+      with_method_def(<<~ANNOT) do |method_def|
+        %a{rigor:v1:param: value is non-empty-string}
+        %a{rigor:v1:assert value is String}
+      ANNOT
+        bundle = described_class.read_flow_contribution(method_def)
+        # The bundle reflects only the assert directive; param: stays
+        # on read_param_type_overrides / param_type_override_map.
+        expect(bundle.post_return_facts.size).to eq(1)
+        expect(bundle.return_type).to be_nil
+        expect(bundle.truthy_facts).to be_nil
+        expect(described_class.param_type_override_map(method_def)).to include(value: anything)
+      end
+    end
+  end
 end

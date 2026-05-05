@@ -2,6 +2,7 @@
 
 require_relative "type"
 require_relative "builtins/imported_refinements"
+require_relative "flow_contribution"
 
 module Rigor
   # Slice 7 phase 15 — first-preview reader for the
@@ -409,6 +410,60 @@ module Rigor
       return nil if type.nil?
 
       ParamOverride.new(param_name: match[:param].to_sym, type: type)
+    end
+
+    # The shared {Rigor::FlowContribution::Provenance} for every
+    # bundle this module produces. `source_family: :rbs_extended`
+    # so consumers (today the documentation surface; v0.1.0 the
+    # plugin contribution merger) can attribute facts back to the
+    # RBS::Extended layer.
+    RBS_EXTENDED_PROVENANCE = FlowContribution::Provenance.new(
+      source_family: :rbs_extended,
+      plugin_id: nil,
+      node: nil,
+      descriptor: nil
+    ).freeze
+
+    # Rolls up every recognised RBS::Extended directive on
+    # `method_def` into a single {Rigor::FlowContribution}:
+    #
+    # - `predicate-if-true`  → `truthy_facts` (`PredicateEffect`s)
+    # - `predicate-if-false` → `falsey_facts` (`PredicateEffect`s)
+    # - `assert*`            → `post_return_facts` (`AssertEffect`s)
+    # - `return:` override   → `return_type` (`Rigor::Type`)
+    #
+    # Param overrides are intentionally NOT included — they refine
+    # the call's signature contract rather than its flow facts and
+    # do not fit ADR-2 § "Flow Contribution Bundle" slot semantics.
+    # Callers that care about parameter contracts keep using
+    # {.read_param_type_overrides} / {.param_type_override_map}.
+    #
+    # Returns `nil` when the method carries no recognised
+    # contribution directives (callers can skip the merge step
+    # without iterating an empty bundle).
+    def read_flow_contribution(method_def)
+      return nil if method_def.nil?
+
+      predicate_effects = read_predicate_effects(method_def)
+      assert_effects = read_assert_effects(method_def)
+      return_override = read_return_type_override(method_def)
+      return nil if predicate_effects.empty? && assert_effects.empty? && return_override.nil?
+
+      build_flow_contribution(predicate_effects, assert_effects, return_override)
+    end
+
+    def build_flow_contribution(predicate_effects, assert_effects, return_override)
+      FlowContribution.new(
+        return_type: return_override,
+        truthy_facts: nilable_slot(predicate_effects.select(&:truthy_only?)),
+        falsey_facts: nilable_slot(predicate_effects.select(&:falsey_only?)),
+        post_return_facts: nilable_slot(assert_effects),
+        provenance: RBS_EXTENDED_PROVENANCE
+      )
+    end
+
+    def nilable_slot(facts)
+      facts.empty? ? nil : facts
     end
   end
 end

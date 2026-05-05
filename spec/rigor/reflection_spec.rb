@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "tmpdir"
+require "fileutils"
 
 RSpec.describe Rigor::Reflection do
   describe ".class_known?" do
@@ -68,6 +70,33 @@ RSpec.describe Rigor::Reflection do
       env = Rigor::Environment.new
       scope = Rigor::Scope.empty(environment: env)
       expect(described_class.constant_type_for("FROBINATOR", scope: scope)).to be_nil
+    end
+
+    describe "RBS-backed lookups under cache_store (v0.0.9 group A slice 4)" do
+      let(:tmpdir) { Dir.mktmpdir("rigor-reflection-cache-spec-") }
+      let(:store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }
+
+      after { FileUtils.rm_rf(tmpdir) }
+
+      it "matches the uncached RBS path through Environment.for_project(cache_store:)" do
+        cached_env = Rigor::Environment.for_project(libraries: [], signature_paths: [], cache_store: store)
+        cached_scope = Rigor::Scope.empty(environment: cached_env)
+        cached = described_class.constant_type_for("ARGV", scope: cached_scope)
+        uncached = described_class.constant_type_for("ARGV")
+        expect(cached).to eq(uncached)
+      end
+
+      it "shares the cache so a second project Environment never rebuilds the constant table" do
+        first_env = Rigor::Environment.for_project(libraries: [], signature_paths: [], cache_store: store)
+        described_class.constant_type_for("ARGV", scope: Rigor::Scope.empty(environment: first_env))
+        first_writes = store.stats.fetch(:writes)
+        expect(first_writes).to be >= 1
+
+        second_env = Rigor::Environment.for_project(libraries: [], signature_paths: [], cache_store: store)
+        described_class.constant_type_for("ARGV", scope: Rigor::Scope.empty(environment: second_env))
+        expect(store.stats.fetch(:writes)).to eq(first_writes)
+        expect(store.stats.fetch(:hits)).to be >= 1
+      end
     end
   end
 

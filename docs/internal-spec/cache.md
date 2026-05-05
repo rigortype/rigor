@@ -253,9 +253,33 @@ without blocking on the serialiser question.
 
 Returns a hash mapping every canonical constant name (top-level-
 prefixed, e.g. `"::Math::PI"`) to its translated `Rigor::Type`.
-The producer block enumerates `loader.constant_names` and calls
-`loader.constant_type(name)` for each; entries whose translation
-returns `nil` are dropped from the table.
+The producer block iterates `loader.each_constant_decl` (which
+yields `(name, entry)` pairs from `env.constant_decls`) and
+translates each entry directly; entries whose translation
+returns `Rigor::Type::Bot` or raises are dropped from the table.
+
+Going through `each_constant_decl` instead of
+`loader.constant_type` keeps the producer free of the recursion
+risk: `RbsLoader#constant_type` itself consults the cache when
+`cache_store` is set.
+
+### Constant-lookup path under `cache_store`
+
+Once an `Environment` is built with `Environment.for_project(..., cache_store:)`,
+every constant lookup path threads through the cache:
+
+- `Rigor::Reflection.constant_type_for(name, scope:)` — public
+  read API; in-source constants win on collision, otherwise
+  falls through to:
+- `Environment#constant_for_name(name)` →
+- `Environment::RbsLoader#constant_type(name)` — checks
+  `constant_type_table[rbs_name.to_s]` (memoized per loader,
+  populated through `RbsConstantTable.fetch`).
+
+The first lookup on a cold cache pays the full table-build cost
+once and persists the result; warm runs (and a separate loader
+that shares the same Store) skip the env walk entirely and pay
+only a `Marshal.load` of the stored hash.
 
 ### Descriptor shape
 

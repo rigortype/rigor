@@ -115,6 +115,43 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
+  describe "#stats (v0.0.9 group A slice 3)" do
+    it "starts at zero hits / misses / writes" do
+      expect(store.stats).to include(hits: 0, misses: 0, writes: 0)
+      expect(store.stats.fetch(:by_producer)).to be_empty
+    end
+
+    it "increments misses and writes on a cache miss, hits on subsequent reads" do
+      3.times do |i|
+        store.fetch_or_compute(producer_id: "demo", params: { i: i }, descriptor: descriptor) { i }
+      end
+      store.fetch_or_compute(producer_id: "demo", params: { i: 0 }, descriptor: descriptor) { :unused }
+      store.fetch_or_compute(producer_id: "demo", params: { i: 0 }, descriptor: descriptor) { :unused }
+
+      stats = store.stats
+      expect(stats).to include(misses: 3, writes: 3, hits: 2)
+      expect(stats.fetch(:by_producer)).to include("demo" => { hits: 2, misses: 3, writes: 3 })
+    end
+
+    it "tracks counters separately per producer" do
+      store.fetch_or_compute(producer_id: "alpha", params: {}, descriptor: descriptor) { :a }
+      store.fetch_or_compute(producer_id: "beta", params: {}, descriptor: descriptor) { :b }
+      store.fetch_or_compute(producer_id: "alpha", params: {}, descriptor: descriptor) { :unused }
+
+      by_producer = store.stats.fetch(:by_producer)
+      expect(by_producer.fetch("alpha")).to eq(hits: 1, misses: 1, writes: 1)
+      expect(by_producer.fetch("beta")).to eq(hits: 0, misses: 1, writes: 1)
+    end
+
+    it "returns a frozen snapshot so callers cannot mutate the live counters" do
+      store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) { :v }
+      snapshot = store.stats
+      expect(snapshot).to be_frozen
+      expect(snapshot.fetch(:by_producer)).to be_frozen
+      expect(snapshot.fetch(:by_producer).fetch("demo")).to be_frozen
+    end
+  end
+
   describe ".disk_inventory" do
     it "returns nil schema_version and an empty producer list when the root does not exist" do
       inv = described_class.disk_inventory(root: cache_root)

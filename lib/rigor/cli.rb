@@ -76,14 +76,15 @@ module Rigor
 
       configuration = Configuration.load(options.fetch(:config))
       paths = @argv.empty? ? configuration.paths : @argv
-      result = Analysis::Runner.new(
+      runner = Analysis::Runner.new(
         configuration: configuration,
         explain: options.fetch(:explain),
         cache_store: cache_store
-      ).run(paths)
+      )
+      result = runner.run(paths)
 
       write_result(result, options.fetch(:format))
-      write_cache_stats(cache_root) if options.fetch(:cache_stats)
+      write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
       result.success? ? 0 : 1
     end
 
@@ -118,13 +119,18 @@ module Rigor
       end
     end
 
-    def write_cache_stats(cache_root)
+    def write_cache_stats(cache_root, runtime_store)
       inv = Cache::Store.disk_inventory(root: cache_root)
 
       @out.puts("")
       @out.puts("Cache (root: #{inv.fetch(:root)})")
       schema = inv.fetch(:schema_version)
       @out.puts("  schema_version: #{schema.nil? ? 'absent' : schema}")
+      write_disk_inventory(inv)
+      write_runtime_stats(runtime_store) if runtime_store
+    end
+
+    def write_disk_inventory(inv)
       if inv.fetch(:total_entries).zero?
         @out.puts("  (empty)")
         return
@@ -135,6 +141,25 @@ module Rigor
         bytes = format_bytes(producer.fetch(:bytes))
         @out.puts("    #{producer.fetch(:id)}: #{producer.fetch(:entries)} entries, #{bytes}")
       end
+    end
+
+    def write_runtime_stats(store)
+      stats = store.stats
+      hits = stats.fetch(:hits)
+      misses = stats.fetch(:misses)
+      writes = stats.fetch(:writes)
+      @out.puts("  this run: #{hits} #{plural(hits, 'hit')}, " \
+                "#{misses} #{plural(misses, 'miss', 'misses')}, " \
+                "#{writes} #{plural(writes, 'write')}")
+      stats.fetch(:by_producer).each do |id, counts|
+        @out.puts("    #{id}: #{counts.fetch(:hits)} #{plural(counts.fetch(:hits), 'hit')}, " \
+                  "#{counts.fetch(:misses)} #{plural(counts.fetch(:misses), 'miss', 'misses')}, " \
+                  "#{counts.fetch(:writes)} #{plural(counts.fetch(:writes), 'write')}")
+      end
+    end
+
+    def plural(count, singular, plural = "#{singular}s")
+      count == 1 ? singular : plural
     end
 
     def format_bytes(bytes)

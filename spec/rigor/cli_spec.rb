@@ -281,6 +281,25 @@ RSpec.describe Rigor::CLI do
       end
     end
 
+    it "reports per-run hit/miss/write totals under --cache-stats" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        status, out, _err = run_cli("check", "--cache-stats", "a.rb")
+        expect(status).to eq(0)
+        expect(out).to match(/this run: \d+ hits?, \d+ (miss|misses), \d+ writes?/)
+      end
+    end
+
+    it "skips the per-run section under --no-cache --cache-stats" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        status, out, _err = run_cli("check", "--no-cache", "--cache-stats", "a.rb")
+        expect(status).to eq(0)
+        expect(out).to include("Cache (root: .rigor/cache)")
+        expect(out).not_to include("this run:")
+      end
+    end
+
     it "removes the cache directory under --clear-cache" do
       write_check_fixture("a.rb", "1\n")
       Dir.chdir(tmpdir) do

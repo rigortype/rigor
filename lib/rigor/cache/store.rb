@@ -30,9 +30,26 @@ module Rigor
 
       def initialize(root:)
         @root = root.to_s.dup.freeze
+        @hits = 0
+        @misses = 0
+        @writes = 0
+        @by_producer = Hash.new { |h, k| h[k] = { hits: 0, misses: 0, writes: 0 } }
       end
 
       attr_reader :root
+
+      # Returns a frozen snapshot of this Store's per-run hit / miss /
+      # write counters. The bookkeeping is in-memory only — every new
+      # `Store.new` starts at zero — so the counters reflect activity
+      # against this specific instance rather than the on-disk cache
+      # state. Disk-level state is reported separately by
+      # {.disk_inventory}.
+      #
+      # @return [Hash] `{ hits:, misses:, writes:, by_producer: { id => { hits:, misses:, writes: } } }`
+      def stats
+        per_producer = @by_producer.transform_values { |counts| counts.dup.freeze }.freeze
+        { hits: @hits, misses: @misses, writes: @writes, by_producer: per_producer }.freeze
+      end
 
       # Walks the on-disk cache rooted at `root` and reports a
       # producer-level inventory. Used by `rigor check --cache-stats`
@@ -95,10 +112,15 @@ module Rigor
         path = entry_path(producer_id, key)
 
         cached = read_entry(path)
-        return cached.value unless cached.nil?
+        unless cached.nil?
+          record(:hits, producer_id)
+          return cached.value
+        end
 
+        record(:misses, producer_id)
         value = block.call
         write_entry(path, descriptor, value)
+        record(:writes, producer_id)
         value
       end
 
@@ -106,6 +128,15 @@ module Rigor
 
       Entry = Data.define(:descriptor_bytes, :value)
       private_constant :Entry
+
+      def record(counter, producer_id)
+        case counter
+        when :hits then @hits += 1
+        when :misses then @misses += 1
+        when :writes then @writes += 1
+        end
+        @by_producer[producer_id][counter] += 1
+      end
 
       def validate_producer_id!(producer_id)
         return if producer_id.is_a?(String) && producer_id.match?(VALID_PRODUCER_ID)

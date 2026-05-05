@@ -287,8 +287,8 @@ present. The check itself runs to completion regardless.
 
 ### `--cache-stats`
 
-Prints an on-disk inventory at the end of the run, sourced from
-{Store.disk_inventory}. Output sample:
+Prints both an on-disk inventory and the runtime hit/miss/write
+counters from the runner's `Cache::Store`. Output sample:
 
 ```
 Cache (root: .rigor/cache)
@@ -296,16 +296,34 @@ Cache (root: .rigor/cache)
   3 entries, 12.4 KiB
     rbs.constant_type_table: 1 entries, 11.0 KiB
     reflection.instance_method_definition: 2 entries, 1.4 KiB
+  this run: 5 hits, 1 miss, 1 write
+    rbs.constant_type_table: 5 hits, 1 miss, 1 write
 ```
 
 When the cache directory does not exist, `schema_version` reads
-`absent` and the body shows `(empty)`. The flag is intentionally
-disk-oriented for v0.0.8: per-run hit/miss counters require the
-analysis runner to share a Store instance with the producers,
-which is deferred until production code paths actually consult
-the cache (no production caller in v0.0.8 — the slice 3 producer
-exists as a working surface but is not yet wired into
-`rigor check`).
+`absent` and the body shows `(empty)`. When the runner has no
+Store (e.g. under `--no-cache`), the `this run:` section is
+omitted — there is no in-memory state to report.
+
+### `Store#stats`
+
+Returns a frozen snapshot of the Store's per-run counters:
+
+```ruby
+{
+  hits: Integer,
+  misses: Integer,
+  writes: Integer,
+  by_producer: { producer_id => { hits:, misses:, writes: } }
+}
+```
+
+The counters are in-memory only — every new `Store.new` starts
+at zero. Bumped inside `#fetch_or_compute`: a successful read
+increments `:hits`; a miss increments `:misses` immediately and
+then `:writes` after the producer block returns and the entry
+is persisted. Per-producer counts mirror the totals so callers
+can report the breakdown shown above.
 
 ### `Store.disk_inventory(root:)`
 

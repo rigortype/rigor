@@ -63,7 +63,9 @@ module Rigor
 
     class Runner
       RUBY_GLOB: String
-      def initialize: (configuration: Configuration) -> void
+      DEFAULT_CACHE_ROOT: String
+      attr_reader cache_store: Rigor::Cache::Store?
+      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: Rigor::Cache::Store?) -> void
       def run: (?Array[String] paths) -> Result
     end
   end

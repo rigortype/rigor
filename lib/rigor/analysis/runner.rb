@@ -50,7 +50,8 @@ module Rigor
 
         environment = Environment.for_project(
           libraries: @configuration.libraries,
-          signature_paths: @configuration.signature_paths
+          signature_paths: @configuration.signature_paths,
+          cache_store: @cache_store
         )
         expansion = expand_paths(paths)
 

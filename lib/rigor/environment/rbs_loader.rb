@@ -44,7 +44,7 @@ module Rigor
         end
       end
 
-      attr_reader :libraries, :signature_paths
+      attr_reader :libraries, :signature_paths, :cache_store
 
       # @param libraries [Array<String, Symbol>] stdlib library names to
       #   load on top of core (e.g., `["pathname", "json"]`). Empty by
@@ -57,9 +57,16 @@ module Rigor
       #   `sig/` tree). Non-existent or non-directory paths are filtered
       #   out at build time so the loader stays robust to fixtures and
       #   bare repositories.
-      def initialize(libraries: [], signature_paths: [])
+      # @param cache_store [Rigor::Cache::Store, nil] the persistent
+      #   cache the loader consults for translated constant lookups
+      #   (and, in later v0.0.9 slices, other Marshal-clean
+      #   reflection artefacts). Pass `nil` (the default) to skip
+      #   the cache entirely; the runner threads its own Store
+      #   through here when caching is enabled.
+      def initialize(libraries: [], signature_paths: [], cache_store: nil)
         @libraries = libraries.map(&:to_s).freeze
         @signature_paths = signature_paths.map { |p| Pathname(p) }.freeze
+        @cache_store = cache_store
         @state = { env: nil, builder: nil }
         @instance_definition_cache = {}
         @singleton_definition_cache = {}
@@ -155,6 +162,21 @@ module Rigor
         []
       end
 
+      # Yields `(name, entry)` for every RBS constant declaration
+      # currently loaded into the environment. The cache producer
+      # uses this to materialise the constant-type table without
+      # going back through {#constant_type} (which would recurse
+      # back into the cache when `cache_store` is set).
+      def each_constant_decl
+        return enum_for(:each_constant_decl) unless block_given?
+
+        env.constant_decls.each do |rbs_name, entry|
+          yield rbs_name.to_s, entry
+        end
+      rescue StandardError
+        # fail-soft: a broken environment yields no entries.
+      end
+
       # Slice A constant-value lookup. Returns the translated
       # `Rigor::Type` for a non-class constant declaration
       # (`BUCKETS: Array[Symbol]`, `DEFAULT_PATH: String`, ...) or
@@ -164,20 +186,42 @@ module Rigor
       # nil; the loader does NOT consult the class declarations
       # here — class objects are still resolved through
       # {#class_known?} and `Environment#singleton_for_name`.
+      #
+      # When `cache_store` is set, the loader fetches the entire
+      # translated constant table once (per process) through
+      # {Cache::RbsConstantTable.fetch} and answers point lookups
+      # from it. Cold runs pay the translation cost up-front and
+      # write the result to disk; warm runs skip the translation
+      # entirely and pay only a `Marshal.load` of the table.
       def constant_type(name)
         rbs_name = parse_type_name(name)
         return nil unless rbs_name
 
-        entry = env.constant_decls[rbs_name]
-        return nil unless entry
-
-        translated = Inference::RbsTypeTranslator.translate(entry.decl.type)
-        translated unless translated.is_a?(Type::Bot)
+        if cache_store
+          constant_type_table[rbs_name.to_s]
+        else
+          translate_constant_decl(rbs_name)
+        end
       rescue StandardError
         nil
       end
 
       private
+
+      def constant_type_table
+        @constant_type_table ||= begin
+          require_relative "../cache/rbs_constant_table"
+          Cache::RbsConstantTable.fetch(loader: self, store: cache_store)
+        end
+      end
+
+      def translate_constant_decl(rbs_name)
+        entry = env.constant_decls[rbs_name]
+        return nil unless entry
+
+        translated = Inference::RbsTypeTranslator.translate(entry.decl.type)
+        translated unless translated.is_a?(Type::Bot)
+      end
 
       def env
         @state[:env] ||= build_env

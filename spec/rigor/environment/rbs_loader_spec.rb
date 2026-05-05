@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "tmpdir"
+require "fileutils"
 
 RSpec.describe Rigor::Environment::RbsLoader do
   let(:loader) { described_class.default }
@@ -197,6 +199,34 @@ RSpec.describe Rigor::Environment::RbsLoader do
 
     it "returns unknown when either class is absent" do
       expect(loader.class_ordering("Integer", "ThisClassDoesNotExist123")).to eq(:unknown)
+    end
+  end
+
+  describe "#constant_type via cache_store (v0.0.9 group A slice 2)" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-cache-spec-") }
+    let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "returns the same translated type as the uncached path" do
+      uncached = described_class.new
+      cached = described_class.new(cache_store: cache_store)
+      expect(cached.constant_type("Math::PI")).to eq(uncached.constant_type("Math::PI"))
+    end
+
+    it "returns nil for unknown constant names under the cached path" do
+      cached = described_class.new(cache_store: cache_store)
+      expect(cached.constant_type("Math::ThisConstantDoesNotExist123")).to be_nil
+    end
+
+    it "uses the on-disk cache so a fresh loader sharing the store never builds env" do
+      first = described_class.new(cache_store: cache_store)
+      first.constant_type("Math::PI")
+
+      second = described_class.new(cache_store: cache_store)
+      allow(second).to receive(:each_constant_decl).and_call_original
+      second.constant_type("Math::PI")
+      expect(second).not_to have_received(:each_constant_decl)
     end
   end
 end

@@ -76,11 +76,20 @@ module Rigor
       #   list of `sig/`-style directories. When `nil` (the default),
       #   the canonical project layout `<root>/sig` is used if it
       #   exists, otherwise no signature path is loaded.
+      # @param cache_store [Rigor::Cache::Store, nil] persistent cache
+      #   threaded into the underlying {Environment::RbsLoader} so
+      #   constant lookups (and, in later v0.0.9 slices, other
+      #   reflection artefacts) consult the cache. Pass `nil` (the
+      #   default) to skip caching for this environment.
       # @return [Rigor::Environment]
-      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil)
+      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil)
         resolved_paths = signature_paths || default_signature_paths(root)
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
-        loader = RbsLoader.new(libraries: merged_libraries, signature_paths: resolved_paths)
+        loader = RbsLoader.new(
+          libraries: merged_libraries,
+          signature_paths: resolved_paths,
+          cache_store: cache_store
+        )
         new(rbs_loader: loader)
       end
 

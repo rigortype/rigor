@@ -45,10 +45,10 @@ RSpec.describe Rigor::Cache::RbsConstantTable do
     end
 
     it "skips the producer block on a cache hit" do
-      allow(loader).to receive(:constant_names).and_call_original
+      allow(loader).to receive(:each_constant_decl).and_call_original
       described_class.fetch(loader: loader, store: store)
       described_class.fetch(loader: loader, store: store)
-      expect(loader).to have_received(:constant_names).once
+      expect(loader).to have_received(:each_constant_decl).once
     end
   end
 

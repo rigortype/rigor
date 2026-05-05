@@ -44,10 +44,16 @@ module Rigor
       end
 
       def self.compute(loader)
-        loader.constant_names.each_with_object({}) do |name, table|
-          translated = loader.constant_type(name)
-          table[name] = translated unless translated.nil?
+        table = {}
+        loader.each_constant_decl do |name, entry|
+          translated = Inference::RbsTypeTranslator.translate(entry.decl.type)
+          table[name] = translated unless translated.is_a?(Type::Bot)
+        rescue StandardError
+          # Skip entries whose RBS type fails to translate; the cache
+          # stays robust to a broken signature rather than corrupting
+          # the whole table.
         end
+        table
       end
 
       def self.rbs_gem_entry

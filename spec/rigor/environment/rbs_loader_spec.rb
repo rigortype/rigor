@@ -202,6 +202,32 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "env via cache_store (v0.0.10 C2)" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-env-spec-") }
+    let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "uses the cached env so a fresh loader sharing the store never rebuilds" do
+      first = described_class.new(cache_store: cache_store)
+      first.send(:env) # force build + cache write
+
+      allow(described_class).to receive(:build_env_for).and_call_original
+      second = described_class.new(cache_store: cache_store)
+      second.send(:env)
+      expect(described_class).not_to have_received(:build_env_for)
+    end
+
+    it "keeps instance_method lookups working on the cached env" do
+      first = described_class.new(cache_store: cache_store)
+      first.instance_method(class_name: "Hash", method_name: :fetch)
+
+      second = described_class.new(cache_store: cache_store)
+      method_def = second.instance_method(class_name: "Hash", method_name: :fetch)
+      expect(method_def).to be_a(RBS::Definition::Method)
+    end
+  end
+
   describe "#class_type_param_names via cache_store (v0.0.10 A)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-type-params-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

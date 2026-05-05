@@ -42,6 +42,26 @@ module Rigor
         def reset_default!
           @default = nil
         end
+
+        # Builds an `RBS::Environment` from explicit `libraries` and
+        # `signature_paths`. Stateless surface so the v0.0.10
+        # {Cache::RbsEnvironment} producer can build an env on cache
+        # miss without holding a loader instance, and the
+        # instance-side {#build_env} delegates here so the
+        # implementation stays single-rooted.
+        def build_env_for(libraries:, signature_paths:)
+          rbs_loader = RBS::EnvironmentLoader.new
+          libraries.each do |library|
+            next unless rbs_loader.has_library?(library: library, version: nil)
+
+            rbs_loader.add(library: library, version: nil)
+          end
+          signature_paths.each do |path|
+            path = Pathname(path) unless path.is_a?(Pathname)
+            rbs_loader.add(path: path) if path.directory?
+          end
+          RBS::Environment.from_loader(rbs_loader).resolve_type_names
+        end
       end
 
       attr_reader :libraries, :signature_paths, :cache_store
@@ -283,7 +303,12 @@ module Rigor
       end
 
       def env
-        @state[:env] ||= build_env
+        @state[:env] ||= cache_store ? cached_env : build_env
+      end
+
+      def cached_env
+        require_relative "../cache/rbs_environment"
+        Cache::RbsEnvironment.fetch(loader: self, store: cache_store)
       end
 
       def builder
@@ -291,23 +316,7 @@ module Rigor
       end
 
       def build_env
-        rbs_loader = RBS::EnvironmentLoader.new
-        @libraries.each do |library|
-          # Phase 2a deliberately fails-soft on unknown stdlib libraries
-          # so a stale `.rigor.yml` (or future config plumbing) does not
-          # take down the whole analyzer. Phase 2b will surface this
-          # through diagnostics once the configuration layer can name
-          # the offending source. The unknown-library check happens at
-          # `from_loader` time, not at `add` time, so we have to gate
-          # ahead of `add`.
-          next unless rbs_loader.has_library?(library: library, version: nil)
-
-          rbs_loader.add(library: library, version: nil)
-        end
-        @signature_paths.each do |path|
-          rbs_loader.add(path: path) if path.directory?
-        end
-        RBS::Environment.from_loader(rbs_loader).resolve_type_names
+        self.class.build_env_for(libraries: @libraries, signature_paths: @signature_paths)
       end
 
       def build_instance_definition(class_name)

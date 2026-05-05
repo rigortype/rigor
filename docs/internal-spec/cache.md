@@ -342,6 +342,75 @@ same set of definitions.
 cached table when `cache_store` is set. The accessor returns a
 fresh `Array.dup` so callers cannot mutate the cached payload.
 
+## `Rigor::Cache::RbsEnvironment` (v0.0.10 C2)
+
+Fifth cached producer — and the first to use the
+{`Store#fetch_or_compute`} default-`Marshal` path against a
+non-Marshal-clean RBS-native value. The producer caches the
+loader's full `build_env` result (`RBS::Environment` after
+`from_loader` + `resolve_type_names`); cold runs pay the parse +
+resolve cost once and persist the result, while warm runs (and
+a separate loader sharing the same Store) load the marshalled
+blob and skip the parse / resolve stages entirely.
+
+Producer id `"rbs.environment"`. Cache descriptor reuses
+{`RbsDescriptor.build`} so a single signature change or rbs gem
+bump invalidates this producer alongside the four
+post-translation caches.
+
+### `RbsEnvironment.fetch(loader:, store:) -> ::RBS::Environment`
+
+Returns the env. The producer block calls
+`Rigor::Environment::RbsLoader.build_env_for(libraries:, signature_paths:)`
+— a stateless class-method counterpart to
+`RbsLoader#build_env` so the producer does not need to hold a
+loader instance.
+
+### `RBS::Location` Marshal patch
+
+`RBS::Environment` and its transitive AST nodes carry
+`RBS::Location` instances. The rbs gem's C-extension
+`RBS::Location` does not ship `_dump` / `_load`, so a naive
+`Marshal.dump(env)` raises `TypeError`. v0.0.10 patches
+`RBS::Location` with the minimal Marshal hooks the cache
+machinery requires:
+
+```ruby
+class RBS::Location
+  def _dump(_) = ""
+  def self._load(_) = new(buffer: ..., start_pos: 0, end_pos: 0)
+end
+```
+
+The patch is purely additive (only adds methods that previously
+raised `TypeError` on dispatch) and idempotent (gated behind
+`method_defined?(:_dump)`). Cached `RBS::Location` instances
+lose their per-node source-position info — but Rigor never
+consults `RBS::Location` from any analysis code path (every
+diagnostic flows through Prism's own location), so the loss is
+inert in practice. Code paths that DO read Location after a
+cache hit (e.g. third-party tools) see a benign zero-range
+sentinel rather than crashing.
+
+The patch lives in
+`lib/rigor/cache/rbs_environment_marshal_patch.rb` and is
+required by the producer; it is loaded once per process when
+the producer is first referenced.
+
+### Composition with the post-translation caches
+
+`RbsEnvironment` lives alongside `RbsConstantTable`,
+`RbsKnownClassNames`, `RbsClassAncestorTable`, and
+`RbsClassTypeParamNames`. The post-translation caches answer
+the lookups they cover from disk without ever materialising an
+env; `RbsEnvironment` answers everything else (e.g.
+`RbsLoader#instance_method` and `singleton_method`) by handing
+the cached env to RBS's `DefinitionBuilder`. The two layers
+compose: a warm process pays no env build, no constant
+translation, no ancestors walk, and no type-parameter walk for
+already-cached lookups, and only an env load + per-class
+DefinitionBuilder cost for the few that aren't.
+
 ## `Rigor::Cache::RbsDescriptor` (shared)
 
 Both `RbsConstantTable` and `RbsKnownClassNames` depend on the

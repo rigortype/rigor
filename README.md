@@ -1,7 +1,8 @@
 # Rigor
 
 [![Gem Version](https://badge.fury.io/rb/rigortype.svg?icon=si%3Arubygems)](https://badge.fury.io/rb/rigortype)
-![GitHub License](https://img.shields.io/github/license/rigortype/rigor)
+[![GitHub License](https://img.shields.io/github/license/rigortype/rigor)](https://github.com/rigortype/rigor/blob/master/LICENSE)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rigortype/rigor)
 
 **Inference-first static analysis for Ruby.** Add Rigor to your
 Gemfile and run `rigor check` over your code — no annotations,

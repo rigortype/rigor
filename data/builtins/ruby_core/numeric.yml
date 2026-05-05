@@ -81,8 +81,9 @@ classes:
         cfunc: num_clone
         arity: -1
         defined_at: references/ruby/numeric.c:6461
-        purity: unknown
-        c_body_at: not_found
+        c_body_at: references/ruby/object.c:472
+        c_effects: []
+        purity: leaf
         rbs:
         - "(?freeze: true?) -> self"
         rbs_at: references/rbs/core/numeric.rbs:828

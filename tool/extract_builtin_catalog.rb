@@ -104,7 +104,7 @@ TOPICS = {
       "Integer" => "references/rbs/core/integer.rbs",
       "Float" => "references/rbs/core/float.rbs"
     },
-    c_index_paths: %w[references/ruby/numeric.c references/ruby/bignum.c],
+    c_index_paths: %w[references/ruby/numeric.c references/ruby/bignum.c references/ruby/object.c],
     output_path: "data/builtins/ruby_core/numeric.yml"
   },
   "string" => {

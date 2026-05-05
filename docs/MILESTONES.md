@@ -179,14 +179,37 @@ Slices in commit order:
 
 6. **`Rigor::Cache::RbsKnownClassNames`** materialises the Set<String> of every RBS-declared class / module / alias name. `RbsLoader#class_known?` consults it on the cached path. **`Rigor::Cache::RbsDescriptor`** extracts the rbs-environment descriptor builder both producers share, so a single signature change or rbs gem bump invalidates every RBS-derived cached producer in lockstep.
 
-Deferred from v0.0.9 (carried forward) — these stay v0.0.10+ or v0.1.0 territory:
+Deferred from v0.0.9 (mostly absorbed into the v0.0.10 cluster):
 
-- **Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.** Direct caching of `build_env` still requires either a `Store`-side `dump`/`load` callable surface or a schema-stable intermediate that walks `RBS::Environment` into a Marshal-safe shape. The constant-table and known-class-names caches close some of the cold-start gap but the env build is still paid on every cold run.
-- **More cached producers under `Rigor::Reflection`** (`instance_method_definition`, `singleton_method_definition`, …). Their RBS-native return values carry `RBS::Location`, so caching them requires custom serialisers or a translation surface emitting Marshal-clean Rigor types.
-- **Wire `FlowContribution` bundles through internal producers.** Built-in narrowing rules, `RbsExtended` annotations, and `PredicateEffect`-style facts could round-trip through the bundle, but the conversion sites stay analyzer-internal until v0.1.0's plugin merger requires them.
+- ~~**Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.**~~ Landed in v0.0.10 C1 + C2.
+- ~~**More cached producers under `Rigor::Reflection`**~~ — partial: ancestor table and type-param-names landed in v0.0.10 (B+A); per-method `instance_method_definition` / `singleton_method_definition` still pending.
+- **Wire `FlowContribution` bundles through internal narrowing.** Built-in narrowing rules and `PredicateEffect`-style facts could round-trip through the bundle; the conversion sites stay analyzer-internal until v0.1.0's plugin merger requires them. RbsExtended did lift directives into a bundle in v0.0.10 D.
 - **Plugin-side cache producers.** Gated on the plugin API (v0.1.0).
 - **LSP / long-running-daemon cache mode.**
-- **LRU eviction / size cap.** v0.0.9 still ships unbounded; users run `--clear-cache` if needed.
+- **LRU eviction / size cap.** Still unbounded; users run `--clear-cache` if needed.
+
+## v0.0.10 — In development
+
+Theme: **finish the cache surface and broaden the type language.** Builds on the v0.0.9 cluster: more cached producers, a custom-serialiser surface on Store, `RBS::Environment` itself cached on top of the new surface, and three pieces of language work (FlowContribution wiring on the producer side, paired-complement narrowing for Refined predicates, literal-string flow tracking through interpolation and concat).
+
+Commits in chronological order:
+
+- 41aec51 — **D**: `Rigor::RbsExtended.read_flow_contribution(method_def)` rolls every recognised directive on a single method into a `Rigor::FlowContribution` bundle. `:rbs_extended` source family. Internal narrowing keeps the typed Data carriers; the bundle is the public packaging the v0.1.0 contribution merger consumes.
+- 3ae65e2 — **E**: paired-complement registry on `Type::Refined` (`COMPLEMENT_PAIRS`). First pair: `lowercase ↔ not_lowercase`. `~lowercase-string` narrows `String` to `non-lowercase-string` instead of `Difference[String, lowercase-string]`.
+- 908eb08 — **F**: `literal-string` and `non-empty-literal-string` carriers; `ExpressionTyper` lifts an interpolated string to `literal-string` when every part is literal-bearing.
+- 8951c1d — **C1**: `Store#fetch_or_compute` gains `serialize:` / `deserialize:` callable kwargs. Defaults to `Marshal.dump` / `Marshal.load`. Custom serialisers must round-trip; deserialiser exceptions become cache misses.
+- 9b50e2b — **B**: `Rigor::Cache::RbsClassAncestorTable` (`Hash<String, Array<String>>`). `RbsHierarchy#ancestor_names` consults the cached table; `class_ordering` benefits transitively.
+- c601f40 — **A**: `Rigor::Cache::RbsClassTypeParamNames` (`Hash<String, Array<Symbol>>`). `RbsLoader#class_type_param_names` consults the cached table.
+- d662d4a — **E follow-up**: registers `uppercase ↔ not_uppercase` and `numeric ↔ not_numeric` pairs alongside `non-uppercase-string` and `non-numeric-string` carriers.
+- 5600efc — **F follow-up**: `LiteralStringFolding` dispatcher tier between ConstantFolding and ShapeDispatch. `String#+` and `String#*` lift to `literal-string` when every operand is itself literal-bearing.
+- 8f7c32c — **C2**: `Rigor::Cache::RbsEnvironment` caches the full `RBS::Environment` via the C1 callable surface. Pulls in `lib/rigor/cache/rbs_environment_marshal_patch.rb` — a minimal `_dump` / `_load` patch on `RBS::Location` so the env round-trips through Marshal. Biggest cold-start win in the cluster.
+
+Deferred from v0.0.10 (carry forward):
+
+- **Per-method `Reflection` caches** (`instance_method_definition`, `singleton_method_definition`). Now feasible since the C2 patch makes every RBS-native value Marshal-clean.
+- **Wire `FlowContribution` bundles through internal narrowing.** Internal-only refactor; no user-visible behaviour change.
+- **`literal-string` through `<<` mutation.** Requires a mutation-effect surface the dispatcher does not currently expose.
+- **`decimal-int-string` / `octal-int-string` / `hex-int-string` paired complements.** Complement domains are too vague to warrant separate carriers in practice.
 
 ## v0.1.0 — Long Horizon (architecture commitments deferred)
 

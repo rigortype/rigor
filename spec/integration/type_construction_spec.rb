@@ -669,5 +669,14 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
         expect(mismatches).to be_empty
       end
     end
+
+    describe "fixtures/exception_catalog.rb — Exception catalog-driven folding" do
+      let(:harness) { harness_for("exception_catalog") }
+
+      it "self-asserts the new Exception catalog coverage" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
   end
 end

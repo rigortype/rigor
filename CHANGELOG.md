@@ -80,6 +80,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receiver-class recognition for `Regexp.new(...)` plus
   every `MatchData` method, so RBS dispatch routes precisely
   through the new catalog entries.
+- **Exception catalog import.** `tool/scaffold_builtin_catalog.rb`
+  with `--rb-global rb_eException` writes
+  `data/builtins/ruby_core/exception.yml` (34 instance methods,
+  6 singletons across the entire 27-class error hierarchy that
+  `Init_Exception` registers in one pass — Exception,
+  StandardError, RuntimeError, KeyError, NameError,
+  NoMethodError, FrozenError, …) and the matching
+  `Builtins::EXCEPTION_CATALOG` loader. Only the base
+  `Exception` row is wired into `CATALOG_BY_CLASS`; subclass
+  receivers reach the catalog via `is_a?(Exception)` and consult
+  the base-class entries. The blocklist defends every base
+  method whose answer depends on runtime state (`:backtrace`,
+  `:backtrace_locations`, `:set_backtrace`, `:detailed_message`,
+  the singleton `:to_tty?`) and the aliasing constructors
+  (`:initialize`, `:exception`, `:initialize_copy`) so a
+  hypothetical future `Constant<Exception>` carrier cannot fold
+  a non-deterministic value through the catalog. `rb_eException`
+  joins `BASE_CLASS_VARS` alongside the previously-imported
+  exception globals (`rb_eStandardError`, `rb_eRuntimeError`,
+  `rb_eKeyError`, …). Subclass-specific methods
+  (`KeyError#receiver`, `NameError#name`, …) intentionally miss
+  the lookup until a later slice routes per-subclass class names.
 ## [0.0.8] - 2026-05-04
 
 The eighth preview. Theme: **first cache-related code slice** — land the persistence layer that v0.0.7's cache slice taxonomy design doc fixed the schema for, with a Marshal-clean producer wired through it end-to-end. Backend choice is fixed by [ADR-6](docs/adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies**.

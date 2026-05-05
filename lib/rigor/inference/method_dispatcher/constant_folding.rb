@@ -19,6 +19,7 @@ require_relative "../builtins/struct_catalog"
 require_relative "../builtins/encoding_catalog"
 require_relative "../builtins/re_catalog"
 require_relative "../builtins/proc_catalog"
+require_relative "../builtins/exception_catalog"
 
 module Rigor
   module Inference
@@ -1090,7 +1091,8 @@ module Rigor
           [MatchData, [Builtins::REGEXP_CATALOG, "MatchData"]],
           [Proc, [Builtins::PROC_CATALOG, "Proc"]],
           [Method, [Builtins::PROC_CATALOG, "Method"]],
-          [UnboundMethod, [Builtins::PROC_CATALOG, "UnboundMethod"]]
+          [UnboundMethod, [Builtins::PROC_CATALOG, "UnboundMethod"]],
+          [Exception, [Builtins::EXCEPTION_CATALOG, "Exception"]]
         ].freeze
         private_constant :CATALOG_BY_CLASS
 

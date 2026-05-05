@@ -96,7 +96,8 @@ BASE_CLASS_VARS = {
   "rb_cStruct" => "Struct",
   "rb_cProc" => "Proc",
   "rb_cMethod" => "Method",
-  "rb_cUnboundMethod" => "UnboundMethod"
+  "rb_cUnboundMethod" => "UnboundMethod",
+  "rb_eException" => "Exception"
 }.freeze
 
 TOPICS = {
@@ -341,6 +342,16 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/proc.c],
     output_path: "data/builtins/ruby_core/proc.yml"
+  },
+  "exception" => {
+    init_function: "Init_Exception",
+    ruby_c_path: "references/ruby/error.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Exception" => "references/rbs/core/exception.rbs"
+    },
+    c_index_paths: %w[references/ruby/error.c],
+    output_path: "data/builtins/ruby_core/exception.yml"
   }
 }.freeze
 

@@ -485,4 +485,40 @@ RSpec.describe Rigor::Type::Combinator do
       end
     end
   end
+
+  describe ".literal_string_compatible? (v0.0.10 F follow-up)" do
+    it "accepts Constant<String>" do
+      expect(described_class.literal_string_compatible?(described_class.constant_of("hi"))).to be(true)
+    end
+
+    it "accepts the literal-string Refined carrier" do
+      expect(described_class.literal_string_compatible?(described_class.literal_string)).to be(true)
+    end
+
+    it "accepts an Intersection containing literal-string" do
+      expect(described_class.literal_string_compatible?(described_class.non_empty_literal_string)).to be(true)
+    end
+
+    it "accepts a Union of literal-bearing members" do
+      union = described_class.union(described_class.constant_of("a"), described_class.constant_of("b"))
+      expect(described_class.literal_string_compatible?(union)).to be(true)
+    end
+
+    it "rejects Nominal[String] (no literal evidence)" do
+      expect(described_class.literal_string_compatible?(described_class.nominal_of("String"))).to be(false)
+    end
+
+    it "rejects a Constant of a non-String type" do
+      expect(described_class.literal_string_compatible?(described_class.constant_of(5))).to be(false)
+    end
+
+    it "rejects a Refined predicate other than :literal_string" do
+      expect(described_class.literal_string_compatible?(described_class.lowercase_string)).to be(false)
+    end
+
+    it "rejects a Union with at least one non-literal member" do
+      union = described_class.union(described_class.constant_of("a"), described_class.nominal_of("String"))
+      expect(described_class.literal_string_compatible?(union)).to be(false)
+    end
+  end
 end

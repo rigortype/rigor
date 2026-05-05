@@ -111,15 +111,17 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(dispatch(receiver: constant("a"), method_name: :*, args: [constant(-1)])).to be_nil
       end
 
-      it "caps string concatenation that would exceed STRING_FOLD_BYTE_LIMIT" do
+      it "lifts a size-capped Constant + Constant concat to literal-string (v0.0.10 F)" do
         big = "a" * 4000
         more = "b" * 1000
 
-        expect(dispatch(receiver: constant(big), method_name: :+, args: [constant(more)])).to be_nil
+        result = dispatch(receiver: constant(big), method_name: :+, args: [constant(more)])
+        expect(result).to eq(Rigor::Type::Combinator.literal_string)
       end
 
-      it "caps string repetition that would exceed STRING_FOLD_BYTE_LIMIT" do
-        expect(dispatch(receiver: constant("xyz"), method_name: :*, args: [constant(10_000)])).to be_nil
+      it "lifts a size-capped Constant * Constant repeat to literal-string (v0.0.10 F)" do
+        result = dispatch(receiver: constant("xyz"), method_name: :*, args: [constant(10_000)])
+        expect(result).to eq(Rigor::Type::Combinator.literal_string)
       end
 
       it "folds String == String comparisons" do

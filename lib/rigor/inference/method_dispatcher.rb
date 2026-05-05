@@ -3,6 +3,7 @@
 require_relative "../reflection"
 require_relative "../type"
 require_relative "method_dispatcher/constant_folding"
+require_relative "method_dispatcher/literal_string_folding"
 require_relative "method_dispatcher/shape_dispatch"
 require_relative "method_dispatcher/rbs_dispatch"
 require_relative "method_dispatcher/iterator_dispatch"
@@ -101,6 +102,7 @@ module Rigor
         return meta_result if meta_result
 
         ConstantFolding.try_fold(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          LiteralStringFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           ShapeDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           KernelDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||

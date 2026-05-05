@@ -495,26 +495,10 @@ module Rigor
         when Prism::StringNode
           true
         when Prism::EmbeddedStatementsNode, Prism::EmbeddedVariableNode
-          literal_string_compatible?(type_of(part))
+          Type::Combinator.literal_string_compatible?(type_of(part))
         else
           false
         end
-      end
-
-      def literal_string_compatible?(type)
-        case type
-        when Type::Constant then type.value.is_a?(String)
-        when Type::Refined then literal_string_carrier?(type)
-        when Type::Intersection then type.members.any? { |m| literal_string_compatible?(m) }
-        when Type::Union then type.members.all? { |m| literal_string_compatible?(m) }
-        else false
-        end
-      end
-
-      def literal_string_carrier?(refined)
-        refined.predicate_id == :literal_string &&
-          refined.base.is_a?(Type::Nominal) &&
-          refined.base.class_name == "String"
       end
 
       def type_of_interpolated_symbol(_node)

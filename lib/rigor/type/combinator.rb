@@ -216,6 +216,31 @@ module Rigor
         intersection(non_empty_string, literal_string)
       end
 
+      # Recognises the carriers that participate in literal-string
+      # flow tracking: any `Constant<String>` (constants are literal
+      # by construction), the `literal-string` Refined carrier, an
+      # `Intersection` containing `literal-string`, or a `Union`
+      # whose every member qualifies. Used by
+      # `ExpressionTyper#type_of_interpolated_string` and the
+      # `LiteralStringFolding` dispatcher tier so propagation
+      # through interpolation and `+`/`*` composition stays
+      # consistent.
+      def literal_string_compatible?(type)
+        case type
+        when Constant then type.value.is_a?(String)
+        when Refined then literal_string_carrier?(type)
+        when Intersection then type.members.any? { |m| literal_string_compatible?(m) }
+        when Union then type.members.all? { |m| literal_string_compatible?(m) }
+        else false
+        end
+      end
+
+      def literal_string_carrier?(refined)
+        refined.predicate_id == :literal_string &&
+          refined.base.is_a?(Nominal) &&
+          refined.base.class_name == "String"
+      end
+
       # Normalised intersection. Flattens nested Intersections,
       # drops `Top` members, collapses to `Bot` if any member is
       # `Bot`, deduplicates structurally-equal members, sorts the

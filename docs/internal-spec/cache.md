@@ -302,6 +302,27 @@ positive and negative answers across calls within a single
 loader instance — the disk cache only changes the cold-start
 behaviour, not the warm hot path.
 
+## `Rigor::Cache::RbsClassAncestorTable` (v0.0.10 B)
+
+Third cached producer. Materialises every loaded class /
+module's RBS-declared ancestor chain as a Marshal-clean
+`Hash<String, Array<String>>` keyed by top-level-stripped class
+name (e.g. `"Integer"` → `["Integer", "Numeric", "Comparable",
+"Object", "BasicObject"]`). Producer id `"rbs.class_ancestor_table"`.
+
+Building one ancestor chain requires a full
+`RBS::DefinitionBuilder#build_instance` over that class — the
+single most expensive RBS operation per class. Caching the table
+lets a warm process pay only a `Marshal.load` of the resulting
+hash; subsequent `class_ordering` queries are O(table-lookup +
+ancestor-list-membership-check), with no env walk.
+
+`RbsHierarchy#ancestor_names` consults the cached table when
+`loader.cache_store` is set. The in-process per-name cache
+(`@ancestor_names_cache`) still memoises results across calls
+within a single hierarchy instance, so the disk cache only
+changes the cold-start behaviour.
+
 ## `Rigor::Cache::RbsDescriptor` (shared)
 
 Both `RbsConstantTable` and `RbsKnownClassNames` depend on the

@@ -202,6 +202,32 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "#class_ordering via cache_store (v0.0.10 B)" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-ordering-spec-") }
+    let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "matches the uncached path for known and unknown class pairs" do
+      cached = described_class.new(cache_store: cache_store)
+      uncached = described_class.new
+      [%w[Integer Numeric], %w[Numeric Integer], %w[Integer String]].each do |lhs, rhs|
+        expect(cached.class_ordering(lhs, rhs)).to eq(uncached.class_ordering(lhs, rhs))
+      end
+    end
+
+    it "uses the cached ancestor table so a fresh loader sharing the store never builds a definition" do
+      first = described_class.new(cache_store: cache_store)
+      first.class_ordering("Integer", "Numeric")
+
+      second = described_class.new(cache_store: cache_store)
+      allow(second).to receive(:instance_definition).and_call_original
+      second.class_ordering("Integer", "Numeric")
+      second.class_ordering("String", "Object")
+      expect(second).not_to have_received(:instance_definition)
+    end
+  end
+
   describe "#class_known? via cache_store (v0.0.9 group C)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-class-known-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

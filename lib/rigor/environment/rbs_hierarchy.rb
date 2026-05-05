@@ -45,15 +45,28 @@ module Rigor
         key = normalize_name(class_name)
         return @ancestor_names_cache[key] if @ancestor_names_cache.key?(key)
 
-        definition = loader.instance_definition(key)
         @ancestor_names_cache[key] =
-          if definition
-            definition.ancestors.ancestors.map { |ancestor| normalize_name(ancestor.name.to_s) }.uniq.freeze
+          if loader.cache_store
+            ancestor_table.fetch(key, [].freeze)
           else
-            [].freeze
+            compute_ancestor_names(key)
           end
+      end
+
+      def compute_ancestor_names(key)
+        definition = loader.instance_definition(key)
+        return [].freeze if definition.nil?
+
+        definition.ancestors.ancestors.map { |ancestor| normalize_name(ancestor.name.to_s) }.uniq.freeze
       rescue StandardError
-        @ancestor_names_cache[key] = [].freeze
+        [].freeze
+      end
+
+      def ancestor_table
+        @ancestor_table ||= begin
+          require_relative "../cache/rbs_class_ancestor_table"
+          Cache::RbsClassAncestorTable.fetch(loader: loader, store: loader.cache_store)
+        end
       end
 
       def normalize_name(name)

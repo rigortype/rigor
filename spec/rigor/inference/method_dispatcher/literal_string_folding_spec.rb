@@ -42,6 +42,40 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
     end
   end
 
+  describe "<< (mutating append)" do
+    it "lifts literal-string << literal-string to literal-string" do
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :<<, args: [literal_string])
+      expect(result).to eq(literal_string)
+    end
+
+    it "lifts literal-string << Constant<String> to literal-string" do
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :<<, args: [string_const])
+      expect(result).to eq(literal_string)
+    end
+
+    it "declines literal-string << Nominal[String] (arg is not literal-bearing)" do
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :<<, args: [nominal_string])
+      expect(result).to be_nil
+    end
+
+    it "declines when receiver is plain Nominal[String]" do
+      result = described_class.try_dispatch(receiver: nominal_string, method_name: :<<, args: [literal_string])
+      expect(result).to be_nil
+    end
+  end
+
+  describe "concat (alias of <<)" do
+    it "lifts literal-string.concat(literal-string) to literal-string" do
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :concat, args: [literal_string])
+      expect(result).to eq(literal_string)
+    end
+
+    it "declines when the argument is non-literal" do
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :concat, args: [nominal_string])
+      expect(result).to be_nil
+    end
+  end
+
   describe "* (string repetition)" do
     it "lifts literal-string * Constant<Integer> to literal-string" do
       result = described_class.try_dispatch(receiver: literal_string, method_name: :*, args: [int_const])
@@ -65,8 +99,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
   end
 
   describe "unrecognised method names" do
-    it "declines for methods other than + and *" do
-      result = described_class.try_dispatch(receiver: literal_string, method_name: :concat, args: [literal_string])
+    it "declines for methods outside the recognised set" do
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :upcase, args: [literal_string])
       expect(result).to be_nil
     end
   end

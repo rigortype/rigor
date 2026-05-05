@@ -9,17 +9,22 @@ module Rigor
       # the `literal-string` carrier when every operand is itself
       # literal-bearing. Sits between {ConstantFolding} (which
       # handles all-Constant cases) and {ShapeDispatch}; runs only
-      # for `String#+` / `String#*` calls whose inputs the
-      # ConstantFolding tier could not fold to a precise
-      # `Constant<String>` (e.g. one operand is `literal-string`
-      # rather than `Constant<String>`, or the multiplication
-      # exceeds the constant-fold size cap).
+      # for `String#+` / `String#*` / `String#<<` / `String#concat`
+      # calls whose inputs the ConstantFolding tier could not fold
+      # to a precise `Constant<String>` (e.g. one operand is
+      # `literal-string` rather than `Constant<String>`, or the
+      # multiplication exceeds the constant-fold size cap).
       #
       # Result rule:
       #
-      # - `+`: receiver and argument MUST both be
+      # - `+`, `<<`, `concat`: receiver and argument MUST both be
       #   `Type::Combinator.literal_string_compatible?`. The result
-      #   is `literal-string`.
+      #   is `literal-string`. `<<` and `concat` mutate the
+      #   receiver at runtime; the analyzer does not track that
+      #   mutation against the local's binding, but the call's
+      #   *return value* is the receiver itself, and the receiver
+      #   stays literal-bearing because every appended slice was
+      #   literal-bearing too.
       # - `*`: receiver MUST be literal-bearing; argument MUST be
       #   integer-typed. The result is `literal-string`.
       #
@@ -30,13 +35,17 @@ module Rigor
       module LiteralStringFolding
         module_function
 
+        CONCAT_METHODS = %i[+ << concat].freeze
+        private_constant :CONCAT_METHODS
+
         def try_dispatch(receiver:, method_name:, args:, **)
           return nil unless Type::Combinator.literal_string_compatible?(receiver)
           return nil unless args.size == 1
 
-          case method_name
-          when :+ then fold_concat(args.first)
-          when :* then fold_repeat(args.first)
+          if CONCAT_METHODS.include?(method_name)
+            fold_concat(args.first)
+          elsif method_name == :*
+            fold_repeat(args.first)
           end
         end
 

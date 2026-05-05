@@ -87,6 +87,22 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     for_project(key:root,key:libraries,key:signature_paths,key:cache_store)
   ].freeze
 
+  REFLECTION_SINGLETON = %w[
+    class_known?(req:class_name,key:scope)
+    class_ordering(req:lhs,req:rhs,key:scope)
+    class_type_param_names(req:class_name,key:scope,key:environment)
+    constant_type_for(req:constant_name,key:scope)
+    discovered_class?(req:class_name,key:scope)
+    discovered_method?(req:class_name,req:method_name,key:kind,key:scope)
+    instance_definition(req:class_name,key:scope,key:environment)
+    instance_method_definition(req:class_name,req:method_name,key:scope,key:environment)
+    nominal_for_name(req:class_name,key:scope)
+    rbs_class_known?(req:class_name,key:scope,key:environment)
+    singleton_definition(req:class_name,key:scope,key:environment)
+    singleton_for_name(req:class_name,key:scope)
+    singleton_method_definition(req:class_name,req:method_name,key:scope,key:environment)
+  ].freeze
+
   COMBINATOR_SINGLETON = %w[
     bot()
     constant_of(req:value)
@@ -171,6 +187,12 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
   describe "Rigor::Type::Combinator" do
     it "exposes the expected factory surface" do
       expect(singleton_signatures(Rigor::Type::Combinator)).to eq(PublicApiDriftSnapshots::COMBINATOR_SINGLETON)
+    end
+  end
+
+  describe "Rigor::Reflection" do
+    it "exposes the expected read-side facade surface" do
+      expect(singleton_signatures(Rigor::Reflection)).to eq(PublicApiDriftSnapshots::REFLECTION_SINGLETON)
     end
   end
 end

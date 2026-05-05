@@ -64,8 +64,22 @@ module Rigor
         }
       end
 
+      # Text rendering for `rigor check`. The qualified rule
+      # identifier (per ADR-2 § "Plugin Diagnostic Provenance" —
+      # `plugin.<id>.<rule>`, `rbs_extended.<rule>`,
+      # `generated.<provider>.<rule>`) is appended in brackets
+      # whenever the diagnostic carries a non-default `source_family`,
+      # so plugin / RBS::Extended / generated provenance is visible
+      # in the standard text output without changing the layout for
+      # built-in rules. Slice 5 (v0.1.0) wires this surface.
       def to_s
-        "#{path}:#{line}:#{column}: #{severity}: #{message}"
+        base = "#{path}:#{line}:#{column}: #{severity}: #{message}"
+        return base if source_family == DEFAULT_SOURCE_FAMILY
+
+        qualified = qualified_rule
+        return base if qualified.nil?
+
+        "#{base} [#{qualified}]"
       end
     end
   end

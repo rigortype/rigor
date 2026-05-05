@@ -54,4 +54,39 @@ RSpec.describe Rigor::Analysis::Diagnostic do
       expect(diagnostic.qualified_rule).to be_nil
     end
   end
+
+  describe "qualified-rule rendering in #to_s (v0.1.0 slice 5)" do
+    it "leaves builtin diagnostics unchanged" do
+      diagnostic = described_class.new(
+        path: "f.rb", line: 1, column: 2, message: "boom", rule: "undefined-method"
+      )
+      expect(diagnostic.to_s).to eq("f.rb:1:2: error: boom")
+    end
+
+    it "appends the qualified rule for non-builtin source families" do
+      diagnostic = described_class.new(
+        path: "f.rb", line: 1, column: 2, message: "load failure",
+        rule: "load-error", source_family: :plugin_loader
+      )
+      expect(diagnostic.to_s).to eq("f.rb:1:2: error: load failure [plugin_loader.load-error]")
+    end
+
+    it "renders plugin.<id>.<rule> prefixes for string source families" do
+      diagnostic = described_class.new(
+        path: "f.rb", line: 1, column: 2, message: "frozen mutation",
+        rule: "no-mutation", source_family: "plugin.rigor-immutable"
+      )
+      expect(diagnostic.to_s).to eq(
+        "f.rb:1:2: error: frozen mutation [plugin.rigor-immutable.no-mutation]"
+      )
+    end
+
+    it "leaves the message unchanged when rule is nil even with non-builtin source family" do
+      diagnostic = described_class.new(
+        path: "f.rb", line: 1, column: 2, message: "internal",
+        source_family: :rbs_extended
+      )
+      expect(diagnostic.to_s).to eq("f.rb:1:2: error: internal")
+    end
+  end
 end

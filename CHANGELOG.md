@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — v0.1.0 slice 5 (partial): qualified-rule text rendering
+
+- **`Diagnostic#to_s` now appends the qualified rule for non-builtin source families.** The renderer keeps the existing `path:line:col: severity: message` layout for `:builtin` diagnostics; when `source_family` is non-default and `rule` is set, it appends `[<source_family>.<rule>]` per [ADR-2 § "Plugin Diagnostic Provenance"](docs/adr/2-extension-api.md). Loader failures (`source_family: :plugin_loader`, `rule: "load-error"`) and any future `plugin.<id>.<rule>` / `rbs_extended.<rule>` / `generated.<provider>.<rule>` diagnostics now surface their provenance in standard `rigor check` output without changing the layout for built-in rules. The plugin-side emission protocol (the matching hook on `Rigor::Plugin::Base`) is intentionally deferred — it carries plugin-protocol design decisions that arrive alongside slices 4 / 6.
+
 ### Added — v0.1.0 slice 3: plugin contribution merger
 
 - **`Rigor::FlowContribution#to_element_list`.** Flattens a bundle into a tagged element list keyed by `(target, edge, kind)` per [ADR-2 § "Flow Contribution Bundle"](docs/adr/2-extension-api.md). Mechanical, deterministic, round-trippable through the merger; spec at [`docs/internal-spec/flow-contribution-merger.md`](docs/internal-spec/flow-contribution-merger.md).

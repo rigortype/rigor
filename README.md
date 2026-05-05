@@ -14,6 +14,14 @@ for any class it can find, and reports a small but trustworthy
 catalogue of bugs (undefined methods on typed receivers, wrong
 positional arity, provable `Integer / 0`, …).
 
+The differentiator is a richer type vocabulary than ordinary
+RBS expresses. Rigor reasons about *what values an expression
+actually produces* — literal values, integer ranges,
+refinement-type carriers, per-position tuple / hash shapes —
+not just *which class an object belongs to*. See **[Beyond
+`Integer` and `String`](#beyond-integer-and-string-rigors-richer-type-vocabulary)**
+for the full type-model story; the short pitch is below.
+
 When you want tighter types than RBS expresses, refine them
 through the
 [`RBS::Extended`](docs/type-specification/rbs-extended.md)
@@ -114,6 +122,100 @@ bundle exec rigor check --no-cache lib
 
 Add `.rigor/` to your `.gitignore` — the cache is per-checkout
 and contains nothing reproducible to share.
+
+## Beyond `Integer` and `String`: Rigor's richer type vocabulary
+
+A vanilla static checker answers "what *class* is this object?"
+Rigor answers a much narrower question: "what *subset of values*
+can this expression actually produce?" That distinction is the
+whole point of Rigor — types like `Integer` and `String` describe
+classes, but real-world code carries far more structure (a count
+that's always non-negative, a name that's never empty, a flag
+that's one of three Symbols). Rigor reasons about that structure
+out of the box, without you writing a single annotation.
+
+### The carrier zoo
+
+| Carrier | What it records | Example |
+| --- | --- | --- |
+| **Literal types** (`Type::Constant`) | A single Ruby value | `Constant<42>`, `Constant<"hello">`, `Constant<:foo>` |
+| **Integer ranges** (`Type::IntegerRange`) | A bounded integer interval `int<a, b>` | `positive-int = int<1, max>`, `int<5, 10>` |
+| **Refinement types** — split into two halves: `Type::Difference` and `Type::Refined` | A base nominal minus a single value, or a base nominal restricted by a predicate | `non-empty-string = String - ""`, `lowercase-string = String & lowercase?`, `literal-string` |
+| **Intersection** (`Type::Intersection`) | Composition of multiple refinements | `non-empty-lowercase-string = non-empty-string ∩ lowercase-string` |
+| **Tuple / HashShape** | Heterogeneous arrays / known-key hashes that carry per-position / per-key types | `[1, "two", :three]` types as `Tuple[Constant<1>, Constant<"two">, Constant<:three>]`; `{name: "Alice", age: 30}` as `HashShape{name: Constant<"Alice">, age: Constant<30>}` |
+| **Union** (`Type::Union`) | "One of these literal values" — finite enums Rigor can enumerate | `Constant<:zero> \| Constant<:small> \| Constant<:large>` |
+| **`Dynamic[T]`** | The gradual carrier — wraps a static facet with a "could be anything" admission | `Dynamic[Top]` is the conservative fallback Rigor uses when it cannot prove a narrower type |
+
+Each refinement / range / literal carrier **erases to its base
+class** for ordinary RBS interop, so importing Rigor is a
+strictly additive change: a method whose RBS sig says
+`-> String` keeps that contract, and Rigor's narrower inference
+just sits on top.
+
+### What this buys you in practice
+
+```ruby
+# Rigor doesn't just see "Integer", it sees "non-negative integer".
+n = ARGV.size                  # int<0, max>  (non-negative-int)
+m = n + 1                      # int<1, max>  (positive-int)
+m.zero?                        # Constant<false>  — proven; the
+                               # branch elision can drop the `else`
+
+# String composition stays as precise as the inputs allow.
+greeting = "Hello, "           # Constant<"Hello, ">
+name     = ARGV.first          # String?       — RBS-declared
+hello    = "Hello, #{name}!"   # literal-string — every part is
+                               # literal-bearing, so the result is
+                               # provably source-derived.
+
+# Tuple-shaped destructuring stays per-position.
+first, _middle, last = [10, 20, 30]
+first                          # Constant<10>
+last                           # Constant<30>
+
+# Constant folding through user methods.
+def is_odd(n) = n.odd?
+is_odd(3)                      # Constant<true>  — folded through
+                               # the body, not just typed as `bool`
+
+# Case/when narrowing produces a literal-set Union.
+label = case n
+        when 0      then :zero
+        when 1..9   then :small
+        else             :large
+        end
+label                          # Constant<:zero> | Constant<:small>
+                               #   | Constant<:large>
+
+# RBS::Extended directives let you tighten beyond what RBS expresses.
+class Slug
+  %a{rigor:v1:return: non-empty-string}
+  def normalise: (::String id) -> ::String
+end
+Slug.new.normalise("foo").size  # positive-int  — provably ≥ 1
+```
+
+Rigor never invents these answers — every narrower carrier is
+derived from literals in the source, control-flow narrowing
+(`is_a?`, `nil?`, `==` against finite literal sets, integer
+comparisons), per-class catalogues for the bundled built-ins,
+or `RBS::Extended` directives the user opted into. When the
+inference cannot prove a value is in a narrower carrier, it
+stays at the wider one (or `Dynamic[Top]`) and Rigor stays
+silent — diagnostics fire only when the narrow type is
+genuinely proved.
+
+### Where the type model is documented
+
+- One-page mental model:
+  [`docs/types.md`](docs/types.md).
+- Binding spec corpus:
+  [`docs/type-specification/`](docs/type-specification/README.md).
+- Imported refinement names (kebab-case catalogue):
+  [`docs/type-specification/imported-built-in-types.md`](docs/type-specification/imported-built-in-types.md).
+- The `RBS::Extended` annotation grammar that opens this
+  vocabulary up to your own RBS:
+  [`docs/type-specification/rbs-extended.md`](docs/type-specification/rbs-extended.md).
 
 ## How Rigor finds your types
 

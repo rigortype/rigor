@@ -158,6 +158,34 @@ Deferred from v0.0.8 (carried forward) — these are part of v0.1.0 or later:
 - **Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.** The biggest cold-start cost remains `RbsLoader#build_env`. Caching it directly requires either a `Store`-side `dump`/`load` callable surface (each producer registers its own serialiser) or a schema-stable intermediate that walks `RBS::Environment` into a Marshal-safe shape. Both are out of scope for v0.0.8.
 - `Rigor::FlowContribution` bundle struct — the next pre-v0.1.0 substrate slice after the cache layer.
 
+## v0.0.9 — Planned
+
+Theme: **wire the cache into `rigor check`, then advance the next pre-v0.1.0 substrate.** v0.0.8 shipped the cache infrastructure plus a working producer surface but no production caller; v0.0.9 closes that loop, then carries pre-v0.1.0 work forward.
+
+Planned slices, in execution order (A → B → C):
+
+### Group A — Wire the cache into `rigor check`
+
+1. **`Analysis::Runner` accepts a `cache_store:` keyword.** Defaults to a Store rooted at `.rigor/cache`; `rigor check --no-cache` disables it. Pure plumbing slice — no behaviour change yet, but every subsequent producer can opt in.
+2. **`Environment::RbsLoader#constant_type` consults the cached `RbsConstantTable`** when the runner provides a Store. First end-to-end cold/warm-start gap. `--cache-stats` starts reporting non-empty inventory.
+3. **`Cache::Store#stats` in-process counters** (hits / misses / writes, per-producer). Bumped inside `fetch_or_compute`. `--cache-stats` adds a "this run" section alongside the disk inventory.
+4. **`Rigor::Reflection.constant_type_for` routed through the cache.** Last constant-resolution path that bypasses the table; closes the loop for v0.0.9's first deliverable.
+
+### Group B — `Rigor::FlowContribution` bundle struct
+
+ADR-2 § "Flow Contribution Bundle" fixes the 8-slot shape plugins return. v0.0.9 lands the struct + the `RbsExtended` / `Narrowing` boundary conversion; built-in rules also emit bundles. Pre-v0.1.0 substrate that unblocks the dynamic-return / type-specifying / dynamic-reflection extension protocols. No user-visible behaviour change.
+
+### Group C — Next cached producers
+
+Adds the next Marshal-clean producers under `Rigor::Reflection`: `instance_method_definition`, `singleton_method_definition`, and any other point lookups that translate RBS to Rigor types. Each is a small, additive slice that grows the warm-run win.
+
+Deferred from v0.0.9 (carried forward) — these stay v0.1.0 territory or later:
+
+- **Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.** Direct caching of `build_env` still requires either a `Store`-side `dump`/`load` callable surface or a schema-stable intermediate that walks `RBS::Environment` into a Marshal-safe shape. Revisit only if Group A's constant-table win turns out to be insufficient.
+- **Plugin-side cache producers.** Gated on the plugin API (v0.1.0).
+- **LSP / long-running-daemon cache mode.**
+- **LRU eviction / size cap.** v0.0.9 still ships unbounded; users run `--clear-cache` if needed.
+
 ## v0.1.0 — Long Horizon (architecture commitments deferred)
 
 Theme: **infrastructure**. v0.1.0 reserves two cross-cutting machinery surfaces that should not be retro-fitted later:

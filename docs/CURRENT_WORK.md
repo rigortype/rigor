@@ -4,22 +4,30 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 ## Status
 
-**v0.0.8 ready for release on `master`.** Five slices landed: `Rigor::Cache::Descriptor`, `Rigor::Cache::Store`, the first cached producer (`RbsConstantTable`), the `--cache-stats` / `--clear-cache` CLI flags, and the `Diagnostic#source_family` provenance prefix. The full release summary is in `CHANGELOG.md`'s `[0.0.8] - 2026-05-04` section and the v0.0.8 row of [`docs/MILESTONES.md`](MILESTONES.md). Backend choice is fixed by [ADR-6](adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies** (the `rigortype` gem stays at the current `(prism, rbs)` runtime surface).
+**v0.0.8 released.** Cache infrastructure (`Descriptor`, `Store`), the first cached producer (`RbsConstantTable`), CLI observability flags (`--cache-stats` / `--clear-cache`), and `Diagnostic#source_family` provenance landed. See `CHANGELOG.md`'s `[0.0.8]` section and the v0.0.8 row of [`docs/MILESTONES.md`](MILESTONES.md).
 
-Slices in commit order:
+**v0.0.9 in planning on `master`.** Theme: **wire the cache into `rigor check`, then advance the next pre-v0.1.0 substrate.** Three groups of slices, executed in order A → B → C:
 
-1. ✅ `Rigor::Cache::Descriptor` value object — 50d864b.
-2. ✅ `Rigor::Cache::Store` filesystem backend — c7f8f94.
-3. ✅ `Rigor::Cache::RbsConstantTable` first cached producer — cc132ee. The original plan named the RBS environment loader (`build_env`) as the first producer; implementation discovered `RBS::Environment` is not Marshal-clean (transitive `RBS::Location` lacks `_dump_data`). [ADR-6 § 8](adr/6-cache-persistence-backend.md) documents the finding; Slice 3 caches a post-translation artefact instead.
-4. ✅ `rigor check --cache-stats` / `--clear-cache` — fdb3743.
-5. ✅ `Diagnostic#source_family` + `qualified_rule` — ed9ae0a.
+### Group A — Wire the cache into `rigor check` (highest leverage)
 
-Working state at the v0.0.8 release point: 1591 RSpec examples / 0 failures, RuboCop 146 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. Version is bumped to `0.0.8` and the `Gemfile.lock` is regenerated; `bundle exec rake release` is gated on explicit user authorisation per `AGENTS.md`.
+Closes the v0.0.8 deferral so users see a measurable cold/warm-start gap and `--cache-stats` reports real hit/miss/write counts instead of `(empty)`.
 
-### Notable v0.0.8 deferrals (already documented in MILESTONES)
+1. `Analysis::Runner` gains a `cache_store:` keyword (default `.rigor/cache`); `rigor check` accepts `--no-cache` to disable. Pure plumbing slice.
+2. `Environment::RbsLoader#constant_type` consults the cached `RbsConstantTable` when a Store is available — the first end-to-end cold-start win.
+3. `Cache::Store#stats` adds in-process hit/miss/write counters bumped inside `fetch_or_compute`. `--cache-stats` displays them alongside the disk inventory.
+4. `Rigor::Reflection.constant_type_for` (and any other paths that resolve constants) routed through the same cached lookup.
 
-- **Wiring the cache into `rigor check`.** Production callers don't yet exercise the cache; `--cache-stats` shows `(empty)` by default. v0.0.9 follow-up.
-- **Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.** The biggest cold-start cost remains `RbsLoader#build_env`. Caching it directly requires either a `Store`-side `dump`/`load` callable surface or a schema-stable intermediate that walks `RBS::Environment` into a Marshal-safe shape.
+### Group B — `Rigor::FlowContribution` bundle struct
+
+The 8-slot bundle ADR-2 § "Flow Contribution Bundle" fixes. Internal narrowing / predicate plumbing converts to bundles at the `RbsExtended` boundary; built-in rules emit bundles too. Pre-v0.1.0 substrate that unblocks the dynamic-return / type-specifying / dynamic-reflection extension protocols. Modest implementation, no user-visible behaviour change.
+
+### Group C — Next cached producers
+
+Cache the rest of `Rigor::Reflection`'s Marshal-clean lookups (`instance_method_definition`, `singleton_method_definition`, …). Each is a small, additive slice that grows the warm-run win once Group A's plumbing is in place.
+
+### Notable v0.0.8 carry-overs (already documented in MILESTONES)
+
+- **Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.** The biggest cold-start cost remains `RbsLoader#build_env`. Caching it directly requires either a `Store`-side `dump`/`load` callable surface or a schema-stable intermediate that walks `RBS::Environment` into a Marshal-safe shape. Out of v0.0.9 scope; revisit once Group A's wiring shows whether the constant-table win is enough.
 
 ## Where the Work Resumes
 

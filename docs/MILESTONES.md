@@ -134,18 +134,17 @@ Deferred from v0.0.7 (carried forward):
 - `rigor:v1:conforms-to` directive — needs a real structural-conformance checker beyond the v0.0.7 envelope.
 - Caches and the plugin API — reserved for v0.1.0. The cache slice taxonomy design doc is the contract; the persistence layer is the next pre-v0.1.0 slice (and the first cache-related code).
 
-## v0.0.8 — Planned
+## v0.0.8 — Released 2026-05-04
 
-Theme: **first cache-related code slice**. Land the persistence layer the v0.0.7 cache slice taxonomy design doc ([`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md)) commits to, with the **RBS environment loader** as the first real producer wired through the cache. Backend choice is fixed by [ADR-6](adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, zero new gem dependencies.
+Theme: **first cache-related code slice**. Landed the persistence layer the v0.0.7 cache slice taxonomy design doc ([`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md)) commits to, plus a Marshal-clean producer wired through it end-to-end. Backend per [ADR-6](adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, zero new gem dependencies.
 
-Planned surfaces (operational slice order):
+Slices (in commit order):
 
-1. **`Rigor::Cache::Descriptor` value object.** The taxonomy doc's typed-slot schema as Ruby (`FileEntry`, `GemEntry`, `PluginEntry`, `ConfigEntry`); composition (`union-by-key`, stricter-comparator-wins for `files`, conflict detection); canonical serialisation. Pure value object; spec-tested in isolation.
-2. **`Rigor::Cache::Store` filesystem backend.** `.rigor/cache/<producer-id>/<key-prefix>/<key-suffix>.entry` layout per ADR-6; rename-into-place atomicity; per-file `flock`; trailing SHA-256 integrity check; schema-version directory marker.
-3. **RBS environment loader as the first cached producer.** The single biggest cost in a cold `rigor check` run. The RBS loader's `build_env` step caches its result keyed by `signature_paths` digests + libraries list + `rbs` gem version. Warm runs skip the RBS parse entirely.
-4. **`rigor check --cache-stats` CLI flag.** Reports hit/miss counts per producer at the end of the run. Only observability; no policy yet.
-5. **`rigor check --clear-cache` CLI flag.** `rm -rf .rigor/cache` equivalent.
-6. **Diagnostic provenance prefix.** Small companion slice: `Rigor::Analysis::Diagnostic` gains a `source_family` field defaulting to `:builtin`; the formatter optionally prepends the source-family prefix to the rule id (`plugin.<id>.<rule>`, `rbs_extended.<rule>`, etc.). Prepares ADR-2's plugin-observability story without committing to the plugin API itself.
+1. **`Rigor::Cache::Descriptor` value object.** The taxonomy doc's typed-slot schema (`FileEntry`, `GemEntry`, `PluginEntry`, `ConfigEntry`); composition (`union-by-key`, stricter-comparator-wins for `files`, `Conflict` on disagreement); canonical serialisation; SHA-256 cache-key derivation. Pure value object, spec-tested in isolation.
+2. **`Rigor::Cache::Store` filesystem backend.** `<root>/<producer-id>/<2-prefix>/<62-suffix>.entry` layout; `"RIGOR\x00\x01"` magic + varint-prefixed descriptor + value + trailing SHA-256 file format; rename-into-place atomicity with `flock(LOCK_EX)` on the destination; schema-version marker at `<root>/schema_version.txt` (mismatch wipes the directory). Read failures (missing, short, bad magic, bad checksum, malformed varint, unmarshal-able) silently fall through to a cache miss. Producer ids constrained to `[a-z][a-z0-9._-]*` for filesystem safety.
+3. **First cached producer — `Rigor::Cache::RbsConstantTable`.** Caches a `Hash<String, Rigor::Type>` mapping every RBS-declared constant to its translated `Rigor::Type`. The slice plan originally named the RBS environment loader as the first producer; implementation discovered `RBS::Environment` is not Marshal-clean (transitive `RBS::Location` lacks `_dump_data`). [ADR-6 § 8](adr/6-cache-persistence-backend.md) documents the finding; the slice caches a post-translation artefact instead. Adds `RbsLoader#constant_names` so the producer can enumerate constants through the public surface.
+4. **`rigor check --cache-stats` and `--clear-cache`.** `--cache-stats` prints an on-disk inventory at end-of-run (per-producer entry counts, total bytes, schema version) sourced from `Store.disk_inventory`. `--clear-cache` wipes `.rigor/cache` before the run. Per-run hit/miss counters deferred until production code wires the cache.
+5. **Diagnostic source-family provenance.** `Rigor::Analysis::Diagnostic` gains `source_family:` (default `:builtin`) and `qualified_rule` (`"#{source_family}.#{rule}"` for non-default families). JSON output carries both `source_family` and the bare `rule` side-by-side. Prepares ADR-2's plugin-observability story without committing to the plugin API itself.
 
 Deferred from v0.0.8 (carried forward) — these are part of v0.1.0 or later:
 
@@ -154,7 +153,9 @@ Deferred from v0.0.8 (carried forward) — these are part of v0.1.0 or later:
 - LSP / long-running-daemon cache mode.
 - Cross-machine cache sharing.
 - Plugin-side cache producers — gated on the plugin API itself, which lands in v0.1.0.
-- Inference / catalog / scope-index caches beyond the RBS environment loader. The architecture supports them; the implementation work is per-producer and naturally fans out into v0.0.9+.
+- Inference / catalog / scope-index caches beyond `RbsConstantTable`. The architecture supports them; the implementation work is per-producer and naturally fans out into v0.0.9+.
+- **Wiring the cache into `rigor check`.** v0.0.8 ships the cache infrastructure plus a working producer surface, but no production caller in `rigor check` exercises it yet. Connecting `RbsConstantTable.fetch` (or successor producers) into the analysis pipeline so cold-start runs see a measurable speed-up is the natural v0.0.9 follow-up.
+- **Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.** The biggest cold-start cost remains `RbsLoader#build_env`. Caching it directly requires either a `Store`-side `dump`/`load` callable surface (each producer registers its own serialiser) or a schema-stable intermediate that walks `RBS::Environment` into a Marshal-safe shape. Both are out of scope for v0.0.8.
 - `Rigor::FlowContribution` bundle struct — the next pre-v0.1.0 substrate slice after the cache layer.
 
 ## v0.1.0 — Long Horizon (architecture commitments deferred)

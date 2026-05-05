@@ -4,19 +4,22 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 ## Status
 
-**v0.0.7 released 2026-05-05.** The full release summary is in `CHANGELOG.md`'s `[0.0.7] - 2026-05-05` section and the v0.0.7 row of [`docs/MILESTONES.md`](MILESTONES.md). The composite payoff: sixteen feature slices closing the spec ↔ implementation gap, plus three pre-v0.1.0 substrate slices (`Rigor::Reflection` facade + consumer migration; v0.1.0 readiness and cache slice taxonomy design docs).
+**v0.0.8 ready for release on `master`.** Five slices landed: `Rigor::Cache::Descriptor`, `Rigor::Cache::Store`, the first cached producer (`RbsConstantTable`), the `--cache-stats` / `--clear-cache` CLI flags, and the `Diagnostic#source_family` provenance prefix. The full release summary is in `CHANGELOG.md`'s `[0.0.8] - 2026-05-04` section and the v0.0.8 row of [`docs/MILESTONES.md`](MILESTONES.md). Backend choice is fixed by [ADR-6](adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies** (the `rigortype` gem stays at the current `(prism, rbs)` runtime surface).
 
-**v0.0.8 in progress on `master`** — the **first cache-related code slice**. Theme: land the persistence layer that v0.0.7's cache slice taxonomy design doc ([`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md)) commits to, with the RBS environment loader as the first real producer. Backend choice is fixed by [ADR-6](adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies** (the `rigortype` gem stays at the current `(prism, rbs)` runtime surface).
+Slices in commit order:
 
-Planned slice order — see the v0.0.8 row of [`docs/MILESTONES.md`](MILESTONES.md) for the full list:
+1. ✅ `Rigor::Cache::Descriptor` value object — 50d864b.
+2. ✅ `Rigor::Cache::Store` filesystem backend — c7f8f94.
+3. ✅ `Rigor::Cache::RbsConstantTable` first cached producer — cc132ee. The original plan named the RBS environment loader (`build_env`) as the first producer; implementation discovered `RBS::Environment` is not Marshal-clean (transitive `RBS::Location` lacks `_dump_data`). [ADR-6 § 8](adr/6-cache-persistence-backend.md) documents the finding; Slice 3 caches a post-translation artefact instead.
+4. ✅ `rigor check --cache-stats` / `--clear-cache` — fdb3743.
+5. ✅ `Diagnostic#source_family` + `qualified_rule` — ed9ae0a.
 
-1. ✅ `Rigor::Cache::Descriptor` value object (pure-value composition + canonical serialisation). Landed at 50d864b.
-2. ✅ `Rigor::Cache::Store` filesystem backend (sharded directory, atomic rename, per-file flock, SHA-256 integrity). Landed at c7f8f94.
-3. ✅ First cached producer — `Rigor::Cache::RbsConstantTable` (Hash<String, Rigor::Type> for every RBS-declared constant). Landed at cc132ee. The slice plan originally named the RBS environment loader (`build_env`) as the first producer; implementation discovered `RBS::Environment` is not Marshal-clean (transitive `RBS::Location` lacks `_dump_data`), so Slice 3 caches a post-translation artefact instead. See [`docs/adr/6-cache-persistence-backend.md`](adr/6-cache-persistence-backend.md) § 8 and [`docs/internal-spec/cache.md`](internal-spec/cache.md) for the rationale and public read shape.
-4. ✅ `rigor check --cache-stats` (on-disk inventory) and `--clear-cache` (manual eviction). Landed at fdb3743. Disk-oriented inventory only; per-run hit/miss counters deferred until a production caller wires the cache.
-5. Diagnostic provenance prefix (small companion slice — `source_family` field on `Diagnostic`). **← next.**
+Working state at the v0.0.8 release point: 1591 RSpec examples / 0 failures, RuboCop 146 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. Version is bumped to `0.0.8` and the `Gemfile.lock` is regenerated; `bundle exec rake release` is gated on explicit user authorisation per `AGENTS.md`.
 
-Working state after slice 4: 1586 RSpec examples / 0 failures, RuboCop 146 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. Version stays at `0.0.7` until the v0.0.8 surface is locked in.
+### Notable v0.0.8 deferrals (already documented in MILESTONES)
+
+- **Wiring the cache into `rigor check`.** Production callers don't yet exercise the cache; `--cache-stats` shows `(empty)` by default. v0.0.9 follow-up.
+- **Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.** The biggest cold-start cost remains `RbsLoader#build_env`. Caching it directly requires either a `Store`-side `dump`/`load` callable surface or a schema-stable intermediate that walks `RBS::Environment` into a Marshal-safe shape.
 
 ## Where the Work Resumes
 

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-05-04
+
+The eighth preview. Theme: **first cache-related code slice** — land the persistence layer that v0.0.7's cache slice taxonomy design doc fixed the schema for, with a Marshal-clean producer wired through it end-to-end. Backend choice is fixed by [ADR-6](docs/adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies**.
+
+### Added
+
+- **`Rigor::Cache::Descriptor` value object.** Pure-value four-slot schema (`files`, `gems`, `plugins`, `configs`) per [`docs/design/20260505-cache-slice-taxonomy.md`](docs/design/20260505-cache-slice-taxonomy.md). Each slot holds typed, frozen entries; `FileEntry` validates its comparator enum (`:digest > :mtime > :exists`); the rest accept already-canonical hashes. `Descriptor.compose(*descriptors)` unions slots by key, prefers the stricter comparator on file conflicts, and raises `Descriptor::Conflict` on disagreeing values. `descriptor.cache_key_for(producer_id:, params:)` derives the canonical hex SHA-256 over the composed inputs; `to_canonical_bytes` produces sorted, deterministic JSON so equivalent descriptors round-trip to identical bytes.
+- **`Rigor::Cache::Store` filesystem backend.** Sharded layout `<root>/<producer-id>/<2-prefix>/<62-suffix>.entry`, schema-version marker at `<root>/schema_version.txt`. Custom binary entry format (`"RIGOR\x00\x01"` magic, varint-prefixed descriptor and value, trailing SHA-256 integrity). Writes follow rename-into-place with `flock(LOCK_EX)` on the destination and `fsync` on the temp file. Reads tolerate any failure (missing file, bad magic, bad SHA-256, malformed varint, unmarshal-able payload) by falling through to a cache miss. `Store#fetch_or_compute(producer_id:, params:, descriptor:) { ... }` is the single producer-facing API; producer ids are constrained to `[a-z][a-z0-9._-]*` for filesystem safety.
+- **First cached producer — `Rigor::Cache::RbsConstantTable`.** Caches a `Hash<String, Rigor::Type>` mapping every RBS-declared constant (e.g. `"::Math::PI"`) to its translated `Rigor::Type`. Descriptor: the `rbs` gem with its locked version, `:digest` entries for every `.rbs` file under `signature_paths`, and a configs entry for the libraries list. The slice plan originally named the RBS environment loader (`build_env`) as the first producer; implementation discovered `RBS::Environment` is not Marshal-clean (`RBS::Location` is a C-extension class without `_dump_data`). [ADR-6 § 8](docs/adr/6-cache-persistence-backend.md) documents the finding; the slice caches a post-translation artefact instead. `RbsLoader#constant_names` is added to the public surface so the producer can enumerate constants without reaching into the loader's private state.
+- **`rigor check --cache-stats`.** Prints an on-disk inventory at the end of the run (per-producer entry counts, total bytes, schema-version marker). Sourced from a new `Rigor::Cache::Store.disk_inventory(root:)` class method. Per-run hit/miss counters are deferred until production code wires the cache (no production caller in v0.0.8).
+- **`rigor check --clear-cache`.** Removes the `.rigor/cache` directory (CWD-relative) before the analysis run. Prints `Cleared cache: .rigor/cache` or `Cache already empty: .rigor/cache`. The check itself runs to completion regardless.
+- **Diagnostic source-family provenance.** `Rigor::Analysis::Diagnostic` gains a `source_family:` keyword (default `:builtin`) and a `qualified_rule` accessor returning `"#{source_family}.#{rule}"` for non-default families and just `rule` for builtin diagnostics. JSON output (`to_h`) carries both `source_family` and the bare `rule` side-by-side. Prepares ADR-2's plugin-observability story without committing to the plugin API itself; no production caller in v0.0.8 sets a non-default source family.
+
+### Internal
+
+- New normative spec [`docs/internal-spec/cache.md`](docs/internal-spec/cache.md) tracks the cache layer's public read shape (Descriptor API, Store API, file format, atomicity & locking, schema-version mismatch behaviour, disk inventory, diagnostic provenance).
+
 ## [0.0.7] - 2026-05-05
 
 The seventh preview. Theme: **pre-plugin coverage push** — close the gap between what the type-language and built-in-coverage specs already commit to and what the analyzer actually implements, so the plugin API designed against this surface in v0.1.0 has a complete substrate to attach to. The release is breadth-over-depth: many small fills, plus the first design output in the pre-v0.1.0 sequence.
@@ -1156,7 +1173,8 @@ The gem is published to RubyGems as **`rigortype`** (the
   reserved for `dump_type`); per-rule configuration and
   suppression comments are deferred.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.8...HEAD
+[0.0.8]: https://github.com/rigortype/rigor/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/rigortype/rigor/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/rigortype/rigor/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/rigortype/rigor/compare/v0.0.4...v0.0.5

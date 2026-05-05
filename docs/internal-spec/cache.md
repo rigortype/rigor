@@ -118,7 +118,7 @@ Constructs a store rooted at `root` (a directory path, typically
 `.rigor/cache`). The directory is not created eagerly — the first
 write materialises it along with the `schema_version.txt` marker.
 
-### `store.fetch_or_compute(producer_id:, params:, descriptor:) { ... } -> Object`
+### `store.fetch_or_compute(producer_id:, params:, descriptor:, serialize: nil, deserialize: nil) { ... } -> Object`
 
 The single producer-facing entry point.
 
@@ -131,8 +131,21 @@ The single producer-facing entry point.
   derive cache keys themselves.
 - `descriptor` ([`Rigor::Cache::Descriptor`](#rigorcachedescriptor-v008-slice-1))
   — the invalidation descriptor for the cached value.
-- The block (`yield`) is invoked **only on cache miss**. Its
-  return value is `Marshal.dump`-ed and stored.
+- `serialize` (callable, optional) — turns the producer's return
+  value into a binary `String`. Defaults to `Marshal.dump(value).b`.
+  Producers whose return values are not `Marshal`-clean (RBS-
+  native objects with `RBS::Location` members, raw `IO`, …) MUST
+  provide a serialiser.
+- `deserialize` (callable, optional) — turns bytes back into the
+  producer's value. Defaults to `Marshal.load`. The pair
+  `(serialize, deserialize)` MUST round-trip — a producer that
+  reads with one strategy and writes with another corrupts its
+  own cache slice. Any exception (`StandardError`) raised by
+  the deserialiser is treated as a cache miss; the entry is
+  considered corrupt, the producer block reruns, and the next
+  write overwrites it. This matches the read fault-tolerance
+  rules below.
+- The block (`yield`) is invoked **only on cache miss**.
 
 Returns the cached value (loaded from disk on hit; produced by
 the block on miss).

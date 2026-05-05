@@ -3,6 +3,7 @@
 require "spec_helper"
 require "tmpdir"
 require "fileutils"
+require "json"
 
 RSpec.describe Rigor::Cache::Store do
   let(:tmpdir) { Dir.mktmpdir("rigor-cache-store-spec-") }
@@ -112,6 +113,72 @@ RSpec.describe Rigor::Cache::Store do
       expect(result).to eq(:second)
       expect(File.read(File.join(cache_root, "schema_version.txt")).strip)
         .to eq(Rigor::Cache::Descriptor::SCHEMA_VERSION.to_s)
+    end
+  end
+
+  describe "custom serialize: / deserialize: (v0.0.10 C1)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+    let(:upcase_serialize) { :upcase.to_proc }
+    let(:downcase_deserialize) { :downcase.to_proc }
+
+    it "round-trips through the supplied callables" do
+      store.fetch_or_compute(
+        producer_id: "demo", params: {}, descriptor: descriptor,
+        serialize: upcase_serialize, deserialize: downcase_deserialize
+      ) { "hello" }
+
+      result = store.fetch_or_compute(
+        producer_id: "demo", params: {}, descriptor: descriptor,
+        serialize: upcase_serialize, deserialize: downcase_deserialize
+      ) { :should_not_run }
+
+      # The value was UPCASE-ed on write, then downcase-d on read.
+      expect(result).to eq("hello")
+    end
+
+    it "writes raw serialised bytes (no Marshal wrapping)" do
+      json_serialize = ->(value) { JSON.generate(value) }
+      json_deserialize = ->(bytes) { JSON.parse(bytes) }
+      store.fetch_or_compute(
+        producer_id: "demo", params: {}, descriptor: descriptor,
+        serialize: json_serialize, deserialize: json_deserialize
+      ) { { "name" => "Alice", "age" => 30 } }
+
+      key = descriptor.cache_key_for(producer_id: "demo", params: {})
+      entry_path = File.join(cache_root, "demo", key[0, 2], "#{key[2..]}.entry")
+      bytes = File.binread(entry_path)
+      # Custom serialiser bytes must appear verbatim somewhere in the entry body.
+      expect(bytes).to include('{"name":"Alice","age":30}')
+    end
+
+    it "raises TypeError when serialize returns a non-String" do
+      bad = ->(_) { 42 }
+      expect do
+        store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor, serialize: bad) { "x" }
+      end.to raise_error(TypeError, /serialize must return a String/)
+    end
+
+    it "treats a deserialize raise as a cache miss" do
+      identity = ->(v) { v }
+      raising = ->(_) { raise "boom" }
+      store.fetch_or_compute(
+        producer_id: "demo", params: {}, descriptor: descriptor,
+        serialize: identity, deserialize: identity
+      ) { "first" }
+      result = store.fetch_or_compute(
+        producer_id: "demo", params: {}, descriptor: descriptor,
+        serialize: identity, deserialize: raising
+      ) { "second" }
+      expect(result).to eq("second")
+    end
+
+    it "keeps the default Marshal path unchanged when serialize/deserialize are omitted" do
+      result = store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) do
+        { complex: [1, "two", :three] }
+      end
+      expect(result).to eq(complex: [1, "two", :three])
+
+      hit = store.fetch_or_compute(producer_id: "demo", params: {}, descriptor: descriptor) { :should_not_run }
+      expect(hit).to eq(complex: [1, "two", :three])
     end
   end
 

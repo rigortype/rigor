@@ -101,17 +101,34 @@ module Rigor
       #   via {Descriptor#cache_key_for}.
       # @param descriptor [Rigor::Cache::Descriptor] the invalidation
       #   descriptor for the value being cached.
-      # @yieldreturn the value to cache (must be `Marshal.dump`-able).
+      # @param serialize [#call, nil] optional callable that turns the
+      #   producer's return value into a binary `String`. Defaults to
+      #   `Marshal.dump(value).b`. Producers whose return values are
+      #   not `Marshal`-clean (RBS-native objects with `RBS::Location`
+      #   members, raw `IO`, …) MUST provide a serialiser. The pair
+      #   `(serialize, deserialize)` MUST round-trip — a producer that
+      #   reads with one strategy and writes with another corrupts
+      #   its own cache slice.
+      # @param deserialize [#call, nil] optional callable that turns
+      #   bytes back into the producer's value. Defaults to
+      #   `Marshal.load`. Any exception (`StandardError`) raised by
+      #   the deserialiser is treated as a cache miss — the entry is
+      #   considered corrupt, the producer block reruns, and the
+      #   next write overwrites it. This is consistent with the
+      #   fault-tolerance contract for the default `Marshal.load`
+      #   path.
+      # @yieldreturn the value to cache.
       # @return the cached value (loaded from disk on hit; produced by
       #   the block on miss).
-      def fetch_or_compute(producer_id:, params:, descriptor:, &block)
+      def fetch_or_compute(producer_id:, params:, descriptor:,
+                           serialize: nil, deserialize: nil, &block)
         validate_producer_id!(producer_id)
         ensure_schema_version!
 
         key = descriptor.cache_key_for(producer_id: producer_id, params: params)
         path = entry_path(producer_id, key)
 
-        cached = read_entry(path)
+        cached = read_entry(path, deserialize: deserialize)
         unless cached.nil?
           record(:hits, producer_id)
           return cached.value
@@ -119,7 +136,7 @@ module Rigor
 
         record(:misses, producer_id)
         value = block.call
-        write_entry(path, descriptor, value)
+        write_entry(path, descriptor, value, serialize: serialize)
         record(:writes, producer_id)
         value
       end
@@ -152,7 +169,7 @@ module Rigor
       # Reads and validates one entry file. Any failure (missing,
       # short, bad magic, bad version, bad checksum, unmarshal-able)
       # returns nil so the caller treats it as a cache miss.
-      def read_entry(path)
+      def read_entry(path, deserialize: nil)
         return nil unless File.file?(path)
 
         bytes = File.binread(path)
@@ -162,8 +179,8 @@ module Rigor
         descriptor_bytes, value_bytes = parse_body(body)
         return nil if descriptor_bytes.nil?
 
-        value = safe_marshal_load(value_bytes)
-        return nil if value.equal?(MARSHAL_LOAD_FAILED)
+        value = safe_load(value_bytes, deserialize)
+        return nil if value.equal?(LOAD_FAILED)
 
         Entry.new(descriptor_bytes, value)
       end
@@ -195,20 +212,24 @@ module Rigor
         [descriptor_bytes, value_bytes]
       end
 
-      MARSHAL_LOAD_FAILED = Object.new.freeze
-      private_constant :MARSHAL_LOAD_FAILED
+      LOAD_FAILED = Object.new.freeze
+      private_constant :LOAD_FAILED
 
-      def safe_marshal_load(bytes)
-        Marshal.load(bytes) # rubocop:disable Security/MarshalLoad
+      def safe_load(bytes, deserialize)
+        if deserialize
+          deserialize.call(bytes)
+        else
+          Marshal.load(bytes) # rubocop:disable Security/MarshalLoad
+        end
       rescue StandardError
-        MARSHAL_LOAD_FAILED
+        LOAD_FAILED
       end
 
-      def write_entry(path, descriptor, value)
+      def write_entry(path, descriptor, value, serialize: nil)
         FileUtils.mkdir_p(File.dirname(path))
 
         descriptor_bytes = descriptor.to_canonical_bytes
-        value_bytes = Marshal.dump(value).b
+        value_bytes = serialize_value(value, serialize)
 
         body = +"".b
         body << HEADER
@@ -219,6 +240,18 @@ module Rigor
         body << Digest::SHA256.digest(body)
 
         atomically_replace(path, body)
+      end
+
+      def serialize_value(value, serialize)
+        return Marshal.dump(value).b if serialize.nil?
+
+        bytes = serialize.call(value)
+        unless bytes.is_a?(String)
+          raise TypeError,
+                "custom serialize must return a String, got #{bytes.class}"
+        end
+
+        bytes.b
       end
 
       def atomically_replace(path, body)

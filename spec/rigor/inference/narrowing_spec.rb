@@ -1052,12 +1052,24 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(result).to eq(Rigor::Type::Combinator.lowercase_string)
     end
 
-    it "falls back to Difference[String, refined] when no complement pair is registered" do
-      # numeric-string has no complement pair registered today, so the
-      # carrier-of-last-resort still applies.
+    it "narrows Nominal[String] under ~uppercase-string to non-uppercase-string" do
+      uc = Rigor::Type::Combinator.uppercase_string
+      result = described_class.narrow_not_refinement(nominal("String"), uc)
+      expect(result).to eq(Rigor::Type::Combinator.non_uppercase_string)
+    end
+
+    it "narrows Nominal[String] under ~numeric-string to non-numeric-string" do
       ns = Rigor::Type::Combinator.numeric_string
       result = described_class.narrow_not_refinement(nominal("String"), ns)
-      expect(result).to eq(Rigor::Type::Combinator.difference(nominal("String"), ns))
+      expect(result).to eq(Rigor::Type::Combinator.non_numeric_string)
+    end
+
+    it "falls back to Difference[String, refined] when no complement pair is registered" do
+      # decimal-int-string has no complement pair registered today, so the
+      # carrier-of-last-resort still applies.
+      di = Rigor::Type::Combinator.decimal_int_string
+      result = described_class.narrow_not_refinement(nominal("String"), di)
+      expect(result).to eq(Rigor::Type::Combinator.difference(nominal("String"), di))
     end
 
     it "drops the negated refinement itself from a union" do

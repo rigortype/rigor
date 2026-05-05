@@ -143,7 +143,9 @@ module Rigor
         lowercase: ->(v) { v.is_a?(String) && v == v.downcase },
         not_lowercase: ->(v) { v.is_a?(String) && v != v.downcase },
         uppercase: ->(v) { v.is_a?(String) && v == v.upcase },
+        not_uppercase: ->(v) { v.is_a?(String) && v != v.upcase },
         numeric: ->(v) { v.is_a?(String) && NUMERIC_STRING_PATTERN.match?(v) },
+        not_numeric: ->(v) { v.is_a?(String) && !NUMERIC_STRING_PATTERN.match?(v) },
         decimal_int: ->(v) { v.is_a?(String) && DECIMAL_INT_STRING_PATTERN.match?(v) },
         octal_int: ->(v) { v.is_a?(String) && OCTAL_INT_STRING_PATTERN.match?(v) },
         hex_int: ->(v) { v.is_a?(String) && HEX_INT_STRING_PATTERN.match?(v) },
@@ -167,7 +169,9 @@ module Rigor
         ["String", :lowercase] => "lowercase-string",
         ["String", :not_lowercase] => "non-lowercase-string",
         ["String", :uppercase] => "uppercase-string",
+        ["String", :not_uppercase] => "non-uppercase-string",
         ["String", :numeric] => "numeric-string",
+        ["String", :not_numeric] => "non-numeric-string",
         ["String", :decimal_int] => "decimal-int-string",
         ["String", :octal_int] => "octal-int-string",
         ["String", :hex_int] => "hex-int-string",
@@ -192,7 +196,11 @@ module Rigor
       # the registered complement automatically.
       COMPLEMENT_PAIRS = {
         lowercase: :not_lowercase,
-        not_lowercase: :lowercase
+        not_lowercase: :lowercase,
+        uppercase: :not_uppercase,
+        not_uppercase: :uppercase,
+        numeric: :not_numeric,
+        not_numeric: :numeric
       }.freeze
       private_constant :COMPLEMENT_PAIRS
 

@@ -163,8 +163,24 @@ module Rigor
         Refined.new(nominal_of("String"), :uppercase)
       end
 
+      # Complement of `uppercase-string`: a `String` with at least
+      # one non-uppercase character. Paired with `:uppercase` in
+      # {Refined::COMPLEMENT_PAIRS}.
+      def non_uppercase_string
+        Refined.new(nominal_of("String"), :not_uppercase)
+      end
+
       def numeric_string
         Refined.new(nominal_of("String"), :numeric)
+      end
+
+      # Complement of `numeric-string`: a `String` that is not
+      # accepted by Rigor's Ruby numeric-string predicate
+      # (contains at least one non-digit, has a malformed numeric
+      # form, etc.). Paired with `:numeric` in
+      # {Refined::COMPLEMENT_PAIRS}.
+      def non_numeric_string
+        Refined.new(nominal_of("String"), :not_numeric)
       end
 
       def decimal_int_string

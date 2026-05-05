@@ -173,9 +173,26 @@ RSpec.describe Rigor::Type::Refined do
       expect(not_lc.complement_predicate_id).to eq(:lowercase)
     end
 
-    it "returns nil for predicates without a registered complement" do
+    it "returns the registered complement for :uppercase" do
+      uc = Rigor::Type::Combinator.uppercase_string
+      expect(uc.complement_predicate_id).to eq(:not_uppercase)
+    end
+
+    it "returns the registered complement for :numeric" do
       ns = Rigor::Type::Combinator.numeric_string
-      expect(ns.complement_predicate_id).to be_nil
+      expect(ns.complement_predicate_id).to eq(:not_numeric)
+    end
+
+    it "is bidirectional for the additional pairs" do
+      not_uc = Rigor::Type::Combinator.non_uppercase_string
+      expect(not_uc.complement_predicate_id).to eq(:uppercase)
+      not_num = Rigor::Type::Combinator.non_numeric_string
+      expect(not_num.complement_predicate_id).to eq(:numeric)
+    end
+
+    it "returns nil for predicates without a registered complement" do
+      di = Rigor::Type::Combinator.decimal_int_string
+      expect(di.complement_predicate_id).to be_nil
     end
   end
 
@@ -221,6 +238,44 @@ RSpec.describe Rigor::Type::Refined do
 
     it "describes as `non-lowercase-string`" do
       expect(not_lc.describe).to eq("non-lowercase-string")
+    end
+  end
+
+  describe ":not_uppercase predicate semantics" do
+    let(:not_uc) { Rigor::Type::Combinator.non_uppercase_string }
+
+    it "matches strings with at least one non-uppercase character" do
+      expect(not_uc.accepts(constant_of("Hi")).yes?).to be(true)
+      expect(not_uc.accepts(constant_of("hello")).yes?).to be(true)
+    end
+
+    it "rejects all-uppercase strings (the existing :uppercase set)" do
+      expect(not_uc.accepts(constant_of("ABC")).no?).to be(true)
+      expect(not_uc.accepts(constant_of("")).no?).to be(true)
+      expect(not_uc.accepts(constant_of("123")).no?).to be(true)
+    end
+
+    it "describes as `non-uppercase-string`" do
+      expect(not_uc.describe).to eq("non-uppercase-string")
+    end
+  end
+
+  describe ":not_numeric predicate semantics" do
+    let(:not_num) { Rigor::Type::Combinator.non_numeric_string }
+
+    it "matches strings with at least one non-digit character" do
+      expect(not_num.accepts(constant_of("hello")).yes?).to be(true)
+      expect(not_num.accepts(constant_of("12a")).yes?).to be(true)
+      expect(not_num.accepts(constant_of("")).yes?).to be(true)
+    end
+
+    it "rejects strings the numeric-string predicate accepts" do
+      expect(not_num.accepts(constant_of("123")).no?).to be(true)
+      expect(not_num.accepts(constant_of("-12.5")).no?).to be(true)
+    end
+
+    it "describes as `non-numeric-string`" do
+      expect(not_num.describe).to eq("non-numeric-string")
     end
   end
 end

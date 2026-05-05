@@ -16,6 +16,7 @@ require_relative "../builtins/complex_catalog"
 require_relative "../builtins/pathname_catalog"
 require_relative "../builtins/random_catalog"
 require_relative "../builtins/struct_catalog"
+require_relative "../builtins/encoding_catalog"
 
 module Rigor
   module Inference
@@ -1081,7 +1082,8 @@ module Rigor
           [Complex,  [Builtins::COMPLEX_CATALOG,  "Complex"]],
           [Pathname, [Builtins::PATHNAME_CATALOG, "Pathname"]],
           [Random, [Builtins::RANDOM_CATALOG, "Random"]],
-          [Struct, [Builtins::STRUCT_CATALOG, "Struct"]]
+          [Struct, [Builtins::STRUCT_CATALOG, "Struct"]],
+          [Encoding, [Builtins::ENCODING_CATALOG, "Encoding"]]
         ].freeze
         private_constant :CATALOG_BY_CLASS
 

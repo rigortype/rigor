@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot fold an aliasing copy, a member-dependent hash, or
   a member-name-dependent reader through the catalog.
   `rb_cStruct` joins `BASE_CLASS_VARS`.
-
+- **Encoding catalog import.** `Init_Encoding` from `references/ruby/encoding.c` is extracted into `data/builtins/ruby_core/encoding.yml` and routed through `Builtins::ENCODING_CATALOG`. `Encoding::UTF_8` and the other built-in Encoding constants resolve to `Nominal[Encoding]`; instance reads (`#name`, `#names`, `#dummy?`, `#ascii_compatible?`, `#inspect`) and the registry-walking singletons (`Encoding.find`, `.list`, `.aliases`, `.name_list`, `.default_external`, `.default_internal`) now answer through the catalog with their precise nominal returns. The blocklist defends against folding singleton lookups (`find`/`list`/`aliases`/`name_list`) and global-default mutators (`default_external=` / `default_internal=`) against the analyzer process's encoding registry, plus the conventional `:initialize_copy` / `:hash` / `:eql?` defensive entries.
 ## [0.0.8] - 2026-05-04
 
 The eighth preview. Theme: **first cache-related code slice** — land the persistence layer that v0.0.7's cache slice taxonomy design doc fixed the schema for, with a Marshal-clean producer wired through it end-to-end. Backend choice is fixed by [ADR-6](docs/adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies**.

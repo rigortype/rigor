@@ -296,6 +296,16 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/struct.c],
     output_path: "data/builtins/ruby_core/struct.yml"
+  },
+  "encoding" => {
+    init_function: "Init_Encoding",
+    ruby_c_path: "references/ruby/encoding.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Encoding" => "references/rbs/core/encoding.rbs"
+    },
+    c_index_paths: %w[references/ruby/encoding.c],
+    output_path: "data/builtins/ruby_core/encoding.yml"
   }
 }.freeze
 

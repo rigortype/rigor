@@ -5,6 +5,9 @@ require "prism"
 require_relative "../environment"
 require_relative "../scope"
 require_relative "../cache/store"
+require_relative "../plugin"
+require_relative "../reflection"
+require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/method_dispatcher/file_folding"
@@ -18,7 +21,7 @@ module Rigor
       RUBY_GLOB = "**/*.rb"
       DEFAULT_CACHE_ROOT = ".rigor/cache"
 
-      attr_reader :cache_store
+      attr_reader :cache_store, :plugin_registry
 
       # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events
@@ -34,6 +37,7 @@ module Rigor
         @configuration = configuration
         @explain = explain
         @cache_store = cache_store
+        @plugin_registry = Plugin::Registry::EMPTY
       end
 
       # Walks every Ruby file under `paths`, parses it, builds a
@@ -53,15 +57,51 @@ module Rigor
           signature_paths: @configuration.signature_paths,
           cache_store: @cache_store
         )
+
+        @plugin_registry = load_plugins
         expansion = expand_paths(paths)
 
-        diagnostics = expansion.fetch(:errors)
+        diagnostics = plugin_load_diagnostics
+        diagnostics += expansion.fetch(:errors)
         diagnostics += expansion.fetch(:files).flat_map { |path| analyze_file(path, environment) }
 
         Result.new(diagnostics: diagnostics)
       end
 
       private
+
+      # Loads project-configured plugins through {Rigor::Plugin::Loader}
+      # and returns the resulting {Rigor::Plugin::Registry}. Loader
+      # failures are isolated: each surfaces as a `:plugin_loader`
+      # diagnostic on the run's `Result` rather than aborting the
+      # analysis. Plugins that load successfully but contribute no
+      # protocol hooks are inert in slice 1; later v0.1.0 slices
+      # wire the contribution merger through this registry.
+      def load_plugins
+        return Plugin::Registry::EMPTY if @configuration.plugins.empty?
+
+        services = Plugin::Services.new(
+          reflection: Reflection,
+          type: Type::Combinator,
+          configuration: @configuration,
+          cache_store: @cache_store
+        )
+        Plugin::Loader.load(configuration: @configuration, services: services)
+      end
+
+      def plugin_load_diagnostics
+        @plugin_registry.load_errors.map do |error|
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: error.message,
+            severity: :error,
+            rule: "load-error",
+            source_family: :plugin_loader
+          )
+        end
+      end
 
       # Resolves the user-supplied path list into:
       # - `:files`  — the concrete `.rb` files to analyze.

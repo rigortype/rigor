@@ -36,7 +36,9 @@ module Rigor
 
       @target_ruby = data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")).to_s
       @paths = Array(data.fetch("paths", DEFAULTS.fetch("paths"))).map(&:to_s)
-      @plugins = Array(data.fetch("plugins", DEFAULTS.fetch("plugins"))).map(&:to_s)
+      @plugins = Array(data.fetch("plugins", DEFAULTS.fetch("plugins"))).map do |entry|
+        coerce_plugin_entry(entry)
+      end.freeze
       @disabled_rules = Array(data.fetch("disable", DEFAULTS.fetch("disable"))).map(&:to_s).freeze
       @libraries = Array(data.fetch("libraries", DEFAULTS.fetch("libraries"))).map(&:to_s).freeze
       sig_paths = data.fetch("signature_paths", DEFAULTS.fetch("signature_paths"))
@@ -60,6 +62,24 @@ module Rigor
           "path" => cache_path
         }
       }
+    end
+
+    private
+
+    # Accepts either `"rigor-foo"` (gem-name shorthand) or
+    # `{ "gem" => "rigor-foo", "id" => "foo", "config" => {...} }`
+    # (full form). Returns the canonical hash form so the loader
+    # works against a single shape.
+    def coerce_plugin_entry(entry)
+      case entry
+      when String
+        entry.dup.freeze
+      when Hash
+        entry.to_h { |k, v| [k.to_s, v] }.freeze
+      else
+        raise ArgumentError,
+              "plugin configuration entry must be a String or Hash, got #{entry.inspect}"
+      end
     end
   end
 end

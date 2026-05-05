@@ -54,6 +54,17 @@ pins instance and singleton method sets for:
   `discovered_method?`, `instance_definition`, `instance_method_definition`,
   `nominal_for_name`, `rbs_class_known?`, `singleton_definition`,
   `singleton_for_name`, `singleton_method_definition`.
+- `Rigor::Plugin` — `register`, `registered`, `registered_for`,
+  `unregister!` (test helper). v0.1.0 slice 1.
+- `Rigor::Plugin::Base` — class-level `manifest(**fields)`,
+  instance-level `services` / `config` / `manifest`, the override
+  hook `#init(services)`. v0.1.0 slice 1.
+- `Rigor::Plugin::Manifest` — `id`, `version`, `description`,
+  `protocols`, `config_schema`, `validate_config(config)`.
+- `Rigor::Plugin::Services` — `reflection`, `type`, `configuration`,
+  `cache_store`.
+- `Rigor::Plugin::Registry` — `plugins`, `ids`, `find(id)`,
+  `load_errors`, `empty?`, `any_load_errors?`.
 
 Any signature change on these methods has to update the matching
 `PublicApiDriftSnapshots::*` constant in the same commit.
@@ -84,6 +95,12 @@ Any signature change on these methods has to update the matching
   Data carriers (`PredicateEffect`, `AssertEffect`,
   `ParamOverride`) are subject to the same v0.1.0 refinement as
   `FlowContribution`.
+- **`Rigor::Plugin::*`** — registration / loading surface landed
+  in v0.1.0 slice 1. The instance-level `Rigor::Plugin::Base#init`
+  hook is stable today; protocol hooks added by slices 3–6 may
+  refine the public method set on `Base`. Plugin authors should
+  pin their gem to a specific Rigor version while v0.1.0 is in
+  development.
 
 ## Internal surfaces (NOT public)
 

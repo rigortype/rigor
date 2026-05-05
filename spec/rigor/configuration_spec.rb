@@ -62,5 +62,45 @@ RSpec.describe Rigor::Configuration do
         expect(configuration.fold_platform_specific_paths).to be(true)
       end
     end
+
+    it "accepts plugin entries as bare gem-name strings" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          plugins:
+            - rigor-rails
+            - rigor-rspec
+        YAML
+
+        configuration = described_class.load(path)
+        expect(configuration.plugins).to eq(%w[rigor-rails rigor-rspec])
+      end
+    end
+
+    it "accepts plugin entries as hashes with gem/id/config keys" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          plugins:
+            - gem: rigor-rails
+              id: rails
+              config:
+                eager_load: true
+        YAML
+
+        configuration = described_class.load(path)
+        expect(configuration.plugins).to eq(
+          [
+            { "gem" => "rigor-rails", "id" => "rails", "config" => { "eager_load" => true } }
+          ]
+        )
+      end
+    end
+
+    it "rejects plugin entries that are neither String nor Hash" do
+      expect do
+        described_class.new(Rigor::Configuration::DEFAULTS.merge("plugins" => [42]))
+      end.to raise_error(ArgumentError, /must be a String or Hash/)
+    end
   end
 end

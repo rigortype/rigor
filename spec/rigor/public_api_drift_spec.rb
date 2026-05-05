@@ -103,6 +103,51 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     singleton_method_definition(req:class_name,req:method_name,key:scope,key:environment)
   ].freeze
 
+  PLUGIN_SINGLETON = %w[
+    register(req:plugin_class)
+    registered()
+    registered_for(req:id)
+    unregister!(opt:id)
+  ].freeze
+
+  PLUGIN_BASE_INSTANCE = %w[
+    config()
+    init(req:services)
+    manifest()
+    services()
+  ].freeze
+
+  PLUGIN_BASE_SINGLETON = %w[manifest(keyrest:fields)].freeze
+
+  PLUGIN_MANIFEST_INSTANCE = %w[
+    ==(req:other)
+    config_schema()
+    description()
+    eql?(req:other)
+    hash()
+    id()
+    protocols()
+    to_h()
+    validate_config(req:config)
+    version()
+  ].freeze
+
+  PLUGIN_SERVICES_INSTANCE = %w[
+    cache_store()
+    configuration()
+    reflection()
+    type()
+  ].freeze
+
+  PLUGIN_REGISTRY_INSTANCE = %w[
+    any_load_errors?()
+    empty?()
+    find(req:id)
+    ids()
+    load_errors()
+    plugins()
+  ].freeze
+
   COMBINATOR_SINGLETON = %w[
     bot()
     constant_of(req:value)
@@ -193,6 +238,40 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
   describe "Rigor::Reflection" do
     it "exposes the expected read-side facade surface" do
       expect(singleton_signatures(Rigor::Reflection)).to eq(PublicApiDriftSnapshots::REFLECTION_SINGLETON)
+    end
+  end
+
+  describe "Rigor::Plugin" do
+    it "exposes the expected registration surface" do
+      expect(singleton_signatures(Rigor::Plugin)).to eq(PublicApiDriftSnapshots::PLUGIN_SINGLETON)
+    end
+  end
+
+  describe "Rigor::Plugin::Base" do
+    it "exposes the expected instance surface" do
+      expect(instance_signatures(Rigor::Plugin::Base)).to eq(PublicApiDriftSnapshots::PLUGIN_BASE_INSTANCE)
+    end
+
+    it "exposes the expected class surface" do
+      expect(singleton_signatures(Rigor::Plugin::Base)).to eq(PublicApiDriftSnapshots::PLUGIN_BASE_SINGLETON)
+    end
+  end
+
+  describe "Rigor::Plugin::Manifest" do
+    it "exposes the expected value-object surface" do
+      expect(instance_signatures(Rigor::Plugin::Manifest)).to eq(PublicApiDriftSnapshots::PLUGIN_MANIFEST_INSTANCE)
+    end
+  end
+
+  describe "Rigor::Plugin::Services" do
+    it "exposes the expected DI accessor surface" do
+      expect(instance_signatures(Rigor::Plugin::Services)).to eq(PublicApiDriftSnapshots::PLUGIN_SERVICES_INSTANCE)
+    end
+  end
+
+  describe "Rigor::Plugin::Registry" do
+    it "exposes the expected read-side surface" do
+      expect(instance_signatures(Rigor::Plugin::Registry)).to eq(PublicApiDriftSnapshots::PLUGIN_REGISTRY_INSTANCE)
     end
   end
 end

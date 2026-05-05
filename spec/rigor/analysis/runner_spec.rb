@@ -39,6 +39,29 @@ RSpec.describe Rigor::Analysis::Runner do
     expect(result.diagnostics.first.message).not_to be_empty
   end
 
+  describe "cache_store surface (v0.0.9 group A slice 1)" do
+    let(:configuration) { Rigor::Configuration.new("paths" => []) }
+
+    it "exposes a Cache::Store rooted at .rigor/cache by default" do
+      runner = described_class.new(configuration: configuration)
+      expect(runner.cache_store).to be_a(Rigor::Cache::Store)
+      expect(runner.cache_store.root).to eq(Rigor::Analysis::Runner::DEFAULT_CACHE_ROOT)
+    end
+
+    it "accepts an explicit cache_store override" do
+      Dir.mktmpdir do |dir|
+        custom = Rigor::Cache::Store.new(root: File.join(dir, "alt-cache"))
+        runner = described_class.new(configuration: configuration, cache_store: custom)
+        expect(runner.cache_store).to equal(custom)
+      end
+    end
+
+    it "honours a nil cache_store (caching disabled, e.g. --no-cache)" do
+      runner = described_class.new(configuration: configuration, cache_store: nil)
+      expect(runner.cache_store).to be_nil
+    end
+  end
+
   describe "CheckRules diagnostics (Slice 7 phase 8)" do
     it "flags an undefined method on a typed Constant receiver" do
       result = analyze("\"hello\".no_such_method\n")

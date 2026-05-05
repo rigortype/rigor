@@ -303,6 +303,35 @@ RSpec.describe Rigor::CLI do
         expect(out).to include("Cache already empty: .rigor/cache")
       end
     end
+
+    it "passes nil cache_store to the runner under --no-cache" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        captured = nil
+        allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured = kwargs
+          original.call(**kwargs)
+        end
+        status, _out, _err = run_cli("check", "--no-cache", "a.rb")
+        expect(status).to eq(0)
+        expect(captured).to include(cache_store: nil)
+      end
+    end
+
+    it "passes a Cache::Store rooted at .rigor/cache to the runner by default" do
+      write_check_fixture("a.rb", "1\n")
+      Dir.chdir(tmpdir) do
+        captured = nil
+        allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured = kwargs
+          original.call(**kwargs)
+        end
+        status, _out, _err = run_cli("check", "a.rb")
+        expect(status).to eq(0)
+        expect(captured.fetch(:cache_store)).to be_a(Rigor::Cache::Store)
+        expect(captured.fetch(:cache_store).root).to eq(".rigor/cache")
+      end
+    end
   end
 
   describe "type-scan" do

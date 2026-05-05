@@ -72,10 +72,15 @@ module Rigor
 
       cache_root = ".rigor/cache"
       handle_clear_cache(cache_root) if options.fetch(:clear_cache)
+      cache_store = options.fetch(:no_cache) ? nil : Cache::Store.new(root: cache_root)
 
       configuration = Configuration.load(options.fetch(:config))
       paths = @argv.empty? ? configuration.paths : @argv
-      result = Analysis::Runner.new(configuration: configuration, explain: options.fetch(:explain)).run(paths)
+      result = Analysis::Runner.new(
+        configuration: configuration,
+        explain: options.fetch(:explain),
+        cache_store: cache_store
+      ).run(paths)
 
       write_result(result, options.fetch(:format))
       write_cache_stats(cache_root) if options.fetch(:cache_stats)
@@ -88,7 +93,8 @@ module Rigor
         format: "text",
         explain: false,
         cache_stats: false,
-        clear_cache: false
+        clear_cache: false,
+        no_cache: false
       }
       parser = OptionParser.new do |opts|
         opts.banner = "Usage: rigor check [options] [paths]"
@@ -97,6 +103,7 @@ module Rigor
         opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
         opts.on("--cache-stats", "Print on-disk cache inventory at end of run") { options[:cache_stats] = true }
         opts.on("--clear-cache", "Remove the .rigor/cache directory before running") { options[:clear_cache] = true }
+        opts.on("--no-cache", "Disable the persistent cache for this run") { options[:no_cache] = true }
       end
       parser.parse!(@argv)
       options

@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../environment"
 require_relative "../scope"
+require_relative "../cache/store"
 require_relative "../inference/coverage_scanner"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/method_dispatcher/file_folding"
@@ -15,10 +16,24 @@ module Rigor
   module Analysis
     class Runner # rubocop:disable Metrics/ClassLength
       RUBY_GLOB = "**/*.rb"
+      DEFAULT_CACHE_ROOT = ".rigor/cache"
 
-      def initialize(configuration:, explain: false)
+      attr_reader :cache_store
+
+      # @param configuration [Rigor::Configuration]
+      # @param explain [Boolean] surface fail-soft fallback events
+      #   as `:info` diagnostics.
+      # @param cache_store [Rigor::Cache::Store, nil] the persistent
+      #   cache the runner exposes to producers (`RbsConstantTable`
+      #   and successors). Pass `nil` to disable caching for this
+      #   run; the CLI's `--no-cache` flag wires `nil` through.
+      #   v0.0.9 group A slice 1 introduces the surface; later
+      #   slices route real producers through it.
+      def initialize(configuration:, explain: false,
+                     cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT))
         @configuration = configuration
         @explain = explain
+        @cache_store = cache_store
       end
 
       # Walks every Ruby file under `paths`, parses it, builds a

@@ -202,6 +202,32 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "#class_known? via cache_store (v0.0.9 group C)" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-class-known-spec-") }
+    let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "matches the uncached path for known and unknown names" do
+      cached = described_class.new(cache_store: cache_store)
+      uncached = described_class.new
+      %w[Integer Object Hash ThisClassDoesNotExist123].each do |name|
+        expect(cached.class_known?(name)).to eq(uncached.class_known?(name))
+      end
+    end
+
+    it "uses the cached set so a fresh loader sharing the store never re-walks env decls" do
+      first = described_class.new(cache_store: cache_store)
+      first.class_known?("Integer")
+
+      second = described_class.new(cache_store: cache_store)
+      allow(second).to receive(:each_known_class_name).and_call_original
+      second.class_known?("Integer")
+      second.class_known?("ThisClassDoesNotExist123")
+      expect(second).not_to have_received(:each_known_class_name)
+    end
+  end
+
   describe "#constant_type via cache_store (v0.0.9 group A slice 2)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-cache-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

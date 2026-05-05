@@ -78,11 +78,35 @@ module Rigor
       # name is loaded. Accepts unprefixed or top-level-prefixed names
       # ("Integer" or "::Integer"). Memoized per-name (positive and
       # negative results both cache).
+      #
+      # When `cache_store` is set, the loader fetches the entire set of
+      # known class / module / alias names once (per process) through
+      # {Cache::RbsKnownClassNames.fetch} and answers `class_known?`
+      # from the in-memory Set. Cold runs pay a single env walk and
+      # persist the result; warm runs (and a separate loader sharing
+      # the same Store) skip the env walk entirely.
       def class_known?(name)
         key = name.to_s
         return @class_known_cache[key] if @class_known_cache.key?(key)
 
-        @class_known_cache[key] = compute_class_known(name)
+        @class_known_cache[key] = if cache_store
+                                    cached_class_known(name)
+                                  else
+                                    compute_class_known(name)
+                                  end
+      end
+
+      # Yields every known class / module / alias name (top-level
+      # prefixed) currently loaded into the environment. The cache
+      # producer that materialises the known-name set uses this so
+      # it never recurses back through {#class_known?}.
+      def each_known_class_name
+        return enum_for(:each_known_class_name) unless block_given?
+
+        env.class_decls.each_key { |rbs_name| yield rbs_name.to_s }
+        env.class_alias_decls.each_key { |rbs_name| yield rbs_name.to_s }
+      rescue StandardError
+        # fail-soft: a broken environment yields no names.
       end
 
       # @return [RBS::Definition, nil] the resolved instance definition
@@ -213,6 +237,22 @@ module Rigor
           require_relative "../cache/rbs_constant_table"
           Cache::RbsConstantTable.fetch(loader: self, store: cache_store)
         end
+      end
+
+      def known_class_names_set
+        @known_class_names_set ||= begin
+          require_relative "../cache/rbs_known_class_names"
+          Cache::RbsKnownClassNames.fetch(loader: self, store: cache_store)
+        end
+      end
+
+      def cached_class_known(name)
+        rbs_name = parse_type_name(name)
+        return false unless rbs_name
+
+        known_class_names_set.include?(rbs_name.to_s)
+      rescue StandardError
+        false
       end
 
       def translate_constant_decl(rbs_name)

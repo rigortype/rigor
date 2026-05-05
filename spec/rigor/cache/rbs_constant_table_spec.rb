@@ -54,19 +54,19 @@ RSpec.describe Rigor::Cache::RbsConstantTable do
 
   describe "descriptor invariants" do
     it "produces a descriptor that includes the rbs gem with its locked version" do
-      descriptor = described_class.send(:build_descriptor, loader)
+      descriptor = Rigor::Cache::RbsDescriptor.build(loader)
       gem_entry = descriptor.gems.find { |e| e.name == "rbs" }
       expect(gem_entry).not_to be_nil
       expect(gem_entry.locked).to match(/\A\d+\.\d+\.\d+/)
     end
 
     it "produces an empty files slot for a loader with no signature_paths" do
-      descriptor = described_class.send(:build_descriptor, loader)
+      descriptor = Rigor::Cache::RbsDescriptor.build(loader)
       expect(descriptor.files).to eq([])
     end
 
     it "produces a configs entry capturing the libraries list" do
-      descriptor = described_class.send(:build_descriptor, loader)
+      descriptor = Rigor::Cache::RbsDescriptor.build(loader)
       libs_entry = descriptor.configs.find { |e| e.key == "rbs.libraries" }
       expect(libs_entry).not_to be_nil
       expect(libs_entry.value_hash).to match(/\A[0-9a-f]{64}\z/)
@@ -78,7 +78,7 @@ RSpec.describe Rigor::Cache::RbsConstantTable do
         File.write(File.join(sig_dir, "b.rbs"), "class Bar end\n")
 
         custom_loader = Rigor::Environment::RbsLoader.new(signature_paths: [sig_dir])
-        descriptor = described_class.send(:build_descriptor, custom_loader)
+        descriptor = Rigor::Cache::RbsDescriptor.build(custom_loader)
         expect(descriptor.files.size).to eq(2)
         expect(descriptor.files.map(&:comparator).uniq).to eq([:digest])
       end

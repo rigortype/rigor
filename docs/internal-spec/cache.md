@@ -263,7 +263,49 @@ Going through `each_constant_decl` instead of
 risk: `RbsLoader#constant_type` itself consults the cache when
 `cache_store` is set.
 
-### Constant-lookup path under `cache_store`
+## `Rigor::Cache::RbsKnownClassNames` (v0.0.9 group C)
+
+Second cached producer. Materialises the set of every RBS-declared
+class / module / alias name (top-level prefixed) currently loaded
+into the environment, as a Marshal-clean `Set<String>`. Producer
+id `"rbs.known_class_names"`.
+
+### `RbsKnownClassNames.fetch(loader:, store:) -> Set<String>`
+
+Returns the set. The producer block iterates
+`loader.each_known_class_name` (which walks both
+`env.class_decls` and `env.class_alias_decls`); a fail-soft
+`rescue StandardError` inside the iterator means a broken
+environment yields no names rather than aborting the whole run.
+
+### Class-known path under `cache_store`
+
+`RbsLoader#class_known?(name)` consults the cached set when the
+loader was constructed with `cache_store:` set. Cold runs build
+the set once and persist it; warm runs (and a separate loader
+sharing the same Store) skip the env walk entirely. The in-
+process per-name cache (`@class_known_cache`) still memoizes
+positive and negative answers across calls within a single
+loader instance — the disk cache only changes the cold-start
+behaviour, not the warm hot path.
+
+## `Rigor::Cache::RbsDescriptor` (shared)
+
+Both `RbsConstantTable` and `RbsKnownClassNames` depend on the
+same RBS environment state, so they share a descriptor builder:
+
+```ruby
+Rigor::Cache::RbsDescriptor.build(loader)
+# => Descriptor with:
+#    gems    = [{ name: "rbs", requirement: ">= 0", locked: ::RBS::VERSION }]
+#    files   = [...]   # :digest entries for every .rbs under signature_paths
+#    configs = [{ key: "rbs.libraries", value_hash: SHA256(sorted-libraries) }]
+```
+
+Sharing the builder means a single signature change or rbs gem
+bump invalidates every RBS-derived cached producer in lockstep.
+
+## Constant-lookup path under `cache_store`
 
 Once an `Environment` is built with `Environment.for_project(..., cache_store:)`,
 every constant lookup path threads through the cache:
@@ -279,23 +321,10 @@ every constant lookup path threads through the cache:
 The first lookup on a cold cache pays the full table-build cost
 once and persists the result; warm runs (and a separate loader
 that shares the same Store) skip the env walk entirely and pay
-only a `Marshal.load` of the stored hash.
-
-### Descriptor shape
-
-- `gems`: `{ name: "rbs", requirement: ">= 0", locked: ::RBS::VERSION }`.
-  The bundled core + stdlib RBS signatures live inside the `rbs`
-  gem; a gem upgrade therefore invalidates the table.
-- `files`: a `:digest`-comparator entry for every `.rbs` file
-  reachable under the loader's `signature_paths` (the project's
-  own signature directories, which the gem-version entry cannot
-  cover).
-- `configs`: a single `rbs.libraries` entry whose `value_hash` is
-  the SHA-256 of the loader's sorted libraries list, so adding
-  or removing a stdlib library invalidates the table.
-
-The `params` argument is empty — every input the producer
-consumes is already encoded in the descriptor.
+only a `Marshal.load` of the stored hash. The `params` argument
+to `Store#fetch_or_compute` is empty — every input the producer
+consumes is already encoded in the descriptor (see
+{Cache::RbsDescriptor.build}).
 
 ## CLI observability (v0.0.8 slice 4)
 

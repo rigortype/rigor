@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Proc / Method / UnboundMethod catalog import.**
+  `tool/scaffold_builtin_catalog.rb` for the primary `Proc`
+  class plus a manual `TOPICS` extension for the two sibling
+  classes writes `data/builtins/ruby_core/proc.yml` (62
+  instance methods, 1 singleton across the three callable
+  carriers — `Init_Proc` registers them in a single C init
+  block) and the matching `Builtins::PROC_CATALOG` loader.
+  The three classes share the same fundamental hazard at the
+  catalog tier: their public methods invoke the wrapped Ruby
+  code, so the blocklist deliberately declines `:call` /
+  `:[]` / `:===` / `:yield` (Proc + Method execution paths)
+  and the identity-allocating combinators `:curry` / `:<<` /
+  `:>>` / `:to_proc` / `:bind` / `:bind_call` / `:unbind`.
+  Identity-based equality (`:hash` / `:==` / `:eql?`) is
+  also blocklisted so a hypothetical future `Constant<Proc>`
+  carrier cannot freeze a memory-layout-dependent answer.
+  What the import buys is receiver-class recognition for
+  `Proc.new`, `Object#method`, and `Module#instance_method`,
+  plus reflective leaf coverage for `#arity`, `#owner`,
+  `#name`, `#receiver`, `#parameters`, `#source_location`,
+  `#lambda?`, … `rb_cProc`, `rb_cMethod`, and
+  `rb_cUnboundMethod` join `BASE_CLASS_VARS`.
 - **Random catalog import.** `tool/scaffold_builtin_catalog.rb`
   with `--init-fn InitVM_Random` writes
   `data/builtins/ruby_core/random.yml` (6 instance methods,

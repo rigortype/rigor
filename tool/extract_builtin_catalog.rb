@@ -93,7 +93,10 @@ BASE_CLASS_VARS = {
   "rb_cComplex" => "Complex",
   "rb_cPathname" => "Pathname",
   "rb_cRandom" => "Random",
-  "rb_cStruct" => "Struct"
+  "rb_cStruct" => "Struct",
+  "rb_cProc" => "Proc",
+  "rb_cMethod" => "Method",
+  "rb_cUnboundMethod" => "UnboundMethod"
 }.freeze
 
 TOPICS = {
@@ -321,6 +324,23 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/re.c],
     output_path: "data/builtins/ruby_core/re.yml"
+  },
+  "proc" => {
+    # `Init_Proc` registers `Proc`, `Method`, AND `UnboundMethod`
+    # in a single C init block (plus the `LocalJumpError` /
+    # `SystemStackError` exception classes), so a single topic
+    # suffices — `rbs_paths` carries one entry per class. There is
+    # no Ruby-side prelude.
+    init_function: "Init_Proc",
+    ruby_c_path: "references/ruby/proc.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Proc" => "references/rbs/core/proc.rbs",
+      "Method" => "references/rbs/core/method.rbs",
+      "UnboundMethod" => "references/rbs/core/unbound_method.rbs"
+    },
+    c_index_paths: %w[references/ruby/proc.c],
+    output_path: "data/builtins/ruby_core/proc.yml"
   }
 }.freeze
 

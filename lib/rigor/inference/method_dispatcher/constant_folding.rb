@@ -18,6 +18,7 @@ require_relative "../builtins/random_catalog"
 require_relative "../builtins/struct_catalog"
 require_relative "../builtins/encoding_catalog"
 require_relative "../builtins/re_catalog"
+require_relative "../builtins/proc_catalog"
 
 module Rigor
   module Inference
@@ -1086,7 +1087,10 @@ module Rigor
           [Struct, [Builtins::STRUCT_CATALOG, "Struct"]],
           [Encoding, [Builtins::ENCODING_CATALOG, "Encoding"]],
           [Regexp, [Builtins::REGEXP_CATALOG, "Regexp"]],
-          [MatchData, [Builtins::REGEXP_CATALOG, "MatchData"]]
+          [MatchData, [Builtins::REGEXP_CATALOG, "MatchData"]],
+          [Proc, [Builtins::PROC_CATALOG, "Proc"]],
+          [Method, [Builtins::PROC_CATALOG, "Method"]],
+          [UnboundMethod, [Builtins::PROC_CATALOG, "UnboundMethod"]]
         ].freeze
         private_constant :CATALOG_BY_CLASS
 

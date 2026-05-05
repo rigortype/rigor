@@ -179,6 +179,32 @@ RSpec.describe Rigor::Type::Refined do
     end
   end
 
+  describe ":literal_string predicate (v0.0.10 F)" do
+    let(:lit) { Rigor::Type::Combinator.literal_string }
+
+    it "describes as `literal-string`" do
+      expect(lit.describe).to eq("literal-string")
+    end
+
+    it "accepts every Constant<String> (constants are implicitly literal)" do
+      expect(lit.accepts(constant_of("hello")).yes?).to be(true)
+      expect(lit.accepts(constant_of("")).yes?).to be(true)
+    end
+
+    it "rejects non-String constants" do
+      expect(lit.accepts(constant_of(5)).no?).to be(true)
+      expect(lit.accepts(constant_of(:hi)).no?).to be(true)
+    end
+
+    it "accepts itself" do
+      expect(lit.accepts(Rigor::Type::Combinator.literal_string).yes?).to be(true)
+    end
+
+    it "has no registered complement (flow-tracked, no clean inverse)" do
+      expect(lit.complement_predicate_id).to be_nil
+    end
+  end
+
   describe ":not_lowercase predicate semantics" do
     let(:not_lc) { Rigor::Type::Combinator.non_lowercase_string }
 

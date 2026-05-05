@@ -179,6 +179,27 @@ module Rigor
         Refined.new(nominal_of("String"), :hex_int)
       end
 
+      # `literal-string` — a `String` that is statically known to
+      # come from a source-code literal (or a composition of
+      # literals). v0.0.10 tracks this flow through interpolation
+      # `"#{...}"`, leaving propagation through `+` / `<<` to a
+      # later slice. Every `Constant<String>` is implicitly
+      # literal-string-compatible; the carrier exists for cases
+      # where the concrete value is unknown but literal-ness has
+      # been established (an RBS::Extended `return: literal-string`
+      # annotation, or interpolation over literal-bearing parts).
+      def literal_string
+        Refined.new(nominal_of("String"), :literal_string)
+      end
+
+      # `non-empty-literal-string` = `non-empty-string ∩ literal-string`.
+      # Composes the point-removal half (`Difference[String, ""]`)
+      # with the predicate-subset half. Both members erase to
+      # `String`.
+      def non_empty_literal_string
+        intersection(non_empty_string, literal_string)
+      end
+
       # Normalised intersection. Flattens nested Intersections,
       # drops `Top` members, collapses to `Bot` if any member is
       # `Bot`, deduplicates structurally-equal members, sorts the

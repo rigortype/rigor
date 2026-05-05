@@ -1057,4 +1057,53 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(members).to contain_exactly("yes", "no")
     end
   end
+
+  describe "literal-string flow tracking on interpolation (v0.0.10 F)" do
+    let(:literal_string) { Rigor::Type::Combinator.literal_string }
+
+    it "lifts a fully literal-bearing interpolation to literal-string" do
+      bound = scope.with_local(:name, Rigor::Type::Combinator.constant_of("Alice"))
+      node = parse_expression("\"hello \#{name}!\"", scopes: [[:name]])
+      expect(bound.type_of(node)).to eq(literal_string)
+    end
+
+    it "lifts an interpolation whose embedded type is itself literal-string" do
+      bound = scope.with_local(:greeting, literal_string)
+      node = parse_expression("\"prefix-\#{greeting}-suffix\"", scopes: [[:greeting]])
+      expect(bound.type_of(node)).to eq(literal_string)
+    end
+
+    it "lifts when the embedded part is non-empty-literal-string (literal-bearing intersection)" do
+      nels = Rigor::Type::Combinator.non_empty_literal_string
+      bound = scope.with_local(:greeting, nels)
+      node = parse_expression("\"hi \#{greeting}!\"", scopes: [[:greeting]])
+      expect(bound.type_of(node)).to eq(literal_string)
+    end
+
+    it "widens to plain Nominal[String] when any embedded part is non-literal" do
+      bound = scope.with_local(:user, Rigor::Type::Combinator.nominal_of("String"))
+      node = parse_expression("\"hello \#{user}!\"", scopes: [[:user]])
+      type = bound.type_of(node)
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("String")
+    end
+
+    it "widens when an embedded part is a non-String value" do
+      bound = scope.with_local(:n, Rigor::Type::Combinator.constant_of(42))
+      node = parse_expression("\"\#{n}\"", scopes: [[:n]])
+      type = bound.type_of(node)
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("String")
+    end
+
+    it "lifts when every member of a Union embedded type is literal-bearing" do
+      union = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of("a"),
+        Rigor::Type::Combinator.constant_of("b")
+      )
+      bound = scope.with_local(:tag, union)
+      node = parse_expression("\"<\#{tag}>\"", scopes: [[:tag]])
+      expect(bound.type_of(node)).to eq(literal_string)
+    end
+  end
 end

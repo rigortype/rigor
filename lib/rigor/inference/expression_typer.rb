@@ -472,8 +472,49 @@ module Rigor
         [keys, values]
       end
 
-      def type_of_interpolated_string(_node)
+      # An interpolated string `"#{a}b#{c}"` is `literal-string`
+      # when every part contributes literal-bearing material:
+      # plain text segments are literal by construction, embedded
+      # expressions count when their type is itself literal-string-
+      # compatible (a `Constant<String>`, the `literal-string`
+      # carrier, an `Intersection` containing it, or a `Union`
+      # whose members all qualify). Otherwise the result widens to
+      # plain `Nominal[String]` as before.
+      def type_of_interpolated_string(node)
+        return Type::Combinator.literal_string if interpolation_parts_literal?(node.parts)
+
         Type::Combinator.nominal_of(String)
+      end
+
+      def interpolation_parts_literal?(parts)
+        parts.all? { |part| interpolation_part_literal?(part) }
+      end
+
+      def interpolation_part_literal?(part)
+        case part
+        when Prism::StringNode
+          true
+        when Prism::EmbeddedStatementsNode, Prism::EmbeddedVariableNode
+          literal_string_compatible?(type_of(part))
+        else
+          false
+        end
+      end
+
+      def literal_string_compatible?(type)
+        case type
+        when Type::Constant then type.value.is_a?(String)
+        when Type::Refined then literal_string_carrier?(type)
+        when Type::Intersection then type.members.any? { |m| literal_string_compatible?(m) }
+        when Type::Union then type.members.all? { |m| literal_string_compatible?(m) }
+        else false
+        end
+      end
+
+      def literal_string_carrier?(refined)
+        refined.predicate_id == :literal_string &&
+          refined.base.is_a?(Type::Nominal) &&
+          refined.base.class_name == "String"
       end
 
       def type_of_interpolated_symbol(_node)

@@ -146,7 +146,17 @@ module Rigor
         numeric: ->(v) { v.is_a?(String) && NUMERIC_STRING_PATTERN.match?(v) },
         decimal_int: ->(v) { v.is_a?(String) && DECIMAL_INT_STRING_PATTERN.match?(v) },
         octal_int: ->(v) { v.is_a?(String) && OCTAL_INT_STRING_PATTERN.match?(v) },
-        hex_int: ->(v) { v.is_a?(String) && HEX_INT_STRING_PATTERN.match?(v) }
+        hex_int: ->(v) { v.is_a?(String) && HEX_INT_STRING_PATTERN.match?(v) },
+        # `literal-string` is a flow-tracked predicate, not a value-
+        # level predicate: a String is literal-string when it is
+        # known to come from a source-code literal (or composition
+        # of literals). Every concrete `Constant<String>` is
+        # already literal by construction, so the inspection
+        # recogniser returns true for any String — the property is
+        # really tracked in the flow analysis (interpolation,
+        # concatenation, RBS::Extended `return: literal-string`)
+        # rather than recovered by inspecting an arbitrary string.
+        literal_string: ->(v) { v.is_a?(String) }
       }.freeze
 
       # Maps `[base_class_name, predicate_id]` pairs to their
@@ -160,7 +170,8 @@ module Rigor
         ["String", :numeric] => "numeric-string",
         ["String", :decimal_int] => "decimal-int-string",
         ["String", :octal_int] => "octal-int-string",
-        ["String", :hex_int] => "hex-int-string"
+        ["String", :hex_int] => "hex-int-string",
+        ["String", :literal_string] => "literal-string"
       }.freeze
       private_constant :CANONICAL_NAMES
 

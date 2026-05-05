@@ -20,8 +20,9 @@ through the
 annotation surface — `rigor:v1:return:` /
 `rigor:v1:param:` / `rigor:v1:assert` directives accept the
 imported-built-in refinement names (`non-empty-string`,
-`positive-int`, `non-empty-array[Integer]`, `int<5, 10>`, …)
-without changing the underlying RBS.
+`positive-int`, `non-empty-array[Integer]`, `int<5, 10>`,
+`literal-string`, `non-lowercase-string`, …) without changing
+the underlying RBS.
 
 ## Installation
 
@@ -51,7 +52,7 @@ The gem ships an executable named `rigor` (gem name is
 
 **Ruby version.** The gemspec requires `>= 4.0.0, < 4.1`.
 
-## First analysis
+## Quick start
 
 Drop into your project root and run the canonical commands:
 
@@ -60,15 +61,15 @@ Drop into your project root and run the canonical commands:
 # rule-driven bugs across `lib/`.
 bundle exec rigor check lib
 
+# Drop a starter .rigor.yml into the project root.
+bundle exec rigor init
+
 # Print the inferred type at a precise FILE:LINE:COL position.
 bundle exec rigor type-of lib/foo.rb:10:5
 
 # Report Scope#type_of coverage across a tree (handy when
 # diagnosing why a particular call site reads as `untyped`).
 bundle exec rigor type-scan lib
-
-# Drop a starter .rigor.yml into the project root.
-bundle exec rigor init
 ```
 
 ### Sample output
@@ -90,6 +91,30 @@ RBS or in-source `def` / `define_method` discovery. Implicit-
 self calls, dynamic receivers, and constant-decl alias classes
 (e.g. `YAML` → `Psych`) are skipped to avoid false positives.
 
+### Faster runs through the cache
+
+Rigor caches expensive RBS work (the loaded `RBS::Environment`,
+constant-type translation, class hierarchy, type-parameter
+names, known-class set) under `.rigor/cache/` so the second
+`rigor check` is significantly faster than the first. The cache
+is keyed by your project's `.rbs` file digests + the locked
+`rbs` gem version, so a signature change or a gem upgrade
+invalidates exactly what it should.
+
+```sh
+# Inspect what is cached on disk and what this run did.
+bundle exec rigor check --cache-stats lib
+
+# Wipe the cache (do this if you suspect staleness).
+bundle exec rigor check --clear-cache lib
+
+# Run with caching disabled.
+bundle exec rigor check --no-cache lib
+```
+
+Add `.rigor/` to your `.gitignore` — the cache is per-checkout
+and contains nothing reproducible to share.
+
 ## How Rigor finds your types
 
 Rigor consults, in order:
@@ -102,8 +127,9 @@ Rigor consults, in order:
 3. **Gem RBS.** RBS files vendored with installed gems
    (Prism's own `.rbs`, the `rbs` gem's, …).
 4. **In-source class discovery.** When no RBS is available,
-   Rigor walks `def` / `define_method` / `attr_*` so
-   user-defined methods on a class are recognised.
+   Rigor walks `def` / `define_method` / `attr_*` /
+   `Data.define(*Symbol)` so user-defined methods on a class
+   are recognised.
 
 If a type cannot be proved, the engine returns `Dynamic[Top]`
 (Rigor's gradual carrier) and stays silent — Rigor never invents
@@ -139,8 +165,17 @@ Right-hand side accepts:
   - Predicate refinements — `lowercase-string`,
     `uppercase-string`, `numeric-string`, `decimal-int-string`,
     `octal-int-string`, `hex-int-string`.
+  - Paired complements (`~T`-symmetric) —
+    `non-lowercase-string`, `non-uppercase-string`,
+    `non-numeric-string`. Writing `~lowercase-string` narrows
+    `String` to `non-lowercase-string` instead of the generic
+    `Difference[String, lowercase-string]` fallback.
   - Composed shapes — `non-empty-lowercase-string`,
-    `non-empty-uppercase-string`.
+    `non-empty-uppercase-string`, `non-empty-literal-string`.
+  - Flow-tracked source-literal — `literal-string`. Rigor lifts
+    `"hi #{name}!"`, `"a" + literal_str`, and `literal_str * 3`
+    to `literal-string` when every operand is itself
+    literal-bearing.
 
 The full directive table is in
 [`docs/type-specification/rbs-extended.md`](docs/type-specification/rbs-extended.md);
@@ -191,26 +226,38 @@ sees `id` as `non-empty-string` (so `id.empty?` reduces to
 - **Predicate narrowing** — truthiness, `nil?`, `is_a?` /
   `kind_of?` / `instance_of?`, finite-literal equality,
   case-equality (`===`) for Class / Module / Range / Regexp,
-  `case` / `when` integration.
+  `case` / `when` integration. Paired-complement narrowing for
+  Refined predicates (`~lowercase-string` →
+  `non-lowercase-string`).
 - **Tuple / HashShape carriers** — shape-aware element access,
   range / start-length slices, closed / open / required /
-  optional policies.
+  optional policies, per-element block fold over
+  `map`, `select`, `filter_map`, `flat_map`, `find` /
+  `find_index`, `count`, `any?` / `all?` / `none?`, `zip`.
 - **Constant folding** — aggressive arithmetic / string /
   Symbol / Tuple-shaped `divmod` folding, cartesian fold over
   `Union[Constant…]`, integer-range arithmetic
   (`positive-int + 1` → `int<2, max>`), branch elision on
-  provably-truthy / falsey predicates.
-- **Built-in catalogues** — Numeric, String, Symbol, Array,
-  IO, File, Hash, Range, Set, Time. Each catalog drives the
-  fold dispatcher with per-class blocklists for indirect
-  mutators.
+  provably-truthy / falsey predicates,
+  `Constant<String>#%` format-string fold against
+  `Tuple` / `HashShape` arguments.
+- **Built-in catalogues** — Numeric / Integer / Float, String /
+  Symbol, Array, Hash, IO, File, Range, Set, Time, Date /
+  DateTime, Comparable, Enumerable, Rational, Complex,
+  Pathname, Random, Struct (+ `Data`), Encoding, Regexp /
+  MatchData, Proc / Method / UnboundMethod, Exception. Each
+  catalog drives the fold dispatcher with per-class blocklists
+  for indirect mutators.
 - **Refinement carriers** — `Type::Difference`,
   `Type::Refined`, `Type::Intersection` provide the
   imported-built-in catalogue end-to-end through
   `Builtins::ImportedRefinements`.
 - **`RBS::Extended` directive routes** — `return:`, `param:`
   (call-site + body-side), `assert:` /
-  `predicate-if-(true|false)` accept refinement payloads.
+  `predicate-if-(true|false)` accept refinement payloads, and
+  roll up into a single `Rigor::FlowContribution` bundle per
+  method (the v0.1.0 plugin contribution merger reads bundles
+  directly).
 
 The full per-release surface lives in
 [`CHANGELOG.md`](CHANGELOG.md). The internal contracts the
@@ -226,18 +273,41 @@ bundle exec rigor init           # fails if .rigor.yml exists
 bundle exec rigor init --force   # overwrite
 ```
 
-The configuration is intentionally small in v0.0.x; see the
-generated file for the available knobs.
+Common knobs the file exposes:
+
+- `paths` — directories `rigor check` and `rigor type-scan`
+  scan when no path is given (defaults to `lib`).
+- `target_ruby` — minimum Ruby version your project targets.
+- `libraries` — extra stdlib libraries to load on top of the
+  bundled defaults (e.g. `["csv", "set"]`).
+- `signature_paths` — explicit list of `sig/`-style directories.
+  Leave unset (or `null`) to auto-detect `<root>/sig`. Use `[]`
+  to disable project-RBS loading entirely.
+- `disable` — rule identifiers to silence project-wide. Shipped
+  rules: `undefined-method`, `wrong-arity`,
+  `argument-type-mismatch`, `possible-nil-receiver`,
+  `dump-type`, `assert-type`, `always-raises`. In-source
+  `# rigor:disable <rule>` end-of-line comments silence
+  per-line; `# rigor:disable all` suppresses every rule.
 
 ## Status
 
-Current release: **`v0.0.4`** (the fourth preview). The
-analyzer is usable on real Ruby code today but the rule
+Current released version: **`v0.0.8`** (the eighth preview).
+The analyzer is usable on real Ruby code today but the rule
 catalogue is deliberately narrow — Rigor's stance is to surface
 zero false positives while the inference surface stabilises.
 The roadmap is tracked in
 [`docs/MILESTONES.md`](docs/MILESTONES.md); release-by-release
 detail lives in [`CHANGELOG.md`](CHANGELOG.md).
+
+`v0.0.9` is the active development cluster on `master` and
+covers the persistent cache infrastructure (`.rigor/cache/`,
+`--cache-stats`, `--clear-cache`, `--no-cache`),
+paired-complement Refined narrowing, `literal-string` flow
+tracking, the `Rigor::FlowContribution` bundle struct, and
+six additional built-in catalogues (Random, Struct, Encoding,
+Regexp + MatchData, Proc / Method / UnboundMethod, Exception).
+The next release after `0.0.9` will be `0.1.0`.
 
 ## Contributing
 
@@ -248,3 +318,5 @@ skill documentation contributors should know about.
 ## License
 
 Mozilla Public License Version 2.0. See [`LICENSE`](LICENSE).
+</content>
+</invoke>

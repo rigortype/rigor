@@ -91,7 +91,8 @@ BASE_CLASS_VARS = {
   "rb_cDateTime" => "DateTime",
   "rb_cRational" => "Rational",
   "rb_cComplex" => "Complex",
-  "rb_cPathname" => "Pathname"
+  "rb_cPathname" => "Pathname",
+  "rb_cRandom" => "Random"
 }.freeze
 
 TOPICS = {
@@ -267,6 +268,16 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/pathname.c],
     output_path: "data/builtins/ruby_core/pathname.yml"
+  },
+  "random" => {
+    init_function: "InitVM_Random",
+    ruby_c_path: "references/ruby/random.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Random" => "references/rbs/core/random.rbs"
+    },
+    c_index_paths: %w[references/ruby/random.c],
+    output_path: "data/builtins/ruby_core/random.yml"
   }
 }.freeze
 

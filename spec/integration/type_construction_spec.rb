@@ -624,5 +624,14 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
         expect(mismatches).to be_empty
       end
     end
+
+    describe "fixtures/random_catalog.rb — Random catalog-driven folding" do
+      let(:harness) { harness_for("random_catalog") }
+
+      it "self-asserts the new Random catalog coverage" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
   end
 end

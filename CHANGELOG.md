@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Random catalog import.** `tool/scaffold_builtin_catalog.rb`
+  with `--init-fn InitVM_Random` writes
+  `data/builtins/ruby_core/random.yml` (6 instance methods,
+  6 singletons) and the matching `Builtins::RANDOM_CATALOG`
+  loader. Random is the textbook stateful class: every call
+  to `#rand` / `#bytes` advances the receiver's Mersenne-
+  Twister state, and the singleton `.rand` / `.bytes` mutate
+  `Random::DEFAULT`. The catalog tier deliberately blocklists
+  all of those plus the non-deterministic `Random.new_seed`
+  / `Random.urandom`, so no state-advancing or entropy-
+  reading call can fold to a constant. What the import buys
+  is receiver-class recognition for `Random.new(...)`
+  (resolves to `Nominal[Random]`) so downstream RBS dispatch
+  routes precisely.
+
 ## [0.0.8] - 2026-05-04
 
 The eighth preview. Theme: **first cache-related code slice** — land the persistence layer that v0.0.7's cache slice taxonomy design doc fixed the schema for, with a Marshal-clean producer wired through it end-to-end. Backend choice is fixed by [ADR-6](docs/adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies**.

@@ -14,6 +14,7 @@ require_relative "../builtins/enumerable_catalog"
 require_relative "../builtins/rational_catalog"
 require_relative "../builtins/complex_catalog"
 require_relative "../builtins/pathname_catalog"
+require_relative "../builtins/random_catalog"
 
 module Rigor
   module Inference
@@ -1077,7 +1078,8 @@ module Rigor
           [Date,     [Builtins::DATE_CATALOG,   "Date"]],
           [Rational, [Builtins::RATIONAL_CATALOG, "Rational"]],
           [Complex,  [Builtins::COMPLEX_CATALOG,  "Complex"]],
-          [Pathname, [Builtins::PATHNAME_CATALOG, "Pathname"]]
+          [Pathname, [Builtins::PATHNAME_CATALOG, "Pathname"]],
+          [Random, [Builtins::RANDOM_CATALOG, "Random"]]
         ].freeze
         private_constant :CATALOG_BY_CLASS
 

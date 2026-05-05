@@ -92,7 +92,8 @@ BASE_CLASS_VARS = {
   "rb_cRational" => "Rational",
   "rb_cComplex" => "Complex",
   "rb_cPathname" => "Pathname",
-  "rb_cRandom" => "Random"
+  "rb_cRandom" => "Random",
+  "rb_cStruct" => "Struct"
 }.freeze
 
 TOPICS = {
@@ -278,6 +279,23 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/random.c],
     output_path: "data/builtins/ruby_core/random.yml"
+  },
+  "struct" => {
+    # Class registration lives in `InitVM_Struct` — the outer
+    # `Init_Struct` only sets up symbol IDs and forwards to
+    # `InitVM(Struct)`. The same `InitVM_*` indirection that
+    # Random and Pathname use. `InitVM_Struct` defines both
+    # `Struct` and `Data` in one pass, so the YAML carries
+    # both classes; only `Struct` is wired into
+    # `CATALOG_BY_CLASS` today.
+    init_function: "InitVM_Struct",
+    ruby_c_path: "references/ruby/struct.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Struct" => "references/rbs/core/struct.rbs"
+    },
+    c_index_paths: %w[references/ruby/struct.c],
+    output_path: "data/builtins/ruby_core/struct.yml"
   }
 }.freeze
 

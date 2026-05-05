@@ -633,5 +633,14 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
         expect(mismatches).to be_empty
       end
     end
+
+    describe "fixtures/struct_catalog.rb — Struct catalog-driven folding" do
+      let(:harness) { harness_for("struct_catalog") }
+
+      it "self-asserts the new Struct catalog coverage" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
   end
 end

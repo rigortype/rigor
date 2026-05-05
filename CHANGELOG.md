@@ -23,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is receiver-class recognition for `Random.new(...)`
   (resolves to `Nominal[Random]`) so downstream RBS dispatch
   routes precisely.
+- **Struct catalog import.** `tool/scaffold_builtin_catalog.rb`
+  with `--init-fn InitVM_Struct` writes
+  `data/builtins/ruby_core/struct.yml` (33 instance methods,
+  5 singletons across `Struct` + `Data` — both classes are
+  registered in `InitVM_Struct`) and the matching
+  `Builtins::STRUCT_CATALOG` loader. `Struct` is a meta-class:
+  `Struct.new(*members)` returns a fresh anonymous subclass,
+  so the catalog tier deliberately leaves `:new` at its
+  block-dependent classification (calls fall through to RBS
+  dispatch, which resolves the result to `Nominal[Struct]`).
+  The blocklist defends `:initialize_copy`, `:hash`, and
+  `:[]` so a hypothetical future `Constant<Struct>` carrier
+  cannot fold an aliasing copy, a member-dependent hash, or
+  a member-name-dependent reader through the catalog.
+  `rb_cStruct` joins `BASE_CLASS_VARS`.
 
 ## [0.0.8] - 2026-05-04
 

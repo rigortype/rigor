@@ -327,11 +327,34 @@ Class method backing `--cache-stats`. Returns:
 Producers are sorted by id. Empty producer subdirectories are
 omitted from the listing.
 
-## Diagnostic provenance (v0.0.8 slice 6 — pending)
+## Diagnostic provenance (v0.0.8 slice 5)
 
-Companion slice. `Rigor::Analysis::Diagnostic` gains a
-`source_family` field defaulting to `:builtin`; the formatter
-optionally prepends the source-family prefix (`plugin.<id>`,
-`rbs_extended`, `generated.<provider>`) to the rule id. Prepares
-ADR-2's plugin-observability story without committing to the
-plugin API itself.
+Companion slice on `Rigor::Analysis::Diagnostic`. The class gains
+a `source_family:` keyword (default `Diagnostic::DEFAULT_SOURCE_FAMILY`,
+which is `:builtin`) and a `qualified_rule` accessor:
+
+```ruby
+diagnostic = Rigor::Analysis::Diagnostic.new(
+  path: "lib/foo.rb", line: 12, column: 3,
+  message: "...", rule: "no-mutation",
+  source_family: "plugin.rigor-immutable"
+)
+
+diagnostic.source_family   # => "plugin.rigor-immutable"
+diagnostic.rule            # => "no-mutation"  (bare kebab-case identifier)
+diagnostic.qualified_rule  # => "plugin.rigor-immutable.no-mutation"
+diagnostic.to_h            # includes both "source_family" and "rule"
+```
+
+The bare `rule` accessor stays as the kebab-case identifier so
+existing config / `# rigor:disable` plumbing keeps working.
+`qualified_rule` is the namespaced identifier consumers should
+display when they want unambiguous attribution. JSON output
+(`to_h`) carries both fields side-by-side so downstream consumers
+can choose which one they care about.
+
+This prepares ADR-2's plugin-observability story (`plugin.<id>`,
+`rbs_extended`, `generated.<provider>`) without committing to the
+plugin API itself. No production caller in v0.0.8 sets a non-
+default source_family — the surface is reserved for plugin
+authors and future RBS-extended / generated rules.

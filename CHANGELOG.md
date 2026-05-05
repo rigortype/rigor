@@ -39,6 +39,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a member-name-dependent reader through the catalog.
   `rb_cStruct` joins `BASE_CLASS_VARS`.
 - **Encoding catalog import.** `Init_Encoding` from `references/ruby/encoding.c` is extracted into `data/builtins/ruby_core/encoding.yml` and routed through `Builtins::ENCODING_CATALOG`. `Encoding::UTF_8` and the other built-in Encoding constants resolve to `Nominal[Encoding]`; instance reads (`#name`, `#names`, `#dummy?`, `#ascii_compatible?`, `#inspect`) and the registry-walking singletons (`Encoding.find`, `.list`, `.aliases`, `.name_list`, `.default_external`, `.default_internal`) now answer through the catalog with their precise nominal returns. The blocklist defends against folding singleton lookups (`find`/`list`/`aliases`/`name_list`) and global-default mutators (`default_external=` / `default_internal=`) against the analyzer process's encoding registry, plus the conventional `:initialize_copy` / `:hash` / `:eql?` defensive entries.
+- **Regexp / MatchData catalog import.**
+  `tool/scaffold_builtin_catalog.rb` for the primary `Regexp`
+  class plus a manual `TOPICS` extension for `MatchData`
+  writes `data/builtins/ruby_core/re.yml` (47 instance
+  methods, 9 singletons across both classes — `Init_Regexp`
+  registers them in a single C init block) and the matching
+  `Builtins::REGEXP_CATALOG` loader. The blocklist defends
+  every Regexp method whose answer mutates the per-thread
+  `$~` backref (`:=~`, `:===`, `:~`, `:match`) so a
+  constant-fold cannot drop the visible side effect of
+  writing `$1..$N` / `$&` / `` $` `` / `$'`; the defensive
+  `:initialize_copy` entry on both classes mirrors the rest
+  of the catalog family. What the import buys is fold-tier
+  coverage for the pure readers on a `Constant<Regexp>`
+  literal (`#source`, `#options`, `#casefold?`,
+  `#fixed_encoding?`, `#inspect`, `#to_s`, `#hash`) and
+  receiver-class recognition for `Regexp.new(...)` plus
+  every `MatchData` method, so RBS dispatch routes precisely
+  through the new catalog entries.
 ## [0.0.8] - 2026-05-04
 
 The eighth preview. Theme: **first cache-related code slice** — land the persistence layer that v0.0.7's cache slice taxonomy design doc fixed the schema for, with a Marshal-clean producer wired through it end-to-end. Backend choice is fixed by [ADR-6](docs/adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies**.

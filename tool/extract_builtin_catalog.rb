@@ -306,6 +306,21 @@ TOPICS = {
     },
     c_index_paths: %w[references/ruby/encoding.c],
     output_path: "data/builtins/ruby_core/encoding.yml"
+  },
+  "re" => {
+    # `Init_Regexp` registers BOTH `Regexp` and `MatchData` (and the
+    # `RegexpError` exception class) in a single C init block, so a
+    # single topic suffices — `rbs_paths` carries one entry per class.
+    # There is no Ruby-side prelude.
+    init_function: "Init_Regexp",
+    ruby_c_path: "references/ruby/re.c",
+    ruby_prelude_path: nil,
+    rbs_paths: {
+      "Regexp" => "references/rbs/core/regexp.rbs",
+      "MatchData" => "references/rbs/core/match_data.rbs"
+    },
+    c_index_paths: %w[references/ruby/re.c],
+    output_path: "data/builtins/ruby_core/re.yml"
   }
 }.freeze
 

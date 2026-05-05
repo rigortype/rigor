@@ -116,7 +116,7 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
-  describe "custom serialize: / deserialize: (v0.0.10 C1)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+  describe "custom serialize: / deserialize: (v0.0.9 C1)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
     let(:upcase_serialize) { :upcase.to_proc }
     let(:downcase_deserialize) { :downcase.to_proc }
 

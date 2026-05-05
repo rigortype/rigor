@@ -111,7 +111,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(dispatch(receiver: constant("a"), method_name: :*, args: [constant(-1)])).to be_nil
       end
 
-      it "lifts a size-capped Constant + Constant concat to literal-string (v0.0.10 F)" do
+      it "lifts a size-capped Constant + Constant concat to literal-string (v0.0.9 F)" do
         big = "a" * 4000
         more = "b" * 1000
 
@@ -119,7 +119,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to eq(Rigor::Type::Combinator.literal_string)
       end
 
-      it "lifts a size-capped Constant * Constant repeat to literal-string (v0.0.10 F)" do
+      it "lifts a size-capped Constant * Constant repeat to literal-string (v0.0.9 F)" do
         result = dispatch(receiver: constant("xyz"), method_name: :*, args: [constant(10_000)])
         expect(result).to eq(Rigor::Type::Combinator.literal_string)
       end

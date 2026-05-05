@@ -371,7 +371,7 @@ RSpec.describe Rigor::RbsExtended do
     end
   end
 
-  describe ".read_flow_contribution (v0.0.10 group D — FlowContribution wiring)" do
+  describe ".read_flow_contribution (v0.0.9 group D — FlowContribution wiring)" do
     def with_method_def(rbs_body)
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "sig"))

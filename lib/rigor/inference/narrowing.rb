@@ -539,7 +539,7 @@ module Rigor
         # downstream narrowing knows the refinement subset is
         # excluded.
         #
-        # v0.0.10 — when the predicate has a registered
+        # v0.0.9 — when the predicate has a registered
         # complement (see {Type::Refined::COMPLEMENT_PAIRS}) and
         # the part is exactly the refinement's base, the
         # narrowing returns `Refined[base, complement_predicate]`

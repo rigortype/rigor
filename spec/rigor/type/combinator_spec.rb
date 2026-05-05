@@ -486,7 +486,7 @@ RSpec.describe Rigor::Type::Combinator do
     end
   end
 
-  describe ".literal_string_compatible? (v0.0.10 F follow-up)" do
+  describe ".literal_string_compatible? (v0.0.9 F follow-up)" do
     it "accepts Constant<String>" do
       expect(described_class.literal_string_compatible?(described_class.constant_of("hi"))).to be(true)
     end

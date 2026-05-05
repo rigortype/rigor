@@ -7,7 +7,7 @@ require "rbs"
 # which carry Locations) round-trips through `Marshal`. The
 # rbs gem's C-extension `RBS::Location` ships without the
 # Marshal hooks; until rbs grows them upstream this patch is
-# the minimal monkey-patch the v0.0.10 RBS::Environment cache
+# the minimal monkey-patch the v0.0.9 RBS::Environment cache
 # relies on.
 #
 # Patch policy (purely additive):

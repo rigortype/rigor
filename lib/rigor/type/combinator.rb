@@ -197,7 +197,7 @@ module Rigor
 
       # `literal-string` — a `String` that is statically known to
       # come from a source-code literal (or a composition of
-      # literals). v0.0.10 tracks this flow through interpolation
+      # literals). v0.0.9 tracks this flow through interpolation
       # `"#{...}"`, leaving propagation through `+` / `<<` to a
       # later slice. Every `Constant<String>` is implicitly
       # literal-string-compatible; the carrier exists for cases

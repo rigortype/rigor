@@ -6,37 +6,34 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.0.8 released.** Cache infrastructure (`Descriptor`, `Store`), the first cached producer (`RbsConstantTable`), CLI observability flags (`--cache-stats` / `--clear-cache`), and `Diagnostic#source_family` provenance landed. See `CHANGELOG.md`'s `[0.0.8]` section and the v0.0.8 row of [`docs/MILESTONES.md`](MILESTONES.md).
 
-**v0.0.9 + v0.0.10 development on `master` — ready for release at the user's discretion.** v0.0.9 wired the cache into `rigor check` and introduced the `FlowContribution` substrate; v0.0.10 extended both axes plus added the custom-serialiser surface and an RBS::Environment cache.
+**v0.0.9 in development on `master`.** Per the single-digit version-component policy, `0.0.9` is the only pre-`0.1.0` slot — the next release after `0.0.9` is `0.1.0`, not `0.0.10`. Every pre-`0.1.0` slice continues to land inside `0.0.9` until the user authorises a release.
 
-Commits since v0.0.8 (v0.0.9 cluster):
+The v0.0.9 cluster, in commit order:
 
-- 9378df2 — A1: `Analysis::Runner.cache_store` + `rigor check --no-cache`.
-- ee021a2 — A2: `RbsLoader#constant_type` routes through `RbsConstantTable`.
-- 1407225 — A3: `Cache::Store#stats` + `--cache-stats` runtime breakdown.
-- e764565 — A4: `Reflection.constant_type_for` confirmed cached end-to-end.
-- c48f05f — B: `Rigor::FlowContribution` bundle struct (8 slots + Provenance).
-- 8a94e7a — C: `Rigor::Cache::RbsKnownClassNames` + `RbsDescriptor` shared builder.
-
-Commits since the v0.0.9 cluster (v0.0.10 cluster):
-
-- 41aec51 — D: `RbsExtended.read_flow_contribution` rolls directives into a bundle.
-- 3ae65e2 — E: paired-complement registry; `lowercase ↔ not_lowercase` pair.
-- 908eb08 — F: `literal-string` carrier + interpolation flow tracking.
-- 8951c1d — C1: `Store#fetch_or_compute(serialize:, deserialize:)` callable surface.
-- 9b50e2b — B (v0.0.10): `Rigor::Cache::RbsClassAncestorTable`.
-- c601f40 — A (v0.0.10): `Rigor::Cache::RbsClassTypeParamNames`.
-- d662d4a — E follow-up: `uppercase ↔ not_uppercase` and `numeric ↔ not_numeric` pairs.
-- 5600efc — F follow-up: `LiteralStringFolding` tier — literal-string through `String#+` / `String#*`.
-- 8f7c32c — C2: `Rigor::Cache::RbsEnvironment` + `RBS::Location` Marshal patch — caches the full env, biggest cold-start win.
+- 9378df2 — **A1**: `Analysis::Runner.cache_store` + `rigor check --no-cache`.
+- ee021a2 — **A2**: `RbsLoader#constant_type` routes through `RbsConstantTable`; `Environment.for_project(cache_store:)` plumbs the Store down.
+- 1407225 — **A3**: `Cache::Store#stats` + `--cache-stats` runtime breakdown.
+- e764565 — **A4**: `Reflection.constant_type_for` confirmed cached end-to-end.
+- c48f05f — **B**: `Rigor::FlowContribution` bundle struct (8 slots + `Provenance`).
+- 8a94e7a — **C**: `Rigor::Cache::RbsKnownClassNames` + `RbsDescriptor` shared builder.
+- 41aec51 — **D**: `RbsExtended.read_flow_contribution` rolls directives into a bundle.
+- 3ae65e2 — **E**: paired-complement registry; `lowercase ↔ not_lowercase` pair.
+- 908eb08 — **F**: `literal-string` carrier + interpolation flow tracking.
+- 8951c1d — **C1**: `Store#fetch_or_compute(serialize:, deserialize:)` callable surface.
+- 9b50e2b — **B (cache producer)**: `Rigor::Cache::RbsClassAncestorTable`.
+- c601f40 — **A (cache producer)**: `Rigor::Cache::RbsClassTypeParamNames`.
+- d662d4a — **E follow-up**: `uppercase ↔ not_uppercase` and `numeric ↔ not_numeric` pairs.
+- 5600efc — **F follow-up**: `LiteralStringFolding` tier — literal-string through `String#+` / `String#*`.
+- 8f7c32c — **C2**: `Rigor::Cache::RbsEnvironment` + `RBS::Location` Marshal patch — caches the full env, biggest cold-start win.
 
 Working state: 1710 RSpec examples / 0 failures, RuboCop 160 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics. Version stays at `0.0.8` until the user authorises a release.
 
-### Notable carry-overs (deferred past the current cluster)
+### Notable carry-overs (deferred past the v0.0.9 cluster, queued for v0.1.0+ or further v0.0.9 slices)
 
-- **More cached producers under `Rigor::Reflection`** (`instance_method_definition`, `singleton_method_definition`, …). Now feasible since the `RBS::Environment` cache + the `Location` Marshal patch make every RBS-native return value Marshal-clean; left out of the current cluster purely on scope grounds.
+- **More cached producers under `Rigor::Reflection`** (`instance_method_definition`, `singleton_method_definition`, …). Now feasible since C2 made every RBS-native value Marshal-clean.
 - **Wire `FlowContribution` bundles through internal narrowing.** Built-in narrowing rules and `PredicateEffect`-style facts could round-trip through the bundle; the conversion sites stay analyzer-internal until v0.1.0's plugin merger requires them.
-- **Decimal/octal/hex `int-string` complement pairs.** Their complement domains are mostly "anything that is not <very specific pattern>", which is rarely useful in practice; left at the Difference fallback.
-- **literal-string propagation through `<<` mutation.** Requires a mutation-effect path that the dispatcher does not currently expose; out of scope for the v0.0.10 cluster.
+- **Decimal / octal / hex `int-string` complement pairs.** Complement domains are too vague to warrant separate carriers in practice; the Difference fallback stays.
+- **literal-string propagation through `<<` mutation.** Requires a mutation-effect path the dispatcher does not currently expose.
 
 ## Where the Work Resumes
 

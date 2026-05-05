@@ -302,7 +302,7 @@ positive and negative answers across calls within a single
 loader instance — the disk cache only changes the cold-start
 behaviour, not the warm hot path.
 
-## `Rigor::Cache::RbsClassAncestorTable` (v0.0.10 B)
+## `Rigor::Cache::RbsClassAncestorTable` (v0.0.9 B)
 
 Third cached producer. Materialises every loaded class /
 module's RBS-declared ancestor chain as a Marshal-clean
@@ -323,7 +323,7 @@ ancestor-list-membership-check), with no env walk.
 within a single hierarchy instance, so the disk cache only
 changes the cold-start behaviour.
 
-## `Rigor::Cache::RbsClassTypeParamNames` (v0.0.10 A)
+## `Rigor::Cache::RbsClassTypeParamNames` (v0.0.9 A)
 
 Fourth cached producer. Materialises every loaded class's
 RBS-declared type-parameter names as a Marshal-clean
@@ -342,7 +342,7 @@ same set of definitions.
 cached table when `cache_store` is set. The accessor returns a
 fresh `Array.dup` so callers cannot mutate the cached payload.
 
-## `Rigor::Cache::RbsEnvironment` (v0.0.10 C2)
+## `Rigor::Cache::RbsEnvironment` (v0.0.9 C2)
 
 Fifth cached producer — and the first to use the
 {`Store#fetch_or_compute`} default-`Marshal` path against a
@@ -371,7 +371,7 @@ loader instance.
 `RBS::Environment` and its transitive AST nodes carry
 `RBS::Location` instances. The rbs gem's C-extension
 `RBS::Location` does not ship `_dump` / `_load`, so a naive
-`Marshal.dump(env)` raises `TypeError`. v0.0.10 patches
+`Marshal.dump(env)` raises `TypeError`. v0.0.9 patches
 `RBS::Location` with the minimal Marshal hooks the cache
 machinery requires:
 

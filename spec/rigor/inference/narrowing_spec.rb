@@ -1040,7 +1040,7 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(described_class.narrow_not_refinement(nominal("Integer"), nes)).to eq(nominal("Integer"))
     end
 
-    it "narrows Nominal[String] under ~lowercase-string to non-lowercase-string (v0.0.10 paired complement)" do
+    it "narrows Nominal[String] under ~lowercase-string to non-lowercase-string (v0.0.9 paired complement)" do
       lc = Rigor::Type::Combinator.lowercase_string
       result = described_class.narrow_not_refinement(nominal("String"), lc)
       expect(result).to eq(Rigor::Type::Combinator.non_lowercase_string)
@@ -1152,7 +1152,7 @@ RSpec.describe Rigor::Inference::Narrowing do
         # ~(non-empty-string ∩ lowercase-string) within String =
         #   (~non-empty-string within String) ∪ (~lowercase-string within String)
         # = Constant[""] ∪ non-lowercase-string.
-        # The v0.0.10 paired-complement registry routes the second
+        # The v0.0.9 paired-complement registry routes the second
         # arm through Refined[String, :not_lowercase] instead of the
         # legacy Difference[String, lowercase-string] fallback.
         composite = Rigor::Type::Combinator.non_empty_lowercase_string

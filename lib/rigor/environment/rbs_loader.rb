@@ -44,7 +44,7 @@ module Rigor
         end
 
         # Builds an `RBS::Environment` from explicit `libraries` and
-        # `signature_paths`. Stateless surface so the v0.0.10
+        # `signature_paths`. Stateless surface so the v0.0.9
         # {Cache::RbsEnvironment} producer can build an env on cache
         # miss without holding a loader instance, and the
         # instance-side {#build_env} delegates here so the

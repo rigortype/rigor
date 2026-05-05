@@ -162,7 +162,7 @@ RSpec.describe Rigor::Type::Refined do
     end
   end
 
-  describe "#complement_predicate_id (v0.0.10 paired-complement registry)" do
+  describe "#complement_predicate_id (v0.0.9 paired-complement registry)" do
     it "returns the registered complement for :lowercase" do
       lc = Rigor::Type::Combinator.lowercase_string
       expect(lc.complement_predicate_id).to eq(:not_lowercase)
@@ -196,7 +196,7 @@ RSpec.describe Rigor::Type::Refined do
     end
   end
 
-  describe ":literal_string predicate (v0.0.10 F)" do
+  describe ":literal_string predicate (v0.0.9 F)" do
     let(:lit) { Rigor::Type::Combinator.literal_string }
 
     it "describes as `literal-string`" do

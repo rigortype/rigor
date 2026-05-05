@@ -1058,7 +1058,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
-  describe "literal-string flow tracking on interpolation (v0.0.10 F)" do
+  describe "literal-string flow tracking on interpolation (v0.0.9 F)" do
     let(:literal_string) { Rigor::Type::Combinator.literal_string }
 
     it "lifts a fully literal-bearing interpolation to literal-string" do

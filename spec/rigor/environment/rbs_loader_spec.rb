@@ -202,7 +202,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
-  describe "env via cache_store (v0.0.10 C2)" do
+  describe "env via cache_store (v0.0.9 C2)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-env-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }
 
@@ -228,7 +228,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
-  describe "#class_type_param_names via cache_store (v0.0.10 A)" do
+  describe "#class_type_param_names via cache_store (v0.0.9 A)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-type-params-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }
 
@@ -266,7 +266,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
-  describe "#class_ordering via cache_store (v0.0.10 B)" do
+  describe "#class_ordering via cache_store (v0.0.9 B)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-ordering-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }
 

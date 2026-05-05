@@ -323,6 +323,25 @@ ancestor-list-membership-check), with no env walk.
 within a single hierarchy instance, so the disk cache only
 changes the cold-start behaviour.
 
+## `Rigor::Cache::RbsClassTypeParamNames` (v0.0.10 A)
+
+Fourth cached producer. Materialises every loaded class's
+RBS-declared type-parameter names as a Marshal-clean
+`Hash<String, Array<Symbol>>` keyed by top-level-stripped class
+name (e.g. `"Array"` → `[:Elem]`, `"Hash"` → `[:K, :V]`,
+`"Integer"` → `[]`). Producer id `"rbs.class_type_param_names"`.
+
+The dispatcher reads type-parameter names every time it builds
+a substitution map from a receiver's `type_args` into a method's
+return type. Each entry shares the underlying
+`RBS::DefinitionBuilder#build_instance` cost with
+{RbsClassAncestorTable}; populating both producers warms the
+same set of definitions.
+
+`RbsLoader#class_type_param_names(class_name)` consults the
+cached table when `cache_store` is set. The accessor returns a
+fresh `Array.dup` so callers cannot mutate the cached payload.
+
 ## `Rigor::Cache::RbsDescriptor` (shared)
 
 Both `RbsConstantTable` and `RbsKnownClassNames` depend on the

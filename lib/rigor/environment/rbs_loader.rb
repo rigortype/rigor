@@ -164,7 +164,19 @@ module Rigor
       # names (the loader stays fail-soft). NOTE: in the `rbs` gem,
       # `RBS::Definition#type_params` returns `Array<Symbol>` directly,
       # not the AST `TypeParam` object (those live on the AST level).
+      #
+      # When `cache_store` is set, the loader fetches the entire
+      # type-parameter-name table once (per process) through
+      # {Cache::RbsClassTypeParamNames.fetch} and answers point
+      # lookups from it. Cold runs build the table once and persist
+      # it; warm runs (and a separate loader sharing the same Store)
+      # skip the env walk entirely.
       def class_type_param_names(class_name)
+        if cache_store
+          key = class_name.to_s.delete_prefix("::")
+          return type_param_names_table.fetch(key, []).dup
+        end
+
         definition = instance_definition(class_name)
         return [] unless definition
 
@@ -243,6 +255,13 @@ module Rigor
         @known_class_names_set ||= begin
           require_relative "../cache/rbs_known_class_names"
           Cache::RbsKnownClassNames.fetch(loader: self, store: cache_store)
+        end
+      end
+
+      def type_param_names_table
+        @type_param_names_table ||= begin
+          require_relative "../cache/rbs_class_type_param_names"
+          Cache::RbsClassTypeParamNames.fetch(loader: self, store: cache_store)
         end
       end
 

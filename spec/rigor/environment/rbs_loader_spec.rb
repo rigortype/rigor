@@ -202,6 +202,44 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "#class_type_param_names via cache_store (v0.0.10 A)" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-type-params-spec-") }
+    let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "matches the uncached path for generic and non-generic classes" do
+      cached = described_class.new(cache_store: cache_store)
+      uncached = described_class.new
+      %w[Array Hash Integer ::Set].each do |class_name|
+        expect(cached.class_type_param_names(class_name)).to eq(uncached.class_type_param_names(class_name))
+      end
+    end
+
+    it "returns an empty array for unknown class names" do
+      cached = described_class.new(cache_store: cache_store)
+      expect(cached.class_type_param_names("ThisClassDoesNotExist123")).to eq([])
+    end
+
+    it "uses the cached table so a fresh loader sharing the store never builds a definition" do
+      first = described_class.new(cache_store: cache_store)
+      first.class_type_param_names("Array")
+
+      second = described_class.new(cache_store: cache_store)
+      allow(second).to receive(:instance_definition).and_call_original
+      second.class_type_param_names("Array")
+      second.class_type_param_names("Hash")
+      expect(second).not_to have_received(:instance_definition)
+    end
+
+    it "returns a fresh Array on each call so callers cannot mutate the cached payload" do
+      cached = described_class.new(cache_store: cache_store)
+      a = cached.class_type_param_names("Array")
+      a << :Mutated
+      expect(cached.class_type_param_names("Array")).to eq([:Elem])
+    end
+  end
+
   describe "#class_ordering via cache_store (v0.0.10 B)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-ordering-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

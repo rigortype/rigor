@@ -102,5 +102,40 @@ RSpec.describe Rigor::Configuration do
         described_class.new(Rigor::Configuration::DEFAULTS.merge("plugins" => [42]))
       end.to raise_error(ArgumentError, /must be a String or Hash/)
     end
+
+    it "defaults plugins_io.network to :disabled and allowed_paths to []" do
+      Dir.mktmpdir do |dir|
+        configuration = described_class.load(File.join(dir, "missing.yml"))
+        expect(configuration.plugins_io_network).to eq(:disabled)
+        expect(configuration.plugins_io_allowed_paths).to eq([])
+      end
+    end
+
+    it "reads plugins_io.network and plugins_io.allowed_paths from the YAML file" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          plugins_io:
+            network: disabled
+            allowed_paths:
+              - vendor/generated
+              - db/schema.rb
+        YAML
+
+        configuration = described_class.load(path)
+        expect(configuration.plugins_io_network).to eq(:disabled)
+        expect(configuration.plugins_io_allowed_paths).to eq(%w[vendor/generated db/schema.rb])
+      end
+    end
+
+    it "rejects plugins_io.network values other than :disabled in slice 2" do
+      expect do
+        described_class.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "plugins_io" => { "network" => "allowed", "allowed_paths" => [] }
+          )
+        )
+      end.to raise_error(ArgumentError, /plugins_io\.network/)
+    end
   end
 end

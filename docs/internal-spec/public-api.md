@@ -62,9 +62,15 @@ pins instance and singleton method sets for:
 - `Rigor::Plugin::Manifest` — `id`, `version`, `description`,
   `protocols`, `config_schema`, `validate_config(config)`.
 - `Rigor::Plugin::Services` — `reflection`, `type`, `configuration`,
-  `cache_store`.
+  `cache_store`, `trust_policy`, `io_boundary_for(plugin_id)`.
 - `Rigor::Plugin::Registry` — `plugins`, `ids`, `find(id)`,
   `load_errors`, `empty?`, `any_load_errors?`.
+- `Rigor::Plugin::TrustPolicy` — `trusted_gems`,
+  `allowed_read_roots`, `network_policy`, `allow_read?(path)`,
+  `network_allowed?`, `gem_trusted?(name)`, `to_h`. v0.1.0 slice 2.
+- `Rigor::Plugin::IoBoundary` — `policy`, `plugin_id`,
+  `read_file(path)`, `open_url(url)`, `cache_descriptor`. v0.1.0
+  slice 2.
 
 Any signature change on these methods has to update the matching
 `PublicApiDriftSnapshots::*` constant in the same commit.

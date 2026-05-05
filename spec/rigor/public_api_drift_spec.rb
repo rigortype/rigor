@@ -135,7 +135,9 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   PLUGIN_SERVICES_INSTANCE = %w[
     cache_store()
     configuration()
+    io_boundary_for(req:plugin_id)
     reflection()
+    trust_policy()
     type()
   ].freeze
 
@@ -146,6 +148,24 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     ids()
     load_errors()
     plugins()
+  ].freeze
+
+  PLUGIN_TRUST_POLICY_INSTANCE = %w[
+    allow_read?(req:path)
+    allowed_read_roots()
+    gem_trusted?(req:name)
+    network_allowed?()
+    network_policy()
+    to_h()
+    trusted_gems()
+  ].freeze
+
+  PLUGIN_IO_BOUNDARY_INSTANCE = %w[
+    cache_descriptor()
+    open_url(req:url)
+    plugin_id()
+    policy()
+    read_file(req:path)
   ].freeze
 
   COMBINATOR_SINGLETON = %w[
@@ -272,6 +292,22 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
   describe "Rigor::Plugin::Registry" do
     it "exposes the expected read-side surface" do
       expect(instance_signatures(Rigor::Plugin::Registry)).to eq(PublicApiDriftSnapshots::PLUGIN_REGISTRY_INSTANCE)
+    end
+  end
+
+  describe "Rigor::Plugin::TrustPolicy" do
+    it "exposes the expected policy surface" do
+      expect(instance_signatures(Rigor::Plugin::TrustPolicy)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_TRUST_POLICY_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::IoBoundary" do
+    it "exposes the expected I/O surface" do
+      expect(instance_signatures(Rigor::Plugin::IoBoundary)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_IO_BOUNDARY_INSTANCE
+      )
     end
   end
 end

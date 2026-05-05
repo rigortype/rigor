@@ -183,9 +183,9 @@ successfully still participate in later v0.1.0 slices.
   family for load failures. Slice 5 routes plugin-emitted
   diagnostics through `Diagnostic#source_family` with
   `plugin.<id>.<rule>` prefixes.
-- **Plugin trust / I/O policy enforcement.** Slice 2 enforces
-  network disablement and project-scoped file reads; slice 1
-  trusts the gem set the user listed in `.rigor.yml`.
+- **Plugin trust / I/O policy enforcement.** Slice 2 ships the
+  declarative {Rigor::Plugin::TrustPolicy} + {Rigor::Plugin::IoBoundary}
+  surface plugins are expected to use; see [`plugin-trust.md`](plugin-trust.md).
 - **Plugin-side cache producers.** Slice 6 wires
   `Store#fetch_or_compute` for plugins via `PluginEntry`
   descriptors.

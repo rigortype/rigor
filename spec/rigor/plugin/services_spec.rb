@@ -3,7 +3,7 @@
 require "spec_helper"
 
 RSpec.describe Rigor::Plugin::Services do
-  it "exposes the four core analyzer services" do
+  it "exposes the core analyzer services" do
     services = described_class.new(
       reflection: Rigor::Reflection,
       type: Rigor::Type::Combinator,
@@ -24,5 +24,49 @@ RSpec.describe Rigor::Plugin::Services do
       configuration: Rigor::Configuration.new
     )
     expect(services).to be_frozen
+  end
+
+  it "defaults to a network-disabled trust policy when none is supplied" do
+    services = described_class.new(
+      reflection: Rigor::Reflection,
+      type: Rigor::Type::Combinator,
+      configuration: Rigor::Configuration.new
+    )
+    expect(services.trust_policy).to be_a(Rigor::Plugin::TrustPolicy)
+    expect(services.trust_policy.network_allowed?).to be(false)
+  end
+
+  it "carries a user-supplied trust policy through to plugins" do
+    Dir.mktmpdir do |dir|
+      policy = Rigor::Plugin::TrustPolicy.new(
+        trusted_gems: ["rigor-rspec"],
+        allowed_read_roots: [dir]
+      )
+      services = described_class.new(
+        reflection: Rigor::Reflection,
+        type: Rigor::Type::Combinator,
+        configuration: Rigor::Configuration.new,
+        trust_policy: policy
+      )
+      expect(services.trust_policy).to eq(policy)
+    end
+  end
+
+  describe "#io_boundary_for" do
+    it "returns a fresh IoBoundary bound to the requested plugin id" do
+      Dir.mktmpdir do |dir|
+        services = described_class.new(
+          reflection: Rigor::Reflection,
+          type: Rigor::Type::Combinator,
+          configuration: Rigor::Configuration.new,
+          trust_policy: Rigor::Plugin::TrustPolicy.new(allowed_read_roots: [dir])
+        )
+
+        boundary = services.io_boundary_for("alpha")
+        expect(boundary).to be_a(Rigor::Plugin::IoBoundary)
+        expect(boundary.plugin_id).to eq("alpha")
+        expect(boundary.policy).to eq(services.trust_policy)
+      end
+    end
   end
 end

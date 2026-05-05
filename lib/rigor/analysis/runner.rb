@@ -84,9 +84,51 @@ module Rigor
           reflection: Reflection,
           type: Type::Combinator,
           configuration: @configuration,
-          cache_store: @cache_store
+          cache_store: @cache_store,
+          trust_policy: build_trust_policy
         )
         Plugin::Loader.load(configuration: @configuration, services: services)
+      end
+
+      # Builds the {Rigor::Plugin::TrustPolicy} for this run. Trusted
+      # gems are the gem-name half of every entry in
+      # `Configuration#plugins`. Allowed read roots default to the
+      # project root (CWD), the project's signature_paths, and each
+      # trusted gem's `Gem::Specification#full_gem_path`, plus any
+      # extras the user listed under `plugins_io.allowed_paths`.
+      # Slice 2 keeps `network_policy` `:disabled` — the only value
+      # the configuration accepts today.
+      def build_trust_policy
+        trusted_gems = @configuration.plugins.map { |entry| trusted_gem_name(entry) }.uniq
+        roots = [Dir.pwd]
+        Array(@configuration.signature_paths).each { |sp| roots << File.expand_path(sp) }
+        trusted_gems.each do |gem_name|
+          path = trusted_gem_root(gem_name)
+          roots << path if path
+        end
+        @configuration.plugins_io_allowed_paths.each { |p| roots << File.expand_path(p) }
+
+        Plugin::TrustPolicy.new(
+          trusted_gems: trusted_gems,
+          allowed_read_roots: roots,
+          network_policy: @configuration.plugins_io_network
+        )
+      end
+
+      def trusted_gem_name(entry)
+        case entry
+        when String then entry
+        when Hash then entry["gem"] || entry["id"]
+        end
+      end
+
+      def trusted_gem_root(gem_name)
+        return nil if gem_name.nil? || gem_name.empty?
+
+        spec = Gem.loaded_specs[gem_name]
+        spec&.full_gem_path
+      rescue StandardError
+        nil
       end
 
       def plugin_load_diagnostics

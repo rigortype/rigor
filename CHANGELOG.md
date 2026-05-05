@@ -7,101 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.9] - 2026-05-05
+
+The ninth preview. Theme: **finish the cache surface, broaden the type vocabulary, and lock the public API ahead of the v0.1.0 plugin contract.** v0.0.9 closes every remaining pre-`0.1.0` substrate slice: the persistent cache is wired into `rigor check` end-to-end (warm runs hit disk-backed tables; `--cache-stats` reports real hit/miss/write counts; `--no-cache` toggles it off), the type vocabulary picks up paired-complement `~T` narrowing and `literal-string` flow tracking through interpolation / `+` / `*` / `<<`, the [`RBS::Extended`](docs/type-specification/rbs-extended.md) directive surface rolls every recognised directive on a method into a single `Rigor::FlowContribution` bundle, and six new built-in catalogues cover `Random`, `Struct` (+ `Data`), `Encoding`, `Regexp` / `MatchData`, `Proc` / `Method` / `UnboundMethod`, and `Exception`.
+
+The next release after `0.0.9` is `0.1.0` — single-digit version-component policy, no `0.0.10`. v0.1.0 starts the plugin contract proper; v0.0.9 ships the substrate that contract is designed against.
+
 ### Added
 
-- **Proc / Method / UnboundMethod catalog import.**
-  `tool/scaffold_builtin_catalog.rb` for the primary `Proc`
-  class plus a manual `TOPICS` extension for the two sibling
-  classes writes `data/builtins/ruby_core/proc.yml` (62
-  instance methods, 1 singleton across the three callable
-  carriers — `Init_Proc` registers them in a single C init
-  block) and the matching `Builtins::PROC_CATALOG` loader.
-  The three classes share the same fundamental hazard at the
-  catalog tier: their public methods invoke the wrapped Ruby
-  code, so the blocklist deliberately declines `:call` /
-  `:[]` / `:===` / `:yield` (Proc + Method execution paths)
-  and the identity-allocating combinators `:curry` / `:<<` /
-  `:>>` / `:to_proc` / `:bind` / `:bind_call` / `:unbind`.
-  Identity-based equality (`:hash` / `:==` / `:eql?`) is
-  also blocklisted so a hypothetical future `Constant<Proc>`
-  carrier cannot freeze a memory-layout-dependent answer.
-  What the import buys is receiver-class recognition for
-  `Proc.new`, `Object#method`, and `Module#instance_method`,
-  plus reflective leaf coverage for `#arity`, `#owner`,
-  `#name`, `#receiver`, `#parameters`, `#source_location`,
-  `#lambda?`, … `rb_cProc`, `rb_cMethod`, and
-  `rb_cUnboundMethod` join `BASE_CLASS_VARS`.
-- **Random catalog import.** `tool/scaffold_builtin_catalog.rb`
-  with `--init-fn InitVM_Random` writes
-  `data/builtins/ruby_core/random.yml` (6 instance methods,
-  6 singletons) and the matching `Builtins::RANDOM_CATALOG`
-  loader. Random is the textbook stateful class: every call
-  to `#rand` / `#bytes` advances the receiver's Mersenne-
-  Twister state, and the singleton `.rand` / `.bytes` mutate
-  `Random::DEFAULT`. The catalog tier deliberately blocklists
-  all of those plus the non-deterministic `Random.new_seed`
-  / `Random.urandom`, so no state-advancing or entropy-
-  reading call can fold to a constant. What the import buys
-  is receiver-class recognition for `Random.new(...)`
-  (resolves to `Nominal[Random]`) so downstream RBS dispatch
-  routes precisely.
-- **Struct catalog import.** `tool/scaffold_builtin_catalog.rb`
-  with `--init-fn InitVM_Struct` writes
-  `data/builtins/ruby_core/struct.yml` (33 instance methods,
-  5 singletons across `Struct` + `Data` — both classes are
-  registered in `InitVM_Struct`) and the matching
-  `Builtins::STRUCT_CATALOG` loader. `Struct` is a meta-class:
-  `Struct.new(*members)` returns a fresh anonymous subclass,
-  so the catalog tier deliberately leaves `:new` at its
-  block-dependent classification (calls fall through to RBS
-  dispatch, which resolves the result to `Nominal[Struct]`).
-  The blocklist defends `:initialize_copy`, `:hash`, and
-  `:[]` so a hypothetical future `Constant<Struct>` carrier
-  cannot fold an aliasing copy, a member-dependent hash, or
-  a member-name-dependent reader through the catalog.
-  `rb_cStruct` joins `BASE_CLASS_VARS`.
-- **Encoding catalog import.** `Init_Encoding` from `references/ruby/encoding.c` is extracted into `data/builtins/ruby_core/encoding.yml` and routed through `Builtins::ENCODING_CATALOG`. `Encoding::UTF_8` and the other built-in Encoding constants resolve to `Nominal[Encoding]`; instance reads (`#name`, `#names`, `#dummy?`, `#ascii_compatible?`, `#inspect`) and the registry-walking singletons (`Encoding.find`, `.list`, `.aliases`, `.name_list`, `.default_external`, `.default_internal`) now answer through the catalog with their precise nominal returns. The blocklist defends against folding singleton lookups (`find`/`list`/`aliases`/`name_list`) and global-default mutators (`default_external=` / `default_internal=`) against the analyzer process's encoding registry, plus the conventional `:initialize_copy` / `:hash` / `:eql?` defensive entries.
-- **Regexp / MatchData catalog import.**
-  `tool/scaffold_builtin_catalog.rb` for the primary `Regexp`
-  class plus a manual `TOPICS` extension for `MatchData`
-  writes `data/builtins/ruby_core/re.yml` (47 instance
-  methods, 9 singletons across both classes — `Init_Regexp`
-  registers them in a single C init block) and the matching
-  `Builtins::REGEXP_CATALOG` loader. The blocklist defends
-  every Regexp method whose answer mutates the per-thread
-  `$~` backref (`:=~`, `:===`, `:~`, `:match`) so a
-  constant-fold cannot drop the visible side effect of
-  writing `$1..$N` / `$&` / `` $` `` / `$'`; the defensive
-  `:initialize_copy` entry on both classes mirrors the rest
-  of the catalog family. What the import buys is fold-tier
-  coverage for the pure readers on a `Constant<Regexp>`
-  literal (`#source`, `#options`, `#casefold?`,
-  `#fixed_encoding?`, `#inspect`, `#to_s`, `#hash`) and
-  receiver-class recognition for `Regexp.new(...)` plus
-  every `MatchData` method, so RBS dispatch routes precisely
-  through the new catalog entries.
-- **Exception catalog import.** `tool/scaffold_builtin_catalog.rb`
-  with `--rb-global rb_eException` writes
-  `data/builtins/ruby_core/exception.yml` (34 instance methods,
-  6 singletons across the entire 27-class error hierarchy that
-  `Init_Exception` registers in one pass — Exception,
-  StandardError, RuntimeError, KeyError, NameError,
-  NoMethodError, FrozenError, …) and the matching
-  `Builtins::EXCEPTION_CATALOG` loader. Only the base
-  `Exception` row is wired into `CATALOG_BY_CLASS`; subclass
-  receivers reach the catalog via `is_a?(Exception)` and consult
-  the base-class entries. The blocklist defends every base
-  method whose answer depends on runtime state (`:backtrace`,
-  `:backtrace_locations`, `:set_backtrace`, `:detailed_message`,
-  the singleton `:to_tty?`) and the aliasing constructors
-  (`:initialize`, `:exception`, `:initialize_copy`) so a
-  hypothetical future `Constant<Exception>` carrier cannot fold
-  a non-deterministic value through the catalog. `rb_eException`
-  joins `BASE_CLASS_VARS` alongside the previously-imported
-  exception globals (`rb_eStandardError`, `rb_eRuntimeError`,
-  `rb_eKeyError`, …). Subclass-specific methods
-  (`KeyError#receiver`, `NameError#name`, …) intentionally miss
-  the lookup until a later slice routes per-subclass class names.
+#### Cache layer wired through to `rigor check`
+
+- **`Analysis::Runner.cache_store` surface + `rigor check --no-cache`.** Runner defaults to a `Cache::Store` rooted at `.rigor/cache`; the CLI flag threads `nil` through to disable. `Environment.for_project(cache_store:)` plumbs the Store down to the underlying `RbsLoader`.
+- **First end-to-end cached producer — `RbsLoader#constant_type` reads from `RbsConstantTable`.** Cold runs build the translated constant-type table once and persist it; warm runs (and a separate loader sharing the same Store) skip the env walk entirely and pay only a `Marshal.load` of the table.
+- **Five more cache producers** — `RbsKnownClassNames` (Set<String>), `RbsClassAncestorTable` (Hash<String, Array<String>>), `RbsClassTypeParamNames` (Hash<String, Array<Symbol>>), and `RbsEnvironment` (the full `RBS::Environment`). The fifth producer (`RbsEnvironment`) caches the biggest cold-start cost — `RBS::EnvironmentLoader#load + Environment.from_loader + resolve_type_names` — by adding minimal `_dump`/`_load` Marshal hooks to the rbs gem's C-extension `RBS::Location`. The patch is purely additive and idempotent; `RBS::Location` is never read from any analysis path so the lost source-position metadata is inert.
+- **`Cache::Store#stats` + `--cache-stats` runtime breakdown.** In-process hits / misses / writes counters (per-producer breakdown) bumped inside `fetch_or_compute`; `rigor check --cache-stats` prints an on-disk inventory followed by a "this run:" section. Under `--no-cache` the section is omitted.
+- **`Cache::Store#fetch_or_compute(serialize:, deserialize:)` callable surface.** Producers whose return values are not Marshal-clean (RBS-native objects with `RBS::Location` members, raw `IO`, …) can register custom round-trip callables. Default stays at `Marshal.dump` / `Marshal.load`. Deserialiser exceptions become cache misses. `RbsEnvironment` rides this surface.
+- **Shared `Rigor::Cache::RbsDescriptor`.** Every RBS-derived producer attaches the same descriptor (rbs gem locked version + `:digest` entries for every `.rbs` file under `signature_paths` + a `rbs.libraries` configs entry), so a signature change or rbs gem bump invalidates them in lockstep.
+
+#### Type vocabulary
+
+- **Paired-complement narrowing for `Refined[base, predicate]`.** `Type::Refined::COMPLEMENT_PAIRS` registers bidirectional pairs; the narrowing tier returns `Refined[base, complement]` instead of the imprecise `Difference[base, refined]` fallback. Three pairs land in v0.0.9: `lowercase ↔ not_lowercase`, `uppercase ↔ not_uppercase`, `numeric ↔ not_numeric`. Positive carriers `non-lowercase-string`, `non-uppercase-string`, `non-numeric-string` join `Builtins::ImportedRefinements::REGISTRY` so users can write them directly.
+- **`literal-string` carrier and `non-empty-literal-string` composition.** A `String` known to come from a source-code literal (or a composition of literals). Tracked through string interpolation `"#{...}"` (lifts to `literal-string` when every part is literal-bearing) and through the new `LiteralStringFolding` dispatcher tier covering `String#+`, `String#*`, `String#<<`, `String#concat` (lifts when every operand is literal-bearing).
+- **Six new built-in catalogues** — Random, Struct (+ Data), Encoding, Regexp + MatchData, Proc / Method / UnboundMethod, Exception. Each catalog drives the fold dispatcher with per-class blocklists for indirect mutators (Random's MT-state-advancing methods, Regexp's `$~`-writing matchers, Proc / Method's `:call` / `:[]` execution paths, Exception's runtime-state readers, etc.).
+- **`Numeric#clone` reclassified.** `numeric` topic's `c_index_paths` now includes `references/ruby/object.c`, so `Numeric#clone`'s alias to `rb_immutable_obj_clone` is found by the C-body classifier and the entry moves from `purity: unknown` to `purity: leaf`.
+
+#### Pre-v0.1.0 substrate (locks the surface the plugin contract attaches to)
+
+- **`Rigor::FlowContribution` bundle struct.** Eight content slots (`return_type`, `truthy_facts`, `falsey_facts`, `post_return_facts`, `mutations`, `invalidations`, `exceptional`, `role_conformance`) plus a `Provenance` Data carrier (`source_family`, `plugin_id`, `node`, `descriptor`). Frozen on construction; collection slots duped + frozen. Public read shape per ADR-2 § "Flow Contribution Bundle"; element-list flattening deferred to v0.1.0 alongside the contribution merger that consumes it.
+- **`Rigor::RbsExtended.read_flow_contribution(method_def)`.** Rolls every recognised directive on a single RBS method (`predicate-if-(true|false)`, `assert*`, `return:`) into one `FlowContribution` with `:rbs_extended` source family. Internal narrowing keeps consuming the typed Data carriers; the bundle is the public packaging the v0.1.0 contribution merger reads.
+- **Public-API drift specs for `Rigor::Scope`, `Rigor::Environment`, `Rigor::Type::Combinator`, `Rigor::Reflection`.** Snapshot-style spec at `spec/rigor/public_api_drift_spec.rb` pins each namespace's instance + singleton method set so accidental signature changes show up as test failures, not silent breakage. The four namespaces are the v0.1.0 plugin-contract attachment points.
+- **`docs/internal-spec/public-api.md`.** Public/internal stability boundary declared explicitly: which namespaces are drift-pinned today (Scope / Environment / Type::Combinator / Reflection), which are public-shape but still in flux until v0.1.0 (FlowContribution, Diagnostic, Cache::Store#fetch_or_compute, RbsExtended directive readers), and which stay strictly internal (Inference::*, Analysis::FactStore / CheckRules / Runner, AST::* virtuals, Source / CLI / Configuration plumbing).
+
+### Internal
+
+- The cache layer's public read shape grows to cover all six producers in [`docs/internal-spec/cache.md`](docs/internal-spec/cache.md): `Descriptor`, `Store` (with the new `serialize:`/`deserialize:` kwargs and `Store#stats`), `RbsConstantTable`, `RbsKnownClassNames`, `RbsClassAncestorTable`, `RbsClassTypeParamNames`, `RbsEnvironment`, the shared `RbsDescriptor` builder, and the `RBS::Location` Marshal patch.
+- `Rigor::FlowContribution` documented in [`docs/internal-spec/flow-contribution.md`](docs/internal-spec/flow-contribution.md) with the slot table, equality / `to_h` / `empty?` semantics, `RbsExtended.read_flow_contribution` mapping (predicate-if-* → `truthy_facts` / `falsey_facts`, `assert*` → `post_return_facts`, `return:` → `return_type`), and the deferred element-list flattening note.
+
 ## [0.0.8] - 2026-05-04
 
 The eighth preview. Theme: **first cache-related code slice** — land the persistence layer that v0.0.7's cache slice taxonomy design doc fixed the schema for, with a Marshal-clean producer wired through it end-to-end. Backend choice is fixed by [ADR-6](docs/adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, **zero new gem dependencies**.
@@ -1268,7 +1209,8 @@ The gem is published to RubyGems as **`rigortype`** (the
   reserved for `dump_type`); per-rule configuration and
   suppression comments are deferred.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.8...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.0.9...HEAD
+[0.0.9]: https://github.com/rigortype/rigor/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/rigortype/rigor/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/rigortype/rigor/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/rigortype/rigor/compare/v0.0.5...v0.0.6

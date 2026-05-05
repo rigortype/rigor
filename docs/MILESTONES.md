@@ -158,7 +158,7 @@ Deferred from v0.0.8 (status as of the v0.0.9 cluster):
 - ~~**Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.**~~ Landed in v0.0.9 (C1 surface + C2 producer).
 - ~~`Rigor::FlowContribution` bundle struct~~ — Landed in v0.0.9 group B.
 
-## v0.0.9 — In development
+## v0.0.9 — Released 2026-05-05
 
 Per the single-digit version-component policy (next release after `0.0.9` is `0.1.0`, not `0.0.10`), every pre-`0.1.0` slice continues to land inside `0.0.9` until the user authorises a release. The cluster combines the original "wire the cache into `rigor check`" slate with the cache-surface completion and three pieces of type-language work (FlowContribution producer wiring, paired-complement narrowing for Refined predicates, literal-string flow tracking through interpolation and concat).
 

@@ -4,9 +4,21 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 ## Status
 
-**v0.0.8 released.** Cache infrastructure (`Descriptor`, `Store`), the first cached producer (`RbsConstantTable`), CLI observability flags (`--cache-stats` / `--clear-cache`), and `Diagnostic#source_family` provenance landed. See `CHANGELOG.md`'s `[0.0.8]` section and the v0.0.8 row of [`docs/MILESTONES.md`](MILESTONES.md).
+**v0.0.9 released 2026-05-05.** Closes every remaining pre-`0.1.0` substrate slice — the persistent cache wired through `rigor check` (six producers + `--cache-stats` / `--clear-cache` / `--no-cache`), paired-complement `~T` Refined narrowing, `literal-string` flow tracking through interpolation / `+` / `*` / `<<` / `concat`, the `Rigor::FlowContribution` bundle struct, the public-API drift specs for `Scope` / `Environment` / `Type::Combinator` / `Reflection`, and six new built-in catalogues (Random, Struct + Data, Encoding, Regexp + MatchData, Proc + Method + UnboundMethod, Exception). See `CHANGELOG.md`'s `[0.0.9]` section and the v0.0.9 row of [`docs/MILESTONES.md`](MILESTONES.md). Per the single-digit version-component policy, the next release is **`v0.1.0`** (not `0.0.10`).
 
-**v0.0.9 in development on `master`.** Per the single-digit version-component policy, `0.0.9` is the only pre-`0.1.0` slot — the next release after `0.0.9` is `0.1.0`, not `0.0.10`. Every pre-`0.1.0` slice continues to land inside `0.0.9` until the user authorises a release.
+**v0.1.0 in planning on `master`.** Theme: **first plugin contract.** ADR-2 § "Extension API" fixes the design surface; v0.1.0's job is the implementation. The substrate landed in v0.0.3 → v0.0.9 — type vocabulary, inference engine, cache layer, FlowContribution bundle, public-API drift pins, RBS::Extended directive plumbing — leaves the contract surface as a finite assembly job:
+
+- **Plugin registration / loading** — manifest discovery, dependency-injected analyzer services (Reflection, type factories, configuration readers), deterministic ordering. ADR-2 § "Registration, Configuration, and Caching".
+- **Plugin contribution merger** — consumes `FlowContribution` bundles per ADR-2 § "Plugin Contribution Merging". Built-in narrowing rules and `RbsExtended` directives convert into bundles at the boundary so the merger is the single point of integration.
+- **Plugin diagnostic provenance** — `plugin.<id>.<rule>` identifier publishing already shipped in v0.0.8 via `Diagnostic#source_family`; v0.1.0 wires plugin-emitted diagnostics through the same channel.
+- **Plugin-side cache producers** — gated on the plugin API. Plugins register `producer_id`s and ride the v0.0.9 `Store#fetch_or_compute(serialize:, deserialize:)` surface, with `PluginEntry` rows in the descriptor schema for invalidation.
+- **Plugin trust / I/O policy** — ADR-2 § "Plugin Trust and I/O Policy"; trusted-gem model, network disabled by default during analysis, file reads scoped to project + dependency metadata.
+
+The public surface the plugin contract attaches to is pinned by `spec/rigor/public_api_drift_spec.rb` (Scope / Environment / Type::Combinator / Reflection) and documented in [`docs/internal-spec/public-api.md`](internal-spec/public-api.md). Pre-v0.1.0 design docs live at [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) and [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md).
+
+### Historical: v0.0.8 → v0.0.9 cluster (released 2026-05-05)
+
+**v0.0.8 released.** Cache infrastructure (`Descriptor`, `Store`), the first cached producer (`RbsConstantTable`), CLI observability flags (`--cache-stats` / `--clear-cache`), and `Diagnostic#source_family` provenance landed.
 
 The v0.0.9 cluster, in commit order:
 

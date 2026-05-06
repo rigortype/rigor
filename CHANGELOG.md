@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — v0.1.0 slice 5 (plugin emission protocol)
+
+- **`Rigor::Plugin::Base#diagnostics_for_file(path:, scope:, root:)`** per [ADR-7 § "Slice 5-A"](docs/adr/7-v0.1.0-slice-decisions.md). Plugin subclasses override the hook to return an array of `Rigor::Analysis::Diagnostic` rows for the analysed file; the default returns `[]`. Plugin authors traverse `root` (the parsed `Prism::Node`) themselves if they need node-scoped rules — the `Rule<TNode>` API ADR-2 § "Custom rules" mentions stays deferred to v0.1.x.
+- **`Analysis::Runner` invokes plugin emission per file and auto-stamps `source_family: "plugin.<manifest.id>"`** per [ADR-7 § "Slice 5-B"](docs/adr/7-v0.1.0-slice-decisions.md). Plugin authors construct `Diagnostic` rows without setting `source_family`; the runner overwrites every value with the manifest-id-derived family so plugin authors cannot accidentally publish under another plugin's id or under `:builtin`. Plugin exceptions inside the hook isolate as a `:plugin_loader` `runtime-error` diagnostic per ADR-2 § "Plugin Trust and I/O Policy".
+- **`Rigor::FlowContribution::Conflict#to_diagnostic(path:, line:, column:, severity: :error)`** per [ADR-7 § "Slice 5-C"](docs/adr/7-v0.1.0-slice-decisions.md). Converts a merger conflict into a `Diagnostic` with `source_family: :contribution_merge` and a kebab-cased `rule` derived from the conflict reason (`return_type_collapse` → `return-type-collapse`, etc.). The qualified rule renders as `[contribution_merge.return-type-collapse]` in the standard text stream — slice 4's merger wiring will emit these once cross-tier contributions land.
+- **`Analysis::Runner.new(plugin_requirer:)`** kwarg lets specs inject a fake `requirer` so the runner exercises plugin loading without depending on installed gems. Defaults to `nil` (built-in `Kernel.require`).
+- **Public-API drift snapshots updated** for `Plugin::Base` (gains `diagnostics_for_file`) so the hook surface is locked alongside the implementation.
+
 ### Changed — v0.1.0 slice 4b-3: RBS dispatch return-type override through the merger
 
 - **`Inference::MethodDispatcher::RbsDispatch.translate_return_type` reads the `return_type` slot via `Rigor::FlowContribution::Merger.merge([RbsExtended.read_flow_contribution(method_definition)])`** per [ADR-7 § "Slice 4-A/4-B"](docs/adr/7-v0.1.0-slice-decisions.md). Replaces the direct `RbsExtended.read_return_type_override` call. Future plugin / `:rbs_extended` bundles that assert a `return_type` slot at the same call site compose through the merger rather than silently racing each other; cross-tier conflicts surface through `MergeResult#conflicts` (slice 5 wires those onto the diagnostic stream). **No user-visible behaviour change** — the existing 1860-example RSpec suite passes unchanged.

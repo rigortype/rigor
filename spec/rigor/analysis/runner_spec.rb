@@ -485,4 +485,82 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(result.diagnostics.find { |d| d.rule == "always-raises" }).to be_nil
     end
   end
+
+  describe "plugin diagnostic emission (v0.1.0 slice 5-A/5-B)" do
+    let(:plugin_class) do
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "demo-emitter", version: "0.1.0")
+
+        def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+          [
+            Rigor::Analysis::Diagnostic.new(
+              path: path, line: 1, column: 1,
+              message: "demo plugin says hello",
+              severity: :warning,
+              rule: "saw-file"
+            )
+          ]
+        end
+      end
+      stub_const("FakeDemoEmitterPlugin", klass)
+      klass
+    end
+
+    before { Rigor::Plugin.unregister! }
+    after { Rigor::Plugin.unregister! }
+
+    def run_with_plugin(plugin_class:, source: "x = 1\n")
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "demo.rb"), source)
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "demo.rb")],
+            "plugins" => ["rigor-demo-emitter"]
+          )
+        )
+        requirer = lambda { |_name|
+          Rigor::Plugin.register(plugin_class)
+          true
+        }
+        described_class.new(
+          configuration: configuration,
+          cache_store: nil,
+          plugin_requirer: requirer
+        ).run
+      end
+    end
+
+    it "auto-stamps plugin-emitted diagnostics with source_family plugin.<id>" do
+      result = run_with_plugin(plugin_class: plugin_class)
+      diag = result.diagnostics.find { |d| d.rule == "saw-file" }
+      expect(diag).not_to be_nil
+      expect(diag.source_family).to eq("plugin.demo-emitter")
+      expect(diag.qualified_rule).to eq("plugin.demo-emitter.saw-file")
+      expect(diag.to_s).to include("[plugin.demo-emitter.saw-file]")
+    end
+
+    it "isolates plugin exceptions as :plugin_loader runtime-error diagnostics" do
+      bomb_class = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "bomb-emitter", version: "0.1.0")
+      end
+      bomb_class.define_method(:diagnostics_for_file) { |**| raise "kaboom" }
+      stub_const("FakeBombEmitterPlugin", bomb_class)
+
+      result = run_with_plugin(plugin_class: bomb_class)
+      diag = result.diagnostics.find { |d| d.source_family == :plugin_loader && d.rule == "runtime-error" }
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("kaboom")
+    end
+
+    it "leaves the diagnostic stream unchanged when no plugin emits" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "demo.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge("paths" => [File.join(dir, "demo.rb")])
+        )
+        result = described_class.new(configuration: configuration, cache_store: nil).run
+        expect(result.diagnostics.select { |d| d.source_family.to_s.start_with?("plugin.") }).to be_empty
+      end
+    end
+  end
 end

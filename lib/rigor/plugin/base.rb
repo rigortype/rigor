@@ -63,6 +63,29 @@ module Rigor
         nil
       end
 
+      # ADR-7 § "Slice 5-A" — per-file diagnostic emission hook.
+      # Override in plugin subclasses to return an array of
+      # `Rigor::Analysis::Diagnostic` rows for the analysed file.
+      # The runner stamps each returned diagnostic with
+      # `source_family: "plugin.<manifest.id>"` automatically per
+      # ADR-7 § "Slice 5-B"; plugin authors should construct
+      # diagnostics without setting `source_family` (any value
+      # they pass is overwritten).
+      #
+      # `path` is the analysed file path; `scope` is the entry
+      # `Rigor::Scope` after `ScopeIndexer` ran; `root` is the
+      # parsed `Prism::Node` root. Plugin authors traverse `root`
+      # themselves if they need node-scoped rules — the
+      # `Rule<TNode>` API ADR-2 § "Custom rules" mentions stays
+      # deferred to v0.1.x.
+      #
+      # Default returns `[]` so plugins that contribute through
+      # other channels (e.g. slice-4 narrowing contributions,
+      # slice-6 cache producers) do not have to override.
+      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+        []
+      end
+
       # Convenience accessor — `manifest` on the instance returns
       # the class-level manifest declaration.
       def manifest

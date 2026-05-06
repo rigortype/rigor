@@ -65,6 +65,17 @@ and a frozen copy of the user's config. `#init(services)` is the
 override hook plugins use to wire up state from the service
 container; the default implementation is a no-op.
 
+`#diagnostics_for_file(path:, scope:, root:)` (slice 5) is the
+per-file diagnostic emission hook. The default returns an empty
+array. Plugin authors override it to walk `root` (the parsed
+`Prism::Node`) and return an array of
+`Rigor::Analysis::Diagnostic` rows; the runner re-stamps every
+returned diagnostic with `source_family: "plugin.<manifest.id>"`
+per ADR-7 § "Slice 5-B" so plugin authors cannot accidentally
+publish under another plugin's id. Plugin exceptions inside the
+hook isolate as a `:plugin_loader` `runtime-error` diagnostic
+rather than crashing `rigor check`.
+
 ### `Rigor::Plugin::Manifest`
 
 Frozen value object describing one plugin's identity. Fields:

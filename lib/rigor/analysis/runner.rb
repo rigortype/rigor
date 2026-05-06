@@ -33,10 +33,12 @@ module Rigor
       #   v0.0.9 group A slice 1 introduces the surface; later
       #   slices route real producers through it.
       def initialize(configuration:, explain: false,
-                     cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT))
+                     cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
+                     plugin_requirer: nil)
         @configuration = configuration
         @explain = explain
         @cache_store = cache_store
+        @plugin_requirer = plugin_requirer
         @plugin_registry = Plugin::Registry::EMPTY
       end
 
@@ -87,7 +89,11 @@ module Rigor
           cache_store: @cache_store,
           trust_policy: build_trust_policy
         )
-        Plugin::Loader.load(configuration: @configuration, services: services)
+        if @plugin_requirer
+          Plugin::Loader.load(configuration: @configuration, services: services, requirer: @plugin_requirer)
+        else
+          Plugin::Loader.load(configuration: @configuration, services: services)
+        end
       end
 
       # Builds the {Rigor::Plugin::TrustPolicy} for this run. Trusted
@@ -145,6 +151,64 @@ module Rigor
         end
       end
 
+      # ADR-7 § "Slice 5-A/5-B" — invokes every loaded plugin's
+      # per-file diagnostic emission hook
+      # (`Plugin::Base#diagnostics_for_file`) and re-stamps the
+      # returned diagnostics with
+      # `source_family: "plugin.<manifest.id>"` so plugin
+      # authors cannot accidentally publish under another
+      # plugin's identifier or under `:builtin`. Plugin
+      # exceptions are isolated per ADR-2 § "Plugin Trust and
+      # I/O Policy" — a raise from one plugin becomes a
+      # `:plugin_loader` `runtime-error` diagnostic without
+      # affecting other plugins or the rest of the run.
+      def plugin_emitted_diagnostics(path, root, scope)
+        return [] if @plugin_registry.empty?
+
+        @plugin_registry.plugins.flat_map do |plugin|
+          collect_plugin_diagnostics(plugin, path, root, scope)
+        end
+      end
+
+      def collect_plugin_diagnostics(plugin, path, root, scope)
+        raw = plugin.diagnostics_for_file(path: path, scope: scope, root: root)
+        Array(raw).map { |diagnostic| stamp_plugin_diagnostic(diagnostic, plugin.manifest.id) }
+      rescue StandardError => e
+        [plugin_runtime_error_diagnostic(path, plugin, e)]
+      end
+
+      def stamp_plugin_diagnostic(diagnostic, plugin_id)
+        Diagnostic.new(
+          path: diagnostic.path,
+          line: diagnostic.line,
+          column: diagnostic.column,
+          message: diagnostic.message,
+          severity: diagnostic.severity,
+          rule: diagnostic.rule,
+          source_family: "plugin.#{plugin_id}"
+        )
+      end
+
+      def plugin_runtime_error_diagnostic(path, plugin, error)
+        plugin_id = safe_plugin_id(plugin)
+        Diagnostic.new(
+          path: path,
+          line: 1,
+          column: 1,
+          message: "plugin #{plugin_id.inspect} raised during diagnostics_for_file: " \
+                   "#{error.class}: #{error.message}",
+          severity: :error,
+          rule: "runtime-error",
+          source_family: :plugin_loader
+        )
+      end
+
+      def safe_plugin_id(plugin)
+        plugin.manifest.id
+      rescue StandardError
+        plugin.class.to_s
+      end
+
       # Resolves the user-supplied path list into:
       # - `:files`  — the concrete `.rb` files to analyze.
       # - `:errors` — `Diagnostic` entries for each path that
@@ -193,6 +257,7 @@ module Rigor
           comments: parse_result.comments,
           disabled_rules: @configuration.disabled_rules
         )
+        diagnostics += plugin_emitted_diagnostics(path, parse_result.value, scope)
         diagnostics + explain_diagnostics(path, parse_result.value, scope)
       rescue Errno::ENOENT => e
         [

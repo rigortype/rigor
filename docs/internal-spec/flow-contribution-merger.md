@@ -75,6 +75,15 @@ Frozen `Data.define(:target, :edge, :kind, :reason, :provenances, :message)`.
 and the contradicting one). `#to_h` renders the conflict for
 diagnostic / formatter output.
 
+`#to_diagnostic(path:, line:, column:, severity: :error)` (slice
+5-C) converts the conflict into a `Rigor::Analysis::Diagnostic`
+with `source_family: :contribution_merge` and a kebab-cased
+`rule` derived from the conflict reason
+(`return_type_collapse` → `return-type-collapse`). The qualified
+rule renders as `[contribution_merge.return-type-collapse]` in
+the standard `rigor check` text stream once the slice-4 wiring
+emits a conflict.
+
 ### `Rigor::FlowContribution::MergeResult`
 
 Frozen value object with the eight content slots from

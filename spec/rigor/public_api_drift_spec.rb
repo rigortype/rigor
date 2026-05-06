@@ -112,6 +112,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   PLUGIN_BASE_INSTANCE = %w[
     config()
+    diagnostics_for_file(keyreq:path,keyreq:scope,keyreq:root)
     init(req:services)
     manifest()
     services()

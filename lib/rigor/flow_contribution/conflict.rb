@@ -50,6 +50,32 @@ module Rigor
           "message" => message
         }
       end
+
+      # ADR-7 § "Slice 5-C" — converts the conflict into a
+      # `Rigor::Analysis::Diagnostic` for the run result.
+      # Carries `source_family: :contribution_merge` so the
+      # qualified-rule formatter (slice 5 formatter half,
+      # `ef730b2`) prefixes the rule id with
+      # `contribution_merge.` and the JSON output side-bands
+      # `source_family` + `rule` for plugin attribution.
+      #
+      # The `rule` identifier is the kebab-case form of the
+      # conflict reason (`return_type_collapse` →
+      # `return-type-collapse`, etc.) so the qualified rule
+      # reads `[contribution_merge.return-type-collapse]` in
+      # the standard text stream.
+      def to_diagnostic(path:, line:, column:, severity: :error)
+        require_relative "../analysis/diagnostic" unless defined?(Rigor::Analysis::Diagnostic)
+        Rigor::Analysis::Diagnostic.new(
+          path: path,
+          line: line,
+          column: column,
+          message: message,
+          severity: severity,
+          rule: reason.to_s.tr("_", "-"),
+          source_family: :contribution_merge
+        )
+      end
     end
   end
 end

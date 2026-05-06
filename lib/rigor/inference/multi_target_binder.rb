@@ -131,6 +131,8 @@ module Rigor
         end
 
         def bind_rest_target(splat_node, type, bindings)
+          return unless splat_node.is_a?(Prism::SplatNode)
+
           expression = splat_node.expression
           case expression
           when Prism::LocalVariableTargetNode, Prism::RequiredParameterNode

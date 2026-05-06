@@ -765,9 +765,38 @@ module Rigor
       def type_of_range(node)
         left_static, left = static_range_endpoint(node.left)
         right_static, right = static_range_endpoint(node.right)
-        return Type::Combinator.nominal_of(Range) unless left_static && right_static
+        return Type::Combinator.constant_of(Range.new(left, right, node.exclude_end?)) if left_static && right_static
 
-        Type::Combinator.constant_of(Range.new(left, right, node.exclude_end?))
+        nominal_range_for_endpoints(node.left, node.right)
+      end
+
+      # Derives `Nominal[Range, [T]]` from the endpoint expression
+      # types when at least one endpoint is statically typeable. The
+      # element parameter is the union of the endpoint types (lifted
+      # from `Constant<v>` to `Nominal<v.class>` so the carrier matches
+      # what `Range#each` would yield). Falls back to bare
+      # `Nominal[Range]` when no endpoint contributes a typable shape.
+      def nominal_range_for_endpoints(left_node, right_node)
+        endpoints = [left_node, right_node].compact.map { |n| range_endpoint_element_type(n) }
+        endpoints.reject! { |t| t.equal?(Type::Combinator.untyped) }
+        return Type::Combinator.nominal_of("Range") if endpoints.empty?
+
+        Type::Combinator.nominal_of("Range", type_args: [Type::Combinator.union(*endpoints)])
+      end
+
+      def range_endpoint_element_type(node)
+        type = type_of(node)
+        case type
+        when Type::Constant
+          value = type.value
+          return Type::Combinator.untyped if value.nil?
+
+          Type::Combinator.nominal_of(value.class.name)
+        when Type::IntegerRange
+          Type::Combinator.nominal_of("Integer")
+        else
+          type
+        end
       end
 
       # v0.0.7 — non-interpolated regex literals lift to
@@ -788,6 +817,7 @@ module Rigor
       def static_range_endpoint(node)
         return [true, nil] if node.nil?
         return [true, node.value] if node.is_a?(Prism::IntegerNode)
+        return [true, node.unescaped] if node.is_a?(Prism::StringNode) && node.respond_to?(:unescaped)
 
         [false, nil]
       end

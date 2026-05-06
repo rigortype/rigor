@@ -1067,6 +1067,20 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Range")
     end
 
+    it "types static string RangeNode as Constant<Range>" do
+      type = scope.type_of(parse_expression('("a".."z")'))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of("a".."z"))
+    end
+
+    it "types Float RangeNode as Range[Float]" do
+      type = scope.type_of(parse_expression("(1.5..2.5)"))
+
+      expect(type.class_name).to eq("Range")
+      expect(type.type_args.size).to eq(1)
+      expect(type.type_args.first).to eq(Rigor::Type::Combinator.nominal_of("Float"))
+    end
+
     it "types non-interpolated RegularExpressionNode as Constant<Regexp> (v0.0.7)" do
       type = scope.type_of(parse_expression("/foo/"))
 

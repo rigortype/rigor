@@ -68,6 +68,10 @@ Working state at release: 1728 RSpec examples / 0 failures, RuboCop 167 files / 
 
 ## Where the Work Resumes
 
+### v0.1.1 — deepen the literal-string narrowing surface (planned)
+
+Headline slice: **regex pattern → refinement-name recogniser** per `docs/MILESTONES.md` § "v0.1.1 — Planned". Extends the `Inference::Narrowing.analyse_match_write` path that v0.1.0 added (which narrows named-capture targets from `String | nil` to `String` in the truthy branch of `if /(?<x>...)/ =~ str`) so common anchored regex shapes — `/\A\d+\z/`, `/\A[a-z]+\z/`, `/\A\h+\z/`, etc. — additionally narrow each capture to the matching imported refinement carrier (`decimal-int-string`, `lowercase-string`, `hex-int-string`, …). Adjacent slices: `numeric-string`-aware folding through `Integer(s)` / `s.to_i`, and the `self`-narrowing in `predicate-if-*` carry-over.
+
 ### v0.1.0 — first plugin contract
 
 ADR-2 § "Extension API" fixes the design surface; v0.1.0's job is the implementation. The substrate landed in v0.0.3 → v0.0.9 — type vocabulary, inference engine, cache layer, FlowContribution bundle, public-API drift pins, RBS::Extended directive plumbing — leaves the contract surface as a finite assembly job. Recommended slice order, narrow-to-broad:
@@ -100,8 +104,7 @@ These remain explicitly out of scope until the plugin contract is stable; they s
 - **ObjectSpace catalog import** — needs a singleton-module dispatch path the catalog tier does not yet provide.
 - **URI / Kernel catalog imports** — fall outside the standard import skill's premise (pure-Ruby stdlib gem; methods scattered across 20+ C files with no single Init function). Both need hand-rolled or custom-scaffold approaches.
 - **Pathname / URI delegation rules** — wider refactor (Pathname facade routing through File projections).
-- **`numeric-string` regex-pattern recogniser.**
-- **`self`-narrowing in `predicate-if-*`** — no `self`-narrowing surface in the engine yet.
+- **`self`-narrowing in `predicate-if-*`** — no `self`-narrowing surface in the engine yet. (Promoted to v0.1.1 candidate per `docs/MILESTONES.md` § "v0.1.1 — Planned".)
 - **`rigor:v1:conforms-to` directive** — needs a real structural-conformance checker.
 - **`Trinary` return-type contract on type-carrier predicate methods** — needs a new CheckRules rule family (`return-type-mismatch`); deferred until the inference surface is sturdy enough to avoid false-positive churn.
 - **New CheckRules rule families** beyond the v0.0.3 `always-raises` line (type-incompatible writes, return-type mismatch, unreachable branches).

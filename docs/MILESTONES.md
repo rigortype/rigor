@@ -217,7 +217,6 @@ Out of scope for v0.1.0 (deferred to v0.1.x or beyond):
 - **ObjectSpace catalog import** — needs a singleton-module dispatch path the catalog tier does not yet provide.
 - **URI / Kernel catalog imports** — fall outside the standard import skill's premise.
 - **Pathname / URI delegation rules.**
-- **`numeric-string` regex-pattern recogniser.**
 - **`self`-narrowing in `predicate-if-*`.**
 - **`rigor:v1:conforms-to` directive** — needs a real structural-conformance checker.
 - **`Trinary` return-type contract on type-carrier predicate methods** — needs a new CheckRules rule family (`return-type-mismatch`).
@@ -225,3 +224,35 @@ Out of scope for v0.1.0 (deferred to v0.1.x or beyond):
 - **C-body classifier wider transitive mutator scan** — guards against the `Array#to_a` regression that gated the v0.0.5 fix.
 - **`Data.define` override-aware initializer dispatch.**
 - **Decimal / octal / hex `int-string` complement pairs.** Complement domains are too vague to warrant separate carriers.
+
+## v0.1.1 — Planned
+
+Theme: **deepen the literal-string narrowing surface that v0.1.0 just lit up**. The v0.1.0 release added narrowing through `if /(?<x>...)/ =~ str` predicates that lifts named-capture targets from `String | nil` to `String` in the truthy branch (`Inference::Narrowing.analyse_match_write`). v0.1.1 builds on that substrate.
+
+Slice plan:
+
+1. **Regex pattern → refinement-name recogniser.** Map common regex shapes onto Rigor's existing imported refinement carriers ([`docs/type-specification/imported-built-in-types.md`](type-specification/imported-built-in-types.md)) so a successful match narrows further than just `String`. Working table:
+
+   | Regex pattern (anchored, simple) | Refinement |
+   | --- | --- |
+   | `/\A\d+\z/` (one-or-more digits, anchored) | `decimal-int-string` |
+   | `/\A\d{N}\z/`, `/\A\d{N,M}\z/` (fixed / bounded length) | `decimal-int-string` |
+   | `/\A\h+\z/` or `/\A[0-9a-fA-F]+\z/` | `hex-int-string` |
+   | `/\A[0-7]+\z/` | `octal-int-string` |
+   | `/\A[a-z]+\z/` | `lowercase-string` |
+   | `/\A[A-Z]+\z/` | `uppercase-string` |
+   | `/\A[[:digit:]]+\z/` | `numeric-string` |
+   | named captures inside the above (`(?<year>\d{4})`) | each capture inherits the per-group refinement |
+
+   Implementation hook is `Inference::Narrowing.analyse_match_write` (added in v0.1.0). Today it returns `String` for every matched capture; v0.1.1 introspects the regex's source pattern, runs it through a pure `Builtins::RegexRefinement` recogniser, and returns the matching refinement carrier from `Type::Combinator` (`decimal_int_string`, `hex_int_string`, `numeric_string`, `lowercase_string`, `uppercase_string`) when one fits. Anything outside the table stays as plain `String`.
+
+   Recognition is deliberately limited to anchored patterns of the curated forms above; arbitrary regex semantic equivalence is undecidable. The recogniser is a small, audited table of canonical shapes, mirroring the spirit of `Builtins::ImportedRefinements`.
+
+2. **`numeric-string` (and friends) propagation through narrowing predicates.** Once a regex-derived refinement is in scope, `Integer(s)` / `Float(s)` / `s.to_i` / etc. on a `numeric-string` should fold to a more precise return type than the RBS `Integer` / `Float` baseline (when the conversion is total over the refinement's domain). Slice (1) is the producer; this slice is the consumer.
+
+3. **`self`-narrowing in `predicate-if-*` directives.** Carry-over from v0.1.0's deferred list. Independent of the regex work; can land in parallel with (1).
+
+Out of scope for v0.1.1 (deferred to v0.1.2 or beyond):
+
+- **Plugin return-type contributions.** Plugins authored in v0.1.0 emit diagnostics; the natural next step is to let them contribute `FlowContribution` bundles consumed by `Inference::MethodDispatcher` so plugin-side analysers can replace the analyzer's inferred return type for a call site. Sketched in [`examples/rigor-lisp-eval/README.md`](../examples/rigor-lisp-eval/README.md) § "Future direction" and at the head of `lib/rigor/plugin/lisp_eval.rb`. Likely a v0.1.2 / v0.1.3 slice once the example plugins have stabilised against the merger surface.
+- **Lightweight HKT / type-level type computation.** Conditional and indexed-access types per [`docs/type-specification/rigor-extensions.md`](type-specification/rigor-extensions.md) rows 22 / 51. Sketched in `examples/rigor-lisp-eval/demo/sig/lisp.rbs` and `examples/rigor-units/demo/sig/units.rbs`. Larger surface; not a single-slice item.

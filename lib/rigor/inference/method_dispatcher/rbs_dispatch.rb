@@ -243,7 +243,13 @@ module Rigor
 
           # rubocop:disable Metrics/ParameterLists
           def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:)
-            override = RbsExtended.read_return_type_override(method_definition)
+            # Slice 4b-3 (ADR-7 § "Slice 4-A/4-B") — read the
+            # return-type override through the merger so future
+            # plugin / `:rbs_extended` bundles that also assert a
+            # `return_type` slot at this call site compose with
+            # the RBS::Extended directive instead of silently
+            # racing it.
+            override = merged_return_type(method_definition)
             return override if override
 
             instance_type = Type::Combinator.nominal_of(class_name)
@@ -273,6 +279,20 @@ module Rigor
             )
           end
           # rubocop:enable Metrics/ParameterLists
+
+          # ADR-7 § "Slice 4-A/4-B" — folds the
+          # `RBS::Extended` `return:` directive (and any
+          # other `return_type`-bearing contribution future
+          # slices add at this call site) through the merger
+          # before consuming. Returns the merged return type
+          # or nil when no contribution overrides the
+          # RBS-declared return.
+          def merged_return_type(method_definition)
+            contribution = RbsExtended.read_flow_contribution(method_definition)
+            return nil if contribution.nil?
+
+            Rigor::FlowContribution::Merger.merge([contribution]).return_type
+          end
 
           # When a block type is supplied, locate the method-level
           # type parameter that the selected overload's block return

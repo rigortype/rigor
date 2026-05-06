@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — v0.1.0 slice 4b-3: RBS dispatch return-type override through the merger
+
+- **`Inference::MethodDispatcher::RbsDispatch.translate_return_type` reads the `return_type` slot via `Rigor::FlowContribution::Merger.merge([RbsExtended.read_flow_contribution(method_definition)])`** per [ADR-7 § "Slice 4-A/4-B"](docs/adr/7-v0.1.0-slice-decisions.md). Replaces the direct `RbsExtended.read_return_type_override` call. Future plugin / `:rbs_extended` bundles that assert a `return_type` slot at the same call site compose through the merger rather than silently racing each other; cross-tier conflicts surface through `MergeResult#conflicts` (slice 5 wires those onto the diagnostic stream). **No user-visible behaviour change** — the existing 1860-example RSpec suite passes unchanged.
+
 ### Changed — v0.1.0 slice 4b-2: post-return assertion narrowing through the merger
 
 - **`Inference::StatementEvaluator#apply_rbs_extended_assertions` routes through `RbsExtended.read_flow_contribution` + `Rigor::FlowContribution::Merger.merge`** per [ADR-7 § "Slice 4-A/4-B"](docs/adr/7-v0.1.0-slice-decisions.md). The earlier `apply_assert_effect` / `assert_effect_target_node` / `narrow_for_assert_effect` / `lookup_assert_arg` helpers (which read the typed `RbsExtended::AssertEffect` carriers via `read_assert_effects` and filtered for `:always`) collapse into `apply_post_return_fact` consuming the merged `post_return_facts` slot (which the slice-4a routing places `:always`-condition Facts on). `Narrowing.narrow_for_fact` is now the public entry point shared between the predicate (slice 4b-1) and post-return (this slice) paths. **No user-visible behaviour change** — the existing 1860-example RSpec suite passes unchanged.

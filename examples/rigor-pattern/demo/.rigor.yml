@@ -1,0 +1,9 @@
+paths:
+  - demo.rb
+
+plugins:
+  - gem: rigor-pattern
+    config:
+      patterns:
+        email: '\A[^\s@]+@[^\s@]+\z'
+        uuid: '\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z'

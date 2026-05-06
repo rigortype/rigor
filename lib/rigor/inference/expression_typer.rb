@@ -172,7 +172,9 @@ module Rigor
         Prism::WhileNode => :type_of_loop,
         Prism::UntilNode => :type_of_loop,
         Prism::ForNode => :type_of_dynamic_top,
-        Prism::DefinedNode => :type_of_dynamic_top,
+        Prism::DefinedNode => :type_of_defined,
+        Prism::NumberedReferenceReadNode => :type_of_string_or_nil,
+        Prism::BackReferenceReadNode => :type_of_string_or_nil,
         Prism::MatchPredicateNode => :type_of_dynamic_top,
         Prism::MatchRequiredNode => :type_of_dynamic_top,
         Prism::MatchWriteNode => :type_of_dynamic_top,
@@ -297,6 +299,29 @@ module Rigor
 
       def type_of_dynamic_top(_node)
         dynamic_top
+      end
+
+      # `defined?(expr)` returns `String | nil` per Ruby semantics —
+      # a description of the expression's category (`"local-variable"`,
+      # `"method"`, ...) when defined, or `nil` when not. The argument
+      # is not evaluated (it is statically inspected by the runtime),
+      # so the typer does not recurse into it.
+      def type_of_defined(_node)
+        Type::Combinator.union(
+          Type::Combinator.nominal_of("String"),
+          Type::Combinator.constant_of(nil)
+        )
+      end
+
+      # `$1`, `$&`, `$'`, `$+`, `$\`` — the regex back-reference and
+      # numbered-capture globals each carry `String | nil`. They share
+      # the typer because the typing rule is identical regardless of
+      # which back-reference shape Prism emitted.
+      def type_of_string_or_nil(_node)
+        Type::Combinator.union(
+          Type::Combinator.nominal_of("String"),
+          Type::Combinator.constant_of(nil)
+        )
       end
 
       # The expression `Foo` evaluates to the *class object* `Foo`, not

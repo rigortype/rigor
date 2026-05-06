@@ -79,6 +79,30 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  describe "regex back-references and `defined?`" do
+    let(:string_or_nil) do
+      Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("String"),
+        Rigor::Type::Combinator.constant_of(nil)
+      )
+    end
+
+    it "types `defined?(expr)` as String | nil" do
+      type = scope.type_of(parse_expression("defined?(y)"))
+      expect(type).to eq(string_or_nil)
+    end
+
+    it "types numbered references ($1, $2, ...) as String | nil" do
+      type = scope.type_of(parse_expression("$1"))
+      expect(type).to eq(string_or_nil)
+    end
+
+    it "types back-references ($&, $+, ...) as String | nil" do
+      type = scope.type_of(parse_expression("$&"))
+      expect(type).to eq(string_or_nil)
+    end
+  end
+
   describe "shallow array literals" do
     it "types empty arrays as the empty Tuple[] carrier (v0.0.6)" do
       # v0.0.6 — `[]` resolves to `Tuple[]` so the per-element

@@ -6,6 +6,7 @@ AllCops:
     - "vendor/**/*"
     - "spec/integration/fixtures/**/*"
     - "tool/**/*"
+    - "examples/**/*"
 
 plugins:
   - rubocop-rake

@@ -1,0 +1,37 @@
+module Lisp
+  # The runtime signature is intentionally permissive — the
+  # static return type is best inferred per call site by the
+  # rigor-lisp-eval plugin. Without the plugin loaded, every
+  # call resolves to `untyped`.
+  #
+  # Future direction — lightweight HKT / type-level eval.
+  #   The plugin currently surfaces the inferred type as a
+  #   diagnostic because v0.1.0 has no plugin hook for return-
+  #   type contributions. Once Rigor grows a lightweight type-
+  #   level computation surface — the conditional / indexed-
+  #   access form already listed under
+  #   docs/type-specification/rigor-extensions.md — the
+  #   `untyped` here can be replaced with a Rigor-side type
+  #   function that mirrors `Interpreter#evaluate`:
+  #
+  #     def self.eval: [E] (E expr) -> lisp_type[E]
+  #
+  #     type lisp_type[E] =
+  #         (E <: Integer ? Integer
+  #       : E <: Float    ? Float
+  #       : E <: bool     ? bool
+  #       : E <: [:+ | :- | :* | :/, A, B] ? numeric_join[lisp_type[A], lisp_type[B]]
+  #       : E <: [:< | :> | :<= | :>= | :==, _, _] ? bool
+  #       : E <: [:and | :or | :not, *_] ? bool
+  #       : E <: [:if, _, A, B] ? (lisp_type[A] | lisp_type[B])
+  #       : untyped)
+  #
+  #   At that point the runtime interpreter (lib/lisp.rb) and
+  #   the static type function live in one declarative table,
+  #   the analyzer's call-site inference replaces the
+  #   diagnostic with a real return-type, and `untyped`
+  #   disappears from this signature. The same `Interpreter`
+  #   class inside the plugin moves to a `FlowContribution`
+  #   contribution rather than a diagnostic emitter.
+  def self.eval: (untyped expr) -> untyped
+end

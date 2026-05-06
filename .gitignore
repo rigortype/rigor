@@ -1,6 +1,6 @@
 /.bundle/
 /.direnv/
-/.rigor/cache/
+.rigor/cache/
 /coverage/
 /pkg/
 /tmp/

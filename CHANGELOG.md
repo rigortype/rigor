@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — diagnostic ID family hierarchy (ADR-8 § 1)
+
+- **Built-in rule identifiers normalised to `family.rule-name` form** per [ADR-8 § "Diagnostic ID family hierarchy"](docs/adr/8-steep-inspired-improvements.md). The five built-in families are `call.*` (call-site rules), `flow.*` (flow-analysis proofs), `assert.*` (runtime assertion rules), `dump.*` (debug helpers), `def.*` (method-definition rules — first occupant arrives in slice #1). Mapping: `undefined-method` → `call.undefined-method`; `wrong-arity` → `call.wrong-arity`; `argument-type-mismatch` → `call.argument-type-mismatch`; `possible-nil-receiver` → `call.possible-nil-receiver`; `dump-type` → `dump.type`; `assert-type` → `assert.type-mismatch`; `always-raises` → `flow.always-raises`.
+- **Backward-compatible legacy aliases** keep `# rigor:disable undefined-method` and `disable: ["undefined-method"]` working unchanged. Unprefixed legacy names resolve through `Rigor::Analysis::CheckRules::LEGACY_RULE_ALIASES`. Removing the alias table is a future ADR once user code has migrated.
+- **Family wildcards** in `disable:` config and `# rigor:disable` comments. A bare family token (`call`, `flow`, `assert`, `dump`, `def`) suppresses every rule whose canonical id starts with that prefix. `# rigor:disable call` on a line with `"x".no_method` and `[1].rotate(1, 2)` suppresses both `call.undefined-method` and `call.wrong-arity` at once.
+- **`Rigor::Analysis::CheckRules.resolve_rule_token(token)`** is the public surface that resolves a user-supplied disable token (legacy unprefixed name, canonical name, or family wildcard) to its canonical-id set.
+
 ### Changed — per-method Reflection cache: single-blob layout
 
 - **`Cache::RbsInstanceDefinitions` / `Cache::RbsSingletonDefinitions` reshaped to the `RbsConstantTable` pattern.** A single `Hash<String, RBS::Definition>` blob per kind replaces the per-class entry layout the v0.1.0-carryover landed with. Disk footprint for `bundle exec exe/rigor check lib` drops from **212 MiB → 25 MiB** (1312 small files → 2 large blobs); cold-run timing drops from **5.94s → 3.15s**. Warm-run timing matches `--no-cache` (1.81s vs 1.92s) — the per-class layout was actively *slower* than no-cache because each lookup paid disk-open + Marshal.load overhead and the in-memory `RBS::DefinitionBuilder.build_instance` was fast given a cached `RBS::Environment`. Surfaced by dogfooding (Rigor analysing Rigor) once the v0.0.9 cache regression was fixed.

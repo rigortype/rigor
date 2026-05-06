@@ -27,17 +27,17 @@ RSpec.describe Rigor::Analysis::Diagnostic do
     end
 
     it "qualified_rule strips the prefix for builtin diagnostics" do
-      diagnostic = described_class.new(path: "f.rb", line: 1, column: 1, message: "x", rule: "always-raises")
-      expect(diagnostic.qualified_rule).to eq("always-raises")
+      diagnostic = described_class.new(path: "f.rb", line: 1, column: 1, message: "x", rule: "flow.always-raises")
+      expect(diagnostic.qualified_rule).to eq("flow.always-raises")
     end
 
     it "qualified_rule prefixes the source family for non-builtin diagnostics" do
       diagnostic = described_class.new(
-        path: "f.rb", line: 1, column: 1, message: "x", rule: "always-raises",
+        path: "f.rb", line: 1, column: 1, message: "x", rule: "flow.always-raises",
         source_family: :rbs_extended
       )
-      expect(diagnostic.qualified_rule).to eq("rbs_extended.always-raises")
-      expect(diagnostic.to_h).to include("source_family" => "rbs_extended", "rule" => "always-raises")
+      expect(diagnostic.qualified_rule).to eq("rbs_extended.flow.always-raises")
+      expect(diagnostic.to_h).to include("source_family" => "rbs_extended", "rule" => "flow.always-raises")
     end
 
     it "qualified_rule handles plugin.<id>-style string source families" do
@@ -58,7 +58,7 @@ RSpec.describe Rigor::Analysis::Diagnostic do
   describe "qualified-rule rendering in #to_s (v0.1.0 slice 5)" do
     it "leaves builtin diagnostics unchanged" do
       diagnostic = described_class.new(
-        path: "f.rb", line: 1, column: 2, message: "boom", rule: "undefined-method"
+        path: "f.rb", line: 1, column: 2, message: "boom", rule: "call.undefined-method"
       )
       expect(diagnostic.to_s).to eq("f.rb:1:2: error: boom")
     end

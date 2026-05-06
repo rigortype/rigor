@@ -42,19 +42,24 @@ module Rigor
     # the first preview; later slices broaden it.
     # rubocop:disable Metrics/ModuleLength
     module CheckRules
-      # Stable identifiers for each rule. Used by the
-      # configuration `disable:` list and the in-source
-      # `# rigor:disable <rule>` suppression comment system
-      # to identify diagnostics by category. Rule identifiers
-      # are kebab-case strings; new rules MUST register here
-      # so user configuration can refer to them.
-      RULE_UNDEFINED_METHOD = "undefined-method"
-      RULE_WRONG_ARITY = "wrong-arity"
-      RULE_ARGUMENT_TYPE = "argument-type-mismatch"
-      RULE_NIL_RECEIVER = "possible-nil-receiver"
-      RULE_DUMP_TYPE = "dump-type"
-      RULE_ASSERT_TYPE = "assert-type"
-      RULE_ALWAYS_RAISES = "always-raises"
+      # Canonical identifiers for each rule. Per ADR-8 §
+      # "Diagnostic ID family hierarchy", rule names are
+      # `family.rule-name` two-segment strings; the families
+      # group diagnostics by where they originate
+      # (`call.*` for call-site rules, `flow.*` for flow-analysis
+      # proofs, `assert.*` for runtime-assertion rules,
+      # `dump.*` for debug helpers, `def.*` for method-definition
+      # rules). Used by the configuration `disable:` list and the
+      # in-source `# rigor:disable <rule>` suppression comment
+      # system; new rules MUST register here so user configuration
+      # can refer to them.
+      RULE_UNDEFINED_METHOD = "call.undefined-method"
+      RULE_WRONG_ARITY = "call.wrong-arity"
+      RULE_ARGUMENT_TYPE = "call.argument-type-mismatch"
+      RULE_NIL_RECEIVER = "call.possible-nil-receiver"
+      RULE_DUMP_TYPE = "dump.type"
+      RULE_ASSERT_TYPE = "assert.type-mismatch"
+      RULE_ALWAYS_RAISES = "flow.always-raises"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -65,6 +70,42 @@ module Rigor
         RULE_ASSERT_TYPE,
         RULE_ALWAYS_RAISES
       ].freeze
+
+      # Backward-compat alias table (ADR-8 § "Backward
+      # compatibility"). Existing user code with
+      # `# rigor:disable undefined-method` /
+      # `disable: [undefined-method]` keeps working — the
+      # legacy unprefixed identifiers map to their canonical
+      # `family.rule-name` form here. Removing the aliases is
+      # a future ADR once user code has migrated; until then,
+      # both spellings resolve identically.
+      LEGACY_RULE_ALIASES = {
+        "undefined-method" => RULE_UNDEFINED_METHOD,
+        "wrong-arity" => RULE_WRONG_ARITY,
+        "argument-type-mismatch" => RULE_ARGUMENT_TYPE,
+        "possible-nil-receiver" => RULE_NIL_RECEIVER,
+        "dump-type" => RULE_DUMP_TYPE,
+        "assert-type" => RULE_ASSERT_TYPE,
+        "always-raises" => RULE_ALWAYS_RAISES
+      }.freeze
+
+      # Family wildcard — a `<family>` token in a suppression
+      # comment or `disable:` list disables every rule whose
+      # canonical id starts with `<family>.`. Per ADR-8 § "1".
+      RULE_FAMILIES = %w[call flow assert dump def].freeze
+
+      # Resolves a user-supplied rule token (`undefined-method`,
+      # `call.undefined-method`, or the family wildcard `call`)
+      # to the set of canonical rule identifiers it disables.
+      # Returns `nil` for `"all"` (the existing wildcard meaning
+      # "every rule"), or for unknown tokens.
+      def self.resolve_rule_token(token)
+        return nil if token == "all"
+        return [LEGACY_RULE_ALIASES.fetch(token)] if LEGACY_RULE_ALIASES.key?(token)
+        return ALL_RULES.select { |r| r.start_with?("#{token}.") } if RULE_FAMILIES.include?(token)
+
+        ALL_RULES.include?(token) ? [token] : []
+      end
 
       module_function
 
@@ -125,7 +166,7 @@ module Rigor
       # silence away.
       def filter_suppressed(diagnostics, comments:, disabled_rules:)
         suppressions = parse_suppression_comments(comments)
-        disabled = disabled_rules.to_set(&:to_s)
+        disabled = expand_rule_tokens(disabled_rules)
 
         diagnostics.reject do |diagnostic|
           rule = diagnostic.rule
@@ -137,7 +178,7 @@ module Rigor
         end
       end
 
-      SUPPRESSION_PATTERN = /#\s*rigor:disable\s+(?<rules>[\w,\s-]+)/
+      SUPPRESSION_PATTERN = /#\s*rigor:disable\s+(?<rules>[\w.,\s-]+)/
       private_constant :SUPPRESSION_PATTERN
 
       def parse_suppression_comments(comments)
@@ -148,9 +189,27 @@ module Rigor
           next if match.nil?
 
           rules = match[:rules].to_s.split(/[\s,]+/).reject(&:empty?)
-          rules.each { |rule| result[comment.location.start_line] << rule }
+          rules.each { |token| result[comment.location.start_line].merge(expand_token(token)) }
         end
         result
+      end
+
+      # Expands a list of user-supplied rule tokens into the
+      # canonical-id set per ADR-8 § "Backward compatibility".
+      # `disabled_rules` accepts unprefixed legacy names
+      # (`undefined-method`), canonical names
+      # (`call.undefined-method`), and family wildcards (`call`).
+      def expand_rule_tokens(tokens)
+        Array(tokens).each_with_object(Set.new) do |token, set|
+          set.merge(expand_token(token.to_s))
+        end
+      end
+
+      def expand_token(token)
+        return ["all"] if token == "all"
+
+        resolved = resolve_rule_token(token)
+        resolved.nil? || resolved.empty? ? [token] : resolved
       end
 
       # rubocop:disable Metrics/ClassLength

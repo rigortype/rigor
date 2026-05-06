@@ -151,7 +151,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
       describe "diagnostic suppression (v0.0.2 #6)" do # rubocop:disable RSpec/NestedGroups
         it "skips rules listed in `disable:` of the configuration" do
-          result = analyze("\"x\".no_method\n", config: { "disable" => ["undefined-method"] })
+          result = analyze("\"x\".no_method\n", config: { "disable" => ["call.undefined-method"] })
 
           expect(result).to be_success
         end
@@ -169,7 +169,28 @@ RSpec.describe Rigor::Analysis::Runner do
           RUBY
 
           expect(result.diagnostics.size).to eq(1)
-          expect(result.diagnostics.first.rule).to eq("wrong-arity")
+          expect(result.diagnostics.first.rule).to eq("call.wrong-arity")
+        end
+
+        # ADR-8 § "Diagnostic ID family hierarchy"
+        it "honours legacy unprefixed disable identifiers" do
+          legacy = analyze("\"x\".no_method\n", config: { "disable" => ["undefined-method"] })
+          expect(legacy).to be_success
+        end
+
+        it "supports family-wildcard disable tokens (`call` disables every call.* rule)" do
+          src = "\"x\".no_method\n[1].rotate(1, 2)\n"
+          # Both diagnostics fire under default config
+          baseline = analyze(src)
+          expect(baseline.diagnostics.map(&:rule)).to include("call.undefined-method", "call.wrong-arity")
+          # `call` family wildcard suppresses both
+          wild = analyze(src, config: { "disable" => ["call"] })
+          expect(wild).to be_success
+        end
+
+        it "honours a family-wildcard `# rigor:disable call` comment on the same line" do
+          result = analyze(%("x".no_method  # rigor:disable call\n))
+          expect(result).to be_success
         end
       end
 
@@ -311,7 +332,7 @@ RSpec.describe Rigor::Analysis::Runner do
         assert_type("42", x)
       RUBY
 
-      expect(result.diagnostics.select { |d| d.rule == "assert-type" }).to be_empty
+      expect(result.diagnostics.select { |d| d.rule == "assert.type-mismatch" }).to be_empty
     end
 
     it "returns Dynamic[Top] when the top-level def has a complex param shape" do
@@ -331,7 +352,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
       # `mt` is `Dynamic[Top]`; the undefined-method rule
       # skips Dynamic receivers so no diagnostic surfaces.
-      expect(result.diagnostics.select { |d| d.rule == "undefined-method" }).to be_empty
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
     end
   end
 
@@ -347,7 +368,7 @@ RSpec.describe Rigor::Analysis::Runner do
         x.upcase
       RUBY
 
-      nil_errors = result.diagnostics.select { |d| d.rule == "possible-nil-receiver" }
+      nil_errors = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
       expect(nil_errors).to be_empty
     end
 
@@ -362,7 +383,7 @@ RSpec.describe Rigor::Analysis::Runner do
         x.upcase
       RUBY
 
-      expect(result.diagnostics.select { |d| d.rule == "possible-nil-receiver" }).to be_empty
+      expect(result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }).to be_empty
     end
 
     it "narrows a union to the asserted class after `expect(x).to be_a(C)`" do
@@ -382,7 +403,7 @@ RSpec.describe Rigor::Analysis::Runner do
       # integer-side carrier (Constant[42] survives because
       # it is a subtype of Integer); the String carrier is
       # dropped.
-      mismatch = result.diagnostics.find { |d| d.rule == "assert-type" }
+      mismatch = result.diagnostics.find { |d| d.rule == "assert.type-mismatch" }
       expect(mismatch).to be_nil
     end
 
@@ -400,7 +421,7 @@ RSpec.describe Rigor::Analysis::Runner do
         x.upcase
       RUBY
 
-      nil_errors = result.diagnostics.select { |d| d.rule == "possible-nil-receiver" }
+      nil_errors = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
       expect(nil_errors).not_to be_empty
     end
   end
@@ -428,7 +449,7 @@ RSpec.describe Rigor::Analysis::Runner do
   describe "always-raises rule (Integer division/modulo by zero)" do
     it "flags `5 / 0` as always-raising at :error severity" do
       result = analyze("5 / 0\n")
-      diag = result.diagnostics.find { |d| d.rule == "always-raises" }
+      diag = result.diagnostics.find { |d| d.rule == "flow.always-raises" }
       expect(diag).not_to be_nil
       expect(diag.message).to include("ZeroDivisionError")
       expect(diag.severity).to eq(:error)
@@ -443,28 +464,28 @@ RSpec.describe Rigor::Analysis::Runner do
         "5.divmod(0)\n" => "divmod"
       }
       sources.each do |src, label|
-        diag = analyze(src).diagnostics.find { |d| d.rule == "always-raises" }
+        diag = analyze(src).diagnostics.find { |d| d.rule == "flow.always-raises" }
         expect(diag).not_to(be_nil, "expected an always-raises diagnostic for `#{label}`")
       end
     end
 
     it "fires when the receiver is Nominal[Integer] (wider receiver)" do
-      diag = analyze("rand(100) / 0\n").diagnostics.find { |d| d.rule == "always-raises" }
+      diag = analyze("rand(100) / 0\n").diagnostics.find { |d| d.rule == "flow.always-raises" }
       expect(diag).not_to be_nil
     end
 
     it "does not fire on Float arithmetic (returns Infinity, not raise)" do
       expect(
-        analyze("5.0 / 0\n").diagnostics.find { |d| d.rule == "always-raises" }
+        analyze("5.0 / 0\n").diagnostics.find { |d| d.rule == "flow.always-raises" }
       ).to be_nil
       expect(
-        analyze("5 / 0.0\n").diagnostics.find { |d| d.rule == "always-raises" }
+        analyze("5 / 0.0\n").diagnostics.find { |d| d.rule == "flow.always-raises" }
       ).to be_nil
     end
 
     it "does not fire on Integer#fdiv (returns Infinity, not raise)" do
       expect(
-        analyze("5.fdiv(0)\n").diagnostics.find { |d| d.rule == "always-raises" }
+        analyze("5.fdiv(0)\n").diagnostics.find { |d| d.rule == "flow.always-raises" }
       ).to be_nil
     end
 
@@ -476,13 +497,13 @@ RSpec.describe Rigor::Analysis::Runner do
       # `rand(100)` could be zero but the analyzer cannot
       # prove it, so the rule stays silent.
       expect(
-        analyze("rand(100) / rand(100)\n").diagnostics.find { |d| d.rule == "always-raises" }
+        analyze("rand(100) / rand(100)\n").diagnostics.find { |d| d.rule == "flow.always-raises" }
       ).to be_nil
     end
 
     it "is suppressible via `# rigor:disable always-raises`" do
       result = analyze("5 / 0 # rigor:disable always-raises\n")
-      expect(result.diagnostics.find { |d| d.rule == "always-raises" }).to be_nil
+      expect(result.diagnostics.find { |d| d.rule == "flow.always-raises" }).to be_nil
     end
   end
 

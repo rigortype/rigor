@@ -211,9 +211,15 @@ module Rigor
         #                (no plugins are loaded today).
         # - disable:     list of `rigor check` rule identifiers to
         #                silence project-wide. The shipped rules are
-        #                undefined-method, wrong-arity,
-        #                argument-type-mismatch, possible-nil-receiver,
-        #                dump-type, assert-type. In-source
+        #                call.undefined-method, call.wrong-arity,
+        #                call.argument-type-mismatch,
+        #                call.possible-nil-receiver, dump.type,
+        #                assert.type-mismatch, flow.always-raises.
+        #                A bare family token (`call`, `flow`,
+        #                `assert`, `dump`, `def`) wildcards every
+        #                rule under that prefix. Legacy unprefixed
+        #                names (`undefined-method`, …) still
+        #                resolve. In-source
         #                `# rigor:disable <rule>` comments at the end
         #                of an offending line silence per-line; use
         #                `# rigor:disable all` to suppress every rule.

@@ -59,6 +59,7 @@ When a change touches type-language behaviour or analyzer-internal contracts, th
 | [`docs/adr/5-robustness-principle.md`](docs/adr/5-robustness-principle.md) | Design rationale for Postel's law. Companion to `docs/type-specification/robustness-principle.md`. |
 | [`docs/adr/6-cache-persistence-backend.md`](docs/adr/6-cache-persistence-backend.md) | Cache persistence backend choice (sharded directory of binary entries, per-file `flock` write atomicity, no eviction). |
 | [`docs/adr/7-v0.1.0-slice-decisions.md`](docs/adr/7-v0.1.0-slice-decisions.md) | Working decisions for v0.1.0 slices 4 – 6 (FlowContribution wiring through internal narrowing, plugin diagnostic emission protocol, plugin-side cache producers). |
+| [`docs/adr/8-steep-inspired-improvements.md`](docs/adr/8-steep-inspired-improvements.md) | Working decisions for the Steep-inspired improvements (diagnostic family hierarchy, severity profile, `def.return-type-mismatch` rule). |
 
 ## Skills available in this repository
 

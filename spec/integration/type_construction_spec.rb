@@ -507,7 +507,7 @@ RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpe
       # The fixture uses `# rigor:disable always-raises` on each
       # raising line, so a clean run proves both that the rule
       # fired AND that the suppression comment matches.
-      raises = harness.errors.select { |d| d.rule == "always-raises" }
+      raises = harness.errors.select { |d| d.rule == "flow.always-raises" }
       expect(raises).to be_empty
     end
   end

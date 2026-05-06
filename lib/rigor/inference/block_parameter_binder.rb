@@ -34,6 +34,12 @@ module Rigor
     # `[1, 2, 3].each { _1 + _2 }` sees `_1`/`_2` typed identically
     # to their explicit `|x, y|` counterparts.
     #
+    # The `it` implicit parameter (Ruby 3.4+) is bound from
+    # `Prism::ItParametersNode`. It is the single-argument cousin of
+    # `_1`: the binder produces `{ it: expected_param_types[0] }` so
+    # the body's `Prism::ItLocalVariableReadNode` lookup sees the same
+    # type as the explicit `|x|` form would.
+    #
     # Block-local declarations after `;` (e.g., `|x; y, z|`) are
     # still skipped — they are explicitly block-local, so the outer
     # scope MUST NOT observe them and the binder leaves them unbound.
@@ -65,6 +71,8 @@ module Rigor
         case params_root
         when Prism::NumberedParametersNode
           bind_numbered_parameters(params_root)
+        when Prism::ItParametersNode
+          bind_it_parameter
         when Prism::BlockParametersNode
           bind_block_parameters(params_root)
         else
@@ -86,6 +94,13 @@ module Rigor
           bindings[:"_#{i + 1}"] = positional_type_at(i)
         end
         bindings
+      end
+
+      # `{ it.foo }` — Ruby 3.4 `it` is a single-argument implicit
+      # parameter. Always binds the symbol `:it`; `ItLocalVariableReadNode`
+      # in the body looks the binding up by name.
+      def bind_it_parameter
+        { it: positional_type_at(0) }
       end
 
       def bind_block_parameters(params_root)

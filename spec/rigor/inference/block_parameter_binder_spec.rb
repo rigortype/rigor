@@ -143,6 +143,19 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
       expect(bindings[:_2]).to eq(Rigor::Type::Combinator.untyped)
     end
 
+    it "binds the `it` implicit parameter from ItParametersNode" do
+      block = parse_block("foo { it.succ }")
+      expect(block.parameters).to be_a(Prism::ItParametersNode)
+      bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)
+      expect(bindings).to eq(it: integer_nominal)
+    end
+
+    it "defaults `it` to Dynamic[Top] when expected_param_types is empty" do
+      block = parse_block("foo { it.succ }")
+      bindings = described_class.new(expected_param_types: []).bind(block)
+      expect(bindings).to eq(it: untyped)
+    end
+
     it "destructures MultiTargetNode block parameters element-wise from a Tuple" do
       block = parse_block("foo { |(a, b), c| a }")
       tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)

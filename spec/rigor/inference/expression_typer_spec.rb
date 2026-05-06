@@ -65,6 +65,18 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       _ = scope.type_of(parse_expression("y = 7"))
       expect(scope.local(:y)).to be_nil
     end
+
+    it "types `it` (Ruby 3.4) as the binding installed under :it" do
+      bound = scope.with_local(:it, Rigor::Type::Combinator.constant_of(42))
+      it_read = Prism.parse("[1].each { it }").value.statements.body.first.block.body.body.first
+      expect(it_read).to be_a(Prism::ItLocalVariableReadNode)
+      expect(bound.type_of(it_read).describe).to eq("42")
+    end
+
+    it "fails soft on unbound `it` to Dynamic[Top]" do
+      it_read = Prism.parse("[1].each { it }").value.statements.body.first.block.body.body.first
+      expect(scope.type_of(it_read)).to equal(Rigor::Type::Combinator.untyped)
+    end
   end
 
   describe "shallow array literals" do

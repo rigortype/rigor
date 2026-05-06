@@ -65,6 +65,7 @@ module Rigor
         Prism::NilNode => :type_of_nil,
         # Locals
         Prism::LocalVariableReadNode => :local_read,
+        Prism::ItLocalVariableReadNode => :it_read,
         Prism::LocalVariableWriteNode => :type_of_assignment_write,
         # Containers and pass-throughs
         Prism::ArrayNode => :array_type_for,
@@ -803,6 +804,13 @@ module Rigor
 
       def local_read(node)
         scope.local(node.name) || dynamic_top
+      end
+
+      # `it` (Ruby 3.4) — `ItLocalVariableReadNode` carries no `name`
+      # field; the implicit name is always `:it`, matching the binding
+      # `BlockParameterBinder` installs for `Prism::ItParametersNode`.
+      def it_read(_node)
+        scope.local(:it) || dynamic_top
       end
 
       # Slice 5 phase 1 upgrades array literals to `Tuple[T1..Tn]`

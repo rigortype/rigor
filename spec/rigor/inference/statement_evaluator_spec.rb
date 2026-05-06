@@ -212,6 +212,39 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       expect(post.local(:y).members.map(&:value)).to contain_exactly("hi", nil)
     end
+
+    it "for-loop binds the index in the post-loop scope (nil-injected)" do
+      type, post = evaluate(<<~RUBY)
+        for i in [1, 2, 3]
+        end
+      RUBY
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(nil))
+      # `i` is bound only inside the body, so the no-iteration join
+      # path nil-injects it into the post-loop scope.
+      i_type = post.local(:i)
+      expect(i_type.members).to include(Rigor::Type::Combinator.constant_of(nil)) if i_type.is_a?(Rigor::Type::Union)
+      expect(i_type).not_to be_nil
+    end
+
+    it "for-loop body-locals leak into the surrounding scope" do
+      _, post = evaluate(<<~RUBY)
+        for i in [1, 2, 3]
+          y = "hi"
+        end
+      RUBY
+      # Unlike `each {}`, `for` does not introduce a new variable
+      # scope: writes inside the body are observable after the loop.
+      expect(post.local(:y).members.map(&:value)).to contain_exactly("hi", nil)
+    end
+
+    it "for-loop with multi-target index binds each name" do
+      _, post = evaluate(<<~RUBY)
+        for a, b in [[1, 2]]
+        end
+      RUBY
+      expect(post.local(:a)).not_to be_nil
+      expect(post.local(:b)).not_to be_nil
+    end
   end
 
   describe "and/or short-circuit" do

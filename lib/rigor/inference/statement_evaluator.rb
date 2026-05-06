@@ -85,6 +85,7 @@ module Rigor
         Prism::EnsureNode => :eval_ensure,
         Prism::WhileNode => :eval_loop,
         Prism::UntilNode => :eval_loop,
+        Prism::ForNode => :eval_for,
         Prism::AndNode => :eval_and_or,
         Prism::OrNode => :eval_and_or,
         Prism::ParenthesesNode => :eval_parentheses,
@@ -567,6 +568,46 @@ module Rigor
           Type::Combinator.constant_of(nil),
           join_with_nil_injection(post_pred, body_scope)
         ]
+      end
+
+      # `for index in collection; body; end`. Unlike `each {}` blocks,
+      # `for` does NOT create a new variable scope: the index variable
+      # AND every local written in the body leak to the surrounding
+      # scope. The collection is evaluated once; the body runs zero or
+      # more times, so the post-loop scope is the join of the
+      # no-iteration scope (just `post_collection`) and the body scope,
+      # with half-bound names degraded to `T | nil` via nil-injection.
+      # The loop expression itself types as `Constant[nil]` (the common
+      # case where no `break VALUE` is observed), matching the policy
+      # `eval_loop` uses for `while` / `until`.
+      def eval_for(node)
+        _coll_type, post_coll = sub_eval(node.collection, scope)
+        body_entry = bind_for_index(node.index, post_coll)
+
+        return [Type::Combinator.constant_of(nil), body_entry] if node.statements.nil?
+
+        _body_type, body_scope = sub_eval(node.statements, body_entry)
+        [
+          Type::Combinator.constant_of(nil),
+          join_with_nil_injection(post_coll, body_scope)
+        ]
+      end
+
+      # Binds the `for` index variable(s) into `scope`. A single
+      # `LocalVariableTargetNode` is bound to `untyped` (per-element
+      # iteration-protocol type extraction is a future slice); a
+      # `MultiTargetNode` (`for a, b in pairs`) delegates to
+      # {MultiTargetBinder} with an `untyped` slot type.
+      def bind_for_index(index_node, scope)
+        case index_node
+        when Prism::LocalVariableTargetNode
+          scope.with_local(index_node.name, Type::Combinator.untyped)
+        when Prism::MultiTargetNode
+          MultiTargetBinder.bind(index_node, Type::Combinator.untyped)
+                           .reduce(scope) { |s, (name, type)| s.with_local(name, type) }
+        else
+          scope
+        end
       end
 
       # `a && b` / `a || b`. The LHS always runs, the RHS only

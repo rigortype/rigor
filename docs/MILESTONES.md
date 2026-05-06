@@ -190,26 +190,34 @@ Deferred from v0.0.9 (carry forward to v0.1.0+):
 - **LSP / long-running-daemon cache mode.**
 - **LRU eviction / size cap.** Still unbounded; users run `--clear-cache` if needed.
 
-## v0.1.0 — In Development
+## v0.1.0 — All slices landed; release pending
 
 Theme: **first plugin contract**. ADR-2 § "Extension API" fixes the design surface; v0.1.0 ships the implementation. The pre-v0.1.0 substrate landed in v0.0.3 → v0.0.9 — type vocabulary, inference engine, persistent cache layer wired through `rigor check`, `Rigor::Reflection` facade, `Rigor::FlowContribution` bundle, public-API drift pins (`Scope` / `Environment` / `Type::Combinator` / `Reflection`), `Diagnostic#source_family`, RBS::Extended directive plumbing — leaving v0.1.0 as a finite assembly job rather than an open architectural exercise.
 
 The public surface plugins attach to is documented in [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) and pinned by `spec/rigor/public_api_drift_spec.rb`. Slices that extend a pinned namespace update the drift spec in the same commit.
 
-Slice plan (recommended order; each slice independently shippable behind a `Rigor::Plugin` namespace gate until the contract is exercised end-to-end):
+Slice plan — **all six landed (unreleased on `master`)**:
 
-1. **Plugin registration / loading.** Manifest discovery (gem metadata + project-local plugins), deterministic load ordering, dependency-injected analyzer services (`Reflection`, type factories, configuration readers). ADR-2 § "Registration, Configuration, and Caching". Smallest viable slice; no engine behaviour change yet, just the registry the rest of v0.1.0 attaches to.
-2. **Plugin trust / I/O policy.** ADR-2 § "Plugin Trust and I/O Policy". Trusted-gem model, network disabled by default during analysis, file reads scoped to project + dependency metadata. Lands alongside (1) so the loader has the policy to enforce.
-3. **Plugin contribution merger.** Consumes `FlowContribution` bundles per ADR-2 § "Plugin Contribution Merging". The analyzer-internal conversion (built-in narrowing rules + `RbsExtended.read_flow_contribution` from v0.0.9 group D) is the reference implementation; this slice routes plugin-emitted bundles through the same merger.
-4. **FlowContribution wiring through internal narrowing.** Internal-only refactor that turns the merger into the single point of integration. Carry-over from v0.0.9. No user-visible behaviour change, but de-risks (3) by exercising every conversion site under existing specs.
-5. **Plugin diagnostic provenance.** `Diagnostic#source_family` (shipped in v0.0.8) already publishes `plugin.<id>.<rule>` qualified rules; this slice wires plugin-emitted diagnostics through the formatter so the path is exercised end-to-end.
-6. **Plugin-side cache producers.** Plugins register `producer_id`s and ride the v0.0.9 `Store#fetch_or_compute(serialize:, deserialize:)` surface, with `PluginEntry` rows in the descriptor schema for invalidation. Bundles cleanly with the per-method Reflection cache re-attempt deferred from v0.0.9.
+1. **Plugin registration / loading.** ✅ `Rigor::Plugin` namespace (Base / Manifest / Services / Registry / Loader / LoadError) per ADR-2 § "Registration, Configuration, and Caching". Spec [`docs/internal-spec/plugin.md`](internal-spec/plugin.md).
+2. **Plugin trust / I/O policy.** ✅ `Plugin::TrustPolicy` + `Plugin::IoBoundary` + `Plugin::AccessDeniedError` + `.rigor.yml` `plugins_io:` section. Spec [`docs/internal-spec/plugin-trust.md`](internal-spec/plugin-trust.md).
+3. **Plugin contribution merger.** ✅ `FlowContribution::Merger` + `Element` flattening + `MergeResult` + `Conflict`. Spec [`docs/internal-spec/flow-contribution-merger.md`](internal-spec/flow-contribution-merger.md).
+4. **FlowContribution wiring through internal narrowing.** ✅ Slice 4a (substrate — `Fact` value object + carrier translations) + slice 4b (three consumer call sites — `analyse_rbs_extended_contribution`, post-return assertion, return-type override). Working decisions in [ADR-7 § "Slice 4"](adr/7-v0.1.0-slice-decisions.md).
+5. **Plugin diagnostic emission protocol.** ✅ `Plugin::Base#diagnostics_for_file` per-file hook + `Analysis::Runner` auto-stamps `source_family: "plugin.<id>"` + `Conflict#to_diagnostic`.
+6. **Plugin-side cache producers.** ✅ `Plugin::Base.producer` DSL + `Plugin::Base#cache_for` callable + auto-prefixed `plugin.<manifest.id>.` ids + auto-assembled `Cache::Descriptor`. Spec [`docs/internal-spec/plugin-cache-producers.md`](internal-spec/plugin-cache-producers.md).
+
+V0.1.0 polish work that landed alongside the six slices:
+
+- **Six worked plugin examples** under [`examples/`](../examples/README.md) — `rigor-deprecations`, `rigor-lisp-eval`, `rigor-pattern`, `rigor-routes`, `rigor-statesman`, `rigor-units`. 67 integration examples across `spec/integration/examples/`.
+- **Nine-chapter end-user handbook** under [`docs/handbook/`](handbook/README.md).
+- **Two precision improvements** — named-capture regex narrowing through `if /(?<x>...)/ =~ str`; `;`-prefixed block-local `Constant[nil]` shadow.
+
+Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), the version bump (`Rigor::VERSION` → `0.1.0`, `CHANGELOG.md` `[Unreleased]` → `[0.1.0] - YYYY-MM-DD`, `Gemfile.lock` regenerated) waits for explicit user authorisation. Once the user authorises the cut, follow [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md).
 
 Carry-overs from v0.0.9 absorbed into v0.1.0 (independent of plugin loading; can land in parallel with the slices above):
 
-- **Per-method Reflection caches** (`instance_method_definition`, `singleton_method_definition`, …). Marshal-clean since the v0.0.9 C2 patch. A v0.0.9 attempt at conditional cache wiring inside `RbsLoader` triggered an analyzer regression (`uninitialized constant Rigor::Cache::RbsDescriptor::Descriptor` on `rigor check lib`); root cause not isolated. Re-attempt belongs alongside (6) where the conditional-store discipline is unified.
+- **Per-method Reflection caches** (`instance_method_definition`, `singleton_method_definition`, …). Marshal-clean since the v0.0.9 C2 patch. A v0.0.9 attempt at conditional cache wiring inside `RbsLoader` triggered an analyzer regression (`uninitialized constant Rigor::Cache::RbsDescriptor::Descriptor` on `rigor check lib`); root cause diagnosed (missing `require_relative "descriptor"` in two files; the `NameError` was being silently swallowed by fail-soft `rescue StandardError` blocks). Fix landed; cache hits register correctly through `--cache-stats`.
 
-Out of scope for v0.1.0 (deferred to v0.1.x or beyond):
+Out of scope for v0.1.0 (deferred to v0.1.x or beyond — see also the v0.1.1 section below):
 
 - **LSP / long-running-daemon cache mode.** Requires concurrent multi-process safety beyond the per-file `flock` model.
 - **LRU eviction / size cap.** Cache stays unbounded; users run `--clear-cache` if needed.

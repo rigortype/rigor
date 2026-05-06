@@ -8,7 +8,7 @@ All project-authored documentation in this repository should be written in Engli
 
 Rigor is an inference-first static analyzer for Ruby. It keeps application code free of type annotations and runtime dependencies, and starts with a CLI-first development experience.
 
-The current implementation is an initial scaffold. It uses `Prism` to parse Ruby source files and exposes syntax diagnostics through the CLI as the smallest useful analysis surface.
+The current implementation is the v0.1.0-ready inference engine plus the v0.1.0 plugin contract. It parses Ruby with `Prism`, runs a flow-sensitive type-inference engine over each file, consults RBS signatures (bundled stdlib + project `sig/` + gem RBS) plus in-source `def` / `define_method` / `attr_*` / `Data.define` discovery, and reports a deliberately-narrow rule catalogue (the `call.*` / `flow.*` / `def.*` / `assert.*` / `dump.*` families). The plugin contract — registration / loading, `TrustPolicy` + `IoBoundary`, `FlowContribution::Merger`, per-file diagnostic emission, plugin-side cache producers — is all landed; six worked plugin examples live under [`examples/`](examples/README.md) and a nine-chapter end-user handbook lives under [`docs/handbook/`](docs/handbook/README.md).
 
 ## Development Environment
 
@@ -85,6 +85,8 @@ nix --extra-experimental-features 'nix-command flakes' develop --command bundle 
 - `lib/rigor/analysis`: diagnostics, analysis results, and the analysis runner
 - `sig`: public RBS signatures for Rigor itself
 - `spec`: RSpec test suite
+- `examples/`: worked plugin examples for the v0.1.0 plugin contract. Six gems (`rigor-deprecations`, `rigor-lisp-eval`, `rigor-pattern`, `rigor-routes`, `rigor-statesman`, `rigor-units`) each with `lib/`, runnable `demo/`, README, and an end-to-end integration spec under `spec/integration/examples/`. Read [`examples/README.md`](examples/README.md) for the comparison table and recommended reading order.
+- `docs/handbook/`: nine-chapter end-user walkthrough of the type model, written for Ruby programmers without prior static-typing background. Informational — `docs/type-specification/` binds when they disagree.
 - `docs/types.md`: one-page quick guide to the Rigor type system
 - `docs/type-specification`: normative type specification, split into topical documents
 - `docs/internal-spec`: analyzer-internal contracts (engine surface, type-object public API)
@@ -143,6 +145,12 @@ rg PATTERN --no-ignore references/python-typing
 - Do **not** use Conventional-Commits-style `type:` or `area:` prefixes. The subject starts with a capitalised verb, no leading tag.
 - Keep the subject self-contained and reasonably short; detail belongs in the body. Wrap the body at ~72 columns and write it for humans — explain the why and any context a future reader will need, not the diff itself.
 - Release version bumps follow the fixed form `Bump up version to x.y.z`. See [`.codex/skills/rigor-release-prep/SKILL.md`](.codex/skills/rigor-release-prep/SKILL.md) for the full release-prep flow.
+
+## Release Cadence
+
+- **No autonomous version bumps.** `Rigor::VERSION` (in `lib/rigor/version.rb`), `CHANGELOG.md` released-version sections, and `Gemfile.lock` MUST only be bumped on explicit user request. Land feature commits with their `## [Unreleased]` CHANGELOG entries and stop there; the user drives the cut-over to a numbered release. Adding entries under `## [Unreleased]` does NOT count as a version bump.
+- **Single-digit version components.** Each `x.y.z` component stays single-digit. `0.0.9`'s successor is `0.1.0` — never `0.0.10`. `0.9.x`'s successor is `1.0.0`. Same rule applies recursively at every position.
+- The `bundle exec rake release` task (which tags `vx.y.z`, pushes to origin, and publishes to RubyGems) is gated separately — never run it without explicit user authorisation, even when the version is already bumped.
 
 ## Verification Notes
 

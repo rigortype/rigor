@@ -26,15 +26,14 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 The remaining five `Rigor::RbsExtended::*` consumer call sites are param-override readers (`method_parameter_binder.rb`, `analysis/check_rules.rb`, `method_dispatcher/overload_selector.rb`) which ADR-7 4-A explicitly excludes from `read_flow_contribution` — they refine the call's signature contract rather than its flow facts and stay on `param_type_override_map`. Slice 4b is therefore complete to the ADR's contract. **Working state: 1860 RSpec examples / 0 failures, RuboCop 196 files / 0 offenses, `bundle exec exe/rigor check lib` reports 0 diagnostics.**
 
-**v0.1.0 in progress on `master`.** Theme: **first plugin contract.** ADR-2 § "Extension API" fixes the design surface; v0.1.0's job is the implementation. The substrate landed in v0.0.3 → v0.0.9 — type vocabulary, inference engine, cache layer, FlowContribution bundle, public-API drift pins, RBS::Extended directive plumbing — leaves the contract surface as a finite assembly job:
+**v0.1.0 ready for release on `master` (unreleased).** All six v0.1.0 slices have landed (status entries above) plus the v0.1.0-polish work that builds on them:
 
-- **Plugin registration / loading** — manifest discovery, dependency-injected analyzer services (Reflection, type factories, configuration readers), deterministic ordering. ADR-2 § "Registration, Configuration, and Caching".
-- **Plugin contribution merger** — consumes `FlowContribution` bundles per ADR-2 § "Plugin Contribution Merging". Built-in narrowing rules and `RbsExtended` directives convert into bundles at the boundary so the merger is the single point of integration.
-- **Plugin diagnostic provenance** — `plugin.<id>.<rule>` identifier publishing already shipped in v0.0.8 via `Diagnostic#source_family`; v0.1.0 wires plugin-emitted diagnostics through the same channel.
-- **Plugin-side cache producers** — gated on the plugin API. Plugins register `producer_id`s and ride the v0.0.9 `Store#fetch_or_compute(serialize:, deserialize:)` surface, with `PluginEntry` rows in the descriptor schema for invalidation.
-- **Plugin trust / I/O policy** — ADR-2 § "Plugin Trust and I/O Policy"; trusted-gem model, network disabled by default during analysis, file reads scoped to project + dependency metadata.
+- **Six worked plugin examples** under [`examples/`](../examples/README.md) — `rigor-deprecations` (smallest config-driven plugin), `rigor-lisp-eval` (literal AST typing), `rigor-statesman` (two-pass DSL analysis), `rigor-pattern` (engine collaboration via `Scope#type_of` + literal-string carrier), `rigor-units` (local-variable flow tracking), `rigor-routes` (slice 2 + slice 6 — `IoBoundary` + cache producer). Each gem ships `lib/`, runnable `demo/`, README, and an end-to-end integration spec under [`spec/integration/examples/`](../spec/integration/examples/). Total 67 integration examples.
+- **Nine-chapter end-user handbook** under [`docs/handbook/`](handbook/README.md) — getting started, everyday types, narrowing, tuples / hash shapes, methods / blocks, classes, RBS / `RBS::Extended`, understanding errors, plugins. Modeled on the TypeScript handbook v2 in volume of information; adapted to Rigor's idioms.
+- **Two precision improvements landed during the polish.** `Inference::Narrowing.analyse_match_write` narrows named-capture targets from `String | nil` to `String` in the truthy branch of `if /(?<x>...)/ =~ str` (commit `7571616`); `;`-prefixed block-locals (`do |i; x|`) now bind to `Constant[nil]` at block entry to shadow outer locals per Ruby semantics (commit `bdfa85e`).
+- **`docs/MILESTONES.md` § "v0.1.1 — Planned"** scoped — headline slice is the regex pattern → refinement-name recogniser that extends `analyse_match_write`. Adjacent slices: `numeric-string`-aware folding through `Integer(s)` / `s.to_i`; `self`-narrowing in `predicate-if-*` (carry-over from v0.1.0 deferred).
 
-The public surface the plugin contract attaches to is pinned by `spec/rigor/public_api_drift_spec.rb` (Scope / Environment / Type::Combinator / Reflection) and documented in [`docs/internal-spec/public-api.md`](internal-spec/public-api.md). Pre-v0.1.0 design docs live at [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) and [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md).
+The public surface the plugin contract attaches to is pinned by `spec/rigor/public_api_drift_spec.rb` (Scope / Environment / Type::Combinator / Reflection / Plugin::*) and documented in [`docs/internal-spec/public-api.md`](internal-spec/public-api.md). Pre-v0.1.0 design docs at [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) and [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md). Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), `Rigor::VERSION` / `CHANGELOG.md` released-version sections / `Gemfile.lock` await an explicit user request to cut `0.1.0`.
 
 ### Historical: v0.0.8 → v0.0.9 cluster (released 2026-05-05)
 
@@ -68,35 +67,46 @@ Working state at release: 1728 RSpec examples / 0 failures, RuboCop 167 files / 
 
 ## Where the Work Resumes
 
-### v0.1.1 — deepen the literal-string narrowing surface (planned)
+### v0.1.1 — deepen the literal-string narrowing surface (next)
 
-Headline slice: **regex pattern → refinement-name recogniser** per `docs/MILESTONES.md` § "v0.1.1 — Planned". Extends the `Inference::Narrowing.analyse_match_write` path that v0.1.0 added (which narrows named-capture targets from `String | nil` to `String` in the truthy branch of `if /(?<x>...)/ =~ str`) so common anchored regex shapes — `/\A\d+\z/`, `/\A[a-z]+\z/`, `/\A\h+\z/`, etc. — additionally narrow each capture to the matching imported refinement carrier (`decimal-int-string`, `lowercase-string`, `hex-int-string`, …). Adjacent slices: `numeric-string`-aware folding through `Integer(s)` / `s.to_i`, and the `self`-narrowing in `predicate-if-*` carry-over.
+Headline slice: **regex pattern → refinement-name recogniser** per [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned". Extends the `Inference::Narrowing.analyse_match_write` path that v0.1.0 added (which narrows named-capture targets from `String | nil` to `String` in the truthy branch of `if /(?<x>...)/ =~ str`) so common anchored regex shapes additionally narrow each capture to the matching imported refinement carrier:
 
-### v0.1.0 — first plugin contract
+| Anchored regex pattern | Refinement |
+| --- | --- |
+| `/\A\d+\z/`, `/\A\d{N}\z/`, `/\A\d{N,M}\z/` | `decimal-int-string` |
+| `/\A\h+\z/` | `hex-int-string` |
+| `/\A[0-7]+\z/` | `octal-int-string` |
+| `/\A[a-z]+\z/` | `lowercase-string` |
+| `/\A[A-Z]+\z/` | `uppercase-string` |
+| `/\A[[:digit:]]+\z/` | `numeric-string` |
 
-ADR-2 § "Extension API" fixes the design surface; v0.1.0's job is the implementation. The substrate landed in v0.0.3 → v0.0.9 — type vocabulary, inference engine, cache layer, FlowContribution bundle, public-API drift pins, RBS::Extended directive plumbing — leaves the contract surface as a finite assembly job. Recommended slice order, narrow-to-broad:
+Implementation hook is the existing `analyse_match_write` helper plus a small audited `Builtins::RegexRefinement` table. Recognition is closed to the curated forms (arbitrary regex equivalence is undecidable). Adjacent v0.1.1 slices: `numeric-string`-aware folding through `Integer(s)` / `s.to_i`; `self`-narrowing in `predicate-if-*` (carry-over from v0.1.0 deferred).
 
-1. **Plugin registration / loading** — ✅ landed (unreleased on `master`). `Rigor::Plugin` namespace (Base / Manifest / Services / Registry / Loader / LoadError) per ADR-2 § "Registration, Configuration, and Caching". `.rigor.yml` `plugins:` accepts bare-gem-name strings or `{ gem:, id:, config: }` hashes. `Analysis::Runner` builds a service container, calls `Plugin::Loader.load`, and exposes the `Plugin::Registry` via `Runner#plugin_registry`. Loader failures isolate as `:plugin_loader` diagnostics. Public namespaces drift-pinned at `spec/rigor/public_api_drift_spec.rb`. Spec at [`docs/internal-spec/plugin.md`](internal-spec/plugin.md). Plugins are inert until later slices wire protocol hooks.
-2. **Plugin trust / I/O policy** — ✅ landed (unreleased on `master`). `Rigor::Plugin::TrustPolicy` + `Rigor::Plugin::IoBoundary` + `Rigor::Plugin::AccessDeniedError` + `.rigor.yml` `plugins_io:` section. ADR-2 § "Plugin Trust and I/O Policy" trade-off honoured (declarative policy over forced isolation). Public namespaces drift-pinned. Spec at [`docs/internal-spec/plugin-trust.md`](internal-spec/plugin-trust.md).
-3. **Plugin contribution merger** — ✅ landed (unreleased on `master`). `Rigor::FlowContribution::Merger` + `Element` flattening + `MergeResult` + `Conflict`. Authority tiers and composition rules per ADR-2. Public namespaces drift-pinned. Spec at [`docs/internal-spec/flow-contribution-merger.md`](internal-spec/flow-contribution-merger.md).
-4. **FlowContribution wiring through internal narrowing.** ✅ landed (unreleased on `master`). Slice 4a (substrate — `Fact` value object + carrier translations) and slice 4b (three consumer call sites — `analyse_rbs_extended_contribution`, post-return assertion, return-type override — through `Merger.merge`). The remaining `Rigor::RbsExtended::*` consumers are param-override readers explicitly excluded from `read_flow_contribution` per ADR-7 4-A. Working decisions pinned by [ADR-7 § "Slice 4"](adr/7-v0.1.0-slice-decisions.md).
-5. **Plugin diagnostic emission protocol.** ✅ landed (unreleased on `master`). Qualified-rule text rendering (`ef730b2`) + `Plugin::Base#diagnostics_for_file` per-file hook + `Analysis::Runner` auto-stamps `source_family: "plugin.<id>"` + `Conflict#to_diagnostic` per [ADR-7 § "Slice 5"](adr/7-v0.1.0-slice-decisions.md). Plugin exceptions in the hook isolate as `:plugin_loader` `runtime-error` diagnostics. The `Rule<TNode>` node-scoped surface ADR-2 § "Custom rules" mentions stays deferred to v0.1.x.
-6. **Plugin-side cache producers.** ✅ landed (unreleased on `master`). `Plugin::Base.producer` DSL + `Plugin::Base#cache_for` callable + auto-prefixed `plugin.<manifest.id>.` ids + auto-assembled `Cache::Descriptor` (PluginEntry + IoBoundary + params) per [ADR-7 § "Slice 6"](adr/7-v0.1.0-slice-decisions.md). The v0.0.9 per-method Reflection cache re-attempt is descoped to a separate v0.1.x ticket (6-D).
+### v0.1.0 — first plugin contract (all slices landed; release pending)
 
-The public surface the plugin contract attaches to is pinned by `spec/rigor/public_api_drift_spec.rb` (Scope / Environment / Type::Combinator / Reflection) and documented in [`docs/internal-spec/public-api.md`](internal-spec/public-api.md). When a v0.1.0 slice extends or modifies any pinned namespace, update the drift spec in the same commit.
+ADR-2 § "Extension API" fixed the design surface. The substrate landed in v0.0.3 → v0.0.9 (type vocabulary, inference engine, cache layer, FlowContribution bundle, public-API drift pins, `RBS::Extended` directive plumbing) reduced v0.1.0 to a finite assembly job. All six slices closed:
+
+1. **Plugin registration / loading** — ✅ `Rigor::Plugin` namespace (Base / Manifest / Services / Registry / Loader / LoadError). Spec [`docs/internal-spec/plugin.md`](internal-spec/plugin.md).
+2. **Plugin trust / I/O policy** — ✅ `Plugin::TrustPolicy` + `Plugin::IoBoundary` + `Plugin::AccessDeniedError` + `.rigor.yml` `plugins_io:` section. Spec [`docs/internal-spec/plugin-trust.md`](internal-spec/plugin-trust.md).
+3. **Plugin contribution merger** — ✅ `FlowContribution::Merger` + `Element` flattening + `MergeResult` + `Conflict`. Spec [`docs/internal-spec/flow-contribution-merger.md`](internal-spec/flow-contribution-merger.md).
+4. **FlowContribution wiring through internal narrowing** — ✅ Slice 4a (substrate — `Fact` value object + carrier translations) + slice 4b (three consumer call sites — `analyse_rbs_extended_contribution`, post-return assertion, return-type override — routed through `Merger.merge`). Working decisions pinned by [ADR-7 § "Slice 4"](adr/7-v0.1.0-slice-decisions.md).
+5. **Plugin diagnostic emission protocol** — ✅ `Plugin::Base#diagnostics_for_file` per-file hook + `Analysis::Runner` auto-stamps `source_family: "plugin.<id>"` + `Conflict#to_diagnostic`. Plugin exceptions isolate as `:plugin_loader` diagnostics.
+6. **Plugin-side cache producers** — ✅ `Plugin::Base.producer` DSL + `Plugin::Base#cache_for` callable + auto-prefixed `plugin.<manifest.id>.` ids + auto-assembled `Cache::Descriptor`. Spec [`docs/internal-spec/plugin-cache-producers.md`](internal-spec/plugin-cache-producers.md).
+
+Plus the v0.1.0-polish work documented in the Status section above (six worked plugin examples, the nine-chapter end-user handbook, the named-capture narrowing fix, the `;`-prefixed block-local nil shadow fix). Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), the version bump (`Rigor::VERSION` → `0.1.0`, `CHANGELOG.md` `[Unreleased]` → `[0.1.0] - YYYY-MM-DD`, `Gemfile.lock` regenerated) waits for explicit user authorisation.
 
 ### Parallel-safe entry points
 
-Slices that do not depend on (1) and can be tackled by a parallel implementer or interleaved between plugin slices:
+Items that can be tackled in parallel with v0.1.1 work:
 
-- **Per-method Reflection caches** (post-mortem first, then re-attempt) — see Notable carry-overs above. Independent of plugin loading.
+- **Per-method Reflection caches** (post-mortem first, then re-attempt) — see Notable carry-overs above. Independent of v0.1.x narrowing work.
 - **`literal-string` propagation through structured constructors** — `Array#join`, `String#format` over literal-bearing operands. Self-contained dispatcher tier work; no FlowContribution dependency.
 - **C-body classifier wider transitive mutator scan** — `references/`-scoped tooling work. Guards against the `Array#to_a` regression that gated the v0.0.5 fix.
 - **`Data.define` override-aware initializer dispatch** — block-body `def initialize(...)` as the canonical sig for `Const.new`. Today the auto-generated kw shape wins.
 
-### Open Items deferred past v0.1.0
+### Open Items deferred past v0.1.x
 
-These remain explicitly out of scope until the plugin contract is stable; they should not block v0.1.0 release:
+Out of scope until the plugin contract has live downstream consumers and a reason to extend the surface:
 
 - **LSP / long-running-daemon cache mode.** Requires concurrent multi-process safety beyond the per-file `flock` model.
 - **LRU eviction / size cap.** Cache stays unbounded; users run `--clear-cache` if needed.
@@ -104,10 +114,10 @@ These remain explicitly out of scope until the plugin contract is stable; they s
 - **ObjectSpace catalog import** — needs a singleton-module dispatch path the catalog tier does not yet provide.
 - **URI / Kernel catalog imports** — fall outside the standard import skill's premise (pure-Ruby stdlib gem; methods scattered across 20+ C files with no single Init function). Both need hand-rolled or custom-scaffold approaches.
 - **Pathname / URI delegation rules** — wider refactor (Pathname facade routing through File projections).
-- **`self`-narrowing in `predicate-if-*`** — no `self`-narrowing surface in the engine yet. (Promoted to v0.1.1 candidate per `docs/MILESTONES.md` § "v0.1.1 — Planned".)
 - **`rigor:v1:conforms-to` directive** — needs a real structural-conformance checker.
 - **`Trinary` return-type contract on type-carrier predicate methods** — needs a new CheckRules rule family (`return-type-mismatch`); deferred until the inference surface is sturdy enough to avoid false-positive churn.
-- **New CheckRules rule families** beyond the v0.0.3 `always-raises` line (type-incompatible writes, return-type mismatch, unreachable branches).
+- **New CheckRules rule families** beyond the v0.0.3 `always-raises` and v0.1.0 `def.return-type-mismatch` lines (type-incompatible writes, unreachable branches).
+- **Plugin return-type contributions.** Plugins emit diagnostics today; the `FlowContribution`-based contribution surface that lets them replace the analyzer's inferred return type for a call site is queued for a v0.1.x slice once the example plugins have stabilised against the merger surface. Sketched in each example's "Future direction" section.
 
 ## Open Engineering Items
 
@@ -121,13 +131,16 @@ Persistent items that have come up across v0.0.x slices and that the next implem
 
 ## Reading Order for a Returning Implementer
 
-1. `git log --oneline master ^v0.0.8` — every v0.0.9 slice in commit order (the cache wiring + FlowContribution + paired-complement + literal-string + six built-in catalog imports + public-API surface declaration).
-2. `CHANGELOG.md` `[0.0.9]` section — user-visible summary, structured by Cache layer / Type vocabulary / Pre-v0.1.0 substrate / Internal.
-3. [`docs/MILESTONES.md`](MILESTONES.md) — v0.0.9 row for shipped scope, v0.1.0 row for the plugin-contract commitment envelope.
-4. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — the design surface v0.1.0 implements. Read end-to-end; the registration / contribution-merging / trust sections are normative for the v0.1.0 slice plan above.
-5. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — public-vs-internal stability boundary. Cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
-6. [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md) — what the v0.0.x substrate already provides for the plugin contract and what each v0.1.0 slice still has to build.
-7. [`docs/adr/3-type-representation.md`](adr/3-type-representation.md) Working Decisions — OQ1 / OQ2 / OQ3 outcomes still bind the type-object public surface plugins consume.
-8. [`docs/adr/5-robustness-principle.md`](adr/5-robustness-principle.md) — the asymmetric authorship rule plugin-authored signatures will follow.
+The default goal is "ship v0.1.0, then start v0.1.1." Read in this order:
 
-After those, the implementation surface for v0.1.0 is locatable from grep over `lib/rigor/flow_contribution*.rb`, `lib/rigor/cache/`, `lib/rigor/reflection*.rb`, `lib/rigor/rbs_extended/`, and `lib/rigor/analysis/`.
+1. `CHANGELOG.md` `[Unreleased]` section — every v0.1.0 slice + polish item that has landed since `v0.0.9` was tagged. The user-visible summary the release will publish.
+2. [`docs/MILESTONES.md`](MILESTONES.md) — `v0.1.0` row (six slices closed, polish work landed) and `v0.1.1 — Planned` (the regex-pattern recogniser is the headline).
+3. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — the binding design for the plugin contract that v0.1.0 ships.
+4. [`docs/adr/7-v0.1.0-slice-decisions.md`](adr/7-v0.1.0-slice-decisions.md) — slice-by-slice working decisions for slices 4 / 5 / 6 (the trickier half of v0.1.0).
+5. [`examples/README.md`](../examples/README.md) — plugin-authoring landing page; comparison table over the six worked examples + recommended reading order.
+6. [`docs/handbook/`](handbook/README.md) — end-user view of the type model. Skim Chapter 7 (RBS / `RBS::Extended`) and Chapter 8 (Understanding errors) for what user-facing diagnostics now look like.
+7. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — public-vs-internal stability boundary. Cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
+8. [`docs/adr/3-type-representation.md`](adr/3-type-representation.md) Working Decisions — OQ1 / OQ2 / OQ3 outcomes still bind the type-object public surface plugins consume.
+9. [`docs/adr/5-robustness-principle.md`](adr/5-robustness-principle.md) — the asymmetric authorship rule plugin-authored signatures follow.
+
+After those, the implementation surface for v0.1.x is locatable from grep over `lib/rigor/inference/narrowing.rb`, `lib/rigor/flow_contribution*.rb`, `lib/rigor/plugin/`, `lib/rigor/cache/`, `lib/rigor/rbs_extended/`, and `lib/rigor/analysis/`.

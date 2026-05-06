@@ -6,11 +6,13 @@ Project-level briefing for Claude (and any other agent that reads top-level docs
 
 | Document | Purpose |
 | --- | --- |
-| [`AGENTS.md`](AGENTS.md) | Development environment (Flake mandate, target Ruby), common commands, directory layout, references/ submodule rules, implementation guidelines, commit-message style, and verification protocol. **Required reading.** |
+| [`AGENTS.md`](AGENTS.md) | Development environment (Flake mandate, target Ruby), common commands, directory layout, references/ submodule rules, implementation guidelines, commit-message style, release cadence, and verification protocol. **Required reading.** |
 | [`README.md`](README.md) | User-facing project overview (CLI, what `rigor check` does today). |
-| [`docs/types.md`](docs/types.md) | One-page quick guide to the Rigor type system. Start here for the type model mental model. |
-| [`docs/MILESTONES.md`](docs/MILESTONES.md) | Release-by-release commitment envelope. v0.0.3 (released), v0.0.4 (planned), v0.1.0 (long horizon — caches and plugin API). |
-| [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) | Resume bookmark for the next implementer. Names the highest-leverage v0.0.4 slice, parallel-safe entry points, and open engineering items. Transient. |
+| [`docs/handbook/`](docs/handbook/README.md) | Nine-chapter end-user walkthrough of the type model. Reach for this when you need to explain Rigor concepts to a Ruby programmer (or to yourself) without diving into the spec corpus. Informational; the spec binds. |
+| [`docs/types.md`](docs/types.md) | One-page quick guide to the Rigor type system. Faster mental-model warm-up than the handbook when you only need the carrier zoo. |
+| [`docs/MILESTONES.md`](docs/MILESTONES.md) | Release-by-release commitment envelope. v0.0.3 → v0.0.9 (released), v0.1.0 (all six slices landed; release pending), v0.1.1 (planned — regex pattern → refinement-name recogniser). |
+| [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) | Resume bookmark for the next implementer. Names the v0.1.0 ship-readiness state, the v0.1.1 entry slice, parallel-safe items, and open engineering items. Transient. |
+| [`examples/README.md`](examples/README.md) | Plugin-authoring landing page. Comparison table across the six worked examples + recommended reading order. Reach for this when authoring a plugin or answering "how do I use the plugin contract for X?". |
 
 ## Authoritative specifications
 
@@ -95,4 +97,4 @@ If the Flake shell is unavailable, mention any skipped verification in the final
 - Do NOT bypass the Flake. `bundle`, `rake`, `rspec`, `rubocop`, and `exe/rigor` MUST run inside `nix … develop` per AGENTS.md.
 - Do NOT modify `references/` submodules unless the task is "bump references/<name>". The vendored sources are read-only; engine changes happen against Rigor's own code.
 - Do NOT run `bundle exec rake release` without explicit user authorisation. The release task tags `vx.y.z`, pushes to origin, and publishes to RubyGems.
-- The reading order for a returning implementer is in [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md). It points back at the relevant ADRs and skills for the v0.0.4 work.
+- The reading order for a returning implementer is in [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md). It points back at the relevant ADRs and skills for the v0.1.0 → v0.1.1 work.

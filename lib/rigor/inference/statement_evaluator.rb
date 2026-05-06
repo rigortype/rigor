@@ -582,7 +582,7 @@ module Rigor
       # `eval_loop` uses for `while` / `until`.
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
-        element_type = collection_element_type(coll_type)
+        element_type = for_iteration_element_type(coll_type)
         body_entry = bind_for_index(node.index, element_type, post_coll)
 
         body_scope = node.statements ? sub_eval(node.statements, body_entry).last : body_entry
@@ -590,6 +590,29 @@ module Rigor
           Type::Combinator.constant_of(nil),
           join_with_nil_injection(post_coll, body_scope)
         ]
+      end
+
+      # `for x in coll` is semantically `coll.each { |x| ... }`. We
+      # ask the method dispatcher for `coll.each`'s expected block
+      # parameter types — that path consults RBS and the iterator
+      # dispatch table, which is more precise than the structural
+      # `collection_element_type` fallback (it knows, e.g., that
+      # `Hash[K, V]#each` yields `[K, V]` even when the receiver is
+      # not a literal Hash carrier in our local lattice). When the
+      # dispatcher returns nothing (no signature, unknown receiver)
+      # we fall back to the structural extractor.
+      def for_iteration_element_type(coll_type)
+        block_params = MethodDispatcher.expected_block_param_types(
+          receiver_type: coll_type,
+          method_name: :each,
+          arg_types: [],
+          environment: scope.environment
+        )
+        return collection_element_type(coll_type) if block_params.nil? || block_params.empty?
+
+        block_params.size == 1 ? block_params.first : Type::Combinator.tuple_of(*block_params)
+      rescue StandardError
+        collection_element_type(coll_type)
       end
 
       # Binds the `for` index variable(s) into `scope`. A single

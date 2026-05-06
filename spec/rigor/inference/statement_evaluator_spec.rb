@@ -248,6 +248,22 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local(:x)).not_to be_nil
     end
 
+    it "for-loop over a Hash literal destructures into key / value via RBS dispatch" do
+      env = Rigor::Environment.for_project
+      base = Rigor::Scope.empty(environment: env)
+      _, post = evaluate(<<~RUBY, base_scope: base)
+        for k, v in { a: 1, b: 2 }
+        end
+      RUBY
+      # `Hash#each` yields `[K, V]`; the multi-target binder splits
+      # that into per-iteration `k` and `v` bindings, nil-injected
+      # through the zero-iteration join.
+      k_members = post.local(:k).members.map { |m| m.is_a?(Rigor::Type::Constant) ? m.value : m }
+      v_members = post.local(:v).members.map { |m| m.is_a?(Rigor::Type::Constant) ? m.value : m }
+      expect(k_members).to include(:a, :b, nil)
+      expect(v_members).to include(1, 2, nil)
+    end
+
     it "for-loop body-locals leak into the surrounding scope" do
       _, post = evaluate(<<~RUBY)
         for i in [1, 2, 3]

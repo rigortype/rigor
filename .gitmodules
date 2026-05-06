@@ -22,3 +22,6 @@
 	path = references/ruby
 	url = https://github.com/ruby/ruby.git
 	branch = ruby_4_0
+[submodule "references/typeprof"]
+	path = references/typeprof
+	url = git@github.com:ruby/typeprof.git

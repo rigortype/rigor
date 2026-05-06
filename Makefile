@@ -6,7 +6,8 @@ REFERENCE_SUBMODULES := \
 	references/phpstan \
 	references/python-typing \
 	references/ruby \
-	references/TypeScript-Website
+	references/TypeScript-Website \
+	references/typeprof
 
 setup: install init-git-config init-submodules
 
@@ -43,6 +44,7 @@ init-submodules:
 	fi
 	git submodule update --init --filter=blob:none references/python-typing
 	git submodule update --init --filter=blob:none references/ruby
+	git submodule update --init --filter=blob:none references/typeprof
 	@if [ ! -e references/TypeScript-Website/.git ]; then \
 		url="$$(git config -f .gitmodules submodule.references/TypeScript-Website.url)"; \
 		sha="$$(git rev-parse HEAD:references/TypeScript-Website)"; \

@@ -1,0 +1,6 @@
+paths:
+  - demo.rb
+  - errors_demo.rb
+
+plugins:
+  - rigor-routes

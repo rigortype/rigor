@@ -1,0 +1,27 @@
+- name: users
+  method: GET
+  path: /users
+
+- name: new_user
+  method: GET
+  path: /users/new
+
+- name: user
+  method: GET
+  path: /users/:id
+
+- name: edit_user
+  method: GET
+  path: /users/:id/edit
+
+- name: posts
+  method: GET
+  path: /posts
+
+- name: post
+  method: GET
+  path: /posts/:id
+
+- name: post_comment
+  method: GET
+  path: /posts/:post_id/comments/:id

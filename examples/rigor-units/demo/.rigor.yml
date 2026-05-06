@@ -1,0 +1,8 @@
+paths:
+  - demo.rb
+
+signature_paths:
+  - sig
+
+plugins:
+  - rigor-units

@@ -1,0 +1,89 @@
+# Permissive runtime signatures for the units-of-measure DSL.
+# Each method's static dimensional type is inferred per call
+# site by the rigor-units plugin; without the plugin loaded,
+# every constructor / arithmetic / query call falls back to
+# `untyped`.
+#
+# Future direction — lightweight HKT.
+#   With Rigor's conditional-type / indexed-access surface
+#   (cf. docs/type-specification/rigor-extensions.md rows 22 /
+#   51), the table the plugin currently dispatches at lint time
+#   becomes expressible directly here. Sketch:
+#
+#     class Distance
+#       def +: (Distance) -> Distance
+#       def /: [T] (T) -> (T <: Time ? Speed : untyped)
+#     end
+#
+#     class Numeric
+#       %a{rigor:v1:return-type-of-distance-unit}
+#       def kilometers: () -> Distance
+#     end
+#
+#   Once that lands, the rigor-units plugin moves from emitting
+#   diagnostics to producing FlowContribution bundles, and the
+#   `untyped`s below become real Distance / Time / Speed /
+#   Acceleration types.
+
+class Distance
+  include Comparable
+  attr_reader meters: Float
+  def initialize: (Numeric) -> void
+  def +: (untyped) -> untyped
+  def -: (untyped) -> untyped
+  def <=>: (untyped) -> Integer?
+  def /: (untyped) -> untyped
+  def per_hour: () -> untyped
+  def per_minute: () -> untyped
+  def per_second: () -> untyped
+  def per_second_squared: () -> untyped
+  def in_meters: () -> Float
+  def in_kilometers: () -> Float
+  def in_miles: () -> Float
+  def in_feet: () -> Float
+end
+
+class Time
+  include Comparable
+  attr_reader seconds: Float
+  def initialize: (Numeric) -> void
+  def +: (untyped) -> untyped
+  def -: (untyped) -> untyped
+  def <=>: (untyped) -> Integer?
+  def in_seconds: () -> Float
+  def in_minutes: () -> Float
+  def in_hours: () -> Float
+end
+
+class Speed
+  include Comparable
+  attr_reader meters_per_second: Float
+  def initialize: (Numeric) -> void
+  def +: (untyped) -> untyped
+  def -: (untyped) -> untyped
+  def <=>: (untyped) -> Integer?
+  def *: (untyped) -> untyped
+  def /: (untyped) -> untyped
+  def in_meters_per_second: () -> Float
+  def in_kilometers_per_hour: () -> Float
+  def in_miles_per_hour: () -> Float
+end
+
+class Acceleration
+  attr_reader meters_per_second_squared: Float
+  def initialize: (Numeric) -> void
+  def *: (untyped) -> untyped
+  def <=>: (untyped) -> Integer?
+  def in_meters_per_second_squared: () -> Float
+  def in_kilometers_per_hour_squared: () -> Float
+end
+
+class Numeric
+  def kilometers: () -> Distance
+  def meters: () -> Distance
+  def miles: () -> Distance
+  def feet: () -> Distance
+  def seconds: () -> Time
+  def minutes: () -> Time
+  def hours: () -> Time
+end

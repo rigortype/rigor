@@ -1474,11 +1474,7 @@ module Rigor
         bindings = [*pattern.requireds, *pattern.posts].flat_map do |elem|
           collect_in_pattern_bindings(nil, elem, scope)
         end
-        rest = pattern.rest
-        if rest.is_a?(Prism::SplatNode)
-          target = rest.expression
-          bindings << [target.name, Type::Combinator.untyped] if target.is_a?(Prism::LocalVariableTargetNode)
-        end
+        append_array_splat_binding(bindings, pattern.rest)
         bindings
       end
 
@@ -1491,7 +1487,7 @@ module Rigor
         rest = pattern.rest
         if rest.is_a?(Prism::AssocSplatNode)
           val = rest.value
-          bindings << [val.name, Type::Combinator.untyped] if val.is_a?(Prism::LocalVariableTargetNode)
+          bindings << [val.name, hash_pattern_rest_type] if val.is_a?(Prism::LocalVariableTargetNode)
         end
         bindings
       end
@@ -1500,13 +1496,33 @@ module Rigor
         bindings = pattern.requireds.flat_map do |elem|
           collect_in_pattern_bindings(nil, elem, scope)
         end
-        [pattern.left, pattern.right].each do |splat|
-          next unless splat.is_a?(Prism::SplatNode)
-
-          target = splat.expression
-          bindings << [target.name, Type::Combinator.untyped] if target.is_a?(Prism::LocalVariableTargetNode)
-        end
+        [pattern.left, pattern.right].each { |splat| append_array_splat_binding(bindings, splat) }
         bindings
+      end
+
+      # `[..., *rest, ...]` / `[*pre, x, *post]` capture an Array of
+      # the unmatched elements; bind `rest` to `Array[untyped]` rather
+      # than the previous bare `untyped`. Per-element typing waits on
+      # subject-aware element-type extraction (the binder doesn't see
+      # the case subject).
+      def append_array_splat_binding(bindings, splat)
+        return unless splat.is_a?(Prism::SplatNode)
+
+        target = splat.expression
+        return unless target.is_a?(Prism::LocalVariableTargetNode)
+
+        bindings << [target.name, Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])]
+      end
+
+      # `{ key:, **rest }` binds `rest` to a Hash whose keys are
+      # Symbols (the only legal key shape for a hash pattern) and
+      # whose values are untyped (the binder can't see the subject's
+      # value type).
+      def hash_pattern_rest_type
+        Type::Combinator.nominal_of(
+          "Hash",
+          type_args: [Type::Combinator.nominal_of("Symbol"), Type::Combinator.untyped]
+        )
       end
 
       # ---------------------------------------------------------------

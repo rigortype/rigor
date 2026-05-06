@@ -1546,7 +1546,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(nominal_b.map(&:class_name)).to contain_exactly("String")
     end
 
-    it "binds the splat variable in an array pattern to untyped" do
+    it "binds the splat variable in an array pattern to Array[untyped]" do
       _, post = evaluate(<<~RUBY)
         case value
         in [Integer => first, *rest]
@@ -1555,7 +1555,32 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       nominal_first = post.local(:first).members.grep(Rigor::Type::Nominal)
       expect(nominal_first.map(&:class_name)).to contain_exactly("Integer")
-      expect(post.local(:rest).members).to include(Rigor::Type::Combinator.untyped)
+      rest_nominal = post.local(:rest).members.grep(Rigor::Type::Nominal)
+      expect(rest_nominal.map(&:class_name)).to contain_exactly("Array")
+    end
+
+    it "binds find-pattern *pre / *post splats to Array[untyped]" do
+      _, post = evaluate(<<~RUBY)
+        case value
+        in [*pre, Integer, *post]
+          [pre, post]
+        end
+      RUBY
+      %i[pre post].each do |name|
+        nominal = post.local(name).members.grep(Rigor::Type::Nominal)
+        expect(nominal.map(&:class_name)).to contain_exactly("Array")
+      end
+    end
+
+    it "binds the **rest splat in a hash pattern to Hash[Symbol, untyped]" do
+      _, post = evaluate(<<~RUBY)
+        case value
+        in { x:, **rest }
+          rest
+        end
+      RUBY
+      nominal = post.local(:rest).members.grep(Rigor::Type::Nominal)
+      expect(nominal.map(&:class_name)).to contain_exactly("Hash")
     end
 
     it "extracts bindings from a hash pattern" do

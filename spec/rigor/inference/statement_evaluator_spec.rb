@@ -1394,4 +1394,167 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local_facts(:x, bucket: :local_binding)).to be_empty
     end
   end
+
+  describe "rescue variable binding" do
+    # The rescue variable is only bound inside the rescue branch; the
+    # primary body's scope does not include it. After the begin/rescue join
+    # the post-scope nil-injects the variable, so the observable type is
+    # `ExcType | nil`.  These tests verify the exception-type component.
+    it "binds the rescue reference to StandardError when no classes named" do
+      _, post = evaluate(<<~RUBY)
+        begin
+          risky
+        rescue => e
+          e
+        end
+      RUBY
+      expect(post.local(:e).members).to include(Rigor::Type::Combinator.nominal_of("StandardError"))
+    end
+
+    it "binds the rescue reference to the named exception class" do
+      _, post = evaluate(<<~RUBY)
+        begin
+          risky
+        rescue TypeError => e
+          e
+        end
+      RUBY
+      nominal_members = post.local(:e).members.grep(Rigor::Type::Nominal)
+      expect(nominal_members.map(&:class_name)).to contain_exactly("TypeError")
+    end
+
+    it "binds to the union of multiple exception classes" do
+      _, post = evaluate(<<~RUBY)
+        begin
+          risky
+        rescue TypeError, ArgumentError => e
+          e
+        end
+      RUBY
+      nominal_members = post.local(:e).members.grep(Rigor::Type::Nominal)
+      expect(nominal_members.map(&:class_name)).to contain_exactly("TypeError", "ArgumentError")
+    end
+
+    it "leaves scope unchanged when no reference is given" do
+      _, post = evaluate(<<~RUBY)
+        begin
+          risky
+        rescue TypeError
+          1
+        end
+      RUBY
+      expect(post.local(:e)).to be_nil
+    end
+
+    it "each clause in a rescue chain gets its own exception type" do
+      _, post = evaluate(<<~RUBY)
+        begin
+          risky
+        rescue TypeError => e
+          e
+        rescue ArgumentError => e
+          e
+        end
+      RUBY
+      nominal_members = post.local(:e).members.grep(Rigor::Type::Nominal)
+      expect(nominal_members.map(&:class_name)).to contain_exactly("TypeError", "ArgumentError")
+    end
+  end
+
+  describe "case/in pattern variable binding" do
+    # Like rescue, captured pattern variables are only bound on the matched
+    # branch; nil-injection produces `MatchType | nil` in the post-scope.
+    # We verify the match-type component is present.
+    it "binds a capture variable to the matched class type" do
+      _, post = evaluate(<<~RUBY)
+        case value
+        in Integer => n
+          n
+        end
+      RUBY
+      nominal_members = post.local(:n).members.grep(Rigor::Type::Nominal)
+      expect(nominal_members.map(&:class_name)).to contain_exactly("Integer")
+    end
+
+    it "handles a bare local variable target (captures subject type)" do
+      _, post = evaluate(<<~RUBY)
+        x = 1
+        case x
+        in n
+          n
+        end
+      RUBY
+      expect(post.local(:n).members).to include(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "extracts bindings from an array pattern" do
+      _, post = evaluate(<<~RUBY)
+        case value
+        in [Integer => a, String => b]
+          [a, b]
+        end
+      RUBY
+      nominal_a = post.local(:a).members.grep(Rigor::Type::Nominal)
+      nominal_b = post.local(:b).members.grep(Rigor::Type::Nominal)
+      expect(nominal_a.map(&:class_name)).to contain_exactly("Integer")
+      expect(nominal_b.map(&:class_name)).to contain_exactly("String")
+    end
+
+    it "binds the splat variable in an array pattern to untyped" do
+      _, post = evaluate(<<~RUBY)
+        case value
+        in [Integer => first, *rest]
+          rest
+        end
+      RUBY
+      nominal_first = post.local(:first).members.grep(Rigor::Type::Nominal)
+      expect(nominal_first.map(&:class_name)).to contain_exactly("Integer")
+      expect(post.local(:rest).members).to include(Rigor::Type::Combinator.untyped)
+    end
+
+    it "extracts bindings from a hash pattern" do
+      _, post = evaluate(<<~RUBY)
+        case value
+        in { name: String => n, age: Integer => a }
+          [n, a]
+        end
+      RUBY
+      nominal_n = post.local(:n).members.grep(Rigor::Type::Nominal)
+      nominal_a = post.local(:a).members.grep(Rigor::Type::Nominal)
+      expect(nominal_n.map(&:class_name)).to contain_exactly("String")
+      expect(nominal_a.map(&:class_name)).to contain_exactly("Integer")
+    end
+
+    it "handles hash shorthand pattern {key:}" do
+      _, post = evaluate(<<~RUBY)
+        case value
+        in { name: }
+          name
+        end
+      RUBY
+      expect(post.local(:name)).not_to be_nil
+    end
+  end
+
+  describe "MatchWriteNode (named regex captures)" do
+    it "binds each named capture to String | nil" do
+      _, post = evaluate(<<~RUBY)
+        /(?<year>\d+)-(?<month>\d+)/ =~ date_str
+      RUBY
+      string_or_nil = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.nominal_of("String"),
+        Rigor::Type::Combinator.constant_of(nil)
+      )
+      expect(post.local(:year)).to eq(string_or_nil)
+      expect(post.local(:month)).to eq(string_or_nil)
+    end
+
+    it "binds multiple captures independently" do
+      _, post = evaluate(<<~RUBY)
+        /(?<a>x)(?<b>y)/ =~ str
+      RUBY
+      expect(post.local(:a)).to be_a(Rigor::Type::Union)
+      expect(post.local(:b)).to be_a(Rigor::Type::Union)
+    end
+  end
 end

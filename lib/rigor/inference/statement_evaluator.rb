@@ -93,7 +93,8 @@ module Rigor
         Prism::ModuleNode => :eval_class_or_module,
         Prism::SingletonClassNode => :eval_singleton_class,
         Prism::CallNode => :eval_call,
-        Prism::BlockNode => :eval_block
+        Prism::BlockNode => :eval_block,
+        Prism::MatchWriteNode => :eval_match_write
       }.freeze
       private_constant :HANDLERS
 
@@ -452,11 +453,24 @@ module Rigor
         results = []
         falsey_scope = entry_scope
         conditions.each do |branch|
-          when_conditions = branch.respond_to?(:conditions) ? branch.conditions : []
-          body_scope, falsey_scope = Narrowing.case_when_scopes(subject, when_conditions, falsey_scope)
+          body_scope, falsey_scope = branch_body_and_falsey_scopes(subject, branch, falsey_scope)
           results << sub_eval(branch, body_scope)
         end
         [results, falsey_scope]
+      end
+
+      # Returns `[body_scope, updated_falsey_scope]` for a single branch.
+      # `InNode` branches apply pattern bindings; `WhenNode` branches
+      # narrow through `Narrowing.case_when_scopes`. The falsey scope is
+      # unchanged for `in` branches (conservative: no exhaustiveness
+      # tracking yet).
+      def branch_body_and_falsey_scopes(subject, branch, falsey_scope)
+        if branch.is_a?(Prism::InNode)
+          [apply_in_pattern_bindings(subject, branch.pattern, falsey_scope), falsey_scope]
+        else
+          when_conditions = branch.respond_to?(:conditions) ? branch.conditions : []
+          Narrowing.case_when_scopes(subject, when_conditions, falsey_scope)
+        end
       end
 
       def eval_case_else(else_clause, falsey_scope)
@@ -524,7 +538,8 @@ module Rigor
         results = []
         current = rescue_node
         while current
-          results << eval_branch_or_nil(current.statements, entry_scope)
+          rescue_scope = bind_rescue_reference(current, entry_scope)
+          results << eval_branch_or_nil(current.statements, rescue_scope)
           current = current.subsequent
         end
         results
@@ -1315,6 +1330,148 @@ module Rigor
       # `Scope#join`.
       def reduce_scopes_with_nil_injection(scopes)
         scopes.reduce { |a, b| join_with_nil_injection(a, b) }
+      end
+
+      # ---------------------------------------------------------------
+      # rescue variable binding helpers
+      # ---------------------------------------------------------------
+
+      # Returns `scope` extended with the rescue reference variable bound
+      # to the exception instance type. Leaves scope unchanged when the
+      # node carries no reference (bare `rescue` without `=> var`).
+      def bind_rescue_reference(rescue_node, scope)
+        ref = rescue_node.reference
+        return scope unless ref.is_a?(Prism::LocalVariableTargetNode)
+
+        scope.with_local(ref.name, rescue_exception_type(rescue_node, scope))
+      end
+
+      # Derives the exception instance type for a `RescueNode`. When the
+      # exceptions list is empty (bare `rescue`) the type is
+      # `StandardError`. When one or more exception classes are named the
+      # types are unioned. Falls back to `StandardError` for any class
+      # that cannot be resolved to a `Singleton` type.
+      def rescue_exception_type(rescue_node, scope)
+        exceptions = rescue_node.exceptions
+        if exceptions.empty?
+          Type::Combinator.nominal_of("StandardError")
+        else
+          types = exceptions.map do |exc_node|
+            singleton_type, = sub_eval(exc_node, scope)
+            singleton_to_nominal(singleton_type)
+          end
+          Type::Combinator.union(*types)
+        end
+      end
+
+      # ---------------------------------------------------------------
+      # `case/in` pattern variable binding helpers
+      # ---------------------------------------------------------------
+
+      # Builds the entry scope for an `in` branch by injecting every
+      # variable captured by the pattern as a local binding.
+      def apply_in_pattern_bindings(subject, pattern, scope)
+        bindings = collect_in_pattern_bindings(subject, pattern, scope)
+        bindings.reduce(scope) { |s, (name, type)| s.with_local(name, type) }
+      end
+
+      # Returns an array of `[Symbol, Rigor::Type]` pairs for every
+      # variable captured by `pattern`. Unrecognised pattern nodes
+      # contribute no bindings (fail-soft).
+      # rubocop:disable Metrics/CyclomaticComplexity
+      def collect_in_pattern_bindings(subject, pattern, scope)
+        case pattern
+        when Prism::CapturePatternNode
+          type = singleton_to_nominal(sub_eval(pattern.value, scope).first)
+          [[pattern.target.name, type]]
+        when Prism::LocalVariableTargetNode
+          subject_type = subject.is_a?(Prism::LocalVariableReadNode) ? scope.local(subject.name) : nil
+          [[pattern.name, subject_type || Type::Combinator.untyped]]
+        when Prism::ImplicitNode
+          collect_in_pattern_bindings(subject, pattern.value, scope)
+        when Prism::ArrayPatternNode
+          collect_array_pattern_bindings(pattern, scope)
+        when Prism::FindPatternNode
+          collect_find_pattern_bindings(pattern, scope)
+        when Prism::HashPatternNode
+          collect_hash_pattern_bindings(pattern, scope)
+        else
+          []
+        end
+      end
+      # rubocop:enable Metrics/CyclomaticComplexity
+
+      def collect_array_pattern_bindings(pattern, scope)
+        bindings = [*pattern.requireds, *pattern.posts].flat_map do |elem|
+          collect_in_pattern_bindings(nil, elem, scope)
+        end
+        rest = pattern.rest
+        if rest.is_a?(Prism::SplatNode)
+          target = rest.expression
+          bindings << [target.name, Type::Combinator.untyped] if target.is_a?(Prism::LocalVariableTargetNode)
+        end
+        bindings
+      end
+
+      def collect_hash_pattern_bindings(pattern, scope)
+        bindings = pattern.elements.flat_map do |assoc|
+          next [] unless assoc.is_a?(Prism::AssocNode) && assoc.value
+
+          collect_in_pattern_bindings(nil, assoc.value, scope)
+        end
+        rest = pattern.rest
+        if rest.is_a?(Prism::AssocSplatNode)
+          val = rest.value
+          bindings << [val.name, Type::Combinator.untyped] if val.is_a?(Prism::LocalVariableTargetNode)
+        end
+        bindings
+      end
+
+      def collect_find_pattern_bindings(pattern, scope)
+        bindings = pattern.requireds.flat_map do |elem|
+          collect_in_pattern_bindings(nil, elem, scope)
+        end
+        [pattern.left, pattern.right].each do |splat|
+          next unless splat.is_a?(Prism::SplatNode)
+
+          target = splat.expression
+          bindings << [target.name, Type::Combinator.untyped] if target.is_a?(Prism::LocalVariableTargetNode)
+        end
+        bindings
+      end
+
+      # ---------------------------------------------------------------
+      # named-capture regex binding (`MatchWriteNode`)
+      # ---------------------------------------------------------------
+
+      # `/(?<year>\d+)/ =~ str` — Prism emits a `MatchWriteNode` that
+      # wraps the `=~` call and lists the named-capture targets. Each
+      # target is bound to `String | nil` (the capture is absent as nil
+      # when the pattern doesn't match or the group didn't participate).
+      def eval_match_write(node)
+        match_type, post_scope = sub_eval(node.call, scope)
+        string_or_nil = Type::Combinator.union(
+          Type::Combinator.nominal_of("String"),
+          Type::Combinator.constant_of(nil)
+        )
+        bound_scope = node.targets.reduce(post_scope) do |s, target|
+          next s unless target.is_a?(Prism::LocalVariableTargetNode)
+
+          s.with_local(target.name, string_or_nil)
+        end
+        [match_type, bound_scope]
+      end
+
+      # ---------------------------------------------------------------
+      # shared type conversion helper
+      # ---------------------------------------------------------------
+
+      # Converts a `Singleton[ClassName]` (the class object) to the
+      # corresponding `Nominal[ClassName]` (an instance). Falls back to
+      # `untyped` for carriers that are not Singleton (e.g. Dynamic[Top]
+      # when the class could not be resolved).
+      def singleton_to_nominal(type)
+        type.is_a?(Type::Singleton) ? Type::Combinator.nominal_of(type.class_name) : Type::Combinator.untyped
       end
     end
     # rubocop:enable Metrics/ClassLength

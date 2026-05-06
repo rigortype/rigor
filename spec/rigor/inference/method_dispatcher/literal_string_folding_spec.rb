@@ -98,6 +98,54 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
     end
   end
 
+  describe "Array#join (Tuple receiver lift)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+    let(:tuple_of_literals) { Rigor::Type::Combinator.tuple_of(literal_string, string_const) }
+    let(:tuple_with_nominal) { Rigor::Type::Combinator.tuple_of(literal_string, nominal_string) }
+    let(:empty_tuple) { Rigor::Type::Combinator.tuple_of }
+
+    it "lifts Tuple[literal, Constant<String>].join to literal-string (no separator)" do
+      result = described_class.try_dispatch(receiver: tuple_of_literals, method_name: :join, args: [])
+      expect(result).to eq(literal_string)
+    end
+
+    it "lifts Tuple[…].join(literal-string) to literal-string" do
+      result = described_class.try_dispatch(
+        receiver: tuple_of_literals, method_name: :join, args: [string_const]
+      )
+      expect(result).to eq(literal_string)
+    end
+
+    it "lifts Tuple[].join (empty tuple) to literal-string" do
+      result = described_class.try_dispatch(receiver: empty_tuple, method_name: :join, args: [])
+      expect(result).to eq(literal_string)
+    end
+
+    it "declines when an element is a plain Nominal[String]" do
+      result = described_class.try_dispatch(receiver: tuple_with_nominal, method_name: :join, args: [])
+      expect(result).to be_nil
+    end
+
+    it "declines when the separator is not literal-bearing" do
+      result = described_class.try_dispatch(
+        receiver: tuple_of_literals, method_name: :join, args: [nominal_string]
+      )
+      expect(result).to be_nil
+    end
+
+    it "declines when the receiver is a plain Nominal[Array]" do
+      array = Rigor::Type::Combinator.nominal_of("Array")
+      result = described_class.try_dispatch(receiver: array, method_name: :join, args: [])
+      expect(result).to be_nil
+    end
+
+    it "declines when more than one separator argument is supplied" do
+      result = described_class.try_dispatch(
+        receiver: tuple_of_literals, method_name: :join, args: [string_const, string_const]
+      )
+      expect(result).to be_nil
+    end
+  end
+
   describe "unrecognised method names" do
     it "declines for methods outside the recognised set" do
       result = described_class.try_dispatch(receiver: literal_string, method_name: :upcase, args: [literal_string])

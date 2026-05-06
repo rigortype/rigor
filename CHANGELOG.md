@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `literal-string` propagation through `Array#join`
+
+- **`MethodDispatcher::LiteralStringFolding` lifts `Tuple[…].join(separator)` to `literal-string`** when every element of the Tuple plus the optional separator argument is `Type::Combinator.literal_string_compatible?`. Empty `Tuple[]` lifts trivially (`[].join` is the empty string at runtime, which is literal-bearing). Other receiver / argument shapes (plain `Nominal[Array]`, non-literal element, non-literal separator) decline so the call site widens to the RBS-declared `Nominal[String]` as before. Self-contained dispatcher tier addition; no FlowContribution / merger dependency.
+
 ### Added — slice 6 follow-up: `cache_for(descriptor:)` extension point
 
 - **`Rigor::Plugin::Base#cache_for(producer_id, params:, descriptor:)`** now accepts an optional plugin-author-supplied `Cache::Descriptor` extension. The supplied descriptor flows through `Cache::Descriptor.compose` with the auto-built one (`PluginEntry` template + `IoBoundary` reads); per-slot conflicts raise `Cache::Descriptor::Conflict` so divergent inputs surface rather than silently shadowing. Plugin authors can now pin gem-version `GemEntry`, configuration-file `FileEntry` digests, and `ConfigEntry` rows for external state the boundary cannot capture, without escaping the supported caching API. ADR-7 § "Slice 6" originally listed this as a follow-up; it lands ahead of v0.1.0 release. Drift snapshot for `Plugin::Base#cache_for` updated accordingly.

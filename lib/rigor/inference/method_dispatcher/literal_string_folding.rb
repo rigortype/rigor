@@ -8,12 +8,17 @@ module Rigor
       # Dispatcher tier that lifts string-composition results into
       # the `literal-string` carrier when every operand is itself
       # literal-bearing. Sits between {ConstantFolding} (which
-      # handles all-Constant cases) and {ShapeDispatch}; runs only
-      # for `String#+` / `String#*` / `String#<<` / `String#concat`
-      # calls whose inputs the ConstantFolding tier could not fold
-      # to a precise `Constant<String>` (e.g. one operand is
-      # `literal-string` rather than `Constant<String>`, or the
-      # multiplication exceeds the constant-fold size cap).
+      # handles all-Constant cases) and {ShapeDispatch}; runs for:
+      #
+      # - `String#+` / `String#*` / `String#<<` / `String#concat`
+      #   on string-typed receivers whose inputs the
+      #   ConstantFolding tier could not fold to a precise
+      #   `Constant<String>` (e.g. one operand is `literal-string`
+      #   rather than `Constant<String>`, or the multiplication
+      #   exceeds the constant-fold size cap).
+      # - `Array#join` on `Tuple[…]` receivers whose every element
+      #   plus the separator argument (when given) is
+      #   literal-bearing.
       #
       # Result rule:
       #
@@ -27,6 +32,12 @@ module Rigor
       #   literal-bearing too.
       # - `*`: receiver MUST be literal-bearing; argument MUST be
       #   integer-typed. The result is `literal-string`.
+      # - `join`: receiver MUST be `Tuple[…]` with every element
+      #   literal-string-compatible; the optional separator
+      #   argument MUST also be literal-string-compatible.
+      #   Result: `literal-string`. Empty `Tuple[]` lifts too —
+      #   `[].join` is the empty string at runtime, which is
+      #   literal-bearing trivially.
       #
       # Other receiver / argument shapes decline so the next tier
       # (ShapeDispatch / FileFolding / RbsDispatch) takes over and
@@ -39,6 +50,8 @@ module Rigor
         private_constant :CONCAT_METHODS
 
         def try_dispatch(receiver:, method_name:, args:, **)
+          return fold_array_join(receiver, args) if method_name == :join
+
           return nil unless Type::Combinator.literal_string_compatible?(receiver)
           return nil unless args.size == 1
 
@@ -62,6 +75,21 @@ module Rigor
           Type::Combinator.literal_string
         end
 
+        # `[lit, lit].join(sep)` — receiver must be a Tuple
+        # whose every element is literal-bearing; separator
+        # (when given) must be literal-bearing too. Multi-arg
+        # forms / `Array#join(*args)` splat shapes don't reach
+        # here because the dispatcher only routes through this
+        # tier when the call resolves to a single named method.
+        def fold_array_join(receiver, args)
+          return nil unless receiver.is_a?(Type::Tuple)
+          return nil unless receiver.elements.all? { |el| Type::Combinator.literal_string_compatible?(el) }
+          return nil unless args.size <= 1
+          return nil if args.size == 1 && !Type::Combinator.literal_string_compatible?(args.first)
+
+          Type::Combinator.literal_string
+        end
+
         def integer_typed?(type)
           case type
           when Type::Constant then type.value.is_a?(Integer)
@@ -80,7 +108,7 @@ module Rigor
           type.is_a?(Type::Constant) && type.value.is_a?(Integer) && type.value.negative?
         end
 
-        private_class_method :fold_concat, :fold_repeat, :integer_typed?
+        private_class_method :fold_concat, :fold_repeat, :fold_array_join, :integer_typed?
       end
     end
   end

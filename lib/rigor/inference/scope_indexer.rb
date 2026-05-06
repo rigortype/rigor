@@ -340,7 +340,7 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      def walk_methods(node, qualified_prefix, in_singleton_class, accumulator) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def walk_methods(node, qualified_prefix, in_singleton_class, accumulator) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -358,6 +358,9 @@ module Rigor
           end
         when Prism::DefNode
           record_def_method(node, qualified_prefix, in_singleton_class, accumulator)
+          return
+        when Prism::AliasMethodNode
+          record_alias_method(node, qualified_prefix, in_singleton_class, accumulator)
           return
         when Prism::CallNode
           record_define_method(node, qualified_prefix, in_singleton_class, accumulator) if node.name == :define_method
@@ -390,6 +393,7 @@ module Rigor
       def build_discovered_def_nodes(root)
         accumulator = {}
         walk_def_nodes(root, [], false, accumulator)
+        apply_alias_def_nodes(root, accumulator)
         accumulator.transform_values(&:freeze).freeze
       end
 
@@ -434,6 +438,76 @@ module Rigor
         class_name = qualified_prefix.empty? ? TOP_LEVEL_DEF_KEY : qualified_prefix.join("::")
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = def_node
+      end
+
+      # Registers the alias name in the `discovered_methods` table so
+      # `undefined-method` diagnostics are not emitted for calls to the
+      # aliased name. The kind mirrors the surrounding class context
+      # (instance inside a regular class body, singleton inside
+      # `class << self`).
+      def record_alias_method(alias_node, qualified_prefix, in_singleton_class, accumulator)
+        return if qualified_prefix.empty?
+        return unless alias_node.new_name.is_a?(Prism::SymbolNode)
+
+        class_name = qualified_prefix.join("::")
+        new_name = alias_node.new_name.unescaped.to_sym
+        kind = in_singleton_class ? :singleton : :instance
+        (accumulator[class_name] ||= {})[new_name] = kind
+      end
+
+      # Post-pass over the `def_nodes` accumulator: for every `alias`
+      # declaration inside a class body, if the original method name
+      # maps to a `Prism::DefNode`, register the new name pointing to
+      # the same node so inter-procedural return-type inference works
+      # for the aliased name.
+      def apply_alias_def_nodes(root, accumulator)
+        alias_map = collect_class_alias_map(root, [], {})
+        alias_map.each do |class_name, aliases|
+          class_defs = accumulator[class_name]
+          next unless class_defs
+
+          aliases.each do |new_name, old_name|
+            def_node = class_defs[old_name]
+            next unless def_node.is_a?(Prism::DefNode)
+
+            (accumulator[class_name] ||= {})[new_name] = def_node
+          end
+        end
+      end
+
+      # Builds a map `{class_name => {new_name_sym => old_name_sym}}` by
+      # walking the tree for `AliasMethodNode` nodes inside class bodies.
+      # rubocop:disable Metrics/CyclomaticComplexity
+      def collect_class_alias_map(node, qualified_prefix, accumulator)
+        return accumulator unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            collect_class_alias_map(node.body, qualified_prefix + [name], accumulator) if node.body
+            return accumulator
+          end
+        when Prism::SingletonClassNode
+          return accumulator
+        when Prism::AliasMethodNode
+          record_alias_map_entry(node, qualified_prefix, accumulator)
+          return accumulator
+        end
+
+        node.compact_child_nodes.each { |child| collect_class_alias_map(child, qualified_prefix, accumulator) }
+        accumulator
+      end
+      # rubocop:enable Metrics/CyclomaticComplexity
+
+      def record_alias_map_entry(alias_node, qualified_prefix, accumulator)
+        return if qualified_prefix.empty?
+        return unless alias_node.new_name.is_a?(Prism::SymbolNode) && alias_node.old_name.is_a?(Prism::SymbolNode)
+
+        class_name = qualified_prefix.join("::")
+        new_name = alias_node.new_name.unescaped.to_sym
+        old_name = alias_node.old_name.unescaped.to_sym
+        (accumulator[class_name] ||= {})[new_name] = old_name
       end
 
       def record_define_method(call_node, qualified_prefix, in_singleton_class, accumulator)

@@ -282,4 +282,57 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(method_body_scope.declared_types).not_to be_empty
     end
   end
+
+  describe "alias discovery" do
+    it "registers the aliased name in discovered_methods" do
+      program = parse(<<~RUBY)
+        class Greeter
+          def greet = "hi"
+          alias say_hello greet
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      expect(outer_scope.discovered_method?("Greeter", :say_hello, :instance)).to be(true)
+    end
+
+    it "does not register aliases outside any class body" do
+      program = parse(<<~RUBY)
+        def greet = "hi"
+        alias say_hello greet
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      # Top-level aliases have no class context; they should be silently ignored
+      expect(outer_scope.discovered_method?("", :say_hello, :instance)).to be(false)
+    end
+
+    it "maps the aliased name to the original DefNode for return-type inference" do
+      program = parse(<<~RUBY)
+        class Greeter
+          def greet = "hi"
+          alias say_hello greet
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      def_node = outer_scope.user_def_for("Greeter", :say_hello)
+      expect(def_node).to be_a(Prism::DefNode)
+      expect(def_node.name).to eq(:greet)
+    end
+
+    it "resolves alias that appears before the def (forward reference)" do
+      program = parse(<<~RUBY)
+        class Greeter
+          alias say_hello greet
+          def greet = "hi"
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      def_node = outer_scope.user_def_for("Greeter", :say_hello)
+      expect(def_node).to be_a(Prism::DefNode)
+      expect(def_node.name).to eq(:greet)
+    end
+  end
 end

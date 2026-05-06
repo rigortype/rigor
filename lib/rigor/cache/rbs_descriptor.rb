@@ -2,6 +2,8 @@
 
 require "digest"
 
+require_relative "descriptor"
+
 module Rigor
   module Cache
     # Shared descriptor builder for cache producers that depend on the

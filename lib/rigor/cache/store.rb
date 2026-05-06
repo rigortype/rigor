@@ -5,6 +5,8 @@ require "fileutils"
 require "json"
 require "securerandom"
 
+require_relative "descriptor"
+
 module Rigor
   module Cache
     # Filesystem-backed cache store. Schema, layout, file format,

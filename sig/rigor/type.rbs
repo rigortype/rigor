@@ -244,9 +244,16 @@ module Rigor
       def self?.decimal_int_string: () -> Refined
       def self?.octal_int_string: () -> Refined
       def self?.hex_int_string: () -> Refined
+      def self?.literal_string: () -> Refined
+      def self?.non_lowercase_string: () -> Refined
+      def self?.non_uppercase_string: () -> Refined
+      def self?.non_numeric_string: () -> Refined
+      def self?.literal_string_carrier?: (Type::t refined) -> bool
+      def self?.literal_string_compatible?: (Type::t type) -> bool
       def self?.intersection: (*Type::t members) -> Type::t
       def self?.non_empty_lowercase_string: () -> Type::t
       def self?.non_empty_uppercase_string: () -> Type::t
+      def self?.non_empty_literal_string: () -> Type::t
       def self?.integer_range: ((Integer | Symbol) min, (Integer | Symbol) max) -> IntegerRange
       def self?.positive_int: () -> IntegerRange
       def self?.non_negative_int: () -> IntegerRange

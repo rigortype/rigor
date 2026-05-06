@@ -43,6 +43,8 @@ module Rigor
     def self?.read_return_type_override: (untyped method_def) -> Type::t?
     def self?.parse_return_type_override: (String string) -> Type::t?
 
+    def self?.read_flow_contribution: (untyped method_def) -> untyped?
+
     class ParamOverride
       attr_reader param_name: Symbol
       attr_reader type: Type::t

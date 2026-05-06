@@ -32,19 +32,25 @@ module Rigor
     class RbsLoader
       attr_reader libraries: Array[String]
       attr_reader signature_paths: Array[String | _ToPath]
+      attr_reader cache_store: untyped?
 
       def self.default: () -> RbsLoader
       def self.reset_default!: () -> void
+      def self.build_env_for: (libraries: Array[String], signature_paths: Array[String | _ToPath]) -> untyped
 
-      def initialize: (?libraries: Array[String], ?signature_paths: Array[String | _ToPath]) -> void
+      def initialize: (?libraries: Array[String], ?signature_paths: Array[String | _ToPath], ?cache_store: untyped?) -> void
       def class_known?: (String | Symbol name) -> bool
       def instance_definition: (String | Symbol class_name) -> untyped?
       def instance_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped?
+      def uncached_instance_definition: (String | Symbol class_name) -> untyped?
       def singleton_definition: (String | Symbol class_name) -> untyped?
       def singleton_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped?
+      def uncached_singleton_definition: (String | Symbol class_name) -> untyped?
       def class_type_param_names: (String | Symbol class_name) -> Array[Symbol]
       def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
       def constant_type: (String name) -> Type::t?
+      def constant_names: () -> Array[String]
+      def each_known_class_name: () { (String name) -> void } -> untyped
     end
 
     class RbsHierarchy

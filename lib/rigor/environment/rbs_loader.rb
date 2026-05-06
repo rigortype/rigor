@@ -133,11 +133,30 @@ module Rigor
       #   for `class_name`, or nil when the class is unknown or its
       #   definition cannot be built (RBS may raise on broken hierarchies;
       #   we fail-soft and return nil so the caller can fall back).
+      #
+      # When `cache_store` is set, the loader fetches the per-class
+      # definition through {Cache::RbsInstanceDefinitions.fetch} so
+      # subsequent runs (and other loaders sharing the same Store)
+      # skip the `RBS::DefinitionBuilder.build_instance` step.
+      # In-memory `@instance_definition_cache` keeps the per-process
+      # short-circuit on top.
       def instance_definition(class_name)
         key = class_name.to_s
         return @instance_definition_cache[key] if @instance_definition_cache.key?(key)
 
-        @instance_definition_cache[key] = build_instance_definition(class_name)
+        @instance_definition_cache[key] = if cache_store
+                                            cached_instance_definition(class_name)
+                                          else
+                                            build_instance_definition(class_name)
+                                          end
+      end
+
+      # Public uncached accessor used by the cache producer
+      # ({Rigor::Cache::RbsInstanceDefinitions}). Avoids the
+      # `private_method_called` round-trip a `loader.send(...)`
+      # callsite would require.
+      def uncached_instance_definition(class_name)
+        build_instance_definition(class_name)
       end
 
       # @return [RBS::Definition::Method, nil]
@@ -153,11 +172,25 @@ module Rigor
       #   definition are the *class methods* of `class_name`, including
       #   those inherited from `Class` and `Module` for class types.
       #   Returns nil for unknown names and on RBS build errors (fail-soft).
+      #
+      # When `cache_store` is set, the loader fetches the per-class
+      # singleton definition through
+      # {Cache::RbsSingletonDefinitions.fetch}; the same caching
+      # discipline as {#instance_definition}.
       def singleton_definition(class_name)
         key = class_name.to_s
         return @singleton_definition_cache[key] if @singleton_definition_cache.key?(key)
 
-        @singleton_definition_cache[key] = build_singleton_definition(class_name)
+        @singleton_definition_cache[key] = if cache_store
+                                             cached_singleton_definition(class_name)
+                                           else
+                                             build_singleton_definition(class_name)
+                                           end
+      end
+
+      # Public uncached accessor used by the cache producer.
+      def uncached_singleton_definition(class_name)
+        build_singleton_definition(class_name)
       end
 
       # @return [RBS::Definition::Method, nil] the class method on
@@ -309,6 +342,16 @@ module Rigor
       def cached_env
         require_relative "../cache/rbs_environment"
         Cache::RbsEnvironment.fetch(loader: self, store: cache_store)
+      end
+
+      def cached_instance_definition(class_name)
+        require_relative "../cache/rbs_instance_definitions"
+        Cache::RbsInstanceDefinitions.fetch(loader: self, store: cache_store, class_name: class_name)
+      end
+
+      def cached_singleton_definition(class_name)
+        require_relative "../cache/rbs_instance_definitions"
+        Cache::RbsSingletonDefinitions.fetch(loader: self, store: cache_store, class_name: class_name)
       end
 
       def builder

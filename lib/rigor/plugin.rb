@@ -21,7 +21,7 @@ module Rigor
                 "Rigor::Plugin.register expects a subclass of Rigor::Plugin::Base, got #{plugin_class.inspect}"
         end
 
-        manifest = plugin_class.manifest
+        manifest = plugin_class.manifest # rigor:disable undefined-method
         @mutex.synchronize do
           existing = @registered[manifest.id]
           if existing && existing != plugin_class

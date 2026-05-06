@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require "digest"
+require "json"
+
 require_relative "manifest"
 
 module Rigor
@@ -46,6 +49,51 @@ module Rigor
 
           @manifest = Manifest.new(**fields)
         end
+
+        # ADR-7 § "Slice 6-A" — DSL declaration of a cached
+        # producer. Plugin authors write
+        #
+        #   class MyPlugin < Rigor::Plugin::Base
+        #     manifest(id: "rails", version: "0.1.0")
+        #
+        #     producer :schema_table do |params|
+        #       schema = io_boundary.read_file("db/schema.rb")
+        #       parse(schema, params)
+        #     end
+        #   end
+        #
+        # The block runs through `instance_exec` so `self` inside
+        # the body is the plugin instance — `io_boundary`,
+        # `services`, `manifest`, `config` are all in scope. The
+        # block receives the call-site `params` Hash as its sole
+        # argument; the same params Hash mixes into the cache
+        # key per `Cache::Descriptor#cache_key_for`.
+        #
+        # `serialize:` / `deserialize:` are forwarded verbatim to
+        # `Cache::Store#fetch_or_compute`. Default round-trip is
+        # `Marshal.dump` / `Marshal.load` per the v0.0.9 callable
+        # surface; producers whose return values are not Marshal-
+        # clean must supply their own pair.
+        #
+        # Producer ids are auto-prefixed `plugin.<manifest.id>.`
+        # at the cache layer (slice 6-C) so plugin-side ids cannot
+        # collide with built-in producers.
+        def producer(id, serialize: nil, deserialize: nil, &block)
+          raise ArgumentError, "Plugin::Base.producer requires a block body" if block.nil?
+
+          @producers ||= {}
+          @producers[id.to_sym] = { block: block, serialize: serialize, deserialize: deserialize }.freeze
+          id.to_sym
+        end
+
+        # Frozen snapshot of the producer table. Inherited
+        # producers from a superclass are intentionally NOT
+        # surfaced — Plugin::Base subclasses do not chain
+        # producers, and the loader instantiates one
+        # subclass per registration.
+        def producers
+          (@producers || {}).dup.freeze
+        end
       end
 
       attr_reader :services, :config
@@ -90,6 +138,80 @@ module Rigor
       # the class-level manifest declaration.
       def manifest
         self.class.manifest
+      end
+
+      # ADR-7 § "Slice 6-A/6-B" — per-plugin {IoBoundary}.
+      # Memoised so the boundary's accumulated `FileEntry`
+      # rows persist across producer invocations within the
+      # same plugin instance and feed cache invalidation
+      # via `cache_for`.
+      def io_boundary
+        @io_boundary ||= services.io_boundary_for(manifest.id)
+      end
+
+      # ADR-7 § "Slice 6-A" — returns a callable that performs
+      # a `Cache::Store#fetch_or_compute` round-trip for the
+      # named producer. The descriptor (per ADR-7 § "Slice
+      # 6-B") is auto-assembled from the plugin's
+      # `PluginEntry` template (id, version, config_hash) and
+      # the {IoBoundary} read history. The producer id is
+      # auto-prefixed `plugin.<manifest.id>.` per ADR-7 §
+      # "Slice 6-C" so plugin caches stay sandboxed from
+      # built-in producers.
+      #
+      # When `services.cache_store` is `nil` (e.g. CLI
+      # `--no-cache`), the callable bypasses the cache and
+      # runs the producer block every time — same semantics
+      # as the v0.0.9 cache surface for built-in producers.
+      def cache_for(producer_id, params: {})
+        producer = self.class.producers[producer_id.to_sym]
+        unless producer
+          raise ArgumentError,
+                "plugin #{manifest.id.inspect} did not declare producer #{producer_id.inspect}"
+        end
+
+        compute = -> { instance_exec(params, &producer[:block]) }
+        store = services.cache_store
+        return compute unless store
+
+        prefixed_id = "plugin.#{manifest.id}.#{producer_id}"
+        descriptor = build_plugin_cache_descriptor
+        lambda do
+          store.fetch_or_compute(
+            producer_id: prefixed_id,
+            params: params,
+            descriptor: descriptor,
+            serialize: producer[:serialize],
+            deserialize: producer[:deserialize],
+            &compute
+          )
+        end
+      end
+
+      private
+
+      # ADR-7 § "Slice 6-B" — composes the per-call cache
+      # descriptor from (1) the plugin's PluginEntry template
+      # and (2) the IoBoundary's accumulated FileEntry rows.
+      # Future cross-plugin descriptor extensions ride a
+      # follow-up API; slice 6 builds only the auto-assembled
+      # path.
+      def build_plugin_cache_descriptor
+        plugin_entry = Cache::Descriptor::PluginEntry.new(
+          id: manifest.id,
+          version: manifest.version,
+          config_hash: digest_config(config)
+        )
+        boundary_descriptor = io_boundary.cache_descriptor
+        Cache::Descriptor.new(
+          plugins: [plugin_entry],
+          files: boundary_descriptor.files
+        )
+      end
+
+      def digest_config(config)
+        canonical = Cache::Descriptor.canonicalize_value(config || {})
+        Digest::SHA256.hexdigest(JSON.generate(canonical))
       end
     end
   end

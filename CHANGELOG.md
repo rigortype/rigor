@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — v0.1.0 slice 6: plugin-side cache producers
+
+- **`Rigor::Plugin::Base.producer(id, serialize:, deserialize:, &block)` DSL** per [ADR-7 § "Slice 6-A"](docs/adr/7-v0.1.0-slice-decisions.md). Class-level declaration registers a cached producer; the body runs through `instance_exec` so `self` inside the block is the plugin instance (`io_boundary`, `services`, `manifest`, `config` all in scope). `serialize:` / `deserialize:` forward verbatim to `Cache::Store#fetch_or_compute`; default round-trip is the v0.0.9 `Marshal.dump` / `Marshal.load` pair.
+- **`Rigor::Plugin::Base#cache_for(producer_id, params:)` callable** returns a callable that performs the cache round-trip. The descriptor is auto-assembled per [ADR-7 § "Slice 6-B"](docs/adr/7-v0.1.0-slice-decisions.md) from (1) the plugin's `PluginEntry` template (id, version, config_hash via SHA-256 of canonicalised config), (2) the `IoBoundary`'s accumulated `:digest` `FileEntry` rows (slice 2), and (3) the user-supplied `params:` hash. Plugin authors never construct descriptors manually. When `services.cache_store` is `nil` (`--no-cache`), the callable bypasses caching and runs the producer block every time.
+- **`Rigor::Plugin::Base#io_boundary` memoised accessor** so the per-plugin `IoBoundary`'s read history persists across producer invocations within the same plugin instance and feeds cache invalidation.
+- **Cache-id sandbox** per [ADR-7 § "Slice 6-C"](docs/adr/7-v0.1.0-slice-decisions.md). `Plugin::Base#cache_for` auto-prefixes producer ids with `plugin.<manifest.id>.` (matching `Cache::Store::VALID_PRODUCER_ID`) so plugin caches stay sandboxed from built-in producers (`rbs.*`) and from each other. `rigor check --cache-stats` shows attribution unambiguously through the prefix.
+- **Public-API drift snapshots updated** for `Plugin::Base` (gains `cache_for`, `io_boundary`, class-level `producer` / `producers`) so the producer-API surface is locked alongside the implementation.
+- **Documentation**: [`docs/internal-spec/plugin-cache-producers.md`](docs/internal-spec/plugin-cache-producers.md) (normative).
+
+Out of scope per ADR-7 § "Slice 6-D": the v0.0.9 carry-over per-method `Reflection` cache re-attempt is descoped to a separate v0.1.x ticket; the engine-internal regression investigation it requires does not entangle with the new public plugin API.
+
 ### Added — v0.1.0 slice 5 (plugin emission protocol)
 
 - **`Rigor::Plugin::Base#diagnostics_for_file(path:, scope:, root:)`** per [ADR-7 § "Slice 5-A"](docs/adr/7-v0.1.0-slice-decisions.md). Plugin subclasses override the hook to return an array of `Rigor::Analysis::Diagnostic` rows for the analysed file; the default returns `[]`. Plugin authors traverse `root` (the parsed `Prism::Node`) themselves if they need node-scoped rules — the `Rule<TNode>` API ADR-2 § "Custom rules" mentions stays deferred to v0.1.x.

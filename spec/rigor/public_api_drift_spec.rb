@@ -111,14 +111,20 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   PLUGIN_BASE_INSTANCE = %w[
+    cache_for(req:producer_id,key:params)
     config()
     diagnostics_for_file(keyreq:path,keyreq:scope,keyreq:root)
     init(req:services)
+    io_boundary()
     manifest()
     services()
   ].freeze
 
-  PLUGIN_BASE_SINGLETON = %w[manifest(keyrest:fields)].freeze
+  PLUGIN_BASE_SINGLETON = %w[
+    manifest(keyrest:fields)
+    producer(req:id,key:serialize,key:deserialize,block:block)
+    producers()
+  ].freeze
 
   PLUGIN_MANIFEST_INSTANCE = %w[
     ==(req:other)

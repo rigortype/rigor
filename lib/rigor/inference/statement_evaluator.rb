@@ -1423,8 +1423,7 @@ module Rigor
       def collect_in_pattern_bindings(subject, pattern, scope)
         case pattern
         when Prism::CapturePatternNode
-          type = singleton_to_nominal(sub_eval(pattern.value, scope).first)
-          [[pattern.target.name, type]]
+          [[pattern.target.name, pattern_capture_type(pattern.value, scope)]]
         when Prism::LocalVariableTargetNode
           subject_type = subject.is_a?(Prism::LocalVariableReadNode) ? scope.local(subject.name) : nil
           [[pattern.name, subject_type || Type::Combinator.untyped]]
@@ -1436,6 +1435,8 @@ module Rigor
           collect_find_pattern_bindings(pattern, scope)
         when Prism::HashPatternNode
           collect_hash_pattern_bindings(pattern, scope)
+        when Prism::AlternationPatternNode
+          collect_alternation_pattern_bindings(subject, pattern, scope)
         else
           []
         end
@@ -1513,6 +1514,38 @@ module Rigor
       # when the class could not be resolved).
       def singleton_to_nominal(type)
         type.is_a?(Type::Singleton) ? Type::Combinator.nominal_of(type.class_name) : Type::Combinator.untyped
+      end
+
+      # Returns the type to bind for a `CapturePatternNode`'s target.
+      # Plain class references collapse to the matching `Nominal[T]`;
+      # `AlternationPatternNode` (`Integer | String => x`) unions every
+      # alternate's resolved type. Anything else falls back to
+      # `untyped` (the conservative legacy behaviour).
+      def pattern_capture_type(value_node, scope)
+        if value_node.is_a?(Prism::AlternationPatternNode)
+          left = pattern_capture_type(value_node.left, scope)
+          right = pattern_capture_type(value_node.right, scope)
+          Type::Combinator.union(left, right)
+        else
+          singleton_to_nominal(sub_eval(value_node, scope).first)
+        end
+      end
+
+      # `in PatternA | PatternB` — Ruby requires both alternates to
+      # bind the same names, but the binder runs against the AST and
+      # cannot enforce that. We collect bindings from each side and
+      # merge by name, unioning types when both alternates contribute.
+      # Names that only one alternate contributes still surface (the
+      # parser would have rejected the case at compile time, so by the
+      # time we see it the user's intent is the merged set).
+      def collect_alternation_pattern_bindings(subject, pattern, scope)
+        left = collect_in_pattern_bindings(subject, pattern.left, scope)
+        right = collect_in_pattern_bindings(subject, pattern.right, scope)
+        merged = {}
+        (left + right).each do |name, type|
+          merged[name] = merged.key?(name) ? Type::Combinator.union(merged[name], type) : type
+        end
+        merged.to_a
       end
     end
     # rubocop:enable Metrics/ClassLength

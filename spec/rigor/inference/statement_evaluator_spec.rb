@@ -1567,6 +1567,28 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       expect(post.local(:name)).not_to be_nil
     end
+
+    it "binds an alternation+capture target to the union of the alternates" do
+      _, post = evaluate(<<~RUBY)
+        case value
+        in Integer | String => x
+          x
+        end
+      RUBY
+      nominal_members = post.local(:x).members.grep(Rigor::Type::Nominal)
+      expect(nominal_members.map(&:class_name)).to contain_exactly("Integer", "String")
+    end
+
+    it "merges bindings across alternation branches by name" do
+      _, post = evaluate(<<~RUBY)
+        case value
+        in [Integer => i] | [String => i]
+          i
+        end
+      RUBY
+      nominal_members = post.local(:i).members.grep(Rigor::Type::Nominal)
+      expect(nominal_members.map(&:class_name)).to contain_exactly("Integer", "String")
+    end
   end
 
   describe "MatchWriteNode (named regex captures)" do

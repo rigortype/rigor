@@ -293,6 +293,29 @@ module Rigor
         end
       end
 
+      # ADR-7 § "Slice 4-A" — public Fact-shaped narrowing
+      # entry. Distinguishes a `Nominal[<class>]`-typed Fact
+      # (uses `narrow_class` / `narrow_not_class` for
+      # hierarchy-aware narrowing) from a refinement-shaped
+      # Fact (refined types, IntegerRange, Difference, …).
+      # The implementation lives next to its sibling helpers
+      # `narrow_class` and `narrow_not_refinement`; consumers
+      # outside `Narrowing` (today: `StatementEvaluator`'s
+      # post-return assertion path) reach for it via
+      # `Rigor::Inference::Narrowing.narrow_for_fact`.
+      def narrow_for_fact(current, fact, environment)
+        if fact.type.is_a?(Type::Nominal) && fact.type.type_args.empty?
+          class_name = fact.type.class_name
+          return narrow_not_class(current, class_name, exact: false, environment: environment) if fact.negative?
+
+          return narrow_class(current, class_name, exact: false, environment: environment)
+        end
+
+        return narrow_not_refinement(current, fact.type) if fact.negative?
+
+        fact.type
+      end
+
       # Public predicate analyser. Returns `[truthy_scope, falsey_scope]`,
       # always; when no narrowing rule matches the predicate node both
       # entries are the receiver scope unchanged.
@@ -1240,27 +1263,6 @@ module Rigor
           else
             lookup_positional_arg(call_node, method_def, fact.target_name)
           end
-        end
-
-        # ADR-7 § "Slice 4-A" canonical narrowing. Distinguishes
-        # `Nominal[<class>]` Facts (the class-name path — uses
-        # `narrow_class` / `narrow_not_class` for hierarchy-aware
-        # narrowing) from refinement-shaped Facts (refined
-        # types, IntegerRange, Difference, …). For the latter,
-        # positive narrowing substitutes the fact's type
-        # directly; negative narrowing routes through
-        # `narrow_not_refinement`.
-        def narrow_for_fact(current, fact, environment)
-          if fact.type.is_a?(Rigor::Type::Nominal) && fact.type.type_args.empty?
-            class_name = fact.type.class_name
-            return narrow_not_class(current, class_name, exact: false, environment: environment) if fact.negative?
-
-            return narrow_class(current, class_name, exact: false, environment: environment)
-          end
-
-          return narrow_not_refinement(current, fact.type) if fact.negative?
-
-          fact.type
         end
 
         def resolve_rbs_extended_method(node, scope)

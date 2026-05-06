@@ -819,23 +819,30 @@ module Rigor
         parts.join("::")
       end
 
-      # v0.0.2 — applies `RBS::Extended` `assert <target> is T`
-      # directives to the post-call scope. The conditional
-      # variants (`assert-if-true` / `assert-if-false`) are
-      # NOT applied here — they refine the scope only when the
-      # call is observed as a truthy / falsey predicate, which
-      # `Narrowing.predicate_scopes` handles separately.
+      # Slice 4b-2 (ADR-7 § "Slice 4-A/4-B") — applies the
+      # post-return facts the merger produces for an
+      # `RBS::Extended`-annotated call. Reads through
+      # `RbsExtended.read_flow_contribution` so the bundle
+      # carries the canonical `Rigor::FlowContribution::Fact`
+      # rows for `:always` assert directives (the slice-4a
+      # routing places conditional asserts on `truthy_facts` /
+      # `falsey_facts`, which `Narrowing.predicate_scopes`
+      # consumes). Future plugin contributions that add
+      # `:always` assertions at the same call site flow through
+      # the same merger and land here.
       def apply_rbs_extended_assertions(call_node, current_scope)
         method_def = resolve_call_method(call_node, current_scope)
         return current_scope if method_def.nil?
 
-        effects = RbsExtended.read_assert_effects(method_def)
-        return current_scope if effects.empty?
+        contribution = RbsExtended.read_flow_contribution(method_def)
+        return current_scope if contribution.nil?
 
-        effects.reduce(current_scope) do |scope_acc, effect|
-          next scope_acc unless effect.always?
+        result = Rigor::FlowContribution::Merger.merge([contribution])
+        post_return = result.post_return_facts
+        return current_scope if post_return.empty?
 
-          apply_assert_effect(effect, call_node, scope_acc, method_def)
+        post_return.reduce(current_scope) do |scope_acc, fact|
+          apply_post_return_fact(fact, call_node, scope_acc, method_def)
         end
       end
 
@@ -868,44 +875,35 @@ module Rigor
         end
       end
 
-      def apply_assert_effect(effect, call_node, current_scope, method_def)
-        target_node = assert_effect_target_node(effect, call_node, method_def)
+      # Slice 4b-2 — applies a single post-return Fact to the
+      # scope. Mirrors `Narrowing#apply_fact_to_scope` (Fact
+      # variant of the v0.0.2 `apply_assert_effect`); shares the
+      # narrowing logic via `Narrowing.narrow_for_fact` so the
+      # predicate / assert / plugin paths all converge on the
+      # same hierarchy-aware narrowing rules.
+      def apply_post_return_fact(fact, call_node, current_scope, method_def)
+        target_node = fact_target_node(fact, call_node, method_def)
         return current_scope unless target_node.is_a?(Prism::LocalVariableReadNode)
 
         local_name = target_node.name
         current_type = current_scope.local(local_name)
         return current_scope if current_type.nil?
 
-        narrowed = narrow_for_assert_effect(current_type, effect, current_scope.environment)
+        narrowed = Narrowing.narrow_for_fact(current_type, fact, current_scope.environment)
         current_scope.with_local(local_name, narrowed)
       end
 
-      # v0.0.2 #3 — same `target: self` accommodation as
-      # `Narrowing.effect_target_node`: the call's receiver
-      # serves as the target for self-targeted directives.
-      def assert_effect_target_node(effect, call_node, method_def)
-        if effect.target_kind == :self
+      # `:self` routes to the call receiver; otherwise we look
+      # up the matching positional argument by parameter name.
+      def fact_target_node(fact, call_node, method_def)
+        if fact.target_kind == :self
           call_node.receiver
         else
-          lookup_assert_arg(call_node, method_def, effect.target_name)
+          lookup_post_return_arg(call_node, method_def, fact.target_name)
         end
       end
 
-      def narrow_for_assert_effect(current_type, effect, environment)
-        if effect.refinement?
-          return Narrowing.narrow_not_refinement(current_type, effect.refinement_type) if effect.negative?
-
-          return effect.refinement_type
-        end
-
-        if effect.negative?
-          Narrowing.narrow_not_class(current_type, effect.class_name, exact: false, environment: environment)
-        else
-          Narrowing.narrow_class(current_type, effect.class_name, exact: false, environment: environment)
-        end
-      end
-
-      def lookup_assert_arg(call_node, method_def, target_name)
+      def lookup_post_return_arg(call_node, method_def, target_name)
         arguments = call_node.arguments&.arguments || []
         method_def.method_types.each do |mt|
           params = mt.type.required_positionals + mt.type.optional_positionals

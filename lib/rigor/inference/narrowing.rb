@@ -734,32 +734,7 @@ module Rigor
           # `rigor:v1:predicate-if-true` / `predicate-if-false`
           # annotations, apply them to narrow the corresponding
           # local-variable arguments on each edge.
-          predicate_result = analyse_rbs_extended_predicate(node, scope)
-          assert_result = analyse_rbs_extended_assert_if(node, scope)
-          merge_extended_results(predicate_result, assert_result, scope)
-        end
-
-        # Combines two `[truthy_scope, falsey_scope]` pair
-        # results from sibling RBS::Extended analysers
-        # (`predicate-if-*` and `assert-if-*`). When only one
-        # side fires, return it directly; when both fire the
-        # right side's per-local deltas are applied on top of
-        # the left side's edges so the rules compose.
-        def merge_extended_results(left, right, base_scope)
-          return left if right.nil?
-          return right if left.nil?
-
-          [
-            merge_scope_pair(left[0], right[0], base_scope),
-            merge_scope_pair(left[1], right[1], base_scope)
-          ]
-        end
-
-        def merge_scope_pair(left_scope, right_scope, base_scope)
-          right_scope.locals.reduce(left_scope) do |acc, (name, type)|
-            base_type = base_scope.local(name)
-            type.equal?(base_type) ? acc : acc.with_local(name, type)
-          end
+          analyse_rbs_extended_contribution(node, scope)
         end
 
         ZERO_CLASS_PREDICATES = %i[positive? negative? zero? nonzero?].freeze
@@ -1187,114 +1162,105 @@ module Rigor
           node
         end
 
-        # Slice 7 phase 15 — RBS::Extended predicate-effect
-        # analyser. Resolves the called method through the
-        # RBS environment, reads any `rigor:v1:predicate-if-*`
-        # annotations, and applies them to the call's
-        # local-variable arguments.
+        # Slice 4b-1 (ADR-7 § "Slice 4-A/4-B") — single-point
+        # RBS::Extended contribution analyser. Replaces the
+        # earlier sibling pair (`analyse_rbs_extended_predicate`
+        # + `analyse_rbs_extended_assert_if`) with one path that
+        # routes through `RbsExtended.read_flow_contribution` and
+        # `Rigor::FlowContribution::Merger.merge`. The bundle's
+        # `truthy_facts` slot already includes both the
+        # `predicate-if-true` and `assert-if-true` Facts (slice
+        # 4a routing closed the v0.0.9 imperfection); the
+        # `falsey_facts` slot mirrors that. The merger composes
+        # any future plugin contribution at the same site
+        # alongside the RBS::Extended bundle without changing
+        # this analyser.
         #
-        # Conservative envelope:
+        # Conservative envelope (carried over from the previous
+        # implementation):
         # - Receiver type must be `Type::Nominal`,
         #   `Type::Singleton`, or `Type::Constant`.
         # - The method must be present in the loader.
-        # - For each predicate effect, the corresponding
-        #   positional argument (matched by parameter name in
-        #   the selected overload) MUST be a
-        #   `Prism::LocalVariableReadNode` for narrowing to
-        #   apply.
-        # - When the target is `self`, narrowing applies to
-        #   the receiver — but the engine does not yet narrow
-        #   `self` itself (Slice A-engine self-typing is
-        #   read-only), so `self`-targeted effects are
-        #   accepted by the parser but currently produce no
+        # - For each fact, the corresponding positional
+        #   argument (matched by parameter name in the selected
+        #   overload) MUST be a `Prism::LocalVariableReadNode`
+        #   for narrowing to apply.
+        # - When the target is `self`, narrowing applies to the
+        #   receiver — but the engine does not yet narrow
+        #   `self` itself, so `self`-targeted facts are
+        #   accepted by the merger but currently produce no
         #   scope edits.
-        def analyse_rbs_extended_predicate(node, scope)
+        def analyse_rbs_extended_contribution(node, scope)
           method_def = resolve_rbs_extended_method(node, scope)
           return nil if method_def.nil?
 
-          effects = RbsExtended.read_predicate_effects(method_def)
-          return nil if effects.empty?
+          contribution = RbsExtended.read_flow_contribution(method_def)
+          return nil if contribution.nil?
 
-          truthy_scope = scope
-          falsey_scope = scope
-          effects.each do |effect|
-            truthy_scope, falsey_scope =
-              apply_predicate_effect(effect, node, scope, truthy_scope, falsey_scope, method_def)
+          result = Rigor::FlowContribution::Merger.merge([contribution])
+          truthy_facts = result.truthy_facts
+          falsey_facts = result.falsey_facts
+          return nil if truthy_facts.empty? && falsey_facts.empty?
+
+          apply_facts_to_scope_pair(node, scope, truthy_facts, falsey_facts, method_def)
+        end
+
+        def apply_facts_to_scope_pair(call_node, entry_scope, truthy_facts, falsey_facts, method_def)
+          truthy_scope = entry_scope
+          falsey_scope = entry_scope
+          truthy_facts.each do |fact|
+            truthy_scope = apply_fact_to_scope(fact, call_node, entry_scope, truthy_scope, method_def)
+          end
+          falsey_facts.each do |fact|
+            falsey_scope = apply_fact_to_scope(fact, call_node, entry_scope, falsey_scope, method_def)
           end
           [truthy_scope, falsey_scope]
         end
 
-        # v0.0.2 — `assert-if-true` / `assert-if-false`. Reads
-        # the conditional assertion effects off the called
-        # method and narrows the matching argument on the
-        # corresponding edge. The unconditional `assert`
-        # variant is NOT applied here; `StatementEvaluator`
-        # applies it directly to the post-call scope.
-        def analyse_rbs_extended_assert_if(node, scope)
-          method_def = resolve_rbs_extended_method(node, scope)
-          return nil if method_def.nil?
-
-          effects = RbsExtended.read_assert_effects(method_def).reject(&:always?)
-          return nil if effects.empty?
-
-          truthy_scope = scope
-          falsey_scope = scope
-          effects.each do |effect|
-            truthy_scope, falsey_scope =
-              apply_assert_if_effect(effect, node, scope, truthy_scope, falsey_scope, method_def)
-          end
-          [truthy_scope, falsey_scope]
-        end
-
-        # rubocop:disable Metrics/ParameterLists
-        def apply_assert_if_effect(effect, call_node, entry_scope, truthy_scope, falsey_scope, method_def)
-          target_node = effect_target_node(effect, call_node, method_def)
-          return [truthy_scope, falsey_scope] unless target_node.is_a?(Prism::LocalVariableReadNode)
+        def apply_fact_to_scope(fact, call_node, entry_scope, target_scope, method_def)
+          target_node = fact_target_node(fact, call_node, method_def)
+          return target_scope unless target_node.is_a?(Prism::LocalVariableReadNode)
 
           local_name = target_node.name
           current = entry_scope.local(local_name)
-          return [truthy_scope, falsey_scope] if current.nil?
+          return target_scope if current.nil?
 
-          narrowed = narrow_for_effect(current, effect, entry_scope.environment)
-          if effect.if_truthy_return?
-            [truthy_scope.with_local(local_name, narrowed), falsey_scope]
-          else
-            [truthy_scope, falsey_scope.with_local(local_name, narrowed)]
-          end
+          narrowed = narrow_for_fact(current, fact, entry_scope.environment)
+          target_scope.with_local(local_name, narrowed)
         end
-        # rubocop:enable Metrics/ParameterLists
 
-        # v0.0.2 #3 — resolves an effect's target node. For
-        # `target: <param>` we look up the matching positional
-        # argument; for `target: self` we use the call's
-        # receiver. In both cases the caller still requires a
-        # `Prism::LocalVariableReadNode` for narrowing to
-        # actually fire (the engine's narrowing surface only
-        # rebinds locals).
-        def effect_target_node(effect, call_node, method_def)
-          if effect.target_kind == :self
+        # Resolves a Fact's target node. Mirrors the earlier
+        # `effect_target_node` helper but reads from the
+        # canonical Fact carrier; `:self` routes to the call
+        # receiver, otherwise we look up the matching
+        # positional argument by parameter name.
+        def fact_target_node(fact, call_node, method_def)
+          if fact.target_kind == :self
             call_node.receiver
           else
-            lookup_positional_arg(call_node, method_def, effect.target_name)
+            lookup_positional_arg(call_node, method_def, fact.target_name)
           end
         end
 
-        # v0.0.2 — selects `narrow_class` (positive) or
-        # `narrow_not_class` (negative `~T` form) based on
-        # the effect's `negative?` flag. Shared between
-        # predicate-if-* and assert-if-* application paths.
-        def narrow_for_effect(current, effect, environment)
-          if effect.respond_to?(:refinement?) && effect.refinement?
-            return narrow_not_refinement(current, effect.refinement_type) if effect.negative?
+        # ADR-7 § "Slice 4-A" canonical narrowing. Distinguishes
+        # `Nominal[<class>]` Facts (the class-name path — uses
+        # `narrow_class` / `narrow_not_class` for hierarchy-aware
+        # narrowing) from refinement-shaped Facts (refined
+        # types, IntegerRange, Difference, …). For the latter,
+        # positive narrowing substitutes the fact's type
+        # directly; negative narrowing routes through
+        # `narrow_not_refinement`.
+        def narrow_for_fact(current, fact, environment)
+          if fact.type.is_a?(Rigor::Type::Nominal) && fact.type.type_args.empty?
+            class_name = fact.type.class_name
+            return narrow_not_class(current, class_name, exact: false, environment: environment) if fact.negative?
 
-            return effect.refinement_type
+            return narrow_class(current, class_name, exact: false, environment: environment)
           end
 
-          if effect.negative?
-            narrow_not_class(current, effect.class_name, exact: false, environment: environment)
-          else
-            narrow_class(current, effect.class_name, exact: false, environment: environment)
-          end
+          return narrow_not_refinement(current, fact.type) if fact.negative?
+
+          fact.type
         end
 
         def resolve_rbs_extended_method(node, scope)
@@ -1331,24 +1297,6 @@ module Rigor
           CONSTANT_CLASSES.each { |klass, name| return name if value.is_a?(klass) }
           nil
         end
-
-        # rubocop:disable Metrics/ParameterLists
-        def apply_predicate_effect(effect, call_node, entry_scope, truthy_scope, falsey_scope, method_def)
-          target_node = effect_target_node(effect, call_node, method_def)
-          return [truthy_scope, falsey_scope] unless target_node.is_a?(Prism::LocalVariableReadNode)
-
-          local_name = target_node.name
-          current = entry_scope.local(local_name)
-          return [truthy_scope, falsey_scope] if current.nil?
-
-          narrowed = narrow_for_effect(current, effect, entry_scope.environment)
-          if effect.truthy_only?
-            [truthy_scope.with_local(local_name, narrowed), falsey_scope]
-          else
-            [truthy_scope, falsey_scope.with_local(local_name, narrowed)]
-          end
-        end
-        # rubocop:enable Metrics/ParameterLists
 
         # Maps the effect's target parameter name to the call
         # site argument by inspecting the selected overload's

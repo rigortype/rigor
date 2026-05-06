@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — v0.1.0 slice 4b-1: predicate / assert narrowing through the merger
+
+- **`Inference::Narrowing` predicate / assert-if narrowing routes through `RbsExtended.read_flow_contribution` + `Rigor::FlowContribution::Merger.merge` per [ADR-7 § "Slice 4-A/4-B"](docs/adr/7-v0.1.0-slice-decisions.md).** The earlier sibling pair `analyse_rbs_extended_predicate` + `analyse_rbs_extended_assert_if` (plus the `merge_extended_results` reconciliation helper) collapses into a single `analyse_rbs_extended_contribution` analyser that consumes the merged `truthy_facts` / `falsey_facts` slots. Per ADR-7 4-B's per-call-site rule, the merger runs once per call site that activates the contribution. **No user-visible behaviour change** — the existing 1860-example RSpec suite passes unchanged. The replaced helpers (`apply_predicate_effect`, `apply_assert_if_effect`, `narrow_for_effect`, `effect_target_node`, `merge_extended_results`, `merge_scope_pair`) are removed; new helpers (`apply_facts_to_scope_pair`, `apply_fact_to_scope`, `fact_target_node`, `narrow_for_fact`) operate on canonical `FlowContribution::Fact` payloads instead of the typed RBS::Extended Effect carriers.
+
 ### Added — v0.1.0 slice 4 (partial): canonical `FlowContribution::Fact` substrate
 
 - **`Rigor::FlowContribution::Fact` value object.** Per [ADR-7 § "Slice 4-A"](docs/adr/7-v0.1.0-slice-decisions.md): the canonical slot payload for the edge-aware fact slots (`truthy_facts` / `falsey_facts` / `post_return_facts`). Frozen `Data.define(:target_kind, :target_name, :type, :negative)` with a `target` accessor (`:self` for self-targeted facts, `[:parameter, name]` for parameter-targeted ones) so two facts that narrow the same target group into a single merge bucket regardless of source family. `target_kind` is restricted to `%i[parameter self]` in slice 4a; future slices extend the set without changing the merger.

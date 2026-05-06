@@ -1,0 +1,17 @@
+paths:
+  - demo.rb
+
+plugins:
+  - gem: rigor-deprecations
+    config:
+      methods:
+        - method: find_by_sql
+          receiver: User
+          replacement: "where(...).to_sql or sanitize_sql"
+          since: "v6.0"
+        - method: silence_warnings
+          replacement: "Warning[:deprecated] = false"
+          since: "v7.0"
+        - method: with_lock
+          receiver: ActiveRecord::Base
+          replacement: "transaction { ... }"

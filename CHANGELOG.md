@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — example plugin: `rigor-deprecations`
+
+- **The smallest worked example of the v0.1.0 plugin authoring surface** under [`examples/rigor-deprecations/`](examples/rigor-deprecations/) — under 80 lines of plugin code, no I/O, no cache, no engine query, and the recommended starting point for "I want to write my own Rigor plugin." The plugin's value is **user-extensibility**: a user extends Rigor's lint surface for their own deprecations by editing `.rigor.yml`, with no plugin-side code. The plugin is the engine; the rules are pure data.
+- **Configuration** declares an `:array` of `{method:, receiver:?, replacement:?, since:?}` rows. `receiver:` matches the literal source text of the call's receiver (`User.find_by_sql(…)` matches `receiver: User`); omitting it matches any receiver including no-receiver calls. Each match emits a `:warning plugin.deprecations.deprecated-call` with the full deprecation context.
+- **Demo project** under `examples/rigor-deprecations/demo/` (`.rigor.yml` + `demo.rb`) — three rules in config drive three warnings on three call sites, with two adjacent call sites correctly staying silent (different receiver / different method).
+- **Integration spec** at [`spec/integration/examples/deprecations_plugin_spec.rb`](spec/integration/examples/deprecations_plugin_spec.rb) — 10 examples covering receiver-pinned matching, receiver-omitted matching, message formatting (`since` / `replacement` / both / neither), deduplication when multiple entries match the same call site, and the empty-configuration silent path.
+
 ### Added — example plugin: `rigor-statesman`
 
 - **Reference example for the two-pass DSL analysis pattern** under [`examples/rigor-statesman/`](examples/rigor-statesman/). Many DSL plugins (state machines, GraphQL types, ActiveModel validations, route declarations) share a collect-then-validate skeleton; `rigor-statesman` codifies it in a small example. Pass 1 walks the file once and gathers every `state :name` declaration inside `state_machine do ... end` blocks; pass 2 walks the file again and validates each `transition_to(:sym)` reference against the collected state set. Levenshtein distance ≤ 3 drives the did-you-mean suggestions.

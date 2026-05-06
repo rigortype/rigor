@@ -194,6 +194,54 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # ADR-8 § "Severity profile"
+      describe "severity profile re-stamping (v0.1.0+)" do # rubocop:disable RSpec/NestedGroups
+        it "lenient profile drops call.argument-type-mismatch to :warning" do # rubocop:disable RSpec/ExampleLength
+          Dir.mktmpdir do |dir|
+            File.write(File.join(dir, "demo.rbs"), <<~RBS)
+              class Demo
+                def take_string: (String value) -> String
+              end
+            RBS
+            FileUtils.mkdir_p(File.join(dir, "sig"))
+            FileUtils.mv(File.join(dir, "demo.rbs"), File.join(dir, "sig"))
+            File.write(File.join(dir, "use.rb"), <<~RUBY)
+              class Demo
+                def take_string(value); value; end
+              end
+              Demo.new.take_string(42)
+            RUBY
+            Dir.chdir(dir) do
+              configuration = Rigor::Configuration.new(
+                Rigor::Configuration::DEFAULTS.merge(
+                  "paths" => ["use.rb"], "severity_profile" => "lenient"
+                )
+              )
+              result = described_class.new(configuration: configuration, cache_store: nil).run
+              mismatch = result.diagnostics.find { |d| d.rule == "call.argument-type-mismatch" }
+              expect(mismatch).not_to be_nil
+              expect(mismatch.severity).to eq(:warning)
+            end
+          end
+        end
+
+        it "severity_overrides off drops the diagnostic entirely" do
+          Dir.mktmpdir do |dir|
+            File.write(File.join(dir, "use.rb"), "\"x\".no_method\n")
+            Dir.chdir(dir) do
+              configuration = Rigor::Configuration.new(
+                Rigor::Configuration::DEFAULTS.merge(
+                  "paths" => ["use.rb"],
+                  "severity_overrides" => { "call.undefined-method" => "off" }
+                )
+              )
+              result = described_class.new(configuration: configuration, cache_store: nil).run
+              expect(result.diagnostics.find { |d| d.rule == "call.undefined-method" }).to be_nil
+            end
+          end
+        end
+      end
+
       describe "argument-type-mismatch rule (v0.0.2 #4)" do # rubocop:disable RSpec/NestedGroups
         # `Demo#take_string: (String) -> String` fixture, paired
         # with the matching `def`. `analyze` writes the sig under

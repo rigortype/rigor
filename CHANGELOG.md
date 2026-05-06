@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — severity profile (ADR-8 § 2)
+
+- **`Rigor::Configuration::SeverityProfile`** module with three named profiles per [ADR-8 § "Severity profile"](docs/adr/8-steep-inspired-improvements.md): `lenient` (uncertain rules `:warning`), `balanced` (default — most rules `:error`, `dump.type` `:info`), `strict` (everything `:error`). Profiles re-stamp severity as a **final filter** after rules emit; rules never consult the profile directly.
+- **`.rigor.yml` `severity_profile:` and `severity_overrides:` keys.** `severity_profile` selects one of `lenient` / `balanced` / `strict` (default: `balanced`). `severity_overrides:` is a `{rule => severity}` map that beats the profile; keys can be canonical rule ids (`call.undefined-method`) or family wildcards (`call`); per-rule entries beat family-wildcard entries. Severity values: `error`, `warning`, `info`, `off` (`off` drops the diagnostic from the result). YAML reserves the literal `off` token; users quote `"off"` to get the symbol.
+- **`Analysis::Runner` re-stamps severity** through `SeverityProfile.resolve` before the result is finalised. Rules' authored severities serve as the fallback when the profile / overrides have no entry; unknown profile values fall back to the `balanced` profile silently. CI gating examples: set `severity_profile: strict` to fail on any diagnostic; set `severity_profile: lenient` for incremental adoption on legacy code.
+- **End-to-end spec coverage** in `spec/rigor/analysis/runner_spec.rb` exercises `lenient` re-stamping (`call.argument-type-mismatch` drops to `:warning`) and `severity_overrides: { rule => off }` dropping diagnostics entirely.
+
 ### Changed — diagnostic ID family hierarchy (ADR-8 § 1)
 
 - **Built-in rule identifiers normalised to `family.rule-name` form** per [ADR-8 § "Diagnostic ID family hierarchy"](docs/adr/8-steep-inspired-improvements.md). The five built-in families are `call.*` (call-site rules), `flow.*` (flow-analysis proofs), `assert.*` (runtime assertion rules), `dump.*` (debug helpers), `def.*` (method-definition rules — first occupant arrives in slice #1). Mapping: `undefined-method` → `call.undefined-method`; `wrong-arity` → `call.wrong-arity`; `argument-type-mismatch` → `call.argument-type-mismatch`; `possible-nil-receiver` → `call.possible-nil-receiver`; `dump-type` → `dump.type`; `assert-type` → `assert.type-mismatch`; `always-raises` → `flow.always-raises`.

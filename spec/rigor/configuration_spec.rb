@@ -128,6 +128,54 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
+    it "defaults severity_profile to :balanced" do
+      Dir.mktmpdir do |dir|
+        configuration = described_class.load(File.join(dir, "missing.yml"))
+        expect(configuration.severity_profile).to eq(:balanced)
+        expect(configuration.severity_overrides).to eq({})
+      end
+    end
+
+    it "reads severity_profile + severity_overrides from the YAML file" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        # NOTE: `off` is reserved in YAML 1.1 (parses to `false`),
+        # so users quote `"off"` when they want the severity. The
+        # config loader does NOT auto-coerce booleans.
+        File.write(path, <<~YAML)
+          severity_profile: strict
+          severity_overrides:
+            call.argument-type-mismatch: warning
+            dump: "off"
+        YAML
+
+        configuration = described_class.load(path)
+        expect(configuration.severity_profile).to eq(:strict)
+        expect(configuration.severity_overrides).to eq(
+          "call.argument-type-mismatch" => :warning,
+          "dump" => :off
+        )
+      end
+    end
+
+    it "rejects unknown severity_profile values" do
+      expect do
+        described_class.new(
+          Rigor::Configuration::DEFAULTS.merge("severity_profile" => "nonsense")
+        )
+      end.to raise_error(ArgumentError, /severity_profile/)
+    end
+
+    it "rejects severity_overrides values outside the recognised set" do
+      expect do
+        described_class.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "severity_overrides" => { "call.undefined-method" => "noisy" }
+          )
+        )
+      end.to raise_error(ArgumentError, /must be one of/)
+    end
+
     it "rejects plugins_io.network values other than :disabled in slice 2" do
       expect do
         described_class.new(

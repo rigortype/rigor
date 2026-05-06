@@ -2,6 +2,7 @@
 
 require_relative "rigor/version"
 require_relative "rigor/configuration"
+require_relative "rigor/configuration/severity_profile"
 require_relative "rigor/trinary"
 require_relative "rigor/type"
 require_relative "rigor/ast"

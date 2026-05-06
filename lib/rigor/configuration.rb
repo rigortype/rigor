@@ -2,8 +2,10 @@
 
 require "yaml"
 
+require_relative "configuration/severity_profile"
+
 module Rigor
-  class Configuration
+  class Configuration # rubocop:disable Metrics/ClassLength
     DEFAULT_PATH = ".rigor.yml"
     DEFAULTS = {
       "target_ruby" => "4.0",
@@ -19,12 +21,15 @@ module Rigor
       "plugins_io" => {
         "network" => "disabled",
         "allowed_paths" => []
-      }
+      },
+      "severity_profile" => "balanced",
+      "severity_overrides" => {}
     }.freeze
 
     attr_reader :target_ruby, :paths, :plugins, :cache_path, :disabled_rules,
                 :libraries, :signature_paths, :fold_platform_specific_paths,
-                :plugins_io_network, :plugins_io_allowed_paths
+                :plugins_io_network, :plugins_io_allowed_paths,
+                :severity_profile, :severity_overrides
 
     def self.load(path = DEFAULT_PATH)
       data = if File.exist?(path)
@@ -55,6 +60,12 @@ module Rigor
       @cache_path = cache.fetch("path").to_s
       @plugins_io_network = coerce_network_policy(plugins_io.fetch("network"))
       @plugins_io_allowed_paths = Array(plugins_io.fetch("allowed_paths")).map(&:to_s).freeze
+      @severity_profile = coerce_severity_profile(
+        data.fetch("severity_profile", DEFAULTS.fetch("severity_profile"))
+      )
+      @severity_overrides = coerce_severity_overrides(
+        data.fetch("severity_overrides", DEFAULTS.fetch("severity_overrides"))
+      )
     end
 
     def to_h
@@ -72,7 +83,9 @@ module Rigor
         "plugins_io" => {
           "network" => plugins_io_network.to_s,
           "allowed_paths" => plugins_io_allowed_paths
-        }
+        },
+        "severity_profile" => severity_profile.to_s,
+        "severity_overrides" => severity_overrides.to_h { |k, v| [k, v.to_s] }
       }
     end
 
@@ -115,6 +128,42 @@ module Rigor
       end
 
       sym
+    end
+
+    # ADR-8 § "Severity profile" — accepts the canonical Symbol
+    # form or its String spelling; rejects unknown profile names
+    # so typos fail loudly.
+    def coerce_severity_profile(value)
+      sym = value.to_sym
+      unless SeverityProfile::VALID_PROFILES.include?(sym)
+        raise ArgumentError,
+              "severity_profile must be one of " \
+              "#{SeverityProfile::VALID_PROFILES.inspect}, got #{value.inspect}"
+      end
+
+      sym
+    end
+
+    # ADR-8 § "Severity profile" — `severity_overrides:` is a
+    # `{ rule => severity }` map. Keys are canonical rule ids
+    # (`call.undefined-method`) or family wildcards (`call`).
+    # Values are {SeverityProfile::VALID_SEVERITIES} symbols
+    # (`:error` / `:warning` / `:info` / `:off`). Unknown
+    # severities raise; unknown rule ids are silently kept (the
+    # override is inert until the rule lands).
+    def coerce_severity_overrides(value)
+      raise ArgumentError, "severity_overrides must be a Hash, got #{value.inspect}" unless value.is_a?(Hash)
+
+      value.to_h do |k, v|
+        sym = v.to_sym
+        unless SeverityProfile::VALID_SEVERITIES.include?(sym)
+          raise ArgumentError,
+                "severity_overrides[#{k.inspect}] must be one of " \
+                "#{SeverityProfile::VALID_SEVERITIES.inspect}, got #{v.inspect}"
+        end
+
+        [k.to_s, sym]
+      end.freeze
     end
   end
 end

@@ -67,7 +67,7 @@ module Rigor
         diagnostics += expansion.fetch(:errors)
         diagnostics += expansion.fetch(:files).flat_map { |path| analyze_file(path, environment) }
 
-        Result.new(diagnostics: diagnostics)
+        Result.new(diagnostics: apply_severity_profile(diagnostics))
       end
 
       private
@@ -135,6 +135,38 @@ module Rigor
         spec&.full_gem_path # rigor:disable undefined-method
       rescue StandardError
         nil
+      end
+
+      # ADR-8 § "Severity profile" — re-stamps each diagnostic's
+      # severity from the configured profile + per-rule
+      # overrides. Rules emit with their authored severity; the
+      # profile is the final filter. Diagnostics whose resolved
+      # severity is `:off` are dropped from the run result.
+      def apply_severity_profile(diagnostics)
+        diagnostics.filter_map { |diagnostic| stamp_severity(diagnostic) }
+      end
+
+      def stamp_severity(diagnostic)
+        return diagnostic if diagnostic.rule.nil?
+
+        resolved = Configuration::SeverityProfile.resolve(
+          rule: diagnostic.rule,
+          authored_severity: diagnostic.severity,
+          profile: @configuration.severity_profile,
+          overrides: @configuration.severity_overrides
+        )
+        return nil if resolved == :off
+        return diagnostic if resolved == diagnostic.severity
+
+        Diagnostic.new(
+          path: diagnostic.path,
+          line: diagnostic.line,
+          column: diagnostic.column,
+          message: diagnostic.message,
+          severity: resolved,
+          rule: diagnostic.rule,
+          source_family: diagnostic.source_family
+        )
       end
 
       def plugin_load_diagnostics

@@ -103,6 +103,22 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  describe "pattern-matching expressions" do
+    it "types `expr in pattern` as a true/false union" do
+      type = scope.type_of(parse_expression("x in Integer", scopes: [[:x]]))
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members).to contain_exactly(
+        Rigor::Type::Combinator.constant_of(true),
+        Rigor::Type::Combinator.constant_of(false)
+      )
+    end
+
+    it "types `expr => pattern` as Constant[nil]" do
+      type = scope.type_of(parse_expression("x => Integer", scopes: [[:x]]))
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(nil))
+    end
+  end
+
   describe "shallow array literals" do
     it "types empty arrays as the empty Tuple[] carrier (v0.0.6)" do
       # v0.0.6 — `[]` resolves to `Tuple[]` so the per-element

@@ -175,8 +175,8 @@ module Rigor
         Prism::DefinedNode => :type_of_defined,
         Prism::NumberedReferenceReadNode => :type_of_string_or_nil,
         Prism::BackReferenceReadNode => :type_of_string_or_nil,
-        Prism::MatchPredicateNode => :type_of_dynamic_top,
-        Prism::MatchRequiredNode => :type_of_dynamic_top,
+        Prism::MatchPredicateNode => :type_of_match_predicate,
+        Prism::MatchRequiredNode => :type_of_match_required,
         Prism::MatchWriteNode => :type_of_dynamic_top,
         # Literal containers
         Prism::LambdaNode => :type_of_lambda,
@@ -322,6 +322,22 @@ module Rigor
           Type::Combinator.nominal_of("String"),
           Type::Combinator.constant_of(nil)
         )
+      end
+
+      # `expr in pattern` — pattern-match predicate. Returns `true`
+      # when the pattern matches, `false` otherwise.
+      def type_of_match_predicate(_node)
+        Type::Combinator.union(
+          Type::Combinator.constant_of(true),
+          Type::Combinator.constant_of(false)
+        )
+      end
+
+      # `expr => pattern` — one-line pattern-match assertion. Raises
+      # `NoMatchingPatternError` on mismatch; on success the expression
+      # itself evaluates to `nil`.
+      def type_of_match_required(_node)
+        Type::Combinator.constant_of(nil)
       end
 
       # The expression `Foo` evaluates to the *class object* `Foo`, not

@@ -602,17 +602,20 @@ module Rigor
       # dispatcher returns nothing (no signature, unknown receiver)
       # we fall back to the structural extractor.
       def for_iteration_element_type(coll_type)
+        structural = collection_element_type(coll_type)
+        return structural unless structural.equal?(Type::Combinator.untyped)
+
         block_params = MethodDispatcher.expected_block_param_types(
           receiver_type: coll_type,
           method_name: :each,
           arg_types: [],
           environment: scope.environment
         )
-        return collection_element_type(coll_type) if block_params.nil? || block_params.empty?
+        return structural if block_params.nil? || block_params.empty?
 
         block_params.size == 1 ? block_params.first : Type::Combinator.tuple_of(*block_params)
       rescue StandardError
-        collection_element_type(coll_type)
+        Type::Combinator.untyped
       end
 
       # Binds the `for` index variable(s) into `scope`. A single
@@ -636,16 +639,39 @@ module Rigor
       # carrier. `Tuple[T1..Tn]` yields the union of its elements;
       # `Nominal[Array, [T]]` and `Nominal[Range, [T]]` yield `T`;
       # `Nominal[Hash, [K, V]]` yields `Tuple[K, V]` (Hash#each yields
-      # `[key, value]` pairs). Anything else falls back to `untyped`.
+      # `[key, value]` pairs); `IntegerRange` yields `Integer`;
+      # `Constant<Range>` reads the literal range's element class.
+      # Anything else falls back to `untyped`.
       def collection_element_type(type)
         case type
         when Type::Tuple
           type.elements.empty? ? Type::Combinator.untyped : Type::Combinator.union(*type.elements)
         when Type::Nominal
           nominal_element_type(type)
+        when Type::IntegerRange
+          Type::Combinator.nominal_of("Integer")
+        when Type::Constant
+          constant_element_type(type)
         else
           Type::Combinator.untyped
         end
+      end
+
+      def constant_element_type(constant)
+        value = constant.value
+        case value
+        when Range
+          first = value.first
+          first.nil? ? Type::Combinator.untyped : Type::Combinator.nominal_of(first.class.name)
+        when Array
+          return Type::Combinator.untyped if value.empty?
+
+          Type::Combinator.union(*value.map { |v| Type::Combinator.constant_of(v) })
+        else
+          Type::Combinator.untyped
+        end
+      rescue StandardError
+        Type::Combinator.untyped
       end
 
       def nominal_element_type(nominal)

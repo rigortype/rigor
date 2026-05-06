@@ -248,6 +248,24 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local(:x)).not_to be_nil
     end
 
+    it "for-loop over an Integer Range literal binds the index to Integer" do
+      _, post = evaluate(<<~RUBY)
+        for i in (1..10)
+        end
+      RUBY
+      nominal = post.local(:i).members.grep(Rigor::Type::Nominal)
+      expect(nominal.map(&:class_name)).to contain_exactly("Integer")
+    end
+
+    it "for-loop over a String Range literal binds the index to String" do
+      _, post = evaluate(<<~RUBY)
+        for ch in ("a".."z")
+        end
+      RUBY
+      nominal = post.local(:ch).members.grep(Rigor::Type::Nominal)
+      expect(nominal.map(&:class_name)).to contain_exactly("String")
+    end
+
     it "for-loop over a Hash literal destructures into key / value via RBS dispatch" do
       env = Rigor::Environment.for_project
       base = Rigor::Scope.empty(environment: env)

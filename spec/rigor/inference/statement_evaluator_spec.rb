@@ -220,10 +220,32 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       RUBY
       expect(type).to eq(Rigor::Type::Combinator.constant_of(nil))
       # `i` is bound only inside the body, so the no-iteration join
-      # path nil-injects it into the post-loop scope.
+      # path nil-injects it into the post-loop scope. The element
+      # type comes from the Tuple[1, 2, 3] carrier.
       i_type = post.local(:i)
-      expect(i_type.members).to include(Rigor::Type::Combinator.constant_of(nil)) if i_type.is_a?(Rigor::Type::Union)
-      expect(i_type).not_to be_nil
+      members = i_type.members.map { |m| m.is_a?(Rigor::Type::Constant) ? m.value : m }
+      expect(members).to include(1, 2, 3, nil)
+    end
+
+    it "for-loop with multi-target index destructures a tuple element" do
+      _, post = evaluate(<<~RUBY)
+        for a, b in [[1, 2]]
+        end
+      RUBY
+      # `[[1, 2]]` is `Tuple[Tuple[1, 2]]`; the per-iteration element
+      # is `Tuple[1, 2]`, which the multi-target binder splits into
+      # `a: 1` and `b: 2`. The names are nil-injected through the
+      # zero-iteration join.
+      expect(post.local(:a).members).to include(Rigor::Type::Combinator.constant_of(1))
+      expect(post.local(:b).members).to include(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "for-loop falls back to untyped when collection has no known element type" do
+      _, post = evaluate(<<~RUBY)
+        for x in unknown
+        end
+      RUBY
+      expect(post.local(:x)).not_to be_nil
     end
 
     it "for-loop body-locals leak into the surrounding scope" do
@@ -235,15 +257,6 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       # Unlike `each {}`, `for` does not introduce a new variable
       # scope: writes inside the body are observable after the loop.
       expect(post.local(:y).members.map(&:value)).to contain_exactly("hi", nil)
-    end
-
-    it "for-loop with multi-target index binds each name" do
-      _, post = evaluate(<<~RUBY)
-        for a, b in [[1, 2]]
-        end
-      RUBY
-      expect(post.local(:a)).not_to be_nil
-      expect(post.local(:b)).not_to be_nil
     end
   end
 

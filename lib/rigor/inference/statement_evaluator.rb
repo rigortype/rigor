@@ -581,12 +581,11 @@ module Rigor
       # case where no `break VALUE` is observed), matching the policy
       # `eval_loop` uses for `while` / `until`.
       def eval_for(node)
-        _coll_type, post_coll = sub_eval(node.collection, scope)
-        body_entry = bind_for_index(node.index, post_coll)
+        coll_type, post_coll = sub_eval(node.collection, scope)
+        element_type = collection_element_type(coll_type)
+        body_entry = bind_for_index(node.index, element_type, post_coll)
 
-        return [Type::Combinator.constant_of(nil), body_entry] if node.statements.nil?
-
-        _body_type, body_scope = sub_eval(node.statements, body_entry)
+        body_scope = node.statements ? sub_eval(node.statements, body_entry).last : body_entry
         [
           Type::Combinator.constant_of(nil),
           join_with_nil_injection(post_coll, body_scope)
@@ -594,19 +593,47 @@ module Rigor
       end
 
       # Binds the `for` index variable(s) into `scope`. A single
-      # `LocalVariableTargetNode` is bound to `untyped` (per-element
-      # iteration-protocol type extraction is a future slice); a
-      # `MultiTargetNode` (`for a, b in pairs`) delegates to
-      # {MultiTargetBinder} with an `untyped` slot type.
-      def bind_for_index(index_node, scope)
+      # `LocalVariableTargetNode` is bound to `element_type` (the
+      # per-iteration value the collection yields). A `MultiTargetNode`
+      # (`for a, b in pairs`) delegates to {MultiTargetBinder}, which
+      # decomposes a tuple-shaped element into the inner slots.
+      def bind_for_index(index_node, element_type, scope)
         case index_node
         when Prism::LocalVariableTargetNode
-          scope.with_local(index_node.name, Type::Combinator.untyped)
+          scope.with_local(index_node.name, element_type)
         when Prism::MultiTargetNode
-          MultiTargetBinder.bind(index_node, Type::Combinator.untyped)
+          MultiTargetBinder.bind(index_node, element_type)
                            .reduce(scope) { |s, (name, type)| s.with_local(name, type) }
         else
           scope
+        end
+      end
+
+      # Extracts the per-iteration element type from a collection
+      # carrier. `Tuple[T1..Tn]` yields the union of its elements;
+      # `Nominal[Array, [T]]` and `Nominal[Range, [T]]` yield `T`;
+      # `Nominal[Hash, [K, V]]` yields `Tuple[K, V]` (Hash#each yields
+      # `[key, value]` pairs). Anything else falls back to `untyped`.
+      def collection_element_type(type)
+        case type
+        when Type::Tuple
+          type.elements.empty? ? Type::Combinator.untyped : Type::Combinator.union(*type.elements)
+        when Type::Nominal
+          nominal_element_type(type)
+        else
+          Type::Combinator.untyped
+        end
+      end
+
+      def nominal_element_type(nominal)
+        args = nominal.type_args
+        case nominal.class_name
+        when "Array", "Range", "Set", "Enumerator" then args[0] || Type::Combinator.untyped
+        when "Hash"
+          k = args[0] || Type::Combinator.untyped
+          v = args[1] || Type::Combinator.untyped
+          Type::Combinator.tuple_of(k, v)
+        else Type::Combinator.untyped
         end
       end
 

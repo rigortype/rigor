@@ -375,7 +375,7 @@ module Rigor
       # the predicate shape is recognised, or `nil` to signal "no
       # narrowing" so the public surface can fall back to the entry
       # scope.
-      def analyse(node, scope)
+      def analyse(node, scope) # rubocop:disable Metrics/CyclomaticComplexity
         case node
         when Prism::ParenthesesNode
           analyse_parentheses(node, scope)
@@ -389,6 +389,8 @@ module Rigor
           analyse_and(node, scope)
         when Prism::OrNode
           analyse_or(node, scope)
+        when Prism::MatchWriteNode
+          analyse_match_write(node, scope)
         end
       end
 
@@ -733,6 +735,29 @@ module Rigor
             scope.with_local(node.name, narrow_truthy(current)),
             scope.with_local(node.name, narrow_falsey(current))
           ]
+        end
+
+        # `if /(?<x>...)/ =~ str` — Prism wraps the `=~` call in a
+        # `MatchWriteNode` listing the named-capture targets. The
+        # parent `eval_match_write` has already bound each target
+        # to `String | nil`; in the truthy branch (the regex
+        # matched) every named capture is guaranteed `String`,
+        # and in the falsey branch (no match) every capture is
+        # `nil`. Subtract the dead half on each edge so callers
+        # like `year.upcase` inside the truthy branch no longer
+        # fire `possible-nil-receiver`.
+        def analyse_match_write(node, scope)
+          string_t = Type::Combinator.nominal_of("String")
+          nil_t = Type::Combinator.constant_of(nil)
+          truthy = scope
+          falsey = scope
+          node.targets.each do |target|
+            next unless target.is_a?(Prism::LocalVariableTargetNode)
+
+            truthy = truthy.with_local(target.name, string_t)
+            falsey = falsey.with_local(target.name, nil_t)
+          end
+          [truthy, falsey]
         end
 
         # Recognised CallNode predicates:

@@ -1779,5 +1779,82 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local(:a)).to be_a(Rigor::Type::Union)
       expect(post.local(:b)).to be_a(Rigor::Type::Union)
     end
+
+    # `if /(?<x>...)/ =~ str` — Ruby guarantees the named
+    # capture is a `String` inside the truthy branch (the
+    # match succeeded; the capture group must have
+    # participated for the match to be truthy with a
+    # non-optional group). The else branch sees `nil`.
+    describe "narrowing through `if regex =~ str`" do
+      let(:string_t) { Rigor::Type::Combinator.nominal_of("String") }
+      let(:nil_t) { Rigor::Type::Combinator.constant_of(nil) }
+      let(:string_or_nil) { Rigor::Type::Combinator.union(string_t, nil_t) }
+      let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+
+      def first_local_seen(name, source)
+        events = []
+        on_enter = lambda do |node, sc|
+          next unless node.is_a?(Prism::LocalVariableReadNode) && node.name == name
+
+          events << sc.local(name)
+        end
+        Rigor::Inference::StatementEvaluator.new(
+          scope: default_env_scope, on_enter: on_enter
+        ).evaluate(parse_program(source))
+        events.first
+      end
+
+      it "narrows the capture to String inside the truthy branch" do
+        observed = first_local_seen(:year, <<~RUBY)
+          if /(?<year>\\d+)/ =~ str
+            year
+          end
+        RUBY
+        expect(observed).to eq(string_t)
+      end
+
+      it "narrows the capture to nil inside the falsey branch" do
+        observed = first_local_seen(:year, <<~RUBY)
+          if /(?<year>\\d+)/ =~ str
+            nil
+          else
+            year
+          end
+        RUBY
+        expect(observed).to eq(nil_t)
+      end
+
+      it "joins back to String | nil after the if" do
+        _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+          if /(?<year>\\d+)/ =~ str
+            "matched"
+          end
+          year
+        RUBY
+        expect(post.local(:year)).to eq(string_or_nil)
+      end
+
+      it "narrows multiple captures simultaneously in the truthy branch" do
+        source = <<~RUBY
+          if /(?<year>\\d{4})-(?<month>\\d{2})/ =~ str
+            year
+            month
+          end
+        RUBY
+        expect(first_local_seen(:year, source)).to eq(string_t)
+        expect(first_local_seen(:month, source)).to eq(string_t)
+      end
+
+      it "narrows symmetrically through `unless` (falsey branch is the matched edge)" do
+        observed = first_local_seen(:year, <<~RUBY)
+          unless /(?<year>\\d+)/ =~ str
+            "no match"
+          else
+            year
+          end
+        RUBY
+        expect(observed).to eq(string_t)
+      end
+    end
   end
 end

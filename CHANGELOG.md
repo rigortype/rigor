@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — narrowing through `if regex =~ str` named-capture predicates
+
+- **`Inference::Narrowing` now recognises `Prism::MatchWriteNode` predicates** (i.e. `if /(?<x>...)/ =~ str`). The truthy branch narrows every named-capture target from `String | nil` (the binding `eval_match_write` records) down to `String`; the falsey branch narrows them to `Constant[nil]`. After the if joins back, the local goes back to `String | nil` per the existing semantics. Closes a precision gap that produced false `call.possible-nil-receiver` diagnostics for code like `if /(?<year>\d{4})/ =~ str then year.upcase end`, where the runtime guarantees `year: String` once the match succeeds.
+- **New `Narrowing.analyse_match_write` private helper** added next to the other `analyse_*` predicate handlers and dispatched from `Narrowing.analyse`. Symmetric for `unless`, conditional expressions, and post-modifier `if` — they all route through `predicate_scopes` and pick up the same narrowing.
+- **Spec coverage** in `spec/rigor/inference/statement_evaluator_spec.rb` under "MatchWriteNode (named regex captures) > narrowing through `if regex =~ str`" — 5 examples covering the truthy edge (`String`), the falsey edge (`Constant[nil]`), the post-if join (`String | nil`), simultaneous narrowing of multiple named captures, and the `unless`-flavoured mirror.
+
 ### Fixed — `;`-prefixed block-local declarations now shadow outer locals to `Constant[nil]`
 
 - **`Inference::StatementEvaluator#build_block_entry_scope` now binds every `;`-prefixed block-local (`do |i; x| ... end`) to `Constant[nil]` at block entry**, shadowing any same-named outer local for the duration of the block body. Per Ruby's semantics, `;`-block-locals are freshly nil-valued on every block invocation; previously the inner read of `x` saw the outer binding (e.g. `x: Constant[100]`), which would let `x.even?` type-check despite the runtime `nil.even?` `NoMethodError`.

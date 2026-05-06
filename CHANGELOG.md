@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — slice 6 follow-up: `cache_for(descriptor:)` extension point
+
+- **`Rigor::Plugin::Base#cache_for(producer_id, params:, descriptor:)`** now accepts an optional plugin-author-supplied `Cache::Descriptor` extension. The supplied descriptor flows through `Cache::Descriptor.compose` with the auto-built one (`PluginEntry` template + `IoBoundary` reads); per-slot conflicts raise `Cache::Descriptor::Conflict` so divergent inputs surface rather than silently shadowing. Plugin authors can now pin gem-version `GemEntry`, configuration-file `FileEntry` digests, and `ConfigEntry` rows for external state the boundary cannot capture, without escaping the supported caching API. ADR-7 § "Slice 6" originally listed this as a follow-up; it lands ahead of v0.1.0 release. Drift snapshot for `Plugin::Base#cache_for` updated accordingly.
+
 ### Added — v0.1.0 slice 6: plugin-side cache producers
 
 - **`Rigor::Plugin::Base.producer(id, serialize:, deserialize:, &block)` DSL** per [ADR-7 § "Slice 6-A"](docs/adr/7-v0.1.0-slice-decisions.md). Class-level declaration registers a cached producer; the body runs through `instance_exec` so `self` inside the block is the plugin instance (`io_boundary`, `services`, `manifest`, `config` all in scope). `serialize:` / `deserialize:` forward verbatim to `Cache::Store#fetch_or_compute`; default round-trip is the v0.0.9 `Marshal.dump` / `Marshal.load` pair.

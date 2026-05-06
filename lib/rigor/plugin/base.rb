@@ -163,7 +163,19 @@ module Rigor
       # `--no-cache`), the callable bypasses the cache and
       # runs the producer block every time — same semantics
       # as the v0.0.9 cache surface for built-in producers.
-      def cache_for(producer_id, params: {})
+      #
+      # `descriptor:` (optional, ADR-7 § "Slice 6" follow-up)
+      # supplies extra `Cache::Descriptor` rows the plugin
+      # author wants to compose into the auto-built descriptor
+      # — typically gem-version `GemEntry`, configuration-file
+      # `FileEntry` digests, or `ConfigEntry` rows for external
+      # state the {IoBoundary} cannot capture itself. The
+      # passed descriptor composes via `Cache::Descriptor.compose`
+      # with the auto-built one (PluginEntry template + boundary
+      # reads); per-slot conflicts raise
+      # `Cache::Descriptor::Conflict` to make divergent inputs
+      # visible rather than silently shadowing.
+      def cache_for(producer_id, params: {}, descriptor: nil)
         producer = self.class.producers[producer_id.to_sym]
         unless producer
           raise ArgumentError,
@@ -175,12 +187,12 @@ module Rigor
         return compute unless store
 
         prefixed_id = "plugin.#{manifest.id}.#{producer_id}"
-        descriptor = build_plugin_cache_descriptor
+        composed_descriptor = compose_cache_descriptor(descriptor)
         lambda do
           store.fetch_or_compute(
             producer_id: prefixed_id,
             params: params,
-            descriptor: descriptor,
+            descriptor: composed_descriptor,
             serialize: producer[:serialize],
             deserialize: producer[:deserialize],
             &compute
@@ -193,9 +205,6 @@ module Rigor
       # ADR-7 § "Slice 6-B" — composes the per-call cache
       # descriptor from (1) the plugin's PluginEntry template
       # and (2) the IoBoundary's accumulated FileEntry rows.
-      # Future cross-plugin descriptor extensions ride a
-      # follow-up API; slice 6 builds only the auto-assembled
-      # path.
       def build_plugin_cache_descriptor
         plugin_entry = Cache::Descriptor::PluginEntry.new(
           id: manifest.id,
@@ -207,6 +216,20 @@ module Rigor
           plugins: [plugin_entry],
           files: boundary_descriptor.files
         )
+      end
+
+      # ADR-7 § "Slice 6" follow-up — composes the auto-built
+      # cache descriptor with an optional plugin-author-supplied
+      # extension. Extra `GemEntry` / `FileEntry` / `ConfigEntry`
+      # rows the plugin needs (gem-version pins, external
+      # configuration files, sibling-plugin state) flow through
+      # `Cache::Descriptor.compose`; the union behaviour matches
+      # built-in producers (`RbsConstantTable`, `RbsEnvironment`).
+      def compose_cache_descriptor(extra)
+        auto_built = build_plugin_cache_descriptor
+        return auto_built if extra.nil?
+
+        Cache::Descriptor.compose(auto_built, extra)
       end
 
       def digest_config(config)

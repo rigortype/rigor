@@ -68,7 +68,7 @@ for `cache_for` round-trips: file reads through `io_boundary`
 that happen **before** `cache_for` is called include the file
 digest in the descriptor. See "Invalidation contract" below.
 
-### `Rigor::Plugin::Base#cache_for(producer_id, params: {})`
+### `Rigor::Plugin::Base#cache_for(producer_id, params: {}, descriptor: nil)`
 
 Returns a callable that performs the cache round-trip for the
 named producer. The callable, when called, returns the cached
@@ -84,6 +84,17 @@ Producer ids are auto-prefixed `plugin.<manifest.id>.`; the
 cache-store layout for a producer registered as `:schema_table`
 on a plugin with `manifest.id = "rails"` lives at
 `<root>/plugin.rails.schema_table/<2-prefix>/<62-suffix>.entry`.
+
+The optional `descriptor:` kwarg supplies extra
+`Cache::Descriptor` rows the plugin author wants to compose
+into the auto-built descriptor — typically gem-version
+`GemEntry`, configuration-file `FileEntry` digests, or
+`ConfigEntry` rows for external state the {IoBoundary} cannot
+capture itself. The passed descriptor flows through
+`Cache::Descriptor.compose` with the auto-built one
+(`PluginEntry` template + boundary reads); per-slot conflicts
+raise `Cache::Descriptor::Conflict` so divergent inputs
+surface rather than silently shadowing.
 
 ## Cache descriptor composition (6-B)
 
@@ -153,10 +164,6 @@ regex; on-disk attribution is unambiguous through
 
 ## What slice 6 deliberately does NOT do
 
-- **Manual descriptor extension.** `cache_for` does not (yet)
-  accept a `descriptor:` kwarg for plugin authors to add
-  rows. The auto-built composition is the only supported path
-  in v0.1.0.
 - **Re-attempt the v0.0.9 per-method `Reflection` cache
   carry-over.** Per ADR-7 § "Slice 6-D", that work is
   descoped and lands in a separate v0.1.x ticket so the

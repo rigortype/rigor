@@ -163,6 +163,49 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
       expect(result).to eq("hello")
     end
 
+    it "composes a plugin-author-supplied descriptor with the auto-built one" do # rubocop:disable RSpec/ExampleLength
+      called = 0
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      klass.producer(:value) { |_p| called += 1; 99 } # rubocop:disable Style/Semicolon
+      plugin = klass.new(services: services)
+
+      v1 = Rigor::Cache::Descriptor.new(
+        gems: [Rigor::Cache::Descriptor::GemEntry.new(name: "rails", requirement: ">= 0", locked: "7.0.0")]
+      )
+      v2 = Rigor::Cache::Descriptor.new(
+        gems: [Rigor::Cache::Descriptor::GemEntry.new(name: "rails", requirement: ">= 0", locked: "7.1.0")]
+      )
+
+      expect(plugin.cache_for(:value, params: {}, descriptor: v1).call).to eq(99)
+      expect(plugin.cache_for(:value, params: {}, descriptor: v1).call).to eq(99)
+      # Same auto-built + same extra → cache hit, called stays at 1
+      expect(called).to eq(1)
+
+      # Different gem-version pin → different cache slice → recompute
+      expect(plugin.cache_for(:value, params: {}, descriptor: v2).call).to eq(99)
+      expect(called).to eq(2)
+    end
+
+    it "raises Cache::Descriptor::Conflict when extra and auto-built rows disagree" do
+      klass = Class.new(described_class) do
+        manifest(id: "alpha", version: "0.1.0")
+      end
+      klass.producer(:value) { |_p| 1 }
+      plugin = klass.new(services: services)
+
+      conflicting = Rigor::Cache::Descriptor.new(
+        plugins: [Rigor::Cache::Descriptor::PluginEntry.new(
+          id: "alpha", version: "9.9.9", config_hash: "x"
+        )]
+      )
+
+      expect do
+        plugin.cache_for(:value, params: {}, descriptor: conflicting).call
+      end.to raise_error(Rigor::Cache::Descriptor::Conflict)
+    end
+
     it "invalidates when files read via io_boundary BEFORE cache_for change between calls" do # rubocop:disable RSpec/ExampleLength
       file = File.join(tmpdir, "data.txt")
       File.write(file, "v1")

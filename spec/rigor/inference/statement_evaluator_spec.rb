@@ -1182,6 +1182,102 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         default_env_scope.evaluate(parse_program("[1, 2, 3].each { _1.succ }"))
       end.not_to raise_error
     end
+
+    # `do |i; x|` — Ruby's explicit block-local declaration. The
+    # `x` after the `;` introduces a fresh local that shadows
+    # any outer `x`; writes to it inside the block MUST NOT
+    # touch the outer binding. Rigor's `BlockParameterBinder`
+    # documents that it skips these names; these specs lock the
+    # observable behaviour the comment describes.
+    describe "explicit block-local declarations (`do |i; x|`)" do
+      it "preserves the outer local's narrowed type after the block returns" do
+        _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+          x = 100
+          [1, 2, 3].each do |i; x|
+            x = i * 2
+          end
+        RUBY
+        expect(post.local(:x)).to eq(Rigor::Type::Combinator.constant_of(100))
+      end
+
+      it "leaves the outer scope untouched even when only the block-local is written" do
+        _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+          x = "outer"
+          [1, 2, 3].each do |i; x|
+            x = "inner-\#{i}"
+          end
+        RUBY
+        expect(post.local(:x)).to eq(Rigor::Type::Combinator.constant_of("outer"))
+      end
+
+      it "does not bind the block-local name in the post-call scope" do
+        _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+          [1, 2, 3].each do |i; y|
+            y = i * 2
+          end
+        RUBY
+        expect(post.local(:y)).to be_nil
+      end
+
+      it "binds multiple `;`-prefixed locals all as block-scoped" do
+        _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+          a = 1
+          b = "two"
+          [1].each do |_i; a, b|
+            a = 999
+            b = "rebound"
+          end
+        RUBY
+        expect(post.local(:a)).to eq(Rigor::Type::Combinator.constant_of(1))
+        expect(post.local(:b)).to eq(Rigor::Type::Combinator.constant_of("two"))
+      end
+
+      it "still treats normal block parameters before the `;` as parameters" do
+        events, on_enter = watch_local_reads(:i)
+        run_eval(default_env_scope, on_enter, "[1, 2, 3].each do |i; x| x = i; i end")
+        expect(events.last.members).to contain_exactly(
+          Rigor::Type::Combinator.constant_of(1),
+          Rigor::Type::Combinator.constant_of(2),
+          Rigor::Type::Combinator.constant_of(3)
+        )
+      end
+
+      # Per Ruby's semantics, `;`-prefixed block-locals are
+      # freshly bound to `nil` at the start of each block
+      # invocation. Reading the name before writing it must
+      # therefore yield `Constant[nil]` — NOT the outer
+      # binding's value, which would be unsound (a runtime
+      # `nil.even?` would NoMethodError but the analyzer would
+      # claim the receiver is the outer Integer).
+      it "binds block-locals to Constant[nil] at block entry, shadowing the outer value" do
+        events, on_enter = watch_local_reads(:x)
+        run_eval(
+          default_env_scope, on_enter, <<~RUBY
+            x = 100
+            [1].each do |_i; x|
+              x
+            end
+          RUBY
+        )
+        expect(events).not_to be_empty
+        expect(events.last).to eq(Rigor::Type::Combinator.constant_of(nil))
+      end
+
+      # The terminal `x` read is the block body's last expression:
+      # by then the block-local has been written from `x = i`, so
+      # the read should see the Tuple-element union, not the outer
+      # `Constant[100]` shadow that `nil`-init introduced.
+      it "exposes the written type after the block-local is written" do
+        events, on_enter = watch_local_reads(:x)
+        run_eval(default_env_scope, on_enter, "x = 100; [1, 2, 3].each do |i; x| x = i; x end")
+        expect(events.last).to be_a(Rigor::Type::Union)
+        expect(events.last.members).to contain_exactly(
+          Rigor::Type::Combinator.constant_of(1),
+          Rigor::Type::Combinator.constant_of(2),
+          Rigor::Type::Combinator.constant_of(3)
+        )
+      end
+    end
   end
 
   describe "closure escape fact recording (Slice 6 phase C sub-phase 3b)" do

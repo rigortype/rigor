@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `;`-prefixed block-local declarations now shadow outer locals to `Constant[nil]`
+
+- **`Inference::StatementEvaluator#build_block_entry_scope` now binds every `;`-prefixed block-local (`do |i; x| ... end`) to `Constant[nil]` at block entry**, shadowing any same-named outer local for the duration of the block body. Per Ruby's semantics, `;`-block-locals are freshly nil-valued on every block invocation; previously the inner read of `x` saw the outer binding (e.g. `x: Constant[100]`), which would let `x.even?` type-check despite the runtime `nil.even?` `NoMethodError`.
+- **Outer-scope behaviour unchanged.** The block's writes already did not leak past the call (the `BlockParameterBinder` documented at line 43 leaves block-locals out of post-call scope and `block_introduced_locals` correctly excludes them from captured-write tracking). The fix only tightens the in-block read precision.
+- **New `Inference::StatementEvaluator#block_local_names`** private helper extracts the `;`-prefixed names from `Prism::BlockParametersNode#locals`. Used by `build_block_entry_scope` to enumerate the names that need the nil shadow.
+- **Spec coverage** in `spec/rigor/inference/statement_evaluator_spec.rb` under "explicit block-local declarations (`do |i; x|`)" — 7 examples covering outer-scope preservation (Integer / String narrowed types), no leakage of the block-local name into the post-call scope, multi-name `;`-block-local lists (`|_i; a, b|`), the inner nil shadow (this fix), and the inner read after the first write (returns the written union, not the nil shadow).
+
 ### Added — example plugin: `rigor-deprecations`
 
 - **The smallest worked example of the v0.1.0 plugin authoring surface** under [`examples/rigor-deprecations/`](examples/rigor-deprecations/) — under 80 lines of plugin code, no I/O, no cache, no engine query, and the recommended starting point for "I want to write my own Rigor plugin." The plugin's value is **user-extensibility**: a user extends Rigor's lint surface for their own deprecations by editing `.rigor.yml`, with no plugin-side code. The plugin is the engine; the rules are pure data.

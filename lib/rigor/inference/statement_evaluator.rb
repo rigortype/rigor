@@ -1161,10 +1161,29 @@ module Rigor
       # bindings for every named block parameter on top. Parameter
       # types come from the receiving method's RBS signature when
       # one is available; the rest default to `Dynamic[Top]`.
+      #
+      # `;`-prefixed block-locals (`do |i; x|`) are bound to
+      # `Constant[nil]` so the inner read shadows any outer
+      # `x` per Ruby's semantics — at runtime the block-local is
+      # a fresh nil-valued variable on every block invocation.
+      # Without this shadow, an inner `x.even?` before the first
+      # write would type-check against the OUTER `x` (e.g.
+      # `Integer`) when the runtime would actually `NoMethodError`
+      # on `nil`.
       def build_block_entry_scope(call_node, block_node)
         expected = expected_block_param_types_for(call_node)
         bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_node)
-        bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        scope_with_params = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+        block_local_names(block_node).reduce(scope_with_params) do |acc, name|
+          acc.with_local(name, Type::Combinator.constant_of(nil))
+        end
+      end
+
+      def block_local_names(block_node)
+        params_root = block_node.parameters
+        return [] unless params_root.is_a?(Prism::BlockParametersNode)
+
+        params_root.locals.map(&:name)
       end
 
       def expected_block_param_types_for(call_node)

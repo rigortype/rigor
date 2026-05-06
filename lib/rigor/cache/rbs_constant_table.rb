@@ -33,10 +33,10 @@ module Rigor
         loader.each_constant_decl do |name, entry|
           translated = Inference::RbsTypeTranslator.translate(entry.decl.type)
           table[name] = translated unless translated.is_a?(Type::Bot)
-        rescue StandardError
+        rescue ::RBS::BaseError
           # Skip entries whose RBS type fails to translate; the cache
           # stays robust to a broken signature rather than corrupting
-          # the whole table.
+          # the whole table. Analyzer-internal errors propagate.
         end
         table
       end

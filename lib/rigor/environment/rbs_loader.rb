@@ -125,8 +125,12 @@ module Rigor
 
         env.class_decls.each_key { |rbs_name| yield rbs_name.to_s }
         env.class_alias_decls.each_key { |rbs_name| yield rbs_name.to_s }
-      rescue StandardError
-        # fail-soft: a broken environment yields no names.
+      rescue ::RBS::BaseError
+        # fail-soft: a broken RBS environment yields no names.
+        # Analyzer-internal errors (NameError, NoMethodError,
+        # LoadError) are NOT swallowed — those are bugs and
+        # must surface so they don't hide silently the way the
+        # v0.0.9 cache `Cache::Descriptor` regression did.
       end
 
       # @return [RBS::Definition, nil] the resolved instance definition
@@ -247,7 +251,7 @@ module Rigor
       #   should keep using {#constant_type} for point lookups.
       def constant_names
         env.constant_decls.keys.map(&:to_s)
-      rescue StandardError
+      rescue ::RBS::BaseError
         []
       end
 
@@ -262,8 +266,8 @@ module Rigor
         env.constant_decls.each do |rbs_name, entry|
           yield rbs_name.to_s, entry
         end
-      rescue StandardError
-        # fail-soft: a broken environment yields no entries.
+      rescue ::RBS::BaseError
+        # fail-soft: a broken RBS environment yields no entries.
       end
 
       # Slice A constant-value lookup. Returns the translated
@@ -291,7 +295,7 @@ module Rigor
         else
           translate_constant_decl(rbs_name)
         end
-      rescue StandardError
+      rescue ::RBS::BaseError
         nil
       end
 
@@ -323,7 +327,7 @@ module Rigor
         return false unless rbs_name
 
         known_class_names_set.include?(rbs_name.to_s)
-      rescue StandardError
+      rescue ::RBS::BaseError
         false
       end
 
@@ -344,14 +348,43 @@ module Rigor
         Cache::RbsEnvironment.fetch(loader: self, store: cache_store)
       end
 
+      # Per-process Hash<String, RBS::Definition> for the instance
+      # side. Loaded once on first miss through the
+      # {Cache::RbsInstanceDefinitions} producer (single Marshal
+      # blob); subsequent calls are pure Hash lookups. Cold runs
+      # build every known class once and persist; warm runs (and
+      # other loaders sharing the same Store) skip the
+      # `RBS::DefinitionBuilder.build_instance` work entirely.
       def cached_instance_definition(class_name)
-        require_relative "../cache/rbs_instance_definitions"
-        Cache::RbsInstanceDefinitions.fetch(loader: self, store: cache_store, class_name: class_name)
+        instance_definitions_table[normalise_class_key(class_name)]
+      end
+
+      def instance_definitions_table
+        @state[:instance_definitions_table] ||= begin
+          require_relative "../cache/rbs_instance_definitions"
+          Cache::RbsInstanceDefinitions.fetch(loader: self, store: cache_store)
+        end
       end
 
       def cached_singleton_definition(class_name)
-        require_relative "../cache/rbs_instance_definitions"
-        Cache::RbsSingletonDefinitions.fetch(loader: self, store: cache_store, class_name: class_name)
+        singleton_definitions_table[normalise_class_key(class_name)]
+      end
+
+      def singleton_definitions_table
+        @state[:singleton_definitions_table] ||= begin
+          require_relative "../cache/rbs_instance_definitions"
+          Cache::RbsSingletonDefinitions.fetch(loader: self, store: cache_store)
+        end
+      end
+
+      # The cache producers persist class names in
+      # `RBS::TypeName#to_s` form (top-level prefixed
+      # `"::Hash"`); plain-name lookups (`"Hash"`) normalise
+      # before the Hash query so callers stay agnostic to the
+      # prefix.
+      def normalise_class_key(class_name)
+        s = class_name.to_s
+        s.start_with?("::") ? s : "::#{s}"
       end
 
       def builder
@@ -368,7 +401,7 @@ module Rigor
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_instance(rbs_name)
-      rescue StandardError
+      rescue ::RBS::BaseError
         nil
       end
 
@@ -378,7 +411,7 @@ module Rigor
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_singleton(rbs_name)
-      rescue StandardError
+      rescue ::RBS::BaseError
         nil
       end
 
@@ -388,7 +421,7 @@ module Rigor
 
         s = "::#{s}" unless s.start_with?("::")
         RBS::TypeName.parse(s)
-      rescue StandardError
+      rescue ::RBS::BaseError
         nil
       end
 
@@ -401,7 +434,7 @@ module Rigor
         # them under one map post-resolution. Aliases live in their
         # own table.
         env.class_decls.key?(rbs_name) || env.class_alias_decls.key?(rbs_name)
-      rescue StandardError
+      rescue ::RBS::BaseError
         false
       end
     end

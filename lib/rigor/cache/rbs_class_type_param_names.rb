@@ -50,7 +50,7 @@ module Rigor
         return nil if definition.nil?
 
         definition.type_params.dup.freeze
-      rescue StandardError
+      rescue ::RBS::BaseError
         nil
       end
 

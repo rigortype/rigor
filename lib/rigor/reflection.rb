@@ -147,7 +147,7 @@ module Rigor
       return nil if loader.nil?
 
       loader.instance_definition(class_name.to_s)
-    rescue StandardError
+    rescue ::RBS::BaseError
       nil
     end
 
@@ -157,7 +157,7 @@ module Rigor
       return nil if loader.nil?
 
       loader.singleton_definition(class_name.to_s)
-    rescue StandardError
+    rescue ::RBS::BaseError
       nil
     end
 

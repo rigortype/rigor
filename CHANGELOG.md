@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — per-method Reflection cache: single-blob layout
+
+- **`Cache::RbsInstanceDefinitions` / `Cache::RbsSingletonDefinitions` reshaped to the `RbsConstantTable` pattern.** A single `Hash<String, RBS::Definition>` blob per kind replaces the per-class entry layout the v0.1.0-carryover landed with. Disk footprint for `bundle exec exe/rigor check lib` drops from **212 MiB → 25 MiB** (1312 small files → 2 large blobs); cold-run timing drops from **5.94s → 3.15s**. Warm-run timing matches `--no-cache` (1.81s vs 1.92s) — the per-class layout was actively *slower* than no-cache because each lookup paid disk-open + Marshal.load overhead and the in-memory `RBS::DefinitionBuilder.build_instance` was fast given a cached `RBS::Environment`. Surfaced by dogfooding (Rigor analysing Rigor) once the v0.0.9 cache regression was fixed.
+- **`RbsLoader#instance_definitions_table` / `#singleton_definitions_table`** load the blob on first access and answer per-class queries via Hash lookup; class-name keys normalise to `RBS::TypeName#to_s` form (`"::Hash"`) via the new `#normalise_class_key` helper.
+
+### Fixed — fail-soft `rescue StandardError` was masking analyzer-internal bugs
+
+- **Tightened `rescue StandardError` to `rescue ::RBS::BaseError` across the RBS-touching code paths.** The v0.0.9 cache regression hid for months because `RbsLoader#cached_class_known` (and friends) caught `NameError: uninitialized constant Rigor::Cache::RbsDescriptor::Descriptor` indiscriminately and returned `false` — the analyzer treated every RBS-side class as unknown, the cache was reported as "0 hits, 0 misses, 0 writes", and the user-visible behaviour silently degraded. Now only RBS-specific exceptions are swallowed; analyzer-internal `NameError` / `NoMethodError` / `LoadError` propagate so similar bugs surface immediately. Affected files: `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`.
+
+### Added — RBS sig drift detection in `spec/rigor/public_api_drift_spec.rb`
+
+- **A new `RBS sig drift` describe block** verifies that every public method in the runtime drift snapshots is also declared in the project's `sig/rigor/*.rbs`. Catches the dual of the existing runtime-side drift check: when a public Ruby method is added to a drift-pinned namespace but the matching RBS-side declaration is forgotten. Members surveyed: `MethodDefinition` (instance / singleton / singleton_instance kinds), `AttrReader` / `AttrWriter` / `AttrAccessor`, `Alias`. Five drift-pinned namespaces with sigs (`Scope`, `Environment`, `Type::Combinator`, `Reflection`) are now sig-drift-checked at every spec run; eleven namespaces without sigs (`Plugin::*`, `FlowContribution::*`) are tracked in a dedicated `UNSIGNED_NAMESPACES` snapshot so the absence stays visible.
+- **Backfill**: `sig/rigor/scope.rbs` gains `alias eql? ==` to match the runtime aliasing.
+
 ### Fixed — cache load order for CLI flow (silent NameError swallowing)
 
 - **`lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`.** Both files reference `Cache::Descriptor` (`Descriptor::SCHEMA_VERSION` for `Store#ensure_schema_version!`; `Descriptor.new(…)` / `Descriptor::FileEntry.new(…)` etc. for `RbsDescriptor.build`) without explicitly requiring it. In CLI flow (`exe/rigor` → `cli.rb` → `analysis/runner.rb` → `cache/store.rb`), the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError: uninitialized constant Rigor::Cache::RbsDescriptor::Descriptor` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). The require additions unblock the cache; `--cache-stats` now reports real activity (cold run writes per-producer entries; warm runs hit the cache).

@@ -48,6 +48,7 @@ module Rigor
     def evaluate: (untyped node, ?tracer: Inference::FallbackTracer?) -> [Type::t, Scope]
     def join: (Scope other) -> Scope
     def ==: (untyped other) -> bool
+    alias eql? ==
     def hash: () -> Integer
   end
 end

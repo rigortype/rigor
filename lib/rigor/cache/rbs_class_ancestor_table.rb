@@ -53,7 +53,7 @@ module Rigor
                   .map { |ancestor| ancestor.name.to_s.delete_prefix("::") }
                   .uniq
                   .freeze
-      rescue StandardError
+      rescue ::RBS::BaseError
         nil
       end
 

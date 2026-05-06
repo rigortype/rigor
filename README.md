@@ -367,6 +367,37 @@ The full per-release surface lives in
 analyzer guarantees live under
 [`docs/internal-spec/`](docs/internal-spec/).
 
+## Plugins (v0.1.0)
+
+`v0.1.0` adds an extension API so projects can teach Rigor about
+their own DSLs. Six worked examples ship under
+[`examples/`](examples/) — each is a fully-shaped plugin gem
+with a runnable demo and an end-to-end integration spec, and
+each spotlights a different facet of the plugin contract:
+
+- [`rigor-deprecations`](examples/rigor-deprecations/) —
+  smallest possible plugin (~80 lines); config-driven rules.
+- [`rigor-lisp-eval`](examples/rigor-lisp-eval/) — typing literal
+  AST arguments at a method call.
+- [`rigor-statesman`](examples/rigor-statesman/) — two-pass DSL
+  analysis (collect declarations, then validate references).
+- [`rigor-pattern`](examples/rigor-pattern/) — plugin →
+  analyzer collaboration via `Scope#type_of` and the
+  literal-string carrier.
+- [`rigor-units`](examples/rigor-units/) — local-variable flow
+  tracking through arithmetic.
+- [`rigor-routes`](examples/rigor-routes/) — `Plugin::IoBoundary`
+  reads under `TrustPolicy` plus cache producers (slice 2 +
+  slice 6) — the most architecturally complete example.
+
+[`examples/README.md`](examples/README.md) is the plugin
+authoring landing page — comparison table, recommended reading
+order, and the architectural map of which surface each example
+exercises. The binding contract for the plugin API lives in
+[`docs/adr/2-extension-api.md`](docs/adr/2-extension-api.md)
+and the slice-by-slice normative specs under
+[`docs/internal-spec/plugin*.md`](docs/internal-spec/).
+
 ## Configuration
 
 `rigor init` writes a starter `.rigor.yml`:

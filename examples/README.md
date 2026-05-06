@@ -1,0 +1,130 @@
+# Rigor plugin examples
+
+Six worked examples of the **v0.1.0 plugin authoring surface**.
+Each one is a fully-shaped plugin gem (manifest + `lib/` +
+gemspec) with a runnable demo (`demo/.rigor.yml`, `demo/demo.rb`,
+runtime, optional sigs) and an end-to-end integration spec under
+[`spec/integration/examples/`](../spec/integration/examples/).
+
+| Example | Headline facet | LoC | I/O | Cache | Engine query | Tests |
+| --- | --- | --- | --- | --- | --- | --- |
+| [`rigor-deprecations`](rigor-deprecations/) | **Config-driven rules** (smallest possible plugin) | ~80 | — | — | — | 10 |
+| [`rigor-lisp-eval`](rigor-lisp-eval/) | **Literal AST typing** (interpret a Lisp expression) | ~200 | — | — | — | 9 |
+| [`rigor-statesman`](rigor-statesman/) | **Two-pass DSL analysis** (collect → validate) | ~210 | — | — | — | 7 |
+| [`rigor-pattern`](rigor-pattern/) | **Engine collaboration** via `Scope#type_of` + literal-string carrier | ~180 | — | — | ✅ | 12 |
+| [`rigor-units`](rigor-units/) | **Local-variable flow tracking** through arithmetic | ~280 | — | — | — | 16 |
+| [`rigor-routes`](rigor-routes/) | **`IoBoundary` + cache producer** (slice 2 + slice 6) | ~250 | YAML | ✅ | — | 13 |
+
+All six rely on **slice 5** (`Plugin::Base#diagnostics_for_file`)
+to surface diagnostics. The "headline facet" column names the
+*additional* surface each example spotlights — that is the
+column to read when you have a specific question about how to
+use one part of the plugin contract.
+
+## Recommended reading order
+
+Pick the path that matches what you are trying to learn:
+
+| Your goal | Read in this order |
+| --- | --- |
+| **Author your first plugin (under 100 lines)** | `rigor-deprecations` |
+| **Inspect a method call's literal arguments** | `rigor-lisp-eval` → `rigor-pattern` |
+| **Track types through a series of statements** | `rigor-units` |
+| **Validate references to declarations from earlier in the same file** | `rigor-statesman` |
+| **Read a project file (`config/routes.rb` style) under TrustPolicy + cache the parse** | `rigor-routes` |
+| **Read every example to internalise the architecture** | deprecations → lisp-eval → statesman → pattern → units → routes |
+
+The recommended-for-everyone path runs from the smallest
+plugin (`rigor-deprecations`, ~80 lines, pure data → rules) up
+through the most architecturally complete one (`rigor-routes`,
+which exercises every v0.1.0 slice).
+
+## What each example exercises (architectural map)
+
+| Surface | Where it lives | Examples that use it |
+| --- | --- | --- |
+| `Rigor::Plugin::Base.manifest(...)` | manifest declaration | all six |
+| `config_schema` (`:string` / `:array` / `:hash` kinds) | manifest body | deprecations / lisp-eval / pattern / statesman |
+| `#init(services)` config plumbing | init hook | lisp-eval / pattern / statesman / routes |
+| `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all six |
+| `Rigor::Analysis::Diagnostic` construction | diagnostic emission | all six |
+| `source_family: "plugin.<id>"` auto-stamp | runner-side, never set by plugin | all six |
+| `Plugin::IoBoundary#read_file` (slice 2) | sandboxed file reads | **routes** |
+| `Plugin::TrustPolicy.allowed_read_roots` (slice 2) | declarative read-root policy | **routes** (transitively, via `IoBoundary`) |
+| `Plugin::Base.producer` DSL (slice 6) | cached producer declaration | **routes** |
+| `Plugin::Base#cache_for` callable (slice 6) | cache round-trip wrapper | **routes** |
+| `Scope#type_of(node)` | engine query for an expression's inferred type | **pattern** |
+| `Type::Combinator.literal_string_compatible?` | engine-side literal-string predicate | **pattern** |
+| `Type::Constant#value` | exact-value extraction | **pattern** |
+| Two-pass walk (collect → validate) | pattern, not API | **statesman** |
+| Local-variable binding map across statements | pattern, not API | **units** |
+
+The unmarked surfaces — return-type contributions, custom
+node-scoped `Rule<TNode>`, plugin-author logging — are queued
+for later v0.1.x slices. Future-direction notes live at the
+head of each example's `lib/rigor/plugin/<id>.rb` and in the
+relevant README section.
+
+## Running an example
+
+Every example follows the same shape:
+
+```sh
+cd examples/<plugin-name>/demo
+RUBYLIB=$PWD/../lib bundle exec rigor check
+```
+
+The `RUBYLIB` prefix puts the plugin's `lib/` on the load path
+so `Kernel.require("rigor-<plugin-name>")` from the plugin
+loader resolves to the in-repo source. The demo's `.rigor.yml`
+points at the plugin id (and any plugin-specific config); the
+demo's `demo.rb` is the user-side code under analysis.
+
+Some demos ship a sibling `errors_demo.rb` listing intentionally
+ill-typed code that exercises the plugin's `:error` paths. Those
+files would `NoMethodError` / similar at runtime — analyse them
+with `rigor check`, do not `ruby` them.
+
+`rigor-routes` additionally demonstrates the cache surface; run
+
+```sh
+cd examples/rigor-routes/demo
+RUBYLIB=$PWD/../lib bundle exec rigor check --cache-stats
+```
+
+twice to see `plugin.routes.route_table: 0 hits, 1 miss, 1 write`
+on the first run and `1 hit, 0 misses, 0 writes` on the second.
+
+## Where the plugin contract is documented
+
+These examples are the executable counterpart of the spec
+corpus. Cross-references:
+
+- **ADR-2 — Extension API** ([`docs/adr/2-extension-api.md`](../docs/adr/2-extension-api.md))
+  is the binding design document for the plugin contract.
+- **`docs/internal-spec/plugin.md`** — slice-1 normative
+  surface (registration, manifest, services, registry).
+- **`docs/internal-spec/plugin-trust.md`** — slice-2 normative
+  surface (`TrustPolicy`, `IoBoundary`).
+- **`docs/internal-spec/flow-contribution-merger.md`** — slice-3
+  contribution merger (analyzer-internal today; the wire plugins
+  will emit bundles through later).
+- **`docs/internal-spec/plugin-cache-producers.md`** — slice-6
+  cache-producer surface (`producer` DSL, `cache_for`).
+- **`spec/rigor/public_api_drift_spec.rb`** pins every public
+  namespace the examples touch. When the contract changes, the
+  drift spec updates in the same commit.
+
+## Status note (intentional, all examples)
+
+v0.1.0 plugins emit diagnostics only — they cannot replace the
+analyzer's inferred return type for a call site. The
+`FlowContribution`-based plugin contribution surface is queued
+for a later v0.1.x slice. Each example's README has a "Future
+direction" section showing what the same plugin would look like
+once that lands.
+
+## License
+
+Each example is MPL-2.0, matching the parent Rigor project. The
+example sources are intended as reference material — fork freely.

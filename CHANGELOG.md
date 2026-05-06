@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — example plugin: `rigor-statesman`
+
+- **Reference example for the two-pass DSL analysis pattern** under [`examples/rigor-statesman/`](examples/rigor-statesman/). Many DSL plugins (state machines, GraphQL types, ActiveModel validations, route declarations) share a collect-then-validate skeleton; `rigor-statesman` codifies it in a small example. Pass 1 walks the file once and gathers every `state :name` declaration inside `state_machine do ... end` blocks; pass 2 walks the file again and validates each `transition_to(:sym)` reference against the collected state set. Levenshtein distance ≤ 3 drives the did-you-mean suggestions.
+- **Diagnostics.** `:info plugin.statesman.known-state` for matching transitions; `:error plugin.statesman.unknown-state` for typos (with a `(did you mean :…?)` hint when within distance 3, plain otherwise). Files that declare no state machine, and `transition_to(some_var)` calls with non-Symbol arguments, stay completely silent.
+- **Configurable for `aasm` / hand-rolled DSLs.** `dsl_method`, `state_method`, and `transition_method` config strings let users adapt the plugin to a different state-machine API (default values match `Statesman::Machine`).
+- **File-scoping trade-off (intentional).** The plugin treats each file independently — states declared in `models/order.rb` are not visible from `actions/promote.rb`. Real Statesman / aasm DSLs keep declaration and usage in the same model file, so the trade-off matches usage. Cross-file declaration tracking would extend the architecture by adding a `Plugin::Base.producer`-backed project-wide declaration index, queued for a follow-up once Rigor exposes a whole-project plugin hook.
+- **Demo project** under `examples/rigor-statesman/demo/` (`.rigor.yml` + `demo.rb` + `errors_demo.rb` + `lib/runtime.rb`).
+- **Integration spec** at [`spec/integration/examples/statesman_plugin_spec.rb`](spec/integration/examples/statesman_plugin_spec.rb) — 7 examples covering known-state info, unknown-state with did-you-mean, unknown-state without hint, non-Symbol arguments, no-state-machine files, configurable DSL keywords, and union of state sets across multiple state machines in one file.
+
 ### Added — example plugin: `rigor-pattern`
 
 - **Reference example for plugin → analyzer collaboration** under [`examples/rigor-pattern/`](examples/rigor-pattern/). Where the earlier examples reimplement what they need (Lisp's type interpreter, units' dimension tracker, routes' YAML parse), `rigor-pattern` **asks Rigor's type system** whether each `validate(:name, value)` call's `value` argument is provably a literal string and runs the configured regex against the literal value at lint time.

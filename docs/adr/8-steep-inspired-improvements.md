@@ -120,8 +120,16 @@ Scope (v0.1.x first cut):
 - The comparison is `declared.accepts(inferred)`:
   - `:yes` — silent.
   - `:no` — emit `:error` with rule `def.return-type-mismatch`.
-  - `:maybe` — emit `:warning` (and become `:error` under
-    `severity_profile: strict`).
+  - `:maybe` — silent in the v0.1.x first cut. Implementation
+    discipline: dogfooding revealed 16 warnings on Rigor's own
+    `lib/`, all from the same set of analyzer-precision gaps
+    (`{}` not recovering its declared element type, `Set.new`
+    returning bare `Set` rather than `Set[Symbol]`, …) that the
+    body's inferred type does not yet pin precisely enough.
+    Lifting `:maybe` to `:warning` (and `:error` under
+    `severity_profile: strict`) is queued for a follow-up that
+    lands together with the narrowing precision improvements
+    those cases require.
 
 Out of scope for the first cut:
 

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `def.return-type-mismatch` rule (ADR-8 § 3)
+
+- **`Rigor::Analysis::CheckRules` now flags methods whose body's last expression cannot satisfy the RBS-declared return type.** Per [ADR-8 § "`def.return-type-mismatch` rule"](docs/adr/8-steep-inspired-improvements.md), this is the symmetric counterpart of `call.argument-type-mismatch` on the return side and the first concrete consumer of [ADR-5 § "Strict on returns"](docs/adr/5-robustness-principle.md). Conservative envelope:
+  - The method must have an RBS sig reachable through `Reflection.{instance,singleton}_method_definition`. Source-only methods have no contract to compare against.
+  - The body's last expression must type to a non-`Dynamic[top]` value. Fail-soft fallback bodies are skipped.
+  - The comparison is `declared.accepts(inferred)`. `:no` (proven mismatch) emits at the rule's authored `:error` severity (re-stamped by the configured profile — `:warning` under `balanced`, `:error` under `strict`). `:maybe` is silent in the v0.1.x first cut; lifting `:maybe` to a configurable severity is queued for a follow-up that lands together with narrowing precision improvements (`{}` → `Hash[K, V]` element recovery, `Set.new` → `Set[Symbol]`, …).
+- **`def self.foo` (singleton) and `def foo` (instance) dispatch correctly** through the right `Reflection` accessor. Singleton-method bodies compare against the singleton-side RBS declaration; instance-method bodies against the instance-side.
+- **Three real findings on Rigor's own `lib/`**: `Trinary#negate` returns `Trinary | nil` but its sig declares `Trinary`; `IntegerRange#lower` / `#upper` return `Float | Integer | Symbol` (with `:negative_infinity` / `:positive_infinity` sentinels) but the sig declares `Float | Integer`. Both are documented in [`docs/notes/20260503-steep-cross-check-triage.md`](docs/notes/20260503-steep-cross-check-triage.md) (categories A-1 / A-2); the new rule confirms them autonomously. They surface as `:warning` under the `balanced` profile and do not fail `make verify`; users on `severity_profile: strict` see them as `:error`.
+
 ### Added — severity profile (ADR-8 § 2)
 
 - **`Rigor::Configuration::SeverityProfile`** module with three named profiles per [ADR-8 § "Severity profile"](docs/adr/8-steep-inspired-improvements.md): `lenient` (uncertain rules `:warning`), `balanced` (default — most rules `:error`, `dump.type` `:info`), `strict` (everything `:error`). Profiles re-stamp severity as a **final filter** after rules emit; rules never consult the profile directly.

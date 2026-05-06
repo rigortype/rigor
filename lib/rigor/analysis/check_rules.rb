@@ -60,6 +60,7 @@ module Rigor
       RULE_DUMP_TYPE = "dump.type"
       RULE_ASSERT_TYPE = "assert.type-mismatch"
       RULE_ALWAYS_RAISES = "flow.always-raises"
+      RULE_RETURN_TYPE = "def.return-type-mismatch"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -68,7 +69,8 @@ module Rigor
         RULE_NIL_RECEIVER,
         RULE_DUMP_TYPE,
         RULE_ASSERT_TYPE,
-        RULE_ALWAYS_RAISES
+        RULE_ALWAYS_RAISES,
+        RULE_RETURN_TYPE
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward
@@ -119,33 +121,29 @@ module Rigor
       # @param root [Prism::Node]
       # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
       # @return [Array<Rigor::Analysis::Diagnostic>]
-      def diagnose(path:, root:, scope_index:, comments: [], disabled_rules: []) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def diagnose(path:, root:, scope_index:, comments: [], disabled_rules: [])
         diagnostics = []
         Source::NodeWalker.each(root) do |node|
-          next unless node.is_a?(Prism::CallNode)
-
-          diagnostic = undefined_method_diagnostic(path, node, scope_index)
-          diagnostics << diagnostic if diagnostic
-
-          arity_diagnostic = wrong_arity_diagnostic(path, node, scope_index)
-          diagnostics << arity_diagnostic if arity_diagnostic
-
-          arg_type_diagnostic = argument_type_diagnostic(path, node, scope_index)
-          diagnostics << arg_type_diagnostic if arg_type_diagnostic
-
-          nil_diagnostic = nil_receiver_diagnostic(path, node, scope_index)
-          diagnostics << nil_diagnostic if nil_diagnostic
-
-          dump_diagnostic = dump_type_diagnostic(path, node, scope_index)
-          diagnostics << dump_diagnostic if dump_diagnostic
-
-          assert_diagnostic = assert_type_diagnostic(path, node, scope_index)
-          diagnostics << assert_diagnostic if assert_diagnostic
-
-          raises_diagnostic = always_raises_diagnostic(path, node, scope_index)
-          diagnostics << raises_diagnostic if raises_diagnostic
+          if node.is_a?(Prism::CallNode)
+            diagnostics.concat(call_node_diagnostics(path, node, scope_index))
+          elsif node.is_a?(Prism::DefNode)
+            return_diagnostic = return_type_mismatch_diagnostic(path, node, scope_index)
+            diagnostics << return_diagnostic if return_diagnostic
+          end
         end
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
+      end
+
+      def call_node_diagnostics(path, node, scope_index)
+        [
+          undefined_method_diagnostic(path, node, scope_index),
+          wrong_arity_diagnostic(path, node, scope_index),
+          argument_type_diagnostic(path, node, scope_index),
+          nil_receiver_diagnostic(path, node, scope_index),
+          dump_type_diagnostic(path, node, scope_index),
+          assert_type_diagnostic(path, node, scope_index),
+          always_raises_diagnostic(path, node, scope_index)
+        ].compact
       end
 
       # v0.0.2 #6 — diagnostic suppression. Two kinds of
@@ -849,6 +847,137 @@ module Rigor
             column: location.start_column + 1,
             message: "undefined method `#{call_node.name}' for #{rendered_receiver}",
             severity: :error
+          )
+        end
+
+        # ADR-8 § "`def.return-type-mismatch` rule" — flags a
+        # `def m(...) ... end` whose body's last expression's
+        # type cannot satisfy the RBS-declared return type.
+        # Conservative envelope (v0.1.x first cut):
+        #
+        # - Skips methods without an RBS declaration. The rule
+        #   has no contract to compare against for source-only
+        #   methods.
+        # - Skips methods whose enclosing class isn't a
+        #   `Type::Singleton` self_type that we can name (top-
+        #   level / module-level methods land outside the rule).
+        # - Skips methods whose body's last expression is
+        #   absent or types as `Dynamic[top]` (the analyzer's
+        #   fail-soft fallback) — emitting on `Dynamic[top]`
+        #   would be noise.
+        # - Compares the inferred body type against the
+        #   declared return via `accepts?`:
+        #     :yes   → silent
+        #     :no    → emit at :error (severity_profile may
+        #              re-stamp; default `balanced` keeps the
+        #              authored severity).
+        #     :maybe → emit at :warning. Promoted to :error
+        #              under `severity_profile: strict` per
+        #              ADR-8 § "Severity profile".
+        def return_type_mismatch_diagnostic(path, def_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+          return nil if def_node.body.nil?
+
+          last_expr = body_last_expression(def_node.body)
+          return nil if last_expr.nil?
+
+          inner_scope = scope_index[last_expr] || scope_index[def_node.body] || scope_index[def_node]
+          return nil if inner_scope.nil?
+
+          declared = declared_return_type(def_node, scope_index)
+          return nil if declared.nil?
+
+          inferred = inner_scope.type_of(last_expr)
+          return nil if dynamic_top?(inferred)
+
+          severity = compare_return(declared, inferred)
+          return nil if severity.nil?
+
+          build_return_type_mismatch_diagnostic(path, def_node, declared, inferred, severity)
+        end
+
+        # The body of a `def` is the last `Prism::StatementsNode`
+        # child (or a single expression for one-liner defs).
+        # Take the last statement; that's the implicit return.
+        def body_last_expression(body)
+          case body
+          when Prism::StatementsNode then body.body.last
+          when Prism::BeginNode then body_last_expression(body.statements)
+          else body
+          end
+        end
+
+        # Pulls the declared RBS return type for the def. The
+        # enclosing class name comes from the def's scope's
+        # `self_type`; the method name is on the def itself.
+        # `def self.foo` is a singleton method — dispatched
+        # through `Reflection.singleton_method_definition`;
+        # plain `def foo` uses `instance_method_definition`.
+        # Method overloads contribute their union of declared
+        # return types (any one of them satisfying the body
+        # silences the rule).
+        def declared_return_type(def_node, scope_index)
+          scope = scope_index[def_node]
+          return nil if scope.nil?
+
+          self_type = scope.self_type
+          return nil unless self_type.respond_to?(:class_name)
+
+          method_def =
+            if def_node.receiver.nil?
+              Reflection.instance_method_definition(self_type.class_name, def_node.name, scope: scope)
+            else
+              Reflection.singleton_method_definition(self_type.class_name, def_node.name, scope: scope)
+            end
+          return nil if method_def.nil?
+
+          declared_return_union(method_def, scope.environment)
+        end
+
+        def declared_return_union(method_def, _environment)
+          translated = method_def.method_types.filter_map do |mt|
+            Inference::RbsTypeTranslator.translate(
+              mt.type.return_type,
+              self_type: nil, instance_type: nil, type_vars: {}
+            )
+          rescue StandardError
+            nil
+          end
+          return nil if translated.empty?
+
+          translated.size == 1 ? translated.first : Type::Combinator.union(*translated)
+        end
+
+        def dynamic_top?(type)
+          type.is_a?(Type::Dynamic) || (type.respond_to?(:top?) && type.top?.yes?)
+        end
+
+        # Returns the severity to emit at, or nil to stay
+        # silent. The first-cut implementation only fires on
+        # proven (`:no`) mismatches; `:maybe` is treated as
+        # silent until the analyzer's narrowing becomes precise
+        # enough to avoid noise on common patterns (`{}` →
+        # declared `Hash[K, V]`, `Set.new` → declared
+        # `Set[Symbol]`, …). ADR-8's promise to emit on
+        # `:maybe` under `severity_profile: strict` is
+        # deferred to a follow-up that lands together with the
+        # narrowing precision improvements.
+        def compare_return(declared, inferred)
+          result = declared.accepts(inferred)
+          return :error if result.no?
+
+          nil
+        end
+
+        def build_return_type_mismatch_diagnostic(path, def_node, declared, inferred, severity)
+          location = def_node.name_loc || def_node.location
+          Diagnostic.new(
+            rule: RULE_RETURN_TYPE,
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "return-type mismatch on `#{def_node.name}': " \
+                     "declared #{declared.describe(:short)}, inferred #{inferred.describe(:short)}",
+            severity: severity
           )
         end
       end

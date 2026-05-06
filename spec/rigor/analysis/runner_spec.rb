@@ -194,6 +194,81 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # ADR-8 § "`def.return-type-mismatch` rule"
+      describe "def.return-type-mismatch rule" do # rubocop:disable RSpec/NestedGroups
+        let(:demo_sig) do
+          { "demo.rbs" => <<~RBS }
+            class Demo
+              def returns_string: () -> String
+              def returns_int_or_nil: () -> Integer?
+            end
+          RBS
+        end
+
+        it "stays silent when the body's last expression matches the declared return type" do
+          src = <<~RUBY
+            class Demo
+              def returns_string
+                "hi"
+              end
+            end
+          RUBY
+          result = analyze(src, sig: demo_sig)
+          expect(result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }).to be_nil
+        end
+
+        it "flags a body whose inferred type cannot satisfy the declared return type" do
+          src = <<~RUBY
+            class Demo
+              def returns_string
+                42
+              end
+            end
+          RUBY
+          result = analyze(src, sig: demo_sig)
+          mismatch = result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }
+          expect(mismatch).not_to be_nil
+          expect(mismatch.message).to include("returns_string")
+          expect(mismatch.message).to include("declared String")
+        end
+
+        it "skips bodies whose inferred type is Dynamic[top] (analyzer fail-soft)" do
+          src = <<~RUBY
+            class Demo
+              def returns_string
+                some_unknown_helper
+              end
+            end
+          RUBY
+          result = analyze(src, sig: demo_sig)
+          expect(result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }).to be_nil
+        end
+
+        it "skips methods that have no RBS sig (no contract to violate)" do
+          src = <<~RUBY
+            class Demo
+              def no_sig_method
+                42
+              end
+            end
+          RUBY
+          result = analyze(src, sig: demo_sig)
+          expect(result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }).to be_nil
+        end
+
+        it "is suppressible via `# rigor:disable def.return-type-mismatch`" do
+          src = <<~RUBY
+            class Demo
+              def returns_string  # rigor:disable def.return-type-mismatch
+                42
+              end
+            end
+          RUBY
+          result = analyze(src, sig: demo_sig)
+          expect(result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }).to be_nil
+        end
+      end
+
       # ADR-8 § "Severity profile"
       describe "severity profile re-stamping (v0.1.0+)" do # rubocop:disable RSpec/NestedGroups
         it "lenient profile drops call.argument-type-mismatch to :warning" do # rubocop:disable RSpec/ExampleLength

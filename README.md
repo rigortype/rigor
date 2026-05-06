@@ -208,6 +208,12 @@ genuinely proved.
 
 ### Where the type model is documented
 
+- **End-user handbook** — chapter-by-chapter walkthrough of
+  the type model written for Ruby programmers without prior
+  static-typing background:
+  [`docs/handbook/`](docs/handbook/README.md). Start here if
+  you want a guided tour of how Rigor sees your code rather
+  than a spec deep-dive.
 - One-page mental model:
   [`docs/types.md`](docs/types.md).
 - Binding spec corpus:

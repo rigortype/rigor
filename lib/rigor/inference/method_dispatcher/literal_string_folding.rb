@@ -19,6 +19,10 @@ module Rigor
       # - `Array#join` on `Tuple[…]` receivers whose every element
       #   plus the separator argument (when given) is
       #   literal-bearing.
+      # - `Kernel#format` / `Kernel#sprintf` (any receiver) and
+      #   `String#%` (literal-bearing receiver) when every value
+      #   argument is literal-bearing or a Type::Constant of any
+      #   value.
       #
       # Result rule:
       #
@@ -47,12 +51,16 @@ module Rigor
         module_function
 
         CONCAT_METHODS = %i[+ << concat].freeze
-        private_constant :CONCAT_METHODS
+        FORMAT_METHODS = %i[format sprintf].freeze
+        private_constant :CONCAT_METHODS, :FORMAT_METHODS
 
-        def try_dispatch(receiver:, method_name:, args:, **)
+        def try_dispatch(receiver:, method_name:, args:, **) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
           return fold_array_join(receiver, args) if method_name == :join
+          return fold_format(args) if FORMAT_METHODS.include?(method_name)
 
           return nil unless Type::Combinator.literal_string_compatible?(receiver)
+
+          return fold_string_percent(args) if method_name == :%
           return nil unless args.size == 1
 
           if CONCAT_METHODS.include?(method_name)
@@ -90,6 +98,54 @@ module Rigor
           Type::Combinator.literal_string
         end
 
+        # `format("hello %s", lit)` / `sprintf(...)` — template
+        # plus every value argument must be literal-bearing
+        # ({Type::Combinator.literal_string_compatible?}) or a
+        # `Type::Constant` of any value (Constants are always
+        # provably literal). The template arg specifically must
+        # be literal-bearing — a Constant<Integer> first arg
+        # would not be a valid format template, so the
+        # `Type::Constant` allowance applies only to subsequent
+        # value args.
+        def fold_format(args)
+          return nil if args.empty?
+          return nil unless Type::Combinator.literal_string_compatible?(args.first)
+          return nil unless args.drop(1).all? { |arg| literal_or_constant?(arg) }
+
+          Type::Combinator.literal_string
+        end
+
+        # `"foo %s" % "x"` / `"foo %s" % ["x", "y"]` — receiver
+        # is the template (already verified literal-bearing by
+        # the caller); arg is either:
+        #
+        # - a single literal-bearing string / Constant value, or
+        # - a Tuple whose every element is literal-bearing or a
+        #   Constant.
+        #
+        # Hash-form `%` (e.g. `"%{name}" % {name: "x"}`) is not
+        # yet folded — the analyzer's HashShape carrier could
+        # support this, but the v0.0.x catalogue declines and
+        # widens to Nominal[String].
+        def fold_string_percent(args)
+          return nil unless args.size == 1
+
+          arg = args.first
+          if arg.is_a?(Type::Tuple)
+            return nil unless arg.elements.all? { |el| literal_or_constant?(el) }
+
+            return Type::Combinator.literal_string
+          end
+
+          return nil unless literal_or_constant?(arg)
+
+          Type::Combinator.literal_string
+        end
+
+        def literal_or_constant?(type)
+          Type::Combinator.literal_string_compatible?(type) || type.is_a?(Type::Constant)
+        end
+
         def integer_typed?(type)
           case type
           when Type::Constant then type.value.is_a?(Integer)
@@ -108,7 +164,9 @@ module Rigor
           type.is_a?(Type::Constant) && type.value.is_a?(Integer) && type.value.negative?
         end
 
-        private_class_method :fold_concat, :fold_repeat, :fold_array_join, :integer_typed?
+        private_class_method :fold_concat, :fold_repeat, :fold_array_join,
+                             :fold_format, :fold_string_percent,
+                             :literal_or_constant?, :integer_typed?
       end
     end
   end

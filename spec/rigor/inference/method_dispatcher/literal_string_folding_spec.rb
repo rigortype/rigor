@@ -146,6 +146,80 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
     end
   end
 
+  describe "Kernel#format / Kernel#sprintf (template + value args)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+    let(:int_arg) { int_const }
+    let(:singleton_kernel) { Rigor::Type::Combinator.singleton_of("Kernel") }
+
+    it "lifts format(literal-string, literal-string) to literal-string" do
+      result = described_class.try_dispatch(
+        receiver: singleton_kernel, method_name: :format, args: [string_const, literal_string]
+      )
+      expect(result).to eq(literal_string)
+    end
+
+    it "lifts sprintf(literal-string, Constant<Integer>) to literal-string" do
+      result = described_class.try_dispatch(
+        receiver: singleton_kernel, method_name: :sprintf, args: [string_const, int_arg]
+      )
+      expect(result).to eq(literal_string)
+    end
+
+    it "declines when the template is not literal-bearing" do
+      result = described_class.try_dispatch(
+        receiver: singleton_kernel, method_name: :format, args: [nominal_string, literal_string]
+      )
+      expect(result).to be_nil
+    end
+
+    it "declines when a value arg is plain Nominal[Integer]" do
+      result = described_class.try_dispatch(
+        receiver: singleton_kernel, method_name: :format, args: [string_const, nominal_integer]
+      )
+      expect(result).to be_nil
+    end
+
+    it "declines an empty argument list" do
+      result = described_class.try_dispatch(
+        receiver: singleton_kernel, method_name: :format, args: []
+      )
+      expect(result).to be_nil
+    end
+  end
+
+  describe "String#% (template % values)" do
+    it "lifts literal-string % literal-string to literal-string" do
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :%, args: [literal_string])
+      expect(result).to eq(literal_string)
+    end
+
+    it "lifts literal-string % Constant<Integer> to literal-string" do
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :%, args: [int_const])
+      expect(result).to eq(literal_string)
+    end
+
+    it "lifts literal-string % Tuple[literal, Constant<Integer>] to literal-string" do
+      tuple = Rigor::Type::Combinator.tuple_of(literal_string, int_const)
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :%, args: [tuple])
+      expect(result).to eq(literal_string)
+    end
+
+    it "declines when receiver is plain Nominal[String]" do
+      result = described_class.try_dispatch(receiver: nominal_string, method_name: :%, args: [literal_string])
+      expect(result).to be_nil
+    end
+
+    it "declines when an arg-tuple element is not literal-bearing" do
+      tuple = Rigor::Type::Combinator.tuple_of(literal_string, nominal_string)
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :%, args: [tuple])
+      expect(result).to be_nil
+    end
+
+    it "declines when the value arg is plain Nominal[Integer]" do
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :%, args: [nominal_integer])
+      expect(result).to be_nil
+    end
+  end
+
   describe "unrecognised method names" do
     it "declines for methods outside the recognised set" do
       result = described_class.try_dispatch(receiver: literal_string, method_name: :upcase, args: [literal_string])

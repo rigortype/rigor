@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `literal-string` propagation through `Kernel#format` / `Kernel#sprintf` / `String#%`
+
+- **`MethodDispatcher::LiteralStringFolding` lifts `format(template, *values)` / `sprintf(template, *values)` to `literal-string`** when the template is `Type::Combinator.literal_string_compatible?` and every value argument is either literal-bearing or a `Type::Constant` of any value (Constants are always provably literal). Closes the v0.0.6 stretch surface for the literal-string path; the existing `ConstantFolding` tier still handles all-Constant cases for the precise `Constant<String>` fold.
+- **`String#%` lift on literal-bearing receivers** when the value argument is either literal-bearing/Constant directly, or a `Tuple[…]` whose every element is literal-bearing/Constant. Hash-form `%` (`"%{name}" % {…}`) declines for now and widens to `Nominal[String]`. Plain `Nominal[String]` receiver paths decline so the call site widens normally.
+
 ### Added — `literal-string` propagation through `Array#join`
 
 - **`MethodDispatcher::LiteralStringFolding` lifts `Tuple[…].join(separator)` to `literal-string`** when every element of the Tuple plus the optional separator argument is `Type::Combinator.literal_string_compatible?`. Empty `Tuple[]` lifts trivially (`[].join` is the empty string at runtime, which is literal-bearing). Other receiver / argument shapes (plain `Nominal[Array]`, non-literal element, non-literal separator) decline so the call site widens to the RBS-declared `Nominal[String]` as before. Self-contained dispatcher tier addition; no FlowContribution / merger dependency.

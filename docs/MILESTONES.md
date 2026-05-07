@@ -161,17 +161,20 @@ Theme: **deepen the literal-string narrowing surface, ship the cross-plugin API,
 
 1. ✅ **Regex pattern → refinement-name recogniser** — landed unreleased. `Rigor::Builtins::RegexRefinement` (a curated table of canonical sub-patterns: `\d+`, `\d{N}`, `\d{N,M}`, `\h+`, `[0-9a-fA-F]+`, `[0-9a-f]+`, `[0-9A-F]+`, `[0-7]+`, `[a-z]+`, `[A-Z]+`, `[[:digit:]]+`, all admitting `+` / `{n}` / `{n,m}` quantifiers with `n >= 1`) is consulted from `Inference::Narrowing.analyse_match_write` so the truthy branch of `if /(?<year>\d+)/ =~ str` narrows `year` to `decimal-int-string` instead of plain `String`. Bodies that admit zero-length matches (`*`, `?`, `{0,N}`) or sit outside the audited table fall back to plain `String`. Whole-regex anchored forms (`/\A\d+\z/.match?(str)` narrowing `str` itself) are deferred — the v0.1.1 hook is named-capture only, since anchored-whole-regex narrowing requires a separate consumer site (probably `String#match?` predicate narrowing) that is not yet wired.
 
-2. **`numeric-string` (and friends) propagation through narrowing predicates.** Once a regex-derived refinement is in scope, `Integer(s)` / `Float(s)` / `s.to_i` / etc. on a `numeric-string` should fold to a more precise return type than the RBS `Integer` / `Float` baseline (when the conversion is total over the refinement's domain). Slice (1) is the producer; this slice is the consumer.
+2. ✅ **`numeric-string` / `decimal-int-string` propagation through Integer-conversion predicates** — landed unreleased. Two consumer sites tightened:
+   - **2a — `String#to_i` / `#to_int`.** `MethodDispatcher::ShapeDispatch.dispatch_refined` recognises `decimal-int-string` (`/\A\d+\z/`) and `numeric-string` (Rigor's numeric-string predicate) receivers and projects `to_i` / `to_int` (no args) to `non-negative-int`. Both refinements describe digit-only ASCII strings, so the parse is total over the carrier domain.
+   - **2b — `Kernel#Integer`.** `MethodDispatcher::KernelDispatch.try_integer_from_refinement` mirrors the same rule for the `Kernel#Integer(s)` (single-arg) form.
+   - End-to-end, `if /(?<year>\d+)/ =~ str; year.to_i; end` and `… Integer(year); end` both fold to `non-negative-int`. `Float(s)` / `s.to_f` are deferred — Rigor has no FloatRange carrier to express tighter Float precision than the RBS baseline.
 
-3. **`self`-narrowing in `predicate-if-*` directives.** Carry-over from v0.1.0's deferred list. Independent of the regex work; can land in parallel with (1).
+3. **`self`-narrowing in `predicate-if-*` directives.** Carry-over from v0.1.0's deferred list. Needs investigation of how `predicate-if-true: x is T` currently handles `self` as a target. Independent of the regex work.
 
-4. **Additional `String` predicate narrowing.** `String#start_with?` / `#end_with?` / `#include?` against a literal `String` needle narrows the receiver to a "starts/ends/contains" refinement when the body branch is taken. Same dispatch site as `analyse_call`; one additional table-row per predicate.
+4. **Additional `String` predicate narrowing.** `String#start_with?` / `#end_with?` / `#include?` against a literal `String` needle narrows the receiver to a "starts/ends/contains" refinement when the body branch is taken. **Needs a new refinement carrier or flow-fact form** — Rigor has no "starts-with-X" carrier today. Design pending.
 
-5. **`literal-string` propagation through additional methods.** Round out the `MethodDispatcher::LiteralStringFolding` tier:
-   - `Integer#to_s(base)` (with Constant base) → `decimal-int-string` / `hex-int-string` / `octal-int-string`
-   - `Numeric#to_s` (no args) → `numeric-string`
-   - `String#center` / `#ljust` / `#rjust` (with literal padding) → `literal-string` when receiver is also `literal-string`
-   - `String#strip` / `#chomp` / `#scrub` (idempotent on already-literal) → preserve `literal-string` carrier
+5. ✅ **`literal-string` propagation through additional methods** — three sub-slices landed unreleased.
+   - **5a — `String#strip` / `#lstrip` / `#rstrip` / `#chomp` (no-arg) / `#chop` / `#scrub` (no-arg).** `LITERAL_PRESERVING_METHODS` in `LiteralStringFolding`. Each strips a known character subset from the ends (or replaces invalid bytes), so a literal-bearing receiver stays literal-bearing. `non-empty-literal-string` collapses to plain `literal-string` because `"   ".strip == ""`.
+   - **5b — `Integer#to_s(base)` on non-negative `IntegerRange`.** `MethodDispatcher::ShapeDispatch.dispatch_integer_range` recognises an `IntegerRange` receiver with `lower >= 0` and lifts `to_s` (no args, default base 10) → `decimal-int-string`, `to_s(8)` → `octal-int-string`, `to_s(16)` → `hex-int-string`. Bases without a digit-only refinement (2, 36, …) and signed ranges (whose `to_s` could carry a leading `-`) decline.
+   - **5c — `String#center` / `#ljust` / `#rjust`.** `LiteralStringFolding.fold_width_pad`. Width arg MUST be Integer-typed; optional padding arg MUST be literal-bearing (the default-padding form passes through). The result is `literal-string`.
+   - **`Numeric#to_s` (no args)** is not implemented; the bullet doesn't fit cleanly because `Float#to_s` produces a `.`-bearing string that no Rigor refinement currently captures, and `Integer#to_s` on signed ranges leaks a `-` sign. The non-negative-Integer case is covered by 5b.
 
 ### Track 2 — Cross-plugin API + return-type contributions (parallel)
 

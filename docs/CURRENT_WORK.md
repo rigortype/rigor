@@ -8,10 +8,12 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.1.1 in flight.** Four parallel tracks scoped. Landed unreleased on the work branch:
 - Track 1 slice 1 — regex pattern → refinement-name recogniser
+- Track 1 slice 2 — `String#to_i` / `#to_int` (2a) and `Kernel#Integer(s)` (2b) on `decimal-int-string` / `numeric-string` → `non-negative-int`
+- Track 1 slice 5 — `literal-string` preservation through `#strip`/`#lstrip`/`#rstrip`/`#chomp`/`#chop`/`#scrub` (5a), `Integer#to_s` precision on non-negative `IntegerRange` (5b), `#center`/`#ljust`/`#rjust` literal-bearing lift (5c)
 - Track 3 slice 8 (helpers, prior commit `ce64bb6`) and slice 10 — examples re-included in RuboCop with documented relaxations
 - Track 4 fully drained: item 11 (three `lib/` sig drifts closed), item 12 (`node_locator_spec.rb:82` stale; constant-folding already removes the diagnostic), item 13 (prelude `composed` bodies reclassified `unknown` → `dispatch`).
 
-Working state: 2090 RSpec examples / 0 failures, RuboCop 262 files / 0 offenses, `bundle exec exe/rigor check lib` reports `No diagnostics`. Remaining: Track 1 slices 2 / 3 / 4 / 5 (`numeric-string` propagation through `Integer(s)`, `self`-narrowing in `predicate-if-*`, `String#start_with?` / `#end_with?` / `#include?` predicate narrowing, additional `literal-string` propagation methods); Track 2 (cross-plugin API per [ADR-9](adr/9-cross-plugin-api.md) + return-type contributions); Track 3 slice 9 (demo cache directory handling — needs the `(a)` / `(b)` design call). Full slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned".
+Working state: 2140 RSpec examples / 0 failures, RuboCop 262 files / 0 offenses, `bundle exec exe/rigor check lib` reports `No diagnostics`. Remaining v0.1.1: Track 1 slice 3 (`self`-narrowing in `predicate-if-*` — needs design investigation), slice 4 (`String#start_with?` / `#end_with?` / `#include?` — needs a new "starts-with" refinement carrier, design pending); Track 2 (cross-plugin API per [ADR-9](adr/9-cross-plugin-api.md) + return-type contributions); Track 3 slice 9 (demo cache directory handling — needs the `(a)` / `(b)` design call). Full slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned".
 
 ## Where the Work Resumes
 
@@ -23,10 +25,11 @@ The Rails plugin family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-act
 
 Read [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned" for the full slice list. Recommended entry order:
 
-- **Track 1 slice 2** (`numeric-string` propagation through conversion predicates) is the natural follow-on to slice 1: now that `if /(?<year>\d+)/ =~ str` binds `year` to `decimal-int-string`, `Integer(year)` should fold to a tighter return type than the RBS `Integer` baseline. Touches `MethodDispatcher::KernelDispatch` (`Integer(s)` / `Float(s)`) and `Inference::Narrowing` for `s.to_i` / `s.to_f`.
-- **Track 1 slice 4** (`String#start_with?` / `#end_with?` / `#include?` against literal needles) is independent and can land in parallel with slice 2.
+- **Track 1 slice 4** (`String#start_with?` / `#end_with?` / `#include?` against literal needles) needs a new refinement carrier (or a flow-fact form) to express "starts with X". Design pending.
+- **Track 1 slice 3** (`self`-narrowing in `predicate-if-*` directives) needs investigation of how the existing `predicate-if-true: x is T` plumbing handles `self` as the target.
 - **Track 2 ADR-9 slice 1** (`Plugin::FactStore` value object) is the smallest unblocking step for Tier 2 Rails plugins; six independently shippable slices in the ADR.
-- **Track 4 maintenance** is fully drained: items 11 (sig drifts), 12 (`node_locator_spec.rb:82` — closed as stale; constant-folding already removes the diagnostic), and 13 (`Integer#ceildiv` `unknown` → `dispatch`) are all closed.
+- **Track 3 slice 9** (demo cache directory handling) is queued behind a `(a)` / `(b)` design call.
+- **Track 4 maintenance** is fully drained.
 
 ## Open Engineering Items
 

@@ -189,7 +189,7 @@ Theme: **deepen the literal-string narrowing surface, ship the cross-plugin API,
 
 ### Track 4 — Maintenance (any v0.1.x release)
 
-11. **Three `lib/` sig drifts.** `Trinary#negate`, `IntegerRange#lower`, `IntegerRange#upper` — surface every `make verify` run as `def.return-type-mismatch` warnings. Either tighten the runtime to match the sigs or relax the sigs to match the runtime. Categories A-1 / A-2 in [`docs/notes/20260503-steep-cross-check-triage.md`](notes/20260503-steep-cross-check-triage.md).
+11. ✅ **Three `lib/` sig drifts** — landed unreleased. `Trinary#negate` collapsed the `:maybe` arm into `else` so the case is exhaustive without changing semantics (the constructor invariant `value ∈ [:yes, :no, :maybe]` already guaranteed the third path). `IntegerRange#lower` / `IntegerRange#upper` rewrote the `is_a?(Symbol) ? ∞ : m` ternary as an `is_a?(Integer)` early return, so the analyzer's narrowing path produces `Integer | Float` directly without leaking the Symbol branch. `bundle exec exe/rigor check lib` now reports `No diagnostics`. Categories A-1 / A-2 in [`docs/notes/20260503-steep-cross-check-triage.md`](notes/20260503-steep-cross-check-triage.md) closed.
 
 12. **`spec/rigor/source/node_locator_spec.rb:82` — `String#index + 1` unguarded.** `possible-nil-receiver` flags it correctly; the spec uses a load-bearing nil-or-throw idiom. Either `# rigor:disable call.possible-nil-receiver` or rewrite to guard explicitly.
 

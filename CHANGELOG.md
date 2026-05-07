@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — three `lib/` sig drifts closed (v0.1.1 Track 4 item 11)
+
+- **`Trinary#negate`** collapsed the `:maybe` arm into the `case`'s `else`, so the case is exhaustive without changing semantics. The constructor invariant (`value ∈ [:yes, :no, :maybe]`) already guaranteed the third path; the previous form returned `nil` on the unreachable fallthrough, which Rigor's type analysis (correctly) flagged as a `Trinary | nil` return against the declared `Trinary`.
+- **`Type::IntegerRange#lower` / `#upper`** rewrote the `m.is_a?(Symbol) ? ±Float::INFINITY : m` ternary as an `is_a?(Integer)` early return. The two methods now read `return m if m.is_a?(Integer); ±Float::INFINITY`, which lines up with Rigor's narrowing path so the analyzer infers `Integer | Float` directly without leaking the Symbol arm. Runtime behaviour is unchanged — `min` / `max` were always one of `Integer` / `:neg_infinity` / `:pos_infinity` and the new form handles each case identically.
+- **`bundle exec exe/rigor check lib`** now reports `No diagnostics`. Categories A-1 / A-2 in [`docs/notes/20260503-steep-cross-check-triage.md`](docs/notes/20260503-steep-cross-check-triage.md) closed.
+
 ### Added — regex pattern -> refinement-name recogniser for named captures (v0.1.1 Track 1 slice 1)
 
 - **New `Rigor::Builtins::RegexRefinement` module** at [`lib/rigor/builtins/regex_refinement.rb`](lib/rigor/builtins/regex_refinement.rb). Pure recogniser that maps a curated table of canonical regex sub-patterns (`\d+`, `\d{N}`, `\d{N,M}`, `\h+`, `[0-9a-fA-F]+`, `[0-9a-f]+`, `[0-9A-F]+`, `\h{N}`, `[0-7]+` and bounded forms, `[a-z]+`, `[A-Z]+`, `[[:digit:]]+`, all with `+` or `{n}` / `{n,m}` quantifiers where `n >= 1`) onto the imported refinement carriers Rigor already ships (`decimal-int-string`, `hex-int-string`, `octal-int-string`, `lowercase-string`, `uppercase-string`, `numeric-string`). Bodies that admit the empty string (`*`, `?`, `{0,N}`) or sit outside the audited table return `nil` so callers fall back to the v0.1.0 baseline (plain `String`). Spec at [`spec/rigor/builtins/regex_refinement_spec.rb`](spec/rigor/builtins/regex_refinement_spec.rb).

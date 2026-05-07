@@ -66,12 +66,16 @@ module Rigor
       # `:neg_infinity` directly with an `Integer`.
       def lower
         m = min
-        m.is_a?(Symbol) ? -Float::INFINITY : m
+        return m if m.is_a?(Integer)
+
+        -Float::INFINITY
       end
 
       def upper
         m = max
-        m.is_a?(Symbol) ? Float::INFINITY : m
+        return m if m.is_a?(Integer)
+
+        Float::INFINITY
       end
 
       ALIAS_NAMES = {

@@ -58,7 +58,7 @@ module Rigor
       case value
       when :yes then self.class.no
       when :no then self.class.yes
-      when :maybe then self.class.maybe
+      else self.class.maybe
       end
     end
 

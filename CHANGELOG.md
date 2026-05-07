@@ -12,17 +12,6 @@ cycles live in dedicated archives:
 
 - [`docs/CHANGELOG-0.0.x.md`](docs/CHANGELOG-0.0.x.md) — `0.0.1` through `0.0.9`.
 
-### Archival rule
-
-At the **first release after a leading-digit bump** — e.g. `0.1.1` is the
-first release after the `0.0.x` → `0.1.x` bump landed at `0.1.0` — the
-entire previous-digit range moves out of this file into a new
-`docs/CHANGELOG-<old-prefix>.md` archive. The trigger is the first `a.b.c`
-release where `(a, b)` matches the most recent release's `(a, b)` but
-differs from the previous archive's prefix. The release-prep SKILL
-([`.codex/skills/rigor-release-prep/SKILL.md`](.codex/skills/rigor-release-prep/SKILL.md))
-codifies the move as a checklist step so the archive doesn't drift.
-
 ## [Unreleased]
 
 ### Added

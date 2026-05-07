@@ -220,6 +220,43 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
     end
   end
 
+  describe "literal-string preservation through #center / #ljust / #rjust (v0.1.1 Track 1 slice 5c)" do
+    %i[center ljust rjust].each do |sel|
+      it "lifts ##{sel}(width) on literal-string to literal-string (default padding)" do
+        result = described_class.try_dispatch(receiver: literal_string, method_name: sel, args: [int_const])
+        expect(result).to eq(literal_string)
+      end
+
+      it "lifts ##{sel}(width, literal-string) to literal-string when both are literal" do
+        result = described_class.try_dispatch(
+          receiver: literal_string, method_name: sel, args: [int_const, literal_string]
+        )
+        expect(result).to eq(literal_string)
+      end
+
+      it "declines for ##{sel} when the padding argument is not literal-bearing" do
+        result = described_class.try_dispatch(
+          receiver: literal_string, method_name: sel, args: [int_const, nominal_string]
+        )
+        expect(result).to be_nil
+      end
+
+      it "declines for ##{sel} when the width argument is not Integer-typed" do
+        result = described_class.try_dispatch(
+          receiver: literal_string, method_name: sel, args: [nominal_string]
+        )
+        expect(result).to be_nil
+      end
+
+      it "declines for ##{sel} when the receiver is plain Nominal[String]" do
+        result = described_class.try_dispatch(
+          receiver: nominal_string, method_name: sel, args: [int_const]
+        )
+        expect(result).to be_nil
+      end
+    end
+  end
+
   describe "literal-string preservation through #strip / #chomp / #scrub family (v0.1.1 Track 1 slice 5a)" do
     %i[strip lstrip rstrip chomp chop scrub].each do |sel|
       it "preserves literal-string through ##{sel} (no args)" do

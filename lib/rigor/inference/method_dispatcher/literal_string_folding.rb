@@ -65,7 +65,14 @@ module Rigor
         # == ""`); the carrier collapses from `non-empty-literal-string`
         # down to plain `literal-string`.
         LITERAL_PRESERVING_METHODS = %i[strip lstrip rstrip chomp chop scrub].freeze
-        private_constant :CONCAT_METHODS, :FORMAT_METHODS, :LITERAL_PRESERVING_METHODS
+        # v0.1.1 Track 1 slice 5c — width-padding methods. `center`
+        # / `ljust` / `rjust` take a `width` Integer plus an
+        # optional literal padding `String`. When the receiver
+        # and the (default or supplied) padding are both
+        # literal-bearing, the result is literal-bearing too.
+        WIDTH_PADDING_METHODS = %i[center ljust rjust].freeze
+        private_constant :CONCAT_METHODS, :FORMAT_METHODS,
+                         :LITERAL_PRESERVING_METHODS, :WIDTH_PADDING_METHODS
 
         def try_dispatch(receiver:, method_name:, args:, **) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
           return fold_array_join(receiver, args) if method_name == :join
@@ -77,6 +84,7 @@ module Rigor
           if args.empty?
             return LITERAL_PRESERVING_METHODS.include?(method_name) ? Type::Combinator.literal_string : nil
           end
+          return fold_width_pad(args) if WIDTH_PADDING_METHODS.include?(method_name)
           return nil unless args.size == 1
 
           if CONCAT_METHODS.include?(method_name)
@@ -84,6 +92,23 @@ module Rigor
           elsif method_name == :*
             fold_repeat(args.first)
           end
+        end
+
+        # `String#center` / `#ljust` / `#rjust` — first argument is
+        # the target width (Integer-typed), optional second
+        # argument is the padding string (must be literal-bearing
+        # for the result to stay literal). The default padding
+        # (a space) is always literal so the no-second-arg form
+        # passes through. Width is allowed to be any Integer
+        # because Ruby's runtime accepts negative widths and
+        # widths smaller than the receiver's length without
+        # raising.
+        def fold_width_pad(args)
+          return nil unless [1, 2].include?(args.size)
+          return nil unless integer_typed?(args[0])
+          return nil if args.size == 2 && !Type::Combinator.literal_string_compatible?(args[1])
+
+          Type::Combinator.literal_string
         end
 
         def fold_concat(arg_type)
@@ -181,7 +206,7 @@ module Rigor
         end
 
         private_class_method :fold_concat, :fold_repeat, :fold_array_join,
-                             :fold_format, :fold_string_percent,
+                             :fold_format, :fold_string_percent, :fold_width_pad,
                              :literal_or_constant?, :integer_typed?
       end
     end

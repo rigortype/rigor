@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `literal-string` preservation through `#center` / `#ljust` / `#rjust` (v0.1.1 Track 1 slice 5c)
+
+- **`MethodDispatcher::LiteralStringFolding.fold_width_pad`** lifts `#center` / `#ljust` / `#rjust` calls on a literal-bearing receiver to `literal-string`. The first argument (the target width) MUST be Integer-typed (`Type::Constant<Integer>`, `Type::Nominal["Integer"]`, or `Type::IntegerRange`). The optional second argument (padding) MUST be literal-bearing per `Type::Combinator.literal_string_compatible?`. The default padding is a space — always literal — so the no-second-arg form passes through directly. Width is allowed to be any Integer because Ruby accepts negative widths and widths smaller than the receiver's length without raising.
+- **Carrier collapse.** `non-empty-literal-string` collapses to plain `literal-string` for the same reason it does in slice 5a — the result is structurally a fresh string of given width, so the receiver's non-empty refinement isn't carried.
+
 ### Added — `Integer#to_s` precision on non-negative `IntegerRange` (v0.1.1 Track 1 slice 5b)
 
 - **`MethodDispatcher::ShapeDispatch`** gains an `IntegerRange` receiver handler. When the range's lower bound is `>= 0`, every member is a non-negative integer and `to_s(base)` returns a digit-string with no leading sign, so the result lifts to the matching imported refinement: base 10 → `decimal-int-string`, base 8 → `octal-int-string`, base 16 → `hex-int-string`. No-arg `to_s` defaults to base 10. Bases without a digit-only refinement (2, 36, …) and signed ranges (whose `to_s` can carry a leading `-`) keep the v0.1.0 baseline.

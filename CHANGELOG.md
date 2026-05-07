@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `Plugin::Base#prepare(services)` hook + Runner invocation (v0.1.1 Track 2 / ADR-9 slice 3)
+
+- **New `Plugin::Base#prepare(services)`** default-no-op hook. Producer plugins override to compute and publish facts other plugins consume:
+  ```ruby
+  def prepare(services)
+    services.fact_store.publish(plugin_id: manifest.id, name: :model_index, value: model_index)
+  end
+  ```
+- **`Analysis::Runner` calls `#prepare`** on every loaded plugin once per `run`, after `#init` and before per-file iteration. Plugins are visited in registration order; ADR-9 slice 5 (queued) introduces topological ordering by `manifest(consumes:)` so producers always run before consumers, but for now `Configuration#plugins` order MUST be producer-first if cross-plugin dependencies exist.
+- **Failure isolation.** A `#prepare` raise becomes a `:plugin_loader runtime-error` diagnostic mirroring the `#diagnostics_for_file` raise envelope. The plugin's facts are considered un-published; downstream consumers see `nil` from `fact_store.read` and degrade gracefully.
+- **Drift snapshot** updated: `Rigor::Plugin::Base` now exposes `prepare(req:services)` alongside `init(req:services)`.
+
 ### Added — `Plugin::Services#fact_store` accessor (v0.1.1 Track 2 / ADR-9 slice 2)
 
 - **`Rigor::Plugin::Services`** gains a `fact_store` attribute (and a matching keyword arg in the constructor). When no `fact_store:` is supplied, a fresh `Plugin::FactStore` instance is constructed per Services. The runner (slice 3) will thread its own per-run instance through. Plugins reach for `services.fact_store.read(plugin_id:, name:)` to consume facts and `services.fact_store.publish(...)` to produce them.

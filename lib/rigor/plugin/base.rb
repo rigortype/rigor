@@ -111,6 +111,32 @@ module Rigor
         nil
       end
 
+      # ADR-9 slice 3 — per-run preparation hook. The runner
+      # invokes `#prepare(services)` on every loaded plugin once
+      # per `Analysis::Runner.run`, after `#init` has run on every
+      # plugin and before any `#diagnostics_for_file` call.
+      # Plugins use this hook to compute and publish facts other
+      # plugins consume:
+      #
+      #   def prepare(services)
+      #     services.fact_store.publish(
+      #       plugin_id: manifest.id, name: :model_index, value: model_index
+      #     )
+      #   end
+      #
+      # Default no-op so plugins without facts to publish leave
+      # `#prepare` unimplemented. Failures isolate as
+      # `:plugin_loader runtime-error` diagnostics; a plugin that
+      # raises in `#prepare` has its facts considered un-published
+      # and downstream consumers see `nil` from `fact_store.read`.
+      #
+      # Slice 3 calls plugins in registration order. ADR-9 slice 5
+      # introduces topological ordering by `consumes:` so producers
+      # always run before consumers.
+      def prepare(services) # rubocop:disable Lint/UnusedMethodArgument
+        nil
+      end
+
       # ADR-7 § "Slice 5-A" — per-file diagnostic emission hook.
       # Override in plugin subclasses to return an array of
       # `Rigor::Analysis::Diagnostic` rows for the analysed file.

@@ -64,6 +64,7 @@ module Rigor
         expansion = expand_paths(paths)
 
         diagnostics = plugin_load_diagnostics
+        diagnostics += plugin_prepare_diagnostics
         diagnostics += expansion.fetch(:errors)
         diagnostics += expansion.fetch(:files).flat_map { |path| analyze_file(path, environment) }
 
@@ -181,6 +182,47 @@ module Rigor
             source_family: :plugin_loader
           )
         end
+      end
+
+      # ADR-9 slice 3 — invokes every loaded plugin's `#prepare`
+      # hook once per run, after the loader's `#init` pass and
+      # before per-file iteration. Plugins publish facts here
+      # for cross-plugin consumption via the shared
+      # `services.fact_store`. Failures isolate as
+      # `:plugin_loader runtime-error` diagnostics, mirroring the
+      # `#diagnostics_for_file` raise envelope in
+      # `plugin_runtime_error_diagnostic`.
+      #
+      # Slice 3 visits plugins in registration order. Slice 5
+      # introduces topological ordering by `manifest(consumes:)`
+      # so producers always run before consumers; until then,
+      # `Configuration#plugins` order MUST be producer-first if
+      # cross-plugin dependencies exist.
+      def plugin_prepare_diagnostics
+        return [] if @plugin_registry.empty?
+
+        @plugin_registry.plugins.flat_map { |plugin| invoke_plugin_prepare(plugin) }
+      end
+
+      def invoke_plugin_prepare(plugin)
+        plugin.prepare(plugin.services)
+        []
+      rescue StandardError => e
+        [plugin_prepare_error_diagnostic(plugin, e)]
+      end
+
+      def plugin_prepare_error_diagnostic(plugin, error)
+        plugin_id = safe_plugin_id(plugin)
+        Diagnostic.new(
+          path: ".rigor.yml",
+          line: 1,
+          column: 1,
+          message: "plugin #{plugin_id.inspect} raised during prepare: " \
+                   "#{error.class}: #{error.message}",
+          severity: :error,
+          rule: "runtime-error",
+          source_family: :plugin_loader
+        )
       end
 
       # ADR-7 § "Slice 5-A/5-B" — invokes every loaded plugin's

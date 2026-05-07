@@ -117,6 +117,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     init(req:services)
     io_boundary()
     manifest()
+    prepare(req:services)
     services()
   ].freeze
 

@@ -707,4 +707,73 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
   end
+
+  describe "Plugin#prepare invocation (v0.1.1 / ADR-9 slice 3)" do
+    before { Rigor::Plugin.unregister! }
+    after { Rigor::Plugin.unregister! }
+
+    def run_with_plugin(plugin_class)
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "demo.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "demo.rb")],
+            "plugins" => ["rigor-prepare-test"]
+          )
+        )
+        requirer = lambda do |_name|
+          Rigor::Plugin.register(plugin_class)
+          true
+        end
+        described_class.new(
+          configuration: configuration, cache_store: nil, plugin_requirer: requirer
+        ).run
+      end
+    end
+
+    let(:publishing_plugin) do
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "prepare-test", version: "0.1.0")
+
+        def prepare(services)
+          services.fact_store.publish(plugin_id: manifest.id, name: :greeting, value: "hello")
+        end
+
+        def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+          greeting = services.fact_store.read(plugin_id: manifest.id, name: :greeting)
+          [Rigor::Analysis::Diagnostic.new(
+            path: path, line: 1, column: 1,
+            message: "saw fact: #{greeting.inspect}", severity: :info, rule: "saw-fact"
+          )]
+        end
+      end
+      stub_const("FakePrepareTestPlugin", klass)
+      klass
+    end
+
+    it "calls #prepare on every loaded plugin so facts are visible per-file" do
+      result = run_with_plugin(publishing_plugin)
+      diag = result.diagnostics.find { |d| d.rule == "saw-fact" }
+      expect(diag).not_to be_nil
+      expect(diag.message).to include('"hello"')
+    end
+
+    it "isolates a #prepare raise as a :plugin_loader runtime-error diagnostic" do
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "prepare-bomb", version: "0.1.0")
+
+        def prepare(_services)
+          raise "kaboom"
+        end
+      end
+      stub_const("FakePrepareBombPlugin", klass)
+
+      result = run_with_plugin(klass)
+      diag = result.diagnostics.find do |d|
+        d.source_family == :plugin_loader && d.rule == "runtime-error" && d.message.include?("prepare")
+      end
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("kaboom")
+    end
+  end
 end

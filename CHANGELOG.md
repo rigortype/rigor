@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `Rigor::Plugin::FactStore` value object (v0.1.1 Track 2 / ADR-9 slice 1)
+
+- **New `Rigor::Plugin::FactStore`** at [`lib/rigor/plugin/fact_store.rb`](lib/rigor/plugin/fact_store.rb). Per-run cross-plugin fact storage per [ADR-9](docs/adr/9-cross-plugin-api.md) — a producer plugin (e.g. `rigor-activerecord`) publishes a typed `(plugin_id, name) -> value` triple in its `#prepare` hook (slice 3), and a consumer plugin (e.g. `rigor-actionpack` Phase 1) reads it via `services.fact_store.read(plugin_id:, name:)` in `#diagnostics_for_file`. The store is constructed fresh at the start of every `Analysis::Runner.run` and discarded at the end — caching the underlying expensive computation is the producer's job (`Plugin::Base.producer`); the FactStore just publishes the *reference* to that already-cached result.
+- **API surface (frozen by `spec/rigor/public_api_drift_spec.rb`).** `#publish(plugin_id:, name:, value:)`, `#read(plugin_id:, name:)`, `#published?(plugin_id:, name:)`, `#each_fact(&)`, plus the `Fact = Data.define(:plugin_id, :name, :value)` shape and `Conflict` exception class. `plugin_id` is canonicalised to String and `name` to Symbol on every operation. `Conflict` carries `plugin_id` / `name` / `existing` / `incoming` for diagnostic provenance. The store is thread-safe via an internal Mutex.
+- **Conflict semantics.** A duplicate `publish` with the same value (`==`) is a no-op; differing values raise `Conflict`. Since `plugin_id` namespaces the key, a real conflict only happens when a single plugin publishes twice with differing values — the conflict signals a plugin-author bug, never a load-time interaction between unrelated plugins.
+- **Slice 1 only.** This is the pure value object — no plugin loader changes yet. ADR-9 slices 2 (`Plugin::Services#fact_store` accessor), 3 (`Plugin::Base#prepare(services)` hook + Runner invocation), 4 (`manifest(produces:/consumes:)` declarations), and 5 (topological sort + missing-producer detection) follow in subsequent commits.
+
 ### Changed — strict per-demo cache isolation under `tmp/` (v0.1.1 Track 3 slice 9)
 
 - **Each `examples/rigor-*/demo/.rigor.yml` now sets `cache.path: tmp/.rigor/cache`** so demo runs write their cache under `tmp/` instead of `.rigor/cache/`. The `tmp/` location is anchored within each demo, which matters for the eventual `git subtree split` per the `rigor-plugin-author` SKILL — the cache discipline survives the split without depending on the parent repo's `.gitignore`.

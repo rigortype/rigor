@@ -167,6 +167,19 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     trusted_gems()
   ].freeze
 
+  PLUGIN_FACT_STORE_INSTANCE = %w[
+    each_fact(block:&)
+    publish(keyreq:plugin_id,keyreq:name,keyreq:value)
+    published?(keyreq:plugin_id,keyreq:name)
+    read(keyreq:plugin_id,keyreq:name)
+  ].freeze
+
+  PLUGIN_FACT_STORE_FACT_INSTANCE = %w[
+    name()
+    plugin_id()
+    value()
+  ].freeze
+
   PLUGIN_IO_BOUNDARY_INSTANCE = %w[
     cache_descriptor()
     open_url(req:url)
@@ -236,6 +249,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::Plugin::Registry
     Rigor::Plugin::TrustPolicy
     Rigor::Plugin::IoBoundary
+    Rigor::Plugin::FactStore
+    Rigor::Plugin::FactStore::Fact
     Rigor::FlowContribution
     Rigor::FlowContribution::Fact
     Rigor::FlowContribution::MergeResult
@@ -413,6 +428,22 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
     it "exposes the expected canonical-fact surface" do
       expect(instance_signatures(Rigor::FlowContribution::Fact)).to eq(
         PublicApiDriftSnapshots::FLOW_CONTRIBUTION_FACT_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::FactStore" do
+    it "exposes the expected publish / read / iterate surface" do
+      expect(instance_signatures(Rigor::Plugin::FactStore)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_FACT_STORE_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::FactStore::Fact" do
+    it "exposes the expected (plugin_id, name, value) data shape" do
+      expect(instance_signatures(Rigor::Plugin::FactStore::Fact)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_FACT_STORE_FACT_INSTANCE
       )
     end
   end

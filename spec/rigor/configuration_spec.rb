@@ -36,6 +36,31 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
+    it "accepts target_ruby in `<major>.<minor>` and `<major>.<minor>.<patch>` forms" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "target_ruby: \"3.4\"\n")
+        expect(described_class.load(path).target_ruby).to eq("3.4")
+
+        File.write(path, "target_ruby: \"3.4.1\"\n")
+        expect(described_class.load(path).target_ruby).to eq("3.4.1")
+
+        File.write(path, "target_ruby: latest\n")
+        expect(described_class.load(path).target_ruby).to eq("latest")
+      end
+    end
+
+    it "rejects target_ruby values that are not version-shaped or `latest`" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "target_ruby: stable\n")
+        expect { described_class.load(path) }.to raise_error(ArgumentError, /target_ruby/)
+
+        File.write(path, "target_ruby: \"3\"\n")
+        expect { described_class.load(path) }.to raise_error(ArgumentError, /target_ruby/)
+      end
+    end
+
     it "treats signature_paths: [] as 'load no project signatures'" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")

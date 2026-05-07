@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `target_ruby` setting is now actually consumed at parse time
+
+- **Phantom configuration setting closed.** `target_ruby` had an attribute reader, a `.rigor.yml` entry, a default of `"4.0"`, a CLI help mention, and a handbook example — but no runtime code consumed it. The setting was loaded into `Configuration#target_ruby` and then ignored. `Prism.parse_file` was called without `version:` everywhere.
+- **Wired through to Prism.** `Analysis::Runner#analyze_file`, `CLI::TypeOfCommand#execute`, and `CLI::TypeScanCommand#scan_one` now pass `version: @configuration.target_ruby` to `Prism.parse_file` / `Prism.parse`. Projects targeting an older Ruby get parse errors for syntax their target doesn't support; the existing `Prism.parse_file(path)` calls had been silently parsing under whatever Prism's default was.
+- **Format validation at Configuration load.** `target_ruby` MUST match `<major>.<minor>` (e.g. `"3.4"`), `<major>.<minor>.<patch>` (`"3.4.0"`), or the literal `"latest"`. Other shapes raise `ArgumentError` at `Configuration.new` time.
+- **Fail-fast for Prism-rejected versions.** Format-passing strings that Prism doesn't accept (e.g. `"3.0"` — too old) used to crash the run on the first file. `Runner#run` now does a one-time smoke parse against `target_ruby`; if Prism raises `ArgumentError`, the run returns a single `:builtin configuration-error` diagnostic at `.rigor.yml:1:1` naming the offending version.
+
 ### Added — topological sort + missing-producer detection in `Plugin::Loader` (v0.1.1 Track 2 / ADR-9 slice 5)
 
 - **`Plugin::Loader.load` topologically sorts** loaded plugins by their `manifest(consumes:)` declarations so producer plugins run before consumers in the runner's `#prepare` pass. Tie-break preserves `Configuration#plugins` order, which keeps the v0.1.0 contract intact for plugins that don't opt into the cross-plugin API. The topo sort itself is skipped entirely when no loaded plugin declares a `consumes:` entry — same observable behaviour as before slice 5.

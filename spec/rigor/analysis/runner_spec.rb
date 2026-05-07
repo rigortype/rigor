@@ -39,6 +39,26 @@ RSpec.describe Rigor::Analysis::Runner do
     expect(result.diagnostics.first.message).not_to be_empty
   end
 
+  describe "target_ruby wiring (`.rigor.yml` -> Prism version:)" do
+    it "passes target_ruby through to Prism so the configured version drives the parse" do
+      # Prism's `version: "3.4"` accepts current Ruby syntax.
+      result = analyze("x = 1\n", config: { "target_ruby" => "3.4" })
+      expect(result.diagnostics.select { |d| d.message.include?("parse") }).to be_empty
+    end
+
+    it "surfaces a configuration-error diagnostic when target_ruby is not Prism-accepted" do
+      # `3.0` matches the format regex but Prism rejects it. The
+      # one-time smoke parse in `Runner#run` converts the
+      # `ArgumentError` into a single `:builtin configuration-error`
+      # diagnostic so the run fails fast rather than crashing.
+      result = analyze("x = 1\n", config: { "target_ruby" => "3.0" })
+      diag = result.diagnostics.find { |d| d.rule == "configuration-error" }
+      expect(diag).not_to be_nil
+      expect(diag.path).to eq(".rigor.yml")
+      expect(diag.message).to include('"3.0"')
+    end
+  end
+
   describe "cache_store surface (v0.0.9 group A slice 1)" do
     let(:configuration) { Rigor::Configuration.new("paths" => []) }
 

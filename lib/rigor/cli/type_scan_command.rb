@@ -93,7 +93,7 @@ module Rigor
         scope = Scope.empty(environment: project_environment(configuration))
         scanner = Inference::CoverageScanner.new(scope: scope)
         accumulator = ScanAccumulator.new
-        paths.each { |path| scan_one(path, scanner, accumulator) }
+        paths.each { |path| scan_one(path, scanner, accumulator, configuration) }
         accumulator.to_report(paths, options)
       end
 
@@ -107,9 +107,9 @@ module Rigor
         )
       end
 
-      def scan_one(path, scanner, accumulator)
+      def scan_one(path, scanner, accumulator, configuration)
         source = File.read(path)
-        parse_result = Prism.parse(source, filepath: path)
+        parse_result = Prism.parse(source, filepath: path, version: configuration.target_ruby)
         if parse_result.errors.any?
           accumulator.record_parse_error(path, parse_result.errors)
           return

@@ -54,6 +54,9 @@ module Rigor
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
 
+        target_ruby_error = validate_target_ruby
+        return Result.new(diagnostics: [target_ruby_error]) if target_ruby_error
+
         environment = Environment.for_project(
           libraries: @configuration.libraries,
           signature_paths: @configuration.signature_paths,
@@ -69,6 +72,25 @@ module Rigor
         diagnostics += expansion.fetch(:files).flat_map { |path| analyze_file(path, environment) }
 
         Result.new(diagnostics: apply_severity_profile(diagnostics))
+      end
+
+      # `target_ruby` flows through to Prism's `version:` option.
+      # Prism enforces the supported range and raises
+      # `ArgumentError` for versions it does not recognise. Run a
+      # one-time smoke parse here so a misconfigured target_ruby
+      # surfaces as a single project-level diagnostic instead of
+      # crashing the whole run on the first file.
+      def validate_target_ruby
+        Prism.parse("nil", version: @configuration.target_ruby)
+        nil
+      rescue ArgumentError => e
+        Diagnostic.new(
+          path: ".rigor.yml", line: 1, column: 1,
+          message: "target_ruby #{@configuration.target_ruby.inspect} is not accepted by Prism: #{e.message}",
+          severity: :error,
+          rule: "configuration-error",
+          source_family: :builtin
+        )
       end
 
       private
@@ -319,7 +341,7 @@ module Rigor
       end
 
       def analyze_file(path, environment) # rubocop:disable Metrics/MethodLength
-        parse_result = Prism.parse_file(path)
+        parse_result = Prism.parse_file(path, version: @configuration.target_ruby)
         return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
 
         scope = Scope.empty(environment: environment)

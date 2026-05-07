@@ -65,8 +65,9 @@ module Rigor
         file, line, column = target
         return 1 unless file_exists?(file)
 
+        configuration = Configuration.load(options.fetch(:config))
         source = File.read(file)
-        parse_result = Prism.parse(source, filepath: file)
+        parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
         return 1 if parse_errors?(parse_result, file)
 
         node = locate_node(source: source, root: parse_result.value, file: file, line: line, column: column)
@@ -74,7 +75,6 @@ module Rigor
         return 1 if node.nil?
 
         tracer = options[:trace] ? Inference::FallbackTracer.new : nil
-        configuration = Configuration.load(options.fetch(:config))
         base_scope = Scope.empty(environment: project_environment(file, configuration))
 
         # Build a per-node scope index so locals bound earlier in the

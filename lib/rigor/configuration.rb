@@ -45,7 +45,7 @@ module Rigor
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
 
-      @target_ruby = data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")).to_s
+      @target_ruby = coerce_target_ruby(data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")))
       @paths = Array(data.fetch("paths", DEFAULTS.fetch("paths"))).map(&:to_s)
       @plugins = Array(data.fetch("plugins", DEFAULTS.fetch("plugins"))).map do |entry|
         coerce_plugin_entry(entry)
@@ -105,6 +105,29 @@ module Rigor
         raise ArgumentError,
               "plugin configuration entry must be a String or Hash, got #{entry.inspect}"
       end
+    end
+
+    # `target_ruby` is passed to `Prism.parse_file(path, version:)` at
+    # the analyser's three parse sites (`Analysis::Runner`,
+    # `CLI::TypeOfCommand`, `CLI::TypeScanCommand`) so projects that
+    # target an older Ruby get parse errors for syntax their target
+    # doesn't support. Format validation here is loose — accepts
+    # any `<major>.<minor>` or `<major>.<minor>.<patch>` form, plus
+    # the literal `"latest"`. Prism itself enforces the supported
+    # set and raises `ArgumentError` for versions it does not
+    # recognise (e.g. `"1.0"`); the parse-time error message names
+    # the version, so the user can correct the setting.
+    TARGET_RUBY_FORMAT = /\A(?:\d+\.\d+(?:\.\d+)?|latest)\z/
+    private_constant :TARGET_RUBY_FORMAT
+
+    def coerce_target_ruby(value)
+      s = value.to_s
+      unless s.match?(TARGET_RUBY_FORMAT)
+        raise ArgumentError,
+              "target_ruby must be a version (e.g. \"3.4\", \"4.0\", \"3.4.0\") or \"latest\", got #{value.inspect}"
+      end
+
+      s.dup.freeze
     end
 
     # Slice 2 only accepts `:disabled` for the network policy. The

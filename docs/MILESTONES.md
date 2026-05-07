@@ -56,18 +56,6 @@ Major surfaces landed:
 - **`Kernel#Array` precision tier (`MethodDispatcher::KernelDispatch`).** Folds `Array(arg)` into a precise `Array[E]` whenever the argument's value-lattice shape lets us prove the element type. Distributes element-wise over unions and unifies.
 - **`Const = Data.define(*Symbol)` discovery.** `Inference::ScopeIndexer.record_declarations` registers `Const` (qualified by the surrounding path) as a discovered class so `Const.new(...)` resolves to `Nominal[<qualified>]` via `meta_new`. Override-aware initializer-signature dispatch (using the block's `def initialize(...)` as the canonical sig) remains open as a follow-up.
 
-Deferred from v0.0.5 (carried forward):
-
-- Predicate-complement narrowing for `Refined[base, predicate]` — needs either a new mixed-case carrier or per-predicate paired-complement registry entries.
-- Block-shaped fold dispatch — folding the block's *return* into a precise carrier on top of the existing `IteratorDispatch` block-parameter typing; IntegerRange operands on the 2-arg path are also still held back.
-- Further catalog imports — URI and Kernel fall outside the standard import skill's premise (Kernel methods scatter across 20+ C files with no single Init function; URI is a pure-Ruby stdlib gem with no C surface). Both need a hand-rolled or custom-scaffold approach. Pathname (already partial) and ObjectSpace remain in the candidate pool.
-- C-body classifier — wider transitive mutator scan that does not over-flag legitimate non-mutators (the `Array#to_a` regression that gated the conservative v0.0.5 fix).
-- `Data.define` override-aware initializer dispatch — block-body `def initialize(...)` as the canonical sig for `Const.new` (today the auto-generated kw shape wins).
-- `Trinary` return-type contract on type-carrier predicate methods — closing the strict-on-returns gap requires a new CheckRules rule family (`return-type-mismatch`), explicitly deferred by [`docs/CURRENT_WORK.md`](CURRENT_WORK.md) until the inference surface is sturdy enough to avoid false-positive churn.
-- Cross-checker runner integration — `make steep-check` stays out-of-band; the Steep residual (6 warnings, all in `fact_store.rb` and rooted in Steep-side limitations Rigor closes natively) is the steady-state floor.
-
-(Stretch surfaces carry forward into the v0.0.6 row below.)
-
 ## v0.0.6 — Released 2026-05-05
 
 The sixth preview. Theme: **fold block-taking Enumerable methods through the constant-folding tier** so iterator-shaped expressions over literal collections produce precise carriers instead of widening through RBS. See `CHANGELOG.md`'s `[0.0.6]` section for the full added / fixed list.
@@ -82,22 +70,6 @@ Major surfaces landed:
 - **Empty array literal carrier — `[]` → `Tuple[]`.** Pins the literal's known arity so `:flat_map` can concatenate cleanly across all-empty per-position results.
 - **Pathname catalog import** (102 instance methods, 2 singletons, 5 aliases) via `tool/scaffold_builtin_catalog.rb --init-fn InitVM_pathname`. Pathname is a thin wrapper that mostly delegates to File / Dir / FileTest, so the user-visible payoff is narrower than Numeric or String — the import buys receiver-class recognition, a defensive `:initialize_copy` blocklist entry, and `:leaf` folding for `<=>`.
 - **Extractor BeginNode-bodied-`def` classifier fix.** `PreludeParser#analyse_body` previously raised on the rescue-on-def idiom (`def foo; …; rescue; …; end`). The classifier now descends into the begin-block's `statements`. Surfaced importing Pathname; every catalog regenerates cleanly under `make extract-builtin-catalogs`.
-
-Deferred from v0.0.6 (carried forward):
-
-- Predicate-complement narrowing for `Refined[base, predicate]` — still needs either a new mixed-case carrier or per-predicate paired-complement registry entries.
-- C-body classifier wider transitive mutator scan that does not over-flag legitimate non-mutators.
-- `Data.define` override-aware initializer dispatch — block-body `def initialize(...)` as the canonical sig for `Const.new`.
-- `Trinary` return-type contract on type-carrier predicate methods — still deferred until the inference surface is sturdy enough to avoid false-positive churn.
-- Cross-checker runner integration — `make steep-check` stays out-of-band.
-- Further catalog imports — URI and Kernel still fall outside the standard import skill's premise. ObjectSpace is in the candidate pool but is a thin module (5 module functions defined under `Init_GC`); the user-visible payoff is small.
-- `:flat_map` over `Nominal[Array[T]]` per-position results — largely subsumed by the existing RBS substitution; not worth a dedicated slice.
-
-Stretch surfaces (carried forward unchanged):
-
-- Pathname / URI delegation rules so `Pathname#exist?` etc routes through `File.exist?` projections.
-- `String#%` format-string parsing for catalog-aware fold over `Constant<String>` template + `Constant<…>` values.
-- `numeric-string` recogniser that classifies `String#match?(/\A\d+\z/)` as a `Refined[String, :numeric]` narrowing.
 
 ## v0.0.7 — Released 2026-05-05
 
@@ -121,19 +93,6 @@ Pre-v0.1.0 substrate that landed in the v0.0.7 cycle:
 - **v0.1.0 readiness design doc** at [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md).
 - **Cache slice taxonomy design doc** at [`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md).
 
-Deferred from v0.0.7 (carried forward):
-
-- `literal-string` / `non-empty-literal-string` — needs flow tracking, not a value-domain refinement.
-- Predicate-complement narrowing for `Refined[base, predicate]` requires either a mixed-case carrier or a paired-complement registry (architectural decision).
-- C-body classifier wider transitive mutator scan.
-- `Data.define` override-aware initializer dispatch.
-- ObjectSpace catalog import — needs singleton-module dispatch, which the catalog tier does not yet provide.
-- URI catalog import — pure-Ruby stdlib gem with no C surface; outside the standard import skill's premise.
-- `numeric-string` regex-pattern recogniser.
-- `self`-narrowing in `predicate-if-*` — no `self`-narrowing surface in the engine yet.
-- `rigor:v1:conforms-to` directive — needs a real structural-conformance checker beyond the v0.0.7 envelope.
-- Caches and the plugin API — reserved for v0.1.0. The cache slice taxonomy design doc is the contract; the persistence layer is the next pre-v0.1.0 slice (and the first cache-related code).
-
 ## v0.0.8 — Released 2026-05-04
 
 Theme: **first cache-related code slice**. Landed the persistence layer the v0.0.7 cache slice taxonomy design doc ([`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md)) commits to, plus a Marshal-clean producer wired through it end-to-end. Backend per [ADR-6](adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, zero new gem dependencies.
@@ -145,18 +104,6 @@ Slices (in commit order):
 3. **First cached producer — `Rigor::Cache::RbsConstantTable`.** Caches a `Hash<String, Rigor::Type>` mapping every RBS-declared constant to its translated `Rigor::Type`. The slice plan originally named the RBS environment loader as the first producer; implementation discovered `RBS::Environment` is not Marshal-clean (transitive `RBS::Location` lacks `_dump_data`). [ADR-6 § 8](adr/6-cache-persistence-backend.md) documents the finding; the slice caches a post-translation artefact instead. Adds `RbsLoader#constant_names` so the producer can enumerate constants through the public surface.
 4. **`rigor check --cache-stats` and `--clear-cache`.** `--cache-stats` prints an on-disk inventory at end-of-run (per-producer entry counts, total bytes, schema version) sourced from `Store.disk_inventory`. `--clear-cache` wipes `.rigor/cache` before the run. Per-run hit/miss counters deferred until production code wires the cache.
 5. **Diagnostic source-family provenance.** `Rigor::Analysis::Diagnostic` gains `source_family:` (default `:builtin`) and `qualified_rule` (`"#{source_family}.#{rule}"` for non-default families). JSON output carries both `source_family` and the bare `rule` side-by-side. Prepares ADR-2's plugin-observability story without committing to the plugin API itself.
-
-Deferred from v0.0.8 (status as of the v0.0.9 cluster):
-
-- Eviction / LRU / size cap. v0.0.9 still ships unbounded; users run `--clear-cache` if needed.
-- Concurrent multi-process writes beyond the per-file `flock` model. Still deferred.
-- LSP / long-running-daemon cache mode. Still deferred.
-- Cross-machine cache sharing. Still deferred.
-- Plugin-side cache producers — gated on the plugin API itself, which lands in v0.1.0.
-- ~~Inference / catalog / scope-index caches beyond `RbsConstantTable`.~~ Three more producers landed in v0.0.9 (`RbsKnownClassNames`, `RbsClassAncestorTable`, `RbsClassTypeParamNames`) plus the full `RbsEnvironment` cache. Per-method reflection caches still pending.
-- ~~**Wiring the cache into `rigor check`.**~~ Landed in v0.0.9 group A.
-- ~~**Custom-serialiser plumbing on `Store` for `RBS::Environment` itself.**~~ Landed in v0.0.9 (C1 surface + C2 producer).
-- ~~`Rigor::FlowContribution` bundle struct~~ — Landed in v0.0.9 group B.
 
 ## v0.0.9 — Released 2026-05-05
 
@@ -180,17 +127,7 @@ Commits in chronological order:
 - 5600efc — **F follow-up**: `LiteralStringFolding` dispatcher tier between ConstantFolding and ShapeDispatch. `String#+` and `String#*` lift to `literal-string` when every operand is itself literal-bearing.
 - 8f7c32c — **C2**: `Rigor::Cache::RbsEnvironment` caches the full `RBS::Environment` via the C1 callable surface. Adds `lib/rigor/cache/rbs_environment_marshal_patch.rb` — a minimal `_dump` / `_load` patch on `RBS::Location` so the env round-trips through Marshal. Biggest cold-start win in the cluster.
 
-Deferred from v0.0.9 (carry forward to v0.1.0+):
-
-- **Per-method `Reflection` caches** (`instance_method_definition`, `singleton_method_definition`). Now feasible since the C2 patch makes every RBS-native value Marshal-clean.
-- **Wire `FlowContribution` bundles through internal narrowing.** Internal-only refactor; no user-visible behaviour change.
-- **`literal-string` through `<<` mutation.** Requires a mutation-effect surface the dispatcher does not currently expose.
-- **`decimal-int-string` / `octal-int-string` / `hex-int-string` paired complements.** Complement domains are too vague to warrant separate carriers in practice.
-- **Plugin-side cache producers.** Gated on the plugin API (v0.1.0).
-- **LSP / long-running-daemon cache mode.**
-- **LRU eviction / size cap.** Still unbounded; users run `--clear-cache` if needed.
-
-## v0.1.0 — All slices landed; release pending
+## v0.1.0 — Version-bumped on `master` (release pending)
 
 Theme: **first plugin contract**. ADR-2 § "Extension API" fixes the design surface; v0.1.0 ships the implementation. The pre-v0.1.0 substrate landed in v0.0.3 → v0.0.9 — type vocabulary, inference engine, persistent cache layer wired through `rigor check`, `Rigor::Reflection` facade, `Rigor::FlowContribution` bundle, public-API drift pins (`Scope` / `Environment` / `Type::Combinator` / `Reflection`), `Diagnostic#source_family`, RBS::Extended directive plumbing — leaving v0.1.0 as a finite assembly job rather than an open architectural exercise.
 
@@ -207,31 +144,14 @@ Slice plan — **all six landed (unreleased on `master`)**:
 
 V0.1.0 polish work that landed alongside the six slices:
 
-- **Six worked plugin examples** under [`examples/`](../examples/README.md) — `rigor-deprecations`, `rigor-lisp-eval`, `rigor-pattern`, `rigor-routes`, `rigor-statesman`, `rigor-units`. 67 integration examples across `spec/integration/examples/`.
+- **Seven worked plugin examples** under [`examples/`](../examples/README.md) — `rigor-deprecations`, `rigor-lisp-eval`, `rigor-pattern`, `rigor-routes`, `rigor-statesman`, `rigor-units`, plus `rigor-activerecord` (the most architecturally complete: DSL interpretation + multi-file `IoBoundary` + chained cache producers + two-pass discover-then-validate). 67 integration examples across `spec/integration/examples/`.
 - **Nine-chapter end-user handbook** under [`docs/handbook/`](handbook/README.md).
 - **Two precision improvements** — named-capture regex narrowing through `if /(?<x>...)/ =~ str`; `;`-prefixed block-local `Constant[nil]` shadow.
+- **Per-method Reflection caches** (carry-over from v0.0.9). `Rigor::Cache::RbsInstanceDefinitions` / `Rigor::Cache::RbsSingletonDefinitions` per-class producers landed; the v0.0.9 fail-soft `NameError` regression diagnosed and fixed (missing `require_relative "descriptor"` in two cache files).
 
-Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), the version bump (`Rigor::VERSION` → `0.1.0`, `CHANGELOG.md` `[Unreleased]` → `[0.1.0] - YYYY-MM-DD`, `Gemfile.lock` regenerated) waits for explicit user authorisation. Once the user authorises the cut, follow [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md).
+`Rigor::VERSION` was bumped to `"0.1.0"` and `CHANGELOG.md` reorganised into the `[0.1.0] - 2026-05-07` section in commit `6170832`. Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), `bundle exec rake release` (which tags `v0.1.0`, pushes to origin, and publishes to RubyGems) waits for explicit user authorisation. Follow [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md) when the cut is authorised.
 
-Carry-overs from v0.0.9 absorbed into v0.1.0 (independent of plugin loading; can land in parallel with the slices above):
-
-- **Per-method Reflection caches** (`instance_method_definition`, `singleton_method_definition`, …). Marshal-clean since the v0.0.9 C2 patch. A v0.0.9 attempt at conditional cache wiring inside `RbsLoader` triggered an analyzer regression (`uninitialized constant Rigor::Cache::RbsDescriptor::Descriptor` on `rigor check lib`); root cause diagnosed (missing `require_relative "descriptor"` in two files; the `NameError` was being silently swallowed by fail-soft `rescue StandardError` blocks). Fix landed; cache hits register correctly through `--cache-stats`.
-
-Out of scope for v0.1.0 (deferred to v0.1.x or beyond — see also the v0.1.1 section below):
-
-- **LSP / long-running-daemon cache mode.** Requires concurrent multi-process safety beyond the per-file `flock` model.
-- **LRU eviction / size cap.** Cache stays unbounded; users run `--clear-cache` if needed.
-- **Cross-machine cache sharing.**
-- **ObjectSpace catalog import** — needs a singleton-module dispatch path the catalog tier does not yet provide.
-- **URI / Kernel catalog imports** — fall outside the standard import skill's premise.
-- **Pathname / URI delegation rules.**
-- **`self`-narrowing in `predicate-if-*`.**
-- **`rigor:v1:conforms-to` directive** — needs a real structural-conformance checker.
-- **`Trinary` return-type contract on type-carrier predicate methods** — needs a new CheckRules rule family (`return-type-mismatch`).
-- **New CheckRules rule families** beyond `always-raises` (type-incompatible writes, return-type mismatch, unreachable branches).
-- **C-body classifier wider transitive mutator scan** — guards against the `Array#to_a` regression that gated the v0.0.5 fix.
-- **`Data.define` override-aware initializer dispatch.**
-- **Decimal / octal / hex `int-string` complement pairs.** Complement domains are too vague to warrant separate carriers.
+Items deferred past v0.1.0 are tracked in the [v0.1.1 section](#v011--planned) below (Tracks 1–4 plus the v0.1.1 "Out of scope" list at the end). Items still queued past v0.1.1 (LSP / long-running daemon, LRU eviction, cross-machine cache sharing, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation rules, `rigor:v1:conforms-to`, broader CheckRules rule families) are listed there.
 
 ## v0.1.1 — Planned
 
@@ -292,11 +212,17 @@ Theme: **deepen the literal-string narrowing surface, ship the cross-plugin API,
 
 Out of scope for v0.1.1 (deferred to v0.1.2 or beyond):
 
-- **New CheckRules rule families.** `flow.unreachable-branch`, `flow.dead-assignment`, `flow.always-truthy-condition`, `def.ivar-write-mismatch`, `def.method-visibility-mismatch`. Each needs careful false-positive triage.
-- **Plugin::IoBoundary#open_url allowlist.** Currently always raises; relaxed network-policy lands when a concrete plugin needs it.
+- **New CheckRules rule families.** `flow.unreachable-branch`, `flow.dead-assignment`, `flow.always-truthy-condition`, `def.ivar-write-mismatch`, `def.method-visibility-mismatch`, plus `def.return-type-mismatch` for type-carrier predicates. Each needs careful false-positive triage.
+- **C-body classifier wider transitive mutator scan.** Long-deferred catalog-extractor work that needs to track `str_modifiable` / `time_modify` / similar helpers without over-flagging legitimate non-mutators (the `Array#to_a` regression that gated the v0.0.5 fix).
+- **`Data.define` override-aware initializer dispatch.** Block-body `def initialize(...)` as the canonical sig for `Const.new`.
+- **`Plugin::IoBoundary#open_url` allowlist.** Currently always raises; relaxed network-policy lands when a concrete plugin needs it.
 - **`rigor:v1:conforms-to` directive.** Needs a real structural-conformance checker.
 - **DX tooling track.** `rigor explain <rule-id>` / `rigor diff <baseline>` / `# rigor:disable-file <rule>` / `.rigor.yml` JSON schema for editor autocomplete. Separate user-facing surface; queue for v0.1.2.
-- **LSP / long-running daemon mode.** Increasingly relevant as the plugin ecosystem grows, but still substantial.
+- **LSP / long-running daemon mode.** Requires concurrent multi-process safety beyond the per-file `flock` model. Increasingly relevant as the plugin ecosystem grows, but still substantial.
+- **Cache eviction / LRU / size cap.** Cache stays unbounded; users run `--clear-cache` if needed.
+- **Cross-machine cache sharing.**
+- **ObjectSpace / URI / Kernel catalog imports.** ObjectSpace needs a singleton-module dispatch path the catalog tier does not yet provide. URI is a pure-Ruby stdlib gem with no C surface; Kernel methods scatter across 20+ C files with no single Init function. Both need hand-rolled or custom-scaffold approaches.
+- **Pathname / URI delegation rules.** Wider refactor (Pathname facade routing through File projections).
 - **Lightweight HKT / type-level type computation.** Conditional and indexed-access types per [`docs/type-specification/rigor-extensions.md`](type-specification/rigor-extensions.md) rows 22 / 51. Sketched in `examples/rigor-lisp-eval/demo/sig/lisp.rbs` and `examples/rigor-units/demo/sig/units.rbs`. Larger surface; not a single-slice item.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)

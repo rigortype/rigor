@@ -358,6 +358,69 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(truthy.local(:x)).to eq(literal_a)
       expect(falsey.local(:x)).to eq(literal_b)
     end
+
+    # v0.1.1 Track 1 slice 4 — `String#start_with?` /
+    # `#end_with?` / `#include?` against a literal needle
+    # attaches a flow fact on each edge but does not change
+    # the receiver type (no "starts-with-X" carrier today).
+    describe "String predicate flow facts (v0.1.1 Track 1 slice 4)" do
+      %i[start_with? end_with? include?].each do |sel|
+        it "attaches a #{sel} relational fact with the needle on both edges" do
+          bound = scope.with_local(:s, string_nominal)
+          pred = parse_predicate(%(s.#{sel}("foo")), locals: %i[s])
+
+          truthy, falsey = described_class.predicate_scopes(pred, bound)
+
+          truthy_fact = truthy.local_facts(:s, bucket: :relational).find { |f| f.predicate == sel }
+          falsey_fact = falsey.local_facts(:s, bucket: :relational).find { |f| f.predicate == sel }
+          expect(truthy_fact.payload).to eq("foo")
+          expect(truthy_fact.polarity).to eq(:positive)
+          expect(falsey_fact.payload).to eq("foo")
+          expect(falsey_fact.polarity).to eq(:negative)
+        end
+
+        it "leaves the receiver type unchanged for #{sel}" do
+          bound = scope.with_local(:s, string_nominal)
+          pred = parse_predicate(%(s.#{sel}("foo")), locals: %i[s])
+
+          truthy, falsey = described_class.predicate_scopes(pred, bound)
+
+          expect(truthy.local(:s)).to eq(string_nominal)
+          expect(falsey.local(:s)).to eq(string_nominal)
+        end
+      end
+
+      it "declines when the needle is not a Constant<String>" do
+        bound = scope.with_local(:s, string_nominal).with_local(:n, string_nominal)
+        pred = parse_predicate("s.start_with?(n)", locals: %i[s n])
+
+        truthy, falsey = described_class.predicate_scopes(pred, bound)
+
+        expect(truthy.local_facts(:s, bucket: :relational)).to be_empty
+        expect(falsey.local_facts(:s, bucket: :relational)).to be_empty
+      end
+
+      it "declines when the receiver is not a LocalVariableReadNode" do
+        pred = parse_predicate('"foo".start_with?("f")')
+
+        truthy, falsey = described_class.predicate_scopes(pred, scope)
+
+        expect(truthy).to eq(scope)
+        expect(falsey).to eq(scope)
+      end
+
+      it "declines when the call has zero or multiple positional arguments" do
+        bound = scope.with_local(:s, string_nominal)
+
+        zero = described_class.predicate_scopes(parse_predicate("s.start_with?", locals: %i[s]), bound)
+        expect(zero[0].local_facts(:s, bucket: :relational)).to be_empty
+
+        multi = described_class.predicate_scopes(
+          parse_predicate(%(s.start_with?("a", "b")), locals: %i[s]), bound
+        )
+        expect(multi[0].local_facts(:s, bucket: :relational)).to be_empty
+      end
+    end
   end
 
   describe ".narrow_class (Slice 6 phase 2 sub-phase 1)" do

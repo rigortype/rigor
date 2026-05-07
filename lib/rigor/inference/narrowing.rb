@@ -808,6 +808,10 @@ module Rigor
           unless node.receiver.nil?
             shape_result = dispatch_call(node, scope, node.name)
             return shape_result if shape_result
+
+            # v0.1.1 Track 1 slice 4 — String predicate flow facts.
+            string_predicate_result = analyse_string_predicate(node, scope)
+            return string_predicate_result if string_predicate_result
           end
 
           # Slice 7 phase 15 — RBS::Extended predicate
@@ -820,6 +824,60 @@ module Rigor
           # through here too so `self`-targeted facts can edit
           # `scope.self_type`.
           analyse_rbs_extended_contribution(node, scope)
+        end
+
+        # v0.1.1 Track 1 slice 4 — `String#start_with?` /
+        # `#end_with?` / `#include?` against a `Constant<String>`
+        # needle attaches a relational `FactStore::Fact` to the
+        # local on each edge. The receiver's type does NOT
+        # change — Rigor has no "starts-with-X" carrier today —
+        # so the fact carries the predicate semantics for any
+        # downstream consumer that wants to read it (e.g. a
+        # plugin's `prepare(services)` hook in v0.1.x).
+        # Truthy edge: positive polarity. Falsey edge: negative
+        # polarity. Mirrors the equality-predicate fact pattern
+        # already used by `analyse_equality_predicate`.
+        STRING_PREDICATE_NAMES = %i[start_with? end_with? include?].freeze
+        private_constant :STRING_PREDICATE_NAMES
+
+        def analyse_string_predicate(node, scope)
+          return nil unless string_predicate_call?(node)
+
+          needle = string_predicate_needle(node, scope)
+          return nil if needle.nil?
+
+          local_name = node.receiver.name
+          return nil if scope.local(local_name).nil?
+
+          [
+            scope.with_fact(string_predicate_fact(local_name, node.name, needle, polarity: :positive)),
+            scope.with_fact(string_predicate_fact(local_name, node.name, needle, polarity: :negative))
+          ]
+        end
+
+        def string_predicate_call?(node)
+          STRING_PREDICATE_NAMES.include?(node.name) &&
+            node.receiver.is_a?(Prism::LocalVariableReadNode) &&
+            !node.arguments.nil? &&
+            node.arguments.arguments.size == 1
+        end
+
+        def string_predicate_needle(node, scope)
+          needle_type = static_literal_type(node.arguments.arguments.first, scope)
+          return nil unless needle_type.is_a?(Type::Constant) && needle_type.value.is_a?(String)
+
+          needle_type.value
+        end
+
+        def string_predicate_fact(name, predicate, needle, polarity:)
+          Analysis::FactStore::Fact.new(
+            bucket: :relational,
+            target: Analysis::FactStore::Target.local(name),
+            predicate: predicate,
+            payload: needle,
+            polarity: polarity,
+            stability: :local_binding
+          )
         end
 
         ZERO_CLASS_PREDICATES = %i[positive? negative? zero? nonzero?].freeze

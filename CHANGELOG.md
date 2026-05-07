@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `String#start_with?` / `#end_with?` / `#include?` flow facts (v0.1.1 Track 1 slice 4)
+
+- **`Inference::Narrowing#analyse_string_predicate`** recognises `s.start_with?("foo")`, `s.end_with?(...)`, and `s.include?(...)` against a `Constant<String>` needle and a `Prism::LocalVariableReadNode` receiver. The truthy edge attaches an `Analysis::FactStore::Fact` (`bucket: :relational`, `predicate:` the method name, `payload:` the needle string, `polarity: :positive`); the falsey edge attaches the `:negative` mirror.
+- **No type narrowing.** Rigor has no "starts-with-X" carrier today, so the receiver's type stays unchanged on both edges. The slice intentionally lands the lightweight FactStore-based form first; downstream consumers (a future plugin's `prepare(services)` hook, an internal post-narrowing rule) read these facts when they need the predicate semantics. Mirrors the relational-fact pattern already used by `==` / `!=` against broader-than-Constant domains.
+- **Receiver type gating is left to consumers.** `String#start_with?` / `#end_with?` are String-only, but `Array#include?` / `Hash#include?` exist with different semantics. The slice 4 producer doesn't gate on receiver type — facts are advisory, and any consumer that acts on them must verify the receiver is a String.
+
 ### Added — full `self`-narrowing in `predicate-if-*` / `assert-if-*` / `assert` directives (v0.1.1 Track 1 slice 3)
 
 - **Three additional receiver shapes now narrow `self`-targeted facts** (in addition to the v0.1.0 LocalVariableReadNode case):

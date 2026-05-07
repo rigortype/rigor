@@ -67,6 +67,10 @@ Working state at release: 1728 RSpec examples / 0 failures, RuboCop 167 files / 
 
 ## Where the Work Resumes
 
+### Rails ecosystem plugins (parallel running track)
+
+The Rails plugin family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionpack`, `rigor-actionmailer`, `rigor-activejob`, plus `rigor-activerecord` extensions — is being authored in parallel with v0.1.x core work. The full plan is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Tier 1 plugins (current API, no analyser-side change required) are unblocked and authoring can start immediately. Tier 2 (`rigor-actionpack` Phase 1, `rigor-factorybot`) blocks on [ADR-9 — Cross-plugin API](adr/9-cross-plugin-api.md), which proposes `Plugin::FactStore` + `Plugin::Base#prepare(services)` + `manifest(consumes:)`. ADR-9 is queued for v0.1.x; the slicing (six independently shippable slices) is in the ADR.
+
 ### v0.1.1 — deepen the literal-string narrowing surface (next)
 
 Headline slice: **regex pattern → refinement-name recogniser** per [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned". Extends the `Inference::Narrowing.analyse_match_write` path that v0.1.0 added (which narrows named-capture targets from `String | nil` to `String` in the truthy branch of `if /(?<x>...)/ =~ str`) so common anchored regex shapes additionally narrow each capture to the matching imported refinement carrier:

@@ -10,9 +10,10 @@ Project-level briefing for Claude (and any other agent that reads top-level docs
 | [`README.md`](README.md) | User-facing project overview (CLI, what `rigor check` does today). |
 | [`docs/handbook/`](docs/handbook/README.md) | Nine-chapter end-user walkthrough of the type model. Reach for this when you need to explain Rigor concepts to a Ruby programmer (or to yourself) without diving into the spec corpus. Informational; the spec binds. |
 | [`docs/types.md`](docs/types.md) | One-page quick guide to the Rigor type system. Faster mental-model warm-up than the handbook when you only need the carrier zoo. |
-| [`docs/MILESTONES.md`](docs/MILESTONES.md) | Release-by-release commitment envelope. v0.0.3 → v0.0.9 (released), v0.1.0 (all six slices landed; release pending), v0.1.1 (planned — regex pattern → refinement-name recogniser). |
-| [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) | Resume bookmark for the next implementer. Names the v0.1.0 ship-readiness state, the v0.1.1 entry slice, parallel-safe items, and open engineering items. Transient. |
-| [`examples/README.md`](examples/README.md) | Plugin-authoring landing page. Comparison table across the six worked examples + recommended reading order. Reach for this when authoring a plugin or answering "how do I use the plugin contract for X?". |
+| [`docs/MILESTONES.md`](docs/MILESTONES.md) | Release-by-release commitment envelope. v0.0.3 → v0.0.9 (released), v0.1.0 (all six slices landed; release pending), v0.1.1 (planned — regex pattern → refinement-name recogniser), Rails ecosystem plugins (running parallel track). |
+| [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) | Resume bookmark for the next implementer. Names the v0.1.0 ship-readiness state, the v0.1.1 entry slice, the Rails plugin parallel track, and open engineering items. Transient. |
+| [`docs/design/20260508-rails-plugins-roadmap.md`](docs/design/20260508-rails-plugins-roadmap.md) | Roadmap for the `rigor-*` Rails ecosystem plugins. Tier table, dependency graph, per-plugin sketches, subtree-split readiness checklist. Use when planning new Rails-side plugin work. |
+| [`examples/README.md`](examples/README.md) | Plugin-authoring landing page. Comparison table across the seven worked examples + recommended reading order. Reach for this when authoring a plugin or answering "how do I use the plugin contract for X?". |
 
 ## Authoritative specifications
 
@@ -62,6 +63,7 @@ When a change touches type-language behaviour or analyzer-internal contracts, th
 | [`docs/adr/6-cache-persistence-backend.md`](docs/adr/6-cache-persistence-backend.md) | Cache persistence backend choice (sharded directory of binary entries, per-file `flock` write atomicity, no eviction). |
 | [`docs/adr/7-v0.1.0-slice-decisions.md`](docs/adr/7-v0.1.0-slice-decisions.md) | Working decisions for v0.1.0 slices 4 – 6 (FlowContribution wiring through internal narrowing, plugin diagnostic emission protocol, plugin-side cache producers). |
 | [`docs/adr/8-steep-inspired-improvements.md`](docs/adr/8-steep-inspired-improvements.md) | Working decisions for the Steep-inspired improvements (diagnostic family hierarchy, severity profile, `def.return-type-mismatch` rule). |
+| [`docs/adr/9-cross-plugin-api.md`](docs/adr/9-cross-plugin-api.md) | Proposed cross-plugin API (`Plugin::FactStore` + `Plugin::Base#prepare(services)` + `manifest(consumes:)`). Queued for v0.1.x. Required before `rigor-actionpack` Phase 1 / `rigor-factorybot` can land. |
 
 ## Skills available in this repository
 

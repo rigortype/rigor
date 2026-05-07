@@ -264,3 +264,33 @@ Out of scope for v0.1.1 (deferred to v0.1.2 or beyond):
 
 - **Plugin return-type contributions.** Plugins authored in v0.1.0 emit diagnostics; the natural next step is to let them contribute `FlowContribution` bundles consumed by `Inference::MethodDispatcher` so plugin-side analysers can replace the analyzer's inferred return type for a call site. Sketched in [`examples/rigor-lisp-eval/README.md`](../examples/rigor-lisp-eval/README.md) § "Future direction" and at the head of `lib/rigor/plugin/lisp_eval.rb`. Likely a v0.1.2 / v0.1.3 slice once the example plugins have stabilised against the merger surface.
 - **Lightweight HKT / type-level type computation.** Conditional and indexed-access types per [`docs/type-specification/rigor-extensions.md`](type-specification/rigor-extensions.md) rows 22 / 51. Sketched in `examples/rigor-lisp-eval/demo/sig/lisp.rbs` and `examples/rigor-units/demo/sig/units.rbs`. Larger surface; not a single-slice item.
+
+## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
+
+The full roadmap is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Summary of the running track:
+
+**Already landed (unreleased on `master`):**
+
+- [`rigor-activerecord`](../examples/rigor-activerecord/) — schema + finders + columns. The seventh worked plugin example and the most architecturally complete (DSL interpretation + multi-file IoBoundary + chained cache producers + two-pass discover-then-validate).
+
+**Tier 1 (current API, no analyser-side change required) — author next:**
+
+- `rigor-rails-routes` — real `config/routes.rb` DSL → `*_path` / `*_url` validation.
+- `rigor-rails-i18n` — `config/locales/*.yml` → `t('key.path')` validation.
+- `rigor-actionmailer` — Mailer methods + view template existence.
+- `rigor-activejob` — Job `perform` arity.
+
+**Tier 2 (needs the cross-plugin API per [ADR-9](adr/9-cross-plugin-api.md)):**
+
+- `rigor-actionpack` Phase 1 (strong parameters → AR column validation).
+- `rigor-factorybot` (factory attributes → AR column validation).
+- `rigor-actionpack` Phase 2-4 (filter chains, render targets, route-helper consumption).
+- `rigor-activerecord` extensions (associations, enums, scopes, validations, callbacks — landed as 0.2.0+ minor bumps in the existing gem rather than separate gems).
+
+**Tier 3 (specialised, author when there is concrete user demand):**
+
+- `rigor-rspec`, `rigor-pundit`, `rigor-sidekiq`, `rigor-graphql`, `rigor-activestorage`, `rigor-actioncable`.
+
+Each plugin is staged in `examples/rigor-<id>/` per the [`rigor-plugin-author`](../.codex/skills/rigor-plugin-author/SKILL.md) SKILL discipline and extracted via `git subtree split` once its contract is stable. The eventual `rigor-rails` meta-gem will declare the Tier 1+2 plugins as gem dependencies so a single Gemfile line opts the user into the whole stack.
+
+[ADR-9](adr/9-cross-plugin-api.md) is queued for v0.1.x — Tier 1 does not block on it; Tier 2 does. Slicing per ADR-9 § "Implementation slicing" allows partial landings.

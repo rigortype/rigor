@@ -153,6 +153,22 @@ codifies the move as a checklist step so the archive doesn't drift.
 
 ### Changed
 
+#### Two-file config convention — `.rigor.yml` (dev-local) + `.rigor.dist.yml` (project default)
+
+- **Auto-discovery order**: `Configuration.load(nil)` (the default when `--config=PATH` is not passed) now reads the **first** of `.rigor.yml` then `.rigor.dist.yml` it finds in the project root. Both files are **never merged automatically** — when a developer keeps a `.rigor.yml`, that file is the sole source of config for that developer's runs. The repo's own committed config moved from `.rigor.yml` to `.rigor.dist.yml`; the seven worked examples under `examples/rigor-*/demo/.rigor.yml` moved to `.rigor.dist.yml` for the same reason. `.gitignore` (top-level + each demo's `.gitignore`) now ignores `/.rigor.yml` so a developer's local override does not get accidentally committed.
+- **`includes:` directive** (PHPStan-style). To extend the project default, an override file lists the dist file (and any others) under `includes:`:
+  ```yaml
+  # .rigor.yml
+  includes:
+    - .rigor.dist.yml
+  disable:
+    - call.undefined-method
+  ```
+  Processed in declaration order; later content overrides earlier; the current file's keys override every included file. Circular includes raise `ArgumentError`.
+- **Path resolution** mirrors [PHPStan's rule](https://phpstan.org/config-reference#paths). Every path-bearing key (`paths:`, `signature_paths:`, `plugins_io.allowed_paths:`, `includes:`) is resolved relative to the **directory of the config file that declares it**. `paths: [lib]` in `<root>/.rigor.dist.yml` means `<root>/lib`; the same line in `<root>/sub/extra.yml` means `<root>/sub/lib`. `cache.path:` is the one exception — it stays as the literal user-supplied string so `--cache-stats` / `--clear-cache` messages read project-relative.
+- **`rigor init`** now writes `.rigor.dist.yml` by default (the committed project default). Pass `--path=.rigor.yml` for the developer-local override.
+- **`docs/handbook/01-getting-started.md`** § "A first walk through Rigor's config file" expanded with the new "Two file names, no implicit merge" + "Path resolution rules" subsections.
+
 #### v0.1.1 Track 3 — plugin authoring DX
 
 ##### Slice 8 — plugin spec helper module extracted

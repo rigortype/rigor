@@ -6,7 +6,23 @@ require_relative "configuration/severity_profile"
 
 module Rigor
   class Configuration # rubocop:disable Metrics/ClassLength
-    DEFAULT_PATH = ".rigor.yml"
+    # File-discovery order for `Configuration.load(nil)`.
+    #
+    # The first file present is loaded; the others are NOT
+    # implicitly merged. To extend a base config explicitly the
+    # winning file MUST list the base via `includes:`.
+    #
+    # `.rigor.yml` is a developer-local override (typically
+    # gitignored); `.rigor.dist.yml` is the project default
+    # (committed to the repo). When both are present the
+    # developer's local override wins outright — there is no
+    # implicit auto-merge.
+    DISCOVERY_ORDER = %w[.rigor.yml .rigor.dist.yml].freeze
+    # Back-compat alias. Keep here so external callers that read
+    # `Configuration::DEFAULT_PATH` for help text / fixture paths
+    # still work; the discovery list is the canonical source.
+    DEFAULT_PATH = DISCOVERY_ORDER.first
+
     # Built-in exclusion patterns appended to `exclude:` so vendored
     # dependencies, Bundler artefacts, and JavaScript node_modules are
     # never analysed by accident when a directory glob expands. Users
@@ -44,20 +60,127 @@ module Rigor
       "severity_overrides" => {}
     }.freeze
 
+    # Top-level keys whose values are file/directory paths that
+    # MUST be resolved relative to the config file's directory.
+    # `exclude:` is intentionally NOT in this list — its entries
+    # are glob patterns (`**/vendor/**`), not paths.
+    PATH_KEYS = %w[paths signature_paths].freeze
+    private_constant :PATH_KEYS
+
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :disabled_rules,
                 :libraries, :signature_paths, :fold_platform_specific_paths,
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :severity_profile, :severity_overrides
 
-    def self.load(path = DEFAULT_PATH)
-      data = if File.exist?(path)
-               YAML.safe_load_file(path, aliases: false) || {}
-             else
-               {}
-             end
+    # Loads a configuration file.
+    #
+    # `path == nil` triggers auto-discovery against
+    # {DISCOVERY_ORDER}. The first present file in that list is
+    # loaded; if none exist the built-in {DEFAULTS} are used.
+    #
+    # When a path is supplied (whether by auto-discovery or by
+    # the caller) the YAML body is processed for `includes:`
+    # recursively, and every relative path inside path-bearing
+    # keys (`paths:`, `signature_paths:`, `plugins_io.allowed_paths:`,
+    # `includes:`) is resolved against THAT file's directory.
+    # The resolution is per-file: an included file's relative
+    # paths resolve against the included file's directory, not
+    # the top-level file. Path resolution mirrors
+    # [PHPStan](https://phpstan.org/config-reference#paths).
+    def self.load(path = nil)
+      resolved = path || discover
+      return new(DEFAULTS) if resolved.nil? || !File.exist?(resolved)
 
+      data = load_with_includes(resolved)
       new(DEFAULTS.merge(data))
     end
+
+    # Returns the path to the config file Rigor would load
+    # under auto-discovery, or `nil` when neither candidate
+    # exists. Public so the CLI / spec drift checks can
+    # introspect the resolved file.
+    def self.discover
+      DISCOVERY_ORDER.find { |candidate| File.exist?(candidate) }
+    end
+
+    # Reads `path` (which MUST exist) plus every file listed in
+    # its `includes:` chain, merging them under the order:
+    # included files first (in declaration order), then the
+    # current file's own keys override. Relative paths inside
+    # each file are resolved against that file's directory.
+    def self.load_with_includes(path, visited: Set.new)
+      absolute = File.expand_path(path)
+      raise ArgumentError, "circular include: #{absolute}" if visited.include?(absolute)
+
+      raw = YAML.safe_load_file(absolute, aliases: false) || {}
+      raise ArgumentError, "config file must be a YAML mapping: #{absolute}" unless raw.is_a?(Hash)
+
+      base_dir = File.dirname(absolute)
+      includes = Array(raw.delete("includes") || [])
+      data = resolve_paths_in(raw, base_dir)
+      next_visited = visited + [absolute]
+      merge_includes(data, includes, base_dir, next_visited)
+    end
+
+    def self.merge_includes(data, includes, base_dir, visited)
+      return data if includes.empty?
+
+      accumulated = {}
+      includes.each do |inc|
+        inc_path = File.expand_path(inc.to_s, base_dir)
+        unless File.exist?(inc_path)
+          raise ArgumentError, "include not found: #{inc.inspect} (referenced from #{base_dir})"
+        end
+
+        accumulated = deep_merge(accumulated, load_with_includes(inc_path, visited: visited))
+      end
+      deep_merge(accumulated, data)
+    end
+
+    # Per-file path resolution. Each path-bearing key listed in
+    # {PATH_KEYS} plus the nested `plugins_io.allowed_paths:`
+    # entries get their relative paths expanded against the
+    # config file's directory. `cache.path:` is intentionally
+    # left as-is so end-user messages (e.g. `--cache-stats`
+    # output) keep the project-relative form the user wrote.
+    def self.resolve_paths_in(data, base_dir)
+      return data unless data.is_a?(Hash)
+
+      out = data.dup
+      PATH_KEYS.each { |key| resolve_path_key!(out, key, base_dir) }
+      resolve_plugins_io_paths!(out, base_dir)
+      out
+    end
+
+    def self.resolve_path_key!(out, key, base_dir)
+      return unless out.key?(key) && !out[key].nil?
+
+      out[key] = Array(out[key]).map { |p| File.expand_path(p.to_s, base_dir) }
+    end
+
+    def self.resolve_plugins_io_paths!(out, base_dir)
+      plugins_io = out["plugins_io"]
+      return unless plugins_io.is_a?(Hash) && plugins_io["allowed_paths"]
+
+      duped = plugins_io.dup
+      duped["allowed_paths"] = Array(plugins_io["allowed_paths"]).map { |p| File.expand_path(p.to_s, base_dir) }
+      out["plugins_io"] = duped
+    end
+
+    def self.deep_merge(left, right)
+      return right unless left.is_a?(Hash) && right.is_a?(Hash)
+
+      merged = left.dup
+      right.each do |key, value|
+        merged[key] = if merged.key?(key) && merged[key].is_a?(Hash) && value.is_a?(Hash)
+                        deep_merge(merged[key], value)
+                      else
+                        value
+                      end
+      end
+      merged
+    end
+    private_class_method :load_with_includes, :merge_includes, :resolve_paths_in, :deep_merge
 
     def initialize(data = DEFAULTS) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))

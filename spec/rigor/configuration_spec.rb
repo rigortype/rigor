@@ -60,22 +60,16 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
-    it "reads libraries: and signature_paths: from the YAML file" do
+    it "reads libraries: as-is and resolves signature_paths: relative to the config file's directory" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")
-        File.write(path, <<~YAML)
-          libraries:
-            - csv
-            - set
-          signature_paths:
-            - sig
-            - vendor/sig
-        YAML
+        File.write(path, "libraries: [csv, set]\nsignature_paths: [sig, vendor/sig]\n")
 
         configuration = described_class.load(path)
+        resolved = [File.join(File.expand_path(dir), "sig"), File.join(File.expand_path(dir), "vendor/sig")]
 
         expect(configuration.libraries).to eq(%w[csv set])
-        expect(configuration.signature_paths).to eq(%w[sig vendor/sig])
+        expect(configuration.signature_paths).to eq(resolved)
       end
     end
 
@@ -179,7 +173,7 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
-    it "reads plugins_io.network and plugins_io.allowed_paths from the YAML file" do
+    it "reads plugins_io.network and resolves plugins_io.allowed_paths against the config file" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")
         File.write(path, <<~YAML)
@@ -192,7 +186,10 @@ RSpec.describe Rigor::Configuration do
 
         configuration = described_class.load(path)
         expect(configuration.plugins_io_network).to eq(:disabled)
-        expect(configuration.plugins_io_allowed_paths).to eq(%w[vendor/generated db/schema.rb])
+        expect(configuration.plugins_io_allowed_paths).to eq([
+                                                               File.join(File.expand_path(dir), "vendor/generated"),
+                                                               File.join(File.expand_path(dir), "db/schema.rb")
+                                                             ])
       end
     end
 
@@ -252,6 +249,141 @@ RSpec.describe Rigor::Configuration do
           )
         )
       end.to raise_error(ArgumentError, /plugins_io\.network/)
+    end
+  end
+
+  describe ".discover" do
+    it "prefers `.rigor.yml` over `.rigor.dist.yml` when both are present" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write(".rigor.yml", "")
+          File.write(".rigor.dist.yml", "")
+          expect(described_class.discover).to eq(".rigor.yml")
+        end
+      end
+    end
+
+    it "falls back to `.rigor.dist.yml` when only the dist file is present" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write(".rigor.dist.yml", "")
+          expect(described_class.discover).to eq(".rigor.dist.yml")
+        end
+      end
+    end
+
+    it "returns nil when neither candidate is present" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) { expect(described_class.discover).to be_nil }
+      end
+    end
+  end
+
+  describe ".load auto-discovery semantics" do
+    it "loads `.rigor.yml` exclusively when both files are present (NO implicit merge)" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write(".rigor.yml", "target_ruby: \"3.4\"\n")
+          File.write(".rigor.dist.yml", "target_ruby: \"4.0\"\nlibraries: [csv]\n")
+
+          configuration = described_class.load
+          expect(configuration.target_ruby).to eq("3.4")
+          # `.rigor.dist.yml` is NOT auto-merged — its `libraries:` does not leak in.
+          expect(configuration.libraries).to eq([])
+        end
+      end
+    end
+
+    it "uses defaults when neither file is present" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          configuration = described_class.load
+          expect(configuration.target_ruby).to eq("4.0")
+          expect(configuration.paths).to eq(["lib"])
+        end
+      end
+    end
+  end
+
+  describe ".load with `includes:`" do
+    it "merges an explicit included file under the current file's keys" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "base.yml"), <<~YAML)
+          target_ruby: "3.4"
+          libraries: [csv, set]
+        YAML
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          includes:
+            - base.yml
+          target_ruby: "4.0"
+        YAML
+
+        configuration = described_class.load(path)
+        # current file's `target_ruby` overrides the included one
+        expect(configuration.target_ruby).to eq("4.0")
+        # the included file's `libraries:` is inherited
+        expect(configuration.libraries).to eq(%w[csv set])
+      end
+    end
+
+    it "resolves paths in an included file relative to that file's directory (PHPStan convention)" do
+      Dir.mktmpdir do |dir|
+        sub = File.join(dir, "sub")
+        FileUtils.mkdir_p(sub)
+        File.write(File.join(sub, "shared.yml"), <<~YAML)
+          signature_paths:
+            - sigs
+        YAML
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          includes:
+            - sub/shared.yml
+        YAML
+
+        configuration = described_class.load(path)
+        # `sigs` resolves against `<dir>/sub`, NOT `<dir>`.
+        expect(configuration.signature_paths).to eq([File.join(File.expand_path(sub), "sigs")])
+      end
+    end
+
+    it "supports nested includes" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "level2.yml"), "libraries: [csv]\n")
+        File.write(File.join(dir, "level1.yml"), <<~YAML)
+          includes:
+            - level2.yml
+          target_ruby: "3.4"
+        YAML
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          includes:
+            - level1.yml
+        YAML
+
+        configuration = described_class.load(path)
+        expect(configuration.target_ruby).to eq("3.4")
+        expect(configuration.libraries).to eq(["csv"])
+      end
+    end
+
+    it "raises a clear error when an included file does not exist" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "includes: [missing.yml]\n")
+
+        expect { described_class.load(path) }
+          .to raise_error(ArgumentError, /include not found.*missing\.yml/)
+      end
+    end
+
+    it "raises on circular includes" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "a.yml"), "includes: [b.yml]\n")
+        File.write(File.join(dir, "b.yml"), "includes: [a.yml]\n")
+        expect { described_class.load(File.join(dir, "a.yml")) }
+          .to raise_error(ArgumentError, /circular include/)
+      end
     end
   end
 end

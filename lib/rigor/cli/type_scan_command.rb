@@ -46,7 +46,7 @@ module Rigor
 
       def parse_options
         options = { format: "text", limit: 10, show_recognized: false, threshold: nil,
-                    config: Configuration::DEFAULT_PATH }
+                    config: nil }
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE

@@ -143,9 +143,10 @@ will need them:
 Chapters 7 and 9 cover these in detail. Most projects only
 need (1) and (2).
 
-## A first walk through `.rigor.yml`
+## A first walk through Rigor's config file
 
-`rigor init` writes a starter configuration:
+`rigor init` writes a starter configuration to `.rigor.dist.yml`
+— the project default that gets committed:
 
 ```yaml
 target_ruby: "3.4"
@@ -165,10 +166,59 @@ severity_profile: balanced
 # plugins: []
 ```
 
-The minimum useful run does not require a `.rigor.yml` at all
+The minimum useful run does not require any config file at all
 — `rigor check lib` works out of the box. The file is for
 non-default behaviours: extra `paths`, alternative
 `severity_profile`, project-wide rule disables, plugins.
+
+### Two file names, no implicit merge
+
+Rigor auto-discovers config in this order, reading the FIRST
+file found:
+
+| Priority | File | Purpose |
+| --- | --- | --- |
+| 1 | `.rigor.yml` | Developer-local override (typically gitignored). |
+| 2 | `.rigor.dist.yml` | Project default (committed to the repo). |
+
+**Both files are never merged automatically** — when a developer
+maintains a `.rigor.yml`, that file is the sole source of config
+for that developer's runs. To extend the project default
+explicitly, the override lists the dist file (and any others)
+under `includes:`:
+
+```yaml
+# .rigor.yml
+includes:
+  - .rigor.dist.yml
+
+# my own developer-local additions:
+disable:
+  - call.undefined-method   # I'm WIP, ignore this rule for now
+```
+
+`includes:` is processed in declaration order; later content
+overrides earlier. The CURRENT file's keys override every
+included file. This is the same shape PHPStan uses for its
+`.neon` config files.
+
+### Path resolution rules
+
+Every path-bearing key (`paths:`, `signature_paths:`,
+`plugins_io.allowed_paths:`, `includes:`) is resolved
+**relative to the directory of the config file that declares
+it**. So `paths: [lib]` in `<project>/.rigor.dist.yml` means
+`<project>/lib`; the same line in `<project>/sub/extra.yml`
+means `<project>/sub/lib`. Moving a config file to a different
+directory therefore changes only its own relative paths, not
+those declared by the file that includes it. This mirrors
+[PHPStan's path-resolution
+rule](https://phpstan.org/config-reference#paths).
+
+`cache.path:` is the one exception — it stays as the literal
+string the user wrote, because the value surfaces back to the
+user in `--cache-stats` / `--clear-cache` messages and a
+project-relative form reads better there.
 
 ## What's next
 

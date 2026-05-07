@@ -90,7 +90,9 @@ module Rigor
 
     def parse_check_options
       options = {
-        config: Configuration::DEFAULT_PATH,
+        # `nil` triggers `Configuration.discover` (`.rigor.yml` then
+        # `.rigor.dist.yml`); an explicit `--config=PATH` overrides.
+        config: nil,
         format: "text",
         explain: false,
         cache_stats: false,
@@ -170,9 +172,14 @@ module Rigor
     end
 
     def run_init
+      # Default destination is `.rigor.dist.yml` — the
+      # project-default config that gets committed. Developers
+      # who want a personal override layer create `.rigor.yml`
+      # alongside it (auto-discovery prefers `.rigor.yml` when
+      # both are present; no implicit merge).
       options = {
         force: false,
-        path: Configuration::DEFAULT_PATH
+        path: ".rigor.dist.yml"
       }
 
       parser = OptionParser.new do |opts|

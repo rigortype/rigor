@@ -4,3 +4,7 @@
 # output from leaking into commits and survives the future
 # `git subtree split` per the rigor-plugin-author SKILL.
 /tmp/
+
+# Developer-local Rigor config override (committed default is
+# `.rigor.dist.yml`).
+/.rigor.yml

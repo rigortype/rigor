@@ -48,7 +48,7 @@ module Rigor
       private
 
       def parse_options
-        options = { format: "text", trace: false, config: Configuration::DEFAULT_PATH }
+        options = { format: "text", trace: false, config: nil }
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE

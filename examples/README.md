@@ -14,8 +14,9 @@ runtime, optional sigs) and an end-to-end integration spec under
 | [`rigor-pattern`](rigor-pattern/) | **Engine collaboration** via `Scope#type_of` + literal-string carrier | ~180 | — | — | ✅ | 12 |
 | [`rigor-units`](rigor-units/) | **Local-variable flow tracking** through arithmetic | ~280 | — | — | — | 16 |
 | [`rigor-routes`](rigor-routes/) | **`IoBoundary` + cache producer** (slice 2 + slice 6) | ~250 | YAML | ✅ | — | 13 |
+| [`rigor-activerecord`](rigor-activerecord/) | **Most architecturally complete** — DSL interpretation + multi-file IoBoundary + chained cache producers + two-pass discover-then-validate | ~700 | Ruby (`db/schema.rb` + `app/models/*.rb`) | ✅ ✅ | — | 14 |
 
-All six rely on **slice 5** (`Plugin::Base#diagnostics_for_file`)
+All seven rely on **slice 5** (`Plugin::Base#diagnostics_for_file`)
 to surface diagnostics. The "headline facet" column names the
 *additional* surface each example spotlights — that is the
 column to read when you have a specific question about how to
@@ -32,7 +33,8 @@ Pick the path that matches what you are trying to learn:
 | **Track types through a series of statements** | `rigor-units` |
 | **Validate references to declarations from earlier in the same file** | `rigor-statesman` |
 | **Read a project file (`config/routes.rb` style) under TrustPolicy + cache the parse** | `rigor-routes` |
-| **Read every example to internalise the architecture** | deprecations → lisp-eval → statesman → pattern → units → routes |
+| **Combine DSL interpretation, multi-file IoBoundary, chained cache producers, two-pass analysis** | `rigor-activerecord` |
+| **Read every example to internalise the architecture** | deprecations → lisp-eval → statesman → pattern → units → routes → activerecord |
 
 The recommended-for-everyone path runs from the smallest
 plugin (`rigor-deprecations`, ~80 lines, pure data → rules) up

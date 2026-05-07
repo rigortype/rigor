@@ -376,7 +376,7 @@ analyzer guarantees live under
 ## Plugins (v0.1.0)
 
 `v0.1.0` adds an extension API so projects can teach Rigor about
-their own DSLs. Six worked examples ship under
+their own DSLs. Seven worked examples ship under
 [`examples/`](examples/) — each is a fully-shaped plugin gem
 with a runnable demo and an end-to-end integration spec, and
 each spotlights a different facet of the plugin contract:
@@ -394,7 +394,12 @@ each spotlights a different facet of the plugin contract:
   tracking through arithmetic.
 - [`rigor-routes`](examples/rigor-routes/) — `Plugin::IoBoundary`
   reads under `TrustPolicy` plus cache producers (slice 2 +
-  slice 6) — the most architecturally complete example.
+  slice 6).
+- [`rigor-activerecord`](examples/rigor-activerecord/) —
+  validates `Model.find` / `.find_by` / `.where` against
+  `db/schema.rb` and discovered AR model classes; combines
+  DSL interpretation, multi-file `IoBoundary`, and chained
+  cache producers — the most architecturally complete example.
 
 [`examples/README.md`](examples/README.md) is the plugin
 authoring landing page — comparison table, recommended reading

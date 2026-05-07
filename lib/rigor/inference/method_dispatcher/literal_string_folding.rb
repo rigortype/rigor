@@ -52,7 +52,20 @@ module Rigor
 
         CONCAT_METHODS = %i[+ << concat].freeze
         FORMAT_METHODS = %i[format sprintf].freeze
-        private_constant :CONCAT_METHODS, :FORMAT_METHODS
+        # v0.1.1 Track 1 slice 5a — methods that, called with no
+        # arguments on a literal-bearing receiver, return a value
+        # that is also literal-bearing. `#strip` / `#lstrip` /
+        # `#rstrip` / `#chomp` (no-arg) / `#chop` strip a known
+        # subset of characters from the ends, so the survivors
+        # are always a substring of an already-literal value.
+        # `#scrub` (no-arg) replaces invalid bytes; a literal-string
+        # value comes from source code and is always valid UTF-8,
+        # so the result is identical to the receiver. None of
+        # these preserve `non-empty-string`-ness (e.g. `"   ".strip
+        # == ""`); the carrier collapses from `non-empty-literal-string`
+        # down to plain `literal-string`.
+        LITERAL_PRESERVING_METHODS = %i[strip lstrip rstrip chomp chop scrub].freeze
+        private_constant :CONCAT_METHODS, :FORMAT_METHODS, :LITERAL_PRESERVING_METHODS
 
         def try_dispatch(receiver:, method_name:, args:, **) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
           return fold_array_join(receiver, args) if method_name == :join
@@ -61,6 +74,9 @@ module Rigor
           return nil unless Type::Combinator.literal_string_compatible?(receiver)
 
           return fold_string_percent(args) if method_name == :%
+          if args.empty?
+            return LITERAL_PRESERVING_METHODS.include?(method_name) ? Type::Combinator.literal_string : nil
+          end
           return nil unless args.size == 1
 
           if CONCAT_METHODS.include?(method_name)

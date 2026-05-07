@@ -220,6 +220,33 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
     end
   end
 
+  describe "literal-string preservation through #strip / #chomp / #scrub family (v0.1.1 Track 1 slice 5a)" do
+    %i[strip lstrip rstrip chomp chop scrub].each do |sel|
+      it "preserves literal-string through ##{sel} (no args)" do
+        result = described_class.try_dispatch(receiver: literal_string, method_name: sel, args: [])
+        expect(result).to eq(literal_string)
+      end
+
+      it "declines for ##{sel} when the receiver is plain Nominal[String]" do
+        result = described_class.try_dispatch(receiver: nominal_string, method_name: sel, args: [])
+        expect(result).to be_nil
+      end
+    end
+
+    it "preserves literal-string through #strip on `non-empty-literal-string` (carrier collapses to literal-string)" do
+      nels = Rigor::Type::Combinator.non_empty_literal_string
+      result = described_class.try_dispatch(receiver: nels, method_name: :strip, args: [])
+      expect(result).to eq(literal_string)
+    end
+
+    it "declines when the preserving method is given an argument (slice 5a covers no-arg only)" do
+      result = described_class.try_dispatch(
+        receiver: literal_string, method_name: :chomp, args: [Rigor::Type::Combinator.constant_of("\n")]
+      )
+      expect(result).to be_nil
+    end
+  end
+
   describe "unrecognised method names" do
     it "declines for methods outside the recognised set" do
       result = described_class.try_dispatch(receiver: literal_string, method_name: :upcase, args: [literal_string])

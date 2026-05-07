@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `literal-string` preservation through `#strip` / `#chomp` / `#scrub` family (v0.1.1 Track 1 slice 5a)
+
+- **`MethodDispatcher::LiteralStringFolding`** gains a `LITERAL_PRESERVING_METHODS` rule covering `#strip`, `#lstrip`, `#rstrip`, `#chomp` (no-arg), `#chop`, and `#scrub` (no-arg). Each strips a known character subset from the ends of the string (or, for `#scrub`, replaces invalid bytes — a no-op on always-valid literal source code), so the result on a literal-bearing receiver is itself literal-bearing. The result is `literal-string` (not `non-empty-literal-string`, since `"   ".strip == ""` collapses non-empty-ness).
+- **Carrier collapse on intersection.** `non-empty-literal-string` (an `Intersection[non-empty-string, literal-string]`) collapses to plain `literal-string` after the call — the non-empty refinement isn't preserved across `#strip`. Both shapes still beat the v0.1.0 baseline (`Nominal[String]` from RBS).
+- **Scope.** No-arg form only. `#chomp("\n")` and other arg-bearing variants keep the v0.1.0 baseline; future slices may extend the rule when the argument itself is literal-bearing.
+
 ### Added — `Kernel#Integer` on digit-only refinements narrows to `non-negative-int` (v0.1.1 Track 1 slice 2b)
 
 - **`MethodDispatcher::KernelDispatch`** gains a `try_integer_from_refinement` arm matching `Kernel#Integer(s)` whose argument is a `Refined[String, predicate]` with `predicate ∈ { :decimal_int, :numeric }`. The result is `non-negative-int`, mirroring the slice 2a `String#to_i` projection — both refinements describe digit-only ASCII strings, so the parse is total over the carrier domain. Plain `Nominal[String]` and other refinements (lowercase / uppercase / hex / octal) continue to fall through to the RBS sig.

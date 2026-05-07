@@ -1,7 +1,5 @@
 # Everyday types
 
-[← Getting started](01-getting-started.md) · Next: [Narrowing →](03-narrowing.md)
-
 This is the most important chapter. Once you have a feel for
 the carriers below, the rest of the handbook is just rules
 operating on them.
@@ -318,5 +316,3 @@ Chapter 3 (narrowing) is the engine that takes these carriers
 and changes them as control flow passes — `if` / `case` /
 `is_a?` / `nil?`. That is where the value-lattice carriers
 above start paying for themselves.
-
-[← Getting started](01-getting-started.md) · Next: [Narrowing →](03-narrowing.md)

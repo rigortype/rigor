@@ -1,7 +1,5 @@
 # Getting started
 
-[← Handbook index](README.md) · Next: [Everyday types →](02-everyday-types.md)
-
 ## What does `rigor check` look at?
 
 Rigor reads your `.rb` files, runs a flow-sensitive type
@@ -228,5 +226,3 @@ ordinary RBS. After that, Chapter 3 (narrowing) makes the
 carriers come alive: the carriers describe values, and
 narrowing describes how those carriers change as control
 flow passes through `if` / `case` / predicate methods.
-
-[← Handbook index](README.md) · Next: [Everyday types →](02-everyday-types.md)

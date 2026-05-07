@@ -1,7 +1,5 @@
 # Methods and blocks
 
-[← Tuples and hash shapes](04-tuples-and-shapes.md) · Next: [Classes →](06-classes.md)
-
 This chapter covers what Rigor knows about method calls — the
 receiver's type, the argument types, the inferred return
 type, and the block parameters when a block is attached.
@@ -277,5 +275,3 @@ violate.
 Chapter 6 covers the class side: how Rigor types `self`,
 constant lookup, `attr_*` declarations, and the
 class-vs-instance method distinction.
-
-[← Tuples and hash shapes](04-tuples-and-shapes.md) · Next: [Classes →](06-classes.md)

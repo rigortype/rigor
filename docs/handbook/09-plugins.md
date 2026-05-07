@@ -1,7 +1,5 @@
 # Plugins
 
-[← Understanding errors](08-understanding-errors.md) · [Handbook index](README.md)
-
 This is the shortest chapter. Plugins exist for one reason:
 some methods' types depend on the **shape of their arguments
 at runtime** in ways that no RBS sig can express.
@@ -121,5 +119,3 @@ You have reached the end of the handbook. From here:
 
 Welcome to the small, growing community of static-Ruby
 believers.
-
-[← Understanding errors](08-understanding-errors.md) · [Handbook index](README.md)

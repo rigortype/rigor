@@ -1,7 +1,5 @@
 # Classes
 
-[← Methods and blocks](05-methods-and-blocks.md) · Next: [RBS and `RBS::Extended` →](07-rbs-and-extended.md)
-
 This chapter covers class-side typing — what `self` means in
 different positions, how constants are resolved, and how
 Rigor reads `attr_*` and `Data.define` declarations.
@@ -270,5 +268,3 @@ question.
 Chapter 7 covers RBS and `RBS::Extended` — the external
 signature surface that takes you beyond what inference alone
 can prove.
-
-[← Methods and blocks](05-methods-and-blocks.md) · Next: [RBS and `RBS::Extended` →](07-rbs-and-extended.md)

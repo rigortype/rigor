@@ -1,7 +1,5 @@
 # Narrowing
 
-[← Everyday types](02-everyday-types.md) · Next: [Tuples and hash shapes →](04-tuples-and-shapes.md)
-
 A carrier describes a value at one program point. **Narrowing**
 describes how the carrier changes when control flow passes
 through a predicate. This chapter walks through every form of
@@ -301,5 +299,3 @@ pin behaviour.
 Chapter 4 covers the structural carriers — `Tuple` and
 `HashShape` — which behave a lot like a per-element
 narrowing of `Array` and `Hash`.
-
-[← Everyday types](02-everyday-types.md) · Next: [Tuples and hash shapes →](04-tuples-and-shapes.md)

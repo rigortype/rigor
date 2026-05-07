@@ -1,7 +1,5 @@
 # Understanding errors
 
-[← RBS and `RBS::Extended`](07-rbs-and-extended.md) · Next: [Plugins →](09-plugins.md)
-
 This chapter is the catalogue of diagnostics Rigor ships, the
 families they belong to, and how to suppress one when it is
 wrong (or move its severity around).
@@ -250,5 +248,3 @@ The final chapter — Plugins — is a one-page pointer to the
 specific DSLs (units of measure, route helpers, deprecations,
 …). Most projects will never write one; the chapter exists so
 you know the option is there.
-
-[← RBS and `RBS::Extended`](07-rbs-and-extended.md) · Next: [Plugins →](09-plugins.md)

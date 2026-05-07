@@ -1,7 +1,5 @@
 # RBS and `RBS::Extended`
 
-[← Classes](06-classes.md) · Next: [Understanding errors →](08-understanding-errors.md)
-
 When Rigor's inference cannot prove a type, the next escape
 hatch is RBS — Ruby's signature language. When RBS cannot
 express the precise contract you want, `RBS::Extended` adds a
@@ -268,5 +266,3 @@ see [Chapter 9](09-plugins.md) and the
 Chapter 8 covers the rule catalogue — what each diagnostic
 means, when it fires, and how to suppress it when it is wrong
 or noisy.
-
-[← Classes](06-classes.md) · Next: [Understanding errors →](08-understanding-errors.md)

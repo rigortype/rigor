@@ -1,7 +1,5 @@
 # Tuples and hash shapes
 
-[← Narrowing](03-narrowing.md) · Next: [Methods and blocks →](05-methods-and-blocks.md)
-
 `Tuple` and `HashShape` are how Rigor gives precise types to
 heterogeneous arrays and known-key hashes. They look a lot like
 Ruby's `Array` and `Hash` from the outside (and erase to those
@@ -233,5 +231,3 @@ Chapter 5 covers the function side: how Rigor types method
 parameters and return values, how block parameters are bound
 through Enumerable iteration, and how arity / parameter-type
 mismatches surface as `call.*` diagnostics.
-
-[← Narrowing](03-narrowing.md) · Next: [Methods and blocks →](05-methods-and-blocks.md)

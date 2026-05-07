@@ -157,6 +157,64 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       )
     end
 
+    it "registers Const = Struct.new(*sym) as a discovered class (v0.1.1)" do
+      program = parse(<<~RUBY)
+        Bar = Struct.new(:a, :b)
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      bar_constant = program.statements.body.first
+
+      expect(idx[bar_constant].discovered_classes["Bar"]).to(
+        eq(Rigor::Type::Combinator.singleton_of("Bar"))
+      )
+    end
+
+    it "accepts Struct.new with a trailing keyword_init: hash" do
+      program = parse(<<~RUBY)
+        Entry = Struct.new(:method, :receiver, keyword_init: true)
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      entry_constant = program.statements.body.first
+
+      expect(idx[entry_constant].discovered_classes["Entry"]).to(
+        eq(Rigor::Type::Combinator.singleton_of("Entry"))
+      )
+    end
+
+    it "qualifies Struct.new constants with the surrounding class path" do
+      program = parse(<<~RUBY)
+        class Container
+          Row = Struct.new(:k, :v)
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      class_node = program.statements.body.first
+
+      expect(idx[class_node].discovered_classes["Container::Row"]).to(
+        eq(Rigor::Type::Combinator.singleton_of("Container::Row"))
+      )
+    end
+
+    it "ignores Struct.new with non-symbol positional arguments" do
+      program = parse(<<~RUBY)
+        Bar = Struct.new(:a, "not_a_symbol")
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      bar_constant = program.statements.body.first
+
+      expect(idx[bar_constant].discovered_classes).not_to have_key("Bar")
+    end
+
+    it "ignores Struct.new() with no positional members (degenerate form)" do
+      program = parse(<<~RUBY)
+        Empty = Struct.new
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      empty_constant = program.statements.body.first
+
+      expect(idx[empty_constant].discovered_classes).not_to have_key("Empty")
+    end
+
     it "narrows IfNode branches when the conditional sits in expression position" do
       # `x = nil` makes x's entry type Constant[nil]; narrow_truthy collapses
       # it to Bot. Without branch-aware propagation x would still read as

@@ -27,6 +27,13 @@ codifies the move as a checklist step so the archive doesn't drift.
 
 ### Added
 
+#### `Const = Struct.new(*Symbol)` discovery — symmetric with `Data.define`
+
+- **`Inference::ScopeIndexer.record_meta_new_constant?`** (renamed from `record_data_define_constant?`) now recognises `Const = Struct.new(:a, :b)` and the `keyword_init:` variant `Const = Struct.new(:a, :b, keyword_init: true)` alongside the existing `Const = Data.define(:a, :b)` recogniser. The discovered constant gets registered as `Singleton[<qualified-Const>]`, so `Const.new(...)` resolves to a fresh `Nominal[<qualified-Const>]` via `meta_new` instead of the un-narrowed `Dynamic[top]` returned by the default `Class#new` envelope.
+- **Cleared 30 false positives across the seven worked plugin examples.** Before this slice, `examples/rigor-deprecations/lib`, `examples/rigor-routes/lib`, `examples/rigor-units/lib`, `examples/rigor-lisp-eval/lib`, `examples/rigor-activerecord/lib` all fired `error: undefined method 'new' for Struct` at every site that used the canonical `Foo = Struct.new(:a, :b)` pattern. `bundle exec exe/rigor check examples/rigor-*/lib` now reports `No diagnostics` for each.
+- **Trailing `KeywordHashNode`** (the `keyword_init: <expr>` form Ruby 3+ requires for keyword-arg struct types) is recognised and ignored at member-discovery time. Members must still all be `Prism::SymbolNode`; non-symbol positional args (e.g. `Struct.new(:x, "not_a_symbol")`) decline. `Struct.new()` with no positional args is a degenerate form Ruby allows but Rigor declines, since it has no members to discover.
+- Spec coverage: 5 new examples in `spec/rigor/inference/scope_indexer_spec.rb` (basic discovery, `keyword_init:` variant, qualified-class-path discovery, non-symbol arg rejection, empty-arg rejection).
+
 #### v0.1.1 Track 1 — narrowing depth
 
 ##### Slice 1 — regex pattern → refinement-name recogniser

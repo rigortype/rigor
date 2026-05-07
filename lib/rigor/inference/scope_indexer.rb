@@ -552,7 +552,7 @@ module Rigor
         when Prism::ModuleNode, Prism::ClassNode
           return if record_class_or_module?(node, qualified_prefix, identity_table, discovered)
         when Prism::ConstantWriteNode
-          return if record_data_define_constant?(node, qualified_prefix, identity_table, discovered)
+          return if record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
         end
 
         node.compact_child_nodes.each do |child|
@@ -573,17 +573,23 @@ module Rigor
         true
       end
 
-      # Recognises `Const = Data.define(*Symbol) [do ... end]` and registers
-      # `Const` (qualified by the surrounding class/module path) as a
-      # discovered class. `Const.new(...)` then resolves to a fresh
-      # `Nominal[Const]` via `meta_new`, instead of the un-narrowed
-      # `Dynamic[top]` returned by the default `Class#new` envelope.
+      # Recognises class-creating meta calls at constant-write rvalue
+      # position and registers `Const` (qualified by the surrounding
+      # class/module path) as a discovered class. `Const.new(...)`
+      # then resolves to a fresh `Nominal[Const]` via `meta_new`,
+      # instead of the un-narrowed `Dynamic[top]` returned by the
+      # default `Class#new` envelope.
       #
-      # The Data.define block body, if present, is recursed into so any
-      # nested class/module declarations in the override block (rare but
-      # legal) still feed the discovered table.
-      def record_data_define_constant?(node, qualified_prefix, identity_table, discovered)
-        return false unless data_define_call?(node.value)
+      # Two recognised meta forms:
+      #
+      # - `Const = Data.define(*Symbol) [do ... end]`
+      # - `Const = Struct.new(*Symbol [, keyword_init: ...]) [do ... end]`
+      #
+      # The block body, if present, is recursed into so any nested
+      # class/module declarations in the override block (rare but legal)
+      # still feed the discovered table.
+      def record_meta_new_constant?(node, qualified_prefix, identity_table, discovered)
+        return false unless data_define_call?(node.value) || struct_new_call?(node.value)
 
         full = (qualified_prefix + [node.name.to_s]).join("::")
         discovered[full] = Type::Combinator.singleton_of(full)
@@ -599,18 +605,46 @@ module Rigor
       def data_define_call?(node)
         return false unless node.is_a?(Prism::CallNode)
         return false unless node.name == :define
-        return false unless data_constant_receiver?(node.receiver)
+        return false unless meta_constant_receiver?(node.receiver, :Data)
 
         args = node.arguments&.arguments || []
         args.all?(Prism::SymbolNode)
       end
 
-      def data_constant_receiver?(node)
+      # Recognises `Struct.new(*Symbol)` and
+      # `Struct.new(*Symbol, keyword_init: <expr>)` at constant-write
+      # rvalue position. A trailing `KeywordHashNode` (the
+      # `keyword_init: ...` form) is accepted but does not contribute
+      # to member discovery; every other argument MUST be a
+      # `Prism::SymbolNode`. At least one Symbol member is required —
+      # `Struct.new()` is a degenerate form callers don't typically use.
+      def struct_new_call?(node)
+        return false unless meta_call_with_name?(node, :Struct, :new)
+
+        args = node.arguments&.arguments || []
+        positional = struct_new_positionals(args)
+        return false if positional.nil? || positional.empty?
+
+        positional.all?(Prism::SymbolNode)
+      end
+
+      def meta_call_with_name?(node, receiver_name, method_name)
+        return false unless node.is_a?(Prism::CallNode)
+        return false unless node.name == method_name
+
+        meta_constant_receiver?(node.receiver, receiver_name)
+      end
+
+      def struct_new_positionals(args)
+        args.last.is_a?(Prism::KeywordHashNode) ? args[0..-2] : args
+      end
+
+      def meta_constant_receiver?(node, expected_name)
         case node
         when Prism::ConstantReadNode
-          node.name == :Data
+          node.name == expected_name
         when Prism::ConstantPathNode
-          node.parent.nil? && node.name == :Data
+          node.parent.nil? && node.name == expected_name
         end
       end
 

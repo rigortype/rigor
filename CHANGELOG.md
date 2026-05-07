@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `Plugin::Services#fact_store` accessor (v0.1.1 Track 2 / ADR-9 slice 2)
+
+- **`Rigor::Plugin::Services`** gains a `fact_store` attribute (and a matching keyword arg in the constructor). When no `fact_store:` is supplied, a fresh `Plugin::FactStore` instance is constructed per Services. The runner (slice 3) will thread its own per-run instance through. Plugins reach for `services.fact_store.read(plugin_id:, name:)` to consume facts and `services.fact_store.publish(...)` to produce them.
+- **Public-API drift snapshot** in `spec/rigor/public_api_drift_spec.rb` updated to include `fact_store()` on `Rigor::Plugin::Services`.
+
 ### Added — `Rigor::Plugin::FactStore` value object (v0.1.1 Track 2 / ADR-9 slice 1)
 
 - **New `Rigor::Plugin::FactStore`** at [`lib/rigor/plugin/fact_store.rb`](lib/rigor/plugin/fact_store.rb). Per-run cross-plugin fact storage per [ADR-9](docs/adr/9-cross-plugin-api.md) — a producer plugin (e.g. `rigor-activerecord`) publishes a typed `(plugin_id, name) -> value` triple in its `#prepare` hook (slice 3), and a consumer plugin (e.g. `rigor-actionpack` Phase 1) reads it via `services.fact_store.read(plugin_id:, name:)` in `#diagnostics_for_file`. The store is constructed fresh at the start of every `Analysis::Runner.run` and discarded at the end — caching the underlying expensive computation is the producer's job (`Plugin::Base.producer`); the FactStore just publishes the *reference* to that already-cached result.

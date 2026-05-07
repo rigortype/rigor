@@ -31,15 +31,27 @@ module Rigor
     # raw `File.read` so reads stay within the trusted scope and
     # feed cache invalidation; ADR-2 § "Plugin Trust and I/O
     # Policy" documents the trust model the boundary enforces.
+    #
+    # ADR-9 slice 2 adds `fact_store`: the per-run cross-plugin
+    # `Plugin::FactStore`. Producer plugins publish their facts
+    # in `#prepare(services)` (slice 3); consumer plugins read in
+    # `#diagnostics_for_file` via `services.fact_store.read(...)`.
+    # A fresh `FactStore` instance is constructed per Services
+    # when none is supplied — the runner threads its own instance
+    # in once slice 3 wires `#prepare` invocation.
     class Services
-      attr_reader :reflection, :type, :configuration, :cache_store, :trust_policy
+      attr_reader :reflection, :type, :configuration, :cache_store, :trust_policy, :fact_store
 
-      def initialize(reflection:, type:, configuration:, cache_store: nil, trust_policy: nil)
+      def initialize( # rubocop:disable Metrics/ParameterLists
+        reflection:, type:, configuration:,
+        cache_store: nil, trust_policy: nil, fact_store: nil
+      )
         @reflection = reflection
         @type = type
         @configuration = configuration
         @cache_store = cache_store
         @trust_policy = trust_policy || default_trust_policy
+        @fact_store = fact_store || FactStore.new
         freeze
       end
 

@@ -142,6 +142,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   PLUGIN_SERVICES_INSTANCE = %w[
     cache_store()
     configuration()
+    fact_store()
     io_boundary_for(req:plugin_id)
     reflection()
     trust_policy()

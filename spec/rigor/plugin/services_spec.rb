@@ -69,4 +69,33 @@ RSpec.describe Rigor::Plugin::Services do
       end
     end
   end
+
+  describe "#fact_store (ADR-9 slice 2)" do
+    it "constructs a fresh Plugin::FactStore by default" do
+      services = described_class.new(
+        reflection: Rigor::Reflection,
+        type: Rigor::Type::Combinator,
+        configuration: Rigor::Configuration.new
+      )
+
+      expect(services.fact_store).to be_a(Rigor::Plugin::FactStore)
+      expect(services.fact_store.read(plugin_id: "x", name: :y)).to be_nil
+    end
+
+    it "carries a user-supplied FactStore through unchanged" do
+      injected = Rigor::Plugin::FactStore.new
+      injected.publish(plugin_id: "activerecord", name: :model_index, value: { user: %i[id] })
+
+      services = described_class.new(
+        reflection: Rigor::Reflection,
+        type: Rigor::Type::Combinator,
+        configuration: Rigor::Configuration.new,
+        fact_store: injected
+      )
+
+      expect(services.fact_store).to be(injected)
+      expect(services.fact_store.read(plugin_id: "activerecord", name: :model_index))
+        .to eq(user: %i[id])
+    end
+  end
 end

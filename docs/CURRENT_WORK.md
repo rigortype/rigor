@@ -6,14 +6,18 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.1.0 version-bumped on `master` (commit `6170832`); release pending.** All six plugin-contract slices and the v0.1.0-polish work landed (six worked plugin examples, the nine-chapter end-user handbook, the named-capture narrowing fix, the `;`-prefixed block-local nil shadow fix). The seventh plugin example (`rigor-activerecord`) landed during the polish window. Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), `bundle exec rake release` waits for explicit user authorisation. The slice-by-slice recap is in `CHANGELOG.md`'s `[0.1.0]` section and the v0.1.0 row of [`docs/MILESTONES.md`](MILESTONES.md).
 
-**v0.1.1 in flight.** Four parallel tracks scoped. Landed unreleased on the work branch:
-- Track 1 slice 1 — regex pattern → refinement-name recogniser
-- Track 1 slice 2 — `String#to_i` / `#to_int` (2a) and `Kernel#Integer(s)` (2b) on `decimal-int-string` / `numeric-string` → `non-negative-int`
-- Track 1 slice 5 — `literal-string` preservation through `#strip`/`#lstrip`/`#rstrip`/`#chomp`/`#chop`/`#scrub` (5a), `Integer#to_s` precision on non-negative `IntegerRange` (5b), `#center`/`#ljust`/`#rjust` literal-bearing lift (5c)
-- Track 3 slice 8 (helpers, prior commit `ce64bb6`) and slice 10 — examples re-included in RuboCop with documented relaxations
-- Track 4 fully drained: item 11 (three `lib/` sig drifts closed), item 12 (`node_locator_spec.rb:82` stale; constant-folding already removes the diagnostic), item 13 (prelude `composed` bodies reclassified `unknown` → `dispatch`).
+**v0.1.1 nearly complete.** All four tracks essentially landed unreleased on the work branch:
 
-Working state: 2140 RSpec examples / 0 failures, RuboCop 262 files / 0 offenses, `bundle exec exe/rigor check lib` reports `No diagnostics`. Remaining v0.1.1: Track 1 slice 3 (`self`-narrowing in `predicate-if-*` — needs design investigation), slice 4 (`String#start_with?` / `#end_with?` / `#include?` — needs a new "starts-with" refinement carrier, design pending); Track 2 (cross-plugin API per [ADR-9](adr/9-cross-plugin-api.md) + return-type contributions); Track 3 slice 9 (demo cache directory handling — needs the `(a)` / `(b)` design call). Full slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned".
+- **Track 1 slice 1** — regex pattern → refinement-name recogniser.
+- **Track 1 slice 2** — `String#to_i` / `#to_int` (2a) and `Kernel#Integer(s)` (2b) on `decimal-int-string` / `numeric-string` → `non-negative-int`.
+- **Track 1 slice 3** — full `self`-narrowing in `predicate-if-*` / `assert-if-*` / `assert` (LocalVariable / InstanceVariable / SelfNode / implicit-self receiver shapes).
+- **Track 1 slice 4** — `String#start_with?` / `#end_with?` / `#include?` flow facts (FactStore-based; no new carrier).
+- **Track 1 slice 5** — `literal-string` preservation through `#strip` family (5a), `Integer#to_s` precision on non-negative `IntegerRange` (5b), `#center` / `#ljust` / `#rjust` literal-bearing lift (5c). The `Numeric#to_s` bullet is intentionally not implemented (no clean carrier for `Float` / signed `Integer` outputs).
+- **Track 2 (ADR-9 cross-plugin API)** — slices 1 → 5 all landed (`Plugin::FactStore`, `Services#fact_store`, `#prepare(services)` hook + Runner invocation, `manifest(produces:/consumes:)`, topological sort + missing-producer detection). Tier 2 Rails plugins are now unblocked.
+- **Track 3** — slice 8 (helpers, prior commit `ce64bb6`), slice 9 (per-demo cache isolation under `tmp/` + CLI fix to honour `cache.path` from `.rigor.yml`), slice 10 (examples re-included in RuboCop with documented relaxations).
+- **Track 4** — fully drained: item 11 (three `lib/` sig drifts closed), item 12 (`node_locator_spec.rb:82` stale), item 13 (prelude `composed` bodies reclassified `unknown` → `dispatch`).
+
+Working state: 2181 RSpec examples / 0 failures, RuboCop 264 files / 0 offenses, `bundle exec exe/rigor check lib` reports `No diagnostics`. Remaining v0.1.1: only **Track 2 slice 7** (plugin return-type contributions via `Plugin::Base#flow_contribution_for` + dispatcher integration). v0.1.1 is otherwise ready for `bundle exec rake release` once the user authorises it. Full slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned".
 
 ## Where the Work Resumes
 
@@ -25,11 +29,9 @@ The Rails plugin family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-act
 
 Read [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned" for the full slice list. Recommended entry order:
 
-- **Track 1 slice 4** (`String#start_with?` / `#end_with?` / `#include?` against literal needles) needs a new refinement carrier (or a flow-fact form) to express "starts with X". Design pending.
-- **Track 1 slice 3** (`self`-narrowing in `predicate-if-*` directives) needs investigation of how the existing `predicate-if-true: x is T` plumbing handles `self` as the target.
-- **Track 2 ADR-9 slice 1** (`Plugin::FactStore` value object) is the smallest unblocking step for Tier 2 Rails plugins; six independently shippable slices in the ADR.
-- **Track 3 slice 9** (demo cache directory handling) is queued behind a `(a)` / `(b)` design call.
-- **Track 4 maintenance** is fully drained.
+- **Track 2 slice 7** (plugin return-type contributions via `Plugin::Base#flow_contribution_for` + dispatcher integration) is the only remaining v0.1.1 slice. The substrate (`FlowContribution::Merger`) is wired internally already; this slice exposes a per-call hook plugins can override and integrates a new dispatcher tier ahead of `RbsDispatch`.
+- After slice 7, v0.1.1 is ready for `bundle exec rake release` once the user authorises it.
+- The Rails plugin parallel running track is also unblocked now that ADR-9 has shipped — `rigor-actionpack` Phase 1 and `rigor-factorybot` (Tier 2) can author against the new cross-plugin API.
 
 ## Open Engineering Items
 

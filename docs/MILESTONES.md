@@ -178,7 +178,13 @@ Theme: **deepen the literal-string narrowing surface, ship the cross-plugin API,
 
 ### Track 2 — Cross-plugin API + return-type contributions (parallel)
 
-6. **ADR-9 cross-plugin API — slices 1 → 5.** Implementation of [`docs/adr/9-cross-plugin-api.md`](adr/9-cross-plugin-api.md): `Plugin::FactStore` value object → `Plugin::Services#fact_store` accessor → `Plugin::Base#prepare(services)` hook + Runner invocation → `manifest(produces:/consumes:)` declarations → topological sort + missing-producer detection. Unblocks Tier 2 Rails plugins (`rigor-actionpack` Phase 1, `rigor-factorybot`).
+6. ✅ **ADR-9 cross-plugin API — slices 1 → 5** all landed unreleased.
+   - **Slice 1** — `Plugin::FactStore` value object (`#publish` / `#read` / `#published?` / `#each_fact`, plus the `Fact = Data.define(:plugin_id, :name, :value)` shape and `Conflict` exception). Thread-safe; canonicalises `plugin_id` to String and `name` to Symbol.
+   - **Slice 2** — `Plugin::Services#fact_store` accessor. A fresh `FactStore` is constructed per Services when none is supplied; the runner threads its own per-run instance through.
+   - **Slice 3** — `Plugin::Base#prepare(services)` default-no-op hook. `Analysis::Runner.run` invokes `#prepare` on every loaded plugin once per run, after `#init` and before per-file iteration; failures isolate as `:plugin_loader runtime-error` diagnostics.
+   - **Slice 4** — `manifest(produces: [...])` / `manifest(consumes: [{plugin_id:, name:, optional:}])` declarations + the `Manifest::Consumption` Data shape. The loader doesn't yet enforce them in slice 4.
+   - **Slice 5** — `Plugin::Loader.load` topologically sorts plugins by `consumes:` (configuration-order tie-break), emits `Plugin::LoadError(reason: :"missing-producer")` when a non-optional consume names a `(plugin_id, name)` no loaded plugin produces, and `Plugin::LoadError(reason: :"dependency-cycle")` when consumes form a cycle. `Plugin::LoadError` gains an optional `reason:` field for the new codes. Topo sort skips entirely when no loaded plugin declares a `consumes:` entry, preserving v0.1.0 observable behaviour for projects that don't opt into the cross-plugin API.
+   - Tier 2 Rails plugins (`rigor-actionpack` Phase 1, `rigor-factorybot`) are now unblocked.
 
 7. **Plugin return-type contributions slice 1.** Plugins emit `FlowContribution` bundles consumed by `Inference::MethodDispatcher` so plugin-side analysers can replace the analyzer's inferred return type for a call site. The substrate (`FlowContribution::Merger`) is already wired internally in v0.1.0. Slice 1: a `Plugin::Base#flow_contribution_for(call_node:, scope:)` hook + dispatcher integration tier ahead of `RbsDispatch`. Existing seven example plugins migrate from "info diagnostic only" to "narrowed return type" incrementally as follow-up work.
 

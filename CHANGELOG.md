@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — full `self`-narrowing in `predicate-if-*` / `assert-if-*` / `assert` directives (v0.1.1 Track 1 slice 3)
+
+- **Three additional receiver shapes now narrow `self`-targeted facts** (in addition to the v0.1.0 LocalVariableReadNode case):
+  - **`InstanceVariableReadNode`** — `@buddy.logged_in?` narrows `@buddy` itself on each edge via `Scope#with_ivar`.
+  - **`Prism::SelfNode`** — `self.logged_in?` narrows `scope.self_type` via `Scope#with_self_type`.
+  - **Implicit self (nil receiver)** — `logged_in?` with no receiver inside an instance method body narrows `scope.self_type`. `Inference::Narrowing#analyse_call` no longer rejects nil-receiver call shapes outright; the RBS::Extended path is allowed to run when the receiver is implicit.
+- **`Inference::Narrowing#apply_self_fact`** is the new dispatch helper covering all four receiver shapes (LocalVariableRead / InstanceVariableRead / SelfNode / nil). Mirrored as `StatementEvaluator#apply_self_post_return_fact` for the `assert self is T` post-return path.
+- **`Inference::Narrowing#resolve_rbs_extended_method`** consults `scope.self_type` when `node.receiver` is nil so the implicit-self call's method definition is reachable. Mirrors the resolver pattern already in use in `StatementEvaluator#resolve_call_method`.
+- **Inference engine spec** at [`docs/internal-spec/inference-engine.md`](docs/internal-spec/inference-engine.md) updated to describe the four supported receiver shapes; the previous "self produces no scope edits" caveat is removed.
+- **Integration fixture** `spec/integration/fixtures/self_predicate/` extended with `User#greet_buddy` (ivar receiver) and `User#greet` (implicit self) cases. `assert_type` checks confirm the narrowing on each edge.
+
 ### Added — `literal-string` preservation through `#center` / `#ljust` / `#rjust` (v0.1.1 Track 1 slice 5c)
 
 - **`MethodDispatcher::LiteralStringFolding.fold_width_pad`** lifts `#center` / `#ljust` / `#rjust` calls on a literal-bearing receiver to `literal-string`. The first argument (the target width) MUST be Integer-typed (`Type::Constant<Integer>`, `Type::Nominal["Integer"]`, or `Type::IntegerRange`). The optional second argument (padding) MUST be literal-bearing per `Type::Combinator.literal_string_compatible?`. The default padding is a space — always literal — so the no-second-arg form passes through directly. Width is allowed to be any Integer because Ruby accepts negative widths and widths smaller than the receiver's length without raising.

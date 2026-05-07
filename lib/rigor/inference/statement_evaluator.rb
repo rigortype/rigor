@@ -1015,6 +1015,7 @@ module Rigor
       # same hierarchy-aware narrowing rules.
       def apply_post_return_fact(fact, call_node, current_scope, method_def)
         target_node = fact_target_node(fact, call_node, method_def)
+        return apply_self_post_return_fact(fact, target_node, current_scope) if fact.target_kind == :self
         return current_scope unless target_node.is_a?(Prism::LocalVariableReadNode)
 
         local_name = target_node.name
@@ -1023,6 +1024,34 @@ module Rigor
 
         narrowed = Narrowing.narrow_for_fact(current_type, fact, current_scope.environment)
         current_scope.with_local(local_name, narrowed)
+      end
+
+      # v0.1.1 Track 1 slice 3 — `assert self is T` post-return
+      # narrowing for the four supported receiver shapes (mirrors
+      # `Narrowing#apply_self_fact`).
+      def apply_self_post_return_fact(fact, receiver_node, current_scope)
+        case receiver_node
+        when nil, Prism::SelfNode
+          current = current_scope.self_type
+          return current_scope if current.nil?
+
+          narrowed = Narrowing.narrow_for_fact(current, fact, current_scope.environment)
+          current_scope.with_self_type(narrowed)
+        when Prism::LocalVariableReadNode
+          current = current_scope.local(receiver_node.name)
+          return current_scope if current.nil?
+
+          narrowed = Narrowing.narrow_for_fact(current, fact, current_scope.environment)
+          current_scope.with_local(receiver_node.name, narrowed)
+        when Prism::InstanceVariableReadNode
+          current = current_scope.ivar(receiver_node.name)
+          return current_scope if current.nil?
+
+          narrowed = Narrowing.narrow_for_fact(current, fact, current_scope.environment)
+          current_scope.with_ivar(receiver_node.name, narrowed)
+        else
+          current_scope
+        end
       end
 
       # `:self` routes to the call receiver; otherwise we look

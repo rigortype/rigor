@@ -263,9 +263,11 @@ today:
 - Open-ended class-comparison via `===` against arbitrary
   user-defined `case_eq` — only Class / Module / Range /
   Regexp are recognised.
-- `self`-narrowing inside `predicate-if-*` directives —
-  queued for v0.1.1 per
-  [`docs/MILESTONES.md`](../MILESTONES.md).
+- Method-chain receivers in `self`-targeted directives
+  (`get_user.admin?`) — there is no scope binding to narrow
+  against. Local, instance-variable, explicit-`self`, and
+  implicit-self receivers are all supported (v0.1.1 Track 1
+  slice 3).
 
 When narrowing is not recognised, both edges share the entry
 scope unchanged — Rigor stays conservative rather than

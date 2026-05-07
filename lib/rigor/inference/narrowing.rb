@@ -804,16 +804,21 @@ module Rigor
         # through to the no-narrowing fallback.
         def analyse_call(node, scope)
           return nil if node.block
-          return nil if node.receiver.nil?
 
-          shape_result = dispatch_call(node, scope, node.name)
-          return shape_result if shape_result
+          unless node.receiver.nil?
+            shape_result = dispatch_call(node, scope, node.name)
+            return shape_result if shape_result
+          end
 
           # Slice 7 phase 15 — RBS::Extended predicate
           # effects. When the method's RBS signature carries
           # `rigor:v1:predicate-if-true` / `predicate-if-false`
           # annotations, apply them to narrow the corresponding
-          # local-variable arguments on each edge.
+          # local-variable arguments on each edge. v0.1.1 Track
+          # 1 slice 3 — implicit-self calls (`recv == nil`,
+          # e.g. `admin?` inside an instance method body) flow
+          # through here too so `self`-targeted facts can edit
+          # `scope.self_type`.
           analyse_rbs_extended_contribution(node, scope)
         end
 
@@ -1299,6 +1304,7 @@ module Rigor
 
         def apply_fact_to_scope(fact, call_node, entry_scope, target_scope, method_def)
           target_node = fact_target_node(fact, call_node, method_def)
+          return apply_self_fact(fact, target_node, entry_scope, target_scope) if fact.target_kind == :self
           return target_scope unless target_node.is_a?(Prism::LocalVariableReadNode)
 
           local_name = target_node.name
@@ -1307,6 +1313,45 @@ module Rigor
 
           narrowed = narrow_for_fact(current, fact, entry_scope.environment)
           target_scope.with_local(local_name, narrowed)
+        end
+
+        # v0.1.1 Track 1 slice 3 — `target_kind == :self` facts
+        # (`predicate-if-true self is T`, `predicate-if-false
+        # self is T`) narrow whichever scope binding is bound to
+        # the call's receiver. Four receiver shapes participate:
+        #
+        #   `recv.method?` where recv is...
+        #   - `LocalVariableReadNode`            -> narrow that local
+        #   - `InstanceVariableReadNode`         -> narrow that ivar
+        #   - `Prism::SelfNode` (explicit self)  -> narrow `self_type`
+        #   - nil (implicit self call inside a method body)
+        #                                        -> narrow `self_type`
+        #
+        # Other receiver shapes (method chains, expressions) have
+        # no scope binding to narrow against and fall through.
+        def apply_self_fact(fact, receiver_node, entry_scope, target_scope)
+          case receiver_node
+          when nil, Prism::SelfNode
+            current = entry_scope.self_type
+            return target_scope if current.nil?
+
+            narrowed = narrow_for_fact(current, fact, entry_scope.environment)
+            target_scope.with_self_type(narrowed)
+          when Prism::LocalVariableReadNode
+            current = entry_scope.local(receiver_node.name)
+            return target_scope if current.nil?
+
+            narrowed = narrow_for_fact(current, fact, entry_scope.environment)
+            target_scope.with_local(receiver_node.name, narrowed)
+          when Prism::InstanceVariableReadNode
+            current = entry_scope.ivar(receiver_node.name)
+            return target_scope if current.nil?
+
+            narrowed = narrow_for_fact(current, fact, entry_scope.environment)
+            target_scope.with_ivar(receiver_node.name, narrowed)
+          else
+            target_scope
+          end
         end
 
         # Resolves a Fact's target node. Mirrors the earlier
@@ -1323,7 +1368,9 @@ module Rigor
         end
 
         def resolve_rbs_extended_method(node, scope)
-          receiver_type = scope.type_of(node.receiver)
+          receiver_type = receiver_type_for_resolve(node, scope)
+          return nil if receiver_type.nil?
+
           class_name = rbs_extended_class_name(receiver_type)
           return nil if class_name.nil?
           return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
@@ -1335,6 +1382,13 @@ module Rigor
           end
         rescue StandardError
           nil
+        end
+
+        # Implicit self call (`admin?` with no receiver inside an
+        # instance method body) — read the method definition from
+        # `scope.self_type` per v0.1.1 Track 1 slice 3.
+        def receiver_type_for_resolve(node, scope)
+          node.receiver.nil? ? scope.self_type : scope.type_of(node.receiver)
         end
 
         def rbs_extended_class_name(receiver_type)

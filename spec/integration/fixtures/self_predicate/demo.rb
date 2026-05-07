@@ -31,3 +31,37 @@ def ensure_registered
   user.ensure_registered!
   assert_type("RegisteredUser", user)
 end
+
+# v0.1.1 Track 1 slice 3 — `predicate-if-*` self narrowing
+# now covers three receiver shapes beyond the local-variable
+# case already supported in v0.1.0.
+class User
+  def setup
+    @buddy = User.new
+  end
+
+  # InstanceVariableReadNode receiver: `@buddy.logged_in?`
+  # narrows `@buddy` itself on each edge. `LoggedInUser < User`
+  # so the intersection on the truthy edge is `LoggedInUser`.
+  def greet_buddy
+    if @buddy.logged_in?
+      assert_type("LoggedInUser", @buddy)
+    else
+      assert_type("User", @buddy)
+    end
+  end
+
+  # Implicit self (no receiver): `logged_in?` inside an
+  # instance method body narrows `scope.self_type` on each
+  # edge. `assert_type(_, self)` reads `scope.type_of(self)`,
+  # which returns the (narrowed) `self_type`. `User#logged_in?`
+  # carries `predicate-if-true self is LoggedInUser`, so the
+  # truthy edge sees `User ∩ LoggedInUser = LoggedInUser`.
+  def greet
+    if logged_in?
+      assert_type("LoggedInUser", self)
+    else
+      assert_type("User", self)
+    end
+  end
+end

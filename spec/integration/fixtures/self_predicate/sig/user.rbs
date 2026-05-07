@@ -1,4 +1,6 @@
 class User
+  @buddy: User
+
   %a{rigor:v1:predicate-if-true self is LoggedInUser}
   def logged_in?: () -> bool
 
@@ -7,6 +9,10 @@ class User
 
   %a{rigor:v1:assert self is RegisteredUser}
   def ensure_registered!: () -> void
+
+  def setup: () -> User
+  def greet_buddy: () -> void
+  def greet: () -> void
 end
 
 class LoggedInUser < User

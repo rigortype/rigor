@@ -32,8 +32,13 @@ Use these rules:
 - Add an entry for every released version.
 - Keep the newest released version directly below `Unreleased`.
 - Add a new `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
-- Use Keep a Changelog section headings as needed: `Added`, `Changed`,
-  `Deprecated`, `Removed`, `Fixed`, and `Security`.
+- Use Keep a Changelog section headings: `Added`, `Changed`, `Deprecated`,
+  `Removed`, `Fixed`, and `Security`. Each version uses these headings
+  verbatim — do NOT inline a short description into the heading
+  (`### Added — feature X` is wrong; the heading is `### Added` and the
+  feature description is a `####` sub-heading or the bullet text below).
+- When a section has many distinct changes, group them under `####`
+  sub-headings (free-form titles) so the bullet stream stays readable.
 - Group the same kinds of changes under the same section heading.
 - Keep changelog entries user-facing. Do not list internal refactors unless
   they affect users.
@@ -50,6 +55,41 @@ Use these rules:
   new `rigor (x.y.z)` revision; commit the regenerated lockfile alongside
   the version bump.
 - Keep the release commit message in the form `Bump up version to x.y.z`.
+
+### Archival rule (mandatory check)
+
+Before bumping the version, check whether the new release is the **first
+release after a leading-digit bump**. The archival rule:
+
+> At the first `a.b.c` release whose `(a, b)` pair matches the most recent
+> release but DIFFERS from the most recent archive's prefix, move the
+> previous-digit range out of `CHANGELOG.md` into a new
+> `docs/CHANGELOG-<old-prefix>.md` archive file.
+
+Worked example: the rule fires at `0.1.1` because `(0, 1)` matches `0.1.0`
+(the previous release) but differs from the most recent archive (none yet),
+so `0.0.x` moves to `docs/CHANGELOG-0.0.x.md`. The next archival fires at
+the first `0.2.x` post-bump release (`0.2.1`), which moves `0.1.x` to
+`docs/CHANGELOG-0.1.x.md`.
+
+When the rule fires:
+
+1. Create `docs/CHANGELOG-<old-prefix>.md` with a header explaining what's
+   in the file and a back-link to `CHANGELOG.md`. Use the archive built at
+   `0.1.1` as the template — the explanatory header on
+   [`docs/CHANGELOG-0.0.x.md`](../../../docs/CHANGELOG-0.0.x.md) is the
+   reference shape.
+2. Move the entire `## [a.b.c] - YYYY-MM-DD` block for every version in the
+   range, plus the matching `[a.b.c]: https://...` reference links from
+   the bottom of `CHANGELOG.md`, into the archive.
+3. Update `CHANGELOG.md`'s top-of-file "Older release notes are archived"
+   pointer list to include the new archive file.
+4. Verify the active `CHANGELOG.md` now holds only `[Unreleased]` and the
+   most recent leading-digit cycle (`a.b.0` plus any later `a.b.c`).
+
+The rule keeps the active `CHANGELOG.md` small enough to read top-to-bottom
+without scrolling fatigue while preserving every release note's full text
+and link addressability.
 
 ## Verify the Release
 

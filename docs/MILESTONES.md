@@ -208,7 +208,7 @@ Out of scope for v0.1.1 (deferred to v0.1.2 or beyond):
 
 - **New CheckRules rule families.** `flow.unreachable-branch`, `flow.dead-assignment`, `flow.always-truthy-condition`, `def.ivar-write-mismatch`, `def.method-visibility-mismatch`, plus `def.return-type-mismatch` for type-carrier predicates. Each needs careful false-positive triage.
 - **C-body classifier wider transitive mutator scan.** Long-deferred catalog-extractor work that needs to track `str_modifiable` / `time_modify` / similar helpers without over-flagging legitimate non-mutators (the `Array#to_a` regression that gated the v0.0.5 fix).
-- **`Data.define` override-aware initializer dispatch.** Block-body `def initialize(...)` as the canonical sig for `Const.new`.
+- ~~`Data.define` override-aware initializer dispatch.~~ Closed in v0.1.2 Track 2 — see below.
 - **`Plugin::IoBoundary#open_url` allowlist.** Currently always raises; relaxed network-policy lands when a concrete plugin needs it.
 - **`rigor:v1:conforms-to` directive.** Needs a real structural-conformance checker.
 - **DX tooling track.** `rigor explain <rule-id>` / `rigor diff <baseline>` / `# rigor:disable-file <rule>` / `.rigor.yml` JSON schema for editor autocomplete. Separate user-facing surface; queue for v0.1.2.
@@ -244,9 +244,11 @@ The other three example plugins (`rigor-deprecations`, `rigor-statesman`, `rigor
 
 6. ✅ **Interface-strictness on overload selection** — landed unreleased. `OverloadSelector` now runs a two-pass match: pass 1 considers only overloads whose param types stay strictly typed (no `RBS::Types::Alias` / `Interface` / `Intersection` / `Bases::Any`-translated `Dynamic[Top]`), pass 2 falls back to the existing gradual matcher. The strict pass is also skipped when any arg is itself `Dynamic[Top]` (literal `untyped`) so gradual acceptance against an untyped arg doesn't arbitrarily lock in a strict overload. Closes the v0.1.1 self-analysis miss (`Array[String]#[](Range)` now returns `Array[String]?` via the `(::Range[::Integer?]) -> ::Array[Elem]?` overload instead of `String` via the `(::int) -> Elem` alias-typed overload that previously won by coming first); the `# rigor:disable call.undefined-method` workaround at `tool/extract_builtin_catalog.rb:750` is removed.
 
+7. ✅ **`Data.define` / `Struct.new` block-body method discovery** — landed unreleased. `ScopeIndexer.walk_methods` and `walk_def_nodes` now recurse into the block body of a `Const = Data.define(*sym) do ... end` / `Const = Struct.new(*sym) do ... end` write with `Const`'s qualified name pushed onto the prefix. Block-body `def initialize(...)` and any other override defs are registered under the constant's name in both `discovered_methods` and `discovered_def_nodes`, so a `Point.new` whose `Point` constant is RBS-known no longer surfaces a false-positive `call.undefined-method` for block-defined accessors. Closes the v0.0.5 follow-up "override-aware initializer-signature dispatch (using the block's `def initialize(...)` as the canonical sig)".
+
 ### Out of scope for v0.1.2 (deferred to v0.1.3 or beyond)
 
-The full "Out of scope for v0.1.1" list above applies (minus the now-closed interface-strictness item) — new `flow.*` / `def.*` rule families, `Data.define` initializer dispatch, `Plugin::IoBoundary#open_url`, `rigor:v1:conforms-to`, DX tooling track, LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT.
+The full "Out of scope for v0.1.1" list above applies (minus the now-closed interface-strictness and `Data.define` items) — new `flow.*` / `def.*` rule families, `Plugin::IoBoundary#open_url`, `rigor:v1:conforms-to`, DX tooling track, LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 

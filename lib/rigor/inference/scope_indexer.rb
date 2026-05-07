@@ -340,7 +340,8 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      def walk_methods(node, qualified_prefix, in_singleton_class, accumulator) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
+      def walk_methods(node, qualified_prefix, in_singleton_class, accumulator)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -356,6 +357,12 @@ module Rigor
             walk_methods(node.body, qualified_prefix, true, accumulator)
             return
           end
+        when Prism::ConstantWriteNode
+          if meta_new_block_body(node)
+            child_prefix = qualified_prefix + [node.name.to_s]
+            walk_methods(meta_new_block_body(node), child_prefix, false, accumulator)
+            return
+          end
         when Prism::DefNode
           record_def_method(node, qualified_prefix, in_singleton_class, accumulator)
           return
@@ -369,6 +376,24 @@ module Rigor
         node.compact_child_nodes.each do |child|
           walk_methods(child, qualified_prefix, in_singleton_class, accumulator)
         end
+      end
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
+
+      # v0.1.2 — when a `Const = Data.define(*sym) do ... end`
+      # / `Const = Struct.new(*sym) do ... end` constant write
+      # carries a block, the block body holds method overrides
+      # whose canonical class is `Const`. Returns the block body
+      # node (a `Prism::StatementsNode`) when the rvalue
+      # matches; nil otherwise. Used by `walk_methods` /
+      # `walk_def_nodes` to push `Const` onto the qualified
+      # prefix before recursing.
+      def meta_new_block_body(node)
+        return nil unless node.is_a?(Prism::ConstantWriteNode)
+
+        rvalue = node.value
+        return nil unless data_define_call?(rvalue) || struct_new_call?(rvalue)
+
+        rvalue.block&.body
       end
 
       def record_def_method(def_node, qualified_prefix, in_singleton_class, accumulator)
@@ -397,7 +422,8 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      def walk_def_nodes(node, qualified_prefix, in_singleton_class, accumulator) # rubocop:disable Metrics/CyclomaticComplexity
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+      def walk_def_nodes(node, qualified_prefix, in_singleton_class, accumulator)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -413,6 +439,12 @@ module Rigor
             walk_def_nodes(node.body, qualified_prefix, true, accumulator)
             return
           end
+        when Prism::ConstantWriteNode
+          if meta_new_block_body(node)
+            child_prefix = qualified_prefix + [node.name.to_s]
+            walk_def_nodes(meta_new_block_body(node), child_prefix, false, accumulator)
+            return
+          end
         when Prism::DefNode
           record_def_node(node, qualified_prefix, in_singleton_class, accumulator)
           return
@@ -422,6 +454,7 @@ module Rigor
           walk_def_nodes(child, qualified_prefix, in_singleton_class, accumulator)
         end
       end
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
       # v0.0.3 A — sentinel key under which `record_def_node`
       # files DefNodes that live outside any class / module

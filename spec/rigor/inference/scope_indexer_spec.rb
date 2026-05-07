@@ -157,6 +157,70 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       )
     end
 
+    # v0.1.2 — Data.define / Struct.new block-body methods are
+    # registered under the constant's qualified name in both
+    # `discovered_methods` and `discovered_def_nodes`. Without
+    # this, the block-body `def initialize(...)` override is
+    # invisible to `Reflection.user_def_for` / `discovered_method?`
+    # and the canonical-sig contract is missing.
+    it "registers Data.define block-body methods under the constant's name" do # rubocop:disable RSpec/ExampleLength
+      program = parse(<<~RUBY)
+        Point = Data.define(:x, :y) do
+          def initialize(x:, y:)
+            super(x: x.to_i, y: y.to_i)
+          end
+
+          def magnitude
+            42
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.user_def_for("Point", :initialize)).to be_a(Prism::DefNode)
+      expect(scope.user_def_for("Point", :magnitude)).to be_a(Prism::DefNode)
+      expect(scope.discovered_method?("Point", :initialize, :instance)).to be(true)
+      expect(scope.discovered_method?("Point", :magnitude, :instance)).to be(true)
+    end
+
+    it "registers Struct.new block-body methods under the constant's name" do
+      program = parse(<<~RUBY)
+        Row = Struct.new(:k, :v) do
+          def initialize(k, v)
+            super(k.to_s, v)
+          end
+
+          def to_pair
+            [k, v]
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.user_def_for("Row", :initialize)).to be_a(Prism::DefNode)
+      expect(scope.user_def_for("Row", :to_pair)).to be_a(Prism::DefNode)
+      expect(scope.discovered_method?("Row", :to_pair, :instance)).to be(true)
+    end
+
+    it "qualifies block-body methods under the surrounding module path" do
+      program = parse(<<~RUBY)
+        module Geom
+          Point = Data.define(:x, :y) do
+            def magnitude
+              42
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.user_def_for("Geom::Point", :magnitude)).to be_a(Prism::DefNode)
+      expect(scope.discovered_method?("Geom::Point", :magnitude, :instance)).to be(true)
+    end
+
     it "registers Const = Struct.new(*sym) as a discovered class (v0.1.1)" do
       program = parse(<<~RUBY)
         Bar = Struct.new(:a, :b)

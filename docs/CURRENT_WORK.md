@@ -71,20 +71,17 @@ Working state at release: 1728 RSpec examples / 0 failures, RuboCop 167 files / 
 
 The Rails plugin family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionpack`, `rigor-actionmailer`, `rigor-activejob`, plus `rigor-activerecord` extensions — is being authored in parallel with v0.1.x core work. The full plan is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Tier 1 plugins (current API, no analyser-side change required) are unblocked and authoring can start immediately. Tier 2 (`rigor-actionpack` Phase 1, `rigor-factorybot`) blocks on [ADR-9 — Cross-plugin API](adr/9-cross-plugin-api.md), which proposes `Plugin::FactStore` + `Plugin::Base#prepare(services)` + `manifest(consumes:)`. ADR-9 is queued for v0.1.x; the slicing (six independently shippable slices) is in the ADR.
 
-### v0.1.1 — deepen the literal-string narrowing surface (next)
+### v0.1.1 — multi-track release (next)
 
-Headline slice: **regex pattern → refinement-name recogniser** per [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned". Extends the `Inference::Narrowing.analyse_match_write` path that v0.1.0 added (which narrows named-capture targets from `String | nil` to `String` in the truthy branch of `if /(?<x>...)/ =~ str`) so common anchored regex shapes additionally narrow each capture to the matching imported refinement carrier:
+Per [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned", v0.1.1 ships four tracks in parallel:
 
-| Anchored regex pattern | Refinement |
-| --- | --- |
-| `/\A\d+\z/`, `/\A\d{N}\z/`, `/\A\d{N,M}\z/` | `decimal-int-string` |
-| `/\A\h+\z/` | `hex-int-string` |
-| `/\A[0-7]+\z/` | `octal-int-string` |
-| `/\A[a-z]+\z/` | `lowercase-string` |
-| `/\A[A-Z]+\z/` | `uppercase-string` |
-| `/\A[[:digit:]]+\z/` | `numeric-string` |
+**Track 1 — Literal-string / refinement narrowing depth.** Headline slice: regex pattern → refinement-name recogniser extending `Inference::Narrowing.analyse_match_write`. Plus `numeric-string` propagation through `Integer(s)` / `s.to_i`; `self`-narrowing in `predicate-if-*`; additional `String#start_with?` / `#end_with?` / `#include?` predicate narrowing; `literal-string` propagation through more methods (`Integer#to_s(base)`, `Numeric#to_s`, `String#center` / `#ljust` / `#rjust`, etc.).
 
-Implementation hook is the existing `analyse_match_write` helper plus a small audited `Builtins::RegexRefinement` table. Recognition is closed to the curated forms (arbitrary regex equivalence is undecidable). Adjacent v0.1.1 slices: `numeric-string`-aware folding through `Integer(s)` / `s.to_i`; `self`-narrowing in `predicate-if-*` (carry-over from v0.1.0 deferred).
+**Track 2 — Cross-plugin API + plugin return-type contributions.** Implementation of [ADR-9](adr/9-cross-plugin-api.md) slices 1 → 5: `Plugin::FactStore` value object, `Plugin::Services#fact_store`, `Plugin::Base#prepare(services)`, `manifest(produces:/consumes:)`, topological sort + missing-producer detection in `Plugin::Loader`. Unblocks Tier 2 Rails plugins. Plus plugin return-type contributions slice 1 (`Plugin::Base#flow_contribution_for(call_node:, scope:)` hook + dispatcher integration ahead of `RbsDispatch`) — moves the seven existing examples from "info diagnostic only" to "narrowed return type" incrementally.
+
+**Track 3 — Plugin authoring DX.** Plugin spec helper module ✅ **landed (`ce64bb6`)**; future items: demo cache directory handling, examples RuboCop relaxation.
+
+**Track 4 — Maintenance.** Three `lib/` sig drifts (`Trinary#negate`, `IntegerRange#lower`, `IntegerRange#upper`); `node_locator_spec.rb:82` `String#index + 1` cleanup; `numeric.yml` `Integer#ceildiv` `unknown` entry.
 
 ### v0.1.0 — first plugin contract (all slices landed; release pending)
 

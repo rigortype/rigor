@@ -235,9 +235,9 @@ Out of scope for v0.1.0 (deferred to v0.1.x or beyond — see also the v0.1.1 se
 
 ## v0.1.1 — Planned
 
-Theme: **deepen the literal-string narrowing surface that v0.1.0 just lit up**. The v0.1.0 release added narrowing through `if /(?<x>...)/ =~ str` predicates that lifts named-capture targets from `String | nil` to `String` in the truthy branch (`Inference::Narrowing.analyse_match_write`). v0.1.1 builds on that substrate.
+Theme: **deepen the literal-string narrowing surface, ship the cross-plugin API, and stabilise the plugin authoring DX**. v0.1.0 closed the plugin contract (six slices) and shipped seven worked plugin examples; v0.1.1 extends the substrate in two directions and cleans up persistent maintenance items.
 
-Slice plan:
+### Track 1 — Literal-string / refinement narrowing depth (theme)
 
 1. **Regex pattern → refinement-name recogniser.** Map common regex shapes onto Rigor's existing imported refinement carriers ([`docs/type-specification/imported-built-in-types.md`](type-specification/imported-built-in-types.md)) so a successful match narrows further than just `String`. Working table:
 
@@ -260,9 +260,43 @@ Slice plan:
 
 3. **`self`-narrowing in `predicate-if-*` directives.** Carry-over from v0.1.0's deferred list. Independent of the regex work; can land in parallel with (1).
 
+4. **Additional `String` predicate narrowing.** `String#start_with?` / `#end_with?` / `#include?` against a literal `String` needle narrows the receiver to a "starts/ends/contains" refinement when the body branch is taken. Same dispatch site as `analyse_call`; one additional table-row per predicate.
+
+5. **`literal-string` propagation through additional methods.** Round out the `MethodDispatcher::LiteralStringFolding` tier:
+   - `Integer#to_s(base)` (with Constant base) → `decimal-int-string` / `hex-int-string` / `octal-int-string`
+   - `Numeric#to_s` (no args) → `numeric-string`
+   - `String#center` / `#ljust` / `#rjust` (with literal padding) → `literal-string` when receiver is also `literal-string`
+   - `String#strip` / `#chomp` / `#scrub` (idempotent on already-literal) → preserve `literal-string` carrier
+
+### Track 2 — Cross-plugin API + return-type contributions (parallel)
+
+6. **ADR-9 cross-plugin API — slices 1 → 5.** Implementation of [`docs/adr/9-cross-plugin-api.md`](adr/9-cross-plugin-api.md): `Plugin::FactStore` value object → `Plugin::Services#fact_store` accessor → `Plugin::Base#prepare(services)` hook + Runner invocation → `manifest(produces:/consumes:)` declarations → topological sort + missing-producer detection. Unblocks Tier 2 Rails plugins (`rigor-actionpack` Phase 1, `rigor-factorybot`).
+
+7. **Plugin return-type contributions slice 1.** Plugins emit `FlowContribution` bundles consumed by `Inference::MethodDispatcher` so plugin-side analysers can replace the analyzer's inferred return type for a call site. The substrate (`FlowContribution::Merger`) is already wired internally in v0.1.0. Slice 1: a `Plugin::Base#flow_contribution_for(call_node:, scope:)` hook + dispatcher integration tier ahead of `RbsDispatch`. Existing seven example plugins migrate from "info diagnostic only" to "narrowed return type" incrementally as follow-up work.
+
+### Track 3 — Plugin authoring DX (parallel)
+
+8. **Plugin spec helper module extraction.** ✅ **landed (commit `ce64bb6`).** `Rigor::IntegrationSupport::PluginHelpers` extracted to `spec/integration/examples/support/plugin_helpers.rb`; seven plugin specs migrated; `rigor-plugin-author` SKILL Phase 6 updated with the slimmed boilerplate.
+
+9. **Demo cache directory handling.** `examples/<plugin>/demo/.rigor/cache/` is created on every demo run; the `.gitignore` non-anchored `.rigor/cache/` pattern catches it but the discipline is fragile. Either: (a) `bundle exec rigor check` defaults `cache_root` to `tmp/.rigor/cache` when the project is detected to be a demo, or (b) the demo `.rigor.yml` template gets a `cache_root: tmp/.rigor/cache` knob.
+
+10. **Examples RuboCop relaxation.** `examples/**/*` is currently fully excluded from RuboCop. Re-include with relaxed rules (Metrics/* disabled, Naming/FileName disabled, Style/* light) so example code stays exemplary without forcing a single style on illustrative variations.
+
+### Track 4 — Maintenance (any v0.1.x release)
+
+11. **Three `lib/` sig drifts.** `Trinary#negate`, `IntegerRange#lower`, `IntegerRange#upper` — surface every `make verify` run as `def.return-type-mismatch` warnings. Either tighten the runtime to match the sigs or relax the sigs to match the runtime. Categories A-1 / A-2 in [`docs/notes/20260503-steep-cross-check-triage.md`](notes/20260503-steep-cross-check-triage.md).
+
+12. **`spec/rigor/source/node_locator_spec.rb:82` — `String#index + 1` unguarded.** `possible-nil-receiver` flags it correctly; the spec uses a load-bearing nil-or-throw idiom. Either `# rigor:disable call.possible-nil-receiver` or rewrite to guard explicitly.
+
+13. **`numeric.yml` `Integer#ceildiv` `unknown` entry.** Last remaining `unknown` after v0.0.9. Prelude classifier needs to flag `composed` bodies that delegate to user-overridable methods as `dispatch`.
+
 Out of scope for v0.1.1 (deferred to v0.1.2 or beyond):
 
-- **Plugin return-type contributions.** Plugins authored in v0.1.0 emit diagnostics; the natural next step is to let them contribute `FlowContribution` bundles consumed by `Inference::MethodDispatcher` so plugin-side analysers can replace the analyzer's inferred return type for a call site. Sketched in [`examples/rigor-lisp-eval/README.md`](../examples/rigor-lisp-eval/README.md) § "Future direction" and at the head of `lib/rigor/plugin/lisp_eval.rb`. Likely a v0.1.2 / v0.1.3 slice once the example plugins have stabilised against the merger surface.
+- **New CheckRules rule families.** `flow.unreachable-branch`, `flow.dead-assignment`, `flow.always-truthy-condition`, `def.ivar-write-mismatch`, `def.method-visibility-mismatch`. Each needs careful false-positive triage.
+- **Plugin::IoBoundary#open_url allowlist.** Currently always raises; relaxed network-policy lands when a concrete plugin needs it.
+- **`rigor:v1:conforms-to` directive.** Needs a real structural-conformance checker.
+- **DX tooling track.** `rigor explain <rule-id>` / `rigor diff <baseline>` / `# rigor:disable-file <rule>` / `.rigor.yml` JSON schema for editor autocomplete. Separate user-facing surface; queue for v0.1.2.
+- **LSP / long-running daemon mode.** Increasingly relevant as the plugin ecosystem grows, but still substantial.
 - **Lightweight HKT / type-level type computation.** Conditional and indexed-access types per [`docs/type-specification/rigor-extensions.md`](type-specification/rigor-extensions.md) rows 22 / 51. Sketched in `examples/rigor-lisp-eval/demo/sig/lisp.rbs` and `examples/rigor-units/demo/sig/units.rbs`. Larger surface; not a single-slice item.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)

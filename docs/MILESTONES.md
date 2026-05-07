@@ -193,7 +193,7 @@ Theme: **deepen the literal-string narrowing surface, ship the cross-plugin API,
 
 12. **`spec/rigor/source/node_locator_spec.rb:82` — `String#index + 1` unguarded.** `possible-nil-receiver` flags it correctly; the spec uses a load-bearing nil-or-throw idiom. Either `# rigor:disable call.possible-nil-receiver` or rewrite to guard explicitly.
 
-13. **`numeric.yml` `Integer#ceildiv` `unknown` entry.** Last remaining `unknown` after v0.0.9. Prelude classifier needs to flag `composed` bodies that delegate to user-overridable methods as `dispatch`.
+13. ✅ **`numeric.yml` `Integer#ceildiv` `unknown` entry** — landed unreleased. `tool/extract_builtin_catalog.rb` `classify_purity` now classifies `body_kind: composed` prelude bodies as `dispatch` instead of `unknown`. `composed` means the body is neither `Primitive.attr!(:leaf)`, a literal return, nor `self`, so it invariably ends in a Ruby method dispatch (and Ruby methods are all user-overridable). Both `unknown` and `dispatch` are non-foldable per `FOLDABLE_PURITIES`, so folding behaviour is unchanged; the rename is purely catalog self-documentation cleanup. Catalogs regenerated via `make extract-builtin-catalogs`.
 
 Out of scope for v0.1.1 (deferred to v0.1.2 or beyond):
 

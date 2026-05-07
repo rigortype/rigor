@@ -1222,7 +1222,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/numeric.rb:308
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/numeric.rb:308

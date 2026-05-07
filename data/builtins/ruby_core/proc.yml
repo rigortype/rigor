@@ -277,7 +277,7 @@ classes:
     singleton_methods: {}
     undefined: []
   SystemStackError:
-    parent: rb_eException
+    parent: Exception
     defined_at: references/ruby/proc.c:4593
     includes: []
     constants: {}

@@ -891,7 +891,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/io.rb:62
-        purity: unknown
+        purity: dispatch
         arity: -2
         cfunc:
         defined_at: references/ruby/io.rb:62
@@ -906,7 +906,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/io.rb:120
-        purity: unknown
+        purity: dispatch
         arity: -2
         cfunc:
         defined_at: references/ruby/io.rb:120
@@ -920,7 +920,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/io.rb:133
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/io.rb:133

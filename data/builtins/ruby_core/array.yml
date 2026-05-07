@@ -1361,7 +1361,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/array.rb:22
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/array.rb:22
@@ -1374,7 +1374,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/array.rb:45
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/array.rb:45
@@ -1387,7 +1387,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/array.rb:95
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/array.rb:95
@@ -1401,7 +1401,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/array.rb:129
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/array.rb:129
@@ -1415,7 +1415,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/array.rb:166
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/array.rb:166
@@ -1429,7 +1429,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/array.rb:210
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/array.rb:210

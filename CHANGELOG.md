@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — prelude `composed` bodies classify as `dispatch` (v0.1.1 Track 4 item 13)
+
+- **`tool/extract_builtin_catalog.rb` `classify_purity`** now returns `"dispatch"` for `body_kind: composed` prelude entries instead of falling through to `"unknown"`. `composed` is the residual body kind — a Ruby method body that is neither `Primitive.attr!(:leaf)` nor a literal return nor `self` — and any such body ends in a Ruby method dispatch (Ruby methods are user-overridable, so the catalog must treat the call as unsafe for folding either way).
+- **Catalog regenerated.** `numeric.yml` `Integer#ceildiv` is the v0.1.1 trigger (the last `composed`/`unknown` entry on the numeric catalog after v0.0.9); `pathname.yml` (~50 entries that delegate through the Pathname facade), plus a handful of `array.yml` / `hash.yml` / `io.yml` / `proc.yml` / `time.yml` rows reclassify the same way. Both `unknown` and `dispatch` are non-foldable per `FOLDABLE_PURITIES = ["leaf", "trivial", "leaf_when_numeric"]`, so folding behaviour is unchanged; the rename is purely catalog self-documentation cleanup.
+
 ### Fixed — three `lib/` sig drifts closed (v0.1.1 Track 4 item 11)
 
 - **`Trinary#negate`** collapsed the `:maybe` arm into the `case`'s `else`, so the case is exhaustive without changing semantics. The constructor invariant (`value ∈ [:yes, :no, :maybe]`) already guaranteed the third path; the previous form returned `nil` on the unreachable fallthrough, which Rigor's type analysis (correctly) flagged as a `Trinary | nil` return against the declared `Trinary`.

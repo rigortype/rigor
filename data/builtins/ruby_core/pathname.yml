@@ -69,7 +69,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:214
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:214
@@ -79,7 +79,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:223
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:223
@@ -89,7 +89,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:234
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:234
@@ -99,7 +99,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:249
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:249
@@ -109,7 +109,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:254
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:254
@@ -119,7 +119,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:261
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:261
@@ -129,7 +129,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:292
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:292
@@ -139,7 +139,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:334
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:334
@@ -149,7 +149,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:359
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:359
@@ -159,7 +159,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:370
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:370
@@ -169,7 +169,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:380
-        purity: unknown
+        purity: dispatch
         arity: 2
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:380
@@ -179,7 +179,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:403
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:403
@@ -189,7 +189,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:415
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:415
@@ -199,7 +199,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:442
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:442
@@ -209,7 +209,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:453
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:453
@@ -219,7 +219,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:462
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:462
@@ -229,7 +229,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:474
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:474
@@ -239,7 +239,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:505
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:505
@@ -249,7 +249,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:510
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:510
@@ -259,7 +259,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:527
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:527
@@ -269,7 +269,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:542
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:542
@@ -279,7 +279,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:557
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:557
@@ -289,7 +289,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:574
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:574
@@ -299,7 +299,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:606
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:606
@@ -309,7 +309,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:639
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:639
@@ -319,7 +319,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:665
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:665
@@ -329,7 +329,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:671
-        purity: unknown
+        purity: dispatch
         arity: 2
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:671
@@ -339,7 +339,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:725
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:725
@@ -349,7 +349,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:758
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:758
@@ -359,7 +359,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:808
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:808
@@ -369,7 +369,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:826
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:826
@@ -379,7 +379,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:871
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:871
@@ -389,7 +389,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:877
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:877
@@ -399,7 +399,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:881
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:881
@@ -409,7 +409,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:884
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:884
@@ -419,7 +419,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:887
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:887
@@ -429,7 +429,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:890
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:890
@@ -439,7 +439,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:895
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:895
@@ -449,7 +449,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:898
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:898
@@ -459,7 +459,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:904
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:904
@@ -469,7 +469,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:907
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:907
@@ -479,7 +479,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:910
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:910
@@ -489,7 +489,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:913
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:913
@@ -499,7 +499,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:916
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:916
@@ -509,7 +509,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:919
-        purity: unknown
+        purity: dispatch
         arity: 2
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:919
@@ -519,7 +519,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:922
-        purity: unknown
+        purity: dispatch
         arity: 2
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:922
@@ -529,7 +529,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:926
-        purity: unknown
+        purity: dispatch
         arity: -2
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:926
@@ -539,7 +539,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:929
-        purity: unknown
+        purity: dispatch
         arity: -2
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:929
@@ -549,7 +549,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:933
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:933
@@ -559,7 +559,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:936
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:936
@@ -569,7 +569,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:939
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:939
@@ -579,7 +579,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:944
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:944
@@ -589,7 +589,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:947
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:947
@@ -599,7 +599,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:950
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:950
@@ -609,7 +609,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:953
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:953
@@ -619,7 +619,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:956
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:956
@@ -629,7 +629,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:959
-        purity: unknown
+        purity: dispatch
         arity: 1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:959
@@ -639,7 +639,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:962
-        purity: unknown
+        purity: dispatch
         arity: 2
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:962
@@ -649,7 +649,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:969
-        purity: unknown
+        purity: dispatch
         arity: 2
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:969
@@ -659,7 +659,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:972
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:972
@@ -669,7 +669,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:975
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:975
@@ -679,7 +679,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:978
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:978
@@ -689,7 +689,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:981
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:981
@@ -699,7 +699,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:985
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:985
@@ -709,7 +709,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:996
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:996
@@ -719,7 +719,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1003
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1003
@@ -729,7 +729,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1010
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1010
@@ -739,7 +739,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1013
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1013
@@ -749,7 +749,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1018
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1018
@@ -759,7 +759,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1027
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1027
@@ -769,7 +769,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1030
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1030
@@ -779,7 +779,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1033
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1033
@@ -789,7 +789,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1036
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1036
@@ -799,7 +799,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1039
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1039
@@ -809,7 +809,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1042
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1042
@@ -819,7 +819,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1045
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1045
@@ -829,7 +829,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1048
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1048
@@ -839,7 +839,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1051
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1051
@@ -849,7 +849,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1054
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1054
@@ -859,7 +859,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1057
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1057
@@ -869,7 +869,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1060
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1060
@@ -879,7 +879,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1063
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1063
@@ -889,7 +889,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1066
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1066
@@ -899,7 +899,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1069
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1069
@@ -909,7 +909,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1072
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1072
@@ -919,7 +919,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1075
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1075
@@ -929,7 +929,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1078
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1078
@@ -939,7 +939,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1081
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1081
@@ -949,7 +949,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1084
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1084
@@ -959,7 +959,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1087
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1087
@@ -969,7 +969,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1090
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1090
@@ -979,7 +979,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1111
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1111
@@ -989,7 +989,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1127
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1127
@@ -999,7 +999,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1133
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1133
@@ -1009,7 +1009,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1139
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1139
@@ -1019,7 +1019,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1142
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1142
@@ -1029,7 +1029,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1145
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1145
@@ -1039,7 +1039,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1153
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1153
@@ -1050,7 +1050,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1096
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1096
@@ -1060,7 +1060,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/pathname_builtin.rb:1120
-        purity: unknown
+        purity: dispatch
         arity: 0
         cfunc:
         defined_at: references/ruby/pathname_builtin.rb:1120

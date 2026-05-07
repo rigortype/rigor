@@ -1215,6 +1215,14 @@ class CatalogBuilder # rubocop:disable Metrics/ClassLength
     return "leaf" if prelude_method.attrs.include?("leaf")
     return "inline_block" if prelude_method.attrs.intersect?(%w[inline_block use_block])
     return "trivial" if %w[trivial_self trivial_literal].include?(prelude_method.body_kind)
+    # `composed` prelude bodies (every prelude method whose body is
+    # neither `Primitive.attr!(:leaf)`, a literal return, nor `self`)
+    # invariably end in a Ruby method dispatch — and Ruby methods are
+    # all user-overridable, so the catalog must treat them as
+    # `dispatch` for folding-safety. Same effect as the previous
+    # `unknown` classification (both fall outside `FOLDABLE_PURITIES`)
+    # but more accurate self-documentation.
+    return "dispatch" if prelude_method.body_kind == "composed"
 
     "unknown"
   end

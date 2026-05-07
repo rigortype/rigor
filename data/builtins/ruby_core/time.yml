@@ -684,7 +684,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/timev.rb:440
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/timev.rb:440
@@ -726,7 +726,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/timev.rb:270
-        purity: unknown
+        purity: dispatch
         arity: -1
         cfunc:
         defined_at: references/ruby/timev.rb:270
@@ -739,7 +739,7 @@ classes:
         body_kind: composed
         cexpr_target:
         prelude_at: references/ruby/timev.rb:329
-        purity: unknown
+        purity: dispatch
         arity: -2
         cfunc:
         defined_at: references/ruby/timev.rb:329

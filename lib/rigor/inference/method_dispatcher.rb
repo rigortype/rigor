@@ -2,6 +2,8 @@
 
 require_relative "../reflection"
 require_relative "../type"
+require_relative "../flow_contribution"
+require_relative "../flow_contribution/merger"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/literal_string_folding"
 require_relative "method_dispatcher/shape_dispatch"
@@ -59,11 +61,24 @@ module Rigor
       # @param environment [Rigor::Environment, nil] required for
       #   RBS-backed dispatch; when nil only constant folding can fire.
       # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
-      def dispatch(receiver_type:, method_name:, arg_types:, block_type: nil, environment: nil)
+      def dispatch(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/ParameterLists
+                   block_type: nil, environment: nil,
+                   call_node: nil, scope: nil)
         return nil if receiver_type.nil?
 
         precise = dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type)
         return precise if precise
+
+        # v0.1.1 Track 2 slice 7 — plugin return-type contribution
+        # tier. Sits ahead of `RbsDispatch` so a plugin that
+        # understands a domain-specific dispatch (e.g. an
+        # `ActiveRecord::Base.find` returning `Nominal[<resolved
+        # model>]`) wins over the RBS-projected envelope. Only
+        # consults the registry when both `call_node` and `scope`
+        # are supplied — the dispatcher's own internal callers
+        # (per-element block fold, etc.) skip this tier.
+        plugin_result = try_plugin_contribution(call_node, scope)
+        return plugin_result if plugin_result
 
         rbs_result = RbsDispatch.try_dispatch(
           receiver: receiver_type, method_name: method_name, args: arg_types,
@@ -83,6 +98,40 @@ module Rigor
         # user classes without requiring the user to author
         # their own RBS.
         try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type)
+      end
+
+      # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2
+      # slice 7. Walks every loaded plugin's
+      # `#flow_contribution_for(call_node:, scope:)` hook,
+      # collects the non-nil `FlowContribution` bundles, merges
+      # them through `FlowContribution::Merger`, and returns
+      # the merged `return_type` slot (or nil when no plugin
+      # contributed a return type).
+      #
+      # Plugins whose hook raises have their contribution
+      # silently dropped for this call so the dispatch chain
+      # keeps moving — the run-level diagnostic envelope (per
+      # ADR-2 § "Plugin Trust and I/O Policy") is owned by
+      # `Analysis::Runner#plugin_emitted_diagnostics`.
+      def try_plugin_contribution(call_node, scope)
+        return nil if call_node.nil? || scope.nil?
+
+        registry = scope.environment&.plugin_registry
+        return nil if registry.nil? || registry.empty?
+
+        contributions = collect_plugin_contributions(registry, call_node, scope)
+        return nil if contributions.empty?
+
+        FlowContribution::Merger.merge(contributions).return_type
+      end
+
+      def collect_plugin_contributions(registry, call_node, scope)
+        registry.plugins.filter_map do |plugin|
+          contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+          contribution.is_a?(FlowContribution) ? contribution : nil
+        rescue StandardError
+          nil
+        end
       end
 
       # Runs the precision tiers (constant fold, shape dispatch,

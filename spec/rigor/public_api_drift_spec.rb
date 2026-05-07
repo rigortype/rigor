@@ -78,13 +78,14 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     class_registry()
     constant_for_name(req:name)
     nominal_for_name(req:name)
+    plugin_registry()
     rbs_loader()
     singleton_for_name(req:name)
   ].freeze
 
   ENVIRONMENT_SINGLETON = %w[
     default()
-    for_project(key:root,key:libraries,key:signature_paths,key:cache_store)
+    for_project(key:root,key:libraries,key:signature_paths,key:cache_store,key:plugin_registry)
   ].freeze
 
   REFLECTION_SINGLETON = %w[
@@ -114,6 +115,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     cache_for(req:producer_id,key:params,key:descriptor)
     config()
     diagnostics_for_file(keyreq:path,keyreq:scope,keyreq:root)
+    flow_contribution_for(keyreq:call_node,keyreq:scope)
     init(req:services)
     io_boundary()
     manifest()

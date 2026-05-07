@@ -111,6 +111,23 @@ module Rigor
         nil
       end
 
+      # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2
+      # slice 7 — per-call return-type contribution hook. When
+      # the inference engine dispatches a `Prism::CallNode` and
+      # neither the precision tiers nor RBS resolve a result,
+      # `MethodDispatcher` consults each loaded plugin via this
+      # hook ahead of `RbsDispatch`. Plugins that override the
+      # default return a {Rigor::FlowContribution} bundle whose
+      # `return_type` slot pins the call site's result type.
+      #
+      # Default returns nil — plugins that don't refine return
+      # types skip the override. Failures are isolated: a hook
+      # that raises gets its contribution dropped silently for
+      # this call so the rest of the dispatch chain continues.
+      def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
+        nil
+      end
+
       # ADR-9 slice 3 — per-run preparation hook. The runner
       # invokes `#prepare(services)` on every loaded plugin once
       # per `Analysis::Runner.run`, after `#init` has run on every

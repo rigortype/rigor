@@ -981,7 +981,9 @@ module Rigor
           method_name: node.name,
           arg_types: arg_types,
           block_type: block_type,
-          environment: scope.environment
+          environment: scope.environment,
+          call_node: node,
+          scope: scope
         )
         return result if result
 

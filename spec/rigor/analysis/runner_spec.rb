@@ -798,6 +798,63 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "Plugin#flow_contribution_for return-type override (v0.1.1 / Track 2 slice 7)" do
+    before { Rigor::Plugin.unregister! }
+    after { Rigor::Plugin.unregister! }
+
+    def run_with(plugin_class, source: "x = 1\n")
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "demo.rb"), source)
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "demo.rb")],
+            "plugins" => ["rigor-flow-contributor"]
+          )
+        )
+        requirer = lambda do |_name|
+          Rigor::Plugin.register(plugin_class)
+          true
+        end
+        runner = described_class.new(
+          configuration: configuration, cache_store: nil, plugin_requirer: requirer
+        )
+        [runner, runner.run]
+      end
+    end
+
+    it "threads the plugin registry through Environment#plugin_registry" do
+      noop_plugin = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "flow-noop", version: "0.1.0")
+      end
+      stub_const("FakeFlowNoopPlugin", noop_plugin)
+
+      runner, result = run_with(noop_plugin)
+      expect(result).to be_a(Rigor::Analysis::Result)
+      expect(runner.plugin_registry.ids).to eq(["flow-noop"])
+    end
+
+    it "isolates a #flow_contribution_for raise — dispatch keeps running, no plugin_loader runtime-error" do
+      raising = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "raising-contributor", version: "0.1.0")
+
+        def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
+          raise "boom"
+        end
+      end
+      stub_const("FakeRaisingContributorPlugin", raising)
+
+      _, result = run_with(raising, source: "[1, 2, 3].first\n")
+      runtime_errors = result.diagnostics.select do |d|
+        d.source_family == :plugin_loader && d.rule == "runtime-error"
+      end
+      # The contribution is silently dropped — no diagnostic. The
+      # rest of the run continues. (Plugins that need to surface
+      # their own errors should emit through diagnostics_for_file.)
+      expect(runtime_errors).to be_empty
+      expect(result).to be_a(Rigor::Analysis::Result)
+    end
+  end
+
   describe "Plugin#prepare invocation (v0.1.1 / ADR-9 slice 3)" do
     before { Rigor::Plugin.unregister! }
     after { Rigor::Plugin.unregister! }

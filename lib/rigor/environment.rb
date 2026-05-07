@@ -41,7 +41,7 @@ module Rigor
       prism rbs
     ].freeze
 
-    attr_reader :class_registry, :rbs_loader
+    attr_reader :class_registry, :rbs_loader, :plugin_registry
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
     # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the
@@ -50,9 +50,17 @@ module Rigor
     #   wires the shared core loader, which is itself lazy: requesting an
     #   environment instance does NOT load RBS until a method or class
     #   query actually consults the loader.
-    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil)
+    # @param plugin_registry [Rigor::Plugin::Registry, nil] v0.1.1
+    #   Track 2 slice 7. The per-run plugin registry the
+    #   inference engine consults at call sites for plugin
+    #   `#flow_contribution_for` overrides. When nil (the
+    #   default), no plugin-level return-type contribution
+    #   participates — useful for tests, the `Environment.default`
+    #   facade, and analyses that don't load plugins.
+    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil, plugin_registry: nil)
       @class_registry = class_registry
       @rbs_loader = rbs_loader
+      @plugin_registry = plugin_registry
       freeze
     end
 
@@ -82,7 +90,7 @@ module Rigor
       #   reflection artefacts) consult the cache. Pass `nil` (the
       #   default) to skip caching for this environment.
       # @return [Rigor::Environment]
-      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil)
+      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, plugin_registry: nil)
         resolved_paths = signature_paths || default_signature_paths(root)
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
         loader = RbsLoader.new(
@@ -90,7 +98,7 @@ module Rigor
           signature_paths: resolved_paths,
           cache_store: cache_store
         )
-        new(rbs_loader: loader)
+        new(rbs_loader: loader, plugin_registry: plugin_registry)
       end
 
       private

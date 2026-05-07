@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `Plugin::Base#flow_contribution_for` return-type contribution tier (v0.1.1 Track 2 slice 7)
+
+- **New `Plugin::Base#flow_contribution_for(call_node:, scope:)`** default-no-op hook. Plugins override it to return a `Rigor::FlowContribution` bundle whose `return_type` slot pins the result type for a specific call site. Hooks that raise have their contribution silently dropped for that call so the dispatch chain keeps going.
+- **`MethodDispatcher.dispatch`** gains optional `call_node:` and `scope:` keywords. When both are provided and the receiver scope's environment carries a non-empty `plugin_registry`, the dispatcher inserts a new tier between the precision tiers (`ConstantFolding` / `ShapeDispatch` / etc.) and `RbsDispatch`. The tier walks every loaded plugin's `flow_contribution_for` hook, merges the non-nil bundles via `FlowContribution::Merger`, and returns the merged `return_type` if present. Internal dispatcher callers (per-element block fold, etc.) skip the tier by passing nil for `call_node` / `scope`, preserving the previous behaviour.
+- **`Environment#plugin_registry`** new optional reader (default nil; `Environment.for_project(plugin_registry:)` accepts it). `Analysis::Runner` threads its per-run `Plugin::Registry` through here so the dispatcher tier can consult the loaded plugins from any call site.
+- **`ExpressionTyper`** passes the current `node` and `scope` into `MethodDispatcher.dispatch`, enabling the new tier without a wider context restructure.
+- **Drift snapshot updates.** `Rigor::Plugin::Base#flow_contribution_for(keyreq:call_node,keyreq:scope)`, `Rigor::Environment#plugin_registry()`, and `Environment.for_project(..., key:plugin_registry)` are pinned. RBS sig (`sig/rigor/environment.rbs`) updated in lockstep.
+- **End-to-end coverage.** Three unit specs in `method_dispatcher_spec.rb` (plugin tier returns the merged type, internal callers skip the tier, raising plugin drops cleanly) plus two integration specs in `runner_spec.rb` (registry threaded through, raising plugin doesn't surface a `:plugin_loader runtime-error`). Migrating the existing seven example plugins from "info diagnostic only" to "narrowed return type" is intentionally deferred — slice 7 lands the substrate; per-plugin migration is incremental follow-up.
+
 ### Added — runtime audit guards for every `.rigor.yml` setting
 
 - **New `Rigor::Analysis::Runner` "configuration wiring at runtime (audit guard)" spec block** verifies that each documented `.rigor.yml` setting actually flows from `Configuration` into the runtime, beyond the existing per-attribute load tests. The block was prompted by two phantom-setting bugs caught earlier in this batch (`cache.path` and `target_ruby`); the guard prevents the same regression class from re-opening silently.

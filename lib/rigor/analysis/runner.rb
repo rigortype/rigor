@@ -57,13 +57,13 @@ module Rigor
         target_ruby_error = validate_target_ruby
         return Result.new(diagnostics: [target_ruby_error]) if target_ruby_error
 
+        @plugin_registry = load_plugins
         environment = Environment.for_project(
           libraries: @configuration.libraries,
           signature_paths: @configuration.signature_paths,
-          cache_store: @cache_store
+          cache_store: @cache_store,
+          plugin_registry: @plugin_registry
         )
-
-        @plugin_registry = load_plugins
         expansion = expand_paths(paths)
 
         diagnostics = plugin_load_diagnostics

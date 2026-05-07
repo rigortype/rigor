@@ -14,32 +14,13 @@ RSpec.describe "examples/rigor-deprecations" do # rubocop:disable RSpec/Describe
   after { Rigor::Plugin.unregister! }
 
   let(:plugin_class) { Rigor::Plugin::Deprecations }
-  let(:requirer) do
-    lambda do |_name|
-      Rigor::Plugin.register(plugin_class)
-      true
-    end
-  end
 
-  def run_plugin(source, methods:)
-    Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "demo.rb"), source.end_with?("\n") ? source : "#{source}\n")
-      configuration = Rigor::Configuration.new(
-        Rigor::Configuration::DEFAULTS.merge(
-          "paths" => [File.join(dir, "demo.rb")],
-          "plugins" => [{ "gem" => "rigor-deprecations", "config" => { "methods" => methods } }]
-        )
-      )
-      Rigor::Analysis::Runner.new(
-        configuration: configuration,
-        cache_store: nil,
-        plugin_requirer: requirer
-      ).run
-    end
-  end
-
-  def plugin_diagnostics(result)
-    result.diagnostics.select { |d| d.source_family == "plugin.deprecations" }
+  def run_with_methods(source, methods:)
+    src = source.end_with?("\n") ? source : "#{source}\n"
+    run_plugin(
+      source: src,
+      plugin_entry: { "gem" => "rigor-deprecations", "config" => { "methods" => methods } }
+    )
   end
 
   describe "with a receiver-pinned entry" do
@@ -53,7 +34,7 @@ RSpec.describe "examples/rigor-deprecations" do # rubocop:disable RSpec/Describe
     end
 
     it "warns at matching receiver+method calls" do
-      diags = plugin_diagnostics(run_plugin('User.find_by_sql("SELECT * FROM users")', methods: methods))
+      diags = plugin_diagnostics(run_with_methods('User.find_by_sql("SELECT * FROM users")', methods: methods))
       expect(diags.size).to eq(1)
       expect(diags.first.severity).to eq(:warning)
       expect(diags.first.message).to eq(
@@ -63,12 +44,12 @@ RSpec.describe "examples/rigor-deprecations" do # rubocop:disable RSpec/Describe
     end
 
     it "stays silent for the same method on a different receiver" do
-      diags = plugin_diagnostics(run_plugin('Account.find_by_sql("SELECT * FROM accounts")', methods: methods))
+      diags = plugin_diagnostics(run_with_methods('Account.find_by_sql("SELECT * FROM accounts")', methods: methods))
       expect(diags).to be_empty
     end
 
     it "stays silent for an unrelated method on the same receiver" do
-      diags = plugin_diagnostics(run_plugin("User.where(id: 1)", methods: methods))
+      diags = plugin_diagnostics(run_with_methods("User.where(id: 1)", methods: methods))
       expect(diags).to be_empty
     end
   end
@@ -79,19 +60,19 @@ RSpec.describe "examples/rigor-deprecations" do # rubocop:disable RSpec/Describe
     end
 
     it "matches a no-receiver call" do
-      diags = plugin_diagnostics(run_plugin("silence_warnings { puts 1 }", methods: methods))
+      diags = plugin_diagnostics(run_with_methods("silence_warnings { puts 1 }", methods: methods))
       expect(diags.first.message).to start_with("`silence_warnings` is deprecated")
     end
 
     it "matches the same method on any receiver too" do
-      diags = plugin_diagnostics(run_plugin("Kernel.silence_warnings { puts 1 }", methods: methods))
+      diags = plugin_diagnostics(run_with_methods("Kernel.silence_warnings { puts 1 }", methods: methods))
       expect(diags.first.message).to start_with("`silence_warnings` is deprecated")
     end
   end
 
   describe "message formatting" do
     it "elides the `since` clause when not configured" do
-      diags = plugin_diagnostics(run_plugin(
+      diags = plugin_diagnostics(run_with_methods(
                                    "User.legacy_call",
                                    methods: [{ "method" => "legacy_call", "receiver" => "User",
                                                "replacement" => "modern_call" }]
@@ -100,7 +81,7 @@ RSpec.describe "examples/rigor-deprecations" do # rubocop:disable RSpec/Describe
     end
 
     it "elides the `replacement` clause when not configured" do
-      diags = plugin_diagnostics(run_plugin(
+      diags = plugin_diagnostics(run_with_methods(
                                    "User.legacy_call",
                                    methods: [{ "method" => "legacy_call", "receiver" => "User", "since" => "v8.0" }]
                                  ))
@@ -108,7 +89,7 @@ RSpec.describe "examples/rigor-deprecations" do # rubocop:disable RSpec/Describe
     end
 
     it "drops the parenthesised tail when neither is configured" do
-      diags = plugin_diagnostics(run_plugin(
+      diags = plugin_diagnostics(run_with_methods(
                                    "User.legacy_call",
                                    methods: [{ "method" => "legacy_call", "receiver" => "User" }]
                                  ))
@@ -122,14 +103,14 @@ RSpec.describe "examples/rigor-deprecations" do # rubocop:disable RSpec/Describe
         { "method" => "legacy", "since" => "v6.0" },
         { "method" => "legacy", "since" => "v7.0" }
       ]
-      diags = plugin_diagnostics(run_plugin("legacy", methods: methods))
+      diags = plugin_diagnostics(run_with_methods("legacy", methods: methods))
       expect(diags.size).to eq(1)
     end
   end
 
   describe "empty configuration" do
     it "stays completely silent when no methods are declared" do
-      diags = plugin_diagnostics(run_plugin('User.find_by_sql("...")', methods: []))
+      diags = plugin_diagnostics(run_with_methods('User.find_by_sql("...")', methods: []))
       expect(diags).to be_empty
     end
   end

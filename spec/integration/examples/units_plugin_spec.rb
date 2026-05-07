@@ -17,37 +17,10 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
   after { Rigor::Plugin.unregister! }
 
   let(:plugin_class) { Rigor::Plugin::Units }
-  let(:requirer) do
-    lambda do |_name|
-      Rigor::Plugin.register(plugin_class)
-      true
-    end
-  end
-
-  def run_plugin(source)
-    Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "demo.rb"), source)
-      configuration = Rigor::Configuration.new(
-        Rigor::Configuration::DEFAULTS.merge(
-          "paths" => [File.join(dir, "demo.rb")],
-          "plugins" => ["rigor-units"]
-        )
-      )
-      Rigor::Analysis::Runner.new(
-        configuration: configuration,
-        cache_store: nil,
-        plugin_requirer: requirer
-      ).run
-    end
-  end
-
-  def plugin_diagnostics(result)
-    result.diagnostics.select { |d| d.source_family == "plugin.units" }
-  end
 
   describe "local-variable binding inference" do
     it "binds a numeric `.kilometers` constructor to Distance" do
-      diags = plugin_diagnostics(run_plugin("distance = 100.kilometers\n"))
+      diags = plugin_diagnostics(run_plugin(source: "distance = 100.kilometers\n"))
       expect(diags.size).to eq(1)
       expect(diags.first.message).to eq("local `distance` inferred as Distance")
       expect(diags.first.severity).to eq(:info)
@@ -55,12 +28,12 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "binds a numeric `.hours` constructor to Time" do
-      diags = plugin_diagnostics(run_plugin("t = 2.hours\n"))
+      diags = plugin_diagnostics(run_plugin(source: "t = 2.hours\n"))
       expect(diags.first.message).to eq("local `t` inferred as Time")
     end
 
     it "propagates dimensions through reads" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_plugin(source: <<~RUBY))
         distance = 100.kilometers
         time     = 2.hours
         speed    = distance / time
@@ -73,17 +46,17 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "infers Speed from chained Distance.per_hour" do
-      diags = plugin_diagnostics(run_plugin("limit = 60.kilometers.per_hour\n"))
+      diags = plugin_diagnostics(run_plugin(source: "limit = 60.kilometers.per_hour\n"))
       expect(diags.first.message).to eq("local `limit` inferred as Speed")
     end
 
     it "infers Acceleration from chained Distance.per_second_squared" do
-      diags = plugin_diagnostics(run_plugin("g = 9.8.meters.per_second_squared\n"))
+      diags = plugin_diagnostics(run_plugin(source: "g = 9.8.meters.per_second_squared\n"))
       expect(diags.first.message).to eq("local `g` inferred as Acceleration")
     end
 
     it "infers Acceleration from `(Speed - Speed) / Time`" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_plugin(source: <<~RUBY))
         v0 = 0.kilometers.per_hour
         v1 = 100.kilometers.per_hour
         dt = 5.seconds
@@ -94,7 +67,7 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "infers Speed from Acceleration * Time" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_plugin(source: <<~RUBY))
         g = 9.8.meters.per_second_squared
         t = 3.seconds
         v = g * t
@@ -106,7 +79,7 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
 
   describe "`.in_<unit>` query results" do
     it "infers Float from a matching query" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_plugin(source: <<~RUBY))
         speed = 60.kilometers.per_hour
         puts speed.in_kilometers_per_hour
       RUBY
@@ -118,7 +91,7 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "errors on a query whose unit does not match the receiver dimension" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_plugin(source: <<~RUBY))
         speed = 60.kilometers.per_hour
         puts speed.in_meters
       RUBY
@@ -131,7 +104,7 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
 
   describe "dimensional mismatches in operators" do
     it "errors on Distance + Time" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_plugin(source: <<~RUBY))
         d = 100.kilometers
         t = 2.hours
         d + t
@@ -144,7 +117,7 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "errors on Distance / Distance (ratio not modelled)" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_plugin(source: <<~RUBY))
         a = 100.kilometers
         b = 50.meters
         a / b
@@ -156,7 +129,7 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "errors on cross-dimension comparison (Distance <= Time)" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_plugin(source: <<~RUBY))
         d = 100.kilometers
         t = 2.hours
         d <= t
@@ -168,7 +141,7 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "stays silent on same-dimension comparison" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_plugin(source: <<~RUBY))
         a = 100.kilometers
         b = 50.meters
         a <= b
@@ -181,13 +154,13 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
     let(:demo_source) { File.read(File.expand_path("../../../examples/rigor-units/demo/demo.rb", __dir__)) }
 
     it "produces no error diagnostics" do
-      diags = plugin_diagnostics(run_plugin(demo_source))
+      diags = plugin_diagnostics(run_plugin(source: demo_source))
       errors = diags.select { |d| d.severity == :error }
       expect(errors).to be_empty, -> { "unexpected errors: #{errors.map(&:message).inspect}" }
     end
 
     it "binds every dimensional local declared in the demo" do
-      diags = plugin_diagnostics(run_plugin(demo_source))
+      diags = plugin_diagnostics(run_plugin(source: demo_source))
       bindings = diags.select { |d| d.rule == "inferred-binding" }.map(&:message)
       expect(bindings).to include(
         "local `distance` inferred as Distance",
@@ -203,7 +176,7 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "annotates every `.in_<unit>` call in the demo with a Float result note" do
-      diags = plugin_diagnostics(run_plugin(demo_source))
+      diags = plugin_diagnostics(run_plugin(source: demo_source))
       in_method_diags = diags.select { |d| d.rule == "in-method-result" }
       expect(in_method_diags.size).to be >= 4
       expect(in_method_diags).to all(satisfy { |d| d.message.include?("returns Float") })

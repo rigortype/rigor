@@ -359,8 +359,12 @@ you see staged cache files, run `rm -rf demo/.rigor` and re-stage.
 ## Phase 6 — Integration spec
 
 Mirror one of the existing specs under
-`spec/integration/examples/`. The shape is fixed — only the
-diagnostic-shape assertions change.
+`spec/integration/examples/`. The shared boilerplate
+(`run_plugin`, `plugin_diagnostics`, requirer construction,
+tmpdir lifecycle) lives in
+[`spec/integration/examples/support/plugin_helpers.rb`](../../../spec/integration/examples/support/plugin_helpers.rb)
+and is auto-included for every `*_plugin_spec.rb` file under
+that directory. The spec only needs the per-plugin parts.
 
 ```ruby
 # spec/integration/examples/<id>_plugin_spec.rb
@@ -377,60 +381,82 @@ RSpec.describe "examples/rigor-<id>" do # rubocop:disable RSpec/DescribeClass
   after { Rigor::Plugin.unregister! }
 
   let(:plugin_class) { Rigor::Plugin::ClassName }
-  let(:requirer) do
-    lambda do |_name|
-      Rigor::Plugin.register(plugin_class)
-      true
-    end
+
+  it "describes a recognised diagnostic shape" do
+    diags = plugin_diagnostics(run_plugin(source: "Some.call(...)\n"))
+    expect(diags.first.message).to include("...")
   end
 
-  def run_plugin(source, plugin_config: nil, **opts)
+  # When the plugin needs project files (config/routes.yml,
+  # db/schema.rb, app/models/*.rb), pass `files:`:
+  it "validates against an external schema" do
+    diags = plugin_diagnostics(run_plugin(
+      source: "Model.find(1)\n",
+      files: { "db/schema.rb" => "..." }
+    ))
+    # ...
+  end
+
+  # When the plugin needs a non-default config:
+  it "honours custom config" do
+    diags = plugin_diagnostics(run_plugin(
+      source: "...",
+      plugin_entry: { "gem" => "rigor-<id>", "config" => { "key" => "value" } }
+    ))
+    # ...
+  end
+
+  # When the spec needs multiple runs against the same tmpdir
+  # (cache invalidation tests etc.), use the lower-level
+  # run_plugin_in_dir helper:
+  it "exercises cache invalidation" do
     Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "demo.rb"), source)
-      plugin_entry = plugin_config ? { "gem" => "rigor-<id>", "config" => plugin_config } : "rigor-<id>"
-      configuration = Rigor::Configuration.new(
-        Rigor::Configuration::DEFAULTS.merge(
-          "paths" => [File.join(dir, "demo.rb")],
-          "plugins" => [plugin_entry]
-        )
+      Rigor::Plugin.unregister!
+      run_plugin_in_dir(
+        dir: dir, source: "...",
+        cache_store: cache_store,
+        files: { "config/something.yml" => "..." }
       )
-      Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
-          configuration: configuration,
-          cache_store: nil,  # use a real Cache::Store only when testing slice 6
-          plugin_requirer: requirer,
-          **opts
-        ).run
-      end
+
+      Rigor::Plugin.unregister!
+      run_plugin_in_dir(
+        dir: dir, source: "...",
+        cache_store: cache_store,
+        files: { "config/something.yml" => "...changed..." }
+      )
     end
   end
-
-  def plugin_diagnostics(result)
-    result.diagnostics.select { |d| d.source_family == "plugin.<id>" }
-  end
-
-  # ... per-feature `describe` / `it` blocks ...
 end
 ```
 
+### What the helpers provide
+
+| Helper | When to use |
+| --- | --- |
+| `run_plugin(source:, ...)` | The default. Creates a tmpdir, writes `demo.rb` and any `files:`, runs `Analysis::Runner`, returns `Result`. Auto-`unregister!`s the plugin registry on entry. |
+| `run_plugin_in_dir(dir:, source:, ...)` | Lower-level: takes an existing tmpdir. Use for multi-run tests against the same project (cache invalidation, second-run-after-edit scenarios). Does NOT auto-unregister; the caller controls lifecycle. |
+| `plugin_diagnostics(result)` | Filters a result down to `source_family == "plugin.<manifest.id>"`. Reads the id from `plugin_class.manifest.id` via the spec's `let`. |
+| `build_plugin_requirer` | The requirer lambda the loader expects. For specs that drive `Analysis::Runner` themselves. |
+| `materialize_files(dir, files)` | Convenience: writes `{path => contents}` into `dir`. |
+
+The helpers read `plugin_class` via RSpec's method resolution
+chain, so the `let(:plugin_class) { ... }` declaration is the
+only spec-specific binding callers need.
+
 ### Spec gotchas
 
-- **Plugin re-registration across runs.** The loader detects
-  newly-registered plugins by diffing `Rigor::Plugin.registered`
-  before/after `requirer.call`. Two `Runner.run` invocations in the
-  same test must call `Rigor::Plugin.unregister!` between them, or
-  the second run sees no newly-registered plugins and the loader
-  silently emits a `:plugin_loader load-error`. See
-  `spec/integration/examples/routes_plugin_spec.rb` `run_twice`
-  helper for the canonical workaround.
-- **`Dir.chdir(dir)` matters for `IoBoundary`.** The boundary
-  resolves paths via `File.expand_path`. If the spec doesn't chdir
-  to the tmpdir, `config/routes.yml`-style relative paths resolve
-  against the host's CWD and the read fails the trust check.
-- **`runner_helpers.rb` `analyze` doesn't load plugins.** The
-  shared `analyze` helper does not pass `plugin_requirer:`. For
-  plugin specs, write the runner invocation inline (as above)
-  rather than reusing `analyze`.
+- **Plugin re-registration across runs.** `run_plugin` always
+  calls `Rigor::Plugin.unregister!` on entry. `run_plugin_in_dir`
+  does NOT — multi-run tests must call `unregister!` between
+  invocations themselves. See
+  `routes_plugin_spec.rb`'s `run_routes_in_dir_twice` for the
+  canonical pattern.
+- **`Dir.chdir` happens inside the helpers.** Relative paths
+  (e.g. `config/routes.yml` from a plugin's `IoBoundary` read)
+  resolve against the tmpdir, not the host CWD.
+- **`spec/support/runner_helpers.rb`'s `analyze` doesn't load
+  plugins.** That helper is for analyser-internal specs. Plugin
+  specs use `run_plugin` from `plugin_helpers.rb`.
 
 ---
 

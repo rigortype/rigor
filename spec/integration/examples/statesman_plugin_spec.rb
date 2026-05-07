@@ -15,12 +15,6 @@ RSpec.describe "examples/rigor-statesman" do # rubocop:disable RSpec/DescribeCla
   after { Rigor::Plugin.unregister! }
 
   let(:plugin_class) { Rigor::Plugin::Statesman }
-  let(:requirer) do
-    lambda do |_name|
-      Rigor::Plugin.register(plugin_class)
-      true
-    end
-  end
   let(:state_machine_source) do
     <<~RUBY
       class Order
@@ -34,31 +28,15 @@ RSpec.describe "examples/rigor-statesman" do # rubocop:disable RSpec/DescribeCla
     RUBY
   end
 
-  def run_plugin(source, plugin_config: nil)
-    Dir.mktmpdir do |dir|
-      File.write(File.join(dir, "demo.rb"), source.end_with?("\n") ? source : "#{source}\n")
-      plugin_entry = plugin_config ? { "gem" => "rigor-statesman", "config" => plugin_config } : "rigor-statesman"
-      configuration = Rigor::Configuration.new(
-        Rigor::Configuration::DEFAULTS.merge(
-          "paths" => [File.join(dir, "demo.rb")],
-          "plugins" => [plugin_entry]
-        )
-      )
-      Rigor::Analysis::Runner.new(
-        configuration: configuration,
-        cache_store: nil,
-        plugin_requirer: requirer
-      ).run
-    end
-  end
-
-  def plugin_diagnostics(result)
-    result.diagnostics.select { |d| d.source_family == "plugin.statesman" }
+  def run_statesman(source, plugin_config: nil)
+    src = source.end_with?("\n") ? source : "#{source}\n"
+    plugin_entry = plugin_config ? { "gem" => "rigor-statesman", "config" => plugin_config } : nil
+    run_plugin(source: src, plugin_entry: plugin_entry)
   end
 
   describe "transition validation" do
     it "marks a known transition as :info" do
-      diags = plugin_diagnostics(run_plugin("#{state_machine_source}order.transition_to(:submitted)"))
+      diags = plugin_diagnostics(run_statesman("#{state_machine_source}order.transition_to(:submitted)"))
       info = diags.find { |d| d.rule == "known-state" }
       expect(info).not_to be_nil
       expect(info.severity).to eq(:info)
@@ -66,20 +44,20 @@ RSpec.describe "examples/rigor-statesman" do # rubocop:disable RSpec/DescribeCla
     end
 
     it "errors on a typo with a Levenshtein-suggested neighbour" do
-      diags = plugin_diagnostics(run_plugin("#{state_machine_source}order.transition_to(:approval)"))
+      diags = plugin_diagnostics(run_statesman("#{state_machine_source}order.transition_to(:approval)"))
       err = diags.find { |d| d.rule == "unknown-state" }
       expect(err.severity).to eq(:error)
       expect(err.message).to eq("unknown state :approval (did you mean :approved?)")
     end
 
     it "errors without a hint when no state is close enough" do
-      diags = plugin_diagnostics(run_plugin("#{state_machine_source}order.transition_to(:purgatory)"))
+      diags = plugin_diagnostics(run_statesman("#{state_machine_source}order.transition_to(:purgatory)"))
       err = diags.find { |d| d.rule == "unknown-state" }
       expect(err.message).to eq("unknown state :purgatory")
     end
 
     it "stays silent on non-Symbol arguments" do
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_statesman(<<~RUBY))
         #{state_machine_source}
         target = :submitted
         order.transition_to(target)
@@ -90,7 +68,7 @@ RSpec.describe "examples/rigor-statesman" do # rubocop:disable RSpec/DescribeCla
 
   describe "no-state-machine files" do
     it "stays completely silent when the file has no state_machine block" do
-      diags = plugin_diagnostics(run_plugin("order.transition_to(:foo)"))
+      diags = plugin_diagnostics(run_statesman("order.transition_to(:foo)"))
       expect(diags).to be_empty
     end
   end
@@ -109,7 +87,7 @@ RSpec.describe "examples/rigor-statesman" do # rubocop:disable RSpec/DescribeCla
         order.advance_to(:rdy)
       RUBY
 
-      diags = plugin_diagnostics(run_plugin(
+      diags = plugin_diagnostics(run_statesman(
                                    source,
                                    plugin_config: {
                                      "dsl_method" => "aasm",
@@ -127,7 +105,7 @@ RSpec.describe "examples/rigor-statesman" do # rubocop:disable RSpec/DescribeCla
 
   describe "multiple state machines in the same file" do
     it "unions the state sets across all state_machine blocks" do # rubocop:disable RSpec/ExampleLength
-      diags = plugin_diagnostics(run_plugin(<<~RUBY))
+      diags = plugin_diagnostics(run_statesman(<<~RUBY))
         class Order
           state_machine do
             state :pending, initial: true

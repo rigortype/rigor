@@ -53,51 +53,16 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
   after { Rigor::Plugin.unregister! }
 
   let(:plugin_class) { Rigor::Plugin::Activerecord }
-  let(:requirer) do
-    lambda do |_name|
-      Rigor::Plugin.register(plugin_class)
-      true
-    end
-  end
 
-  def materialize_project(dir, source:, schema: DEFAULT_SCHEMA, models: DEFAULT_MODELS, plugin_config: nil)
-    FileUtils.mkdir_p(File.join(dir, "db"))
-    File.write(File.join(dir, "db", "schema.rb"), schema)
-    models.each do |path, contents|
-      full = File.join(dir, path)
-      FileUtils.mkdir_p(File.dirname(full))
-      File.write(full, contents)
-    end
-    File.write(File.join(dir, "demo.rb"), source)
-    plugin_entry = plugin_config ? { "gem" => "rigor-activerecord", "config" => plugin_config } : "rigor-activerecord"
-    Rigor::Configuration.new(
-      Rigor::Configuration::DEFAULTS.merge(
-        "paths" => [File.join(dir, "demo.rb")],
-        "plugins" => [plugin_entry]
-      )
-    )
-  end
-
-  def run_plugin(source, **)
-    Dir.mktmpdir do |dir|
-      configuration = materialize_project(dir, source: source, **)
-      Dir.chdir(dir) do
-        Rigor::Analysis::Runner.new(
-          configuration: configuration,
-          cache_store: nil,
-          plugin_requirer: requirer
-        ).run
-      end
-    end
-  end
-
-  def plugin_diagnostics(result)
-    result.diagnostics.select { |d| d.source_family == "plugin.activerecord" }
+  def run_ar(source, schema: DEFAULT_SCHEMA, models: DEFAULT_MODELS, plugin_config: nil)
+    files = { "db/schema.rb" => schema }.merge(models)
+    plugin_entry = plugin_config ? { "gem" => "rigor-activerecord", "config" => plugin_config } : nil
+    run_plugin(source: source, plugin_entry: plugin_entry, files: files)
   end
 
   describe "recognised AR finder calls" do
     it "annotates `Model.find(id)` with the resolved table" do
-      diags = plugin_diagnostics(run_plugin("User.find(1)\n"))
+      diags = plugin_diagnostics(run_ar("User.find(1)\n"))
       info = diags.find { |d| d.rule == "model-call" }
       expect(info.severity).to eq(:info)
       expect(info.message).to eq("`User.find` returns User (table: `users`)")
@@ -105,29 +70,29 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
     end
 
     it "annotates `Model.find_by(col: v)` with the matched column" do
-      diags = plugin_diagnostics(run_plugin("User.find_by(email: 'a')\n"))
+      diags = plugin_diagnostics(run_ar("User.find_by(email: 'a')\n"))
       expect(diags.first.message).to eq("`User.find_by` (:email) on table `users`")
     end
 
     it "annotates `Model.where(col: v)` with the matched column" do
-      diags = plugin_diagnostics(run_plugin("User.where(admin: true)\n"))
+      diags = plugin_diagnostics(run_ar("User.where(admin: true)\n"))
       expect(diags.first.message).to eq("`User.where` (:admin) on table `users`")
     end
 
     it "recognises `t.references` columns as `<name>_id`" do
-      diags = plugin_diagnostics(run_plugin("Post.where(user_id: 1)\n"))
+      diags = plugin_diagnostics(run_ar("Post.where(user_id: 1)\n"))
       expect(diags.first.message).to eq("`Post.where` (:user_id) on table `posts`")
     end
 
     it "uses the Inflector to derive `User → users` / `Post → posts`" do
-      diags = plugin_diagnostics(run_plugin("Post.find(42)\n"))
+      diags = plugin_diagnostics(run_ar("Post.find(42)\n"))
       expect(diags.first.message).to include("table: `posts`")
     end
   end
 
   describe "unknown-column diagnostics" do
     it "errors on a typo with a Levenshtein-suggested name" do
-      diags = plugin_diagnostics(run_plugin("User.where(emial: 'a')\n"))
+      diags = plugin_diagnostics(run_ar("User.where(emial: 'a')\n"))
       err = diags.find { |d| d.rule == "unknown-column" }
       expect(err.severity).to eq(:error)
       expect(err.message).to include("unknown column `emial`")
@@ -135,13 +100,13 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
     end
 
     it "errors without a hint when no column is close enough" do
-      diags = plugin_diagnostics(run_plugin("User.where(foo_bar_baz_quux: 1)\n"))
+      diags = plugin_diagnostics(run_ar("User.where(foo_bar_baz_quux: 1)\n"))
       err = diags.find { |d| d.rule == "unknown-column" }
       expect(err.message).not_to include("did you mean")
     end
 
     it "fires once per unknown key in a multi-key call" do
-      diags = plugin_diagnostics(run_plugin("Post.where(title: 'x', invented: true)\n"))
+      diags = plugin_diagnostics(run_ar("Post.where(title: 'x', invented: true)\n"))
       errors = diags.select { |d| d.rule == "unknown-column" }
       expect(errors.size).to eq(1)
       expect(errors.first.message).to include("`invented`")
@@ -150,7 +115,7 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
 
   describe "wrong-arity diagnostics" do
     it "errors when `find` is called with no arguments" do
-      diags = plugin_diagnostics(run_plugin("User.find\n"))
+      diags = plugin_diagnostics(run_ar("User.find\n"))
       err = diags.find { |d| d.rule == "wrong-arity" }
       expect(err.severity).to eq(:error)
       expect(err.message).to eq("`User.find` expects at least 1 argument, got 0")
@@ -159,12 +124,12 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
 
   describe "non-model receivers" do
     it "stays silent when the receiver is not a known model" do
-      diags = plugin_diagnostics(run_plugin("Random.where(foo: 1)\n"))
+      diags = plugin_diagnostics(run_ar("Random.where(foo: 1)\n"))
       expect(diags).to be_empty
     end
 
     it "stays silent when the receiver is a local variable" do
-      diags = plugin_diagnostics(run_plugin("user = User.new; user.where(foo: 1)\n"))
+      diags = plugin_diagnostics(run_ar("user = User.new; user.where(foo: 1)\n"))
       expect(diags).to be_empty
     end
   end
@@ -191,7 +156,7 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
 
     it "resolves the override, not the inflected name" do
       diags = plugin_diagnostics(
-        run_plugin("User.where(given_name: 'A')\n", models: user_with_override, schema: schema_with_people_table)
+        run_ar("User.where(given_name: 'A')\n", models: user_with_override, schema: schema_with_people_table)
       )
       expect(diags.first.message).to eq("`User.where` (:given_name) on table `people`")
     end
@@ -215,37 +180,19 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
       SCHEMA
 
       diags = plugin_diagnostics(
-        run_plugin("Widget.where(label: 'x')\n",
-                   schema: schema,
-                   models: custom_base_models,
-                   plugin_config: { "model_base_classes" => ["DbRecord"] })
+        run_ar("Widget.where(label: 'x')\n",
+               schema: schema,
+               models: custom_base_models,
+               plugin_config: { "model_base_classes" => ["DbRecord"] })
       )
       expect(diags.first.message).to eq("`Widget.where` (:label) on table `widgets`")
     end
   end
 
   describe "graceful failure modes" do
-    def run_without_schema_file(source)
-      Dir.mktmpdir do |dir|
-        File.write(File.join(dir, "demo.rb"), source)
-        configuration = Rigor::Configuration.new(
-          Rigor::Configuration::DEFAULTS.merge(
-            "paths" => [File.join(dir, "demo.rb")],
-            "plugins" => ["rigor-activerecord"]
-          )
-        )
-        Dir.chdir(dir) do
-          Rigor::Analysis::Runner.new(
-            configuration: configuration,
-            cache_store: nil,
-            plugin_requirer: requirer
-          ).run
-        end
-      end
-    end
-
     it "warns when `db/schema.rb` is missing rather than crashing" do
-      result = run_without_schema_file("User.find(1)\n")
+      # No `files:` argument — no schema.rb gets written.
+      result = run_plugin(source: "User.find(1)\n")
       warning = result.diagnostics.find { |d| d.rule == "load-error" }
       expect(warning.severity).to eq(:warning)
       expect(warning.message).to include("db/schema.rb")

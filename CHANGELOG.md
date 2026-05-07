@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — strict per-demo cache isolation under `tmp/` (v0.1.1 Track 3 slice 9)
+
+- **Each `examples/rigor-*/demo/.rigor.yml` now sets `cache.path: tmp/.rigor/cache`** so demo runs write their cache under `tmp/` instead of `.rigor/cache/`. The `tmp/` location is anchored within each demo, which matters for the eventual `git subtree split` per the `rigor-plugin-author` SKILL — the cache discipline survives the split without depending on the parent repo's `.gitignore`.
+- **Each demo gets a `/tmp/`-only `.gitignore`** (anchored to the demo root) so the cache stays out of git automatically. The repo-root `.gitignore` `/tmp/` is anchored at the root and would not catch demo-local `tmp/` directories without this addition.
+- **CLI fix.** `Rigor::CLI#run_check` previously hardcoded `cache_root = ".rigor/cache"` and ignored `.rigor.yml`'s `cache.path:` setting. The CLI now consults `configuration.cache_path` so the demo `.rigor.yml` setting actually takes effect. `--cache-stats` reports `Cache (root: tmp/.rigor/cache)` when the demo runs.
+- **No CLI "demo mode" concept.** The slice intentionally avoids auto-detection — demos opt in explicitly via `.rigor.yml`. The repo-root `.gitignore`'s non-anchored `.rigor/cache/` pattern stays in place as a fallback for any project that still defaults to that path.
+- **`rigor-plugin-author` SKILL Phase 5** updated with the `cache.path: tmp/.rigor/cache` template, the per-demo `.gitignore` template, and the subtree-split readiness checklist.
+
 ### Added — `String#start_with?` / `#end_with?` / `#include?` flow facts (v0.1.1 Track 1 slice 4)
 
 - **`Inference::Narrowing#analyse_string_predicate`** recognises `s.start_with?("foo")`, `s.end_with?(...)`, and `s.include?(...)` against a `Constant<String>` needle and a `Prism::LocalVariableReadNode` receiver. The truthy edge attaches an `Analysis::FactStore::Fact` (`bucket: :relational`, `predicate:` the method name, `payload:` the needle string, `polarity: :positive`); the falsey edge attaches the `:negative` mirror.

@@ -328,7 +328,9 @@ runnable. Two-file convention when Q4 is B or C:
   errors_demo.rb` — analyse with `rigor check`."
 
 The `.rigor.yml` `paths:` lists both, so `rigor check` analyses
-both:
+both. Set `cache.path` to a `tmp/`-anchored directory so the
+cache is strictly per-demo and survives the eventual
+`git subtree split`:
 
 ```yaml
 paths:
@@ -337,6 +339,16 @@ paths:
 
 plugins:
   - rigor-<id>
+
+cache:
+  path: tmp/.rigor/cache
+```
+
+Pair it with a per-demo `.gitignore` so the cache stays out of git:
+
+```
+# examples/rigor-<id>/demo/.gitignore
+/tmp/
 ```
 
 Verify the demo runs:
@@ -348,11 +360,9 @@ nix --extra-experimental-features 'nix-command flakes' develop --command \
   rigor check
 ```
 
-The diagnostic stream should match what the README claims. **Clean
-up the cache directory** before staging — every demo run creates
-`demo/.rigor/cache/`. The repo's `.gitignore` matches `.rigor/cache/`
-non-anchored, so the cache should not be staged automatically; if
-you see staged cache files, run `rm -rf demo/.rigor` and re-stage.
+The diagnostic stream should match what the README claims. The
+`tmp/` cache layout keeps demo runs from polluting the repo —
+`git status` after the run should be clean.
 
 ---
 
@@ -537,19 +547,23 @@ Body: explain WHY this plugin was needed (the user's requirement),
 WHICH facet it primarily exercises, and HOW the integration spec
 locks the diagnostic shape. ~72-column wrap.
 
-If the cache directory `examples/rigor-<id>/demo/.rigor/cache/` was
-created during demo verification, ensure it's removed before
-staging — `git status` should not list it.
+The `tmp/`-anchored cache plus the per-demo `.gitignore` keep
+demo verification artefacts out of git automatically — `git status`
+should not list anything cache-related. (Older demos that set the
+default `.rigor/cache/` are caught by the repo-root `.gitignore`'s
+non-anchored `.rigor/cache/` pattern as a fallback.)
 
 ---
 
 ## Common pitfalls (the "got me last time" list)
 
-1. **Cache directory in the demo gets committed.** `.gitignore`'s
-   `.rigor/cache/` (non-anchored) catches it, but if the repo's
-   `.gitignore` ever regresses to `/.rigor/cache/` the example demo
-   dirs will start staging cache. Verify `git status` after running
-   the demo.
+1. **Cache directory in the demo gets committed.** Each demo's
+   `.rigor.yml` MUST set `cache.path: tmp/.rigor/cache` AND each
+   demo MUST carry a `/tmp/`-only `.gitignore` (the repo-root
+   `.gitignore` catches `/tmp/` only at the root). Demos that
+   miss either piece can leak cache artefacts into commits. The
+   repo-root `.gitignore`'s non-anchored `.rigor/cache/` pattern
+   is a fallback for older demos that still default to that path.
 2. **Plugin id collisions in tests.** `Rigor::Plugin.unregister!`
    in `before` AND `after` for every plugin spec; otherwise spec
    ordering bleeds plugin state across files.
@@ -703,6 +717,8 @@ Before declaring "the plugin is done":
 - [ ] README follows the structure in Phase 7.
 - [ ] CHANGELOG entry under `## [Unreleased]` only.
 - [ ] `make verify` clean.
-- [ ] `git status` shows no `.rigor/cache/` directories.
+- [ ] `.rigor.yml` sets `cache.path: tmp/.rigor/cache` and the
+      demo carries a `/tmp/`-only `.gitignore`.
+- [ ] `git status` shows no `.rigor/cache/` or `tmp/` directories.
 - [ ] One commit, message follows AGENTS.md style.
 - [ ] No `Rigor::VERSION` bump (per AGENTS.md § "Release Cadence").

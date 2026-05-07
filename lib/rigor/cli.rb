@@ -70,11 +70,11 @@ module Rigor
 
       options = parse_check_options
 
-      cache_root = ".rigor/cache"
+      configuration = Configuration.load(options.fetch(:config))
+      cache_root = configuration.cache_path
       handle_clear_cache(cache_root) if options.fetch(:clear_cache)
       cache_store = options.fetch(:no_cache) ? nil : Cache::Store.new(root: cache_root)
 
-      configuration = Configuration.load(options.fetch(:config))
       paths = @argv.empty? ? configuration.paths : @argv
       runner = Analysis::Runner.new(
         configuration: configuration,

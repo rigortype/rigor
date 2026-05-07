@@ -7,3 +7,10 @@ plugins:
       patterns:
         email: '\A[^\s@]+@[^\s@]+\z'
         uuid: '\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z'
+
+cache:
+  # Strict per-demo isolation: cache lives under tmp/, which the
+  # demo's .gitignore excludes. Keeps demo runs from polluting
+  # the repo with cache artefacts and survives the eventual
+  # `git subtree split` per the rigor-plugin-author SKILL.
+  path: tmp/.rigor/cache

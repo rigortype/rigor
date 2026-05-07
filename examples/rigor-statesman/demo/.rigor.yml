@@ -4,3 +4,10 @@ paths:
 
 plugins:
   - rigor-statesman
+
+cache:
+  # Strict per-demo isolation: cache lives under tmp/, which the
+  # demo's .gitignore excludes. Keeps demo runs from polluting
+  # the repo with cache artefacts and survives the eventual
+  # `git subtree split` per the rigor-plugin-author SKILL.
+  path: tmp/.rigor/cache

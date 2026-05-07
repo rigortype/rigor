@@ -1,0 +1,6 @@
+# Demo-local cache and any other build artefacts. The repo-root
+# .gitignore's `/tmp/` is anchored to the root, not to the demo
+# tree, so this anchored copy keeps `rigor check --cache-stats`
+# output from leaking into commits and survives the future
+# `git subtree split` per the rigor-plugin-author SKILL.
+/tmp/

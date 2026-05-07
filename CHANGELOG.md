@@ -27,6 +27,13 @@ codifies the move as a checklist step so the archive doesn't drift.
 
 ### Added
 
+#### Steep cross-check baseline closes the only `[error]` ahead of v0.1.1
+
+- **`sig/rigor.rbs:67`** referenced `Rigor::Cache::Store` but no `sig/rigor/cache/store.rbs` exists (the Cache namespace is in `UNSIGNED_NAMESPACES` per `spec/rigor/public_api_drift_spec.rb`). `make steep-check` raised the only `[error]`-level diagnostic — `RBS::UnknownTypeName: Rigor::Cache::Store`. Replaced with `untyped` until the full Cache::Store sig lands.
+- **`Rigor::Analysis::Runner`'s sig** also gained `attr_reader plugin_registry: untyped` and `?plugin_requirer: untyped` to match the v0.1.1 Track 2 slice 7 surface (the `plugin_registry` / `plugin_requirer` Runner additions added without sig updates would have shown up as drift on the next sig audit).
+- **Remaining 8 `[warning]`s** are all Steep's coarse handling of Ruby idioms (`Data.define do def initialize ... end end` override blocks, `Kernel#Array` narrowing on `Target | Array[Target]`, lambda defaults inside `def`). They sit in `D::Ruby.lenient` warning territory and will dissolve naturally as `Plugin::*` / `Cache::Store` sigs land. Triage at [`docs/notes/20260503-steep-cross-check-triage.md`](docs/notes/20260503-steep-cross-check-triage.md) updated with a v0.1.1 follow-up section.
+- `make steep-check` is intentionally NOT part of `make verify` — it's an advisory cross-checker, not a release blocker.
+
 #### `.rigor.yml` `exclude:` setting + built-in defaults
 
 - **New `Configuration#exclude_patterns`** — a list of `File.fnmatch?` glob patterns layered over the project's directory globs. The runner's `expand_paths` consults the list when expanding a directory argument and skips any file whose path matches an exclusion pattern. Explicit file arguments to the CLI bypass the filter — only directory expansion is filtered.

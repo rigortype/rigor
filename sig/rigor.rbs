@@ -64,8 +64,14 @@ module Rigor
     class Runner
       RUBY_GLOB: String
       DEFAULT_CACHE_ROOT: String
-      attr_reader cache_store: Rigor::Cache::Store?
-      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: Rigor::Cache::Store?) -> void
+      # `Rigor::Cache::Store` itself is not yet sig-covered (the
+      # cache namespace is in `UNSIGNED_NAMESPACES` per
+      # `spec/rigor/public_api_drift_spec.rb`), so reference it as
+      # `untyped` until the full Cache::Store sig lands. Steep
+      # otherwise raises `RBS::UnknownTypeName` for the named type.
+      attr_reader cache_store: untyped
+      attr_reader plugin_registry: untyped
+      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped) -> void
       def run: (?Array[String] paths) -> Result
     end
   end

@@ -238,3 +238,43 @@ nix develop --command make steep ARGS="check --severity-level=error"
 を網羅的に拾うため (= strict より広く検出するため) この設定にしている。
 将来 `make verify` チェーンに組み込むかどうかは、A-1〜A-5 を解消した後
 の残件を見て判断する。
+
+---
+
+## v0.1.1 リリース直前 follow-up (2026-05-08)
+
+A-1〜A-5 はすべて v0.1.x の Track 4 で着地済 (`docs/MILESTONES.md` v0.1.1
+Track 4 item 11 / 13 / 12 参照)。再走 (`make steep-check`) の結果を
+v0.1.1 リリース直前に再分類:
+
+- **入力:** `make steep-check` (v0.1.1 リリース候補ブランチ)
+- **集計:** 8 件 / 2 ファイル (warning 8 件のみ、error 0 件)
+
+| カテゴリ | 件数 | 内容 |
+| --- | --- | --- |
+| A. 真の sig drift | 0 | A-1〜A-5 は全て解消済 |
+| B. Rigor では検知しないのが適切 | 8 | `Data.define do ... end` override block / `Kernel#Array` narrowing / `def` の lambda default — Steep の Ruby idiom サポートの限界に起因 |
+| C. 偽陽性 (Rigor の精密化で消える) | 0 | カテゴリ B に再分類 |
+
+### v0.1.1 で解消した error (1 件)
+
+- `sig/rigor.rbs:67` `RBS::UnknownTypeName: Rigor::Cache::Store` — `Rigor::Cache::Store` は v0.1.1 時点でも sig 未整備 (`UNSIGNED_NAMESPACES` 入り) なので、参照を `untyped` に変更して落とした。同時に `attr_reader plugin_registry: untyped` と `?plugin_requirer: untyped` を `Runner` 宣言に追加 (Track 2 slice 7 で導入された Runner サーフェスを sig に反映)。
+- `Rigor::Cache::Store` の本格 sig は v0.1.x 維持タスクとして deferred (`UNSIGNED_NAMESPACES` から外す段階で書く)。
+
+### 残る 8 件 (warning) の分類
+
+すべて Steep の Ruby idiom 認識の限界に起因し、Rigor のコードベース側に
+直すべき不一致は無い:
+
+| 件数 | 場所 | 種類 | 性質 |
+| --- | --- | --- | --- |
+| 5 | `lib/rigor/analysis/fact_store.rb:26-32` | `Ruby::MethodParameterMismatch` | `Target = Data.define(...) do def initialize(kind:, name:); ...; end; end` の override-block 内 `def initialize` を Steep が外側 `FactStore` の `initialize` 宣言と照合してしまう。Data subclass の sig と紐付けられない既知の Steep 限界。runtime は `super(...)` で正しく Data#initialize を呼び出している。 |
+| 1 | `lib/rigor/analysis/fact_store.rb:128` | `Ruby::MethodBodyTypeMismatch` | `Array(fact.target)` で `fact.target: Target \| Array[Target]` の `Kernel#Array` 強制変換を Steep が `[Target \| Array[Target]]` ではなく `Array[Target]` に narrow できない。書き換え (`fact.target.is_a?(Array) ? fact.target : [fact.target]`) で消えるが、可読性はむしろ落ちるので保留。 |
+| 2 | `lib/rigor/plugin/loader.rb:41` | `Ruby::MethodParameterMismatch` | `def self.load(configuration:, services:, requirer: ->(name) { require name })` の lambda default を Steep が `Kernel#require` の sig 形と取り違える。Plugin 名前空間に sig が無い (`UNSIGNED_NAMESPACES`) ことの副作用。 |
+
+### 結論
+
+`make steep-check` は **error 0 / warning 8** で安定。`make verify`
+チェーンには引き続き含めない (warning 段階での意図的な乖離は許容)。
+`Plugin::*` / `Cache::Store` の sig が整備されたタイミングで warning は
+全て解消する見込み。

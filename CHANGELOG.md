@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — topological sort + missing-producer detection in `Plugin::Loader` (v0.1.1 Track 2 / ADR-9 slice 5)
+
+- **`Plugin::Loader.load` topologically sorts** loaded plugins by their `manifest(consumes:)` declarations so producer plugins run before consumers in the runner's `#prepare` pass. Tie-break preserves `Configuration#plugins` order, which keeps the v0.1.0 contract intact for plugins that don't opt into the cross-plugin API. The topo sort itself is skipped entirely when no loaded plugin declares a `consumes:` entry — same observable behaviour as before slice 5.
+- **Missing producer detection.** A non-optional `consumes:` entry that names a `(plugin_id, name)` no loaded plugin produces emits a `Plugin::LoadError` with `reason: :"missing-producer"`, dropping the offending consumer from the registry. `optional: true` consumes skip the check; the consumer's `fact_store.read` returns `nil` and the consumer must degrade gracefully.
+- **Cycle detection.** A consumes graph that forms a cycle emits a `Plugin::LoadError` with `reason: :"dependency-cycle"` naming the offending plugins. The plugins involved in the cycle drop from the registry; non-cycle plugins still load.
+- **`Plugin::LoadError`** gains an optional `reason:` field carrying the new symbol codes (`:"missing-producer"`, `:"dependency-cycle"`). Older callers omit `reason:` and the field defaults to nil (legacy "load failure" envelope).
+
 ### Added — `manifest(produces:)` / `manifest(consumes:)` declarations (v0.1.1 Track 2 / ADR-9 slice 4)
 
 - **`Rigor::Plugin::Manifest`** gains two new declarative fields. `produces:` is an `Array<Symbol>` listing the names this plugin publishes through `#prepare(services)`; `consumes:` is an `Array<{ plugin_id:, name:, optional: }>` listing the `(plugin_id, name)` pairs this plugin reads from `services.fact_store`. Optional flag (`optional: true`) marks dependencies whose absence is acceptable — the consumer falls through to a graceful `nil` from `fact_store.read`.

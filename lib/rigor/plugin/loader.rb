@@ -63,6 +63,15 @@ module Rigor
           end
         end
 
+        # ADR-9 slice 5 — topological sort by `manifest(consumes:)`
+        # so producers run before consumers, plus early
+        # `missing-producer` validation. Cycles surface as
+        # `dependency-cycle` LoadErrors. When validation fails, the
+        # offending plugin(s) drop from the returned plugins list
+        # and the LoadError surfaces alongside any earlier failure.
+        plugins, sort_errors = topo_sort_plugins(plugins)
+        load_errors.concat(sort_errors)
+
         Registry.new(plugins: plugins, load_errors: load_errors)
       end
 
@@ -185,6 +194,113 @@ module Rigor
         plugin_class.manifest.id
       rescue StandardError
         plugin_class.to_s
+      end
+
+      # ADR-9 slice 5 — topological sort of plugins by their
+      # `manifest(consumes:)` declarations. Returns `[sorted_plugins,
+      # load_errors]`. Determinism: when no dependency relation
+      # forces an order, plugins are visited alphabetically by
+      # manifest id. A non-optional consume of a `(plugin_id, name)`
+      # whose producer is missing emits a `:missing-producer`
+      # LoadError and drops the consumer; cycles emit a
+      # `:dependency-cycle` LoadError naming the offending chain.
+      def topo_sort_plugins(plugins)
+        # If no plugin opts into the cross-plugin API the loader's
+        # legacy configuration-order contract is preserved
+        # unchanged. Topo sort and missing-producer validation only
+        # run when at least one plugin declares `consumes:`.
+        return [plugins, []] unless plugins.any? { |p| p.manifest.consumes.any? }
+
+        index = plugins.to_h { |plugin| [plugin.manifest.id, plugin] }
+        errors = validate_missing_producers(plugins, index)
+        sortable = plugins.reject { |p| errors.any? { |e| e.plugin_ref == p.manifest.id } }
+        config_order = plugins.each_with_index.to_h { |plugin, i| [plugin.manifest.id, i] }
+
+        sort_in_topo_order(sortable, index, errors, config_order)
+      end
+
+      def validate_missing_producers(plugins, index)
+        errors = []
+        plugins.each do |plugin|
+          plugin.manifest.consumes.each do |consume|
+            next if consume.optional
+            next if index.key?(consume.plugin_id) && producer_provides?(index[consume.plugin_id], consume.name)
+
+            errors << LoadError.new(
+              "plugin #{plugin.manifest.id.inspect} consumes " \
+              "#{consume.plugin_id.inspect}/#{consume.name} but no loaded plugin " \
+              "with that id declares `produces: [#{consume.name.inspect}]`",
+              plugin_ref: plugin.manifest.id,
+              reason: :"missing-producer"
+            )
+          end
+        end
+        errors
+      end
+
+      def producer_provides?(producer, name)
+        producer.manifest.produces.include?(name)
+      end
+
+      # Kahn's algorithm with `Configuration#plugins`-order
+      # tie-break. Edges go from producer -> consumer (producer
+      # must visit first). When two plugins are simultaneously
+      # ready, the configuration-order index decides the visit
+      # order — preserves the v0.1.0 legacy contract for plugins
+      # without dependencies.
+      def sort_in_topo_order(plugins, index, errors, config_order)
+        in_degree, forward = build_consumes_graph(plugins, index, errors)
+        ordered, cycle_errors = kahn_walk(plugins, in_degree, forward, config_order)
+        [ordered, errors + cycle_errors]
+      end
+
+      def build_consumes_graph(plugins, index, errors)
+        in_degree = Hash.new(0)
+        forward = Hash.new { |h, k| h[k] = [] }
+        plugins.each do |consumer|
+          consumer.manifest.consumes.each do |consume|
+            next unless index.key?(consume.plugin_id)
+            next if errors.any? { |e| e.plugin_ref == consume.plugin_id }
+
+            forward[consume.plugin_id] << consumer.manifest.id
+            in_degree[consumer.manifest.id] += 1
+          end
+        end
+        [in_degree, forward]
+      end
+
+      def kahn_walk(plugins, in_degree, forward, config_order)
+        order = ->(plugin) { config_order.fetch(plugin.manifest.id, Float::INFINITY) }
+        ready = plugins.select { |p| in_degree[p.manifest.id].zero? }.sort_by(&order)
+        result = kahn_collect(plugins, in_degree, forward, ready, order)
+
+        return [result, []] if result.size == plugins.size
+
+        cycled = plugins - result
+        [result, [dependency_cycle_error(cycled)]]
+      end
+
+      def kahn_collect(plugins, in_degree, forward, ready, order)
+        result = []
+        until ready.empty?
+          plugin = ready.shift
+          result << plugin
+          forward[plugin.manifest.id].each do |consumer_id|
+            in_degree[consumer_id] -= 1
+            ready << plugins.find { |p| p.manifest.id == consumer_id } if in_degree[consumer_id].zero?
+          end
+          ready.sort_by!(&order)
+        end
+        result
+      end
+
+      def dependency_cycle_error(cycled)
+        ids = cycled.map { |p| p.manifest.id }.sort
+        LoadError.new(
+          "plugin dependency cycle through `manifest(consumes:)`: #{ids.inspect}",
+          plugin_ref: ids.first,
+          reason: :"dependency-cycle"
+        )
       end
     end
   end

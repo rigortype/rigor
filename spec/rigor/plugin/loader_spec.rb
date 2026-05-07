@@ -250,4 +250,131 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry).to be_empty
     end
   end
+
+  describe "topological sort + missing-producer (ADR-9 slice 5)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+    let(:producer_class) do
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "activerecord", version: "0.1.0", produces: [:model_index])
+      end
+      stub_const("FakeActiverecordPlugin", klass)
+      klass
+    end
+
+    let(:consumer_class) do
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "actionpack",
+          version: "0.1.0",
+          consumes: [{ plugin_id: "activerecord", name: :model_index }]
+        )
+      end
+      stub_const("FakeActionpackPlugin", klass)
+      klass
+    end
+
+    let(:plugins) { %w[rigor-actionpack rigor-activerecord] }
+
+    def consumer_first_requirer
+      lambda { |name|
+        case name
+        when "rigor-actionpack" then Rigor::Plugin.register(consumer_class)
+        when "rigor-activerecord" then Rigor::Plugin.register(producer_class)
+        end
+        true
+      }
+    end
+
+    it "orders the producer before the consumer regardless of configuration order" do
+      registry = described_class.load(
+        configuration: configuration, services: services, requirer: consumer_first_requirer
+      )
+
+      expect(registry.ids).to eq(%w[activerecord actionpack])
+      expect(registry.load_errors).to be_empty
+    end
+
+    it "emits :missing-producer when a non-optional consume has no matching producer" do # rubocop:disable RSpec/ExampleLength
+      requirer = lambda { |_name|
+        Rigor::Plugin.register(consumer_class)
+        true
+      }
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("plugins" => ["rigor-actionpack"])
+      )
+
+      registry = described_class.load(
+        configuration: configuration, services: services, requirer: requirer
+      )
+
+      expect(registry.plugins).to be_empty
+      err = registry.load_errors.first
+      expect(err.reason).to eq(:"missing-producer")
+      expect(err.plugin_ref).to eq("actionpack")
+      expect(err.message).to include("activerecord")
+      expect(err.message).to include("model_index")
+    end
+
+    it "skips :missing-producer validation for optional consumes" do # rubocop:disable RSpec/ExampleLength
+      optional_consumer = Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "factorybot",
+          version: "0.1.0",
+          consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }]
+        )
+      end
+      stub_const("FakeFactoryBotPlugin", optional_consumer)
+      requirer = lambda { |_name|
+        Rigor::Plugin.register(optional_consumer)
+        true
+      }
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("plugins" => ["rigor-factorybot"])
+      )
+
+      registry = described_class.load(
+        configuration: configuration, services: services, requirer: requirer
+      )
+
+      expect(registry.ids).to eq(["factorybot"])
+      expect(registry.load_errors).to be_empty
+    end
+
+    it "emits :dependency-cycle when consumes form a cycle" do # rubocop:disable RSpec/ExampleLength
+      cycle_a = Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "cycle-a", version: "0.1.0",
+          produces: [:fact_a],
+          consumes: [{ plugin_id: "cycle-b", name: :fact_b }]
+        )
+      end
+      cycle_b = Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "cycle-b", version: "0.1.0",
+          produces: [:fact_b],
+          consumes: [{ plugin_id: "cycle-a", name: :fact_a }]
+        )
+      end
+      stub_const("FakeCycleAPlugin", cycle_a)
+      stub_const("FakeCycleBPlugin", cycle_b)
+      requirer = lambda { |name|
+        case name
+        when "rigor-cycle-a" then Rigor::Plugin.register(cycle_a)
+        when "rigor-cycle-b" then Rigor::Plugin.register(cycle_b)
+        end
+        true
+      }
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("plugins" => %w[rigor-cycle-a rigor-cycle-b])
+      )
+
+      registry = described_class.load(
+        configuration: configuration, services: services, requirer: requirer
+      )
+
+      err = registry.load_errors.find { |e| e.reason == :"dependency-cycle" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("cycle-a")
+      expect(err.message).to include("cycle-b")
+    end
+  end
 end

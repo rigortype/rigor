@@ -47,7 +47,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
       expect(dispatch(Rigor::Type::Combinator.bot)).to be_nil
     end
 
-    it "declines methods other than :Array" do
+    it "declines methods other than :Array (Integer with non-refined arg falls through to RBS)" do
       result = described_class.try_dispatch(receiver: receiver, method_name: :Integer, args: [nominal("String")])
       expect(result).to be_nil
     end
@@ -56,6 +56,46 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
       two_args = [nominal("String"), nominal("Integer")]
       expect(described_class.try_dispatch(receiver: receiver, method_name: :Array, args: [])).to be_nil
       expect(described_class.try_dispatch(receiver: receiver, method_name: :Array, args: two_args)).to be_nil
+    end
+  end
+
+  describe ".try_dispatch on Kernel#Integer (v0.1.1 Track 1 slice 2b)" do
+    def non_negative_int = Rigor::Type::Combinator.non_negative_int
+
+    def integer_dispatch(arg)
+      described_class.try_dispatch(receiver: receiver, method_name: :Integer, args: [arg])
+    end
+
+    it "narrows Integer(decimal-int-string) to non-negative-int" do
+      expect(integer_dispatch(Rigor::Type::Combinator.decimal_int_string)).to eq(non_negative_int)
+    end
+
+    it "narrows Integer(numeric-string) to non-negative-int" do
+      expect(integer_dispatch(Rigor::Type::Combinator.numeric_string)).to eq(non_negative_int)
+    end
+
+    it "declines on non-digit refinements (lowercase / uppercase / hex)" do
+      [
+        Rigor::Type::Combinator.lowercase_string,
+        Rigor::Type::Combinator.uppercase_string,
+        Rigor::Type::Combinator.hex_int_string,
+        Rigor::Type::Combinator.octal_int_string
+      ].each do |arg|
+        expect(integer_dispatch(arg)).to be_nil
+      end
+    end
+
+    it "declines on plain Nominal[String] (no predicate to lean on)" do
+      expect(integer_dispatch(nominal("String"))).to be_nil
+    end
+
+    it "declines on `Integer(s, base)` (slice 2b covers no-base form only)" do
+      result = described_class.try_dispatch(
+        receiver: receiver,
+        method_name: :Integer,
+        args: [Rigor::Type::Combinator.decimal_int_string, constant_of(10)]
+      )
+      expect(result).to be_nil
     end
   end
 end

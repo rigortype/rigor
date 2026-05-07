@@ -42,12 +42,43 @@ module Rigor
         }.freeze
         private_constant :NUMERIC_CONSTRUCTORS
 
+        # `Kernel#Integer(s)` predicate-aware refinement set
+        # (v0.1.1 Track 1 slice 2b). Both `decimal-int-string` and
+        # `numeric-string` describe digit-only ASCII strings, so
+        # `Integer(s)` is total over the carrier domain and the
+        # result is `>= 0`. The default `base: 10` invocation
+        # accepts the same shape `String#to_i` does for these
+        # predicates; the `Integer(s, base)` overload is left for
+        # a later slice.
+        INTEGER_REFINEMENT_PREDICATES = Set[:decimal_int, :numeric].freeze
+        private_constant :INTEGER_REFINEMENT_PREDICATES
+
         def try_dispatch(receiver:, method_name:, args:)
           return nil if receiver.nil?
           return try_array(args) if method_name == :Array
           return try_numeric_constructor(method_name, args) if NUMERIC_CONSTRUCTORS.key?(method_name)
+          return try_integer_from_refinement(args) if method_name == :Integer
 
           nil
+        end
+
+        # `Kernel#Integer(s)` over a `Refined[String, predicate]`
+        # whose predicate is in {INTEGER_REFINEMENT_PREDICATES}.
+        # Mirrors the `String#to_i` projection in `ShapeDispatch`
+        # (v0.1.1 slice 2a) — the result is always
+        # `non-negative-int`. Returns nil for any other arg shape
+        # so the RBS tier handles the generic `Integer(arg)` case.
+        def try_integer_from_refinement(args)
+          return nil unless args.size == 1
+
+          arg = args.first
+          return nil unless arg.is_a?(Type::Refined)
+
+          base = arg.base
+          return nil unless base.is_a?(Type::Nominal) && base.class_name == "String"
+          return nil unless INTEGER_REFINEMENT_PREDICATES.include?(arg.predicate_id)
+
+          Type::Combinator.non_negative_int
         end
 
         def try_array(args)

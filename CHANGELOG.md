@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `Kernel#Integer` on digit-only refinements narrows to `non-negative-int` (v0.1.1 Track 1 slice 2b)
+
+- **`MethodDispatcher::KernelDispatch`** gains a `try_integer_from_refinement` arm matching `Kernel#Integer(s)` whose argument is a `Refined[String, predicate]` with `predicate ∈ { :decimal_int, :numeric }`. The result is `non-negative-int`, mirroring the slice 2a `String#to_i` projection — both refinements describe digit-only ASCII strings, so the parse is total over the carrier domain. Plain `Nominal[String]` and other refinements (lowercase / uppercase / hex / octal) continue to fall through to the RBS sig.
+- **End-to-end with slice 1.** `if /(?<year>\d+)/ =~ str; Integer(year); end` now resolves the `Integer(year)` call to `non-negative-int` instead of the RBS-declared `Integer`. Verified via `exe/rigor type-of`.
+- **Scope.** Single-arg form only. `Integer(s, base)` keeps the v0.1.0 baseline (the new arm requires `args.size == 1`); a future slice can extend the recogniser to honour the explicit base.
+
 ### Added — `String#to_i` / `#to_int` on digit-only refinements narrows to `non-negative-int` (v0.1.1 Track 1 slice 2a)
 
 - **`MethodDispatcher::ShapeDispatch.dispatch_refined`** gains four rows in `REFINED_STRING_PROJECTIONS` covering `to_i` and `to_int` on `decimal-int-string` (`/\A\d+\z/`) and `numeric-string` (Rigor's numeric-string predicate). Both refinements describe digit-only strings, so the parse is total over the carrier domain and the result is always `>= 0`. The tightest existing carrier that captures the lower bound and the integer-ness is `non-negative-int`, which the projection returns.

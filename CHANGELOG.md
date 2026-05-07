@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — runtime audit guards for every `.rigor.yml` setting
+
+- **New `Rigor::Analysis::Runner` "configuration wiring at runtime (audit guard)" spec block** verifies that each documented `.rigor.yml` setting actually flows from `Configuration` into the runtime, beyond the existing per-attribute load tests. The block was prompted by two phantom-setting bugs caught earlier in this batch (`cache.path` and `target_ruby`); the guard prevents the same regression class from re-opening silently.
+  - `libraries:` reaches `Environment.for_project(libraries:)`.
+  - `signature_paths:` reaches `Environment.for_project(signature_paths:)`, and a custom `.rbs` declared on a non-default path makes the class known via `Reflection`.
+  - `plugins_io.allowed_paths:` extends `Plugin::TrustPolicy#allowed_read_roots`.
+  - `cache.path:` is honoured by `Rigor::CLI#run_check` when constructing the `Cache::Store` (covered in `cli_spec.rb`).
+  - `target_ruby:` is honoured by `Prism.parse_file(version:)` and a Prism-rejected version surfaces a single configuration-error diagnostic (already covered by the `target_ruby` block).
+
 ### Fixed — `target_ruby` setting is now actually consumed at parse time
 
 - **Phantom configuration setting closed.** `target_ruby` had an attribute reader, a `.rigor.yml` entry, a default of `"4.0"`, a CLI help mention, and a handbook example — but no runtime code consumed it. The setting was loaded into `Configuration#target_ruby` and then ignored. `Prism.parse_file` was called without `version:` everywhere.

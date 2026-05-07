@@ -351,6 +351,27 @@ RSpec.describe Rigor::CLI do
         expect(captured.fetch(:cache_store).root).to eq(".rigor/cache")
       end
     end
+
+    it "honours `cache.path:` from .rigor.yml when constructing the Cache::Store" do # rubocop:disable RSpec/ExampleLength
+      write_check_fixture("a.rb", "1\n")
+      write_check_fixture(".rigor.yml", <<~YAML)
+        paths:
+          - a.rb
+        cache:
+          path: tmp/custom-cache
+      YAML
+      Dir.chdir(tmpdir) do
+        captured = nil
+        allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured = kwargs
+          original.call(**kwargs)
+        end
+        status, out, _err = run_cli("check", "--cache-stats")
+        expect(status).to eq(0)
+        expect(captured.fetch(:cache_store).root).to eq("tmp/custom-cache")
+        expect(out).to include("Cache (root: tmp/custom-cache)")
+      end
+    end
   end
 
   describe "type-scan" do

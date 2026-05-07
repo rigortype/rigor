@@ -39,6 +39,76 @@ RSpec.describe Rigor::Analysis::Runner do
     expect(result.diagnostics.first.message).not_to be_empty
   end
 
+  describe "configuration wiring at runtime (audit guard)" do
+    # Adjacent to the `target_ruby` block below, these specs guard
+    # against any of the documented `.rigor.yml` settings going
+    # phantom — i.e., loaded into `Configuration` but never read
+    # at runtime. The `cache.path` regression that prompted this
+    # block (the CLI hardcoded `".rigor/cache"` and ignored the
+    # config) is covered separately in `cli_spec.rb`.
+
+    it "loads `libraries:` stdlib RBS into Environment.for_project" do
+      libraries_args = nil
+      allow(Rigor::Environment).to receive(:for_project).and_wrap_original do |original, **kwargs|
+        libraries_args = kwargs[:libraries]
+        original.call(**kwargs)
+      end
+      analyze("x = 1\n", config: { "libraries" => %w[csv set] })
+
+      expect(libraries_args).to include("csv")
+      expect(libraries_args).to include("set")
+    end
+
+    it "passes `signature_paths:` to Environment.for_project" do
+      sig_paths_args = nil
+      allow(Rigor::Environment).to receive(:for_project).and_wrap_original do |original, **kwargs|
+        sig_paths_args = kwargs[:signature_paths]
+        original.call(**kwargs)
+      end
+      analyze("x = 1\n", config: { "signature_paths" => %w[custom-sig vendor/sig] })
+
+      expect(sig_paths_args).to eq(%w[custom-sig vendor/sig])
+    end
+
+    it "loads custom RBS classes declared under signature_paths: at runtime" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "code.rb"), "x = 1\n")
+        FileUtils.mkdir_p(File.join(dir, "custom-sig"))
+        File.write(File.join(dir, "custom-sig", "marker.rbs"), "class CustomMarker\nend\n")
+
+        configuration = Rigor::Configuration.new(
+          "paths" => [File.join(dir, "code.rb")],
+          "signature_paths" => [File.join(dir, "custom-sig")]
+        )
+        env = Rigor::Environment.for_project(
+          libraries: configuration.libraries,
+          signature_paths: configuration.signature_paths
+        )
+        scope = Rigor::Scope.empty(environment: env)
+        expect(scope.environment.nominal_for_name("CustomMarker")).not_to be_nil
+      end
+    end
+
+    it "extends the plugin TrustPolicy's allowed_read_roots from `plugins_io.allowed_paths`" do
+      captured_kwargs = nil
+      allow(Rigor::Plugin::TrustPolicy).to receive(:new).and_wrap_original do |original, **kwargs|
+        captured_kwargs ||= kwargs
+        original.call(**kwargs)
+      end
+      analyze("x = 1\n", config: {
+                "plugins" => ["rigor-fake"],
+                "plugins_io" => { "network" => "disabled", "allowed_paths" => %w[vendor/generated] }
+              })
+
+      expect(captured_kwargs).not_to be_nil
+      # The `analyze` helper chdirs into a tmpdir; on macOS the
+      # tmpdir resolves under `/private/tmp/...`, so match by
+      # suffix rather than full prefix to stay portable.
+      expect(captured_kwargs[:allowed_read_roots]).to include(end_with("/vendor/generated"))
+      expect(captured_kwargs[:network_policy]).to eq(:disabled)
+    end
+  end
+
   describe "target_ruby wiring (`.rigor.yml` -> Prism version:)" do
     it "passes target_ruby through to Prism so the configured version drives the parse" do
       # Prism's `version: "3.4"` accepts current Ruby syntax.

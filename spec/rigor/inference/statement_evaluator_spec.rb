@@ -1788,7 +1788,7 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     describe "narrowing through `if regex =~ str`" do
       let(:string_t) { Rigor::Type::Combinator.nominal_of("String") }
       let(:nil_t) { Rigor::Type::Combinator.constant_of(nil) }
-      let(:string_or_nil) { Rigor::Type::Combinator.union(string_t, nil_t) }
+      let(:decimal_int_string_t) { Rigor::Type::Combinator.decimal_int_string }
       let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
 
       def first_local_seen(name, source)
@@ -1804,10 +1804,13 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         events.first
       end
 
-      it "narrows the capture to String inside the truthy branch" do
-        observed = first_local_seen(:year, <<~RUBY)
-          if /(?<year>\\d+)/ =~ str
-            year
+      # When the named-capture body is outside the v0.1.1 recogniser
+      # table (e.g. `.+`), the truthy branch still narrows to plain
+      # `String` per the v0.1.0 baseline.
+      it "narrows the capture to String inside the truthy branch (recogniser fallback)" do
+        observed = first_local_seen(:rest, <<~RUBY)
+          if /(?<rest>.+)/ =~ str
+            rest
           end
         RUBY
         expect(observed).to eq(string_t)
@@ -1824,25 +1827,18 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
         expect(observed).to eq(nil_t)
       end
 
-      it "joins back to String | nil after the if" do
+      # `\d+` triggers the v0.1.1 recogniser, so the truthy edge
+      # carries `decimal-int-string`; rejoining with the falsey
+      # `nil` edge widens back to a `decimal-int-string | nil`
+      # union (still tighter than the v0.1.0 `String | nil`).
+      it "joins back to <refinement> | nil after the if" do
         _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
           if /(?<year>\\d+)/ =~ str
             "matched"
           end
           year
         RUBY
-        expect(post.local(:year)).to eq(string_or_nil)
-      end
-
-      it "narrows multiple captures simultaneously in the truthy branch" do
-        source = <<~RUBY
-          if /(?<year>\\d{4})-(?<month>\\d{2})/ =~ str
-            year
-            month
-          end
-        RUBY
-        expect(first_local_seen(:year, source)).to eq(string_t)
-        expect(first_local_seen(:month, source)).to eq(string_t)
+        expect(post.local(:year)).to eq(Rigor::Type::Combinator.union(decimal_int_string_t, nil_t))
       end
 
       it "narrows symmetrically through `unless` (falsey branch is the matched edge)" do
@@ -1851,6 +1847,106 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
             "no match"
           else
             year
+          end
+        RUBY
+        expect(observed).to eq(decimal_int_string_t)
+      end
+
+      # ---- v0.1.1 Track 1 slice 1: regex pattern -> refinement ----
+
+      it "narrows `\\d+` named capture to decimal-int-string" do
+        observed = first_local_seen(:year, <<~RUBY)
+          if /(?<year>\\d+)/ =~ str
+            year
+          end
+        RUBY
+        expect(observed).to eq(decimal_int_string_t)
+      end
+
+      it "narrows `\\d{N}` and `\\d{N,M}` bounded forms to decimal-int-string" do
+        source = <<~RUBY
+          if /(?<year>\\d{4})-(?<month>\\d{1,2})/ =~ str
+            year
+            month
+          end
+        RUBY
+        expect(first_local_seen(:year, source)).to eq(decimal_int_string_t)
+        expect(first_local_seen(:month, source)).to eq(decimal_int_string_t)
+      end
+
+      it "narrows `\\h+` named capture to hex-int-string" do
+        observed = first_local_seen(:hash, <<~RUBY)
+          if /(?<hash>\\h+)/ =~ str
+            hash
+          end
+        RUBY
+        expect(observed).to eq(Rigor::Type::Combinator.hex_int_string)
+      end
+
+      it "narrows `[0-9a-fA-F]+` named capture to hex-int-string" do
+        observed = first_local_seen(:hex, <<~RUBY)
+          if /(?<hex>[0-9a-fA-F]+)/ =~ str
+            hex
+          end
+        RUBY
+        expect(observed).to eq(Rigor::Type::Combinator.hex_int_string)
+      end
+
+      it "narrows `[0-7]+` named capture to octal-int-string" do
+        observed = first_local_seen(:oct, <<~RUBY)
+          if /(?<oct>[0-7]+)/ =~ str
+            oct
+          end
+        RUBY
+        expect(observed).to eq(Rigor::Type::Combinator.octal_int_string)
+      end
+
+      it "narrows `[a-z]+` named capture to lowercase-string" do
+        observed = first_local_seen(:tag, <<~RUBY)
+          if /(?<tag>[a-z]+)/ =~ str
+            tag
+          end
+        RUBY
+        expect(observed).to eq(Rigor::Type::Combinator.lowercase_string)
+      end
+
+      it "narrows `[A-Z]+` named capture to uppercase-string" do
+        observed = first_local_seen(:tag, <<~RUBY)
+          if /(?<tag>[A-Z]+)/ =~ str
+            tag
+          end
+        RUBY
+        expect(observed).to eq(Rigor::Type::Combinator.uppercase_string)
+      end
+
+      it "narrows `[[:digit:]]+` named capture to numeric-string" do
+        observed = first_local_seen(:digits, <<~RUBY)
+          if /(?<digits>[[:digit:]]+)/ =~ str
+            digits
+          end
+        RUBY
+        expect(observed).to eq(Rigor::Type::Combinator.numeric_string)
+      end
+
+      it "mixes recognised and unrecognised captures in a single regex" do
+        source = <<~RUBY
+          if /(?<year>\\d{4})-(?<rest>.+)/ =~ str
+            year
+            rest
+          end
+        RUBY
+        expect(first_local_seen(:year, source)).to eq(decimal_int_string_t)
+        expect(first_local_seen(:rest, source)).to eq(string_t)
+      end
+
+      # `\d*` admits the empty string, which is not a valid
+      # `decimal-int-string` (the carrier excludes `""`). The
+      # recogniser rejects unbounded-zero quantifiers and the
+      # fallback to plain `String` keeps the carrier sound.
+      it "falls back to String for `\\d*` and other zero-length-admitting forms" do
+        observed = first_local_seen(:n, <<~RUBY)
+          if /(?<n>\\d*)/ =~ str
+            n
           end
         RUBY
         expect(observed).to eq(string_t)

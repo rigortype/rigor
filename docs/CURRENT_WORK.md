@@ -6,9 +6,7 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.1.0 version-bumped on `master` (commit `6170832`); release pending.** All six plugin-contract slices and the v0.1.0-polish work landed (six worked plugin examples, the nine-chapter end-user handbook, the named-capture narrowing fix, the `;`-prefixed block-local nil shadow fix). The seventh plugin example (`rigor-activerecord`) landed during the polish window. Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), `bundle exec rake release` waits for explicit user authorisation. The slice-by-slice recap is in `CHANGELOG.md`'s `[0.1.0]` section and the v0.1.0 row of [`docs/MILESTONES.md`](MILESTONES.md).
 
-**v0.1.1 in planning.** Four parallel tracks scoped — narrowing-depth (Track 1, headline regex pattern → refinement-name recogniser), cross-plugin API + return-type contributions (Track 2, ADR-9), plugin authoring DX (Track 3, helper module already landed in commit `ce64bb6`), and maintenance items (Track 4). Full slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned".
-
-**Working state on `master`:** 2061 RSpec examples / 0 failures, RuboCop 208 files / 0 offenses, `bundle exec exe/rigor check lib` reports the three v0.1.1 Track 4 sig-drift warnings (`Trinary#negate`, `IntegerRange#lower`, `IntegerRange#upper`) and nothing else.
+**v0.1.1 in flight.** Four parallel tracks scoped; **Track 1 slice 1 (regex pattern → refinement-name recogniser) landed unreleased on the work branch.** Remaining tracks: Track 1 slices 2 / 3 / 4 / 5 (`numeric-string` propagation through `Integer(s)`, `self`-narrowing in `predicate-if-*`, `String#start_with?` / `#end_with?` / `#include?` predicate narrowing, additional `literal-string` propagation methods); Track 2 (cross-plugin API per [ADR-9](adr/9-cross-plugin-api.md) + return-type contributions); Track 3 remaining items (demo cache directory handling, examples RuboCop relaxation; helper extraction landed in commit `ce64bb6`); Track 4 maintenance. Full slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned".
 
 ## Where the Work Resumes
 
@@ -20,7 +18,8 @@ The Rails plugin family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-act
 
 Read [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned" for the full slice list. Recommended entry order:
 
-- **Track 1 slice 1** (regex pattern → refinement-name recogniser) is the highest-leverage standalone slice and a clean implementation bookmark — touches `Inference::Narrowing.analyse_match_write` (added in v0.1.0) plus a new `Builtins::RegexRefinement` table. No cross-cutting refactor.
+- **Track 1 slice 2** (`numeric-string` propagation through conversion predicates) is the natural follow-on to slice 1: now that `if /(?<year>\d+)/ =~ str` binds `year` to `decimal-int-string`, `Integer(year)` should fold to a tighter return type than the RBS `Integer` baseline. Touches `MethodDispatcher::KernelDispatch` (`Integer(s)` / `Float(s)`) and `Inference::Narrowing` for `s.to_i` / `s.to_f`.
+- **Track 1 slice 4** (`String#start_with?` / `#end_with?` / `#include?` against literal needles) is independent and can land in parallel with slice 2.
 - **Track 2 ADR-9 slice 1** (`Plugin::FactStore` value object) is the smallest unblocking step for Tier 2 Rails plugins; six independently shippable slices in the ADR.
 - **Track 4 maintenance** items (three sig drifts, `node_locator_spec.rb:82`, `Integer#ceildiv`) are pick-up-anytime cleanups.
 

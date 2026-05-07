@@ -7,6 +7,7 @@ require_relative "../type"
 require_relative "../environment"
 require_relative "../rbs_extended"
 require_relative "../analysis/fact_store"
+require_relative "../builtins/regex_refinement"
 
 module Rigor
   module Inference
@@ -746,18 +747,49 @@ module Rigor
         # `nil`. Subtract the dead half on each edge so callers
         # like `year.upcase` inside the truthy branch no longer
         # fire `possible-nil-receiver`.
+        #
+        # v0.1.1 Track 1 slice 1 — when the regex source is a
+        # statically known `RegularExpressionNode` and a named
+        # capture's body matches one of the curated shapes in
+        # {Rigor::Builtins::RegexRefinement::RULES}, the truthy
+        # branch narrows further than `String` to the matching
+        # imported refinement (e.g. `decimal-int-string` for
+        # `\d+`). Bodies outside the table fall back to the
+        # v0.1.0 baseline (plain `String`).
         def analyse_match_write(node, scope)
           string_t = Type::Combinator.nominal_of("String")
           nil_t = Type::Combinator.constant_of(nil)
+          refinements = match_write_capture_refinements(node)
           truthy = scope
           falsey = scope
           node.targets.each do |target|
             next unless target.is_a?(Prism::LocalVariableTargetNode)
 
-            truthy = truthy.with_local(target.name, string_t)
+            truthy = truthy.with_local(target.name, refinements[target.name] || string_t)
             falsey = falsey.with_local(target.name, nil_t)
           end
           [truthy, falsey]
+        end
+
+        # Extracts `{ capture_name => Refinement }` for every named
+        # capture group in the `MatchWriteNode`'s wrapped `=~` call
+        # whose body the recogniser table accepts. Bodies that
+        # contain nested groups, anchors, alternation, or anything
+        # else outside the curated forms drop out and the caller
+        # falls back to plain `String`.
+        NAMED_CAPTURE_BODY_RE = /\(\?<([A-Za-z_][A-Za-z0-9_]*)>([^()|]*)\)/
+        private_constant :NAMED_CAPTURE_BODY_RE
+
+        def match_write_capture_refinements(node)
+          regex = node.call.is_a?(Prism::CallNode) ? node.call.receiver : nil
+          return {} unless regex.is_a?(Prism::RegularExpressionNode)
+
+          refinements = {}
+          regex.unescaped.scan(NAMED_CAPTURE_BODY_RE) do |name, body|
+            type = ::Rigor::Builtins::RegexRefinement.for_capture_body(body)
+            refinements[name.to_sym] = type if type
+          end
+          refinements
         end
 
         # Recognised CallNode predicates:

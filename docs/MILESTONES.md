@@ -159,22 +159,7 @@ Theme: **deepen the literal-string narrowing surface, ship the cross-plugin API,
 
 ### Track 1 — Literal-string / refinement narrowing depth (theme)
 
-1. **Regex pattern → refinement-name recogniser.** Map common regex shapes onto Rigor's existing imported refinement carriers ([`docs/type-specification/imported-built-in-types.md`](type-specification/imported-built-in-types.md)) so a successful match narrows further than just `String`. Working table:
-
-   | Regex pattern (anchored, simple) | Refinement |
-   | --- | --- |
-   | `/\A\d+\z/` (one-or-more digits, anchored) | `decimal-int-string` |
-   | `/\A\d{N}\z/`, `/\A\d{N,M}\z/` (fixed / bounded length) | `decimal-int-string` |
-   | `/\A\h+\z/` or `/\A[0-9a-fA-F]+\z/` | `hex-int-string` |
-   | `/\A[0-7]+\z/` | `octal-int-string` |
-   | `/\A[a-z]+\z/` | `lowercase-string` |
-   | `/\A[A-Z]+\z/` | `uppercase-string` |
-   | `/\A[[:digit:]]+\z/` | `numeric-string` |
-   | named captures inside the above (`(?<year>\d{4})`) | each capture inherits the per-group refinement |
-
-   Implementation hook is `Inference::Narrowing.analyse_match_write` (added in v0.1.0). Today it returns `String` for every matched capture; v0.1.1 introspects the regex's source pattern, runs it through a pure `Builtins::RegexRefinement` recogniser, and returns the matching refinement carrier from `Type::Combinator` (`decimal_int_string`, `hex_int_string`, `numeric_string`, `lowercase_string`, `uppercase_string`) when one fits. Anything outside the table stays as plain `String`.
-
-   Recognition is deliberately limited to anchored patterns of the curated forms above; arbitrary regex semantic equivalence is undecidable. The recogniser is a small, audited table of canonical shapes, mirroring the spirit of `Builtins::ImportedRefinements`.
+1. ✅ **Regex pattern → refinement-name recogniser** — landed unreleased. `Rigor::Builtins::RegexRefinement` (a curated table of canonical sub-patterns: `\d+`, `\d{N}`, `\d{N,M}`, `\h+`, `[0-9a-fA-F]+`, `[0-9a-f]+`, `[0-9A-F]+`, `[0-7]+`, `[a-z]+`, `[A-Z]+`, `[[:digit:]]+`, all admitting `+` / `{n}` / `{n,m}` quantifiers with `n >= 1`) is consulted from `Inference::Narrowing.analyse_match_write` so the truthy branch of `if /(?<year>\d+)/ =~ str` narrows `year` to `decimal-int-string` instead of plain `String`. Bodies that admit zero-length matches (`*`, `?`, `{0,N}`) or sit outside the audited table fall back to plain `String`. Whole-regex anchored forms (`/\A\d+\z/.match?(str)` narrowing `str` itself) are deferred — the v0.1.1 hook is named-capture only, since anchored-whole-regex narrowing requires a separate consumer site (probably `String#match?` predicate narrowing) that is not yet wired.
 
 2. **`numeric-string` (and friends) propagation through narrowing predicates.** Once a regex-derived refinement is in scope, `Integer(s)` / `Float(s)` / `s.to_i` / etc. on a `numeric-string` should fold to a more precise return type than the RBS `Integer` / `Float` baseline (when the conversion is total over the refinement's domain). Slice (1) is the producer; this slice is the consumer.
 

@@ -40,7 +40,7 @@ module Rigor
         # Recursing down a tree always uses `evaluate`; the
         # diagnostics each node owns fire as a side-effect of
         # evaluating it, exactly once per node.
-        def evaluate(node) # rubocop:disable Metrics/CyclomaticComplexity
+        def evaluate(node)
           return nil if node.nil?
 
           case node
@@ -93,7 +93,7 @@ module Rigor
             emit_info(
               node,
               "`#{render_call(node)}` returns Float (#{MethodTable.label(receiver_dim)} → " \
-              "#{node.name.to_s.delete_prefix("in_").tr("_", " ")})",
+              "#{node.name.to_s.delete_prefix('in_').tr('_', ' ')})",
               rule: "in-method-result"
             )
           end

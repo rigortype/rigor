@@ -6,7 +6,7 @@ AllCops:
     - "vendor/**/*"
     - "spec/integration/fixtures/**/*"
     - "tool/**/*"
-    - "examples/**/*"
+    - "examples/*/demo/.rigor/**/*"
 
 plugins:
   - rubocop-rake
@@ -32,3 +32,62 @@ RSpec/ExampleLength:
 
 RSpec/MultipleExpectations:
   Enabled: false
+
+# Relaxed rules for the worked plugin examples. Each example is a
+# self-contained gem-like layout authored for illustrative variation
+# (kebab-case file names per the gem-id convention, multi-class demo
+# files for at-a-glance reading, deliberate domain words like
+# `:method` for the HTTP method member). Metrics, snake_case file
+# naming, and the multi-class / single-file structural cops fight
+# that goal; everything else stays enabled.
+inherit_mode:
+  merge:
+    - Exclude
+
+Metrics:
+  Exclude:
+    - "examples/**/*"
+
+Naming/FileName:
+  Exclude:
+    - "examples/**/*"
+
+# Demo entry points (`demo.rb`, `errors_demo.rb`) deliberately call
+# into the plugin's discovery surface as top-level scripts rather
+# than wrapping a class. The reproductive shape is the script.
+Style/TopLevelMethodDefinition:
+  Exclude:
+    - "examples/*/demo/**/*"
+
+# Demo runtime files often define a small ad-hoc class hierarchy
+# inline so a reader can take in the whole shape on one screen.
+Style/OneClassPerFile:
+  Exclude:
+    - "examples/*/demo/**/*"
+
+# `Struct.new(:method, ...)` is a natural fit for an HTTP-route
+# entry; the `:method` member name reads better than the alternatives.
+Lint/StructNewOverride:
+  Exclude:
+    - "examples/**/*"
+
+# Diagnostic-message strings in plugin examples occasionally exceed
+# the 120-column limit so the message stays readable end-to-end.
+Layout/LineLength:
+  Exclude:
+    - "examples/**/*"
+
+# Switch arms that share a body but exist for documentation
+# (`when X then a; when Y then a` for two semantically distinct
+# inputs that happen to produce the same value) are common in the
+# DSL-interpreter examples.
+Lint/DuplicateBranch:
+  Exclude:
+    - "examples/**/*"
+
+# A trailing empty `else` after a chain of explicit `when` arms is
+# often kept in DSL interpreters as a comment-bearing extension
+# point ("future column types fall through to here").
+Style/EmptyElse:
+  Exclude:
+    - "examples/**/*"

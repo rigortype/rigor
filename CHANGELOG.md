@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — examples re-included in RuboCop with documented relaxations (v0.1.1 Track 3 slice 10)
+
+- **`.rubocop.yml`** removed the blanket `examples/**/*` exclusion. The new layout disables `Metrics/*` and `Naming/FileName` for examples (kebab-case file names are part of the gem-id convention; mid-sized methods keep illustrations end-to-end legible), relaxes `Style/TopLevelMethodDefinition` and `Style/OneClassPerFile` for `examples/*/demo/**/*` (demos run as scripts and pack ad-hoc class hierarchies into one file), and excludes `Lint/StructNewOverride` / `Layout/LineLength` / `Lint/DuplicateBranch` / `Style/EmptyElse` for `examples/**/*` (deliberate domain words like the `:method` Struct member, long diagnostic-message strings, multi-arm switches that share a body for documentation, comment-bearing trailing `else` extension points). Each carve-out is annotated inline.
+- **Autocorrect.** Running RuboCop with `-A` cleaned up the previously-unchecked example sources: dropped `require "set"` (Set is built-in on Ruby 3+), switched to the block-pass shorthand `&` form, retired stale `Metrics/*` suppressions made redundant by the carve-out, normalised string-literal interpolation quoting, etc. No example's behaviour changed; the diffs are cosmetic.
+- **Result.** RuboCop now inspects 262 files / 0 offenses (was 210).
+
 ### Changed — prelude `composed` bodies classify as `dispatch` (v0.1.1 Track 4 item 13)
 
 - **`tool/extract_builtin_catalog.rb` `classify_purity`** now returns `"dispatch"` for `body_kind: composed` prelude entries instead of falling through to `"unknown"`. `composed` is the residual body kind — a Ruby method body that is neither `Primitive.attr!(:leaf)` nor a literal return nor `self` — and any such body ends in a Ruby method dispatch (Ruby methods are user-overridable, so the catalog must treat the call as unsafe for folding either way).

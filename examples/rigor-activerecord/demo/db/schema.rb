@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_07_000000) do
+ActiveRecord::Schema[8.0].define(version: 20_260_507_000_000) do
   create_table "users", force: :cascade do |t|
     t.string  "name", limit: 100, null: false
     t.string  "email", null: false

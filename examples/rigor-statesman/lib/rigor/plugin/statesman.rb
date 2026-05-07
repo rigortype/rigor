@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "set"
 require "prism"
 require "rigor/plugin"
 
@@ -150,11 +149,11 @@ module Rigor
         node.unescaped.to_sym
       end
 
-      def walk(node, &block)
+      def walk(node, &)
         return if node.nil?
 
         yield node
-        node.compact_child_nodes.each { |child| walk(child, &block) }
+        node.compact_child_nodes.each { |child| walk(child, &) }
       end
 
       def did_you_mean(name, states)
@@ -171,11 +170,11 @@ module Rigor
         best
       end
 
-      def levenshtein(a, b) # rubocop:disable Naming/MethodParameterName,Metrics/AbcSize,Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+      def levenshtein(a, b) # rubocop:disable Naming/MethodParameterName
         return b.length if a.empty?
         return a.length if b.empty?
 
-        rows = Array.new(a.length + 1) { |i| Array.new(b.length + 1, 0) }
+        rows = Array.new(a.length + 1) { |_i| Array.new(b.length + 1, 0) }
         (0..a.length).each { |i| rows[i][0] = i }
         (0..b.length).each { |j| rows[0][j] = j }
 

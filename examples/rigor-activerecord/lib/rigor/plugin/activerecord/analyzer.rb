@@ -43,11 +43,11 @@ module Rigor
 
         private
 
-        def walk(node, &block)
+        def walk(node, &)
           return if node.nil?
 
           yield node
-          node.compact_child_nodes.each { |child| walk(child, &block) }
+          node.compact_child_nodes.each { |child| walk(child, &) }
         end
 
         def visit_call(node)
@@ -96,7 +96,7 @@ module Rigor
 
         def push_recognised(node, entry, keys = nil)
           msg = "`#{entry.class_name}.#{node.name}`"
-          msg += " (#{keys.map { |k| ":#{k}" }.join(", ")})" if keys && !keys.empty?
+          msg += " (#{keys.map { |k| ":#{k}" }.join(', ')})" if keys && !keys.empty?
           msg += " on table `#{entry.table_name}`"
           push_info(node, "model-call", msg)
         end
@@ -119,9 +119,9 @@ module Rigor
           end
           case current
           when nil
-            "::#{parts.join("::")}"
+            "::#{parts.join('::')}"
           when Prism::ConstantReadNode
-            "#{current.name}::#{parts.join("::")}"
+            "#{current.name}::#{parts.join('::')}"
           end
         end
 
@@ -164,11 +164,11 @@ module Rigor
           best
         end
 
-        def levenshtein(a, b) # rubocop:disable Naming/MethodParameterName,Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+        def levenshtein(a, b) # rubocop:disable Naming/MethodParameterName
           return b.length if a.empty?
           return a.length if b.empty?
 
-          rows = Array.new(a.length + 1) { |i| Array.new(b.length + 1, 0) }
+          rows = Array.new(a.length + 1) { |_i| Array.new(b.length + 1, 0) }
           (0..a.length).each { |i| rows[i][0] = i }
           (0..b.length).each { |j| rows[0][j] = j }
 

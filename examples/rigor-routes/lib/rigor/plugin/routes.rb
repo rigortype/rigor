@@ -120,10 +120,10 @@ module Rigor
         return [unknown_route_diagnostic(path, node, base, kind, table)] unless entry
 
         actual_arity = call_argument_count(node)
-        if actual_arity != entry.arity
-          [arity_mismatch_diagnostic(path, node, base, kind, entry, actual_arity)]
-        else
+        if actual_arity == entry.arity
           [recognised_diagnostic(path, node, base, kind, entry)]
+        else
+          [arity_mismatch_diagnostic(path, node, base, kind, entry, actual_arity)]
         end
       end
 
@@ -201,11 +201,11 @@ module Rigor
         best
       end
 
-      def levenshtein(a, b) # rubocop:disable Naming/MethodParameterName,Metrics/AbcSize,Metrics/MethodLength,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+      def levenshtein(a, b) # rubocop:disable Naming/MethodParameterName
         return b.length if a.empty?
         return a.length if b.empty?
 
-        rows = Array.new(a.length + 1) { |i| Array.new(b.length + 1, 0) }
+        rows = Array.new(a.length + 1) { |_i| Array.new(b.length + 1, 0) }
         (0..a.length).each { |i| rows[i][0] = i }
         (0..b.length).each { |j| rows[0][j] = j }
 

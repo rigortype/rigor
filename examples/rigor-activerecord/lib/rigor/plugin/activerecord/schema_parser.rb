@@ -52,14 +52,12 @@ module Rigor
 
         private
 
-        def collect_create_table_calls(node, &block)
+        def collect_create_table_calls(node, &)
           return if node.nil?
 
-          if node.is_a?(Prism::CallNode) && node.name == :create_table && node.receiver.nil?
-            yield node
-          end
+          yield node if node.is_a?(Prism::CallNode) && node.name == :create_table && node.receiver.nil?
 
-          node.compact_child_nodes.each { |child| collect_create_table_calls(child, &block) }
+          node.compact_child_nodes.each { |child| collect_create_table_calls(child, &) }
         end
 
         def parse_create_table(call_node)
@@ -104,7 +102,7 @@ module Rigor
         # Skips nested blocks (e.g. inside `if`-conditioned columns)
         # only at the top level — for richer schema constructs the
         # parser falls back silently.
-        def collect_column_calls(node, &block)
+        def collect_column_calls(node, &)
           return if node.nil?
 
           if node.is_a?(Prism::CallNode) && node.receiver.is_a?(Prism::LocalVariableReadNode)
@@ -112,7 +110,7 @@ module Rigor
             return
           end
 
-          node.compact_child_nodes.each { |child| collect_column_calls(child, &block) }
+          node.compact_child_nodes.each { |child| collect_column_calls(child, &) }
         end
 
         def parse_column(call_node)

@@ -11,6 +11,7 @@
 
 class Distance
   include Comparable
+
   attr_reader :meters
 
   def initialize(meters)
@@ -40,6 +41,7 @@ end
 
 class Time
   include Comparable
+
   attr_reader :seconds
 
   def initialize(seconds)
@@ -57,6 +59,7 @@ end
 
 class Speed
   include Comparable
+
   attr_reader :meters_per_second
 
   def initialize(meters_per_second)
@@ -86,6 +89,7 @@ end
 
 class Acceleration
   include Comparable
+
   attr_reader :meters_per_second_squared
 
   def initialize(meters_per_second_squared)

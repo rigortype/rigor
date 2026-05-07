@@ -29,11 +29,11 @@ module Rigor
           end
         end
 
-        def walk(node, &block)
+        def walk(node, &)
           return if node.nil?
 
           yield node
-          node.compact_child_nodes.each { |child| walk(child, &block) }
+          node.compact_child_nodes.each { |child| walk(child, &) }
         end
       end
     end

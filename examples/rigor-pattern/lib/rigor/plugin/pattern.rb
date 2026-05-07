@@ -91,7 +91,7 @@ module Rigor
             path, call,
             severity: :error,
             rule: "unknown-pattern",
-            message: "no pattern named :#{pattern_name} in plugin config (declared: #{known.empty? ? "(none)" : known})"
+            message: "no pattern named :#{pattern_name} in plugin config (declared: #{known.empty? ? '(none)' : known})"
           )
         end
 

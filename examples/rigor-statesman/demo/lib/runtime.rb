@@ -5,9 +5,9 @@
 # of the `transition_to(:state)` calls below.
 
 class Class
-  def state_machine(&block)
+  def state_machine(&)
     machine = StateMachine.new
-    machine.instance_exec(&block)
+    machine.instance_exec(&)
     instance_variable_set(:@state_machine, machine)
 
     define_method(:transition_to) do |target|

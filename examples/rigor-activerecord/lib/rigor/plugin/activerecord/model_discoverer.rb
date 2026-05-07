@@ -68,24 +68,24 @@ module Rigor
             absolute = File.expand_path(root)
             next [] unless File.directory?(absolute)
 
-            Dir.glob(File.join(absolute, "**", "*.rb")).sort
+            Dir.glob(File.join(absolute, "**", "*.rb"))
           end
         end
 
-        def walk_for_classes(node, lexical_path, &block)
+        def walk_for_classes(node, lexical_path, &)
           return if node.nil?
 
           case node
           when Prism::ClassNode
-            visit_class(node, lexical_path, &block)
+            visit_class(node, lexical_path, &)
           when Prism::ModuleNode
-            visit_module(node, lexical_path, &block)
+            visit_module(node, lexical_path, &)
           else
-            node.compact_child_nodes.each { |child| walk_for_classes(child, lexical_path, &block) }
+            node.compact_child_nodes.each { |child| walk_for_classes(child, lexical_path, &) }
           end
         end
 
-        def visit_class(node, lexical_path, &block)
+        def visit_class(node, lexical_path, &)
           class_local_name = constant_path_name(node.constant_path)
           return if class_local_name.nil?
 
@@ -99,15 +99,15 @@ module Rigor
 
           # Recurse into the body in case nested classes exist.
           inner_path = lexical_path + [class_local_name]
-          walk_for_classes(node.body, inner_path, &block) if node.body
+          walk_for_classes(node.body, inner_path, &) if node.body
         end
 
-        def visit_module(node, lexical_path, &block)
+        def visit_module(node, lexical_path, &)
           module_local_name = constant_path_name(node.constant_path)
           return if module_local_name.nil?
 
           inner_path = lexical_path + [module_local_name]
-          walk_for_classes(node.body, inner_path, &block) if node.body
+          walk_for_classes(node.body, inner_path, &) if node.body
         end
 
         # Renders a constant-path node (`Admin::User`,
@@ -128,9 +128,9 @@ module Rigor
             end
             case current
             when nil
-              "::#{parts.join("::")}"
+              "::#{parts.join('::')}"
             when Prism::ConstantReadNode
-              "#{current.name}::#{parts.join("::")}"
+              "#{current.name}::#{parts.join('::')}"
             end
           end
         end

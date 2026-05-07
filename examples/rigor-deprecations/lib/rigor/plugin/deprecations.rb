@@ -104,7 +104,7 @@ module Rigor
         suffix = []
         suffix << "since #{entry.since}" if entry.since
         suffix << "use: #{entry.replacement}" if entry.replacement
-        tail = suffix.empty? ? "" : " (#{suffix.join("; ")})"
+        tail = suffix.empty? ? "" : " (#{suffix.join('; ')})"
         receiver_label = entry.receiver ? "#{entry.receiver}." : ""
         location = node.location
         Rigor::Analysis::Diagnostic.new(
@@ -117,11 +117,11 @@ module Rigor
         )
       end
 
-      def walk(node, &block)
+      def walk(node, &)
         return if node.nil?
 
         yield node
-        node.compact_child_nodes.each { |child| walk(child, &block) }
+        node.compact_child_nodes.each { |child| walk(child, &) }
       end
     end
 

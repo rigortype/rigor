@@ -8,11 +8,10 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.1.1 in flight.** Four parallel tracks scoped. Landed unreleased on the work branch:
 - Track 1 slice 1 — regex pattern → refinement-name recogniser
-- Track 4 item 11 — three `lib/` sig drifts closed (`Trinary#negate`, `IntegerRange#lower`, `IntegerRange#upper`)
-- Track 4 item 12 — `node_locator_spec.rb:82` confirmed stale (constant-folding already removes the diagnostic; no code change)
-- Track 4 item 13 — prelude `composed` bodies reclassified `unknown` → `dispatch` (catalog cleanup, no folding-behaviour change)
+- Track 3 slice 8 (helpers, prior commit `ce64bb6`) and slice 10 — examples re-included in RuboCop with documented relaxations
+- Track 4 fully drained: item 11 (three `lib/` sig drifts closed), item 12 (`node_locator_spec.rb:82` stale; constant-folding already removes the diagnostic), item 13 (prelude `composed` bodies reclassified `unknown` → `dispatch`).
 
-Working state: 2090 RSpec examples / 0 failures, RuboCop 210 files / 0 offenses, `bundle exec exe/rigor check lib` reports `No diagnostics`. Remaining: Track 1 slices 2 / 3 / 4 / 5 (`numeric-string` propagation through `Integer(s)`, `self`-narrowing in `predicate-if-*`, `String#start_with?` / `#end_with?` / `#include?` predicate narrowing, additional `literal-string` propagation methods); Track 2 (cross-plugin API per [ADR-9](adr/9-cross-plugin-api.md) + return-type contributions); Track 3 remaining items (demo cache directory handling, examples RuboCop relaxation; helper extraction landed in commit `ce64bb6`). Full slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned".
+Working state: 2090 RSpec examples / 0 failures, RuboCop 262 files / 0 offenses, `bundle exec exe/rigor check lib` reports `No diagnostics`. Remaining: Track 1 slices 2 / 3 / 4 / 5 (`numeric-string` propagation through `Integer(s)`, `self`-narrowing in `predicate-if-*`, `String#start_with?` / `#end_with?` / `#include?` predicate narrowing, additional `literal-string` propagation methods); Track 2 (cross-plugin API per [ADR-9](adr/9-cross-plugin-api.md) + return-type contributions); Track 3 slice 9 (demo cache directory handling — needs the `(a)` / `(b)` design call). Full slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned".
 
 ## Where the Work Resumes
 

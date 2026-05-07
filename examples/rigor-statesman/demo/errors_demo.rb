@@ -27,4 +27,4 @@ order.transition_to(:approval)   # error: unknown state :approval (did you mean 
 order.transition_to(:submited)   # error: unknown state :submited (did you mean :submitted?)
 
 # Not close to anything — error without a hint.
-order.transition_to(:purgatory)  # error: unknown state :purgatory
+order.transition_to(:purgatory) # error: unknown state :purgatory

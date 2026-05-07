@@ -1,0 +1,609 @@
+---
+name: rigor-plugin-author
+description: End-to-end workflow for an AI agent to translate a user requirement into a working Rigor plugin under `examples/`. Use when the user asks to "create a Rigor plugin for X", "write a plugin that does Y", "extend Rigor for our DSL", or similar. Covers requirements gathering, template selection, scaffolding, integration spec, and verification.
+---
+
+# Rigor Plugin Author Workflow
+
+This SKILL is for AI agents. It compresses the experience of having
+authored the six examples under [`examples/`](../../../examples/README.md)
+into a procedural pipeline so the next plugin can be built end-to-end
+without re-discovering the gotchas.
+
+The user-facing handbook for plugin **authoring** is the
+[`examples/README.md`](../../../examples/README.md) landing page.
+This document is the agent-facing **how-to-build** companion.
+
+All commands MUST run through the Flake per `AGENTS.md`.
+
+---
+
+## Phase 0 — When this SKILL fires
+
+Trigger the SKILL when the user requests a plugin in the broad
+sense:
+
+- "Rigor で X を解析するプラグインを作って"
+- "Create a Rigor plugin that catches Y"
+- "Extend Rigor to understand our DSL Z"
+- "Write a plugin similar to rigor-units but for currency"
+
+Do NOT trigger for:
+
+- Modifications to existing plugins under `examples/` (those are
+  ordinary edit tasks).
+- Requests for the analyser engine itself (`lib/rigor/inference/`,
+  `lib/rigor/analysis/`, `lib/rigor/plugin/`). Those are core
+  development; this SKILL only covers writing third-party-style
+  plugins under `examples/`.
+
+---
+
+## Phase 1 — Requirements gathering
+
+Before any code, get the user to commit to answers for **all five**
+of these. Ask them as a single message; do NOT scaffold anything
+yet. The answers narrow the architecture choice in Phase 2.
+
+### Q1. Trigger surface — what call shape activates the plugin?
+
+- A. A specific module / class method (`Module.method(...)`,
+  `Class#method(...)`).
+- B. A specific implicit-receiver method (top-level `helper(...)`).
+- C. A method whose name matches a pattern (`*_path`, `*_url`,
+  `transition_to_*`).
+- D. A constructor chain on a built-in type
+  (`100.kilometers`, `"x".validates_as(:email)`).
+- E. A DSL block (`state_machine do ... end`,
+  `validates_with do ... end`).
+
+### Q2. What does the plugin need to LOOK at?
+
+- A. Just the call site (literal arguments, immediate receiver).
+- B. The local-variable bindings flowing INTO the call site
+  (variable came from earlier in the file).
+- C. Declarations from EARLIER in the same file (a `state` block
+  before the `transition_to` call).
+- D. Declarations from ANOTHER file in the project (cross-file).
+- E. An external resource — `config/routes.yml`, `db/schema.rb`,
+  `config/locales/*.yml`.
+
+### Q3. What does the plugin need to PROVE?
+
+- A. The argument is one of a known finite set (route name, state
+  name, deprecated method name).
+- B. The argument's literal value matches a pattern (regex, format
+  string).
+- C. The arguments compose dimensionally (Distance + Distance =
+  Distance, Distance + Time = error).
+- D. The arity / shape matches a declared signature.
+- E. The literal expression evaluates to a known type (Lisp eval
+  pattern).
+
+### Q4. What diagnostic output does the user want?
+
+- A. **Info-only** — surface the inferred type / matched name as a
+  trace, no errors.
+- B. **Error on mismatch** — flag wrong inputs, otherwise stay
+  silent.
+- C. **Both** — info on success, error on mismatch.
+- D. **Warning** for deprecation / soft contract violation.
+
+### Q5. What is the plugin's CONFIGURATION shape?
+
+- A. **None** — behaviour is hard-coded.
+- B. **A few string knobs** (`module_name`, `severity`).
+- C. **A list / hash of rules** (deprecation entries, regex
+  patterns).
+- D. **An external file path** (`routes_file: "config/routes.yml"`).
+- E. **All of the above** (rich configuration).
+
+---
+
+## Phase 2 — Template selection
+
+Map the answers to one of the six existing examples. Use the chosen
+example as the **structural template** — copy the directory layout
+and adapt the analyser body. Do NOT start from scratch.
+
+| If the answers look like… | Use template | Why |
+| --- | --- | --- |
+| Q1=A/B, Q2=A, Q3=A, Q5=C | [`rigor-deprecations`](../../../examples/rigor-deprecations/) | Smallest possible plugin; pure config-driven rules; ~80 lines. |
+| Q1=A, Q2=A, Q3=E, Q5=A/B | [`rigor-lisp-eval`](../../../examples/rigor-lisp-eval/) | Recursive interpretation of the literal AST argument. |
+| Q1=D, Q2=B, Q3=C, Q5=A | [`rigor-units`](../../../examples/rigor-units/) | Local-variable flow tracking through arithmetic and chained calls. |
+| Q1=C/E, Q2=C, Q3=A, Q5=A/B | [`rigor-statesman`](../../../examples/rigor-statesman/) | Two-pass DSL analysis — collect declarations, then validate uses. |
+| Q1=B, Q2=A/B, Q3=B, Q5=C | [`rigor-pattern`](../../../examples/rigor-pattern/) | Plugin asks the analyser via `Scope#type_of` + `literal_string_compatible?`; matches against a literal value. |
+| Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D | [`rigor-routes`](../../../examples/rigor-routes/) | Reads a project file via `IoBoundary` under `TrustPolicy`; caches the parse via `Plugin::Base.producer`. |
+
+If the requirement falls into NONE of the six, **stop and ask the
+user**. The plugin contract surface in v0.1.0 may not yet expose
+what they need (e.g. plugin-emitted return-type contributions are
+queued for a v0.1.x slice — see the "Future direction" sections in
+the example READMEs). Don't invent a workaround.
+
+---
+
+## Phase 3 — Scaffold
+
+Pick a plugin id and gem name following the convention:
+
+- **Plugin id** — kebab-case, lowercase, descriptive. Matches
+  `Rigor::Plugin::Manifest::VALID_ID` (`/\A[a-z][a-z0-9._-]*\z/`).
+  Examples: `routes`, `lisp-eval`, `deprecations`.
+- **Gem name** — `rigor-<id>`. The plugin loader calls
+  `require "rigor-<id>"` from each `.rigor.yml` `plugins:` entry.
+
+Create the directory tree (replacing `<id>` and `ClassName` with the
+chosen id and matching CamelCase Ruby class name):
+
+```text
+examples/rigor-<id>/
+├── README.md
+├── rigor-<id>.gemspec
+├── lib/
+│   ├── rigor-<id>.rb              ← gem entry; `require_relative "rigor/plugin/<id>"`
+│   └── rigor/plugin/
+│       └── <id>.rb                ← manifest, init, hook (small plugins keep all here)
+│       └── <id>/                  ← only if the plugin has helpers
+│           ├── analyzer.rb        ← AST walker (units / statesman pattern)
+│           ├── method_table.rb    ← pure dispatch table (units pattern)
+│           └── route_table.rb     ← parsed external state (routes pattern)
+└── demo/
+    ├── .rigor.yml                 ← `plugins: [rigor-<id>]`
+    ├── demo.rb                    ← runnable example (no errors)
+    ├── errors_demo.rb             ← intentionally ill-typed (only if Q4=B/C)
+    ├── lib/runtime.rb             ← user-side runtime so demo.rb runs
+    └── sig/...rbs                 ← only if the demo references typed method calls
+```
+
+### Gemspec template
+
+```ruby
+# rigor-<id>.gemspec
+# frozen_string_literal: true
+
+Gem::Specification.new do |spec|
+  spec.name = "rigor-<id>"
+  spec.version = "0.1.0"
+  spec.authors = ["Rigor contributors"]
+  spec.email = ["maintainers@example.invalid"]
+
+  spec.summary = "Rigor plugin example: <one-line description>."
+  spec.description = "<two-sentence description that names the user-facing API the plugin types>."
+  spec.license = "MPL-2.0"
+  spec.required_ruby_version = [">= 4.0.0", "< 4.1"]
+  spec.metadata = { "rubygems_mfa_required" => "true" }
+
+  spec.files = Dir.glob(%w[README.md lib/**/*.rb])
+  spec.require_paths = ["lib"]
+
+  spec.add_dependency "prism", ">= 1.0", "< 2.0"
+  spec.add_dependency "rigortype", ">= 0.1.0", "< 0.2.0"
+end
+```
+
+### Plugin entry template (`lib/rigor-<id>.rb`)
+
+```ruby
+# frozen_string_literal: true
+
+require_relative "rigor/plugin/<id>"
+```
+
+### Plugin class skeleton (`lib/rigor/plugin/<id>.rb`)
+
+```ruby
+# frozen_string_literal: true
+
+require "rigor/plugin"
+
+module Rigor
+  module Plugin
+    class ClassName < Rigor::Plugin::Base
+      manifest(
+        id: "<id>",
+        version: "0.1.0",
+        description: "<one-line>",
+        config_schema: {
+          # Phase 1 Q5 answers map here. Examples:
+          # "module_name" => :string,
+          # "rules" => :array,
+          # "patterns" => :hash,
+        }
+      )
+
+      def init(_services)
+        # Read config defaults. See template-specific section below.
+      end
+
+      def diagnostics_for_file(path:, scope:, root:)
+        # Walk `root` (Prism::Node), return Array<Rigor::Analysis::Diagnostic>.
+        # See template-specific section below.
+      end
+
+      private
+
+      # Diagnostic constructor helper — every plugin uses this shape.
+      def diagnostic(path, node, severity:, rule:, message:)
+        location = node.location
+        Rigor::Analysis::Diagnostic.new(
+          path: path,
+          line: location.start_line,
+          column: location.start_column + 1,
+          message: message,
+          severity: severity,
+          rule: rule
+        )
+      end
+    end
+
+    Rigor::Plugin.register(ClassName)
+  end
+end
+```
+
+---
+
+## Phase 4 — AST walker pattern (per template)
+
+The analyser body inside `#diagnostics_for_file` is the part that
+varies most by template. Don't invent a new walker — copy the
+matching example's `lib/rigor/plugin/<id>/analyzer.rb` (or the
+inline walker in the small plugins) and adapt the dispatch table.
+
+### Template-specific reference points
+
+- **rigor-deprecations** — single-pass walk, match `CallNode` against
+  config rules. See `lib/rigor/plugin/deprecations.rb` `each_call`
+  helper.
+- **rigor-lisp-eval** — recursive evaluation of a literal AST
+  argument. See `lib/rigor/plugin/lisp_eval/interpreter.rb#evaluate`
+  for the recursion pattern; arrives at a tag (`:integer` /
+  `:float` / `:bool`) bottom-up.
+- **rigor-units** — `evaluate(node)` returns a dimension tag while
+  threading `@bindings` (a Hash<Symbol, Symbol> of local-variable
+  name → dimension tag). On `LocalVariableWriteNode`, evaluate the
+  RHS and store the result. See
+  `lib/rigor/plugin/units/analyzer.rb#evaluate`.
+- **rigor-statesman** — two passes: `collect_states(root)` produces a
+  Set; `validate_transitions(root, states)` consults it. See
+  `lib/rigor/plugin/statesman.rb` `collect_states` /
+  `validate_transitions`.
+- **rigor-pattern** — the walker calls `scope.type_of(arg_node)` to
+  ASK the analyser for the inferred type, then `literal_string_compatible?`
+  to gate further checks. See `lib/rigor/plugin/pattern.rb`
+  `analyse_call` and `literal_value_of`.
+- **rigor-routes** — single-pass walk for `*_path` / `*_url` calls,
+  but the route table is loaded via `cache_for(:route_table)` (see
+  Phase 4.5).
+
+### Phase 4.5 — IoBoundary + cache producer (rigor-routes only)
+
+If Phase 1 Q2=E (external file), the plugin uses slice 2 + slice 6.
+The exact pattern is documented in `cache_producer_spec.rb` — but
+it is a TRAP if you get it wrong. The rule is:
+
+```ruby
+producer :route_table do |_params|
+  contents = io_boundary.read_file(@routes_file)
+  RouteTable.parse(contents)
+end
+
+def diagnostics_for_file(path:, scope:, root:)
+  table = route_table  # see below
+  # ... walker
+end
+
+private
+
+def route_table
+  return @table if @table
+
+  # CRITICAL: read the file BEFORE cache_for so the IoBoundary's
+  # FileEntry digest is captured in the descriptor at cache_for time.
+  # If you read AFTER, the cache key has no file digest and never
+  # invalidates.
+  io_boundary.read_file(@routes_file)
+  @table = cache_for(:route_table, params: {}).call
+rescue Plugin::AccessDeniedError, Errno::ENOENT, Psych::SyntaxError => e
+  @load_error = "rigor-#{manifest.id}: #{e.message}"
+  nil
+end
+```
+
+Demo `.rigor.yml` may need `plugins_io.allowed_paths:` if the
+plugin reads from outside the project root + signature paths.
+
+---
+
+## Phase 5 — Demo
+
+The demo project under `examples/rigor-<id>/demo/` makes the plugin
+runnable. Two-file convention when Q4 is B or C:
+
+- `demo.rb` — only the recognised / valid call sites. Runs cleanly
+  under MRI.
+- `errors_demo.rb` — intentionally ill-typed code that exercises the
+  `:error` paths. Add a header comment: "DO NOT run via `ruby
+  errors_demo.rb` — analyse with `rigor check`."
+
+The `.rigor.yml` `paths:` lists both, so `rigor check` analyses
+both:
+
+```yaml
+paths:
+  - demo.rb
+  - errors_demo.rb
+
+plugins:
+  - rigor-<id>
+```
+
+Verify the demo runs:
+
+```sh
+cd examples/rigor-<id>/demo
+nix --extra-experimental-features 'nix-command flakes' develop --command \
+  env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../../Gemfile \
+  rigor check
+```
+
+The diagnostic stream should match what the README claims. **Clean
+up the cache directory** before staging — every demo run creates
+`demo/.rigor/cache/`. The repo's `.gitignore` matches `.rigor/cache/`
+non-anchored, so the cache should not be staged automatically; if
+you see staged cache files, run `rm -rf demo/.rigor` and re-stage.
+
+---
+
+## Phase 6 — Integration spec
+
+Mirror one of the existing specs under
+`spec/integration/examples/`. The shape is fixed — only the
+diagnostic-shape assertions change.
+
+```ruby
+# spec/integration/examples/<id>_plugin_spec.rb
+# frozen_string_literal: true
+
+require "spec_helper"
+
+PLUGIN_LIB = File.expand_path("../../../examples/rigor-<id>/lib", __dir__)
+$LOAD_PATH.unshift(PLUGIN_LIB) unless $LOAD_PATH.include?(PLUGIN_LIB)
+require "rigor-<id>"
+
+RSpec.describe "examples/rigor-<id>" do # rubocop:disable RSpec/DescribeClass
+  before { Rigor::Plugin.unregister! }
+  after { Rigor::Plugin.unregister! }
+
+  let(:plugin_class) { Rigor::Plugin::ClassName }
+  let(:requirer) do
+    lambda do |_name|
+      Rigor::Plugin.register(plugin_class)
+      true
+    end
+  end
+
+  def run_plugin(source, plugin_config: nil, **opts)
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "demo.rb"), source)
+      plugin_entry = plugin_config ? { "gem" => "rigor-<id>", "config" => plugin_config } : "rigor-<id>"
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge(
+          "paths" => [File.join(dir, "demo.rb")],
+          "plugins" => [plugin_entry]
+        )
+      )
+      Dir.chdir(dir) do
+        Rigor::Analysis::Runner.new(
+          configuration: configuration,
+          cache_store: nil,  # use a real Cache::Store only when testing slice 6
+          plugin_requirer: requirer,
+          **opts
+        ).run
+      end
+    end
+  end
+
+  def plugin_diagnostics(result)
+    result.diagnostics.select { |d| d.source_family == "plugin.<id>" }
+  end
+
+  # ... per-feature `describe` / `it` blocks ...
+end
+```
+
+### Spec gotchas
+
+- **Plugin re-registration across runs.** The loader detects
+  newly-registered plugins by diffing `Rigor::Plugin.registered`
+  before/after `requirer.call`. Two `Runner.run` invocations in the
+  same test must call `Rigor::Plugin.unregister!` between them, or
+  the second run sees no newly-registered plugins and the loader
+  silently emits a `:plugin_loader load-error`. See
+  `spec/integration/examples/routes_plugin_spec.rb` `run_twice`
+  helper for the canonical workaround.
+- **`Dir.chdir(dir)` matters for `IoBoundary`.** The boundary
+  resolves paths via `File.expand_path`. If the spec doesn't chdir
+  to the tmpdir, `config/routes.yml`-style relative paths resolve
+  against the host's CWD and the read fails the trust check.
+- **`runner_helpers.rb` `analyze` doesn't load plugins.** The
+  shared `analyze` helper does not pass `plugin_requirer:`. For
+  plugin specs, write the runner invocation inline (as above)
+  rather than reusing `analyze`.
+
+---
+
+## Phase 7 — README
+
+Use the README structure from `examples/rigor-routes/README.md` as
+the template. Required sections:
+
+1. **Headline** — one paragraph naming what the plugin types and
+   which architecture facet it primarily exercises.
+2. **What the plugin recognises** — a `text` block of sample
+   diagnostics (info + error rows). Match `rigor check`'s actual
+   output verbatim.
+3. **Layout** — directory tree.
+4. **Running the demo** — `cd examples/rigor-<id>/demo` + `RUBYLIB=...`.
+5. **Plugin authoring surface this exercises** — table of which
+   surfaces (manifest / config_schema / IoBoundary / cache producer
+   / Scope#type_of / etc.) the plugin touches.
+6. **Future direction** — boilerplate paragraph about plugin return-
+   type contributions being queued for v0.1.x. Copy from another
+   example's README and adapt.
+7. **License** — `MPL-2.0, matching the parent Rigor project.`
+
+---
+
+## Phase 8 — CHANGELOG entry
+
+Per `AGENTS.md` § "Release Cadence", add the entry under
+`## [Unreleased]` only — do NOT bump `Rigor::VERSION`. The user
+drives the cut-over.
+
+```markdown
+### Added — example plugin: `rigor-<id>`
+
+- **One-line description.** Two-to-three-sentence body describing the
+  user-facing diagnostics, the architecture facet, and how to run
+  the demo.
+- **Configuration.** What the user puts in `.rigor.yml`.
+- **Demo project** under `examples/rigor-<id>/demo/`.
+- **Integration spec** at `spec/integration/examples/<id>_plugin_spec.rb` — N examples covering …
+```
+
+---
+
+## Phase 9 — Verify
+
+Run the full Flake-mediated verification:
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' develop --command make verify
+nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
+```
+
+`make verify` must report:
+
+- RSpec passing (the new integration spec adds N examples to the
+  total).
+- RuboCop 0 offenses (the example's own source is excluded by
+  `.rubocop.yml`'s `examples/**/*` rule, but the integration spec
+  IS linted — keep it under the per-example length / multiple-
+  expectations limits, or add inline `# rubocop:disable` with a
+  reason).
+- `bundle exec exe/rigor check lib` reporting only the three
+  documented pre-existing warnings (`Trinary#negate`,
+  `IntegerRange#lower` / `#upper`).
+
+---
+
+## Phase 10 — Commit
+
+One commit per plugin is preferred. Subject:
+
+```text
+Add rigor-<id> example plugin (<facet>)
+```
+
+Body: explain WHY this plugin was needed (the user's requirement),
+WHICH facet it primarily exercises, and HOW the integration spec
+locks the diagnostic shape. ~72-column wrap.
+
+If the cache directory `examples/rigor-<id>/demo/.rigor/cache/` was
+created during demo verification, ensure it's removed before
+staging — `git status` should not list it.
+
+---
+
+## Common pitfalls (the "got me last time" list)
+
+1. **Cache directory in the demo gets committed.** `.gitignore`'s
+   `.rigor/cache/` (non-anchored) catches it, but if the repo's
+   `.gitignore` ever regresses to `/.rigor/cache/` the example demo
+   dirs will start staging cache. Verify `git status` after running
+   the demo.
+2. **Plugin id collisions in tests.** `Rigor::Plugin.unregister!`
+   in `before` AND `after` for every plugin spec; otherwise spec
+   ordering bleeds plugin state across files.
+3. **Manifest config_schema kinds.** Only `:string` / `:boolean` /
+   `:integer` / `:array` / `:hash` / `:any` are accepted. Nested
+   shapes (Hash inside Array) are not validated — the plugin must
+   validate the inner shape itself in `#init`.
+4. **Method-name match must be a Symbol.** `Prism::CallNode#name`
+   returns a Symbol. `node.name == "users_path"` always fails;
+   use `node.name == :users_path` or `node.name.to_s == "users_path"`.
+5. **Operator method names are symbols.** `:+`, `:-`, `:<=`, etc.
+   not `"+"` strings.
+6. **`scope.type_of(node)` not `scope[node]`.** The latter is the
+   per-node scope index lookup; the former is the inferred type at
+   that node's scope.
+7. **`source_family` is set by the runner.** Plugin authors should
+   NOT pass `source_family:` when constructing `Diagnostic`. The
+   runner overwrites it with `"plugin.<manifest.id>"`.
+8. **`literal_string_compatible?` vs `literal_string_carrier?`.**
+   `compatible?` is the public predicate Rigor publishes for the
+   "this might be a literal string" gate; `carrier?` is internal.
+   Use `Type::Combinator.literal_string_compatible?(type)` from
+   plugin code.
+9. **Examples are excluded from RuboCop globally** (`.rubocop.yml`'s
+   `Exclude:` list). The integration spec under
+   `spec/integration/examples/` is NOT excluded — keep it within
+   the project's RuboCop limits.
+10. **The plugin's lib/ is NOT on the load path in tests.** The
+    spec must `$LOAD_PATH.unshift(...)` before `require "rigor-<id>"`,
+    or use a `requirer:` lambda that registers the plugin class
+    directly.
+
+---
+
+## Reference index
+
+When in doubt, read these in order:
+
+1. **[`examples/README.md`](../../../examples/README.md)** — the
+   landing page. Comparison table and recommended reading order
+   across the six worked examples.
+2. **[`docs/handbook/09-plugins.md`](../../../docs/handbook/09-plugins.md)**
+   — the user-facing one-pager. Names what plugins can and cannot
+   do today.
+3. **[`docs/internal-spec/plugin.md`](../../../docs/internal-spec/plugin.md)**
+   — slice-1 normative surface (registration, manifest, services).
+4. **[`docs/internal-spec/plugin-trust.md`](../../../docs/internal-spec/plugin-trust.md)**
+   — slice-2 normative surface (`TrustPolicy`, `IoBoundary`).
+5. **[`docs/internal-spec/plugin-cache-producers.md`](../../../docs/internal-spec/plugin-cache-producers.md)**
+   — slice-6 normative surface (`producer` DSL, `cache_for`).
+6. **[`docs/adr/2-extension-api.md`](../../../docs/adr/2-extension-api.md)**
+   — binding design document. Read end-to-end before authoring a
+   plugin that pushes the surface in a non-obvious direction.
+7. **`spec/rigor/public_api_drift_spec.rb`** — pins every public
+   namespace plugins touch. If the plugin needs a method not in
+   the drift snapshots, the method is internal — do not depend on
+   it.
+8. **`spec/rigor/plugin/cache_producer_spec.rb`** — the
+   "invalidates when files read via io_boundary BEFORE cache_for
+   change between calls" example is the canonical reference for
+   the slice-6 read-then-cache pattern.
+
+---
+
+## Closing checklist
+
+Before declaring "the plugin is done":
+
+- [ ] Phase 1 questions answered explicitly by the user (not
+      assumed).
+- [ ] Template selected from Phase 2's table; no inventing.
+- [ ] `examples/rigor-<id>/` directory tree complete (gemspec,
+      lib, demo).
+- [ ] Demo runs cleanly under `rigor check`; diagnostics match the
+      README's "What the plugin recognises" section verbatim.
+- [ ] Integration spec at `spec/integration/examples/<id>_plugin_spec.rb`
+      passes; covers every diagnostic shape the plugin emits.
+- [ ] README follows the structure in Phase 7.
+- [ ] CHANGELOG entry under `## [Unreleased]` only.
+- [ ] `make verify` clean.
+- [ ] `git status` shows no `.rigor/cache/` directories.
+- [ ] One commit, message follows AGENTS.md style.
+- [ ] No `Rigor::VERSION` bump (per AGENTS.md § "Release Cadence").

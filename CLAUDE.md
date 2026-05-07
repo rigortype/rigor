@@ -71,6 +71,7 @@ The `.codex/skills/` tree carries per-task playbooks. Each skill has a `SKILL.md
 | --- | --- |
 | [`.codex/skills/rigor-release-prep/SKILL.md`](.codex/skills/rigor-release-prep/SKILL.md) | Preparing a RubyGems release: bumping `Rigor::VERSION`, updating `CHANGELOG.md` (Keep a Changelog 1.1.0), regenerating `Gemfile.lock`, building the gem, and running `bundle exec rake release`. |
 | [`.codex/skills/rigor-builtin-import/SKILL.md`](.codex/skills/rigor-builtin-import/SKILL.md) | Importing a Ruby core / stdlib class into Rigor's catalog-driven inference pipeline. Records the nine-stage flow (locate sources → extend `TOPICS` → regenerate YAML → wire loader → curate `:leaf` blocklist → decide RBS::Extended overrides → fixture → verify → changelog) and the decision points where the procedure is NOT mechanical. |
+| [`.codex/skills/rigor-plugin-author/SKILL.md`](.codex/skills/rigor-plugin-author/SKILL.md) | Authoring a new Rigor plugin from a user requirement under `examples/`. End-to-end pipeline: 5-question requirements gathering → template selection from the six existing examples → directory scaffold → AST walker pattern → integration spec → CHANGELOG `[Unreleased]` entry. Use whenever the user asks to "create a Rigor plugin for X" or similar. |
 
 ## Commit message style (mirrors AGENTS.md)
 

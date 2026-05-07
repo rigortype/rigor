@@ -25,6 +25,14 @@ codifies the move as a checklist step so the archive doesn't drift.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-08
+
+The eleventh preview, and a **multi-track follow-up to the v0.1.0 plugin-contract release**. Four parallel tracks landed: Track 1 (literal-string / refinement narrowing depth — regex pattern → refinement-name recogniser, digit-only refinement propagation through `to_i` / `Integer(s)`, full self-narrowing in predicate / assert paths, additional `literal-string` propagation rules); Track 2 (cross-plugin API per [ADR-9](docs/adr/9-cross-plugin-api.md) — `Plugin::FactStore`, `Plugin::Base#prepare(services)`, `manifest(produces:/consumes:)`, topo-sorted plugin loading, `#flow_contribution_for` return-type contribution tier); Track 3 (plugin authoring DX — extracted spec helpers, per-demo cache isolation under `tmp/`, examples re-included in RuboCop); Track 4 (maintenance — prelude `composed` reclassification, three `lib/` sig drifts closed).
+
+This release also introduces a **two-file configuration convention**: `.rigor.yml` is the developer-local override (auto-discovered first, `.gitignore`d by default), `.rigor.dist.yml` is the project default (committed to the repo). The two files are NEVER merged automatically — when a developer keeps a `.rigor.yml`, that file is the sole source of config for that developer's runs. PHPStan-style `includes:` lets an override extend the project default explicitly; path-bearing keys (`paths:`, `signature_paths:`, `plugins_io.allowed_paths:`, `includes:`) resolve relative to the directory of the config file that declares them. The committed config in this repo and every `examples/rigor-*/demo/.rigor.yml` moved to `.rigor.dist.yml` accordingly; `rigor init` now writes `.rigor.dist.yml` by default. The full rationale lives in [`docs/handbook/01-getting-started.md`](docs/handbook/01-getting-started.md) § "A first walk through Rigor's config file".
+
+A seventh worked plugin example also lands in this cycle: **`rigor-activerecord`** validates `Model.find` / `Model.find_by` / `Model.where` calls against `db/schema.rb` and the discovered AR model classes — combining DSL interpretation, multi-file `IoBoundary` reads, chained cache producers, and two-pass discover-then-validate.
+
 ### Added
 
 #### Steep cross-check baseline closes the only `[error]` ahead of v0.1.1
@@ -298,5 +306,6 @@ Each example ships `lib/`, runnable `demo/`, README, and an end-to-end integrati
 - **Cache load order for CLI flow.** `lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`. In CLI flow, the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). Fixed; `--cache-stats` now reports real activity.
 - **Fail-soft `rescue StandardError` was masking analyzer-internal bugs.** Tightened to `rescue ::RBS::BaseError` across the RBS-touching code paths — `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`. Analyzer-internal `NameError` / `NoMethodError` / `LoadError` now propagate so similar bugs surface immediately rather than silently degrading user-visible behaviour.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/rigortype/rigor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rigortype/rigor/compare/v0.0.9...v0.1.0

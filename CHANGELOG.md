@@ -25,6 +25,7 @@ cycles live in dedicated archives:
 
 ### Changed
 
+- **Interface-strictness preference in `OverloadSelector`.** The selector now runs in two passes. Pass 1 considers only overloads whose param types stay strictly typed — `RBS::Types::Alias` (`::int`, `::interned`, …), `RBS::Types::Interface` (`_ToInt`, `_Each[T]`, …), `RBS::Types::Intersection`, and the explicit `RBS::Types::Bases::Any` (`untyped` keyword) all degrade to `Dynamic[Top]` through the translator and gradually accept anything, so they're skipped in pass 1. Pass 2 falls back to the existing gradual matcher when no fully strict overload applies. The strict pass is also skipped when any arg is itself `Dynamic[Top]` (literal `untyped`), because gradual acceptance against an untyped arg accepts every param indiscriminately and would lock in an arbitrary strict overload (e.g. `Regexp#=~(nil) -> nil` would beat `(::interned?) -> Integer?`). The change closes a long-standing self-analysis miss: `Array[String]#[](Range)` now returns `Array[String]?` (via the `(::Range[::Integer?]) -> ::Array[Elem]?` overload) instead of `String` (via the `(::int) -> Elem` alias-typed overload that previously won by coming first). The matching `# rigor:disable call.undefined-method` workaround at `tool/extract_builtin_catalog.rb:750` is removed.
 - The `rigor-deprecations`, `rigor-statesman`, and `rigor-routes` example plugins remain diagnostic-only. Deprecation reports and state-machine declarations have no return-type fit; route helpers (`users_path`) are already RBS-expressible.
 
 ## [0.1.1] - 2026-05-08

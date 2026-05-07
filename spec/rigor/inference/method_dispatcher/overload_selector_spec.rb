@@ -86,5 +86,49 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       mt = select("Hash", :fetch, [Rigor::Type::Combinator.constant_of(:k)])
       expect(mt).not_to be_nil
     end
+
+    describe "interface-strictness preference (v0.1.2)" do
+      # When two overloads are arity-compatible and accept the
+      # call site's arg types, prefer the one whose params do
+      # NOT depend on `RBS::Types::Alias` / `Interface` /
+      # `Intersection` translating to `Dynamic[Top]`. The
+      # gradual-acceptance fall-back at the bottom of the
+      # selector still applies when no fully strict overload
+      # matches — only the ranking changes.
+      #
+      # Surfaced when self-analysing this repo: `Array#[]`
+      # ships three overloads —
+      #   (::int) -> Elem
+      #   (::int, ::int) -> Array[Elem]?
+      #   (::Range[::Integer?]) -> Array[Elem]?
+      # `int` is `RBS::Types::Alias`, which translates to
+      # `Dynamic[Top]` and gradually accepts a Range. Without
+      # the strict-first pass the first overload wins and the
+      # call resolves to `Elem` instead of `Array[Elem]?`.
+      it "prefers `(Range) -> Array[Elem]?` over `(int) -> Elem` for an Array#[](Range) call" do
+        mt = select("Array", :[], [Rigor::Type::Combinator.nominal_of("Range")])
+        expect(mt.type.required_positionals.size).to eq(1)
+        expect(mt.type.required_positionals.first.type.name.relative!.to_s).to eq("Range")
+      end
+
+      it "still picks the alias-typed overload when only it is arity-compatible (Array#[](Integer))" do
+        mt = select("Array", :[], [Rigor::Type::Combinator.nominal_of("Integer")])
+        # Pass 1 (strict) finds nothing — Range param doesn't
+        # accept Integer. Pass 2 falls back to the gradual
+        # behaviour and the alias-typed overload wins.
+        expect(mt.type.required_positionals.size).to eq(1)
+        expect(mt.type.required_positionals.first.type).to be_a(RBS::Types::Alias)
+      end
+
+      it "still picks the alias-typed overload for two-Integer slicing (Array#[](Integer, Integer))" do
+        # The two-int overload is arity-2 and the only option;
+        # neither pass changes the outcome here.
+        mt = select(
+          "Array", :[],
+          [Rigor::Type::Combinator.nominal_of("Integer"), Rigor::Type::Combinator.nominal_of("Integer")]
+        )
+        expect(mt.type.required_positionals.size).to eq(2)
+      end
+    end
   end
 end

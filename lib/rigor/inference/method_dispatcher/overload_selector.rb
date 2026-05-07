@@ -8,24 +8,40 @@ module Rigor
   module Inference
     module MethodDispatcher
       # Picks the RBS overload that should answer a call given the
-      # caller's actual argument types. Slice 4 phase 2c shape:
+      # caller's actual argument types. Slice 4 phase 2c shape (with
+      # the v0.1.2 interface-strictness preference layered on top):
       #
       # 1. Filter overloads by positional arity (required, optional and
       #    rest_positionals are honored; required_keywords disqualify the
       #    overload because we do not yet thread keyword args through
       #    `call_arg_types`).
-      # 2. Within the arity-matching overloads, accept the first one
-      #    whose every (param, arg) pair returns a `yes` or `maybe`
-      #    answer from `Rigor::Type#accepts(arg, mode: :gradual)`.
-      # 3. If no overload matches, fall back to `method_types.first`
-      #    so existing call sites keep their phase 1 / 2b behavior.
-      #    This preserves the fail-soft invariant of the dispatcher.
+      # 2. **Pass 1 — strict matches first.** Among the arity-matching
+      #    overloads, prefer the first one whose every (param, arg)
+      #    pair returns a `yes` or `maybe` answer AND whose param
+      #    types do NOT translate through `RBS::Types::Alias` /
+      #    `Interface` / `Intersection`. The translator demotes those
+      #    to `Dynamic[Top]`, which gradually accepts any argument —
+      #    so without this preference, an alias-typed overload like
+      #    `Array#[](::int) -> Elem` would beat the strict
+      #    `Array#[](Range) -> Array[Elem]?` overload for a Range
+      #    argument. (Surfaced during v0.1.1 self-analysis; see the
+      #    "Interface-strictness on overload selection" item in
+      #    `docs/MILESTONES.md`.)
+      # 3. **Pass 2 — gradual fall-back.** If no fully strict overload
+      #    matches, accept the first arity-and-gradual-accept match
+      #    (the v0.1.1 behaviour). Alias / Interface / Intersection
+      #    params still reach this pass, so call sites whose only
+      #    candidate IS an alias-typed overload keep working.
+      # 4. If no overload matches at all, fall back to
+      #    `method_types.first` so existing call sites keep their
+      #    phase 1 / 2b behavior. This preserves the fail-soft
+      #    invariant of the dispatcher.
       #
       # The selector is intentionally agnostic about the dispatch kind
       # (instance vs singleton). Both kinds share the same arity and
       # acceptance shape; the difference is only in which `Definition`
       # the caller fetched.
-      module OverloadSelector
+      module OverloadSelector # rubocop:disable Metrics/ModuleLength
         module_function
 
         # @param method_definition [RBS::Definition::Method]
@@ -61,6 +77,18 @@ module Rigor
           # compatibility.
           param_overrides = RbsExtended.param_type_override_map(method_definition)
 
+          # Pass 1: prefer overloads whose param types stay strict —
+          # no translator-induced `Dynamic[Top]` from Alias /
+          # Interface / Intersection. The pass is skipped
+          # entirely when any arg is `Dynamic[Top]` (literally
+          # `untyped`), because gradual acceptance against an
+          # untyped arg accepts every param indiscriminately and
+          # would let pass 1 lock in an arbitrary strict overload
+          # (e.g. `Regexp#=~(nil) -> nil` over the
+          # `(::interned?) -> Integer?` overload). Pass 2 falls
+          # back to the original gradual matcher so overloads
+          # that legitimately rely on duck-typed params still
+          # resolve when nothing stricter applies.
           match = find_matching_overload(
             overloads,
             arg_types: arg_types,
@@ -68,7 +96,17 @@ module Rigor
             instance_type: instance_type,
             type_vars: type_vars,
             block_required: block_required,
-            param_overrides: param_overrides
+            param_overrides: param_overrides,
+            strict: true
+          ) || find_matching_overload(
+            overloads,
+            arg_types: arg_types,
+            self_type: self_type,
+            instance_type: instance_type,
+            type_vars: type_vars,
+            block_required: block_required,
+            param_overrides: param_overrides,
+            strict: false
           )
           return match if match
           return overloads.find { |mt| overload_has_block?(mt) } if block_required
@@ -84,11 +122,14 @@ module Rigor
         class << self
           private
 
-          # rubocop:disable Metrics/ParameterLists
+          # rubocop:disable Metrics/ParameterLists, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           def find_matching_overload(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:,
-                                     param_overrides:)
+                                     param_overrides:, strict:)
+            return nil if strict && arg_types.any? { |t| untyped_arg?(t) }
+
             overloads.find do |method_type|
               next false if block_required && !OverloadSelector.overload_has_block?(method_type)
+              next false if strict && !strictly_typed_params?(method_type, arg_types.size)
 
               matches?(
                 method_type,
@@ -100,7 +141,58 @@ module Rigor
               )
             end
           end
-          # rubocop:enable Metrics/ParameterLists
+          # rubocop:enable Metrics/ParameterLists, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+
+          # Treats the literal `untyped` carrier (`Dynamic[Top]`)
+          # as too imprecise to drive a strict-pass match. Other
+          # `Dynamic`-wrapped types with a concrete static facet
+          # carry enough information to pick a sensible overload.
+          def untyped_arg?(type)
+            type.is_a?(Type::Dynamic) && type.static_facet.is_a?(Type::Top)
+          end
+
+          # Returns true when every positional param the call
+          # site engages translates to a non-`Dynamic[Top]`
+          # carrier. Alias / Interface / Intersection RBS types
+          # all degrade to `Dynamic[Top]` per the translator's
+          # current shape — those gradually accept any arg, so
+          # an overload that includes one would beat strictly-
+          # typed alternatives in pass 2 of the selector.
+          def strictly_typed_params?(method_type, actual_count)
+            fun = method_type.type
+            return false unless arity_compatible?(fun, actual_count)
+
+            params = positional_params_for(fun, actual_count)
+            params.all? { |param| !alias_or_interface_param?(param.type) }
+          end
+
+          # Recursive: an Optional / Union wrapper is strict iff
+          # every member is strict. Type args of a ClassInstance
+          # are NOT walked — `Range[::int]` is a Range carrier
+          # at the param level; the alias only colours the
+          # element type, which is checked separately when the
+          # element is actually accessed.
+          #
+          # `RBS::Types::Bases::Any` (the explicit `untyped`
+          # keyword) is treated like Alias / Interface /
+          # Intersection — both translate to `Dynamic[Top]`,
+          # both gradually accept anything. A `(untyped) -> T`
+          # catch-all overload that comes after the strictly-
+          # typed ones must lose pass 1 so the typed overloads
+          # win when their param actually fits the arg.
+          def alias_or_interface_param?(rbs_type)
+            case rbs_type
+            when RBS::Types::Alias, RBS::Types::Interface,
+                 RBS::Types::Intersection, RBS::Types::Bases::Any
+              true
+            when RBS::Types::Optional
+              alias_or_interface_param?(rbs_type.type)
+            when RBS::Types::Union
+              rbs_type.types.any? { |t| alias_or_interface_param?(t) }
+            else
+              false
+            end
+          end
 
           # rubocop:disable Metrics/ParameterLists
           def matches?(method_type, arg_types, self_type:, instance_type:, type_vars:, param_overrides:)

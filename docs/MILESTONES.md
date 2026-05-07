@@ -218,7 +218,7 @@ Out of scope for v0.1.1 (deferred to v0.1.2 or beyond):
 - **ObjectSpace / URI / Kernel catalog imports.** ObjectSpace needs a singleton-module dispatch path the catalog tier does not yet provide. URI is a pure-Ruby stdlib gem with no C surface; Kernel methods scatter across 20+ C files with no single Init function. Both need hand-rolled or custom-scaffold approaches.
 - **Pathname / URI delegation rules.** Wider refactor (Pathname facade routing through File projections).
 - **Lightweight HKT / type-level type computation.** Conditional and indexed-access types per [`docs/type-specification/rigor-extensions.md`](type-specification/rigor-extensions.md) rows 22 / 51. Sketched in `examples/rigor-lisp-eval/demo/sig/lisp.rbs` and `examples/rigor-units/demo/sig/units.rbs`. Larger surface; not a single-slice item.
-- **Interface-strictness on overload selection.** Surfaced during v0.1.1 self-analysis: `Array#[](Range) -> Array[Elem]?` loses to `Array#[](int) -> Elem` because the RBS `int` alias expands to `Integer | _ToInt` and Rigor translates the `_ToInt` interface to `Dynamic[top]` (which gradually accepts any type — including a Range). Symptom: `arr = Array<String>; arr[0..i]` returns `String` instead of `Array[String]?`. Suppressed at the one site in `tool/extract_builtin_catalog.rb` for v0.1.1 via `# rigor:disable call.undefined-method`. Real fix needs the overload selector to demote matches that depend on `Dynamic[top]` (from interface translation) so a non-interface match wins when both are arity-compatible.
+- ~~Interface-strictness on overload selection.~~ Closed in v0.1.2 Track 2 — see below.
 
 ## v0.1.2 — Planned
 
@@ -240,9 +240,13 @@ The other three example plugins (`rigor-deprecations`, `rigor-statesman`, `rigor
 
 5. ✅ **`spec/integration/examples/support/plugin_helpers.rb` accepts `signature_paths:` keyword.** Lets a plugin integration spec materialise an RBS sig file under the per-test tmpdir and thread its directory through `Configuration#signature_paths`. The new narrowing tests use this to provide minimal sigs for user-defined classes (`User` for `rigor-activerecord`, the `Distance / Time / Speed` family for `rigor-units`) so `call.undefined-method` can fire on them — the rule's `rbs_class_known?` gate would otherwise silence the diagnostic.
 
+### Track 2 — Engine depth follow-up
+
+6. ✅ **Interface-strictness on overload selection** — landed unreleased. `OverloadSelector` now runs a two-pass match: pass 1 considers only overloads whose param types stay strictly typed (no `RBS::Types::Alias` / `Interface` / `Intersection` / `Bases::Any`-translated `Dynamic[Top]`), pass 2 falls back to the existing gradual matcher. The strict pass is also skipped when any arg is itself `Dynamic[Top]` (literal `untyped`) so gradual acceptance against an untyped arg doesn't arbitrarily lock in a strict overload. Closes the v0.1.1 self-analysis miss (`Array[String]#[](Range)` now returns `Array[String]?` via the `(::Range[::Integer?]) -> ::Array[Elem]?` overload instead of `String` via the `(::int) -> Elem` alias-typed overload that previously won by coming first); the `# rigor:disable call.undefined-method` workaround at `tool/extract_builtin_catalog.rb:750` is removed.
+
 ### Out of scope for v0.1.2 (deferred to v0.1.3 or beyond)
 
-The full "Out of scope for v0.1.1" list above applies — interface-strictness on overload selection, new `flow.*` / `def.*` rule families, `Data.define` initializer dispatch, `Plugin::IoBoundary#open_url`, `rigor:v1:conforms-to`, DX tooling track, LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT.
+The full "Out of scope for v0.1.1" list above applies (minus the now-closed interface-strictness item) — new `flow.*` / `def.*` rule families, `Data.define` initializer dispatch, `Plugin::IoBoundary#open_url`, `rigor:v1:conforms-to`, DX tooling track, LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 

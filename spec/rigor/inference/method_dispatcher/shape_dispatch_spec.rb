@@ -569,4 +569,48 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: nominal("Array"), method_name: :first)).to be_nil
     end
   end
+
+  describe "Refined<String> projections (v0.1.1 Track 1 slice 2)" do
+    def non_negative_int = Rigor::Type::Combinator.non_negative_int
+
+    context "with a decimal-int-string receiver" do
+      let(:receiver) { Rigor::Type::Combinator.decimal_int_string }
+
+      it "narrows `to_i` to non-negative-int" do
+        expect(dispatch(receiver: receiver, method_name: :to_i)).to eq(non_negative_int)
+      end
+
+      it "narrows `to_int` to non-negative-int" do
+        expect(dispatch(receiver: receiver, method_name: :to_int)).to eq(non_negative_int)
+      end
+
+      it "preserves the refinement across `#downcase` / `#upcase` (digit-only is case-invariant)" do
+        expect(dispatch(receiver: receiver, method_name: :downcase)).to eq(receiver)
+        expect(dispatch(receiver: receiver, method_name: :upcase)).to eq(receiver)
+      end
+    end
+
+    context "with a numeric-string receiver" do
+      let(:receiver) { Rigor::Type::Combinator.numeric_string }
+
+      it "narrows `to_i` to non-negative-int" do
+        expect(dispatch(receiver: receiver, method_name: :to_i)).to eq(non_negative_int)
+      end
+
+      it "narrows `to_int` to non-negative-int" do
+        expect(dispatch(receiver: receiver, method_name: :to_int)).to eq(non_negative_int)
+      end
+    end
+
+    it "declines for `to_i` on non-digit refinements (lowercase/uppercase strings parse as 0)" do
+      [Rigor::Type::Combinator.lowercase_string, Rigor::Type::Combinator.uppercase_string].each do |t|
+        expect(dispatch(receiver: t, method_name: :to_i)).to be_nil
+      end
+    end
+
+    it "declines for `to_i` with an explicit base argument (slice 2 covers no-arg only)" do
+      receiver = Rigor::Type::Combinator.decimal_int_string
+      expect(dispatch(receiver: receiver, method_name: :to_i, args: [constant(10)])).to be_nil
+    end
+  end
 end

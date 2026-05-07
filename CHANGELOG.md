@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `String#to_i` / `#to_int` on digit-only refinements narrows to `non-negative-int` (v0.1.1 Track 1 slice 2a)
+
+- **`MethodDispatcher::ShapeDispatch.dispatch_refined`** gains four rows in `REFINED_STRING_PROJECTIONS` covering `to_i` and `to_int` on `decimal-int-string` (`/\A\d+\z/`) and `numeric-string` (Rigor's numeric-string predicate). Both refinements describe digit-only strings, so the parse is total over the carrier domain and the result is always `>= 0`. The tightest existing carrier that captures the lower bound and the integer-ness is `non-negative-int`, which the projection returns.
+- **End-to-end with slice 1.** A pattern like `if /(?<year>\d+)/ =~ str; year.to_i; end` now binds `year.to_i` to `non-negative-int` instead of plain `Integer`. Slice 1 (regex pattern recogniser) is the producer; this is the first consumer of that signal.
+- **Scope.** Slice 2a covers the no-arg form only. Forms like `s.to_i(base)` keep the v0.1.0 baseline since the table only fires when `args.empty?`. Slices 2b (`Kernel#Integer`) and beyond consume the same producer in subsequent commits.
+
 ### Changed — examples re-included in RuboCop with documented relaxations (v0.1.1 Track 3 slice 10)
 
 - **`.rubocop.yml`** removed the blanket `examples/**/*` exclusion. The new layout disables `Metrics/*` and `Naming/FileName` for examples (kebab-case file names are part of the gem-id convention; mid-sized methods keep illustrations end-to-end legible), relaxes `Style/TopLevelMethodDefinition` and `Style/OneClassPerFile` for `examples/*/demo/**/*` (demos run as scripts and pack ad-hoc class hierarchies into one file), and excludes `Lint/StructNewOverride` / `Layout/LineLength` / `Lint/DuplicateBranch` / `Style/EmptyElse` for `examples/**/*` (deliberate domain words like the `:method` Struct member, long diagnostic-message strings, multi-arm switches that share a body for documentation, comment-bearing trailing `else` extension points). Each carve-out is annotated inline.

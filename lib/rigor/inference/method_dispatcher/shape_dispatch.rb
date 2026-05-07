@@ -289,7 +289,21 @@ module Rigor
             %i[octal_int downcase] => :refined_self,
             %i[octal_int upcase] => :refined_self,
             %i[hex_int downcase] => :refined_self,
-            %i[hex_int upcase] => :refined_self
+            %i[hex_int upcase] => :refined_self,
+            # v0.1.1 Track 1 slice 2 — `to_i` / `to_int` on a
+            # known digit-only string. `decimal-int-string`
+            # (`/\A\d+\z/`) and `numeric-string` (Rigor's
+            # numeric-string predicate, ASCII digits) are
+            # predicates over digit-only strings, so the parse
+            # is total over the carrier domain and the result
+            # is always `>= 0`. `non-negative-int` is the
+            # tightest carrier that captures both the lower
+            # bound and the integer-ness without inventing a
+            # narrower carrier.
+            %i[decimal_int to_i] => :non_negative_int,
+            %i[decimal_int to_int] => :non_negative_int,
+            %i[numeric to_i] => :non_negative_int,
+            %i[numeric to_int] => :non_negative_int
           }.freeze
           private_constant :REFINED_STRING_PROJECTIONS
 
@@ -313,6 +327,7 @@ module Rigor
             when :refined_self then refined
             when :uppercase_string then Type::Combinator.uppercase_string
             when :lowercase_string then Type::Combinator.lowercase_string
+            when :non_negative_int then Type::Combinator.non_negative_int
             end
           end
 

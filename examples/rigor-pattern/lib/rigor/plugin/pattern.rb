@@ -78,7 +78,59 @@ module Rigor
         diagnostics
       end
 
+      # v0.1.2 — return-type contribution. Runtime `validate`
+      # returns its `value` argument when the regex matches and
+      # raises otherwise, so on a successful match we narrow the
+      # call site's return type to the value argument's type
+      # (typically `Constant<String>` after Rigor's literal-
+      # string folding). Mismatches keep the existing
+      # `literal-mismatch` diagnostic and stay at the RBS-level
+      # untyped return — propagating `bot` would silence the
+      # diagnostic-driven feedback the README centres on.
+      def flow_contribution_for(call_node:, scope:)
+        return nil unless validate_call?(call_node)
+
+        pattern_name = literal_symbol_arg(call_node, 0)
+        return nil if pattern_name.nil?
+
+        pattern = @patterns[pattern_name.to_s]
+        return nil if pattern.nil?
+
+        value_node = call_node.arguments.arguments[1]
+        return nil if value_node.nil?
+
+        value_type = scope.type_of(value_node)
+        return nil unless services.type.literal_string_compatible?(value_type)
+
+        return nil if literal_mismatch?(value_type, pattern)
+
+        Rigor::FlowContribution.new(
+          return_type: value_type,
+          provenance: Rigor::FlowContribution::Provenance.new(
+            source_family: "plugin.#{manifest.id}",
+            plugin_id: manifest.id,
+            node: call_node,
+            descriptor: nil
+          )
+        )
+      end
+
       private
+
+      def validate_call?(call_node)
+        return false unless call_node.is_a?(Prism::CallNode)
+        return false unless call_node.name == @method_name
+        return false if call_node.arguments.nil?
+
+        call_node.arguments.arguments.size >= 2
+      end
+
+      def literal_mismatch?(value_type, pattern)
+        return false unless value_type.is_a?(Rigor::Type::Constant)
+        return false unless value_type.value.is_a?(String)
+
+        !pattern.match?(value_type.value)
+      end
 
       def analyse_call(path, scope, call)
         pattern_name = literal_symbol_arg(call, 0)

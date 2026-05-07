@@ -129,12 +129,16 @@ on top of the surfaces `rigor-lisp-eval` covered:
 
 ## Future direction — lightweight HKT
 
-The same future-shape note applies as to the Lisp example:
-once Rigor grows a lightweight type-level computation surface
-(conditional / indexed-access types per
-[`docs/type-specification/rigor-extensions.md`](../../docs/type-specification/rigor-extensions.md) rows 22 / 51),
-the dispatch table here becomes expressible directly in
-`sig/units.rbs`:
+As of v0.1.2 the plugin already produces `FlowContribution`
+bundles via `#flow_contribution_for`: dimensional results
+(`Distance / Time -> Speed`, `Distance + Distance -> Distance`,
+`Speed * Time -> Distance`, `.in_<unit>` queries returning
+`Float`) override the demo's `untyped` RBS at every call site,
+so chained calls resolve through Rigor's normal dispatch.
+
+The remaining open surface is **lightweight HKT** — the
+type-level computation that lets the dispatch table live on
+the RBS sig instead of in the plugin:
 
 ```rbs
 class Distance
@@ -143,11 +147,10 @@ class Distance
 end
 ```
 
-When that lands, the plugin moves from emitting diagnostics to
-producing `FlowContribution` bundles, the runtime and static
-type function live in one declarative table, and the
-`untyped`s in `demo/sig/units.rbs` collapse into precise
-return types.
+When that lands the runtime and static type function live in
+one declarative table inside the sig, the plugin can shed its
+`MethodTable`-based contributions, and the `untyped`s in
+`demo/sig/units.rbs` collapse into precise return types.
 
 ## License
 

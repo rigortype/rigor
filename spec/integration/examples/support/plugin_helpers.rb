@@ -54,7 +54,7 @@ module Rigor
     # belt-and-braces is harmless and surfaces the lifecycle
     # for readers.
     module PluginHelpers
-      def run_plugin(source:, plugin_entry: nil, cache_store: nil, files: {}, paths: nil)
+      def run_plugin(source:, plugin_entry: nil, cache_store: nil, files: {}, paths: nil, signature_paths: nil) # rubocop:disable Metrics/ParameterLists
         Rigor::Plugin.unregister!
         Dir.mktmpdir do |dir|
           run_plugin_in_dir(
@@ -63,18 +63,22 @@ module Rigor
             plugin_entry: plugin_entry,
             cache_store: cache_store,
             files: files,
-            paths: paths
+            paths: paths,
+            signature_paths: signature_paths
           )
         end
       end
 
-      def run_plugin_in_dir(dir:, source:, plugin_entry: nil, cache_store: nil, files: {}, paths: nil) # rubocop:disable Metrics/ParameterLists
+      # rubocop:disable Metrics/ParameterLists, Layout/LineLength
+      def run_plugin_in_dir(dir:, source:, plugin_entry: nil, cache_store: nil, files: {}, paths: nil, signature_paths: nil)
+        # rubocop:enable Metrics/ParameterLists, Layout/LineLength
         materialize_files(dir, files)
         File.write(File.join(dir, "demo.rb"), source)
         configuration = build_plugin_configuration(
           dir: dir,
           plugin_entry: plugin_entry || default_plugin_entry,
-          paths: paths
+          paths: paths,
+          signature_paths: signature_paths
         )
         Dir.chdir(dir) do
           Rigor::Analysis::Runner.new(
@@ -119,14 +123,14 @@ module Rigor
         "plugin.#{plugin_class.manifest.id}"
       end
 
-      def build_plugin_configuration(dir:, plugin_entry:, paths:)
+      def build_plugin_configuration(dir:, plugin_entry:, paths:, signature_paths: nil)
         path_list = paths || ["demo.rb"]
-        Rigor::Configuration.new(
-          Rigor::Configuration::DEFAULTS.merge(
-            "paths" => path_list.map { |p| File.join(dir, p) },
-            "plugins" => [plugin_entry]
-          )
+        merged = Rigor::Configuration::DEFAULTS.merge(
+          "paths" => path_list.map { |p| File.join(dir, p) },
+          "plugins" => [plugin_entry]
         )
+        merged = merged.merge("signature_paths" => signature_paths.map { |p| File.join(dir, p) }) if signature_paths
+        Rigor::Configuration.new(merged)
       end
     end
   end

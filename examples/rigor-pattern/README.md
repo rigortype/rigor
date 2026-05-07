@@ -113,20 +113,29 @@ through `FlowContribution::Merger`.
 
 ## Future direction — lightweight HKT
 
-Once Rigor grows the type-level computation surface, the
-plugin's regex match could project the literal into a refined
-return type rather than emit a diagnostic:
+As of v0.1.2 the plugin already supplies a return type at the
+call site through `#flow_contribution_for`: on a successful
+match the runtime `validate` returns the value argument, so
+the plugin contributes the argument's type (typically
+`Constant<String>`) as the call site's return type. Mismatches
+keep the existing `literal-mismatch` `:error` diagnostic and
+stay at the RBS-level untyped — propagating `bot` would silence
+the diagnostic-driven feedback the README centres on.
+
+The remaining open surface is **lightweight HKT** — the
+type-level computation that lets the same predicate live on
+the RBS sig itself:
 
 ```rbs
 def validate: [N : Symbol, V <: literal-string]
   (N, V) -> (matches[N, V] ? V : bot)
 ```
 
-The same `literal_string_compatible?` query inside the plugin
-moves into a `FlowContribution` bundle, the runtime `validate`
-keeps its `raise` behaviour, and the analyzer proves at the
-call site that the input is statically known to satisfy the
-pattern.
+With that lands, the regex check moves out of the plugin and
+into a Rigor-side type function, the runtime `validate` keeps
+its `raise` behaviour, and the analyzer proves at the call
+site that the input is statically known to satisfy the pattern
+without consulting the plugin.
 
 ## License
 

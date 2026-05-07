@@ -6,6 +6,8 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.1.0 version-bumped on `master` (commit `6170832`); release pending.** All six plugin-contract slices and the v0.1.0-polish work landed (six worked plugin examples, the nine-chapter end-user handbook, the named-capture narrowing fix, the `;`-prefixed block-local nil shadow fix). The seventh plugin example (`rigor-activerecord`) landed during the polish window. Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), `bundle exec rake release` waits for explicit user authorisation. The slice-by-slice recap is in `CHANGELOG.md`'s `[0.1.0]` section and the v0.1.0 row of [`docs/MILESTONES.md`](MILESTONES.md).
 
+**v0.1.2 in progress.** Track 1 (example plugin return-type migration) landed on `master` for four of the seven worked plugins — `rigor-lisp-eval`, `rigor-pattern`, `rigor-units`, `rigor-activerecord` now contribute call-site return types via `#flow_contribution_for`. The diagnostic trace stays — both channels run from the same interpretation. The other three (`rigor-deprecations`, `rigor-statesman`, `rigor-routes`) remain diagnostic-only by design (no return-type fit / RBS-expressible). Spec helper extension (`signature_paths:` keyword on `run_plugin`) landed alongside so narrowing assertions can provide minimal sigs for `call.undefined-method` to fire on user-defined classes. Slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.2 — Planned".
+
 **v0.1.1 complete.** All four tracks landed unreleased on the work branch:
 
 - **Track 1 slice 1** — regex pattern → refinement-name recogniser.
@@ -27,13 +29,13 @@ Working state: 2195 RSpec examples / 0 failures, RuboCop 264 files / 0 offenses,
 
 The Rails plugin family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionpack`, `rigor-actionmailer`, `rigor-activejob`, plus `rigor-activerecord` extensions — is being authored in parallel with v0.1.x core work. The full plan is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Tier 1 plugins (current API, no analyser-side change required) are unblocked and authoring can start immediately, **one plugin per session**, staged in `examples/rigor-<id>/` and extracted via `git subtree split` once the contract is stable. Tier 2 (`rigor-actionpack` Phase 1, `rigor-factorybot`) blocks on [ADR-9 — Cross-plugin API](adr/9-cross-plugin-api.md), which is v0.1.1 Track 2.
 
-### v0.1.1 entry path
+### v0.1.2 entry path
 
-Read [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned" for the full slice list. Recommended entry order:
+Read [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.2 — Planned" for the slice list. Recommended entry order:
 
-- v0.1.1 is feature-complete on `master` (origin-pending). When the user authorises a release, follow [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md) — bump `Rigor::VERSION` to `"0.1.1"`, reorganise `CHANGELOG.md`'s `[Unreleased]` into `[0.1.1] - YYYY-MM-DD`, regenerate `Gemfile.lock`, run `bundle exec rake release`.
+- v0.1.2 Track 1 (four of seven example plugins migrated to `#flow_contribution_for`) is on `master`. v0.1.1 also remains version-bumped on `master` and ready for `bundle exec rake release` once the user authorises both cuts together (or sequentially, per [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md)).
 - The Rails plugin parallel running track is unblocked — Tier 2 (`rigor-actionpack` Phase 1, `rigor-factorybot`) can now author against the cross-plugin API. Tier 1 plugins (`rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionmailer`, `rigor-activejob`) were unblocked from v0.1.0.
-- Existing seven example plugins migrating from "info diagnostic only" to "narrowed return type" via `flow_contribution_for` is queued for v0.1.2; the slice 7 substrate landed in v0.1.1 but per-plugin migration is incremental.
+- Out-of-scope items deferred from v0.1.1 (interface-strictness on overload selection, new `flow.*` / `def.*` rule families, `Data.define` initializer dispatch, `Plugin::IoBoundary#open_url`, DX tooling, LSP daemon, etc.) carry forward to v0.1.3+.
 
 ## Open Engineering Items
 

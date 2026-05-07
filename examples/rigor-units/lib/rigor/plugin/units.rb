@@ -43,8 +43,94 @@ module Rigor
         description: "Types a units-of-measure DSL (Distance / Time / Speed / Acceleration)."
       )
 
+      # Dimension → Rigor type. Used by `flow_contribution_for`
+      # to translate the {MethodTable} dispatch result back into
+      # the carrier the analyzer threads through call sites.
+      DIMENSION_NOMINALS = {
+        distance: "Distance",
+        time: "Time",
+        speed: "Speed",
+        acceleration: "Acceleration",
+        float: "Float"
+      }.freeze
+
+      # Inverse map — Rigor type → dimension Symbol. Keyed on the
+      # nominal class name; non-class carriers (Constant, IntegerRange)
+      # fall through and the contribution declines.
+      NOMINAL_DIMENSIONS = {
+        "Distance" => :distance,
+        "Time" => :time,
+        "Speed" => :speed,
+        "Acceleration" => :acceleration,
+        "Float" => :float,
+        "Integer" => :numeric,
+        "Numeric" => :numeric
+      }.freeze
+
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         Analyzer.new(path: path).analyze(root).diagnostics
+      end
+
+      # v0.1.2 — return-type contribution. The same {MethodTable}
+      # the diagnostics path consults supplies the call-site
+      # return type when both receiver and argument map cleanly
+      # to a known dimension. Dimensional mismatches stay at the
+      # RBS-level untyped return — surfacing the existing
+      # `dimension-mismatch` / `in-method-mismatch` error
+      # diagnostic without propagating `bot` downstream.
+      def flow_contribution_for(call_node:, scope:)
+        return nil unless call_node.is_a?(Prism::CallNode)
+        return nil if call_node.receiver.nil?
+
+        receiver_dim = dimension_for_type(scope.type_of(call_node.receiver))
+        return nil if receiver_dim.nil?
+
+        arg_dims = call_node.arguments&.arguments&.map { |arg| dimension_for_type(scope.type_of(arg)) } || []
+        return nil if arg_dims.any?(&:nil?)
+
+        result = MethodTable.dispatch(receiver: receiver_dim, method: call_node.name, args: arg_dims)
+        return nil if result.nil? || result.error || result.dimension.nil?
+
+        return_type = type_for_dimension(result.dimension)
+        return nil if return_type.nil?
+
+        Rigor::FlowContribution.new(
+          return_type: return_type,
+          provenance: Rigor::FlowContribution::Provenance.new(
+            source_family: "plugin.#{manifest.id}",
+            plugin_id: manifest.id,
+            node: call_node,
+            descriptor: nil
+          )
+        )
+      end
+
+      private
+
+      def dimension_for_type(type)
+        case type
+        when Rigor::Type::Nominal then NOMINAL_DIMENSIONS[type.class_name]
+        when Rigor::Type::Constant
+          case type.value
+          when Integer, Float then :numeric
+          when true, false then :bool
+          when ::String then :string
+          end
+        when Rigor::Type::IntegerRange then :numeric
+        end
+      end
+
+      def type_for_dimension(dimension)
+        case dimension
+        when :bool
+          Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.constant_of(true),
+            Rigor::Type::Combinator.constant_of(false)
+          )
+        else
+          class_name = DIMENSION_NOMINALS[dimension]
+          Rigor::Type::Combinator.nominal_of(class_name) if class_name
+        end
       end
     end
 

@@ -107,17 +107,16 @@ narrowly focused on the diagnostic emission protocol.
 
 ## Future direction — lightweight HKT / type-level eval
 
-The plugin currently surfaces the inferred type as a diagnostic
-because v0.1.0 has no plugin hook for return-type
-contributions. Two adjacent surfaces would let the example move
-from "describes the type" to "supplies the type":
+As of v0.1.2 the plugin already supplies the inferred type at
+the call site through `#flow_contribution_for`: downstream
+calls on the result resolve against the inferred carrier
+(`Lisp.eval([:+, 1, 2]).bit_length` resolves on `Integer`,
+not the RBS-level `untyped`). The diagnostic stays as a
+user-facing trace per the README's "info-diagnostic" pattern,
+and the same `Interpreter` walk feeds both channels. One
+adjacent surface remains queued:
 
-1. **Plugin return-type contributions.** Once plugins can emit
-   `FlowContribution` bundles consumed by
-   `Inference::MethodDispatcher`, the same `Interpreter` body
-   moves into a `return_type` slot and the diagnostic stays as
-   a user-facing trace.
-2. **Lightweight HKT — type-level `eval`.** Rigor's extension
+1. **Lightweight HKT — type-level `eval`.** Rigor's extension
    spec already lists *conditional types* and *indexed-access
    types* under
    [`docs/type-specification/rigor-extensions.md`](../../docs/type-specification/rigor-extensions.md) (rows 22 and 51) as

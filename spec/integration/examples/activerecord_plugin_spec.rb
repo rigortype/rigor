@@ -48,6 +48,13 @@ DEFAULT_MODELS = {
   RUBY
 }.freeze
 
+USER_RBS_FOR_NARROWING = <<~RBS
+  class User
+    attr_accessor name: String
+    attr_accessor email: String
+  end
+RBS
+
 RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/DescribeClass
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
@@ -197,6 +204,63 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
       expect(warning.severity).to eq(:warning)
       expect(warning.message).to include("db/schema.rb")
       expect(warning.message).to include("not found")
+    end
+  end
+
+  describe "#flow_contribution_for return-type contribution (v0.1.2)" do
+    # The plugin's `Model.find(id)` rule contributes
+    # `Nominal[Model]` so chained call sites resolve through
+    # the analyzer's normal dispatch — without the contribution
+    # the RBS-level untyped return would let any chained method
+    # name through silently. The `call.undefined-method` rule
+    # only fires when the receiver class is known to RBS, so the
+    # tests below ship an RBS sig for User (top-level
+    # `USER_RBS_FOR_NARROWING`) declaring its columns.
+    def run_ar_with_user_sig(source, schema: DEFAULT_SCHEMA, models: DEFAULT_MODELS)
+      files = { "db/schema.rb" => schema, "sig/user.rbs" => USER_RBS_FOR_NARROWING }.merge(models)
+      run_plugin(
+        source: source,
+        plugin_entry: nil,
+        files: files,
+        signature_paths: ["sig"]
+      )
+    end
+
+    it "narrows `Model.find(id)` to Nominal[Model] so non-Model calls surface" do
+      result = run_ar_with_user_sig(<<~RUBY)
+        user = User.find(1)
+        user.bit_length
+      RUBY
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("bit_length")
+      end
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("User")
+    end
+
+    it "leaves `Model.where` at the RBS untyped return (relations deferred)" do
+      result = run_ar_with_user_sig(<<~RUBY)
+        users = User.where(admin: true)
+        users.bit_length
+      RUBY
+      # No contribution → RBS untyped → no method-undefined.
+      method_undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("bit_length")
+      end
+      expect(method_undefined).to be_empty
+    end
+
+    it "does not contribute on non-model receivers" do
+      result = run_ar_with_user_sig(<<~RUBY)
+        x = Object.find(1)
+        x.upcase
+      RUBY
+      # Object.find isn't a model — no contribution; the call
+      # falls through to the analyzer's normal dispatch.
+      method_undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("upcase")
+      end
+      expect(method_undefined).to be_empty
     end
   end
 end

@@ -180,12 +180,15 @@ relevant CHANGELOG `[Unreleased]` entry. The extraction process
 is recorded in
 [`.codex/skills/rigor-plugin-author/SKILL.md`](../../.codex/skills/rigor-plugin-author/SKILL.md).
 
-Once plugin-emitted `FlowContribution` return-type bundles ship
-(currently queued for v0.1.x), the same `ModelIndex` lookup
-moves into the contribution — `User.find(1)` then
-contributes `Nominal[User]` to the analyser's inferred type for
-the call site, and `user.name` follows naturally through Rigor's
-existing dispatch.
+As of v0.1.2 the plugin emits `FlowContribution` bundles
+through `#flow_contribution_for`: `User.find(1)` now narrows
+to `Nominal[User]` at the call site, and `User.find_by(...)` to
+`Nominal[User] | nil`. Chained calls (`User.find(1).name`)
+resolve through Rigor's normal dispatch instead of the
+RBS-level `untyped` envelope. `where` / `find_or_*` are
+intentionally deferred — they return relations, and Rigor does
+not yet carry an Enumerable-backed relation shape that would
+be more precise than the existing RBS envelope.
 
 ## License
 

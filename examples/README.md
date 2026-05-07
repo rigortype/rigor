@@ -117,14 +117,27 @@ corpus. Cross-references:
   namespace the examples touch. When the contract changes, the
   drift spec updates in the same commit.
 
-## Status note (intentional, all examples)
+## Status note
 
-v0.1.0 plugins emit diagnostics only — they cannot replace the
-analyzer's inferred return type for a call site. The
-`FlowContribution`-based plugin contribution surface is queued
-for a later v0.1.x slice. Each example's README has a "Future
-direction" section showing what the same plugin would look like
-once that lands.
+`v0.1.1` shipped the `FlowContribution`-based plugin
+contribution substrate (Track 2 slice 7 —
+`Plugin::Base#flow_contribution_for`). `v0.1.2` migrated the
+four examples whose runtime returns a typeable value to it:
+`rigor-lisp-eval`, `rigor-pattern`, `rigor-units`, and
+`rigor-activerecord`. Those plugins now both emit the
+diagnostic trace and narrow the call site's return type, so
+chained calls (`User.find(1).name`,
+`Lisp.eval([:+, 1, 2]).bit_length`,
+`(distance / time).in_kilometers_per_hour`) resolve through
+the analyzer's normal dispatch instead of the RBS-level
+`untyped` envelope.
+
+The other three (`rigor-deprecations`, `rigor-statesman`,
+`rigor-routes`) stay diagnostic-only by design: deprecation
+reports and state-machine declarations have no return-type
+fit, and route helpers are already RBS-expressible. Each
+example's README "Future direction" section names the
+remaining surfaces queued for later v0.1.x or v0.2.x slices.
 
 ## License
 

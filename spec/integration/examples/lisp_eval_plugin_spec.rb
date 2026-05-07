@@ -86,4 +86,48 @@ RSpec.describe "examples/rigor-lisp-eval" do # rubocop:disable RSpec/DescribeCla
     expect(diags.size).to eq(1)
     expect(diags.first.message).to start_with("Calculator.run return type inferred as Integer")
   end
+
+  describe "#flow_contribution_for return-type contribution (v0.1.2)" do
+    # The plugin narrows `Lisp.eval(literal)` to a precise
+    # carrier so downstream call sites resolve against the
+    # inferred class — without the contribution, the RBS
+    # `untyped` return would silence every downstream miss.
+    it "narrows the result so a non-Integer call surfaces a method-undefined diagnostic" do
+      result = run_plugin(source: <<~RUBY)
+        sum = Lisp.eval([:+, 1, 2])
+        sum.upcase
+      RUBY
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("upcase")
+      expect(undefined.message).to include("Integer")
+    end
+
+    it "promotes mixed int/float arithmetic so calls resolve against Float" do
+      result = run_plugin(source: <<~RUBY)
+        promoted = Lisp.eval([:+, 1, 2.0])
+        promoted.upcase
+      RUBY
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("upcase")
+      expect(undefined.message).to include("Float")
+    end
+
+    it "leaves non-literal arguments at the RBS `untyped` return so downstream calls stay silent" do
+      result = run_plugin(source: <<~RUBY)
+        program = [:+, 1, 2]
+        sum = Lisp.eval(program)
+        sum.upcase
+      RUBY
+      method_undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+      expect(method_undefined).to be_empty
+    end
+  end
 end

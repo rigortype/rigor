@@ -67,6 +67,36 @@ module Rigor
         diagnostics
       end
 
+      # v0.1.2 — return-type contribution. The same Interpreter
+      # walk feeds two channels: this hook returns the inferred
+      # carrier so downstream call sites narrow naturally
+      # (`Lisp.eval([:+, 1, 2]).bit_length` resolves on
+      # `Integer`), while `#diagnostics_for_file` keeps the
+      # human-facing trace per the README's "the diagnostic
+      # stays as a user-facing trace" promise.
+      def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
+        return nil unless eval_call?(call_node)
+
+        argument = first_argument(call_node)
+        return nil if argument.nil?
+
+        result = @interpreter.evaluate(argument)
+        return nil if result.is_a?(Interpreter::TypeError) || result.is_a?(Interpreter::UnknownExpression)
+
+        return_type = type_for_tag(result)
+        return nil if return_type.nil?
+
+        Rigor::FlowContribution.new(
+          return_type: return_type,
+          provenance: Rigor::FlowContribution::Provenance.new(
+            source_family: "plugin.#{manifest.id}",
+            plugin_id: manifest.id,
+            node: call_node,
+            descriptor: nil
+          )
+        )
+      end
+
       private
 
       def analyse_call(path, call_node)
@@ -84,6 +114,30 @@ module Rigor
           nil
         else
           diagnostic_for_inferred_type(path, call_node, result)
+        end
+      end
+
+      def eval_call?(call_node)
+        return false unless call_node.is_a?(Prism::CallNode)
+        return false unless call_node.name == @method_name
+
+        Walker.receiver_matches?(call_node.receiver, @module_name)
+      end
+
+      def type_for_tag(tag)
+        case tag
+        when Array
+          members = tag.filter_map { |t| type_for_tag(t) }
+          return nil if members.empty?
+
+          Rigor::Type::Combinator.union(*members)
+        when Interpreter::INTEGER then Rigor::Type::Combinator.nominal_of("Integer")
+        when Interpreter::FLOAT then Rigor::Type::Combinator.nominal_of("Float")
+        when Interpreter::BOOL
+          Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.constant_of(true),
+            Rigor::Type::Combinator.constant_of(false)
+          )
         end
       end
 

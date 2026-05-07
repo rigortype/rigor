@@ -182,4 +182,69 @@ RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
       expect(in_method_diags).to all(satisfy { |d| d.message.include?("returns Float") })
     end
   end
+
+  describe "#flow_contribution_for return-type contribution (v0.1.2)" do
+    # The plugin's MethodTable resolves `Distance / Time -> Speed`,
+    # `Distance + Distance -> Distance`, `Speed * Time -> Distance`,
+    # etc. The demo's RBS annotates these methods as `untyped`,
+    # so without the contribution downstream calls never surface
+    # dimensional errors. With the contribution, mis-using the
+    # result against the wrong dimension trips
+    # `call.undefined-method`. The unit-class declarations live
+    # in the demo's `sig/units.rbs`; the helpers re-materialise
+    # that file under a tmpdir so the test runs without leaking
+    # the demo's working directory.
+    let(:units_rbs) { File.read(File.expand_path("../../../examples/rigor-units/demo/sig/units.rbs", __dir__)) }
+
+    def with_units_sigs(source)
+      run_plugin(
+        source: source,
+        files: { "sig/units.rbs" => units_rbs },
+        signature_paths: ["sig"]
+      )
+    end
+
+    it "narrows `Distance / Time` to Speed so non-Speed calls surface" do
+      result = with_units_sigs(<<~RUBY)
+        distance = 100.kilometers
+        time     = 2.hours
+        speed    = distance / time
+        speed.upcase
+      RUBY
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("upcase")
+      end
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("Speed")
+    end
+
+    it "narrows `Distance + Distance` to Distance" do
+      result = with_units_sigs(<<~RUBY)
+        a = 100.kilometers
+        b = 50.kilometers
+        total = a + b
+        total.upcase
+      RUBY
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("upcase")
+      end
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("Distance")
+    end
+
+    it "declines to contribute on dimensional mismatches (existing diagnostic stays)" do
+      result = with_units_sigs(<<~RUBY)
+        distance = 100.kilometers
+        time     = 2.hours
+        bogus    = distance + time
+        bogus.upcase
+      RUBY
+      mismatch = plugin_diagnostics(result).find { |d| d.rule == "dimension-mismatch" }
+      expect(mismatch).not_to be_nil
+      method_undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("upcase")
+      end
+      expect(method_undefined).to be_empty
+    end
+  end
 end

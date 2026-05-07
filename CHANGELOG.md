@@ -25,6 +25,19 @@ codifies the move as a checklist step so the archive doesn't drift.
 
 ## [Unreleased]
 
+### Added
+
+- **Example plugins migrated from "info diagnostic only" to `flow_contribution_for` return-type narrowing.** Four of the seven worked plugin examples now contribute call-site return types via the v0.1.1 Track 2 slice 7 substrate, so chained calls resolve through the analyzer's normal dispatch instead of the RBS-level `untyped` fall-back. The diagnostic trace stays — both channels run from the same interpretation.
+  - **`rigor-lisp-eval`** — `Lisp.eval(literal)` narrows to the carrier the literal interpreter produces (`Nominal[Integer]`, `Nominal[Float]`, `Union[Constant[true], Constant[false]]`, or unions across `:if` branches). Type-error and unknown-expression cases stay at the RBS untyped envelope so the existing `:error` / silent fall-through behaviour is unchanged.
+  - **`rigor-pattern`** — `validate(:name, value)` narrows to the value argument's type on a successful match (typically `Constant<String>` after Rigor's literal-string folding). Mismatches keep the `literal-mismatch` diagnostic and stay untyped — propagating `bot` would silence the diagnostic-driven feedback the README centres on.
+  - **`rigor-units`** — Dimensional arithmetic / chained constructors / queries narrow through the existing `MethodTable` dispatch (`Distance / Time -> Speed`, `Distance + Distance -> Distance`, `Speed * Time -> Distance`, `.in_<unit>` queries return `Float`, etc.). The plugin's `dimension_for_type` helper folds Rigor's nominal carriers back into the table's dimension Symbols and translates the result back through `DIMENSION_NOMINALS`.
+  - **`rigor-activerecord`** — `Model.find(id)` narrows to `Nominal[Model]`, so chained `User.find(1).name` resolves through the analyzer's normal dispatch. `Model.find_by(...)` narrows to `Nominal[Model] | nil` because Rails returns nil when no row matches. `where` / `find_or_*` are intentionally deferred (relations need a richer carrier than the current Nominal/Tuple shapes carry).
+- **`spec/integration/examples/support/plugin_helpers.rb` accepts a `signature_paths:` keyword.** Lets a plugin integration spec materialise an RBS sig file under the per-test tmpdir and thread its directory through `Configuration#signature_paths`. The new narrowing tests use this to provide minimal sigs for user-defined classes (`User` for `rigor-activerecord`, the `Distance / Time / Speed` family for `rigor-units`) so `call.undefined-method` can fire on them — the rule's `rbs_class_known?` gate would otherwise silence the diagnostic for unknown classes.
+
+### Changed
+
+- The `rigor-deprecations`, `rigor-statesman`, and `rigor-routes` example plugins remain diagnostic-only. Deprecation reports and state-machine declarations have no return-type fit; route helpers (`users_path`) are already RBS-expressible.
+
 ## [0.1.1] - 2026-05-08
 
 The eleventh preview, and a **multi-track follow-up to the v0.1.0 plugin-contract release**. Four parallel tracks landed: Track 1 (literal-string / refinement narrowing depth — regex pattern → refinement-name recogniser, digit-only refinement propagation through `to_i` / `Integer(s)`, full self-narrowing in predicate / assert paths, additional `literal-string` propagation rules); Track 2 (cross-plugin API per [ADR-9](docs/adr/9-cross-plugin-api.md) — `Plugin::FactStore`, `Plugin::Base#prepare(services)`, `manifest(produces:/consumes:)`, topo-sorted plugin loading, `#flow_contribution_for` return-type contribution tier); Track 3 (plugin authoring DX — extracted spec helpers, per-demo cache isolation under `tmp/`, examples re-included in RuboCop); Track 4 (maintenance — prelude `composed` reclassification, three `lib/` sig drifts closed).

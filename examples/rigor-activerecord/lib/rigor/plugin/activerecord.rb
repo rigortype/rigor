@@ -108,7 +108,84 @@ module Rigor
         Analyzer.new(path: path, model_index: index).analyze(root).diagnostics
       end
 
+      # v0.1.2 — return-type contribution. `Model.find(id)`
+      # narrows the call site's return type to `Nominal[Model]`,
+      # so chained calls (`User.find(1).name`) resolve through
+      # the analyzer's normal dispatch instead of the RBS-level
+      # untyped fall-back. `Model.find_by(...)` narrows to
+      # `Nominal[Model] | nil` because Rails returns nil when no
+      # row matches. `where` / `find_or_*` are intentionally
+      # deferred — they return relations, and Rigor does not yet
+      # carry an Enumerable-backed relation shape that would be
+      # more precise than the RBS envelope.
+      def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
+        return nil unless call_node.is_a?(Prism::CallNode)
+        return nil if call_node.receiver.nil?
+
+        index = model_index
+        return nil if index.nil? || index.empty?
+
+        model_name = constant_receiver_name(call_node.receiver)
+        return nil if model_name.nil?
+
+        entry = index.find(model_name) || index.find("::#{model_name}")
+        return nil if entry.nil?
+
+        return_type = return_type_for(call_node, entry)
+        return nil if return_type.nil?
+
+        Rigor::FlowContribution.new(
+          return_type: return_type,
+          provenance: Rigor::FlowContribution::Provenance.new(
+            source_family: "plugin.#{manifest.id}",
+            plugin_id: manifest.id,
+            node: call_node,
+            descriptor: nil
+          )
+        )
+      end
+
       private
+
+      def return_type_for(call_node, entry)
+        case call_node.name
+        when :find
+          return nil if call_argument_count(call_node).zero?
+
+          Rigor::Type::Combinator.nominal_of(entry.class_name)
+        when :find_by
+          Rigor::Type::Combinator.union(
+            Rigor::Type::Combinator.nominal_of(entry.class_name),
+            Rigor::Type::Combinator.constant_of(nil)
+          )
+        end
+      end
+
+      def constant_receiver_name(node)
+        case node
+        when Prism::ConstantReadNode then node.name.to_s
+        when Prism::ConstantPathNode then constant_path_name(node)
+        end
+      end
+
+      def constant_path_name(node)
+        parts = []
+        current = node
+        while current.is_a?(Prism::ConstantPathNode)
+          parts.unshift(current.name.to_s)
+          current = current.parent
+        end
+        case current
+        when nil then "::#{parts.join('::')}"
+        when Prism::ConstantReadNode then "#{current.name}::#{parts.join('::')}"
+        end
+      end
+
+      def call_argument_count(node)
+        return 0 if node.arguments.nil?
+
+        node.arguments.arguments.size
+      end
 
       def model_index
         return @model_index if @model_index

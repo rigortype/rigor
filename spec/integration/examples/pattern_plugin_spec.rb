@@ -134,4 +134,47 @@ RSpec.describe "examples/rigor-pattern" do # rubocop:disable RSpec/DescribeClass
       expect(err).not_to be_nil
     end
   end
+
+  describe "#flow_contribution_for return-type contribution (v0.1.2)" do
+    # On a successful match the runtime `validate` returns its
+    # value argument unchanged, so the plugin contributes the
+    # argument's type (typically `Constant<String>`) as the
+    # call site's return type. Downstream calls then resolve
+    # against `String` instead of the RBS-level untyped.
+    it "narrows a matching literal so downstream non-String calls surface" do
+      result = with_pattern_config(<<~RUBY)
+        result = validate(:email, "user@example.com")
+        result.bit_length
+      RUBY
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("bit_length")
+      expect(undefined.message).to include("user@example.com")
+    end
+
+    it "stays at untyped when the pattern does not match (mismatch surfaces only the existing diagnostic)" do
+      result = with_pattern_config(<<~RUBY)
+        result = validate(:email, "not-an-email")
+        result.bit_length
+      RUBY
+      method_undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+      expect(method_undefined).to be_empty
+    end
+
+    it "does not contribute when the value is not literal-string-compatible" do
+      result = with_pattern_config(<<~RUBY)
+        external = ARGV.first || "fallback"
+        result = validate(:email, external)
+        result.bit_length
+      RUBY
+      method_undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+      expect(method_undefined).to be_empty
+    end
+  end
 end

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `Integer#to_s` precision on non-negative `IntegerRange` (v0.1.1 Track 1 slice 5b)
+
+- **`MethodDispatcher::ShapeDispatch`** gains an `IntegerRange` receiver handler. When the range's lower bound is `>= 0`, every member is a non-negative integer and `to_s(base)` returns a digit-string with no leading sign, so the result lifts to the matching imported refinement: base 10 → `decimal-int-string`, base 8 → `octal-int-string`, base 16 → `hex-int-string`. No-arg `to_s` defaults to base 10. Bases without a digit-only refinement (2, 36, …) and signed ranges (whose `to_s` can carry a leading `-`) keep the v0.1.0 baseline.
+- **End-to-end with v0.0.3 narrowing.** `if n.is_a?(Integer) && n >= 0; n.to_s(16); end` narrows the receiver to `non-negative-int` (existing v0.0.3 narrowing) and the call result to `hex-int-string` (this slice). Verified via `exe/rigor type-of`.
+
 ### Added — `literal-string` preservation through `#strip` / `#chomp` / `#scrub` family (v0.1.1 Track 1 slice 5a)
 
 - **`MethodDispatcher::LiteralStringFolding`** gains a `LITERAL_PRESERVING_METHODS` rule covering `#strip`, `#lstrip`, `#rstrip`, `#chomp` (no-arg), `#chop`, and `#scrub` (no-arg). Each strips a known character subset from the ends of the string (or, for `#scrub`, replaces invalid bytes — a no-op on always-valid literal source code), so the result on a literal-bearing receiver is itself literal-bearing. The result is `literal-string` (not `non-empty-literal-string`, since `"   ".strip == ""` collapses non-empty-ness).

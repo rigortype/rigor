@@ -122,9 +122,24 @@ module Rigor
           Type::Nominal => :dispatch_nominal_size,
           Type::Difference => :dispatch_difference,
           Type::Refined => :dispatch_refined,
-          Type::Intersection => :dispatch_intersection
+          Type::Intersection => :dispatch_intersection,
+          Type::IntegerRange => :dispatch_integer_range
         }.freeze
         private_constant :RECEIVER_HANDLERS
+
+        # v0.1.1 Track 1 slice 5b — `Integer#to_s(base)` on a
+        # non-negative `IntegerRange` receiver. The output of
+        # `n.to_s(b)` for `n >= 0` is digit-string-only (no
+        # leading sign), so when the base is in this table the
+        # result lifts to the matching imported refinement.
+        # Bases not listed (2, 36, ...) keep the v0.1.0 baseline
+        # since Rigor has no carrier for the resulting alphabet.
+        TO_S_BASE_REFINEMENTS = {
+          10 => :decimal_int_string,
+          8 => :octal_int_string,
+          16 => :hex_int_string
+        }.freeze
+        private_constant :TO_S_BASE_REFINEMENTS
 
         def try_dispatch(receiver:, method_name:, args:)
           args ||= []
@@ -182,6 +197,42 @@ module Rigor
             return nil unless selectors&.include?(method_name)
 
             Type::Combinator.non_negative_int
+          end
+
+          # `IntegerRange#to_s` precision (v0.1.1 Track 1 slice 5b).
+          # When the range's lower bound is `>= 0`, every member is
+          # a non-negative integer and `to_s(base)` returns a
+          # digit-string with no leading sign. The result lifts to
+          # the matching imported refinement (`decimal-int-string`
+          # for base 10, `octal-int-string` for 8, `hex-int-string`
+          # for 16). Signed ranges fall through (the result could
+          # carry a `-` sign that no Rigor refinement currently
+          # captures), as do bases without a digit-only refinement.
+          def dispatch_integer_range(range, method_name, args)
+            return nil unless method_name == :to_s
+            return nil unless range.lower >= 0
+
+            base = base_argument(args)
+            return nil if base.nil?
+
+            refinement = TO_S_BASE_REFINEMENTS[base]
+            return nil if refinement.nil?
+
+            Type::Combinator.public_send(refinement)
+          end
+
+          # `to_s` with no argument defaults to base 10. With one
+          # argument, the value MUST be a `Constant<Integer>` to
+          # be statically known. Anything else (Nominal[Integer]
+          # arg, multi-arg, etc.) declines.
+          def base_argument(args)
+            return 10 if args.empty?
+            return nil unless args.size == 1
+
+            arg = args.first
+            return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Integer)
+
+            arg.value
           end
 
           # Refinement-aware projections over a `Difference[base,

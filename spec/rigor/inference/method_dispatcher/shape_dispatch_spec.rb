@@ -613,4 +613,57 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: receiver, method_name: :to_i, args: [constant(10)])).to be_nil
     end
   end
+
+  describe "IntegerRange#to_s precision (v0.1.1 Track 1 slice 5b)" do
+    let(:non_negative) { Rigor::Type::Combinator.non_negative_int }
+    let(:positive) { Rigor::Type::Combinator.positive_int }
+    let(:bounded_non_negative) { Rigor::Type::Combinator.integer_range(0, 99) }
+    let(:negative) { Rigor::Type::Combinator.negative_int }
+    let(:signed) { Rigor::Type::Combinator.integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 5) }
+
+    it "narrows non-negative-int#to_s (no args) to decimal-int-string" do
+      expect(dispatch(receiver: non_negative, method_name: :to_s))
+        .to eq(Rigor::Type::Combinator.decimal_int_string)
+    end
+
+    it "narrows positive-int#to_s to decimal-int-string" do
+      expect(dispatch(receiver: positive, method_name: :to_s))
+        .to eq(Rigor::Type::Combinator.decimal_int_string)
+    end
+
+    it "narrows bounded non-negative range #to_s to decimal-int-string" do
+      expect(dispatch(receiver: bounded_non_negative, method_name: :to_s))
+        .to eq(Rigor::Type::Combinator.decimal_int_string)
+    end
+
+    it "narrows non-negative-int#to_s(16) to hex-int-string" do
+      expect(dispatch(receiver: non_negative, method_name: :to_s, args: [constant(16)]))
+        .to eq(Rigor::Type::Combinator.hex_int_string)
+    end
+
+    it "narrows non-negative-int#to_s(8) to octal-int-string" do
+      expect(dispatch(receiver: non_negative, method_name: :to_s, args: [constant(8)]))
+        .to eq(Rigor::Type::Combinator.octal_int_string)
+    end
+
+    it "declines for unsupported bases (binary, custom alphabets)" do
+      [2, 7, 36].each do |b|
+        expect(dispatch(receiver: non_negative, method_name: :to_s, args: [constant(b)])).to be_nil
+      end
+    end
+
+    it "declines on signed ranges (the result could carry a leading `-`)" do
+      expect(dispatch(receiver: negative, method_name: :to_s)).to be_nil
+      expect(dispatch(receiver: signed, method_name: :to_s)).to be_nil
+    end
+
+    it "declines when the base argument is not a Constant<Integer>" do
+      nominal_int = Rigor::Type::Combinator.nominal_of("Integer")
+      expect(dispatch(receiver: non_negative, method_name: :to_s, args: [nominal_int])).to be_nil
+    end
+
+    it "declines for non-`to_s` selectors on IntegerRange receivers" do
+      expect(dispatch(receiver: non_negative, method_name: :inspect)).to be_nil
+    end
+  end
 end

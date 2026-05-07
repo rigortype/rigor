@@ -130,14 +130,22 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   PLUGIN_MANIFEST_INSTANCE = %w[
     ==(req:other)
     config_schema()
+    consumes()
     description()
     eql?(req:other)
     hash()
     id()
+    produces()
     protocols()
     to_h()
     validate_config(req:config)
     version()
+  ].freeze
+
+  PLUGIN_MANIFEST_CONSUMPTION_INSTANCE = %w[
+    name()
+    optional()
+    plugin_id()
   ].freeze
 
   PLUGIN_SERVICES_INSTANCE = %w[
@@ -253,6 +261,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::Plugin::IoBoundary
     Rigor::Plugin::FactStore
     Rigor::Plugin::FactStore::Fact
+    Rigor::Plugin::Manifest::Consumption
     Rigor::FlowContribution
     Rigor::FlowContribution::Fact
     Rigor::FlowContribution::MergeResult
@@ -446,6 +455,14 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
     it "exposes the expected (plugin_id, name, value) data shape" do
       expect(instance_signatures(Rigor::Plugin::FactStore::Fact)).to eq(
         PublicApiDriftSnapshots::PLUGIN_FACT_STORE_FACT_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::Manifest::Consumption" do
+    it "exposes the expected (plugin_id, name, optional) data shape" do
+      expect(instance_signatures(Rigor::Plugin::Manifest::Consumption)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_MANIFEST_CONSUMPTION_INSTANCE
       )
     end
   end

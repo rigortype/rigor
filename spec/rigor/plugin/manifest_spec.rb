@@ -98,4 +98,83 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(a).not_to eq(b)
     end
   end
+
+  describe "produces / consumes (ADR-9 slice 4)" do
+    it "defaults to empty produces and consumes" do
+      m = described_class.new(id: "rails", version: "0.1.0")
+      expect(m.produces).to eq([])
+      expect(m.consumes).to eq([])
+    end
+
+    it "canonicalises produces names to Symbol" do
+      m = described_class.new(id: "ar", version: "0.1.0", produces: [:model_index, "schema_table"])
+      expect(m.produces).to eq(%i[model_index schema_table])
+    end
+
+    it "rejects non-Symbol/String produces entries" do
+      expect do
+        described_class.new(id: "ar", version: "0.1.0", produces: [123])
+      end.to raise_error(ArgumentError, /produces/)
+    end
+
+    it "coerces consumes hashes into Consumption value objects" do
+      m = described_class.new(
+        id: "ap",
+        version: "0.1.0",
+        consumes: [{ plugin_id: "activerecord", name: :model_index }]
+      )
+      expect(m.consumes.size).to eq(1)
+      cm = m.consumes.first
+      expect(cm).to be_a(Rigor::Plugin::Manifest::Consumption)
+      expect(cm.plugin_id).to eq("activerecord")
+      expect(cm.name).to eq(:model_index)
+      expect(cm.optional).to be(false)
+    end
+
+    it "honours optional: true on consumes entries" do
+      m = described_class.new(
+        id: "factorybot",
+        version: "0.1.0",
+        consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }]
+      )
+      expect(m.consumes.first.optional).to be(true)
+    end
+
+    it "accepts string keys on consumes entries (YAML round-trip)" do
+      m = described_class.new(
+        id: "ap",
+        version: "0.1.0",
+        consumes: [{ "plugin_id" => "ar", "name" => "model_index" }]
+      )
+      expect(m.consumes.first.plugin_id).to eq("ar")
+    end
+
+    it "rejects malformed consumes entries (missing plugin_id or name)" do
+      expect do
+        described_class.new(id: "ap", version: "0.1.0", consumes: [{ plugin_id: "ar" }])
+      end.to raise_error(ArgumentError, /consumes/)
+      expect do
+        described_class.new(id: "ap", version: "0.1.0", consumes: [{ name: :x }])
+      end.to raise_error(ArgumentError, /consumes/)
+    end
+
+    it "rejects non-Array consumes" do
+      expect do
+        described_class.new(id: "ap", version: "0.1.0", consumes: "model_index")
+      end.to raise_error(ArgumentError, /consumes/)
+    end
+
+    it "round-trips produces / consumes through #to_h" do
+      m = described_class.new(
+        id: "ap",
+        version: "0.1.0",
+        produces: [:strong_params_validation],
+        consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }]
+      )
+      expect(m.to_h["produces"]).to eq(["strong_params_validation"])
+      expect(m.to_h["consumes"]).to eq(
+        [{ "plugin_id" => "activerecord", "name" => "model_index", "optional" => true }]
+      )
+    end
+  end
 end

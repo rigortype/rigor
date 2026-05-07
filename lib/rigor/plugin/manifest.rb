@@ -11,7 +11,7 @@ module Rigor
     # The fields are pinned by ADR-2 § "Registration, Configuration,
     # and Caching"; the v0.1.0 plugin contract surface treats this
     # struct as the public manifest shape.
-    class Manifest
+    class Manifest # rubocop:disable Metrics/ClassLength
       # Same regex {Rigor::Cache::Store::VALID_PRODUCER_ID} uses,
       # so plugin ids round-trip through cache producer ids and
       # `plugin.<id>.<rule>` diagnostic identifiers without escape.
@@ -23,22 +23,50 @@ module Rigor
       # the v0.1.0 protocol slices need them.
       VALID_VALUE_KINDS = %i[string boolean integer array hash any].freeze
 
-      attr_reader :id, :version, :description, :protocols, :config_schema
+      # ADR-9 slice 4 — declared cross-plugin fact dependencies.
+      # `produces:` lists the names this plugin publishes through
+      # its `#prepare(services)` hook. `consumes:` lists the
+      # `(plugin_id, name)` pairs this plugin reads from
+      # `services.fact_store`. The loader uses both for
+      # topological sort + missing-producer detection (slice 5);
+      # slice 4 carries the declarations on the manifest but the
+      # loader does not yet enforce them.
+      Consumption = Data.define(:plugin_id, :name, :optional) do
+        def initialize(plugin_id:, name:, optional: false)
+          super(plugin_id: plugin_id.to_s, name: name.to_sym, optional: optional ? true : false)
+        end
+      end
 
-      def initialize(id:, version:, description: nil, protocols: [], config_schema: {})
+      attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes
+
+      def initialize( # rubocop:disable Metrics/ParameterLists
+        id:, version:,
+        description: nil, protocols: [], config_schema: {},
+        produces: [], consumes: []
+      )
         validate_id!(id)
         validate_version!(version)
         validate_protocols!(protocols)
         validate_config_schema!(config_schema)
+        validate_produces!(produces)
 
+        assign_fields(id, version, description, protocols, config_schema, produces, consumes)
+        freeze
+      end
+
+      private
+
+      def assign_fields(id, version, description, protocols, config_schema, produces, consumes) # rubocop:disable Metrics/ParameterLists
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
         @protocols = protocols.map(&:to_sym).freeze
         @config_schema = config_schema.to_h { |k, v| [k.to_s.dup.freeze, v.to_sym] }.freeze
-
-        freeze
+        @produces = produces.map(&:to_sym).freeze
+        @consumes = coerce_consumes(consumes)
       end
+
+      public
 
       # Validates the user-supplied plugin config block against this
       # manifest's `config_schema`. Returns an array of human-readable
@@ -69,7 +97,9 @@ module Rigor
           "version" => version,
           "description" => description,
           "protocols" => protocols.map(&:to_s),
-          "config_schema" => config_schema.to_h { |k, v| [k, v.to_s] }
+          "config_schema" => config_schema.to_h { |k, v| [k, v.to_s] },
+          "produces" => produces.map(&:to_s),
+          "consumes" => consumes.map { |c| consumption_hash(c) }
         }
       end
 
@@ -128,6 +158,45 @@ module Rigor
         when :any then true
         else false
         end
+      end
+
+      def validate_produces!(produces)
+        return if produces.is_a?(Array) && produces.all? { |p| p.is_a?(Symbol) || p.is_a?(String) }
+
+        raise ArgumentError, "plugin manifest produces must be an Array of Symbol/String, got #{produces.inspect}"
+      end
+
+      def coerce_consumes(consumes)
+        unless consumes.is_a?(Array)
+          raise ArgumentError, "plugin manifest consumes must be an Array, got #{consumes.inspect}"
+        end
+
+        consumes.map { |entry| coerce_consumption(entry) }.freeze
+      end
+
+      def coerce_consumption(entry)
+        case entry
+        when Consumption then entry
+        when Hash then build_consumption_from_hash(entry)
+        else raise ArgumentError,
+                   "plugin manifest consumes entry must be a Hash or Consumption, got #{entry.inspect}"
+        end
+      end
+
+      def consumption_hash(consumption)
+        { "plugin_id" => consumption.plugin_id, "name" => consumption.name.to_s, "optional" => consumption.optional }
+      end
+
+      def build_consumption_from_hash(entry)
+        plugin_id = entry[:plugin_id] || entry["plugin_id"]
+        name = entry[:name] || entry["name"]
+        optional = entry.key?(:optional) ? entry[:optional] : entry["optional"]
+        if plugin_id.nil? || name.nil?
+          raise ArgumentError,
+                "plugin manifest consumes entry missing plugin_id/name: #{entry.inspect}"
+        end
+
+        Consumption.new(plugin_id: plugin_id, name: name, optional: optional || false)
       end
     end
   end

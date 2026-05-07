@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `manifest(produces:)` / `manifest(consumes:)` declarations (v0.1.1 Track 2 / ADR-9 slice 4)
+
+- **`Rigor::Plugin::Manifest`** gains two new declarative fields. `produces:` is an `Array<Symbol>` listing the names this plugin publishes through `#prepare(services)`; `consumes:` is an `Array<{ plugin_id:, name:, optional: }>` listing the `(plugin_id, name)` pairs this plugin reads from `services.fact_store`. Optional flag (`optional: true`) marks dependencies whose absence is acceptable — the consumer falls through to a graceful `nil` from `fact_store.read`.
+- **New `Rigor::Plugin::Manifest::Consumption`** frozen Data shape (`Data.define(:plugin_id, :name, :optional)`). Manifest construction coerces hash entries (`{ plugin_id: "ar", name: :model_index }`) into `Consumption` instances; YAML round-trip via string-keyed hashes is supported. Malformed entries (missing `plugin_id` or `name`, non-Array `consumes:`) raise `ArgumentError` at class-definition time with a message naming the offending entry.
+- **No loader behaviour change yet.** Slice 4 carries the declarations on the manifest; ADR-9 slice 5 (queued) wires `Plugin::Loader` to consume them — topological sort by `consumes` so producers run before consumers, plus early `:missing-producer` validation when a non-`optional` consume names a `(plugin_id, name)` no loaded plugin produces.
+- **Drift snapshot** updates: `Rigor::Plugin::Manifest` exposes `produces()` / `consumes()` getters, and the new `Rigor::Plugin::Manifest::Consumption` Data shape is pinned alongside `Rigor::Plugin::FactStore::Fact`.
+
 ### Added — `Plugin::Base#prepare(services)` hook + Runner invocation (v0.1.1 Track 2 / ADR-9 slice 3)
 
 - **New `Plugin::Base#prepare(services)`** default-no-op hook. Producer plugins override to compute and publish facts other plugins consume:

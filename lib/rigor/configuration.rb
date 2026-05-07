@@ -7,9 +7,27 @@ require_relative "configuration/severity_profile"
 module Rigor
   class Configuration # rubocop:disable Metrics/ClassLength
     DEFAULT_PATH = ".rigor.yml"
+    # Built-in exclusion patterns appended to `exclude:` so vendored
+    # dependencies, Bundler artefacts, and JavaScript node_modules are
+    # never analysed by accident when a directory glob expands. Users
+    # cannot disable these defaults; the trade-off is that analysing
+    # any of these paths is essentially never what the user wants
+    # (they're build outputs / external dependencies, not source).
+    #
+    # We deliberately keep this list narrow. `tmp/` and similar
+    # directories vary across project layouts (Rails has `tmp/`,
+    # libraries usually don't); user-supplied `exclude:` entries
+    # in `.rigor.yml` cover the project-specific cases.
+    BUILTIN_EXCLUDES = %w[
+      **/vendor/bundle/**
+      **/.bundle/**
+      **/node_modules/**
+    ].freeze
+
     DEFAULTS = {
       "target_ruby" => "4.0",
       "paths" => ["lib"],
+      "exclude" => [],
       "plugins" => [],
       "disable" => [],
       "libraries" => [],
@@ -26,7 +44,7 @@ module Rigor
       "severity_overrides" => {}
     }.freeze
 
-    attr_reader :target_ruby, :paths, :plugins, :cache_path, :disabled_rules,
+    attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :disabled_rules,
                 :libraries, :signature_paths, :fold_platform_specific_paths,
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :severity_profile, :severity_overrides
@@ -41,12 +59,14 @@ module Rigor
       new(DEFAULTS.merge(data))
     end
 
-    def initialize(data = DEFAULTS) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity
+    def initialize(data = DEFAULTS) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
 
       @target_ruby = coerce_target_ruby(data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")))
       @paths = Array(data.fetch("paths", DEFAULTS.fetch("paths"))).map(&:to_s)
+      user_excludes = Array(data.fetch("exclude", DEFAULTS.fetch("exclude"))).map(&:to_s)
+      @exclude_patterns = (BUILTIN_EXCLUDES + user_excludes).uniq.freeze
       @plugins = Array(data.fetch("plugins", DEFAULTS.fetch("plugins"))).map do |entry|
         coerce_plugin_entry(entry)
       end.freeze
@@ -72,6 +92,7 @@ module Rigor
       {
         "target_ruby" => target_ruby,
         "paths" => paths,
+        "exclude" => exclude_patterns - BUILTIN_EXCLUDES,
         "plugins" => plugins,
         "disable" => disabled_rules,
         "libraries" => libraries,

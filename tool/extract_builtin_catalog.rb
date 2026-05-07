@@ -739,7 +739,15 @@ class CBodyIndex
               k += 1
             end
             if k < lines.length
-              body_text = lines[j..k].join
+              # `lines[j..k]` is `Array<String>?` at runtime, but
+              # Rigor's overload selector prefers `Array#[](int) ->
+              # Elem` because the RBS `int` alias expands to
+              # `Integer | _ToInt` and `_ToInt` (an interface)
+              # translates to `Dynamic[top]`, which gradually accepts
+              # any argument including a Range. Tracked as a v0.1.x
+              # deferred item under "interface-strictness on overload
+              # selection".
+              body_text = lines[j..k].join # rigor:disable call.undefined-method
               bodies[name] ||= Body.new(cfunc: name, path: rel, start_line: i + 1, text: body_text)
               i = k + 1
               next

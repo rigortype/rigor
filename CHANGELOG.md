@@ -27,6 +27,20 @@ codifies the move as a checklist step so the archive doesn't drift.
 
 ### Added
 
+#### `.rigor.yml` `exclude:` setting + built-in defaults
+
+- **New `Configuration#exclude_patterns`** — a list of `File.fnmatch?` glob patterns layered over the project's directory globs. The runner's `expand_paths` consults the list when expanding a directory argument and skips any file whose path matches an exclusion pattern. Explicit file arguments to the CLI bypass the filter — only directory expansion is filtered.
+- **Built-in defaults** that users can't disable (and rarely want to): `**/vendor/bundle/**`, `**/.bundle/**`, `**/node_modules/**`. These cover the cases where Rigor would otherwise walk into vendored gems / build artefacts and emit floods of diagnostics for code the user doesn't own.
+  - Earlier self-analysis surfaced 1677 errors over 132 files when running `rigor check tool` against this repo, almost all of them inside `tool/steep/vendor/bundle/`. After this slice, `rigor check tool` reports `No diagnostics`.
+- **User additions** layer on top via `.rigor.yml`:
+  ```yaml
+  exclude:
+    - "spec/integration/fixtures/**"
+    - "examples/*/demo/**"
+  ```
+  The `to_h` / round-trip surface returns only the user-supplied entries — built-in defaults are implicit and not echoed back.
+- **`tool/extract_builtin_catalog.rb:750`** — point fix via `# rigor:disable call.undefined-method` for the `lines[j..k].join` site. Self-analysis revealed Rigor's overload selector currently picks `Array#[](int) -> Elem` over `Array#[](Range) -> Array[Elem]?` because the RBS `int` alias expands to `Integer | _ToInt` and Rigor translates the `_ToInt` interface to `Dynamic[top]`, which gradually accepts any argument including a Range. Tracked as a deferred v0.1.x item under "interface-strictness on overload selection" in `MILESTONES.md`.
+
 #### `Const = Struct.new(*Symbol)` discovery — symmetric with `Data.define`
 
 - **`Inference::ScopeIndexer.record_meta_new_constant?`** (renamed from `record_data_define_constant?`) now recognises `Const = Struct.new(:a, :b)` and the `keyword_init:` variant `Const = Struct.new(:a, :b, keyword_init: true)` alongside the existing `Const = Data.define(:a, :b)` recogniser. The discovered constant gets registered as `Singleton[<qualified-Const>]`, so `Const.new(...)` resolves to a fresh `Nominal[<qualified-Const>]` via `meta_new` instead of the un-narrowed `Dynamic[top]` returned by the default `Class#new` envelope.

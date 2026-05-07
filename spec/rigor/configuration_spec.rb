@@ -17,6 +17,49 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
+    it "exposes built-in exclude patterns by default" do
+      Dir.mktmpdir do |dir|
+        configuration = described_class.load(File.join(dir, "missing.yml"))
+
+        expect(configuration.exclude_patterns).to include(
+          "**/vendor/bundle/**",
+          "**/.bundle/**",
+          "**/node_modules/**"
+        )
+      end
+    end
+
+    it "appends user-supplied exclude patterns to the built-in defaults" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          exclude:
+            - "spec/integration/fixtures/**"
+            - "examples/*/demo/**"
+        YAML
+
+        configuration = described_class.load(path)
+
+        # built-in defaults still present
+        expect(configuration.exclude_patterns).to include("**/vendor/bundle/**")
+        # user entries appended
+        expect(configuration.exclude_patterns).to include(
+          "spec/integration/fixtures/**",
+          "examples/*/demo/**"
+        )
+      end
+    end
+
+    it "round-trips `exclude:` through #to_h without leaking the built-in defaults" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "exclude: [\"spec/fixtures/**\"]\n")
+        configuration = described_class.load(path)
+
+        expect(configuration.to_h["exclude"]).to eq(["spec/fixtures/**"])
+      end
+    end
+
     it "reads libraries: and signature_paths: from the YAML file" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")

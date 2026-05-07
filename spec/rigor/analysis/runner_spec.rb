@@ -39,6 +39,61 @@ RSpec.describe Rigor::Analysis::Runner do
     expect(result.diagnostics.first.message).not_to be_empty
   end
 
+  describe "exclude: patterns filter directory globs" do
+    # Each test plants a parse-error-shaped file (unclosed `def`)
+    # so analysis attempts surface as diagnostics; the test then
+    # checks whether those diagnostics include the planted path.
+    let(:bad_source) { "def broken\n" }
+
+    it "skips the built-in vendor/bundle pattern when a directory expansion contains it" do
+      Dir.mktmpdir do |dir|
+        src = File.join(dir, "src")
+        vendored = File.join(src, "vendor", "bundle", "ruby", "4.0.0", "gems", "fakegem")
+        FileUtils.mkdir_p(vendored)
+        File.write(File.join(src, "real.rb"), bad_source)
+        File.write(File.join(vendored, "lib.rb"), bad_source)
+
+        configuration = Rigor::Configuration.new("paths" => [src])
+        result = described_class.new(configuration: configuration, cache_store: nil).run
+
+        analysed = result.diagnostics.map(&:path)
+        expect(analysed).to include(File.join(src, "real.rb"))
+        expect(analysed).not_to include(File.join(vendored, "lib.rb"))
+      end
+    end
+
+    it "honours user-supplied exclude patterns from `.rigor.yml`" do
+      Dir.mktmpdir do |dir|
+        src = File.join(dir, "src")
+        FileUtils.mkdir_p(File.join(src, "fixtures"))
+        File.write(File.join(src, "real.rb"), bad_source)
+        File.write(File.join(src, "fixtures", "demo.rb"), bad_source)
+
+        configuration = Rigor::Configuration.new(
+          "paths" => [src], "exclude" => ["**/fixtures/**"]
+        )
+        result = described_class.new(configuration: configuration, cache_store: nil).run
+
+        analysed = result.diagnostics.map(&:path)
+        expect(analysed).to include(File.join(src, "real.rb"))
+        expect(analysed).not_to include(File.join(src, "fixtures", "demo.rb"))
+      end
+    end
+
+    it "does NOT exclude explicit file arguments (only directory globs filter)" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "vendor", "bundle"))
+        explicit = File.join(dir, "vendor", "bundle", "lib.rb")
+        File.write(explicit, bad_source)
+
+        configuration = Rigor::Configuration.new("paths" => [explicit])
+        result = described_class.new(configuration: configuration, cache_store: nil).run
+
+        expect(result.diagnostics.map(&:path)).to include(explicit)
+      end
+    end
+  end
+
   describe "configuration wiring at runtime (audit guard)" do
     # Adjacent to the `target_ruby` block below, these specs guard
     # against any of the documented `.rigor.yml` settings going

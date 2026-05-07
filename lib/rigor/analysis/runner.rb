@@ -318,7 +318,7 @@ module Rigor
         errors = []
         Array(paths).each do |path|
           if File.directory?(path)
-            files.concat(Dir.glob(File.join(path, RUBY_GLOB)))
+            files.concat(reject_excluded(Dir.glob(File.join(path, RUBY_GLOB))))
           elsif File.file?(path) && path.end_with?(".rb")
             files << path
           elsif File.exist?(path)
@@ -328,6 +328,25 @@ module Rigor
           end
         end
         { files: files, errors: errors }
+      end
+
+      # `Configuration#exclude_patterns` is a list of glob patterns
+      # checked against each globbed path via `File.fnmatch?` (without
+      # `FNM_PATHNAME`, so `**` and `*` both span path separators —
+      # the patterns behave like substring globs). Built-in defaults
+      # exclude `vendor/bundle`, `.bundle`, `node_modules`, and `tmp`
+      # so the analyser never walks into vendored deps or build
+      # artefacts. User-supplied entries (`.rigor.yml` `exclude:`)
+      # layer on top. Explicit file arguments to the CLI bypass this
+      # filter — only the directory-glob expansion is filtered.
+      def reject_excluded(file_list)
+        return file_list if @configuration.exclude_patterns.empty?
+
+        file_list.reject { |path| excluded?(path) }
+      end
+
+      def excluded?(path)
+        @configuration.exclude_patterns.any? { |pattern| File.fnmatch?(pattern, path) }
       end
 
       def path_error(path, message)

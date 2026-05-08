@@ -97,9 +97,45 @@
         "type": "string",
         "enum": ["error", "warning", "info", "off"]
       }
+    },
+    "dependencies": {
+      "description": "Opt-in extensions to Rigor's outer inference boundary. Per ADR-10, `source_inference[]` lists gems whose Ruby implementation Rigor MAY walk when a signature contract is missing (or, in `mode: full`, alongside RBS). Inferred returns crossing the gem boundary are wrapped in `Dynamic[T]` with `dynamic.dependency-source.*` provenance — never published as ground-truth types and never round-tripped out as authored RBS. Omitted / empty = the existing RBS-or-`Dynamic[top]` boundary.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_inference": {
+          "description": "Per-gem opt-in entries. Gems not listed keep the unlisted-gem default (no source walk).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/sourceInferenceEntry" }
+        }
+      }
     }
   },
   "$defs": {
+    "sourceInferenceEntry": {
+      "description": "A single per-gem source-inference opt-in.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gem"],
+      "properties": {
+        "gem": {
+          "description": "Gem name (matched against the bundle at walk time).",
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "description": "`when_missing` (default): walk gem source ONLY when no signature contract resolves for the call site. `full`: walk even when RBS is present; the analyzer reconciles via the contribution-merging rules in ADR-2 (RBS still wins on conflict). `disabled`: explicitly opt out (matches the unlisted-gem default).",
+          "type": "string",
+          "enum": ["disabled", "when_missing", "full"]
+        },
+        "roots": {
+          "description": "Subdirectories within the gem's installation directory to walk. Defaults to `[\"lib\"]`. C extensions and `spec/` / `test/` / `bin/` are hard-excluded by the loader regardless of this setting (per ADR-10).",
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      }
+    },
     "pluginEntry": {
       "description": "A single plugin entry — either a gem-name shorthand or the full configured form.",
       "oneOf": [

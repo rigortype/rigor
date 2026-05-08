@@ -241,6 +241,69 @@ RSpec.describe Rigor::Configuration do
       end.to raise_error(ArgumentError, /must be one of/)
     end
 
+    it "exposes an empty Configuration::Dependencies by default (ADR-10 slice 1)" do
+      Dir.mktmpdir do |dir|
+        configuration = described_class.load(File.join(dir, "missing.yml"))
+
+        expect(configuration.dependencies).to be_a(Rigor::Configuration::Dependencies)
+        expect(configuration.dependencies.source_inference).to eq([])
+      end
+    end
+
+    it "reads dependencies.source_inference: from the YAML file" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          dependencies:
+            source_inference:
+              - gem: rack
+                mode: full
+              - gem: faraday
+        YAML
+        entries = described_class.load(path).dependencies.source_inference
+
+        expect(entries.length).to eq(2)
+        expect(entries[0].gem).to eq("rack")
+        expect(entries[0].mode).to eq(:full)
+        expect(entries[1].gem).to eq("faraday")
+        expect(entries[1].mode).to eq(:when_missing)
+      end
+    end
+
+    it "round-trips dependencies: through #to_h" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          dependencies:
+            source_inference:
+              - gem: rack
+                mode: full
+                roots: [lib, app]
+        YAML
+        round_tripped = described_class.load(path).to_h["dependencies"]
+
+        expect(round_tripped).to eq(
+          "source_inference" => [
+            { "gem" => "rack", "mode" => "full", "roots" => %w[lib app] }
+          ]
+        )
+      end
+    end
+
+    it "surfaces dependencies-section parse errors as ArgumentError at load time" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, <<~YAML)
+          dependencies:
+            source_inference:
+              - mode: full
+        YAML
+
+        expect { described_class.load(path) }
+          .to raise_error(ArgumentError, /gem must be a non-empty String/)
+      end
+    end
+
     it "rejects plugins_io.network values other than :disabled in slice 2" do
       expect do
         described_class.new(

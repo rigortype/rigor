@@ -4,38 +4,31 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 ## Status
 
-**v0.1.0 version-bumped on `master` (commit `6170832`); release pending.** All six plugin-contract slices and the v0.1.0-polish work landed (six worked plugin examples, the nine-chapter end-user handbook, the named-capture narrowing fix, the `;`-prefixed block-local nil shadow fix). The seventh plugin example (`rigor-activerecord`) landed during the polish window. Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), `bundle exec rake release` waits for explicit user authorisation. The slice-by-slice recap is in `CHANGELOG.md`'s `[0.1.0]` section and the v0.1.0 row of [`docs/MILESTONES.md`](MILESTONES.md).
+**v0.1.2 released.** All v0.1.2 tracks landed and the version cut. Slice-by-slice recap in `CHANGELOG.md` § `[0.1.2]` and `docs/MILESTONES.md` § "v0.1.2 — Planned".
 
-**v0.1.2 in progress.** Track 1 (example plugin return-type migration) landed on `master` for four of the seven worked plugins — `rigor-lisp-eval`, `rigor-pattern`, `rigor-units`, `rigor-activerecord` now contribute call-site return types via `#flow_contribution_for`. The diagnostic trace stays — both channels run from the same interpretation. The other three (`rigor-deprecations`, `rigor-statesman`, `rigor-routes`) remain diagnostic-only by design (no return-type fit / RBS-expressible). Spec helper extension (`signature_paths:` keyword on `run_plugin`) landed alongside so narrowing assertions can provide minimal sigs for `call.undefined-method` to fire on user-defined classes. Slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.2 — Planned".
+**v0.1.3 in progress.** Theme: **deliver [ADR-10 — Opt-in dependency-source inference](adr/10-dependency-source-inference.md) end-to-end.** ADR-10 was authored alongside v0.1.2 and queued for v0.1.3+; v0.1.3 starts implementing it. Five slices (config plumbing → walker + dispatcher tier → cache descriptor → per-gem budget → docs) per the ADR's "Implementation slicing" section.
 
-**v0.1.1 complete.** All four tracks landed unreleased on the work branch:
+- **Slice 1 (Configuration plumbing)** — landed unreleased. New `Configuration::Dependencies` value object + `Entry(gem:, mode:, roots:)` frozen Data. `.rigor.yml` gains a `dependencies.source_inference[]` section. JSON schema + parser tests + integration tests through `Configuration.load`. **No analyzer wiring yet** — `Configuration#dependencies` is parsed but not consumed by any walker. CHANGELOG entry under `[Unreleased]`.
+- **Slices 2–5** queued.
 
-- **Track 1 slice 1** — regex pattern → refinement-name recogniser.
-- **Track 1 slice 2** — `String#to_i` / `#to_int` (2a) and `Kernel#Integer(s)` (2b) on `decimal-int-string` / `numeric-string` → `non-negative-int`.
-- **Track 1 slice 3** — full `self`-narrowing in `predicate-if-*` / `assert-if-*` / `assert` (LocalVariable / InstanceVariable / SelfNode / implicit-self receiver shapes).
-- **Track 1 slice 4** — `String#start_with?` / `#end_with?` / `#include?` flow facts (FactStore-based; no new carrier).
-- **Track 1 slice 5** — `literal-string` preservation through `#strip` family (5a), `Integer#to_s` precision on non-negative `IntegerRange` (5b), `#center` / `#ljust` / `#rjust` literal-bearing lift (5c). `Numeric#to_s` intentionally retracted (no clean carrier for `Float` / signed `Integer` outputs).
-- **Track 2 (ADR-9 cross-plugin API + return-type contributions)** — slices 1 → 5 (`Plugin::FactStore`, `Services#fact_store`, `#prepare(services)` hook + Runner invocation, `manifest(produces:/consumes:)`, topological sort + missing-producer detection) + slice 7 (`Plugin::Base#flow_contribution_for` hook + dispatcher tier ahead of `RbsDispatch`). Tier 2 Rails plugins are unblocked.
-- **Track 3** — slice 8 (helpers, prior commit `ce64bb6`), slice 9 (per-demo cache isolation under `tmp/` + CLI fix to honour `cache.path` from `.rigor.yml`), slice 10 (examples re-included in RuboCop with documented relaxations).
-- **Track 4** — fully drained: item 11 (three `lib/` sig drifts closed), item 12 (`node_locator_spec.rb:82` stale), item 13 (prelude `composed` bodies reclassified `unknown` → `dispatch`).
-
-Configuration audit (also during this batch): closed the `target_ruby` phantom-setting wiring gap (now passed to `Prism.parse_file(version:)` at all three parse sites), and added a runtime audit-guard spec block so future `.rigor.yml` settings can't go phantom silently.
-
-Working state: 2195 RSpec examples / 0 failures, RuboCop 264 files / 0 offenses, `bundle exec exe/rigor check lib` reports `No diagnostics`. **v0.1.1 is ready for `bundle exec rake release` once the user authorises it.** Full slice list in [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.1 — Planned".
+**v0.1.0 → v0.1.2 released.** Slice-by-slice recaps in `CHANGELOG.md` (§ `[0.1.0]`, `[0.1.1]`, `[0.1.2]`) and `docs/MILESTONES.md` (§ "v0.1.0 — Released", "v0.1.1 — Planned" entries marked complete, "v0.1.2 — Planned" entries marked complete). The `target_ruby` phantom-setting fix and the runtime audit-guard spec block under [`spec/rigor/analysis/runner_spec.rb`](../spec/rigor/analysis/runner_spec.rb) "configuration wiring at runtime (audit guard)" landed during the v0.1.1 batch and remain in force.
 
 ## Where the Work Resumes
 
+### v0.1.3 entry path
+
+Read [ADR-10](adr/10-dependency-source-inference.md) § "Implementation slicing" for the binding slice list. With Slice 1 landed, recommended entry order for the next session:
+
+- **Slice 2** — `Analysis::DependencySourceInference` walker + dispatcher tier. Re-uses `Analysis::Runner` machinery against a listed gem's `roots:` and contributes inferred return types as `Dynamic[T]` through the same `flow_contribution_for` substrate plugins use today. New tier ordering: core RBS > `RBS::Extended` > plugins > **dependency-source inference** > engine fallback. The runtime audit-guard spec block in [`spec/rigor/analysis/runner_spec.rb`](../spec/rigor/analysis/runner_spec.rb) "configuration wiring at runtime (audit guard)" is the natural place to land an audit case once the walker reads `Configuration#dependencies`.
+- **Slice 3** — `Cache::Descriptor::DependencyEntry` + per-gem-version cache slice invalidation. Slot it next to the existing `gems:` entry on the cache descriptor; `bundle update` invalidates exactly that gem's slice.
+- **Slice 4** — per-gem budget pool + `dynamic.dependency-source.budget-exceeded` diagnostic. New `dependencies.budget_per_gem` config entry; range 0.25× – 4× of the project budget.
+- **Slice 5** — documentation update. New `docs/internal-spec/dependency-source-inference.md` normative doc; cross-link from `inference-budgets.md`, `special-types.md`, `diagnostic-policy.md`.
+
+The ADR's open questions (per-receiver plugin veto, `mode: full` retention, cache size cap, configurable tier ordering) are revisited at slice 2 / 3 boundaries.
+
 ### Rails ecosystem plugins (parallel running track)
 
-The Rails plugin family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionpack`, `rigor-actionmailer`, `rigor-activejob`, plus `rigor-activerecord` extensions — is being authored in parallel with v0.1.x core work. The full plan is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Tier 1 plugins (current API, no analyser-side change required) are unblocked and authoring can start immediately, **one plugin per session**, staged in `examples/rigor-<id>/` and extracted via `git subtree split` once the contract is stable. Tier 2 (`rigor-actionpack` Phase 1, `rigor-factorybot`) blocks on [ADR-9 — Cross-plugin API](adr/9-cross-plugin-api.md), which is v0.1.1 Track 2.
-
-### v0.1.2 entry path
-
-Read [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.2 — Planned" for the slice list. Recommended entry order:
-
-- v0.1.2 Track 1 (four of seven example plugins migrated to `#flow_contribution_for`) is on `master`. v0.1.1 also remains version-bumped on `master` and ready for `bundle exec rake release` once the user authorises both cuts together (or sequentially, per [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md)).
-- The Rails plugin parallel running track is unblocked — Tier 2 (`rigor-actionpack` Phase 1, `rigor-factorybot`) can now author against the cross-plugin API. Tier 1 plugins (`rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionmailer`, `rigor-activejob`) were unblocked from v0.1.0.
-- Out-of-scope items deferred from v0.1.1 (interface-strictness on overload selection, new `flow.*` / `def.*` rule families, `Data.define` initializer dispatch, `Plugin::IoBoundary#open_url`, DX tooling, LSP daemon, etc.) carry forward to v0.1.3+.
+The Rails plugin family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionpack`, `rigor-actionmailer`, `rigor-activejob`, plus `rigor-activerecord` extensions — continues in parallel with v0.1.x core work. The full plan is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Tier 1 unblocked from v0.1.0; Tier 2 unblocked from v0.1.1's cross-plugin API. Authoring proceeds **one plugin per session**, staged in `examples/rigor-<id>/` and extracted via `git subtree split` once the contract is stable.
 
 ## Open Engineering Items
 

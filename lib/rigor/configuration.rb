@@ -2,6 +2,7 @@
 
 require "yaml"
 
+require_relative "configuration/dependencies"
 require_relative "configuration/severity_profile"
 
 module Rigor
@@ -58,7 +59,10 @@ module Rigor
         "allowed_url_hosts" => []
       },
       "severity_profile" => "balanced",
-      "severity_overrides" => {}
+      "severity_overrides" => {},
+      "dependencies" => {
+        "source_inference" => []
+      }
     }.freeze
 
     # Top-level keys whose values are file/directory paths that
@@ -72,7 +76,8 @@ module Rigor
                 :libraries, :signature_paths, :fold_platform_specific_paths,
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
-                :severity_profile, :severity_overrides
+                :severity_profile, :severity_overrides,
+                :dependencies
 
     # Loads a configuration file.
     #
@@ -213,6 +218,9 @@ module Rigor
       @severity_overrides = coerce_severity_overrides(
         data.fetch("severity_overrides", DEFAULTS.fetch("severity_overrides"))
       )
+      @dependencies = Dependencies.from_h(
+        data.fetch("dependencies", DEFAULTS.fetch("dependencies"))
+      )
     end
     # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
 
@@ -235,7 +243,8 @@ module Rigor
           "allowed_url_hosts" => plugins_io_allowed_url_hosts
         },
         "severity_profile" => severity_profile.to_s,
-        "severity_overrides" => severity_overrides.to_h { |k, v| [k, v.to_s] }
+        "severity_overrides" => severity_overrides.to_h { |k, v| [k, v.to_s] },
+        "dependencies" => dependencies.to_h
       }
     end
 

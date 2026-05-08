@@ -1,4 +1,4 @@
-# rigor-sorbet (slices 1 + 2)
+# rigor-sorbet (slices 1 + 2 + 3)
 
 The eighth worked example. Reads inline Sorbet `sig { ... }`
 blocks on first-party Ruby code and contributes the parsed
@@ -7,15 +7,20 @@ return type at every call site, so chained calls
 dispatch instead of degrading to `Dynamic[top]`. As of slice 2,
 also recognises Sorbet's type-assertion calls (`T.let` /
 `T.cast` / `T.must` / `T.unsafe`) and lifts them to
-`FlowContribution` return-type contributions.
+`FlowContribution` return-type contributions. Slice 3 widens
+the type-vocabulary translator to cover the dense middle of
+Sorbet's surface — generic class applications (`T::Array[E]`,
+`T::Hash[K, V]`, `T::Set[E]`, `T::Range[E]`, `T::Enumerable[E]`,
+`T::Enumerator[E]`), class-object types (`T.class_of(C)`,
+`T::Class[T]`), tuple literals `[A, B]` and shape literals
+`{a: A, b: B}` in sig position.
 
-This is **slices 1 + 2 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**.
-The current cut covers method-signature contributions
-(slice 1) and the four most-used type assertions (slice 2);
-later slices add `T.bind` / `T.absurd` (slice 2 follow-up),
-broaden the type-vocabulary translator (slice 3), walk
-Sorbet's RBI directories (slice 4), and honour `# typed:`
-sigils (slice 5).
+This is **slices 1 + 2 + 3 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**.
+Later slices walk Sorbet's RBI directories (slice 4),
+honour `# typed:` sigils + finalise dispatcher tier ordering
+(slice 5), and wire `T.absurd` into `flow.unreachable-branch`
+(slice 6). `T.bind`, `T.assert_type!`, `T.must_because`, and
+`T.reveal_type` remain deferred to a slice-2 follow-up.
 
 ## What the plugin recognises
 
@@ -85,24 +90,38 @@ demo/errors_demo.rb:34:3: plugin.sorbet.parse-error
 `T.bind`, `T.assert_type!`, `T.must_because`, `T.absurd` and
 `T.reveal_type` are deferred to a follow-up slice.
 
-## Slice 1 type vocabulary
+## Type vocabulary (slices 1 + 3)
 
-| Sorbet form         | Rigor representation                     |
-| ------------------- | ---------------------------------------- |
-| `Integer` etc.      | `Nominal["Integer"]`                     |
-| `::Foo::Bar`        | `Nominal["Foo::Bar"]`                    |
-| `T.untyped`         | `Dynamic[top]`                           |
-| `T.anything`        | `top`                                    |
-| `T.noreturn`        | `bot`                                    |
-| `T.nilable(X)`      | `Union[X, Constant[nil]]`                |
-| `T.any(A, B, ...)`  | `Union[A, B, ...]`                       |
-| `T.all(A, B, ...)`  | `Intersection[A, B, ...]`                |
-| `T::Boolean`        | `Union[Constant[true], Constant[false]]` |
+| Sorbet form              | Rigor representation                     |
+| ------------------------ | ---------------------------------------- |
+| `Integer` etc.           | `Nominal["Integer"]`                     |
+| `::Foo::Bar`             | `Nominal["Foo::Bar"]`                    |
+| `T.untyped`              | `Dynamic[top]`                           |
+| `T.anything`             | `top`                                    |
+| `T.noreturn`             | `bot`                                    |
+| `T.nilable(X)`           | `Union[X, Constant[nil]]`                |
+| `T.any(A, B, ...)`       | `Union[A, B, ...]`                       |
+| `T.all(A, B, ...)`       | `Intersection[A, B, ...]`                |
+| `T::Boolean`             | `Union[Constant[true], Constant[false]]` |
+| `T::Array[E]`            | `Nominal["Array", [E]]`                  |
+| `T::Hash[K, V]`          | `Nominal["Hash", [K, V]]`                |
+| `T::Set[E]`              | `Nominal["Set", [E]]`                    |
+| `T::Range[E]`            | `Nominal["Range", [E]]`                  |
+| `T::Enumerable[E]`       | `Nominal["Enumerable", [E]]`             |
+| `T::Enumerator[E]`       | `Nominal["Enumerator", [E]]`             |
+| `T::Class[T]`            | `Singleton[T-class-name]` (lossy)        |
+| `T.class_of(C)`          | `Singleton[C]`                           |
+| `[A, B]` (tuple in sig)  | `Tuple[A, B]`                            |
+| `{a: A, b: B}` (shape)   | `HashShape{a: A, b: B}` (closed)         |
 
-Anything outside this table (`T.proc`, `T::Array[E]`,
-`T.class_of`, `T::Struct`, …) currently degrades to
-`Dynamic[top]` silently. Slice 3 of the ADR widens the
-translator.
+Anything outside this table (`T.proc`, `T.attached_class`,
+`T.self_type`, `T.type_parameter`, `T::Struct` / `T::Enum`
+subclasses, …) still degrades silently to `Dynamic[top]`.
+Slice 4 of the ADR walks Sorbet's RBI directories (which
+typically use the same vocabulary, so the same coverage
+applies). Diagnostics flagging unsupported constructs land
+in a later slice; the silent-degradation policy keeps the
+signal-to-noise ratio high during the early adoption period.
 
 ## Layout
 

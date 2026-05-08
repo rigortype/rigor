@@ -185,6 +185,114 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
     end
   end
 
+  describe "widened type vocabulary (ADR-11 slice 3)" do
+    it "translates `T::Array[E]` to a generic `Nominal[Array]`" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        class List
+          extend T::Sig
+          sig { returns(T::Array[Integer]) }
+          def self.numbers; [1, 2, 3]; end
+        end
+        # Calling `.first` on the contributed Array[Integer]
+        # would resolve through Rigor's array-shape dispatch.
+        # Asserting only that the Sorbet sig parsed without
+        # producing a plugin-side error keeps the spec robust
+        # against engine-side changes to `Array#first`'s exact
+        # carrier shape.
+        List.numbers.first
+      RUBY
+
+      diags = plugin_diagnostics(run_plugin(source: source))
+      expect(diags).to be_empty
+    end
+
+    it "translates `T::Hash[K, V]` to a generic `Nominal[Hash]`" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        class Index
+          extend T::Sig
+          sig { returns(T::Hash[Symbol, Integer]) }
+          def self.counts; {a: 1, b: 2}; end
+        end
+        Index.counts.size
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "translates `T.class_of(C)` to a `Singleton[C]`" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        class Animal
+          extend T::Sig
+          sig { returns(T.class_of(Animal)) }
+          def self.factory; self; end
+        end
+        # Calling `.new` on the contributed Singleton[Animal]
+        # resolves through Rigor's normal class-method dispatch.
+        Animal.factory.new
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "translates a tuple literal `[A, B]` in sig position to `Tuple`" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        class Pair
+          extend T::Sig
+          sig { returns([Integer, String]) }
+          def self.first_pair; [1, "two"]; end
+        end
+        # Tuple shape preserves per-position types; .first
+        # picks element 0 (Integer).
+        Pair.first_pair.first
+      RUBY
+
+      diags = plugin_diagnostics(run_plugin(source: source))
+      expect(diags).to be_empty
+    end
+
+    it "translates a hash-shape literal `{a: A, b: B}` in sig position to `HashShape`" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        class Record
+          extend T::Sig
+          sig { returns({name: String, age: Integer}) }
+          def self.template; {name: "Alice", age: 30}; end
+        end
+        Record.template.size
+      RUBY
+
+      diags = plugin_diagnostics(run_plugin(source: source))
+      expect(diags).to be_empty
+    end
+
+    it "leaves unsupported `T.proc` / `T.attached_class` constructs as Dynamic[top] without crashing" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        class Maker
+          extend T::Sig
+          sig { returns(T.proc.params(x: Integer).returns(String)) }
+          def self.fn; ->(x) { x.to_s }; end
+          sig { returns(T.attached_class) }
+          def self.make; new; end
+        end
+        # The two unsupported constructs degrade silently;
+        # neither crashes the plugin nor emits a plugin
+        # diagnostic.
+        Maker.fn
+        Maker.make
+      RUBY
+
+      diags = plugin_diagnostics(run_plugin(source: source))
+      expect(diags).to be_empty
+    end
+  end
+
   describe "type assertion recognition (ADR-11 slice 2)" do
     it "narrows `T.let(expr, T)` to the asserted type" do
       source = <<~RUBY

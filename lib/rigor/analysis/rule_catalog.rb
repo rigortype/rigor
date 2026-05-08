@@ -20,8 +20,9 @@ module Rigor
     #   intentionally skips. Useful for "why am I NOT seeing
     #   this diagnostic?" questions.
     # - `suppression` — short note on how to suppress (in-source
-    #   `# rigor:disable` and `.rigor.yml` `disable:` both apply
-    #   to every rule, so the note covers any rule-specific
+    #   `# rigor:disable` and the v0.1.2 file-scope variant
+    #   `# rigor:disable-file`, plus `.rigor.yml` `disable:`,
+    #   apply to every rule, so the note covers any rule-specific
     #   nuance — e.g. unreachable-branch lives on the dead-branch
     #   line, not the predicate line).
     # - `severity_authored` — Symbol the rule emits with.

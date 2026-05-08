@@ -337,6 +337,58 @@ RSpec.describe Rigor::Analysis::Runner do
           result = analyze(%("x".no_method  # rigor:disable call\n))
           expect(result).to be_success
         end
+
+        it "honours a `# rigor:disable-file <rule>` comment on every line" do
+          result = analyze(<<~RUBY)
+            # rigor:disable-file undefined-method
+            "x".no_method
+            "y".another_missing_method
+          RUBY
+          expect(result).to be_success
+        end
+
+        it "honours `# rigor:disable-file all` (entire-file every-rule suppression)" do
+          result = analyze(<<~RUBY)
+            # rigor:disable-file all
+            "x".no_method
+            5 / 0
+          RUBY
+          expect(result).to be_success
+        end
+
+        it "respects file-suppression placed at the bottom of the file" do
+          # The convention is to put the comment near the top,
+          # but Rigor scans every comment in the file so any
+          # placement works.
+          result = analyze(<<~RUBY)
+            "x".no_method
+            "y".also_missing
+            # rigor:disable-file undefined-method
+          RUBY
+          expect(result).to be_success
+        end
+
+        it "does not confuse `disable-file` with the line-only `disable`" do
+          # Per-line suppression on line 1 only; line 2's
+          # diagnostic still fires.
+          result = analyze(<<~RUBY)
+            "x".no_method # rigor:disable undefined-method
+            "y".also_missing
+          RUBY
+          undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+          expect(undefined.size).to eq(1)
+          expect(undefined.first.line).to eq(2)
+        end
+
+        it "expands family wildcards inside disable-file" do
+          result = analyze(<<~RUBY)
+            # rigor:disable-file call
+            "x".no_method
+            5 / 0
+          RUBY
+          undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+          expect(undefined).to be_empty
+        end
       end
 
       # ADR-8 § "`def.return-type-mismatch` rule"

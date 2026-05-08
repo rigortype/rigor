@@ -204,13 +204,20 @@ module Rigor
         end
       end
 
-      # v0.0.2 #6 — diagnostic suppression. Two kinds of
+      # v0.0.2 #6 — diagnostic suppression. Three kinds of
       # suppression compose:
       #
       # - **Project-level**: `disabled_rules` is the
       #   project's `.rigor.yml` `disable:` list. Any
       #   diagnostic whose `rule` is in the list is dropped.
-      # - **In-source**: `# rigor:disable <rule1>, <rule2>`
+      # - **File-level** (v0.1.2): `# rigor:disable-file <rule1>,
+      #   <rule2>` anywhere in the file suppresses the matching
+      #   diagnostic for every line. `# rigor:disable-file all`
+      #   suppresses every rule across the file. Convention is
+      #   to put the comment near the top, but Rigor accepts it
+      #   anywhere — the comment scope is "this file" regardless
+      #   of position.
+      # - **In-source line**: `# rigor:disable <rule1>, <rule2>`
       #   on the same line as the offending expression
       #   suppresses the matching diagnostic for that line
       #   only. `# rigor:disable all` on a line suppresses
@@ -220,34 +227,49 @@ module Rigor
       # errors, internal analyzer errors) are NEVER
       # suppressed — they represent failures the user cannot
       # silence away.
-      def filter_suppressed(diagnostics, comments:, disabled_rules:)
-        suppressions = parse_suppression_comments(comments)
+      def filter_suppressed(diagnostics, comments:, disabled_rules:) # rubocop:disable Metrics/CyclomaticComplexity
+        line_suppressions, file_suppressions = parse_suppression_comments(comments)
         disabled = expand_rule_tokens(disabled_rules)
 
         diagnostics.reject do |diagnostic|
           rule = diagnostic.rule
           next false if rule.nil?
           next true if disabled.include?(rule)
+          next true if file_suppressions.include?("all") || file_suppressions.include?(rule)
 
-          line_rules = suppressions[diagnostic.line]
+          line_rules = line_suppressions[diagnostic.line]
           line_rules && (line_rules.include?("all") || line_rules.include?(rule))
         end
       end
 
-      SUPPRESSION_PATTERN = /#\s*rigor:disable\s+(?<rules>[\w.,\s-]+)/
-      private_constant :SUPPRESSION_PATTERN
+      LINE_SUPPRESSION_PATTERN = /#\s*rigor:disable(?!-file)\s+(?<rules>[\w.,\s-]+)/
+      private_constant :LINE_SUPPRESSION_PATTERN
 
+      FILE_SUPPRESSION_PATTERN = /#\s*rigor:disable-file\s+(?<rules>[\w.,\s-]+)/
+      private_constant :FILE_SUPPRESSION_PATTERN
+
+      # @return [Array<(Hash{Integer => Set}, Set)>] pair of
+      #   `(line_suppressions, file_suppressions)`. Line
+      #   suppressions are keyed by source line number; file
+      #   suppressions apply to every line.
       def parse_suppression_comments(comments)
-        result = Hash.new { |h, k| h[k] = Set.new }
+        line_suppressions = Hash.new { |h, k| h[k] = Set.new }
+        file_suppressions = Set.new
         comments.each do |comment|
           source = comment.location.slice
-          match = SUPPRESSION_PATTERN.match(source)
-          next if match.nil?
-
-          rules = match[:rules].to_s.split(/[\s,]+/).reject(&:empty?)
-          rules.each { |token| result[comment.location.start_line].merge(expand_token(token)) }
+          if (match = FILE_SUPPRESSION_PATTERN.match(source))
+            absorb_suppression_tokens(match[:rules], file_suppressions)
+          elsif (match = LINE_SUPPRESSION_PATTERN.match(source))
+            absorb_suppression_tokens(match[:rules], line_suppressions[comment.location.start_line])
+          end
         end
-        result
+        [line_suppressions, file_suppressions]
+      end
+
+      def absorb_suppression_tokens(raw, target)
+        raw.to_s.split(/[\s,]+/).reject(&:empty?).each do |token|
+          target.merge(expand_token(token))
+        end
       end
 
       # Expands a list of user-supplied rule tokens into the

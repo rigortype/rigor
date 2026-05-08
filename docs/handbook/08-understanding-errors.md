@@ -148,6 +148,27 @@ the qualified rule, the family wildcard, or `all`:
 For multiline blocks, suppress at every line — Rigor does
 not yet ship a `disable-block` syntax.
 
+### File-scope suppression
+
+When you need to silence a rule everywhere in a file —
+typically a generated file, a fixture, or a vendored snippet
+that triggers a known false positive — drop a single
+`# rigor:disable-file` comment anywhere in the file:
+
+```ruby
+# rigor:disable-file call.undefined-method
+
+# This whole file is generated; the analyzer's call surface
+# is mismatched with the runtime layer for these stubs.
+```
+
+Convention is to put the comment near the top, but Rigor
+scans every comment in the file so any placement works. The
+same token forms apply: qualified rule, family wildcard, or
+`all`. The line-scope `# rigor:disable` form continues to
+work — the two compose, and any project-wide
+`disable: [...]` in `.rigor.yml` also still applies.
+
 ## Project-wide suppression
 
 ```yaml

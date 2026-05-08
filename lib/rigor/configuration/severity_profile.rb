@@ -43,6 +43,7 @@ module Rigor
           "call.argument-type-mismatch" => :warning,
           "call.possible-nil-receiver" => :warning,
           "flow.always-raises" => :warning,
+          "flow.unreachable-branch" => :info,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning
@@ -53,6 +54,7 @@ module Rigor
           "call.argument-type-mismatch" => :error,
           "call.possible-nil-receiver" => :error,
           "flow.always-raises" => :error,
+          "flow.unreachable-branch" => :warning,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning
@@ -63,6 +65,7 @@ module Rigor
           "call.argument-type-mismatch" => :error,
           "call.possible-nil-receiver" => :error,
           "flow.always-raises" => :error,
+          "flow.unreachable-branch" => :error,
           "assert.type-mismatch" => :error,
           "dump.type" => :error,
           "def.return-type-mismatch" => :error

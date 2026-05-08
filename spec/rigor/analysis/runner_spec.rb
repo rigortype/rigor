@@ -586,6 +586,137 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(analyze("[1, 2].push(1)\n")).to be_success
       end
     end
+
+    describe "unreachable-branch rule (v0.1.2)" do
+      it "flags the else branch when the if predicate is the `true` literal" do
+        result = analyze(<<~RUBY)
+          if true
+            x = 1
+          else
+            x = 2
+          end
+        RUBY
+        diag = result.diagnostics.find { |d| d.rule == "flow.unreachable-branch" }
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("always truthy")
+      end
+
+      it "flags the then branch when the if predicate is the `false` literal" do
+        result = analyze(<<~RUBY)
+          if false
+            x = 1
+          else
+            x = 2
+          end
+        RUBY
+        diag = result.diagnostics.find { |d| d.rule == "flow.unreachable-branch" }
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("always falsey")
+      end
+
+      it "flags a postfix-if body when the predicate is `false`" do
+        result = analyze("puts \"never\" if false\n")
+        diag = result.diagnostics.find { |d| d.rule == "flow.unreachable-branch" }
+        expect(diag).not_to be_nil
+      end
+
+      it "flags the body when an unless predicate is the `true` literal" do
+        result = analyze(<<~RUBY)
+          unless true
+            x = 1
+          end
+        RUBY
+        diag = result.diagnostics.find { |d| d.rule == "flow.unreachable-branch" }
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("always truthy")
+      end
+
+      it "flags the else branch in a ternary expression with a literal predicate" do
+        result = analyze("x = true ? 1 : 2\n")
+        diag = result.diagnostics.find { |d| d.rule == "flow.unreachable-branch" }
+        expect(diag).not_to be_nil
+      end
+
+      it "treats `if nil` as always falsey" do
+        result = analyze(<<~RUBY)
+          if nil
+            x = 1
+          else
+            x = 2
+          end
+        RUBY
+        diag = result.diagnostics.find { |d| d.rule == "flow.unreachable-branch" }
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("always falsey")
+      end
+
+      it "treats numeric / string / symbol literals as always truthy (Ruby semantics)" do
+        result = analyze(<<~RUBY)
+          if 0
+            x = 1
+          else
+            x = 2
+          end
+        RUBY
+        diag = result.diagnostics.find { |d| d.rule == "flow.unreachable-branch" }
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("always truthy")
+      end
+
+      it "does not flag inferred-constant predicates (envelope is literal-only)" do
+        # `class_object.name.nil?` folds to `Constant<false>`
+        # because RBS declares `Module#name -> String`, but
+        # anonymous classes really do return nil at runtime.
+        # The literal-only envelope avoids flagging the
+        # defensive `raise ... if x.name.nil?` shape.
+        result = analyze(<<~RUBY)
+          def register(class_object)
+            raise ArgumentError unless class_object.is_a?(Module)
+            raise ArgumentError, "anonymous" if class_object.name.nil?
+
+            class_object.name
+          end
+        RUBY
+        unreachable = result.diagnostics.select { |d| d.rule == "flow.unreachable-branch" }
+        expect(unreachable).to be_empty
+      end
+
+      it "does not flag when the predicate is a non-literal expression" do
+        result = analyze(<<~RUBY)
+          n = ARGV.first&.to_i || 0
+          if n > 0
+            x = 1
+          else
+            x = 2
+          end
+        RUBY
+        unreachable = result.diagnostics.select { |d| d.rule == "flow.unreachable-branch" }
+        expect(unreachable).to be_empty
+      end
+
+      it "does not flag `if true; ...; end` with no else (no observable dead branch)" do
+        result = analyze(<<~RUBY)
+          if true
+            x = 1
+          end
+        RUBY
+        unreachable = result.diagnostics.select { |d| d.rule == "flow.unreachable-branch" }
+        expect(unreachable).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable unreachable-branch` on the dead-branch line" do
+        # The diagnostic points at the dead branch's location,
+        # so the suppression comment lives on the dead-branch
+        # statement (not the `if` line).
+        result = analyze(<<~RUBY)
+          if false
+            x = 1 # rigor:disable unreachable-branch
+          end
+        RUBY
+        unreachable = result.diagnostics.select { |d| d.rule == "flow.unreachable-branch" }
+        expect(unreachable).to be_empty
+      end
+    end
   end
 
   describe "implicit-self call dispatch (v0.0.3 A)" do

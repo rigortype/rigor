@@ -6,6 +6,7 @@ require_relative "../reflection"
 require_relative "../source/node_walker"
 require_relative "../type"
 require_relative "diagnostic"
+require_relative "check_rules/dead_assignment_collector"
 require_relative "check_rules/ivar_write_collector"
 
 module Rigor
@@ -65,6 +66,7 @@ module Rigor
       RULE_RETURN_TYPE = "def.return-type-mismatch"
       RULE_VISIBILITY_MISMATCH = "def.method-visibility-mismatch"
       RULE_IVAR_WRITE_MISMATCH = "def.ivar-write-mismatch"
+      RULE_DEAD_ASSIGNMENT = "flow.dead-assignment"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -75,6 +77,7 @@ module Rigor
         RULE_ASSERT_TYPE,
         RULE_ALWAYS_RAISES,
         RULE_UNREACHABLE_BRANCH,
+        RULE_DEAD_ASSIGNMENT,
         RULE_RETURN_TYPE,
         RULE_VISIBILITY_MISMATCH,
         RULE_IVAR_WRITE_MISMATCH
@@ -98,7 +101,8 @@ module Rigor
         "always-raises" => RULE_ALWAYS_RAISES,
         "unreachable-branch" => RULE_UNREACHABLE_BRANCH,
         "method-visibility-mismatch" => RULE_VISIBILITY_MISMATCH,
-        "ivar-write-mismatch" => RULE_IVAR_WRITE_MISMATCH
+        "ivar-write-mismatch" => RULE_IVAR_WRITE_MISMATCH,
+        "dead-assignment" => RULE_DEAD_ASSIGNMENT
       }.freeze
 
       # Family wildcard — a `<family>` token in a suppression
@@ -146,6 +150,7 @@ module Rigor
           end
         end
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, root, scope_index))
+        diagnostics.concat(dead_assignment_diagnostics(path, root, scope_index))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
 
@@ -187,6 +192,18 @@ module Rigor
           writes_by_ivar.flat_map do |ivar_name, writes|
             ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
           end
+        end
+      end
+
+      # v0.1.2 — `flow.dead-assignment`. Walks every `DefNode`
+      # body and emits a diagnostic for each plain
+      # `LocalVariableWriteNode` whose target name is never
+      # read in the same body. The
+      # `Analysis::CheckRules::DeadAssignmentCollector` describes
+      # the conservative envelope.
+      def dead_assignment_diagnostics(path, root, scope_index)
+        DeadAssignmentCollector.new(scope_index).collect(root).map do |result|
+          build_dead_assignment_diagnostic(path, result[:write_node], result[:def_node])
         end
       end
 
@@ -911,6 +928,18 @@ module Rigor
         # different filters) without disturbing the call rules.
         def ivar_class_for(type)
           concrete_class_name(type)
+        end
+
+        def build_dead_assignment_diagnostic(path, write_node, def_node)
+          location = write_node.name_loc || write_node.location
+          Diagnostic.new(
+            rule: RULE_DEAD_ASSIGNMENT,
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "local `#{write_node.name}' assigned in `#{def_node.name}' but never read",
+            severity: :warning
+          )
         end
 
         # rubocop:disable Metrics/ParameterLists

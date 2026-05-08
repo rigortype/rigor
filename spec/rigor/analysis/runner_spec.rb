@@ -901,6 +901,103 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    describe "dead-assignment rule (v0.1.2)" do
+      def dead_diags(result)
+        result.diagnostics.select { |d| d.rule == "flow.dead-assignment" }
+      end
+
+      it "flags a local that is assigned but never read" do
+        result = analyze(<<~RUBY)
+          def example
+            x = 1
+            42
+          end
+        RUBY
+        diag = dead_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("local `x'")
+        expect(diag.message).to include("`example'")
+        expect(diag.message).to include("never read")
+      end
+
+      it "does not flag the trailing assignment (Ruby's implicit return)" do
+        result = analyze(<<~RUBY)
+          def example
+            x = 1
+          end
+        RUBY
+        expect(dead_diags(result)).to be_empty
+      end
+
+      it "does not flag locals that are read later in the same body" do
+        result = analyze(<<~RUBY)
+          def example
+            x = 1
+            x + 2
+          end
+        RUBY
+        expect(dead_diags(result)).to be_empty
+      end
+
+      it "does not flag locals read inside a nested block" do
+        result = analyze(<<~RUBY)
+          def example
+            x = [1, 2, 3]
+            [4, 5].each { |y| puts y + x.size }
+          end
+        RUBY
+        expect(dead_diags(result)).to be_empty
+      end
+
+      it "does not flag names starting with `_` (intentionally unused)" do
+        result = analyze(<<~RUBY)
+          def example
+            _scratch = 1
+            42
+          end
+        RUBY
+        expect(dead_diags(result)).to be_empty
+      end
+
+      it "does not flag operator-writes (`x += 1`)" do
+        result = analyze(<<~RUBY)
+          def example
+            x = 0
+            x += 1
+            42
+          end
+        RUBY
+        expect(dead_diags(result)).to be_empty
+      end
+
+      it "does not flag multi-assignment (`a, b = foo`)" do
+        result = analyze(<<~RUBY)
+          def example
+            a, b = [1, 2]
+            b
+          end
+        RUBY
+        expect(dead_diags(result)).to be_empty
+      end
+
+      it "does not flag top-level assignments (the rule scope is method bodies)" do
+        result = analyze(<<~RUBY)
+          dead_at_top = 1
+        RUBY
+        expect(dead_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable dead-assignment`" do
+        result = analyze(<<~RUBY)
+          def example
+            x = 1 # rigor:disable dead-assignment
+            42
+          end
+        RUBY
+        expect(dead_diags(result)).to be_empty
+      end
+    end
+
     describe "ivar-write-mismatch rule (v0.1.2)" do
       def ivar_diags(result)
         result.diagnostics.select { |d| d.rule == "def.ivar-write-mismatch" }

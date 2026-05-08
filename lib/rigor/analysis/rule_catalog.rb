@@ -204,6 +204,27 @@ module Rigor
           since: "0.1.2"
         ),
 
+        CheckRules::RULE_DEAD_ASSIGNMENT => Entry.new(
+          id: CheckRules::RULE_DEAD_ASSIGNMENT,
+          summary: "Local variable assigned in a method body but never read.",
+          fires_when: [
+            "Plain `LocalVariableWriteNode` (not `+=` / `||=` / multi-assign) inside a `DefNode` body.",
+            "The target name does not appear as a `LocalVariableReadNode` anywhere in the same body, " \
+            "including nested blocks / lambdas.",
+            "The write is not the last statement of the body (Ruby's implicit return)."
+          ],
+          does_not_fire_when: [
+            "Top-level / class-body assignments (their reachability spans the file's introspection / require surface).",
+            "The target name starts with `_` (Ruby convention for intentionally-unused).",
+            "The write is a destructure (`a, b = foo`) or operator-write (`x += 1` / `x ||= 1`).",
+            "The write is the last statement of the method body (assignments return their rvalue)."
+          ],
+          suppression: "`# rigor:disable dead-assignment` on the offending line, or rename the local to `_<name>`.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          since: "0.1.2"
+        ),
+
         CheckRules::RULE_RETURN_TYPE => Entry.new(
           id: CheckRules::RULE_RETURN_TYPE,
           summary: "Method body's last-expression type is incompatible with the declared return type.",

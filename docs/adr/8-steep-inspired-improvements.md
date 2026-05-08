@@ -48,7 +48,7 @@ Family prefixes:
 | --- | --- |
 | `call`   | `call.undefined-method`, `call.wrong-arity`, `call.argument-type-mismatch`, `call.possible-nil-receiver` |
 | `assert` | `assert.type-mismatch` (test-harness assertion), `dump.type` (debug) |
-| `flow`   | `flow.always-raises` (proves a flow path ends in raise), `flow.unreachable-branch` (literal-predicate dead branch) |
+| `flow`   | `flow.always-raises` (proves a flow path ends in raise), `flow.unreachable-branch` (literal-predicate dead branch), `flow.dead-assignment` (write-then-never-read local) |
 | `def`    | `def.return-type-mismatch` (slice #1 below), `def.method-visibility-mismatch` (private-method receiver check), `def.ivar-write-mismatch` (per-class ivar concrete-class drift) |
 
 `dump.type` lives under its own `dump` family rather than

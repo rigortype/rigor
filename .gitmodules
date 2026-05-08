@@ -28,3 +28,6 @@
 [submodule "references/sorbet"]
 	path = references/sorbet
 	url = https://github.com/sorbet/sorbet.git
+[submodule "references/tapioca"]
+	path = references/tapioca
+	url = https://github.com/Shopify/tapioca.git

@@ -8,7 +8,8 @@ REFERENCE_SUBMODULES := \
 	references/ruby \
 	references/TypeScript-Website \
 	references/typeprof \
-	references/sorbet
+	references/sorbet \
+	references/tapioca
 
 setup: install init-git-config init-submodules
 
@@ -47,6 +48,7 @@ init-submodules:
 	git submodule update --init --filter=blob:none references/ruby
 	git submodule update --init --filter=blob:none references/typeprof
 	git submodule update --init --filter=blob:none references/sorbet
+	git submodule update --init --filter=blob:none references/tapioca
 	@if [ ! -e references/TypeScript-Website/.git ]; then \
 		url="$$(git config -f .gitmodules submodule.references/TypeScript-Website.url)"; \
 		sha="$$(git rev-parse HEAD:references/TypeScript-Website)"; \

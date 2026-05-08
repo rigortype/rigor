@@ -483,6 +483,72 @@ RSpec.describe Rigor::Analysis::Runner do
           result = analyze(src, sig: demo_sig)
           expect(result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }).to be_nil
         end
+
+        describe "refinement carrier override (v0.1.2)" do # rubocop:disable RSpec/NestedGroups
+          let(:refined_sig) do
+            { "refined.rbs" => <<~RBS }
+              class Refined
+                %a{rigor:v1:return: non-empty-string}
+                def name: () -> String
+
+                %a{rigor:v1:return: positive-int}
+                def count: () -> Integer
+              end
+            RBS
+          end
+
+          it "fires when the body returns the empty string against `non-empty-string`" do
+            src = <<~RUBY
+              class Refined
+                def name
+                  ""
+                end
+              end
+            RUBY
+            result = analyze(src, sig: refined_sig)
+            mismatch = result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }
+            expect(mismatch).not_to be_nil
+            expect(mismatch.message).to include("name")
+          end
+
+          it "stays silent when the body satisfies `non-empty-string`" do
+            src = <<~RUBY
+              class Refined
+                def name
+                  "Alice"
+                end
+              end
+            RUBY
+            result = analyze(src, sig: refined_sig)
+            expect(result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }).to be_nil
+          end
+
+          it "fires when the body returns 0 against `positive-int`" do
+            src = <<~RUBY
+              class Refined
+                def count
+                  0
+                end
+              end
+            RUBY
+            result = analyze(src, sig: refined_sig)
+            mismatch = result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }
+            expect(mismatch).not_to be_nil
+            expect(mismatch.message).to include("count")
+          end
+
+          it "stays silent when the body satisfies `positive-int`" do
+            src = <<~RUBY
+              class Refined
+                def count
+                  42
+                end
+              end
+            RUBY
+            result = analyze(src, sig: refined_sig)
+            expect(result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }).to be_nil
+          end
+        end
       end
 
       # ADR-8 § "Severity profile"

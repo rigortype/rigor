@@ -253,7 +253,10 @@ module Rigor
           fires_when: [
             "Method has a `def` body the engine can re-type.",
             "Method's RBS sig declares a non-`untyped` return type.",
-            "Body's inferred return type does not flow into the declared type under gradual acceptance."
+            "Body's inferred return type does not flow into the declared type under gradual acceptance.",
+            "When the RBS sig carries `%a{rigor:v1:return: <refinement>}` (v0.1.2), the refinement " \
+            "carrier — `non-empty-string`, `positive-int`, etc. — replaces the bare RBS class for the " \
+            "comparison, so a body the bare class would accept may still fail the refinement."
           ],
           does_not_fire_when: [
             "Method's declared return is `untyped` / `void`.",

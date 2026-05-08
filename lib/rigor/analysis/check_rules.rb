@@ -1227,6 +1227,19 @@ module Rigor
         # Method overloads contribute their union of declared
         # return types (any one of them satisfying the body
         # silences the rule).
+        #
+        # v0.1.2 — when the RBS sig carries a
+        # `%a{rigor:v1:return: <refinement>}` annotation
+        # (recognised by `RbsExtended.read_return_type_override`),
+        # the refinement carrier replaces the RBS-declared
+        # return for this rule. Annotation-driven refinements
+        # — `non-empty-string`, `positive-int`, `non-empty-
+        # array[Integer]`, etc. — are stricter than the
+        # underlying RBS class, so a body whose inferred type
+        # the bare RBS sig would accept may still fail the
+        # refinement (e.g. `def name; ""; end` returns
+        # `Constant[""]`, accepted by `String` but rejected by
+        # `non-empty-string`).
         def declared_return_type(def_node, scope_index)
           scope = scope_index[def_node]
           return nil if scope.nil?
@@ -1241,6 +1254,9 @@ module Rigor
               Reflection.singleton_method_definition(self_type.class_name, def_node.name, scope: scope)
             end
           return nil if method_def.nil?
+
+          override = Rigor::RbsExtended.read_return_type_override(method_def)
+          return override if override
 
           declared_return_union(method_def, scope.environment)
         end

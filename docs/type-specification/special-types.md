@@ -54,9 +54,10 @@ Rigor SHOULD distinguish dynamic-origin sources for diagnostics, even though the
 
 - explicit `untyped` in RBS, rbs-inline, or Steep-compatible annotations;
 - missing external signatures or implicit unknown library facts;
-- analyzer limits, failed inference, or plugin-declared dynamic behavior.
+- analyzer limits, failed inference, or plugin-declared dynamic behavior;
+- opt-in dependency-source inference per [ADR-10](../adr/10-dependency-source-inference.md): gems listed under `dependencies.source_inference:` whose Ruby implementation Rigor walks as a fallback below the RBS tier. The wrapper preserves the fact that the proof came from third-party source rather than from a contract the gem author committed to. Diagnostics emitted on this path use the `dynamic.dependency-source.*` prefix family (see [diagnostic-policy.md](diagnostic-policy.md)).
 
-Diagnostics MAY use these distinctions to explain whether a `Dynamic[T]` came from a deliberate gradual boundary or from a missing signature.
+Diagnostics MAY use these distinctions to explain whether a `Dynamic[T]` came from a deliberate gradual boundary, a missing signature, or an opt-in gem-source walk.
 
 ### Strict modes
 

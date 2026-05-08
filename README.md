@@ -239,6 +239,16 @@ Rigor consults, in order:
    Rigor walks `def` / `define_method` / `attr_*` /
    `Data.define(*Symbol)` so user-defined methods on a class
    are recognised.
+5. **Opt-in gem-source inference (ADR-10).** Gems listed
+   under `dependencies.source_inference:` in `.rigor.yml`
+   have their `lib/` walked the same way project source is,
+   so methods on those gems' classes resolve even without
+   RBS. Inferred returns crossing the gem boundary are
+   wrapped in `Dynamic[T]` so the call site retains the
+   provenance — RBS / RBS::Inline / generated stubs / plugin
+   contracts always win on conflict. Default behaviour is
+   unchanged: gems not listed stay at the
+   RBS-or-`Dynamic[Top]` boundary.
 
 If a type cannot be proved, the engine returns `Dynamic[Top]`
 (Rigor's gradual carrier) and stays silent — Rigor never invents

@@ -29,7 +29,7 @@ Diagnostic identifiers are hierarchical so plugin authors, RBS metadata, and use
 
 | Prefix | Use |
 |---|---|
-| `dynamic.*` | `untyped` and `Dynamic[T]` boundary crossings, unchecked generic leaks, and method calls whose proof depends on dynamic origin |
+| `dynamic.*` | `untyped` and `Dynamic[T]` boundary crossings, unchecked generic leaks, and method calls whose proof depends on dynamic origin. Includes `dynamic.dependency-source.*` (e.g. `gem-not-found`) for the opt-in gem-source-inference path per [ADR-10](../adr/10-dependency-source-inference.md). |
 | `static.*` | Static checks that stop short of a proof, including incomplete-inference cutoffs |
 | `flow.*` | Control-flow narrowing failures, equality and predicate refinement issues, fact-stability violations |
 | `compat.*` | RBS, rbs-inline, and Steep-compatible signature compatibility |

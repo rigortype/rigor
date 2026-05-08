@@ -127,8 +127,9 @@ will need them:
 1. **Add an `.rbs` file.** Drop a signature into `sig/` and
    Rigor picks it up automatically. This is the most common
    reason inference does not see further than the local
-   `def` — the analyzer cannot reach inside an external gem
-   without the gem's RBS.
+   `def` — by default the analyzer treats every external gem
+   as `Dynamic[Top]` unless the gem ships RBS or you
+   opt in to gem-source inference per (4) below.
 2. **Tighten an existing RBS sig with `RBS::Extended`.** Add
    a `%a{rigor:v1:return: non-empty-string}` annotation
    above the method's `def ... -> ::String` line. Rigor
@@ -137,9 +138,20 @@ will need them:
    (`Lisp.eval`, `100.kilometers`, `transition_to(:foo)`)
    that no general-purpose analyzer can know about, a
    plugin teaches Rigor about it.
+4. **Opt in to gem-source inference.** When a no-RBS gem's
+   methods would otherwise resolve to `Dynamic[Top]`, list
+   the gem under `dependencies.source_inference:` in
+   `.rigor.yml` and Rigor will walk its `lib/` the same way
+   it walks project source. Returns are wrapped in
+   `Dynamic[T]` so the call site retains the provenance.
+   See [ADR-10](../adr/10-dependency-source-inference.md)
+   for the trade-offs (per-gem opt-in by design — broad
+   defaults would inflate budgets and make `bundle update`
+   noisy).
 
-Chapters 7 and 9 cover these in detail. Most projects only
-need (1) and (2).
+Chapters 7 and 9 cover (1)–(3) in detail. Most projects only
+need (1) and (2); (4) is for the long tail of utility gems
+that ship no signatures.
 
 ## A first walk through Rigor's config file
 

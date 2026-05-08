@@ -1,4 +1,4 @@
-# rigor-sorbet (slices 1 + 2 + 3 + 4 + 5 + 6 — feature-complete)
+# rigor-sorbet (slices 1–8)
 
 The eighth worked example. Reads inline Sorbet `sig { ... }`
 blocks on first-party Ruby code and contributes the parsed
@@ -35,8 +35,16 @@ matching Sorbet's runtime behaviour) AND surfaces
 `plugin.sorbet.absurd-reachable` warnings when the
 discriminant didn't narrow to `bot` at the call site.
 
-This is **all six slices of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**
-— the plugin's primary surface is feature-complete. `T.bind`,
+Slice 8 lifts sigs declared on a `Generated*` module
+through the `include` / `extend` chain so Tapioca-generated
+DSL RBIs work out of the box (`class Post; include
+GeneratedAttributeMethods; module GeneratedAttributeMethods;
+sig { ... }; def body; end; end; end` resolves
+`post.body` correctly).
+
+This is **slices 1–8 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**
+— the plugin's primary surface is feature-complete and
+covers the realistic Tapioca-using project shape. `T.bind`,
 `T.assert_type!`, `T.must_because`, and `T.reveal_type`
 remain deferred to a slice-2 follow-up; per-call-site sigil
 enforcement (e.g. only firing `T.let` recognition in
@@ -98,6 +106,54 @@ demo/errors_demo.rb:25:3: plugin.sorbet.parse-error
 demo/errors_demo.rb:34:3: plugin.sorbet.parse-error
   Two `sig` blocks in a row; the first one has no following method definition.
 ```
+
+## Slice 8 — Mixin chain resolution (Tapioca DSL compatibility)
+
+Tapioca's standard DSL RBI shape declares sigs on a
+generated module that's `include`d / `extend`ed into the
+host class:
+
+```rbi
+class Post
+  include GeneratedAttributeMethods
+  module GeneratedAttributeMethods
+    sig { returns(::String) }
+    def body; end
+  end
+end
+```
+
+Slice 4's RBI walker recorded the sig under
+`("Post::GeneratedAttributeMethods", :body, :instance)`;
+slice 8 lifts it to `Post#body` at lookup time.
+
+The catalog gains a per-class mixin map:
+
+```ruby
+catalog.mixins_for("Post")
+# => { include: ["GeneratedAttributeMethods"], extend: [] }
+```
+
+`Sorbet#chain_lookup` walks the recorded chain on every
+call site — direct lookup first, then transitively across
+`include` / `extend` declarations:
+
+| Receiver | Sig location | Lookup chain |
+| --- | --- | --- |
+| instance (`post.body`) | `Post::GeneratedAttributeMethods#body` (`:instance`) | direct → `include` chain (`:instance`) |
+| singleton (`Post.find`) | `Post::GeneratedClassMethods#find` (`:instance`) | direct → `extend` chain (lifts `:instance` to singleton) |
+| transitive | `Post → AttributeMixin → InnerMixin#body` | recurses through `include`d module's own includes |
+
+For each module name in the chain, the lookup tries three
+textual forms — `Post::GeneratedAttributeMethods` (Tapioca's
+nested form), `GeneratedAttributeMethods` (top-level
+shims), and `::GeneratedAttributeMethods` (explicitly
+rooted). This covers every layout convention in the wild.
+
+`extend M` correctly lifts M's `:instance` methods to the
+extending class's singleton side, matching Ruby's runtime
+MRO. Mixins inside `class << self` are deferred to a
+future slice (the meta-singleton case).
 
 ## Slice 6 — `T.absurd` exhaustiveness
 

@@ -185,34 +185,93 @@ module Rigor
         return nil if method_name.nil?
 
         if (singleton_target = constant_receiver_name(receiver))
-          singleton_lookup(singleton_target, method_name)
+          # `Post.find(...)` — direct singleton method, or
+          # `extend M` lifting `M#find` to the extending class.
+          chain_lookup(singleton_target, method_name, anchor_kind: :singleton, mixin_kind: :extend)
         elsif receiver
-          instance_lookup(receiver, method_name, scope)
+          instance_chain_lookup(receiver, method_name, scope)
         end
       end
 
-      def singleton_lookup(class_name, method_name)
-        # Try the as-is name first, then the rooted form
-        # (`::Foo`); user code typically writes `Foo.find(...)`,
-        # but the catalog records the lexical full name which
-        # may have a leading `::` for top-level classes.
-        @catalog.lookup(class_name: class_name, method_name: method_name, kind: :singleton) ||
-          @catalog.lookup(class_name: "::#{class_name}", method_name: method_name, kind: :singleton)
-      end
-
-      def instance_lookup(receiver_node, method_name, scope)
+      def instance_chain_lookup(receiver_node, method_name, scope)
         return nil if scope.nil?
 
         receiver_type = scope.type_of(receiver_node)
         return nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
-        @catalog.lookup(class_name: receiver_type.class_name, method_name: method_name, kind: :instance) ||
-          @catalog.lookup(class_name: "::#{receiver_type.class_name}", method_name: method_name, kind: :instance)
+        chain_lookup(receiver_type.class_name, method_name, anchor_kind: :instance, mixin_kind: :include)
       rescue StandardError
         # `scope.type_of` can raise on unrecognised synthetic
         # nodes; degrade to "no contribution" rather than
         # bubbling the failure into the dispatcher.
         nil
+      end
+
+      # ADR-11 slice 8 — chain-aware catalog lookup.
+      #
+      # For instance-side calls (`post.body`):
+      # - `anchor_kind: :instance` (try `Post#body` first)
+      # - `mixin_kind: :include` (then walk Post's `include`d
+      #   modules and try `Foo#body` on each)
+      #
+      # For singleton-side calls (`Post.find`):
+      # - `anchor_kind: :singleton` (try `Post.find` first)
+      # - `mixin_kind: :extend` (then walk Post's `extend`ed
+      #   modules and try `Foo#find` *as :instance* — `extend
+      #   Foo` lifts Foo's INSTANCE methods to the extending
+      #   class's SINGLETON methods, matching Ruby's MRO).
+      def chain_lookup(class_name, method_name, anchor_kind:, mixin_kind:)
+        each_class_form(class_name).each do |form|
+          sig = @catalog.lookup(class_name: form, method_name: method_name, kind: anchor_kind)
+          return sig if sig
+        end
+
+        visited = Set.new
+        queue = mixin_modules_for(class_name, mixin_kind).dup
+
+        until queue.empty?
+          candidate = queue.shift
+          next unless visited.add?(candidate)
+
+          forms_for_mixin(class_name, candidate).each do |form|
+            sig = @catalog.lookup(class_name: form, method_name: method_name, kind: :instance)
+            return sig if sig
+
+            # Transitive: an `include` inside the mixed-in
+            # module is also inherited by the host class.
+            mixin_modules_for(form, :include).each do |inner|
+              queue << inner unless visited.include?(inner)
+            end
+          end
+        end
+
+        nil
+      end
+
+      # `Post` and `::Post` are routinely confused at the catalog
+      # boundary (the walker records the lexical name; user code
+      # often writes the rooted form). Try both at every lookup.
+      def each_class_form(class_name)
+        [class_name, "::#{class_name}"]
+      end
+
+      # Resolution forms for a mixed-in module name. Tapioca's
+      # generated DSL RBIs use the nested form
+      # (`class Post; module GeneratedAttributeMethods; ...; end`);
+      # hand-written shims often use the top-level form
+      # (`module GeneratedAttributeMethods; ...; end` outside any
+      # class); explicit rooting (`::GeneratedAttributeMethods`)
+      # is occasionally seen. Try all three.
+      def forms_for_mixin(host_class, mixin_name)
+        if mixin_name.start_with?("::")
+          [mixin_name, mixin_name.delete_prefix("::")]
+        else
+          ["#{host_class}::#{mixin_name}", mixin_name, "::#{mixin_name}"]
+        end
+      end
+
+      def mixin_modules_for(class_name, kind)
+        each_class_form(class_name).flat_map { |form| @catalog.mixins_for(form)[kind] }.uniq
       end
 
       def constant_receiver_name(node)

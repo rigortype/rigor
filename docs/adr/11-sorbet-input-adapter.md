@@ -402,6 +402,44 @@ per the existing pattern (see
     arrive from a Sorbet-using project. Cross-link from
     [`docs/handbook/01-getting-started.md`](../handbook/01-getting-started.md)'s
     "When inference is not enough" escape hatches.
+8.  **Mixin chain resolution (Tapioca DSL compatibility).**
+    Slice 4's RBI walker records sigs verbatim under their
+    declaring class/module. This works for hand-written
+    sig+def pairs but misses Tapioca's standard pattern of
+    declaring the sig on a generated module and `include` /
+    `extend`-ing that module into the user class:
+
+    ```rbi
+    class Post
+      include GeneratedAttributeMethods
+      module GeneratedAttributeMethods
+        sig { returns(String) }
+        def body; end
+      end
+    end
+    ```
+
+    The catalog stores this under
+    `("Post::GeneratedAttributeMethods", :body, :instance)`,
+    but the user-facing `post.body` lookup is
+    `("Post", :body, :instance)`. The slice extends
+    `Catalog` with `mixins_for(class_name) → {include: [...],
+    extend: [...]}`, teaches `CatalogWalker` to record
+    `include` / `extend` declarations alongside `sig` /
+    `def` pairs, and walks the recorded mixin chain on
+    lookup. `extend` lookups consult the mixed-in module's
+    instance side (matching Ruby's runtime behaviour:
+    `extend M` lifts M's instance methods to singleton
+    methods of the extending class).
+
+    The pattern isn't Tapioca-specific — hand-written
+    shims in `sorbet/rbi/shims/` and community
+    annotations in `rbi-central` use the same shape. The
+    slice closes the gap for every RBI consumer, not just
+    Tapioca users. See [`20260509-rigor-tapioca-investigation.md`](../design/20260509-rigor-tapioca-investigation.md)
+    for the design exploration that decided to land this
+    inside ADR-11 instead of as a separate
+    `rigor-tapioca` plugin.
 
 [rails-roadmap]: ../design/20260508-rails-plugins-roadmap.md
 
@@ -507,3 +545,11 @@ compose.
   type-inference sources, with a stated preference for
   runtime-enforced types in the PHP style. Resolution:
   plugin adapter, not core integration.
+- 2026-05-09 — added slice 8 (mixin chain resolution).
+  Triggered by the Tapioca-comparison investigation which
+  surfaced that Tapioca-generated DSL RBIs declare sigs on
+  `Generated*` modules `include`d / `extend`ed into the
+  user class. Slice 8 lands inside ADR-11 rather than as
+  a separate `rigor-tapioca` plugin because the underlying
+  semantics (mixin chain traversal during method lookup)
+  are general RBI handling, not Tapioca-specific.

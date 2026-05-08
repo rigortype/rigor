@@ -293,6 +293,114 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
     end
   end
 
+  describe "mixin chain resolution (ADR-11 slice 8)" do
+    # Tapioca's standard DSL RBI shape. Slice 8 lifts sigs
+    # declared on a `Generated*` module up to the host class
+    # via the recorded `include` / `extend` chain.
+
+    let(:tapioca_include_rbi) do
+      <<~RBI
+        # typed: true
+        class Post
+          include GeneratedAttributeMethods
+          module GeneratedAttributeMethods
+            extend T::Sig
+            sig { returns(String) }
+            def body; end
+          end
+        end
+      RBI
+    end
+
+    let(:tapioca_extend_rbi) do
+      <<~RBI
+        # typed: true
+        class Post
+          extend GeneratedClassMethods
+          module GeneratedClassMethods
+            extend T::Sig
+            sig { params(id: Integer).returns(String) }
+            def find(id); end
+          end
+        end
+      RBI
+    end
+
+    let(:transitive_rbi) do
+      <<~RBI
+        # typed: true
+        class Post
+          include AttributeMixin
+        end
+        module AttributeMixin
+          include InnerMixin
+        end
+        module InnerMixin
+          extend T::Sig
+          sig { returns(String) }
+          def body; end
+        end
+      RBI
+    end
+
+    it "resolves `post.body` through the `include`d Generated module's sig" do
+      result = run_plugin(
+        source: "#{SIG_STUB}post = Post.new; post.body.upcase\n",
+        files: {
+          "app/models/post.rb" => "class Post; end\n",
+          "sorbet/rbi/dsl/post.rbi" => tapioca_include_rbi
+        },
+        paths: ["demo.rb", "app/models/post.rb"]
+      )
+      # Plugin contributed `String` for `post.body`, so the
+      # chained `.upcase` resolves through String's RBS.
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "resolves `Post.find` through the `extend`ed Generated module's sig" do
+      result = run_plugin(
+        source: "#{SIG_STUB}Post.find(1).upcase\n",
+        files: {
+          "app/models/post.rb" => "class Post; end\n",
+          "sorbet/rbi/dsl/post.rbi" => tapioca_extend_rbi
+        },
+        paths: ["demo.rb", "app/models/post.rb"]
+      )
+      # `extend M` lifts M's instance methods to singleton
+      # methods on the extending class. `Post.find` resolves
+      # via `GeneratedClassMethods#find`, returning `String`.
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "walks transitive `include` chains across modules" do
+      result = run_plugin(
+        source: "#{SIG_STUB}post = Post.new; post.body.upcase\n",
+        files: {
+          "app/models/post.rb" => "class Post; end\n",
+          "sorbet/rbi/dsl/post.rbi" => transitive_rbi
+        },
+        paths: ["demo.rb", "app/models/post.rb"]
+      )
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "leaves `post.bogus` untouched when no module in the chain declares it" do
+      result = run_plugin(
+        source: "#{SIG_STUB}post = Post.new; post.bogus\n",
+        files: {
+          "app/models/post.rb" => "class Post; end\n",
+          "sorbet/rbi/dsl/post.rbi" => tapioca_include_rbi
+        },
+        paths: ["demo.rb", "app/models/post.rb"]
+      )
+      # `bogus` isn't in any chained module — the plugin
+      # contributes nothing and no spurious sig lands on the
+      # method. (`call.undefined-method` is silenced
+      # separately by Post being a non-RBS-known class.)
+      expect(plugin_diagnostics(result)).to be_empty
+    end
+  end
+
   describe "RBI tree walking (ADR-11 slice 4)" do
     let(:gem_rbi) do
       <<~RBI

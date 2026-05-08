@@ -114,11 +114,50 @@ module Rigor
                 state.record_error(:dangling_sig, pending_sig)
                 pending_sig = nil
               end
+              # ADR-11 slice 8 — record `include` / `extend`
+              # declarations alongside the regular walk so the
+              # plugin's chain lookup can lift sigs declared
+              # on a mixed-in module to the host class.
+              record_mixin_call(child, state, lexical_path) if mixin_call?(child) && !in_singleton_class
               walk_node(child, state, lexical_path: lexical_path, in_singleton_class: in_singleton_class)
             end
           end
 
           state.record_error(:dangling_sig, pending_sig) if pending_sig
+        end
+
+        # `include Foo` / `extend Foo` / `include Foo, Bar` —
+        # the `include` and `extend` mixin macros that Tapioca-
+        # generated DSL RBIs depend on. Recognised when the
+        # call has no explicit receiver (top-level inside a
+        # class body) and every argument is a constant
+        # reference.
+        def mixin_call?(node)
+          return false unless node.is_a?(Prism::CallNode)
+          return false unless %i[include extend].include?(node.name)
+          return false unless node.receiver.nil?
+
+          args = node.arguments&.arguments
+          return false if args.nil? || args.empty?
+
+          args.all? do |arg|
+            arg.is_a?(Prism::ConstantReadNode) || arg.is_a?(Prism::ConstantPathNode)
+          end
+        end
+
+        def record_mixin_call(node, state, lexical_path)
+          return if lexical_path.empty?
+
+          class_name = lexical_path.join("::")
+          kind = node.name == :include ? :include : :extend
+          (node.arguments&.arguments || []).each do |arg|
+            module_name = qualified_name_for(arg)
+            next if module_name.nil?
+
+            state.catalog.record_mixin(
+              class_name: class_name, kind: kind, module_name: module_name
+            )
+          end
         end
 
         def sig_call?(node)

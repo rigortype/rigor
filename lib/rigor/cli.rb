@@ -23,7 +23,8 @@ module Rigor
       "init" => :run_init,
       "type-of" => :run_type_of,
       "type-scan" => :run_type_scan,
-      "explain" => :run_explain
+      "explain" => :run_explain,
+      "diff" => :run_diff
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -271,6 +272,12 @@ module Rigor
       ExplainCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_diff
+      require_relative "cli/diff_command"
+
+      DiffCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def write_result(result, format)
       case format
       when "json"
@@ -309,6 +316,7 @@ module Rigor
           type-of    Print the inferred type at FILE:LINE:COL
           type-scan  Report Scope#type_of coverage across PATHs
           explain    Print the description of one or all CheckRules
+          diff       Compare current diagnostics to a saved baseline JSON
           version    Print the Rigor version
           help       Print this help
       HELP

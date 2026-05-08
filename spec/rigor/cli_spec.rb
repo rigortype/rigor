@@ -496,6 +496,125 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  describe "diff (v0.1.2)" do
+    let(:baseline_payload) do
+      {
+        "diagnostics" => [
+          {
+            "path" => "f.rb", "line" => 1, "column" => 1, "severity" => "error",
+            "rule" => "call.undefined-method", "source_family" => "builtin", "message" => "no method foo"
+          }
+        ]
+      }
+    end
+
+    let(:fresh_diag) do
+      {
+        "path" => "f.rb", "line" => 5, "column" => 1, "severity" => "error",
+        "rule" => "call.undefined-method", "source_family" => "builtin", "message" => "no method bar"
+      }
+    end
+
+    def write_json(dir, name, payload)
+      path = File.join(dir, name)
+      File.write(path, JSON.generate(payload))
+      path
+    end
+
+    it "reports a new diagnostic that is not in the baseline" do
+      Dir.mktmpdir do |dir|
+        baseline_path = write_json(dir, "baseline.json", baseline_payload)
+        current_path = write_json(dir, "current.json", baseline_payload["diagnostics"] + [fresh_diag])
+
+        status, out, _err = run_cli("diff", "--current=#{current_path}", baseline_path)
+        expect(status).to eq(1)
+        expect(out).to include("+ NEW")
+        expect(out).to include("no method bar")
+        expect(out).to include("1 new, 0 fixed")
+      end
+    end
+
+    it "reports a fixed diagnostic that is in the baseline but not the current" do
+      Dir.mktmpdir do |dir|
+        baseline_path = write_json(dir, "baseline.json", baseline_payload)
+        current_path = write_json(dir, "current.json", [])
+
+        status, out, _err = run_cli("diff", "--current=#{current_path}", baseline_path)
+        expect(status).to eq(0)
+        expect(out).to include("- FIXED")
+        expect(out).to include("0 new, 1 fixed")
+      end
+    end
+
+    it "exits 0 with no diff when baseline and current match" do
+      Dir.mktmpdir do |dir|
+        baseline_path = write_json(dir, "baseline.json", baseline_payload)
+        current_path = write_json(dir, "current.json", baseline_payload["diagnostics"])
+
+        status, out, _err = run_cli("diff", "--current=#{current_path}", baseline_path)
+        expect(status).to eq(0)
+        expect(out).to include("0 new, 0 fixed")
+        expect(out).not_to include("+ NEW")
+        expect(out).not_to include("- FIXED")
+      end
+    end
+
+    it "renders JSON when --format=json" do
+      Dir.mktmpdir do |dir|
+        baseline_path = write_json(dir, "baseline.json", baseline_payload)
+        current_path = write_json(dir, "current.json", baseline_payload["diagnostics"] + [fresh_diag])
+
+        status, out, _err = run_cli("diff", "--format=json", "--current=#{current_path}", baseline_path)
+        expect(status).to eq(1)
+        payload = JSON.parse(out)
+        expect(payload["new"].size).to eq(1)
+        expect(payload["fixed"]).to be_empty
+        expect(payload["baseline_count"]).to eq(1)
+        expect(payload["current_count"]).to eq(2)
+      end
+    end
+
+    it "accepts a baseline saved as a flat array (no `diagnostics:` wrapper)" do
+      Dir.mktmpdir do |dir|
+        baseline_path = write_json(dir, "baseline.json", baseline_payload["diagnostics"])
+        current_path = write_json(dir, "current.json", baseline_payload["diagnostics"])
+
+        status, out, _err = run_cli("diff", "--current=#{current_path}", baseline_path)
+        expect(status).to eq(0)
+        expect(out).to include("0 new, 0 fixed")
+      end
+    end
+
+    it "errors when the baseline file is missing" do
+      status, _out, err = run_cli("diff", "--current=/dev/null", "/no/such/baseline.json")
+      expect(status).not_to eq(0)
+      expect(err).to include("Baseline file not found")
+    end
+
+    it "errors when the baseline JSON is malformed" do
+      Dir.mktmpdir do |dir|
+        bad = File.join(dir, "bad.json")
+        File.write(bad, "{ not json")
+        current_path = write_json(dir, "current.json", [])
+
+        status, _out, err = run_cli("diff", "--current=#{current_path}", bad)
+        expect(status).not_to eq(0)
+        expect(err).to include("Invalid JSON")
+      end
+    end
+
+    it "exits with usage when no baseline argument is given" do
+      status, _out, err = run_cli("diff")
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("Usage: rigor diff")
+    end
+
+    it "lists diff in the help text" do
+      _status, out, _err = run_cli("help")
+      expect(out).to include("diff")
+    end
+  end
+
   describe "explain (v0.1.2)" do
     it "lists every rule with no argument" do
       status, out, err = run_cli("explain")

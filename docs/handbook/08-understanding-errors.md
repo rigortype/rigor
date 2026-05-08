@@ -181,6 +181,37 @@ Drops the rule project-wide. Heavier hammer than
 `severity_overrides: { call.possible-nil-receiver: off }` —
 both work; the choice is stylistic.
 
+## Baseline diffing for CI
+
+When you adopt Rigor on an existing codebase, you usually
+inherit a long tail of legitimate-but-pre-existing diagnostics
+that nobody is going to fix today. The pragmatic move is to
+**snapshot the current state as a baseline** and then have CI
+fail only on *new* diagnostics introduced by a PR:
+
+```sh
+# Once: capture the current diagnostic surface.
+bundle exec rigor check --format=json > rigor.baseline.json
+git add rigor.baseline.json
+git commit
+
+# Per PR: compare against the committed baseline.
+bundle exec rigor diff rigor.baseline.json
+```
+
+`rigor diff` prints `+ NEW` rows for each diagnostic that
+wasn't in the baseline and `- FIXED` rows for each that has
+been resolved since. The exit code is `1` when any new
+diagnostic appears and `0` otherwise — so adding a new
+violation fails CI, but the legacy diagnostics recorded in
+the baseline don't.
+
+When you fix a row in the baseline, regenerate it with the
+same `rigor check --format=json > rigor.baseline.json` so
+the project tightens monotonically over time. The
+`--format=json` form of `rigor diff` itself is also
+available for editor / dashboard integrations.
+
 ## Why a diagnostic might NOT fire when you expected one
 
 The most common reasons:

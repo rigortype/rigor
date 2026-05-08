@@ -65,6 +65,7 @@ When a change touches type-language behaviour or analyzer-internal contracts, th
 | [`docs/adr/8-steep-inspired-improvements.md`](docs/adr/8-steep-inspired-improvements.md) | Working decisions for the Steep-inspired improvements (diagnostic family hierarchy, severity profile, `def.return-type-mismatch` rule). |
 | [`docs/adr/9-cross-plugin-api.md`](docs/adr/9-cross-plugin-api.md) | Proposed cross-plugin API (`Plugin::FactStore` + `Plugin::Base#prepare(services)` + `manifest(consumes:)`). Queued for v0.1.x. Required before `rigor-actionpack` Phase 1 / `rigor-factorybot` can land. |
 | [`docs/adr/10-dependency-source-inference.md`](docs/adr/10-dependency-source-inference.md) | Proposed opt-in `dependencies.source_inference` for gems shipping no RBS / RBS::Inline. Walker contributes `Dynamic[T]` returns at a dispatcher tier strictly below plugins. Per-gem budget pools, per-gem-version cache slice, hard-excluded `spec/` / `test/` / `bin/` / C extensions. Implementation queued (target v0.1.3+). |
+| [`docs/adr/11-sorbet-input-adapter.md`](docs/adr/11-sorbet-input-adapter.md) | Proposed `rigor-sorbet` plugin adapter that ingests Sorbet `sig { ... }` blocks, `T.let` / `T.cast` / `T.must` / `T.bind` / `T.absurd`, and RBI files as type sources. Translation at the plugin boundary; core stays RBS-canonical per ADR-0 / ADR-1. Runtime enforcement remains `sorbet-runtime`'s job. Implementation queued (no committed milestone). |
 
 ## Skills available in this repository
 

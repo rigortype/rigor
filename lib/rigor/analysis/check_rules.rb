@@ -6,6 +6,7 @@ require_relative "../reflection"
 require_relative "../source/node_walker"
 require_relative "../type"
 require_relative "diagnostic"
+require_relative "check_rules/ivar_write_collector"
 
 module Rigor
   module Analysis
@@ -63,6 +64,7 @@ module Rigor
       RULE_UNREACHABLE_BRANCH = "flow.unreachable-branch"
       RULE_RETURN_TYPE = "def.return-type-mismatch"
       RULE_VISIBILITY_MISMATCH = "def.method-visibility-mismatch"
+      RULE_IVAR_WRITE_MISMATCH = "def.ivar-write-mismatch"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -74,7 +76,8 @@ module Rigor
         RULE_ALWAYS_RAISES,
         RULE_UNREACHABLE_BRANCH,
         RULE_RETURN_TYPE,
-        RULE_VISIBILITY_MISMATCH
+        RULE_VISIBILITY_MISMATCH,
+        RULE_IVAR_WRITE_MISMATCH
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward
@@ -94,7 +97,8 @@ module Rigor
         "assert-type" => RULE_ASSERT_TYPE,
         "always-raises" => RULE_ALWAYS_RAISES,
         "unreachable-branch" => RULE_UNREACHABLE_BRANCH,
-        "method-visibility-mismatch" => RULE_VISIBILITY_MISMATCH
+        "method-visibility-mismatch" => RULE_VISIBILITY_MISMATCH,
+        "ivar-write-mismatch" => RULE_IVAR_WRITE_MISMATCH
       }.freeze
 
       # Family wildcard — a `<family>` token in a suppression
@@ -141,6 +145,7 @@ module Rigor
             diagnostics << unreachable if unreachable
           end
         end
+        diagnostics.concat(ivar_write_mismatch_diagnostics(path, root, scope_index))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
       end
 
@@ -155,6 +160,48 @@ module Rigor
           always_raises_diagnostic(path, node, scope_index),
           visibility_mismatch_diagnostic(path, node, scope_index)
         ].compact
+      end
+
+      # v0.1.2 — `def.ivar-write-mismatch`. Walks every
+      # ClassNode / ModuleNode body, gathers per-class ivar
+      # writes with their rvalue types, and emits a diagnostic
+      # when a later write's concrete class disagrees with the
+      # first write's. The first write per (class, ivar) is
+      # treated as the "declared" type; subsequent writes that
+      # land on a different concrete class trigger.
+      #
+      # Conservative envelope:
+      # - Only fires when both the first and the offending
+      #   write resolve to a `concrete_class_name` (Nominal /
+      #   Singleton / Constant / Tuple → "Array" / HashShape →
+      #   "Hash"). Unions / Dynamic / IntegerRange / shape-
+      #   varied carriers fall through.
+      # - `NilClass` is an intentional widening idiom (`@x =
+      #   "value"` then later `@x = nil` to "clear") — skipped.
+      # - Singleton-method (`def self.foo`) bodies are skipped.
+      #   Class-level ivars (`@x = 1` outside any def, in the
+      #   class body) are also skipped — they're a separate
+      #   surface (`Module#@var`) the engine doesn't yet model.
+      def ivar_write_mismatch_diagnostics(path, root, scope_index)
+        IvarWriteCollector.new(scope_index).collect(root).flat_map do |class_name, writes_by_ivar|
+          writes_by_ivar.flat_map do |ivar_name, writes|
+            ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
+          end
+        end
+      end
+
+      def ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
+        return [] if writes.size < 2
+
+        first_class = ivar_class_for(writes.first[:type])
+        return [] if first_class.nil?
+
+        writes[1..].filter_map do |write|
+          other_class = ivar_class_for(write[:type])
+          next nil if other_class.nil? || other_class == "NilClass" || other_class == first_class
+
+          build_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, first_class, other_class)
+        end
       end
 
       # v0.0.2 #6 — diagnostic suppression. Two kinds of
@@ -832,6 +879,32 @@ module Rigor
             severity: :error
           )
         end
+
+        # Pulls a single concrete class name from an ivar write's
+        # rvalue type. Returns nil when the type is too unstable
+        # to compare (Union / Dynamic / IntegerRange / etc.).
+        # `concrete_class_name` already covers Nominal / Singleton
+        # / Constant / Tuple / HashShape; the wrapper exists so
+        # the ivar rule can extend the envelope (or apply
+        # different filters) without disturbing the call rules.
+        def ivar_class_for(type)
+          concrete_class_name(type)
+        end
+
+        # rubocop:disable Metrics/ParameterLists
+        def build_ivar_write_mismatch_diagnostic(path, node, class_name, ivar_name, first_class, other_class)
+          location = node.name_loc || node.location
+          Diagnostic.new(
+            rule: RULE_IVAR_WRITE_MISMATCH,
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "instance variable `#{ivar_name}' on #{class_name} was previously assigned " \
+                     "#{first_class}; this write assigns #{other_class}",
+            severity: :error
+          )
+        end
+        # rubocop:enable Metrics/ParameterLists
 
         # Returns the dead-branch node for a literal-predicate
         # if/unless, or nil when no observable branch is dead.

@@ -848,6 +848,105 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(visibility_mismatch_diags(result)).to be_empty
       end
     end
+
+    describe "ivar-write-mismatch rule (v0.1.2)" do
+      def ivar_diags(result)
+        result.diagnostics.select { |d| d.rule == "def.ivar-write-mismatch" }
+      end
+
+      it "flags a String → Integer ivar drift in the same class" do # rubocop:disable RSpec/ExampleLength
+        result = analyze(<<~RUBY)
+          class Foo
+            def initialize
+              @name = "Alice"
+            end
+
+            def reset
+              @name = 42
+            end
+          end
+        RUBY
+        diag = ivar_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("@name")
+        expect(diag.message).to include("Foo")
+        expect(diag.message).to include("String")
+        expect(diag.message).to include("Integer")
+      end
+
+      it "does not flag widening to nil (intentional 'clear' idiom)" do
+        result = analyze(<<~RUBY)
+          class Foo
+            def initialize
+              @value = "hello"
+            end
+
+            def clear
+              @value = nil
+            end
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "does not flag multiple writes that share the same concrete class" do
+        result = analyze(<<~RUBY)
+          class Foo
+            def initialize
+              @count = 0
+            end
+
+            def bump
+              @count = 5
+            end
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "does not flag class-body ivars outside any def" do
+        # Class-level ivars (`Module#@var`) are a separate
+        # surface the engine doesn't yet model.
+        result = analyze(<<~RUBY)
+          class Foo
+            @config = "default"
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "does not flag ivars in unrelated classes that share a name" do
+        result = analyze(<<~RUBY)
+          class Foo
+            def initialize
+              @value = "hello"
+            end
+          end
+
+          class Bar
+            def initialize
+              @value = 42
+            end
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable ivar-write-mismatch`" do
+        result = analyze(<<~RUBY)
+          class Foo
+            def initialize
+              @name = "Alice"
+            end
+
+            def reset
+              @name = 42 # rigor:disable ivar-write-mismatch
+            end
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+    end
   end
 
   describe "implicit-self call dispatch (v0.0.3 A)" do

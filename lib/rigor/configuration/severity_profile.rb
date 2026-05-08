@@ -47,7 +47,8 @@ module Rigor
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
-          "def.method-visibility-mismatch" => :warning
+          "def.method-visibility-mismatch" => :warning,
+          "def.ivar-write-mismatch" => :warning
         }.freeze,
         balanced: {
           "call.undefined-method" => :error,
@@ -59,7 +60,8 @@ module Rigor
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
-          "def.method-visibility-mismatch" => :error
+          "def.method-visibility-mismatch" => :error,
+          "def.ivar-write-mismatch" => :warning
         }.freeze,
         strict: {
           "call.undefined-method" => :error,
@@ -71,7 +73,8 @@ module Rigor
           "assert.type-mismatch" => :error,
           "dump.type" => :error,
           "def.return-type-mismatch" => :error,
-          "def.method-visibility-mismatch" => :error
+          "def.method-visibility-mismatch" => :error,
+          "def.ivar-write-mismatch" => :error
         }.freeze
       }.freeze
 

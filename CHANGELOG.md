@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-05-09
+
+The twelfth preview. Theme: **put the v0.1.1 plugin substrate to work, broaden CheckRules coverage, and round out the DX surface**. Track 1 migrates four of the seven worked example plugins (`rigor-lisp-eval`, `rigor-pattern`, `rigor-units`, `rigor-activerecord`) from "info diagnostic only" to `flow_contribution_for` return-type narrowing — chained calls now resolve through the analyzer's normal dispatch instead of the RBS-level `untyped` envelope. Track 2 ships six new CheckRules (`flow.unreachable-branch`, `flow.dead-assignment`, `flow.always-truthy-condition`, `def.method-visibility-mismatch`, `def.ivar-write-mismatch`, plus a refinement-aware extension of `def.return-type-mismatch`), each with a deliberately conservative envelope shaped by self-analysis on `lib/`. Track 3 lands the DX-tooling slate the v0.1.1 "Out of scope" list named: `rigor explain <rule>` for terminal rule docs, `rigor diff <baseline.json>` for CI baseline-aware checking, `# rigor:disable-file <rule>` for file-scope suppression, `schemas/rigor-config.schema.json` for editor autocomplete via the yaml-language-server convention. Engine-depth follow-ups close two long-standing items: `Plugin::IoBoundary#open_url` lifts behind a host allowlist (`network_policy: :allowlist` + `allowed_url_hosts:`), and the C-body classifier now recognises `_modify` / `_modifiable`-named mutation gates so `String#replace` and friends classify natively without per-class blocklists. Two `OverloadSelector` precision fixes (interface-strictness + `Data.define` block-body method discovery) close self-analysis gaps the prior release flagged.
+
 ### Added
 
 - **Example plugins migrated from "info diagnostic only" to `flow_contribution_for` return-type narrowing.** Four of the seven worked plugin examples now contribute call-site return types via the v0.1.1 Track 2 slice 7 substrate, so chained calls resolve through the analyzer's normal dispatch instead of the RBS-level `untyped` fall-back. The diagnostic trace stays — both channels run from the same interpretation.
@@ -323,6 +327,7 @@ Each example ships `lib/`, runnable `demo/`, README, and an end-to-end integrati
 - **Cache load order for CLI flow.** `lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`. In CLI flow, the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). Fixed; `--cache-stats` now reports real activity.
 - **Fail-soft `rescue StandardError` was masking analyzer-internal bugs.** Tightened to `rescue ::RBS::BaseError` across the RBS-touching code paths — `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`. Analyzer-internal `NameError` / `NoMethodError` / `LoadError` now propagate so similar bugs surface immediately rather than silently degrading user-visible behaviour.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/rigortype/rigor/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/rigortype/rigor/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rigortype/rigor/compare/v0.0.9...v0.1.0

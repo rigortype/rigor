@@ -2,6 +2,7 @@
 
 require_relative "dependency_source_inference/gem_resolver"
 require_relative "dependency_source_inference/index"
+require_relative "dependency_source_inference/walker"
 require_relative "dependency_source_inference/builder"
 
 module Rigor

@@ -13,10 +13,19 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
   end
 
   describe "#contribution_for" do
-    it "returns nil for any (class_name, method_name) — slice 2a stub" do
+    it "returns nil for any (class_name, method_name) when no catalog is supplied" do
       index = described_class.new
 
       expect(index.contribution_for(class_name: "Foo", method_name: :bar)).to be_nil
+    end
+
+    it "returns the recorded kind when the catalog has a matching entry" do
+      catalog = { ["Foo", :bar] => :instance, ["Foo", :baz] => :singleton }
+      index = described_class.new(method_catalog: catalog)
+
+      expect(index.contribution_for(class_name: "Foo", method_name: :bar)).to eq(:instance)
+      expect(index.contribution_for(class_name: "Foo", method_name: :baz)).to eq(:singleton)
+      expect(index.contribution_for(class_name: "Foo", method_name: :missing)).to be_nil
     end
   end
 

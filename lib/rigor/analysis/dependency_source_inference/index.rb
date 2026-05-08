@@ -13,23 +13,30 @@ module Rigor
       # answers `nil` until slice 2b populates the method table
       # by walking the resolved gems' `roots:`.
       class Index
-        attr_reader :resolved_gems, :unresolvable
+        attr_reader :resolved_gems, :unresolvable, :method_catalog
 
-        def initialize(resolved_gems: [], unresolvable: [])
+        # @param method_catalog [Hash{[String, Symbol] => Symbol}]
+        #   the flat `(class_name, method_name) → :instance | :singleton`
+        #   table produced by {Walker.walk}, aggregated across
+        #   every resolved gem in the run. The Index itself stays
+        #   gem-agnostic — the per-gem attribution that slice 3's
+        #   cache descriptor needs lives on `Resolved`, not here.
+        def initialize(resolved_gems: [], unresolvable: [], method_catalog: {})
           @resolved_gems = resolved_gems.freeze
           @unresolvable = unresolvable.freeze
+          @method_catalog = method_catalog.freeze
           freeze
         end
 
-        # Slice 2a stub. Slice 2b will return a
-        # `Type::Dynamic`-wrapped inferred return type when the
-        # walker has visited a definition that matches
-        # `(class_name, method_name)`. Until then the dispatcher
-        # tier always falls through to the next layer.
+        # Looks up the recorded method kind for a
+        # `(class_name, method_name)` pair. Returns `:instance`
+        # / `:singleton` when the walker observed a definition
+        # under one of the resolved gems' `roots:`, or `nil`
+        # otherwise. Slice 2b-ii enriches this with the inferred
+        # return type so the dispatcher tier can build a
+        # `Type::Dynamic` directly from the lookup result.
         def contribution_for(class_name:, method_name:)
-          _ = class_name
-          _ = method_name
-          nil
+          @method_catalog[[class_name, method_name]]
         end
 
         def empty?

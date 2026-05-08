@@ -42,5 +42,28 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       expect(index.resolved_gems).to eq([])
       expect(index.unresolvable).to eq([])
     end
+
+    it "aggregates each resolved gem's method catalog into the Index (slice 2b-i)" do
+      stub_resolved_for("alpha", method_catalog: { ["Alpha", :one] => :instance })
+      stub_resolved_for("beta", method_catalog: { ["Beta", :two] => :singleton })
+
+      index = described_class.build(dependencies({ "gem" => "alpha" }, { "gem" => "beta" }))
+
+      expect(index.contribution_for(class_name: "Alpha", method_name: :one)).to eq(:instance)
+      expect(index.contribution_for(class_name: "Beta", method_name: :two)).to eq(:singleton)
+    end
+
+    def stub_resolved_for(gem_name, method_catalog:)
+      gem_dir = "/fake/#{gem_name}"
+      resolver = Rigor::Analysis::DependencySourceInference::GemResolver
+      walker = Rigor::Analysis::DependencySourceInference::Walker
+      allow(resolver).to receive(:resolve).with(have_attributes(gem: gem_name)).and_return(
+        resolver::Resolved.new(
+          gem_name: gem_name, version: "1.0.0",
+          gem_dir: gem_dir, mode: :when_missing, roots: %w[lib]
+        )
+      )
+      allow(walker).to receive(:walk).with(gem_dir: gem_dir, roots: %w[lib]).and_return(method_catalog)
+    end
   end
 end

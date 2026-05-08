@@ -35,9 +35,19 @@ module Rigor
     #
     # Architecture: per-run `Catalog` is built lazily on first
     # access by walking every configured `paths:` entry's `.rb`
-    # files via the plugin's `IoBoundary`. The catalog is
-    # frozen after the first build and consulted by
-    # `#flow_contribution_for` at every call site.
+    # files plus every `rbi_paths:` entry's `.rbi` files (slice
+    # 4) via the plugin's `IoBoundary`. The catalog is frozen
+    # after the first build and consulted by
+    # `#flow_contribution_for` at every call site. RBI files
+    # share the catalog with project-source sigs — both produce
+    # `MethodSignature` entries keyed by
+    # `(class_name, method_name, kind)`. When a key collides
+    # across files, the last-walked sig wins (ordering is
+    # platform-dependent: `Dir.glob` returns directory entries
+    # in filesystem order). Sorbet's full shim-override
+    # semantics — `sorbet/rbi/shims/` overriding
+    # `sorbet/rbi/gems/` — lands in a later slice once the
+    # catalog gains per-source provenance.
     #
     # The plugin emits `plugin.sorbet.parse-error` warnings for
     # malformed sig blocks (no block / empty block / no
@@ -49,23 +59,38 @@ module Rigor
     #     plugins:
     #       - gem: rigor-sorbet
     #         config:
-    #           paths: ["lib", "app"]   # directories to scan; defaults to .rigor.yml's `paths:`
+    #           paths: ["lib", "app"]         # directories to scan for `.rb` sigs; defaults to `paths:`
+    #           rbi_paths: ["sorbet/rbi"]     # directories to scan for `.rbi` files; default shown
     #
-    # The `paths:` config key narrows the plugin's catalog walk;
-    # omit it to inherit the project-wide `paths:` value.
+    # The `paths:` config key narrows the plugin's `.rb` walk;
+    # omit it to inherit the project-wide `paths:` value. The
+    # `rbi_paths:` key controls where Sorbet's RBI tree is read
+    # from — defaults to `sorbet/rbi/` per Tapioca's standard
+    # layout (`gems/`, `annotations/`, `dsl/`, `shims/`). Set
+    # to `[]` to opt out of RBI loading entirely.
     class Sorbet < Rigor::Plugin::Base
       manifest(
         id: "sorbet",
         version: "0.1.0",
         description: "Ingests Sorbet `sig` blocks as method-signature contributions.",
         config_schema: {
-          "paths" => :array
+          "paths" => :array,
+          "rbi_paths" => :array
         }
       )
+
+      # Default RBI directory tree. Matches the layout
+      # `tapioca init` generates — see Sorbet's `rbi.md`. Slice 4
+      # walks every `.rbi` file under these roots recursively;
+      # the four standard Tapioca subdirectories
+      # (`gems` / `annotations` / `dsl` / `shims`) are picked
+      # up as a side effect of recursing into the parent root.
+      DEFAULT_RBI_PATHS = ["sorbet/rbi"].freeze
 
       def init(services)
         @services = services
         @configured_paths = Array(config.fetch("paths", services.configuration.paths)).map(&:to_s)
+        @rbi_paths = Array(config.fetch("rbi_paths", DEFAULT_RBI_PATHS)).map(&:to_s)
         @catalog = nil
         @parse_errors_by_path = {}
         @catalog_built = false
@@ -189,20 +214,30 @@ module Rigor
         return @catalog if @catalog_built
 
         catalog = Catalog.new
-        @configured_paths.each { |root| harvest_path(root, catalog) }
+        # Project source — `.rb` only.
+        @configured_paths.each { |root| harvest_path(root, catalog, extensions: %w[.rb]) }
+        # Sorbet RBI tree — `.rbi` only. Slice 4 of ADR-11.
+        @rbi_paths.each { |root| harvest_path(root, catalog, extensions: %w[.rbi]) }
         catalog.freeze!
         @catalog = catalog
         @catalog_built = true
         catalog
       end
 
-      def harvest_path(root, catalog)
+      # @param root [String] directory or single file.
+      # @param catalog [Catalog]
+      # @param extensions [Array<String>] file extensions to
+      #   accept (e.g. `[".rb"]` for project source,
+      #   `[".rbi"]` for Sorbet RBI tree).
+      def harvest_path(root, catalog, extensions:)
         absolute = canonicalize(root)
         if File.directory?(absolute)
-          Dir.glob(File.join(absolute, "**", "*.rb")).each do |path|
-            harvest_file(canonicalize(path), catalog)
+          extensions.each do |ext|
+            Dir.glob(File.join(absolute, "**", "*#{ext}")).each do |path|
+              harvest_file(canonicalize(path), catalog)
+            end
           end
-        elsif File.file?(absolute) && absolute.end_with?(".rb")
+        elsif File.file?(absolute) && extensions.any? { |ext| absolute.end_with?(ext) }
           # `paths:` may list individual files (the demos do
           # this); walk them directly rather than skipping.
           harvest_file(absolute, catalog)

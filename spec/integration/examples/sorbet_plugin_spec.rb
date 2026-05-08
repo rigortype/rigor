@@ -293,6 +293,70 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
     end
   end
 
+  describe "RBI tree walking (ADR-11 slice 4)" do
+    let(:gem_rbi) do
+      <<~RBI
+        # typed: true
+        module Gem
+          class Connection
+            extend T::Sig
+            sig { returns(Gem::Connection) }
+            def self.open; new; end
+            sig { returns(String) }
+            def handshake; "ok"; end
+          end
+        end
+      RBI
+    end
+
+    let(:mixed_rbi) do
+      # Adjacent malformed (no terminus) + well-formed sigs.
+      # Slice 4 contract: malformed silently degrades; the
+      # well-formed sig in the same file is still recorded.
+      <<~RBI
+        # typed: true
+        module Gem
+          class Mixed
+            extend T::Sig
+            sig { params(x: Integer) }
+            def malformed(x); x; end
+            sig { returns(String) }
+            def well_formed; "ok"; end
+          end
+        end
+      RBI
+    end
+
+    it "loads sigs from `sorbet/rbi/**/*.rbi` and contributes them at call sites" do
+      result = run_plugin(
+        source: "#{SIG_STUB}Gem::Connection.open.handshake\n",
+        files: { "sorbet/rbi/gems/gem.rbi" => gem_rbi }
+      )
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "tolerates malformed sigs in RBI files alongside well-formed ones in the same file" do
+      result = run_plugin(
+        source: "#{SIG_STUB}Gem::Mixed.new.well_formed.upcase\n",
+        files: { "sorbet/rbi/shims/mixed.rbi" => mixed_rbi }
+      )
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+      expect(plugin_diagnostics(result)).to be_empty
+    end
+
+    it "respects an empty `rbi_paths` to opt out of RBI loading entirely" do
+      # With rbi_paths: [] the plugin doesn't walk the RBI;
+      # the RBI's sig is therefore never recorded. We only
+      # assert that the opt-out doesn't crash the plugin.
+      result = run_plugin(
+        source: "#{SIG_STUB}Gem::Connection.open\n",
+        files: { "sorbet/rbi/gems/gem.rbi" => gem_rbi },
+        plugin_entry: { "gem" => "rigor-sorbet", "config" => { "rbi_paths" => [] } }
+      )
+      expect(plugin_diagnostics(result)).to be_empty
+    end
+  end
+
   describe "type assertion recognition (ADR-11 slice 2)" do
     it "narrows `T.let(expr, T)` to the asserted type" do
       source = <<~RUBY

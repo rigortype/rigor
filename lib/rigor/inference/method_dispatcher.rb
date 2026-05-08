@@ -86,6 +86,18 @@ module Rigor
         )
         return rbs_result if rbs_result
 
+        # ADR-10 slice 2b-ii — dependency-source inference tier.
+        # Sits BELOW RBS dispatch (RBS / RBS::Inline / generated
+        # stubs / plugin contracts always win) and ABOVE the
+        # user-class fallback so a method defined in an opt-in
+        # gem stops emitting `call.undefined-method` even when
+        # no signature contract resolves. Returns
+        # `Dynamic[top]` — slice 2b-ii deliberately stops at the
+        # dynamic-origin envelope; per-method return-type
+        # precision is queued for a later slice.
+        dep_source_result = try_dependency_source(receiver_type, method_name, environment)
+        return dep_source_result if dep_source_result
+
         # Slice 7 phase 10 — user-class ancestor fallback. When
         # the receiver is `Nominal[T]` or `Singleton[T]` for a
         # class not in the RBS environment (typically a
@@ -123,6 +135,34 @@ module Rigor
         return nil if contributions.empty?
 
         FlowContribution::Merger.merge(contributions).return_type
+      end
+
+      # ADR-10 slice 2b-ii. Consults the per-run
+      # `Analysis::DependencySourceInference::Index` carried by
+      # the environment for `(class_name, method_name)`
+      # observations harvested from opt-in gems' `roots:`. On a
+      # hit, returns `Combinator.untyped` so the call site
+      # carries the `Dynamic[top]` provenance (per ADR-10's
+      # "Inference contract": gem-source-inferred shapes never
+      # publish as ground-truth `T`). Returns `nil` when the
+      # environment carries no index, the index has no entry, or
+      # the receiver has no nominal class to look up.
+      def try_dependency_source(receiver_type, method_name, environment)
+        index = environment&.dependency_source_index
+        return nil if index.nil? || index.empty?
+
+        class_name = dep_source_class_name(receiver_type)
+        return nil if class_name.nil?
+
+        return nil if index.contribution_for(class_name: class_name, method_name: method_name).nil?
+
+        Type::Combinator.untyped
+      end
+
+      def dep_source_class_name(receiver_type)
+        case receiver_type
+        when Type::Nominal, Type::Singleton then receiver_type.class_name
+        end
       end
 
       def collect_plugin_contributions(registry, call_node, scope)

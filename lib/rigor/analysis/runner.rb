@@ -65,7 +65,8 @@ module Rigor
           libraries: @configuration.libraries,
           signature_paths: @configuration.signature_paths,
           cache_store: @cache_store,
-          plugin_registry: @plugin_registry
+          plugin_registry: @plugin_registry,
+          dependency_source_index: @dependency_source_index
         )
         expansion = expand_paths(paths)
 

@@ -80,15 +80,17 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     class_ordering(req:lhs,req:rhs)
     class_registry()
     constant_for_name(req:name)
+    dependency_source_index()
     nominal_for_name(req:name)
     plugin_registry()
     rbs_loader()
     singleton_for_name(req:name)
   ].freeze
 
-  ENVIRONMENT_SINGLETON = %w[
-    default()
-    for_project(key:root,key:libraries,key:signature_paths,key:cache_store,key:plugin_registry)
+  ENVIRONMENT_SINGLETON = [
+    "default()",
+    "for_project(key:root,key:libraries,key:signature_paths,key:cache_store," \
+    "key:plugin_registry,key:dependency_source_index)"
   ].freeze
 
   REFLECTION_SINGLETON = %w[

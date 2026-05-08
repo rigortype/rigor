@@ -7,11 +7,12 @@ module Rigor
     attr_reader class_registry: ClassRegistry
     attr_reader rbs_loader: RbsLoader?
     attr_reader plugin_registry: untyped?
+    attr_reader dependency_source_index: untyped?
 
     def self.default: () -> Environment
-    def self.for_project: (?root: String, ?libraries: Array[String], ?signature_paths: Array[String | _ToPath]?, ?cache_store: untyped?, ?plugin_registry: untyped?) -> Environment
+    def self.for_project: (?root: String, ?libraries: Array[String], ?signature_paths: Array[String | _ToPath]?, ?cache_store: untyped?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?) -> Environment
 
-    def initialize: (?class_registry: ClassRegistry, ?rbs_loader: RbsLoader?, ?plugin_registry: untyped?) -> void
+    def initialize: (?class_registry: ClassRegistry, ?rbs_loader: RbsLoader?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?) -> void
     def nominal_for_name: (String | Symbol name) -> Type::Nominal?
     def singleton_for_name: (String | Symbol name) -> Type::Singleton?
     def constant_for_name: (String | Symbol name) -> Type::t?

@@ -41,7 +41,7 @@ module Rigor
       prism rbs
     ].freeze
 
-    attr_reader :class_registry, :rbs_loader, :plugin_registry
+    attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
     # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the
@@ -57,10 +57,17 @@ module Rigor
     #   default), no plugin-level return-type contribution
     #   participates — useful for tests, the `Environment.default`
     #   facade, and analyses that don't load plugins.
-    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil, plugin_registry: nil)
+    # @param dependency_source_index [Rigor::Analysis::DependencySourceInference::Index, nil]
+    #   ADR-10 slice 2b-ii. The per-run index of opt-in gem
+    #   sources the dispatcher consults BELOW RBS dispatch.
+    #   When nil (the default), no dep-source contribution
+    #   participates and the dispatcher tier is a no-op.
+    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil,
+                   plugin_registry: nil, dependency_source_index: nil)
       @class_registry = class_registry
       @rbs_loader = rbs_loader
       @plugin_registry = plugin_registry
+      @dependency_source_index = dependency_source_index
       freeze
     end
 
@@ -90,7 +97,8 @@ module Rigor
       #   reflection artefacts) consult the cache. Pass `nil` (the
       #   default) to skip caching for this environment.
       # @return [Rigor::Environment]
-      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, plugin_registry: nil)
+      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, # rubocop:disable Metrics/ParameterLists
+                      plugin_registry: nil, dependency_source_index: nil)
         resolved_paths = signature_paths || default_signature_paths(root)
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
         loader = RbsLoader.new(
@@ -98,7 +106,11 @@ module Rigor
           signature_paths: resolved_paths,
           cache_store: cache_store
         )
-        new(rbs_loader: loader, plugin_registry: plugin_registry)
+        new(
+          rbs_loader: loader,
+          plugin_registry: plugin_registry,
+          dependency_source_index: dependency_source_index
+        )
       end
 
       private

@@ -299,5 +299,64 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to be_nil
       end
     end
+
+    describe "dependency-source inference tier (ADR-10 slice 2b-ii)" do
+      def env_with_index(method_catalog)
+        index = Rigor::Analysis::DependencySourceInference::Index.new(
+          resolved_gems: [
+            Rigor::Analysis::DependencySourceInference::GemResolver::Resolved.new(
+              gem_name: "fake", version: "1.0.0", gem_dir: "/fake",
+              mode: :when_missing, roots: %w[lib]
+            )
+          ],
+          method_catalog: method_catalog
+        )
+        Rigor::Environment.new(dependency_source_index: index)
+      end
+
+      it "returns Dynamic[top] for a Nominal receiver whose (class, method) is in the catalog" do
+        env = env_with_index({ ["FakeLib::Widget", :render] => :instance })
+
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("FakeLib::Widget"),
+          method_name: :render, arg_types: [], environment: env
+        )
+
+        expect(result).to eq(Rigor::Type::Combinator.untyped)
+      end
+
+      it "returns Dynamic[top] for a Singleton receiver whose (class, method) is in the catalog" do
+        env = env_with_index({ ["FakeLib::Widget", :build] => :singleton })
+
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.singleton_of("FakeLib::Widget"),
+          method_name: :build, arg_types: [], environment: env
+        )
+
+        expect(result).to eq(Rigor::Type::Combinator.untyped)
+      end
+
+      it "falls through when the receiver class is not in the catalog" do
+        env = env_with_index({ ["Other", :render] => :instance })
+
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("FakeLib::Widget"),
+          method_name: :render, arg_types: [], environment: env
+        )
+
+        expect(result).to be_nil
+      end
+
+      it "falls through when the environment carries no dependency_source_index" do
+        env = Rigor::Environment.new
+
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("FakeLib::Widget"),
+          method_name: :render, arg_types: [], environment: env
+        )
+
+        expect(result).to be_nil
+      end
+    end
   end
 end

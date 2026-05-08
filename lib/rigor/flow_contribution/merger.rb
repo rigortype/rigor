@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require_relative "conflict"
+require_relative "fact"
+require_relative "merge_result"
+
 module Rigor
   class FlowContribution
     # Composes any number of {FlowContribution} bundles into a

@@ -1,0 +1,9 @@
+paths:
+  - demo.rb
+  - errors_demo.rb
+
+plugins:
+  - rigor-sorbet
+
+cache:
+  path: tmp/.rigor/cache

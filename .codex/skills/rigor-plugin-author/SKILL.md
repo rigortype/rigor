@@ -6,11 +6,11 @@ description: End-to-end workflow for an AI agent to translate a user requirement
 # Rigor Plugin Author Workflow
 
 This SKILL is for AI agents. It compresses the experience of having
-authored the twelve examples under [`examples/`](../../../examples/README.md)
-(eight plugin-contract walkthroughs plus the Tier 1 Rails ecosystem
+authored the thirteen examples under [`examples/`](../../../examples/README.md)
+(eight plugin-contract walkthroughs plus the Rails ecosystem
 family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionmailer`,
-`rigor-activejob`) into a procedural pipeline so the next plugin can be
-built end-to-end without re-discovering the gotchas.
+`rigor-activejob`, `rigor-pundit`) into a procedural pipeline so the
+next plugin can be built end-to-end without re-discovering the gotchas.
 
 The user-facing handbook for plugin **authoring** is the
 [`examples/README.md`](../../../examples/README.md) landing page.
@@ -679,8 +679,9 @@ When in doubt, read these in order:
 
 1. **[`examples/README.md`](../../../examples/README.md)** — the
    landing page. Comparison table and recommended reading order
-   across the twelve worked examples (eight plugin-contract
-   walkthroughs + four Rails ecosystem Tier 1 plugins).
+   across the thirteen worked examples (eight plugin-contract
+   walkthroughs + five Rails ecosystem plugins covering Tier 1
+   + Tier 3B).
 2. **[`docs/handbook/09-plugins.md`](../../../docs/handbook/09-plugins.md)**
    — the user-facing one-pager. Names what plugins can and cannot
    do today.

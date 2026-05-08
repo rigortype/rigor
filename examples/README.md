@@ -1,6 +1,6 @@
 # Rigor plugin examples
 
-Twelve worked examples of the **v0.1.0 plugin authoring
+Thirteen worked examples of the **v0.1.0 plugin authoring
 surface**. Each one is a fully-shaped plugin gem (manifest
 + `lib/` + gemspec) with a runnable demo (`demo/.rigor.yml`,
 `demo/demo.rb`, runtime, optional sigs) and an end-to-end
@@ -9,8 +9,8 @@ integration spec under
 
 The first eight examples illustrate the v0.1.0 plugin
 contract itself (one architectural surface per plugin).
-The four `rigor-rails-*` / `rigor-action*` / `rigor-active*`
-plugins are working drafts of the
+The five `rigor-rails-*` / `rigor-action*` / `rigor-active*`
+/ `rigor-pundit` plugins are working drafts of the
 [Rails ecosystem family](../docs/design/20260508-rails-plugins-roadmap.md)
 — they layer on top of the same contract but ship as a
 distinct readable group.
@@ -28,7 +28,7 @@ distinct readable group.
 | [`rigor-activerecord`](rigor-activerecord/) | **Most architecturally complete** — DSL interpretation + multi-file IoBoundary + chained cache producers + two-pass discover-then-validate | ~700 | Ruby (`db/schema.rb` + `app/models/*.rb`) | ✅ ✅ | — | 14 |
 | [`rigor-sorbet`](rigor-sorbet/) | **External type DSL adapter** — reads inline `sig { params(...).returns(T) }` blocks and contributes return types via `flow_contribution_for` | ~900 | Ruby (`sig` blocks across `paths:`) | ✅ | — | 30+ |
 
-### Rails ecosystem family (Tier 1)
+### Rails ecosystem family
 
 | Example | Tier | Headline facet | I/O | Cache | Tests |
 | --- | --- | --- | --- | --- | --- |
@@ -36,8 +36,9 @@ distinct readable group.
 | [`rigor-rails-i18n`](rigor-rails-i18n/) | 1B | `config/locales/*.yml` → `t('key.path')` validation (key existence, per-locale coverage, interpolation matching) | YAML | ✅ | 11 |
 | [`rigor-actionmailer`](rigor-actionmailer/) | 1C | Mailer call shape + view template existence | Ruby (`app/mailers/`) + view templates | ✅ | 11 |
 | [`rigor-activejob`](rigor-activejob/) | 1D | Job `perform_later` / `perform_now` / `perform` argument arity | Ruby (`app/jobs/`) | ✅ | 9 |
+| [`rigor-pundit`](rigor-pundit/) | 3B | Policy class + predicate method validation for `authorize(record, :action)`; receiver-type lookup via `Scope#type_of` | Ruby (`app/policies/`) | ✅ | 12 |
 
-All twelve rely on **slice 5**
+All thirteen rely on **slice 5**
 (`Plugin::Base#diagnostics_for_file`) to surface
 diagnostics. The "headline facet" column names the
 *additional* surface each example spotlights — that is the
@@ -58,7 +59,8 @@ Pick the path that matches what you are trying to learn:
 | **Combine DSL interpretation, multi-file IoBoundary, chained cache producers, two-pass analysis** | `rigor-activerecord` |
 | **Adapt an external type DSL (Sorbet sig / T.let) into Rigor's narrowing engine** | `rigor-sorbet` |
 | **Author a Rails ecosystem plugin (Tier 1)** | `rigor-activejob` (smallest) → `rigor-rails-i18n` → `rigor-actionmailer` → `rigor-rails-routes` (largest, publishes ADR-9 fact) |
-| **Read every example to internalise the architecture** | deprecations → lisp-eval → statesman → pattern → units → routes → activerecord → sorbet → activejob → rails-i18n → actionmailer → rails-routes |
+| **Validate against an inferred-type catalog (Pundit-style)** | `rigor-pundit` — uses `Scope#type_of` to map records to policy classes |
+| **Read every example to internalise the architecture** | deprecations → lisp-eval → statesman → pattern → units → routes → activerecord → sorbet → activejob → rails-i18n → actionmailer → rails-routes → pundit |
 
 The recommended-for-everyone path runs from the smallest
 plugin (`rigor-deprecations`, ~80 lines, pure data → rules) up
@@ -73,23 +75,24 @@ DSL"; start with `rigor-rails-routes` if your interest is
 
 | Surface | Where it lives | Examples that use it |
 | --- | --- | --- |
-| `Rigor::Plugin::Base.manifest(...)` | manifest declaration | all twelve |
-| `config_schema` (`:string` / `:array` / `:hash` kinds) | manifest body | deprecations / lisp-eval / pattern / statesman / activejob / rails-i18n / rails-routes / actionmailer |
+| `Rigor::Plugin::Base.manifest(...)` | manifest declaration | all thirteen |
+| `config_schema` (`:string` / `:array` / `:hash` kinds) | manifest body | deprecations / lisp-eval / pattern / statesman / activejob / rails-i18n / rails-routes / actionmailer / pundit |
 | `manifest(produces: [:fact_name])` (ADR-9 cross-plugin) | fact publication | **rails-routes** |
-| `#init(services)` config plumbing | init hook | lisp-eval / pattern / statesman / routes / sorbet / all four Rails plugins |
+| `#init(services)` config plumbing | init hook | lisp-eval / pattern / statesman / routes / sorbet / all five Rails ecosystem plugins |
 | `#prepare(services)` (ADR-9 fact publish) | post-init service handoff | **rails-routes** |
-| `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all twelve |
+| `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all thirteen |
 | `#flow_contribution_for(node, scope)` | return-type contribution | lisp-eval / pattern / units / activerecord / sorbet |
-| `Rigor::Analysis::Diagnostic` construction | diagnostic emission | all twelve |
-| `source_family: "plugin.<id>"` auto-stamp | runner-side, never set by plugin | all twelve |
-| `Plugin::IoBoundary#read_file` (slice 2) | sandboxed file reads | routes / activerecord / sorbet / all four Rails plugins |
+| `Rigor::Analysis::Diagnostic` construction | diagnostic emission | all thirteen |
+| `source_family: "plugin.<id>"` auto-stamp | runner-side, never set by plugin | all thirteen |
+| `Plugin::IoBoundary#read_file` (slice 2) | sandboxed file reads | routes / activerecord / sorbet / all five Rails ecosystem plugins |
 | `Plugin::TrustPolicy.allowed_read_roots` (slice 2) | declarative read-root policy | every IoBoundary user above (transitively) |
-| `Plugin::Base.producer` DSL (slice 6) | cached producer declaration | routes / activerecord / sorbet / all four Rails plugins |
-| `Plugin::Base#cache_for` callable (slice 6) | cache round-trip wrapper | routes / activerecord / sorbet / all four Rails plugins |
-| `Scope#type_of(node)` | engine query for an expression's inferred type | **pattern** / sorbet (receiver resolution) |
+| `Plugin::Base.producer` DSL (slice 6) | cached producer declaration | routes / activerecord / sorbet / all five Rails ecosystem plugins |
+| `Plugin::Base#cache_for` callable (slice 6) | cache round-trip wrapper | routes / activerecord / sorbet / all five Rails ecosystem plugins |
+| `Scope#type_of(node)` | engine query for an expression's inferred type | **pattern** / sorbet (receiver resolution) / **pundit** (record-type → policy-class lookup) |
 | `Type::Combinator.literal_string_compatible?` | engine-side literal-string predicate | **pattern** |
 | `Type::Constant#value` | exact-value extraction | **pattern** |
-| Two-pass walk (collect → validate) | pattern, not API | **statesman** / actionmailer / activejob / rails-i18n |
+| `Type::Nominal#class_name` | mapping inferred type to a class-name string | sorbet / **pundit** |
+| Two-pass walk (collect → validate) | pattern, not API | **statesman** / actionmailer / activejob / rails-i18n / pundit |
 | Local-variable binding map across statements | pattern, not API | **units** |
 
 The unmarked surfaces — return-type contributions, custom
@@ -170,11 +173,13 @@ the analyzer's normal dispatch instead of the RBS-level
   assertions (eight slices landed across ADR-11). Reads
   every `paths:` entry's `.rb` files for `sig` declarations
   and contributes return types via `flow_contribution_for`.
-- **Rails ecosystem family** — Tier 1 plugins per
+- **Rails ecosystem family** — Tier 1 + 3B plugins per
   [`docs/design/20260508-rails-plugins-roadmap.md`](../docs/design/20260508-rails-plugins-roadmap.md):
   `rigor-rails-routes`, `rigor-rails-i18n`,
-  `rigor-actionmailer`, `rigor-activejob`. All four are
-  diagnostic-only for v0.1.0 of each plugin, with future
+  `rigor-actionmailer`, `rigor-activejob` (Tier 1 — current
+  API), and `rigor-pundit` (Tier 3B — uses `Scope#type_of`
+  for receiver-type → policy-class resolution). All five
+  are diagnostic-only for v0.1.0 of each plugin, with future
   cross-plugin handoff (e.g. `rigor-rails-routes`'s
   `:helper_table` ADR-9 fact) queued for downstream
   consumers.

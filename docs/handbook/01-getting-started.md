@@ -169,6 +169,20 @@ The minimum useful run does not require any config file at all
 non-default behaviours: extra `paths`, alternative
 `severity_profile`, project-wide rule disables, plugins.
 
+### Editor autocomplete
+
+The shipped file starts with a `# yaml-language-server: $schema=...`
+magic comment that points at
+[`schemas/rigor-config.schema.json`](../../schemas/rigor-config.schema.json).
+Editors that recognise the convention — VS Code's YAML
+extension, IntelliJ-family IDEs, Helix, Neovim with `yaml-ls`,
+others that follow [redhat-developer/yaml-language-server's
+spec](https://github.com/redhat-developer/yaml-language-server)
+— pick up the schema automatically and surface autocomplete,
+hover docs, and validation while you edit. `rigor init`-generated
+files carry an absolute GitHub URL so the schema works without a
+checked-out copy of Rigor's source.
+
 ### Two file names, no implicit merge
 
 Rigor auto-discovers config in this order, reading the FIRST

@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zenwerk/rigor/raw/master/schemas/rigor-config.schema.json",
+  "title": "Rigor configuration",
+  "description": "Configuration schema for `.rigor.yml` and `.rigor.dist.yml`. The committed default lives in `.rigor.dist.yml`; per-developer overrides live in `.rigor.yml` (gitignored). Path-bearing keys (`paths`, `signature_paths`, `plugins_io.allowed_paths`, `includes`) resolve relative to the config file that declares them. The full surface is documented at docs/handbook/01-getting-started.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "includes": {
+      "description": "PHPStan-style include list. Each entry is a path to another `.rigor.yml`-shaped file whose body is merged under this one (later entries win on conflicts). Paths resolve relative to the file that declares them. Cycles are rejected.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "target_ruby": {
+      "description": "Ruby version Rigor parses against (forwarded to `Prism.parse_file(version:)`). Format: `<major>.<minor>` or `<major>.<minor>.<patch>`, or the literal `\"latest\"`.",
+      "type": "string",
+      "pattern": "^(\\d+\\.\\d+(\\.\\d+)?|latest)$"
+    },
+    "paths": {
+      "description": "Files / directories to analyze. Directories are recursed; explicit files bypass the `exclude:` filter.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "exclude": {
+      "description": "Glob patterns layered over directory globs. Built-in defaults — `**/vendor/bundle/**`, `**/.bundle/**`, `**/node_modules/**` — apply on top of user entries and cannot be disabled. Patterns use `File.fnmatch?` semantics (NOT regex).",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "plugins": {
+      "description": "Plugin gems Rigor loads. Each entry is either a String gem-name shorthand (`\"rigor-deprecations\"`) or a Hash with `gem:` / `id:` / `config:` keys for a configured plugin.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/pluginEntry" }
+    },
+    "disable": {
+      "description": "Project-wide rule suppressions. Entries are canonical rule ids (`call.undefined-method`), legacy unprefixed names (`undefined-method`), or family wildcards (`call`, `flow`, `assert`, `dump`, `def`).",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "libraries": {
+      "description": "Bundled stdlib / stdgem RBS libraries to load (forwarded to `RBS::EnvironmentLoader#add(library:)`). Examples: `csv`, `set`, `pathname`.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "signature_paths": {
+      "description": "Project-local RBS sig directories. `nil` (the default) lets `Environment.for_project` auto-detect a `sig/` directory.",
+      "oneOf": [
+        { "type": "null" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+    "fold_platform_specific_paths": {
+      "description": "When `true`, `File` path-manipulation methods fold to platform-aware constants (`File::SEPARATOR` etc.). Default `false` — most projects want platform-agnostic results.",
+      "type": "boolean"
+    },
+    "cache": {
+      "description": "On-disk cache settings. The cache stores parsed RBS environments, class ancestor tables, and plugin-side artefacts; deleting the directory is always safe (re-populates on next run).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Cache root directory. Default `.rigor/cache`.",
+          "type": "string"
+        }
+      }
+    },
+    "plugins_io": {
+      "description": "Plugin I/O policy. `network: \"disabled\"` is the only network policy v0.1.x ships; loosening waits for a concrete plugin that needs it. `allowed_paths:` extends the default plugin read root (the project root) with extra absolute or relative paths.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "network": {
+          "description": "Plugin network policy. Only `disabled` is currently supported.",
+          "type": "string",
+          "enum": ["disabled"]
+        },
+        "allowed_paths": {
+          "description": "Extra read roots a plugin may access via `Plugin::IoBoundary`. Defaults to `[]` (project root only).",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "severity_profile": {
+      "description": "Profile that re-stamps each rule's authored severity. `lenient` flags the obvious bugs as errors and downgrades the rest to warnings; `balanced` (the default) follows Rigor's stance; `strict` upgrades every rule to error.",
+      "type": "string",
+      "enum": ["lenient", "balanced", "strict"]
+    },
+    "severity_overrides": {
+      "description": "Per-rule severity overrides applied after the profile. Keys are canonical rule ids (`call.undefined-method`) or family wildcards (`call`); values are one of `error` / `warning` / `info` / `off`. `off` drops the diagnostic entirely.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["error", "warning", "info", "off"]
+      }
+    }
+  },
+  "$defs": {
+    "pluginEntry": {
+      "description": "A single plugin entry — either a gem-name shorthand or the full configured form.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Gem-name shorthand, e.g. `rigor-deprecations`. The id defaults to the gem name without the `rigor-` prefix.",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["gem"],
+          "properties": {
+            "gem": {
+              "description": "Gem name. Required.",
+              "type": "string",
+              "minLength": 1
+            },
+            "id": {
+              "description": "Plugin id, used as the `source_family` prefix in diagnostics (`plugin.<id>.<rule>`). Defaults to the gem name without the `rigor-` prefix.",
+              "type": "string",
+              "minLength": 1
+            },
+            "config": {
+              "description": "Plugin-specific configuration. Validated by the plugin's `manifest(config_schema:)`. The shape varies per plugin; see each plugin's README for the recognised keys.",
+              "type": "object"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

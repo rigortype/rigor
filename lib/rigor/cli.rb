@@ -209,6 +209,7 @@ module Rigor
     # most likely to want to edit.
     def init_template
       <<~YAML
+        # yaml-language-server: $schema=https://github.com/zenwerk/rigor/raw/master/schemas/rigor-config.schema.json
         # Rigor configuration. See docs/CURRENT_WORK.md for the
         # full set of features the analyzer ships in this preview.
         #

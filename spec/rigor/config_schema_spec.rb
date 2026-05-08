@@ -1,0 +1,78 @@
+# frozen_string_literal: true
+
+require "json"
+require "yaml"
+
+require "rigor/configuration"
+require "rigor/configuration/severity_profile"
+require "rigor/analysis/check_rules"
+
+RSpec.describe "Rigor configuration JSON Schema" do # rubocop:disable RSpec/DescribeClass
+  let(:schema_path) { File.expand_path("../../schemas/rigor-config.schema.json", __dir__) }
+  let(:schema) { JSON.parse(File.read(schema_path, encoding: "UTF-8")) }
+
+  it "is a valid JSON Schema 2020-12 envelope" do
+    expect(schema).to include(
+      "$schema" => "https://json-schema.org/draft/2020-12/schema",
+      "type" => "object",
+      "additionalProperties" => false
+    )
+    expect(schema["$id"]).to be_a(String)
+    expect(schema["title"]).to be_a(String)
+    expect(schema["description"]).to be_a(String)
+  end
+
+  it "covers every key in Rigor::Configuration::DEFAULTS plus the includes:/`#schema` extras" do
+    schema_keys = schema.fetch("properties").keys.to_set
+    default_keys = Rigor::Configuration::DEFAULTS.keys.to_set
+
+    missing = default_keys - schema_keys
+    expect(missing).to(be_empty, "schema is missing keys present in Configuration::DEFAULTS: #{missing.inspect}")
+
+    # `includes` is a load-time directive, not part of DEFAULTS, but
+    # it MUST be in the schema so editors stop flagging it.
+    expect(schema_keys).to include("includes")
+  end
+
+  it "constrains severity_profile to the runtime VALID_PROFILES set" do
+    enum = schema.dig("properties", "severity_profile", "enum")
+    expect(enum.to_set(&:to_sym)).to(
+      eq(Rigor::Configuration::SeverityProfile::VALID_PROFILES.to_set)
+    )
+  end
+
+  it "constrains severity_overrides values to the runtime VALID_SEVERITIES set" do
+    enum = schema.dig("properties", "severity_overrides", "additionalProperties", "enum")
+    expect(enum.to_set(&:to_sym)).to(
+      eq(Rigor::Configuration::SeverityProfile::VALID_SEVERITIES.to_set)
+    )
+  end
+
+  it "constrains plugins_io.network to the documented enum" do
+    enum = schema.dig("properties", "plugins_io", "properties", "network", "enum")
+    expect(enum).to eq(["disabled"])
+  end
+
+  it "ships the schema reference comment on the committed `.rigor.dist.yml`" do
+    dist = File.read(File.expand_path("../../.rigor.dist.yml", __dir__))
+    expect(dist).to include("yaml-language-server: $schema=schemas/rigor-config.schema.json")
+  end
+
+  it "has the `rigor init` template carry the same schema reference" do
+    require "rigor/cli"
+    cli = Rigor::CLI.new([], out: StringIO.new, err: StringIO.new)
+    template = cli.send(:init_template)
+    expect(template).to include("yaml-language-server: $schema=")
+    expect(template).to include("rigor-config.schema.json")
+  end
+
+  it "shapes plugin entries as either gem-name string or hash with a required `gem` key" do
+    plugin_entry = schema.dig("$defs", "pluginEntry", "oneOf")
+    expect(plugin_entry).to be_an(Array)
+    expect(plugin_entry.map { |alt| alt["type"] }).to contain_exactly("string", "object")
+
+    object_alt = plugin_entry.find { |alt| alt["type"] == "object" }
+    expect(object_alt["required"]).to eq(["gem"])
+    expect(object_alt["properties"].keys).to contain_exactly("gem", "id", "config")
+  end
+end

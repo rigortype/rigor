@@ -68,6 +68,61 @@ RSpec.describe Rigor::Plugin::IoBoundary do
         expect(e.resource).to eq("https://example.invalid/api")
       end
     end
+
+    describe "with an :allowlist network policy (v0.1.2)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+      let(:fake_responses) { {} }
+      let(:fake_http) do
+        responses = fake_responses
+        Class.new do
+          define_method(:get) { |url, **_kwargs| responses.fetch(url) { raise "no fake response for #{url.inspect}" } }
+        end.new
+      end
+
+      let(:allowlist_policy) do
+        Rigor::Plugin::TrustPolicy.new(
+          allowed_read_roots: [tmpdir],
+          network_policy: :allowlist,
+          allowed_url_hosts: %w[example.com]
+        )
+      end
+
+      let(:allowlist_boundary) do
+        described_class.new(policy: allowlist_policy, plugin_id: "demo", http_client: fake_http)
+      end
+
+      it "fetches an allowlisted URL through the injected client and returns its body" do
+        fake_responses["https://example.com/foo"] = "payload"
+        expect(allowlist_boundary.open_url("https://example.com/foo")).to eq("payload")
+      end
+
+      it "records a ConfigEntry keyed `url:<url>` with the SHA-256 of the response body" do
+        fake_responses["https://example.com/foo"] = "payload"
+        allowlist_boundary.open_url("https://example.com/foo")
+
+        descriptor = allowlist_boundary.cache_descriptor
+        expect(descriptor.configs.size).to eq(1)
+        entry = descriptor.configs.first
+        expect(entry.key).to eq("url:https://example.com/foo")
+        expect(entry.value_hash).to eq(Digest::SHA256.hexdigest("payload"))
+      end
+
+      it "denies a URL whose host is not on the allowlist" do
+        expect { allowlist_boundary.open_url("https://other.invalid/foo") }.to raise_error(
+          Rigor::Plugin::AccessDeniedError
+        ) do |e|
+          expect(e.reason).to eq(:network_disabled)
+          expect(e.resource).to eq("https://other.invalid/foo")
+        end
+      end
+
+      it "denies a non-HTTPS URL even if the host is on the allowlist" do
+        expect { allowlist_boundary.open_url("http://example.com/foo") }.to raise_error(
+          Rigor::Plugin::AccessDeniedError
+        ) do |e|
+          expect(e.reason).to eq(:network_disabled)
+        end
+      end
+    end
   end
 
   describe "#cache_descriptor" do

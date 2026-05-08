@@ -27,20 +27,37 @@ module Rigor
     #   the file's contents, and adds a digest-keyed
     #   {Cache::Descriptor::FileEntry} to the boundary's
     #   accumulated descriptor.
-    # - `#open_url(url)` — always raises {AccessDeniedError} while
-    #   `network_policy` is `:disabled` (the only setting in slice
-    #   2). The hook exists so slices 3-6 can layer richer access
-    #   policy without re-defining the API.
+    # - `#open_url(url)` — fetches the URL when the policy
+    #   permits it (`network_policy: :allowlist` plus an
+    #   `allowed_url_hosts` match) and raises
+    #   {AccessDeniedError} otherwise. v0.1.2 ships the
+    #   allowlist surface; the default project policy still
+    #   has `network_policy: :disabled` so plugins that want
+    #   network access opt in explicitly through
+    #   `.rigor.yml`'s `plugins_io.network: allowlist` plus
+    #   `plugins_io.allowed_url_hosts: [...]`. The HTTP fetch
+    #   is GET-only over HTTPS, capped at {URL_TIMEOUT_SECONDS}
+    #   wall time and {URL_MAX_BYTES} body size; non-2xx
+    #   responses raise {AccessDeniedError} so plugin code
+    #   doesn't have to rescue mid-build.
     # - `#cache_descriptor` — flushes the accumulated entries into
     #   a fresh {Cache::Descriptor} for the contribution that
-    #   built it.
+    #   built it. URL fetches contribute `ConfigEntry` rows
+    #   keyed `"url:#{url}"` with the response body's SHA-256
+    #   so contributions invalidate when the remote document
+    #   changes.
     class IoBoundary
+      URL_TIMEOUT_SECONDS = 10
+      URL_MAX_BYTES = 10 * 1024 * 1024
+
       attr_reader :policy, :plugin_id
 
-      def initialize(policy:, plugin_id:)
+      def initialize(policy:, plugin_id:, http_client: DefaultHttpClient.new)
         @policy = policy
         @plugin_id = plugin_id.to_s.dup.freeze
         @file_entries = {}
+        @config_entries = {}
+        @http_client = http_client
         @mutex = Mutex.new
       end
 
@@ -64,30 +81,39 @@ module Rigor
         contents
       end
 
-      # Slice 2 stub: every URL access is denied while
-      # `network_policy` is `:disabled`. Slices that need to relax
-      # the rule (e.g. for opt-in offline-replay caches) will lift
-      # the policy gate; the API does not change.
+      # Fetches the URL when the policy permits it. Returns the
+      # response body. Raises {AccessDeniedError} when the policy
+      # is `:disabled`, the URL scheme is not `https`, the host is
+      # not on the allowlist, the response is non-2xx, the body
+      # exceeds {URL_MAX_BYTES}, or the request times out
+      # ({URL_TIMEOUT_SECONDS}). On success, records a
+      # `ConfigEntry` keyed `"url:#{url}"` with the body's
+      # SHA-256 so the cache descriptor invalidates if the remote
+      # document changes.
       def open_url(url)
-        unless @policy.network_allowed?
+        url_string = url.to_s
+        unless @policy.allow_url?(url_string)
           raise AccessDeniedError.new(
             "plugin #{@plugin_id.inspect} cannot open URL #{url.inspect}: " \
-            "network access is disabled during analysis",
+            "URL is not permitted by the active TrustPolicy " \
+            "(network_policy=#{@policy.network_policy} allowed_url_hosts=#{@policy.allowed_url_hosts.inspect})",
             reason: :network_disabled,
-            resource: url.to_s
+            resource: url_string
           )
         end
 
-        raise NotImplementedError, "URL fetch surface is reserved; slice 2 only ships the deny path"
+        body = @http_client.get(url_string, timeout: URL_TIMEOUT_SECONDS, max_bytes: URL_MAX_BYTES)
+        record_url_entry(url_string, body)
+        body
       end
 
       # @return [Rigor::Cache::Descriptor] frozen snapshot of every
-      #   file the boundary has read so far. Calling this multiple
-      #   times yields equal descriptors; subsequent reads expand
-      #   the underlying record table.
+      #   file / URL the boundary has read so far. Calling this
+      #   multiple times yields equal descriptors; subsequent
+      #   reads expand the underlying record tables.
       def cache_descriptor
-        entries = @mutex.synchronize { @file_entries.values.dup }
-        Cache::Descriptor.new(files: entries)
+        files, configs = @mutex.synchronize { [@file_entries.values.dup, @config_entries.values.dup] }
+        Cache::Descriptor.new(files: files, configs: configs)
       end
 
       private
@@ -97,6 +123,53 @@ module Rigor
         entry = Cache::Descriptor::FileEntry.new(path: path, comparator: :digest, value: digest)
         @mutex.synchronize { @file_entries[path] = entry }
       end
+
+      def record_url_entry(url, body)
+        digest = Digest::SHA256.hexdigest(body)
+        key = "url:#{url}"
+        entry = Cache::Descriptor::ConfigEntry.new(key: key, value_hash: digest)
+        @mutex.synchronize { @config_entries[key] = entry }
+      end
+    end
+
+    # Default HTTP client wrapping `Net::HTTP`. Wraps a single
+    # `GET` over HTTPS. Specs inject a fake client that conforms
+    # to the same `#get(url, timeout:, max_bytes:)` shape so the
+    # tests don't require network access.
+    class DefaultHttpClient
+      # rubocop:disable Metrics/MethodLength
+      def get(url, timeout:, max_bytes:)
+        require "net/http"
+        require "uri"
+
+        uri = URI.parse(url)
+        body = +""
+        Net::HTTP.start(uri.host, uri.port, use_ssl: true,
+                                            open_timeout: timeout,
+                                            read_timeout: timeout) do |http|
+          http.request_get(uri.request_uri) do |response|
+            unless response.is_a?(Net::HTTPSuccess)
+              raise Plugin::AccessDeniedError.new(
+                "URL #{url.inspect} returned non-success status #{response.code}",
+                reason: :url_fetch_failed,
+                resource: url
+              )
+            end
+            response.read_body do |chunk|
+              body << chunk
+              if body.bytesize > max_bytes
+                raise Plugin::AccessDeniedError.new(
+                  "URL #{url.inspect} body exceeds #{max_bytes} bytes",
+                  reason: :url_body_too_large,
+                  resource: url
+                )
+              end
+            end
+          end
+        end
+        body
+      end
+      # rubocop:enable Metrics/MethodLength
     end
   end
 end

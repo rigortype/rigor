@@ -75,6 +75,47 @@ RSpec.describe Rigor::Plugin::TrustPolicy do
     it "is false while the policy is :disabled" do
       expect(described_class.new(network_policy: :disabled).network_allowed?).to be(false)
     end
+
+    it "is true while the policy is :allowlist" do
+      expect(described_class.new(network_policy: :allowlist).network_allowed?).to be(true)
+    end
+  end
+
+  describe "#allow_url? (v0.1.2)" do
+    it "is false while the policy is :disabled" do
+      policy = described_class.new(network_policy: :disabled, allowed_url_hosts: %w[example.com])
+      expect(policy.allow_url?("https://example.com/foo")).to be(false)
+    end
+
+    it "is true for an HTTPS URL whose host is on the allowlist" do
+      policy = described_class.new(network_policy: :allowlist, allowed_url_hosts: %w[example.com])
+      expect(policy.allow_url?("https://example.com/foo")).to be(true)
+    end
+
+    it "is false for a URL whose host is not on the allowlist" do
+      policy = described_class.new(network_policy: :allowlist, allowed_url_hosts: %w[example.com])
+      expect(policy.allow_url?("https://other.invalid/foo")).to be(false)
+    end
+
+    it "rejects HTTP (non-HTTPS) URLs" do
+      policy = described_class.new(network_policy: :allowlist, allowed_url_hosts: %w[example.com])
+      expect(policy.allow_url?("http://example.com/foo")).to be(false)
+    end
+
+    it "matches host case-insensitively" do
+      policy = described_class.new(network_policy: :allowlist, allowed_url_hosts: %w[Example.COM])
+      expect(policy.allow_url?("https://EXAMPLE.com/foo")).to be(true)
+    end
+
+    it "rejects a malformed URL string instead of raising" do
+      policy = described_class.new(network_policy: :allowlist, allowed_url_hosts: %w[example.com])
+      expect(policy.allow_url?("not a url")).to be(false)
+    end
+
+    it "is false when the allowlist is empty even under :allowlist policy" do
+      policy = described_class.new(network_policy: :allowlist, allowed_url_hosts: [])
+      expect(policy.allow_url?("https://example.com/foo")).to be(false)
+    end
   end
 
   describe "#gem_trusted?" do
@@ -92,12 +133,14 @@ RSpec.describe Rigor::Plugin::TrustPolicy do
         policy = described_class.new(
           trusted_gems: %w[rigor-rails],
           allowed_read_roots: [root],
-          network_policy: :disabled
+          network_policy: :allowlist,
+          allowed_url_hosts: %w[example.com]
         )
         h = policy.to_h
         expect(h["trusted_gems"]).to eq(%w[rigor-rails])
         expect(h["allowed_read_roots"]).to include(File.expand_path(root))
-        expect(h["network_policy"]).to eq("disabled")
+        expect(h["network_policy"]).to eq("allowlist")
+        expect(h["allowed_url_hosts"]).to eq(%w[example.com])
       end
     end
   end

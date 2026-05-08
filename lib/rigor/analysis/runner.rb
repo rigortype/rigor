@@ -140,7 +140,8 @@ module Rigor
         Plugin::TrustPolicy.new(
           trusted_gems: trusted_gems,
           allowed_read_roots: roots,
-          network_policy: @configuration.plugins_io_network
+          network_policy: @configuration.plugins_io_network,
+          allowed_url_hosts: @configuration.plugins_io_allowed_url_hosts
         )
       end
 

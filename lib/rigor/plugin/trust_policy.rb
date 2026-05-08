@@ -32,15 +32,18 @@ module Rigor
     #   `Gemfile.lock`, and each trusted gem's
     #   `Gem::Specification#full_gem_path`. The user extends this
     #   with `.rigor.yml`'s `plugins_io.allowed_paths:`.
-    # - `network_policy`: `:disabled` in slice 2; the only value
-    #   accepted today. Plugin {IoBoundary#open_url} always raises
-    #   while the policy is `:disabled`.
+    # - `network_policy`: one of {VALID_NETWORK_POLICIES}.
+    #   `:disabled` (default) makes {IoBoundary#open_url} always
+    #   raise. `:allowlist` (v0.1.2) consults `allowed_url_hosts`
+    #   on every fetch — the hostname must be on the list and
+    #   the URL scheme MUST be `https`. The list of allowed hosts
+    #   is exact-match (no wildcards in v0.1.2).
     class TrustPolicy
-      VALID_NETWORK_POLICIES = %i[disabled].freeze
+      VALID_NETWORK_POLICIES = %i[disabled allowlist].freeze
 
-      attr_reader :trusted_gems, :allowed_read_roots, :network_policy
+      attr_reader :trusted_gems, :allowed_read_roots, :network_policy, :allowed_url_hosts
 
-      def initialize(trusted_gems: [], allowed_read_roots: [], network_policy: :disabled)
+      def initialize(trusted_gems: [], allowed_read_roots: [], network_policy: :disabled, allowed_url_hosts: [])
         validate_network_policy!(network_policy)
 
         @trusted_gems = trusted_gems.map { |g| g.to_s.dup.freeze }.uniq.sort.freeze
@@ -50,6 +53,7 @@ module Rigor
                               .sort
                               .freeze
         @network_policy = network_policy
+        @allowed_url_hosts = allowed_url_hosts.map { |h| h.to_s.downcase.dup.freeze }.uniq.sort.freeze
         freeze
       end
 
@@ -67,6 +71,24 @@ module Rigor
         @network_policy != :disabled
       end
 
+      # @param url [String, URI]
+      # @return [Boolean] true when the URL scheme is `https` and
+      #   the parsed hostname is in `allowed_url_hosts`. Always
+      #   `false` while `network_policy` is `:disabled`.
+      def allow_url?(url)
+        return false if @network_policy == :disabled
+        return false if @allowed_url_hosts.empty?
+
+        require "uri"
+        uri = url.is_a?(URI::Generic) ? url : URI.parse(url.to_s)
+        return false unless uri.is_a?(URI::HTTPS)
+        return false if uri.host.nil?
+
+        @allowed_url_hosts.include?(uri.host.downcase)
+      rescue URI::InvalidURIError
+        false
+      end
+
       def gem_trusted?(name)
         @trusted_gems.include?(name.to_s)
       end
@@ -75,7 +97,8 @@ module Rigor
         {
           "trusted_gems" => trusted_gems,
           "allowed_read_roots" => allowed_read_roots,
-          "network_policy" => network_policy.to_s
+          "network_policy" => network_policy.to_s,
+          "allowed_url_hosts" => allowed_url_hosts
         }
       end
 

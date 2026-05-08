@@ -162,6 +162,25 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(captured_kwargs[:allowed_read_roots]).to include(end_with("/vendor/generated"))
       expect(captured_kwargs[:network_policy]).to eq(:disabled)
     end
+
+    it "threads `plugins_io.allowed_url_hosts` into the TrustPolicy (v0.1.2)" do
+      captured_kwargs = nil
+      allow(Rigor::Plugin::TrustPolicy).to receive(:new).and_wrap_original do |original, **kwargs|
+        captured_kwargs ||= kwargs
+        original.call(**kwargs)
+      end
+      analyze("x = 1\n", config: {
+                "plugins" => ["rigor-fake"],
+                "plugins_io" => {
+                  "network" => "allowlist",
+                  "allowed_url_hosts" => %w[raw.githubusercontent.com example.com]
+                }
+              })
+
+      expect(captured_kwargs).not_to be_nil
+      expect(captured_kwargs[:network_policy]).to eq(:allowlist)
+      expect(captured_kwargs[:allowed_url_hosts]).to contain_exactly("raw.githubusercontent.com", "example.com")
+    end
   end
 
   describe "target_ruby wiring (`.rigor.yml` -> Prism version:)" do

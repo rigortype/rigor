@@ -54,7 +54,8 @@ module Rigor
       },
       "plugins_io" => {
         "network" => "disabled",
-        "allowed_paths" => []
+        "allowed_paths" => [],
+        "allowed_url_hosts" => []
       },
       "severity_profile" => "balanced",
       "severity_overrides" => {}
@@ -70,6 +71,7 @@ module Rigor
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :disabled_rules,
                 :libraries, :signature_paths, :fold_platform_specific_paths,
                 :plugins_io_network, :plugins_io_allowed_paths,
+                :plugins_io_allowed_url_hosts,
                 :severity_profile, :severity_overrides
 
     # Loads a configuration file.
@@ -182,7 +184,8 @@ module Rigor
     end
     private_class_method :load_with_includes, :merge_includes, :resolve_paths_in, :deep_merge
 
-    def initialize(data = DEFAULTS) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
+    def initialize(data = DEFAULTS)
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
 
@@ -203,6 +206,7 @@ module Rigor
       @cache_path = cache.fetch("path").to_s
       @plugins_io_network = coerce_network_policy(plugins_io.fetch("network"))
       @plugins_io_allowed_paths = Array(plugins_io.fetch("allowed_paths")).map(&:to_s).freeze
+      @plugins_io_allowed_url_hosts = Array(plugins_io.fetch("allowed_url_hosts")).map(&:to_s).freeze
       @severity_profile = coerce_severity_profile(
         data.fetch("severity_profile", DEFAULTS.fetch("severity_profile"))
       )
@@ -210,6 +214,7 @@ module Rigor
         data.fetch("severity_overrides", DEFAULTS.fetch("severity_overrides"))
       )
     end
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
 
     def to_h
       {
@@ -226,7 +231,8 @@ module Rigor
         },
         "plugins_io" => {
           "network" => plugins_io_network.to_s,
-          "allowed_paths" => plugins_io_allowed_paths
+          "allowed_paths" => plugins_io_allowed_paths,
+          "allowed_url_hosts" => plugins_io_allowed_url_hosts
         },
         "severity_profile" => severity_profile.to_s,
         "severity_overrides" => severity_overrides.to_h { |k, v| [k, v.to_s] }
@@ -284,7 +290,7 @@ module Rigor
     # `Configuration` does not require the plugin namespace at
     # load time (Configuration is loaded before Plugin in
     # `lib/rigor.rb`); the two stay in lockstep via spec.
-    VALID_NETWORK_POLICIES = %i[disabled].freeze
+    VALID_NETWORK_POLICIES = %i[disabled allowlist].freeze
     private_constant :VALID_NETWORK_POLICIES
 
     def coerce_network_policy(value)

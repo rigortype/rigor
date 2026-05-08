@@ -64,17 +64,22 @@
       }
     },
     "plugins_io": {
-      "description": "Plugin I/O policy. `network: \"disabled\"` is the only network policy v0.1.x ships; loosening waits for a concrete plugin that needs it. `allowed_paths:` extends the default plugin read root (the project root) with extra absolute or relative paths.",
+      "description": "Plugin I/O policy. `network: \"disabled\"` (default) makes `Plugin::IoBoundary#open_url` always raise. `network: \"allowlist\"` (v0.1.2) consults `allowed_url_hosts:` on every fetch — the URL must be HTTPS and the hostname must be on the list. `allowed_paths:` extends the default plugin read root (the project root) with extra absolute or relative paths.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "network": {
-          "description": "Plugin network policy. Only `disabled` is currently supported.",
+          "description": "Plugin network policy. `disabled` denies every URL fetch; `allowlist` permits HTTPS fetches whose hostname is in `allowed_url_hosts`.",
           "type": "string",
-          "enum": ["disabled"]
+          "enum": ["disabled", "allowlist"]
         },
         "allowed_paths": {
           "description": "Extra read roots a plugin may access via `Plugin::IoBoundary`. Defaults to `[]` (project root only).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "allowed_url_hosts": {
+          "description": "Hostnames a plugin may fetch via `Plugin::IoBoundary#open_url` while `network: allowlist`. Exact-match (no wildcards in v0.1.2). Plugins fetching a URL whose hostname is not on the list raise `AccessDeniedError`.",
           "type": "array",
           "items": { "type": "string" }
         }

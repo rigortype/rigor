@@ -6,6 +6,7 @@ require "yaml"
 require "rigor/configuration"
 require "rigor/configuration/severity_profile"
 require "rigor/analysis/check_rules"
+require "rigor/plugin/trust_policy"
 
 RSpec.describe "Rigor configuration JSON Schema" do # rubocop:disable RSpec/DescribeClass
   let(:schema_path) { File.expand_path("../../schemas/rigor-config.schema.json", __dir__) }
@@ -48,9 +49,18 @@ RSpec.describe "Rigor configuration JSON Schema" do # rubocop:disable RSpec/Desc
     )
   end
 
-  it "constrains plugins_io.network to the documented enum" do
+  it "constrains plugins_io.network to the runtime VALID_NETWORK_POLICIES set" do
     enum = schema.dig("properties", "plugins_io", "properties", "network", "enum")
-    expect(enum).to eq(["disabled"])
+    expect(enum.to_set(&:to_sym)).to(
+      eq(Rigor::Plugin::TrustPolicy::VALID_NETWORK_POLICIES.to_set)
+    )
+  end
+
+  it "documents allowed_url_hosts under plugins_io" do
+    schema_obj = schema.dig("properties", "plugins_io", "properties", "allowed_url_hosts")
+    expect(schema_obj).not_to be_nil
+    expect(schema_obj["type"]).to eq("array")
+    expect(schema_obj.dig("items", "type")).to eq("string")
   end
 
   it "ships the schema reference comment on the committed `.rigor.dist.yml`" do

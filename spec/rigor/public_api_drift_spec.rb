@@ -174,7 +174,9 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   PLUGIN_TRUST_POLICY_INSTANCE = %w[
     allow_read?(req:path)
+    allow_url?(req:url)
     allowed_read_roots()
+    allowed_url_hosts()
     gem_trusted?(req:name)
     network_allowed?()
     network_policy()

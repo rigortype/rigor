@@ -50,8 +50,9 @@ classes:
         arity: 1
         defined_at: references/ruby/string.c:12794
         c_body_at: references/ruby/string.c:6548
-        c_effects: []
-        purity: leaf
+        c_effects:
+        - mutate
+        purity: mutates_self
         rbs:
         - "(string other_string) -> self"
         rbs_at: references/rbs/core/string.rbs:4019
@@ -61,8 +62,9 @@ classes:
         arity: 1
         defined_at: references/ruby/string.c:12795
         c_body_at: references/ruby/string.c:6548
-        c_effects: []
-        purity: leaf
+        c_effects:
+        - mutate
+        purity: mutates_self
       "<=>":
         source: c
         cfunc: rb_str_cmp_m
@@ -1167,8 +1169,9 @@ classes:
         arity: -1
         defined_at: references/ruby/string.c:12904
         c_body_at: references/ruby/string.c:10172
-        c_effects: []
-        purity: leaf
+        c_effects:
+        - mutate
+        purity: mutates_self
         rbs:
         - "(nil) -> nil"
         - "(?string? separator) -> self?"
@@ -1223,8 +1226,9 @@ classes:
         arity: 1
         defined_at: references/ruby/string.c:12909
         c_body_at: references/ruby/string.c:11476
-        c_effects: []
-        purity: leaf
+        c_effects:
+        - mutate
+        purity: mutates_self
         rbs:
         - "(string suffix) -> self?"
         rbs_at: references/rbs/core/string.rbs:2664
@@ -1459,8 +1463,9 @@ classes:
         arity: 1
         defined_at: references/ruby/string.c:12937
         c_body_at: references/ruby/string.c:11563
-        c_effects: []
-        purity: leaf
+        c_effects:
+        - mutate
+        purity: mutates_self
         rbs:
         - "(encoding enc) -> self"
         rbs_at: references/rbs/core/string.rbs:3207

@@ -33,8 +33,9 @@ classes:
         arity: -1
         defined_at: references/ruby/range.c:2851
         c_body_at: references/ruby/range.c:103
-        c_effects: []
-        purity: leaf
+        c_effects:
+        - mutate
+        purity: mutates_self
         rbs:
         - "(Elem from, Elem to, ?boolish exclude_end) -> void"
         rbs_at: references/rbs/core/range.rbs:608
@@ -44,8 +45,9 @@ classes:
         arity: 1
         defined_at: references/ruby/range.c:2852
         c_body_at: references/ruby/range.c:115
-        c_effects: []
-        purity: leaf
+        c_effects:
+        - mutate
+        purity: mutates_self
       "==":
         source: c
         cfunc: range_eq

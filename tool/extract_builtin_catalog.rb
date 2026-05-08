@@ -632,7 +632,7 @@ class CBodyIndex
   TYPE_LINE_RE = /\b(?:VALUE|void|int|long|double|bool|char|short|unsigned|size_t|ID|rb_\w+_t)\b\s*\*?\s*\z/
   MACRO_ALIAS_RE = /\A\s*#\s*define\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*$/
 
-  Body = Struct.new(:cfunc, :path, :start_line, :text, keyword_init: true)
+  Body = Struct.new(:cfunc, :path, :start_line, :text, :params, keyword_init: true)
 
   def initialize(paths)
     @paths = paths
@@ -651,18 +651,33 @@ class CBodyIndex
     @bodies[target]
   end
 
-  # Returns the set of cfunc names whose bodies are pure
-  # `rb_check_frozen(self)` wrappers — the per-class
-  # mutation-gate helpers (`time_modify`, `str_modifiable`, …)
-  # that the C-body classifier MUST treat the same way as
-  # `rb_check_frozen` itself. Naive transitive propagation
-  # (every function that calls a mutator helper) over-flags
-  # legitimate non-mutators like `Array#to_a` whose internal
-  # helpers touch a freshly-allocated array, so the helper set
-  # is restricted to bodies that ONLY consist of one or more
-  # `rb_check_frozen` calls (with no other content). Cross-
-  # source helpers and complex wrappers continue to need a
-  # per-class blocklist entry.
+  # Returns the set of cfunc names whose bodies are mutation-
+  # gate helpers — the per-class wrappers (`time_modify`,
+  # `str_modifiable`, …) that the C-body classifier MUST treat
+  # the same way as `rb_check_frozen` itself.
+  #
+  # Two seeding rules feed the set:
+  #
+  # 1. **Pure frozen-check wrappers**: bodies that consist of
+  #    one or more `rb_check_frozen(...)` calls and nothing
+  #    else.
+  # 2. **Transitive closure** (v0.1.2 extension): bodies that
+  #    call an already-recognised helper `h(<param>, ...)`
+  #    where `<param>` is one of the wrapper's own formal
+  #    parameters. The "first arg is our parameter" rule is
+  #    the safety net against the `Array#to_a` regression
+  #    (`rb_ary_to_a` allocates `dup` then calls
+  #    `rb_ary_replace(dup, ary)` — the first arg is `dup`,
+  #    a local, NOT one of the function's formal params, so
+  #    `rb_ary_to_a` is correctly excluded). The closure runs
+  #    to a fixed point, picking up two-hop chains like
+  #    `time_localtime_m -> time_localtime -> time_modify`
+  #    that the previous "frozen-check only" recogniser
+  #    missed.
+  #
+  # Cross-source helpers and complex wrappers that don't
+  # match either rule still need a per-class blocklist entry
+  # in the corresponding `*_catalog.rb` file.
   def mutator_helpers
     @mutator_helpers ||= compute_mutator_helpers
   end
@@ -688,12 +703,56 @@ class CBodyIndex
     @bodies ||= build
     helpers = Set.new
 
+    # Seed-only recognition: a function is a mutator helper
+    # iff its body matches the pure-frozen-check shape OR its
+    # name follows the `_modify` / `_modifiable` convention
+    # AND its body issues a frozen-check call.
+    #
+    # Earlier iterations of this slice tried a "transitive
+    # closure on first-arg-is-formal-param" rule to chain
+    # through helpers like `time_localtime -> time_modify`.
+    # The closure caught a few real cases (`Time#localtime`
+    # via `time_localtime_m`) but also false-positived on
+    # functions where the first arg is a formal param yet the
+    # helper doesn't actually mutate that arg (`rb_ary_reject`
+    # passes `ary` to `ary_reject` which iterates `ary` and
+    # pushes to a separately-passed array). Static C-level
+    # analysis can't distinguish "uses formal as receiver" from
+    # "uses formal as input"; the closure was too permissive
+    # for v0.1.x conservatism. The seed-only recogniser is the
+    # principled middle ground — it catches the gates the
+    # original v0.0.5 fix missed (`str_modifiable`,
+    # `rb_struct_modify`, `rb_class_modify_check`, …) without
+    # the over-classification risk. Per-class blocklists in
+    # `*_catalog.rb` continue to absorb anything still missing.
     @bodies.each do |name, body|
       stripped = CBodyClassifier.strip_comments(body.text)
-      helpers << name if pure_frozen_check_wrapper?(stripped)
+      helpers << name if pure_frozen_check_wrapper?(stripped) || naming_convention_helper?(name, stripped)
     end
 
     helpers
+  end
+
+  # Parses the parenthesised argument list off a function
+  # signature like `static VALUE \nfoo(VALUE x, int y)\n`. The
+  # caller passes the joined header text up to (but not
+  # including) the opening brace. Returns an Array of formal
+  # parameter names, or [] when the parse fails or the
+  # signature is `(void)` / unparseable.
+  def parse_signature_params(header_text)
+    match = header_text.match(/\(([^)]*)\)/m)
+    return [] unless match
+
+    raw = match[1].strip
+    return [] if raw.empty? || raw == "void"
+
+    raw.split(",").filter_map do |chunk|
+      # Take the last identifier of each comma-separated
+      # parameter slot — that's the formal name (the rest is
+      # the type, possibly with `*` or `[]` decoration).
+      ident = chunk.gsub(/[*\[\]]/, " ").split.last
+      ident if ident && ident.match?(/\A[A-Za-z_]\w*\z/)
+    end
   end
 
   PURE_FROZEN_CHECK_RE = /\A
@@ -703,8 +762,28 @@ class CBodyIndex
   \z/x
   private_constant :PURE_FROZEN_CHECK_RE
 
+  # Matches names like `str_modifiable`, `time_modify`,
+  # `rb_struct_modify`, `rb_class_modify_check`, `range_modify`,
+  # `str_modify_keep_cr`. Requires word boundaries around the
+  # `_modify` / `_modifiable` token so unrelated names like
+  # `something_modifier` don't accidentally match.
+  NAMING_HELPER_RE = /(?:_(?:modify|modifiable))(?:\b|_)/
+  private_constant :NAMING_HELPER_RE
+
   def pure_frozen_check_wrapper?(text)
     PURE_FROZEN_CHECK_RE.match?(text)
+  end
+
+  # Naming-convention helper: function name matches the
+  # `_modify` / `_modifiable` convention AND its body issues
+  # a `rb_check_frozen` / `rb_check_lockedtmp` call. The
+  # body-content guard rules out a function that just happens
+  # to have `_modify` in its name without actually being a
+  # mutation gate.
+  def naming_convention_helper?(name, stripped_text)
+    return false unless NAMING_HELPER_RE.match?(name)
+
+    stripped_text.include?("rb_check_frozen") || stripped_text.include?("rb_check_lockedtmp")
   end
 
   def collect_macro_alias(line)
@@ -740,7 +819,10 @@ class CBodyIndex
             end
             if k < lines.length
               body_text = lines[j..k].join
-              bodies[name] ||= Body.new(cfunc: name, path: rel, start_line: i + 1, text: body_text)
+              params = parse_signature_params(lines[i..(j - 1)].join)
+              bodies[name] ||= Body.new(
+                cfunc: name, path: rel, start_line: i + 1, text: body_text, params: params
+              )
               i = k + 1
               next
             end
@@ -809,24 +891,77 @@ module CBodyClassifier
   /x
   RAISE_RE = /\b(?:rb_raise\w*|rb_num_zerodiv|rb_cmperr\w*|rb_name_error\w*|rb_bug)\b/
 
-  def classify(body_text, mutator_helpers: nil)
+  def classify(body_text, mutator_helpers: nil, formal_params: [])
     text = strip_comments(body_text)
 
     {
       block: text =~ BLOCK_RE ? true : false,
-      mutate: mutates?(text, mutator_helpers),
+      mutate: mutates?(text, mutator_helpers, formal_params),
       coerce_fallback: text =~ COERCE_FALLBACK_RE ? true : false,
       dispatch: text =~ DISPATCH_RE ? true : false,
       raises: text =~ RAISE_RE ? true : false
     }
   end
 
-  def mutates?(text, mutator_helpers)
+  # A body counts as mutating self iff:
+  # - the stripped text contains one of the curated raw
+  #   mutators in `MUTATE_RE` (`rb_str_modify`, `rb_ary_pop`,
+  #   etc.), or
+  # - the body calls a `mutator_helpers` member whose first
+  #   argument is one of the body's own formal parameters
+  #   (`time_localtime` calls `time_modify(time)` where `time`
+  #   is a formal param). The "first arg = formal param" rule
+  #   is the safety net that keeps allocator-mutators out —
+  #   `rb_ary_to_a` calls `rb_ary_replace(dup, ary)` where the
+  #   first arg is `dup` (a local), so the body falls through
+  #   the helper match.
+  def mutates?(text, mutator_helpers, formal_params)
     return true if text =~ MUTATE_RE
-    return false if mutator_helpers.nil? || mutator_helpers.empty?
 
-    pattern = Regexp.union(*mutator_helpers.to_a.map { |h| /\b#{Regexp.escape(h)}\b/ })
-    text =~ pattern ? true : false
+    calls_helper_on_own_param?(text, mutator_helpers, formal_params)
+  end
+
+  # Formal parameter names that the convention reserves for
+  # variadic-method bookkeeping (`int argc, VALUE *argv, VALUE
+  # self`). The "self" position in such a signature is the
+  # final formal, not `argc` / `argv` — and only the self
+  # position is what a downstream mutator helper would target.
+  # Filtering these out prevents false-positive matches on
+  # `helper(argc, ...)` patterns that have nothing to do with
+  # mutation.
+  VARARG_FORMAL_NAMES = %w[argc argv _argc _argv].freeze
+
+  def calls_helper_on_own_param?(body_text, helpers, formal_params)
+    return false if helpers.nil? || helpers.empty?
+    return false if formal_params.nil? || formal_params.empty?
+
+    text = body_text.is_a?(String) ? body_text : body_text.to_s
+    text = strip_comments(text)
+    candidates = formal_params - VARARG_FORMAL_NAMES
+    candidates.any? do |param|
+      next false if formal_param_reassigned?(text, param)
+
+      helpers.any? do |helper|
+        text.match?(/\b#{Regexp.escape(helper)}\s*\(\s*#{Regexp.escape(param)}\b/)
+      end
+    end
+  end
+
+  # Detects `<param> = ...` (excluding `==` / `>=` / `<=` / `!=`)
+  # — the C shadowing pattern that lets a body locally
+  # reassign a formal parameter (`time = time_dup(time);`).
+  # When a formal is reassigned, downstream uses of the same
+  # identifier no longer refer to the caller's value, so a
+  # syntactic `helper(<formal>, ...)` match would falsely
+  # imply the caller's value is mutated.
+  #
+  # The negative lookbehind on `[.\w>]` excludes struct
+  # field initialisers (`.self = self`), arrow-deref
+  # initialisers (`x->self = ...`), and identifier prefix
+  # matches (`myself = ...`) — none of those reassign the
+  # formal binding.
+  def formal_param_reassigned?(text, param)
+    text.match?(/(?<![.\w>])#{Regexp.escape(param)}\s*=(?![=])/)
   end
 
   def strip_comments(text)
@@ -1136,7 +1271,9 @@ class CatalogBuilder # rubocop:disable Metrics/ClassLength
     end
 
     record["c_body_at"] = "#{body.path}:#{body.start_line}"
-    effects = CBodyClassifier.classify(body.text, mutator_helpers: @c_bodies.mutator_helpers)
+    effects = CBodyClassifier.classify(
+      body.text, mutator_helpers: @c_bodies.mutator_helpers, formal_params: body.params || []
+    )
     record["c_effects"] = effects.select { |_, v| v }.keys.map(&:to_s)
     record["purity"] = c_purity_from_effects(effects)
   end

@@ -64,6 +64,7 @@ When a change touches type-language behaviour or analyzer-internal contracts, th
 | [`docs/adr/7-v0.1.0-slice-decisions.md`](docs/adr/7-v0.1.0-slice-decisions.md) | Working decisions for v0.1.0 slices 4 – 6 (FlowContribution wiring through internal narrowing, plugin diagnostic emission protocol, plugin-side cache producers). |
 | [`docs/adr/8-steep-inspired-improvements.md`](docs/adr/8-steep-inspired-improvements.md) | Working decisions for the Steep-inspired improvements (diagnostic family hierarchy, severity profile, `def.return-type-mismatch` rule). |
 | [`docs/adr/9-cross-plugin-api.md`](docs/adr/9-cross-plugin-api.md) | Proposed cross-plugin API (`Plugin::FactStore` + `Plugin::Base#prepare(services)` + `manifest(consumes:)`). Queued for v0.1.x. Required before `rigor-actionpack` Phase 1 / `rigor-factorybot` can land. |
+| [`docs/adr/10-dependency-source-inference.md`](docs/adr/10-dependency-source-inference.md) | Proposed opt-in `dependencies.source_inference` for gems shipping no RBS / RBS::Inline. Walker contributes `Dynamic[T]` returns at a dispatcher tier strictly below plugins. Per-gem budget pools, per-gem-version cache slice, hard-excluded `spec/` / `test/` / `bin/` / C extensions. Implementation queued (target v0.1.3+). |
 
 ## Skills available in this repository
 

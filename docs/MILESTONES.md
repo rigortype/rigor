@@ -274,6 +274,10 @@ The other three example plugins (`rigor-deprecations`, `rigor-statesman`, `rigor
 
 The full "Out of scope for v0.1.1" list above applies (minus the now-closed interface-strictness and `Data.define` items) — new `flow.*` / `def.*` rule families, `Plugin::IoBoundary#open_url`, `rigor:v1:conforms-to`, DX tooling track, LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT.
 
+**New deferred item (queued; not yet committed to a release):**
+
+- **Opt-in dependency-source inference.** Walk the Ruby implementation of opt-in gems (those with no RBS / RBS::Inline) instead of degrading to `Dynamic[top]` at the dependency boundary. Design fixed in [ADR-10](adr/10-dependency-source-inference.md): `dependencies.source_inference` config axis, `Dynamic[T]`-wrapped returns, dispatcher tier strictly below plugins, per-gem budget pools, per-gem-version cache slice via new `Cache::Descriptor::DependencyEntry`. Five implementation slices (config plumbing → walker → cache descriptor → per-gem budget → docs). Earliest target v0.1.3, but not committed there; entry depends on the v0.1.x core branch's bandwidth after the Rails plugin parallel track stabilises.
+
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 
 The full roadmap is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Summary of the running track:

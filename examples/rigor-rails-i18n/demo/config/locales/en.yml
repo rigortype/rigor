@@ -1,0 +1,8 @@
+en:
+  users:
+    welcome: "Welcome, %{name}"
+    bye: "Goodbye"
+  errors:
+    messages:
+      blank: "can't be blank"
+      too_short: "is too short (minimum is %{count} characters)"

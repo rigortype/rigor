@@ -1,0 +1,4 @@
+ja:
+  users:
+    welcome: "ようこそ、%{name}さん"
+    bye: "さようなら"

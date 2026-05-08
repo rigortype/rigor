@@ -1,0 +1,11 @@
+paths:
+  - demo.rb
+  - errors_demo.rb
+
+plugins:
+  - gem: rigor-rails-i18n
+    config:
+      configured_locales: ["en", "ja"]
+
+cache:
+  path: tmp/.rigor/cache

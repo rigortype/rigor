@@ -14,6 +14,15 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — example plugin: `rigor-activejob`
+
+- **Tier 1D Rails ecosystem plugin (per [`docs/design/20260508-rails-plugins-roadmap.md`](docs/design/20260508-rails-plugins-roadmap.md)).** Discovers ActiveJob subclasses by walking the configured `job_search_paths` (default `app/jobs/`) — direct-superclass match against `job_base_classes` (default `ApplicationJob` / `ActiveJob::Base`) — and validates `Job.perform_later(...)` / `.perform_now(...)` / `.perform(...)` argument arity at every call site. No Rails runtime dependency: the plugin reads project source via Prism only.
+- **Arity envelope per discovered job.** The discoverer reads the `#perform` method's syntactic parameter list and computes `(min_arity, max_arity)`. `def perform(user_id, locale = "en")` → `1..2`. `def perform(*ids)` → `0+`. Required keyword arguments are recognised but not yet validated at the call site (positional-only for v0.1.0).
+- **Diagnostics.** `plugin.activejob.job-call` (info) names the matched `#perform` arity; `plugin.activejob.wrong-arity` (error) fires when the call site's positional count is outside the envelope. Calls with non-constant receivers are silently passed through.
+- **Cached producer.** `producer :job_index` rides `Plugin::Base#cache_for`; the descriptor's auto-collected `FileEntry` digests invalidate the cache when any file under `job_search_paths` changes.
+- **Demo project** under `examples/rigor-activejob/demo/` — `app/jobs/welcome_email_job.rb` declares two jobs (one with optional args, one with `*rest`); `demo.rb` exercises every recognised call shape; `errors_demo.rb` triggers each error path. Cache rooted at `tmp/.rigor/cache` per the existing convention.
+- **Integration spec** at [`spec/integration/examples/activejob_plugin_spec.rb`](spec/integration/examples/activejob_plugin_spec.rb) — 9 examples covering `perform_later` / `perform_now` / unbounded `*rest`, the two wrong-arity variants, the discoverer's edge cases (non-job receivers silently passed; non-base-class superclasses excluded), and the `job_base_classes` config override.
+
 ### Added — example plugin: `rigor-rails-routes`
 
 - **First Tier 1 plugin in Rigor's Rails ecosystem family.** Statically interprets `config/routes.rb` via Prism — no Rails runtime dependency — and validates every `*_path` / `*_url` call site against the generated helper table. Recognises the v0.1.0 DSL surface from [`docs/design/20260508-rails-plugins-roadmap.md`](docs/design/20260508-rails-plugins-roadmap.md): `Rails.application.routes.draw`, `resources` / `resource` (with `only:` / `except:`), `get`/`post`/`patch`/`put`/`delete` with `as:`, `root to:`, one level of `namespace`, one level of nested `resources`. Both `_path` and `_url` forms emit info diagnostics naming the HTTP method + path; typos surface as `unknown-helper` errors with did-you-mean suggestions; arity mismatches surface as `wrong-arity` errors.

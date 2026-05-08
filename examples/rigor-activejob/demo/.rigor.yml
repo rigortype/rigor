@@ -1,0 +1,10 @@
+paths:
+  - demo.rb
+  - errors_demo.rb
+  - app/jobs/welcome_email_job.rb
+
+plugins:
+  - rigor-activejob
+
+cache:
+  path: tmp/.rigor/cache

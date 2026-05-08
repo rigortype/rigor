@@ -1,0 +1,10 @@
+paths:
+  - demo.rb
+  - errors_demo.rb
+  - app/mailers/user_mailer.rb
+
+plugins:
+  - rigor-actionmailer
+
+cache:
+  path: tmp/.rigor/cache

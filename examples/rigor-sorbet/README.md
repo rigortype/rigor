@@ -1,4 +1,4 @@
-# rigor-sorbet (slices 1 + 2 + 3 + 4 + 5)
+# rigor-sorbet (slices 1 + 2 + 3 + 4 + 5 + 6 — feature-complete)
 
 The eighth worked example. Reads inline Sorbet `sig { ... }`
 blocks on first-party Ruby code and contributes the parsed
@@ -28,11 +28,20 @@ sigil enforcement (e.g. only firing `T.let` recognition in
 `flow_contribution_for` and lives behind a future plugin-
 contract widening slice.
 
-This is **slices 1 + 2 + 3 + 4 + 5 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**.
-The remaining slice wires `T.absurd` into
-`flow.unreachable-branch` (slice 6). `T.bind`,
+Slice 6 wires `T.absurd(x)` into Rigor's flow-sensitive
+narrowing. The plugin treats every `T.absurd` call as
+exceptional (`return_type: bot`, `exceptional: :raises`,
+matching Sorbet's runtime behaviour) AND surfaces
+`plugin.sorbet.absurd-reachable` warnings when the
+discriminant didn't narrow to `bot` at the call site.
+
+This is **all six slices of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**
+— the plugin's primary surface is feature-complete. `T.bind`,
 `T.assert_type!`, `T.must_because`, and `T.reveal_type`
-remain deferred to a slice-2 follow-up.
+remain deferred to a slice-2 follow-up; per-call-site sigil
+enforcement (e.g. only firing `T.let` recognition in
+`# typed: true`+ files) lives behind a future plugin-contract
+widening.
 
 ## What the plugin recognises
 
@@ -89,6 +98,49 @@ demo/errors_demo.rb:25:3: plugin.sorbet.parse-error
 demo/errors_demo.rb:34:3: plugin.sorbet.parse-error
   Two `sig` blocks in a row; the first one has no following method definition.
 ```
+
+## Slice 6 — `T.absurd` exhaustiveness
+
+`T.absurd(x)` is Sorbet's idiom for case/when exhaustiveness:
+
+```ruby
+case x
+when A then ...
+when B then ...
+else
+  T.absurd(x)        # asserts the else branch is unreachable
+end
+```
+
+Slice 6 implements two parts:
+
+1. **Runtime-faithful contribution.** Every `T.absurd(x)`
+   call gets `return_type: bot` and `exceptional: :raises`.
+   The engine's flow analysis treats code after `T.absurd`
+   as unreachable, matching Sorbet's runtime semantics
+   (`T.absurd` always raises).
+2. **`plugin.sorbet.absurd-reachable` diagnostic.** When the
+   discriminant `x`'s type at the absurd call hasn't been
+   narrowed to `bot`, the call is mistakenly reachable. The
+   plugin records the call node during
+   `flow_contribution_for` and surfaces the warning in
+   `diagnostics_for_file`:
+
+   ```text
+   demo.rb:42:5: warning: `T.absurd` is reachable: the discriminant did not
+                          narrow to `T.noreturn`. Either add the missing case
+                          branch above the `else`, or remove the `T.absurd(...)` call.
+                          [plugin.sorbet.absurd-reachable]
+   ```
+
+The detection's accuracy depends on Rigor's flow-sensitive
+narrowing — `is_a?` / `kind_of?` / `nil?` work precisely;
+`case`/`when` narrowing over symbols / non-Class
+discriminants is less precise as of v0.1.3, so the plugin
+may emit false-positive `absurd-reachable` warnings for
+fully-exhausted symbol enums until the engine's case
+narrowing improves. The plugin's own logic is unchanged in
+that future scenario.
 
 ## Slice 5 sigil honoring
 
@@ -231,6 +283,7 @@ examples/rigor-sorbet/
 │           ├── sig_parser.rb          ← chained-call mini-interpreter
 │           ├── type_translator.rb     ← Sorbet → Rigor types
 │           ├── assertion_recognizer.rb ← T.let / T.cast / T.must / T.unsafe
+│           ├── absurd_recognizer.rb   ← T.absurd exhaustiveness composition
 │           └── sigil_detector.rb      ← `# typed: ignore` / false / true / strict / strong
 └── demo/
     ├── .rigor.yml

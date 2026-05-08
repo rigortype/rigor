@@ -423,6 +423,68 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
     end
   end
 
+  describe "T.absurd exhaustiveness (ADR-11 slice 6)" do
+    # Slice 6 relies on Rigor's existing flow-sensitive
+    # narrowing to decide whether the discriminant has been
+    # narrowed to `bot` at the absurd call. `is_a?` narrowing
+    # is precise; `case`/`when` over symbols isn't (as of
+    # v0.1.3 — covered by an open-question in ADR-11). Tests
+    # use the precise pattern so they exercise the plugin's
+    # logic, not the engine's narrowing strength.
+
+    it "stays silent when the discriminant narrows to bot via `is_a?`" do
+      # `Constant<1>` minus `Integer` collapses to `bot`, so
+      # the else branch is unreachable and `T.absurd` is
+      # correct.
+      source = <<~RUBY
+        #{SIG_STUB}
+        val = 1
+        if val.is_a?(Integer)
+          puts(val)
+        else
+          T.absurd(val)
+        end
+      RUBY
+      reachable = plugin_diagnostics(run_plugin(source: source)).select { |d| d.rule == "absurd-reachable" }
+      expect(reachable).to be_empty
+    end
+
+    it "emits `absurd-reachable` when the discriminant remains reachable" do
+      # `Integer` minus `String` is `Integer`, not `bot`, so
+      # the else branch IS reachable — `T.absurd` is wrong.
+      source = <<~RUBY
+        #{SIG_STUB}
+        val = T.let(1, Integer)
+        if val.is_a?(String)
+          puts(val)
+        else
+          T.absurd(val)
+        end
+      RUBY
+      reachable = plugin_diagnostics(run_plugin(source: source)).select { |d| d.rule == "absurd-reachable" }
+      expect(reachable.size).to eq(1)
+      expect(reachable.first.message).to include("did not narrow")
+    end
+
+    it "stays silent when the engine determines the entire else branch is dead before typing" do
+      # `nil.nil?` is statically `true`, so the engine prunes
+      # the else branch entirely — `flow_contribution_for` is
+      # never called for the `T.absurd` and our recorded set
+      # stays empty.
+      source = <<~RUBY
+        #{SIG_STUB}
+        val = nil
+        if val.nil?
+          puts("nil")
+        else
+          T.absurd(val)
+        end
+      RUBY
+      reachable = plugin_diagnostics(run_plugin(source: source)).select { |d| d.rule == "absurd-reachable" }
+      expect(reachable).to be_empty
+    end
+  end
+
   describe "type assertion recognition (ADR-11 slice 2)" do
     it "narrows `T.let(expr, T)` to the asserted type" do
       source = <<~RUBY

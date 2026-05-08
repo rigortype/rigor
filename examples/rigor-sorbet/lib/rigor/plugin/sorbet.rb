@@ -9,6 +9,7 @@ require_relative "sorbet/type_translator"
 require_relative "sorbet/sig_parser"
 require_relative "sorbet/catalog_walker"
 require_relative "sorbet/assertion_recognizer"
+require_relative "sorbet/absurd_recognizer"
 require_relative "sorbet/sigil_detector"
 
 module Rigor
@@ -95,6 +96,16 @@ module Rigor
         @catalog = nil
         @parse_errors_by_path = {}
         @catalog_built = false
+        # ADR-11 slice 6 — Prism nodes for `T.absurd` calls
+        # we observed in `flow_contribution_for` to be
+        # *reachable* (i.e., their discriminant didn't narrow
+        # to `bot`). `diagnostics_for_file` walks the per-file
+        # AST and surfaces these as `plugin.sorbet.absurd-reachable`
+        # warnings. Hash is keyed on the Prism node's
+        # `object_id` because the runner only parses each file
+        # once per run, so identity is stable across the two
+        # plugin hooks.
+        @reachable_absurd_nodes = {}.compare_by_identity
       end
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
@@ -104,7 +115,9 @@ module Rigor
         # symlink-bearing form here. Look up under both so the
         # match is symlink-agnostic.
         errors = @parse_errors_by_path[path] || @parse_errors_by_path[canonicalize(path)] || []
-        errors.map { |error| parse_error_diagnostic(path, error) }
+        diagnostics = errors.map { |error| parse_error_diagnostic(path, error) }
+        diagnostics.concat(absurd_reachable_diagnostics(path, root))
+        diagnostics
       end
 
       # ADR-11 slice 1 — return-type contribution from the
@@ -122,6 +135,17 @@ module Rigor
       # where the sig is on the called method's own class.
       def flow_contribution_for(call_node:, scope:)
         return nil unless call_node.is_a?(Prism::CallNode)
+
+        # ADR-11 slice 6 — `T.absurd(x)` exhaustiveness. Always
+        # contributes a `bot` return + raise effect (matches
+        # Sorbet's runtime behaviour); when the discriminant
+        # *isn't* narrowed to `bot` at this scope, also records
+        # the call node so `diagnostics_for_file` can surface a
+        # `plugin.sorbet.absurd-reachable` warning.
+        if AbsurdRecognizer.absurd_call?(call_node)
+          @reachable_absurd_nodes[call_node] = true unless AbsurdRecognizer.exhaustive?(call_node, scope)
+          return AbsurdRecognizer.contribution(call_node, manifest.id)
+        end
 
         # ADR-11 slice 2 — `T.let` / `T.cast` / `T.must` /
         # `T.unsafe` are checked first because they're cheaper
@@ -279,6 +303,45 @@ module Rigor
         # vanished between glob and read; the plugin produces
         # no output for them.
         nil
+      end
+
+      # Walks the per-file AST looking for `T.absurd(x)` call
+      # nodes and emits a `plugin.sorbet.absurd-reachable`
+      # warning for any whose object identity matches
+      # `@reachable_absurd_nodes` (populated during the engine's
+      # earlier pass through `flow_contribution_for`). Pops
+      # matched entries so a duplicate run doesn't double-emit.
+      def absurd_reachable_diagnostics(path, root)
+        return [] if @reachable_absurd_nodes.empty?
+
+        diagnostics = []
+        walk_for_absurd(root) do |call_node|
+          next unless @reachable_absurd_nodes.delete(call_node)
+
+          diagnostics << absurd_diagnostic(path, call_node)
+        end
+        diagnostics
+      end
+
+      def walk_for_absurd(node, &)
+        return unless node.is_a?(Prism::Node)
+
+        yield node if node.is_a?(Prism::CallNode) && AbsurdRecognizer.absurd_call?(node)
+        node.compact_child_nodes.each { |child| walk_for_absurd(child, &) }
+      end
+
+      def absurd_diagnostic(path, call_node)
+        location = call_node.location
+        Rigor::Analysis::Diagnostic.new(
+          path: path,
+          line: location.start_line,
+          column: location.start_column + 1,
+          message: "`T.absurd` is reachable: the discriminant did not narrow to `T.noreturn`. " \
+                   "Either add the missing case branch above the `else`, or remove the " \
+                   "`T.absurd(...)` call.",
+          severity: :warning,
+          rule: "absurd-reachable"
+        )
       end
 
       def parse_error_diagnostic(path, error)

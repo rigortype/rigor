@@ -13,7 +13,7 @@ Project-level briefing for Claude (and any other agent that reads top-level docs
 | [`docs/MILESTONES.md`](docs/MILESTONES.md) | Release-by-release commitment envelope. v0.0.3 → v0.0.9 (released), v0.1.0 (all six slices landed; release pending), v0.1.1 (planned — regex pattern → refinement-name recogniser), Rails ecosystem plugins (running parallel track). |
 | [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) | Resume bookmark for the next implementer. Names the v0.1.0 ship-readiness state, the v0.1.1 entry slice, the Rails plugin parallel track, and open engineering items. Transient. |
 | [`docs/design/20260508-rails-plugins-roadmap.md`](docs/design/20260508-rails-plugins-roadmap.md) | Roadmap for the `rigor-*` Rails ecosystem plugins. Tier table, dependency graph, per-plugin sketches, subtree-split readiness checklist. Use when planning new Rails-side plugin work. |
-| [`examples/README.md`](examples/README.md) | Plugin-authoring landing page. Comparison table across the thirteen worked examples (eight plugin-contract walkthroughs + five Rails ecosystem plugins covering Tier 1 + Tier 3B) + recommended reading order. Reach for this when authoring a plugin or answering "how do I use the plugin contract for X?". |
+| [`examples/README.md`](examples/README.md) | Plugin-authoring landing page. Comparison table across the fourteen worked examples (eight plugin-contract walkthroughs + six Rails ecosystem plugins covering Tier 1 + Tier 3B + Tier 3C) + recommended reading order. Reach for this when authoring a plugin or answering "how do I use the plugin contract for X?". |
 
 ## Authoritative specifications
 

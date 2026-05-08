@@ -1,0 +1,10 @@
+paths:
+  - demo.rb
+  - errors_demo.rb
+  - app/workers/welcome_email_worker.rb
+
+plugins:
+  - rigor-sidekiq
+
+cache:
+  path: tmp/.rigor/cache

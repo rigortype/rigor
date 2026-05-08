@@ -357,6 +357,72 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
     end
   end
 
+  describe "sigil honoring (ADR-11 slice 5)" do
+    it "skips a file marked `# typed: ignore` during catalog harvest" do
+      # The RBI declares Slug.default_length, but the file is
+      # `# typed: ignore` so rigor-sorbet must not record the
+      # sig. Without the contribution, the chained `.even?`
+      # call on the receiver wouldn't carry an Integer type;
+      # we assert the silent-degradation outcome (no plugin
+      # diagnostic about the missing contribution, no crash).
+      ignored_rbi = <<~RBI
+        # typed: ignore
+        class Slug
+          extend T::Sig
+          sig { returns(Integer) }
+          def self.default_length; 32; end
+        end
+      RBI
+
+      result = run_plugin(
+        source: SIG_STUB,
+        files: { "sorbet/rbi/shims/slug.rbi" => ignored_rbi }
+      )
+      expect(plugin_diagnostics(result)).to be_empty
+    end
+
+    it "honours `# typed: false` by recording sigs for cross-file use" do
+      # Sorbet's contract: `# typed: false` files still have
+      # their sigs PARSED AND USED by other files. We mirror
+      # that — the catalog harvest walks the file the same way
+      # as a `# typed: true` file.
+      typed_false_rbi = <<~RBI
+        # typed: false
+        class Greeter
+          extend T::Sig
+          sig { returns(String) }
+          def self.hello; "hi"; end
+        end
+      RBI
+
+      result = run_plugin(
+        source: "#{SIG_STUB}Greeter.hello.upcase\n",
+        files: { "sorbet/rbi/shims/greeter.rbi" => typed_false_rbi }
+      )
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "treats files without a `# typed:` sigil the same as `# typed: false`" do
+      # Default-Sorbet-behaviour parity: sigs in sigil-less
+      # files still feed the catalog. (Most user-authored
+      # `.rb` files don't carry a sigil; not honouring this
+      # would break the common case.)
+      no_sigil_rbi = <<~RBI
+        class Bareword
+          extend T::Sig
+          sig { returns(Integer) }
+          def self.always; 1; end
+        end
+      RBI
+
+      result = run_plugin(
+        source: "#{SIG_STUB}Bareword.always.even?\n",
+        files: { "sorbet/rbi/shims/bareword.rbi" => no_sigil_rbi }
+      )
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+  end
+
   describe "type assertion recognition (ADR-11 slice 2)" do
     it "narrows `T.let(expr, T)` to the asserted type" do
       source = <<~RUBY

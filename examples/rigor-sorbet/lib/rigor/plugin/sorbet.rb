@@ -9,6 +9,7 @@ require_relative "sorbet/type_translator"
 require_relative "sorbet/sig_parser"
 require_relative "sorbet/catalog_walker"
 require_relative "sorbet/assertion_recognizer"
+require_relative "sorbet/sigil_detector"
 
 module Rigor
   module Plugin
@@ -260,6 +261,13 @@ module Rigor
       def harvest_file(path, catalog)
         contents = io_boundary.read_file(path)
         return if contents.nil?
+
+        # ADR-11 slice 5 — honour Sorbet's `# typed: ignore`
+        # magic comment by skipping the file entirely. Other
+        # levels (`false` / `true` / `strict` / `strong`)
+        # parse and harvest the same way today; per-call-site
+        # honouring is queued for a later slice.
+        return if SigilDetector.ignored?(SigilDetector.detect(contents))
 
         result = Prism.parse(contents)
         return unless result.errors.empty?

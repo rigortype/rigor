@@ -25,3 +25,6 @@
 [submodule "references/typeprof"]
 	path = references/typeprof
 	url = git@github.com:ruby/typeprof.git
+[submodule "references/sorbet"]
+	path = references/sorbet
+	url = https://github.com/sorbet/sorbet.git

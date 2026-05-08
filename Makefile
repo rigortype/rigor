@@ -7,7 +7,8 @@ REFERENCE_SUBMODULES := \
 	references/python-typing \
 	references/ruby \
 	references/TypeScript-Website \
-	references/typeprof
+	references/typeprof \
+	references/sorbet
 
 setup: install init-git-config init-submodules
 
@@ -45,6 +46,7 @@ init-submodules:
 	git submodule update --init --filter=blob:none references/python-typing
 	git submodule update --init --filter=blob:none references/ruby
 	git submodule update --init --filter=blob:none references/typeprof
+	git submodule update --init --filter=blob:none references/sorbet
 	@if [ ! -e references/TypeScript-Website/.git ]; then \
 		url="$$(git config -f .gitmodules submodule.references/TypeScript-Website.url)"; \
 		sha="$$(git rev-parse HEAD:references/TypeScript-Website)"; \

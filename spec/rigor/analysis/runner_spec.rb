@@ -181,6 +181,36 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(captured_kwargs[:network_policy]).to eq(:allowlist)
       expect(captured_kwargs[:allowed_url_hosts]).to contain_exactly("raw.githubusercontent.com", "example.com")
     end
+
+    it "builds a DependencySourceInference::Index from `dependencies.source_inference:` (ADR-10 slice 2a)" do
+      configuration = Rigor::Configuration.new(
+        "paths" => [],
+        "dependencies" => {
+          "source_inference" => [{ "gem" => "prism", "mode" => "when_missing" }]
+        }
+      )
+      runner = described_class.new(configuration: configuration, cache_store: nil)
+      runner.run
+
+      expect(runner.dependency_source_index).to be_a(Rigor::Analysis::DependencySourceInference::Index)
+      expect(runner.dependency_source_index.resolved_gems.map(&:gem_name)).to include("prism")
+    end
+
+    it "surfaces an unresolvable `dependencies.source_inference:` entry as `dynamic.dependency-source.gem-not-found`" do
+      configuration = Rigor::Configuration.new(
+        "paths" => [],
+        "dependencies" => {
+          "source_inference" => [{ "gem" => "definitely-no-such-gem-rigor-12345" }]
+        }
+      )
+      result = described_class.new(configuration: configuration, cache_store: nil).run
+      diag = result.diagnostics.find { |d| d.rule == "dynamic.dependency-source.gem-not-found" }
+
+      expect(diag).not_to be_nil
+      expect(diag.path).to eq(".rigor.yml")
+      expect(diag.message).to include("definitely-no-such-gem-rigor-12345")
+      expect(diag.severity).to eq(:warning)
+    end
   end
 
   describe "target_ruby wiring (`.rigor.yml` -> Prism version:)" do

@@ -12,6 +12,7 @@ require_relative "../inference/coverage_scanner"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
+require_relative "dependency_source_inference"
 require_relative "diagnostic"
 require_relative "result"
 
@@ -21,7 +22,7 @@ module Rigor
       RUBY_GLOB = "**/*.rb"
       DEFAULT_CACHE_ROOT = ".rigor/cache"
 
-      attr_reader :cache_store, :plugin_registry
+      attr_reader :cache_store, :plugin_registry, :dependency_source_index
 
       # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events
@@ -40,6 +41,7 @@ module Rigor
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
         @plugin_registry = Plugin::Registry::EMPTY
+        @dependency_source_index = DependencySourceInference::Index::EMPTY
       end
 
       # Walks every Ruby file under `paths`, parses it, builds a
@@ -58,6 +60,7 @@ module Rigor
         return Result.new(diagnostics: [target_ruby_error]) if target_ruby_error
 
         @plugin_registry = load_plugins
+        @dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
         environment = Environment.for_project(
           libraries: @configuration.libraries,
           signature_paths: @configuration.signature_paths,
@@ -66,12 +69,23 @@ module Rigor
         )
         expansion = expand_paths(paths)
 
-        diagnostics = plugin_load_diagnostics
-        diagnostics += plugin_prepare_diagnostics
-        diagnostics += expansion.fetch(:errors)
+        diagnostics = pre_file_diagnostics(expansion)
         diagnostics += expansion.fetch(:files).flat_map { |path| analyze_file(path, environment) }
 
         Result.new(diagnostics: apply_severity_profile(diagnostics))
+      end
+
+      # Pre-file diagnostic streams that fire once per run rather
+      # than per analyzed file: plugin load / prepare envelopes,
+      # the ADR-10 dependency-source resolution surface, and the
+      # `expand_paths` errors for `paths:` entries that don't
+      # exist or aren't `.rb`. Aggregated here so `#run` stays
+      # under the ABC budget.
+      def pre_file_diagnostics(expansion)
+        plugin_load_diagnostics +
+          plugin_prepare_diagnostics +
+          dependency_source_diagnostics +
+          expansion.fetch(:errors)
       end
 
       # `target_ruby` flows through to Prism's `version:` option.
@@ -203,6 +217,29 @@ module Rigor
             severity: :error,
             rule: "load-error",
             source_family: :plugin_loader
+          )
+        end
+      end
+
+      # ADR-10 § "Diagnostic prefix family" — surfaces gems
+      # listed in `dependencies.source_inference` that RubyGems
+      # could not resolve. The run continues; the gem simply
+      # contributes nothing this session, mirroring the
+      # plugin-load error envelope. Authored `:warning` because
+      # an unresolvable gem usually means a typo or a missing
+      # `bundle install` rather than a project-blocking problem;
+      # the severity profile still re-stamps it.
+      def dependency_source_diagnostics
+        @dependency_source_index.unresolvable.map do |entry|
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "dependencies.source_inference[].gem #{entry.gem_name.inspect} could not be " \
+                     "resolved (#{entry.reason}); skipping",
+            severity: :warning,
+            rule: "dynamic.dependency-source.gem-not-found",
+            source_family: :builtin
           )
         end
       end

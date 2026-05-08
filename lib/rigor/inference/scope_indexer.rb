@@ -106,6 +106,14 @@ module Rigor
         discovered_def_nodes = build_discovered_def_nodes(root)
         seeded_scope = seeded_scope.with_discovered_def_nodes(discovered_def_nodes)
 
+        # v0.1.2 — per-class table of method visibilities
+        # (`:public` / `:private` / `:protected`). The
+        # `def.method-visibility-mismatch` CheckRule consults
+        # the table to flag explicit-non-self calls to a
+        # private user method.
+        discovered_method_visibilities = build_discovered_method_visibilities(root)
+        seeded_scope = seeded_scope.with_discovered_method_visibilities(discovered_method_visibilities)
+
         table = {}.compare_by_identity
         table.default = seeded_scope
 
@@ -471,6 +479,134 @@ module Rigor
         class_name = qualified_prefix.empty? ? TOP_LEVEL_DEF_KEY : qualified_prefix.join("::")
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = def_node
+      end
+
+      VISIBILITY_MODIFIERS = %i[public private protected].freeze
+
+      # v0.1.2 — per-class method-visibility table for the
+      # `def.method-visibility-mismatch` CheckRule.
+      #
+      # Tracks two visibility-changing forms:
+      #
+      # - **Modifier blocks**: a bare `private` / `protected` /
+      #   `public` call inside a class body switches the
+      #   "current default" visibility for every subsequent
+      #   `def` until another modifier flips it again.
+      # - **Named-argument form**: `private :foo, :bar` (or
+      #   the same with `protected` / `public`) marks specific
+      #   names already-recorded under the class. Symbol-only
+      #   args are recognised; `private def foo; end` (the
+      #   wrap-around form) is not yet — it would need
+      #   tracking the def-call's return-value visibility,
+      #   which is a separate slice.
+      #
+      # Top-level (no surrounding class) defs do not contribute
+      # — Ruby's top-level visibility nuances (private at
+      # top-level marks the method on `Object`) are out of
+      # scope for v0.1.2.
+      def build_discovered_method_visibilities(root)
+        accumulator = {}
+        walk_method_visibilities(root, [], false, :public, accumulator)
+        accumulator.transform_values(&:freeze).freeze
+      end
+
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
+      def walk_method_visibilities(node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
+        return current_visibility unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            child_prefix = qualified_prefix + [name]
+            walk_method_visibilities(node.body, child_prefix, false, :public, accumulator) if node.body
+            return current_visibility
+          end
+        when Prism::SingletonClassNode
+          if node.expression.is_a?(Prism::SelfNode) && node.body
+            walk_method_visibilities(node.body, qualified_prefix, true, :public, accumulator)
+            return current_visibility
+          end
+        when Prism::ConstantWriteNode
+          if meta_new_block_body(node)
+            child_prefix = qualified_prefix + [node.name.to_s]
+            walk_method_visibilities(meta_new_block_body(node), child_prefix, false, :public, accumulator)
+            return current_visibility
+          end
+        when Prism::DefNode
+          record_def_visibility(node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
+          return current_visibility
+        when Prism::CallNode
+          updated = apply_visibility_call(node, qualified_prefix, current_visibility, accumulator)
+          return updated unless updated.equal?(current_visibility)
+        end
+
+        # Statement-position StatementsNode preserves
+        # left-to-right visibility flow; everything else
+        # recurses with the entry visibility unchanged.
+        if node.is_a?(Prism::StatementsNode)
+          local_visibility = current_visibility
+          node.compact_child_nodes.each do |child|
+            local_visibility = walk_method_visibilities(child, qualified_prefix, in_singleton_class,
+                                                        local_visibility, accumulator)
+          end
+        else
+          node.compact_child_nodes.each do |child|
+            walk_method_visibilities(child, qualified_prefix, in_singleton_class, current_visibility, accumulator)
+          end
+        end
+        current_visibility
+      end
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
+
+      def record_def_visibility(def_node, qualified_prefix, in_singleton_class, current_visibility, accumulator)
+        return if def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
+        return if qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        accumulator[class_name] ||= {}
+        accumulator[class_name][def_node.name] = current_visibility
+      end
+
+      # Recognises modifier calls on the implicit-self receiver
+      # inside a class body. Returns the (possibly updated)
+      # current visibility:
+      #
+      # - `private` / `public` / `protected` (no args) —
+      #   switch the running default for subsequent defs.
+      # - `private :foo, :bar` — back-patch the named methods
+      #   in the accumulator. Returns `current_visibility`
+      #   unchanged because the running default does NOT
+      #   change for this form.
+      def apply_visibility_call(call_node, qualified_prefix, current_visibility, accumulator)
+        return current_visibility unless call_node.receiver.nil?
+        return current_visibility unless VISIBILITY_MODIFIERS.include?(call_node.name)
+        return current_visibility if qualified_prefix.empty?
+
+        args = call_node.arguments&.arguments || []
+        if args.empty?
+          call_node.name
+        else
+          apply_named_visibility(args, qualified_prefix, call_node.name, accumulator)
+          current_visibility
+        end
+      end
+
+      def apply_named_visibility(args, qualified_prefix, visibility, accumulator)
+        class_name = qualified_prefix.join("::")
+        args.each do |arg|
+          name = visibility_target_name(arg)
+          next if name.nil?
+
+          accumulator[class_name] ||= {}
+          accumulator[class_name][name] = visibility
+        end
+      end
+
+      def visibility_target_name(arg)
+        return arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::StringNode)
+
+        nil
       end
 
       # Registers the alias name in the `discovered_methods` table so

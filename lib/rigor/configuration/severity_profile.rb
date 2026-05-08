@@ -46,7 +46,8 @@ module Rigor
           "flow.unreachable-branch" => :info,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
-          "def.return-type-mismatch" => :warning
+          "def.return-type-mismatch" => :warning,
+          "def.method-visibility-mismatch" => :warning
         }.freeze,
         balanced: {
           "call.undefined-method" => :error,
@@ -57,7 +58,8 @@ module Rigor
           "flow.unreachable-branch" => :warning,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
-          "def.return-type-mismatch" => :warning
+          "def.return-type-mismatch" => :warning,
+          "def.method-visibility-mismatch" => :error
         }.freeze,
         strict: {
           "call.undefined-method" => :error,
@@ -68,7 +70,8 @@ module Rigor
           "flow.unreachable-branch" => :error,
           "assert.type-mismatch" => :error,
           "dump.type" => :error,
-          "def.return-type-mismatch" => :error
+          "def.return-type-mismatch" => :error,
+          "def.method-visibility-mismatch" => :error
         }.freeze
       }.freeze
 

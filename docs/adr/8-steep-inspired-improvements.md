@@ -49,7 +49,7 @@ Family prefixes:
 | `call`   | `call.undefined-method`, `call.wrong-arity`, `call.argument-type-mismatch`, `call.possible-nil-receiver` |
 | `assert` | `assert.type-mismatch` (test-harness assertion), `dump.type` (debug) |
 | `flow`   | `flow.always-raises` (proves a flow path ends in raise), `flow.unreachable-branch` (literal-predicate dead branch) |
-| `def`    | `def.return-type-mismatch` (slice #1 below) |
+| `def`    | `def.return-type-mismatch` (slice #1 below), `def.method-visibility-mismatch` (private-method receiver check) |
 
 `dump.type` lives under its own `dump` family rather than
 `assert.dump-type` because the runtime semantics differ (assertion

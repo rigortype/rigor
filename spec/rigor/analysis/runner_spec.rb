@@ -717,6 +717,137 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(unreachable).to be_empty
       end
     end
+
+    describe "method-visibility-mismatch rule (v0.1.2)" do
+      def visibility_mismatch_diags(result)
+        result.diagnostics.select { |d| d.rule == "def.method-visibility-mismatch" }
+      end
+
+      it "flags an explicit-receiver call to a method declared under `private`" do # rubocop:disable RSpec/ExampleLength
+        result = analyze(<<~RUBY)
+          class Foo
+            def bar
+              secret
+            end
+
+            private
+
+            def secret
+              42
+            end
+          end
+
+          Foo.new.secret
+        RUBY
+        diag = visibility_mismatch_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("private method")
+        expect(diag.message).to include("`secret'")
+        expect(diag.message).to include("Foo")
+      end
+
+      it "honours the `private :foo, :bar` named-argument form" do
+        result = analyze(<<~RUBY)
+          class Foo
+            def bar
+              42
+            end
+
+            def baz
+              43
+            end
+
+            private :baz
+          end
+
+          Foo.new.baz
+        RUBY
+        expect(visibility_mismatch_diags(result).size).to eq(1)
+      end
+
+      it "does not flag implicit-self calls (always allowed for private)" do
+        result = analyze(<<~RUBY)
+          class Foo
+            def bar
+              secret
+            end
+
+            private
+
+            def secret
+              42
+            end
+          end
+        RUBY
+        expect(visibility_mismatch_diags(result)).to be_empty
+      end
+
+      it "does not flag `self.foo` (Ruby 2.7+ permits self.private_method)" do
+        result = analyze(<<~RUBY)
+          class Foo
+            def bar
+              self.secret
+            end
+
+            private
+
+            def secret
+              42
+            end
+          end
+        RUBY
+        expect(visibility_mismatch_diags(result)).to be_empty
+      end
+
+      it "does not flag a public method call on the same class" do
+        result = analyze(<<~RUBY)
+          class Foo
+            def hello
+              "hi"
+            end
+          end
+
+          Foo.new.hello
+        RUBY
+        expect(visibility_mismatch_diags(result)).to be_empty
+      end
+
+      it "switches default visibility back when `public` modifier follows" do
+        result = analyze(<<~RUBY)
+          class Foo
+            private
+
+            def secret
+              42
+            end
+
+            public
+
+            def open
+              43
+            end
+          end
+
+          Foo.new.open
+        RUBY
+        expect(visibility_mismatch_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable method-visibility-mismatch`" do
+        result = analyze(<<~RUBY)
+          class Foo
+            private
+
+            def secret
+              42
+            end
+          end
+
+          Foo.new.secret # rigor:disable method-visibility-mismatch
+        RUBY
+        expect(visibility_mismatch_diags(result)).to be_empty
+      end
+    end
   end
 
   describe "implicit-self call dispatch (v0.0.3 A)" do

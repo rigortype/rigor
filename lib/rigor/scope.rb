@@ -20,7 +20,7 @@ module Rigor
                 :ivars, :cvars, :globals,
                 :class_ivars, :class_cvars, :program_globals,
                 :discovered_classes, :in_source_constants, :discovered_methods,
-                :discovered_def_nodes
+                :discovered_def_nodes, :discovered_method_visibilities
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
@@ -47,7 +47,8 @@ module Rigor
       discovered_classes: EMPTY_VAR_BINDINGS,
       in_source_constants: EMPTY_VAR_BINDINGS,
       discovered_methods: EMPTY_CLASS_BINDINGS,
-      discovered_def_nodes: EMPTY_CLASS_BINDINGS
+      discovered_def_nodes: EMPTY_CLASS_BINDINGS,
+      discovered_method_visibilities: EMPTY_CLASS_BINDINGS
     )
       @environment = environment
       @locals = locals
@@ -64,6 +65,7 @@ module Rigor
       @in_source_constants = in_source_constants
       @discovered_methods = discovered_methods
       @discovered_def_nodes = discovered_def_nodes
+      @discovered_method_visibilities = discovered_method_visibilities
       freeze
     end
 
@@ -268,6 +270,26 @@ module Rigor
       rebuild(discovered_def_nodes: table)
     end
 
+    # v0.1.2 — per-class table mapping `method_name (Symbol) →
+    # :public | :private | :protected`. Populated by
+    # `ScopeIndexer` for every `def` it sees inside a class
+    # body, with the visibility taken from the surrounding
+    # `private` / `protected` / `public` modifier state plus
+    # any post-hoc `private :name, ...` named-argument calls.
+    # Consumed by the `def.method-visibility-mismatch` rule
+    # so explicit-non-self calls to a private method surface
+    # a diagnostic.
+    def discovered_method_visibility(class_name, method_name)
+      table = @discovered_method_visibilities[class_name.to_s]
+      return nil unless table
+
+      table[method_name.to_sym]
+    end
+
+    def with_discovered_method_visibilities(table)
+      rebuild(discovered_method_visibilities: table)
+    end
+
     def facts_for(target: nil, bucket: nil)
       fact_store.facts_for(target: target, bucket: bucket)
     end
@@ -334,7 +356,8 @@ module Rigor
       declared_types: @declared_types, ivars: @ivars, cvars: @cvars, globals: @globals,
       class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals,
       discovered_classes: @discovered_classes, in_source_constants: @in_source_constants,
-      discovered_methods: @discovered_methods, discovered_def_nodes: @discovered_def_nodes
+      discovered_methods: @discovered_methods, discovered_def_nodes: @discovered_def_nodes,
+      discovered_method_visibilities: @discovered_method_visibilities
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -346,7 +369,8 @@ module Rigor
         discovered_classes: discovered_classes,
         in_source_constants: in_source_constants,
         discovered_methods: discovered_methods,
-        discovered_def_nodes: discovered_def_nodes
+        discovered_def_nodes: discovered_def_nodes,
+        discovered_method_visibilities: discovered_method_visibilities
       )
     end
 
@@ -371,7 +395,8 @@ module Rigor
         discovered_classes: discovered_classes,
         in_source_constants: in_source_constants,
         discovered_methods: discovered_methods,
-        discovered_def_nodes: discovered_def_nodes
+        discovered_def_nodes: discovered_def_nodes,
+        discovered_method_visibilities: discovered_method_visibilities
       )
     end
   end

@@ -62,6 +62,7 @@ module Rigor
       RULE_ALWAYS_RAISES = "flow.always-raises"
       RULE_UNREACHABLE_BRANCH = "flow.unreachable-branch"
       RULE_RETURN_TYPE = "def.return-type-mismatch"
+      RULE_VISIBILITY_MISMATCH = "def.method-visibility-mismatch"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -72,7 +73,8 @@ module Rigor
         RULE_ASSERT_TYPE,
         RULE_ALWAYS_RAISES,
         RULE_UNREACHABLE_BRANCH,
-        RULE_RETURN_TYPE
+        RULE_RETURN_TYPE,
+        RULE_VISIBILITY_MISMATCH
       ].freeze
 
       # Backward-compat alias table (ADR-8 § "Backward
@@ -91,7 +93,8 @@ module Rigor
         "dump-type" => RULE_DUMP_TYPE,
         "assert-type" => RULE_ASSERT_TYPE,
         "always-raises" => RULE_ALWAYS_RAISES,
-        "unreachable-branch" => RULE_UNREACHABLE_BRANCH
+        "unreachable-branch" => RULE_UNREACHABLE_BRANCH,
+        "method-visibility-mismatch" => RULE_VISIBILITY_MISMATCH
       }.freeze
 
       # Family wildcard — a `<family>` token in a suppression
@@ -149,7 +152,8 @@ module Rigor
           nil_receiver_diagnostic(path, node, scope_index),
           dump_type_diagnostic(path, node, scope_index),
           assert_type_diagnostic(path, node, scope_index),
-          always_raises_diagnostic(path, node, scope_index)
+          always_raises_diagnostic(path, node, scope_index),
+          visibility_mismatch_diagnostic(path, node, scope_index)
         ].compact
       end
 
@@ -773,6 +777,60 @@ module Rigor
           return :falsey if FALSEY_LITERAL_NODES.any? { |klass| predicate.is_a?(klass) }
 
           nil
+        end
+
+        # v0.1.2 — `def.method-visibility-mismatch`. Fires when
+        # an explicit-receiver `Prism::CallNode` targets a
+        # user-class method whose `discovered_method_visibilities`
+        # entry is `:private`. The rule is intentionally narrow:
+        #
+        # - Only `:private`. `:protected` access depends on
+        #   subclass tracking the engine does not yet model;
+        #   broadening waits for that surface.
+        # - Only user classes whose visibility table the indexer
+        #   built. RBS-known classes (stdlib, gems) are NOT
+        #   consulted yet — RBS visibility is reliable but
+        #   surfacing it would broaden the rule to a level the
+        #   per-rule false-positive triage hasn't covered.
+        # - Implicit-self calls are skipped (always allowed for
+        #   private). Calls whose receiver is `Prism::SelfNode`
+        #   are also skipped — Ruby 2.7+ permits `self.foo` for
+        #   private methods.
+        # - Receiver MUST resolve to a `Type::Nominal` so the
+        #   rule has a single class identity to query. Unions /
+        #   Dynamic / shape carriers are skipped.
+        def visibility_mismatch_diagnostic(path, call_node, scope_index)
+          return nil unless explicit_non_self_receiver?(call_node.receiver)
+
+          scope = scope_index[call_node]
+          return nil if scope.nil?
+
+          receiver_type = scope.type_of(call_node.receiver)
+          return nil unless receiver_type.is_a?(Type::Nominal)
+
+          visibility = scope.discovered_method_visibility(receiver_type.class_name, call_node.name)
+          return nil unless visibility == :private
+
+          build_visibility_mismatch_diagnostic(path, call_node, receiver_type)
+        end
+
+        def explicit_non_self_receiver?(receiver)
+          return false if receiver.nil?
+          return false if receiver.is_a?(Prism::SelfNode)
+
+          true
+        end
+
+        def build_visibility_mismatch_diagnostic(path, call_node, receiver_type)
+          location = call_node.message_loc || call_node.location
+          Diagnostic.new(
+            rule: RULE_VISIBILITY_MISMATCH,
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "private method `#{call_node.name}' called on #{receiver_type.class_name} receiver",
+            severity: :error
+          )
         end
 
         # Returns the dead-branch node for a literal-predicate

@@ -6,6 +6,7 @@ require_relative "../reflection"
 require_relative "../source/node_walker"
 require_relative "../type"
 require_relative "diagnostic"
+require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/dead_assignment_collector"
 require_relative "check_rules/ivar_write_collector"
 
@@ -67,6 +68,7 @@ module Rigor
       RULE_VISIBILITY_MISMATCH = "def.method-visibility-mismatch"
       RULE_IVAR_WRITE_MISMATCH = "def.ivar-write-mismatch"
       RULE_DEAD_ASSIGNMENT = "flow.dead-assignment"
+      RULE_ALWAYS_TRUTHY_CONDITION = "flow.always-truthy-condition"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -78,6 +80,7 @@ module Rigor
         RULE_ALWAYS_RAISES,
         RULE_UNREACHABLE_BRANCH,
         RULE_DEAD_ASSIGNMENT,
+        RULE_ALWAYS_TRUTHY_CONDITION,
         RULE_RETURN_TYPE,
         RULE_VISIBILITY_MISMATCH,
         RULE_IVAR_WRITE_MISMATCH
@@ -102,7 +105,8 @@ module Rigor
         "unreachable-branch" => RULE_UNREACHABLE_BRANCH,
         "method-visibility-mismatch" => RULE_VISIBILITY_MISMATCH,
         "ivar-write-mismatch" => RULE_IVAR_WRITE_MISMATCH,
-        "dead-assignment" => RULE_DEAD_ASSIGNMENT
+        "dead-assignment" => RULE_DEAD_ASSIGNMENT,
+        "always-truthy-condition" => RULE_ALWAYS_TRUTHY_CONDITION
       }.freeze
 
       # Family wildcard — a `<family>` token in a suppression
@@ -149,6 +153,7 @@ module Rigor
             diagnostics << unreachable if unreachable
           end
         end
+        diagnostics.concat(always_truthy_condition_diagnostics(path, root, scope_index))
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, root, scope_index))
         diagnostics.concat(dead_assignment_diagnostics(path, root, scope_index))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
@@ -204,6 +209,19 @@ module Rigor
       def dead_assignment_diagnostics(path, root, scope_index)
         DeadAssignmentCollector.new(scope_index).collect(root).map do |result|
           build_dead_assignment_diagnostic(path, result[:write_node], result[:def_node])
+        end
+      end
+
+      # v0.1.2 — `flow.always-truthy-condition`. Fires on
+      # `if` / `unless` / ternary predicates whose inferred
+      # type is a `Type::Constant` AND that don't fall in
+      # the literal-only / inside-loop-or-block / defensive-
+      # predicate skip envelope (see
+      # `Analysis::CheckRules::AlwaysTruthyConditionCollector`
+      # for the full triage rationale).
+      def always_truthy_condition_diagnostics(path, root, scope_index)
+        AlwaysTruthyConditionCollector.new(scope_index).collect(root).map do |result|
+          build_always_truthy_condition_diagnostic(path, result.node, result.polarity)
         end
       end
 
@@ -928,6 +946,18 @@ module Rigor
         # different filters) without disturbing the call rules.
         def ivar_class_for(type)
           concrete_class_name(type)
+        end
+
+        def build_always_truthy_condition_diagnostic(path, predicate_node, polarity)
+          location = predicate_node.location
+          Diagnostic.new(
+            rule: RULE_ALWAYS_TRUTHY_CONDITION,
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "condition is always #{polarity} (the surrounding flow proves it folds to a constant)",
+            severity: :warning
+          )
         end
 
         def build_dead_assignment_diagnostic(path, write_node, def_node)

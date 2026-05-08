@@ -204,6 +204,28 @@ module Rigor
           since: "0.1.2"
         ),
 
+        CheckRules::RULE_ALWAYS_TRUTHY_CONDITION => Entry.new(
+          id: CheckRules::RULE_ALWAYS_TRUTHY_CONDITION,
+          summary: "An if / unless / ternary predicate's inferred type folds to a constant.",
+          fires_when: [
+            "Predicate's inferred type is `Type::Constant<true | false | nil | ...>`.",
+            "Predicate is NOT a syntactic literal (the literal-only `flow.unreachable-branch` rule covers those)."
+          ],
+          does_not_fire_when: [
+            "Predicate sits inside a `WhileNode` / `UntilNode` / `ForNode` / `BlockNode` ancestor — " \
+            "Rigor's mutation tracking through loop bodies is incomplete enough that an inferred " \
+            "`Constant<bool>` can be a false positive.",
+            "Predicate is a defensive `.nil?` / `.empty?` / `.zero?` / `.any?` / `.none?` / `.all?` / " \
+            "`.respond_to?` call — these typically fire when the user is being more cautious than the " \
+            "RBS strict-on-returns sig admits.",
+            "Predicate folds to a non-Constant type (Union / Nominal / Dynamic / etc.)."
+          ],
+          suppression: "`# rigor:disable always-truthy-condition` on the predicate line.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :info, balanced: :warning, strict: :error },
+          since: "0.1.2"
+        ),
+
         CheckRules::RULE_DEAD_ASSIGNMENT => Entry.new(
           id: CheckRules::RULE_DEAD_ASSIGNMENT,
           summary: "Local variable assigned in a method body but never read.",

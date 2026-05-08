@@ -789,6 +789,111 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    describe "always-truthy-condition rule (v0.1.2)" do
+      def truthy_diags(result)
+        result.diagnostics.select { |d| d.rule == "flow.always-truthy-condition" }
+      end
+
+      it "flags an `if` whose predicate is an inferred Constant" do
+        result = analyze(<<~RUBY)
+          x = 1
+          if x
+            "yes"
+          else
+            "no"
+          end
+        RUBY
+        diag = truthy_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("always truthy")
+      end
+
+      it "does not double-fire on a syntactic literal predicate (covered by unreachable-branch)" do
+        result = analyze(<<~RUBY)
+          if true
+            x = 1
+          else
+            x = 2
+          end
+        RUBY
+        expect(truthy_diags(result)).to be_empty
+      end
+
+      it "does not fire on `.nil?` (defensive predicate skip)" do
+        result = analyze(<<~RUBY)
+          name = "Alice"
+          if name.nil?
+            "missing"
+          else
+            "ok"
+          end
+        RUBY
+        expect(truthy_diags(result)).to be_empty
+      end
+
+      it "does not fire on `.empty?` (defensive predicate skip)" do
+        result = analyze(<<~RUBY)
+          arr = []
+          if arr.empty?
+            "no items"
+          else
+            "items"
+          end
+        RUBY
+        expect(truthy_diags(result)).to be_empty
+      end
+
+      it "does not fire when the predicate sits inside a block (loop-mutation skip)" do
+        result = analyze(<<~RUBY)
+          [1, 2, 3].each do |x|
+            shift = 7
+            if shift
+              x
+            end
+          end
+        RUBY
+        expect(truthy_diags(result)).to be_empty
+      end
+
+      it "does not fire when the predicate sits inside a `while` loop" do
+        result = analyze(<<~RUBY)
+          x = 1
+          while x
+            break
+          end
+        RUBY
+        # `while x` itself isn't an IfNode so it's outside the
+        # rule's scope; if Rigor ever folds the body's `if`
+        # against a loop-mutated local, the loop ancestor
+        # check keeps the rule from firing.
+        expect(truthy_diags(result)).to be_empty
+      end
+
+      it "does not fire on a non-constant predicate (Union / Dynamic etc.)" do
+        result = analyze(<<~RUBY)
+          n = ARGV.first&.to_i || 0
+          if n > 0
+            "positive"
+          else
+            "non-positive"
+          end
+        RUBY
+        expect(truthy_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable always-truthy-condition`" do
+        result = analyze(<<~RUBY)
+          x = 1
+          if x # rigor:disable always-truthy-condition
+            "yes"
+          else
+            "no"
+          end
+        RUBY
+        expect(truthy_diags(result)).to be_empty
+      end
+    end
+
     describe "method-visibility-mismatch rule (v0.1.2)" do
       def visibility_mismatch_diags(result)
         result.diagnostics.select { |d| d.rule == "def.method-visibility-mismatch" }

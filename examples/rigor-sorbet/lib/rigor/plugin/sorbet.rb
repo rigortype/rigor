@@ -8,6 +8,7 @@ require_relative "sorbet/catalog"
 require_relative "sorbet/type_translator"
 require_relative "sorbet/sig_parser"
 require_relative "sorbet/catalog_walker"
+require_relative "sorbet/assertion_recognizer"
 
 module Rigor
   module Plugin
@@ -95,6 +96,16 @@ module Rigor
       # where the sig is on the called method's own class.
       def flow_contribution_for(call_node:, scope:)
         return nil unless call_node.is_a?(Prism::CallNode)
+
+        # ADR-11 slice 2 — `T.let` / `T.cast` / `T.must` /
+        # `T.unsafe` are checked first because they're cheaper
+        # to recognise (no catalog walk required) and they
+        # win over any cataloged signature: the user explicitly
+        # asserted the type at the call site.
+        assertion = AssertionRecognizer.recognize(
+          call_node: call_node, scope: scope, plugin_id: manifest.id
+        )
+        return assertion if assertion
 
         ensure_catalog
         return nil if @catalog.nil? || @catalog.empty?

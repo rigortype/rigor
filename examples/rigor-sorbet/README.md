@@ -1,17 +1,21 @@
-# rigor-sorbet (slice 1)
+# rigor-sorbet (slices 1 + 2)
 
 The eighth worked example. Reads inline Sorbet `sig { ... }`
 blocks on first-party Ruby code and contributes the parsed
 return type at every call site, so chained calls
 (`Slug.default_length.even?`) resolve through Rigor's normal
-dispatch instead of degrading to `Dynamic[top]`.
+dispatch instead of degrading to `Dynamic[top]`. As of slice 2,
+also recognises Sorbet's type-assertion calls (`T.let` /
+`T.cast` / `T.must` / `T.unsafe`) and lifts them to
+`FlowContribution` return-type contributions.
 
-This is **slice 1 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**.
-The current cut covers method-signature contributions only;
-later slices add the `T.let` / `T.cast` / `T.must` / `T.bind` /
-`T.absurd` flow primitives, broaden the type-vocabulary
-translator, walk Sorbet's RBI directories, and honour `# typed:`
-sigils.
+This is **slices 1 + 2 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**.
+The current cut covers method-signature contributions
+(slice 1) and the four most-used type assertions (slice 2);
+later slices add `T.bind` / `T.absurd` (slice 2 follow-up),
+broaden the type-vocabulary translator (slice 3), walk
+Sorbet's RBI directories (slice 4), and honour `# typed:`
+sigils (slice 5).
 
 ## What the plugin recognises
 
@@ -41,6 +45,21 @@ slug.normalise("Alice").upcase   # ✓ returns String, .upcase resolves
 Slug.default_length.even?         # ✓ returns Integer, .even? resolves
 ```
 
+Slice 2's assertion recogniser lifts `T.let` / `T.cast` /
+`T.must` / `T.unsafe` to the same contribution shape:
+
+```ruby
+counter = T.let(0, Integer)         # counter: Integer (widened from Constant<0>)
+counter.even?                        # ✓ resolves on Integer
+
+T.cast(some_value, String).upcase    # ✓ String#upcase resolves
+
+maybe = T.let(nil, T.nilable(Integer))
+T.must(maybe).bit_length             # ✓ Integer#bit_length (nil stripped)
+
+T.unsafe(opaque).any_method_at_all   # ✓ silenced — Dynamic[top]
+```
+
 Malformed sigs surface as `plugin.sorbet.parse-error` warnings:
 
 ```text
@@ -53,6 +72,18 @@ demo/errors_demo.rb:25:3: plugin.sorbet.parse-error
 demo/errors_demo.rb:34:3: plugin.sorbet.parse-error
   Two `sig` blocks in a row; the first one has no following method definition.
 ```
+
+## Slice 2 assertion forms
+
+| Sorbet form           | Contribution                              |
+| --------------------- | ----------------------------------------- |
+| `T.let(expr, T)`      | return type ← translated `T`              |
+| `T.cast(expr, T)`     | return type ← translated `T`              |
+| `T.must(expr)`        | return type ← `inferred(expr) - nil`      |
+| `T.unsafe(expr)`      | return type ← `Dynamic[top]`              |
+
+`T.bind`, `T.assert_type!`, `T.must_because`, `T.absurd` and
+`T.reveal_type` are deferred to a follow-up slice.
 
 ## Slice 1 type vocabulary
 
@@ -82,13 +113,14 @@ examples/rigor-sorbet/
 ├── lib/
 │   ├── rigor-sorbet.rb
 │   └── rigor/plugin/
-│       ├── sorbet.rb               ← plugin entry: manifest, hooks, lookup
+│       ├── sorbet.rb                  ← plugin entry: manifest, hooks, lookup
 │       └── sorbet/
-│           ├── method_signature.rb ← frozen value object
-│           ├── catalog.rb          ← per-run signature table
-│           ├── catalog_walker.rb   ← Prism walker, sig + def pairing
-│           ├── sig_parser.rb       ← chained-call mini-interpreter
-│           └── type_translator.rb  ← Sorbet → Rigor types
+│           ├── method_signature.rb    ← frozen value object
+│           ├── catalog.rb             ← per-run signature table
+│           ├── catalog_walker.rb      ← Prism walker, sig + def pairing
+│           ├── sig_parser.rb          ← chained-call mini-interpreter
+│           ├── type_translator.rb     ← Sorbet → Rigor types
+│           └── assertion_recognizer.rb ← T.let / T.cast / T.must / T.unsafe
 └── demo/
     ├── .rigor.yml
     ├── .gitignore

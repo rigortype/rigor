@@ -184,4 +184,87 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
       expect(diags).to be_empty
     end
   end
+
+  describe "type assertion recognition (ADR-11 slice 2)" do
+    it "narrows `T.let(expr, T)` to the asserted type" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # The literal `0` would normally infer to `Constant<0>`,
+        # but `T.let(0, Integer)` widens to `Integer` so the
+        # variable can hold any Integer in subsequent loops /
+        # branches without "type changed" errors.
+        x = T.let(0, Integer)
+        x.even?
+        x.bit_length
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "narrows `T.cast(expr, T)` the same way as T.let for static analysis" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # Receiver type is opaque (`Object`); the cast asserts
+        # `String` and lets the chained `.upcase` resolve.
+        any_value = Object.new
+        T.cast(any_value, String).upcase
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "narrows `T.must(expr)` to the inner type minus nil" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # `T.let(nil, T.nilable(Integer))` is `Integer | nil`;
+        # `T.must` strips the nil so `.even?` resolves on
+        # `Integer` without a possibly-nil-receiver complaint.
+        maybe = T.let(nil, T.nilable(Integer))
+        T.must(maybe).even?
+      RUBY
+
+      result = run_plugin(source: source)
+      undefined_or_nil = result.diagnostics.select do |d|
+        %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
+      end
+      expect(undefined_or_nil).to be_empty
+    end
+
+    it "treats `T.unsafe(expr)` as `Dynamic[top]` so any chained call is silenced" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        class Mystery
+          extend T::Sig
+          sig { returns(Integer) }
+          def self.from_int; 1; end
+        end
+        # T.unsafe forces the result back to untyped, which
+        # silences `call.undefined-method` for any subsequent
+        # call against unknown methods on the value.
+        T.unsafe(Mystery.from_int).never_defined_anywhere
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "leaves a non-Sorbet `T.let`-shaped call alone (different receiver)" do
+      # If the user's project defines its own `T` constant that
+      # is NOT Sorbet's, the plugin should not interfere. The
+      # recognizer keys on receiver name `T`; a renamed
+      # constant doesn't match and the call falls through.
+      source = <<~RUBY
+        #{SIG_STUB}
+        module NotSorbet
+          def self.let(expr, type) = expr
+        end
+        NotSorbet.let("hello", String)
+      RUBY
+
+      diags = plugin_diagnostics(run_plugin(source: source))
+      expect(diags).to be_empty
+    end
+  end
 end

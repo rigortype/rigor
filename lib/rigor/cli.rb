@@ -22,7 +22,8 @@ module Rigor
       "check" => :run_check,
       "init" => :run_init,
       "type-of" => :run_type_of,
-      "type-scan" => :run_type_scan
+      "type-scan" => :run_type_scan,
+      "explain" => :run_explain
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -264,6 +265,12 @@ module Rigor
       TypeScanCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_explain
+      require_relative "cli/explain_command"
+
+      ExplainCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def write_result(result, format)
       case format
       when "json"
@@ -301,6 +308,7 @@ module Rigor
           init       Create a starter .rigor.yml
           type-of    Print the inferred type at FILE:LINE:COL
           type-scan  Report Scope#type_of coverage across PATHs
+          explain    Print the description of one or all CheckRules
           version    Print the Rigor version
           help       Print this help
       HELP

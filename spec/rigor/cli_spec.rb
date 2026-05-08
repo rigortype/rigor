@@ -495,4 +495,70 @@ RSpec.describe Rigor::CLI do
       end
     end
   end
+
+  describe "explain (v0.1.2)" do
+    it "lists every rule with no argument" do
+      status, out, err = run_cli("explain")
+
+      expect(status).to eq(0)
+      expect(err).to eq("")
+      expect(out).to include("call.undefined-method")
+      expect(out).to include("flow.unreachable-branch")
+      expect(out).to include("def.ivar-write-mismatch")
+      expect(out).to include("Run `rigor explain <rule>`")
+    end
+
+    it "prints the catalog entry for a canonical rule id" do
+      status, out, _err = run_cli("explain", "call.undefined-method")
+
+      expect(status).to eq(0)
+      expect(out).to include("call.undefined-method")
+      expect(out).to include("Method does not exist on the receiver's statically-known class.")
+      expect(out).to include("Fires when:")
+      expect(out).to include("Does not fire when:")
+      expect(out).to include("Suppression:")
+      expect(out).to include("Authored severity:")
+      expect(out).to include("Severity by profile:")
+      expect(out).to include("Since: rigor")
+    end
+
+    it "resolves a legacy alias to the canonical entry" do
+      status, out, _err = run_cli("explain", "undefined-method")
+
+      expect(status).to eq(0)
+      expect(out).to include("call.undefined-method")
+      expect(out).to include("Legacy aliases: undefined-method")
+    end
+
+    it "prints every rule under a family wildcard" do
+      status, out, _err = run_cli("explain", "flow")
+
+      expect(status).to eq(0)
+      expect(out).to include("flow.always-raises")
+      expect(out).to include("flow.unreachable-branch")
+    end
+
+    it "reports unknown rules as usage errors" do
+      status, _out, err = run_cli("explain", "no.such-rule")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("Unknown rule: no.such-rule")
+    end
+
+    it "renders JSON when --format=json is set" do
+      status, out, _err = run_cli("explain", "--format=json", "call.undefined-method")
+
+      expect(status).to eq(0)
+      payload = JSON.parse(out)
+      expect(payload).to be_an(Array)
+      expect(payload.first).to include("id" => "call.undefined-method", "since" => "0.0.1")
+      expect(payload.first["fires_when"]).to be_an(Array)
+    end
+
+    it "lists explain in the help text" do
+      _status, out, _err = run_cli("help")
+
+      expect(out).to include("explain")
+    end
+  end
 end

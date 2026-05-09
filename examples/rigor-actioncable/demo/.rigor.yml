@@ -1,0 +1,12 @@
+paths:
+  - demo.rb
+  - errors_demo.rb
+  - app/channels/chat_channel.rb
+
+plugins:
+  - gem: rigor-actioncable
+    config:
+      channel_base_classes: ["ApplicationCable::Channel"]
+
+cache:
+  path: tmp/.rigor/cache

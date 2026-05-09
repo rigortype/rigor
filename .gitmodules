@@ -31,3 +31,6 @@
 [submodule "references/tapioca"]
 	path = references/tapioca
 	url = https://github.com/Shopify/tapioca.git
+[submodule "references/hanakai-rb"]
+	path = references/hanakai-rb
+	url = https://github.com/hanakai-rb/site.git

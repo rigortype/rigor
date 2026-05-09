@@ -45,4 +45,57 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
       expect(index.resolved_gems).to eq([resolved])
     end
   end
+
+  describe "#cache_descriptor" do
+    let(:resolver) { Rigor::Analysis::DependencySourceInference::GemResolver }
+
+    def resolved(name:, version:, mode:)
+      resolver::Resolved.new(
+        gem_name: name, version: version, gem_dir: "/tmp/#{name}", mode: mode, roots: %w[lib]
+      )
+    end
+
+    it "is empty for the EMPTY index" do
+      descriptor = described_class::EMPTY.cache_descriptor
+      expect(descriptor.dependencies).to eq([])
+    end
+
+    it "lifts every resolved gem into a DependencyEntry row" do
+      index = described_class.new(
+        resolved_gems: [
+          resolved(name: "rack", version: "3.0.0", mode: :when_missing),
+          resolved(name: "faraday", version: "2.7.0", mode: :full)
+        ]
+      )
+
+      rows = index.cache_descriptor.dependencies
+      expect(rows).to contain_exactly(
+        Rigor::Cache::Descriptor::DependencyEntry.new(
+          gem_name: "rack", gem_version: "3.0.0", mode: :when_missing
+        ),
+        Rigor::Cache::Descriptor::DependencyEntry.new(
+          gem_name: "faraday", gem_version: "2.7.0", mode: :full
+        )
+      )
+    end
+
+    it "produces a different cache key when a resolved gem's version bumps" do
+      before = described_class.new(
+        resolved_gems: [resolved(name: "rack", version: "3.0.0", mode: :when_missing)]
+      )
+      after = described_class.new(
+        resolved_gems: [resolved(name: "rack", version: "3.1.0", mode: :when_missing)]
+      )
+
+      expect(before.cache_descriptor.cache_key_for(producer_id: "p"))
+        .not_to eq(after.cache_descriptor.cache_key_for(producer_id: "p"))
+    end
+
+    it "ignores unresolvable entries — they have no version to key on" do
+      unresolvable = resolver::Unresolvable.new(gem_name: "ghost", reason: :not_in_bundle)
+      index = described_class.new(unresolvable: [unresolvable])
+
+      expect(index.cache_descriptor.dependencies).to eq([])
+    end
+  end
 end

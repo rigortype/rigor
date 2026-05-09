@@ -24,8 +24,10 @@ module Rigor
     class Descriptor # rubocop:disable Metrics/ClassLength
       # Bumped on incompatible schema changes. The storage layer
       # mixes this into the cache key, so a bump implicitly
-      # invalidates every cached value.
-      SCHEMA_VERSION = 1
+      # invalidates every cached value. v2 added the
+      # `dependencies` slot for ADR-10 per-gem-version cache slice
+      # invalidation.
+      SCHEMA_VERSION = 2
 
       # Per-slot entry value objects. Constructors validate enums /
       # required fields and freeze the resulting struct so no caller
@@ -134,6 +136,54 @@ module Rigor
         end
       end
 
+      # Per-(gem, version, mode) row carrying the cache slice
+      # boundary for ADR-10 dependency-source inference. A
+      # `bundle update` that bumps a listed gem's pinned version
+      # produces a different `gem_version` here and therefore a
+      # fresh cache key — invalidating exactly that gem's slice
+      # without disturbing other gems' slices or the project's
+      # own cache.
+      #
+      # `mode` mirrors the
+      # [Configuration::Dependencies::VALID_MODES](../configuration/dependencies.rb)
+      # enum (`:disabled` / `:when_missing` / `:full`); a mode
+      # change for the same gem also forces invalidation because
+      # the inferred shapes depend on whether RBS overrides the
+      # walk.
+      class DependencyEntry
+        VALID_MODES = %i[disabled when_missing full].freeze
+
+        attr_reader :gem_name, :gem_version, :mode
+
+        def initialize(gem_name:, gem_version:, mode:)
+          unless VALID_MODES.include?(mode)
+            raise ArgumentError,
+                  "DependencyEntry mode must be one of #{VALID_MODES.inspect}, got #{mode.inspect}"
+          end
+
+          @gem_name = gem_name.to_s.dup.freeze
+          @gem_version = gem_version.to_s.dup.freeze
+          @mode = mode
+          freeze
+        end
+
+        def to_h
+          { "gem_name" => gem_name, "gem_version" => gem_version, "mode" => mode.to_s }
+        end
+
+        def ==(other)
+          other.is_a?(DependencyEntry) &&
+            other.gem_name == gem_name &&
+            other.gem_version == gem_version &&
+            other.mode == mode
+        end
+        alias eql? ==
+
+        def hash
+          [self.class, gem_name, gem_version, mode].hash
+        end
+      end
+
       # Raised when {.compose} encounters incompatible entries
       # under the same key (file digest mismatch, gem-locked
       # disagreement, …). Callers handle the exception by
@@ -141,13 +191,14 @@ module Rigor
       # contribution silently.
       class Conflict < StandardError; end
 
-      attr_reader :files, :gems, :plugins, :configs
+      attr_reader :files, :gems, :plugins, :configs, :dependencies
 
-      def initialize(files: [], gems: [], plugins: [], configs: [])
+      def initialize(files: [], gems: [], plugins: [], configs: [], dependencies: [])
         @files = files.dup.freeze
         @gems = gems.dup.freeze
         @plugins = plugins.dup.freeze
         @configs = configs.dup.freeze
+        @dependencies = dependencies.dup.freeze
         freeze
       end
 
@@ -170,7 +221,8 @@ module Rigor
         gems = compose_by_key(descriptors.flat_map(&:gems), :name)
         plugins = compose_by_key(descriptors.flat_map(&:plugins), :id)
         configs = compose_by_key(descriptors.flat_map(&:configs), :key)
-        new(files: files, gems: gems, plugins: plugins, configs: configs)
+        dependencies = compose_by_key(descriptors.flat_map(&:dependencies), :gem_name)
+        new(files: files, gems: gems, plugins: plugins, configs: configs, dependencies: dependencies)
       end
 
       # @param producer_id [String]
@@ -196,6 +248,7 @@ module Rigor
       def to_canonical_hash
         {
           "configs" => sort_entries(configs, "key").map(&:to_h),
+          "dependencies" => sort_entries(dependencies, "gem_name").map(&:to_h),
           "files" => sort_entries(files, "path").map(&:to_h),
           "gems" => sort_entries(gems, "name").map(&:to_h),
           "plugins" => sort_entries(plugins, "id").map(&:to_h)

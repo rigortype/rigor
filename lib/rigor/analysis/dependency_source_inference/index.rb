@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../../cache/descriptor"
+
 module Rigor
   module Analysis
     module DependencySourceInference
@@ -41,6 +43,31 @@ module Rigor
 
         def empty?
           @resolved_gems.empty?
+        end
+
+        # Builds a frozen `Cache::Descriptor` carrying one
+        # `DependencyEntry` row per resolved gem in this run.
+        # Cache producers that observe ADR-10 inference outputs
+        # compose this descriptor with their own (RBS, plugin,
+        # file-digest) descriptors so a `bundle update` on a
+        # listed gem invalidates exactly that gem's slice while
+        # leaving the rest of the cache hot.
+        #
+        # Unresolvable entries contribute nothing — there is no
+        # version to key on, and the runner already surfaces them
+        # as `dynamic.dependency-source.gem-not-found`
+        # diagnostics. Resolved-but-disabled entries are also
+        # absent: the {Builder} skips them before resolution, so
+        # they never reach the index.
+        def cache_descriptor
+          dependencies = @resolved_gems.map do |resolved|
+            Cache::Descriptor::DependencyEntry.new(
+              gem_name: resolved.gem_name,
+              gem_version: resolved.version,
+              mode: resolved.mode
+            )
+          end
+          Cache::Descriptor.new(dependencies: dependencies)
         end
       end
 

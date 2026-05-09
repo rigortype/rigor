@@ -6,12 +6,12 @@ description: End-to-end workflow for an AI agent to translate a user requirement
 # Rigor Plugin Author Workflow
 
 This SKILL is for AI agents. It compresses the experience of having
-authored the fifteen examples under [`examples/`](../../../examples/README.md)
+authored the sixteen examples under [`examples/`](../../../examples/README.md)
 (eight plugin-contract walkthroughs plus the Rails ecosystem
 family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionmailer`,
-`rigor-activejob`, `rigor-pundit`, `rigor-sidekiq`, `rigor-actioncable`)
-into a procedural pipeline so the next plugin can be built end-to-end
-without re-discovering the gotchas.
+`rigor-activejob`, `rigor-pundit`, `rigor-sidekiq`, `rigor-actioncable`,
+`rigor-rspec`) into a procedural pipeline so the next plugin can be
+built end-to-end without re-discovering the gotchas.
 
 The user-facing handbook for plugin **authoring** is the
 [`examples/README.md`](../../../examples/README.md) landing page.
@@ -680,9 +680,9 @@ When in doubt, read these in order:
 
 1. **[`examples/README.md`](../../../examples/README.md)** — the
    landing page. Comparison table and recommended reading order
-   across the fifteen worked examples (eight plugin-contract
-   walkthroughs + seven Rails ecosystem plugins covering Tier 1
-   + Tier 3B + Tier 3C + Tier 3F).
+   across the sixteen worked examples (eight plugin-contract
+   walkthroughs + eight Rails ecosystem plugins covering Tier 1
+   + Tier 3A + Tier 3B + Tier 3C + Tier 3F).
 2. **[`docs/handbook/09-plugins.md`](../../../docs/handbook/09-plugins.md)**
    — the user-facing one-pager. Names what plugins can and cannot
    do today.

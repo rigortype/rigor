@@ -1,0 +1,9 @@
+paths:
+  - spec/user_spec.rb
+  - spec/errors_spec.rb
+
+plugins:
+  - rigor-rspec
+
+cache:
+  path: tmp/.rigor/cache

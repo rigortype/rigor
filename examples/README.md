@@ -1,6 +1,6 @@
 # Rigor plugin examples
 
-Fifteen worked examples of the **v0.1.0 plugin authoring
+Sixteen worked examples of the **v0.1.0 plugin authoring
 surface**. Each one is a fully-shaped plugin gem (manifest
 + `lib/` + gemspec) with a runnable demo (`demo/.rigor.yml`,
 `demo/demo.rb`, runtime, optional sigs) and an end-to-end
@@ -9,9 +9,9 @@ integration spec under
 
 The first eight examples illustrate the v0.1.0 plugin
 contract itself (one architectural surface per plugin).
-The seven `rigor-rails-*` / `rigor-action*` / `rigor-active*`
-/ `rigor-pundit` / `rigor-sidekiq` plugins are working
-drafts of the
+The eight Rails ecosystem plugins (`rigor-rails-*` /
+`rigor-action*` / `rigor-active*` / `rigor-pundit` /
+`rigor-sidekiq` / `rigor-rspec`) are working drafts of the
 [Rails ecosystem family](../docs/design/20260508-rails-plugins-roadmap.md)
 — they layer on top of the same contract but ship as a
 distinct readable group.
@@ -40,8 +40,9 @@ distinct readable group.
 | [`rigor-pundit`](rigor-pundit/) | 3B | Policy class + predicate method validation for `authorize(record, :action)`; receiver-type lookup via `Scope#type_of` | Ruby (`app/policies/`) | ✅ | 12 |
 | [`rigor-sidekiq`](rigor-sidekiq/) | 3C | Sidekiq worker `perform_async` / `perform_in` / `perform_at` argument shape; schedule-aware arity model | Ruby (`app/workers/`, `app/sidekiq/`) | ✅ | 11 |
 | [`rigor-actioncable`](rigor-actioncable/) | 3F | ActionCable channel discovery + `<Channel>.broadcast_to` / `ActionCable.server.broadcast(stream)` validation, with dynamic-stream suppression | Ruby (`app/channels/`) | ✅ | 9 |
+| [`rigor-rspec`](rigor-rspec/) | 3A | Duplicate `let` / `subject` + self-referencing let detection (deliberately minimal — mock-target validation + let-typo deferred) | — | — | 11 |
 
-All fifteen rely on **slice 5**
+All sixteen rely on **slice 5**
 (`Plugin::Base#diagnostics_for_file`) to surface
 diagnostics. The "headline facet" column names the
 *additional* surface each example spotlights — that is the
@@ -65,7 +66,8 @@ Pick the path that matches what you are trying to learn:
 | **Validate against an inferred-type catalog (Pundit-style)** | `rigor-pundit` — uses `Scope#type_of` to map records to policy classes |
 | **Discover via mixin (`include`) instead of inheritance** | `rigor-sidekiq` — direct-`include` match against marker modules; same arity model as `rigor-activejob` |
 | **Walk DSL calls inside method bodies (not just at class level)** | `rigor-actioncable` — `stream_from "..."` lives inside `def subscribed`, requiring a recursive descent for registration discovery |
-| **Read every example to internalise the architecture** | deprecations → lisp-eval → statesman → pattern → units → routes → activerecord → sorbet → activejob → rails-i18n → actionmailer → rails-routes → pundit → sidekiq → actioncable |
+| **Build a nested-scope tree per file (DSL with describe/context)** | `rigor-rspec` — `ScopeWalker` collects `describe` / `context` blocks; declarations are scope-local |
+| **Read every example to internalise the architecture** | deprecations → lisp-eval → statesman → pattern → units → routes → activerecord → sorbet → activejob → rails-i18n → actionmailer → rails-routes → pundit → sidekiq → actioncable → rspec |
 
 The recommended-for-everyone path runs from the smallest
 plugin (`rigor-deprecations`, ~80 lines, pure data → rules) up
@@ -80,27 +82,28 @@ DSL"; start with `rigor-rails-routes` if your interest is
 
 | Surface | Where it lives | Examples that use it |
 | --- | --- | --- |
-| `Rigor::Plugin::Base.manifest(...)` | manifest declaration | all fifteen |
+| `Rigor::Plugin::Base.manifest(...)` | manifest declaration | all sixteen |
 | `config_schema` (`:string` / `:array` / `:hash` kinds) | manifest body | deprecations / lisp-eval / pattern / statesman / activejob / rails-i18n / rails-routes / actionmailer / pundit / sidekiq / actioncable |
 | `manifest(produces: [:fact_name])` (ADR-9 cross-plugin) | fact publication | **rails-routes** |
-| `#init(services)` config plumbing | init hook | lisp-eval / pattern / statesman / routes / sorbet / all seven Rails ecosystem plugins |
+| `#init(services)` config plumbing | init hook | lisp-eval / pattern / statesman / routes / sorbet / seven Rails ecosystem plugins (excludes rspec — no config) |
 | `#prepare(services)` (ADR-9 fact publish) | post-init service handoff | **rails-routes** |
-| `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all fifteen |
+| `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all sixteen |
 | `#flow_contribution_for(node, scope)` | return-type contribution | lisp-eval / pattern / units / activerecord / sorbet |
-| `Rigor::Analysis::Diagnostic` construction | diagnostic emission | all fifteen |
-| `source_family: "plugin.<id>"` auto-stamp | runner-side, never set by plugin | all fifteen |
-| `Plugin::IoBoundary#read_file` (slice 2) | sandboxed file reads | routes / activerecord / sorbet / all seven Rails ecosystem plugins |
+| `Rigor::Analysis::Diagnostic` construction | diagnostic emission | all sixteen |
+| `source_family: "plugin.<id>"` auto-stamp | runner-side, never set by plugin | all sixteen |
+| `Plugin::IoBoundary#read_file` (slice 2) | sandboxed file reads | routes / activerecord / sorbet / seven Rails ecosystem plugins (excludes rspec — per-file only) |
 | `Plugin::TrustPolicy.allowed_read_roots` (slice 2) | declarative read-root policy | every IoBoundary user above (transitively) |
-| `Plugin::Base.producer` DSL (slice 6) | cached producer declaration | routes / activerecord / sorbet / all seven Rails ecosystem plugins |
-| `Plugin::Base#cache_for` callable (slice 6) | cache round-trip wrapper | routes / activerecord / sorbet / all seven Rails ecosystem plugins |
+| `Plugin::Base.producer` DSL (slice 6) | cached producer declaration | routes / activerecord / sorbet / seven Rails ecosystem plugins (excludes rspec) |
+| `Plugin::Base#cache_for` callable (slice 6) | cache round-trip wrapper | routes / activerecord / sorbet / seven Rails ecosystem plugins (excludes rspec) |
 | `Scope#type_of(node)` | engine query for an expression's inferred type | **pattern** / sorbet (receiver resolution) / **pundit** (record-type → policy-class lookup) |
 | `Type::Combinator.literal_string_compatible?` | engine-side literal-string predicate | **pattern** |
 | `Type::Constant#value` | exact-value extraction | **pattern** |
 | `Type::Nominal#class_name` | mapping inferred type to a class-name string | sorbet / **pundit** |
-| Two-pass walk (collect → validate) | pattern, not API | **statesman** / actionmailer / activejob / rails-i18n / pundit / sidekiq / actioncable |
+| Two-pass walk (collect → validate) | pattern, not API | **statesman** / actionmailer / activejob / rails-i18n / pundit / sidekiq / actioncable / rspec |
 | Local-variable binding map across statements | pattern, not API | **units** |
 | Mixin (`include M`) discovery vs. superclass discovery | pattern, not API | **sidekiq** (mixin) vs. activejob / actionmailer (superclass) |
 | Recursive method-body walk for nested DSL calls | pattern, not API | **actioncable** (`stream_from` inside `def subscribed`) |
+| Nested-scope tree (describe / context) | pattern, not API | **rspec** (`ScopeWalker`) |
 | Did-you-mean on multiple axes | pattern, not API | rails-routes (helper names) / rails-i18n (keys) / pundit (class + method) / actioncable (channel + stream) |
 
 The unmarked surfaces — return-type contributions, custom
@@ -181,8 +184,8 @@ the analyzer's normal dispatch instead of the RBS-level
   assertions (eight slices landed across ADR-11). Reads
   every `paths:` entry's `.rb` files for `sig` declarations
   and contributes return types via `flow_contribution_for`.
-- **Rails ecosystem family** — Tier 1 + 3B + 3C + 3F plugins
-  per
+- **Rails ecosystem family** — Tier 1 + 3A + 3B + 3C + 3F
+  plugins per
   [`docs/design/20260508-rails-plugins-roadmap.md`](../docs/design/20260508-rails-plugins-roadmap.md):
   `rigor-rails-routes`, `rigor-rails-i18n`,
   `rigor-actionmailer`, `rigor-activejob` (Tier 1 — current
@@ -190,13 +193,16 @@ the analyzer's normal dispatch instead of the RBS-level
   for receiver-type → policy-class resolution),
   `rigor-sidekiq` (Tier 3C — discovery via `include`
   marker module, schedule-aware arity model for
-  `perform_in` / `perform_at`), and `rigor-actioncable`
+  `perform_in` / `perform_at`), `rigor-actioncable`
   (Tier 3F — channel + stream-name index, dynamic-stream
-  suppression). All seven are diagnostic-only for v0.1.0
-  of each plugin, with future cross-plugin handoff (e.g.
-  `rigor-rails-routes`'s `:helper_table` ADR-9 fact, or
-  `rigor-actioncable`'s action-method map) queued for
-  downstream consumers.
+  suppression), and `rigor-rspec` (Tier 3A —
+  deliberately scoped to `let` / `subject` validation;
+  the heavier mock-target / let-typo detection from the
+  roadmap is queued for v0.2.x). All eight are
+  diagnostic-only for v0.1.0 of each plugin, with future
+  cross-plugin handoff (e.g. `rigor-rails-routes`'s
+  `:helper_table` ADR-9 fact, or `rigor-actioncable`'s
+  action-method map) queued for downstream consumers.
 
 `rigor-deprecations`, `rigor-statesman`, and `rigor-routes`
 stay diagnostic-only by design: deprecation reports and

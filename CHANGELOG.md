@@ -14,6 +14,12 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — ADR-10 slice 5 (normative documentation)
+
+- **New normative spec [`docs/internal-spec/dependency-source-inference.md`](docs/internal-spec/dependency-source-inference.md).** Covers the analyzer contract for opt-in dependency-source inference as it stands across the four landed slices (configuration, resolution + indexing, walker, dispatcher tier, cache slice) plus the diagnostic family (live `dynamic.dependency-source.gem-not-found`; pending `budget-exceeded` / `boundary-cross` / `config-conflict`) and the boundary contracts with ADR-2 (trusted-gem trust model), ADR-5 (Robustness Principle), and ADR-9 (cross-plugin API). The doc names the public-API drift surfaces locked by `spec/rigor/public_api_drift_spec.rb` and explicitly identifies which behaviours are pending slice 4 so consumers can read the substrate without misinterpreting it as feature-complete.
+- **Sibling-spec cross-links upgraded.** `docs/type-specification/special-types.md`, `inference-budgets.md`, and `diagnostic-policy.md` now link the analyzer contract alongside the existing ADR-10 reference, so readers landing on the dynamic-origin / budget-table / diagnostic-taxonomy surfaces find the implementation contract one click away.
+- **`docs/internal-spec/README.md` reading-order table** gains a row for the new doc.
+
 ### Added — ADR-10 slice 3 (cache descriptor for dependency-source inference)
 
 - **`Cache::Descriptor::DependencyEntry` value object + new `dependencies:` slot.** Per-(`gem_name`, `gem_version`, `mode`) row carrying the cache-slice boundary for ADR-10 opt-in dependency-source inference. Slots into the descriptor next to the existing `gems:` entry; canonical-bytes order, `compose_by_key` over `gem_name`, and conflict detection on disagreeing version / mode all match the existing `GemEntry` pattern. `mode` enum mirrors `Configuration::Dependencies::VALID_MODES` (`:disabled` / `:when_missing` / `:full`); construction validates and freezes.

@@ -45,7 +45,7 @@ The prompt SHOULD prefer small, ecosystem-compatible annotations. For return-onl
 
 If no boundary is supplied, callers MUST NOT receive a fabricated precise type. Rigor MAY use `Dynamic[top]`, `top`, or another conservative incomplete-inference marker internally, but diagnostics and exports MUST preserve the fact that inference stopped.
 
-When the receiver belongs to a gem the user opted into via `dependencies.source_inference:` (per [ADR-10](../adr/10-dependency-source-inference.md)), the dependency-source-inference tier MAY contribute a `Dynamic[T]` answer below the RBS tier instead of leaving the call as raw `Dynamic[top]`. The wrapping preserves the dynamic-origin provenance, so consumers MUST NOT rely on the static facet `T` as a ground-truth contract — RBS / RBS::Inline / generated stubs / plugin contracts always win on conflict, and the inferred shape is never round-tripped out as authored RBS.
+When the receiver belongs to a gem the user opted into via `dependencies.source_inference:` (per [ADR-10](../adr/10-dependency-source-inference.md); analyzer contract: [`docs/internal-spec/dependency-source-inference.md`](../internal-spec/dependency-source-inference.md)), the dependency-source-inference tier MAY contribute a `Dynamic[T]` answer below the RBS tier instead of leaving the call as raw `Dynamic[top]`. The wrapping preserves the dynamic-origin provenance, so consumers MUST NOT rely on the static facet `T` as a ground-truth contract — RBS / RBS::Inline / generated stubs / plugin contracts always win on conflict, and the inferred shape is never round-tripped out as authored RBS.
 
 The interactive prompt surface is target behavior, not a current scaffold feature. The non-interactive cutoff path is normative from v1.
 

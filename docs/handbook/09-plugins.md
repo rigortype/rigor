@@ -37,52 +37,54 @@ Other shapes that fit the plugin niche:
 Each of these has a worked example in
 [`examples/`](../../examples/README.md). The
 [`examples/README.md`](../../examples/README.md) page
-compares the six plugins on architectural axes (config
-schema, file I/O, cache producers, engine-collaboration via
-`Scope#type_of`, …) and recommends a reading order.
+compares the sixteen worked examples on architectural axes
+(config schema, file I/O, cache producers,
+engine-collaboration via `Scope#type_of`, cross-plugin facts,
+return-type contributions, …) and recommends a reading order.
 
 ## What a plugin can do today
 
-The v0.1.0 plugin contract — pinned at
+The v0.1.0+ plugin contract — pinned at
 [`docs/internal-spec/plugin.md`](../internal-spec/plugin.md)
 and laid out across a handful of slice specs in the same
-directory — gives a plugin three primary surfaces:
+directory — gives a plugin five primary surfaces:
 
 1. **`#diagnostics_for_file(path:, scope:, root:)`** — the
    per-file emission hook. Walk the parsed AST, return an
    array of `Rigor::Analysis::Diagnostic` rows. The runner
-   stamps each with `source_family: "plugin.<your-id>"`. All
-   six worked examples use this hook.
-2. **`Plugin::IoBoundary#read_file`** — sandboxed file reads
-   under the active `TrustPolicy`. Use this when the plugin
-   needs to read project files (route tables, schemas,
-   locale files). `examples/rigor-routes` is the reference
-   example.
-3. **`Plugin::Base.producer` + `#cache_for`** — plugin-side
+   stamps each with `source_family: "plugin.<your-id>"`.
+2. **`#flow_contribution_for(call_node:, scope:)`** — the
+   per-call-site return-type contribution hook (v0.1.1
+   Track 2 slice 7). Plugins return a `Rigor::FlowContribution`
+   bundle naming the inferred return type at the call site;
+   the analyzer's dispatcher merges the contributions and
+   uses the merged return as if it were RBS-declared.
+3. **`Plugin::IoBoundary#read_file`** / **`#open_url`** —
+   sandboxed file and (since v0.1.2) HTTPS reads under the
+   active `TrustPolicy`. Use this when the plugin needs to
+   read project files (route tables, schemas, locale files)
+   or fetch a stable URL.
+4. **`Plugin::Base.producer` + `#cache_for`** — plugin-side
    cache producers. Use these for parses / lookups expensive
    enough to want cross-run caching. Auto-invalidates on
-   the digest of every file the IoBoundary read while
-   building the result.
+   the digest of every file (and content hash of every URL)
+   the IoBoundary read while building the result.
+5. **`Plugin::FactStore` + `#prepare(services)`** — the
+   cross-plugin fact-publication surface (v0.1.1 Track 2,
+   ADR-9). Plugins publish facts in `prepare`; downstream
+   plugins consume them through `services.fact_store` so
+   producer-side parsing (e.g., `config/routes.rb`) can be
+   reused by every consumer (controller-side validators,
+   factory-side validators, …).
 
-## What a plugin cannot do today (intentionally)
-
-Plugins can emit diagnostics, but they cannot **replace the
-analyzer's inferred return type for a call site**. The
-`FlowContribution`-based plugin contribution surface that
-would let plugins emit return-type bundles is queued for a
-later v0.1.x slice. Until then, plugins surface their
-inferred types as `:info` diagnostics — useful as a trace,
-not a tightening.
-
-That is exactly the constraint the worked examples document
-at the top of their `lib/rigor/plugin/<id>.rb` files: the
-plugin sees the right type, the user sees the right
-diagnostic, but the analyzer's internal call-site inference
-is unchanged. When the v0.1.x return-type contribution slice
-ships, the same plugin code will move from emitting
-diagnostics to producing FlowContribution bundles, and the
-prose around each example's "Future direction" section
-becomes the implementation.
+The v0.1.2 release migrated four worked examples
+(`rigor-lisp-eval`, `rigor-pattern`, `rigor-units`,
+`rigor-activerecord`) from "diagnostic-only" to "narrowed
+return type via `flow_contribution_for`", so chained calls
+on plugin-typed values resolve through the analyzer's
+normal dispatch rather than the RBS-level `untyped`
+envelope. See the per-plugin README for which surface each
+one demonstrates.
 
 ## Should you write one?
 
@@ -100,8 +102,10 @@ Reach for a plugin only when:
 If those are true, [`examples/README.md`](../../examples/README.md)
 is your starting point. The
 [`rigor-deprecations`](../../examples/rigor-deprecations/)
-example is under 80 lines and is the recommended template
-for "I want to author my first plugin."
+example is the smallest fully-shaped plugin — manifest +
+single per-file walk + a couple of diagnostic emissions —
+and is the recommended template for "I want to author my
+first plugin."
 
 ## What's next
 

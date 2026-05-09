@@ -148,10 +148,18 @@ will need them:
    for the trade-offs (per-gem opt-in by design — broad
    defaults would inflate budgets and make `bundle update`
    noisy).
+5. **Use the `rigor-sorbet` adapter.** If your project
+   already uses [Sorbet](https://sorbet.org/), Rigor can
+   read your existing `sig { ... }` blocks, RBI files, and
+   `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions
+   as type sources without rewriting anything. See
+   [Chapter 10](10-sorbet.md) for the migration patterns
+   and the translation table.
 
-Chapters 7 and 9 cover (1)–(3) in detail. Most projects only
-need (1) and (2); (4) is for the long tail of utility gems
-that ship no signatures.
+Chapters 7 and 9 cover (1)–(3) in detail; chapter 10 covers
+(5). Most projects only need (1) and (2); (4) is for the long
+tail of utility gems that ship no signatures, and (5) is for
+projects arriving from Sorbet.
 
 ## A first walk through Rigor's config file
 

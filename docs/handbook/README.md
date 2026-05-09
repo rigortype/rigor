@@ -52,6 +52,12 @@ this handbook disagrees.
 9. [**Plugins**](09-plugins.md) — when to author one,
    pointer to the [examples/](../../examples/README.md)
    landing page.
+10. [**Coexisting with Sorbet**](10-sorbet.md) — for users
+    arriving from a Sorbet-using project: the
+    [`rigor-sorbet`](../../examples/rigor-sorbet/) adapter
+    reads `sig { ... }` blocks, RBI files, and
+    `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions
+    as type sources without rewriting in RBS.
 
 ## How to read this handbook
 

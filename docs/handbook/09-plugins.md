@@ -105,7 +105,15 @@ for "I want to author my first plugin."
 
 ## What's next
 
-You have reached the end of the handbook. From here:
+If your project uses [Sorbet](https://sorbet.org/), the
+[next chapter](10-sorbet.md) covers the `rigor-sorbet`
+adapter — Rigor reads `sig { ... }` blocks, RBI files, and
+`T.let` / `T.cast` / `T.must` / `T.unsafe` assertions as
+type sources, so you do not have to rewrite anything in RBS
+to start running `rigor check` alongside `srb tc`. If you do
+not use Sorbet, chapter 10 is safe to skip.
+
+From here:
 
 - Cover-to-cover re-reading is rarely useful — most readers
   return to specific chapters as questions arise.

@@ -14,6 +14,12 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — ADR-11 slice 7 (rigor-sorbet handbook chapter)
+
+- **New end-user handbook chapter [`docs/handbook/10-sorbet.md`](docs/handbook/10-sorbet.md).** Renders the rigor-sorbet plugin's coverage for users arriving from a Sorbet-using project: the basic translation contract, the type-vocabulary table (slice 1+3), `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions (slice 2), the RBI tree walker (slice 4), `# typed:` sigils (slice 5), `T.absurd` exhaustiveness (slice 6), the Tapioca DSL mixin pattern (slice 8), the dispatcher tier ordering (RBS still wins on conflict per ADR-2 / ADR-11 WD3), and three migration patterns (run side-by-side, Sorbet-for-sigs / Rigor-for-narrowing, gradual Sorbet → RBS). The README index gains a row; chapter 9's "what's next" wraps to 10 instead of declaring the handbook complete.
+- **Cross-link from [`docs/handbook/01-getting-started.md`](docs/handbook/01-getting-started.md) "When inference is not enough".** The four-escape-hatch list grows to five: (1) RBS, (2) `RBS::Extended`, (3) plugin, (4) gem-source inference (ADR-10), (5) `rigor-sorbet` adapter (chapter 10). The closing prose mentions that (5) is for projects arriving from Sorbet so readers don't think they need it without the prerequisite.
+- **Closes ADR-11's slice plan envelope.** Slices 1–6 + 8 of the Sorbet adapter are already feature-complete; the handbook chapter that slice 7 named was the last documentation deliverable. ADR-11's open follow-ups (`T.bind` / `T.assert_type!` / `T.must_because` / `T.reveal_type`; per-call-site sigil enforcement) remain queued without a milestone.
+
 ### Added — ADR-10 slice 5 (normative documentation)
 
 - **New normative spec [`docs/internal-spec/dependency-source-inference.md`](docs/internal-spec/dependency-source-inference.md).** Covers the analyzer contract for opt-in dependency-source inference as it stands across the four landed slices (configuration, resolution + indexing, walker, dispatcher tier, cache slice) plus the diagnostic family (live `dynamic.dependency-source.gem-not-found`; pending `budget-exceeded` / `boundary-cross` / `config-conflict`) and the boundary contracts with ADR-2 (trusted-gem trust model), ADR-5 (Robustness Principle), and ADR-9 (cross-plugin API). The doc names the public-API drift surfaces locked by `spec/rigor/public_api_drift_spec.rb` and explicitly identifies which behaviours are pending slice 4 so consumers can read the substrate without misinterpreting it as feature-complete.

@@ -86,6 +86,7 @@ module Rigor
         plugin_load_diagnostics +
           plugin_prepare_diagnostics +
           dependency_source_diagnostics +
+          dependency_source_budget_diagnostics +
           expansion.fetch(:errors)
       end
 
@@ -240,6 +241,33 @@ module Rigor
                      "resolved (#{entry.reason}); skipping",
             severity: :warning,
             rule: "dynamic.dependency-source.gem-not-found",
+            source_family: :builtin
+          )
+        end
+      end
+
+      # ADR-10 § "Budget interaction" / slice 4 — emits one
+      # `:warning` per gem whose Walker run hit the
+      # `dependencies.budget_per_gem` cap. The cap is a Walker-
+      # side guard rail (slice 4 picks the (α) semantics from
+      # ADR-10 WD4: harvesting stops, the dispatcher behaves
+      # exactly as before for unrecorded methods). The
+      # diagnostic names the gem and points the user at the
+      # three remediations: ship RBS, reduce `mode:` from
+      # `full` to `when_missing`, or de-list the gem.
+      def dependency_source_budget_diagnostics
+        budget = @configuration.dependencies.budget_per_gem
+        @dependency_source_index.budget_exceeded.map do |gem_name|
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "dependencies.source_inference[].gem #{gem_name.inspect} exceeded the per-gem " \
+                     "catalog cap (#{budget} method definitions); the remaining methods fall back " \
+                     "to the existing RBS-or-Dynamic[top] boundary. Ship RBS for the gem, set " \
+                     "`mode: when_missing` instead of `full`, or de-list the gem.",
+            severity: :warning,
+            rule: "dynamic.dependency-source.budget-exceeded",
             source_family: :builtin
           )
         end

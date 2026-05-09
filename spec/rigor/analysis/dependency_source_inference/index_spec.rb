@@ -8,7 +8,21 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
       expect(described_class::EMPTY).to be_frozen
       expect(described_class::EMPTY.resolved_gems).to eq([])
       expect(described_class::EMPTY.unresolvable).to eq([])
+      expect(described_class::EMPTY.budget_exceeded).to eq([])
       expect(described_class::EMPTY).to be_empty
+    end
+  end
+
+  describe "#budget_exceeded (slice 4)" do
+    it "stores the gem names whose Walker run hit the budget cap" do
+      index = described_class.new(budget_exceeded: %w[rack faraday])
+
+      expect(index.budget_exceeded).to eq(%w[rack faraday])
+      expect(index.budget_exceeded).to be_frozen
+    end
+
+    it "defaults to an empty array when no gem tripped" do
+      expect(described_class.new.budget_exceeded).to eq([])
     end
   end
 

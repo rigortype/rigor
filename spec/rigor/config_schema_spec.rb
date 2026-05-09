@@ -85,4 +85,13 @@ RSpec.describe "Rigor configuration JSON Schema" do # rubocop:disable RSpec/Desc
     expect(object_alt["required"]).to eq(["gem"])
     expect(object_alt["properties"].keys).to contain_exactly("gem", "id", "config")
   end
+
+  it "constrains dependencies.budget_per_gem to the runtime MIN/MAX bounds and default" do
+    schema_obj = schema.dig("properties", "dependencies", "properties", "budget_per_gem")
+    expect(schema_obj).not_to be_nil
+    expect(schema_obj["type"]).to eq("integer")
+    expect(schema_obj["minimum"]).to eq(Rigor::Configuration::Dependencies::MIN_BUDGET_PER_GEM)
+    expect(schema_obj["maximum"]).to eq(Rigor::Configuration::Dependencies::MAX_BUDGET_PER_GEM)
+    expect(schema_obj["default"]).to eq(Rigor::Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM)
+  end
 end

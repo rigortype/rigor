@@ -211,6 +211,30 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.message).to include("definitely-no-such-gem-rigor-12345")
       expect(diag.severity).to eq(:warning)
     end
+
+    it "surfaces a budget-exceeded gem as `dynamic.dependency-source.budget-exceeded` exactly once (ADR-10 slice 4)" do # rubocop:disable RSpec/ExampleLength
+      configuration = Rigor::Configuration.new(
+        "paths" => [],
+        "dependencies" => {
+          "source_inference" => [{ "gem" => "prism", "mode" => "when_missing" }],
+          "budget_per_gem" => 1250
+        }
+      )
+      runner = described_class.new(configuration: configuration, cache_store: nil)
+      walker = Rigor::Analysis::DependencySourceInference::Walker
+      allow(walker).to receive(:walk).and_return(
+        walker::Outcome.new(catalog: { ["Prism::FakeNode", :foo] => :instance }.freeze, truncated: true)
+      )
+
+      result = runner.run
+      budget_diags = result.diagnostics.select { |d| d.rule == "dynamic.dependency-source.budget-exceeded" }
+
+      expect(budget_diags.length).to eq(1)
+      expect(budget_diags.first.path).to eq(".rigor.yml")
+      expect(budget_diags.first.message).to include("prism")
+      expect(budget_diags.first.message).to include("1250")
+      expect(budget_diags.first.severity).to eq(:warning)
+    end
   end
 
   describe "target_ruby wiring (`.rigor.yml` -> Prism version:)" do

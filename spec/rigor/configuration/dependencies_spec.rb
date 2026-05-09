@@ -103,13 +103,56 @@ RSpec.describe Rigor::Configuration::Dependencies do
     end
   end
 
+  describe "#budget_per_gem (slice 4)" do
+    it "defaults to DEFAULT_BUDGET_PER_GEM (5000) when the key is omitted" do
+      deps = described_class.from_h({})
+
+      expect(deps.budget_per_gem).to eq(described_class::DEFAULT_BUDGET_PER_GEM)
+      expect(deps.budget_per_gem).to eq(5000)
+    end
+
+    it "accepts an Integer within the 0.25× – 4× range" do
+      deps = described_class.from_h("budget_per_gem" => 7500)
+
+      expect(deps.budget_per_gem).to eq(7500)
+    end
+
+    it "accepts the minimum bound (1250)" do
+      deps = described_class.from_h("budget_per_gem" => 1250)
+
+      expect(deps.budget_per_gem).to eq(described_class::MIN_BUDGET_PER_GEM)
+    end
+
+    it "accepts the maximum bound (20000)" do
+      deps = described_class.from_h("budget_per_gem" => 20_000)
+
+      expect(deps.budget_per_gem).to eq(described_class::MAX_BUDGET_PER_GEM)
+    end
+
+    it "rejects non-Integer values" do
+      expect { described_class.from_h("budget_per_gem" => "5000") }
+        .to raise_error(ArgumentError, /must be an Integer/)
+    end
+
+    it "rejects values below the minimum" do
+      expect { described_class.from_h("budget_per_gem" => 100) }
+        .to raise_error(ArgumentError, /must be in the range/)
+    end
+
+    it "rejects values above the maximum" do
+      expect { described_class.from_h("budget_per_gem" => 100_000) }
+        .to raise_error(ArgumentError, /must be in the range/)
+    end
+  end
+
   describe "#to_h" do
-    it "round-trips through Configuration::Dependencies.from_h" do
+    it "round-trips through Configuration::Dependencies.from_h" do # rubocop:disable RSpec/ExampleLength
       original = described_class.from_h(
         "source_inference" => [
           { "gem" => "rack", "mode" => "full", "roots" => %w[lib bin] },
           { "gem" => "faraday" }
-        ]
+        ],
+        "budget_per_gem" => 8000
       )
 
       reparsed = described_class.from_h(original.to_h)
@@ -121,6 +164,7 @@ RSpec.describe Rigor::Configuration::Dependencies do
       expect(reparsed.source_inference[1].gem).to eq("faraday")
       expect(reparsed.source_inference[1].mode).to eq(:when_missing)
       expect(reparsed.source_inference[1].roots).to eq(%w[lib])
+      expect(reparsed.budget_per_gem).to eq(8000)
     end
 
     it "emits the mode as its String spelling so the form survives YAML.dump round-trips" do
@@ -129,6 +173,12 @@ RSpec.describe Rigor::Configuration::Dependencies do
       )
 
       expect(deps.to_h.dig("source_inference", 0, "mode")).to eq("when_missing")
+    end
+
+    it "carries budget_per_gem in the round-tripped Hash" do
+      deps = described_class.from_h({})
+
+      expect(deps.to_h["budget_per_gem"]).to eq(described_class::DEFAULT_BUDGET_PER_GEM)
     end
   end
 end

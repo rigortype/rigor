@@ -61,7 +61,8 @@ module Rigor
       "severity_profile" => "balanced",
       "severity_overrides" => {},
       "dependencies" => {
-        "source_inference" => []
+        "source_inference" => [],
+        "budget_per_gem" => Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM
       }
     }.freeze
 

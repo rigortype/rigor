@@ -15,7 +15,7 @@ module Rigor
       # answers `nil` until slice 2b populates the method table
       # by walking the resolved gems' `roots:`.
       class Index
-        attr_reader :resolved_gems, :unresolvable, :method_catalog
+        attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded
 
         # @param method_catalog [Hash{[String, Symbol] => Symbol}]
         #   the flat `(class_name, method_name) → :instance | :singleton`
@@ -23,10 +23,16 @@ module Rigor
         #   every resolved gem in the run. The Index itself stays
         #   gem-agnostic — the per-gem attribution that slice 3's
         #   cache descriptor needs lives on `Resolved`, not here.
-        def initialize(resolved_gems: [], unresolvable: [], method_catalog: {})
+        # @param budget_exceeded [Array<String>] gem names whose
+        #   {Walker} run hit the per-gem catalog cap (slice 4).
+        #   The Runner consumes this list to emit one
+        #   `dynamic.dependency-source.budget-exceeded` warning
+        #   per gem.
+        def initialize(resolved_gems: [], unresolvable: [], method_catalog: {}, budget_exceeded: [])
           @resolved_gems = resolved_gems.freeze
           @unresolvable = unresolvable.freeze
           @method_catalog = method_catalog.freeze
+          @budget_exceeded = budget_exceeded.freeze
           freeze
         end
 

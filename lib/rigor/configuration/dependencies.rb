@@ -24,6 +24,20 @@ module Rigor
       # parser — see ADR-10 § "Hard exclusions".
       DEFAULT_ROOTS = %w[lib].freeze
 
+      # Default per-gem catalog cap. ADR-10 slice 4 picks
+      # 5000 method definitions: it covers Rack (~1500),
+      # Faraday (~500), Sidekiq (~800) and other realistic
+      # opt-in targets, while still surfacing a diagnostic for
+      # ActiveSupport-class libraries (~10 000+ methods) where
+      # the user should ship RBS or de-list the gem instead.
+      DEFAULT_BUDGET_PER_GEM = 5000
+
+      # Range bounds per ADR-10 § "Budget interaction"
+      # ("range 0.25× – 4×"). Configured against the default,
+      # this lands at 1250 – 20 000.
+      MIN_BUDGET_PER_GEM = (DEFAULT_BUDGET_PER_GEM * 0.25).to_i
+      MAX_BUDGET_PER_GEM = (DEFAULT_BUDGET_PER_GEM * 4).to_i
+
       # Frozen value object describing a single per-gem opt-in.
       # `gem:` is the gem name (matched against the bundle at
       # walk time); `mode:` is one of {VALID_MODES}; `roots:` is
@@ -35,21 +49,23 @@ module Rigor
         def full? = mode == :full
       end
 
-      attr_reader :source_inference
+      attr_reader :source_inference, :budget_per_gem
 
       # Parse the YAML-shaped `dependencies:` value into a
       # frozen {Dependencies}. Accepts `nil` / `{}` / a Hash with
-      # `source_inference:` present.
+      # `source_inference:` and / or `budget_per_gem:` present.
       def self.from_h(data)
-        return new([]) if data.nil?
+        return new([], DEFAULT_BUDGET_PER_GEM) if data.nil?
         raise ArgumentError, "dependencies: must be a Hash, got #{data.inspect}" unless data.is_a?(Hash)
 
         entries = Array(data["source_inference"]).map { |raw| coerce_entry(raw) }
-        new(entries)
+        budget = coerce_budget_per_gem(data.fetch("budget_per_gem", DEFAULT_BUDGET_PER_GEM))
+        new(entries, budget)
       end
 
-      def initialize(source_inference)
+      def initialize(source_inference, budget_per_gem = DEFAULT_BUDGET_PER_GEM)
         @source_inference = source_inference.freeze
+        @budget_per_gem = budget_per_gem
         freeze
       end
 
@@ -61,7 +77,8 @@ module Rigor
               "mode" => entry.mode.to_s,
               "roots" => entry.roots
             }
-          end
+          end,
+          "budget_per_gem" => @budget_per_gem
         }
       end
 
@@ -108,6 +125,29 @@ module Rigor
           raise ArgumentError,
                 "dependencies.source_inference[].roots must not be empty when supplied " \
                 "(omit the key to fall back to the default #{DEFAULT_ROOTS.inspect})"
+        end
+
+        # ADR-10 slice 4. Per-gem catalog cap is mandatory
+        # (the parser supplies the default before this is
+        # called, so `nil` only reaches here on an explicit
+        # `budget_per_gem: ~`). Range bounds match
+        # MIN_BUDGET_PER_GEM .. MAX_BUDGET_PER_GEM
+        # (i.e. 0.25× – 4× of the default).
+        def coerce_budget_per_gem(value)
+          unless value.is_a?(Integer)
+            raise ArgumentError,
+                  "dependencies.budget_per_gem must be an Integer, " \
+                  "got #{value.inspect}"
+          end
+
+          unless value.between?(MIN_BUDGET_PER_GEM, MAX_BUDGET_PER_GEM)
+            raise ArgumentError,
+                  "dependencies.budget_per_gem must be in the range " \
+                  "#{MIN_BUDGET_PER_GEM}..#{MAX_BUDGET_PER_GEM}, " \
+                  "got #{value.inspect}"
+          end
+
+          value
         end
       end
     end

@@ -107,6 +107,13 @@
           "description": "Per-gem opt-in entries. Gems not listed keep the unlisted-gem default (no source walk).",
           "type": "array",
           "items": { "$ref": "#/$defs/sourceInferenceEntry" }
+        },
+        "budget_per_gem": {
+          "description": "Per-gem catalog cap (method-definition count). When the walker reaches this many catalog entries for a single gem, harvesting stops for that gem and Rigor surfaces a `dynamic.dependency-source.budget-exceeded` warning. Default 5000 (covers Rack, Faraday, Sidekiq); range 1250 – 20000 (0.25× – 4× of the default per ADR-10 § \"Budget interaction\").",
+          "type": "integer",
+          "minimum": 1250,
+          "maximum": 20000,
+          "default": 5000
         }
       }
     }

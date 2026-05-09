@@ -270,7 +270,7 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
-    it "round-trips dependencies: through #to_h" do
+    it "round-trips dependencies: through #to_h" do # rubocop:disable RSpec/ExampleLength
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")
         File.write(path, <<~YAML)
@@ -285,7 +285,8 @@ RSpec.describe Rigor::Configuration do
         expect(round_tripped).to eq(
           "source_inference" => [
             { "gem" => "rack", "mode" => "full", "roots" => %w[lib app] }
-          ]
+          ],
+          "budget_per_gem" => Rigor::Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM
         )
       end
     end

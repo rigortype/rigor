@@ -18,7 +18,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
   describe ".walk" do
     it "returns an empty hash for a gem with no .rb files under any root" do
       with_fake_gem do |gem_dir|
-        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
         expect(catalog).to be_frozen
         expect(catalog).to eq({})
       end
@@ -33,7 +33,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
           end
         RUBY
 
-        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
         expect(catalog).to eq(
           ["Fake", :shout] => :instance,
@@ -52,7 +52,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
           end
         RUBY
 
-        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
         expect(catalog).to eq(["Fake::Inner", :deep] => :instance)
       end
@@ -68,7 +68,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
           end
         RUBY
 
-        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
         expect(catalog).to eq(["Fake", :from_meta] => :singleton)
       end
@@ -89,7 +89,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
           end
         RUBY
 
-        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
         expect(catalog).to include(["Fake::Sub", :call] => :instance)
       end
@@ -100,7 +100,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         File.write(File.join(gem_dir, "lib", "good.rb"), "class Good; def ok; end; end\n")
         File.write(File.join(gem_dir, "lib", "broken.rb"), "def broken\n") # unterminated def
 
-        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+        catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
         expect(catalog).to include(["Good", :ok] => :instance)
         # The broken file produces no entries — its contents are silently dropped.
@@ -122,7 +122,7 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
           end
         RUBY
 
-        catalog = walker.walk(gem_dir: gem_dir, roots: %w[spec lib])
+        catalog = walker.walk(gem_dir: gem_dir, roots: %w[spec lib]).catalog
 
         expect(catalog.keys.map(&:first)).to contain_exactly("Library")
       end
@@ -133,6 +133,48 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
 
       expect(excluded).to contain_exactly("spec", "test", "bin")
       expect(walker.accepted_roots(%w[Spec TEST Bin lib ext])).to eq(%w[lib ext])
+    end
+
+    describe "budget: cap (slice 4)" do
+      it "caps the catalog at `budget` entries and reports truncated?" do
+        with_fake_gem do |gem_dir|
+          File.write(File.join(gem_dir, "lib", "fake.rb"), <<~RUBY)
+            class Fake
+              def a; end
+              def b; end
+              def c; end
+              def d; end
+              def e; end
+            end
+          RUBY
+
+          outcome = walker.walk(gem_dir: gem_dir, roots: %w[lib], budget: 3)
+
+          expect(outcome.catalog.size).to eq(3)
+          expect(outcome.truncated?).to be(true)
+        end
+      end
+
+      it "reports truncated? false when the catalog fits within budget" do
+        with_fake_gem do |gem_dir|
+          File.write(File.join(gem_dir, "lib", "fake.rb"), "class Fake; def only; end; end\n")
+
+          outcome = walker.walk(gem_dir: gem_dir, roots: %w[lib], budget: 100)
+
+          expect(outcome.catalog.size).to eq(1)
+          expect(outcome.truncated?).to be(false)
+        end
+      end
+
+      it "defaults to UNBOUNDED when budget: is omitted" do
+        with_fake_gem do |gem_dir|
+          File.write(File.join(gem_dir, "lib", "fake.rb"), "class Fake; def only; end; end\n")
+
+          outcome = walker.walk(gem_dir: gem_dir, roots: %w[lib])
+
+          expect(outcome.truncated?).to be(false)
+        end
+      end
     end
   end
 end

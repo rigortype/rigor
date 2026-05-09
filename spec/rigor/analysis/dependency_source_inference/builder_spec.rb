@@ -53,7 +53,31 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       expect(index.contribution_for(class_name: "Beta", method_name: :two)).to eq(:singleton)
     end
 
-    def stub_resolved_for(gem_name, method_catalog:)
+    it "records budget-exceeded gems on the Index when the Walker truncates (slice 4)" do
+      stub_resolved_for("alpha", method_catalog: { ["Alpha", :one] => :instance })
+      stub_resolved_for("beta", method_catalog: { ["Beta", :two] => :instance }, truncated: true)
+
+      index = described_class.build(dependencies({ "gem" => "alpha" }, { "gem" => "beta" }))
+
+      expect(index.budget_exceeded).to eq(["beta"])
+    end
+
+    it "threads dependencies.budget_per_gem through to Walker.walk (slice 4)" do
+      input = Rigor::Configuration::Dependencies.from_h(
+        "source_inference" => [{ "gem" => "alpha" }],
+        "budget_per_gem" => 7500
+      )
+      stub_resolved_for("alpha", method_catalog: {})
+      walker = Rigor::Analysis::DependencySourceInference::Walker
+
+      described_class.build(input)
+
+      expect(walker).to have_received(:walk).with(
+        gem_dir: "/fake/alpha", roots: %w[lib], budget: 7500
+      )
+    end
+
+    def stub_resolved_for(gem_name, method_catalog:, truncated: false)
       gem_dir = "/fake/#{gem_name}"
       resolver = Rigor::Analysis::DependencySourceInference::GemResolver
       walker = Rigor::Analysis::DependencySourceInference::Walker
@@ -63,7 +87,10 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
           gem_dir: gem_dir, mode: :when_missing, roots: %w[lib]
         )
       )
-      allow(walker).to receive(:walk).with(gem_dir: gem_dir, roots: %w[lib]).and_return(method_catalog)
+      outcome = walker::Outcome.new(catalog: method_catalog, truncated: truncated)
+      allow(walker).to receive(:walk).with(
+        gem_dir: gem_dir, roots: %w[lib], budget: anything
+      ).and_return(outcome)
     end
   end
 end

@@ -1,12 +1,12 @@
 # Opt-in Dependency-Source Inference
 
-Status: **v0.1.3 in progress.** Slices 1, 2a, 2b-i, 2b-ii, and 3
-of [ADR-10](../adr/10-dependency-source-inference.md) have landed
-unreleased on `master`; slices 4 (per-gem budget pool +
-`dynamic.dependency-source.budget-exceeded`) and the cross-link
-half of slice 5 are pending. This document fixes the analyzer
-contract for the surface that is in place today and names the
-contract gaps the remaining slices will close.
+Status: **v0.1.3 in progress.** Slices 1, 2a, 2b-i, 2b-ii, 3,
+4, and 5 of
+[ADR-10](../adr/10-dependency-source-inference.md) have all
+landed unreleased on `master`; ADR-10's implementation envelope
+is complete. This document fixes the analyzer contract for the
+delivered surface and names the open follow-ups still tracked
+on ADR-10 § "Open questions".
 
 The binding design surface is
 [ADR-10](../adr/10-dependency-source-inference.md); the
@@ -62,6 +62,7 @@ mirrors the parser.
 | `gem` | non-empty String | yes | — | Bundle-resolvable gem name. |
 | `mode` | enum | no | `when_missing` | One of `disabled`, `when_missing`, `full`. |
 | `roots` | Array&lt;String&gt; | no | `["lib"]` | Per-gem subdirectories the walker MAY visit. |
+| `dependencies.budget_per_gem` | Integer | no | `5000` | Per-gem catalog cap (method-definition count). Range `1250 .. 20000` (0.25× – 4× of the default per ADR-10 § "Budget interaction"). When the walker hits the cap for a gem, harvesting stops and the runner emits a `dynamic.dependency-source.budget-exceeded` warning. |
 
 ### Modes
 
@@ -109,11 +110,15 @@ Signature changes update the matching
 | `Rigor::Configuration#dependencies` | Configuration | Slice 1 |
 | `Rigor::Configuration::Dependencies` value object | Configuration | Slice 1 |
 | `Rigor::Configuration::Dependencies::Entry` Data shape | Configuration | Slice 1 |
+| `Rigor::Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM` / `MIN_BUDGET_PER_GEM` / `MAX_BUDGET_PER_GEM` | Configuration | Slice 4 |
+| `Rigor::Configuration::Dependencies#budget_per_gem` | Configuration | Slice 4 |
 | `Rigor::Analysis::DependencySourceInference` namespace | Analysis | Slice 2a |
 | `Rigor::Analysis::DependencySourceInference::GemResolver.resolve` | Analysis | Slice 2a |
 | `Rigor::Analysis::DependencySourceInference::Index` | Analysis | Slice 2a / 2b-i |
+| `Rigor::Analysis::DependencySourceInference::Index#budget_exceeded` | Analysis | Slice 4 |
 | `Rigor::Analysis::DependencySourceInference::Builder.build` | Analysis | Slice 2a |
-| `Rigor::Analysis::DependencySourceInference::Walker.walk` | Analysis | Slice 2b-i |
+| `Rigor::Analysis::DependencySourceInference::Walker.walk(budget:)` | Analysis | Slice 2b-i / 4 |
+| `Rigor::Analysis::DependencySourceInference::Walker::Outcome` Data shape | Analysis | Slice 4 |
 | `Rigor::Environment#dependency_source_index` | Environment | Slice 2b-ii |
 | `Rigor::Cache::Descriptor::DependencyEntry` | Cache | Slice 3 |
 | `Rigor::Cache::Descriptor#dependencies` slot | Cache | Slice 3 |
@@ -231,6 +236,66 @@ opt-in-gem method calls whose receivers Rigor can recognise by
 `Nominal[T]` (typically because the user authored an RBS
 skeleton or because RBS resolved the constructor call).
 
+## Budget enforcement (slice 4)
+
+Per ADR-10 § "Budget interaction", each opt-in gem gets a
+**separate budget pool** so a poorly-bounded gem cannot
+starve the user's own analysis.
+
+The unit is **method-definition count** harvested into the
+catalog. Default `5000` covers every realistic opt-in target
+(Rack ≈ 1500, Faraday ≈ 500, Sidekiq ≈ 800) while still
+surfacing a diagnostic for ActiveSupport-class libraries
+(~10 000+ methods) where the user should ship RBS or de-list
+the gem instead. The configured value is bounded by the
+`MIN_BUDGET_PER_GEM` (`1250`, 0.25× the default) and
+`MAX_BUDGET_PER_GEM` (`20000`, 4×) constants.
+
+### Walker-side cap (semantics α)
+
+When `Walker.walk(gem_dir:, roots:, budget:)` reaches `budget`
+catalog entries for a single gem, it stops harvesting:
+
+- The current file's remaining `def` nodes are NOT recorded.
+- Subsequent files (and roots) for the same gem are NOT
+  visited.
+- The Walker returns `Outcome.new(catalog: ..., truncated: true)`
+  to signal the cap was hit.
+
+The accumulated catalog stays valid; it just doesn't cover
+the gem completely. For methods that **were** harvested
+before the cap, the dispatcher tier behaves exactly as it
+does for any other catalog hit (returns `Dynamic[top]`). For
+methods that **weren't** harvested — i.e. those past the cap
+— the dispatcher falls through to the existing user-class
+fallback path: usually a `call.undefined-method` if the
+receiver class is RBS-known but the method is not.
+
+This is the **(α) semantics** from ADR-10 WD4: the budget
+caps the harvest, not the dispatch. The richer (β) semantics
+("any call on a budget-exceeded gem's class returns
+`Dynamic[top]` regardless of catalog hit") would require a
+class-to-gem reverse index on the {Index} and a dispatcher
+branch consulting it; that follow-up is queued for a later
+slice if the (α) experience surfaces a concrete need.
+
+### Diagnostic emission
+
+`Index#budget_exceeded` is the frozen Array of gem names that
+tripped the cap during {Builder.build}. The runner consumes
+this list once per run via
+`#dependency_source_budget_diagnostics` and emits one
+`dynamic.dependency-source.budget-exceeded` `:warning` per
+listed gem. The diagnostic message names the gem, the
+configured cap, and points the user at the three remediations
+(ship RBS, reduce `mode:` from `full` to `when_missing`,
+de-list).
+
+The dedupe is per-gem, not per-call-site. A budget-exceeded
+gem with hundreds of unrecorded methods produces exactly one
+warning; the user does not have to suppress dozens of
+identical messages.
+
 ## Cache slice (slice 3)
 
 [`Rigor::Cache::Descriptor`](cache.md) gains a top-level
@@ -293,7 +358,7 @@ Every diagnostic emitted on the dependency-source path uses the
 | Rule | Severity (authored) | Status | Meaning |
 | --- | --- | --- | --- |
 | `dynamic.dependency-source.gem-not-found` | `:warning` | Live (slice 2a) | Listed gem was not resolvable through RubyGems. Run continues; gem contributes nothing. |
-| `dynamic.dependency-source.budget-exceeded` | `:warning` | **Pending (slice 4)** | Per-gem budget tripped. Walker stopped harvesting; remaining sites resolve as if the gem were not listed. Recommendation: ship RBS, reduce mode from `full` to `when_missing`, or delist the gem. |
+| `dynamic.dependency-source.budget-exceeded` | `:warning` | Live (slice 4) | Per-gem budget tripped. Walker stopped harvesting at `dependencies.budget_per_gem` method definitions; remaining sites resolve through the existing RBS-or-`Dynamic[top]` boundary. Emitted at most once per gem per run. Recommendation: ship RBS, reduce mode from `full` to `when_missing`, or delist the gem. |
 | `dynamic.dependency-source.boundary-cross` | `:info` | **Pending (post-slice-4)** | Plugin contract and gem-source inference disagree on a return type. The plugin wins; the diagnostic surfaces the divergence for audit. |
 | `dynamic.dependency-source.config-conflict` | `:error` | **Pending (post-slice-4)** | `.rigor.yml` parse / merge produced two incompatible entries for the same gem (e.g. across `includes:`). The configured profile re-stamps severity per the active severity profile; the authored severity is the one above.
 
@@ -345,34 +410,45 @@ receiver class still wins on conflict.
 
 The surfaces named in "Public-API drift surface" above are
 stable as of v0.1.3 unreleased on `master` and locked by the
-drift spec.
-
-Slice 4 introduces:
-
-- `dependencies.budget_per_gem` configuration entry (range and
-  default to be fixed in the slice).
-- Per-gem budget pool plumbed through the walker (or the
-  dispatcher-time accounting path; the choice is pending).
-- `dynamic.dependency-source.budget-exceeded` `:warning`
-  diagnostic, emitted at most once per gem per run.
-
-Slice 4 MAY also deliver:
-
-- A per-class-to-gem reverse index on `Index` if the budget
-  semantics need it.
-- A wider diagnostic surface (`boundary-cross`,
-  `config-conflict`) if the dogfooding surfaces clear failure
-  modes.
-
-Each addition extends this document; the drift spec follows in
-the same commit.
+drift spec. ADR-10's five-slice implementation envelope is
+complete; further work is tracked under "Open questions"
+below.
 
 ## Open questions
 
 Tracked on [ADR-10](../adr/10-dependency-source-inference.md)
-§ "Open questions" — revisited at each slice boundary:
+§ "Open questions" — revisited as concrete needs surface:
 
-- Per-receiver plugin veto.
-- `mode: full` retention.
-- Cache size cap (`dependencies.cache_size`).
-- Configurable dispatcher tier ordering.
+- **Per-receiver plugin veto** — ADR-9 manifest field or
+  `Plugin::Base#owns_receiver?` so plugins can veto
+  gem-source inference for receivers they own (e.g.
+  `rigor-activerecord` vetoing `ActiveRecord::Base`
+  subclasses to avoid collisions with plugin-generated
+  members).
+- **`mode: full` retention** — the dispatcher tier in v0.1.3
+  treats `full` and `when_missing` identically. The
+  authoring distinction stays in the configuration surface
+  to avoid churn if `full`-distinguishing dispatch lands
+  later.
+- **Cache size cap (`dependencies.cache_size`)** — per ADR-10
+  WD5 the cache slice is per-(gem, version, mode); a global
+  size cap is deferred until the cache backend shows growth
+  issues during dogfooding.
+- **Configurable dispatcher tier ordering** — for users who
+  want plugin output to yield to gem source in narrow cases.
+  Default: no, but revisit after the first concrete user
+  request.
+- **Richer (β) budget semantics** — class-to-gem reverse
+  index + dispatcher branch so all calls on a budget-
+  exceeded gem's class return `Dynamic[top]` regardless of
+  catalog hit. Slice 4 ships the (α) Walker-side cap; the
+  (β) extension lives behind a concrete user need.
+- **`dynamic.dependency-source.boundary-cross` diagnostic** —
+  surfaces RBS-vs-gem-source disagreement on the same
+  receiver / method. Useful for `mode: full` audits; lands
+  alongside the `full` dispatcher distinction.
+- **`dynamic.dependency-source.config-conflict` diagnostic** —
+  surfaces `.rigor.yml` parse / merge disagreement (two
+  incompatible entries for the same gem across `includes:`).
+  Lands alongside the configuration loader's `includes:`
+  audit work.

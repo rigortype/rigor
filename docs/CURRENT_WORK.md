@@ -26,7 +26,9 @@ Read [ADR-10](adr/10-dependency-source-inference.md) § "Implementation slicing"
 
 ### Rails ecosystem plugins (parallel running track)
 
-The Rails plugin family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionpack`, `rigor-actionmailer`, `rigor-activejob`, plus `rigor-activerecord` extensions — continues in parallel with v0.1.x core work. The full plan is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Tier 1 unblocked from v0.1.0; Tier 2 unblocked from v0.1.1's cross-plugin API. Authoring proceeds **one plugin per session**, staged in `examples/rigor-<id>/` and extracted via `git subtree split` once the contract is stable.
+The Rails plugin family continues in parallel with v0.1.x core work. The full plan is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Authoring proceeds **one plugin per session**, staged in `examples/rigor-<id>/` and extracted via `git subtree split` once the contract is stable.
+
+Already landed under `examples/` (unreleased on `master`): `rigor-activerecord`, `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionmailer`, `rigor-activejob` (Tier 1); `rigor-pundit`, `rigor-sidekiq`, `rigor-rspec`, `rigor-actioncable` (Tier 3). Pending Tier 1+2: `rigor-actionpack` (Phase 1+; needs ADR-9 plumbing for cross-plugin column validation), `rigor-factorybot` (also ADR-9-bound), and the `rigor-activerecord` extensions (associations, enums, scopes). Pending Tier 3: `rigor-graphql`, `rigor-activestorage`. The `rigor-sorbet` plugin (ADR-11; slices 1–3 landed) sits parallel to the Rails track.
 
 ## Open Engineering Items
 
@@ -38,16 +40,17 @@ Persistent items that have come up across v0.0.x slices and that the next implem
 
 ## Reading Order for a Returning Implementer
 
-The default goal is "ship v0.1.0, then start v0.1.1." With v0.1.0 version-bumped on `master`, the working assumption for the next session is "implement a v0.1.1 slice." Read in this order:
+The default goal for the next session is "land Slice 4 of ADR-10 (per-gem budget pool)" once the open design judgments are resolved, OR "author the next ecosystem plugin in parallel." Read in this order:
 
-1. `CHANGELOG.md` `[Unreleased]` section — accumulates v0.1.1 work as it lands.
-2. [`docs/MILESTONES.md`](MILESTONES.md) — the four-track v0.1.1 slice list under "v0.1.1 — Planned".
-3. [`docs/adr/9-cross-plugin-api.md`](adr/9-cross-plugin-api.md) — binding design for Track 2; six implementation slices.
-4. [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md) — Rails plugin family ordering, dependency graph, subtree-split readiness checklist.
-5. [`.codex/skills/rigor-plugin-author/SKILL.md`](../.codex/skills/rigor-plugin-author/SKILL.md) — agent-facing playbook for authoring a new plugin (used for every Rails plugin session).
-6. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — public-vs-internal stability boundary. Cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
-7. [`examples/README.md`](../examples/README.md) — comparison table over the seven worked plugin examples; recommended reading order for new authors.
-8. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) and [`docs/adr/7-v0.1.0-slice-decisions.md`](adr/7-v0.1.0-slice-decisions.md) — the binding design and per-slice working decisions for the v0.1.0 plugin contract that v0.1.1 builds on.
-9. [`docs/adr/3-type-representation.md`](adr/3-type-representation.md) Working Decisions — OQ1 / OQ2 / OQ3 outcomes still bind the type-object public surface plugins consume.
+1. `CHANGELOG.md` `[Unreleased]` section — accumulates v0.1.3 work as it lands.
+2. [`docs/MILESTONES.md`](MILESTONES.md) — release-by-release commitment envelope; v0.1.2 is the latest released milestone, v0.1.3 carries the ADR-10 implementation.
+3. [`docs/adr/10-dependency-source-inference.md`](adr/10-dependency-source-inference.md) + [`docs/internal-spec/dependency-source-inference.md`](internal-spec/dependency-source-inference.md) — design rationale and analyzer contract for v0.1.3's primary track.
+4. [`docs/adr/9-cross-plugin-api.md`](adr/9-cross-plugin-api.md) and [`docs/adr/11-sorbet-input-adapter.md`](adr/11-sorbet-input-adapter.md) — sibling ADRs landed in v0.1.x core; Tier 2 Rails plugins depend on ADR-9 and the rigor-sorbet plugin draft tracks ADR-11.
+5. [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md) — Rails plugin family ordering, dependency graph, subtree-split readiness checklist.
+6. [`.codex/skills/rigor-plugin-author/SKILL.md`](../.codex/skills/rigor-plugin-author/SKILL.md) — agent-facing playbook for authoring a new plugin (used for every Rails / dry-rb / Sorbet plugin session).
+7. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — public-vs-internal stability boundary. Cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
+8. [`examples/README.md`](../examples/README.md) — comparison table over the sixteen worked plugin examples; recommended reading order for new authors.
+9. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) and [`docs/adr/7-v0.1.0-slice-decisions.md`](adr/7-v0.1.0-slice-decisions.md) — the binding design and per-slice working decisions for the v0.1.0 plugin contract that v0.1.x extends.
+10. [`docs/adr/3-type-representation.md`](adr/3-type-representation.md) Working Decisions — OQ1 / OQ2 / OQ3 outcomes still bind the type-object public surface plugins consume.
 
-After those, the implementation surface for v0.1.1 is locatable from grep over `lib/rigor/inference/narrowing.rb`, `lib/rigor/flow_contribution*.rb`, `lib/rigor/plugin/`, `lib/rigor/cache/`, `lib/rigor/rbs_extended/`, and `lib/rigor/analysis/`.
+After those, the implementation surface for v0.1.3 is locatable from grep over `lib/rigor/analysis/dependency_source_inference/`, `lib/rigor/cache/`, `lib/rigor/inference/method_dispatcher.rb`, `lib/rigor/configuration*`, and `lib/rigor/plugin/` (for plugin-side work).

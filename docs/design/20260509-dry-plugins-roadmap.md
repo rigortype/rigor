@@ -622,32 +622,33 @@ locally without needing to consume facts from another plugin). That
 tight subset is plausibly the right v1 in any of the three
 strategies.
 
-## Open questions for the follow-up design doc
+## Resolutions and open items
 
-1. **Does Rigor want to launch with the dry MVP (dry-types +
-   dry-struct + dry-monads) before ADR-9 lands, then expand?** The
-   answer determines whether Strategy 1 is viable (yes) or whether
-   Strategy 2/3 must wait for ADR-9 (in which case the MVP slips
-   into the cross-plugin API milestone).
-2. **Should `rigor-dry-rails` live in the dry family, the Rails
-   family ([`docs/design/20260508-rails-plugins-roadmap.md`](20260508-rails-plugins-roadmap.md)),
-   or both?** It depends on plugins from each.
-3. **dry-effects deferral.** Is the effect-tracking absence a real
-   user gap, or a niche concern? Hanami plans (out of scope here)
-   may push it onto the roadmap.
-4. **Hanami / rom plugins.** The same `references/hanakai-rb/` corpus
-   has guides for hanami and rom. A parallel survey for those is a
-   separate task, but the dependency between Hanami slices and
-   dry-system means a Hanami plugin will pull in the dry-system
-   plugin.
-5. **dry-rb gemspec verification.** This survey takes inter-gem
-   dependencies from the guide prose. Before locking a packaging
-   strategy, verify against actual gemspecs (vendoring upstream
-   `dry-*` gemspecs, or reading them via the references submodule).
+Resolutions captured 2026-05-09 in the discussion that followed this
+survey landing. Open items remain genuinely undecided.
+
+1. **MVP timing — RESOLVED.** No rush on the dry plugins. Land
+   [ADR-9 cross-plugin API](../adr/9-cross-plugin-api.md) first,
+   then revisit packaging. This removes the pressure that would have
+   forced Strategy 1 as the only viable pre-ADR-9 path; Strategies 2
+   and 3 are live candidates once ADR-9 ships.
+2. **`rigor-dry-rails` placement — DELEGATED.** No strong preference
+   — implement under whichever family is easier to author. The
+   decision can be made at the time the plugin is scaffolded rather
+   than committed in advance.
+3. **dry-effects — DEFERRED.** Effect-system support is wanted in
+   principle but there is no concrete plan; revisit when an effect-row
+   carrier or similar appears in the Rigor type lattice.
+4. **Hanami / rom plugins — QUEUED.** Targeted for the version after
+   the dry-rb plugins land. The Hanami plugin will pull in the
+   dry-system plugin; rom plugin scope is unscoped here.
+5. **dry-rb gemspec verification — OPEN.** No strong opinion yet.
+   Likely worthwhile before locking a packaging strategy in
+   ADR-12, but not blocking.
 
 ## Next step
 
-Pick a packaging strategy, then file an ADR (likely ADR-12) capturing
-that decision and its rationale. The first plugin to author — under
-any strategy — is `rigor-dry-types`, since every other Tier A plugin
-depends on it.
+Land [ADR-9 cross-plugin API](../adr/9-cross-plugin-api.md). Then
+file ADR-12 capturing the dry-rb packaging strategy choice. The first
+plugin to author — under any strategy — is `rigor-dry-types`, since
+every other Tier A plugin depends on it.

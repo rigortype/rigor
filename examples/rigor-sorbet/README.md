@@ -43,13 +43,14 @@ sig { ... }; def body; end; end; end` resolves
 `post.body` correctly).
 
 This is **slices 1–8 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**
-— the plugin's primary surface is feature-complete and
-covers the realistic Tapioca-using project shape. `T.bind`,
-`T.assert_type!`, `T.must_because`, and `T.reveal_type`
-remain deferred to a slice-2 follow-up; per-call-site sigil
-enforcement (e.g. only firing `T.let` recognition in
-`# typed: true`+ files) lives behind a future plugin-contract
-widening.
+plus the light follow-up that adds `T.must_because` and
+`T.reveal_type` — the plugin's primary surface is
+feature-complete and covers the realistic Tapioca-using
+project shape. `T.bind` and `T.assert_type!` remain deferred
+(self-targeted post-return facts and dynamic-rejection checks
+respectively); per-call-site sigil enforcement (e.g. only
+firing `T.let` recognition in `# typed: true`+ files) lives
+behind a future plugin-contract widening.
 
 ## What the plugin recognises
 
@@ -279,15 +280,17 @@ diagnostic.
 
 ## Slice 2 assertion forms
 
-| Sorbet form           | Contribution                              |
-| --------------------- | ----------------------------------------- |
-| `T.let(expr, T)`      | return type ← translated `T`              |
-| `T.cast(expr, T)`     | return type ← translated `T`              |
-| `T.must(expr)`        | return type ← `inferred(expr) - nil`      |
-| `T.unsafe(expr)`      | return type ← `Dynamic[top]`              |
+| Sorbet form                  | Contribution                              |
+| ---------------------------- | ----------------------------------------- |
+| `T.let(expr, T)`             | return type ← translated `T`              |
+| `T.cast(expr, T)`            | return type ← translated `T`              |
+| `T.must(expr)`               | return type ← `inferred(expr) - nil`      |
+| `T.must_because(expr, "..")` | return type ← `inferred(expr) - nil` (alias of `T.must`; second-arg explanation is informational) |
+| `T.unsafe(expr)`             | return type ← `Dynamic[top]`              |
+| `T.reveal_type(expr)`        | return type ← `inferred(expr)` (passes through; companion `plugin.sorbet.reveal-type` `:info` diagnostic surfaces the type) |
 
-`T.bind`, `T.assert_type!`, `T.must_because`, `T.absurd` and
-`T.reveal_type` are deferred to a follow-up slice.
+`T.bind` and `T.assert_type!` remain deferred. `T.absurd` is
+slice 6 (its own dedicated section above).
 
 ## Type vocabulary (slices 1 + 3)
 

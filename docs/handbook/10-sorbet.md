@@ -97,9 +97,25 @@ T.must(maybe).bit_length            # ✓ nil stripped → Integer
 T.unsafe(opaque).any_method_at_all  # ✓ silenced — return is Dynamic[Top]
 ```
 
-`T.assert_type!` / `T.bind` / `T.must_because` /
-`T.reveal_type` are deferred to a follow-up slice; they
-currently behave like an unrecognised method call.
+`T.must_because(expr, "explanation")` is recognised as an
+alias of `T.must` — the static behaviour is identical (strip
+`nil`); the second-argument string is informational only.
+
+`T.reveal_type(expr)` returns `expr` unchanged at runtime AND
+surfaces the inferred static type as a
+`plugin.sorbet.reveal-type` `:info` diagnostic at the call
+site, so chained calls keep working while you eyeball what
+the analyzer sees:
+
+```ruby
+n = T.let(3, Integer)
+T.reveal_type(n).even?  # info: T.reveal_type inferred type: Integer
+                        # ✓ Integer#even? still resolves
+```
+
+`T.assert_type!` and `T.bind` are deferred to a follow-up
+slice; they currently behave like an unrecognised method
+call.
 
 ## RBI files
 

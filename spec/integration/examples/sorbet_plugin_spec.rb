@@ -675,4 +675,51 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
       expect(diags).to be_empty
     end
   end
+
+  describe "T.must_because + T.reveal_type (ADR-11 light follow-up)" do
+    it "narrows `T.must_because(expr, \"reason\")` identically to T.must" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # Same shape as the slice-2 T.must test, just with the
+        # second-argument string explanation Sorbet supports.
+        maybe = T.let(nil, T.nilable(Integer))
+        T.must_because(maybe, "outer caller guarantees non-nil").even?
+      RUBY
+
+      result = run_plugin(source: source)
+      undefined_or_nil = result.diagnostics.select do |d|
+        %w[call.undefined-method call.possible-nil-receiver].include?(d.rule)
+      end
+      expect(undefined_or_nil).to be_empty
+    end
+
+    it "passes `T.reveal_type(expr)` through unchanged for chained call resolution" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # T.reveal_type returns expr unchanged at runtime; the
+        # static contribution preserves the inferred type so the
+        # `.even?` chained call still resolves on Integer.
+        n = T.let(3, Integer)
+        T.reveal_type(n).even?
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "emits a `plugin.sorbet.reveal-type` :info diagnostic naming the inferred type" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        n = T.let(3, Integer)
+        T.reveal_type(n)
+      RUBY
+
+      diag = run_plugin(source: source).diagnostics.find { |d| d.rule == "reveal-type" }
+
+      expect(diag).not_to be_nil
+      expect(diag.severity).to eq(:info)
+      expect(diag.message).to include("T.reveal_type")
+      expect(diag.message).to include("Integer")
+    end
+  end
 end

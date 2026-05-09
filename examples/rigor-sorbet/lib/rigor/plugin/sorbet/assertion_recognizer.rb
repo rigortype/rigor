@@ -8,15 +8,21 @@ module Rigor
   module Plugin
     class Sorbet < Rigor::Plugin::Base
       # Lifts Sorbet's type-assertion calls (`T.let`, `T.cast`,
-      # `T.must`, `T.unsafe`) into `FlowContribution` return-type
-      # contributions. ADR-11 slice 2.
+      # `T.must`, `T.must_because`, `T.unsafe`, `T.reveal_type`)
+      # into `FlowContribution` return-type contributions.
+      # ADR-11 slice 2 covered the original four; the
+      # `must_because` / `reveal_type` light follow-up extends
+      # the same module rather than splitting into a parallel
+      # recogniser.
       #
-      # | Sorbet form           | Contribution                            |
-      # | --------------------- | --------------------------------------- |
-      # | `T.let(expr, T)`      | return type ← translated `T`            |
-      # | `T.cast(expr, T)`     | return type ← translated `T`            |
-      # | `T.must(expr)`        | return type ← `inferred(expr) - nil`    |
-      # | `T.unsafe(x)`         | return type ← `Dynamic[top]`            |
+      # | Sorbet form                  | Contribution                            |
+      # | ---------------------------- | --------------------------------------- |
+      # | `T.let(expr, T)`             | return type ← translated `T`            |
+      # | `T.cast(expr, T)`            | return type ← translated `T`            |
+      # | `T.must(expr)`               | return type ← `inferred(expr) - nil`    |
+      # | `T.must_because(expr, "..")` | return type ← `inferred(expr) - nil`    |
+      # | `T.unsafe(x)`                | return type ← `Dynamic[top]`            |
+      # | `T.reveal_type(expr)`        | return type ← `inferred(expr)` (passes through) |
       #
       # The Sorbet runtime's `T.let` / `T.cast` actually return
       # the inner expression unchanged at runtime; their job is
@@ -27,18 +33,32 @@ module Rigor
       # `%a{rigor:v1:assert: x is T}` would do for an assignment
       # in the surrounding scope.
       #
-      # `T.bind`, `T.assert_type!`, `T.must_because` and
-      # `T.reveal_type` are deferred to a follow-up slice
-      # (`T.bind` needs a self-targeted post-return fact;
-      # `T.reveal_type` is a diagnostic-only path; the others
-      # are minor variants).
+      # `T.must_because` is `T.must` with a second-argument
+      # string explanation. The static behaviour is identical to
+      # `T.must` — strip `nil` from the inferred type — so the
+      # recogniser dispatches through the same path.
+      #
+      # `T.reveal_type` is "diagnostic-only" in Sorbet: it
+      # passes the value through unchanged at runtime AND
+      # surfaces the inferred static type as a build-time
+      # message. The recogniser contributes the inferred type
+      # (so chained call sites still resolve as if the
+      # `T.reveal_type` wrapper weren't there); the plugin's
+      # `diagnostics_for_file` hook surfaces the
+      # `plugin.sorbet.reveal-type` `:info` message for human
+      # consumption.
+      #
+      # `T.bind` and `T.assert_type!` remain deferred (`T.bind`
+      # needs a self-targeted post-return fact; `T.assert_type!`
+      # adds a Dynamic-rejection check the slice 1 substrate
+      # doesn't model).
       module AssertionRecognizer
         # Method names this recogniser claims as Sorbet
         # assertions. The plugin checks call sites against this
         # set before any catalog lookup so a `T.let` call
         # inside an analysed file always resolves through this
         # module.
-        SORBET_ASSERTIONS = %i[let cast must unsafe].freeze
+        SORBET_ASSERTIONS = %i[let cast must must_because unsafe reveal_type].freeze
 
         module_function
 
@@ -60,9 +80,32 @@ module Rigor
         def return_type_for(call_node, scope)
           case call_node.name
           when :let, :cast then resolve_typed_assertion(call_node)
-          when :must then resolve_must(call_node, scope)
+          when :must, :must_because then resolve_must(call_node, scope)
           when :unsafe then Rigor::Type::Combinator.untyped
+          when :reveal_type then resolve_reveal_type(call_node, scope)
           end
+        end
+
+        # `T.reveal_type(expr)` returns `expr` unchanged at
+        # runtime; the Sorbet-side semantics is "make the
+        # inferred static type visible to the user." The
+        # contribution mirrors `T.must` minus the nil-stripping:
+        # the call's return type is the inner expression's
+        # inferred type. The companion diagnostic is emitted by
+        # the plugin's `diagnostics_for_file` hook through
+        # {RevealTypeRecognizer}; the recogniser here is
+        # contribution-only.
+        def resolve_reveal_type(call_node, scope)
+          inner = nth_argument(call_node, 0)
+          return Rigor::Type::Combinator.untyped if inner.nil? || scope.nil?
+
+          inner_type = scope.type_of(inner)
+          inner_type || Rigor::Type::Combinator.untyped
+        rescue StandardError
+          # Synthetic / virtual nodes can raise from
+          # `scope.type_of`; degrade gracefully so the dispatcher
+          # can still proceed with a benign untyped envelope.
+          Rigor::Type::Combinator.untyped
         end
 
         # `T.let(expr, T)` and `T.cast(expr, T)` share the same

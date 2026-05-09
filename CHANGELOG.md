@@ -14,6 +14,12 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — `rigor-sorbet` ADR-11 light follow-up (T.must_because + T.reveal_type)
+
+- **`T.must_because(expr, "explanation")` recognised as an alias of `T.must`.** `AssertionRecognizer::SORBET_ASSERTIONS` grows the new method name and `return_type_for` dispatches `:must` and `:must_because` through the same `resolve_must` path. The static behaviour is identical (strip `nil` from the inferred type); the second-argument explanation string is informational only.
+- **`T.reveal_type(expr)` recognised — returns `expr` unchanged + surfaces the inferred type as a diagnostic.** The recogniser contributes the inner expression's inferred type as the call's return so chained calls (`T.reveal_type(n).even?`) keep resolving normally. Separately, the plugin records the call node + display string in `flow_contribution_for` and surfaces a `plugin.sorbet.reveal-type` `:info` diagnostic from `diagnostics_for_file`, mirroring the absurd-recognizer pattern (compare-by-identity hash + per-file AST walk to match call nodes). The display uses `Type#describe` — same contract `rigor type-of`'s text renderer uses — for consistency across CLI and plugin output.
+- **3 new integration spec cases** under `spec/integration/examples/sorbet_plugin_spec.rb` covering the `must_because` alias, `reveal_type` chained-call passthrough, and the `:info` diagnostic emission. README + handbook chapter 10 updated; only `T.bind` (self-targeted post-return fact) and `T.assert_type!` (Dynamic-rejection check) remain deferred from the original ADR-11 slice 2 follow-up list.
+
 ### Added — ADR-10 slice 4 (per-gem budget pool)
 
 - **`dependencies.budget_per_gem` configuration entry.** New `Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM` (`5000`) / `MIN_BUDGET_PER_GEM` (`1250` — 0.25× of default) / `MAX_BUDGET_PER_GEM` (`20000` — 4×) per ADR-10 § "Budget interaction". Default 5000 covers Rack (~1500), Faraday (~500), Sidekiq (~800) cleanly while still surfacing a diagnostic on ActiveSupport-class libraries (~10000+ methods) where the user should ship RBS instead. JSON schema + parser tests + integration tests through `Configuration.load` updated; the schema-vs-loader contract spec pins `minimum` / `maximum` / `default` against the runtime constants so the two cannot drift.

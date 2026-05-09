@@ -106,6 +106,13 @@ module Rigor
         # once per run, so identity is stable across the two
         # plugin hooks.
         @reachable_absurd_nodes = {}.compare_by_identity
+        # ADR-11 light follow-up — `T.reveal_type` calls
+        # observed in `flow_contribution_for`, paired with the
+        # display string for the inferred type at the call site.
+        # Mirrors the absurd-node compare-by-identity hash;
+        # `diagnostics_for_file` surfaces each entry as a
+        # `plugin.sorbet.reveal-type` `:info` diagnostic.
+        @reveal_type_calls = {}.compare_by_identity
       end
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
@@ -117,6 +124,7 @@ module Rigor
         errors = @parse_errors_by_path[path] || @parse_errors_by_path[canonicalize(path)] || []
         diagnostics = errors.map { |error| parse_error_diagnostic(path, error) }
         diagnostics.concat(absurd_reachable_diagnostics(path, root))
+        diagnostics.concat(reveal_type_diagnostics(path, root))
         diagnostics
       end
 
@@ -151,11 +159,18 @@ module Rigor
         # `T.unsafe` are checked first because they're cheaper
         # to recognise (no catalog walk required) and they
         # win over any cataloged signature: the user explicitly
-        # asserted the type at the call site.
+        # asserted the type at the call site. The light
+        # follow-up extends the recogniser to `T.must_because`
+        # (alias of `T.must`) and `T.reveal_type` (passes the
+        # type through; the human-facing diagnostic is recorded
+        # here for `diagnostics_for_file` to emit).
         assertion = AssertionRecognizer.recognize(
           call_node: call_node, scope: scope, plugin_id: manifest.id
         )
-        return assertion if assertion
+        if assertion
+          record_reveal_type_call(call_node, assertion.return_type) if call_node.name == :reveal_type
+          return assertion
+        end
 
         ensure_catalog
         return nil if @catalog.nil? || @catalog.empty?
@@ -400,6 +415,59 @@ module Rigor
                    "`T.absurd(...)` call.",
           severity: :warning,
           rule: "absurd-reachable"
+        )
+      end
+
+      # ADR-11 light follow-up — `T.reveal_type(expr)` records
+      # the inferred type at recogniser time so the per-file
+      # diagnostic hook can surface the human-facing message.
+      # The reveal call's contribution already preserved the
+      # inferred type for downstream chaining; this hash carries
+      # the *display* string that the diagnostic shows.
+      def record_reveal_type_call(call_node, return_type)
+        @reveal_type_calls[call_node] = display_for_type(return_type)
+      end
+
+      def display_for_type(type)
+        # `Type#describe` is the human-facing display contract
+        # used by `rigor type-of`'s text renderer.
+        return "untyped" if type.nil?
+
+        type.respond_to?(:describe) ? type.describe : type.inspect
+      end
+
+      def reveal_type_diagnostics(path, root)
+        return [] if @reveal_type_calls.empty?
+
+        diagnostics = []
+        walk_for_reveal_type(root) do |call_node|
+          display = @reveal_type_calls.delete(call_node)
+          next if display.nil?
+
+          diagnostics << reveal_type_diagnostic(path, call_node, display)
+        end
+        diagnostics
+      end
+
+      def walk_for_reveal_type(node, &)
+        return unless node.is_a?(Prism::Node)
+
+        if node.is_a?(Prism::CallNode) && node.name == :reveal_type &&
+           TypeTranslator.sorbet_t_namespaced?(node.receiver)
+          yield node
+        end
+        node.compact_child_nodes.each { |child| walk_for_reveal_type(child, &) }
+      end
+
+      def reveal_type_diagnostic(path, call_node, display)
+        location = call_node.location
+        Rigor::Analysis::Diagnostic.new(
+          path: path,
+          line: location.start_line,
+          column: location.start_column + 1,
+          message: "`T.reveal_type` inferred type: #{display}",
+          severity: :info,
+          rule: "reveal-type"
         )
       end
 

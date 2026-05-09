@@ -19,11 +19,18 @@ The qualified rule (`call.undefined-method`,
 stable identifier for the rule. Use it in:
 
 - `# rigor:disable <rule>` end-of-line suppressions in source
+- `# rigor:disable-file <rule>` file-scope suppressions
 - `severity_overrides:` in `.rigor.yml`
 - `disabled_rules:` in `.rigor.yml`
 
 Wildcards work — `# rigor:disable call` suppresses every
 `call.*` rule on that line.
+
+Need to look up what a rule does without leaving the shell?
+`rigor explain <rule>` prints the rule's summary, when it
+fires, when it doesn't, the suppression token, the authored
+severity, and the per-profile severity. `rigor explain` with
+no argument prints the index of every shipped rule.
 
 ## The rule catalogue
 
@@ -51,10 +58,9 @@ Fire when the control flow itself is unsound.
 | Rule | Fires when | Default severity |
 | --- | --- | --- |
 | `flow.always-raises` | Every reachable evaluation of an expression raises (e.g. `n / 0` where `n: Integer`). | error |
-
-More flow rules are queued for v0.1.x — `flow.unreachable-branch`,
-`flow.dead-assignment`, `flow.always-truthy-condition` — but
-none have shipped yet.
+| `flow.unreachable-branch` | An `if` / `unless` / ternary's predicate is a syntactic literal AND the corresponding dead branch is non-empty. | warning |
+| `flow.always-truthy-condition` | The predicate of an `if` / `unless` / ternary is provably truthy (or falsey) by inferred type, with surgical skips inside loop bodies and on defensive predicate calls. | warning |
+| `flow.dead-assignment` | A plain local-variable write whose target name is never read in the same `def` body. | warning |
 
 ### `def.*` — method-definition rules
 
@@ -63,7 +69,9 @@ contract.
 
 | Rule | Fires when | Default severity |
 | --- | --- | --- |
-| `def.return-type-mismatch` | The body's last expression's inferred type cannot satisfy the RBS-declared return type. | warning under `balanced` profile, error under `strict` |
+| `def.return-type-mismatch` | The body's last expression's inferred type cannot satisfy the RBS-declared return type. Honors `%a{rigor:v1:return: <refinement>}` overrides. | warning under `balanced` profile, error under `strict` |
+| `def.ivar-write-mismatch` | A later `@var = ...` write's concrete class disagrees with the first write's class in the same class body (NilClass-to-clear is allowlisted). | error |
+| `def.method-visibility-mismatch` | An explicit-receiver call targets a `Nominal[X]` whose discovered method is `:private` in the surrounding class body. | error |
 
 ### `assert.*` — runtime assertion rules
 
@@ -295,8 +303,13 @@ A clean `rigor check` run is the goal; a green CI badge says
 
 ## What's next
 
-The final chapter — Plugins — is a one-page pointer to the
-`examples/` directory. Plugins extend Rigor for project-
-specific DSLs (units of measure, route helpers, deprecations,
-…). Most projects will never write one; the chapter exists so
-you know the option is there.
+[Chapter 9 — Plugins](09-plugins.md) is a one-page pointer to
+the `examples/` directory. Plugins extend Rigor for
+project-specific DSLs (units of measure, route helpers,
+deprecations, …). Most projects will never write one; the
+chapter exists so you know the option is there.
+[Chapter 10 — Coexisting with Sorbet](10-sorbet.md) is for
+projects arriving from a Sorbet codebase: the
+[`rigor-sorbet`](../../examples/rigor-sorbet/) adapter reads
+`sig { ... }` blocks, RBI files, and `T.let` / `T.cast` /
+`T.must` / `T.unsafe` assertions as type sources.

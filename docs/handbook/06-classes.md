@@ -92,9 +92,13 @@ u.name    # Constant<"Alice">  — through in-source dispatch +
 
 `attr_writer` exposes the setter; `attr_accessor` exposes
 both. The setter's argument type is whatever the call site
-provides; Rigor does not yet check writes against a declared
-ivar type (that would need the `def.ivar-write-mismatch` rule
-queued for v0.1.x).
+provides. The `def.ivar-write-mismatch` rule (v0.1.2) checks
+that two writes to the same ivar in the same class body
+agree on the concrete class — see
+[Chapter 8 — Understanding errors](08-understanding-errors.md)
+for the rule's exact contract; it lets you catch an
+accidental rebind from `String` to `Array` in the same class
+without authoring an explicit ivar type.
 
 ## Instance variables across methods
 
@@ -137,10 +141,12 @@ assert_type(p.y, "Constant<4>")
 ```
 
 The discovery walks `define_method`-style block bodies too,
-so `Point = Data.define(:x, :y) do ... end` still works.
-Override-aware initializer dispatch (where the block redefines
-`#initialize`) is queued for v0.1.x — today the synthesized
-keyword-argument constructor wins.
+so `Point = Data.define(:x, :y) do ... end` still works,
+including a block-defined `def initialize(...)` whose
+arguments override the synthesised keyword-argument
+constructor (v0.1.2). The same rule covers
+`Const = Struct.new(*Symbol) do ... end` — block-body method
+discovery composes uniformly across both shapes.
 
 ## `Struct.new`
 

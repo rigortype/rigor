@@ -65,7 +65,8 @@ module Rigor
           "schema_file" => :string,
           "model_search_paths" => :array,
           "model_base_classes" => :array
-        }
+        },
+        produces: [:model_index]
       )
 
       DEFAULT_SCHEMA_FILE = "db/schema.rb"
@@ -98,6 +99,40 @@ module Rigor
         @schema_table = nil
         @model_index = nil
         @load_errors = []
+      end
+
+      # ADR-9 cross-plugin publication. Builds the model index
+      # eagerly during the per-run `prepare(services)` pass and
+      # publishes a flat Hash form to the shared fact store so
+      # downstream Tier-2 consumers (rigor-actionpack Phase 1
+      # strong-parameter validation, rigor-factorybot Phase 1
+      # (c) attribute → column cross-check, future plugins
+      # that need to know "what columns does class `User`
+      # expose?") can read it without coupling to this
+      # plugin's carrier classes.
+      #
+      # The published shape:
+      #
+      #     {
+      #       "User" => { table: "users", columns: ["id", "name", "email"] },
+      #       "Post" => { table: "posts", columns: ["id", "title", "body"] },
+      #       ...
+      #     }
+      #
+      # Consumers do `services.fact_store.read(plugin_id:
+      # "activerecord", name: :model_index)` and look up by
+      # class name. Discovery failures (missing schema,
+      # unparseable models) leave the fact unpublished — the
+      # consumer's own degrade path runs (typically a no-op).
+      def prepare(services)
+        index = model_index
+        return if index.nil? || index.empty?
+
+        services.fact_store.publish(
+          plugin_id: manifest.id,
+          name: :model_index,
+          value: index_to_published_hash(index)
+        )
       end
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
@@ -185,6 +220,21 @@ module Rigor
         return 0 if node.arguments.nil?
 
         node.arguments.arguments.size
+      end
+
+      # Marshal-clean Hash form for the cross-plugin fact
+      # store. Consumers (rigor-actionpack Phase 1,
+      # rigor-factorybot Phase 1 (c), ...) get a flat
+      # `class_name → { table:, columns: }` map without
+      # depending on this plugin's `ModelIndex` /
+      # `SchemaTable::Column` carrier classes.
+      def index_to_published_hash(index)
+        index.entries.transform_values do |entry|
+          {
+            table: entry.table_name,
+            columns: entry.columns.map(&:name).freeze
+          }.freeze
+        end.freeze
       end
 
       def model_index

@@ -14,6 +14,13 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — `rigor-activerecord` ADR-9 `:model_index` publication
+
+- **`manifest(produces: [:model_index])`** + new `prepare(services)` hook publishes a Marshal-clean `Hash{class_name => { table:, columns: }}` to the cross-plugin fact store. Downstream Tier-2 consumers (rigor-actionpack Phase 1 strong-parameter validation, rigor-factorybot Phase 1 (c) attribute → column cross-check) read it via `services.fact_store.read(plugin_id: "activerecord", name: :model_index)` without coupling to this plugin's `ModelIndex` / `SchemaTable::Column` carrier classes.
+- **Discovery failures leave the fact unpublished.** When the schema file is missing or the model walk fails, `prepare(services)` returns silently — consumers see `nil` from the fact_store read and degrade to their own no-op path (typically: skip cross-check, the local validation still fires).
+- **New `index_to_published_hash(index)` helper** transforms the in-memory `ModelIndex` into the published shape (frozen, no plugin-private classes leak across the boundary).
+- **1 new integration spec case** under `spec/integration/examples/activerecord_plugin_spec.rb` loads rigor-activerecord alongside a synthetic consumer plugin that reads the published `:model_index` in its own `prepare(services)` and emits a diagnostic naming the column set it sees. Pins the publication contract end to end.
+
 ### Added — `rigor-sorbet` per-file sigil enforcement (`enforce_sigil` knob)
 
 - **New `enforce_sigil` config knob (default `true`).** Mirrors Sorbet's own contract: types are not enforced at `# typed: false`, so under the default Rigor doesn't record sigs from `# typed: false` (or sigil-less, which Sorbet treats identically) files. Files marked `# typed: true` / `:strict` / `:strong` contribute sigs as before; `# typed: ignore` continues to skip the file entirely (no sigs, no parse errors). Set `enforce_sigil: false` in the plugin config to opt into the pre-gate behaviour (every parseable file's sigs land in the catalog regardless of sigil).

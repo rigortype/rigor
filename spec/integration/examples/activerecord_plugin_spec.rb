@@ -263,4 +263,87 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
       expect(method_undefined).to be_empty
     end
   end
+
+  describe "ADR-9 :model_index publication" do
+    # Loads rigor-activerecord (the producer) alongside a
+    # synthetic consumer plugin that reads the published
+    # :model_index in its `prepare(services)` hook and emits
+    # a diagnostic naming the column set it sees. This is the
+    # same shape rigor-actionpack Phase 1 / rigor-factorybot
+    # Phase 1 (c) will use; the test pins the publication
+    # contract.
+    let(:consumer_plugin) do
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "model-consumer", version: "0.1.0",
+          consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }]
+        )
+
+        def prepare(services)
+          @published = services.fact_store.read(plugin_id: "activerecord", name: :model_index)
+        end
+
+        def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+          return [] if @published.nil?
+
+          summary = @published.map { |klass_name, h| "#{klass_name}=#{h[:columns].join(',')}" }.join("|")
+          [Rigor::Analysis::Diagnostic.new(
+            path: path, line: 1, column: 1,
+            message: "model_index seen: #{summary}",
+            severity: :info, rule: "saw-model-index"
+          )]
+        end
+      end
+      stub_const("FakeModelConsumerPlugin", klass)
+      klass
+    end
+
+    def run_two_plugins(source, schema:, models:) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "db"))
+        FileUtils.mkdir_p(File.join(dir, "app", "models"))
+        File.write(File.join(dir, "db", "schema.rb"), schema)
+        models.each do |relative, contents|
+          full = File.join(dir, relative)
+          FileUtils.mkdir_p(File.dirname(full))
+          File.write(full, contents)
+        end
+        File.write(File.join(dir, "demo.rb"), source)
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "demo.rb")],
+            "plugins" => %w[rigor-activerecord rigor-model-consumer]
+          )
+        )
+        Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil,
+            plugin_requirer: lambda { |name|
+              case name
+              when "rigor-activerecord" then Rigor::Plugin.register(Rigor::Plugin::Activerecord)
+              when "rigor-model-consumer" then Rigor::Plugin.register(consumer_plugin)
+              end
+              true
+            }
+          )
+          yield runner.run
+        end
+      end
+    end
+
+    it "publishes the model index for downstream consumers via services.fact_store" do
+      run_two_plugins(
+        "x = 1\n",
+        schema: DEFAULT_SCHEMA,
+        models: DEFAULT_MODELS
+      ) do |result|
+        info = result.diagnostics.find { |d| d.rule == "saw-model-index" }
+        expect(info).not_to be_nil
+        expect(info.message).to include("User=")
+        # Default schema declares User columns (id, name, email).
+        expect(info.message).to include("name")
+        expect(info.message).to include("email")
+      end
+    end
+  end
 end

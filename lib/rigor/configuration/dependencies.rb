@@ -38,6 +38,24 @@ module Rigor
       MIN_BUDGET_PER_GEM = (DEFAULT_BUDGET_PER_GEM * 0.25).to_i
       MAX_BUDGET_PER_GEM = (DEFAULT_BUDGET_PER_GEM * 4).to_i
 
+      # ADR-10 5b — budget-overrun strategy enum.
+      #
+      # - `:walker_cap` (default): the (α) semantics. The
+      #   walker stops harvesting at the cap; methods past the
+      #   cap fall through to the existing user-class fallback
+      #   path. Existing v0.1.3 behaviour.
+      # - `:dependency_silence`: the (β) semantics. Same
+      #   walker behaviour, but the dispatcher additionally
+      #   consults `Index#class_to_gem` after a catalog miss.
+      #   When the receiver's class belongs to a budget-
+      #   exceeded gem, the call resolves to `Dynamic[top]`
+      #   rather than falling through to user-class fallback.
+      #   This silences `call.undefined-method` for unrecorded
+      #   methods at the cost of weaker static checking on
+      #   that gem's surface.
+      VALID_BUDGET_OVERRUN_STRATEGIES = %i[walker_cap dependency_silence].freeze
+      DEFAULT_BUDGET_OVERRUN_STRATEGY = :walker_cap
+
       # Frozen value object describing a single per-gem opt-in.
       # `gem:` is the gem name (matched against the bundle at
       # walk time); `mode:` is one of {VALID_MODES}; `roots:` is
@@ -49,25 +67,31 @@ module Rigor
         def full? = mode == :full
       end
 
-      attr_reader :source_inference, :budget_per_gem, :warnings
+      attr_reader :source_inference, :budget_per_gem, :budget_overrun_strategy, :warnings
 
       # Parse the YAML-shaped `dependencies:` value into a
       # frozen {Dependencies}. Accepts `nil` / `{}` / a Hash with
-      # `source_inference:` and / or `budget_per_gem:` present.
+      # `source_inference:` and / or `budget_per_gem:` /
+      # `budget_overrun_strategy:` present.
       def self.from_h(data)
-        return new([], DEFAULT_BUDGET_PER_GEM) if data.nil?
+        return new([]) if data.nil?
         raise ArgumentError, "dependencies: must be a Hash, got #{data.inspect}" unless data.is_a?(Hash)
 
         raw_entries = Array(data["source_inference"]).map { |raw| coerce_entry(raw) }
         entries, warnings = dedupe_entries(raw_entries)
         budget = coerce_budget_per_gem(data.fetch("budget_per_gem", DEFAULT_BUDGET_PER_GEM))
-        new(entries, budget, warnings)
+        strategy = coerce_budget_overrun_strategy(
+          data.fetch("budget_overrun_strategy", DEFAULT_BUDGET_OVERRUN_STRATEGY)
+        )
+        new(entries, budget, warnings, strategy)
       end
 
-      def initialize(source_inference, budget_per_gem = DEFAULT_BUDGET_PER_GEM, warnings = [])
+      def initialize(source_inference, budget_per_gem = DEFAULT_BUDGET_PER_GEM,
+                     warnings = [], budget_overrun_strategy = DEFAULT_BUDGET_OVERRUN_STRATEGY)
         @source_inference = source_inference.freeze
         @budget_per_gem = budget_per_gem
         @warnings = warnings.freeze
+        @budget_overrun_strategy = budget_overrun_strategy
         freeze
       end
 
@@ -80,7 +104,8 @@ module Rigor
               "roots" => entry.roots
             }
           end,
-          "budget_per_gem" => @budget_per_gem
+          "budget_per_gem" => @budget_per_gem,
+          "budget_overrun_strategy" => @budget_overrun_strategy.to_s
         }
       end
 
@@ -171,6 +196,15 @@ module Rigor
           raise ArgumentError,
                 "dependencies.source_inference[].roots must not be empty when supplied " \
                 "(omit the key to fall back to the default #{DEFAULT_ROOTS.inspect})"
+        end
+
+        def coerce_budget_overrun_strategy(value)
+          symbol = value.to_sym
+          return symbol if VALID_BUDGET_OVERRUN_STRATEGIES.include?(symbol)
+
+          raise ArgumentError,
+                "dependencies.budget_overrun_strategy must be one of " \
+                "#{VALID_BUDGET_OVERRUN_STRATEGIES.inspect}, got #{value.inspect}"
         end
 
         # ADR-10 slice 4. Per-gem catalog cap is mandatory

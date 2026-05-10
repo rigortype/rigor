@@ -26,6 +26,32 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
     end
   end
 
+  describe "#class_to_gem (slice 5b β budget reverse index)" do
+    it "stores the per-class owning gem" do
+      index = described_class.new(class_to_gem: { "Rack::Request" => "rack", "Faraday::Connection" => "faraday" })
+
+      expect(index.gem_for("Rack::Request")).to eq("rack")
+      expect(index.gem_for("Faraday::Connection")).to eq("faraday")
+      expect(index.gem_for("Unknown")).to be_nil
+    end
+
+    it "defaults to an empty hash" do
+      expect(described_class.new.class_to_gem).to eq({})
+      expect(described_class.new.gem_for("Anything")).to be_nil
+    end
+  end
+
+  describe "#budget_overrun_strategy (slice 5b)" do
+    it "defaults to :walker_cap" do
+      expect(described_class.new.budget_overrun_strategy).to eq(:walker_cap)
+    end
+
+    it "accepts :dependency_silence" do
+      expect(described_class.new(budget_overrun_strategy: :dependency_silence).budget_overrun_strategy)
+        .to eq(:dependency_silence)
+    end
+  end
+
   describe "#contribution_for" do
     it "returns nil for any (class_name, method_name) when no catalog is supplied" do
       index = described_class.new

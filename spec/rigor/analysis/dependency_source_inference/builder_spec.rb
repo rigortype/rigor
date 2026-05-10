@@ -53,6 +53,32 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
       expect(index.contribution_for(class_name: "Beta", method_name: :two)).to eq(:singleton)
     end
 
+    it "records the class-to-gem reverse index (slice 5b β budget)" do
+      stub_resolved_for(
+        "alpha", method_catalog: { ["Alpha::A", :one] => :instance, ["Alpha::B", :two] => :instance }
+      )
+      stub_resolved_for("beta", method_catalog: { ["Beta::Klass", :three] => :singleton })
+
+      index = described_class.build(dependencies({ "gem" => "alpha" }, { "gem" => "beta" }))
+
+      expect(index.gem_for("Alpha::A")).to eq("alpha")
+      expect(index.gem_for("Alpha::B")).to eq("alpha")
+      expect(index.gem_for("Beta::Klass")).to eq("beta")
+      expect(index.gem_for("Unknown")).to be_nil
+    end
+
+    it "carries the configured budget_overrun_strategy through to the Index" do
+      input = Rigor::Configuration::Dependencies.from_h(
+        "source_inference" => [{ "gem" => "alpha" }],
+        "budget_overrun_strategy" => "dependency_silence"
+      )
+      stub_resolved_for("alpha", method_catalog: {})
+
+      index = described_class.build(input)
+
+      expect(index.budget_overrun_strategy).to eq(:dependency_silence)
+    end
+
     it "records budget-exceeded gems on the Index when the Walker truncates (slice 4)" do
       stub_resolved_for("alpha", method_catalog: { ["Alpha", :one] => :instance })
       stub_resolved_for("beta", method_catalog: { ["Beta", :two] => :instance }, truncated: true)

@@ -182,6 +182,25 @@ RSpec.describe Rigor::Configuration::Dependencies do
     end
   end
 
+  describe "#budget_overrun_strategy (ADR-10 5b)" do
+    it "defaults to :walker_cap" do
+      deps = described_class.from_h({})
+
+      expect(deps.budget_overrun_strategy).to eq(:walker_cap)
+    end
+
+    it "accepts :dependency_silence" do
+      deps = described_class.from_h("budget_overrun_strategy" => "dependency_silence")
+
+      expect(deps.budget_overrun_strategy).to eq(:dependency_silence)
+    end
+
+    it "rejects unknown strategy values" do
+      expect { described_class.from_h("budget_overrun_strategy" => "tighten_or_explode") }
+        .to raise_error(ArgumentError, /budget_overrun_strategy/)
+    end
+  end
+
   describe "config-conflict deduplication (ADR-10 5d)" do
     it "collapses idempotent duplicate entries with no warning" do
       deps = described_class.from_h(

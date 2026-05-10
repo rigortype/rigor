@@ -441,11 +441,15 @@ Tracked on [ADR-10](../adr/10-dependency-source-inference.md)
   want plugin output to yield to gem source in narrow cases.
   Default: no, but revisit after the first concrete user
   request.
-- **Richer (β) budget semantics** — class-to-gem reverse
-  index + dispatcher branch so all calls on a budget-
-  exceeded gem's class return `Dynamic[top]` regardless of
-  catalog hit. Slice 4 ships the (α) Walker-side cap; the
-  (β) extension lives behind a concrete user need.
+- ✅ **Richer (β) budget semantics** — landed (slice 5b).
+  `dependencies.budget_overrun_strategy: dependency_silence`
+  opts into the (β) semantics: the Walker still caps at
+  `budget_per_gem`, but the dispatcher additionally consults
+  `Index#class_to_gem` (a per-class reverse-lookup table) on
+  catalog miss; if the receiver class belongs to a
+  budget-exceeded gem, the call resolves to `Dynamic[top]`
+  rather than falling through to the user-class fallback.
+  Default stays `:walker_cap` (α) for backward compatibility.
 - **`dynamic.dependency-source.boundary-cross` diagnostic** —
   surfaces RBS-vs-gem-source disagreement on the same
   receiver / method. Useful for `mode: full` audits; lands

@@ -15,7 +15,8 @@ module Rigor
       # answers `nil` until slice 2b populates the method table
       # by walking the resolved gems' `roots:`.
       class Index
-        attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded
+        attr_reader :resolved_gems, :unresolvable, :method_catalog, :budget_exceeded,
+                    :class_to_gem, :budget_overrun_strategy
 
         # @param method_catalog [Hash{[String, Symbol] => Symbol}]
         #   the flat `(class_name, method_name) → :instance | :singleton`
@@ -28,12 +29,34 @@ module Rigor
         #   The Runner consumes this list to emit one
         #   `dynamic.dependency-source.budget-exceeded` warning
         #   per gem.
-        def initialize(resolved_gems: [], unresolvable: [], method_catalog: {}, budget_exceeded: [])
+        # @param class_to_gem [Hash<String, String>] reverse
+        #   lookup `class_name → gem_name` (slice 5b). Built
+        #   first-write-wins: when two opt-in gems re-open the
+        #   same class, the first gem owns it. The dispatcher
+        #   consults this map under the `:dependency_silence`
+        #   budget overrun strategy so call sites on a
+        #   budget-exceeded gem's classes degrade to
+        #   `Dynamic[top]` instead of falling through to the
+        #   user-class fallback.
+        def initialize( # rubocop:disable Metrics/ParameterLists
+          resolved_gems: [], unresolvable: [], method_catalog: {},
+          budget_exceeded: [], class_to_gem: {},
+          budget_overrun_strategy: :walker_cap
+        )
           @resolved_gems = resolved_gems.freeze
           @unresolvable = unresolvable.freeze
           @method_catalog = method_catalog.freeze
           @budget_exceeded = budget_exceeded.freeze
+          @class_to_gem = class_to_gem.freeze
+          @budget_overrun_strategy = budget_overrun_strategy
           freeze
+        end
+
+        # @return [String, nil] the gem that owns `class_name`
+        #   (first-write-wins); `nil` when the class isn't in
+        #   any opt-in gem's catalog.
+        def gem_for(class_name)
+          @class_to_gem[class_name]
         end
 
         # Looks up the recorded method kind for a

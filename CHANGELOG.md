@@ -14,6 +14,17 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — ADR-10 5b (β budget semantics)
+
+- **New `dependencies.budget_overrun_strategy` config knob.** Two enum values: `:walker_cap` (default — the existing α semantics) and `:dependency_silence` (β). Under β, the dispatcher additionally consults a per-class reverse-lookup table on catalog miss: if the receiver class belongs to a budget-exceeded gem, the call resolves to `Dynamic[top]` rather than falling through to the user-class fallback (which would otherwise emit `call.undefined-method` for methods Rigor's catalog couldn't reach because the walker hit its cap).
+- **`Index#class_to_gem`** new attr — frozen `Hash<class_name, gem_name>` built first-write-wins by `Builder`. When two opt-in gems re-open the same class, the first gem to harvest the class owns it in the reverse index.
+- **`Index#gem_for(class_name)`** lookup helper returns the owning gem name or `nil`.
+- **`Index#budget_overrun_strategy`** carries the configured strategy through to the dispatcher; `Configuration::Dependencies#budget_overrun_strategy` is the parser-side accessor.
+- **`MethodDispatcher#budget_silence_result`** new private helper consulted from `try_dependency_source` after a catalog miss. Returns `Type::Combinator.untyped` when the conditions hold; nil otherwise.
+- **JSON schema** gains the new key under `dependencies.budget_overrun_strategy` with the two enum values + default `walker_cap`.
+- **8 new spec cases** across `dependencies_spec.rb` (3 new), `index_spec.rb` (3 new), and `builder_spec.rb` (2 new) cover the config-knob default + accept + reject, the `class_to_gem` shape, the strategy passthrough, and the per-class reverse-index population.
+- **`docs/internal-spec/dependency-source-inference.md`** "Open questions" entry for the (β) semantics moves from "queued" to "✅ landed".
+
 ### Added — ADR-10 5a (per-receiver plugin veto)
 
 - **`Rigor::Plugin::Manifest#owns_receivers`** new attr (frozen Array of class-name Strings). Plugins declare `manifest(owns_receivers: ["ActiveRecord::Base"])` to claim sole ownership of a receiver class so the dispatcher's dependency-source-inference tier declines on owned receivers, keeping plugin contributions authoritative for those types.

@@ -286,7 +286,8 @@ RSpec.describe Rigor::Configuration do
           "source_inference" => [
             { "gem" => "rack", "mode" => "full", "roots" => %w[lib app] }
           ],
-          "budget_per_gem" => Rigor::Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM
+          "budget_per_gem" => Rigor::Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM,
+          "budget_overrun_strategy" => Rigor::Configuration::Dependencies::DEFAULT_BUDGET_OVERRUN_STRATEGY.to_s
         )
       end
     end

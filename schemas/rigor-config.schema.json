@@ -114,6 +114,12 @@
           "minimum": 1250,
           "maximum": 20000,
           "default": 5000
+        },
+        "budget_overrun_strategy": {
+          "description": "What the dispatcher should do for receivers in a budget-exceeded gem (ADR-10 5b). `walker_cap` (default, α): the walker stops harvesting at the cap; methods past the cap fall through to the engine's user-class fallback path. `dependency_silence` (β): same walker behaviour, but the dispatcher additionally returns `Dynamic[top]` for any call on a class belonging to a budget-exceeded gem (silences `call.undefined-method` for unrecorded methods at the cost of weaker static checking on that gem's surface).",
+          "type": "string",
+          "enum": ["walker_cap", "dependency_silence"],
+          "default": "walker_cap"
         }
       }
     }

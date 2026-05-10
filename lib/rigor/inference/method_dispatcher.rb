@@ -163,7 +163,26 @@ module Rigor
         # inference must not contribute behind their backs.
         return nil if plugin_owns_receiver?(class_name, environment)
 
-        return nil if index.contribution_for(class_name: class_name, method_name: method_name).nil?
+        contribution_kind = index.contribution_for(class_name: class_name, method_name: method_name)
+        return Type::Combinator.untyped if contribution_kind
+
+        # ADR-10 5b — β budget semantics. On a catalog miss,
+        # if the receiver class belongs to a budget-exceeded
+        # gem AND the user opted into `:dependency_silence`,
+        # return `Dynamic[top]` rather than falling through to
+        # the user-class fallback. The user-class fallback
+        # would otherwise emit `call.undefined-method` for
+        # methods Rigor's catalog couldn't reach because the
+        # walker hit its cap.
+        budget_silence_result(class_name, index, environment)
+      end
+
+      def budget_silence_result(class_name, index, _environment)
+        return nil unless index.budget_overrun_strategy == :dependency_silence
+
+        owning_gem = index.gem_for(class_name)
+        return nil if owning_gem.nil?
+        return nil unless index.budget_exceeded.include?(owning_gem)
 
         Type::Combinator.untyped
       end

@@ -59,6 +59,37 @@ this handbook disagrees.
     `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions
     as type sources without rewriting in RBS.
 
+### Appendix — Coming from another type checker
+
+A short cross-language reference for readers whose mental
+model of "static type checker" was set by another tool.
+Each page maps Rigor's vocabulary onto the concepts you
+already know — type carriers, narrowing primitives,
+configuration shape, severity model, suppression — and
+calls out the places where the two systems make genuinely
+different choices.
+
+- [**Coming from TypeScript**](appendix-typescript.md) —
+  the structural-vs-nominal-with-refinements split, `unknown`
+  / `any` / `never` ↔ `Top` / `Dynamic[Top]` / `Bot`,
+  type guards ↔ `predicate-if-true` directives, what
+  conditional / mapped types do not have a Rigor analogue.
+- [**Coming from PHPStan**](appendix-phpstan.md) — the
+  closest peer in spirit. Identical refinement vocabulary
+  (`non-empty-string`, `int<min, max>`, `numeric-string`,
+  `literal-string`), `@phpstan-assert*` ↔ `RBS::Extended`,
+  Type-Specifying Extensions ↔ plugins, baseline diffing.
+- [**Coming from mypy / Pyright**](appendix-mypy.md) — gradual
+  typing parallels, `Literal` ↔ `Constant`, `TypeGuard` /
+  `TypeIs` ↔ `predicate-if-true` / `predicate-if-false`,
+  `Protocol` ↔ RBS `interface`, `LiteralString` ↔
+  `literal-string`.
+- [**Coming from Steep**](appendix-steep.md) — Ruby's other
+  RBS-driven static checker. Both consume the same `.rbs`
+  files; this page covers the layer each tool adds on top
+  and the coexistence pattern for projects that want to run
+  both.
+
 ## How to read this handbook
 
 Each chapter is short on theory and long on examples. Every

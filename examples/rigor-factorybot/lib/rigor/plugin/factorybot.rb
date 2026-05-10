@@ -79,7 +79,10 @@ module Rigor
         description: "Validates FactoryBot.create / build / attributes_for call shapes.",
         config_schema: {
           "factory_search_paths" => :array
-        }
+        },
+        consumes: [
+          { plugin_id: "activerecord", name: :model_index, optional: true }
+        ]
       )
 
       DEFAULT_FACTORY_SEARCH_PATHS = [
@@ -94,22 +97,41 @@ module Rigor
         ).discover
       end
 
-      def init(_services)
+      def init(services)
+        @services = services
         @factory_search_paths = Array(
           config.fetch("factory_search_paths", DEFAULT_FACTORY_SEARCH_PATHS)
         ).map(&:to_s)
         @factory_index = nil
+        @model_index = nil
+        @model_index_resolved = false
       end
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = factory_index_or_nil
         return [] if index.nil? || index.empty?
 
-        Analyzer.diagnose(path: path, root: root, factory_index: index)
-                .map { |diag| build_diagnostic(diag) }
+        Analyzer.diagnose(
+          path: path, root: root,
+          factory_index: index, model_index: model_index_or_nil
+        ).map { |diag| build_diagnostic(diag) }
       end
 
       private
+
+      # Phase 1 (c) — lazily resolves the :model_index fact
+      # from rigor-activerecord. Returns nil when
+      # rigor-activerecord isn't loaded or hasn't published
+      # an index; the analyzer treats nil as "no cross-check"
+      # and falls back to Phase 1 (a) behaviour (factory
+      # attributes only).
+      def model_index_or_nil
+        return @model_index if @model_index_resolved
+
+        @model_index = @services.fact_store.read(plugin_id: "activerecord", name: :model_index)
+        @model_index_resolved = true
+        @model_index
+      end
 
       def factory_index_or_nil
         return @factory_index if @factory_index

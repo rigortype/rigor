@@ -14,6 +14,14 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — `rigor-factorybot` Phase 1 (c) (AR column cross-check)
+
+- **Cross-plugin consumer of `rigor-activerecord`'s `:model_index`.** When both plugins are loaded, kwargs in `FactoryBot.create(:user, ...)` calls are validated against the union of (1) the factory's declared attributes and (2) the AR model's columns. FactoryBot's runtime accepts any AR attribute regardless of whether the factory declared it; the static check now mirrors that. A kwarg that's NEITHER a factory attribute NOR a model column still fires `unknown-attribute`.
+- **`manifest(consumes: [...])` extended.** Adds `{ plugin_id: "activerecord", name: :model_index, optional: true }`. Loading without rigor-activerecord stays a clean no-op (Phase 1 (a) behaviour preserved).
+- **Convention-based mapping.** `:user` → `User`, `:order_item` → `OrderItem` (capitalize-then-camelcase). Same convention as rigor-actionpack Phase 1; namespaced models (`:admin_user` → `Admin::User`) are deferred.
+- **3 new integration spec cases** loading rigor-activerecord + rigor-factorybot together: a column-only kwarg now passes (where Phase 1 (a) would have flagged it); a kwarg that's neither still fires `unknown-attribute`; the unknown-factory diagnostic on a typo'd factory name keeps firing regardless of the model index.
+- README updated; the Phase table marks 1 (c) as landed.
+
 ### Added — `rigor-actionpack` Phase 1 (strong-parameter validation)
 
 - **`params.require(:user).permit(:name, :email)` validated against AR columns.** The recogniser walks every `:permit` call site whose receiver is a `:require` call with a literal `Prism::SymbolNode` first argument, takes the symbol's `.to_s.split("_").map(&:capitalize).join` as the candidate model class name (`:user` → `User`, `:order_item` → `OrderItem`), and validates each permit `:key` against the column list published by `rigor-activerecord` (via the cross-plugin `:model_index` fact).

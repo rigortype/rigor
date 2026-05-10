@@ -13,7 +13,7 @@ The full FactoryBot plugin spans two phases:
 | Phase | Surface | Status |
 | --- | --- | --- |
 | 1 (a) | **Factory + attribute key validation** (self-contained) | **landed** |
-| 1 (c) | AR column cross-check via `rigor-activerecord :model_index` (ADR-9 fact) | pending — depends on `rigor-activerecord` adding the publish hook |
+| 1 (c) | **AR column cross-check** via `rigor-activerecord :model_index` (ADR-9 fact) | **landed** |
 
 Subsequent slices add traits, sequences, parent / child
 factories, and dynamic factory names; each composes

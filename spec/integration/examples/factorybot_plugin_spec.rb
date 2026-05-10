@@ -7,8 +7,31 @@
 require "spec_helper"
 
 FACTORYBOT_PLUGIN_LIB = File.expand_path("../../../examples/rigor-factorybot/lib", __dir__)
+ACTIVERECORD_PLUGIN_LIB = File.expand_path("../../../examples/rigor-activerecord/lib", __dir__)
 $LOAD_PATH.unshift(FACTORYBOT_PLUGIN_LIB) unless $LOAD_PATH.include?(FACTORYBOT_PLUGIN_LIB)
+$LOAD_PATH.unshift(ACTIVERECORD_PLUGIN_LIB) unless $LOAD_PATH.include?(ACTIVERECORD_PLUGIN_LIB)
 require "rigor-factorybot"
+require "rigor-activerecord"
+
+PHASE1C_USERS_FACTORY = <<~RUBY
+  FactoryBot.define do
+    factory :user do
+      name { "Alice" }
+    end
+  end
+RUBY
+
+PHASE1C_SCHEMA = <<~SCHEMA
+  ActiveRecord::Schema.define do
+    create_table :users do |t|
+      t.string :name
+      t.string :email
+      t.string :role
+    end
+  end
+SCHEMA
+
+PHASE1C_USER_MODEL = "class User < ApplicationRecord\nend\n"
 
 DEFAULT_USERS_FACTORY_RB = <<~RUBY
   FactoryBot.define do
@@ -157,6 +180,72 @@ RSpec.describe "examples/rigor-factorybot" do # rubocop:disable RSpec/DescribeCl
       # Hence the kwarg surfaces as `unknown-attribute`.
       err = plugin_diagnostics(result).find { |d| d.rule == "unknown-attribute" }
       expect(err).not_to be_nil
+    end
+  end
+
+  describe "Phase 1 (c) AR column cross-check" do
+    def run_factorybot_with_ar(source) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+      Rigor::Plugin.unregister!
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "spec", "factories"))
+        FileUtils.mkdir_p(File.join(dir, "db"))
+        FileUtils.mkdir_p(File.join(dir, "app", "models"))
+        File.write(File.join(dir, "spec", "factories", "users.rb"), PHASE1C_USERS_FACTORY)
+        File.write(File.join(dir, "db", "schema.rb"), PHASE1C_SCHEMA)
+        File.write(File.join(dir, "app", "models", "user.rb"), PHASE1C_USER_MODEL)
+        File.write(File.join(dir, "demo.rb"), source)
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "demo.rb")],
+            "plugins" => %w[rigor-activerecord rigor-factorybot]
+          )
+        )
+        Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil,
+            plugin_requirer: lambda { |name|
+              case name
+              when "rigor-activerecord" then Rigor::Plugin.register(Rigor::Plugin::Activerecord)
+              when "rigor-factorybot" then Rigor::Plugin.register(Rigor::Plugin::Factorybot)
+              end
+              true
+            }
+          )
+          yield runner.run
+        end
+      end
+    end
+
+    it "accepts a column-only kwarg that's NOT in the factory's declared attributes" do
+      # The factory only declares `:name`. Without the AR
+      # cross-check, `:email` would surface as
+      # unknown-attribute. With Phase 1 (c) the email column
+      # is in the model's index, so the kwarg is accepted.
+      run_factorybot_with_ar("FactoryBot.create(:user, email: \"x@y.z\")\n") do |result|
+        unknown = result.diagnostics.select do |d|
+          d.source_family == "plugin.factorybot" && d.rule == "unknown-attribute"
+        end
+        expect(unknown).to be_empty
+      end
+    end
+
+    it "still flags a kwarg that's neither a factory attr nor a model column" do
+      run_factorybot_with_ar("FactoryBot.create(:user, totally_unknown: 42)\n") do |result|
+        err = result.diagnostics.find do |d|
+          d.source_family == "plugin.factorybot" && d.rule == "unknown-attribute"
+        end
+        expect(err).not_to be_nil
+        expect(err.message).to include("totally_unknown")
+      end
+    end
+
+    it "leaves the unknown-factory diagnostic firing on a typo'd factory name" do
+      run_factorybot_with_ar("FactoryBot.create(:usre, email: \"x\")\n") do |result|
+        err = result.diagnostics.find do |d|
+          d.source_family == "plugin.factorybot" && d.rule == "unknown-factory"
+        end
+        expect(err).not_to be_nil
+      end
     end
   end
 end

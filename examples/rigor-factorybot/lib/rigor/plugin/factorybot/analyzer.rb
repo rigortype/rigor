@@ -24,7 +24,7 @@ module Rigor
 
         module_function
 
-        def diagnose(path:, root:, factory_index:)
+        def diagnose(path:, root:, factory_index:, model_index: nil)
           diagnostics = []
           spell_checker = DidYouMean::SpellChecker.new(dictionary: factory_index.names)
 
@@ -33,7 +33,9 @@ module Rigor
             next if factory_name.nil?
 
             entry = factory_index.find(factory_name)
-            diagnostics.concat(diagnostics_for_call(path, call_node, factory_name, entry, spell_checker))
+            diagnostics.concat(
+              diagnostics_for_call(path, call_node, factory_name, entry, spell_checker, model_index)
+            )
           end
 
           diagnostics
@@ -75,10 +77,10 @@ module Rigor
           end
         end
 
-        def diagnostics_for_call(path, call_node, factory_name, entry, spell_checker)
+        def diagnostics_for_call(path, call_node, factory_name, entry, spell_checker, model_index)
           return [unknown_factory_diagnostic(path, call_node, factory_name, spell_checker)] if entry.nil?
 
-          unknown_attribute_diagnostics(path, call_node, entry) +
+          unknown_attribute_diagnostics(path, call_node, entry, model_index) +
             [factory_call_diagnostic(path, call_node, factory_name, entry)]
         end
 
@@ -87,16 +89,46 @@ module Rigor
         # `name: "value"` syntax). Each AssocNode whose key is
         # a `Prism::SymbolNode` is treated as a literal
         # attribute reference.
-        def unknown_attribute_diagnostics(path, call_node, entry)
-          attr_spell_checker = DidYouMean::SpellChecker.new(dictionary: entry.attribute_names)
+        #
+        # Phase 1 (c) — when `model_index` (the cross-plugin
+        # `:model_index` fact published by rigor-activerecord)
+        # is present, the effective accepted key set is the
+        # UNION of the factory's declared attributes plus the
+        # corresponding model's columns. FactoryBot's runtime
+        # accepts any AR attribute regardless of whether the
+        # factory declared it, so the cross-check broadens the
+        # acceptance accordingly.
+        def unknown_attribute_diagnostics(path, call_node, entry, model_index)
+          accepted_keys, suggestion_dictionary = effective_keys(entry, model_index)
+          attr_spell_checker = DidYouMean::SpellChecker.new(dictionary: suggestion_dictionary)
           attribute_assoc_nodes(call_node).filter_map do |assoc|
             next unless assoc.key.is_a?(Prism::SymbolNode)
 
             attr_name = assoc.key.value
-            next if entry.attribute_names.include?(attr_name)
+            next if accepted_keys.include?(attr_name)
 
             unknown_attribute_diagnostic(path, assoc, entry, attr_name, attr_spell_checker)
           end
+        end
+
+        def effective_keys(entry, model_index)
+          factory_keys = entry.attribute_names
+          return [factory_keys, factory_keys] if model_index.nil?
+
+          model_class = model_class_for(entry.name)
+          model_entry = model_index[model_class]
+          return [factory_keys, factory_keys] if model_entry.nil?
+
+          model_columns = model_entry[:columns] || []
+          [(factory_keys + model_columns).uniq.freeze, (factory_keys + model_columns).uniq.freeze]
+        end
+
+        # Convention: `:user` → `User`, `:order_item` →
+        # `OrderItem`. Mirrors rigor-actionpack Phase 1's
+        # convention; namespaced models (`:admin_user` →
+        # `Admin::User`) are deferred.
+        def model_class_for(factory_name)
+          factory_name.to_s.split("_").map(&:capitalize).join
         end
 
         def attribute_assoc_nodes(call_node)

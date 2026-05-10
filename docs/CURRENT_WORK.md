@@ -6,7 +6,19 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.1.2 released.** All v0.1.2 tracks landed and the version cut. Slice-by-slice recap in `CHANGELOG.md` § `[0.1.2]` and `docs/MILESTONES.md` § "v0.1.2 — Planned".
 
-**v0.1.3 in progress.** Theme: **deliver [ADR-10 — Opt-in dependency-source inference](adr/10-dependency-source-inference.md) end-to-end.** ADR-10 was authored alongside v0.1.2 and queued for v0.1.3+; v0.1.3 starts implementing it. Five slices (config plumbing → walker + dispatcher tier → cache descriptor → per-gem budget → docs) per the ADR's "Implementation slicing" section.
+**v0.1.3 in progress.** Theme: **deliver [ADR-10 — Opt-in dependency-source inference](adr/10-dependency-source-inference.md) end-to-end and absorb ADR-11 / Rails plugin Phase work.** What landed since v0.1.2 release:
+
+- **ADR-10 fully implemented.** Five-slice envelope (config plumbing → walker + dispatcher tier → cache descriptor → per-gem budget → docs) plus four "Open questions" follow-ups (5a per-receiver plugin veto / 5b β budget semantics / 5d config-conflict diagnostic; 5c boundary-cross documented as deferred behind `mode: full` distinct dispatch).
+- **ADR-11 (rigor-sorbet) primary surface complete.** Slices 1–6 + 8 of the original plan, plus light follow-ups for `T.must_because`, `T.reveal_type`, `T.assert_type!`, `T.bind`, and `enforce_sigil` per-file gating. Only per-call-site assertion gating remains.
+- **PHPStan-style Type-Specifying Extensions substrate landed.** `Inference::StatementEvaluator#apply_plugin_assertions` wires plugin-side `truthy_facts` / `falsey_facts` / `post_return_facts` through the narrowing engine; closes ADR-7 § "Slice 4-A"'s plugin half. Same substrate T.bind uses; PHPStan-style call-shape assertions are now authorable from a Rigor plugin without engine changes.
+- **rigor-actionpack 4 phases complete.** Phase 4 (route helpers) + Phase 2 (filter chains) + Phase 3 (render targets) + Phase 1 (strong parameters → AR column validation). First Tier 2 plugin to ship the full Action Pack surface.
+- **rigor-factorybot Tier 2 plugin** — Phase 1 (a) self-contained validation + Phase 1 (c) AR column cross-check via the `:model_index` ADR-9 fact.
+- **rigor-activerecord ADR-9 publication.** New `manifest(produces: [:model_index])` + `prepare(services)` hook publishes the model index to the cross-plugin fact store. First "publish-and-consume" cycle exercising ADR-9 end-to-end with two consumers (rigor-actionpack Phase 1 + rigor-factorybot Phase 1 (c)).
+- **handbook expansion.** Chapter 7 gains a `@phpstan-assert` correspondence table; chapter 10 (rigor-sorbet) covers all the new sorbet recognisers.
+
+Eighteen worked example plugins now land under `examples/`. ADR-10's "Open questions" track is closed except for `mode: full` distinct dispatch (a prerequisite for the boundary-cross diagnostic). ADR-11's deferred items are limited to per-call-site assertion gating.
+
+ADR-10 was authored alongside v0.1.2 and queued for v0.1.3+; v0.1.3 starts implementing it. Five slices (config plumbing → walker + dispatcher tier → cache descriptor → per-gem budget → docs) per the ADR's "Implementation slicing" section.
 
 - **Slice 1 (Configuration plumbing)** — landed unreleased. New `Configuration::Dependencies` value object + `Entry(gem:, mode:, roots:)` frozen Data. `.rigor.yml` gains a `dependencies.source_inference[]` section. JSON schema + parser tests + integration tests through `Configuration.load`. CHANGELOG entry under `[Unreleased]`.
 - **Slice 2a (Gem resolver + Runner wiring)** — landed unreleased. `Analysis::DependencySourceInference::GemResolver.resolve` maps an entry to `Resolved` / `Unresolvable`; `Builder.build` partitions, returning a frozen `Index`. `Analysis::Runner` builds the index once per run (closing the slice-1 phantom-setting gap) and surfaces unresolvable gems as `dynamic.dependency-source.gem-not-found` `:warning` diagnostics. The walker-and-dispatcher work was internally split off as **slice 2b** so this commit stays reviewable.
@@ -15,7 +27,7 @@ This is a transient bookmark used to break a long implementation thread into rev
 - **Slice 3 (Cache descriptor + per-gem-version invalidation)** — landed unreleased. `Cache::Descriptor::DependencyEntry(gem_name:, gem_version:, mode:)` value object + new `dependencies:` slot on `Cache::Descriptor`; `compose_by_key` over `gem_name` raises `Conflict` on disagreeing version / mode; canonical-hash slot order is `configs / dependencies / files / gems / plugins`; `SCHEMA_VERSION` bumped to 2 so stale-shape entries get wiped at first run. New `DependencySourceInference::Index#cache_descriptor` lifts every `Resolved` row into a `DependencyEntry` and returns a frozen descriptor populated with the `dependencies:` slot — the primitive future cache producers compose with their own descriptors so a `bundle update` on a listed gem invalidates exactly that gem's slice. Unresolvable entries contribute nothing (no version to key on); resolved-but-disabled entries are filtered upstream by `Builder`.
 - **Slice 4 (per-gem budget pool)** — landed unreleased. New `dependencies.budget_per_gem` config entry (default `5000`, range `1250 .. 20000` per ADR-10 § "Budget interaction"). `Walker.walk` accepts a `budget:` keyword and returns `Walker::Outcome(catalog:, truncated:)`; harvesting stops at the cap and `truncated?` propagates to `Index#budget_exceeded`. `Analysis::Runner` emits one `dynamic.dependency-source.budget-exceeded` `:warning` per listed gem (per-gem dedupe, not per-call-site). Implements the (α) Walker-side cap from ADR-10 WD4; the richer (β) class-to-gem reverse index stays queued behind a concrete user need.
 - **Slice 5 (documentation)** — landed unreleased. New normative spec at [`docs/internal-spec/dependency-source-inference.md`](internal-spec/dependency-source-inference.md) covering all five landed slices end-to-end (configuration, resolver + index, walker, dispatcher tier, cache slice, budget enforcement) plus the live + pending diagnostic family and the boundary contracts with ADR-2 / ADR-5 / ADR-9. `docs/internal-spec/README.md` reading-order table updated; cross-links in `special-types.md` / `inference-budgets.md` / `diagnostic-policy.md` upgraded from "ADR-10 only" to "ADR-10 (analyzer contract: dependency-source-inference.md)" so readers find the implementation contract one click away.
-- **ADR-10 envelope complete.** All five implementation slices landed unreleased on `master`. Open follow-ups (per-receiver plugin veto, β budget semantics, `boundary-cross` / `config-conflict` diagnostics, configurable tier ordering) live behind concrete user needs and are tracked in the spec doc § "Open questions".
+- **ADR-10 envelope complete + open-questions sweep.** The five implementation slices plus 5a (per-receiver plugin veto via `manifest(owns_receivers:)`), 5b (β budget semantics via `dependencies.budget_overrun_strategy: dependency_silence`), and 5d (`dynamic.dependency-source.config-conflict` :warning on `includes:`-chain mode disagreements). 5c (boundary-cross diagnostic) is documented as deferred behind a `mode: full` distinct-dispatch prerequisite — landing the diagnostic without that prerequisite would ship a rule that can never fire.
 
 **v0.1.0 → v0.1.2 released.** Slice-by-slice recaps in `CHANGELOG.md` (§ `[0.1.0]`, `[0.1.1]`, `[0.1.2]`) and `docs/MILESTONES.md` (§ "v0.1.0 — Released", "v0.1.1 — Planned" entries marked complete, "v0.1.2 — Planned" entries marked complete). The `target_ruby` phantom-setting fix and the runtime audit-guard spec block under [`spec/rigor/analysis/runner_spec.rb`](../spec/rigor/analysis/runner_spec.rb) "configuration wiring at runtime (audit guard)" landed during the v0.1.1 batch and remain in force.
 
@@ -23,13 +35,30 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 ### v0.1.3 entry path
 
-ADR-10's five-slice implementation envelope is complete (Slices 1, 2a, 2b-i, 2b-ii, 3, 4, 5 all landed unreleased). v0.1.3's primary track is closed; the next session can either cut a release (`bundle exec rake release` per `.codex/skills/rigor-release-prep/SKILL.md`, awaiting explicit user authorisation) or pick up parallel work — Rails ecosystem plugins (Tier 2 unblocked from ADR-9), ADR-11 follow-ups (`T.bind` / per-call-site sigil), or one of the deferred items in [`docs/internal-spec/dependency-source-inference.md`](internal-spec/dependency-source-inference.md) § "Open questions" (per-receiver plugin veto, β budget semantics, `boundary-cross` / `config-conflict` diagnostics).
+v0.1.3's three primary tracks are closed:
+- **ADR-10**: Five-slice envelope + 5a / 5b / 5d open-question follow-ups all landed; 5c boundary-cross is deferred behind a `mode: full` distinct-dispatch prerequisite.
+- **ADR-11 (rigor-sorbet)**: Slices 1–6 + 8 + light follow-ups (`T.must_because`, `T.reveal_type`, `T.assert_type!`, `T.bind`, `enforce_sigil`) all landed. Only per-call-site assertion gating remains.
+- **Rails ecosystem (Tier 2)**: rigor-actionpack 4 phases + rigor-factorybot Phase 1 (a)+(c) all landed. ADR-9 cross-plugin chain proven end-to-end with `:helper_table` (rails-routes → actionpack) and `:model_index` (activerecord → actionpack + factorybot).
+
+The next session can:
+1. **Cut a release** (`bundle exec rake release` per `.codex/skills/rigor-release-prep/SKILL.md`, awaiting explicit user authorisation). v0.1.3 has accumulated substantial work and is shippable.
+2. **Continue with deferred queue items**:
+   - `mode: full` distinct dispatch (unblocks ADR-10 5c boundary-cross).
+   - Per-call-site assertion gating in rigor-sorbet (the last ADR-11 deferred item).
+   - Tier 3 ecosystem plugins still pending: `rigor-graphql`, `rigor-activestorage`.
+   - rigor-activerecord extensions: associations, enums, scopes, validations, callbacks (each shippable as a 0.2.0+ minor bump per the roadmap).
+3. **New ecosystem work**: ADR-12 candidate plugins (dry-rb adapters per [`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md)).
 
 ### Rails ecosystem plugins (parallel running track)
 
 The Rails plugin family continues in parallel with v0.1.x core work. The full plan is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Authoring proceeds **one plugin per session**, staged in `examples/rigor-<id>/` and extracted via `git subtree split` once the contract is stable.
 
-Already landed under `examples/` (unreleased on `master`): `rigor-activerecord`, `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionmailer`, `rigor-activejob` (Tier 1); `rigor-pundit`, `rigor-sidekiq`, `rigor-rspec`, `rigor-actioncable` (Tier 3). Pending Tier 1+2: `rigor-actionpack` (Phase 1+; needs ADR-9 plumbing for cross-plugin column validation), `rigor-factorybot` (also ADR-9-bound), and the `rigor-activerecord` extensions (associations, enums, scopes). Pending Tier 3: `rigor-graphql`, `rigor-activestorage`. The `rigor-sorbet` plugin (ADR-11; slices 1–3 landed) sits parallel to the Rails track.
+Already landed under `examples/` (unreleased on `master`):
+- **Tier 1**: `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionmailer`, `rigor-activejob`.
+- **Tier 2**: `rigor-actionpack` (4 phases — route helpers, filter chains, render targets, strong parameters → AR column validation); `rigor-factorybot` (Phase 1 (a) self-contained validation + Phase 1 (c) AR column cross-check); `rigor-activerecord` (with `manifest(produces: [:model_index])` ADR-9 publication for downstream consumers).
+- **Tier 3**: `rigor-pundit`, `rigor-sidekiq`, `rigor-rspec`, `rigor-actioncable`.
+
+Pending Tier 3: `rigor-graphql`, `rigor-activestorage`. The `rigor-sorbet` plugin (ADR-11; slices 1–6 + 8 + light follow-ups landed) sits parallel to the Rails track. `rigor-activerecord` extensions (associations, enums, scopes, validations, callbacks) ship as 0.2.0+ minor bumps.
 
 ## Open Engineering Items
 

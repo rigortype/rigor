@@ -3,6 +3,8 @@
 require "rigor/plugin"
 
 require_relative "actionpack/analyzer"
+require_relative "actionpack/controller_discoverer"
+require_relative "actionpack/controller_index"
 
 module Rigor
   module Plugin
@@ -67,7 +69,7 @@ module Rigor
       manifest(
         id: "actionpack",
         version: "0.1.0",
-        description: "Validates Action Pack route-helper calls inside controller files.",
+        description: "Validates Action Pack route-helper calls and filter chains inside controllers.",
         config_schema: {
           "controller_search_paths" => :array
         },
@@ -78,6 +80,18 @@ module Rigor
 
       DEFAULT_CONTROLLER_SEARCH_PATHS = ["app/controllers"].freeze
 
+      # Phase 2 cached producer — the controller index built
+      # from `controller_search_paths`. The IoBoundary records
+      # a `FileEntry` digest for every file the discoverer
+      # reads, so the cache invalidates when any controller
+      # file changes.
+      producer :controller_index do |_params|
+        ControllerDiscoverer.new(
+          io_boundary: io_boundary,
+          search_paths: @controller_search_paths
+        ).discover
+      end
+
       def init(services)
         @services = services
         @controller_search_paths = Array(
@@ -85,11 +99,18 @@ module Rigor
         ).map(&:to_s)
         @helper_table = nil
         @helper_table_resolved = false
+        @controller_index = nil
       end
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         return [] unless controller_file?(path)
 
+        helper_diagnostics(path, root) + filter_diagnostics(path, root)
+      end
+
+      private
+
+      def helper_diagnostics(path, root)
         table = helper_table
         return [] if table.nil? || table.empty?
 
@@ -97,7 +118,43 @@ module Rigor
                 .map { |diag| build_diagnostic(diag) }
       end
 
-      private
+      # Phase 2 — runs the filter-chain validator over the
+      # controller's class body using the cached
+      # {ControllerIndex}. Skips silently when the index is
+      # absent or doesn't recognise the file's top-level class.
+      def filter_diagnostics(path, root)
+        index = controller_index_or_nil
+        return [] if index.nil? || index.empty?
+
+        Analyzer.diagnose_filters(path: path, root: root, controller_index: index)
+                .map { |diag| build_diagnostic(diag) }
+      end
+
+      def controller_index_or_nil
+        return @controller_index if @controller_index
+
+        # Read project source first so the IoBoundary's
+        # FileEntry digests get captured into the descriptor
+        # before `cache_for` snapshots it (mirrors
+        # rigor-rails-routes / rigor-pundit's pattern).
+        prime_io_boundary_for_index
+        @controller_index = cache_for(:controller_index, params: {}).call
+      rescue StandardError
+        nil
+      end
+
+      def prime_io_boundary_for_index
+        @controller_search_paths.each do |root|
+          absolute = File.expand_path(root)
+          next unless File.directory?(absolute)
+
+          Dir.glob(File.join(absolute, "**", "*.rb")).each do |path|
+            io_boundary.read_file(path)
+          rescue Plugin::AccessDeniedError, Errno::ENOENT
+            nil
+          end
+        end
+      end
 
       # Lazily resolves the helper table from the cross-plugin
       # fact store. The cache is per-run because the runner

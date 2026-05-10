@@ -14,7 +14,7 @@ The full Action Pack plugin spans four phases per the
 | Phase | Surface | Status |
 | --- | --- | --- |
 | 1 | Strong parameters → AR column validation | pending |
-| 2 | Filter chains (`before_action :name`) | pending |
+| 2 | **Filter chains** (`before_action :name`) | **landed** |
 | 3 | Render targets (`render :show`) | pending |
 | 4 | **Route-helper consumption** (`redirect_to user_path(@user)`) | **landed** |
 
@@ -60,11 +60,13 @@ record any extra context for them).
 
 ## Diagnostics
 
-| Rule | Severity | Fires when |
-| --- | --- | --- |
-| `plugin.actionpack.helper-call` | info | A `*_path` / `*_url` call resolved against the helper table. Includes the HTTP method, generated path, and Rails action name. |
-| `plugin.actionpack.unknown-helper` | error | The `*_path` / `*_url` name is not in the helper table. Includes a `DidYouMean::SpellChecker` suggestion drawn from the table. |
-| `plugin.actionpack.wrong-helper-arity` | error | The call's positional-argument count doesn't match the helper's recorded arity. |
+| Rule | Severity | Phase | Fires when |
+| --- | --- | --- | --- |
+| `plugin.actionpack.helper-call` | info | 4 | A `*_path` / `*_url` call resolved against the helper table. Includes the HTTP method, generated path, and Rails action name. |
+| `plugin.actionpack.unknown-helper` | error | 4 | The `*_path` / `*_url` name is not in the helper table. Includes a `DidYouMean::SpellChecker` suggestion drawn from the table. |
+| `plugin.actionpack.wrong-helper-arity` | error | 4 | The call's positional-argument count doesn't match the helper's recorded arity. |
+| `plugin.actionpack.filter-call` | info | 2 | A filter-DSL reference (`before_action :name`, `skip_around_action`, etc.) resolves to a defined method on the controller or its immediate parent. |
+| `plugin.actionpack.unknown-filter-method` | error | 2 | A filter-DSL reference names a method not defined on the controller (or its immediate parent). Includes a `DidYouMean::SpellChecker` suggestion drawn from the controller's effective method set. |
 
 ## Configuration
 

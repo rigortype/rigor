@@ -15,7 +15,11 @@
 # Rigor sees the `*_path` argument before it reaches the
 # framework method.
 
-class UsersController
+class UsersController < ApplicationController
+  before_action :authenticate!
+  before_action :set_user, only: %i[show edit]
+  skip_before_action :authenticate!, only: [:index]
+
   def index
     # Bare helper, info trace.
     redirect_to users_path
@@ -39,5 +43,16 @@ class UsersController
   def url_form
     # _url form is recognised identically to _path.
     redirect_to user_url(@user)
+  end
+
+  private
+
+  def authenticate!
+    # Filter callback — defined here so the before_action /
+    # skip_before_action references resolve.
+  end
+
+  def set_user
+    @user = nil
   end
 end

@@ -7,7 +7,12 @@
 # - wrong-helper-arity — `user_path` (arity 1) called with 0
 #   args, and `user_post_path` (arity 2) called with 1.
 
-class ErrorsController
+class ErrorsController < ApplicationController
+  # Phase 2 — `:authenticate!` is not defined on this
+  # controller (or its parent), so the filter reference is an
+  # error.
+  before_action :authenticate!
+
   def typo
     # `usres_path` doesn't exist; should suggest `users_path`.
     redirect_to usres_path

@@ -25,6 +25,18 @@ module Rigor
       module Analyzer
         SUFFIXES = %w[_path _url].freeze
 
+        # Phase 2 — filter-chain DSL methods. Each takes a
+        # variadic list of filter names (Symbols / Strings) plus
+        # optional `only:` / `except:` / `if:` / `unless:`
+        # modifiers. The validation key is the filter NAMES; the
+        # modifiers are accepted but their action-name argument
+        # is not yet validated (Phase 2.5).
+        FILTER_DSL_METHODS = %i[
+          before_action after_action around_action
+          skip_before_action skip_after_action skip_around_action
+          prepend_before_action prepend_after_action prepend_around_action
+        ].freeze
+
         Diagnostic = Data.define(:path, :line, :column, :message, :severity, :rule)
 
         module_function
@@ -48,6 +60,115 @@ module Rigor
           end
 
           diagnostics
+        end
+
+        # Phase 2 — filter-chain validation. Walks the file's
+        # top-level class node, looks it up in the controller
+        # index to get the effective method set (including
+        # one level of inheritance), and validates that every
+        # `before_action :name` reference resolves to a defined
+        # method. Files that don't contain a known controller
+        # contribute no diagnostics.
+        def diagnose_filters(path:, root:, controller_index:)
+          class_node = first_class_node(root)
+          return [] if class_node.nil?
+
+          class_name = qualified_name_for(class_node.constant_path)
+          return [] if class_name.nil?
+          return [] unless controller_index.known?(class_name)
+
+          methods = controller_index.effective_methods_for(class_name)
+          spell_checker = DidYouMean::SpellChecker.new(dictionary: methods.map(&:to_s))
+
+          collect_filter_diagnostics(path, class_node.body, methods, spell_checker)
+        end
+
+        def collect_filter_diagnostics(path, body, methods, spell_checker)
+          diagnostics = []
+          walk_filter_calls(body) do |call_node|
+            filter_name_args(call_node).each do |arg_node|
+              filter_name = literal_symbol_or_string(arg_node)
+              next if filter_name.nil?
+
+              diag = filter_lookup_diagnostic(path, call_node, arg_node, filter_name, methods, spell_checker)
+              diagnostics << diag if diag
+            end
+          end
+          diagnostics
+        end
+
+        def filter_lookup_diagnostic(path, call_node, arg_node, filter_name, methods, spell_checker)
+          if methods.include?(filter_name.to_sym)
+            filter_call_diagnostic(path, call_node, filter_name)
+          else
+            unknown_filter_diagnostic(path, arg_node, call_node, filter_name, spell_checker)
+          end
+        end
+
+        def walk_filter_calls(node, &)
+          return unless node.is_a?(Prism::Node)
+
+          yield node if node.is_a?(Prism::CallNode) && node.receiver.nil? && FILTER_DSL_METHODS.include?(node.name)
+          node.compact_child_nodes.each { |child| walk_filter_calls(child, &) }
+        end
+
+        # Drops the trailing keyword hash (`only:` / `except:` /
+        # `if:` / `unless:`) so the modifier args don't get
+        # treated as filter names.
+        def filter_name_args(call_node)
+          args = call_node.arguments&.arguments || []
+          args = args[0..-2] if args.last.is_a?(Prism::KeywordHashNode)
+          args
+        end
+
+        def literal_symbol_or_string(node)
+          case node
+          when Prism::SymbolNode then node.value
+          when Prism::StringNode then node.unescaped
+          end
+        end
+
+        def first_class_node(node)
+          return nil unless node.is_a?(Prism::Node)
+          return node if node.is_a?(Prism::ClassNode)
+
+          node.compact_child_nodes.each do |child|
+            found = first_class_node(child)
+            return found if found
+          end
+          nil
+        end
+
+        def qualified_name_for(node)
+          case node
+          when Prism::ConstantReadNode then node.name.to_s
+          when Prism::ConstantPathNode
+            parent = node.parent.nil? ? nil : qualified_name_for(node.parent)
+            return nil if !node.parent.nil? && parent.nil?
+
+            parent.nil? ? node.name.to_s : "#{parent}::#{node.name}"
+          end
+        end
+
+        def filter_call_diagnostic(path, call_node, filter_name)
+          loc = call_node.message_loc || call_node.location
+          Diagnostic.new(
+            path: path, line: loc.start_line, column: loc.start_column + 1,
+            message: "Action Pack filter `#{call_node.name} :#{filter_name}` resolves to a defined method.",
+            severity: :info, rule: "filter-call"
+          )
+        end
+
+        def unknown_filter_diagnostic(path, arg_node, call_node, filter_name, spell_checker)
+          loc = arg_node.location
+          base = "Action Pack filter `#{call_node.name} :#{filter_name}` references no method " \
+                 "defined on this controller (or its parent)."
+          suggestion = spell_checker.correct(filter_name.to_s).first
+          message = suggestion ? "#{base} Did you mean `:#{suggestion}`?" : base
+          Diagnostic.new(
+            path: path, line: loc.start_line, column: loc.start_column + 1,
+            message: message, severity: :error, rule: "unknown-filter-method"
+          )
         end
 
         # Walk the AST yielding only call nodes whose method

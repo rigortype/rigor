@@ -189,6 +189,126 @@ RSpec.describe "examples/rigor-actionpack" do # rubocop:disable RSpec/DescribeCl
     end
   end
 
+  describe "filter chains (Phase 2)" do
+    def with_controllers(controllers:, routes: DEFAULT_AP_ROUTES_RB) # rubocop:disable Metrics/MethodLength
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "config"))
+        FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
+        File.write(File.join(dir, "config", "routes.rb"), routes)
+        controllers.each do |relative, contents|
+          full = File.join(dir, "app", "controllers", relative)
+          FileUtils.mkdir_p(File.dirname(full))
+          File.write(full, contents)
+        end
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "app", "controllers")],
+            "plugins" => %w[rigor-rails-routes rigor-actionpack]
+          )
+        )
+        Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil,
+            plugin_requirer: lambda { |name|
+              case name
+              when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
+              when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
+              end
+              true
+            }
+          )
+          yield runner.run
+        end
+      end
+    end
+
+    it "emits a `filter-call` info trace for a `before_action` referencing a defined method" do
+      with_controllers(controllers: {
+                         "users_controller.rb" => <<~RUBY
+                           class UsersController
+                             before_action :authenticate!
+                             def authenticate!; end
+                           end
+                         RUBY
+                       }) do |result|
+        info = actionpack_diagnostics(result).find { |d| d.rule == "filter-call" }
+        expect(info).not_to be_nil
+        expect(info.severity).to eq(:info)
+        expect(info.message).to include("before_action :authenticate!")
+      end
+    end
+
+    it "fires `unknown-filter-method` with a did-you-mean for a typo'd filter name" do
+      with_controllers(controllers: {
+                         "users_controller.rb" => <<~RUBY
+                           class UsersController
+                             before_action :authenticat!
+                             def authenticate!; end
+                           end
+                         RUBY
+                       }) do |result|
+        err = actionpack_diagnostics(result).find { |d| d.rule == "unknown-filter-method" }
+        expect(err).not_to be_nil
+        expect(err.severity).to eq(:error)
+        expect(err.message).to include("authenticat!")
+        expect(err.message).to include("Did you mean `:authenticate!`?")
+      end
+    end
+
+    it "resolves filter methods inherited from a parent controller (one level)" do
+      with_controllers(controllers: {
+                         "application_controller.rb" => "class ApplicationController\n  def authenticate!; end\nend\n",
+                         "users_controller.rb" => <<~RUBY
+                           class UsersController < ApplicationController
+                             before_action :authenticate!
+                           end
+                         RUBY
+                       }) do |result|
+        diags = actionpack_diagnostics(result)
+        expect(diags.select { |d| d.rule == "unknown-filter-method" }).to be_empty
+        expect(diags.select { |d| d.rule == "filter-call" }).not_to be_empty
+      end
+    end
+
+    it "ignores the trailing `only:` / `except:` keyword hash when validating filter names" do
+      with_controllers(controllers: {
+                         "users_controller.rb" => <<~RUBY
+                           class UsersController
+                             before_action :set_user, only: %i[show edit]
+                             def set_user; end
+                             def show; end
+                             def edit; end
+                           end
+                         RUBY
+                       }) do |result|
+        # `:show` and `:edit` are action names, NOT filter
+        # names — Phase 2 must NOT flag them as unknown
+        # filters. (Phase 2.5 will validate the action-name
+        # arguments separately.)
+        unknown = actionpack_diagnostics(result).select { |d| d.rule == "unknown-filter-method" }
+        expect(unknown).to be_empty
+      end
+    end
+
+    it "supports the full filter DSL family (skip_before_action, around_action, prepend_*)" do
+      with_controllers(controllers: {
+                         "users_controller.rb" => <<~RUBY
+                           class UsersController
+                             skip_before_action :authenticate!
+                             around_action :log_request
+                             prepend_before_action :setup
+                             def authenticate!; end
+                             def log_request; end
+                             def setup; end
+                           end
+                         RUBY
+                       }) do |result|
+        infos = actionpack_diagnostics(result).select { |d| d.rule == "filter-call" }
+        expect(infos.length).to eq(3)
+      end
+    end
+  end
+
   describe "graceful degradation" do
     it "runs as a no-op when rigor-rails-routes isn't loaded (helper table absent)" do # rubocop:disable RSpec/ExampleLength
       Dir.mktmpdir do |dir|

@@ -75,7 +75,8 @@ module Rigor
           "view_search_paths" => :array
         },
         consumes: [
-          { plugin_id: "rails-routes", name: :helper_table, optional: true }
+          { plugin_id: "rails-routes", name: :helper_table, optional: true },
+          { plugin_id: "activerecord", name: :model_index, optional: true }
         ]
       )
 
@@ -105,6 +106,8 @@ module Rigor
         @helper_table = nil
         @helper_table_resolved = false
         @controller_index = nil
+        @model_index_value = nil
+        @model_index_resolved = false
       end
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
@@ -112,7 +115,8 @@ module Rigor
 
         helper_diagnostics(path, root) +
           filter_diagnostics(path, root) +
-          render_diagnostics(path, root)
+          render_diagnostics(path, root) +
+          permit_diagnostics(path, root)
       end
 
       private
@@ -144,6 +148,19 @@ module Rigor
       # + class name, no per-controller pre-discovery needed.
       def render_diagnostics(path, root)
         Analyzer.diagnose_renders(path: path, root: root, view_search_roots: @view_search_paths)
+                .map { |diag| build_diagnostic(diag) }
+      end
+
+      # Phase 1 — strong-parameter validation. Reads the
+      # `:model_index` fact from the cross-plugin fact store
+      # (published by rigor-activerecord) and validates every
+      # `params.require(:user).permit(:name, :email)` chain
+      # against the User model's column list.
+      def permit_diagnostics(path, root)
+        index = model_index
+        return [] if index.nil? || index.empty?
+
+        Analyzer.diagnose_permits(path: path, root: root, model_index: index)
                 .map { |diag| build_diagnostic(diag) }
       end
 
@@ -187,6 +204,22 @@ module Rigor
         )
         @helper_table_resolved = true
         @helper_table
+      end
+
+      # Phase 1 — lazily reads the cross-plugin :model_index
+      # fact from rigor-activerecord. The cache is per-run
+      # because the runner builds a fresh FactStore per
+      # invocation; memoizing on the plugin instance saves the
+      # per-file read while still picking up a freshly
+      # published index on the next `bundle exec rigor check`.
+      def model_index
+        return @model_index_value if @model_index_resolved
+
+        @model_index_value = @services.fact_store.read(
+          plugin_id: "activerecord", name: :model_index
+        )
+        @model_index_resolved = true
+        @model_index_value
       end
 
       def controller_file?(path)

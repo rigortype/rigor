@@ -45,6 +45,13 @@ module Rigor
         # families.
         RENDER_TEMPLATE_EXTENSIONS = %w[.html.erb .text.erb].freeze
 
+        # Phase 1 — strong-parameter call shapes that begin a
+        # validatable chain. The walker matches the
+        # `params.require(:user).permit(:name, :email)` chain
+        # by looking for `:permit` call sites whose receiver is
+        # `params.require(:symbol)`.
+        STRONG_PARAMS_RECEIVER_NAMES = %i[require permit_params strong_params].freeze
+
         Diagnostic = Data.define(:path, :line, :column, :message, :severity, :rule)
 
         module_function
@@ -156,6 +163,101 @@ module Rigor
 
             parent.nil? ? node.name.to_s : "#{parent}::#{node.name}"
           end
+        end
+
+        # Phase 1 — strong-parameter validation. Recognises
+        # the `params.require(:symbol).permit(:key, :key, ...)`
+        # chain and validates each `:key` against the AR
+        # model's column list (looked up via the model_index
+        # fact published by `rigor-activerecord`). Calls whose
+        # `:require` argument is a non-literal Symbol are
+        # passed through; namespaced models
+        # (`params.require(:admin_user)` →
+        # `Admin::User`) are deferred to a Phase 1.5 follow-up.
+        def diagnose_permits(path:, root:, model_index:)
+          diagnostics = []
+          walk_permit_calls(root) do |permit_call, model_class|
+            entry = model_index[model_class]
+            next if entry.nil? # unknown model — skip; the model lookup is best-effort.
+
+            columns = entry[:columns]
+            spell_checker = DidYouMean::SpellChecker.new(dictionary: columns)
+            literal_permit_keys(permit_call).each do |key_node, key_name|
+              diagnostics << if columns.include?(key_name)
+                               permit_call_diagnostic(path, permit_call, model_class, key_name)
+                             else
+                               unknown_permit_key_diagnostic(path, key_node, model_class, key_name, spell_checker)
+                             end
+            end
+          end
+          diagnostics
+        end
+
+        # Walks the AST yielding `[permit_call, model_class]`
+        # pairs for every `params.require(:symbol).permit(...)`
+        # chain. The match keys on:
+        #
+        # - method name `:permit` (with any positional args).
+        # - receiver shape: a `:require` call whose first
+        #   positional arg is a literal `Prism::SymbolNode`.
+        #
+        # The literal symbol's `to_s.capitalize` is the
+        # candidate model class name. Namespaced models
+        # (`:admin_user` → `Admin::User`) are deferred — the
+        # mapping for them needs the inflector and a
+        # convention call we don't ship in Phase 1.
+        def walk_permit_calls(node, &)
+          return unless node.is_a?(Prism::Node)
+
+          yield node, model_class_for_permit(node) if permit_chain?(node)
+          node.compact_child_nodes.each { |child| walk_permit_calls(child, &) }
+        end
+
+        def permit_chain?(node)
+          return false unless node.is_a?(Prism::CallNode) && node.name == :permit
+
+          require_call = node.receiver
+          return false unless require_call.is_a?(Prism::CallNode) && require_call.name == :require
+
+          first_arg = require_call.arguments&.arguments&.first
+          first_arg.is_a?(Prism::SymbolNode)
+        end
+
+        def model_class_for_permit(permit_call)
+          require_call = permit_call.receiver
+          symbol_node = require_call.arguments.arguments.first
+          # Phase 1 convention: `:user` → `User`; namespaced
+          # mapping deferred. The capitalize call is sufficient
+          # for the typical single-word model names; users with
+          # multi-word camelcase shape (`:order_item` →
+          # `OrderItem`) need the inflector follow-up.
+          symbol_node.value.to_s.split("_").map(&:capitalize).join
+        end
+
+        def literal_permit_keys(permit_call)
+          (permit_call.arguments&.arguments || []).filter_map do |arg|
+            next [arg, arg.value] if arg.is_a?(Prism::SymbolNode)
+          end
+        end
+
+        def permit_call_diagnostic(path, permit_call, model_class, key_name)
+          loc = permit_call.message_loc || permit_call.location
+          Diagnostic.new(
+            path: path, line: loc.start_line, column: loc.start_column + 1,
+            message: "Action Pack permit `#{key_name}` resolves to a column on `#{model_class}`.",
+            severity: :info, rule: "permit-call"
+          )
+        end
+
+        def unknown_permit_key_diagnostic(path, key_node, model_class, key_name, spell_checker)
+          loc = key_node.location
+          base = "Action Pack permit `#{key_name}` is not a column on `#{model_class}`."
+          suggestion = spell_checker.correct(key_name).first
+          message = suggestion ? "#{base} Did you mean `:#{suggestion}`?" : base
+          Diagnostic.new(
+            path: path, line: loc.start_line, column: loc.start_column + 1,
+            message: message, severity: :error, rule: "unknown-permit-key"
+          )
         end
 
         # Phase 3 — render-target validation. For each

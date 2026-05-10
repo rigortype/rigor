@@ -14,10 +14,28 @@ require "tmpdir"
 
 RAILS_ROUTES_LIB = File.expand_path("../../../examples/rigor-rails-routes/lib", __dir__)
 ACTIONPACK_LIB = File.expand_path("../../../examples/rigor-actionpack/lib", __dir__)
+ACTIVERECORD_LIB = File.expand_path("../../../examples/rigor-activerecord/lib", __dir__)
 $LOAD_PATH.unshift(RAILS_ROUTES_LIB) unless $LOAD_PATH.include?(RAILS_ROUTES_LIB)
 $LOAD_PATH.unshift(ACTIONPACK_LIB) unless $LOAD_PATH.include?(ACTIONPACK_LIB)
+$LOAD_PATH.unshift(ACTIVERECORD_LIB) unless $LOAD_PATH.include?(ACTIVERECORD_LIB)
 require "rigor-rails-routes"
 require "rigor-actionpack"
+require "rigor-activerecord"
+
+SCHEMA_FOR_PHASE1 = <<~SCHEMA
+  ActiveRecord::Schema.define do
+    create_table :users do |t|
+      t.string :name
+      t.string :email
+      t.string :role
+    end
+  end
+SCHEMA
+
+USER_MODEL_FOR_PHASE1 = <<~RUBY
+  class User < ApplicationRecord
+  end
+RUBY
 
 DEFAULT_AP_ROUTES_RB = <<~RUBY
   Rails.application.routes.draw do
@@ -414,6 +432,103 @@ RSpec.describe "examples/rigor-actionpack" do # rubocop:disable RSpec/DescribeCl
           %w[render-target missing-template].include?(d.rule)
         end
         expect(renders).to be_empty
+      end
+    end
+  end
+
+  describe "strong parameters (Phase 1)" do
+    def with_strong_params(controller_source) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "config"))
+        FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
+        FileUtils.mkdir_p(File.join(dir, "app", "models"))
+        FileUtils.mkdir_p(File.join(dir, "db"))
+        File.write(File.join(dir, "config", "routes.rb"), DEFAULT_AP_ROUTES_RB)
+        File.write(File.join(dir, "db", "schema.rb"), SCHEMA_FOR_PHASE1)
+        File.write(File.join(dir, "app", "models", "user.rb"), USER_MODEL_FOR_PHASE1)
+        File.write(File.join(dir, "app", "controllers", "users_controller.rb"), controller_source)
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "app", "controllers")],
+            "plugins" => %w[rigor-rails-routes rigor-activerecord rigor-actionpack]
+          )
+        )
+        Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil,
+            plugin_requirer: lambda { |name|
+              case name
+              when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
+              when "rigor-activerecord" then Rigor::Plugin.register(Rigor::Plugin::Activerecord)
+              when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
+              end
+              true
+            }
+          )
+          yield runner.run
+        end
+      end
+    end
+
+    it "emits a `permit-call` info trace for `params.require(:user).permit(:name)`" do
+      with_strong_params(<<~RUBY) do |result|
+        class UsersController
+          def create
+            params.require(:user).permit(:name, :email)
+          end
+        end
+      RUBY
+        info = actionpack_diagnostics(result).find { |d| d.rule == "permit-call" }
+        expect(info).not_to be_nil
+        expect(info.severity).to eq(:info)
+        expect(info.message).to include("User")
+      end
+    end
+
+    it "fires `unknown-permit-key` with did-you-mean for a non-column kwarg" do
+      with_strong_params(<<~RUBY) do |result|
+        class UsersController
+          def create
+            params.require(:user).permit(:name, :rol)
+          end
+        end
+      RUBY
+        err = actionpack_diagnostics(result).find { |d| d.rule == "unknown-permit-key" }
+        expect(err).not_to be_nil
+        expect(err.severity).to eq(:error)
+        expect(err.message).to include("rol")
+        expect(err.message).to include("Did you mean `:role`?")
+      end
+    end
+
+    it "skips silently when the model isn't in the published index" do
+      with_strong_params(<<~RUBY) do |result|
+        class UsersController
+          def create
+            params.require(:ghost).permit(:any_key_at_all)
+          end
+        end
+      RUBY
+        diags = actionpack_diagnostics(result).select do |d|
+          %w[permit-call unknown-permit-key].include?(d.rule)
+        end
+        expect(diags).to be_empty
+      end
+    end
+
+    it "passes through non-literal `:permit` arguments without recognising them" do
+      with_strong_params(<<~RUBY) do |result|
+        class UsersController
+          def create
+            keys = [:name]
+            params.require(:user).permit(*keys)
+          end
+        end
+      RUBY
+        diags = actionpack_diagnostics(result).select do |d|
+          d.rule == "unknown-permit-key"
+        end
+        expect(diags).to be_empty
       end
     end
   end

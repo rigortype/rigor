@@ -14,6 +14,14 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — `rigor-actionpack` Phase 1 (strong-parameter validation)
+
+- **`params.require(:user).permit(:name, :email)` validated against AR columns.** The recogniser walks every `:permit` call site whose receiver is a `:require` call with a literal `Prism::SymbolNode` first argument, takes the symbol's `.to_s.split("_").map(&:capitalize).join` as the candidate model class name (`:user` → `User`, `:order_item` → `OrderItem`), and validates each permit `:key` against the column list published by `rigor-activerecord` (via the cross-plugin `:model_index` fact).
+- **Two new diagnostics.** `plugin.actionpack.permit-call` (info) emits one row per resolved key naming the model + the column; `plugin.actionpack.unknown-permit-key` (error) fires with a `DidYouMean::SpellChecker` suggestion drawn from the model's column list when a literal key isn't a column.
+- **`manifest(consumes: [...])` extended.** Adds `{ plugin_id: "activerecord", name: :model_index, optional: true }`. The `optional: true` flag means rigor-actionpack still loads when `rigor-activerecord` isn't configured; Phase 1 silently degrades to a no-op (the `model_index` fact_store read returns `nil` and we skip).
+- **Limitations.** Namespaced models (`:admin_user` → `Admin::User`) are deferred — the Phase 1 mapping uses the simple capitalize-then-camelcase convention. Non-literal `permit` arguments (`*keys` splat, `permit(*permitted_attrs)`) are silently passed through. The two-argument `:require` shape and nested-permit (`permit(profile_attrs: [:name])`) are also deferred.
+- **4 new integration spec cases** under `spec/integration/examples/actionpack_plugin_spec.rb` covering the happy-path info trace, the typo did-you-mean, the unknown-model silent skip, and the non-literal `permit` arg pass-through. The test scaffold loads three plugins together (`rigor-rails-routes` + `rigor-activerecord` + `rigor-actionpack`) — the first multi-plugin spec exercising **two** ADR-9 cross-plugin facts at once.
+
 ### Added — `rigor-activerecord` ADR-9 `:model_index` publication
 
 - **`manifest(produces: [:model_index])`** + new `prepare(services)` hook publishes a Marshal-clean `Hash{class_name => { table:, columns: }}` to the cross-plugin fact store. Downstream Tier-2 consumers (rigor-actionpack Phase 1 strong-parameter validation, rigor-factorybot Phase 1 (c) attribute → column cross-check) read it via `services.fact_store.read(plugin_id: "activerecord", name: :model_index)` without coupling to this plugin's `ModelIndex` / `SchemaTable::Column` carrier classes.

@@ -13,7 +13,7 @@ The full Action Pack plugin spans four phases per the
 
 | Phase | Surface | Status |
 | --- | --- | --- |
-| 1 | Strong parameters → AR column validation | pending |
+| 1 | **Strong parameters → AR column validation** (`params.require(:user).permit(:name, :email)`) | **landed** |
 | 2 | **Filter chains** (`before_action :name`) | **landed** |
 | 3 | **Render targets** (`render :show`) | **landed** |
 | 4 | **Route-helper consumption** (`redirect_to user_path(@user)`) | **landed** |
@@ -69,6 +69,8 @@ record any extra context for them).
 | `plugin.actionpack.unknown-filter-method` | error | 2 | A filter-DSL reference names a method not defined on the controller (or its immediate parent). Includes a `DidYouMean::SpellChecker` suggestion drawn from the controller's effective method set. |
 | `plugin.actionpack.render-target` | info | 3 | An explicit `render :symbol` / `render "string"` / `render partial:` call resolved to a view template under `view_search_paths`. |
 | `plugin.actionpack.missing-template` | error | 3 | An explicit `render` call's resolved view path doesn't exist as `.html.erb` or `.text.erb` under any configured `view_search_paths`. |
+| `plugin.actionpack.permit-call` | info | 1 | A `params.require(:user).permit(:key, ...)` chain resolved to a known AR model (via the `:model_index` fact published by `rigor-activerecord`); each accepted `:key` was matched against the model's column list. |
+| `plugin.actionpack.unknown-permit-key` | error | 1 | A literal `:key` in a `permit(...)` chain isn't a column on the corresponding AR model. Includes a `DidYouMean::SpellChecker` suggestion drawn from the model's column list. |
 
 ## Configuration
 

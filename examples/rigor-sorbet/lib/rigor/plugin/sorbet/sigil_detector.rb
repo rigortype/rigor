@@ -76,6 +76,24 @@ module Rigor
         def ignored?(level)
           level == :ignore
         end
+
+        # @return [Boolean] true when `level` is at or above the
+        #   `# typed: true` mark. Used by the
+        #   `enforce_sigil` config gate (default `true`): with
+        #   the gate on, only files marked `:true` / `:strict` /
+        #   `:strong` contribute their sigs to the catalog. The
+        #   `:false` (and sigil-less) levels still get walked
+        #   (so RBI files outside the project can be loaded
+        #   regardless), but their sig-derived narrowing is
+        #   suppressed — matching how Sorbet itself only
+        #   enforces type errors at `# typed: true`+. Assertion
+        #   recognisers (`T.let` / `T.cast` / `T.must` /
+        #   `T.bind` / `T.assert_type!`) are NOT gated by this:
+        #   the user wrote them deliberately, so the
+        #   recogniser still fires regardless of sigil.
+        def enforced?(level)
+          %i[true strict strong].include?(level)
+        end
       end
     end
   end

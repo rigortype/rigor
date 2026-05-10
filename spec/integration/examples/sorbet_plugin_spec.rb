@@ -489,32 +489,35 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
       expect(plugin_diagnostics(result)).to be_empty
     end
 
-    it "honours `# typed: false` by recording sigs for cross-file use" do
-      # Sorbet's contract: `# typed: false` files still have
-      # their sigs PARSED AND USED by other files. We mirror
-      # that — the catalog harvest walks the file the same way
-      # as a `# typed: true` file.
+    it "skips `# typed: false` sigs when enforce_sigil is on (default)" do
+      # Sorbet itself doesn't enforce types at `# typed: false`
+      # — sigs are parsed but not used to surface errors. Rigor
+      # mirrors that under the default `enforce_sigil: true`:
+      # the file's catalog entry is not recorded, so the
+      # chained `.bit_length` call falls back to RBS / nominal
+      # dispatch as if the sig wasn't there.
       typed_false_rbi = <<~RBI
         # typed: false
         class Greeter
           extend T::Sig
-          sig { returns(String) }
-          def self.hello; "hi"; end
+          sig { returns(Integer) }
+          def self.count; 1; end
         end
       RBI
 
+      # Without the sig contribution, `Greeter.count.bit_length`
+      # has no inferred Integer return at the chained call —
+      # we ASSERT no plugin recognised the sig (the
+      # diagnostic-trace check stays empty), not that the
+      # downstream call resolves.
       result = run_plugin(
-        source: "#{SIG_STUB}Greeter.hello.upcase\n",
+        source: "#{SIG_STUB}Greeter.count\n",
         files: { "sorbet/rbi/shims/greeter.rbi" => typed_false_rbi }
       )
-      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+      expect(plugin_diagnostics(result)).to be_empty
     end
 
-    it "treats files without a `# typed:` sigil the same as `# typed: false`" do
-      # Default-Sorbet-behaviour parity: sigs in sigil-less
-      # files still feed the catalog. (Most user-authored
-      # `.rb` files don't carry a sigil; not honouring this
-      # would break the common case.)
+    it "skips sigil-less files under enforce_sigil (defaults to :false)" do
       no_sigil_rbi = <<~RBI
         class Bareword
           extend T::Sig
@@ -524,8 +527,46 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
       RBI
 
       result = run_plugin(
-        source: "#{SIG_STUB}Bareword.always.even?\n",
+        source: "#{SIG_STUB}Bareword.always\n",
         files: { "sorbet/rbi/shims/bareword.rbi" => no_sigil_rbi }
+      )
+      expect(plugin_diagnostics(result)).to be_empty
+    end
+
+    it "records sigs from `# typed: true`+ files under enforce_sigil (default)" do
+      typed_true_rbi = <<~RBI
+        # typed: true
+        class Strict
+          extend T::Sig
+          sig { returns(Integer) }
+          def self.value; 7; end
+        end
+      RBI
+
+      result = run_plugin(
+        source: "#{SIG_STUB}Strict.value.even?\n",
+        files: { "sorbet/rbi/shims/strict.rbi" => typed_true_rbi }
+      )
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "restores pre-gate behaviour when enforce_sigil: false (records every sig)" do
+      typed_false_rbi = <<~RBI
+        # typed: false
+        class Lenient
+          extend T::Sig
+          sig { returns(Integer) }
+          def self.value; 7; end
+        end
+      RBI
+
+      # Override default `enforce_sigil: true` via the plugin
+      # entry's config block. Now the `# typed: false` file's
+      # sig DOES contribute, so the chained `.even?` resolves.
+      result = run_plugin(
+        source: "#{SIG_STUB}Lenient.value.even?\n",
+        files: { "sorbet/rbi/shims/lenient.rbi" => typed_false_rbi },
+        plugin_entry: { "gem" => "rigor-sorbet", "config" => { "enforce_sigil" => false } }
       )
       expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
     end

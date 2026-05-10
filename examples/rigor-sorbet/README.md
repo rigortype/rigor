@@ -44,12 +44,10 @@ sig { ... }; def body; end; end; end` resolves
 
 This is **slices 1–8 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**
 plus the light follow-ups that add `T.must_because`,
-`T.reveal_type`, `T.assert_type!`, and `T.bind`. The plugin's
-primary surface is feature-complete and covers the realistic
-Tapioca-using project shape. Only per-call-site sigil
-enforcement (e.g. only firing `T.let` recognition in
-`# typed: true`+ files) remains behind a plugin-contract
-widening that threads file path through `flow_contribution_for`.
+`T.reveal_type`, `T.assert_type!`, `T.bind`, and per-file
+sigil enforcement (`enforce_sigil` config knob, default
+`true`). The plugin's primary surface is feature-complete and
+covers the realistic Tapioca-using project shape.
 
 ## What the plugin recognises
 
@@ -201,22 +199,38 @@ that future scenario.
 ## Slice 5 sigil honoring
 
 The plugin reads Sorbet's `# typed:` magic comment from the
-top of each file and applies the following at catalog-harvest
-time (per ADR-11's slice 5 table):
+top of each file. Behaviour at catalog-harvest time depends
+on the `enforce_sigil` config knob (default `true`):
 
-| Sigil                  | Behaviour                                      |
-| ---------------------- | ---------------------------------------------- |
-| `# typed: ignore`      | File is skipped entirely; no sigs recorded.    |
-| `# typed: false`       | Sigs recorded normally (Sorbet's contract).    |
-| no sigil (default)     | Same as `# typed: false`.                      |
-| `# typed: true`        | Sigs recorded normally.                        |
-| `# typed: strict`      | Same as `true`.                                |
-| `# typed: strong`      | Same as `true`. (Strong-mode rejection of `T.untyped` is a Sorbet-static stance; Rigor's `severity_profile` covers the analogous filter.) |
+| Sigil                  | `enforce_sigil: true` (default)                                                                                  | `enforce_sigil: false` |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `# typed: ignore`      | File is skipped entirely; no sigs / parse-errors recorded.                                                       | Same.                  |
+| no sigil (default)     | Walked for parse-error diagnostics, **but sigs are not recorded** in the catalog.                                | Sigs recorded.         |
+| `# typed: false`       | Same as no-sigil.                                                                                                | Sigs recorded.         |
+| `# typed: true`        | Sigs recorded.                                                                                                   | Sigs recorded.         |
+| `# typed: strict`      | Sigs recorded.                                                                                                   | Sigs recorded.         |
+| `# typed: strong`      | Sigs recorded. (Strong-mode rejection of `T.untyped` is a Sorbet-static stance; Rigor's `severity_profile` covers the analogous filter.) | Sigs recorded. |
 
-Per-call-site enforcement — e.g. only firing the slice 2
-`T.let` / `T.cast` / `T.must` / `T.unsafe` recognisers in
-`# typed: true`+ files — is queued for a later slice that
-threads file path through `flow_contribution_for`.
+The default mirrors Sorbet's own contract: types are not
+enforced at `# typed: false`, so Rigor doesn't surface
+narrowing from those files either. Set `enforce_sigil: false`
+in the plugin config to opt into the pre-gate behaviour
+(every parseable file's sigs land in the catalog regardless
+of sigil).
+
+**The assertion recognisers** (`T.let`, `T.cast`, `T.must`,
+`T.must_because`, `T.unsafe`, `T.reveal_type`,
+`T.assert_type!`, `T.bind`) are NOT gated by
+`enforce_sigil` — the user wrote those calls deliberately at
+the call site, so the recognisers fire regardless of the
+file's sigil.
+
+```yaml
+plugins:
+  - gem: rigor-sorbet
+    config:
+      enforce_sigil: false   # opt out — record every sig
+```
 
 ## Dispatcher tier ordering
 

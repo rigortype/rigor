@@ -77,7 +77,8 @@ module Rigor
         description: "Ingests Sorbet `sig` blocks as method-signature contributions.",
         config_schema: {
           "paths" => :array,
-          "rbi_paths" => :array
+          "rbi_paths" => :array,
+          "enforce_sigil" => :boolean
         }
       )
 
@@ -93,6 +94,11 @@ module Rigor
         @services = services
         @configured_paths = Array(config.fetch("paths", services.configuration.paths)).map(&:to_s)
         @rbi_paths = Array(config.fetch("rbi_paths", DEFAULT_RBI_PATHS)).map(&:to_s)
+        # Default `true` — only files marked `# typed: true` /
+        # `:strict` / `:strong` contribute their sigs. Set to
+        # `false` to record every file's sigs regardless of
+        # sigil (current behaviour pre-this-config).
+        @enforce_sigil = config.fetch("enforce_sigil", true)
         @catalog = nil
         @parse_errors_by_path = {}
         @catalog_built = false
@@ -373,16 +379,30 @@ module Rigor
         return if contents.nil?
 
         # ADR-11 slice 5 — honour Sorbet's `# typed: ignore`
-        # magic comment by skipping the file entirely. Other
-        # levels (`false` / `true` / `strict` / `strong`)
-        # parse and harvest the same way today; per-call-site
-        # honouring is queued for a later slice.
-        return if SigilDetector.ignored?(SigilDetector.detect(contents))
+        # magic comment by skipping the file entirely.
+        level = SigilDetector.detect(contents)
+        return if SigilDetector.ignored?(level)
 
         result = Prism.parse(contents)
         return unless result.errors.empty?
 
-        errors = CatalogWalker.walk(root: result.value, catalog: catalog, path: path)
+        # `enforce_sigil` follow-up — when on (default), files
+        # at `:false` (or sigil-less, which Sorbet treats as
+        # `:false`) are STILL walked so parse-error diagnostics
+        # surface, but sigs flow into a discardable catalog
+        # rather than the per-run one. Sorbet itself doesn't
+        # enforce types at `# typed: false`, and Rigor mirrors
+        # that for sig contributions. Assertion recognisers
+        # (`T.let` / `T.cast` / `T.must` / `T.bind` /
+        # `T.assert_type!`) stay live regardless of sigil — the
+        # user wrote those deliberately.
+        sig_catalog = if @enforce_sigil && !SigilDetector.enforced?(level)
+                        Catalog.new
+                      else
+                        catalog
+                      end
+
+        errors = CatalogWalker.walk(root: result.value, catalog: sig_catalog, path: path)
         @parse_errors_by_path[path] = errors unless errors.empty?
       rescue Plugin::AccessDeniedError, Errno::ENOENT
         # Skip files outside the trusted read scope or that

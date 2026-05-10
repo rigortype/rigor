@@ -14,6 +14,15 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — `rigor-sorbet` per-file sigil enforcement (`enforce_sigil` knob)
+
+- **New `enforce_sigil` config knob (default `true`).** Mirrors Sorbet's own contract: types are not enforced at `# typed: false`, so under the default Rigor doesn't record sigs from `# typed: false` (or sigil-less, which Sorbet treats identically) files. Files marked `# typed: true` / `:strict` / `:strong` contribute sigs as before; `# typed: ignore` continues to skip the file entirely (no sigs, no parse errors). Set `enforce_sigil: false` in the plugin config to opt into the pre-gate behaviour (every parseable file's sigs land in the catalog regardless of sigil).
+- **Parse-error diagnostics still surface for sigil-gated files.** When `enforce_sigil` skips a file's sigs, the catalog walker still runs over the AST so `plugin.sorbet.parse-error` warnings on malformed `sig` blocks aren't silenced — sigs flow into a discardable per-file catalog rather than the per-run one.
+- **Assertion recognisers are NOT gated.** `T.let` / `T.cast` / `T.must` / `T.must_because` / `T.unsafe` / `T.reveal_type` / `T.assert_type!` / `T.bind` fire regardless of the file's sigil (the user wrote those calls deliberately at the call site). This matches the user-facing intuition that explicit annotations always count, while declarative sigs respect the file's contract level.
+- **`SigilDetector.enforced?(level)`** new public predicate returns `true` for `:true` / `:strict` / `:strong`. The existing `SigilDetector.ignored?` stays unchanged.
+- **4 new integration spec cases** under `spec/integration/examples/sorbet_plugin_spec.rb`: `# typed: false` files have their sigs skipped under the default; sigil-less files behave the same way (Sorbet treats them as `:false`); `# typed: true`+ files have their sigs recorded; `enforce_sigil: false` config restores the pre-gate behaviour. The two prior tests that asserted "honours `# typed: false` by recording sigs" were updated to reflect the new default.
+- **README + handbook chapter 10 updated** with the gated-per-sigil table and the assertion-recogniser carve-out. Closes the last remaining ADR-11 deferred item; the plugin's primary surface is now feature-complete.
+
 ### Added — example plugin: `rigor-factorybot` (Phase 1 (a) — self-contained validation)
 
 - **Tier 2 / second FactoryBot Phase plugin** in Rigor's plugin family. Validates every `FactoryBot.create(:name, key: ...)` / `.build` / `.build_stubbed` / `.attributes_for` / `.create_list` / `.build_list` / `.build_stubbed_list` call (and the legacy `FactoryGirl.*` aliases) against a per-run `FactoryIndex` built from `factory_search_paths` (default `["spec/factories", "spec/factories.rb"]` — covers the modern multi-file convention and the legacy single-file form). No FactoryBot runtime dependency.

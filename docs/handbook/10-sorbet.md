@@ -170,13 +170,27 @@ same way at the call site.
 ## `# typed:` sigils
 
 The plugin reads Sorbet's `# typed:` magic comment from the
-top of each file. `# typed: ignore` files are skipped during
-catalog harvest — sigs in those files are not recorded, so
-the plugin contributes nothing for methods declared there.
-Every other level (`false` / `true` / `strict` / `strong`)
-records sigs identically; per-call-site enforcement (e.g.,
-only firing `T.let` recognition in `# typed: true`+ files) is
-deferred to a future slice.
+top of each file. Behaviour depends on the `enforce_sigil`
+config knob (default `true`):
+
+| Sigil               | `enforce_sigil: true` (default)             | `enforce_sigil: false` |
+| ------------------- | ------------------------------------------- | ---------------------- |
+| `# typed: ignore`   | Skipped entirely; no sigs / parse errors recorded. | Same.            |
+| no sigil / `false`  | Walked for parse-error diagnostics, but sigs are NOT recorded. | Sigs recorded. |
+| `# typed: true`+    | Sigs recorded.                              | Sigs recorded.          |
+
+The default mirrors Sorbet's own contract: types aren't
+enforced at `# typed: false`, so Rigor doesn't surface
+narrowing from those files either. Set `enforce_sigil: false`
+in the plugin config to opt into the pre-gate behaviour
+(every parseable file's sigs land in the catalog regardless
+of sigil).
+
+**Assertion recognisers** (`T.let`, `T.cast`, `T.must`,
+`T.must_because`, `T.unsafe`, `T.reveal_type`,
+`T.assert_type!`, `T.bind`) are NOT gated by
+`enforce_sigil`. The user wrote those calls deliberately, so
+they fire regardless of the file's sigil.
 
 Sorbet-strict's "every method must have a sig" requirement
 and strong-mode's `T.untyped` rejection are intentionally NOT

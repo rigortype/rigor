@@ -14,6 +14,11 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Documented — ADR-10 5c (boundary-cross diagnostic) deferred dependency
+
+- **No code change.** Investigated the boundary-cross slice and confirmed it has no condition under which it would fire in v0.1.3's dispatcher: plugin and RBS contributions preempt gem-source entirely (plugins → RBS → gem-source in the tier order), so there's no overlap to surface as a "boundary cross." The diagnostic only becomes meaningful once `mode: full` dispatches distinctively (gem-source contributing alongside RBS), which is itself a pending "Open questions" item per the spec doc.
+- **`docs/internal-spec/dependency-source-inference.md`** updates the `boundary-cross` row in the diagnostic-family table and the "Open questions" entry to spell out the dependency on `mode: full` distinct dispatch — landing the diagnostic without that prerequisite would ship a rule that can never fire.
+
 ### Added — ADR-10 5b (β budget semantics)
 
 - **New `dependencies.budget_overrun_strategy` config knob.** Two enum values: `:walker_cap` (default — the existing α semantics) and `:dependency_silence` (β). Under β, the dispatcher additionally consults a per-class reverse-lookup table on catalog miss: if the receiver class belongs to a budget-exceeded gem, the call resolves to `Dynamic[top]` rather than falling through to the user-class fallback (which would otherwise emit `call.undefined-method` for methods Rigor's catalog couldn't reach because the walker hit its cap).

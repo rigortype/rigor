@@ -359,7 +359,7 @@ Every diagnostic emitted on the dependency-source path uses the
 | --- | --- | --- | --- |
 | `dynamic.dependency-source.gem-not-found` | `:warning` | Live (slice 2a) | Listed gem was not resolvable through RubyGems. Run continues; gem contributes nothing. |
 | `dynamic.dependency-source.budget-exceeded` | `:warning` | Live (slice 4) | Per-gem budget tripped. Walker stopped harvesting at `dependencies.budget_per_gem` method definitions; remaining sites resolve through the existing RBS-or-`Dynamic[top]` boundary. Emitted at most once per gem per run. Recommendation: ship RBS, reduce mode from `full` to `when_missing`, or delist the gem. |
-| `dynamic.dependency-source.boundary-cross` | `:info` | **Pending (post-slice-4)** | Plugin contract and gem-source inference disagree on a return type. The plugin wins; the diagnostic surfaces the divergence for audit. |
+| `dynamic.dependency-source.boundary-cross` | `:info` | **Pending — depends on `mode: full` dispatch** | Plugin contract / RBS and gem-source inference disagree on a return type. The plugin or RBS wins; the diagnostic surfaces the divergence for audit. Dormant in v0.1.3 because the dispatcher tier order already preempts gem-source whenever a plugin or RBS contributes — no overlap to surface. Becomes meaningful once `mode: full` dispatches distinctively. |
 | `dynamic.dependency-source.config-conflict` | `:warning` | Live (slice 5d) | `.rigor.yml` `includes:` chain produced two `dependencies.source_inference[]` entries for the same gem with disagreeing `mode:`. The later (downstream-include) entry wins; `roots:` are unioned silently. One diagnostic per conflicting `(gem, prior-mode, new-mode)` triple.
 
 The taxonomy row in
@@ -451,9 +451,16 @@ Tracked on [ADR-10](../adr/10-dependency-source-inference.md)
   rather than falling through to the user-class fallback.
   Default stays `:walker_cap` (α) for backward compatibility.
 - **`dynamic.dependency-source.boundary-cross` diagnostic** —
-  surfaces RBS-vs-gem-source disagreement on the same
-  receiver / method. Useful for `mode: full` audits; lands
-  alongside the `full` dispatcher distinction.
+  surfaces RBS-vs-gem-source / plugin-vs-gem-source
+  disagreement on the same receiver / method. **Depends on
+  `mode: full` having a distinct dispatch path first.** In
+  v0.1.3 the dispatcher checks plugins → RBS → gem-source in
+  that order, so plugin / RBS contributions preempt
+  gem-source entirely (no overlap to surface). Once
+  `mode: full` is wired to contribute alongside RBS (the
+  next "Open questions" item below), boundary-cross becomes
+  meaningful — until then it has no condition under which it
+  would fire.
 - **`dynamic.dependency-source.config-conflict` diagnostic** —
   surfaces `.rigor.yml` parse / merge disagreement (two
   incompatible entries for the same gem across `includes:`).

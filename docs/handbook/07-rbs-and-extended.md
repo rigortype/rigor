@@ -252,6 +252,74 @@ dynamic boundaries (deserialisation, `eval`, plugin entry
 points). The static analysis you lose is made up by the
 honesty of admitting "this could be anything."
 
+## Coming from PHPStan? The `@phpstan-assert` family
+
+If you are familiar with PHPStan's PHPDoc annotations,
+Rigor's `RBS::Extended` directives map directly onto the
+post-return / conditional narrowing primitives PHPStan calls
+"asserts" and "type-specifying functions." The behaviour is
+identical:
+
+> "After this method returns, the named argument is `T`."
+
+That is `@phpstan-assert` in PHPStan and
+`%a{rigor:v1:assert:}` in Rigor.
+
+| PHPStan PHPDoc | Rigor RBS::Extended | Effect |
+| --- | --- | --- |
+| `@phpstan-assert T $x` | `%a{rigor:v1:assert: x is T}` | After this method returns normally, the caller's `x` is `T`. |
+| `@phpstan-assert-if-true T $x` | `%a{rigor:v1:predicate-if-true: x is T}` | If this method returns truthy, the caller's `x` is `T`. |
+| `@phpstan-assert-if-false T $x` | `%a{rigor:v1:predicate-if-false: x is T}` | If this method returns falsey, the caller's `x` is `T`. |
+| `@phpstan-assert !T $x` | `%a{rigor:v1:assert: x is ~T}` | After this method returns, the caller's `x` is **not** `T` (negation form). |
+| `@phpstan-assert-if-true !T $x` | `%a{rigor:v1:predicate-if-true: x is ~T}` | Conditional negation. Symmetric with `predicate-if-false`. |
+
+Worked example — the canonical "assertNotNull" pattern from
+PHPStan's docs:
+
+```rbs
+# sig/asserts.rbs
+class Asserts
+  %a{rigor:v1:assert: x is ~nil}
+  def self.not_nil: (untyped x) -> void
+end
+```
+
+```ruby
+# lib/configure.rb
+def configure(maybe)
+  Asserts.not_nil(maybe)
+  # maybe: (~nil), so .upcase resolves on the narrowed type
+  maybe.upcase
+end
+```
+
+Self-targeted forms are supported too — the PHPStan
+analogue would be a method on `$this` that narrows
+`$this`. Use `target self`:
+
+```rbs
+class Connection
+  %a{rigor:v1:assert: self is Connected}
+  def assert_connected!: () -> void
+end
+```
+
+Rigor's directive grammar covers what PHPStan ships in the
+`@phpstan-assert*` family. The directives **only fire from
+RBS** (per ADR-5: strict on returns, lenient on parameters);
+in PHPStan-land you can also write `@phpstan-assert` in
+PHPDoc directly above the function — Rigor's equivalent is
+the same RBS file's `def` line.
+
+If you need plugin-side equivalents (when the assertion is
+recognised by **call shape** rather than by sig — PHPStan's
+"Type-Specifying Extensions"), see
+[Chapter 9](09-plugins.md). The plugin contract surfaces
+the same `Fact(target_kind: :self)` and
+`Fact(target_kind: :parameter)` carriers that the directives
+use, so a plugin author writes the equivalent of a PHPStan
+`StaticMethodTypeSpecifyingExtension` from Ruby.
+
 ## When RBS cannot help — the plugin escape hatch
 
 When a method's behaviour depends on the **shape of its

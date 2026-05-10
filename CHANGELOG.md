@@ -14,6 +14,11 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — handbook chapter 7: `@phpstan-assert` correspondence
+
+- **New "Coming from PHPStan?" section** in [`docs/handbook/07-rbs-and-extended.md`](docs/handbook/07-rbs-and-extended.md) maps every `@phpstan-assert*` PHPDoc annotation to its `RBS::Extended` directive equivalent: `@phpstan-assert T $x` ⇄ `%a{rigor:v1:assert: x is T}`, `@phpstan-assert-if-true` / `-if-false` ⇄ `%a{rigor:v1:predicate-if-*}`, negation form `!T` ⇄ `~T`. Covers a worked "assertNotNull" example (the canonical PHPStan pattern) plus the self-targeted shape for receivers narrowing themselves. Cross-links to chapter 9 with a one-line note that PHPStan-style "Type-Specifying Extensions" (call-shape recognition) are now expressible from Rigor plugins via the same `Fact(target_kind: :self)` / `:parameter` carriers the directives use, after the T.bind / T.assert_type! priority slice 2 wiring.
+- **No code change.** Pure documentation expansion making the existing RBS::Extended assertion family discoverable to readers arriving from a PHPStan-using project.
+
 ### Added — `rigor-sorbet` T.bind (T.bind / T.assert_type! priority slice 3)
 
 - **`T.bind(self, T)` recognised in rigor-sorbet.** New `AssertionRecognizer.recognize_bind` builds a `FlowContribution` with `return_type: Constant[nil]` (matching Sorbet's runtime nil return) AND `post_return_facts: [Fact(target_kind: :self, type: translated T)]`. The engine's slice-2 plugin-fact wiring picks up the post-return fact and narrows `scope.self_type` for the surrounding scope via `apply_self_post_return_fact`. In a block body, the surrounding scope is the block's own scope, so the narrowing applies to the rest of the block — exactly Sorbet's documented contract.

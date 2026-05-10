@@ -1,6 +1,6 @@
 # Rigor plugin examples
 
-Seventeen worked examples of the **v0.1.0 plugin authoring
+Eighteen worked examples of the **v0.1.0 plugin authoring
 surface**. Each one is a fully-shaped plugin gem (manifest
 + `lib/` + gemspec) with a runnable demo (`demo/.rigor.yml`,
 `demo/demo.rb`, runtime, optional sigs) and an end-to-end
@@ -43,7 +43,8 @@ ADR-9's cross-plugin fact store.
 | [`rigor-sidekiq`](rigor-sidekiq/) | 3C | Sidekiq worker `perform_async` / `perform_in` / `perform_at` argument shape; schedule-aware arity model | Ruby (`app/workers/`, `app/sidekiq/`) | ✅ | 11 |
 | [`rigor-actioncable`](rigor-actioncable/) | 3F | ActionCable channel discovery + `<Channel>.broadcast_to` / `ActionCable.server.broadcast(stream)` validation, with dynamic-stream suppression | Ruby (`app/channels/`) | ✅ | 9 |
 | [`rigor-rspec`](rigor-rspec/) | 3A | Duplicate `let` / `subject` + self-referencing let detection (deliberately minimal — mock-target validation + let-typo deferred) | — | — | 11 |
-| [`rigor-actionpack`](rigor-actionpack/) | 2 | **Phase 4** — route-helper consumption. **First concrete ADR-9 consumer**: reads `:helper_table` from rigor-rails-routes via `services.fact_store.read` and validates `*_path` / `*_url` calls in controller files | — | — | 10 |
+| [`rigor-actionpack`](rigor-actionpack/) | 2 | **Phase 4** — route-helper consumption (first concrete ADR-9 consumer); **Phase 2** — filter chain validation (`before_action :name` against the controller's effective method set, including one level of inheritance); **Phase 3** — render-target validation (`render :show` → `app/views/<controller_path>/show.html.erb`) | Ruby (`app/controllers/`) + view templates | ✅ | 21 |
+| [`rigor-factorybot`](rigor-factorybot/) | 2 | **Phase 1 (a)** — self-contained validation of `FactoryBot.create(:name, key: ...)` / `.build` / `.attributes_for` / `*_list` against a per-run factory index built from `spec/factories/`. Phase 1 (c) AR column cross-check is queued | Ruby (`spec/factories/`) | ✅ | 10 |
 
 All sixteen rely on **slice 5**
 (`Plugin::Base#diagnostics_for_file`) to surface
@@ -85,17 +86,17 @@ DSL"; start with `rigor-rails-routes` if your interest is
 
 | Surface | Where it lives | Examples that use it |
 | --- | --- | --- |
-| `Rigor::Plugin::Base.manifest(...)` | manifest declaration | all seventeen |
+| `Rigor::Plugin::Base.manifest(...)` | manifest declaration | all eighteen |
 | `config_schema` (`:string` / `:array` / `:hash` kinds) | manifest body | deprecations / lisp-eval / pattern / statesman / activejob / rails-i18n / rails-routes / actionmailer / pundit / sidekiq / actioncable |
 | `manifest(produces: [:fact_name])` (ADR-9 cross-plugin) | fact publication | **rails-routes** |
 | `manifest(consumes: [...])` (ADR-9 cross-plugin) | fact consumption + topo-sort dependency | **actionpack** |
 | `services.fact_store.read(plugin_id:, name:)` | cross-plugin consumer hook | **actionpack** |
 | `#init(services)` config plumbing | init hook | lisp-eval / pattern / statesman / routes / sorbet / seven Rails ecosystem plugins (excludes rspec — no config) |
 | `#prepare(services)` (ADR-9 fact publish) | post-init service handoff | **rails-routes** |
-| `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all seventeen |
+| `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all eighteen |
 | `#flow_contribution_for(node, scope)` | return-type contribution | lisp-eval / pattern / units / activerecord / sorbet |
-| `Rigor::Analysis::Diagnostic` construction | diagnostic emission | all seventeen |
-| `source_family: "plugin.<id>"` auto-stamp | runner-side, never set by plugin | all seventeen |
+| `Rigor::Analysis::Diagnostic` construction | diagnostic emission | all eighteen |
+| `source_family: "plugin.<id>"` auto-stamp | runner-side, never set by plugin | all eighteen |
 | `Plugin::IoBoundary#read_file` (slice 2) | sandboxed file reads | routes / activerecord / sorbet / seven Rails ecosystem plugins (excludes rspec — per-file only) |
 | `Plugin::TrustPolicy.allowed_read_roots` (slice 2) | declarative read-root policy | every IoBoundary user above (transitively) |
 | `Plugin::Base.producer` DSL (slice 6) | cached producer declaration | routes / activerecord / sorbet / seven Rails ecosystem plugins (excludes rspec) |

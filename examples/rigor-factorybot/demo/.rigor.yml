@@ -1,0 +1,10 @@
+paths:
+  - spec
+  - demo.rb
+  - errors_demo.rb
+
+plugins:
+  - rigor-factorybot
+
+cache:
+  path: tmp/.rigor/cache

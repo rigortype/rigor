@@ -14,6 +14,17 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — example plugin: `rigor-factorybot` (Phase 1 (a) — self-contained validation)
+
+- **Tier 2 / second FactoryBot Phase plugin** in Rigor's plugin family. Validates every `FactoryBot.create(:name, key: ...)` / `.build` / `.build_stubbed` / `.attributes_for` / `.create_list` / `.build_list` / `.build_stubbed_list` call (and the legacy `FactoryGirl.*` aliases) against a per-run `FactoryIndex` built from `factory_search_paths` (default `["spec/factories", "spec/factories.rb"]` — covers the modern multi-file convention and the legacy single-file form). No FactoryBot runtime dependency.
+- **Three diagnostics.** `plugin.factorybot.factory-call` (info) names the resolved factory + its declared attribute set; `plugin.factorybot.unknown-factory` (error) fires with a `DidYouMean::SpellChecker` suggestion drawn from the index when the first positional `:name` is missing; `plugin.factorybot.unknown-attribute` (error) fires with a `DidYouMean::SpellChecker` suggestion drawn from the factory's declared attributes when a literal-Symbol kwarg key isn't declared.
+- **What's recognised inside `factory :name do ... end`.** `name { "Alice" }` (modern method_missing block form), `name "Alice"` (legacy positional form), `add_attribute(:name) { ... }` (explicit form). Sequences (`sequence(:email) { ... }`), associations (`association :author`), traits (`trait :admin do ... end`), and parent / child relationships are intentionally deferred to follow-up slices. Factories whose name is a non-literal expression are silently skipped.
+- **What's recognised at call sites.** `FactoryBot.<entry>(:literal_name, key: value, ...)` with explicit `FactoryBot` (or `FactoryGirl`) receiver. Implicit-receiver `create(:name)` (inside `include FactoryBot::Syntax::Methods`) is NOT recognised in Phase 1 (a) — too many false positives on plain `create` calls outside test files; needs receiver-type inference (Phase 1 (b)).
+- **Cached producer.** `producer :factory_index` plumbs through the IoBoundary so `FileEntry` digests invalidate the cache when any factory file changes. Pattern matches `rigor-pundit` / `rigor-sidekiq` / `rigor-actionpack`.
+- **Demo project** under `examples/rigor-factorybot/demo/` — `spec/factories/users.rb` declares `:user` (3 attrs) + `:post` (3 attrs); `demo.rb` exercises every recognised entry call shape; `errors_demo.rb` triggers each error path. Cache rooted at `tmp/.rigor/cache` per the existing convention.
+- **Integration spec** at `spec/integration/examples/factorybot_plugin_spec.rb` — 10 cases covering all entry methods, the FactoryGirl alias, non-literal-name pass-through, plain-`create` pass-through (no FactoryBot receiver), the two error variants with did-you-mean, the `spec/factories.rb` single-file form, and a Phase 1 (a) limitation (trait-block attributes are not collected).
+- **`examples/README.md`** count moves to eighteen; the Rails-ecosystem-row updates `rigor-actionpack` to reflect Phase 2 + 3 landing alongside Phase 4, and a new `rigor-factorybot` row joins the Tier 2 entries.
+
 ### Added — `rigor-actionpack` Phase 3 (render-target validation)
 
 - **`render :symbol` / `render "string/path"` / `render partial: "..."` validated against `view_search_paths`** (default `["app/views"]`). The recogniser walks every `def` body for top-level `render` calls and derives a candidate view path from the controller's class name + the render argument shape. Recognised forms:

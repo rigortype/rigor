@@ -113,9 +113,37 @@ T.reveal_type(n).even?  # info: T.reveal_type inferred type: Integer
                         # ✓ Integer#even? still resolves
 ```
 
-`T.assert_type!` and `T.bind` are deferred to a follow-up
-slice; they currently behave like an unrecognised method
-call.
+`T.assert_type!(expr, T)` is `T.cast` plus a static subtype
+check. The call returns the asserted type so chained calls
+resolve through it; if the inferred type is provably
+incompatible (`Inference::Acceptance.accepts(...)` returns
+`:no`), the plugin emits `plugin.sorbet.assert-type-mismatch`
+as `:error`. Gradual consistency rules apply — `Dynamic[top]`
+inferred types and `:maybe`-compatible shapes are silenced
+because the runtime check covers them.
+
+```ruby
+T.assert_type!("hello", Integer)  # error: provably incompatible
+T.assert_type!(some_obj, String)  # silent: trust the user
+```
+
+`T.bind(self, T)` narrows `self` to `T` for the rest of the
+current scope (typically a block body):
+
+```ruby
+arr.each do |x|
+  T.bind(self, MyHelper)
+  do_something(x)  # ✓ self is now MyHelper for the rest of this block
+end
+```
+
+The narrowing is implemented via the engine's plugin-side
+`post_return_facts` wiring — the same substrate any future
+PHPStan-style Type-Specifying Extension plugin would use to
+narrow argument variables after a custom assertion call.
+
+`T.bind` rejects non-`self` first arguments silently (matches
+Sorbet's contract — bind is self-only).
 
 ## RBI files
 

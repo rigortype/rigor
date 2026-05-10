@@ -24,6 +24,7 @@ module Rigor
       # | `T.unsafe(x)`                | return type ← `Dynamic[top]`            |
       # | `T.reveal_type(expr)`        | return type ← `inferred(expr)` (passes through) |
       # | `T.assert_type!(expr, T)`    | return type ← translated `T` + static subtype check |
+      # | `T.bind(self, T)`            | return type ← `Constant[nil]` + post_return_fact narrowing self to translated `T` |
       #
       # The Sorbet runtime's `T.let` / `T.cast` actually return
       # the inner expression unchanged at runtime; their job is
@@ -49,20 +50,23 @@ module Rigor
       # `plugin.sorbet.reveal-type` `:info` message for human
       # consumption.
       #
-      # `T.bind` remains deferred until the engine wires
-      # plugin-side `post_return_facts` through the narrowing
-      # path. The carrier (`Fact(target_kind: :self)`) and the
-      # statement evaluator's `apply_self_post_return_fact` are
-      # already in place; the missing piece is plugin
-      # contributions reaching the assertion application site
-      # (currently only `RBS::Extended` is consulted there).
+      # `T.bind(self, T)` is recognised as block-scope self
+      # narrowing. The recogniser returns a contribution whose
+      # `post_return_facts` carries a `Fact(target_kind: :self)`
+      # so the engine's `apply_self_post_return_fact` narrows
+      # `scope.self_type` for the surrounding scope (in a block
+      # body, the rest of the block). The first argument MUST be
+      # a literal `Prism::SelfNode` — Sorbet rejects other
+      # receivers and the recogniser mirrors that. The runtime
+      # call returns nil, so the static return type is
+      # `Constant[nil]`.
       module AssertionRecognizer
         # Method names this recogniser claims as Sorbet
         # assertions. The plugin checks call sites against this
         # set before any catalog lookup so a `T.let` call
         # inside an analysed file always resolves through this
         # module.
-        SORBET_ASSERTIONS = %i[let cast must must_because unsafe reveal_type assert_type!].freeze
+        SORBET_ASSERTIONS = %i[let cast must must_because unsafe reveal_type assert_type! bind].freeze
 
         module_function
 
@@ -74,6 +78,8 @@ module Rigor
         def recognize(call_node:, scope:, plugin_id:)
           return nil unless TypeTranslator.sorbet_t_namespaced?(call_node.receiver)
           return nil unless SORBET_ASSERTIONS.include?(call_node.name)
+
+          return recognize_bind(call_node, plugin_id) if call_node.name == :bind
 
           return_type = return_type_for(call_node, scope)
           return nil if return_type.nil?
@@ -89,6 +95,46 @@ module Rigor
           when :reveal_type then resolve_reveal_type(call_node, scope)
           when :assert_type! then resolve_typed_assertion(call_node)
           end
+        end
+
+        # `T.bind(self, T)` recognition. Sorbet rejects any
+        # non-`self` receiver argument, and the recogniser
+        # mirrors that — calls like `T.bind(other, X)` fall
+        # through silently. The contribution carries:
+        #
+        # - `return_type: Constant[nil]` — Sorbet's runtime
+        #   `T.bind` returns nil; chained calls would be a
+        #   bug, but the typing stays accurate.
+        # - `post_return_facts: [Fact(target_kind: :self,
+        #   type: T)]` — the engine's
+        #   `apply_self_post_return_fact` narrows
+        #   `scope.self_type` for the surrounding scope. In a
+        #   block body, that scope is the block's own, so the
+        #   narrowing applies to the rest of the block —
+        #   matching Sorbet's documented contract.
+        def recognize_bind(call_node, plugin_id)
+          first_arg = nth_argument(call_node, 0)
+          return nil unless first_arg.is_a?(Prism::SelfNode)
+
+          type_arg = nth_argument(call_node, 1)
+          return nil if type_arg.nil?
+
+          asserted = TypeTranslator.translate(type_arg)
+          return nil if asserted.nil?
+
+          fact = Rigor::FlowContribution::Fact.new(
+            target_kind: :self, target_name: :self, type: asserted
+          )
+          Rigor::FlowContribution.new(
+            return_type: Rigor::Type::Combinator.constant_of(nil),
+            post_return_facts: [fact],
+            provenance: Rigor::FlowContribution::Provenance.new(
+              source_family: "plugin.#{plugin_id}",
+              plugin_id: plugin_id,
+              node: call_node,
+              descriptor: nil
+            )
+          )
         end
 
         # `T.assert_type!(expr, T)` shares the typed-assertion

@@ -14,6 +14,13 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — `rigor-sorbet` T.bind (T.bind / T.assert_type! priority slice 3)
+
+- **`T.bind(self, T)` recognised in rigor-sorbet.** New `AssertionRecognizer.recognize_bind` builds a `FlowContribution` with `return_type: Constant[nil]` (matching Sorbet's runtime nil return) AND `post_return_facts: [Fact(target_kind: :self, type: translated T)]`. The engine's slice-2 plugin-fact wiring picks up the post-return fact and narrows `scope.self_type` for the surrounding scope via `apply_self_post_return_fact`. In a block body, the surrounding scope is the block's own scope, so the narrowing applies to the rest of the block — exactly Sorbet's documented contract.
+- **Self-only contract.** The recogniser requires the first argument to be a literal `Prism::SelfNode` (matching Sorbet's rejection of non-self bind targets). `T.bind(other, X)` falls through silently — the call resolves through RBS as if the recogniser weren't there.
+- **Closes the T.bind / T.assert_type! priority track.** Slices 1 (T.assert_type! recogniser), 2 (plugin-side post_return_facts wiring through narrowing engine), and 3 (T.bind plugin recogniser) all landed. T.bind is the first concrete consumer of the slice-2 substrate; the same substrate is what PHPStan-style Type-Specifying Extensions need for any future plugin (the plugin authors a `Fact(target_kind: :self)` or, with the `:local` / `:argument_at` follow-up, a parameter-targeted Fact, and the engine narrows accordingly).
+- **2 new integration spec cases** covering self narrowing in a top-level scope and the silent-pass-through when the first argument isn't `self`. README + handbook chapter 10 updated; only per-call-site sigil enforcement remains as a deferred ADR-11 follow-up.
+
 ### Added — Plugin-side post_return_facts wiring (T.bind / T.assert_type! priority slice 2)
 
 - **`Inference::StatementEvaluator#apply_plugin_assertions`** — sibling of the existing `apply_rbs_extended_assertions`. Collects every loaded plugin's `flow_contribution_for(call_node:, scope:)` result, merges them through `FlowContribution::Merger.merge`, and applies the resulting `post_return_facts` via the existing `apply_post_return_fact` / `apply_self_post_return_fact` path. Called from `eval_call` after the RBS::Extended assertion path so plugin contributions compose with (and don't override) RBS::Extended directives at the same call site.

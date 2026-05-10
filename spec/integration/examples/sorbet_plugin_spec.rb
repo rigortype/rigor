@@ -781,4 +781,38 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
       expect(diags).to be_empty
     end
   end
+
+  describe "T.bind (T.bind / T.assert_type! priority slice 3)" do
+    it "narrows self in a block via post_return_facts(target_kind: :self)" do
+      # Without T.bind, an implicit-self call to `upcase` at top
+      # level would emit `call.undefined-method` (default self
+      # is Object). After `T.bind(self, String)`, the engine
+      # narrows self to String, and `upcase` resolves on the
+      # narrowed self via the standard String method dispatch.
+      source = <<~RUBY
+        #{SIG_STUB}
+        T.bind(self, String)
+        upcase
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "rejects non-self first argument silently (matches Sorbet's contract)" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # `T.bind(other, String)` is invalid Sorbet syntax —
+        # bind is self-only. The recogniser declines, the call
+        # falls through to RBS (no sig), and Rigor stays silent.
+        other = Object.new
+        T.bind(other, String)
+      RUBY
+
+      diags = run_plugin(source: source).diagnostics.select do |d|
+        d.source_family == "plugin.sorbet"
+      end
+      expect(diags).to be_empty
+    end
+  end
 end

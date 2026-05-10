@@ -43,14 +43,13 @@ sig { ... }; def body; end; end; end` resolves
 `post.body` correctly).
 
 This is **slices 1–8 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**
-plus the light follow-up that adds `T.must_because` and
-`T.reveal_type` — the plugin's primary surface is
-feature-complete and covers the realistic Tapioca-using
-project shape. `T.bind` and `T.assert_type!` remain deferred
-(self-targeted post-return facts and dynamic-rejection checks
-respectively); per-call-site sigil enforcement (e.g. only
-firing `T.let` recognition in `# typed: true`+ files) lives
-behind a future plugin-contract widening.
+plus the light follow-ups that add `T.must_because`,
+`T.reveal_type`, `T.assert_type!`, and `T.bind`. The plugin's
+primary surface is feature-complete and covers the realistic
+Tapioca-using project shape. Only per-call-site sigil
+enforcement (e.g. only firing `T.let` recognition in
+`# typed: true`+ files) remains behind a plugin-contract
+widening that threads file path through `flow_contribution_for`.
 
 ## What the plugin recognises
 
@@ -288,9 +287,14 @@ diagnostic.
 | `T.must_because(expr, "..")` | return type ← `inferred(expr) - nil` (alias of `T.must`; second-arg explanation is informational) |
 | `T.unsafe(expr)`             | return type ← `Dynamic[top]`              |
 | `T.reveal_type(expr)`        | return type ← `inferred(expr)` (passes through; companion `plugin.sorbet.reveal-type` `:info` diagnostic surfaces the type) |
+| `T.assert_type!(expr, T)`    | return type ← translated `T` (T.cast-compatible) + static subtype check; mismatch surfaces as `plugin.sorbet.assert-type-mismatch` `:error` |
+| `T.bind(self, T)`            | return type ← `Constant[nil]` + `post_return_fact(target_kind: :self)` narrowing self to translated `T` for the surrounding scope (block body) |
 
-`T.bind` and `T.assert_type!` remain deferred. `T.absurd` is
-slice 6 (its own dedicated section above).
+`T.absurd` is slice 6 (its own dedicated section above).
+`T.bind` requires the engine's plugin-side
+`post_return_facts` wiring (T.bind / T.assert_type! priority
+slice 2); the substrate is shared with PHPStan-style
+Type-Specifying Extensions for any future plugin.
 
 ## Type vocabulary (slices 1 + 3)
 

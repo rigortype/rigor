@@ -14,6 +14,17 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — `rigor-actionpack` Phase 3 (render-target validation)
+
+- **`render :symbol` / `render "string/path"` / `render partial: "..."` validated against `view_search_paths`** (default `["app/views"]`). The recogniser walks every `def` body for top-level `render` calls and derives a candidate view path from the controller's class name + the render argument shape. Recognised forms:
+  - `render :show` inside `UsersController` → `app/views/users/show.html.erb`.
+  - `render "shared/header"` → `app/views/shared/header.html.erb` (path-shaped String passes through verbatim).
+  - `render partial: "user"` → `app/views/users/_user.html.erb` (underscore-prefix the basename).
+  - `render partial: "shared/header"` → `app/views/shared/_header.html.erb` (preserve directory, prefix basename only).
+- **Two new diagnostics.** `plugin.actionpack.render-target` (info) emits one row per resolved render with the located template path; `plugin.actionpack.missing-template` (error) fires when no matching `.html.erb` / `.text.erb` exists. Pass-through shapes (`render plain:`, `render json:`, `render layout:`, `render text:`, `render inline:`, `render :nothing => true`) are silently skipped — Phase 3 only validates explicit template / partial renders, since implicit-render validation would false-positive on `redirect_to` / `head` / early returns.
+- **`view_search_paths` config knob** (default `["app/views"]`). Controller-class → controller-path uses a tiny inflector (`UsersController` → `users`, `Admin::WidgetsController` → `admin/widgets`); class names that don't end in `Controller` are skipped (so non-controller files in the path get no false positives). The two extension family `.html.erb` / `.text.erb` is hardcoded in this slice; `.haml` / `.slim` / `.jbuilder` ship behind a configurable-template-families follow-up.
+- **6 new integration spec cases** covering the symbol form, the path-string form, the partial form, the `missing-template` error, the `.text.erb` fallback, and the pass-through behaviour for non-template render keywords. Demo gains `app/views/users/show.html.erb` and `_user.html.erb`; both controllers grow `render` actions exercising the new path.
+
 ### Added — `rigor-actionpack` Phase 2 (filter chain validation)
 
 - **`before_action :name` / `after_action` / `around_action` and the `skip_*` / `prepend_*` family validated.** The plugin's `controller_index` cached producer walks `controller_search_paths` (default `app/controllers`), parses each file with Prism, and records `(class_name, defined_methods, parent_class_name)` for every top-level class node. At each filter-DSL call site, the recogniser drops the trailing `KeywordHashNode` (`only:` / `except:` / `if:` / `unless:`), takes the literal `Symbol` / `String` arguments as filter names, and validates each against the controller's **effective** method set — own methods plus methods defined on the immediate parent class (one level of inheritance, per the Phase 2 design).

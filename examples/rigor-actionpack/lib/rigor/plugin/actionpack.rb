@@ -71,7 +71,8 @@ module Rigor
         version: "0.1.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers.",
         config_schema: {
-          "controller_search_paths" => :array
+          "controller_search_paths" => :array,
+          "view_search_paths" => :array
         },
         consumes: [
           { plugin_id: "rails-routes", name: :helper_table, optional: true }
@@ -79,6 +80,7 @@ module Rigor
       )
 
       DEFAULT_CONTROLLER_SEARCH_PATHS = ["app/controllers"].freeze
+      DEFAULT_VIEW_SEARCH_PATHS = ["app/views"].freeze
 
       # Phase 2 cached producer — the controller index built
       # from `controller_search_paths`. The IoBoundary records
@@ -97,6 +99,9 @@ module Rigor
         @controller_search_paths = Array(
           config.fetch("controller_search_paths", DEFAULT_CONTROLLER_SEARCH_PATHS)
         ).map(&:to_s)
+        @view_search_paths = Array(
+          config.fetch("view_search_paths", DEFAULT_VIEW_SEARCH_PATHS)
+        ).map(&:to_s)
         @helper_table = nil
         @helper_table_resolved = false
         @controller_index = nil
@@ -105,7 +110,9 @@ module Rigor
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         return [] unless controller_file?(path)
 
-        helper_diagnostics(path, root) + filter_diagnostics(path, root)
+        helper_diagnostics(path, root) +
+          filter_diagnostics(path, root) +
+          render_diagnostics(path, root)
       end
 
       private
@@ -127,6 +134,16 @@ module Rigor
         return [] if index.nil? || index.empty?
 
         Analyzer.diagnose_filters(path: path, root: root, controller_index: index)
+                .map { |diag| build_diagnostic(diag) }
+      end
+
+      # Phase 3 — runs the render-target validator against the
+      # configured `view_search_paths`. Always invoked
+      # regardless of whether the controller is in the index;
+      # render shapes are recognised purely from the call site
+      # + class name, no per-controller pre-discovery needed.
+      def render_diagnostics(path, root)
+        Analyzer.diagnose_renders(path: path, root: root, view_search_roots: @view_search_paths)
                 .map { |diag| build_diagnostic(diag) }
       end
 

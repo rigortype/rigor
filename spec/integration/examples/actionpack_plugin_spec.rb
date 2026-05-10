@@ -309,6 +309,115 @@ RSpec.describe "examples/rigor-actionpack" do # rubocop:disable RSpec/DescribeCl
     end
   end
 
+  describe "render targets (Phase 3)" do
+    def with_render_demo(controller_source, views: {}) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "config"))
+        FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
+        File.write(File.join(dir, "config", "routes.rb"), DEFAULT_AP_ROUTES_RB)
+        File.write(File.join(dir, "app", "controllers", "users_controller.rb"), controller_source)
+        views.each do |relative, contents|
+          full = File.join(dir, "app", "views", relative)
+          FileUtils.mkdir_p(File.dirname(full))
+          File.write(full, contents)
+        end
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "app", "controllers")],
+            "plugins" => %w[rigor-rails-routes rigor-actionpack]
+          )
+        )
+        Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil,
+            plugin_requirer: lambda { |name|
+              case name
+              when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
+              when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
+              end
+              true
+            }
+          )
+          yield runner.run
+        end
+      end
+    end
+
+    it "resolves `render :show` to `app/views/users/show.html.erb`" do
+      with_render_demo(
+        "class UsersController\n  def show\n    render :show\n  end\nend\n",
+        views: { "users/show.html.erb" => "<h1>Show</h1>\n" }
+      ) do |result|
+        info = actionpack_diagnostics(result).find { |d| d.rule == "render-target" }
+        expect(info).not_to be_nil
+        expect(info.severity).to eq(:info)
+        expect(info.message).to include("users/show")
+        expect(info.message).to include(".html.erb")
+      end
+    end
+
+    it "resolves `render \"shared/header\"` to `app/views/shared/header.html.erb`" do
+      with_render_demo(
+        "class UsersController\n  def show\n    render \"shared/header\"\n  end\nend\n",
+        views: { "shared/header.html.erb" => "<header></header>\n" }
+      ) do |result|
+        info = actionpack_diagnostics(result).find { |d| d.rule == "render-target" }
+        expect(info).not_to be_nil
+        expect(info.message).to include("shared/header")
+      end
+    end
+
+    it "resolves `render partial: \"user\"` to `app/views/users/_user.html.erb`" do
+      with_render_demo(
+        "class UsersController\n  def show\n    render partial: \"user\"\n  end\nend\n",
+        views: { "users/_user.html.erb" => "<%= @user %>\n" }
+      ) do |result|
+        info = actionpack_diagnostics(result).find { |d| d.rule == "render-target" }
+        expect(info).not_to be_nil
+        expect(info.message).to include("users/_user")
+      end
+    end
+
+    it "fires `missing-template` when the resolved view doesn't exist" do
+      with_render_demo(
+        "class UsersController\n  def show\n    render :missing\n  end\nend\n"
+      ) do |result|
+        err = actionpack_diagnostics(result).find { |d| d.rule == "missing-template" }
+        expect(err).not_to be_nil
+        expect(err.severity).to eq(:error)
+        expect(err.message).to include("users/missing")
+      end
+    end
+
+    it "checks `.text.erb` as a fallback extension" do
+      with_render_demo(
+        "class UsersController\n  def show\n    render :show\n  end\nend\n",
+        views: { "users/show.text.erb" => "Show\n" }
+      ) do |result|
+        info = actionpack_diagnostics(result).find { |d| d.rule == "render-target" }
+        expect(info).not_to be_nil
+        expect(info.message).to include(".text.erb")
+      end
+    end
+
+    it "ignores `render plain:` / `render json:` / `render layout:` and other non-template shapes" do
+      with_render_demo(
+        <<~RUBY
+          class UsersController
+            def show; render plain: "ok"; end
+            def as_json; render json: { ok: true }; end
+            def with_layout; render layout: "admin"; end
+          end
+        RUBY
+      ) do |result|
+        renders = actionpack_diagnostics(result).select do |d|
+          %w[render-target missing-template].include?(d.rule)
+        end
+        expect(renders).to be_empty
+      end
+    end
+  end
+
   describe "graceful degradation" do
     it "runs as a no-op when rigor-rails-routes isn't loaded (helper table absent)" do # rubocop:disable RSpec/ExampleLength
       Dir.mktmpdir do |dir|

@@ -45,6 +45,18 @@ class UsersController < ApplicationController
     redirect_to user_url(@user)
   end
 
+  def render_template
+    # Phase 3 — `:show` resolves to `app/views/users/show.html.erb`
+    # if that view exists.
+    render :show
+  end
+
+  def render_partial
+    # Phase 3 — `partial: "user"` resolves to
+    # `app/views/users/_user.html.erb`.
+    render partial: "user"
+  end
+
   private
 
   def authenticate!

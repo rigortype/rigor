@@ -15,7 +15,7 @@ The full Action Pack plugin spans four phases per the
 | --- | --- | --- |
 | 1 | Strong parameters → AR column validation | pending |
 | 2 | **Filter chains** (`before_action :name`) | **landed** |
-| 3 | Render targets (`render :show`) | pending |
+| 3 | **Render targets** (`render :show`) | **landed** |
 | 4 | **Route-helper consumption** (`redirect_to user_path(@user)`) | **landed** |
 
 Each phase composes additively under the same plugin id. This
@@ -67,6 +67,8 @@ record any extra context for them).
 | `plugin.actionpack.wrong-helper-arity` | error | 4 | The call's positional-argument count doesn't match the helper's recorded arity. |
 | `plugin.actionpack.filter-call` | info | 2 | A filter-DSL reference (`before_action :name`, `skip_around_action`, etc.) resolves to a defined method on the controller or its immediate parent. |
 | `plugin.actionpack.unknown-filter-method` | error | 2 | A filter-DSL reference names a method not defined on the controller (or its immediate parent). Includes a `DidYouMean::SpellChecker` suggestion drawn from the controller's effective method set. |
+| `plugin.actionpack.render-target` | info | 3 | An explicit `render :symbol` / `render "string"` / `render partial:` call resolved to a view template under `view_search_paths`. |
+| `plugin.actionpack.missing-template` | error | 3 | An explicit `render` call's resolved view path doesn't exist as `.html.erb` or `.text.erb` under any configured `view_search_paths`. |
 
 ## Configuration
 

@@ -27,4 +27,10 @@ class ErrorsController < ApplicationController
     # `user_post_path` requires 2 positional args.
     redirect_to user_post_path(@user)
   end
+
+  def missing_view
+    # Phase 3 — `app/views/errors/nope.html.erb` doesn't exist;
+    # the plugin emits `missing-template` here.
+    render :nope
+  end
 end

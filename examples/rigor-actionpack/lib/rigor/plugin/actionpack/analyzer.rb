@@ -37,6 +37,14 @@ module Rigor
           prepend_before_action prepend_after_action prepend_around_action
         ].freeze
 
+        # Phase 3 — render-target template extensions checked
+        # in priority order. Limited to the two most common
+        # default extensions per the v0.1.x roadmap; users with
+        # `.haml` / `.slim` / `.jbuilder` setups need the
+        # widening slice that ships configurable template
+        # families.
+        RENDER_TEMPLATE_EXTENSIONS = %w[.html.erb .text.erb].freeze
+
         Diagnostic = Data.define(:path, :line, :column, :message, :severity, :rule)
 
         module_function
@@ -148,6 +156,170 @@ module Rigor
 
             parent.nil? ? node.name.to_s : "#{parent}::#{node.name}"
           end
+        end
+
+        # Phase 3 — render-target validation. For each
+        # explicit `render` call inside a controller method,
+        # derive the candidate view template path(s) from the
+        # controller class name + the render argument shape,
+        # then check existence under the configured
+        # `view_search_paths` (default `["app/views"]`). Recognised
+        # call shapes:
+        #
+        # - `render :symbol` — `<views>/<controller_path>/<symbol>.html.erb`
+        # - `render "string/path"` — `<views>/<string_path>.html.erb`
+        # - `render partial: "name"` — `<views>/<controller_path>/_<name>.html.erb`
+        # - `render partial: "string/path"` — `<views>/<string_path with _ prefix>.html.erb`
+        #
+        # `render layout:`, `render plain:`, `render json:`,
+        # `render text:`, `render inline:`, `render :nothing
+        # => true`, etc. are pass-through (no template
+        # lookup). Implicit-render (a controller method that
+        # doesn't call `render`) is also skipped — Phase 3
+        # validates explicit renders only, since the implicit
+        # path would false-positive on `redirect_to` / `head`
+        # / early returns.
+        def diagnose_renders(path:, root:, view_search_roots:)
+          class_node = first_class_node(root)
+          return [] if class_node.nil?
+
+          class_name = qualified_name_for(class_node.constant_path)
+          return [] if class_name.nil?
+
+          controller_path = controller_path_for(class_name)
+          return [] if controller_path.nil?
+
+          collect_render_diagnostics(path, class_node.body, controller_path, view_search_roots)
+        end
+
+        def collect_render_diagnostics(path, body, controller_path, view_search_roots)
+          diagnostics = []
+          walk_render_calls(body) do |call_node|
+            target = render_target_for(call_node, controller_path)
+            next if target.nil?
+
+            diag = render_diagnostic(path, call_node, target, view_search_roots)
+            diagnostics << diag if diag
+          end
+          diagnostics
+        end
+
+        def walk_render_calls(node, &)
+          return unless node.is_a?(Prism::Node)
+
+          yield node if node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :render
+          node.compact_child_nodes.each { |child| walk_render_calls(child, &) }
+        end
+
+        # Returns `[kind, view_relative_path]` where kind is
+        # `:template` or `:partial`, and view_relative_path is
+        # the path under view_search_roots WITHOUT extension
+        # (the extension family is appended at lookup time).
+        # Returns nil for shapes Phase 3 doesn't validate
+        # (`layout:` / `plain:` / `json:` / `text:` / `inline:`
+        # / `:nothing` / no parseable target).
+        def render_target_for(call_node, controller_path)
+          args = call_node.arguments&.arguments || []
+          return nil if args.empty?
+
+          first = args.first
+          # `render partial: "..."` — the keyword form.
+          return partial_target_from_kwargs(first, controller_path) if first.is_a?(Prism::KeywordHashNode)
+
+          # `render :symbol` / `render "path"`. A trailing
+          # KeywordHashNode is allowed (e.g. `render :show,
+          # status: :ok`); the leading positional carries the
+          # template name.
+          template_target_from_positional(first, controller_path)
+        end
+
+        def template_target_from_positional(node, controller_path)
+          case node
+          when Prism::SymbolNode then [:template, "#{controller_path}/#{node.value}"]
+          when Prism::StringNode
+            stripped = node.unescaped
+            stripped.include?("/") ? [:template, stripped] : [:template, "#{controller_path}/#{stripped}"]
+          end
+        end
+
+        def partial_target_from_kwargs(hash_node, controller_path)
+          partial_value = hash_node.elements.find do |elem|
+            elem.is_a?(Prism::AssocNode) &&
+              elem.key.is_a?(Prism::SymbolNode) &&
+              elem.key.value == "partial"
+          end&.value
+          return nil unless partial_value.is_a?(Prism::StringNode)
+
+          stripped = partial_value.unescaped
+          if stripped.include?("/")
+            dir, base = File.split(stripped)
+            [:partial, "#{dir}/_#{base}"]
+          else
+            [:partial, "#{controller_path}/_#{stripped}"]
+          end
+        end
+
+        # `UsersController` → "users".
+        # `Admin::WidgetsController` → "admin/widgets".
+        # Returns nil for class names that don't end with the
+        # `Controller` suffix.
+        def controller_path_for(class_name)
+          return nil unless class_name.end_with?("Controller")
+
+          stripped = class_name.delete_suffix("Controller")
+          stripped.split("::").map { |segment| underscore(segment) }.join("/")
+        end
+
+        # Tiny inflector — sufficient for the typical
+        # `WordWord` → `word_word` mapping. Doesn't try to
+        # handle acronyms (`HTTPController` would inflect to
+        # `h_t_t_p`); users with that need can ship a
+        # configured override in a follow-up slice.
+        def underscore(camel)
+          camel.gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
+               .gsub(/([a-z\d])([A-Z])/, '\1_\2')
+               .downcase
+        end
+
+        def render_diagnostic(path, call_node, target, view_search_roots)
+          kind, relative = target
+          existing = locate_template(relative, view_search_roots)
+          if existing
+            render_target_diagnostic(path, call_node, kind, relative, existing)
+          else
+            missing_template_diagnostic(path, call_node, kind, relative, view_search_roots)
+          end
+        end
+
+        def locate_template(relative, view_search_roots)
+          view_search_roots.each do |root|
+            RENDER_TEMPLATE_EXTENSIONS.each do |ext|
+              candidate = File.join(root, "#{relative}#{ext}")
+              return candidate if File.file?(candidate)
+            end
+          end
+          nil
+        end
+
+        def render_target_diagnostic(path, call_node, kind, relative, located)
+          loc = call_node.message_loc || call_node.location
+          Diagnostic.new(
+            path: path, line: loc.start_line, column: loc.start_column + 1,
+            message: "Action Pack render #{kind} `#{relative}` resolved to `#{located}`.",
+            severity: :info, rule: "render-target"
+          )
+        end
+
+        def missing_template_diagnostic(path, call_node, kind, relative, view_search_roots)
+          loc = call_node.message_loc || call_node.location
+          tried = RENDER_TEMPLATE_EXTENSIONS.map { |ext| "#{relative}#{ext}" }.join(", ")
+          roots = view_search_roots.join(", ")
+          Diagnostic.new(
+            path: path, line: loc.start_line, column: loc.start_column + 1,
+            message: "Action Pack render #{kind} `#{relative}` not found under #{roots} " \
+                     "(tried #{tried}).",
+            severity: :error, rule: "missing-template"
+          )
         end
 
         def filter_call_diagnostic(path, call_node, filter_name)

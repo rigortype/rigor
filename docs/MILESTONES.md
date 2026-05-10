@@ -279,31 +279,77 @@ The full "Out of scope for v0.1.1" list above applies (minus the now-closed inte
 - **Opt-in dependency-source inference.** Walk the Ruby implementation of opt-in gems (those with no RBS / RBS::Inline) instead of degrading to `Dynamic[top]` at the dependency boundary. Design fixed in [ADR-10](adr/10-dependency-source-inference.md): `dependencies.source_inference` config axis, `Dynamic[T]`-wrapped returns, dispatcher tier strictly below plugins, per-gem budget pools, per-gem-version cache slice via new `Cache::Descriptor::DependencyEntry`. Five implementation slices (config plumbing → walker → cache descriptor → per-gem budget → docs). Earliest target v0.1.3, but not committed there; entry depends on the v0.1.x core branch's bandwidth after the Rails plugin parallel track stabilises.
 - **`rigor-sorbet` plugin adapter (ecosystem plugin track).** Read Sorbet `sig { ... }` blocks, `T.let` / `T.cast` / `T.must` / `T.bind` / `T.absurd`, and RBI files as type sources. Plugin-side translation at the Sorbet → Rigor boundary; core stays RBS-canonical per ADR-0 / ADR-1. Runtime enforcement remains `sorbet-runtime`'s job (Rigor doesn't execute application code). Design fixed in [ADR-11](adr/11-sorbet-input-adapter.md). Seven implementation slices (`sig` parser → `T.*` flow primitives → type vocabulary translator → RBI walker → sigil honoring + tier ordering → `T.absurd` exhaustiveness → docs). Lives under `examples/rigor-sorbet/` until the contract stabilises, then extracts via `git subtree split`. Sits parallel to the Rails plugin track; not committed to a specific release.
 
+## v0.1.3 — Planned
+
+Theme: **deliver ADR-10 end-to-end and absorb ADR-11 + Rails Tier 2 work.** v0.1.2 closed the Engine-depth follow-up sweep and migrated four example plugins to the v0.1.1 `flow_contribution_for` substrate; v0.1.3 turns to the queued ADR work and the Rails plugin family that depends on the cross-plugin API.
+
+### Track 1 — ADR-10 (Opt-in dependency-source inference)
+
+ADR-10's five-slice implementation envelope plus four "Open questions" follow-ups:
+
+1. ✅ **Slice 1 (Configuration plumbing)** — `Configuration::Dependencies` value object + `Entry(gem:, mode:, roots:)` + `.rigor.yml` `dependencies.source_inference[]` section + JSON schema.
+2. ✅ **Slice 2 (Resolver + walker + dispatcher tier)** — `GemResolver`, `Walker.walk`, `Index#contribution_for`, `MethodDispatcher.try_dependency_source`. New tier strictly below plugins / RBS, returning `Dynamic[top]` on hits.
+3. ✅ **Slice 3 (Cache descriptor)** — `Cache::Descriptor::DependencyEntry(gem_name:, gem_version:, mode:)` + new `dependencies:` slot + per-gem-version invalidation primitive via `Index#cache_descriptor`.
+4. ✅ **Slice 4 (per-gem budget)** — `dependencies.budget_per_gem` (default 5000, range 1250..20000); `Walker.walk(budget:)` returns `Outcome(catalog:, truncated:)`; `dynamic.dependency-source.budget-exceeded` `:warning` once per tripped gem.
+5. ✅ **Slice 5 (documentation)** — `docs/internal-spec/dependency-source-inference.md` normative spec.
+6. ✅ **5a (per-receiver plugin veto)** — `manifest(owns_receivers:)` declaration; subclass-aware via `Environment#class_ordering`.
+7. ✅ **5b (β budget semantics)** — opt-in `dependencies.budget_overrun_strategy: dependency_silence` returns `Dynamic[top]` on catalog misses for budget-exceeded gems via `Index#class_to_gem` reverse lookup. Default stays `:walker_cap`.
+8. ⏸ **5c (boundary-cross diagnostic)** — deferred behind a `mode: full` distinct-dispatch prerequisite; spec doc explains the dependency.
+9. ✅ **5d (config-conflict diagnostic)** — `dynamic.dependency-source.config-conflict` `:warning` on `includes:`-chain mode disagreements; per-gem dedupe with later-wins + roots union.
+
+### Track 2 — ADR-11 (rigor-sorbet plugin)
+
+The full plugin lives under `examples/rigor-sorbet/`. ADR-11 slices 1–6 + 8 plus light follow-ups:
+
+1. ✅ **Slice 1** — sig parser, vocabulary translation (`Nominal` / `T.untyped` / `T.nilable` / `T.any` / `T::Boolean` / etc.).
+2. ✅ **Slice 2** — `T.let` / `T.cast` / `T.must` / `T.unsafe` recognisers.
+3. ✅ **Slice 3** — widened type vocabulary (`T::Array[E]`, `T::Hash[K, V]`, `T.class_of(C)`, tuple / shape literals in sig position).
+4. ✅ **Slice 4** — RBI tree walker (`sorbet/rbi/**/*.rbi`).
+5. ✅ **Slice 5** — `# typed:` sigil detection at catalog harvest.
+6. ✅ **Slice 6** — `T.absurd(x)` exhaustiveness composition with `flow.unreachable-branch`.
+7. ✅ **Slice 7** — handbook chapter 10 + plugin README.
+8. ✅ **Slice 8** — Tapioca DSL mixin chain resolution.
+9. ✅ **Light follow-ups** — `T.must_because` (alias of `T.must`), `T.reveal_type` (info diagnostic), `T.assert_type!` (return + subtype check), `T.bind(self, T)` (block-scope self narrowing via `post_return_facts(target_kind: :self)`).
+10. ✅ **`enforce_sigil` per-file gating** — default `true`; `# typed: false` / sigil-less files have sigs harvested but not contributed; assertion recognisers (the `T.let` / `T.cast` family) stay live regardless of sigil.
+
+### Track 3 — Cross-plugin substrate (ADR-7 § "Slice 4-A" closure)
+
+`Inference::StatementEvaluator#apply_plugin_assertions` wires plugin-side `truthy_facts` / `falsey_facts` / `post_return_facts` through the narrowing engine. This is the substrate T.bind uses, AND the substrate PHPStan-style Type-Specifying Extensions need — call-shape recognition that narrows argument variables / self after the call returns is now authorable from any Rigor plugin without engine changes. Closes ADR-7 § "Slice 4-A" 's plugin half.
+
+Handbook chapter 7 gains a `@phpstan-assert` correspondence table mapping each PHPStan PHPDoc annotation to its `RBS::Extended` directive equivalent (`%a{rigor:v1:assert: x is T}` ⇄ `@phpstan-assert T $x` etc.).
+
+### Track 4 — Rails ecosystem plugins (Tier 2)
+
+- ✅ **`rigor-actionpack`** — Phase 4 (route helpers via the `:helper_table` ADR-9 fact from `rigor-rails-routes`) + Phase 2 (filter chains + parent-class one-level inheritance lookup) + Phase 3 (render targets `render :action` / `render partial:` against `view_search_paths`) + Phase 1 (strong parameters `params.require(:user).permit(:name)` against the `:model_index` ADR-9 fact from `rigor-activerecord`).
+- ✅ **`rigor-factorybot`** — Phase 1 (a) self-contained factory + attribute key validation; Phase 1 (c) AR column cross-check via the `:model_index` ADR-9 fact.
+- ✅ **`rigor-activerecord`** — `manifest(produces: [:model_index])` + `prepare(services)` hook publishes the per-run model index. First publish-and-consume cycle exercising ADR-9 end-to-end with two consumers (`rigor-actionpack` Phase 1 + `rigor-factorybot` Phase 1 (c)).
+
+### Out of scope for v0.1.3 (deferred to v0.1.4 or beyond)
+
+- **`mode: full` distinct dispatch** — gem-source contributing alongside RBS with merger conflict resolution. Prerequisite for ADR-10 5c (boundary-cross) — the diagnostic has no condition under which it would fire without distinct dispatch.
+- **Per-call-site assertion gating in rigor-sorbet** — the last ADR-11 deferred item. The `enforce_sigil` knob currently gates sig recognition at catalog-harvest time; per-call-site gating would suppress recognised sigs based on the CALLER's sigil at the dispatch site.
+- **Tier 3 plugins remaining**: `rigor-graphql`, `rigor-activestorage`. Author when there is concrete user demand.
+- **rigor-activerecord extensions**: associations, enums, scopes, validations, callbacks. Each ships as a 0.2.0+ minor bump per the roadmap.
+- **dry-rb ecosystem plugins** ([`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md)) — packaging strategy (single gem vs. family vs. mid-grain bundles) needs an explicit ADR-12 decision before any individual plugin can be authored.
+- All earlier "Out of scope" items from v0.1.1 / v0.1.2 still apply: LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT, `rigor:v1:conforms-to`.
+
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 
 The full roadmap is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Summary of the running track:
 
 **Already landed (unreleased on `master`):**
 
-- [`rigor-activerecord`](../examples/rigor-activerecord/) — schema + finders + columns. The seventh worked plugin example and the most architecturally complete (DSL interpretation + multi-file IoBoundary + chained cache producers + two-pass discover-then-validate).
+- **Tier 1**: [`rigor-rails-routes`](../examples/rigor-rails-routes/) (publishes `:helper_table`), [`rigor-rails-i18n`](../examples/rigor-rails-i18n/), [`rigor-actionmailer`](../examples/rigor-actionmailer/), [`rigor-activejob`](../examples/rigor-activejob/).
+- **Tier 2**: [`rigor-activerecord`](../examples/rigor-activerecord/) (publishes `:model_index`); [`rigor-actionpack`](../examples/rigor-actionpack/) (4 phases: routes / filters / renders / strong-params); [`rigor-factorybot`](../examples/rigor-factorybot/) (Phase 1 (a) + (c)).
+- **Tier 3**: [`rigor-pundit`](../examples/rigor-pundit/), [`rigor-sidekiq`](../examples/rigor-sidekiq/), [`rigor-rspec`](../examples/rigor-rspec/), [`rigor-actioncable`](../examples/rigor-actioncable/).
 
-**Tier 1 (current API, no analyser-side change required) — author next:**
+**Pending Tier 3 (specialised, author when there is concrete user demand):**
 
-- `rigor-rails-routes` — real `config/routes.rb` DSL → `*_path` / `*_url` validation.
-- `rigor-rails-i18n` — `config/locales/*.yml` → `t('key.path')` validation.
-- `rigor-actionmailer` — Mailer methods + view template existence.
-- `rigor-activejob` — Job `perform` arity.
+- `rigor-graphql`, `rigor-activestorage`.
 
-**Tier 2 (needs the cross-plugin API per [ADR-9](adr/9-cross-plugin-api.md)):**
+**Future surface within `rigor-activerecord` (ship as 0.2.0+ minor bumps):**
 
-- `rigor-actionpack` Phase 1 (strong parameters → AR column validation).
-- `rigor-factorybot` (factory attributes → AR column validation).
-- `rigor-actionpack` Phase 2-4 (filter chains, render targets, route-helper consumption).
-- `rigor-activerecord` extensions (associations, enums, scopes, validations, callbacks — landed as 0.2.0+ minor bumps in the existing gem rather than separate gems).
-
-**Tier 3 (specialised, author when there is concrete user demand):**
-
-- `rigor-rspec`, `rigor-pundit`, `rigor-sidekiq`, `rigor-graphql`, `rigor-activestorage`, `rigor-actioncable`.
+- Associations (`has_many` / `belongs_to`), enums, scopes, validations, callbacks.
 
 Each plugin is staged in `examples/rigor-<id>/` per the [`rigor-plugin-author`](../.codex/skills/rigor-plugin-author/SKILL.md) SKILL discipline and extracted via `git subtree split` once its contract is stable. The eventual `rigor-rails` meta-gem will declare the Tier 1+2 plugins as gem dependencies so a single Gemfile line opts the user into the whole stack.
 

@@ -785,6 +785,7 @@ module Rigor
         evaluate_block_if_present(node)
         post_scope = record_closure_escape_if_any(node)
         post_scope = apply_rbs_extended_assertions(node, post_scope)
+        post_scope = apply_plugin_assertions(node, post_scope)
         post_scope = apply_rspec_matcher_narrowing(node, post_scope)
         [call_type, post_scope]
       end
@@ -978,6 +979,61 @@ module Rigor
         end
       end
 
+      # ADR-7 § "Slice 4-A" / T.bind priority slice 2 — applies
+      # the post-return facts plugin contributions produce. This
+      # is the sibling of {apply_rbs_extended_assertions}: the
+      # carrier (`Rigor::FlowContribution::Fact`) and the
+      # downstream narrowing path (`apply_post_return_fact` →
+      # `apply_self_post_return_fact`) are the same; only the
+      # *source* of the bundle changes (RBS::Extended vs the
+      # registered plugins' `flow_contribution_for`).
+      #
+      # `:self`-targeted facts narrow `scope.self_type` for the
+      # surrounding scope. In a block body, the surrounding
+      # scope is the block's own scope, so the narrowing applies
+      # to the rest of the block — exactly the contract Sorbet's
+      # `T.bind(self, T)` commits to.
+      #
+      # `:parameter`-targeted facts only land when the called
+      # method has an authoritative RBS sig (via
+      # `resolve_call_method`); plugins recognising their own
+      # synthetic call shapes (e.g. `T.assert_type!`) have no
+      # method_def and the parameter facts silently skip — the
+      # plugin's own diagnostics_for_file path covers those
+      # cases. The full plugin-side parameter-targeting story
+      # (PHPStan-style Type-Specifying Extensions on
+      # plugin-recognised calls) lives behind a follow-up slice
+      # that introduces `:local` / `:argument_at` target kinds.
+      def apply_plugin_assertions(call_node, current_scope)
+        registry = current_scope.environment&.plugin_registry
+        return current_scope if registry.nil? || registry.empty?
+
+        contributions = collect_plugin_contributions(registry, call_node, current_scope)
+        return current_scope if contributions.empty?
+
+        result = Rigor::FlowContribution::Merger.merge(contributions)
+        post_return = result.post_return_facts
+        return current_scope if post_return.empty?
+
+        method_def = resolve_call_method(call_node, current_scope)
+        post_return.reduce(current_scope) do |scope_acc, fact|
+          apply_post_return_fact(fact, call_node, scope_acc, method_def)
+        end
+      end
+
+      # Walks the registry and collects each plugin's
+      # `flow_contribution_for` result, swallowing per-plugin
+      # exceptions so a buggy plugin can't abort the assertion
+      # path. Mirrors `MethodDispatcher.collect_plugin_contributions`
+      # exactly — the two paths consume the same hook.
+      def collect_plugin_contributions(registry, call_node, current_scope)
+        registry.plugins.filter_map do |plugin|
+          plugin.flow_contribution_for(call_node: call_node, scope: current_scope)
+        rescue StandardError
+          nil
+        end
+      end
+
       def resolve_call_method(call_node, current_scope) # rubocop:disable Metrics/PerceivedComplexity
         receiver_node = call_node.receiver
         receiver_type =
@@ -1064,7 +1120,15 @@ module Rigor
         end
       end
 
-      def lookup_post_return_arg(call_node, method_def, target_name)
+      def lookup_post_return_arg(call_node, method_def, target_name) # rubocop:disable Metrics/CyclomaticComplexity
+        # Plugin-source contributions arrive without an
+        # authoritative method_def (the plugin recognised the
+        # call shape directly). Parameter-targeting falls back
+        # to "no narrow" in that case — the wider plugin-side
+        # parameter mapping (`:local` / `:argument_at`) is a
+        # follow-up slice.
+        return nil if method_def.nil?
+
         arguments = call_node.arguments&.arguments || []
         method_def.method_types.each do |mt|
           params = mt.type.required_positionals + mt.type.optional_positionals

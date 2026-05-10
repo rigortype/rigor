@@ -1664,6 +1664,95 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "Plugin-side post_return_facts wiring (T.bind / T.assert_type! priority slice 2)" do
+    before { Rigor::Plugin.unregister! }
+    after { Rigor::Plugin.unregister! }
+
+    # Synthetic plugin: recognises any call named `narrow_self_to_string!`
+    # and contributes a post_return_fact narrowing self to
+    # `Nominal[String]` from that call onwards.
+    let(:self_narrowing_plugin) do
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "self-narrower", version: "0.1.0")
+
+        def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
+          return nil unless call_node.is_a?(Prism::CallNode) && call_node.name == :narrow_self_to_string!
+
+          fact = Rigor::FlowContribution::Fact.new(
+            target_kind: :self, target_name: :self, type: Rigor::Type::Combinator.nominal_of("String")
+          )
+          Rigor::FlowContribution.new(
+            return_type: Rigor::Type::Combinator.constant_of(nil),
+            post_return_facts: [fact],
+            provenance: Rigor::FlowContribution::Provenance.new(
+              source_family: "plugin.self-narrower", plugin_id: "self-narrower",
+              node: call_node, descriptor: nil
+            )
+          )
+        end
+      end
+      stub_const("FakeSelfNarrowingPlugin", klass)
+      klass
+    end
+
+    def run_with_plugin(plugin_class, source:)
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "demo.rb"), source)
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "demo.rb")],
+            "plugins" => ["rigor-self-narrower"]
+          )
+        )
+        requirer = lambda do |_name|
+          Rigor::Plugin.register(plugin_class)
+          true
+        end
+        described_class.new(
+          configuration: configuration, cache_store: nil, plugin_requirer: requirer
+        ).run
+      end
+    end
+
+    it "applies a plugin-contributed post_return_fact(target_kind: :self) to the surrounding scope" do
+      # Without the narrowing, `self.upcase` would emit
+      # `call.undefined-method` because the implicit-self type
+      # at top level isn't `String`. The plugin narrows self to
+      # `Nominal[String]` after `narrow_self_to_string!`, so
+      # `self.upcase` resolves cleanly.
+      result = run_with_plugin(self_narrowing_plugin, source: <<~RUBY)
+        def narrow_self_to_string!; nil; end
+        narrow_self_to_string!
+        self.upcase
+      RUBY
+
+      undef_calls = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(undef_calls).to be_empty
+    end
+
+    it "leaves the rest of the program unchanged when the plugin contributes no facts" do # rubocop:disable RSpec/ExampleLength
+      noop = Class.new(Rigor::Plugin::Base) { manifest(id: "noop-narrower", version: "0.1.0") }
+      stub_const("FakeNoopNarrowingPlugin", noop)
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "demo.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "demo.rb")],
+            "plugins" => ["rigor-noop-narrower"]
+          )
+        )
+        requirer = lambda do |_name|
+          Rigor::Plugin.register(noop)
+          true
+        end
+        result = described_class.new(
+          configuration: configuration, cache_store: nil, plugin_requirer: requirer
+        ).run
+        expect(result.diagnostics.select { |d| d.source_family == "plugin.noop-narrower" }).to be_empty
+      end
+    end
+  end
+
   describe "Plugin#prepare invocation (v0.1.1 / ADR-9 slice 3)" do
     before { Rigor::Plugin.unregister! }
     after { Rigor::Plugin.unregister! }

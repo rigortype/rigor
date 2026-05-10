@@ -142,6 +142,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     eql?(req:other)
     hash()
     id()
+    owns_receivers()
     produces()
     protocols()
     to_h()

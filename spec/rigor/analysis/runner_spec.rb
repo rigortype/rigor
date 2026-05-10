@@ -212,6 +212,41 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.severity).to eq(:warning)
     end
 
+    it "respects the per-receiver plugin veto (ADR-10 5a)" do # rubocop:disable RSpec/ExampleLength
+      # When a plugin declares manifest(owns_receivers: [...])
+      # and the dispatcher's receiver IS owned by the plugin,
+      # try_dependency_source must decline so the plugin
+      # contribution stays authoritative.
+      Rigor::Plugin.unregister!
+      owner = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "owns-fake-node", version: "0.1.0", owns_receivers: ["Prism::FakeOwnedNode"])
+      end
+      stub_const("FakeOwnerPlugin", owner)
+
+      configuration = Rigor::Configuration.new(
+        "paths" => [],
+        "plugins" => ["rigor-owns-fake-node"]
+      )
+      requirer = lambda do |_name|
+        Rigor::Plugin.register(owner)
+        true
+      end
+      runner = described_class.new(
+        configuration: configuration, cache_store: nil, plugin_requirer: requirer
+      )
+      runner.run
+
+      env = Rigor::Environment.for_project(
+        plugin_registry: runner.plugin_registry,
+        dependency_source_index: runner.dependency_source_index,
+        libraries: [], signature_paths: nil, cache_store: nil
+      )
+      dispatcher = Object.new.extend(Rigor::Inference::MethodDispatcher)
+
+      expect(dispatcher.send(:plugin_owns_receiver?, "Prism::FakeOwnedNode", env)).to be(true)
+      expect(dispatcher.send(:plugin_owns_receiver?, "Prism::SomeOtherClass", env)).to be(false)
+    end
+
     it "surfaces a config-conflict mode disagreement as `dynamic.dependency-source.config-conflict`" do
       configuration = Rigor::Configuration.new(
         "paths" => [],

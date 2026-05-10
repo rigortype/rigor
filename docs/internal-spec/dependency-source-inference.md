@@ -419,12 +419,15 @@ below.
 Tracked on [ADR-10](../adr/10-dependency-source-inference.md)
 § "Open questions" — revisited as concrete needs surface:
 
-- **Per-receiver plugin veto** — ADR-9 manifest field or
-  `Plugin::Base#owns_receiver?` so plugins can veto
-  gem-source inference for receivers they own (e.g.
-  `rigor-activerecord` vetoing `ActiveRecord::Base`
-  subclasses to avoid collisions with plugin-generated
-  members).
+- ✅ **Per-receiver plugin veto** — landed (slice 5a).
+  Plugins declare
+  `manifest(owns_receivers: ["ActiveRecord::Base"])` to claim
+  sole ownership of a receiver class (and its subclasses, via
+  `Environment#class_ordering`). The
+  dependency-source-inference tier consults the registry
+  before consulting its own catalog: receivers owned by a
+  registered plugin decline so plugin contributions stay
+  authoritative.
 - **`mode: full` retention** — the dispatcher tier in v0.1.3
   treats `full` and `when_missing` identically. The
   authoring distinction stays in the configuration surface

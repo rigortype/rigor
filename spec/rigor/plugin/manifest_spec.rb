@@ -117,6 +117,26 @@ RSpec.describe Rigor::Plugin::Manifest do
       end.to raise_error(ArgumentError, /produces/)
     end
 
+    it "accepts owns_receivers as an Array of class-name Strings (ADR-10 5a)" do
+      m = described_class.new(
+        id: "ar", version: "0.1.0",
+        owns_receivers: ["ActiveRecord::Base", "ApplicationRecord"]
+      )
+      expect(m.owns_receivers).to eq(%w[ActiveRecord::Base ApplicationRecord])
+      expect(m.owns_receivers).to be_frozen
+    end
+
+    it "defaults owns_receivers to an empty array" do
+      m = described_class.new(id: "ar", version: "0.1.0")
+      expect(m.owns_receivers).to eq([])
+    end
+
+    it "rejects non-String / empty-String owns_receivers entries" do
+      expect do
+        described_class.new(id: "ar", version: "0.1.0", owns_receivers: [:Foo])
+      end.to raise_error(ArgumentError, /owns_receivers/)
+    end
+
     it "coerces consumes hashes into Consumption value objects" do
       m = described_class.new(
         id: "ap",

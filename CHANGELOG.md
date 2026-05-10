@@ -14,6 +14,14 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — ADR-10 5a (per-receiver plugin veto)
+
+- **`Rigor::Plugin::Manifest#owns_receivers`** new attr (frozen Array of class-name Strings). Plugins declare `manifest(owns_receivers: ["ActiveRecord::Base"])` to claim sole ownership of a receiver class so the dispatcher's dependency-source-inference tier declines on owned receivers, keeping plugin contributions authoritative for those types.
+- **Subclass-aware lookup.** The dispatcher's `receiver_matches_owner?` consults `Environment#class_ordering(class_name, owner)` and accepts `:equal` / `:subclass`. So a plugin declaring `["ActiveRecord::Base"]` automatically owns every `ActiveRecord::Base` subclass — `User`, `Admin::Post`, etc. — without enumerating each one. The lookup is fail-soft (any exception during the ordering call falls back to the direct-name check).
+- **Drift snapshot updated.** `PublicApiDriftSnapshots::PLUGIN_MANIFEST_INSTANCE` grows the `owns_receivers()` accessor; the `Rigor::Plugin::Manifest` drift spec stays green.
+- **3 new manifest spec cases** confirm the field accepts an Array of class-name Strings, defaults to empty, and rejects non-String / empty-String entries; **1 new runner spec case** confirms the dispatcher's `plugin_owns_receiver?` returns true for owned class names and false for unrelated ones.
+- **`docs/internal-spec/dependency-source-inference.md`** "Open questions" entry for per-receiver plugin veto moves from "queued" to "✅ landed".
+
 ### Added — ADR-10 5d (config-conflict diagnostic)
 
 - **`dynamic.dependency-source.config-conflict` `:warning` diagnostic.** Surfaces `dependencies.source_inference[]` entries for the same gem that disagree on `mode:` across an `.rigor.yml` `includes:` chain. The later (downstream-include) entry's mode wins; `roots:` are unioned silently. One diagnostic per conflicting `(gem, prior-mode, new-mode)` triple.

@@ -154,9 +154,37 @@ module Rigor
         class_name = dep_source_class_name(receiver_type)
         return nil if class_name.nil?
 
+        # ADR-10 5a — per-receiver plugin veto. When a
+        # registered plugin declares `manifest(owns_receivers:
+        # [<class>])` AND the call's receiver IS that class
+        # (or a subclass), decline and let plugins handle the
+        # call. Plugins that own a receiver are the
+        # authoritative source for that type; gem-source
+        # inference must not contribute behind their backs.
+        return nil if plugin_owns_receiver?(class_name, environment)
+
         return nil if index.contribution_for(class_name: class_name, method_name: method_name).nil?
 
         Type::Combinator.untyped
+      end
+
+      def plugin_owns_receiver?(class_name, environment)
+        registry = environment&.plugin_registry
+        return false if registry.nil? || registry.empty?
+
+        registry.plugins.any? do |plugin|
+          owns = plugin.manifest.owns_receivers # rigor:disable undefined-method
+          owns.any? { |owner| receiver_matches_owner?(class_name, owner, environment) }
+        end
+      end
+
+      def receiver_matches_owner?(class_name, owner, environment)
+        return true if class_name == owner
+
+        ordering = environment.class_ordering(class_name, owner)
+        %i[equal subclass].include?(ordering)
+      rescue StandardError
+        false
       end
 
       def dep_source_class_name(receiver_type)

@@ -37,26 +37,29 @@ module Rigor
         end
       end
 
-      attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes
+      attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
+                  :owns_receivers
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
-        produces: [], consumes: []
+        produces: [], consumes: [], owns_receivers: []
       )
         validate_id!(id)
         validate_version!(version)
         validate_protocols!(protocols)
         validate_config_schema!(config_schema)
         validate_produces!(produces)
+        validate_owns_receivers!(owns_receivers)
 
-        assign_fields(id, version, description, protocols, config_schema, produces, consumes)
+        assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers)
         freeze
       end
 
       private
 
-      def assign_fields(id, version, description, protocols, config_schema, produces, consumes) # rubocop:disable Metrics/ParameterLists
+      # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize
+      def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
@@ -64,7 +67,9 @@ module Rigor
         @config_schema = config_schema.to_h { |k, v| [k.to_s.dup.freeze, v.to_sym] }.freeze
         @produces = produces.map(&:to_sym).freeze
         @consumes = coerce_consumes(consumes)
+        @owns_receivers = owns_receivers.map { |c| c.to_s.dup.freeze }.freeze
       end
+      # rubocop:enable Metrics/ParameterLists,Metrics/AbcSize
 
       public
 
@@ -99,7 +104,8 @@ module Rigor
           "protocols" => protocols.map(&:to_s),
           "config_schema" => config_schema.to_h { |k, v| [k, v.to_s] },
           "produces" => produces.map(&:to_s),
-          "consumes" => consumes.map { |c| consumption_hash(c) }
+          "consumes" => consumes.map { |c| consumption_hash(c) },
+          "owns_receivers" => owns_receivers
         }
       end
 
@@ -164,6 +170,21 @@ module Rigor
         return if produces.is_a?(Array) && produces.all? { |p| p.is_a?(Symbol) || p.is_a?(String) }
 
         raise ArgumentError, "plugin manifest produces must be an Array of Symbol/String, got #{produces.inspect}"
+      end
+
+      # ADR-10 5a — `owns_receivers:` declares the class names
+      # this plugin claims sole ownership of. The dispatcher's
+      # dependency-source-inference tier consults this list
+      # before consulting its own catalog: receivers owned by a
+      # registered plugin (directly or via subclass) decline,
+      # so plugin contributions stay authoritative for those
+      # types.
+      def validate_owns_receivers!(owns_receivers)
+        return if owns_receivers.is_a?(Array) && owns_receivers.all? { |c| c.is_a?(String) && !c.empty? }
+
+        raise ArgumentError,
+              "plugin manifest owns_receivers must be an Array of non-empty String, " \
+              "got #{owns_receivers.inspect}"
       end
 
       def coerce_consumes(consumes)

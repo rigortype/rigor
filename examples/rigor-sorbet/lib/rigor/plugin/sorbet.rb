@@ -113,6 +113,16 @@ module Rigor
         # `diagnostics_for_file` surfaces each entry as a
         # `plugin.sorbet.reveal-type` `:info` diagnostic.
         @reveal_type_calls = {}.compare_by_identity
+        # T.bind / T.assert_type! priority slice 1 —
+        # `T.assert_type!` calls observed in
+        # `flow_contribution_for` whose static subtype check
+        # FAILED, paired with the inferred + asserted type
+        # display strings. Same compare-by-identity discipline.
+        # `diagnostics_for_file` walks the file AST for
+        # `T.assert_type!` calls and surfaces matching entries
+        # as `plugin.sorbet.assert-type-mismatch` `:error`
+        # diagnostics.
+        @assert_type_mismatches = {}.compare_by_identity
       end
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
@@ -125,6 +135,7 @@ module Rigor
         diagnostics = errors.map { |error| parse_error_diagnostic(path, error) }
         diagnostics.concat(absurd_reachable_diagnostics(path, root))
         diagnostics.concat(reveal_type_diagnostics(path, root))
+        diagnostics.concat(assert_type_mismatch_diagnostics(path, root))
         diagnostics
       end
 
@@ -169,6 +180,7 @@ module Rigor
         )
         if assertion
           record_reveal_type_call(call_node, assertion.return_type) if call_node.name == :reveal_type
+          record_assert_type_check(call_node, scope) if call_node.name == :assert_type!
           return assertion
         end
 
@@ -468,6 +480,65 @@ module Rigor
           message: "`T.reveal_type` inferred type: #{display}",
           severity: :info,
           rule: "reveal-type"
+        )
+      end
+
+      # T.bind / T.assert_type! priority slice 1 — runs the
+      # static subtype check at recogniser time and records the
+      # call only when the inferred type is *provably
+      # incompatible* with the asserted type. Gradual
+      # consistency rules (`Inference::Acceptance.accepts(...)`
+      # mode `:gradual`): a `Dynamic[top]` inferred type
+      # silences the check; a definite `:no` records for
+      # diagnostic emission; `:maybe` (uncertain) is treated as
+      # "trust the user" and silenced — the runtime check is
+      # there for those cases.
+      def record_assert_type_check(call_node, scope)
+        check = AssertionRecognizer.assert_type_check(call_node, scope)
+        return if check.nil?
+
+        inferred, asserted = check
+        return if inferred.nil?
+
+        result = Rigor::Inference::Acceptance.accepts(asserted, inferred)
+        return unless result.no?
+
+        @assert_type_mismatches[call_node] = [display_for_type(inferred), display_for_type(asserted)]
+      end
+
+      def assert_type_mismatch_diagnostics(path, root)
+        return [] if @assert_type_mismatches.empty?
+
+        diagnostics = []
+        walk_for_assert_type(root) do |call_node|
+          recorded = @assert_type_mismatches.delete(call_node)
+          next if recorded.nil?
+
+          diagnostics << assert_type_mismatch_diagnostic(path, call_node, *recorded)
+        end
+        diagnostics
+      end
+
+      def walk_for_assert_type(node, &)
+        return unless node.is_a?(Prism::Node)
+
+        if node.is_a?(Prism::CallNode) && node.name == :assert_type! &&
+           TypeTranslator.sorbet_t_namespaced?(node.receiver)
+          yield node
+        end
+        node.compact_child_nodes.each { |child| walk_for_assert_type(child, &) }
+      end
+
+      def assert_type_mismatch_diagnostic(path, call_node, inferred_display, asserted_display)
+        location = call_node.location
+        Rigor::Analysis::Diagnostic.new(
+          path: path,
+          line: location.start_line,
+          column: location.start_column + 1,
+          message: "`T.assert_type!` failed: inferred type #{inferred_display} is not " \
+                   "compatible with asserted type #{asserted_display}.",
+          severity: :error,
+          rule: "assert-type-mismatch"
         )
       end
 

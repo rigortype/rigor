@@ -23,6 +23,7 @@ module Rigor
       # | `T.must_because(expr, "..")` | return type ← `inferred(expr) - nil`    |
       # | `T.unsafe(x)`                | return type ← `Dynamic[top]`            |
       # | `T.reveal_type(expr)`        | return type ← `inferred(expr)` (passes through) |
+      # | `T.assert_type!(expr, T)`    | return type ← translated `T` + static subtype check |
       #
       # The Sorbet runtime's `T.let` / `T.cast` actually return
       # the inner expression unchanged at runtime; their job is
@@ -48,17 +49,20 @@ module Rigor
       # `plugin.sorbet.reveal-type` `:info` message for human
       # consumption.
       #
-      # `T.bind` and `T.assert_type!` remain deferred (`T.bind`
-      # needs a self-targeted post-return fact; `T.assert_type!`
-      # adds a Dynamic-rejection check the slice 1 substrate
-      # doesn't model).
+      # `T.bind` remains deferred until the engine wires
+      # plugin-side `post_return_facts` through the narrowing
+      # path. The carrier (`Fact(target_kind: :self)`) and the
+      # statement evaluator's `apply_self_post_return_fact` are
+      # already in place; the missing piece is plugin
+      # contributions reaching the assertion application site
+      # (currently only `RBS::Extended` is consulted there).
       module AssertionRecognizer
         # Method names this recogniser claims as Sorbet
         # assertions. The plugin checks call sites against this
         # set before any catalog lookup so a `T.let` call
         # inside an analysed file always resolves through this
         # module.
-        SORBET_ASSERTIONS = %i[let cast must must_because unsafe reveal_type].freeze
+        SORBET_ASSERTIONS = %i[let cast must must_because unsafe reveal_type assert_type!].freeze
 
         module_function
 
@@ -83,7 +87,33 @@ module Rigor
           when :must, :must_because then resolve_must(call_node, scope)
           when :unsafe then Rigor::Type::Combinator.untyped
           when :reveal_type then resolve_reveal_type(call_node, scope)
+          when :assert_type! then resolve_typed_assertion(call_node)
           end
+        end
+
+        # `T.assert_type!(expr, T)` shares the typed-assertion
+        # contribution shape with `T.cast` (return is the
+        # asserted type), so the recogniser delegates the
+        # return-type half through `resolve_typed_assertion`.
+        # The static subtype check that distinguishes
+        # `assert_type!` from `cast` lives in the plugin's
+        # `diagnostics_for_file` hook (mirroring the
+        # absurd-recognizer pattern: record the call here, emit
+        # the diagnostic from the per-file walker).
+        def assert_type_check(call_node, scope)
+          return nil if scope.nil?
+
+          inner = nth_argument(call_node, 0)
+          asserted_node = nth_argument(call_node, 1)
+          return nil if inner.nil? || asserted_node.nil?
+
+          asserted_type = TypeTranslator.translate(asserted_node)
+          return nil if asserted_type.nil?
+
+          inferred = scope.type_of(inner)
+          [inferred, asserted_type]
+        rescue StandardError
+          nil
         end
 
         # `T.reveal_type(expr)` returns `expr` unchanged at

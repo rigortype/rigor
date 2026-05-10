@@ -14,6 +14,13 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — `rigor-sorbet` T.assert_type! (T.bind / T.assert_type! priority slice 1)
+
+- **`T.assert_type!(expr, T)` recognised at call sites.** Returns the asserted type as the call's contribution (T.cast-compatible, so chained calls resolve through it). Separately, the plugin runs the static subtype check at recogniser time via `Rigor::Inference::Acceptance.accepts(asserted, inferred, mode: :gradual)`: a `:no` result records the call for diagnostic emission; `:yes` and `:maybe` are silenced (gradual consistency — Dynamic[top] and uncertain shapes trust the user, matching the runtime check's role).
+- **`plugin.sorbet.assert-type-mismatch` `:error` diagnostic.** Emitted from `diagnostics_for_file` for each recorded mismatch. Mirrors the absurd-recognizer / reveal-type pattern (compare-by-identity hash + per-file AST walk to match call nodes by Prism object identity). Message names both the inferred and asserted type displays.
+- **First slice of the T.bind / T.assert_type! priority track.** T.assert_type! ships today with no engine changes (pure plugin work). The follow-up slices land plugin-side fact wiring through the narrowing engine (slice 2 — substrate that PHPStan-style Type-Specifying Extensions also need) and T.bind via `post_return_facts(target_kind: :self)` (slice 3 — depends on slice 2).
+- **4 new integration spec cases** under `spec/integration/examples/sorbet_plugin_spec.rb` covering the T.cast-compatible return type, the mismatch diagnostic, the Dynamic-silenced path, and the trust-the-user (:maybe) silence.
+
 ### Added — example plugin: `rigor-actionpack` (Phase 4 — route-helper consumption)
 
 - **First Tier 2 plugin in Rigor's Rails ecosystem family + first concrete ADR-9 cross-plugin consumer.** Phase 4 of the four-phase Action Pack plugin (Phase 1 strong-parameters + Phase 2 filter chains + Phase 3 render targets + **Phase 4 route-helper consumption** is what this slice ships). The plugin reads the `:helper_table` fact published by `rigor-rails-routes` (`manifest(produces: [:helper_table])`) via `services.fact_store.read(plugin_id: "rails-routes", name: :helper_table)` and validates every implicit-self `*_path` / `*_url` call inside files under `controller_search_paths` (default `app/controllers`). The `manifest(consumes: [...])` declaration uses `optional: true` so the plugin still loads without `rigor-rails-routes` and silently degrades to a no-op (no helper-table → no checks, no load-error).

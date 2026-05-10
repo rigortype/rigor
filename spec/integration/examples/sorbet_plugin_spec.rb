@@ -722,4 +722,63 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
       expect(diag.message).to include("Integer")
     end
   end
+
+  describe "T.assert_type! (T.bind / T.assert_type! priority slice 1)" do
+    it "narrows the call's return to the asserted type (T.cast-compatible)" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # T.assert_type! returns the asserted type so chained
+        # calls resolve through it (same return-type contract
+        # as T.cast).
+        any_value = Object.new
+        T.assert_type!(any_value, String).upcase
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
+    end
+
+    it "emits `plugin.sorbet.assert-type-mismatch` when the inferred type is provably incompatible" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # `s` is provably `Constant<"hello">`; asserting Integer
+        # is definitely incompatible — the gradual-acceptance
+        # check returns :no, so the plugin records a mismatch.
+        s = "hello"
+        T.assert_type!(s, Integer)
+      RUBY
+
+      diag = run_plugin(source: source).diagnostics.find { |d| d.rule == "assert-type-mismatch" }
+
+      expect(diag).not_to be_nil
+      expect(diag.severity).to eq(:error)
+      expect(diag.message).to include("Integer")
+    end
+
+    it "stays silent when the inferred type is Dynamic (gradual consistency)" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # T.unsafe widens the value back to Dynamic[top]; under
+        # gradual consistency, the assertion is silenced.
+        opaque = T.unsafe(Object.new)
+        T.assert_type!(opaque, Integer)
+      RUBY
+
+      diags = run_plugin(source: source).diagnostics.select { |d| d.rule == "assert-type-mismatch" }
+      expect(diags).to be_empty
+    end
+
+    it "stays silent when the inferred type is :maybe-compatible (trust the user)" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        # `n` is Integer (literal-folded). Asserting Integer is
+        # definitely compatible (:yes) — no diagnostic.
+        n = T.let(3, Integer)
+        T.assert_type!(n, Integer)
+      RUBY
+
+      diags = run_plugin(source: source).diagnostics.select { |d| d.rule == "assert-type-mismatch" }
+      expect(diags).to be_empty
+    end
+  end
 end

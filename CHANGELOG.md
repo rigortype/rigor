@@ -14,6 +14,14 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added — ADR-10 5d (config-conflict diagnostic)
+
+- **`dynamic.dependency-source.config-conflict` `:warning` diagnostic.** Surfaces `dependencies.source_inference[]` entries for the same gem that disagree on `mode:` across an `.rigor.yml` `includes:` chain. The later (downstream-include) entry's mode wins; `roots:` are unioned silently. One diagnostic per conflicting `(gem, prior-mode, new-mode)` triple.
+- **`Configuration.merge_dependencies_hash`** carves out `dependencies.source_inference[]` from the standard right-wins merge: arrays are concatenated across `includes:` so `Dependencies.from_h` sees every contributor's entries. The deduplication moves into `Dependencies.dedupe_entries`: same gem with same all fields collapses idempotently (no warning); same gem with different `mode:` keeps the later one and accumulates a warning string; same gem with different `roots:` unions silently.
+- **`Dependencies#warnings`** new accessor exposes the warnings list (frozen). `Analysis::Runner#dependency_source_config_conflict_diagnostics` consumes it once per run and emits one diagnostic per warning.
+- **3 new spec cases** under `spec/rigor/configuration/dependencies_spec.rb` cover the idempotent collapse, the mode conflict + warning, and the silent roots union; **1 new spec** under `spec/rigor/analysis/runner_spec.rb` confirms the runner emits the diagnostic end-to-end.
+- **`docs/internal-spec/dependency-source-inference.md`** diagnostic-family table updated: `config-conflict` moves from "pending" to "live".
+
 ### Added — `rigor-factorybot` Phase 1 (c) (AR column cross-check)
 
 - **Cross-plugin consumer of `rigor-activerecord`'s `:model_index`.** When both plugins are loaded, kwargs in `FactoryBot.create(:user, ...)` calls are validated against the union of (1) the factory's declared attributes and (2) the AR model's columns. FactoryBot's runtime accepts any AR attribute regardless of whether the factory declared it; the static check now mirrors that. A kwarg that's NEITHER a factory attribute NOR a model column still fires `unknown-attribute`.

@@ -212,6 +212,24 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.severity).to eq(:warning)
     end
 
+    it "surfaces a config-conflict mode disagreement as `dynamic.dependency-source.config-conflict`" do
+      configuration = Rigor::Configuration.new(
+        "paths" => [],
+        "dependencies" => {
+          "source_inference" => [
+            { "gem" => "prism", "mode" => "when_missing" },
+            { "gem" => "prism", "mode" => "full" }
+          ]
+        }
+      )
+      result = described_class.new(configuration: configuration, cache_store: nil).run
+      diag = result.diagnostics.find { |d| d.rule == "dynamic.dependency-source.config-conflict" }
+
+      expect(diag).not_to be_nil
+      expect(diag.severity).to eq(:warning)
+      expect(diag.message).to include("prism")
+    end
+
     it "surfaces a budget-exceeded gem as `dynamic.dependency-source.budget-exceeded` exactly once (ADR-10 slice 4)" do # rubocop:disable RSpec/ExampleLength
       configuration = Rigor::Configuration.new(
         "paths" => [],

@@ -360,7 +360,7 @@ Every diagnostic emitted on the dependency-source path uses the
 | `dynamic.dependency-source.gem-not-found` | `:warning` | Live (slice 2a) | Listed gem was not resolvable through RubyGems. Run continues; gem contributes nothing. |
 | `dynamic.dependency-source.budget-exceeded` | `:warning` | Live (slice 4) | Per-gem budget tripped. Walker stopped harvesting at `dependencies.budget_per_gem` method definitions; remaining sites resolve through the existing RBS-or-`Dynamic[top]` boundary. Emitted at most once per gem per run. Recommendation: ship RBS, reduce mode from `full` to `when_missing`, or delist the gem. |
 | `dynamic.dependency-source.boundary-cross` | `:info` | **Pending (post-slice-4)** | Plugin contract and gem-source inference disagree on a return type. The plugin wins; the diagnostic surfaces the divergence for audit. |
-| `dynamic.dependency-source.config-conflict` | `:error` | **Pending (post-slice-4)** | `.rigor.yml` parse / merge produced two incompatible entries for the same gem (e.g. across `includes:`). The configured profile re-stamps severity per the active severity profile; the authored severity is the one above.
+| `dynamic.dependency-source.config-conflict` | `:warning` | Live (slice 5d) | `.rigor.yml` `includes:` chain produced two `dependencies.source_inference[]` entries for the same gem with disagreeing `mode:`. The later (downstream-include) entry wins; `roots:` are unioned silently. One diagnostic per conflicting `(gem, prior-mode, new-mode)` triple.
 
 The taxonomy row in
 [`docs/type-specification/diagnostic-policy.md`](../type-specification/diagnostic-policy.md)

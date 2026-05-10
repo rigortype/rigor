@@ -13,7 +13,7 @@ module Rigor
     # is read, but no analyzer machinery consumes it yet. Slice 2
     # wires `Analysis::DependencySourceInference` against this
     # value object.
-    class Dependencies
+    class Dependencies # rubocop:disable Metrics/ClassLength
       # Walking modes per
       # [ADR-10 § "Decision"](../../../docs/adr/10-dependency-source-inference.md#decision).
       VALID_MODES = %i[disabled when_missing full].freeze
@@ -49,7 +49,7 @@ module Rigor
         def full? = mode == :full
       end
 
-      attr_reader :source_inference, :budget_per_gem
+      attr_reader :source_inference, :budget_per_gem, :warnings
 
       # Parse the YAML-shaped `dependencies:` value into a
       # frozen {Dependencies}. Accepts `nil` / `{}` / a Hash with
@@ -58,14 +58,16 @@ module Rigor
         return new([], DEFAULT_BUDGET_PER_GEM) if data.nil?
         raise ArgumentError, "dependencies: must be a Hash, got #{data.inspect}" unless data.is_a?(Hash)
 
-        entries = Array(data["source_inference"]).map { |raw| coerce_entry(raw) }
+        raw_entries = Array(data["source_inference"]).map { |raw| coerce_entry(raw) }
+        entries, warnings = dedupe_entries(raw_entries)
         budget = coerce_budget_per_gem(data.fetch("budget_per_gem", DEFAULT_BUDGET_PER_GEM))
-        new(entries, budget)
+        new(entries, budget, warnings)
       end
 
-      def initialize(source_inference, budget_per_gem = DEFAULT_BUDGET_PER_GEM)
+      def initialize(source_inference, budget_per_gem = DEFAULT_BUDGET_PER_GEM, warnings = [])
         @source_inference = source_inference.freeze
         @budget_per_gem = budget_per_gem
+        @warnings = warnings.freeze
         freeze
       end
 
@@ -85,6 +87,50 @@ module Rigor
       def empty? = @source_inference.empty?
 
       class << self
+        # ADR-10 § "config-conflict diagnostic" — merges a
+        # potentially-duplicated entry list (the `includes:`
+        # chain produces concatenated arrays via
+        # `Configuration.deep_merge`'s special-case for
+        # `dependencies.source_inference`) into a single
+        # canonical entry per gem name. The merge rules:
+        #
+        # - Same gem, same all fields → idempotent collapse
+        #   (no warning).
+        # - Same gem, different `mode:` → keep the LAST entry
+        #   (matches existing right-wins semantics elsewhere)
+        #   AND emit a `:warning` so the user knows their
+        #   `includes:` chain is ambiguous.
+        # - Same gem, different `roots:` → union the roots
+        #   silently (no warning). The walker is happy to
+        #   visit the union.
+        #
+        # Returns `[entries, warnings]` so the caller can
+        # plumb the warning list through to the Runner for
+        # diagnostic emission.
+        def dedupe_entries(entries)
+          warnings = []
+          by_gem = {}
+          entries.each do |entry|
+            existing = by_gem[entry.gem]
+            by_gem[entry.gem] = if existing.nil?
+                                  entry
+                                else
+                                  merge_entry_pair(existing, entry, warnings)
+                                end
+          end
+          [by_gem.values, warnings]
+        end
+
+        def merge_entry_pair(existing, incoming, warnings)
+          if existing.mode != incoming.mode
+            warnings << "dependencies.source_inference[].gem #{incoming.gem.inspect} declared with " \
+                        "conflicting modes (#{existing.mode.inspect} vs #{incoming.mode.inspect}); " \
+                        "the later (#{incoming.mode.inspect}) wins."
+          end
+          merged_roots = (existing.roots + incoming.roots).uniq.freeze
+          Entry.new(gem: incoming.gem, mode: incoming.mode, roots: merged_roots)
+        end
+
         private
 
         def coerce_entry(raw)

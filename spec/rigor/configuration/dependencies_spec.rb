@@ -181,4 +181,46 @@ RSpec.describe Rigor::Configuration::Dependencies do
       expect(deps.to_h["budget_per_gem"]).to eq(described_class::DEFAULT_BUDGET_PER_GEM)
     end
   end
+
+  describe "config-conflict deduplication (ADR-10 5d)" do
+    it "collapses idempotent duplicate entries with no warning" do
+      deps = described_class.from_h(
+        "source_inference" => [
+          { "gem" => "rack", "mode" => "when_missing", "roots" => %w[lib] },
+          { "gem" => "rack", "mode" => "when_missing", "roots" => %w[lib] }
+        ]
+      )
+
+      expect(deps.source_inference.length).to eq(1)
+      expect(deps.warnings).to be_empty
+    end
+
+    it "warns on a mode conflict with later entry winning" do
+      deps = described_class.from_h(
+        "source_inference" => [
+          { "gem" => "rack", "mode" => "when_missing" },
+          { "gem" => "rack", "mode" => "full" }
+        ]
+      )
+
+      expect(deps.source_inference.length).to eq(1)
+      expect(deps.source_inference.first.mode).to eq(:full)
+      expect(deps.warnings.first).to include("rack")
+      expect(deps.warnings.first).to include(":full")
+      expect(deps.warnings.first).to include(":when_missing")
+    end
+
+    it "unions roots silently across entries with the same mode" do
+      deps = described_class.from_h(
+        "source_inference" => [
+          { "gem" => "rack", "mode" => "when_missing", "roots" => %w[lib] },
+          { "gem" => "rack", "mode" => "when_missing", "roots" => %w[lib app] }
+        ]
+      )
+
+      expect(deps.source_inference.length).to eq(1)
+      expect(deps.source_inference.first.roots).to contain_exactly("lib", "app")
+      expect(deps.warnings).to be_empty
+    end
+  end
 end

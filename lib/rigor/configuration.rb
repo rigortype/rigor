@@ -180,15 +180,39 @@ module Rigor
 
       merged = left.dup
       right.each do |key, value|
-        merged[key] = if merged.key?(key) && merged[key].is_a?(Hash) && value.is_a?(Hash)
-                        deep_merge(merged[key], value)
-                      else
-                        value
-                      end
+        merged[key] = merge_value(key, merged, value)
       end
       merged
     end
-    private_class_method :load_with_includes, :merge_includes, :resolve_paths_in, :deep_merge
+
+    # Most keys are right-wins (override) or recursively
+    # merged hashes. ADR-10 § "config-conflict diagnostic"
+    # carves out `dependencies.source_inference[]`: the
+    # per-gem merge across `includes:` chains needs union
+    # behaviour with mode-conflict detection. The Hash itself
+    # still merges deeply; only the inner array gets
+    # concatenated so {Dependencies.from_h} sees every
+    # contributor's entries and can dedupe them.
+    def self.merge_value(key, merged, value)
+      if key == "dependencies" && merged[key].is_a?(Hash) && value.is_a?(Hash)
+        merge_dependencies_hash(merged[key], value)
+      elsif merged.key?(key) && merged[key].is_a?(Hash) && value.is_a?(Hash)
+        deep_merge(merged[key], value)
+      else
+        value
+      end
+    end
+
+    def self.merge_dependencies_hash(left, right)
+      out = deep_merge(left, right)
+      left_si = Array(left["source_inference"])
+      right_si = Array(right["source_inference"])
+      both_empty = left_si.empty? && right_si.empty?
+      out["source_inference"] = left_si + right_si unless both_empty # rigor:disable flow.always-truthy-condition
+      out
+    end
+    private_class_method :load_with_includes, :merge_includes, :resolve_paths_in, :deep_merge,
+                         :merge_value, :merge_dependencies_hash
 
     # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
     def initialize(data = DEFAULTS)

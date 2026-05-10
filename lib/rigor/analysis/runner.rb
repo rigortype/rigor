@@ -87,6 +87,7 @@ module Rigor
           plugin_prepare_diagnostics +
           dependency_source_diagnostics +
           dependency_source_budget_diagnostics +
+          dependency_source_config_conflict_diagnostics +
           expansion.fetch(:errors)
       end
 
@@ -255,6 +256,28 @@ module Rigor
       # diagnostic names the gem and points the user at the
       # three remediations: ship RBS, reduce `mode:` from
       # `full` to `when_missing`, or de-list the gem.
+      # ADR-10 § "config-conflict diagnostic" / 5d — surfaces
+      # `Configuration::Dependencies` warnings accumulated
+      # during `from_h` deduplication of the `includes:`-chain
+      # source_inference array. Each warning describes a
+      # per-gem mode conflict that the merge resolved
+      # right-wins; the user sees one diagnostic per conflict.
+      # `:warning` matches the user's "warn but don't block"
+      # preference per the design discussion.
+      def dependency_source_config_conflict_diagnostics
+        @configuration.dependencies.warnings.map do |message|
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: message,
+            severity: :warning,
+            rule: "dynamic.dependency-source.config-conflict",
+            source_family: :builtin
+          )
+        end
+      end
+
       def dependency_source_budget_diagnostics
         budget = @configuration.dependencies.budget_per_gem
         @dependency_source_index.budget_exceeded.map do |gem_name|

@@ -1,0 +1,9 @@
+paths:
+  - app/controllers
+
+plugins:
+  - rigor-rails-routes
+  - rigor-actionpack
+
+cache:
+  path: tmp/.rigor/cache

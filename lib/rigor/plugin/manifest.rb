@@ -38,12 +38,12 @@ module Rigor
       end
 
       attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
-                  :owns_receivers
+                  :owns_receivers, :type_node_resolvers
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
-        produces: [], consumes: [], owns_receivers: []
+        produces: [], consumes: [], owns_receivers: [], type_node_resolvers: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -51,15 +51,18 @@ module Rigor
         validate_config_schema!(config_schema)
         validate_produces!(produces)
         validate_owns_receivers!(owns_receivers)
+        validate_type_node_resolvers!(type_node_resolvers)
 
-        assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers)
+        assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
+                      type_node_resolvers)
         freeze
       end
 
       private
 
       # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize
-      def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers)
+      def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
+                        type_node_resolvers)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
@@ -68,6 +71,7 @@ module Rigor
         @produces = produces.map(&:to_sym).freeze
         @consumes = coerce_consumes(consumes)
         @owns_receivers = owns_receivers.map { |c| c.to_s.dup.freeze }.freeze
+        @type_node_resolvers = type_node_resolvers.dup.freeze
       end
       # rubocop:enable Metrics/ParameterLists,Metrics/AbcSize
 
@@ -105,7 +109,8 @@ module Rigor
           "config_schema" => config_schema.to_h { |k, v| [k, v.to_s] },
           "produces" => produces.map(&:to_s),
           "consumes" => consumes.map { |c| consumption_hash(c) },
-          "owns_receivers" => owns_receivers
+          "owns_receivers" => owns_receivers,
+          "type_node_resolvers" => type_node_resolvers.map { |r| r.class.name }
         }
       end
 
@@ -185,6 +190,22 @@ module Rigor
         raise ArgumentError,
               "plugin manifest owns_receivers must be an Array of non-empty String, " \
               "got #{owns_receivers.inspect}"
+      end
+
+      # ADR-13 slice 2 — `type_node_resolvers:` declares the
+      # plugin-supplied `TypeNodeResolver` instances the parser
+      # consults (in slice 3) when an RBS::Extended payload's
+      # named- or generic-type head misses the built-in registry.
+      # Slice 2 carries the declarations on the manifest and the
+      # registry exposes them in registration order; the parser
+      # integration that actually drives the chain lands in
+      # slice 3.
+      def validate_type_node_resolvers!(resolvers)
+        return if resolvers.is_a?(Array) && resolvers.all?(TypeNodeResolver)
+
+        raise ArgumentError,
+              "plugin manifest type_node_resolvers must be an Array of " \
+              "Rigor::Plugin::TypeNodeResolver instances, got #{resolvers.inspect}"
       end
 
       def coerce_consumes(consumes)

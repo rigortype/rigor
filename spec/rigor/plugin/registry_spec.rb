@@ -47,4 +47,40 @@ RSpec.describe Rigor::Plugin::Registry do
     expect(registry.load_errors).to eq([error])
     expect(registry).to be_any_load_errors
   end
+
+  describe "#type_node_resolvers (ADR-13 slice 2)" do
+    let(:resolver_class) { Class.new(Rigor::Plugin::TypeNodeResolver) }
+
+    def build_plugin(id, resolvers, services)
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: id, version: "0.1.0", type_node_resolvers: resolvers)
+      end
+      klass.new(services: services)
+    end
+
+    it "is empty when no plugin declares resolvers" do
+      plugin = plugin_class.new(services: services)
+      registry = described_class.new(plugins: [plugin])
+      expect(registry.type_node_resolvers).to eq([])
+    end
+
+    it "aggregates resolvers across plugins in plugin-registration order" do
+      pick = resolver_class.new
+      omit = resolver_class.new
+      dry  = resolver_class.new
+      ts = build_plugin("ts-utilities", [pick, omit], services)
+      dry_plugin = build_plugin("dry-types", [dry], services)
+      registry = described_class.new(plugins: [ts, dry_plugin])
+
+      expect(registry.type_node_resolvers).to eq([pick, omit, dry])
+    end
+
+    it "preserves intra-plugin resolver order" do
+      pick = resolver_class.new
+      omit = resolver_class.new
+      ts = build_plugin("ts-utilities", [pick, omit], services)
+      registry = described_class.new(plugins: [ts])
+      expect(registry.type_node_resolvers).to eq([pick, omit])
+    end
+  end
 end

@@ -197,4 +197,60 @@ RSpec.describe Rigor::Plugin::Manifest do
       )
     end
   end
+
+  describe "type_node_resolvers (ADR-13 slice 2)" do
+    let(:pick_resolver_class) do
+      Class.new(Rigor::Plugin::TypeNodeResolver) do
+        def self.name = "PickResolver"
+      end
+    end
+    let(:omit_resolver_class) do
+      Class.new(Rigor::Plugin::TypeNodeResolver) do
+        def self.name = "OmitResolver"
+      end
+    end
+
+    it "defaults to an empty Array" do
+      m = described_class.new(id: "ts", version: "0.1.0")
+      expect(m.type_node_resolvers).to eq([])
+      expect(m.type_node_resolvers).to be_frozen
+    end
+
+    it "stores TypeNodeResolver instances in declaration order" do
+      pick = pick_resolver_class.new
+      omit = omit_resolver_class.new
+      m = described_class.new(
+        id: "ts", version: "0.1.0",
+        type_node_resolvers: [pick, omit]
+      )
+      expect(m.type_node_resolvers).to eq([pick, omit])
+      expect(m.type_node_resolvers).to be_frozen
+    end
+
+    it "rejects non-Array type_node_resolvers" do
+      expect do
+        described_class.new(id: "ts", version: "0.1.0", type_node_resolvers: pick_resolver_class.new)
+      end.to raise_error(ArgumentError, /type_node_resolvers must be an Array/)
+    end
+
+    it "rejects entries that are not TypeNodeResolver instances" do
+      expect do
+        described_class.new(id: "ts", version: "0.1.0", type_node_resolvers: ["not-a-resolver"])
+      end.to raise_error(ArgumentError, /TypeNodeResolver instances/)
+    end
+
+    it "rejects a bare TypeNodeResolver class (instances required)" do
+      expect do
+        described_class.new(id: "ts", version: "0.1.0", type_node_resolvers: [pick_resolver_class])
+      end.to raise_error(ArgumentError, /TypeNodeResolver instances/)
+    end
+
+    it "serialises resolver class names through #to_h" do
+      m = described_class.new(
+        id: "ts", version: "0.1.0",
+        type_node_resolvers: [pick_resolver_class.new, omit_resolver_class.new]
+      )
+      expect(m.to_h["type_node_resolvers"]).to eq(%w[PickResolver OmitResolver])
+    end
+  end
 end

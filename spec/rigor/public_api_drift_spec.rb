@@ -146,6 +146,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     produces()
     protocols()
     to_h()
+    type_node_resolvers()
     validate_config(req:config)
     version()
   ].freeze
@@ -173,7 +174,10 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     ids()
     load_errors()
     plugins()
+    type_node_resolvers()
   ].freeze
+
+  PLUGIN_TYPE_NODE_RESOLVER_INSTANCE = %w[resolve(req:node,req:scope)].freeze
 
   PLUGIN_TRUST_POLICY_INSTANCE = %w[
     allow_read?(req:path)
@@ -283,6 +287,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::TypeNode
     Rigor::TypeNode::Identifier
     Rigor::TypeNode::Generic
+    Rigor::Plugin::TypeNodeResolver
   ].freeze
 
   COMBINATOR_SINGLETON = %w[
@@ -496,6 +501,14 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
     it "exposes the expected ADR-13 slice-1 generic-type carrier surface" do
       expect(instance_signatures(Rigor::TypeNode::Generic)).to eq(
         PublicApiDriftSnapshots::TYPE_NODE_GENERIC_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::TypeNodeResolver" do
+    it "exposes the expected ADR-13 slice-2 resolver base surface" do
+      expect(instance_signatures(Rigor::Plugin::TypeNodeResolver)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_TYPE_NODE_RESOLVER_INSTANCE
       )
     end
   end

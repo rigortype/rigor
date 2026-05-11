@@ -44,6 +44,17 @@ module Rigor
         !load_errors.empty?
       end
 
+      # ADR-13 slice 2 — flat ordered list of every loaded
+      # plugin's manifest-declared {TypeNodeResolver} instances,
+      # in plugin registration order. Slice 3 wires this into
+      # the parser's resolver chain; until then the method is a
+      # read-side aggregator only. The first non-nil
+      # `#resolve(node, scope)` return wins per ADR-13 WD3 / WD5
+      # — registration order is the user's lever.
+      def type_node_resolvers
+        plugins.flat_map { |plugin| plugin.manifest.type_node_resolvers }
+      end
+
       EMPTY = new.freeze
     end
   end

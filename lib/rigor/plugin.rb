@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "plugin/type_node_resolver"
 require_relative "plugin/manifest"
 require_relative "plugin/access_denied_error"
 require_relative "plugin/trust_policy"

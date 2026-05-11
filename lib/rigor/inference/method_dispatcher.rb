@@ -98,6 +98,21 @@ module Rigor
         dep_source_result = try_dependency_source(receiver_type, method_name, environment)
         return dep_source_result if dep_source_result
 
+        # v0.1.3 — discovered-method dispatch tier. When the
+        # receiver class has no RBS BUT scope_indexer recorded
+        # `def method_name` for that class (or singleton), the
+        # call dispatches to `Dynamic[top]` rather than falling
+        # through to the user-class fallback. Sits below RBS /
+        # dependency-source so authoritative signatures still win.
+        # The scope-indexer-built table records every project-side
+        # `def`, `define_method`, and `alias_method`; the
+        # `discovered_method?` consult here closes the
+        # fail-soft-event hot spot on implicit-self calls
+        # (`sibling_private(...)`) inside `lib/rigor/`'s own
+        # internals (analyser private helpers don't have RBS).
+        discovered_result = try_discovered_method(receiver_type, method_name, scope)
+        return discovered_result if discovered_result
+
         # Slice 7 phase 10 — user-class ancestor fallback. When
         # the receiver is `Nominal[T]` or `Singleton[T]` for a
         # class not in the RBS environment (typically a
@@ -110,6 +125,49 @@ module Rigor
         # user classes without requiring the user to author
         # their own RBS.
         try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type)
+      end
+
+      # v0.1.3 — discovered-method dispatch tier. `scope` carries
+      # the `discovered_methods` table built once per program by
+      # `ScopeIndexer` (a `Hash[String, Hash[Symbol, :instance |
+      # :singleton]]`). When the receiver names a discovered
+      # class AND the requested method is recorded for that
+      # class's appropriate kind, return `Type::Combinator.untyped`
+      # — the dispatcher cannot infer a more precise return type
+      # from the bare `def` shape, but the call site stops being a
+      # fail-soft hot spot.
+      #
+      # Returns `nil` when scope / receiver class is unavailable,
+      # when the class is RBS-known (RBS dispatch already had its
+      # turn upstream), when the method is not in the discovered
+      # table, OR when `discovered_def_nodes` carries a re-typable
+      # body for the method (so the downstream
+      # `ExpressionTyper#try_user_method_inference` tier can
+      # re-type the body for a precise return type rather than
+      # collapsing to `Dynamic[top]` here).
+      def try_discovered_method(receiver_type, method_name, scope)
+        return nil if scope.nil?
+
+        class_name, kind = discovered_method_lookup(receiver_type)
+        return nil if class_name.nil?
+        return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: scope.environment)
+        return nil unless scope.discovered_method?(class_name, method_name, kind)
+        return nil if kind == :instance && scope.user_def_for(class_name, method_name)
+
+        Type::Combinator.untyped
+      end
+
+      # Resolves the `(class_name, kind)` pair scope_indexer keys
+      # its `discovered_methods` table on. `Nominal[X]` looks up
+      # instance methods on X; `Singleton[X]` looks up singleton
+      # methods on X. Other carriers return `[nil, nil]` so the
+      # tier declines.
+      def discovered_method_lookup(receiver_type)
+        case receiver_type
+        when Type::Nominal then [receiver_type.class_name, :instance]
+        when Type::Singleton then [receiver_type.class_name, :singleton]
+        else [nil, nil]
+        end
       end
 
       # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2

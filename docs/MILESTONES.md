@@ -281,7 +281,7 @@ The full "Out of scope for v0.1.1" list above applies (minus the now-closed inte
 
 ## v0.1.3 — Planned
 
-Theme: **deliver ADR-10 end-to-end and absorb ADR-11 + Rails Tier 2 work.** v0.1.2 closed the Engine-depth follow-up sweep and migrated four example plugins to the v0.1.1 `flow_contribution_for` substrate; v0.1.3 turns to the queued ADR work and the Rails plugin family that depends on the cross-plugin API.
+Theme: **deliver ADR-10 end-to-end, absorb ADR-11 + Rails Tier 2 work, and land ADR-13 (plugin TypeNode resolver + TS-utility-type adapter).** v0.1.2 closed the Engine-depth follow-up sweep and migrated four example plugins to the v0.1.1 `flow_contribution_for` substrate; v0.1.3 turns to the queued ADR work, the Rails plugin family that depends on the cross-plugin API, and the type-language vocabulary extension surface that PHPStan's `TypeNodeResolverExtension` inspired.
 
 ### Track 1 — ADR-10 (Opt-in dependency-source inference)
 
@@ -324,6 +324,19 @@ Handbook chapter 7 gains a `@phpstan-assert` correspondence table mapping each P
 - ✅ **`rigor-factorybot`** — Phase 1 (a) self-contained factory + attribute key validation; Phase 1 (c) AR column cross-check via the `:model_index` ADR-9 fact.
 - ✅ **`rigor-activerecord`** — `manifest(produces: [:model_index])` + `prepare(services)` hook publishes the per-run model index. First publish-and-consume cycle exercising ADR-9 end-to-end with two consumers (`rigor-actionpack` Phase 1 + `rigor-factorybot` Phase 1 (c)).
 
+### Track 5 — ADR-13 (Plugin TypeNode resolver + TS-utility-type adapter)
+
+ADR-13 lands the `Plugin::TypeNodeResolver` extension point, five Rigor-canonical shape-projection type functions on `Type::Combinator`, and the opt-in `rigor-typescript-utility-types` example plugin. Six of seven slices landed; slice 3b (`RbsExtended` caller threading + diagnostics) and slice 7 (handbook update) deferred to v0.1.4.
+
+1. ✅ **Slice 1** — `Rigor::TypeNode::Identifier(name:)` / `Generic(head:, args:)` value-object AST. Drift snapshots pinned.
+2. ✅ **Slice 2** — `Rigor::Plugin::TypeNodeResolver` base class, `Plugin::Manifest#type_node_resolvers` optional keyword, `Plugin::Registry#type_node_resolvers` aggregator (registration order; first non-nil wins per ADR-13 WD3 / WD5).
+3. ✅ **Slice 3** — Parser refactor from inline scan+resolve into "scan to AST" + sibling `Resolver` pass. New AST nodes `IntegerLiteral` / `IndexedAccess`, scope companions `NameScope(resolver:, class_context:, type_alias_table:)` + `ResolverChain`. `ImportedRefinements.parse(payload, name_scope: nil)` accepts the optional scope; `nil` (default) preserves slice-2 behaviour bit-for-bit.
+4. ✅ **Slice 4** — phase A: `Type::Combinator.pick_of` / `omit_of` / `partial_of` / `required_of` / `readonly_of` on `HashShape`. `PARAMETERISED_TYPE_BUILDERS` grows the five new heads. `partial_of` does NOT widen value types to nil — Rigor's HashShape distinguishes "key absent" from "key present with nil value".
+5. ✅ **Slice 5** — phase B: Tuple support for `pick_of` / `omit_of` (integer-index `K`); `shape_projection_lossy?(type)` predicate (`true` for non-HashShape / non-Tuple inputs); `partial_of` / `required_of` / `readonly_of` stay HashShape-only on Tuple (no native required/optional/readonly carrier).
+6. ✅ **Slice 6** — `examples/rigor-typescript-utility-types/` plugin maps `Pick` / `Omit` / `Partial` / `Required` / `Readonly` onto the core functions. Resolver scope-handle fix landed alongside: `NameScope#resolver` now points at the full `Resolver` (built-in registry → chain → RBS Nominal fallback), so plugin authors recursively resolve sub-args via `scope.resolver.resolve(arg, scope)` without re-implementing name resolution.
+7. ⏭ **Slice 3b** — caller-side threading from `RbsExtended` (`resolve_directive_rhs` / sibling sites) + `dynamic.rbs-extended.unresolved` (whole-payload resolution failure) + `dynamic.shape.lossy-projection` (consults `shape_projection_lossy?` at projection-authoring sites). Deferred to v0.1.4: the existing `Combinator.shape_projection_lossy?` predicate is in place; the wiring is a focused follow-up commit.
+8. ⏭ **Slice 7** — handbook TypeScript appendix update naming the opt-in plugin. Deferred to v0.1.4; current handbook still says "no analogue" for TS utility types.
+
 ### Out of scope for v0.1.3 (deferred to v0.1.4 or beyond)
 
 - **`mode: full` distinct dispatch** — gem-source contributing alongside RBS with merger conflict resolution. Prerequisite for ADR-10 5c (boundary-cross) — the diagnostic has no condition under which it would fire without distinct dispatch.
@@ -331,6 +344,7 @@ Handbook chapter 7 gains a `@phpstan-assert` correspondence table mapping each P
 - **Tier 3 plugins remaining**: `rigor-graphql`, `rigor-activestorage`. Author when there is concrete user demand.
 - **rigor-activerecord extensions**: associations, enums, scopes, validations, callbacks. Each ships as a 0.2.0+ minor bump per the roadmap.
 - **dry-rb ecosystem plugins** ([`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md)) — packaging strategy (single gem vs. family vs. mid-grain bundles) needs an explicit ADR-12 decision before any individual plugin can be authored.
+- **ADR-13 slice 3b** (caller-side `RbsExtended` threading + `dynamic.rbs-extended.unresolved` + `dynamic.shape.lossy-projection` diagnostics) and **slice 7** (handbook TypeScript appendix). The core machinery + opt-in plugin landed in v0.1.3; these are the user-facing-diagnostic + documentation polish pass.
 - All earlier "Out of scope" items from v0.1.1 / v0.1.2 still apply: LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT, `rigor:v1:conforms-to`.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)

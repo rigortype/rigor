@@ -13,7 +13,7 @@ module Rigor
     # receiver has been resolved to a {Rigor::Type} carrier and the
     # key has been resolved (typically to a `Constant<Integer>` or
     # a constant String/Symbol singleton).
-    IndexedAccess = Data.define(:receiver, :key) do
+    class IndexedAccess < Data.define(:receiver, :key)
       def initialize(receiver:, key:)
         unless valid_node?(receiver)
           raise ArgumentError,

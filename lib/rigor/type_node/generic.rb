@@ -23,7 +23,7 @@ module Rigor
     # zero-arg Generic so plugins can synthesise nodes for
     # diagnostic or testing purposes without the parser fighting
     # back.
-    Generic = Data.define(:head, :args) do
+    class Generic < Data.define(:head, :args)
       def initialize(head:, args:)
         unless head.is_a?(String) && !head.empty?
           raise ArgumentError,

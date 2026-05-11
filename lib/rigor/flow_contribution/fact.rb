@@ -55,7 +55,7 @@ module Rigor
     # land in the same merge bucket.
     FACT_VALID_TARGET_KINDS = %i[parameter self].freeze
 
-    Fact = Data.define(:target_kind, :target_name, :type, :negative) do
+    class Fact < Data.define(:target_kind, :target_name, :type, :negative)
       def initialize(target_kind:, target_name:, type:, negative: false)
         unless FACT_VALID_TARGET_KINDS.include?(target_kind)
           raise ArgumentError,

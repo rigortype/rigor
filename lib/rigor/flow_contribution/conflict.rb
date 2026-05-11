@@ -28,7 +28,7 @@ module Rigor
       lower_tier_contradiction
     ].freeze
 
-    Conflict = Data.define(:target, :edge, :kind, :reason, :provenances, :message) do
+    class Conflict < Data.define(:target, :edge, :kind, :reason, :provenances, :message)
       def initialize(target:, edge:, kind:, reason:, provenances:, message:) # rubocop:disable Metrics/ParameterLists
         unless CONFLICT_VALID_REASONS.include?(reason)
           raise ArgumentError,

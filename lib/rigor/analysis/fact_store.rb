@@ -18,7 +18,7 @@ module Rigor
         relational
       ].freeze
 
-      Target = Data.define(:kind, :name) do
+      class Target < Data.define(:kind, :name)
         def self.local(name)
           new(kind: :local, name: name.to_sym)
         end
@@ -28,8 +28,8 @@ module Rigor
         end
       end
 
-      Fact = Data.define(:bucket, :target, :predicate, :payload, :polarity, :stability) do
-        def initialize(bucket:, target:, predicate:, payload: nil, polarity: :positive, stability: :local_binding)
+      class Fact < Data.define(:bucket, :target, :predicate, :payload, :polarity, :stability)
+        def initialize(bucket:, target:, predicate:, payload: nil, polarity: :positive, stability: :local_binding) # rubocop:disable Metrics/ParameterLists
           bucket = bucket.to_sym
           raise ArgumentError, "unknown fact bucket #{bucket.inspect}" unless BUCKETS.include?(bucket)
 
@@ -125,8 +125,16 @@ module Rigor
         unique.freeze
       end
 
+      # `fact.target` is `Target | Array[Target]` per the carrier
+      # contract. Branching with an early return on the `Array`
+      # arm lets type narrowing collapse the post-return value to
+      # the bare `Target` case, so the wrapped tuple is `[Target]`
+      # and the union of return paths is exactly `Array[Target]`.
       def fact_targets(fact)
-        Array(fact.target)
+        target = fact.target
+        return target if target.is_a?(Array)
+
+        [target]
       end
     end
   end

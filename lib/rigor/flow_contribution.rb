@@ -32,7 +32,7 @@ module Rigor
     # `descriptor` is the {Rigor::Cache::Descriptor} this
     # contribution attaches to (or `nil` when the contribution does
     # not need its own cache slice).
-    Provenance = Data.define(:source_family, :plugin_id, :node, :descriptor) do
+    class Provenance < Data.define(:source_family, :plugin_id, :node, :descriptor)
       def self.builtin
         new(source_family: :builtin, plugin_id: nil, node: nil, descriptor: nil)
       end

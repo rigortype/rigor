@@ -28,7 +28,7 @@ module Rigor
       role
     ].freeze
 
-    Element = Data.define(:target, :edge, :kind, :payload, :provenance) do
+    class Element < Data.define(:target, :edge, :kind, :payload, :provenance)
       def initialize(target:, edge:, kind:, payload:, provenance:)
         unless ELEMENT_VALID_EDGES.include?(edge)
           raise ArgumentError,

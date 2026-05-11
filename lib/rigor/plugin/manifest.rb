@@ -31,7 +31,7 @@ module Rigor
       # topological sort + missing-producer detection (slice 5);
       # slice 4 carries the declarations on the manifest but the
       # loader does not yet enforce them.
-      Consumption = Data.define(:plugin_id, :name, :optional) do
+      class Consumption < Data.define(:plugin_id, :name, :optional)
         def initialize(plugin_id:, name:, optional: false)
           super(plugin_id: plugin_id.to_s, name: name.to_sym, optional: optional ? true : false)
         end

@@ -60,7 +60,7 @@ module Rigor
     # current local type; `class_name` is then nil and
     # `negative` is false (refinement-form directives do not
     # support `~T` negation in v0.0.4).
-    PredicateEffect = Data.define(:edge, :target_kind, :target_name, :class_name, :negative, :refinement_type) do
+    class PredicateEffect < Data.define(:edge, :target_kind, :target_name, :class_name, :negative, :refinement_type)
       def truthy_only? = edge == :truthy_only
       def falsey_only? = edge == :falsey_only
       def negative? = negative == true
@@ -99,7 +99,7 @@ module Rigor
     #
     # `negative` mirrors `PredicateEffect`: true when the
     # directive uses `~ClassName` syntax.
-    AssertEffect = Data.define(:condition, :target_kind, :target_name, :class_name, :negative, :refinement_type) do
+    class AssertEffect < Data.define(:condition, :target_kind, :target_name, :class_name, :negative, :refinement_type)
       def always? = condition == :always
       def if_truthy_return? = condition == :if_truthy_return
       def if_falsey_return? = condition == :if_falsey_return

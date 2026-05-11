@@ -31,8 +31,8 @@ module Rigor
     #   from `Configuration::SeverityProfile::PROFILES`.
     # - `since` — first version the rule shipped in.
     module RuleCatalog # rubocop:disable Metrics/ModuleLength
-      Entry = Data.define(:id, :summary, :fires_when, :does_not_fire_when,
-                          :suppression, :severity_authored, :severity_by_profile, :since) do
+      class Entry < Data.define(:id, :summary, :fires_when, :does_not_fire_when,
+                                :suppression, :severity_authored, :severity_by_profile, :since)
         def aliases
           CheckRules::LEGACY_RULE_ALIASES.select { |_legacy, canonical| canonical == id }.keys
         end

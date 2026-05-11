@@ -91,3 +91,15 @@ Lint/DuplicateBranch:
 Style/EmptyElse:
   Exclude:
     - "examples/**/*"
+
+# Rigor authors carriers as `class X < Data.define(...)` rather than
+# `X = Data.define(...) do ... end` so Steep can resolve the block
+# body's `self` to `X`. The block form trips a known Steep limitation
+# (`RuntimeError: Unexpected self_type: untyped` on `def self.*`
+# inside the block; `MethodParameterMismatch` warnings on inner
+# `def initialize`). The two forms are runtime-equivalent for the
+# carriers under `lib/rigor/`; the cop's stylistic preference loses
+# to Steep correctness.
+Style/DataInheritance:
+  Exclude:
+    - "lib/**/*"

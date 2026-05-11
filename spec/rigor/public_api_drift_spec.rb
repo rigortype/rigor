@@ -376,8 +376,23 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
     "#{method.name}(#{params})"
   end
 
+  # When `klass` is `class Foo < Data.define(...)`, the Data-generated
+  # readers live on the anonymous parent class rather than on `Foo`
+  # itself. Walk through any anonymous (name == nil) parent so the
+  # surface snapshot is invariant to whether the carrier was authored
+  # as `Foo = Data.define(...) do ... end` or
+  # `class Foo < Data.define(...)`.
   def instance_signatures(klass)
-    klass.public_instance_methods(false).sort.map { |name| signature(klass.instance_method(name)) }
+    collected = []
+    cursor = klass
+    while cursor
+      collected.concat(cursor.public_instance_methods(false))
+      parent = cursor.superclass
+      break unless parent && parent.name.nil? && parent != Object
+
+      cursor = parent
+    end
+    collected.uniq.sort.map { |name| signature(klass.instance_method(name)) }
   end
 
   def singleton_signatures(klass)

@@ -21,7 +21,7 @@ module Rigor
     #   3 lands the slot with a default empty Hash; the
     #   populated table is wired from {Rigor::Environment} in a
     #   later slice once plugin authors ask for it.
-    NameScope = Data.define(:resolver, :class_context, :type_alias_table) do
+    class NameScope < Data.define(:resolver, :class_context, :type_alias_table)
       def initialize(resolver:, class_context: nil, type_alias_table: {})
         unless resolver.respond_to?(:resolve)
           raise ArgumentError,

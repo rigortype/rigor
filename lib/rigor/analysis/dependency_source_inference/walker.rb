@@ -41,7 +41,7 @@ module Rigor
         # this per-gem so the Runner can surface a single
         # `dynamic.dependency-source.budget-exceeded` warning
         # naming the affected gem(s).
-        Outcome = Data.define(:catalog, :truncated) do
+        class Outcome < Data.define(:catalog, :truncated)
           def truncated? = truncated
         end
 

@@ -15,7 +15,7 @@ module Rigor
     # `Identifier("Pick")` since TypeScript's `Pick` is only
     # meaningful with two type arguments. The `Generic` carrier
     # is what plugin resolvers normally key on.
-    Identifier = Data.define(:name) do
+    class Identifier < Data.define(:name)
       def initialize(name:)
         unless name.is_a?(String) && !name.empty?
           raise ArgumentError,

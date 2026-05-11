@@ -21,7 +21,7 @@ module Rigor
         # a String so it round-trips into cache descriptors
         # (slice 3) without leaking a `Gem::Version` instance
         # through public surfaces.
-        Resolved = Data.define(:gem_name, :version, :gem_dir, :mode, :roots) do
+        class Resolved < Data.define(:gem_name, :version, :gem_dir, :mode, :roots)
           def descriptor_key
             [gem_name, version, mode].freeze
           end

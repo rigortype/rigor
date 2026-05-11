@@ -24,7 +24,7 @@ module Rigor
     # hot inference path: it allocates a tracer per visited node and discards
     # the inferred type values.
     class CoverageScanner
-      Result = Data.define(:visits, :unrecognized, :events) do
+      class Result < Data.define(:visits, :unrecognized, :events)
         # @return [Integer] sum of all visits across node classes.
         def visited_count
           visits.values.sum

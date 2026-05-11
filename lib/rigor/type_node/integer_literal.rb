@@ -14,7 +14,7 @@ module Rigor
     # name. Plugin resolvers receive the same shape and MAY treat
     # integer literals as input to custom carriers (e.g. an
     # opinionated `port_number<8000>` plugin).
-    IntegerLiteral = Data.define(:value) do
+    class IntegerLiteral < Data.define(:value)
       def initialize(value:)
         unless value.is_a?(Integer)
           raise ArgumentError,

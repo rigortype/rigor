@@ -61,7 +61,7 @@ module Rigor
       # walk time); `mode:` is one of {VALID_MODES}; `roots:` is
       # the list of subdirectories within the gem's installation
       # directory to walk (defaults to `["lib"]`).
-      Entry = Data.define(:gem, :mode, :roots) do
+      class Entry < Data.define(:gem, :mode, :roots)
         def disabled? = mode == :disabled
         def when_missing? = mode == :when_missing
         def full? = mode == :full

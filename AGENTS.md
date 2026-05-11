@@ -67,6 +67,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make ch
 - `make verify` runs `test`, `lint`, and `check` in sequence.
 - `make check-json` runs `rigor check --format=json lib` (machine-readable diagnostics).
 - Submodule maintenance: `make init-submodules`, `make pull-submodules`.
+- Cross-checker pass: `make steep-install` once, then `make steep-check`. Steep runs under an isolated `tool/steep/Gemfile` so its dependency tree (rbs, prism, …) cannot bleed into Rigor's own `Gemfile.lock`. `make steep ARGS="check --severity-level=error"` is the pass-through escape hatch.
 
 `bundle exec exe/rigor help` and `bundle exec exe/rigor version` remain available for CLI discovery. `rigor init` writes a starter `.rigor.yml` file. Use `--force` when overwriting an existing file intentionally.
 

@@ -151,11 +151,28 @@ module Rigor
       #   `rigor:v1:return:` (or sibling) directive. Accepts
       #   the bare-name forms `lookup` already handles plus the
       #   parameterised forms documented on {Parser}.
+      # @param name_scope [Rigor::TypeNode::NameScope, nil]
+      #   ADR-13 slice 3 — when provided, the parser consults the
+      #   scope's `#resolver` chain after the built-in registry
+      #   and built-in parametric forms but before the RBS Nominal
+      #   fallback. `nil` (default) preserves the slice-1 / slice-2
+      #   behaviour of consulting only built-ins + RBS.
       # @return [Rigor::Type, nil] the resolved refinement
       #   carrier, or `nil` when the payload is unparseable or
-      #   names a refinement / class not in the registry.
-      def parse(payload)
-        Parser.new(payload.to_s).parse
+      #   names a refinement / class no registered source resolved.
+      def parse(payload, name_scope: nil)
+        Parser.new(payload.to_s, name_scope: name_scope).parse
+      end
+
+      # Builder helpers reachable from the Resolver. They live on
+      # the module so the Resolver does not have to import the
+      # `private_constant` builder hashes.
+      def parametric_type_builder(name)
+        PARAMETERISED_TYPE_BUILDERS[name]
+      end
+
+      def parametric_int_builder(name)
+        PARAMETERISED_INT_BUILDERS[name]
       end
 
       def known?(name)
@@ -185,23 +202,34 @@ module Rigor
       # soft (returns `nil` from `parse`) on any deviation so the
       # `RBS::Extended` directive site can fall back to the
       # RBS-declared type rather than crash on a typo.
+      #
+      # ADR-13 slice 3 split the original "scan + resolve" loop
+      # into two passes: the parser emits a {Rigor::TypeNode} AST,
+      # and a sibling {Resolver} walks the AST to produce a
+      # {Rigor::Type} carrier — consulting the built-in registry,
+      # the plugin {Rigor::TypeNode::ResolverChain}, and finally
+      # the RBS Nominal fallback in that order. Plugin resolvers
+      # never see partial parses.
       class Parser # rubocop:disable Metrics/ClassLength
-        def initialize(input)
+        def initialize(input, name_scope: nil)
           @scanner = StringScanner.new(input.strip)
+          @resolver = Resolver.new(name_scope: name_scope)
         end
 
         def parse
-          type = parse_type
-          return nil if type.nil?
+          ast = parse_type_ast
+          return nil if ast.nil?
 
-          # v0.0.7 — trailing `[K]` indexed-access projects
-          # into the parsed type. Multiple `[K]` segments
-          # chain (`Tuple[A, B, C][1][0]`).
-          type = parse_indexed_access_chain(type)
-          return nil if type.nil?
+          # v0.0.7 — trailing `[K]` indexed-access projects into
+          # the parsed type. Multiple `[K]` segments chain
+          # (`Tuple[A, B, C][1][0]`). Each segment wraps the
+          # previous AST in an {IndexedAccess} node so the chain
+          # composes cleanly through the resolver pass.
+          ast = parse_indexed_access_chain_ast(ast)
+          return nil if ast.nil?
           return nil unless @scanner.eos?
 
-          type
+          @resolver.resolve_ast(ast)
         end
 
         private
@@ -216,66 +244,59 @@ module Rigor
         SIGNED_INT = /-?\d+/
         private_constant :SIMPLE_NAME, :CLASS_NAME, :SIGNED_INT
 
-        def parse_type
+        def parse_type_ast
           if (class_name = @scanner.scan(CLASS_NAME))
-            return parse_class_arg_tail(class_name)
+            return parse_class_arg_tail_ast(class_name)
           end
 
           name = @scanner.scan(SIMPLE_NAME)
           return nil if name.nil?
 
           case @scanner.peek(1)
-          when "[" then parse_parametric_type_args(name)
-          when "<" then parse_parametric_int_bounds(name)
-          else          ImportedRefinements.lookup(name)
+          when "[" then parse_bracket_args_ast(name)
+          when "<" then parse_angle_bounds_ast(name)
+          else          TypeNode::Identifier.new(name: name)
           end
         end
 
-        # `T[K]` — keep applying `[K]` indexes until no more
-        # opening brackets are present. Each index consumes one
-        # type argument; multi-arg `[K1, K2]` fails (the spec
-        # specifies a single key).
-        def parse_indexed_access_chain(type)
+        def parse_indexed_access_chain_ast(ast)
           loop do
             skip_ws
             break unless @scanner.peek(1) == "["
 
             @scanner.getch
-            args = parse_type_arg_list
+            args = parse_type_arg_list_ast
             return nil if args.nil? || args.size != 1
             return nil unless @scanner.getch == "]"
 
-            type = Type::Combinator.indexed_access(type, args.first)
+            ast = TypeNode::IndexedAccess.new(receiver: ast, key: args.first)
           end
-          type
+          ast
         end
 
-        def parse_parametric_type_args(name)
-          builder = PARAMETERISED_TYPE_BUILDERS[name]
-          return nil if builder.nil?
-
+        def parse_bracket_args_ast(name)
           @scanner.getch # consume '['
-          args = parse_type_arg_list
+          args = parse_type_arg_list_ast
           return nil if args.nil?
           return nil unless @scanner.getch == "]"
 
-          builder.call(args)
+          TypeNode::Generic.new(head: name, args: args)
         end
 
-        def parse_parametric_int_bounds(name)
-          builder = PARAMETERISED_INT_BUILDERS[name]
-          return nil if builder.nil?
-
+        def parse_angle_bounds_ast(name)
           @scanner.getch # consume '<'
           bounds = parse_int_bound_list
           return nil if bounds.nil?
           return nil unless @scanner.getch == ">"
 
-          builder.call(bounds)
+          TypeNode::Generic.new(
+            head: name,
+            args: bounds.map { |b| TypeNode::IntegerLiteral.new(value: b) }
+          )
         end
 
-        def parse_type_arg_list
-          collect_separated_list { parse_type_arg }
+        def parse_type_arg_list_ast
+          collect_separated_list { parse_type_arg_ast }
         end
 
         def parse_int_bound_list
@@ -298,34 +319,30 @@ module Rigor
           items
         end
 
-        def parse_type_arg
+        def parse_type_arg_ast
           skip_ws
           if (class_name = @scanner.scan(CLASS_NAME))
-            parse_class_arg_tail(class_name)
+            parse_class_arg_tail_ast(class_name)
           elsif (literal = @scanner.scan(SIGNED_INT))
-            # Integer-literal arg, used by `int_mask[1, 2, 4]`.
-            # Wrapped as `Constant<Integer>` so type-arg builders
-            # see a uniform `Array<Type::t>`.
-            Type::Combinator.constant_of(Integer(literal))
+            TypeNode::IntegerLiteral.new(value: Integer(literal))
           else
-            parse_type
+            parse_type_ast
           end
         end
 
         # Class-name-headed type argument with optional `[T_1,
         # …]` type-args tail. Used so `key_of[Hash[Symbol,
         # Integer]]` parses as the projection of a parameterised
-        # nominal carrier rather than rejecting the inner
-        # brackets.
-        def parse_class_arg_tail(class_name)
-          return Type::Combinator.nominal_of(class_name) unless @scanner.peek(1) == "["
+        # nominal carrier rather than rejecting the inner brackets.
+        def parse_class_arg_tail_ast(class_name)
+          return TypeNode::Identifier.new(name: class_name) unless @scanner.peek(1) == "["
 
           @scanner.getch # consume '['
-          args = parse_type_arg_list
+          args = parse_type_arg_list_ast
           return nil if args.nil?
           return nil unless @scanner.getch == "]"
 
-          Type::Combinator.nominal_of(class_name, type_args: args)
+          TypeNode::Generic.new(head: class_name, args: args)
         end
 
         def parse_int_bound
@@ -341,6 +358,121 @@ module Rigor
         end
       end
       private_constant :Parser
+
+      # AST → {Rigor::Type} resolver. ADR-13's resolution order
+      # for every named-type production:
+      #
+      #   1. Built-in `ImportedRefinements.lookup` (no-arg
+      #      refinements like `non-empty-string`).
+      #   2. Built-in parametric builders
+      #      (`PARAMETERISED_TYPE_BUILDERS` for `[...]` forms,
+      #      `PARAMETERISED_INT_BUILDERS` for `<...>` forms).
+      #   3. Plugin resolver chain from the supplied
+      #      {Rigor::TypeNode::NameScope}, if any.
+      #   4. RBS Nominal fallback for class-shaped names
+      #      (PascalCase head, with or without type args).
+      #
+      # Returns `nil` when every step declined — preserves the
+      # parser's fail-soft contract so callers fall back to the
+      # RBS-declared type instead of raising.
+      class Resolver
+        def initialize(name_scope: nil)
+          @name_scope = name_scope
+        end
+
+        def resolve_ast(node)
+          case node
+          when TypeNode::Identifier     then resolve_identifier(node)
+          when TypeNode::Generic        then resolve_generic(node)
+          when TypeNode::IntegerLiteral then Type::Combinator.constant_of(node.value)
+          when TypeNode::IndexedAccess  then resolve_indexed_access(node)
+          end
+        end
+
+        private
+
+        CLASS_SHAPED_HEAD = /\A[A-Z]/
+        private_constant :CLASS_SHAPED_HEAD
+
+        def resolve_identifier(node)
+          if class_shaped?(node.name)
+            chain_type = consult_chain(node)
+            return chain_type unless chain_type.nil?
+
+            return Type::Combinator.nominal_of(node.name)
+          end
+
+          builtin = ImportedRefinements.lookup(node.name)
+          return builtin unless builtin.nil?
+
+          consult_chain(node)
+        end
+
+        def resolve_generic(node)
+          builtin = try_builtin_parametric(node)
+          return builtin unless builtin.nil?
+
+          chain_type = consult_chain(node)
+          return chain_type unless chain_type.nil?
+
+          return nil unless class_shaped?(node.head)
+
+          args = resolve_args(node.args)
+          return nil if args.nil?
+
+          Type::Combinator.nominal_of(node.head, type_args: args)
+        end
+
+        def resolve_indexed_access(node)
+          receiver = resolve_ast(node.receiver)
+          return nil if receiver.nil?
+
+          key = resolve_ast(node.key)
+          return nil if key.nil?
+
+          Type::Combinator.indexed_access(receiver, key)
+        end
+
+        def try_builtin_parametric(node)
+          try_parametric_type_builder(node) || try_parametric_int_builder(node)
+        end
+
+        def try_parametric_type_builder(node)
+          builder = ImportedRefinements.parametric_type_builder(node.head)
+          return nil if builder.nil?
+
+          args = resolve_args(node.args)
+          return nil if args.nil?
+
+          builder.call(args)
+        end
+
+        def try_parametric_int_builder(node)
+          builder = ImportedRefinements.parametric_int_builder(node.head)
+          return nil if builder.nil?
+
+          bounds = node.args.map { |a| a.is_a?(TypeNode::IntegerLiteral) ? a.value : nil }
+          return nil if bounds.any?(&:nil?)
+
+          builder.call(bounds)
+        end
+
+        def resolve_args(args)
+          resolved = args.map { |a| resolve_ast(a) }
+          resolved.any?(&:nil?) ? nil : resolved
+        end
+
+        def consult_chain(node)
+          return nil if @name_scope.nil?
+
+          @name_scope.resolver.resolve(node, @name_scope)
+        end
+
+        def class_shaped?(name)
+          name.match?(CLASS_SHAPED_HEAD)
+        end
+      end
+      private_constant :Resolver
     end
   end
 end

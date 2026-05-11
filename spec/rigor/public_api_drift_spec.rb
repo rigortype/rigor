@@ -264,6 +264,24 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   TYPE_NODE_GENERIC_INSTANCE = %w[args() head()].freeze
 
+  TYPE_NODE_INTEGER_LITERAL_INSTANCE = %w[value()].freeze
+
+  TYPE_NODE_INDEXED_ACCESS_INSTANCE = %w[
+    key()
+    receiver()
+  ].freeze
+
+  TYPE_NODE_NAME_SCOPE_INSTANCE = %w[
+    class_context()
+    resolver()
+    type_alias_table()
+  ].freeze
+
+  TYPE_NODE_RESOLVER_CHAIN_INSTANCE = %w[
+    resolve(req:node,req:scope)
+    resolvers()
+  ].freeze
+
   # Drift-pinned namespaces that still lack a `sig/rigor/*.rbs`
   # entry. Tracked here so the RBS sig drift spec can fail
   # loudly when a sig is added but this list is forgotten —
@@ -287,6 +305,10 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::TypeNode
     Rigor::TypeNode::Identifier
     Rigor::TypeNode::Generic
+    Rigor::TypeNode::IntegerLiteral
+    Rigor::TypeNode::IndexedAccess
+    Rigor::TypeNode::NameScope
+    Rigor::TypeNode::ResolverChain
     Rigor::Plugin::TypeNodeResolver
   ].freeze
 
@@ -501,6 +523,38 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
     it "exposes the expected ADR-13 slice-1 generic-type carrier surface" do
       expect(instance_signatures(Rigor::TypeNode::Generic)).to eq(
         PublicApiDriftSnapshots::TYPE_NODE_GENERIC_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::TypeNode::IntegerLiteral" do
+    it "exposes the expected ADR-13 slice-3 integer-literal AST surface" do
+      expect(instance_signatures(Rigor::TypeNode::IntegerLiteral)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_INTEGER_LITERAL_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::TypeNode::IndexedAccess" do
+    it "exposes the expected ADR-13 slice-3 indexed-access AST surface" do
+      expect(instance_signatures(Rigor::TypeNode::IndexedAccess)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_INDEXED_ACCESS_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::TypeNode::NameScope" do
+    it "exposes the expected ADR-13 slice-3 resolver-context surface" do
+      expect(instance_signatures(Rigor::TypeNode::NameScope)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_NAME_SCOPE_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::TypeNode::ResolverChain" do
+    it "exposes the expected ADR-13 slice-3 chain surface" do
+      expect(instance_signatures(Rigor::TypeNode::ResolverChain)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_RESOLVER_CHAIN_INSTANCE
       )
     end
   end

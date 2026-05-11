@@ -244,5 +244,95 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         end
       end
     end
+
+    describe "plugin TypeNodeResolver chain integration (ADR-13 slice 3)" do
+      def make_resolver(&block)
+        Class.new(Rigor::Plugin::TypeNodeResolver) do
+          define_method(:resolve) do |node, scope|
+            block&.call(node, scope)
+          end
+        end.new
+      end
+
+      def make_scope(*resolvers, class_context: nil)
+        chain = Rigor::TypeNode::ResolverChain.new(resolvers)
+        Rigor::TypeNode::NameScope.new(resolver: chain, class_context: class_context)
+      end
+
+      it "consults the chain after the bare-name built-in registry misses" do
+        replacement = Rigor::Type::Combinator.nominal_of("String")
+        resolver = make_resolver do |node, _scope|
+          next unless node.is_a?(Rigor::TypeNode::Identifier) && node.name == "my-custom-name"
+
+          replacement
+        end
+        scope = make_scope(resolver)
+        expect(described_class.parse("my-custom-name", name_scope: scope)).to eq(replacement)
+      end
+
+      it "does NOT consult the chain when the built-in registry resolves the name" do
+        called = false
+        resolver = make_resolver do |_node, _scope|
+          called = true
+          Rigor::Type::Combinator.nominal_of("String")
+        end
+        scope = make_scope(resolver)
+        # `non-empty-string` is a built-in; the chain MUST NOT see it.
+        described_class.parse("non-empty-string", name_scope: scope)
+        expect(called).to be(false)
+      end
+
+      it "consults the chain for class-shaped Generic before the Nominal fallback" do
+        seen = nil
+        resolver = make_resolver do |node, _scope|
+          seen = node if node.is_a?(Rigor::TypeNode::Generic) && node.head == "Pick"
+          # Resolver still declines so the Nominal fallback runs and the
+          # parse remains valid.
+          nil
+        end
+        scope = make_scope(resolver)
+        # Parse to ensure the chain DID see the Pick node before fallback.
+        described_class.parse("Pick[Address]", name_scope: scope)
+        expect(seen).to be_a(Rigor::TypeNode::Generic)
+        expect(seen.head).to eq("Pick")
+        expect(seen.args.first.name).to eq("Address")
+      end
+
+      it "lets the chain override the Nominal fallback for class-shaped names" do
+        replacement_carrier = Rigor::Type::Combinator.untyped
+        resolver = make_resolver do |node, _scope|
+          next unless node.is_a?(Rigor::TypeNode::Generic) && node.head == "Pick"
+
+          replacement_carrier
+        end
+        scope = make_scope(resolver)
+        expect(described_class.parse("Pick[Address, String]", name_scope: scope)).to eq(replacement_carrier)
+      end
+
+      it "consults plugin resolvers in registration order; first non-nil wins" do
+        replacement = Rigor::Type::Combinator.nominal_of("String")
+        first  = make_resolver { |_node, _scope| nil }
+        second = make_resolver { |_node, _scope| replacement }
+        third  = make_resolver { |_node, _scope| raise "must not be called" }
+        scope = make_scope(first, second, third)
+        expect(described_class.parse("my-name", name_scope: scope)).to eq(replacement)
+      end
+
+      it "falls back to nil when the chain declines and no built-in / RBS path matches" do
+        scope = make_scope(make_resolver { |_node, _scope| nil })
+        expect(described_class.parse("genuinely-unknown-name", name_scope: scope)).to be_nil
+      end
+
+      it "preserves slice-1 / slice-2 behaviour when no NameScope is supplied" do
+        # Bare names that miss the built-in registry return nil (parser
+        # fail-soft); class-shaped names fall back to Nominal.
+        expect(described_class.parse("my-custom-name")).to be_nil
+        expected = Rigor::Type::Combinator.nominal_of(
+          "Pick",
+          type_args: [Rigor::Type::Combinator.nominal_of("Address")]
+        )
+        expect(described_class.parse("Pick[Address]")).to eq(expected)
+      end
+    end
   end
 end

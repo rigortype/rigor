@@ -31,14 +31,26 @@ module Rigor
                 "got #{head.inspect}"
         end
 
-        unless args.is_a?(Array) && args.all? { |a| a.is_a?(Identifier) || a.is_a?(Generic) }
+        unless args.is_a?(Array) && args.all? { |a| valid_arg?(a) }
           raise ArgumentError,
                 "TypeNode::Generic args must be an Array of " \
-                "TypeNode::Identifier or TypeNode::Generic, " \
-                "got #{args.inspect}"
+                "TypeNode::Identifier / TypeNode::Generic / " \
+                "TypeNode::IntegerLiteral, got #{args.inspect}"
         end
 
         super(head: head, args: args.freeze)
+      end
+
+      private
+
+      # ADR-13 slice 3 expanded the accepted set to include
+      # {IntegerLiteral} so the parser can emit a uniform AST for
+      # `int<5, 10>` (angle bounds) and `int_mask[1, 2, 4]`
+      # (square-bracketed bitflag union). Slice 1 originally
+      # accepted only `Identifier` / `Generic`; this addition is
+      # additive — every slice-1-shape Generic remains valid.
+      def valid_arg?(arg)
+        arg.is_a?(Identifier) || arg.is_a?(Generic) || arg.is_a?(IntegerLiteral)
       end
     end
   end

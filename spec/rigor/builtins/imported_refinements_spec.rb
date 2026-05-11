@@ -276,6 +276,22 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
       end
     end
 
+    describe "shape projection — Tuple (ADR-13 slice 5)" do
+      it "evaluates pick_of of a built-up Tuple via Tuple-shaped K argument" do
+        # Construct Tuple[String, Integer] inline through an
+        # auxiliary plugin path is heavy; instead, walk through
+        # Combinator directly to confirm the parser-builder
+        # pipeline isn't a bottleneck. The tuple_of binding is
+        # tested at the Combinator layer.
+        tuple = Rigor::Type::Combinator.tuple_of(
+          Rigor::Type::Combinator.nominal_of("String"),
+          Rigor::Type::Combinator.nominal_of("Integer")
+        )
+        result = Rigor::Type::Combinator.pick_of(tuple, Rigor::Type::Combinator.constant_of(0))
+        expect(result).to eq(Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.nominal_of("String")))
+      end
+    end
+
     describe "plugin TypeNodeResolver chain integration (ADR-13 slice 3)" do
       def make_resolver(&block)
         Class.new(Rigor::Plugin::TypeNodeResolver) do

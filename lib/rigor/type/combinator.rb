@@ -405,30 +405,31 @@ module Rigor
       # of `T` whose key is in the literal-key set extracted from
       # `K`. ADR-13 § "Shape projection / Restriction and removal".
       #
-      # Phase A (this method) handles `Type::HashShape` only:
-      # non-shape inputs return `type` unchanged (the lossy-
-      # projection diagnostic is wired in slice 5). `K` MUST be a
-      # `Constant<Symbol|String>` or a `Union` of such; other
-      # shapes also return `type` unchanged.
+      # Phase A handles `Type::HashShape` (literal-key K).
+      # Phase B (slice 5) extends to `Type::Tuple` (integer-index
+      # K) — `pick_of[Tuple[A, B, C], 0 | 2]` evaluates to
+      # `Tuple[A, C]`. Non-shape inputs (`Type::Nominal`, etc.)
+      # return `type` unchanged ("lossy degradation"; the
+      # `dynamic.shape.lossy-projection` diagnostic that flags
+      # the boundary lands when caller-side diagnostic threading
+      # arrives).
       def pick_of(type, keys)
-        return type unless type.is_a?(HashShape)
-
-        key_set = extract_constant_key_set(keys)
-        return type if key_set.nil?
-
-        rebuild_hash_shape_with_keys(type, type.pairs.keys & key_set)
+        case type
+        when HashShape then hash_shape_pick(type, keys)
+        when Tuple     then tuple_pick(type, keys)
+        else type
+        end
       end
 
       # `omit_of[T, K]` shape-projection — dual of {pick_of}.
-      # Drops entries of `T` whose key is in the literal-key set
-      # extracted from `K`; keeps the rest.
+      # Drops the entries / positions whose key (or index, for a
+      # `Tuple`) is in the literal-key set extracted from `K`.
       def omit_of(type, keys)
-        return type unless type.is_a?(HashShape)
-
-        key_set = extract_constant_key_set(keys)
-        return type if key_set.nil?
-
-        rebuild_hash_shape_with_keys(type, type.pairs.keys - key_set)
+        case type
+        when HashShape then hash_shape_omit(type, keys)
+        when Tuple     then tuple_omit(type, keys)
+        else type
+        end
       end
 
       # `partial_of[T]` shape-projection — flips every required
@@ -475,6 +476,22 @@ module Rigor
           read_only_keys: type.pairs.keys,
           extra_keys: type.extra_keys
         )
+      end
+
+      # Predicate that a shape-projection (`pick_of`, `omit_of`,
+      # `partial_of`, `required_of`, `readonly_of`) would degrade
+      # to "input unchanged" on this carrier. Callers consult
+      # this BEFORE invoking the projection so they can emit a
+      # `dynamic.shape.lossy-projection` diagnostic at the site
+      # where the projection was authored.
+      #
+      # `HashShape` and `Tuple` carry shape-level information
+      # the projections honour; every other carrier is lossy.
+      # Slice 5b wires diagnostic emission through `RbsExtended`
+      # / parser callers; this predicate stands alone in slice 5
+      # for unit-test coverage and future composition.
+      def shape_projection_lossy?(type)
+        !type.is_a?(HashShape) && !type.is_a?(Tuple)
       end
 
       class << self # rubocop:disable Metrics/ClassLength
@@ -599,6 +616,54 @@ module Rigor
             read_only_keys: shape.read_only_keys.select { |k| kept_keys.include?(k) },
             extra_keys: shape.extra_keys
           )
+        end
+
+        def hash_shape_pick(type, keys)
+          key_set = extract_constant_key_set(keys)
+          return type if key_set.nil?
+
+          rebuild_hash_shape_with_keys(type, type.pairs.keys & key_set)
+        end
+
+        def hash_shape_omit(type, keys)
+          key_set = extract_constant_key_set(keys)
+          return type if key_set.nil?
+
+          rebuild_hash_shape_with_keys(type, type.pairs.keys - key_set)
+        end
+
+        # ADR-13 slice 5 — Tuple support. `K` MUST be a
+        # `Constant<Integer>` or `Union[Constant<Integer>, …]`;
+        # other K shapes (or non-integer Constants in a Union)
+        # return the input unchanged. Negative or out-of-range
+        # indices are dropped silently per slice 5's permissive
+        # take — surface diagnostics are slice 5b material.
+        def tuple_pick(type, keys)
+          index_set = extract_tuple_index_set(keys, type.elements.size)
+          return type if index_set.nil?
+
+          Tuple.new(index_set.map { |i| type.elements[i] })
+        end
+
+        def tuple_omit(type, keys)
+          index_set = extract_tuple_index_set(keys, type.elements.size)
+          return type if index_set.nil?
+
+          dropped = index_set.to_a
+          Tuple.new(type.elements.each_with_index.reject { |_, i| dropped.include?(i) }.map(&:first))
+        end
+
+        # Extracts a sorted, deduplicated set of in-range integer
+        # indices from a `Constant<Integer>` / `Union[Constant<Integer>, …]`
+        # carrier. Out-of-range indices are dropped silently; the
+        # caller decides whether an empty result still means
+        # "lossy projection" (current pick / omit just produce an
+        # empty Tuple).
+        def extract_tuple_index_set(type, size)
+          flags = extract_constant_int_set(type)
+          return nil if flags.nil?
+
+          flags.uniq.select { |i| i >= 0 && i < size }.sort
         end
 
         def tuple_indexed_access(tuple, key)

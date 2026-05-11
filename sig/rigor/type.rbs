@@ -273,6 +273,7 @@ module Rigor
       def self?.partial_of: (Type::t type) -> Type::t
       def self?.required_of: (Type::t type) -> Type::t
       def self?.readonly_of: (Type::t type) -> Type::t
+      def self?.shape_projection_lossy?: (Type::t type) -> bool
     end
   end
 end

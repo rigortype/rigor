@@ -584,6 +584,108 @@ RSpec.describe Rigor::Type::Combinator do
       end
     end
 
+    describe ".pick_of (Tuple — slice 5)" do
+      let(:tuple) { described_class.tuple_of(string_t, integer_t, symbol_t) }
+
+      it "picks a single index with Constant<Integer> K" do
+        result = described_class.pick_of(tuple, described_class.constant_of(0))
+        expect(result).to eq(described_class.tuple_of(string_t))
+      end
+
+      it "picks multiple indices with Union[Constant<Integer>, …] K (preserves ascending order)" do
+        keys = described_class.union(described_class.constant_of(2), described_class.constant_of(0))
+        result = described_class.pick_of(tuple, keys)
+        expect(result).to eq(described_class.tuple_of(string_t, symbol_t))
+      end
+
+      it "drops out-of-range and negative indices silently" do
+        keys = described_class.union(
+          described_class.constant_of(0),
+          described_class.constant_of(99),
+          described_class.constant_of(-1)
+        )
+        result = described_class.pick_of(tuple, keys)
+        expect(result).to eq(described_class.tuple_of(string_t))
+      end
+
+      it "deduplicates repeated indices" do
+        keys = described_class.union(described_class.constant_of(1), described_class.constant_of(1))
+        result = described_class.pick_of(tuple, keys)
+        expect(result).to eq(described_class.tuple_of(integer_t))
+      end
+
+      it "returns the input unchanged for non-Integer K" do
+        result = described_class.pick_of(tuple, described_class.constant_of(:zero))
+        expect(result).to eq(tuple)
+      end
+    end
+
+    describe ".omit_of (Tuple — slice 5)" do
+      let(:tuple) { described_class.tuple_of(string_t, integer_t, symbol_t) }
+
+      it "drops a single index" do
+        result = described_class.omit_of(tuple, described_class.constant_of(1))
+        expect(result).to eq(described_class.tuple_of(string_t, symbol_t))
+      end
+
+      it "drops multiple indices with Union K" do
+        keys = described_class.union(described_class.constant_of(0), described_class.constant_of(2))
+        result = described_class.omit_of(tuple, keys)
+        expect(result).to eq(described_class.tuple_of(integer_t))
+      end
+
+      it "leaves out-of-range indices alone (no-op)" do
+        result = described_class.omit_of(tuple, described_class.constant_of(99))
+        expect(result).to eq(tuple)
+      end
+    end
+
+    describe "partial_of / required_of / readonly_of on Tuple (no-op degrade)" do
+      let(:tuple) { described_class.tuple_of(string_t, integer_t) }
+
+      # ADR-13 § "Required-ness flips" doesn't commit to Tuple
+      # semantics; Tuples have positional required-by-structure
+      # entries with no read-only marker carrier. Each function
+      # returns the input unchanged for now.
+      it "partial_of returns the tuple unchanged" do
+        expect(described_class.partial_of(tuple)).to eq(tuple)
+      end
+
+      it "required_of returns the tuple unchanged" do
+        expect(described_class.required_of(tuple)).to eq(tuple)
+      end
+
+      it "readonly_of returns the tuple unchanged" do
+        expect(described_class.readonly_of(tuple)).to eq(tuple)
+      end
+    end
+
+    describe ".shape_projection_lossy?" do
+      it "returns false for a HashShape" do
+        hs = described_class.hash_shape_of({ a: string_t })
+        expect(described_class.shape_projection_lossy?(hs)).to be(false)
+      end
+
+      it "returns false for a Tuple" do
+        tuple = described_class.tuple_of(string_t, integer_t)
+        expect(described_class.shape_projection_lossy?(tuple)).to be(false)
+      end
+
+      it "returns true for a Nominal carrier (Hash[K, V] etc.)" do
+        hash_nominal = described_class.nominal_of("Hash", type_args: [symbol_t, integer_t])
+        expect(described_class.shape_projection_lossy?(hash_nominal)).to be(true)
+      end
+
+      it "returns true for an untyped carrier" do
+        expect(described_class.shape_projection_lossy?(described_class.untyped)).to be(true)
+      end
+
+      it "returns true for top / bot" do
+        expect(described_class.shape_projection_lossy?(described_class.top)).to be(true)
+        expect(described_class.shape_projection_lossy?(described_class.bot)).to be(true)
+      end
+    end
+
     describe ".omit_of" do
       it "drops keys present in K, keeps the rest" do
         result = described_class.omit_of(shape, described_class.constant_of(:age))

@@ -353,6 +353,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     readonly_of(req:type)
     refined(req:base,req:predicate_id)
     required_of(req:type)
+    shape_projection_lossy?(req:type)
     singleton_of(req:class_name_or_object)
     top()
     tuple_of(rest:elements)

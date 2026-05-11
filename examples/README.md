@@ -30,6 +30,7 @@ ADR-9's cross-plugin fact store.
 | [`rigor-routes`](rigor-routes/) | **`IoBoundary` + cache producer** (slice 2 + slice 6) | ~250 | YAML | ✅ | — | 13 |
 | [`rigor-activerecord`](rigor-activerecord/) | **Most architecturally complete** — DSL interpretation + multi-file IoBoundary + chained cache producers + two-pass discover-then-validate | ~700 | Ruby (`db/schema.rb` + `app/models/*.rb`) | ✅ ✅ | — | 14 |
 | [`rigor-sorbet`](rigor-sorbet/) | **External type DSL adapter** — reads inline `sig { params(...).returns(T) }` blocks and contributes return types via `flow_contribution_for` | ~900 | Ruby (`sig` blocks across `paths:`) | ✅ | — | 30+ |
+| [`rigor-typescript-utility-types`](rigor-typescript-utility-types/) | **Type-language vocabulary extension** via `Plugin::TypeNodeResolver` (ADR-13) — maps `Pick<T, K>` / `Omit<T, K>` / `Partial<T>` / `Required<T>` / `Readonly<T>` onto the Rigor-canonical shape-projection type functions | ~150 | — | — | — | 14 |
 
 ### Rails ecosystem family
 

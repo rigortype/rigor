@@ -370,6 +370,25 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         expect(described_class.parse("genuinely-unknown-name", name_scope: scope)).to be_nil
       end
 
+      it "exposes the full Resolver as scope.resolver so plugins can recursively resolve sub-args through every tier" do
+        seen_t_type = nil
+        seen_k_type = nil
+        resolver = make_resolver do |node, scope|
+          next unless node.is_a?(Rigor::TypeNode::Generic) && node.head == "Pick"
+
+          # Recursively resolve sub-args via the full pass.
+          seen_t_type = scope.resolver.resolve(node.args[0], scope)
+          seen_k_type = scope.resolver.resolve(node.args[1], scope)
+          Rigor::Type::Combinator.pick_of(seen_t_type, seen_k_type)
+        end
+        scope = make_scope(resolver)
+        described_class.parse("Pick[Address, non-empty-string]", name_scope: scope)
+        # Address — class-shaped → Nominal[Address] (RBS fallback)
+        # non-empty-string — built-in registry
+        expect(seen_t_type).to eq(Rigor::Type::Combinator.nominal_of("Address"))
+        expect(seen_k_type).to eq(Rigor::Type::Combinator.non_empty_string)
+      end
+
       it "preserves slice-1 / slice-2 behaviour when no NameScope is supplied" do
         # Bare names that miss the built-in registry return nil (parser
         # fail-soft); class-shaped names fall back to Nominal.

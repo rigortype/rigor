@@ -409,7 +409,9 @@ module Rigor
       # RBS-declared type instead of raising.
       class Resolver
         def initialize(name_scope: nil)
-          @name_scope = name_scope
+          @chain = name_scope&.resolver
+          @class_context = name_scope&.class_context
+          @type_alias_table = name_scope&.type_alias_table || {}
         end
 
         def resolve_ast(node)
@@ -419,6 +421,18 @@ module Rigor
           when TypeNode::IntegerLiteral then Type::Combinator.constant_of(node.value)
           when TypeNode::IndexedAccess  then resolve_indexed_access(node)
           end
+        end
+
+        # Public {Rigor::Plugin::TypeNodeResolver}-shaped interface
+        # so a {Rigor::TypeNode::NameScope} can point its
+        # `#resolver` at the Resolver itself. Plugin resolvers
+        # call `scope.resolver.resolve(arg, scope)` to recursively
+        # resolve a nested argument through the FULL pass
+        # (built-in registry → plugin chain → RBS fallback), not
+        # just back through the chain. The `_scope` argument is
+        # ignored — the Resolver owns the scope state internally.
+        def resolve(node, _scope)
+          resolve_ast(node)
         end
 
         private
@@ -495,9 +509,14 @@ module Rigor
         end
 
         def consult_chain(node)
-          return nil if @name_scope.nil?
+          return nil if @chain.nil?
 
-          @name_scope.resolver.resolve(node, @name_scope)
+          scope = TypeNode::NameScope.new(
+            resolver: self,
+            class_context: @class_context,
+            type_alias_table: @type_alias_table
+          )
+          @chain.resolve(node, scope)
         end
 
         def class_shaped?(name)

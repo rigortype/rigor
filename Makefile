@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -114,3 +114,12 @@ steep-check:
 # Pass-through wrapper: `make steep ARGS="check --severity-level=error"`.
 steep:
 	$(STEEP_BUNDLE) exec steep $(ARGS)
+
+# `.rigor/cache` grows monotonically by design (ADR-6 "no eviction").
+# Each unique (configs, dependencies, files, gems, plugins)
+# descriptor produces its own slot, so a long-lived clone with
+# config churn can accumulate 100+ MiB of stale slices. `cache-clean`
+# is the manual GC button. Use `bundle exec exe/rigor check
+# --cache-stats lib` to inventory the per-slot footprint first.
+cache-clean:
+	rm -rf .rigor/cache

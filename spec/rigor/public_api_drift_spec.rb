@@ -256,6 +256,10 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     type()
   ].freeze
 
+  TYPE_NODE_IDENTIFIER_INSTANCE = %w[name()].freeze
+
+  TYPE_NODE_GENERIC_INSTANCE = %w[args() head()].freeze
+
   # Drift-pinned namespaces that still lack a `sig/rigor/*.rbs`
   # entry. Tracked here so the RBS sig drift spec can fail
   # loudly when a sig is added but this list is forgotten —
@@ -276,6 +280,9 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::FlowContribution::Fact
     Rigor::FlowContribution::MergeResult
     Rigor::FlowContribution::Merger
+    Rigor::TypeNode
+    Rigor::TypeNode::Identifier
+    Rigor::TypeNode::Generic
   ].freeze
 
   COMBINATOR_SINGLETON = %w[
@@ -473,6 +480,22 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
     it "exposes the expected (plugin_id, name, optional) data shape" do
       expect(instance_signatures(Rigor::Plugin::Manifest::Consumption)).to eq(
         PublicApiDriftSnapshots::PLUGIN_MANIFEST_CONSUMPTION_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::TypeNode::Identifier" do
+    it "exposes the expected ADR-13 slice-1 named-type carrier surface" do
+      expect(instance_signatures(Rigor::TypeNode::Identifier)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_IDENTIFIER_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::TypeNode::Generic" do
+    it "exposes the expected ADR-13 slice-1 generic-type carrier surface" do
+      expect(instance_signatures(Rigor::TypeNode::Generic)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_GENERIC_INSTANCE
       )
     end
   end

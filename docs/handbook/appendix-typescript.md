@@ -51,9 +51,9 @@ inference cannot see further).
 | `{ name: string; age: number }` | `HashShape{name: String, age: Integer}` | Same per-key model; Ruby uses Symbol keys idiomatically. |
 | `Array<T>` / `T[]` | `Array[T]` | Same. |
 | `Record<K, V>` | `Hash[K, V]` | Same. |
-| `Readonly<T>` | (no analogue) | Rigor does not track mutability today. |
-| `Partial<T>` / `Required<T>` | (none) | Rigor's `HashShape` carries required/optional per-key, but no `Partial` operator. |
-| `Pick<T, K>` / `Omit<T, K>` | (none) | Mapped types have no Rigor analogue; plugins fill the niche. |
+| `Readonly<T>` | `readonly_of[T]` (via opt-in [`rigor-typescript-utility-types`](../../examples/rigor-typescript-utility-types/) plugin) | View-level read-only marker on every entry of a `HashShape`. Does NOT prove the underlying object is frozen — ADR-13 § "Readonly". |
+| `Partial<T>` / `Required<T>` | `partial_of[T]` / `required_of[T]` (same plugin) | Flips every entry's required-ness on a `HashShape`. `Partial` does NOT widen value types to `nil` — Rigor's `HashShape` distinguishes "key absent" from "key present with nil value" (ADR-13 WD on required-ness flips). |
+| `Pick<T, K>` / `Omit<T, K>` | `pick_of[T, K]` / `omit_of[T, K]` (same plugin) | Restrict / remove `HashShape` entries by literal-key union; Tuple receivers project by integer index. Non-shape carriers degrade conservatively and surface `dynamic.shape.lossy-projection`. |
 | Conditional types `T extends U ? A : B` | (none in core; plugin contributions) | A plugin can vary return type by argument shape. |
 | `keyof T` | (none) | `HashShape` exposes its key set internally but not as a type operator. |
 | `T['k']` | `T[k]` indexed access | Rigor supports literal indexed access on `HashShape` and `Tuple` (see the type spec). |
@@ -160,7 +160,7 @@ inferred call-site instantiation as routinely as TypeScript.
 | `Array<T>` | `Array[T]` |
 | `Map<K, V>` | `Hash[K, V]` |
 | `Promise<T>` | (no analogue — Ruby has no built-in Promise) |
-| `Pick<T, K>` / mapped types | (no analogue — would need a plugin) |
+| `Pick<T, K>` / `Omit<T, K>` / `Partial<T>` / `Required<T>` / `Readonly<T>` | Opt-in [`rigor-typescript-utility-types`](../../examples/rigor-typescript-utility-types/) plugin maps each onto `pick_of` / `omit_of` / `partial_of` / `required_of` / `readonly_of` over `HashShape` (and `pick_of` / `omit_of` over `Tuple`). |
 | Conditional types | (no analogue — would need a plugin) |
 
 Rigor reads RBS generics through its dispatcher and instantiates
@@ -213,9 +213,15 @@ Be honest about what you give up:
   Rigor analogue. A plugin can vary return type by argument
   shape (see Chapter 9), but you write Ruby code for the
   variation, not type-level expressions.
-- **Mapped types.** `Pick`, `Omit`, `Partial`, `Readonly`,
-  template literal manipulation. None of these exist in core
-  Rigor.
+- **Mapped types.** `Pick`, `Omit`, `Partial`, `Required`, and
+  `Readonly` ship as opt-in plugin-supplied vocabulary via
+  [`rigor-typescript-utility-types`](../../examples/rigor-typescript-utility-types/),
+  which maps them onto the Rigor-canonical `pick_of` / `omit_of`
+  / `partial_of` / `required_of` / `readonly_of` shape-projection
+  type functions on `HashShape` (and `pick_of` / `omit_of` on
+  `Tuple`). Template literal manipulation and other mapped-type
+  variants (`Uppercase<S>` / `Lowercase<S>` / `Capitalize<S>`)
+  remain outside Rigor's surface.
 - **Type-level computation.** TypeScript's type system is
   Turing-complete; Rigor's deliberately is not. This is a
   feature, not a limitation — the analyzer has to be fast
@@ -286,13 +292,22 @@ end
 def pick: [K, V] (Hash[K, V] obj, Array[K] keys) -> Hash[K, V]
 ```
 
-You lose `Pick<T, K>`'s exact-key-set tracking — RBS does not
-have that. You keep the runtime safety of "every returned key
-was in `keys` and was present in `obj`." For the calls where
-the precise key set matters — typically a Hash literal at the
-call site — Rigor's `HashShape` does carry the per-key types,
-so the call site stays precise even where the signature is
-generic.
+The RBS sig stays generic. If you want `Pick<T, K>`'s exact-
+key-set tracking back, opt into the
+[`rigor-typescript-utility-types`](../../examples/rigor-typescript-utility-types/)
+plugin and annotate the return type with the `Pick` spelling:
+
+```rbs
+# sig/utils.rbs
+%a{rigor:v1:return: Pick[T, K]}
+def pick: [K, V] (Hash[K, V] obj, Array[K] keys) -> Hash[K, V]
+```
+
+The plugin's `TypeNodeResolver` translates `Pick[T, K]` into
+the canonical `pick_of[T, K]` projection. Either way the call
+site stays precise where it matters: a Hash literal at the
+call site is a `HashShape` regardless of the signature, and
+the per-key types survive through `obj.key?(k)` narrowing.
 
 ## What's next
 

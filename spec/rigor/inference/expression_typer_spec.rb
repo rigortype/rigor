@@ -157,6 +157,49 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  describe "LHS-only target nodes (non-value positions)" do
+    # `*TargetNode` kinds appear only on the left of destructuring
+    # assignments, in pattern bodies, or as inner slots of block
+    # parameters. They have no value to extract; the typer recognises
+    # them so the coverage scanner / `--explain` stream stops counting
+    # them as fail-soft fallbacks. Binding the inner names back into
+    # the scope is `StatementEvaluator` / `MultiTargetBinder` /
+    # `BlockParameterBinder`'s concern, never `type_of`'s.
+    def find_first(node, klass)
+      return node if node.is_a?(klass)
+      return nil unless node.respond_to?(:compact_child_nodes)
+
+      node.compact_child_nodes.each do |child|
+        found = find_first(child, klass)
+        return found if found
+      end
+      nil
+    end
+
+    {
+      Prism::MultiTargetNode => "a, (b, c) = 1, [2, 3]",
+      Prism::InstanceVariableTargetNode => "@a, @b = 1, 2",
+      Prism::ClassVariableTargetNode => "@@a, @@b = 1, 2",
+      Prism::GlobalVariableTargetNode => "$a, $b = 1, 2",
+      Prism::ConstantTargetNode => "A, B = 1, 2",
+      Prism::ConstantPathTargetNode => "M::A, M::B = 1, 2",
+      Prism::CallTargetNode => "x.a, x.b = 1, 2",
+      Prism::IndexTargetNode => "h[:a], h[:b] = 1, 2"
+    }.each do |node_class, source|
+      it "types Prism::#{node_class.name.split('::').last} as Dynamic[Top] without recording a fallback" do
+        program = Prism.parse(source).value
+        target = find_first(program, node_class)
+        expect(target).not_to be_nil, "expected to find a #{node_class} in #{source.inspect}"
+
+        tracer = Rigor::Inference::FallbackTracer.new
+        type = scope.type_of(target, tracer: tracer)
+
+        expect(type).to equal(Rigor::Type::Combinator.untyped)
+        expect(tracer).to be_empty
+      end
+    end
+  end
+
   describe "fail-soft policy" do
     it "returns Dynamic[Top] for unrecognised nodes" do
       type = scope.type_of(parse_expression("foo()"))

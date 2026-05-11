@@ -111,7 +111,21 @@ module Rigor
         Prism::IndexOrWriteNode => :type_of_assignment_write,
         Prism::IndexAndWriteNode => :type_of_assignment_write,
         Prism::MultiWriteNode => :type_of_assignment_write,
+        # LHS-only target nodes (destructuring assignment, pattern matching,
+        # `for x in xs`, block parameter `|a, (b, c)|`). They have no value
+        # to extract — the type-of pass acknowledges the node class so the
+        # coverage scanner stops flagging it; binding the inner names back
+        # into the scope is the StatementEvaluator / MultiTargetBinder /
+        # BlockParameterBinder side's concern.
         Prism::LocalVariableTargetNode => :type_of_non_value,
+        Prism::MultiTargetNode => :type_of_non_value,
+        Prism::InstanceVariableTargetNode => :type_of_non_value,
+        Prism::ClassVariableTargetNode => :type_of_non_value,
+        Prism::GlobalVariableTargetNode => :type_of_non_value,
+        Prism::ConstantTargetNode => :type_of_non_value,
+        Prism::ConstantPathTargetNode => :type_of_non_value,
+        Prism::CallTargetNode => :type_of_non_value,
+        Prism::IndexTargetNode => :type_of_non_value,
         # Hashes and interpolation
         Prism::HashNode => :type_of_hash,
         Prism::KeywordHashNode => :type_of_hash,

@@ -268,6 +268,11 @@ module Rigor
       def self?.int_mask: (Array[Integer] flags) -> Type::t?
       def self?.int_mask_of: (Type::t type) -> Type::t?
       def self?.indexed_access: (Type::t type, Type::t key) -> Type::t
+      def self?.pick_of: (Type::t type, Type::t keys) -> Type::t
+      def self?.omit_of: (Type::t type, Type::t keys) -> Type::t
+      def self?.partial_of: (Type::t type) -> Type::t
+      def self?.required_of: (Type::t type) -> Type::t
+      def self?.readonly_of: (Type::t type) -> Type::t
     end
   end
 end

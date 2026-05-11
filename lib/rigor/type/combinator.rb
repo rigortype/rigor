@@ -401,6 +401,82 @@ module Rigor
         end
       end
 
+      # `pick_of[T, K]` shape-projection — keeps only the entries
+      # of `T` whose key is in the literal-key set extracted from
+      # `K`. ADR-13 § "Shape projection / Restriction and removal".
+      #
+      # Phase A (this method) handles `Type::HashShape` only:
+      # non-shape inputs return `type` unchanged (the lossy-
+      # projection diagnostic is wired in slice 5). `K` MUST be a
+      # `Constant<Symbol|String>` or a `Union` of such; other
+      # shapes also return `type` unchanged.
+      def pick_of(type, keys)
+        return type unless type.is_a?(HashShape)
+
+        key_set = extract_constant_key_set(keys)
+        return type if key_set.nil?
+
+        rebuild_hash_shape_with_keys(type, type.pairs.keys & key_set)
+      end
+
+      # `omit_of[T, K]` shape-projection — dual of {pick_of}.
+      # Drops entries of `T` whose key is in the literal-key set
+      # extracted from `K`; keeps the rest.
+      def omit_of(type, keys)
+        return type unless type.is_a?(HashShape)
+
+        key_set = extract_constant_key_set(keys)
+        return type if key_set.nil?
+
+        rebuild_hash_shape_with_keys(type, type.pairs.keys - key_set)
+      end
+
+      # `partial_of[T]` shape-projection — flips every required
+      # entry of `T` to optional. ADR-13 § "Required-ness flips".
+      # Does NOT add `nil` to value types — Rigor's HashShape
+      # distinguishes "key absent" from "key present with nil
+      # value", so flipping required-ness is sufficient.
+      def partial_of(type)
+        return type unless type.is_a?(HashShape)
+
+        HashShape.new(
+          type.pairs,
+          required_keys: [],
+          optional_keys: type.pairs.keys,
+          read_only_keys: type.read_only_keys,
+          extra_keys: type.extra_keys
+        )
+      end
+
+      # `required_of[T]` shape-projection — inverse of
+      # {partial_of}; flips every optional entry to required.
+      def required_of(type)
+        return type unless type.is_a?(HashShape)
+
+        HashShape.new(
+          type.pairs,
+          required_keys: type.pairs.keys,
+          optional_keys: [],
+          read_only_keys: type.read_only_keys,
+          extra_keys: type.extra_keys
+        )
+      end
+
+      # `readonly_of[T]` shape-projection — marks every entry of
+      # `T` as read-only in the current view. View-level only —
+      # does NOT prove the underlying Ruby Hash is frozen.
+      def readonly_of(type)
+        return type unless type.is_a?(HashShape)
+
+        HashShape.new(
+          type.pairs,
+          required_keys: type.required_keys,
+          optional_keys: type.optional_keys,
+          read_only_keys: type.pairs.keys,
+          extra_keys: type.extra_keys
+        )
+      end
+
       class << self # rubocop:disable Metrics/ClassLength
         private
 
@@ -478,6 +554,51 @@ module Rigor
           when Union
             type.members.all?(Constant) ? type.members.map(&:value).grep(Integer) : nil
           end
+        end
+
+        # Literal-key set extraction for {pick_of} / {omit_of}.
+        # Accepts `Constant<Symbol|String>` or `Union[Constant…]`
+        # where every member is such a Constant. Returns `nil`
+        # when the shape can't be reduced to a finite key set
+        # (untyped, Top, Difference, Refined, mixed-kind union,
+        # etc.) — callers degrade to "input unchanged" per
+        # ADR-13's lossy-projection rule.
+        def extract_constant_key_set(type)
+          case type
+          when Constant then constant_key_set(type)
+          when Union    then union_key_set(type)
+          end
+        end
+
+        def constant_key_set(type)
+          literal_key?(type.value) ? [type.value] : nil
+        end
+
+        def union_key_set(type)
+          return nil unless type.members.all?(Constant)
+
+          values = type.members.map(&:value)
+          values.all? { |v| literal_key?(v) } ? values : nil
+        end
+
+        def literal_key?(value)
+          value.is_a?(Symbol) || value.is_a?(String)
+        end
+
+        # Rebuild a {HashShape} from the subset of `keys` the
+        # caller decided to keep. Preserves required / optional /
+        # read-only classification AND the extra-keys policy of
+        # the source shape; entries dropped from `pairs` also
+        # drop from each policy list. Used by both {pick_of}
+        # (intersection with K) and {omit_of} (set difference).
+        def rebuild_hash_shape_with_keys(shape, kept_keys)
+          HashShape.new(
+            shape.pairs.slice(*kept_keys),
+            required_keys: shape.required_keys.select { |k| kept_keys.include?(k) },
+            optional_keys: shape.optional_keys.select { |k| kept_keys.include?(k) },
+            read_only_keys: shape.read_only_keys.select { |k| kept_keys.include?(k) },
+            extra_keys: shape.extra_keys
+          )
         end
 
         def tuple_indexed_access(tuple, key)

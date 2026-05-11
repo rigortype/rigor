@@ -43,7 +43,7 @@ module Rigor
     #   `PARAMETERISED_TYPE_BUILDERS` (square-bracket form, type
     #   args) and `PARAMETERISED_INT_BUILDERS` (angle-bracket form,
     #   integer bounds).
-    module ImportedRefinements
+    module ImportedRefinements # rubocop:disable Metrics/ModuleLength
       REGISTRY = {
         "non-empty-string" => -> { Type::Combinator.non_empty_string },
         "non-zero-int" => -> { Type::Combinator.non_zero_int },
@@ -118,6 +118,38 @@ module Rigor
           return nil unless args.size == 1
 
           Type::Combinator.int_mask_of(args.first)
+        },
+        # ADR-13 § "Canonical type-function additions" — five
+        # shape-projection type functions that the
+        # `rigor-typescript-utility-types` plugin (and any other
+        # plugin that ships a shape-projection vocabulary) maps
+        # onto. Phase A handles `HashShape` carriers; non-shape
+        # inputs return the input unchanged (the lossy-projection
+        # diagnostic lands in slice 5).
+        "pick_of" => lambda { |args|
+          return nil unless args.size == 2
+
+          Type::Combinator.pick_of(args[0], args[1])
+        },
+        "omit_of" => lambda { |args|
+          return nil unless args.size == 2
+
+          Type::Combinator.omit_of(args[0], args[1])
+        },
+        "partial_of" => lambda { |args|
+          return nil unless args.size == 1
+
+          Type::Combinator.partial_of(args.first)
+        },
+        "required_of" => lambda { |args|
+          return nil unless args.size == 1
+
+          Type::Combinator.required_of(args.first)
+        },
+        "readonly_of" => lambda { |args|
+          return nil unless args.size == 1
+
+          Type::Combinator.readonly_of(args.first)
         }
       }.freeze
       private_constant :PARAMETERISED_TYPE_BUILDERS

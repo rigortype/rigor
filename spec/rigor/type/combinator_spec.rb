@@ -521,4 +521,151 @@ RSpec.describe Rigor::Type::Combinator do
       expect(described_class.literal_string_compatible?(union)).to be(false)
     end
   end
+
+  describe "shape projection (ADR-13 slice 4 — phase A: HashShape)" do
+    let(:string_t)  { described_class.nominal_of("String") }
+    let(:integer_t) { described_class.nominal_of("Integer") }
+    let(:symbol_t)  { described_class.nominal_of("Symbol") }
+
+    let(:shape) do
+      described_class.hash_shape_of(
+        { name: string_t, age: integer_t, email: string_t },
+        required_keys: %i[name age],
+        optional_keys: %i[email]
+      )
+    end
+
+    describe ".pick_of" do
+      it "restricts a HashShape to keys present in a Constant<Symbol> singleton K" do
+        result = described_class.pick_of(shape, described_class.constant_of(:name))
+        expect(result.pairs).to eq(name: string_t)
+        expect(result.required_keys).to eq([:name])
+        expect(result.optional_keys).to eq([])
+      end
+
+      it "restricts a HashShape to keys present in a Union[Constant<Symbol>, …] K" do
+        keys = described_class.union(described_class.constant_of(:name), described_class.constant_of(:email))
+        result = described_class.pick_of(shape, keys)
+        expect(result.pairs).to eq(name: string_t, email: string_t)
+        expect(result.required_keys).to eq([:name])
+        expect(result.optional_keys).to eq([:email])
+      end
+
+      it "preserves the source shape's read-only marker on kept keys" do
+        readonly_shape = described_class.hash_shape_of(
+          { a: string_t, b: integer_t },
+          read_only_keys: %i[a b]
+        )
+        result = described_class.pick_of(readonly_shape, described_class.constant_of(:a))
+        expect(result.read_only_keys).to eq([:a])
+      end
+
+      it "returns the input unchanged when K is not a literal-key set" do
+        result = described_class.pick_of(shape, described_class.top)
+        expect(result).to eq(shape)
+      end
+
+      it "returns the input unchanged for non-HashShape carriers (lossy degradation)" do
+        hash_nominal = described_class.nominal_of("Hash", type_args: [symbol_t, integer_t])
+        result = described_class.pick_of(hash_nominal, described_class.constant_of(:name))
+        expect(result).to eq(hash_nominal)
+      end
+
+      it "intersects K with the shape's keys (extra keys in K are no-op)" do
+        keys = described_class.union(described_class.constant_of(:name), described_class.constant_of(:not_in_shape))
+        result = described_class.pick_of(shape, keys)
+        expect(result.pairs).to eq(name: string_t)
+      end
+
+      it "Symbol K does NOT match String-keyed shapes (strict equality)" do
+        string_shape = described_class.hash_shape_of({ "name" => string_t })
+        result = described_class.pick_of(string_shape, described_class.constant_of(:name))
+        expect(result.pairs).to eq({})
+      end
+    end
+
+    describe ".omit_of" do
+      it "drops keys present in K, keeps the rest" do
+        result = described_class.omit_of(shape, described_class.constant_of(:age))
+        expect(result.pairs).to eq(name: string_t, email: string_t)
+        expect(result.required_keys).to eq([:name])
+        expect(result.optional_keys).to eq([:email])
+      end
+
+      it "drops every key when K covers all of them (Union)" do
+        keys = described_class.union(
+          described_class.constant_of(:name),
+          described_class.constant_of(:age),
+          described_class.constant_of(:email)
+        )
+        result = described_class.omit_of(shape, keys)
+        expect(result.pairs).to eq({})
+      end
+
+      it "returns the input unchanged for non-HashShape carriers" do
+        hash_nominal = described_class.nominal_of("Hash", type_args: [symbol_t, integer_t])
+        expect(described_class.omit_of(hash_nominal, described_class.constant_of(:age))).to eq(hash_nominal)
+      end
+    end
+
+    describe ".partial_of" do
+      it "flips every required entry to optional" do
+        result = described_class.partial_of(shape)
+        expect(result.required_keys).to eq([])
+        expect(result.optional_keys.sort).to eq(%i[age email name])
+      end
+
+      it "preserves value types unchanged (no nil-widening per ADR-13)" do
+        result = described_class.partial_of(shape)
+        expect(result.pairs).to eq(name: string_t, age: integer_t, email: string_t)
+      end
+
+      it "is idempotent on an already-fully-optional shape" do
+        all_optional = described_class.partial_of(shape)
+        expect(described_class.partial_of(all_optional)).to eq(all_optional)
+      end
+
+      it "round-trips through required_of" do
+        all_required = described_class.required_of(shape)
+        all_optional = described_class.partial_of(all_required)
+        expect(described_class.required_of(all_optional)).to eq(all_required)
+      end
+
+      it "returns the input unchanged for non-HashShape carriers" do
+        hash_nominal = described_class.nominal_of("Hash")
+        expect(described_class.partial_of(hash_nominal)).to eq(hash_nominal)
+      end
+    end
+
+    describe ".required_of" do
+      it "flips every optional entry to required" do
+        result = described_class.required_of(shape)
+        expect(result.required_keys.sort).to eq(%i[age email name])
+        expect(result.optional_keys).to eq([])
+      end
+
+      it "is idempotent on an already-fully-required shape" do
+        all_required = described_class.required_of(shape)
+        expect(described_class.required_of(all_required)).to eq(all_required)
+      end
+    end
+
+    describe ".readonly_of" do
+      it "marks every entry as read-only" do
+        result = described_class.readonly_of(shape)
+        expect(result.read_only_keys.sort).to eq(%i[age email name])
+      end
+
+      it "preserves required / optional classification" do
+        result = described_class.readonly_of(shape)
+        expect(result.required_keys.sort).to eq(%i[age name])
+        expect(result.optional_keys).to eq([:email])
+      end
+
+      it "returns the input unchanged for non-HashShape carriers" do
+        hash_nominal = described_class.nominal_of("Hash")
+        expect(described_class.readonly_of(hash_nominal)).to eq(hash_nominal)
+      end
+    end
+  end
 end

@@ -245,6 +245,37 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
       end
     end
 
+    describe "shape projection (ADR-13 slice 4)" do
+      it "resolves pick_of[Foo, ...] when Foo names a Nominal carrier" do
+        # `Foo` resolves to Nominal[Foo]; pick_of on a non-HashShape
+        # returns the input unchanged (lossy degradation).
+        result = described_class.parse("pick_of[Foo, NameKey]")
+        expect(result).to eq(Rigor::Type::Combinator.nominal_of("Foo"))
+      end
+
+      it "rejects pick_of arity mismatch" do
+        expect(described_class.parse("pick_of[Foo]")).to be_nil
+        expect(described_class.parse("pick_of[Foo, A, B]")).to be_nil
+      end
+
+      it "rejects omit_of arity mismatch" do
+        expect(described_class.parse("omit_of[Foo]")).to be_nil
+      end
+
+      it "resolves partial_of[T] / required_of[T] / readonly_of[T] for Nominal inputs (no-op degrade)" do
+        foo = Rigor::Type::Combinator.nominal_of("Foo")
+        expect(described_class.parse("partial_of[Foo]")).to eq(foo)
+        expect(described_class.parse("required_of[Foo]")).to eq(foo)
+        expect(described_class.parse("readonly_of[Foo]")).to eq(foo)
+      end
+
+      it "rejects partial_of / required_of / readonly_of with arity mismatches" do
+        expect(described_class.parse("partial_of[A, B]")).to be_nil
+        expect(described_class.parse("required_of[A, B]")).to be_nil
+        expect(described_class.parse("readonly_of[A, B]")).to be_nil
+      end
+    end
+
     describe "plugin TypeNodeResolver chain integration (ADR-13 slice 3)" do
       def make_resolver(&block)
         Class.new(Rigor::Plugin::TypeNodeResolver) do

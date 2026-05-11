@@ -75,6 +75,11 @@ Rigor MUST NOT initially import PHPStan's `list<T>` and `non-empty-list<T>` as s
 | --- | --- |
 | `key_of[T]` | Known keys of a record, hash shape, tuple, or shape-like type |
 | `value_of[T]` | Union of known values of a record, hash shape, tuple, or shape-like type |
+| `pick_of[T, K]` | Record / shape with keys restricted to those in `K` |
+| `omit_of[T, K]` | Record / shape with keys in `K` removed |
+| `partial_of[T]` | Record / shape with every required entry of `T` made optional |
+| `required_of[T]` | Record / shape with every optional entry of `T` made required |
+| `readonly_of[T]` | Record / shape with every entry of `T` marked read-only in the current view |
 | `T[K]` | Indexed access into tuple, record, object shape, or generic container metadata |
 | `int_mask[1, 2, 4]` | Integers representable by bitwise-or over the listed flags, including `0` |
 | `int_mask_of[T]` | Bit mask derived from a finite integer literal union or constant-derived set |
@@ -97,5 +102,5 @@ The following imports are intentionally not provided. Each is recorded so future
 - `non-falsy-string` and `truthy-string` MUST NOT be added because every `String` value is truthy in Ruby.
 - `non-decimal-int-string` MUST NOT be a named built-in initially; use `String - decimal-int-string`.
 - PHP truthiness-oriented types such as `empty`, `empty-scalar`, `non-empty-scalar`, and `non-empty-mixed` MUST NOT be imported directly. Rigor models Ruby truthiness with `false | nil` flow facts and explicit collection/string refinements.
-- `Exclude`, `Extract`, and `NonNullable` MUST NOT be imported as surface aliases initially. Rigor expresses them as `T - U`, `T & U`, and `T - nil`.
-- TypeScript utility or mapped type aliases such as `Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `Record`, `Parameters`, `ReturnType`, and `InstanceType` MUST NOT be imported as Rigor surface forms initially.
+- `Exclude`, `Extract`, and `NonNullable` MUST NOT be imported as surface aliases initially. Rigor expresses them as `T - U`, `T & U`, and `T - nil`. The opt-in `rigor-typescript-utility-types` plugin (see [ADR-13](../adr/13-typenode-resolver-plugin.md)) MAY register these TypeScript-canonical names as plugin-supplied vocabulary that resolves to the same core operators.
+- TypeScript utility or mapped type aliases such as `Partial`, `Required`, `Readonly`, `Pick`, `Omit`, `Record`, `Parameters`, `ReturnType`, and `InstanceType` MUST NOT be imported as Rigor surface forms initially. The shape-projection cases (`Partial`, `Required`, `Readonly`, `Pick`, `Omit`) have canonical Rigor type functions in core (`partial_of[T]`, `required_of[T]`, `readonly_of[T]`, `pick_of[T, K]`, `omit_of[T, K]`) per the table above; `Record<K, V>` is already expressible as RBS `Hash[K, V]`. The TypeScript-canonical spellings ship through the opt-in `rigor-typescript-utility-types` plugin per [ADR-13](../adr/13-typenode-resolver-plugin.md), which translates each TS name to the matching Rigor core operator at parse time. Function-type projections (`Parameters`, `ReturnType`) and class-projection cases (`InstanceType`) remain deferred until the corresponding core operators (`params_of[F]`, `return_of[F]`, `instance_type[C]`) land.

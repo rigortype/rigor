@@ -15,6 +15,11 @@ This document defines the semantics of those operators, the diagnostic display c
 | `T - U` | Difference: values in `T` excluding values in `U` (internal) |
 | `key_of[T]` | Known keys of a record, hash shape, tuple, or shape-like type |
 | `value_of[T]` | Union of known values of a record, hash shape, tuple, or shape-like type |
+| `pick_of[T, K]` | Record / shape with keys restricted to those in `K` |
+| `omit_of[T, K]` | Record / shape with keys in `K` removed |
+| `partial_of[T]` | Record / shape with every required entry of `T` made optional |
+| `required_of[T]` | Record / shape with every optional entry of `T` made required |
+| `readonly_of[T]` | Record / shape with every entry of `T` marked read-only in the current view |
 | `T[K]` | Indexed access into tuple, record, object shape, or generic container metadata |
 | `if T <: U then X else Y` | Conditional type, when needed for advanced library modeling |
 
@@ -111,6 +116,65 @@ The omission contract has a concrete shape so default diagnostics stay readable 
 - `value_of[T]` returns the union of known values of `T`.
 
 These forms are useful in `RBS::Extended` payloads (see [rbs-extended.md](rbs-extended.md)) and inside the analyzer for shape-aware narrowing. They erase to RBS conservatively (see [rbs-erasure.md](rbs-erasure.md)).
+
+## Shape projection (`pick_of`, `omit_of`, `partial_of`, `required_of`, `readonly_of`)
+
+The shape-projection operators transform a record / HashShape / object shape by restricting, removing, or re-marking entries. They are siblings of `key_of[T]` / `value_of[T]` and follow the same `lower_snake[…]` naming convention. They are the canonical Rigor spelling that the [`rigor-typescript-utility-types`](../adr/13-typenode-resolver-plugin.md) plugin maps TypeScript's `Pick<T, K>`, `Omit<T, K>`, `Partial<T>`, `Required<T>`, and `Readonly<T>` onto.
+
+### Restriction and removal (`pick_of`, `omit_of`)
+
+`pick_of[T, K]` keeps only those entries of `T` whose key matches `K`. `omit_of[T, K]` is its dual: it drops every entry whose key matches `K` and keeps the rest. `K` is a union of literal-key types (typically a union of `Symbol` or `String` singleton types, or an explicit literal-type union).
+
+```text
+T = Record{name: String, age: Integer, email: String}
+
+pick_of[T, "name" | "email"] = Record{name: String, email: String}
+omit_of[T, "age"]            = Record{name: String, email: String}
+```
+
+When `T` is a tuple, the keys are integer indices:
+
+```text
+T = Tuple[String, Integer, Symbol]
+pick_of[T, 0 | 2] = Tuple[String, Symbol]  # subject to slice-5 implementation; see ADR-13
+```
+
+`pick_of` / `omit_of` are **shape-aware**. Applied to a value whose type has no entry-level key information (e.g. raw `Hash[K, V]` without record-shape projection), they degrade conservatively: `pick_of[Hash[K, V], K_subset]` evaluates to `Hash[K, V]` and emits a `dynamic.shape.lossy-projection` `:info` diagnostic so the user can audit the boundary.
+
+### Required-ness flips (`partial_of`, `required_of`)
+
+`partial_of[T]` flips every required entry of `T` to optional. `required_of[T]` is its inverse: it flips every optional entry to required.
+
+`partial_of` does NOT add `nil` to value types. TypeScript's `Partial<T>` widens to `T | undefined` implicitly because JavaScript has no shape-level "key absent" carrier; Rigor's HashShape distinguishes "key absent" from "key present with nil value" per [control-flow-analysis.md](control-flow-analysis.md) and [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md). The two facts compose:
+
+```text
+T = Record{name: String, age: Integer}
+
+partial_of[T]  = Record{name?: String, age?: Integer}
+                 # key absent OR (key present AND value String / Integer)
+
+required_of[partial_of[T]] = T
+                 # round-trip
+```
+
+If a future consumer needs the TS-style nil-widening variant, that ships as a separate `partial_nullable_of[T]` operator (see ADR-13 § "Open questions").
+
+### View-level read-only (`readonly_of`)
+
+`readonly_of[T]` marks every entry of `T` as read-only **in the current view**. Writes through a reference whose static type is `readonly_of[T]` are diagnosed as writes-through-a-read-only-view; the underlying Ruby object is not proven to be frozen. This composes with the read-only hash-shape entry semantics described in [imported-built-in-types.md](imported-built-in-types.md) § "Initial collection and shape refinements".
+
+The diagnostic severity for write-through-a-read-only-view follows the active `severity_profile`. The authored default is `:warning`; the strict profile re-stamps to `:error`.
+
+### RBS erasure
+
+The shape-projection operators erase to RBS per [rbs-erasure.md](rbs-erasure.md):
+
+- `pick_of[Record{…}, K]` erases to the underlying record's RBS spelling with non-`K` entries removed (Rigor record syntax supports the result directly).
+- `omit_of[Record{…}, K]` erases to the same record minus the `K` entries.
+- `partial_of[Record{…}]` erases to the record with optional-key markers on every entry.
+- `required_of[Record{…}]` erases to the record with every optional-key marker dropped.
+- `readonly_of[T]` erases by dropping the read-only marker; the underlying RBS type is what the static view's RBS consumers see.
+- `pick_of[Hash[K, V], K_subset]` and the other lossy degradations erase to `Hash[K, V]`.
 
 ## Conditional types
 

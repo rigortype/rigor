@@ -967,7 +967,7 @@ module Rigor
         method_def = resolve_call_method(call_node, current_scope)
         return current_scope if method_def.nil?
 
-        contribution = RbsExtended.read_flow_contribution(method_def)
+        contribution = RbsExtended.read_flow_contribution(method_def, environment: current_scope.environment)
         return current_scope if contribution.nil?
 
         result = Rigor::FlowContribution::Merger.merge([contribution])

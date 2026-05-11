@@ -189,11 +189,29 @@ module Rigor
       #   and built-in parametric forms but before the RBS Nominal
       #   fallback. `nil` (default) preserves the slice-1 / slice-2
       #   behaviour of consulting only built-ins + RBS.
+      # @param reporter [Rigor::RbsExtended::Reporter, nil]
+      #   ADR-13 slice 3b — collector that the Resolver feeds
+      #   `dynamic.shape.lossy-projection` events into when a
+      #   shape-projection head (`pick_of`, `omit_of`,
+      #   `partial_of`, `required_of`, `readonly_of`) is applied
+      #   to a carrier that does not preserve shape information.
+      #   `nil` (default) suppresses event accumulation; legacy
+      #   call sites that have no reporter to thread keep the
+      #   pre-slice-3b silent fall-through.
+      # @param source_location [RBS::Location, nil] location
+      #   attribution for the events the Resolver records. Carries
+      #   the annotation's filename / line / column so the runner
+      #   can stamp diagnostics with the user-visible source site.
       # @return [Rigor::Type, nil] the resolved refinement
       #   carrier, or `nil` when the payload is unparseable or
       #   names a refinement / class no registered source resolved.
-      def parse(payload, name_scope: nil)
-        Parser.new(payload.to_s, name_scope: name_scope).parse
+      def parse(payload, name_scope: nil, reporter: nil, source_location: nil)
+        Parser.new(
+          payload.to_s,
+          name_scope: name_scope,
+          reporter: reporter,
+          source_location: source_location
+        ).parse
       end
 
       # Builder helpers reachable from the Resolver. They live on
@@ -243,9 +261,13 @@ module Rigor
       # the RBS Nominal fallback in that order. Plugin resolvers
       # never see partial parses.
       class Parser # rubocop:disable Metrics/ClassLength
-        def initialize(input, name_scope: nil)
+        def initialize(input, name_scope: nil, reporter: nil, source_location: nil)
           @scanner = StringScanner.new(input.strip)
-          @resolver = Resolver.new(name_scope: name_scope)
+          @resolver = Resolver.new(
+            name_scope: name_scope,
+            reporter: reporter,
+            source_location: source_location
+          )
         end
 
         def parse
@@ -408,10 +430,21 @@ module Rigor
       # parser's fail-soft contract so callers fall back to the
       # RBS-declared type instead of raising.
       class Resolver
-        def initialize(name_scope: nil)
+        # ADR-13 slice 3b — heads that consume a shape-bearing
+        # first argument. When the first arg is not a `HashShape`
+        # / `Tuple` (per {Rigor::Type::Combinator.shape_projection_lossy?}),
+        # the projection degrades to "input unchanged" and the
+        # Resolver records a `dynamic.shape.lossy-projection`
+        # event on the reporter (if any).
+        SHAPE_PROJECTION_HEADS = %w[pick_of omit_of partial_of required_of readonly_of].freeze
+        private_constant :SHAPE_PROJECTION_HEADS
+
+        def initialize(name_scope: nil, reporter: nil, source_location: nil)
           @chain = name_scope&.resolver
           @class_context = name_scope&.class_context
           @type_alias_table = name_scope&.type_alias_table || {}
+          @reporter = reporter
+          @source_location = source_location
         end
 
         def resolve_ast(node)
@@ -490,7 +523,29 @@ module Rigor
           args = resolve_args(node.args)
           return nil if args.nil?
 
-          builder.call(args)
+          result = builder.call(args)
+          record_lossy_projection_if_applicable(node, args, result)
+          result
+        end
+
+        # ADR-13 slice 3b — record one `dynamic.shape.lossy-projection`
+        # event per (head, source_location) pair when the projection
+        # actually degraded. The builders return the source carrier
+        # unchanged on non-HashShape / non-Tuple receivers (see
+        # `Type::Combinator.pick_of` / `omit_of` and the
+        # HashShape-only `partial_of` / `required_of` /
+        # `readonly_of`), so detection is "first arg was lossy".
+        def record_lossy_projection_if_applicable(node, args, result)
+          return if @reporter.nil?
+          return if result.nil?
+          return unless SHAPE_PROJECTION_HEADS.include?(node.head)
+          return if args.empty?
+          return unless Type::Combinator.shape_projection_lossy?(args.first)
+
+          @reporter.record_lossy_projection(
+            head: node.head,
+            source_location: @source_location
+          )
         end
 
         def try_parametric_int_builder(node)

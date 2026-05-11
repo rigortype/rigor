@@ -162,7 +162,8 @@ module Rigor
               kind: kind,
               args: args,
               type_vars: type_vars,
-              block_type: block_type
+              block_type: block_type,
+              environment: environment
             )
           rescue StandardError
             # Defensive: if RBS' definition builder raises on a broken
@@ -242,14 +243,15 @@ module Rigor
           end
 
           # rubocop:disable Metrics/ParameterLists
-          def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:)
+          def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:,
+                                    environment: nil)
             # Slice 4b-3 (ADR-7 § "Slice 4-A/4-B") — read the
             # return-type override through the merger so future
             # plugin / `:rbs_extended` bundles that also assert a
             # `return_type` slot at this call site compose with
             # the RBS::Extended directive instead of silently
             # racing it.
-            override = merged_return_type(method_definition)
+            override = merged_return_type(method_definition, environment: environment)
             return override if override
 
             instance_type = Type::Combinator.nominal_of(class_name)
@@ -265,7 +267,8 @@ module Rigor
               self_type: self_type,
               instance_type: instance_type,
               type_vars: type_vars,
-              block_required: !block_type.nil?
+              block_required: !block_type.nil?,
+              environment: environment
             )
             return nil unless method_type
 
@@ -287,8 +290,8 @@ module Rigor
           # before consuming. Returns the merged return type
           # or nil when no contribution overrides the
           # RBS-declared return.
-          def merged_return_type(method_definition)
-            contribution = RbsExtended.read_flow_contribution(method_definition)
+          def merged_return_type(method_definition, environment: nil)
+            contribution = RbsExtended.read_flow_contribution(method_definition, environment: environment)
             return nil if contribution.nil?
 
             Rigor::FlowContribution::Merger.merge([contribution]).return_type
@@ -377,13 +380,15 @@ module Rigor
               class_name: class_name,
               kind: kind,
               args: args,
-              type_vars: type_vars
+              type_vars: type_vars,
+              environment: environment
             )
           rescue StandardError
             []
           end
 
-          def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:)
+          # rubocop:disable Metrics/ParameterLists
+          def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:, environment: nil)
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
               case kind
@@ -397,7 +402,8 @@ module Rigor
               self_type: self_type,
               instance_type: instance_type,
               type_vars: type_vars,
-              block_required: true
+              block_required: true,
+              environment: environment
             )
             return [] unless method_type
 
@@ -411,6 +417,7 @@ module Rigor
               type_vars: type_vars
             )
           end
+          # rubocop:enable Metrics/ParameterLists
 
           # `RBS::Types::Block#type` is normally an `RBS::Types::Function`
           # carrying the block's parameter list; some signatures use

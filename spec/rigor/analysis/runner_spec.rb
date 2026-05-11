@@ -1874,4 +1874,44 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.message).to include("kaboom")
     end
   end
+
+  describe "RBS::Extended reporter diagnostics (ADR-13 slice 3b)" do
+    def analyze_reporter_demo(class_name, return_annotation)
+      sig = { "demo.rbs" => <<~RBS }
+        class #{class_name}
+          %a{rigor:v1:return: #{return_annotation}}
+          def fetch: () -> String
+        end
+      RBS
+      src = "class #{class_name}\n  def fetch\n    \"x\"\n  end\nend\n"
+      analyze(src, sig: sig)
+    end
+
+    it "surfaces an unresolved `rigor:v1:return:` payload as `dynamic.rbs-extended.unresolved`" do
+      result = analyze_reporter_demo("ReportDemo", "not-a-known-refinement")
+      diag = result.diagnostics.find { |d| d.rule == "dynamic.rbs-extended.unresolved" }
+
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("not-a-known-refinement")
+      expect(diag.source_family).to eq(:builtin)
+      expect(diag.path).to include("demo.rbs")
+    end
+
+    it "surfaces a shape-projection on a non-shape carrier as `dynamic.shape.lossy-projection`" do
+      result = analyze_reporter_demo("LossyDemo", "pick_of[Hash[String, Integer], String]")
+      diag = result.diagnostics.find { |d| d.rule == "dynamic.shape.lossy-projection" }
+
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("pick_of")
+      expect(diag.source_family).to eq(:builtin)
+      expect(diag.path).to include("demo.rbs")
+    end
+
+    it "stays silent when no shape-projection is in play and the payload resolves" do
+      result = analyze_reporter_demo("CleanDemo", "non-empty-string")
+
+      expect(result.diagnostics.find { |d| d.rule == "dynamic.rbs-extended.unresolved" }).to be_nil
+      expect(result.diagnostics.find { |d| d.rule == "dynamic.shape.lossy-projection" }).to be_nil
+    end
+  end
 end

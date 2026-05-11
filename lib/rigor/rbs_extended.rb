@@ -3,6 +3,7 @@
 require_relative "type"
 require_relative "builtins/imported_refinements"
 require_relative "flow_contribution"
+require_relative "rbs_extended/reporter"
 
 module Rigor
   # Slice 7 phase 15 — first-preview reader for the
@@ -129,15 +130,30 @@ module Rigor
     # `rigor:v1:` directives are dropped. Returns an empty
     # array (NEVER `nil`) for a method with no recognised
     # annotations so callers can iterate unconditionally.
-    def read_predicate_effects(method_def)
+    #
+    # @param environment [Rigor::Environment, nil] ADR-13 slice
+    #   3b. When provided, threads the plugin-supplied
+    #   `name_scope:` and the per-run reporter through the
+    #   annotation-parse path. `nil` (default) preserves the
+    #   pre-slice-3b behaviour — no plugin resolvers consulted
+    #   and no diagnostics accumulated.
+    def read_predicate_effects(method_def, environment: nil)
       return [] if method_def.nil?
 
       annotations = method_def.annotations
       return [] if annotations.nil? || annotations.empty?
 
+      name_scope = environment&.name_scope
+      reporter = environment&.rbs_extended_reporter
+
       effects = []
       annotations.each do |annotation|
-        effect = parse_predicate_annotation(annotation.string)
+        effect = parse_predicate_annotation(
+          annotation.string,
+          name_scope: name_scope,
+          reporter: reporter,
+          source_location: annotation.location
+        )
         effects << effect if effect
       end
       effects.uniq
@@ -168,7 +184,7 @@ module Rigor
     /x
     private_constant :PREDICATE_DIRECTIVE_PATTERN
 
-    def parse_predicate_annotation(string)
+    def parse_predicate_annotation(string, name_scope: nil, reporter: nil, source_location: nil)
       match = PREDICATE_DIRECTIVE_PATTERN.match(string)
       return nil if match.nil?
 
@@ -176,8 +192,16 @@ module Rigor
       target = match[:target].to_s
       edge = directive == "predicate-if-true" ? :truthy_only : :falsey_only
       target_kind, target_name = target_fields(target)
-      class_name, refinement_type, negative = resolve_directive_rhs(match)
-      return nil if class_name.nil? && refinement_type.nil?
+      class_name, refinement_type, negative = resolve_directive_rhs(
+        match,
+        name_scope: name_scope,
+        reporter: reporter,
+        source_location: source_location
+      )
+      if class_name.nil? && refinement_type.nil?
+        record_unresolved(reporter, string, source_location)
+        return nil
+      end
 
       PredicateEffect.new(
         edge: edge,
@@ -194,15 +218,26 @@ module Rigor
     # `RBS::Definition::Method#annotations`. Returns an empty
     # array when no recognised assertion directives are
     # attached to the method.
-    def read_assert_effects(method_def)
+    #
+    # See {.read_predicate_effects} for the `environment:`
+    # keyword contract.
+    def read_assert_effects(method_def, environment: nil)
       return [] if method_def.nil?
 
       annotations = method_def.annotations
       return [] if annotations.nil? || annotations.empty?
 
+      name_scope = environment&.name_scope
+      reporter = environment&.rbs_extended_reporter
+
       effects = []
       annotations.each do |annotation|
-        effect = parse_assert_annotation(annotation.string)
+        effect = parse_assert_annotation(
+          annotation.string,
+          name_scope: name_scope,
+          reporter: reporter,
+          source_location: annotation.location
+        )
         effects << effect if effect
       end
       effects.uniq
@@ -232,7 +267,7 @@ module Rigor
     }.freeze
     private_constant :ASSERT_CONDITIONS
 
-    def parse_assert_annotation(string)
+    def parse_assert_annotation(string, name_scope: nil, reporter: nil, source_location: nil)
       match = ASSERT_DIRECTIVE_PATTERN.match(string)
       return nil if match.nil?
 
@@ -242,8 +277,16 @@ module Rigor
 
       target = match[:target].to_s
       target_kind, target_name = target_fields(target)
-      class_name, refinement_type, negative = resolve_directive_rhs(match)
-      return nil if class_name.nil? && refinement_type.nil?
+      class_name, refinement_type, negative = resolve_directive_rhs(
+        match,
+        name_scope: name_scope,
+        reporter: reporter,
+        source_location: source_location
+      )
+      if class_name.nil? && refinement_type.nil?
+        record_unresolved(reporter, string, source_location)
+        return nil
+      end
 
       AssertEffect.new(
         condition: condition,
@@ -273,7 +316,7 @@ module Rigor
     # - Refinement payload unparseable: returns
     #   `[nil, nil, false]` so callers can drop the directive
     #   silently (fail-soft policy).
-    def resolve_directive_rhs(match)
+    def resolve_directive_rhs(match, name_scope: nil, reporter: nil, source_location: nil)
       negative = match[:negation].to_s == "~"
       class_capture = match[:class_name]
       return [class_capture.to_s.sub(/\A::/, ""), nil, negative] if class_capture
@@ -281,7 +324,12 @@ module Rigor
       refinement_capture = match[:refinement]
       return [nil, nil, false] if refinement_capture.nil?
 
-      type = Builtins::ImportedRefinements.parse(refinement_capture)
+      type = Builtins::ImportedRefinements.parse(
+        refinement_capture,
+        name_scope: name_scope,
+        reporter: reporter,
+        source_location: source_location
+      )
       return [nil, nil, false] if type.nil?
 
       [nil, type, negative]
@@ -326,16 +374,25 @@ module Rigor
     # - the directive's payload names a refinement not
     #   registered in `Rigor::Builtins::ImportedRefinements`
     #   (the analyzer prefers a silent miss over crashing on a
-    #   typo; future slices MAY surface the miss as a
-    #   `:warning` self-diagnostic).
-    def read_return_type_override(method_def)
+    #   typo; ADR-13 slice 3b surfaces the miss as a
+    #   `dynamic.rbs-extended.unresolved` `:info` diagnostic when
+    #   an `environment:` is supplied).
+    def read_return_type_override(method_def, environment: nil)
       return nil if method_def.nil?
 
       annotations = method_def.annotations
       return nil if annotations.nil? || annotations.empty?
 
+      name_scope = environment&.name_scope
+      reporter = environment&.rbs_extended_reporter
+
       annotations.each do |annotation|
-        type = parse_return_type_override(annotation.string)
+        type = parse_return_type_override(
+          annotation.string,
+          name_scope: name_scope,
+          reporter: reporter,
+          source_location: annotation.location
+        )
         return type if type
       end
       nil
@@ -360,11 +417,18 @@ module Rigor
     /x
     private_constant :RETURN_DIRECTIVE_PATTERN
 
-    def parse_return_type_override(string)
+    def parse_return_type_override(string, name_scope: nil, reporter: nil, source_location: nil)
       match = RETURN_DIRECTIVE_PATTERN.match(string)
       return nil if match.nil?
 
-      Builtins::ImportedRefinements.parse(match[:payload])
+      type = Builtins::ImportedRefinements.parse(
+        match[:payload],
+        name_scope: name_scope,
+        reporter: reporter,
+        source_location: source_location
+      )
+      record_unresolved(reporter, string, source_location) if type.nil?
+      type
     end
 
     # Returned for `rigor:v1:param: <name> <refinement>`. The
@@ -397,13 +461,23 @@ module Rigor
     # purposes; passing a too-wide `Nominal[String]` argument
     # is flagged as an argument-type mismatch at the call
     # site.
-    def read_param_type_overrides(method_def)
+    def read_param_type_overrides(method_def, environment: nil)
       return [] if method_def.nil?
 
       annotations = method_def.annotations
       return [] if annotations.nil? || annotations.empty?
 
-      annotations.filter_map { |annotation| parse_param_annotation(annotation.string) }
+      name_scope = environment&.name_scope
+      reporter = environment&.rbs_extended_reporter
+
+      annotations.filter_map do |annotation|
+        parse_param_annotation(
+          annotation.string,
+          name_scope: name_scope,
+          reporter: reporter,
+          source_location: annotation.location
+        )
+      end
     end
 
     # Convenience reader for call sites that want to look up
@@ -411,8 +485,10 @@ module Rigor
     # Hash<Symbol, Rigor::Type>; missing keys mean "use the
     # RBS-declared type". Callers MUST treat the hash as
     # read-only.
-    def param_type_override_map(method_def)
-      read_param_type_overrides(method_def).to_h { |o| [o.param_name, o.type] }.freeze
+    def param_type_override_map(method_def, environment: nil)
+      read_param_type_overrides(method_def, environment: environment)
+        .to_h { |o| [o.param_name, o.type] }
+        .freeze
     end
 
     # The `is` glue word is optional so authors can write
@@ -434,12 +510,20 @@ module Rigor
     /x
     private_constant :PARAM_DIRECTIVE_PATTERN
 
-    def parse_param_annotation(string)
+    def parse_param_annotation(string, name_scope: nil, reporter: nil, source_location: nil)
       match = PARAM_DIRECTIVE_PATTERN.match(string)
       return nil if match.nil?
 
-      type = Builtins::ImportedRefinements.parse(match[:payload])
-      return nil if type.nil?
+      type = Builtins::ImportedRefinements.parse(
+        match[:payload],
+        name_scope: name_scope,
+        reporter: reporter,
+        source_location: source_location
+      )
+      if type.nil?
+        record_unresolved(reporter, string, source_location)
+        return nil
+      end
 
       ParamOverride.new(param_name: match[:param].to_sym, type: type)
     end
@@ -477,12 +561,15 @@ module Rigor
     # Returns `nil` when the method carries no recognised
     # contribution directives (callers can skip the merge step
     # without iterating an empty bundle).
-    def read_flow_contribution(method_def)
+    #
+    # See {.read_predicate_effects} for the `environment:`
+    # keyword contract.
+    def read_flow_contribution(method_def, environment: nil)
       return nil if method_def.nil?
 
-      predicate_effects = read_predicate_effects(method_def)
-      assert_effects = read_assert_effects(method_def)
-      return_override = read_return_type_override(method_def)
+      predicate_effects = read_predicate_effects(method_def, environment: environment)
+      assert_effects = read_assert_effects(method_def, environment: environment)
+      return_override = read_return_type_override(method_def, environment: environment)
       return nil if predicate_effects.empty? && assert_effects.empty? && return_override.nil?
 
       build_flow_contribution(predicate_effects, assert_effects, return_override)
@@ -512,6 +599,18 @@ module Rigor
 
     def nilable_slot(facts)
       facts.empty? ? nil : facts
+    end
+
+    # ADR-13 slice 3b — guards every reporter call so the
+    # in-RbsExtended-module call sites can record events
+    # uniformly without nil-checking each time. When the
+    # reporter is nil (the v0.1.0 → v0.1.3 default for call
+    # sites that do not yet thread `environment:`), the call is
+    # a no-op and the parser stays fail-soft.
+    def record_unresolved(reporter, payload, source_location)
+      return if reporter.nil?
+
+      reporter.record_unresolved(payload: payload, source_location: source_location)
     end
   end
 end

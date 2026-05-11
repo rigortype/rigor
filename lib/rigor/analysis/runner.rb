@@ -6,6 +6,7 @@ require_relative "../environment"
 require_relative "../scope"
 require_relative "../cache/store"
 require_relative "../plugin"
+require_relative "../rbs_extended/reporter"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
@@ -22,7 +23,7 @@ module Rigor
       RUBY_GLOB = "**/*.rb"
       DEFAULT_CACHE_ROOT = ".rigor/cache"
 
-      attr_reader :cache_store, :plugin_registry, :dependency_source_index
+      attr_reader :cache_store, :plugin_registry, :dependency_source_index, :rbs_extended_reporter
 
       # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events
@@ -42,6 +43,7 @@ module Rigor
         @plugin_requirer = plugin_requirer
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
+        @rbs_extended_reporter = RbsExtended::Reporter.new
       end
 
       # Walks every Ruby file under `paths`, parses it, builds a
@@ -66,12 +68,14 @@ module Rigor
           signature_paths: @configuration.signature_paths,
           cache_store: @cache_store,
           plugin_registry: @plugin_registry,
-          dependency_source_index: @dependency_source_index
+          dependency_source_index: @dependency_source_index,
+          rbs_extended_reporter: @rbs_extended_reporter
         )
         expansion = expand_paths(paths)
 
         diagnostics = pre_file_diagnostics(expansion)
         diagnostics += expansion.fetch(:files).flat_map { |path| analyze_file(path, environment) }
+        diagnostics += rbs_extended_reporter_diagnostics
 
         Result.new(diagnostics: apply_severity_profile(diagnostics))
       end
@@ -294,6 +298,75 @@ module Rigor
             source_family: :builtin
           )
         end
+      end
+
+      # ADR-13 slice 3b — drains the per-run
+      # {RbsExtended::Reporter} into one diagnostic per accumulated
+      # event:
+      #
+      # - `dynamic.rbs-extended.unresolved` for every annotation
+      #   payload the parser could not turn into a {Rigor::Type}.
+      #   Surfaces typos and references to plugin-supplied names
+      #   the project did not enable.
+      # - `dynamic.shape.lossy-projection` for every shape-projection
+      #   type function (`pick_of`, …) applied to a carrier that
+      #   loses precision (anything other than `HashShape` / `Tuple`).
+      #
+      # Both are authored `:info`; the severity profile re-stamps
+      # them per project taste. Path / line / column come from the
+      # annotation's `RBS::Location` when available, falling back
+      # to `.rigor.yml`-style file-level attribution otherwise.
+      def rbs_extended_reporter_diagnostics
+        return [] if @rbs_extended_reporter.empty?
+
+        unresolved = @rbs_extended_reporter.unresolved_payloads.map do |entry|
+          build_reporter_diagnostic(
+            entry.source_location,
+            rule: "dynamic.rbs-extended.unresolved",
+            message: "`RBS::Extended` directive payload could not be resolved: " \
+                     "#{entry.payload.inspect}. Check for typos or enable a plugin " \
+                     "that contributes the referenced type vocabulary."
+          )
+        end
+
+        lossy = @rbs_extended_reporter.lossy_projections.map do |entry|
+          build_reporter_diagnostic(
+            entry.source_location,
+            rule: "dynamic.shape.lossy-projection",
+            message: "Shape projection `#{entry.head}` applied to a carrier without a " \
+                     "literal shape; the projection degrades to the input type. Author " \
+                     "a `HashShape` / `Tuple` carrier or accept the unchanged result."
+          )
+        end
+
+        unresolved + lossy
+      end
+
+      def build_reporter_diagnostic(source_location, rule:, message:)
+        path, line, column = location_fields(source_location)
+        Diagnostic.new(
+          path: path, line: line, column: column,
+          message: message, severity: :info, rule: rule, source_family: :builtin
+        )
+      end
+
+      def location_fields(source_location)
+        return [".rigor.yml", 1, 1] if source_location.nil?
+
+        path = location_path(source_location)
+        line = source_location.respond_to?(:start_line) ? source_location.start_line : 1
+        column = source_location.respond_to?(:start_column) ? source_location.start_column + 1 : 1
+        [path, line, column]
+      rescue StandardError
+        [".rigor.yml", 1, 1]
+      end
+
+      def location_path(source_location)
+        buffer = source_location.respond_to?(:buffer) ? source_location.buffer : nil
+        return ".rigor.yml" if buffer.nil? || !buffer.respond_to?(:name)
+
+        name = buffer.name.to_s
+        name.empty? ? ".rigor.yml" : name
       end
 
       # ADR-9 slice 3 — invokes every loaded plugin's `#prepare`

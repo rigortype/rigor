@@ -2,6 +2,8 @@
 
 require_relative "environment/class_registry"
 require_relative "environment/rbs_loader"
+require_relative "type_node/name_scope"
+require_relative "type_node/resolver_chain"
 
 module Rigor
   # The engine's view of the type universe outside the current scope.
@@ -41,7 +43,8 @@ module Rigor
       prism rbs
     ].freeze
 
-    attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index
+    attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index,
+                :rbs_extended_reporter, :name_scope
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
     # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the
@@ -63,11 +66,14 @@ module Rigor
     #   When nil (the default), no dep-source contribution
     #   participates and the dispatcher tier is a no-op.
     def initialize(class_registry: ClassRegistry.default, rbs_loader: nil,
-                   plugin_registry: nil, dependency_source_index: nil)
+                   plugin_registry: nil, dependency_source_index: nil,
+                   rbs_extended_reporter: nil)
       @class_registry = class_registry
       @rbs_loader = rbs_loader
       @plugin_registry = plugin_registry
       @dependency_source_index = dependency_source_index
+      @rbs_extended_reporter = rbs_extended_reporter
+      @name_scope = build_name_scope
       freeze
     end
 
@@ -98,7 +104,8 @@ module Rigor
       #   default) to skip caching for this environment.
       # @return [Rigor::Environment]
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, # rubocop:disable Metrics/ParameterLists
-                      plugin_registry: nil, dependency_source_index: nil)
+                      plugin_registry: nil, dependency_source_index: nil,
+                      rbs_extended_reporter: nil)
         resolved_paths = signature_paths || default_signature_paths(root)
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
         loader = RbsLoader.new(
@@ -109,7 +116,8 @@ module Rigor
         new(
           rbs_loader: loader,
           plugin_registry: plugin_registry,
-          dependency_source_index: dependency_source_index
+          dependency_source_index: dependency_source_index,
+          rbs_extended_reporter: rbs_extended_reporter
         )
       end
 
@@ -203,6 +211,27 @@ module Rigor
 
     def normalize_class_name(name)
       name.to_s.delete_prefix("::")
+    end
+
+    # ADR-13 slice 3b — composes the per-run plugin-supplied
+    # {Rigor::TypeNode::ResolverChain} into a single
+    # {Rigor::TypeNode::NameScope} that the RBS::Extended
+    # directive parser threads down to the
+    # {Rigor::Builtins::ImportedRefinements::Resolver}. Returns
+    # `nil` when no plugin contributes a type-node resolver so
+    # the parser short-circuits the chain consultation and
+    # behaves bit-for-bit like the v0.1.0 → v0.1.3 default.
+    def build_name_scope
+      return nil if @plugin_registry.nil? || @plugin_registry.empty?
+
+      resolvers = @plugin_registry.type_node_resolvers
+      return nil if resolvers.empty?
+
+      TypeNode::NameScope.new(
+        resolver: TypeNode::ResolverChain.new(resolvers),
+        class_context: nil,
+        type_alias_table: {}
+      )
     end
   end
 end

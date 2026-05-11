@@ -175,7 +175,7 @@ module Rigor
       # `non-empty-array[Integer]` describe the parameter binding
       # they actually want, not its element type.
       def apply_param_overrides(types, slots, rbs_method)
-        override_map = RbsExtended.param_type_override_map(rbs_method)
+        override_map = RbsExtended.param_type_override_map(rbs_method, environment: @environment)
         return if override_map.empty?
 
         slots.each do |slot|

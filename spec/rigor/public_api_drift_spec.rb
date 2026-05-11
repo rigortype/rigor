@@ -81,8 +81,10 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     class_registry()
     constant_for_name(req:name)
     dependency_source_index()
+    name_scope()
     nominal_for_name(req:name)
     plugin_registry()
+    rbs_extended_reporter()
     rbs_loader()
     singleton_for_name(req:name)
   ].freeze
@@ -90,7 +92,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ENVIRONMENT_SINGLETON = [
     "default()",
     "for_project(key:root,key:libraries,key:signature_paths,key:cache_store," \
-    "key:plugin_registry,key:dependency_source_index)"
+    "key:plugin_registry,key:dependency_source_index,key:rbs_extended_reporter)"
   ].freeze
 
   REFLECTION_SINGLETON = %w[
@@ -310,6 +312,9 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::TypeNode::NameScope
     Rigor::TypeNode::ResolverChain
     Rigor::Plugin::TypeNodeResolver
+    Rigor::RbsExtended::Reporter
+    Rigor::RbsExtended::Reporter::UnresolvedEntry
+    Rigor::RbsExtended::Reporter::LossyProjectionEntry
   ].freeze
 
   COMBINATOR_SINGLETON = %w[

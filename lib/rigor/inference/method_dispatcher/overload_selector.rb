@@ -65,7 +65,8 @@ module Rigor
         # @return [RBS::MethodType, nil] the chosen overload, or nil
         #   when the definition has no method types at all.
         # rubocop:disable Metrics/ParameterLists
-        def select(method_definition, arg_types:, self_type:, instance_type:, type_vars: {}, block_required: false)
+        def select(method_definition, arg_types:, self_type:, instance_type:, type_vars: {}, block_required: false,
+                   environment: nil)
           overloads = method_definition.method_types
           return nil if overloads.empty?
 
@@ -75,7 +76,7 @@ module Rigor
           # `accepts_param?` so overload selection sees the
           # tighter type when filtering candidates by argument
           # compatibility.
-          param_overrides = RbsExtended.param_type_override_map(method_definition)
+          param_overrides = RbsExtended.param_type_override_map(method_definition, environment: environment)
 
           # Pass 1: prefer overloads whose param types stay strict —
           # no translator-induced `Dynamic[Top]` from Alias /

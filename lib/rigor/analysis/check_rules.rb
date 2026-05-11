@@ -1059,7 +1059,7 @@ module Rigor
           return nil if method_def.nil? || method_def == true
           return nil unless method_def.method_types.size == 1
 
-          param_overrides = Rigor::RbsExtended.param_type_override_map(method_def)
+          param_overrides = Rigor::RbsExtended.param_type_override_map(method_def, environment: scope.environment)
           mismatch = first_argument_mismatch(method_def.method_types.first, call_node, scope, param_overrides)
           return nil if mismatch.nil?
 
@@ -1255,7 +1255,7 @@ module Rigor
             end
           return nil if method_def.nil?
 
-          override = Rigor::RbsExtended.read_return_type_override(method_def)
+          override = Rigor::RbsExtended.read_return_type_override(method_def, environment: scope.environment)
           return override if override
 
           declared_return_union(method_def, scope.environment)

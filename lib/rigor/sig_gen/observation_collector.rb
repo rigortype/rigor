@@ -170,12 +170,28 @@ module Rigor
         return if scope.nil?
 
         receiver_type = resolve_receiver_type(receiver, scope, bindings)
-        return unless receiver_type.is_a?(Type::Nominal)
+        key = observation_key(call_node, receiver_type)
+        return if key.nil?
 
-        arg_types = collect_arg_types(call_node, scope)
-        return if arg_types.nil? || arg_types.empty?
+        observation = collect_args(call_node, scope)
+        return if observation.nil? || observation.empty?
 
-        observations[[receiver_type.class_name, call_node.name]] << arg_types
+        observations[key] << observation
+      end
+
+      # ADR-14 follow-up (A): `.new` → `:initialize` routing.
+      # `MethodCatalog.new(path: ...)` types its receiver as
+      # `Type::Singleton[MethodCatalog]` and its call name as
+      # `:new`, but the *implicit* effect at runtime is a call
+      # to `MethodCatalog#initialize(path: ...)`. Route the
+      # observation under `[class_name, :initialize]` so the
+      # initialize-stub renderer can consult it.
+      def observation_key(call_node, receiver_type)
+        if receiver_type.is_a?(Type::Singleton) && call_node.name == :new
+          [receiver_type.class_name, :initialize]
+        elsif receiver_type.is_a?(Type::Nominal)
+          [receiver_type.class_name, call_node.name]
+        end
       end
 
       # ADR-14 slice 5 — RSpec-aware receiver typing.
@@ -323,24 +339,46 @@ module Rigor
         end
       end
 
-      def collect_arg_types(call_node, scope)
+      # ADR-14 follow-up (B): walks a call's argument list
+      # separating positional from keyword arguments and
+      # returning an {ObservedCall} carrier. Splat /
+      # forwarded / block arguments still abort the
+      # observation (`nil`) — those don't map cleanly to a
+      # single per-position type the renderer can union.
+      def collect_args(call_node, scope) # rubocop:disable Metrics/CyclomaticComplexity
+        positional = []
+        keyword = {}
         args = call_node.arguments&.arguments || []
-        return nil if args.any? { |arg| non_positional?(arg) }
+        args.each do |arg|
+          case arg
+          when Prism::KeywordHashNode
+            pairs = read_keyword_pairs(arg, scope)
+            return nil if pairs.nil?
 
-        types = args.map { |arg| safe_type_of(scope, arg) }
-        types.include?(nil) ? nil : types
+            keyword.merge!(pairs)
+          when Prism::SplatNode, Prism::BlockArgumentNode, Prism::ForwardingArgumentsNode
+            return nil
+          else
+            type = safe_type_of(scope, arg)
+            return nil if type.nil?
+
+            positional << type
+          end
+        end
+        ObservedCall.new(positional: positional, keyword: keyword)
       end
 
-      # The MVP rejects splat / keyword / forwarded arguments
-      # — those need positional-vs-keyword separation the
-      # generator does not yet emit. Slice 4 widens the
-      # acceptance once the def-emission surface grows the
-      # matching shapes.
-      def non_positional?(arg)
-        arg.is_a?(Prism::SplatNode) ||
-          arg.is_a?(Prism::KeywordHashNode) ||
-          arg.is_a?(Prism::BlockArgumentNode) ||
-          arg.is_a?(Prism::ForwardingArgumentsNode)
+      def read_keyword_pairs(hash_node, scope)
+        out = {}
+        hash_node.elements.each do |pair|
+          return nil unless pair.is_a?(Prism::AssocNode) && pair.key.is_a?(Prism::SymbolNode)
+
+          type = safe_type_of(scope, pair.value)
+          return nil if type.nil?
+
+          out[pair.key.unescaped.to_sym] = type
+        end
+        out
       end
 
       def safe_type_of(scope, node)

@@ -52,7 +52,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
     RUBY
 
     obs = collector(paths: [spec]).collect
-    arg_types = obs[["Calc", :m]].flat_map(&:itself).map(&:erase_to_rbs)
+    arg_types = obs[["Calc", :m]].flat_map(&:positional).map(&:erase_to_rbs)
 
     expect(arg_types).to contain_exactly("42", '"text"')
   end
@@ -77,15 +77,45 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
     expect(collector(paths: [spec]).collect).to eq({})
   end
 
-  it "skips splat / keyword / block / forwarding argument shapes" do
+  it "skips splat / block / forwarding argument shapes (kwargs are now captured)" do
     write_fixture("lib/calc.rb", "class Calc\n  def m(*a); a; end\nend\n")
     spec = write_fixture("spec/calc_spec.rb", <<~RUBY)
       c = Calc.new
       c.m(*[1, 2])
-      c.m(key: 1)
     RUBY
 
     expect(collector(paths: [spec]).collect).to eq({})
+  end
+
+  it "captures keyword arguments into the observation's `keyword` slot" do
+    write_fixture("lib/calc.rb", "class Calc\n  def m(key:); key; end\nend\n")
+    spec = write_fixture("spec/calc_spec.rb", <<~RUBY)
+      c = Calc.new
+      c.m(key: 1)
+    RUBY
+
+    obs = collector(paths: [spec]).collect
+
+    expect(obs[["Calc", :m]].first.keyword).to eq(key: Rigor::Type::Combinator.constant_of(1))
+  end
+
+  it "routes `Class.new(...)` observations under [class, :initialize]" do
+    write_fixture("lib/calc.rb", "class Calc\n  def initialize(name); @name = name; end\nend\n")
+    spec = write_fixture("spec/calc_spec.rb", "Calc.new(\"hi\")\n")
+
+    obs = collector(paths: [spec]).collect
+
+    expect(obs.keys).to contain_exactly(["Calc", :initialize])
+    expect(obs[["Calc", :initialize]].first.positional.first.erase_to_rbs).to eq(%("hi"))
+  end
+
+  it "routes `.new` calls with kwargs into the initialize observation" do
+    write_fixture("lib/calc.rb", "class Calc\n  def initialize(name:); @name = name; end\nend\n")
+    spec = write_fixture("spec/calc_spec.rb", "Calc.new(name: \"hi\")\n")
+
+    obs = collector(paths: [spec]).collect
+
+    expect(obs[["Calc", :initialize]].first.keyword[:name].erase_to_rbs).to eq(%("hi"))
   end
 
   describe "RSpec-aware bindings (slice 5)" do
@@ -105,7 +135,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
       obs = collector(paths: [spec]).collect
 
-      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq('"hello"')
+      expect(obs[["Calc", :m]].first.positional.first.erase_to_rbs).to eq('"hello"')
     end
 
     it "credits `let(:other) { Calc.new }; other.m(x)` to Calc#m" do
@@ -120,7 +150,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
       obs = collector(paths: [spec]).collect
 
-      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("42")
+      expect(obs[["Calc", :m]].first.positional.first.erase_to_rbs).to eq("42")
     end
 
     it "resolves `described_class.new.m(x)` against the surrounding `describe Calc`" do
@@ -134,7 +164,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
       obs = collector(paths: [spec]).collect
 
-      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq(":sym")
+      expect(obs[["Calc", :m]].first.positional.first.erase_to_rbs).to eq(":sym")
     end
 
     it "recognises bare `describe Foo` (no RSpec receiver) as the described class" do
@@ -149,7 +179,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
       obs = collector(paths: [spec]).collect
 
-      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("true")
+      expect(obs[["Calc", :m]].first.positional.first.erase_to_rbs).to eq("true")
     end
 
     it "honours named `subject(:foo) { ... }` bindings" do
@@ -164,7 +194,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
       obs = collector(paths: [spec]).collect
 
-      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq('"ok"')
+      expect(obs[["Calc", :m]].first.positional.first.erase_to_rbs).to eq('"ok"')
     end
   end
 end

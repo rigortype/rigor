@@ -50,8 +50,20 @@ module Rigor
       def initialize(configuration:, paths:, observations: {}, include_private: false)
         @configuration = configuration
         @paths = paths
-        @observations = observations
+        @observations = normalize_observations(observations)
         @include_private = include_private
+      end
+
+      # Lifts legacy plain-`Array[Type]` observation entries
+      # into {ObservedCall} carriers. Specs from the slice-3
+      # generation predate the carrier and pass observations
+      # as `{ [class, method] => [[type1, type2], ...] }`;
+      # the wrapper keeps those passing while internal code
+      # always sees the new shape.
+      def normalize_observations(map)
+        return map if map.empty?
+
+        map.transform_values { |entries| entries.map { |entry| ObservedCall.from(entry) } }
       end
 
       # @return [Array<MethodCandidate>]
@@ -205,15 +217,21 @@ module Rigor
         kind == :instance && def_node.name == :initialize && !trivial_initialize_params?(def_node.parameters)
       end
 
-      # Emits `def initialize: (<shape>) -> void` with `untyped`
-      # types at every position. The return is always `void`
-      # because Ruby's `initialize` return value is never
-      # meaningful. The parameter list mirrors the runtime
-      # shape (required / optional / rest / keyword / keyword-
-      # rest / block) so Steep / RBS-aware tools see a
-      # signature compatible with the actual constructor.
+      # Emits `def initialize: (<shape>) -> void`. The return
+      # is always `void` because Ruby's `initialize` return
+      # value is never meaningful. The parameter list mirrors
+      # the runtime shape (required / optional / rest /
+      # keyword / keyword-rest / block).
+      #
+      # When `--params=observed` populates `@observations` for
+      # `[class_name, :initialize]` (via the
+      # `ObservationCollector`'s `.new` → `:initialize`
+      # routing), positional and keyword arg types come from
+      # the per-position / per-keyword union of observed
+      # types; otherwise every position keeps `untyped` per
+      # ADR-5 clause 2.
       def initialize_stub_candidate(path, def_node, class_name)
-        rbs = "def initialize: (#{render_initialize_param_list(def_node.parameters)}) -> void"
+        rbs = "def initialize: (#{render_initialize_param_list(def_node.parameters, class_name)}) -> void"
         MethodCandidate.new(
           path: path, class_name: class_name, method_name: :initialize,
           kind: :instance, classification: Classification::NEW_METHOD,
@@ -221,20 +239,53 @@ module Rigor
         )
       end
 
-      def render_initialize_param_list(params)
+      def render_initialize_param_list(params, class_name) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
         return "" unless params.is_a?(Prism::ParametersNode)
 
+        observations = initialize_observations(class_name, params)
+        offset = 0
         parts = []
-        parts.concat(Array.new(params.requireds.size, "untyped"))
-        parts.concat(Array.new(params.optionals.size, "?untyped"))
-        parts << "*untyped" if params.rest
-        params.keywords.each do |kw|
-          prefix = kw.is_a?(Prism::OptionalKeywordParameterNode) ? "?" : ""
-          parts << "#{prefix}#{kw.name}: untyped"
+
+        params.requireds.each_with_index do |_, i|
+          parts << initialize_positional_type(observations, offset + i, "")
         end
+        offset += params.requireds.size
+
+        params.optionals.each_with_index do |_, i|
+          parts << initialize_positional_type(observations, offset + i, "?")
+        end
+
+        parts << "*untyped" if params.rest
+        params.keywords.each { |kw| parts << render_keyword_param(kw, observations) }
         parts << "**untyped" if params.keyword_rest
         parts << "?{ (?) -> void }" if params.block
         parts.join(", ")
+      end
+
+      # Picks observations under `[class_name, :initialize]`
+      # whose positional arity matches the def's accepted
+      # range (required..required+optional). Looser arities
+      # don't get used because they describe a different
+      # overload the stub cannot express.
+      def initialize_observations(class_name, params)
+        return [] if @observations.empty?
+
+        list = @observations[[class_name, :initialize]] || []
+        min = params.requireds.size
+        max = min + params.optionals.size
+        list.select { |obs| (min..max).cover?(obs.positional.size) }
+      end
+
+      def initialize_positional_type(observations, index, prefix)
+        types = observations.filter_map { |obs| obs.positional[index] }
+        "#{prefix}#{types.empty? ? 'untyped' : paren_wrap_union(union_erase(types))}"
+      end
+
+      def render_keyword_param(keyword, observations)
+        optional_marker = keyword.is_a?(Prism::OptionalKeywordParameterNode) ? "?" : ""
+        types = observations.filter_map { |obs| obs.keyword[keyword.name] }
+        rendered = types.empty? ? "untyped" : paren_wrap_union(union_erase(types))
+        "#{optional_marker}#{keyword.name}: #{rendered}"
       end
 
       def qualified_constant_path(constant_path)
@@ -658,14 +709,14 @@ module Rigor
         tuples = matching_observations(class_name, method_name, arity)
         return Array.new(arity, "untyped").join(", ") if tuples.empty?
 
-        Array.new(arity) { |i| union_erase(tuples.map { |args| args[i] }) }.join(", ")
+        Array.new(arity) { |i| union_erase(tuples.map { |obs| obs.positional[i] }) }.join(", ")
       end
 
       def matching_observations(class_name, method_name, arity)
         return [] if @observations.empty?
 
         list = @observations[[class_name, method_name]] || []
-        list.select { |tuple| tuple.size == arity }
+        list.select { |obs| obs.positional.size == arity }
       end
 
       def union_erase(types)

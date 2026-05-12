@@ -169,6 +169,41 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(init.rbs).to eq("def initialize: (name: untyped, ?opts: untyped) -> void")
     end
+
+    it "fills in observed keyword arg types in the stub when --params=observed is active" do
+      src = "class Box\n  def initialize(name:, count: 0)\n    @name = name\n  end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+      observations = {
+        ["Box", :initialize] => [
+          Rigor::SigGen::ObservedCall.new(
+            keyword: { name: Rigor::Type::Combinator.constant_of("Alice"),
+                       count: Rigor::Type::Combinator.constant_of(42) }
+          )
+        ]
+      }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      init = described_class.new(configuration: config, paths: [path], observations: observations)
+                            .run.find { |c| c.method_name == :initialize }
+
+      expect(init.rbs).to eq(%(def initialize: (name: "Alice", ?count: 42) -> void))
+    end
+
+    it "fills in observed positional arg types in the stub" do
+      src = "class Box\n  def initialize(name)\n    @name = name\n  end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+      observations = {
+        ["Box", :initialize] => [
+          Rigor::SigGen::ObservedCall.new(positional: [Rigor::Type::Combinator.constant_of("Alice")])
+        ]
+      }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      init = described_class.new(configuration: config, paths: [path], observations: observations)
+                            .run.find { |c| c.method_name == :initialize }
+
+      expect(init.rbs).to eq(%(def initialize: ("Alice") -> void))
+    end
   end
 
   describe "explicit-return union (post-dogfood body-typer enhancement)" do

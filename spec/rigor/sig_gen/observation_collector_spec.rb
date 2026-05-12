@@ -54,7 +54,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
     obs = collector(paths: [spec]).collect
     arg_types = obs[["Calc", :m]].flat_map(&:itself).map(&:erase_to_rbs)
 
-    expect(arg_types).to contain_exactly("Integer", "String")
+    expect(arg_types).to contain_exactly("42", '"text"')
   end
 
   it "skips zero-argument calls" do
@@ -105,7 +105,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
       obs = collector(paths: [spec]).collect
 
-      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("String")
+      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq('"hello"')
     end
 
     it "credits `let(:other) { Calc.new }; other.m(x)` to Calc#m" do
@@ -120,7 +120,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
       obs = collector(paths: [spec]).collect
 
-      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("Integer")
+      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("42")
     end
 
     it "resolves `described_class.new.m(x)` against the surrounding `describe Calc`" do
@@ -134,7 +134,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
       obs = collector(paths: [spec]).collect
 
-      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("Symbol")
+      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq(":sym")
     end
 
     it "recognises bare `describe Foo` (no RSpec receiver) as the described class" do
@@ -164,7 +164,7 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
       obs = collector(paths: [spec]).collect
 
-      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("String")
+      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq('"ok"')
     end
   end
 end

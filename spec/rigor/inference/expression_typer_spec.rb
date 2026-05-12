@@ -11,28 +11,28 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
   end
 
   describe "literal nodes" do
-    it "types integer literals as Constant<Integer>" do
+    it "types integer literals as Constant<Integer> and erases to the RBS literal form" do
       type = scope.type_of(parse_expression("42"))
       expect(type.describe).to eq("42")
-      expect(type.erase_to_rbs).to eq("Integer")
+      expect(type.erase_to_rbs).to eq("42")
     end
 
-    it "types float literals as Constant<Float>" do
+    it "types float literals as Constant<Float> and widens at erasure (RBS has no Float literal)" do
       type = scope.type_of(parse_expression("2.5"))
       expect(type.describe).to eq("2.5")
       expect(type.erase_to_rbs).to eq("Float")
     end
 
-    it "types string literals as Constant<String>" do
+    it "types string literals as Constant<String> and erases to the RBS literal form" do
       type = scope.type_of(parse_expression('"hi"'))
       expect(type.describe).to eq('"hi"')
-      expect(type.erase_to_rbs).to eq("String")
+      expect(type.erase_to_rbs).to eq('"hi"')
     end
 
-    it "types symbol literals as Constant<Symbol>" do
+    it "types symbol literals as Constant<Symbol> and erases to the RBS literal form" do
       type = scope.type_of(parse_expression(":foo"))
       expect(type.describe).to eq(":foo")
-      expect(type.erase_to_rbs).to eq("Symbol")
+      expect(type.erase_to_rbs).to eq(":foo")
     end
 
     it "types true/false/nil as their constant carriers" do

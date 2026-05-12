@@ -170,13 +170,19 @@ RSpec.describe Rigor::Type::Combinator do
       expect(described_class.constant_of(nil).describe).to eq("nil")
     end
 
-    it "erases to the underlying class name (or RBS literal for true/false/nil)" do
-      expect(described_class.constant_of(1).erase_to_rbs).to eq("Integer")
-      expect(described_class.constant_of("hi").erase_to_rbs).to eq("String")
-      expect(described_class.constant_of(:foo).erase_to_rbs).to eq("Symbol")
+    it "erases to RBS Literal types for true/false/nil and the scalars RBS accepts as literals" do
+      expect(described_class.constant_of(64).erase_to_rbs).to eq("64")
+      expect(described_class.constant_of(-5).erase_to_rbs).to eq("-5")
+      expect(described_class.constant_of("hi").erase_to_rbs).to eq('"hi"')
+      expect(described_class.constant_of(:foo).erase_to_rbs).to eq(":foo")
       expect(described_class.constant_of(true).erase_to_rbs).to eq("true")
       expect(described_class.constant_of(false).erase_to_rbs).to eq("false")
       expect(described_class.constant_of(nil).erase_to_rbs).to eq("nil")
+    end
+
+    it "widens scalars RBS does not accept as literals to their class name" do
+      expect(described_class.constant_of(1.5).erase_to_rbs).to eq("Float")
+      expect(described_class.constant_of(1..10).erase_to_rbs).to eq("Range")
     end
 
     it "rejects compound literals" do
@@ -238,9 +244,14 @@ RSpec.describe Rigor::Type::Combinator do
         expect(union.erase_to_rbs).to eq("untyped")
       end
 
-      it "dedupes post-erasure when distinct constants share an envelope" do
+      it "preserves distinct literal members for RBS-Literal-capable scalars" do
         union = described_class.union(described_class.constant_of("a"), described_class.constant_of("b"))
-        expect(union.erase_to_rbs).to eq("String")
+        expect(union.erase_to_rbs).to eq('"a" | "b"')
+      end
+
+      it "dedupes post-erasure when distinct constants share a non-literal envelope" do
+        union = described_class.union(described_class.constant_of(1.5), described_class.constant_of(2.5))
+        expect(union.erase_to_rbs).to eq("Float")
       end
 
       it "preserves distinct erased members" do

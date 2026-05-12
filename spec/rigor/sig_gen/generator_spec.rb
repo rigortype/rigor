@@ -33,7 +33,7 @@ RSpec.describe Rigor::SigGen::Generator do
       new_methods = candidates.select { |c| c.classification == Rigor::SigGen::Classification::NEW_METHOD }
 
       expect(new_methods.map { |c| [c.class_name, c.method_name, c.rbs] })
-        .to eq([["Widget", :n, "def n: () -> Integer"]])
+        .to eq([["Widget", :n, "def n: () -> 42"]])
     end
 
     it "renders required-positional parameters as untyped per ADR-5 clause 2" do
@@ -48,7 +48,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidates = generator(paths: [path]).run
 
       method = candidates.find { |c| c.method_name == :two }
-      expect(method.rbs).to eq("def two: (untyped, untyped) -> String")
+      expect(method.rbs).to eq(%(def two: (untyped, untyped) -> "constant"))
     end
 
     it "skips defs with optional / keyword / block / rest params via sig.skipped.complex-shape" do
@@ -160,7 +160,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
 
-      expect(candidate.rbs.split(" -> ").last.split(" | ").sort).to eq(%w[Integer String])
+      expect(candidate.rbs.split(" -> ").last.split(" | ").sort).to eq(['"end"', "1"])
     end
 
     it "treats bare `return` as `nil`" do
@@ -169,7 +169,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
 
-      expect(candidate.rbs.split(" -> ").last.split(" | ").sort).to eq(%w[String nil])
+      expect(candidate.rbs.split(" -> ").last.split(" | ").sort).to eq(['"end"', "nil"])
     end
 
     it "does not credit returns from nested blocks / lambdas / inner defs" do
@@ -185,7 +185,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
 
-      expect(candidate.rbs).to eq("def m: () -> String")
+      expect(candidate.rbs).to eq(%(def m: () -> "end"))
     end
   end
 
@@ -223,7 +223,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
   describe "#run when RBS already declares the method" do
     it "classifies an exact-match declaration as equivalent" do
-      write_fixture("sig/widget.rbs", "class Widget\n  def n: () -> Integer\nend\n")
+      write_fixture("sig/widget.rbs", "class Widget\n  def n: () -> 42\nend\n")
       path = write_fixture("lib/widget.rb", "class Widget\n  def n\n    42\n  end\nend\n")
 
       gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
@@ -241,7 +241,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
       expect(method.declared_return_rbs).to eq("Numeric")
-      expect(method.rbs).to eq("def value: () -> Integer")
+      expect(method.rbs).to eq("def value: () -> 42")
     end
   end
 
@@ -252,7 +252,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :factory }
 
       expect(candidate.kind).to eq(:singleton)
-      expect(candidate.rbs).to eq("def self.factory: () -> String")
+      expect(candidate.rbs).to eq(%(def self.factory: () -> "hi"))
     end
 
     it "treats `class << self; def foo; end` defs as singleton" do
@@ -269,7 +269,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :helper }
 
       expect(candidate.kind).to eq(:singleton)
-      expect(candidate.rbs).to eq("def self.helper: () -> Integer")
+      expect(candidate.rbs).to eq("def self.helper: () -> 42")
     end
   end
 
@@ -287,7 +287,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :name }
 
       expect(candidate.kind).to eq(:instance)
-      expect(candidate.rbs).to eq("def name: () -> String")
+      expect(candidate.rbs).to eq(%(def name: () -> "hi"))
     end
 
     it "emits reader + writer candidates for attr_accessor" do
@@ -303,8 +303,8 @@ RSpec.describe Rigor::SigGen::Generator do
       candidates = generator(paths: [path]).run.select { |c| %i[count count=].include?(c.method_name) }
 
       expect(candidates.map { |c| [c.method_name, c.rbs] }).to contain_exactly(
-        [:count, "def count: () -> Integer"],
-        [:count=, "def count=: (Integer) -> Integer"]
+        [:count, "def count: () -> 0"],
+        [:count=, "def count=: (0) -> 0"]
       )
     end
 
@@ -328,7 +328,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = described_class.new(configuration: config, paths: [path], observations: observations)
                                  .run.find { |c| c.method_name == :greet }
 
-      expect(candidate.rbs).to eq("def greet: (String) -> String")
+      expect(candidate.rbs).to eq(%(def greet: ("Alice" | "Bob") -> "hi"))
     end
 
     it "falls back to untyped when no observation matches the method's required arity" do
@@ -340,10 +340,10 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = described_class.new(configuration: config, paths: [path], observations: observations)
                                  .run.find { |c| c.method_name == :add }
 
-      expect(candidate.rbs).to eq("def add: (untyped, untyped) -> String")
+      expect(candidate.rbs).to eq(%(def add: (untyped, untyped) -> "x"))
     end
 
-    it "dedupes erased union members when constant carriers share an envelope" do
+    it "preserves distinct literal observations as a union" do
       path = write_fixture("lib/box.rb", "class Box\n  def m(x)\n    \"r\"\n  end\nend\n")
       observations = {
         ["Box", :m] => [
@@ -356,7 +356,7 @@ RSpec.describe Rigor::SigGen::Generator do
       candidate = described_class.new(configuration: config, paths: [path], observations: observations)
                                  .run.find { |c| c.method_name == :m }
 
-      expect(candidate.rbs).to eq("def m: (String) -> String")
+      expect(candidate.rbs).to eq(%(def m: ("a" | "b") -> "r"))
     end
   end
 
@@ -368,7 +368,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(hash).to include(
         file: path, class: "RoundTrip", method: "m", kind: "instance",
-        classification: "new_method", rbs: "def m: () -> String"
+        classification: "new_method", rbs: %(def m: () -> "x")
       )
     end
   end

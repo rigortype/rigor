@@ -56,7 +56,7 @@ RSpec.describe Rigor::CLI do
       expect(status).to eq(0)
       expect(out).to include("node:    Prism::IntegerNode")
       expect(out).to include("type:    1")
-      expect(out).to include("erased:  Integer")
+      expect(out).to include("erased:  1")
     end
 
     it "accepts FILE LINE COL as separate arguments" do
@@ -67,7 +67,7 @@ RSpec.describe Rigor::CLI do
       expect(err).to eq("")
       expect(status).to eq(0)
       expect(out).to include("Prism::StringNode")
-      expect(out).to include("erased:  String")
+      expect(out).to include('erased:  "hi"')
     end
 
     it "emits a JSON payload when --format=json is supplied" do
@@ -79,7 +79,7 @@ RSpec.describe Rigor::CLI do
       payload = JSON.parse(out)
       expect(payload["node"]).to eq("Prism::SymbolNode")
       expect(payload["type"]).to eq(":sym")
-      expect(payload["erased"]).to eq("Symbol")
+      expect(payload["erased"]).to eq(":sym")
       expect(payload["line"]).to eq(1)
       expect(payload["column"]).to eq(1)
     end
@@ -707,7 +707,7 @@ RSpec.describe Rigor::CLI do
       expect(err).to eq("")
       expect(status).to eq(0)
       expect(out).to include("class Widget")
-      expect(out).to include("def n: () -> Integer")
+      expect(out).to include("def n: () -> 42")
       expect(out).to include("[new]")
     end
 
@@ -720,7 +720,7 @@ RSpec.describe Rigor::CLI do
       expect(status).to eq(0)
       expect(payload["candidates"].first).to include(
         "class" => "Widget", "method" => "s", "kind" => "instance",
-        "classification" => "new_method", "rbs" => "def s: () -> String"
+        "classification" => "new_method", "rbs" => %(def s: () -> "hi")
       )
     end
 
@@ -755,7 +755,7 @@ RSpec.describe Rigor::CLI do
 
       expect(status).to eq(0)
       expect(out).to include("--- ")
-      expect(out).to include("+ def n: () -> Integer")
+      expect(out).to include("+ def n: () -> 42")
     end
 
     it "lists sig-gen in the help text" do
@@ -779,7 +779,7 @@ RSpec.describe Rigor::CLI do
         Dir.chdir(tmpdir) do
           status, out, _err = run_cli("sig-gen", "--params=observed", "--config=#{config}")
           expect(status).to eq(0)
-          expect(out).to include("def greet: (String) -> String")
+          expect(out).to include(%(def greet: ("Alice" | "Bob") -> "hi"))
         end
       end
 
@@ -788,7 +788,7 @@ RSpec.describe Rigor::CLI do
 
         Dir.chdir(tmpdir) do
           _, out, = run_cli("sig-gen", "--params=observed", "--observe=spec", "--config=#{config}")
-          expect(out).to include("def greet: (String) -> String")
+          expect(out).to include(%(def greet: ("Alice" | "Bob") -> "hi"))
         end
       end
 
@@ -800,7 +800,7 @@ RSpec.describe Rigor::CLI do
 
         Dir.chdir(tmpdir) do
           _, out, = run_cli("sig-gen", "--params=observed", "--config=#{config_path}")
-          expect(out).to include("def add: (untyped, untyped) -> String")
+          expect(out).to include(%(def add: (untyped, untyped) -> "x"))
         end
       end
     end
@@ -822,18 +822,18 @@ RSpec.describe Rigor::CLI do
           expect(out).to include("created")
         end
 
-        expect(File.read(File.join(tmpdir, "sig/widget.rbs"))).to include("def n: () -> Integer")
+        expect(File.read(File.join(tmpdir, "sig/widget.rbs"))).to include("def n: () -> 42")
       end
 
       it "merges new methods into an existing sig file without touching authored declarations" do
         write_fixture("lib/widget.rb", "class Widget\n  def n; 42; end\n  def s; \"hi\"; end\nend\n")
-        write_fixture("sig/widget.rbs", "class Widget\n  # keep me\n  def n: () -> Integer\nend\n")
+        write_fixture("sig/widget.rbs", "class Widget\n  # keep me\n  def n: () -> 42\nend\n")
         config = write_config
 
         Dir.chdir(tmpdir) { run_cli("sig-gen", "--write", "--config=#{config}") }
         output = File.read(File.join(tmpdir, "sig/widget.rbs"))
 
-        expect(output).to include("# keep me", "def n: () -> Integer", "def s: () -> String")
+        expect(output).to include("# keep me", "def n: () -> 42", %(def s: () -> "hi"))
       end
 
       it "leaves user-authored tighter-return declarations alone without --overwrite" do
@@ -854,7 +854,7 @@ RSpec.describe Rigor::CLI do
         Dir.chdir(tmpdir) { run_cli("sig-gen", "--write", "--overwrite", "--config=#{config}") }
         output = File.read(File.join(tmpdir, "sig/widget.rbs"))
 
-        expect(output).to include("def n: () -> Integer")
+        expect(output).to include("def n: () -> 42")
         expect(output).not_to include("Numeric")
       end
 

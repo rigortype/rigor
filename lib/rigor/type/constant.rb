@@ -50,11 +50,24 @@ module Rigor
         value.inspect
       end
 
+      # RBS supports `Literal` types for booleans, nil, integer
+      # literals (positive and negative), symbol literals, and
+      # string literals. Erasing to these preserves the
+      # carrier's precision at the RBS boundary — `Constant<64>`
+      # round-trips as `64`, not as `Integer` — and
+      # `RbsTypeTranslator#translate_literal` already maps the
+      # parsed RBS Literal back to `Constant`. Scalar carriers
+      # without RBS Literal support (Float, Range, Rational,
+      # Complex, Regexp, Pathname) keep their pre-existing
+      # widen-to-class-name behaviour because RBS rejects their
+      # literal spellings as syntax errors.
       def erase_to_rbs
         case value
         when true then "true"
         when false then "false"
         when nil then "nil"
+        when Integer then value.to_s
+        when Symbol, String then value.inspect
         else value.class.name
         end
       end

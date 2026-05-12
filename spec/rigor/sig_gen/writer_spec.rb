@@ -100,6 +100,69 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
+  describe "with --overwrite for NEW_METHOD candidates that tighten existing `untyped`" do
+    def new_method_candidate(method_name:, rbs:, kind: :instance, class_name: "Foo")
+      Rigor::SigGen::MethodCandidate.new(
+        path: "lib/foo.rb",
+        class_name: class_name,
+        method_name: method_name,
+        kind: kind,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: rbs
+      )
+    end
+
+    it "replaces an existing declaration when the new RBS has STRICTLY FEWER `untyped` tokens" do
+      write_target("class Foo\n  def initialize: (path: untyped, ?opts: untyped) -> void\nend\n")
+      stub = new_method_candidate(
+        method_name: :initialize,
+        rbs: "def initialize: (path: String, ?opts: Hash[String, untyped]) -> void"
+      )
+
+      result = writer(overwrite: true).write("lib/foo.rb", [stub])
+      output = File.read(File.join(tmpdir, "sig/foo.rbs"))
+
+      expect(result.action).to eq(:updated)
+      expect(output).to include("(path: String, ?opts: Hash[String, untyped])")
+    end
+
+    it "skips when the new RBS has the same `untyped` count" do
+      write_target("class Foo\n  def m: (untyped) -> Integer\nend\n")
+      stub = new_method_candidate(
+        method_name: :m,
+        rbs: "def m: (Integer) -> untyped"
+      )
+
+      result = writer(overwrite: true).write("lib/foo.rb", [stub])
+
+      expect(result.skipped.map(&:last)).to eq([:user_authored])
+    end
+
+    it "skips when the new RBS would INTRODUCE an `untyped` (no widening)" do
+      write_target("class Foo\n  def m: (Integer) -> Integer\nend\n")
+      stub = new_method_candidate(
+        method_name: :m,
+        rbs: "def m: (untyped) -> Integer"
+      )
+
+      result = writer(overwrite: true).write("lib/foo.rb", [stub])
+
+      expect(result.skipped.map(&:last)).to eq([:user_authored])
+    end
+
+    it "does NOT replace without --overwrite even when the new RBS tightens untypeds" do
+      write_target("class Foo\n  def m: (untyped) -> Integer\nend\n")
+      stub = new_method_candidate(
+        method_name: :m,
+        rbs: "def m: (Integer) -> Integer"
+      )
+
+      result = writer(overwrite: false).write("lib/foo.rb", [stub])
+
+      expect(result.skipped.map(&:last)).to eq([:user_authored])
+    end
+  end
+
   describe "with --overwrite" do
     it "replaces user-authored RBS for tighter-return candidates" do
       write_target("class Foo\n  def n: () -> Numeric\nend\n")

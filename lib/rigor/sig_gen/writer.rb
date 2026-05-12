@@ -164,7 +164,7 @@ module Rigor
         applied.concat(new_methods)
 
         if @overwrite
-          source, replaced = replace_tighter_returns(source, decl, conflicting)
+          source, replaced = replace_eligible_conflicts(source, decl, conflicting)
           applied.concat(replaced)
           skipped.concat(conflicting.reject { |c| replaced.include?(c) }.map { |c| [c, :user_authored] })
         else
@@ -218,23 +218,66 @@ module Rigor
       end
 
       # Walks the class's existing method declarations; for
-      # each tighter-return candidate that matches a member
+      # each replaceable candidate that matches a member
       # name, slices out the old declaration's source range
       # and substitutes the new RBS one-liner. Members that
       # are not `MethodDefinition`s are left alone.
-      def replace_tighter_returns(source, decl, candidates)
-        tighter = candidates.select { |c| c.classification == Classification::TIGHTER_RETURN }
-        return [source, []] if tighter.empty?
+      #
+      # Two candidate classifications are eligible for
+      # replacement under `--overwrite`:
+      #
+      # 1. `TIGHTER_RETURN` — the classifier already proved the
+      #    new return type is a strict subtype of the declared
+      #    one (with lenience guards passed).
+      # 2. `NEW_METHOD` whose new RBS strictly tightens an
+      #    `untyped` position in the existing declaration. The
+      #    canonical case is `initialize_stub_candidate`, which
+      #    bypasses the existing-RBS comparison and always
+      #    classifies as `NEW_METHOD` — when sig-gen's
+      #    `--params=observed` upgrades a `(path: untyped) -> void`
+      #    declaration to `(path: String) -> void` we want
+      #    `--overwrite` to apply it.
+      def replace_eligible_conflicts(source, decl, candidates)
+        eligible = candidates.select { |c| eligible_for_replacement?(c, decl, source) }
+        return [source, []] if eligible.empty?
 
         replaced = []
         # Apply replacements from highest byte position downward
         # so earlier byte offsets remain valid as the source
         # grows or shrinks.
-        sorted = tighter.sort_by { |c| -member_position(decl, c.method_name, c.kind) }
+        sorted = eligible.sort_by { |c| -member_position(decl, c.method_name, c.kind) }
         sorted.each do |candidate|
           source = apply_replacement(source, decl, candidate) and replaced << candidate
         end
         [source, replaced]
+      end
+
+      def eligible_for_replacement?(candidate, decl, source)
+        case candidate.classification
+        when Classification::TIGHTER_RETURN then true
+        when Classification::NEW_METHOD then tightens_untyped?(candidate, decl, source)
+        else false
+        end
+      end
+
+      # Compares the existing member's source-side RBS text
+      # against the candidate's proposed RBS text. Returns
+      # true when the new spelling has STRICTLY FEWER bare
+      # `untyped` tokens than the existing one — i.e. at
+      # least one `untyped` slot becomes a concrete type AND
+      # no concrete slot becomes `untyped`. Word-boundary
+      # matching ensures we count `untyped` only as a type
+      # token, not as a substring inside identifiers.
+      def tightens_untyped?(candidate, decl, source)
+        member = find_method_member(decl, candidate.method_name, candidate.kind)
+        return false if member.nil?
+
+        existing_rbs = source[member.location.start_pos...member.location.end_pos]
+        count_untyped(candidate.rbs) < count_untyped(existing_rbs)
+      end
+
+      def count_untyped(rbs)
+        rbs.scan(/\buntyped\b/).size
       end
 
       def member_position(decl, method_name, kind)

@@ -1,0 +1,4 @@
+class Rigor::CLI::ExplainCommand
+  def run: () -> Integer
+  def parse_options: () -> { format: String }
+end

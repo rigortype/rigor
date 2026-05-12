@@ -355,7 +355,9 @@ module Rigor
           return equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
         end
 
-        return equivalent(path, def_node, class_name, kind, inferred, declared_rbs) unless tighter?(declared, inferred)
+        unless tighter?(declared, inferred) && !computed_literal_tightening?(inferred, def_node)
+          return equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
+        end
 
         MethodCandidate.new(
           path: path,
@@ -466,6 +468,36 @@ module Rigor
         return false unless GENERIC_COLLECTION_CLASSES.include?(declared.class_name)
 
         inferred.is_a?(Type::Tuple) || inferred.is_a?(Type::HashShape)
+      end
+
+      # Heuristic added after the third-round self-dogfood:
+      # `FallbackTracer#size` body is `@events.size`, where
+      # `@events` is initialised to `[]` and never assigned
+      # again at the class-ivar pre-pass level. The
+      # `Type::Tuple[]` (size 0) folds `.size` to
+      # `Constant<0>` — the carrier knows the empty-tuple
+      # cardinality exactly. But the runtime contract is
+      # `Integer` because callers add events through other
+      # methods. The signal is "the body's last expression
+      # is NOT a directly-authored literal but the inferred
+      # type IS a Constant"; in that case the precision
+      # came from inference over an internal computation,
+      # not the author's contract, so refuse to tighten.
+      def computed_literal_tightening?(inferred, def_node)
+        return false unless inferred.is_a?(Type::Constant)
+
+        last = body_last_expression(def_node.body)
+        !direct_literal_node?(last)
+      end
+
+      DIRECT_LITERAL_NODE_TYPES = [
+        Prism::IntegerNode, Prism::FloatNode, Prism::StringNode, Prism::SymbolNode,
+        Prism::TrueNode, Prism::FalseNode, Prism::NilNode
+      ].freeze
+      private_constant :DIRECT_LITERAL_NODE_TYPES
+
+      def direct_literal_node?(node)
+        DIRECT_LITERAL_NODE_TYPES.any? { |klass| node.is_a?(klass) }
       end
 
       def replaces_untyped_type_arg?(declared, inferred)

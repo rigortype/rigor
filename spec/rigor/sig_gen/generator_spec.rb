@@ -210,6 +210,28 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
     end
 
+    it "refuses to tighten when the inferred Constant comes from a non-literal body expression" do
+      write_fixture("sig/box.rbs", "class Box\n  def count: () -> Integer\nend\n")
+      src = "class Box\n  def initialize; @items = []; end\n  def count; @items.size; end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :count }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "DOES tighten when the body's last expression is a directly-authored literal" do
+      write_fixture("sig/box.rbs", "class Box\n  def status: () -> Integer\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def status\n    200\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :status }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
+      expect(method.rbs).to eq("def status: () -> 200")
+    end
+
     it "refuses to tighten when an `untyped` type-arg would be replaced by a concrete form" do
       write_fixture("sig/box.rbs", "class Box\n  def to_h: () -> Hash[String, untyped]\nend\n")
       path = write_fixture("lib/box.rb", "class Box\n  def to_h\n    {\"k\" => 1}\n  end\nend\n")

@@ -7,34 +7,34 @@ module Rigor
     class Top
       def self.instance: () -> Top
       def describe: (?Symbol verbosity) -> String
-      def erase_to_rbs: () -> String
+      def erase_to_rbs: () -> "top"
       def top: () -> Trinary
       def bot: () -> Trinary
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
-      def inspect: () -> String
+      def inspect: () -> "#<Rigor::Type::Top>"
     end
 
     class Bot
       def self.instance: () -> Bot
       def describe: (?Symbol verbosity) -> String
-      def erase_to_rbs: () -> String
+      def erase_to_rbs: () -> "bot"
       def top: () -> Trinary
       def bot: () -> Trinary
       def dynamic: () -> Trinary
       def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
       def ==: (untyped other) -> bool
       def hash: () -> Integer
-      def inspect: () -> String
+      def inspect: () -> "#<Rigor::Type::Bot>"
     end
 
     class Dynamic
       attr_reader static_facet: Type::t
       def initialize: (Type::t static_facet) -> void
       def describe: (?Symbol verbosity) -> String
-      def erase_to_rbs: () -> String
+      def erase_to_rbs: () -> "untyped"
       def top: () -> Trinary
       def bot: () -> Trinary
       def dynamic: () -> Trinary
@@ -72,7 +72,7 @@ module Rigor
       def upper: () -> (Integer | Float)
       def describe: (?Symbol verbosity) -> String
       def generic_description: () -> String
-      def erase_to_rbs: () -> String
+      def erase_to_rbs: () -> "Integer"
       def top: () -> Trinary
       def bot: () -> Trinary
       def dynamic: () -> Trinary

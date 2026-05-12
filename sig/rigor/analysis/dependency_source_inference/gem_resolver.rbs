@@ -1,0 +1,25 @@
+module Rigor
+  module Analysis
+    module DependencySourceInference
+      # `module GemResolver` (sig-gen emits `class` by default;
+      # the source is `module GemResolver; module_function; def resolve ...`
+      # so both `GemResolver.resolve(...)` and instance dispatch work.
+      # `def self?.resolve` matches the `module_function`
+      # semantics).
+      module GemResolver
+        class Resolved
+          def descriptor_key: () -> Array[untyped]
+        end
+
+        # `Unresolvable = Data.define(:gem_name, :reason)`.
+        # Declared here so the `resolve` return-type union
+        # resolves; methods are inherited from `Data`.
+        class Unresolvable
+        end
+
+        def self?.resolve: (untyped) -> (Rigor::Analysis::DependencySourceInference::GemResolver::Resolved | Rigor::Analysis::DependencySourceInference::GemResolver::Unresolvable)
+        def self?.locate_gem_spec: (untyped) -> (Gem::BasicSpecification | Gem::Specification | nil)
+      end
+    end
+  end
+end

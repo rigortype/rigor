@@ -1,0 +1,10 @@
+module Rigor
+  module Analysis
+    module CheckRules
+      class AlwaysTruthyConditionCollector
+        def initialize: (untyped) -> void
+        def collect: (untyped) -> Array[untyped]
+      end
+    end
+  end
+end

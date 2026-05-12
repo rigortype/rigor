@@ -126,9 +126,51 @@ module Rigor
 
       def render_new_file(candidates)
         candidates.group_by(&:class_name).map do |class_name, methods|
-          body = methods.map { |c| "#{INDENT}#{c.rbs}" }.join("\n")
-          "class #{class_name}\n#{body}\nend\n"
+          render_nested_class(class_name, methods)
         end.join("\n")
+      end
+
+      # Emits a class declaration wrapped in nested `module`
+      # blocks for every namespace segment, matching the
+      # canonical RBS layout in this project's `sig/`.
+      # `Rigor::Analysis::DependencySourceInference::GemResolver`
+      # becomes:
+      #
+      #     module Rigor
+      #       module Analysis
+      #         module DependencySourceInference
+      #           class GemResolver
+      #             ...method declarations...
+      #           end
+      #         end
+      #       end
+      #     end
+      #
+      # The nested form (vs the flat `class Rigor::A::B::C`
+      # spelling) ensures Steep's constant resolver sees a
+      # parent-module declaration for every intermediate
+      # segment. Flat syntax leaves intermediate modules
+      # undeclared and triggers `RBS::UnknownTypeName` on
+      # type-check.
+      def render_nested_class(class_name, methods)
+        segments = class_name.split("::")
+        leaf = segments.last
+        prefix = segments[0..-2]
+
+        body_lines = methods.map(&:rbs)
+        wrap_in_modules(prefix, "class #{leaf}", body_lines, 0)
+      end
+
+      def wrap_in_modules(prefix, leaf_header, body_lines, depth)
+        indent = INDENT * depth
+        if prefix.empty?
+          inner_indent = INDENT * (depth + 1)
+          lines = body_lines.map { |line| "#{inner_indent}#{line}" }
+          "#{indent}#{leaf_header}\n#{lines.join("\n")}\n#{indent}end\n"
+        else
+          inner = wrap_in_modules(prefix.drop(1), leaf_header, body_lines, depth + 1)
+          "#{indent}module #{prefix.first}\n#{inner}#{indent}end\n"
+        end
       end
 
       def update_existing(source_path, target, candidates)

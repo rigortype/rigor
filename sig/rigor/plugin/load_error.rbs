@@ -1,0 +1,6 @@
+class Rigor::Plugin::LoadError < StandardError
+  attr_reader plugin_ref: untyped
+  attr_reader cause: untyped
+  attr_reader reason: Symbol
+  def initialize: (untyped, plugin_ref: untyped, ?cause: untyped, ?reason: untyped) -> void
+end

@@ -1,0 +1,3 @@
+class Rigor::Plugin::AccessDeniedError
+  def initialize: (untyped, reason: untyped, ?resource: untyped) -> void
+end

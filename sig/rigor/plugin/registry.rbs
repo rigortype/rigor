@@ -1,0 +1,3 @@
+class Rigor::Plugin::Registry
+  def initialize: (?plugins: untyped, ?load_errors: untyped) -> void
+end

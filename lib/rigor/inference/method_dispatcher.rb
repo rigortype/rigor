@@ -138,19 +138,28 @@ module Rigor
       # fail-soft hot spot.
       #
       # Returns `nil` when scope / receiver class is unavailable,
-      # when the class is RBS-known (RBS dispatch already had its
-      # turn upstream), when the method is not in the discovered
-      # table, OR when `discovered_def_nodes` carries a re-typable
-      # body for the method (so the downstream
+      # when the method is not in the discovered table, OR when
+      # `discovered_def_nodes` carries a re-typable body for the
+      # method (so the downstream
       # `ExpressionTyper#try_user_method_inference` tier can
       # re-type the body for a precise return type rather than
       # collapsing to `Dynamic[top]` here).
+      #
+      # The tier does NOT gate on `rbs_class_known?`. RBS dispatch
+      # already had its turn upstream and returned `nil` (otherwise
+      # we wouldn't be here). When RBS knows the class but the
+      # particular method is missing from the sig — common for
+      # internal helpers and for auto-generated stubs that emit
+      # `class X` without enumerating every method — falling
+      # through to the user-class fallback would mistakenly fire
+      # `call.undefined-method`. Honoring the discovered table
+      # here keeps the sibling-private call resolution working
+      # under partial RBS coverage.
       def try_discovered_method(receiver_type, method_name, scope)
         return nil if scope.nil?
 
         class_name, kind = discovered_method_lookup(receiver_type)
         return nil if class_name.nil?
-        return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: scope.environment)
         return nil unless scope.discovered_method?(class_name, method_name, kind)
         return nil if kind == :instance && scope.user_def_for(class_name, method_name)
 

@@ -1,0 +1,4 @@
+class Rigor::Plugin::IoBoundary
+  def initialize: (policy: untyped, plugin_id: untyped, ?http_client: untyped) -> void
+  def read_file: (untyped) -> String
+end

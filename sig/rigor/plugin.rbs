@@ -1,0 +1,8 @@
+module Rigor
+  module Plugin
+    def self.register: (Class plugin_class) -> Class
+    def self.registered_for: (String | Symbol id) -> Class?
+    def self.registered: () -> Hash[String, Class]
+    def self.unregister!: (?(String | Symbol)? id) -> untyped
+  end
+end

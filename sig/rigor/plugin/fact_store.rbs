@@ -1,0 +1,11 @@
+class Rigor::Plugin::FactStore
+  def initialize: () -> void
+  def publish: (plugin_id: untyped, name: untyped, value: untyped) -> nil
+  def read: (plugin_id: untyped, name: untyped) -> untyped
+  def published?: (plugin_id: untyped, name: untyped) -> bool
+  def each_fact: () { (untyped) -> void } -> void
+end
+
+class Rigor::Plugin::FactStore::Conflict
+  def initialize: (plugin_id: untyped, name: untyped, existing: untyped, incoming: untyped) -> void
+end

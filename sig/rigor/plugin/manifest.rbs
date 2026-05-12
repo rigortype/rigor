@@ -1,0 +1,9 @@
+class Rigor::Plugin::Manifest::Consumption
+  def initialize: (plugin_id: untyped, name: untyped, ?optional: untyped) -> void
+end
+
+class Rigor::Plugin::Manifest
+  def initialize: (id: untyped, version: untyped, ?description: untyped, ?protocols: untyped, ?config_schema: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?type_node_resolvers: untyped) -> void
+  def validate_config: (untyped) -> Array[String]
+  def to_h: () -> Hash[String, untyped]
+end

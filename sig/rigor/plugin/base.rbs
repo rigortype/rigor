@@ -1,0 +1,6 @@
+class Rigor::Plugin::Base
+  def self.manifest: () -> Rigor::Plugin::Manifest
+  def initialize: (services: untyped, ?config: untyped) -> void
+  def init: (untyped) -> nil
+  def prepare: (untyped) -> nil
+end

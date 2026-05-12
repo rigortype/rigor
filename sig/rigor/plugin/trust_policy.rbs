@@ -1,0 +1,4 @@
+class Rigor::Plugin::TrustPolicy
+  def initialize: (?trusted_gems: untyped, ?allowed_read_roots: untyped, ?network_policy: untyped, ?allowed_url_hosts: untyped) -> void
+  def to_h: () -> Hash[String, untyped]
+end

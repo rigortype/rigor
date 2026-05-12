@@ -1,0 +1,3 @@
+class Rigor::Inference::Builtins::NumericCatalog
+  def self.reset!: () -> nil
+end

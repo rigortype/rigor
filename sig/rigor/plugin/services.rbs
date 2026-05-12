@@ -1,0 +1,3 @@
+class Rigor::Plugin::Services
+  def initialize: (reflection: untyped, type: untyped, configuration: untyped, ?cache_store: untyped, ?trust_policy: untyped, ?fact_store: untyped) -> void
+end

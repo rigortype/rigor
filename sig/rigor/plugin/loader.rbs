@@ -1,0 +1,20 @@
+module Rigor
+  module Plugin
+    # Resolves the project's `.rigor.yml` `plugins:` entries into
+    # instantiated plugin instances. The other Plugin namespaces
+    # (`Services`, `Registry`, `Base`, etc.) are not yet
+    # sig-covered, so reference them as `untyped` for now. The
+    # critical declaration here is `self.load`: without it, Steep
+    # matches against `Kernel#load`'s `(::String, ?(::Module | bool)) -> bool`
+    # signature and reports `MethodParameterMismatch` for the
+    # keyword-only shape.
+    class Loader
+      attr_reader services: untyped
+      attr_reader requirer: ^(String) -> untyped
+
+      def self.load: (configuration: Configuration, services: untyped, ?requirer: ^(String) -> untyped) -> untyped
+      def initialize: (services: untyped, ?requirer: ^(String) -> untyped) -> void
+      def load: (Array[String | Hash[untyped, untyped]] entries) -> untyped
+    end
+  end
+end

@@ -290,16 +290,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   # the bookkeeping stays honest and the sig backlog stays
   # visible.
   UNSIGNED_NAMESPACES = %w[
-    Rigor::Plugin
-    Rigor::Plugin::Base
-    Rigor::Plugin::Manifest
-    Rigor::Plugin::Services
-    Rigor::Plugin::Registry
-    Rigor::Plugin::TrustPolicy
-    Rigor::Plugin::IoBoundary
-    Rigor::Plugin::FactStore
     Rigor::Plugin::FactStore::Fact
-    Rigor::Plugin::Manifest::Consumption
     Rigor::FlowContribution
     Rigor::FlowContribution::Fact
     Rigor::FlowContribution::MergeResult
@@ -311,7 +302,6 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::TypeNode::IndexedAccess
     Rigor::TypeNode::NameScope
     Rigor::TypeNode::ResolverChain
-    Rigor::Plugin::TypeNodeResolver
     Rigor::RbsExtended::Reporter
     Rigor::RbsExtended::Reporter::UnresolvedEntry
     Rigor::RbsExtended::Reporter::LossyProjectionEntry

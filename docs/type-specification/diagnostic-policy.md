@@ -37,6 +37,7 @@ Diagnostic identifiers are hierarchical so plugin authors, RBS metadata, and use
 | `plugin.<plugin-id>.*` | Plugin-contributed diagnostics |
 | `generated.<provider>.*` | Generated-signature provider diagnostics |
 | `hint.*` | Style and refactor suggestions, gated by configuration (for example `hint.role-generalization.*`) |
+| `sig.*` | RBS signature-generator telemetry per [ADR-14](../adr/14-rbs-sig-generation.md). Reserves `sig.generated.new-file` / `sig.generated.new-method` / `sig.generated.tighter-return` (per-method classifications the `rigor sig-gen` command emits when it produces RBS) and `sig.skipped.complex-shape` / `sig.skipped.user-authored` / `sig.skipped.untyped-return` (per-method reasons the generator declined to emit). The slice-1 MVP surfaces these identifiers through the command's JSON output rather than the diagnostic stream; later slices wire them as `:info` diagnostics when the `--write` path lands. |
 
 ## `Dynamic[T]` display rules
 

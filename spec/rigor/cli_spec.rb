@@ -680,4 +680,88 @@ RSpec.describe Rigor::CLI do
       expect(out).to include("explain")
     end
   end
+
+  describe "sig-gen (ADR-14 slice 1)" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write_fixture(name, contents)
+      path = File.join(tmpdir, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      path
+    end
+
+    it "prints RBS skeletons for instance defs that have no existing RBS" do
+      path = write_fixture("lib/widget.rb", <<~RUBY)
+        class Widget
+          def n
+            42
+          end
+        end
+      RUBY
+
+      status, out, err = run_cli("sig-gen", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("class Widget")
+      expect(out).to include("def n: () -> Integer")
+      expect(out).to include("[new]")
+    end
+
+    it "emits a JSON payload via --format=json" do
+      path = write_fixture("lib/widget.rb", "class Widget\n  def s\n    \"hi\"\n  end\nend\n")
+
+      status, out, _err = run_cli("sig-gen", "--format=json", path)
+      payload = JSON.parse(out)
+
+      expect(status).to eq(0)
+      expect(payload["candidates"].first).to include(
+        "class" => "Widget", "method" => "s", "kind" => "instance",
+        "classification" => "new_method", "rbs" => "def s: () -> String"
+      )
+    end
+
+    it "rejects --params=observed in slice 1 (reserved for slice 3)" do
+      path = write_fixture("lib/widget.rb", "class Widget; def n; 1; end; end\n")
+
+      status, _out, err = run_cli("sig-gen", "--params=observed", path)
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("reserved")
+    end
+
+    it "rejects unknown --params policies" do
+      path = write_fixture("lib/widget.rb", "class Widget; def n; 1; end; end\n")
+
+      status, _out, err = run_cli("sig-gen", "--params=mystery", path)
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("unsupported --params=mystery")
+    end
+
+    it "renders a --diff block when --diff is set" do
+      path = write_fixture("lib/widget.rb", <<~RUBY)
+        class Widget
+          def n
+            42
+          end
+        end
+      RUBY
+
+      status, out, _err = run_cli("sig-gen", "--diff", path)
+
+      expect(status).to eq(0)
+      expect(out).to include("--- ")
+      expect(out).to include("+ def n: () -> Integer")
+    end
+
+    it "lists sig-gen in the help text" do
+      _status, out, _err = run_cli("help")
+
+      expect(out).to include("sig-gen")
+    end
+  end
 end

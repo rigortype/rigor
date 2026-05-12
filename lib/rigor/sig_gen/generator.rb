@@ -55,9 +55,9 @@ module Rigor
 
       # @return [Array<MethodCandidate>]
       def run
-        environment = build_environment
+        @environment = build_environment
         resolved = resolve_paths(@paths)
-        resolved.flat_map { |path| analyse_file(path, environment) }
+        resolved.flat_map { |path| analyse_file(path, @environment) }
       end
 
       private
@@ -324,7 +324,17 @@ module Rigor
         arity = required_arity(def_node)
         head = arity.zero? ? "()" : "(#{render_param_list(class_name, def_node.name, arity)})"
         prefix = kind == :singleton ? "def self." : "def "
-        "#{prefix}#{def_node.name}: #{head} -> #{inferred.erase_to_rbs}"
+        "#{prefix}#{def_node.name}: #{head} -> #{elaborated_rbs(inferred)}"
+      end
+
+      # Routes the inferred carrier through {TypeElaborator}
+      # so bare generic nominals (`Array` / `Hash` / `Set`
+      # / `Range` / `Enumerable`) get their `untyped` type
+      # parameters filled in before erasing to RBS. The
+      # elaborator consults the class's RBS-declared
+      # type-parameter list via `Reflection.class_type_param_names`.
+      def elaborated_rbs(type)
+        TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs
       end
 
       def required_arity(def_node)
@@ -356,16 +366,16 @@ module Rigor
 
       def union_erase(types)
         return "untyped" if types.empty?
-        return types.first.erase_to_rbs if types.size == 1
+        return elaborated_rbs(types.first) if types.size == 1
 
         # `Type::Combinator.union` dedupes by structural type
-        # equality; two distinct `Constant["Alice"]` /
-        # `Constant["Bob"]` carriers survive the dedupe yet
-        # both erase to `String`. Post-erasure dedupe collapses
-        # the trailing `String | String` noise without losing
-        # precision at the carrier level.
-        erased = Type::Combinator.union(*types).erase_to_rbs
-        erased.split(" | ").uniq.join(" | ")
+        # equality. The carrier-level `erase_to_rbs` now
+        # absorbs `untyped` members and dedupes the post-erase
+        # strings (`String | String` → `String` for distinct
+        # `Constant<"Alice">` / `Constant<"Bob">` envelopes),
+        # so the sig-gen layer only needs to elaborate bare
+        # generics before erasing.
+        elaborated_rbs(Type::Combinator.union(*types))
       end
 
       # ADR-14 slice 4 — `attr_reader` / `attr_writer` /
@@ -536,7 +546,7 @@ module Rigor
       # user-authored so a paired source-side `attr_reader`
       # never produces a duplicate `def` insertion.
       def render_attr_rbs_line(method_name, variant, ivar_type)
-        erased = ivar_type.erase_to_rbs
+        erased = elaborated_rbs(ivar_type)
         case variant
         when :reader then "def #{method_name}: () -> #{erased}"
         when :writer then "def #{method_name}: (#{erased}) -> #{erased}"

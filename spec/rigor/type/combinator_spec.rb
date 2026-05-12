@@ -231,6 +231,24 @@ RSpec.describe Rigor::Type::Combinator do
       b = described_class.union(sym, int, str)
       expect(a).to eq(b)
     end
+
+    describe "#erase_to_rbs" do
+      it "absorbs every member when one erases to untyped" do
+        union = described_class.union(described_class.untyped, described_class.nominal_of("Integer"))
+        expect(union.erase_to_rbs).to eq("untyped")
+      end
+
+      it "dedupes post-erasure when distinct constants share an envelope" do
+        union = described_class.union(described_class.constant_of("a"), described_class.constant_of("b"))
+        expect(union.erase_to_rbs).to eq("String")
+      end
+
+      it "preserves distinct erased members" do
+        union = described_class.union(described_class.nominal_of("Integer"),
+                                      described_class.nominal_of("String"))
+        expect(union.erase_to_rbs).to eq("Integer | String")
+      end
+    end
   end
 
   describe ".key_of / .value_of (v0.0.7 type functions)" do

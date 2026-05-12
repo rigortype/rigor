@@ -28,8 +28,27 @@ module Rigor
         members.map { |m| m.describe(verbosity) }.join(" | ")
       end
 
+      # ADR-1 § "RBS round-trip is lossless" + the value-lattice
+      # rule `untyped | T = untyped` (every `T` is gradually
+      # consistent with `untyped`). When any union member erases
+      # to `"untyped"`, the whole union erases to `"untyped"` —
+      # the RBS surface has no carrier for "Dynamic-origin
+      # alongside a static facet", and the gradual-consistency
+      # contract guarantees the substitution is sound at every
+      # call site.
+      #
+      # Post-erasure dedupe removes `String | String` artefacts
+      # that arise when two structurally-distinct `Constant`
+      # carriers (e.g. `Constant<"Alice">` / `Constant<"Bob">`)
+      # share an RBS-erased envelope. The members themselves
+      # are already structurally deduped at construction by
+      # `Type::Combinator.union`, but the post-erase strings
+      # can collide.
       def erase_to_rbs
-        members.map(&:erase_to_rbs).join(" | ")
+        erased = members.map(&:erase_to_rbs)
+        return "untyped" if erased.include?("untyped")
+
+        erased.uniq.join(" | ")
       end
 
       def top

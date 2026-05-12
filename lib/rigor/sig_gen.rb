@@ -2,6 +2,7 @@
 
 require_relative "sig_gen/classification"
 require_relative "sig_gen/method_candidate"
+require_relative "sig_gen/type_elaborator"
 require_relative "sig_gen/observation_collector"
 require_relative "sig_gen/generator"
 require_relative "sig_gen/renderer"

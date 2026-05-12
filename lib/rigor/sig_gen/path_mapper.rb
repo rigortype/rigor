@@ -18,6 +18,13 @@ module Rigor
     # extension, and place the result under the first entry of
     # `configuration.signature_paths` (typically `"sig"`).
     #
+    # ADR-14 follow-up: when a class is already declared in
+    # an existing consolidated sig file (e.g. `sig/rigor/type.rbs`
+    # holds all `Rigor::Type::*` classes), the optional
+    # `LayoutIndex` re-routes the target to that file so the
+    # writer updates the consolidated declaration instead of
+    # creating a duplicate at the 1:1 mirror path.
+    #
     # When the source path is not under any configured source
     # root (e.g. files supplied directly on the CLI from
     # outside `lib/`), the full relative path is preserved
@@ -25,17 +32,35 @@ module Rigor
     class PathMapper
       # @param configuration [Rigor::Configuration]
       # @param project_root [String, Pathname] (defaults to `Dir.pwd`)
-      def initialize(configuration:, project_root: Dir.pwd)
+      # @param layout_index [LayoutIndex, nil] optional class
+      #   → existing sig file index; routes the target to the
+      #   consolidated file when the class is already declared.
+      def initialize(configuration:, project_root: Dir.pwd, layout_index: nil)
         @configuration = configuration
         @project_root = Pathname(project_root)
+        @layout_index = layout_index
       end
 
+      # @param source_path [String]
+      # @param class_name [String, nil] fully-qualified Ruby
+      #   class name. When supplied and matched by the
+      #   `LayoutIndex`, the consolidated sig file's path is
+      #   returned instead of the 1:1 mirror.
       # @return [Pathname] absolute path of the target `.rbs`
-      #   file for `source_path`.
-      def target_for(source_path)
+      #   file for the candidate.
+      def target_for(source_path, class_name: nil)
+        existing = existing_target_for(class_name)
+        return existing if existing
+
         rel_to_root = source_relative_to_root(source_path)
         stripped = strip_source_root(rel_to_root)
         sig_root_dir / "#{stripped.sub_ext('')}.rbs"
+      end
+
+      def existing_target_for(class_name)
+        return nil if class_name.nil? || @layout_index.nil?
+
+        @layout_index.file_for(class_name)
       end
 
       # The directory `--write` is allowed to create / modify.

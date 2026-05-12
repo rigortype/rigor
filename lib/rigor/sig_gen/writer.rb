@@ -48,6 +48,27 @@ module Rigor
         @overwrite = overwrite
       end
 
+      # Process the full candidate list by resolving each
+      # candidate's target sig file via the path mapper (which
+      # may route consolidated-layout classes to existing
+      # files) and grouping candidates that share a target
+      # before writing.
+      #
+      # ADR-14 follow-up: this is the consolidated-layout
+      # entry point. The legacy `write(source_path, candidates)`
+      # below assumes all candidates share a target and
+      # remains for spec convenience.
+      #
+      # @param candidates [Array<MethodCandidate>]
+      # @return [Array<WriteResult>] one per target sig file.
+      def write_all(candidates)
+        emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
+        return [] if emittable.empty?
+
+        emittable.group_by { |c| @path_mapper.target_for(c.path, class_name: c.class_name) }
+                 .map { |target, group| write_target(target, group) }
+      end
+
       # @param source_path [String]
       # @param candidates [Array<MethodCandidate>] only
       #   emittable classifications (new-method /
@@ -58,16 +79,25 @@ module Rigor
         emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
         return WriteResult.new(source_path: source_path, target_path: nil, action: :noop) if emittable.empty?
 
-        target = @path_mapper.target_for(source_path)
+        target = @path_mapper.target_for(source_path, class_name: emittable.first.class_name)
+        write_target(target, emittable, source_path: source_path)
+      end
+
+      private
+
+      # Shared per-target write path used by both `#write` and
+      # `#write_all`. Picks a representative `source_path` for
+      # the {WriteResult} when multiple candidates merge into
+      # one target.
+      def write_target(target, candidates, source_path: nil)
+        source_path ||= candidates.first&.path
         unless inside_sig_root?(target)
           return WriteResult.new(source_path: source_path, target_path: target,
                                  action: :skipped_outside_sig_root)
         end
 
-        target.exist? ? update_existing(source_path, target, emittable) : create_new(source_path, target, emittable)
+        target.exist? ? update_existing(source_path, target, candidates) : create_new(source_path, target, candidates)
       end
-
-      private
 
       EMITTABLE = [Classification::NEW_METHOD, Classification::TIGHTER_RETURN].freeze
       private_constant :EMITTABLE
@@ -132,12 +162,27 @@ module Rigor
         state.decls = parse_signature(state.source) || state.decls
       end
 
+      # Walks the parsed decl tree recursively, tracking the
+      # enclosing module/class prefix, and returns the
+      # declaration whose fully-qualified name matches
+      # `qualified_name`. Recursing into modules lets us
+      # match `Rigor::Type::Nominal` against the
+      # `class Nominal` declaration nested inside
+      # `module Rigor; module Type; … end; end`.
       def find_class_decl(decls, qualified_name)
+        find_class_decl_in(decls, [], qualified_name)
+      end
+
+      def find_class_decl_in(decls, prefix, qualified_name)
         decls.each do |decl|
           next unless decl.is_a?(RBS::AST::Declarations::Class) || decl.is_a?(RBS::AST::Declarations::Module)
 
-          rendered = decl.name.to_s.sub(/\A::/, "")
-          return decl if rendered == qualified_name
+          local = decl.name.to_s.sub(/\A::/, "")
+          full = prefix.empty? ? local : "#{prefix.join('::')}::#{local}"
+          return decl if full == qualified_name
+
+          nested = find_class_decl_in(decl.members, prefix + [local], qualified_name)
+          return nested if nested
         end
         nil
       end

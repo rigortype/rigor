@@ -194,6 +194,68 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
+  describe "consolidated layout routing via LayoutIndex" do
+    def write_consolidated(content)
+      consolidated = File.join(tmpdir, "sig/all.rbs")
+      FileUtils.mkdir_p(File.dirname(consolidated))
+      File.write(consolidated, content)
+      consolidated
+    end
+
+    def consolidated_writer
+      index = Rigor::SigGen::LayoutIndex.new(
+        signature_paths: [File.join(tmpdir, "sig")], project_root: tmpdir
+      )
+      mapper = Rigor::SigGen::PathMapper.new(
+        configuration: configuration, project_root: tmpdir, layout_index: index
+      )
+      described_class.new(path_mapper: mapper, overwrite: false)
+    end
+
+    def consolidated_candidate(class_name:, method_name:, rbs:, path: "lib/x.rb")
+      Rigor::SigGen::MethodCandidate.new(
+        path: path, class_name: class_name, method_name: method_name, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD, rbs: rbs
+      )
+    end
+
+    it "routes a candidate to the consolidated sig file declaring its class" do
+      consolidated = write_consolidated("module Rigor\n  module Type\n    class Bot\n    end\n  end\nend\n")
+      bot = consolidated_candidate(class_name: "Rigor::Type::Bot", method_name: :added,
+                                   rbs: "def added: () -> Integer")
+
+      results = consolidated_writer.write_all([bot])
+
+      expect(results.first.target_path).to eq(Pathname(consolidated))
+      expect(File.read(consolidated)).to include("def added: () -> Integer")
+    end
+
+    it "groups candidates from different source files that route to the same target" do
+      consolidated = write_consolidated(two_class_rbs)
+      bot = consolidated_candidate(class_name: "Rigor::Type::Bot", method_name: :m1, rbs: "def m1: () -> Integer")
+      top = consolidated_candidate(class_name: "Rigor::Type::Top", method_name: :m2, rbs: "def m2: () -> String")
+
+      results = consolidated_writer.write_all([bot, top])
+      output = File.read(consolidated)
+
+      expect(results.size).to eq(1)
+      expect(output).to include("def m1: () -> Integer", "def m2: () -> String")
+    end
+
+    def two_class_rbs
+      <<~RBS
+        module Rigor
+          module Type
+            class Bot
+            end
+            class Top
+            end
+          end
+        end
+      RBS
+    end
+  end
+
   describe "edge cases" do
     it "returns :noop when no emittable candidates are passed" do
       skipped_only = candidate(

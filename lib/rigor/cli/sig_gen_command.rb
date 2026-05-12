@@ -81,11 +81,11 @@ module Rigor
       end
 
       def dispatch_write(candidates, configuration, options)
-        path_mapper = SigGen::PathMapper.new(configuration: configuration)
+        layout_index = SigGen::LayoutIndex.new(signature_paths: configuration.signature_paths)
+        path_mapper = SigGen::PathMapper.new(configuration: configuration, layout_index: layout_index)
         writer = SigGen::Writer.new(path_mapper: path_mapper, overwrite: options.fetch(:overwrite))
 
-        grouped = candidates.group_by(&:path)
-        results = grouped.map { |source, group| writer.write(source, group) }
+        results = writer.write_all(candidates)
 
         SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format))
       end

@@ -724,10 +724,10 @@ RSpec.describe Rigor::CLI do
       )
     end
 
-    it "rejects --params=observed in slice 1 (reserved for slice 3)" do
+    it "rejects --params=observed-strict (reserved for the capability-role catalog)" do
       path = write_fixture("lib/widget.rb", "class Widget; def n; 1; end; end\n")
 
-      status, _out, err = run_cli("sig-gen", "--params=observed", path)
+      status, _out, err = run_cli("sig-gen", "--params=observed-strict", path)
 
       expect(status).to eq(Rigor::CLI::EXIT_USAGE)
       expect(err).to include("reserved")
@@ -762,6 +762,47 @@ RSpec.describe Rigor::CLI do
       _status, out, _err = run_cli("help")
 
       expect(out).to include("sig-gen")
+    end
+
+    describe "--params=observed (slice 3)" do
+      def write_observed_project
+        config_path = File.join(tmpdir, ".rigor.yml")
+        File.write(config_path, "paths:\n  - lib\nsignature_paths: []\n")
+        write_fixture("lib/calc.rb", "class Calc\n  def greet(name)\n    \"hi\"\n  end\nend\n")
+        write_fixture("spec/calc_spec.rb", "c = Calc.new\nc.greet(\"Alice\")\nc.greet(\"Bob\")\n")
+        config_path
+      end
+
+      it "emits observed argument types via the default spec/ observe path" do
+        config = write_observed_project
+
+        Dir.chdir(tmpdir) do
+          status, out, _err = run_cli("sig-gen", "--params=observed", "--config=#{config}")
+          expect(status).to eq(0)
+          expect(out).to include("def greet: (String) -> String")
+        end
+      end
+
+      it "honours an explicit --observe=PATH" do
+        config = write_observed_project
+
+        Dir.chdir(tmpdir) do
+          _, out, = run_cli("sig-gen", "--params=observed", "--observe=spec", "--config=#{config}")
+          expect(out).to include("def greet: (String) -> String")
+        end
+      end
+
+      it "falls back to untyped when no observations match the def's arity" do
+        config_path = File.join(tmpdir, ".rigor.yml")
+        File.write(config_path, "paths:\n  - lib\nsignature_paths: []\n")
+        write_fixture("lib/calc.rb", "class Calc\n  def add(a, b)\n    \"x\"\n  end\nend\n")
+        write_fixture("spec/calc_spec.rb", "c = Calc.new\nc.add(1)\n")
+
+        Dir.chdir(tmpdir) do
+          _, out, = run_cli("sig-gen", "--params=observed", "--config=#{config_path}")
+          expect(out).to include("def add: (untyped, untyped) -> String")
+        end
+      end
     end
 
     describe "--write (slice 2)" do

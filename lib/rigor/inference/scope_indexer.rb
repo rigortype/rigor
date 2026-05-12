@@ -50,16 +50,26 @@ module Rigor
       #   `root`'s subtree.
       # @return [Hash{Prism::Node => Rigor::Scope}] identity-comparing
       #   table whose default value is `default_scope`.
-      def index(root, default_scope:) # rubocop:disable Metrics/AbcSize
+      def index(root, default_scope:) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         # Slice A-declarations. Build the declaration overrides
         # first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through
         # `Scope#with_local` / `#with_fact` / `#with_self_type`
         # propagates it across every derived scope.
         declared_types, discovered_classes = build_declaration_artifacts(root)
+        # Merge the indexer's findings on top of whatever the
+        # base scope already carries so callers that seed
+        # cross-file class knowledge (e.g. the ADR-14
+        # `SigGen::ObservationCollector` pre-walking project
+        # `lib/` before scanning `spec/`) keep their seeds
+        # alongside the per-file declarations the indexer
+        # itself discovers. Indexer-found entries win on
+        # collision — same-file declarations are the most
+        # specific authority.
+        merged_classes = default_scope.discovered_classes.merge(discovered_classes)
         seeded_scope = default_scope
                        .with_declared_types(declared_types)
-                       .with_discovered_classes(discovered_classes)
+                       .with_discovered_classes(merged_classes)
 
         # Slice 7 phase 2. Pre-pass over every class/module body
         # to collect the per-class ivar accumulator. Seeded after

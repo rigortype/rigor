@@ -42,9 +42,15 @@ module Rigor
     class Generator # rubocop:disable Metrics/ClassLength
       # @param configuration [Rigor::Configuration]
       # @param paths [Array<String>] files / directories to scan.
-      def initialize(configuration:, paths:)
+      # @param observations [Hash{[String, Symbol] => Array<Array<Rigor::Type>>}]
+      #   ADR-14 slice 3 — per-target-method arg-tuple observations
+      #   produced by {ObservationCollector}. An empty Hash (the default)
+      #   means "no observations available; emit `untyped` for every
+      #   parameter position" per ADR-5 clause 2.
+      def initialize(configuration:, paths:, observations: {})
         @configuration = configuration
         @paths = paths
+        @observations = observations
       end
 
       # @return [Array<MethodCandidate>]
@@ -228,7 +234,7 @@ module Rigor
           kind: :instance,
           classification: Classification::NEW_METHOD,
           inferred_return: inferred,
-          rbs: render_rbs_line(def_node, inferred)
+          rbs: render_rbs_line(def_node, inferred, class_name)
         )
       end
 
@@ -251,7 +257,7 @@ module Rigor
           classification: Classification::TIGHTER_RETURN,
           inferred_return: inferred,
           declared_return_rbs: declared_rbs,
-          rbs: render_rbs_line(def_node, inferred)
+          rbs: render_rbs_line(def_node, inferred, class_name)
         )
       end
 
@@ -309,12 +315,51 @@ module Rigor
         )
       end
 
-      def render_rbs_line(def_node, inferred)
-        params = def_node.parameters
-        arity = params.is_a?(Prism::ParametersNode) ? params.requireds.size : 0
-        param_list = Array.new(arity, "untyped").join(", ")
-        head = arity.zero? ? "()" : "(#{param_list})"
+      def render_rbs_line(def_node, inferred, class_name)
+        arity = required_arity(def_node)
+        head = arity.zero? ? "()" : "(#{render_param_list(class_name, def_node.name, arity)})"
         "def #{def_node.name}: #{head} -> #{inferred.erase_to_rbs}"
+      end
+
+      def required_arity(def_node)
+        params = def_node.parameters
+        params.is_a?(Prism::ParametersNode) ? params.requireds.size : 0
+      end
+
+      # Per ADR-5 clause 2 the default is `untyped` for every
+      # position. Observed-policy callers (`--params=observed`)
+      # pass an `observations:` map at construction time; the
+      # generator unions per-position arg types whose tuple
+      # arity matches the def's required-positional count.
+      # Observations from arities other than the def's count
+      # are discarded — they describe a different overload
+      # the MVP does not emit.
+      def render_param_list(class_name, method_name, arity)
+        tuples = matching_observations(class_name, method_name, arity)
+        return Array.new(arity, "untyped").join(", ") if tuples.empty?
+
+        Array.new(arity) { |i| union_erase(tuples.map { |args| args[i] }) }.join(", ")
+      end
+
+      def matching_observations(class_name, method_name, arity)
+        return [] if @observations.empty?
+
+        list = @observations[[class_name, method_name]] || []
+        list.select { |tuple| tuple.size == arity }
+      end
+
+      def union_erase(types)
+        return "untyped" if types.empty?
+        return types.first.erase_to_rbs if types.size == 1
+
+        # `Type::Combinator.union` dedupes by structural type
+        # equality; two distinct `Constant["Alice"]` /
+        # `Constant["Bob"]` carriers survive the dedupe yet
+        # both erase to `String`. Post-erasure dedupe collapses
+        # the trailing `String | String` noise without losing
+        # precision at the carrier level.
+        erased = Type::Combinator.union(*types).erase_to_rbs
+        erased.split(" | ").uniq.join(" | ")
       end
     end
   end

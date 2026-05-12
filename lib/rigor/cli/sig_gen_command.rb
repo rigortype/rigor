@@ -7,7 +7,7 @@ require_relative "../sig_gen"
 
 module Rigor
   class CLI
-    # Executes the `rigor sig-gen` command — ADR-14 slices 1–2.
+    # Executes the `rigor sig-gen` command — ADR-14 slices 1–3.
     #
     # Walks the given paths (or `configuration.paths` when none
     # are supplied), classifies every reachable instance method
@@ -25,11 +25,16 @@ module Rigor
     # `--overwrite` is set AND the candidate is a
     # `tighter-return`.
     #
-    # Parameter policy stays at slice 1's `untyped` default;
-    # `--params=observed` / `--params=observed-strict` remain
-    # reserved-but-inert (rejected with a usage error so the
-    # surface stays stable for slice 3).
-    class SigGenCommand
+    # Parameter policy defaults to `untyped`. `--params=observed`
+    # (slice 3) opts in to caller-side observation harvesting:
+    # the `ObservationCollector` walks `--observe=PATH...`
+    # (default `spec/` when no flag is given AND a `spec/`
+    # directory exists), unions per-position arg types, and the
+    # generator emits the union per ADR-5 clause 2.
+    # `--params=observed-strict` stays reserved-but-inert until
+    # the capability-role catalog ships (rejected with a usage
+    # error so the surface stays stable).
+    class SigGenCommand # rubocop:disable Metrics/ClassLength
       USAGE = "Usage: rigor sig-gen [options] [paths]"
 
       VALID_MODES = %w[print diff write].freeze
@@ -50,7 +55,9 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config))
         paths = @argv.empty? ? configuration.paths : @argv
 
-        candidates = SigGen::Generator.new(configuration: configuration, paths: paths).run
+        observations = collect_observations(configuration, options)
+        candidates = SigGen::Generator.new(configuration: configuration, paths: paths,
+                                           observations: observations).run
         mode = options.fetch(:mode).to_sym
 
         if mode == :write
@@ -82,6 +89,18 @@ module Rigor
         SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format))
       end
 
+      # Slice 3 — collect call-site argument observations when
+      # `--params=observed` is set. When `--observe=PATH` is
+      # not specified, default to `spec/` (skipped silently
+      # when the directory is absent).
+      def collect_observations(configuration, options)
+        return {} if options.fetch(:params) != "observed"
+
+        observe_paths = options.fetch(:observe)
+        observe_paths = ["spec"] if observe_paths.empty? && File.directory?("spec")
+        SigGen::ObservationCollector.new(configuration: configuration, paths: observe_paths).collect
+      end
+
       def parse_options
         options = {
           mode: "print",
@@ -89,6 +108,7 @@ module Rigor
           params: "untyped",
           selection: [],
           overwrite: false,
+          observe: [],
           config: nil
         }
         build_option_parser(options).parse!(@argv)
@@ -100,7 +120,7 @@ module Rigor
         nil
       end
 
-      def build_option_parser(options) # rubocop:disable Metrics/AbcSize
+      def build_option_parser(options) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
         OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--print", "Write RBS skeletons to stdout (default)") { options[:mode] = "print" }
@@ -112,6 +132,9 @@ module Rigor
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
           opts.on("--params=POLICY", "Parameter policy: untyped (default), observed, observed-strict") do |value|
             options[:params] = value
+          end
+          opts.on("--observe=PATH", "Directory / file to scan for call-site observations (repeatable)") do |value|
+            options[:observe] << value
           end
           opts.on("--new-files", "Emit only new-file classifications") do
             options[:selection] << SigGen::Classification::NEW_FILE
@@ -134,7 +157,9 @@ module Rigor
         return "--print, --diff, and --write are mutually exclusive flags; pick one" unless VALID_MODES.include?(mode)
         return "unsupported --format=#{format}" unless VALID_FORMATS.include?(format)
         return "unsupported --params=#{params}" unless VALID_PARAM_POLICIES.include?(params)
-        return "--params=#{params} is reserved; slice 1 supports 'untyped' only" if params != "untyped"
+        if params == "observed-strict"
+          return "--params=observed-strict is reserved until the capability-role catalog ships"
+        end
 
         nil
       end

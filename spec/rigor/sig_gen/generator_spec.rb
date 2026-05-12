@@ -139,6 +139,48 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  describe "#run with observations (--params=observed)" do
+    it "renders observed argument types when an observation matches the method's required arity" do
+      path = write_fixture("lib/box.rb", "class Box\n  def greet(name)\n    \"hi\"\n  end\nend\n")
+      type = Rigor::Type::Combinator.constant_of("Alice")
+      observations = { ["Box", :greet] => [[type], [Rigor::Type::Combinator.constant_of("Bob")]] }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      candidate = described_class.new(configuration: config, paths: [path], observations: observations)
+                                 .run.find { |c| c.method_name == :greet }
+
+      expect(candidate.rbs).to eq("def greet: (String) -> String")
+    end
+
+    it "falls back to untyped when no observation matches the method's required arity" do
+      path = write_fixture("lib/box.rb", "class Box\n  def add(a, b)\n    \"x\"\n  end\nend\n")
+      type = Rigor::Type::Combinator.constant_of(42)
+      observations = { ["Box", :add] => [[type]] }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      candidate = described_class.new(configuration: config, paths: [path], observations: observations)
+                                 .run.find { |c| c.method_name == :add }
+
+      expect(candidate.rbs).to eq("def add: (untyped, untyped) -> String")
+    end
+
+    it "dedupes erased union members when constant carriers share an envelope" do
+      path = write_fixture("lib/box.rb", "class Box\n  def m(x)\n    \"r\"\n  end\nend\n")
+      observations = {
+        ["Box", :m] => [
+          [Rigor::Type::Combinator.constant_of("a")],
+          [Rigor::Type::Combinator.constant_of("b")]
+        ]
+      }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      candidate = described_class.new(configuration: config, paths: [path], observations: observations)
+                                 .run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs).to eq("def m: (String) -> String")
+    end
+  end
+
   describe "#run output shape" do
     it "produces MethodCandidate records that round-trip through #to_h" do
       path = write_fixture("lib/round_trip.rb", "class RoundTrip\n  def m\n    \"x\"\n  end\nend\n")

@@ -58,6 +58,12 @@ this handbook disagrees.
     reads `sig { ... }` blocks, RBI files, and
     `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions
     as type sources without rewriting in RBS.
+11. [**Generating RBS with `rigor sig-gen`**](11-sig-gen.md)
+    — emitting RBS from Rigor's inference results, the
+    `new-file` / `new-method` / `tighter-return`
+    classification model, the `--print` / `--diff` /
+    `--write` modes, the `--params` policy and ADR-5
+    trade-off, RSpec-aware observations.
 
 ### Appendix — Coming from another type checker
 

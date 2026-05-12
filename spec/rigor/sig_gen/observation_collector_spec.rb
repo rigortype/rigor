@@ -87,4 +87,84 @@ RSpec.describe Rigor::SigGen::ObservationCollector do
 
     expect(collector(paths: [spec]).collect).to eq({})
   end
+
+  describe "RSpec-aware bindings (slice 5)" do
+    before do
+      write_fixture("lib/calc.rb", "class Calc\n  def m(x); x; end\nend\n")
+    end
+
+    it "credits `subject.m(x)` to Calc#m when `subject { Calc.new }` is declared" do
+      spec = write_fixture("spec/calc_spec.rb", <<~RUBY)
+        RSpec.describe Calc do
+          subject { Calc.new }
+          it "x" do
+            subject.m("hello")
+          end
+        end
+      RUBY
+
+      obs = collector(paths: [spec]).collect
+
+      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("String")
+    end
+
+    it "credits `let(:other) { Calc.new }; other.m(x)` to Calc#m" do
+      spec = write_fixture("spec/calc_spec.rb", <<~RUBY)
+        RSpec.describe Calc do
+          let(:other) { Calc.new }
+          it "x" do
+            other.m(42)
+          end
+        end
+      RUBY
+
+      obs = collector(paths: [spec]).collect
+
+      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("Integer")
+    end
+
+    it "resolves `described_class.new.m(x)` against the surrounding `describe Calc`" do
+      spec = write_fixture("spec/calc_spec.rb", <<~RUBY)
+        RSpec.describe Calc do
+          it "x" do
+            described_class.new.m(:sym)
+          end
+        end
+      RUBY
+
+      obs = collector(paths: [spec]).collect
+
+      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("Symbol")
+    end
+
+    it "recognises bare `describe Foo` (no RSpec receiver) as the described class" do
+      spec = write_fixture("spec/calc_spec.rb", <<~RUBY)
+        describe Calc do
+          subject { Calc.new }
+          it "x" do
+            subject.m(true)
+          end
+        end
+      RUBY
+
+      obs = collector(paths: [spec]).collect
+
+      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("true")
+    end
+
+    it "honours named `subject(:foo) { ... }` bindings" do
+      spec = write_fixture("spec/calc_spec.rb", <<~RUBY)
+        RSpec.describe Calc do
+          subject(:foo) { Calc.new }
+          it "x" do
+            foo.m("ok")
+          end
+        end
+      RUBY
+
+      obs = collector(paths: [spec]).collect
+
+      expect(obs[["Calc", :m]].first.first.erase_to_rbs).to eq("String")
+    end
+  end
 end

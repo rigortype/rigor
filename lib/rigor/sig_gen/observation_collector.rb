@@ -97,8 +97,9 @@ module Rigor
 
         base_scope = Scope.empty(environment: environment).with_discovered_classes(discovered_classes)
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
+        bindings = collect_rspec_bindings(parse_result.value, scope_index)
 
-        walk_calls(parse_result.value, scope_index, observations)
+        walk_calls(parse_result.value, scope_index, bindings, observations)
       end
 
       # Pre-walks `@source_paths` to collect every qualified
@@ -154,27 +155,172 @@ module Rigor
         end
       end
 
-      def walk_calls(node, scope_index, observations)
+      def walk_calls(node, scope_index, bindings, observations)
         return unless node.is_a?(Prism::Node)
 
-        record_call(node, scope_index, observations) if node.is_a?(Prism::CallNode)
-        node.compact_child_nodes.each { |child| walk_calls(child, scope_index, observations) }
+        record_call(node, scope_index, bindings, observations) if node.is_a?(Prism::CallNode)
+        node.compact_child_nodes.each { |child| walk_calls(child, scope_index, bindings, observations) }
       end
 
-      def record_call(call_node, scope_index, observations)
+      def record_call(call_node, scope_index, bindings, observations)
         receiver = call_node.receiver
         return if receiver.nil?
 
         scope = scope_index[call_node] || scope_index[receiver]
         return if scope.nil?
 
-        receiver_type = safe_type_of(scope, receiver)
+        receiver_type = resolve_receiver_type(receiver, scope, bindings)
         return unless receiver_type.is_a?(Type::Nominal)
 
         arg_types = collect_arg_types(call_node, scope)
         return if arg_types.nil? || arg_types.empty?
 
         observations[[receiver_type.class_name, call_node.name]] << arg_types
+      end
+
+      # ADR-14 slice 5 — RSpec-aware receiver typing.
+      # Resolves a CallNode receiver against the collected
+      # `bindings` map (built by {#collect_rspec_bindings})
+      # before falling back to ordinary `scope.type_of`. The
+      # three RSpec-shaped receivers we recognise:
+      #
+      # - Bare-name CallNode (`subject`, `other`, ...) whose
+      #   name matches a `subject` / `let(:name)` binding —
+      #   return the binding's recorded type.
+      # - `described_class.new(...)` chain — when the
+      #   surrounding `describe Foo do … end` resolved `Foo`,
+      #   return `Type::Nominal[Foo]`.
+      # - Anything else — pass through to `scope.type_of`,
+      #   matching slice-3 behaviour.
+      def resolve_receiver_type(receiver, scope, bindings)
+        return resolve_described_class_new(bindings) if described_class_new?(receiver)
+        return bindings[receiver.name] if bound_call?(receiver, bindings)
+
+        safe_type_of(scope, receiver)
+      end
+
+      def bound_call?(receiver, bindings)
+        simple_no_arg_call?(receiver) && bindings.key?(receiver.name)
+      end
+
+      def described_class_new?(node)
+        return false unless node.is_a?(Prism::CallNode) && node.name == :new
+
+        described_class_reference?(node.receiver)
+      end
+
+      def described_class_reference?(node)
+        return false unless node.is_a?(Prism::CallNode) && node.name == :described_class
+
+        node.receiver.nil? && (node.arguments&.arguments || []).empty?
+      end
+
+      def resolve_described_class_new(bindings)
+        singleton = bindings[:described_class]
+        return nil unless singleton.is_a?(Type::Singleton)
+
+        Type::Combinator.nominal_of(singleton.class_name)
+      end
+
+      def simple_no_arg_call?(node)
+        node.is_a?(Prism::CallNode) &&
+          node.receiver.nil? &&
+          (node.arguments&.arguments || []).empty? &&
+          node.block.nil?
+      end
+
+      # Walks the spec file for `describe X do … end` /
+      # `RSpec.describe X do … end` blocks plus the
+      # `subject` / `let(:name)` declarations inside them.
+      # Returns a flat map `{ binding_name (Symbol) => Type }`
+      # plus a synthetic `:described_class` slot keyed off
+      # the nearest enclosing `describe`.
+      #
+      # The recogniser is intentionally lightweight: it does
+      # not enforce RSpec scope rules across `describe` /
+      # `context` blocks. Nested `describe` declarations
+      # overwrite the outer `described_class` for the
+      # remainder of the walk; same-name `let` bindings are
+      # last-wins. This matches the typical one-spec-file
+      # shape ADR-14 slice 5 targets without re-implementing
+      # the `rigor-rspec` plugin's full scope analyser.
+      def collect_rspec_bindings(root, scope_index)
+        bindings = {}
+        walk_rspec_bindings(root, bindings, scope_index)
+        bindings
+      end
+
+      def walk_rspec_bindings(node, bindings, scope_index)
+        return unless node.is_a?(Prism::Node)
+
+        recognise_describe(node, bindings)
+        recognise_subject_or_let(node, bindings, scope_index)
+
+        node.compact_child_nodes.each { |child| walk_rspec_bindings(child, bindings, scope_index) }
+      end
+
+      def recognise_describe(node, bindings)
+        return unless describe_call?(node)
+
+        constant_arg = node.arguments&.arguments&.first
+        name = qualified_constant_path(constant_arg) if constant_arg
+        bindings[:described_class] = Type::Combinator.singleton_of(name) if name
+      end
+
+      def describe_call?(node)
+        return false unless node.is_a?(Prism::CallNode) && node.name == :describe
+
+        receiver = node.receiver
+        receiver.nil? || (receiver.is_a?(Prism::ConstantReadNode) && receiver.name == :RSpec)
+      end
+
+      RSPEC_BINDING_METHODS = %i[subject let let!].freeze
+      private_constant :RSPEC_BINDING_METHODS
+
+      def recognise_subject_or_let(node, bindings, scope_index)
+        return unless node.is_a?(Prism::CallNode) && RSPEC_BINDING_METHODS.include?(node.name)
+        return if node.block.nil?
+
+        name = binding_name_for(node)
+        return if name.nil?
+
+        body_type = type_block_body(node.block, scope_index)
+        bindings[name] = body_type if body_type
+      end
+
+      def binding_name_for(call_node)
+        first_arg = call_node.arguments&.arguments&.first
+        return call_node.name == :subject ? :subject : nil if first_arg.nil?
+        return first_arg.unescaped.to_sym if first_arg.is_a?(Prism::SymbolNode) || first_arg.is_a?(Prism::StringNode)
+
+        nil
+      end
+
+      def type_block_body(block_node, scope_index)
+        body = block_body_node(block_node)
+        return nil if body.nil?
+
+        last_expr = body_last_expression(body)
+        return nil if last_expr.nil?
+
+        scope = scope_index[last_expr] || scope_index[block_node]
+        return nil if scope.nil?
+
+        safe_type_of(scope, last_expr)
+      end
+
+      def block_body_node(block_node)
+        return nil unless block_node.is_a?(Prism::BlockNode)
+
+        block_node.body
+      end
+
+      def body_last_expression(body)
+        case body
+        when Prism::StatementsNode then body.body.last
+        when Prism::BeginNode then body_last_expression(body.statements)
+        else body
+        end
       end
 
       def collect_arg_types(call_node, scope)

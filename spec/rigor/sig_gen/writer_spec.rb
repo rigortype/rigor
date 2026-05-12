@@ -143,4 +143,74 @@ RSpec.describe Rigor::SigGen::Writer do
       expect(result.action).to eq(:noop)
     end
   end
+
+  describe "singleton kind (slice 4)" do
+    def singleton_candidate(method_name:, rbs:)
+      Rigor::SigGen::MethodCandidate.new(
+        path: "lib/foo.rb",
+        class_name: "Foo",
+        method_name: method_name,
+        kind: :singleton,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: rbs
+      )
+    end
+
+    it "inserts a singleton-side def without conflicting with a same-named instance method" do
+      write_target("class Foo\n  def n: () -> Integer\nend\n")
+
+      writer.write("lib/foo.rb", [singleton_candidate(method_name: :n, rbs: "def self.n: () -> Integer")])
+      output = File.read(File.join(tmpdir, "sig/foo.rbs"))
+
+      expect(output).to include("def n: () -> Integer")
+      expect(output).to include("def self.n: () -> Integer")
+    end
+
+    it "treats an existing `def self.foo` as user-authored when classifications collide" do
+      write_target("class Foo\n  def self.n: () -> String\nend\n")
+      tighter = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/foo.rb", class_name: "Foo", method_name: :n, kind: :singleton,
+        classification: Rigor::SigGen::Classification::TIGHTER_RETURN,
+        rbs: "def self.n: () -> Integer", declared_return_rbs: "String"
+      )
+
+      result = writer.write("lib/foo.rb", [tighter])
+
+      expect(result.skipped.map(&:last)).to eq([:user_authored])
+    end
+  end
+
+  describe "attr_* member detection (slice 4)" do
+    it "treats existing attr_reader as a same-name member and skips the generated reader" do
+      write_target("class Foo\n  attr_reader name: String\nend\n")
+      attr_reader = candidate(method_name: :name, rbs: "def name: () -> String")
+
+      result = writer.write("lib/foo.rb", [attr_reader])
+
+      expect(result.applied).to be_empty
+      expect(result.skipped.map(&:last)).to eq([:user_authored])
+    end
+
+    it "treats existing attr_accessor as covering both reader and writer" do
+      write_target("class Foo\n  attr_accessor age: Integer\nend\n")
+      reader = candidate(method_name: :age, rbs: "def age: () -> Integer")
+      writer_c = candidate(method_name: :age=, rbs: "def age=: (Integer) -> Integer")
+
+      result = writer.write("lib/foo.rb", [reader, writer_c])
+
+      expect(result.applied).to be_empty
+      expect(result.skipped.size).to eq(2)
+    end
+
+    it "treats existing attr_writer as covering only the writer side" do
+      write_target("class Foo\n  attr_writer count: Integer\nend\n")
+      reader = candidate(method_name: :count, rbs: "def count: () -> Integer")
+      writer_c = candidate(method_name: :count=, rbs: "def count=: (Integer) -> Integer")
+
+      result = writer.write("lib/foo.rb", [reader, writer_c])
+
+      expect(result.applied.map(&:method_name)).to eq([:count])
+      expect(result.skipped.map { |c, _| c.method_name }).to eq([:count=])
+    end
+  end
 end

@@ -89,17 +89,21 @@ module Rigor
         base_scope = Scope.empty(environment: environment)
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
 
-        defs = collect_instance_defs(parse_result.value)
-        defs.map { |def_node, class_name| classify_def(path, def_node, class_name, scope_index) }
+        defs = collect_method_definitions(parse_result.value)
+        candidates_from_defs = defs.map do |def_node, class_name, kind|
+          classify_def(path, def_node, class_name, kind, scope_index)
+        end
+        candidates_from_defs + collect_attr_candidates(parse_result.value, path, scope_index)
       end
 
-      # Walks the AST collecting `(def_node, class_name)` pairs
-      # for plain `def foo` methods inside a `class` / `module`
-      # body. `def self.foo`, singleton-class defs, and top-
-      # level defs are skipped — the MVP only emits instance
-      # methods that the engine's body-typing path can reach
-      # without extra scaffolding.
-      def collect_instance_defs(root)
+      # Walks the AST collecting `(def_node, class_name, kind)`
+      # tuples for every `def` Rigor can re-type. Slice 1
+      # covered instance `def foo` methods inside a nameable
+      # `class` / `module` body. Slice 4 extends this to
+      # singleton-side methods via `def self.foo` and
+      # `class << self; def foo; end`; top-level / DSL-block
+      # defs still degrade silently (no nameable receiver).
+      def collect_method_definitions(root)
         out = []
         walk_defs(root, [], false, out)
         out
@@ -129,10 +133,10 @@ module Rigor
       end
 
       def collect_def_node(node, prefix, in_singleton_class, out)
-        return if node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
         return if prefix.empty?
 
-        out << [node, prefix.join("::")]
+        kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
+        out << [node, prefix.join("::"), kind]
       end
 
       def qualified_constant_path(constant_path)
@@ -148,19 +152,21 @@ module Rigor
         end
       end
 
-      def classify_def(path, def_node, class_name, scope_index)
-        return skipped(path, def_node, class_name, :complex_shape) unless simple_parameter_shape?(def_node.parameters)
+      def classify_def(path, def_node, class_name, kind, scope_index)
+        unless simple_parameter_shape?(def_node.parameters)
+          return skipped(path, def_node, class_name, kind, :complex_shape)
+        end
 
         inferred = infer_return_type(def_node, scope_index)
-        return skipped(path, def_node, class_name, :untyped_return) if inferred.nil? || dynamic_top?(inferred)
+        return skipped(path, def_node, class_name, kind, :untyped_return) if inferred.nil? || dynamic_top?(inferred)
 
         environment = scope_index[def_node]&.environment
-        method_def = lookup_existing_method(class_name, def_node.name, environment, scope_index[def_node])
+        method_def = lookup_existing_method(class_name, def_node.name, kind, environment, scope_index[def_node])
 
         if method_def.nil?
-          new_method_candidate(path, def_node, class_name, inferred)
+          new_method_candidate(path, def_node, class_name, kind, inferred)
         else
-          compare_against_declared(path, def_node, class_name, inferred, method_def)
+          compare_against_declared(path, def_node, class_name, kind, inferred, method_def)
         end
       end
 
@@ -215,49 +221,48 @@ module Rigor
         type.is_a?(Type::Dynamic) || (type.respond_to?(:top?) && type.top?.yes?)
       end
 
-      def lookup_existing_method(class_name, method_name, environment, scope)
+      def lookup_existing_method(class_name, method_name, kind, environment, scope)
         return nil if environment.nil?
 
-        Reflection.instance_method_definition(
-          class_name,
-          method_name,
-          scope: scope,
-          environment: environment
-        )
+        if kind == :singleton
+          Reflection.singleton_method_definition(class_name, method_name, scope: scope, environment: environment)
+        else
+          Reflection.instance_method_definition(class_name, method_name, scope: scope, environment: environment)
+        end
       end
 
-      def new_method_candidate(path, def_node, class_name, inferred)
+      def new_method_candidate(path, def_node, class_name, kind, inferred)
         MethodCandidate.new(
           path: path,
           class_name: class_name,
           method_name: def_node.name,
-          kind: :instance,
+          kind: kind,
           classification: Classification::NEW_METHOD,
           inferred_return: inferred,
-          rbs: render_rbs_line(def_node, inferred, class_name)
+          rbs: render_rbs_line(def_node, inferred, class_name, kind)
         )
       end
 
-      def compare_against_declared(path, def_node, class_name, inferred, method_def)
+      def compare_against_declared(path, def_node, class_name, kind, inferred, method_def) # rubocop:disable Metrics/ParameterLists
         declared = build_declared_return(method_def)
         declared_rbs = declared&.erase_to_rbs
         inferred_rbs = inferred.erase_to_rbs
 
         if declared.nil? || declared_rbs == inferred_rbs
-          return equivalent(path, def_node, class_name, inferred, declared_rbs)
+          return equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
         end
 
-        return equivalent(path, def_node, class_name, inferred, declared_rbs) unless tighter?(declared, inferred)
+        return equivalent(path, def_node, class_name, kind, inferred, declared_rbs) unless tighter?(declared, inferred)
 
         MethodCandidate.new(
           path: path,
           class_name: class_name,
           method_name: def_node.name,
-          kind: :instance,
+          kind: kind,
           classification: Classification::TIGHTER_RETURN,
           inferred_return: inferred,
           declared_return_rbs: declared_rbs,
-          rbs: render_rbs_line(def_node, inferred, class_name)
+          rbs: render_rbs_line(def_node, inferred, class_name, kind)
         )
       end
 
@@ -292,33 +297,34 @@ module Rigor
         !backward.yes?
       end
 
-      def equivalent(path, def_node, class_name, inferred, declared_rbs)
+      def equivalent(path, def_node, class_name, kind, inferred, declared_rbs) # rubocop:disable Metrics/ParameterLists
         MethodCandidate.new(
           path: path,
           class_name: class_name,
           method_name: def_node.name,
-          kind: :instance,
+          kind: kind,
           classification: Classification::EQUIVALENT,
           inferred_return: inferred,
           declared_return_rbs: declared_rbs
         )
       end
 
-      def skipped(path, def_node, class_name, reason)
+      def skipped(path, def_node, class_name, kind, reason)
         MethodCandidate.new(
           path: path,
           class_name: class_name,
           method_name: def_node.name,
-          kind: :instance,
+          kind: kind,
           classification: Classification::SKIPPED,
           skip_reason: reason
         )
       end
 
-      def render_rbs_line(def_node, inferred, class_name)
+      def render_rbs_line(def_node, inferred, class_name, kind)
         arity = required_arity(def_node)
         head = arity.zero? ? "()" : "(#{render_param_list(class_name, def_node.name, arity)})"
-        "def #{def_node.name}: #{head} -> #{inferred.erase_to_rbs}"
+        prefix = kind == :singleton ? "def self." : "def "
+        "#{prefix}#{def_node.name}: #{head} -> #{inferred.erase_to_rbs}"
       end
 
       def required_arity(def_node)
@@ -360,6 +366,181 @@ module Rigor
         # precision at the carrier level.
         erased = Type::Combinator.union(*types).erase_to_rbs
         erased.split(" | ").uniq.join(" | ")
+      end
+
+      # ADR-14 slice 4 — `attr_reader` / `attr_writer` /
+      # `attr_accessor` recognition. Each Symbol-named entry in
+      # the call's argument list yields one or two
+      # {MethodCandidate}s whose inferred return type is the
+      # corresponding instance-variable's accumulated type from
+      # `Scope#class_ivars_for(class_name)`. `attr_reader` adds
+      # one reader candidate; `attr_writer` adds one
+      # `name=`-method writer candidate; `attr_accessor` adds
+      # both.
+      ATTR_METHOD_NAMES = %i[attr_reader attr_writer attr_accessor].freeze
+      private_constant :ATTR_METHOD_NAMES
+
+      ATTR_KINDS = {
+        attr_reader: [:reader],
+        attr_writer: [:writer],
+        attr_accessor: %i[reader writer]
+      }.freeze
+      private_constant :ATTR_KINDS
+
+      # Per-file context the attr_* walker threads through its
+      # recursive descent. Keeps parameter lists in check.
+      AttrWalkContext = Struct.new(:path, :scope_index, :out, keyword_init: true)
+      private_constant :AttrWalkContext
+
+      def collect_attr_candidates(root, path, scope_index)
+        ctx = AttrWalkContext.new(path: path, scope_index: scope_index, out: [])
+        walk_attr_calls(root, [], false, ctx)
+        ctx.out
+      end
+
+      def walk_attr_calls(node, prefix, in_singleton_class, ctx) # rubocop:disable Metrics/CyclomaticComplexity
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_constant_path(node.constant_path)
+          if name
+            walk_attr_calls(node.body, prefix + [name], false, ctx) if node.body
+            return
+          end
+        when Prism::SingletonClassNode
+          walk_attr_calls(node.body, prefix, true, ctx) if node.body
+          return
+        when Prism::DefNode
+          # Skip method bodies — attr_* there would refer to
+          # whatever the method is doing dynamically, not a
+          # class-level declaration.
+          return
+        when Prism::CallNode
+          collect_attr_call(node, prefix, in_singleton_class, ctx)
+        end
+
+        node.compact_child_nodes.each { |child| walk_attr_calls(child, prefix, in_singleton_class, ctx) }
+      end
+
+      def collect_attr_call(call_node, prefix, in_singleton_class, ctx)
+        return unless ATTR_METHOD_NAMES.include?(call_node.name)
+        return if prefix.empty?
+        return if in_singleton_class
+
+        class_name = prefix.join("::")
+        symbol_names = extract_symbol_arguments(call_node)
+        return if symbol_names.empty?
+
+        ivar_lookup = ivar_type_lookup(ctx.scope_index, class_name)
+        symbol_names.each do |attr_name|
+          ivar_type = ivar_lookup.call(attr_name)
+          ctx.out.concat(build_attr_candidates(call_node.name, class_name, attr_name, ivar_type, ctx))
+        end
+      end
+
+      def extract_symbol_arguments(call_node)
+        (call_node.arguments&.arguments || []).filter_map do |arg|
+          arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::StringNode)
+        end
+      end
+
+      # Returns a closure that looks up `:@<attr_name>` in the
+      # class-ivar accumulator carried by the first scope the
+      # indexer associated with this file. The accumulator is
+      # populated by `ScopeIndexer#build_class_ivar_index`
+      # before any statement evaluation runs, so the lookup
+      # works even when attr_* declarations come before the
+      # corresponding ivar writes lexically.
+      def ivar_type_lookup(scope_index, class_name)
+        any_scope = scope_index.each_value.first
+        return ->(_) {} if any_scope.nil?
+
+        ivars = any_scope.class_ivars_for(class_name)
+        ->(attr_name) { ivars[:"@#{attr_name}"] }
+      end
+
+      def build_attr_candidates(call_name, class_name, attr_name, ivar_type, ctx)
+        ATTR_KINDS.fetch(call_name).flat_map do |variant|
+          method_name = variant == :writer ? :"#{attr_name}=" : attr_name
+          candidate = build_attr_candidate(class_name, method_name, variant, ivar_type, ctx)
+          candidate ? [candidate] : []
+        end
+      end
+
+      def build_attr_candidate(class_name, method_name, variant, ivar_type, ctx)
+        if ivar_type.nil? || dynamic_top?(ivar_type)
+          return attr_skipped(ctx.path, class_name, method_name, :untyped_return)
+        end
+
+        scope = ctx.scope_index.each_value.first
+        environment = scope&.environment
+        method_def = lookup_existing_method(class_name, method_name, :instance, environment, scope)
+        if method_def.nil?
+          attr_new_candidate(ctx.path, class_name, method_name, variant, ivar_type)
+        else
+          attr_compare_against_declared(ctx.path, class_name, method_name, variant, ivar_type, method_def)
+        end
+      end
+
+      def attr_new_candidate(path, class_name, method_name, variant, ivar_type)
+        MethodCandidate.new(
+          path: path,
+          class_name: class_name,
+          method_name: method_name,
+          kind: :instance,
+          classification: Classification::NEW_METHOD,
+          inferred_return: ivar_type,
+          rbs: render_attr_rbs_line(method_name, variant, ivar_type)
+        )
+      end
+
+      def attr_compare_against_declared(path, class_name, method_name, variant, ivar_type, method_def) # rubocop:disable Metrics/ParameterLists
+        declared = build_declared_return(method_def)
+        declared_rbs = declared&.erase_to_rbs
+        inferred_rbs = ivar_type.erase_to_rbs
+
+        if declared.nil? || declared_rbs == inferred_rbs || !tighter?(declared, ivar_type)
+          return attr_equivalent(path, class_name, method_name, ivar_type, declared_rbs)
+        end
+
+        MethodCandidate.new(
+          path: path, class_name: class_name, method_name: method_name,
+          kind: :instance, classification: Classification::TIGHTER_RETURN,
+          inferred_return: ivar_type, declared_return_rbs: declared_rbs,
+          rbs: render_attr_rbs_line(method_name, variant, ivar_type)
+        )
+      end
+
+      def attr_equivalent(path, class_name, method_name, ivar_type, declared_rbs)
+        MethodCandidate.new(
+          path: path, class_name: class_name, method_name: method_name,
+          kind: :instance, classification: Classification::EQUIVALENT,
+          inferred_return: ivar_type, declared_return_rbs: declared_rbs
+        )
+      end
+
+      def attr_skipped(path, class_name, method_name, reason)
+        MethodCandidate.new(
+          path: path, class_name: class_name, method_name: method_name,
+          kind: :instance, classification: Classification::SKIPPED, skip_reason: reason
+        )
+      end
+
+      # Slice 4 emits attr_* in the long-form `def` spelling so
+      # the existing writer's `MethodDefinition`-based merge
+      # path applies without extra wiring. Users who prefer the
+      # idiomatic `attr_reader name: Type` short form can
+      # normalise post-emit; the writer-side member detection
+      # (slice 2) treats existing `attr_*` declarations as
+      # user-authored so a paired source-side `attr_reader`
+      # never produces a duplicate `def` insertion.
+      def render_attr_rbs_line(method_name, variant, ivar_type)
+        erased = ivar_type.erase_to_rbs
+        case variant
+        when :reader then "def #{method_name}: () -> #{erased}"
+        when :writer then "def #{method_name}: (#{erased}) -> #{erased}"
+        end
       end
     end
   end

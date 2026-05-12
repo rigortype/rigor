@@ -157,8 +157,8 @@ module Rigor
       end
 
       def merge_into_existing_class(source, decl, methods, applied, skipped)
-        existing_methods = collect_member_names(decl)
-        new_methods, conflicting = partition_against_existing(methods, existing_methods)
+        existing_pairs = collect_member_pairs(decl)
+        new_methods, conflicting = partition_against_existing(methods, existing_pairs)
 
         source = insert_into_class(source, decl, new_methods)
         applied.concat(new_methods)
@@ -174,14 +174,35 @@ module Rigor
         source
       end
 
-      def collect_member_names(decl)
-        decl.members.filter_map do |member|
-          member.respond_to?(:name) ? member.name : nil
+      # Returns a list of `[method_name (Symbol), kind (Symbol)]`
+      # pairs for every method-like member in the declaration.
+      # ADR-14 slice 4 recognises `MethodDefinition`'s
+      # `:instance` / `:singleton` kind plus the three
+      # `attr_*` declaration kinds so a source-side
+      # `attr_reader :name` and an RBS-side `attr_reader name: T`
+      # are treated as the same member (i.e. user-authored).
+      def collect_member_pairs(decl)
+        pairs = []
+        decl.members.each { |m| collect_pairs_for_member(m, pairs) }
+        pairs
+      end
+
+      def collect_pairs_for_member(member, pairs)
+        case member
+        when RBS::AST::Members::MethodDefinition
+          pairs << [member.name, member.kind]
+        when RBS::AST::Members::AttrReader
+          pairs << [member.name, :instance]
+        when RBS::AST::Members::AttrWriter
+          pairs << [:"#{member.name}=", :instance]
+        when RBS::AST::Members::AttrAccessor
+          pairs << [member.name, :instance]
+          pairs << [:"#{member.name}=", :instance]
         end
       end
 
-      def partition_against_existing(methods, existing_method_names)
-        methods.partition { |c| !existing_method_names.include?(c.method_name) }
+      def partition_against_existing(methods, existing_pairs)
+        methods.partition { |c| !existing_pairs.include?([c.method_name, c.kind]) }
       end
 
       # Inserts each new method line one column before the
@@ -209,21 +230,21 @@ module Rigor
         # Apply replacements from highest byte position downward
         # so earlier byte offsets remain valid as the source
         # grows or shrinks.
-        sorted = tighter.sort_by { |c| -member_position(decl, c.method_name) }
+        sorted = tighter.sort_by { |c| -member_position(decl, c.method_name, c.kind) }
         sorted.each do |candidate|
           source = apply_replacement(source, decl, candidate) and replaced << candidate
         end
         [source, replaced]
       end
 
-      def member_position(decl, method_name)
-        member = find_method_member(decl, method_name)
+      def member_position(decl, method_name, kind)
+        member = find_method_member(decl, method_name, kind)
         member ? member.location.start_pos : -1
       end
 
-      def find_method_member(decl, method_name)
+      def find_method_member(decl, method_name, kind)
         decl.members.find do |m|
-          m.is_a?(RBS::AST::Members::MethodDefinition) && m.name == method_name
+          m.is_a?(RBS::AST::Members::MethodDefinition) && m.name == method_name && m.kind == kind
         end
       end
 
@@ -233,7 +254,7 @@ module Rigor
       # the line, so the leading whitespace stays inside
       # `source[0...start_pos]` and we do not re-emit it.
       def apply_replacement(source, decl, candidate)
-        member = find_method_member(decl, candidate.method_name)
+        member = find_method_member(decl, candidate.method_name, candidate.kind)
         return nil if member.nil?
 
         loc = member.location

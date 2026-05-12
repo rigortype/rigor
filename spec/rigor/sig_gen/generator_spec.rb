@@ -96,22 +96,17 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(candidates).to be_empty
     end
 
-    it "skips def self.foo singleton-side methods in the MVP" do
-      path = write_fixture("lib/singleton.rb", <<~RUBY)
-        class Holder
-          def self.cls_method
-            1
-          end
+    it "covers both `def self.foo` singleton methods and instance methods (slice 4)" do
+      src = "class Holder\n  def self.cls_method; 1; end\n  def instance_method; \"x\"; end\nend\n"
+      path = write_fixture("lib/singleton.rb", src)
 
-          def instance_method
-            "x"
-          end
-        end
-      RUBY
+      candidates = generator(paths: [path]).run.select do |c|
+        c.classification == Rigor::SigGen::Classification::NEW_METHOD
+      end
 
-      candidates = generator(paths: [path]).run
-
-      expect(candidates.map(&:method_name)).to eq([:instance_method])
+      expect(candidates.map { |c| [c.method_name, c.kind] }).to contain_exactly(
+        %i[cls_method singleton], %i[instance_method instance]
+      )
     end
   end
 
@@ -136,6 +131,79 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(method.classification).to eq(Rigor::SigGen::Classification::TIGHTER_RETURN)
       expect(method.declared_return_rbs).to eq("Numeric")
       expect(method.rbs).to eq("def value: () -> Integer")
+    end
+  end
+
+  describe "#run on singleton methods (slice 4)" do
+    it "emits `def self.foo: ...` for `def self.foo` defs" do
+      path = write_fixture("lib/holder.rb", "class Holder\n  def self.factory\n    \"hi\"\n  end\nend\n")
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :factory }
+
+      expect(candidate.kind).to eq(:singleton)
+      expect(candidate.rbs).to eq("def self.factory: () -> String")
+    end
+
+    it "treats `class << self; def foo; end` defs as singleton" do
+      path = write_fixture("lib/holder.rb", <<~RUBY)
+        class Holder
+          class << self
+            def helper
+              42
+            end
+          end
+        end
+      RUBY
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :helper }
+
+      expect(candidate.kind).to eq(:singleton)
+      expect(candidate.rbs).to eq("def self.helper: () -> Integer")
+    end
+  end
+
+  describe "#run on attr_* declarations (slice 4)" do
+    it "emits a long-form reader candidate for attr_reader against the ivar's accumulated type" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def initialize
+            @name = "hi"
+          end
+          attr_reader :name
+        end
+      RUBY
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :name }
+
+      expect(candidate.kind).to eq(:instance)
+      expect(candidate.rbs).to eq("def name: () -> String")
+    end
+
+    it "emits reader + writer candidates for attr_accessor" do
+      path = write_fixture("lib/box.rb", <<~RUBY)
+        class Box
+          def initialize
+            @count = 0
+          end
+          attr_accessor :count
+        end
+      RUBY
+
+      candidates = generator(paths: [path]).run.select { |c| %i[count count=].include?(c.method_name) }
+
+      expect(candidates.map { |c| [c.method_name, c.rbs] }).to contain_exactly(
+        [:count, "def count: () -> Integer"],
+        [:count=, "def count=: (Integer) -> Integer"]
+      )
+    end
+
+    it "skips attr_* whose ivar has no accumulated write (no known type)" do
+      path = write_fixture("lib/box.rb", "class Box\n  attr_reader :empty_ivar\nend\n")
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :empty_ivar }
+
+      expect(candidate.classification).to eq(Rigor::SigGen::Classification::SKIPPED)
+      expect(candidate.skip_reason).to eq(:untyped_return)
     end
   end
 

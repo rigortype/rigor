@@ -165,12 +165,76 @@ module Rigor
       # the conventional RBS spelling is `() -> void`. The
       # body-typing path types the last expression (often an
       # ivar assignment whose rvalue happens to be `[]` /
-      # `{}`), which produces nonsense return types for
-      # `sig/`. Skipping entirely lets the `Object#initialize`
-      # RBS fallback cover the lookup; users who want a
-      # specific initialize sig hand-author it.
+      # `{}`), which produces nonsense return types.
+      #
+      # Skipping `initialize` entirely is correct ONLY for
+      # default constructors — the `Object#initialize: () -> void`
+      # RBS fallback then covers the lookup. When the class
+      # has a non-trivial `initialize(argv:, ...)` (i.e. any
+      # parameter), partial-class sigs trip Steep's
+      # method-parameter-mismatch check: Steep sees the
+      # runtime `def initialize(...)` and compares against
+      # the inherited `Object#initialize: () -> void`. The
+      # mismatch surfaces a `Ruby::MethodParameterMismatch`
+      # warning even when `rigor check` itself is clean.
+      #
+      # Returning `nil` here causes `classify_def` to skip
+      # emission; returning `:emit_stub` causes
+      # `initialize_stub_candidate` to emit a permissive
+      # `(<param shape>) -> void` stub matching the
+      # runtime parameter list.
       def initialize_excludes?(def_node, kind)
-        kind == :instance && def_node.name == :initialize
+        return false unless kind == :instance
+        return false unless def_node.name == :initialize
+
+        # Default constructor with no params — skip; the
+        # Object#initialize RBS fallback covers it.
+        params = def_node.parameters
+        params.nil? || trivial_initialize_params?(params)
+      end
+
+      def trivial_initialize_params?(params)
+        return true unless params.is_a?(Prism::ParametersNode)
+
+        params.requireds.empty? && params.optionals.empty? &&
+          params.rest.nil? && params.keywords.empty? &&
+          params.keyword_rest.nil? && params.block.nil?
+      end
+
+      def non_trivial_initialize?(def_node, kind)
+        kind == :instance && def_node.name == :initialize && !trivial_initialize_params?(def_node.parameters)
+      end
+
+      # Emits `def initialize: (<shape>) -> void` with `untyped`
+      # types at every position. The return is always `void`
+      # because Ruby's `initialize` return value is never
+      # meaningful. The parameter list mirrors the runtime
+      # shape (required / optional / rest / keyword / keyword-
+      # rest / block) so Steep / RBS-aware tools see a
+      # signature compatible with the actual constructor.
+      def initialize_stub_candidate(path, def_node, class_name)
+        rbs = "def initialize: (#{render_initialize_param_list(def_node.parameters)}) -> void"
+        MethodCandidate.new(
+          path: path, class_name: class_name, method_name: :initialize,
+          kind: :instance, classification: Classification::NEW_METHOD,
+          inferred_return: Type::Combinator.untyped, rbs: rbs
+        )
+      end
+
+      def render_initialize_param_list(params)
+        return "" unless params.is_a?(Prism::ParametersNode)
+
+        parts = []
+        parts.concat(Array.new(params.requireds.size, "untyped"))
+        parts.concat(Array.new(params.optionals.size, "?untyped"))
+        parts << "*untyped" if params.rest
+        params.keywords.each do |kw|
+          prefix = kw.is_a?(Prism::OptionalKeywordParameterNode) ? "?" : ""
+          parts << "#{prefix}#{kw.name}: untyped"
+        end
+        parts << "**untyped" if params.keyword_rest
+        parts << "?{ (?) -> void }" if params.block
+        parts.join(", ")
       end
 
       def qualified_constant_path(constant_path)
@@ -189,6 +253,7 @@ module Rigor
       def classify_def(path, def_node, class_name, kind, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         return nil if visibility_excludes?(def_node, class_name, kind, scope_index)
         return nil if initialize_excludes?(def_node, kind)
+        return initialize_stub_candidate(path, def_node, class_name) if non_trivial_initialize?(def_node, kind)
 
         unless simple_parameter_shape?(def_node.parameters)
           return skipped(path, def_node, class_name, kind, :complex_shape)
@@ -537,7 +602,7 @@ module Rigor
         arity = required_arity(def_node)
         head = arity.zero? ? "()" : "(#{render_param_list(class_name, def_node.name, arity)})"
         prefix = kind == :singleton ? "def self." : "def "
-        "#{prefix}#{def_node.name}: #{head} -> #{elaborated_rbs(inferred)}"
+        "#{prefix}#{def_node.name}: #{head} -> #{paren_wrap_union(elaborated_rbs(inferred))}"
       end
 
       # Routes the inferred carrier through {TypeElaborator}
@@ -548,6 +613,32 @@ module Rigor
       # type-parameter list via `Reflection.class_type_param_names`.
       def elaborated_rbs(type)
         TypeElaborator.elaborate(type, environment: @environment).erase_to_rbs
+      end
+
+      # RBS / Steep require return-position unions to be
+      # parenthesised when they appear bare at the top
+      # level of a method type — `def m: () -> 0 | 1` fails
+      # the parser because the trailing `| 1` isn't a valid
+      # method-type start. Wrap when the erased form is a
+      # top-level union; single types and already-bracketed
+      # forms (e.g. `Array[A | B]`) parse without wrapping.
+      def paren_wrap_union(rendered)
+        top_level_union?(rendered) ? "(#{rendered})" : rendered
+      end
+
+      def top_level_union?(rendered) # rubocop:disable Metrics/CyclomaticComplexity
+        return false unless rendered.include?(" | ")
+
+        depth = 0
+        rendered.each_char.with_index do |ch, i|
+          case ch
+          when "(", "[", "{" then depth += 1
+          when ")", "]", "}" then depth -= 1
+          when " "
+            return true if depth.zero? && rendered[i + 1] == "|"
+          end
+        end
+        false
       end
 
       def required_arity(def_node)
@@ -760,9 +851,10 @@ module Rigor
       # never produces a duplicate `def` insertion.
       def render_attr_rbs_line(method_name, variant, ivar_type)
         erased = elaborated_rbs(ivar_type)
+        wrapped = paren_wrap_union(erased)
         case variant
-        when :reader then "def #{method_name}: () -> #{erased}"
-        when :writer then "def #{method_name}: (#{erased}) -> #{erased}"
+        when :reader then "def #{method_name}: () -> #{wrapped}"
+        when :writer then "def #{method_name}: (#{erased}) -> #{wrapped}"
         end
       end
     end

@@ -1,4 +1,4 @@
 class Rigor::CLI::ExplainCommand
-  def run: () -> Integer
-  def parse_options: () -> { format: String }
+  def initialize: (argv: untyped, out: untyped, err: untyped) -> void
+  def run: () -> (0 | Integer)
 end

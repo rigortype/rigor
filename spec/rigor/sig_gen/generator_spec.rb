@@ -151,6 +151,24 @@ RSpec.describe Rigor::SigGen::Generator do
       expect(methods.map(&:method_name)).to eq([:initialize])
       expect(methods.first.kind).to eq(:singleton)
     end
+
+    it "emits an `initialize` stub when the constructor takes arguments" do
+      src = "class Box\n  def initialize(name)\n    @name = name\n  end\n  def n; 1; end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      init = generator(paths: [path]).run.find { |c| c.method_name == :initialize }
+
+      expect(init.rbs).to eq("def initialize: (untyped) -> void")
+    end
+
+    it "emits an `initialize` stub mirroring keyword-argument shape" do
+      src = "class Box\n  def initialize(name:, opts: {})\n    @name = name\n  end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      init = generator(paths: [path]).run.find { |c| c.method_name == :initialize }
+
+      expect(init.rbs).to eq("def initialize: (name: untyped, ?opts: untyped) -> void")
+    end
   end
 
   describe "explicit-return union (post-dogfood body-typer enhancement)" do
@@ -160,7 +178,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
 
-      expect(candidate.rbs.split(" -> ").last.split(" | ").sort).to eq(['"end"', "1"])
+      expect(candidate.rbs.split(" -> ").last.delete("()").split(" | ").sort).to eq(['"end"', "1"])
     end
 
     it "treats bare `return` as `nil`" do
@@ -169,7 +187,7 @@ RSpec.describe Rigor::SigGen::Generator do
 
       candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
 
-      expect(candidate.rbs.split(" -> ").last.split(" | ").sort).to eq(['"end"', "nil"])
+      expect(candidate.rbs.split(" -> ").last.delete("()").split(" | ").sort).to eq(['"end"', "nil"])
     end
 
     it "does not credit returns from nested blocks / lambdas / inner defs" do

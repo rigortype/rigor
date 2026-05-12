@@ -287,14 +287,92 @@ module Rigor
       # reserved by `Inference::Acceptance` and lands in a
       # follow-up. The "different spelling" guard ensures we
       # never classify a same-string round-trip as tighter.
+      #
+      # The `loses_declared_union_member?` guard added after
+      # the Rigor self-dogfood pass refuses to classify as
+      # tighter-return when the declared form is a top-level
+      # Union and the inferred form collapses one or more of
+      # its declared members. The body-typing path in slice 1
+      # only inspects the implicit-return expression, so
+      # methods with `return nil unless ...` / boolean
+      # `false | true` shapes / `Float | Integer` numeric
+      # alternates routinely look "tighter" while actually
+      # dropping reachable branches. Treating those as
+      # equivalent matches the project rule that an
+      # inferred tightening contradicting an existing RBS
+      # member set is suspected incomplete inference until
+      # proven otherwise.
       def tighter?(declared, inferred)
         return false if inferred.is_a?(Type::Dynamic)
+        return false if loses_declared_lenience?(declared, inferred)
 
         forward = declared.accepts(inferred)
         return false unless forward.yes?
 
         backward = inferred.accepts(declared)
         !backward.yes?
+      end
+
+      # Composite guard: refuse to classify as tighter-return
+      # when the declared RBS expresses lenience that the
+      # inferred form removes. Three cases all signal
+      # incomplete inference rather than precision gain:
+      #
+      # 1. Top-level union losing one or more declared
+      #    members. `return nil unless ...` paths, two-valued
+      #    booleans, `Float | Integer` numeric alternates.
+      # 2. Generic collection narrowed to a fixed shape.
+      #    `Array[T]` → `Tuple[T, ...]`, `Hash[K, V]` →
+      #    HashShape — the body's last expression was a
+      #    literal whose specific shape is not the method's
+      #    contract.
+      # 3. `untyped` type-arg replaced by a concrete form.
+      #    Declared `Hash[String, untyped]` carries the
+      #    author's intentional value-type lenience; the
+      #    inference's narrower Union should not override
+      #    it.
+      def loses_declared_lenience?(declared, inferred)
+        loses_declared_union_member?(declared, inferred) ||
+          narrows_collection_to_shape?(declared, inferred) ||
+          replaces_untyped_type_arg?(declared, inferred)
+      end
+
+      def loses_declared_union_member?(declared, inferred)
+        return false unless declared.is_a?(Type::Union)
+
+        inferred_members = inferred.is_a?(Type::Union) ? inferred.members : [inferred]
+        declared.members.any? do |declared_member|
+          inferred_members.none? { |im| structurally_covers?(im, declared_member) }
+        end
+      end
+
+      def structurally_covers?(inferred_member, declared_member)
+        return true if inferred_member == declared_member
+
+        result = inferred_member.accepts(declared_member)
+        result.respond_to?(:yes?) && result.yes?
+      end
+
+      GENERIC_COLLECTION_CLASSES = %w[
+        Array Hash Set Range Enumerable Enumerator Enumerator::Lazy
+      ].freeze
+      private_constant :GENERIC_COLLECTION_CLASSES
+
+      def narrows_collection_to_shape?(declared, inferred)
+        return false unless declared.is_a?(Type::Nominal)
+        return false unless GENERIC_COLLECTION_CLASSES.include?(declared.class_name)
+
+        inferred.is_a?(Type::Tuple) || inferred.is_a?(Type::HashShape)
+      end
+
+      def replaces_untyped_type_arg?(declared, inferred)
+        return false unless declared.is_a?(Type::Nominal) && inferred.is_a?(Type::Nominal)
+        return false unless declared.class_name == inferred.class_name
+        return false unless declared.type_args.size == inferred.type_args.size
+
+        declared.type_args.zip(inferred.type_args).any? do |d_arg, i_arg|
+          d_arg.is_a?(Type::Dynamic) && !i_arg.is_a?(Type::Dynamic)
+        end
       end
 
       def equivalent(path, def_node, class_name, kind, inferred, declared_rbs) # rubocop:disable Metrics/ParameterLists

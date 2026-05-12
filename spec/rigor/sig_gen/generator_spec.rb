@@ -110,6 +110,38 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  describe "lenience-preserving guard (post-dogfood tighter? hardening)" do
+    it "refuses to classify as tighter when the declared union loses a `nil` member" do
+      write_fixture("sig/box.rbs", "class Box\n  def fetch: () -> String?\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def fetch\n    \"hi\"\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :fetch }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "refuses to tighten Array[T] to a Tuple shape" do
+      write_fixture("sig/box.rbs", "class Box\n  def each: () -> Array[Integer]\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def each\n    [1, 2, 3]\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :each }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+
+    it "refuses to tighten when an `untyped` type-arg would be replaced by a concrete form" do
+      write_fixture("sig/box.rbs", "class Box\n  def to_h: () -> Hash[String, untyped]\nend\n")
+      path = write_fixture("lib/box.rb", "class Box\n  def to_h\n    {\"k\" => 1}\n  end\nend\n")
+
+      gen = generator(paths: [path], signature_paths: [File.join(tmpdir, "sig")])
+      method = gen.run.find { |c| c.method_name == :to_h }
+
+      expect(method.classification).to eq(Rigor::SigGen::Classification::EQUIVALENT)
+    end
+  end
+
   describe "#run when RBS already declares the method" do
     it "classifies an exact-match declaration as equivalent" do
       write_fixture("sig/widget.rbs", "class Widget\n  def n: () -> Integer\nend\n")

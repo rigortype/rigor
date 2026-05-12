@@ -227,6 +227,41 @@ The recommended workflow is `--diff` first, review, then
 `--write` (or `--write --overwrite` if you decided that
 the tightening is intentional).
 
+### When tightening is *probably* incomplete inference
+
+The strict-subtype check is a *necessary* condition for
+emitting a tighter-return — it's not a sufficient signal
+that the existing RBS is wrong. Slice 1's body-typing path
+only inspects the implicit-return expression, so a method
+like:
+
+```ruby
+def find(key)
+  return nil unless @table.key?(key)
+  @table[key]
+end
+```
+
+types as the return of `@table[key]` alone. If the existing
+RBS declares `(K) -> V | nil`, the inferred `V` looks
+strictly tighter — but it's tighter for the wrong reason
+(the `nil` branch is unreachable in the body-typer's eyes,
+not in the runtime's). Applying it would silently delete
+the `nil` arm.
+
+**Heuristic**: when a tightening DROPS union members that
+the existing RBS declares — `T | nil → T`, `false | true →
+true`, `Float | Integer → Float`, `Array[T] → [T]` — treat
+it as a contradiction signal, not a precision win, and
+leave the existing RBS alone. The generator does not yet
+classify these automatically; the `--diff` review step is
+where the human gate sits.
+
+For `rigor`'s own `sig/` tree this is the load-bearing
+policy: every tighter-return that contradicts an existing
+declaration is suspected incomplete inference until proven
+otherwise.
+
 ## Putting it together
 
 A typical iteration on a new file:

@@ -1,0 +1,3 @@
+class Rigor::CLI::DiffCommand
+  def run: () -> Integer
+end

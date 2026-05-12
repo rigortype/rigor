@@ -1,0 +1,3 @@
+class Rigor::CLI::TypeScanCommand::ScanAccumulator
+  def record_parse_error: (untyped, untyped) -> Array[untyped]
+end

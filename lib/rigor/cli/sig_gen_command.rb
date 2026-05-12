@@ -57,7 +57,8 @@ module Rigor
 
         observations = collect_observations(configuration, options)
         candidates = SigGen::Generator.new(configuration: configuration, paths: paths,
-                                           observations: observations).run
+                                           observations: observations,
+                                           include_private: options.fetch(:include_private)).run
         mode = options.fetch(:mode).to_sym
 
         if mode == :write
@@ -109,6 +110,7 @@ module Rigor
           selection: [],
           overwrite: false,
           observe: [],
+          include_private: false,
           config: nil
         }
         build_option_parser(options).parse!(@argv)
@@ -121,13 +123,16 @@ module Rigor
       end
 
       def build_option_parser(options) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
-        OptionParser.new do |opts|
+        OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
           opts.banner = USAGE
           opts.on("--print", "Write RBS skeletons to stdout (default)") { options[:mode] = "print" }
           opts.on("--diff", "Write a unified diff against existing RBS") { options[:mode] = "diff" }
           opts.on("--write", "Write generated RBS to sig/<path>.rbs files") { options[:mode] = "write" }
           opts.on("--overwrite", "Allow tighter-return updates to replace user-authored RBS") do
             options[:overwrite] = true
+          end
+          opts.on("--include-private", "Emit private / protected instance methods (default: public only)") do
+            options[:include_private] = true
           end
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
           opts.on("--params=POLICY", "Parameter policy: untyped (default), observed, observed-strict") do |value|

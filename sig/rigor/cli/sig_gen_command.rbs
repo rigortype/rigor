@@ -1,0 +1,3 @@
+class Rigor::CLI::SigGenCommand
+  def run: () -> Integer
+end

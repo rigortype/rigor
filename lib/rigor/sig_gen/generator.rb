@@ -47,10 +47,11 @@ module Rigor
       #   produced by {ObservationCollector}. An empty Hash (the default)
       #   means "no observations available; emit `untyped` for every
       #   parameter position" per ADR-5 clause 2.
-      def initialize(configuration:, paths:, observations: {})
+      def initialize(configuration:, paths:, observations: {}, include_private: false)
         @configuration = configuration
         @paths = paths
         @observations = observations
+        @include_private = include_private
       end
 
       # @return [Array<MethodCandidate>]
@@ -90,7 +91,7 @@ module Rigor
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
 
         defs = collect_method_definitions(parse_result.value)
-        candidates_from_defs = defs.map do |def_node, class_name, kind|
+        candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
           classify_def(path, def_node, class_name, kind, scope_index)
         end
         candidates_from_defs + collect_attr_candidates(parse_result.value, path, scope_index)
@@ -139,6 +140,39 @@ module Rigor
         out << [node, prefix.join("::"), kind]
       end
 
+      # Slice-4 follow-up surfaced by the Rigor self-dogfood:
+      # most `lib/rigor/cli/*` files have a small public
+      # surface (`run`) and many private helpers. Emitting the
+      # private helpers into a `sig/` file is noise — private
+      # methods are implementation details, not part of the
+      # type contract downstream consumers (Steep, IDE, gem
+      # users) read. The default now skips private and
+      # protected methods; the `:include_private` flag
+      # restores the slice-4 behaviour for callers that want
+      # every method.
+      def visibility_excludes?(def_node, class_name, kind, scope_index)
+        return false if kind == :singleton
+        return false if @include_private
+
+        scope = scope_index[def_node] || scope_index.each_value.first
+        return false if scope.nil?
+
+        visibility = scope.discovered_method_visibility(class_name, def_node.name)
+        %i[private protected].include?(visibility)
+      end
+
+      # Ruby's `initialize` return value is never meaningful;
+      # the conventional RBS spelling is `() -> void`. The
+      # body-typing path types the last expression (often an
+      # ivar assignment whose rvalue happens to be `[]` /
+      # `{}`), which produces nonsense return types for
+      # `sig/`. Skipping entirely lets the `Object#initialize`
+      # RBS fallback cover the lookup; users who want a
+      # specific initialize sig hand-author it.
+      def initialize_excludes?(def_node, kind)
+        kind == :instance && def_node.name == :initialize
+      end
+
       def qualified_constant_path(constant_path)
         case constant_path
         when Prism::ConstantReadNode
@@ -152,7 +186,10 @@ module Rigor
         end
       end
 
-      def classify_def(path, def_node, class_name, kind, scope_index)
+      def classify_def(path, def_node, class_name, kind, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        return nil if visibility_excludes?(def_node, class_name, kind, scope_index)
+        return nil if initialize_excludes?(def_node, kind)
+
         unless simple_parameter_shape?(def_node.parameters)
           return skipped(path, def_node, class_name, kind, :complex_shape)
         end
@@ -192,8 +229,18 @@ module Rigor
       # parameter bindings (typed `untyped` per the indexer's
       # default) come from `with_local` inside
       # `StatementEvaluator`; the result is the carrier the
-      # body proves *given an untyped argument tuple*. This is
-      # the MVP's clause-1-precision read.
+      # body proves *given an untyped argument tuple*.
+      #
+      # Post-dogfood enhancement: walk the body's AST for
+      # explicit `return X` statements and union their value
+      # types with the implicit-return expression's type. The
+      # earlier MVP only typed the implicit-return path, which
+      # routinely produced single-branch artefacts like
+      # `parse_options: () -> nil` (the actual runtime return
+      # is `options | nil`) or `find: () -> V` (actually
+      # `V | nil` via `return nil unless ...`). The walk
+      # excludes nested `DefNode` / lambda / block scopes
+      # whose returns belong to different methods.
       def infer_return_type(def_node, scope_index)
         body = def_node.body
         return nil if body.nil?
@@ -204,7 +251,8 @@ module Rigor
         inner_scope = scope_index[last] || scope_index[body] || scope_index[def_node]
         return nil if inner_scope.nil?
 
-        inner_scope.type_of(last)
+        last_type = inner_scope.type_of(last)
+        union_with_explicit_returns(body, last_type, scope_index)
       rescue StandardError
         nil
       end
@@ -217,8 +265,63 @@ module Rigor
         end
       end
 
+      def union_with_explicit_returns(body, last_type, scope_index)
+        return_types = []
+        collect_return_types(body, scope_index, return_types)
+        return last_type if return_types.empty?
+
+        Type::Combinator.union(last_type, *return_types)
+      end
+
+      RETURN_BARRIER_NODES = [Prism::DefNode, Prism::LambdaNode, Prism::BlockNode].freeze
+      private_constant :RETURN_BARRIER_NODES
+
+      def collect_return_types(node, scope_index, out)
+        return unless node.is_a?(Prism::Node)
+        return if RETURN_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        type_return_node(node, scope_index, out) if node.is_a?(Prism::ReturnNode)
+        node.compact_child_nodes.each { |c| collect_return_types(c, scope_index, out) }
+      end
+
+      def type_return_node(return_node, scope_index, out) # rubocop:disable Metrics/CyclomaticComplexity
+        args = return_node.arguments&.arguments || []
+        if args.empty?
+          out << Type::Combinator.constant_of(nil)
+          return
+        end
+
+        scope = scope_index[return_node] || scope_index[args.first]
+        return if scope.nil?
+
+        # `return a, b` packs into a Tuple at runtime; the MVP
+        # only handles the single-value form. Multi-arg returns
+        # contribute no type to keep the implementation
+        # focused.
+        return unless args.size == 1
+
+        type = safe_return_type_of(scope, args.first)
+        out << type unless type.nil?
+      end
+
+      def safe_return_type_of(scope, node)
+        scope.type_of(node)
+      rescue StandardError
+        nil
+      end
+
       def dynamic_top?(type)
-        type.is_a?(Type::Dynamic) || (type.respond_to?(:top?) && type.top?.yes?)
+        return true if type.is_a?(Type::Dynamic)
+        return true if type.respond_to?(:top?) && type.top?.yes?
+
+        # Post-dogfood: when explicit-return union absorbs
+        # Dynamic and the carrier ends up as a Union containing
+        # `Dynamic[top]`, the Bug-1 erasure rule renders it as
+        # `untyped`. Emitting `def m: () -> untyped` is the
+        # `sig.skipped.untyped-return` case — obscures rather
+        # than helps — so the skip check considers the erased
+        # form too.
+        type.respond_to?(:erase_to_rbs) && type.erase_to_rbs == "untyped"
       end
 
       def lookup_existing_method(class_name, method_name, kind, environment, scope)

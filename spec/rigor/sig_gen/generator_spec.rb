@@ -110,6 +110,85 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  describe "visibility-aware emission (post-dogfood)" do
+    it "skips private methods by default" do
+      src = "class Box\n  def public_one; \"x\"; end\n  private\n  def private_one; \"y\"; end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      methods = generator(paths: [path]).run.map(&:method_name)
+
+      expect(methods).to eq([:public_one])
+    end
+
+    it "emits private methods when include_private: true is set" do
+      src = "class Box\n  def public_one; \"x\"; end\n  private\n  def private_one; \"y\"; end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      methods = described_class.new(configuration: config, paths: [path], include_private: true)
+                               .run.map(&:method_name)
+
+      expect(methods).to contain_exactly(:public_one, :private_one)
+    end
+  end
+
+  describe "initialize exclusion (post-dogfood)" do
+    it "skips `def initialize` (RBS inherits `Object#initialize`)" do
+      src = "class Box\n  def initialize\n    @count = 0\n  end\n  def n; 1; end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      methods = generator(paths: [path]).run.map(&:method_name)
+
+      expect(methods).to eq([:n])
+    end
+
+    it "does emit `def self.initialize` (singleton-side; not the constructor)" do
+      src = "class Box\n  def self.initialize\n    \"x\"\n  end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      methods = generator(paths: [path]).run
+
+      expect(methods.map(&:method_name)).to eq([:initialize])
+      expect(methods.first.kind).to eq(:singleton)
+    end
+  end
+
+  describe "explicit-return union (post-dogfood body-typer enhancement)" do
+    it "unions an explicit `return value` with the implicit-return expression" do
+      src = "class Box\n  def m(flag)\n    return 1 if flag\n    \"end\"\n  end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs.split(" -> ").last.split(" | ").sort).to eq(%w[Integer String])
+    end
+
+    it "treats bare `return` as `nil`" do
+      src = "class Box\n  def m(flag)\n    return if flag\n    \"end\"\n  end\nend\n"
+      path = write_fixture("lib/box.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs.split(" -> ").last.split(" | ").sort).to eq(%w[String nil])
+    end
+
+    it "does not credit returns from nested blocks / lambdas / inner defs" do
+      src = <<~RUBY
+        class Box
+          def m
+            [1].each { |i| return false }
+            "end"
+          end
+        end
+      RUBY
+      path = write_fixture("lib/box.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs).to eq("def m: () -> String")
+    end
+  end
+
   describe "lenience-preserving guard (post-dogfood tighter? hardening)" do
     it "refuses to classify as tighter when the declared union loses a `nil` member" do
       write_fixture("sig/box.rbs", "class Box\n  def fetch: () -> String?\nend\n")

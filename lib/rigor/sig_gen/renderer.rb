@@ -19,7 +19,7 @@ module Rigor
     #   `--write` merge.
     # - `:json` — machine-readable payload with the same
     #   classification table as `:print`.
-    class Renderer
+    class Renderer # rubocop:disable Metrics/ClassLength
       def initialize(out:)
         @out = out
       end
@@ -103,6 +103,54 @@ module Rigor
       def render_json(candidates)
         payload = { candidates: candidates.map(&:to_h) }
         @out.puts(JSON.pretty_generate(payload))
+      end
+
+      public
+
+      # Renders the per-source-file outcomes of a `--write`
+      # run. Distinct from {#render} because the write
+      # path's reporting surface is action-oriented (created
+      # / updated / skipped) rather than candidate-oriented.
+      def render_write(results:, format:)
+        case format
+        when "json" then render_write_json(results)
+        when "text" then render_write_text(results)
+        else raise ArgumentError, "unsupported format: #{format}"
+        end
+      end
+
+      private
+
+      def render_write_text(results)
+        if results.all? { |r| r.action == :noop }
+          @out.puts("No changes")
+          return
+        end
+
+        results.each do |result|
+          case result.action
+          when :created then render_write_created(result)
+          when :updated then render_write_updated(result)
+          when :skipped_outside_sig_root then render_write_skipped(result)
+          end
+        end
+      end
+
+      def render_write_created(result)
+        @out.puts("created #{result.target_path} (#{result.applied.size} method(s))")
+      end
+
+      def render_write_updated(result)
+        @out.puts("updated #{result.target_path} (+#{result.applied.size}, " \
+                  "skipped #{result.skipped.size} user-authored)")
+      end
+
+      def render_write_skipped(result)
+        @out.puts("skipped #{result.source_path} -> #{result.target_path} (outside sig root)")
+      end
+
+      def render_write_json(results)
+        @out.puts(JSON.pretty_generate({ results: results.map(&:to_h) }))
       end
     end
   end

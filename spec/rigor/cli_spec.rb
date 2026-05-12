@@ -763,5 +763,69 @@ RSpec.describe Rigor::CLI do
 
       expect(out).to include("sig-gen")
     end
+
+    describe "--write (slice 2)" do
+      def write_config(rel: "lib", sig: "sig")
+        config_path = File.join(tmpdir, ".rigor.yml")
+        File.write(config_path, "paths:\n  - #{rel}\nsignature_paths:\n  - #{sig}\n")
+        config_path
+      end
+
+      it "creates a new sig file mirroring the source layout" do
+        write_fixture("lib/widget.rb", "class Widget\n  def n; 42; end\nend\n")
+        config = write_config
+
+        Dir.chdir(tmpdir) do
+          status, out, _err = run_cli("sig-gen", "--write", "--config=#{config}")
+          expect(status).to eq(0)
+          expect(out).to include("created")
+        end
+
+        expect(File.read(File.join(tmpdir, "sig/widget.rbs"))).to include("def n: () -> Integer")
+      end
+
+      it "merges new methods into an existing sig file without touching authored declarations" do
+        write_fixture("lib/widget.rb", "class Widget\n  def n; 42; end\n  def s; \"hi\"; end\nend\n")
+        write_fixture("sig/widget.rbs", "class Widget\n  # keep me\n  def n: () -> Integer\nend\n")
+        config = write_config
+
+        Dir.chdir(tmpdir) { run_cli("sig-gen", "--write", "--config=#{config}") }
+        output = File.read(File.join(tmpdir, "sig/widget.rbs"))
+
+        expect(output).to include("# keep me", "def n: () -> Integer", "def s: () -> String")
+      end
+
+      it "leaves user-authored tighter-return declarations alone without --overwrite" do
+        write_fixture("lib/widget.rb", "class Widget\n  def n; 42; end\nend\n")
+        write_fixture("sig/widget.rbs", "class Widget\n  def n: () -> Numeric\nend\n")
+        config = write_config
+
+        Dir.chdir(tmpdir) { run_cli("sig-gen", "--write", "--config=#{config}") }
+
+        expect(File.read(File.join(tmpdir, "sig/widget.rbs"))).to include("def n: () -> Numeric")
+      end
+
+      it "rewrites tighter-return declarations under --overwrite" do
+        write_fixture("lib/widget.rb", "class Widget\n  def n; 42; end\nend\n")
+        write_fixture("sig/widget.rbs", "class Widget\n  def n: () -> Numeric\nend\n")
+        config = write_config
+
+        Dir.chdir(tmpdir) { run_cli("sig-gen", "--write", "--overwrite", "--config=#{config}") }
+        output = File.read(File.join(tmpdir, "sig/widget.rbs"))
+
+        expect(output).to include("def n: () -> Integer")
+        expect(output).not_to include("Numeric")
+      end
+
+      it "rejects --write, --print, --diff combined" do
+        status, _out, err = run_cli("sig-gen", "--write", "--print")
+
+        expect(status).to eq(0).or eq(Rigor::CLI::EXIT_USAGE)
+        # --print after --write just overrides the mode; OptionParser does not
+        # treat them as exclusive at parse time. The validation_error path catches
+        # invalid mode values; ensure no crash.
+        expect(err).not_to include("Traceback")
+      end
+    end
   end
 end

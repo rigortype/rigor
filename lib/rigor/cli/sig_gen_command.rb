@@ -7,22 +7,32 @@ require_relative "../sig_gen"
 
 module Rigor
   class CLI
-    # Executes the `rigor sig-gen` command — ADR-14 slice 1 MVP.
+    # Executes the `rigor sig-gen` command — ADR-14 slices 1–2.
     #
     # Walks the given paths (or `configuration.paths` when none
     # are supplied), classifies every reachable instance method
-    # via {Rigor::SigGen::Generator}, and prints the resulting
-    # RBS skeletons (or unified-style diffs, or a JSON payload).
+    # via {Rigor::SigGen::Generator}, and either prints the
+    # resulting RBS skeletons / unified-style diffs (`--print`,
+    # `--diff`; slice 1) or writes them to the project signature
+    # tree via {Rigor::SigGen::Writer} (`--write`; slice 2).
     #
-    # The MVP supports `--print` (default) and `--diff`; the
-    # `--write` mode arrives in slice 2 once the RBS-merge path
-    # lands. Parameter policy is hard-coded to `untyped`; the
-    # `--params` flag is parsed so the surface stays stable
-    # across slices but only `untyped` is wired today.
+    # `--write` follows the established Ruby community
+    # convention: `lib/foo/bar.rb` → `sig/foo/bar.rbs`. New
+    # methods are inserted into the matching class declaration
+    # just before its closing `end`; new classes are appended
+    # to the file; non-existent target files are created. User-
+    # authored declarations are NEVER replaced unless
+    # `--overwrite` is set AND the candidate is a
+    # `tighter-return`.
+    #
+    # Parameter policy stays at slice 1's `untyped` default;
+    # `--params=observed` / `--params=observed-strict` remain
+    # reserved-but-inert (rejected with a usage error so the
+    # surface stays stable for slice 3).
     class SigGenCommand
       USAGE = "Usage: rigor sig-gen [options] [paths]"
 
-      VALID_MODES = %w[print diff].freeze
+      VALID_MODES = %w[print diff write].freeze
       VALID_PARAM_POLICIES = %w[untyped observed observed-strict].freeze
       VALID_FORMATS = %w[text json].freeze
 
@@ -40,20 +50,37 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config))
         paths = @argv.empty? ? configuration.paths : @argv
 
-        generator = SigGen::Generator.new(configuration: configuration, paths: paths)
-        candidates = generator.run
+        candidates = SigGen::Generator.new(configuration: configuration, paths: paths).run
+        mode = options.fetch(:mode).to_sym
 
-        renderer = SigGen::Renderer.new(out: @out)
-        renderer.render(
-          candidates: candidates,
-          mode: options.fetch(:mode).to_sym,
-          format: options.fetch(:format),
-          selection: options.fetch(:selection)
-        )
+        if mode == :write
+          dispatch_write(candidates, configuration, options)
+        else
+          dispatch_print_or_diff(candidates, mode, options)
+        end
         0
       end
 
       private
+
+      def dispatch_print_or_diff(candidates, mode, options)
+        SigGen::Renderer.new(out: @out).render(
+          candidates: candidates,
+          mode: mode,
+          format: options.fetch(:format),
+          selection: options.fetch(:selection)
+        )
+      end
+
+      def dispatch_write(candidates, configuration, options)
+        path_mapper = SigGen::PathMapper.new(configuration: configuration)
+        writer = SigGen::Writer.new(path_mapper: path_mapper, overwrite: options.fetch(:overwrite))
+
+        grouped = candidates.group_by(&:path)
+        results = grouped.map { |source, group| writer.write(source, group) }
+
+        SigGen::Renderer.new(out: @out).render_write(results: results, format: options.fetch(:format))
+      end
 
       def parse_options
         options = {
@@ -61,6 +88,7 @@ module Rigor
           format: "text",
           params: "untyped",
           selection: [],
+          overwrite: false,
           config: nil
         }
         build_option_parser(options).parse!(@argv)
@@ -72,11 +100,15 @@ module Rigor
         nil
       end
 
-      def build_option_parser(options)
+      def build_option_parser(options) # rubocop:disable Metrics/AbcSize
         OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--print", "Write RBS skeletons to stdout (default)") { options[:mode] = "print" }
           opts.on("--diff", "Write a unified diff against existing RBS") { options[:mode] = "diff" }
+          opts.on("--write", "Write generated RBS to sig/<path>.rbs files") { options[:mode] = "write" }
+          opts.on("--overwrite", "Allow tighter-return updates to replace user-authored RBS") do
+            options[:overwrite] = true
+          end
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
           opts.on("--params=POLICY", "Parameter policy: untyped (default), observed, observed-strict") do |value|
             options[:params] = value
@@ -99,7 +131,7 @@ module Rigor
         format = options.fetch(:format)
         params = options.fetch(:params)
 
-        return "--print and --diff are mutually exclusive flags; pick one" unless VALID_MODES.include?(mode)
+        return "--print, --diff, and --write are mutually exclusive flags; pick one" unless VALID_MODES.include?(mode)
         return "unsupported --format=#{format}" unless VALID_FORMATS.include?(format)
         return "unsupported --params=#{params}" unless VALID_PARAM_POLICIES.include?(params)
         return "--params=#{params} is reserved; slice 1 supports 'untyped' only" if params != "untyped"

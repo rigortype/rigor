@@ -1,0 +1,244 @@
+# frozen_string_literal: true
+
+require "fileutils"
+require "rbs"
+
+require_relative "classification"
+require_relative "write_result"
+
+module Rigor
+  module SigGen
+    # Applies a per-source-file group of {MethodCandidate}s to
+    # the target `.rbs` file under the project signature tree.
+    #
+    # ADR-14 slice 2: the writer parses the target with
+    # `RBS::Parser` to find the matching class declaration and
+    # inserts new method declarations just before the class's
+    # closing `end` keyword. Existing declarations are NEVER
+    # touched unless `--overwrite` is set AND the candidate's
+    # classification is `tighter-return`.
+    #
+    # The slice does NOT re-render the whole file through
+    # `RBS::Writer`. That would lose comments / blank-line
+    # formatting per upstream design; the byte-range insertion
+    # approach taken here preserves untouched declarations
+    # verbatim. Mixed hand-written + generated output inside
+    # the *same* class declaration may still lose trailing
+    # blank lines on the touched ranges; the `--diff` review
+    # surface from slice 1 is the user's escape hatch.
+    #
+    # Safety boundary: the writer ASSERTS the target lives
+    # inside the configured signature tree before touching the
+    # disk. Files outside that tree route through
+    # `WriteResult(action: :skipped_outside_sig_root)`; the
+    # caller decides whether to warn or fail.
+    class Writer # rubocop:disable Metrics/ClassLength
+      INDENT = "  "
+      private_constant :INDENT
+
+      # Per-`update_existing` accumulator. The merge_class
+      # helper mutates `source` / `decls` / `applied` /
+      # `skipped` in place as each class is processed so the
+      # next class sees the latest byte positions.
+      MergeState = Struct.new(:source, :decls, :applied, :skipped, keyword_init: true)
+      private_constant :MergeState
+
+      def initialize(path_mapper:, overwrite: false)
+        @path_mapper = path_mapper
+        @overwrite = overwrite
+      end
+
+      # @param source_path [String]
+      # @param candidates [Array<MethodCandidate>] only
+      #   emittable classifications (new-method /
+      #   tighter-return) are honoured; the caller is
+      #   responsible for filtering.
+      # @return [WriteResult]
+      def write(source_path, candidates)
+        emittable = candidates.select { |c| EMITTABLE.include?(c.classification) }
+        return WriteResult.new(source_path: source_path, target_path: nil, action: :noop) if emittable.empty?
+
+        target = @path_mapper.target_for(source_path)
+        unless inside_sig_root?(target)
+          return WriteResult.new(source_path: source_path, target_path: target,
+                                 action: :skipped_outside_sig_root)
+        end
+
+        target.exist? ? update_existing(source_path, target, emittable) : create_new(source_path, target, emittable)
+      end
+
+      private
+
+      EMITTABLE = [Classification::NEW_METHOD, Classification::TIGHTER_RETURN].freeze
+      private_constant :EMITTABLE
+
+      def inside_sig_root?(target)
+        root = @path_mapper.sig_root_dir.realpath
+        target.expand_path.ascend.any? { |ancestor| realpath_or_nil(ancestor) == root }
+      rescue Errno::ENOENT
+        # The sig root doesn't exist yet; we'll create it
+        # alongside the target file. Allow this case.
+        target.expand_path.to_s.start_with?(@path_mapper.sig_root_dir.expand_path.to_s)
+      end
+
+      def realpath_or_nil(path)
+        path.realpath
+      rescue Errno::ENOENT
+        nil
+      end
+
+      def create_new(source_path, target, candidates)
+        FileUtils.mkdir_p(target.dirname)
+        target.write(render_new_file(candidates))
+        WriteResult.new(source_path: source_path, target_path: target,
+                        action: :created, applied: candidates)
+      end
+
+      def render_new_file(candidates)
+        candidates.group_by(&:class_name).map do |class_name, methods|
+          body = methods.map { |c| "#{INDENT}#{c.rbs}" }.join("\n")
+          "class #{class_name}\n#{body}\nend\n"
+        end.join("\n")
+      end
+
+      def update_existing(source_path, target, candidates)
+        source = target.read
+        decls = parse_signature(source)
+        return WriteResult.new(source_path: source_path, target_path: target, action: :noop) if decls.nil?
+
+        state = MergeState.new(source: source, decls: decls, applied: [], skipped: [])
+        candidates.group_by(&:class_name).each { |class_name, methods| merge_class(state, class_name, methods) }
+
+        action = state.applied.empty? ? :noop : :updated
+        target.write(state.source) if action == :updated
+        WriteResult.new(source_path: source_path, target_path: target,
+                        action: action, applied: state.applied, skipped: state.skipped)
+      end
+
+      def parse_signature(source)
+        _, _, decls = RBS::Parser.parse_signature(source)
+        decls
+      rescue RBS::ParsingError
+        nil
+      end
+
+      def merge_class(state, class_name, methods)
+        decl = find_class_decl(state.decls, class_name)
+        state.source = if decl.nil?
+                         append_new_class(state.source, class_name, methods, state.applied)
+                       else
+                         merge_into_existing_class(state.source, decl, methods, state.applied, state.skipped)
+                       end
+        state.decls = parse_signature(state.source) || state.decls
+      end
+
+      def find_class_decl(decls, qualified_name)
+        decls.each do |decl|
+          next unless decl.is_a?(RBS::AST::Declarations::Class) || decl.is_a?(RBS::AST::Declarations::Module)
+
+          rendered = decl.name.to_s.sub(/\A::/, "")
+          return decl if rendered == qualified_name
+        end
+        nil
+      end
+
+      # Appends an entirely new `class Foo … end` block at the
+      # end of the file (with a leading blank line as
+      # separator).
+      def append_new_class(source, class_name, methods, applied)
+        body = methods.map { |c| "#{INDENT}#{c.rbs}" }.join("\n")
+        snippet = "\nclass #{class_name}\n#{body}\nend\n"
+        applied.concat(methods)
+        ends_with_newline?(source) ? source + snippet : "#{source}\n#{snippet}"
+      end
+
+      def ends_with_newline?(source)
+        source.end_with?("\n")
+      end
+
+      def merge_into_existing_class(source, decl, methods, applied, skipped)
+        existing_methods = collect_member_names(decl)
+        new_methods, conflicting = partition_against_existing(methods, existing_methods)
+
+        source = insert_into_class(source, decl, new_methods)
+        applied.concat(new_methods)
+
+        if @overwrite
+          source, replaced = replace_tighter_returns(source, decl, conflicting)
+          applied.concat(replaced)
+          skipped.concat(conflicting.reject { |c| replaced.include?(c) }.map { |c| [c, :user_authored] })
+        else
+          skipped.concat(conflicting.map { |c| [c, :user_authored] })
+        end
+
+        source
+      end
+
+      def collect_member_names(decl)
+        decl.members.filter_map do |member|
+          member.respond_to?(:name) ? member.name : nil
+        end
+      end
+
+      def partition_against_existing(methods, existing_method_names)
+        methods.partition { |c| !existing_method_names.include?(c.method_name) }
+      end
+
+      # Inserts each new method line one column before the
+      # class declaration's `end` keyword. The insertion text
+      # carries its own leading indent + trailing newline so
+      # the surrounding source's whitespace stays intact.
+      def insert_into_class(source, decl, new_methods)
+        return source if new_methods.empty?
+
+        end_pos = decl.location[:end].start_pos
+        addition = new_methods.map { |c| "#{INDENT}#{c.rbs}\n" }.join
+        source[0...end_pos] + addition + source[end_pos..]
+      end
+
+      # Walks the class's existing method declarations; for
+      # each tighter-return candidate that matches a member
+      # name, slices out the old declaration's source range
+      # and substitutes the new RBS one-liner. Members that
+      # are not `MethodDefinition`s are left alone.
+      def replace_tighter_returns(source, decl, candidates)
+        tighter = candidates.select { |c| c.classification == Classification::TIGHTER_RETURN }
+        return [source, []] if tighter.empty?
+
+        replaced = []
+        # Apply replacements from highest byte position downward
+        # so earlier byte offsets remain valid as the source
+        # grows or shrinks.
+        sorted = tighter.sort_by { |c| -member_position(decl, c.method_name) }
+        sorted.each do |candidate|
+          source = apply_replacement(source, decl, candidate) and replaced << candidate
+        end
+        [source, replaced]
+      end
+
+      def member_position(decl, method_name)
+        member = find_method_member(decl, method_name)
+        member ? member.location.start_pos : -1
+      end
+
+      def find_method_member(decl, method_name)
+        decl.members.find do |m|
+          m.is_a?(RBS::AST::Members::MethodDefinition) && m.name == method_name
+        end
+      end
+
+      # Splices the new RBS one-liner over the existing
+      # declaration's byte range. `RBS::Parser`'s location
+      # starts at the `def` keyword, NOT at the column zero of
+      # the line, so the leading whitespace stays inside
+      # `source[0...start_pos]` and we do not re-emit it.
+      def apply_replacement(source, decl, candidate)
+        member = find_method_member(decl, candidate.method_name)
+        return nil if member.nil?
+
+        loc = member.location
+        source[0...loc.start_pos] + candidate.rbs + source[loc.end_pos..]
+      end
+    end
+  end
+end

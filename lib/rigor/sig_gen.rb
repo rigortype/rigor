@@ -4,6 +4,9 @@ require_relative "sig_gen/classification"
 require_relative "sig_gen/method_candidate"
 require_relative "sig_gen/generator"
 require_relative "sig_gen/renderer"
+require_relative "sig_gen/path_mapper"
+require_relative "sig_gen/write_result"
+require_relative "sig_gen/writer"
 
 module Rigor
   # Namespace for the RBS signature generator that powers

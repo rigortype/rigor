@@ -572,6 +572,71 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
     end
   end
 
+  describe "per-call-site assertion gating (ADR-11 deferred follow-up)" do
+    # Sorbet itself only enforces type errors at `# typed: true`
+    # and above. The harvest-time `enforce_sigil` gate already
+    # mirrors that for cataloged sigs; this gate extends the
+    # same discipline to caller-side assertion recognisers
+    # (`T.let` / `T.cast` / `T.must` / `T.bind` /
+    # `T.assert_type!` / `T.reveal_type` / `T.unsafe`).
+    #
+    # Behaviour observability: the suppressed `T.reveal_type`
+    # never records a `record_reveal_type_call`, so
+    # `diagnostics_for_file` emits no `reveal-type` :info
+    # diagnostic. We use that as the smoke signal: the
+    # diagnostic IS / IS-NOT present.
+
+    it "fires assertion recognisers at `# typed: true` files (default enforce_sigil)" do
+      source = <<~RUBY
+        # typed: true
+        #{SIG_STUB}
+        n = T.let(3, Integer)
+        T.reveal_type(n)
+      RUBY
+
+      diag = run_plugin(source: source).diagnostics.find { |d| d.rule == "reveal-type" }
+      expect(diag).not_to be_nil
+    end
+
+    it "suppresses assertion recognisers at `# typed: false` files (default enforce_sigil)" do
+      source = <<~RUBY
+        # typed: false
+        #{SIG_STUB}
+        n = T.let(3, Integer)
+        T.reveal_type(n)
+      RUBY
+
+      diag = run_plugin(source: source).diagnostics.find { |d| d.rule == "reveal-type" }
+      expect(diag).to be_nil
+    end
+
+    it "suppresses assertion recognisers in sigil-less files (treated as `:false`)" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        n = T.let(3, Integer)
+        T.reveal_type(n)
+      RUBY
+
+      diag = run_plugin(source: source).diagnostics.find { |d| d.rule == "reveal-type" }
+      expect(diag).to be_nil
+    end
+
+    it "fires assertion recognisers regardless of sigil when enforce_sigil: false" do
+      source = <<~RUBY
+        # typed: false
+        #{SIG_STUB}
+        n = T.let(3, Integer)
+        T.reveal_type(n)
+      RUBY
+
+      diag = run_plugin(
+        source: source,
+        plugin_entry: { "gem" => "rigor-sorbet", "config" => { "enforce_sigil" => false } }
+      ).diagnostics.find { |d| d.rule == "reveal-type" }
+      expect(diag).not_to be_nil
+    end
+  end
+
   describe "T.absurd exhaustiveness (ADR-11 slice 6)" do
     # Slice 6 relies on Rigor's existing flow-sensitive
     # narrowing to decide whether the discriminant has been
@@ -749,7 +814,12 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "emits a `plugin.sorbet.reveal-type` :info diagnostic naming the inferred type" do
+      # Per-call-site assertion gating (ADR-11 deferred
+      # follow-up): the `T.reveal_type` recogniser only fires
+      # at files Sorbet itself would enforce. The sigil is
+      # required so the gate stays open.
       source = <<~RUBY
+        # typed: true
         #{SIG_STUB}
         n = T.let(3, Integer)
         T.reveal_type(n)
@@ -780,7 +850,11 @@ RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "emits `plugin.sorbet.assert-type-mismatch` when the inferred type is provably incompatible" do
+      # Per-call-site assertion gating (ADR-11 deferred
+      # follow-up): the `T.assert_type!` mismatch check only
+      # fires at files Sorbet itself would enforce.
       source = <<~RUBY
+        # typed: true
         #{SIG_STUB}
         # `s` is provably `Constant<"hello">`; asserting Integer
         # is definitely incompatible — the gradual-acceptance

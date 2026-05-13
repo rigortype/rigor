@@ -526,7 +526,7 @@ module Rigor
         parse_result = Prism.parse_file(path, version: @configuration.target_ruby)
         return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
 
-        scope = Scope.empty(environment: environment)
+        scope = Scope.empty(environment: environment, source_path: path)
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
         diagnostics = CheckRules.diagnose(
           path: path,

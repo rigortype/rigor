@@ -99,6 +99,21 @@ module Rigor
         # `false` to record every file's sigs regardless of
         # sigil (current behaviour pre-this-config).
         @enforce_sigil = config.fetch("enforce_sigil", true)
+        # ADR-11 deferred follow-up — per-call-site assertion
+        # gating. Catalog harvest's `@sigil_by_path` cache is
+        # consulted at every `flow_contribution_for` call so
+        # `T.let` / `T.cast` / `T.must` / `T.bind` /
+        # `T.assert_type!` only fire in files Sorbet itself
+        # would enforce (`# typed: true` / `:strict` /
+        # `:strong`). When `@enforce_sigil` is off (the user
+        # opted out at harvest time), the gate also opens at
+        # every call site — current behaviour. Files whose
+        # sigil hasn't been observed yet (e.g. the catalog
+        # hasn't run, or the call site is in a fixture /
+        # synthetic path the harvest didn't see) treat
+        # missing-info as enforced — failing-open is friendlier
+        # for spec ergonomics than failing-closed.
+        @sigil_by_path = {}
         @catalog = nil
         @parse_errors_by_path = {}
         @catalog_built = false
@@ -181,16 +196,28 @@ module Rigor
         # (alias of `T.must`) and `T.reveal_type` (passes the
         # type through; the human-facing diagnostic is recorded
         # here for `diagnostics_for_file` to emit).
-        assertion = AssertionRecognizer.recognize(
-          call_node: call_node, scope: scope, plugin_id: manifest.id
-        )
-        if assertion
-          record_reveal_type_call(call_node, assertion.return_type) if call_node.name == :reveal_type
-          record_assert_type_check(call_node, scope) if call_node.name == :assert_type!
-          return assertion
+        #
+        # Per-call-site sigil gating: with `enforce_sigil: true`
+        # (default), assertions only fire in files Sorbet itself
+        # would enforce. Files at `# typed: false` (or
+        # sigil-less, which Sorbet treats as `:false`) skip the
+        # assertion path entirely so the dispatcher continues
+        # through the next tier as if the wrapper weren't
+        # there. The catalog tier already gates by sigil at
+        # harvest time; this closes the matching gap for
+        # caller-side recognition.
+        ensure_catalog
+        if assertion_enforced_here?(scope)
+          assertion = AssertionRecognizer.recognize(
+            call_node: call_node, scope: scope, plugin_id: manifest.id
+          )
+          if assertion
+            record_reveal_type_call(call_node, assertion.return_type) if call_node.name == :reveal_type
+            record_assert_type_check(call_node, scope) if call_node.name == :assert_type!
+            return assertion
+          end
         end
 
-        ensure_catalog
         return nil if @catalog.nil? || @catalog.empty?
 
         signature = lookup_signature(call_node, scope)
@@ -211,6 +238,38 @@ module Rigor
       end
 
       private
+
+      # ADR-11 deferred follow-up — per-call-site assertion
+      # gating. With `enforce_sigil: false`, the gate is fully
+      # open (matches the pre-feature behaviour). With
+      # `enforce_sigil: true` (default), the caller file's
+      # sigil must reach `:true` / `:strict` / `:strong` for
+      # assertions to fire. Three honest fallbacks:
+      #
+      # - `scope.source_path` is nil — synthetic call sites
+      #   (specs, virtual-node fixtures) have no file context.
+      #   Default to enforced so existing recogniser tests
+      #   keep working.
+      # - the path is canonicalised to a form not in
+      #   `@sigil_by_path` — the harvest never saw this file
+      #   (out-of-tree call site, or a path the
+      #   `configured_paths` config excluded). Sorbet itself
+      #   has no opinion on such files; default to enforced
+      #   so the recogniser still fires.
+      # - the path IS in `@sigil_by_path` but at `:false` /
+      #   `:ignore` — gate closes.
+      def assertion_enforced_here?(scope)
+        return true unless @enforce_sigil
+
+        path = scope&.source_path
+        return true if path.nil?
+        return true unless @catalog_built
+
+        level = @sigil_by_path[path] || @sigil_by_path[canonicalize(path)]
+        return true if level.nil?
+
+        SigilDetector.enforced?(level)
+      end
 
       def lookup_signature(call_node, scope)
         receiver = call_node.receiver
@@ -381,6 +440,13 @@ module Rigor
         # ADR-11 slice 5 — honour Sorbet's `# typed: ignore`
         # magic comment by skipping the file entirely.
         level = SigilDetector.detect(contents)
+        # Per-call-site assertion gating consults this map at
+        # `flow_contribution_for`. Recorded BEFORE the ignored
+        # short-circuit so a `# typed: ignore` file still
+        # reports its level to the gate (the gate then chooses
+        # to suppress assertions there too — `ignore` is
+        # stricter than `false`).
+        @sigil_by_path[path] = level
         return if SigilDetector.ignored?(level)
 
         result = Prism.parse(contents)

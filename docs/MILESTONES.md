@@ -281,7 +281,7 @@ The full "Out of scope for v0.1.1" list above applies (minus the now-closed inte
 
 ## v0.1.3 — Planned
 
-Theme: **deliver ADR-10 end-to-end, absorb ADR-11 + Rails Tier 2 work, land ADR-13 (plugin TypeNode resolver + TS-utility-type adapter), and close the ADR-14 sig-gen self-dogfood gaps.** v0.1.2 closed the Engine-depth follow-up sweep and migrated four example plugins to the v0.1.1 `flow_contribution_for` substrate; v0.1.3 turns to the queued ADR work, the Rails plugin family that depends on the cross-plugin API, the type-language vocabulary extension surface that PHPStan's `TypeNodeResolverExtension` inspired, and the residual self-dogfood gaps the third-round catalog regen surfaced.
+Theme: **deliver ADR-10 end-to-end, absorb ADR-11 + Rails Tier 2 work, land ADR-13 (plugin TypeNode resolver + TS-utility-type adapter), close the ADR-14 sig-gen self-dogfood gaps, finish ADR-11's per-call-site assertion gating, and close the literal-token follow-up the ADR-13 slice-6 integration spec needed to work around.** v0.1.2 closed the Engine-depth follow-up sweep and migrated four example plugins to the v0.1.1 `flow_contribution_for` substrate; v0.1.3 turns to the queued ADR work, the Rails plugin family that depends on the cross-plugin API, the type-language vocabulary extension surface, the residual self-dogfood gaps, and the parser-side literal-token gap.
 
 ### Track 1 — ADR-10 (Opt-in dependency-source inference)
 
@@ -337,6 +337,14 @@ ADR-13 lands the `Plugin::TypeNodeResolver` extension point, five Rigor-canonica
 7. ✅ **Slice 3b** — Caller-side threading from `RbsExtended` (`resolve_directive_rhs` / `parse_*_annotation` / every `read_*` reader) + new `Rigor::RbsExtended::Reporter` per-run accumulator. `Environment` exposes `name_scope` (built from `plugin_registry.type_node_resolvers` via `TypeNode::ResolverChain` + `NameScope`) and `rbs_extended_reporter`. The seven analyzer-surface call sites (`Analysis::CheckRules` × 2, `Inference::StatementEvaluator` / `Narrowing` / `MethodParameterBinder` / `MethodDispatcher::OverloadSelector` / `MethodDispatcher::RbsDispatch`) pass `environment:`. Runner drains the reporter at end-of-run into `dynamic.rbs-extended.unresolved` (whole-payload resolution failure) and `dynamic.shape.lossy-projection` (consults `shape_projection_lossy?` at projection-authoring sites in the parser's Resolver) `:info` diagnostics; severity profile re-stamps both.
 8. ✅ **Slice 7** — handbook TypeScript appendix update. The five mapped-type rows for `Readonly` / `Partial` / `Required` / `Pick` / `Omit` in [`docs/handbook/appendix-typescript.md`](handbook/appendix-typescript.md) now name the opt-in `rigor-typescript-utility-types` plugin alongside the matching core type functions (`readonly_of` / `partial_of` / `required_of` / `pick_of` / `omit_of`); the migration vignette gains a sibling RBS snippet showing the plugin-supplied `%a{rigor:v1:return: Pick[T, K]}` annotation.
 
+### Track 7 — rigor-sorbet per-call-site assertion gating
+
+Closes the last ADR-11 deferred item. New `Rigor::Scope#source_path` slot is set once per file in `Analysis::Runner#analyze_file` and propagated through every `with_*` rebuild + `build_joined_scope`. `rigor-sorbet` caches the per-file sigil during catalog harvest (`@sigil_by_path`); `flow_contribution_for` gates the assertion-recogniser path via `assertion_enforced_here?(scope)` so `T.let` / `T.cast` / `T.must` / `T.bind` / `T.assert_type!` / `T.reveal_type` only fire in files Sorbet itself would enforce. `enforce_sigil: false` opens the gate everywhere for backwards compat.
+
+### Track 8 — RBS::Extended Symbol / String literal tokens
+
+Closes the `docs/CURRENT_WORK.md` engineering item that ADR-13 slice 6's integration spec worked around with synthetic AST. Three new `TypeNode` AST nodes (`SymbolLiteral` / `StringLiteral` / `Union`) + `ImportedRefinements::Parser` recognises `:name` / `"name"` at type-arg position + literal-union folding via `|`. `pick_of[T, :a | :b]` / `Pick[T, "a" | "b"]` now round-trip end-to-end through `ImportedRefinements.parse`; the resolver translates literals to `Type::Constant<value>` and unions via `Type::Combinator.union`.
+
 ### Track 6 — ADR-14 sig-gen self-dogfood gap closure
 
 The third-round `lib/rigor/analysis/` self-dogfood (`343a475`) surfaced four interacting gaps (a) – (e). Gaps (a) / (b) landed in `b6d3286`; gaps (c) / (d) / (e) close this track.
@@ -347,7 +355,6 @@ The third-round `lib/rigor/analysis/` self-dogfood (`343a475`) surfaced four int
 
 ### Out of scope for v0.1.3 (deferred to v0.1.4 or beyond)
 - **`mode: full` distinct dispatch** — gem-source contributing alongside RBS with merger conflict resolution. Prerequisite for ADR-10 5c (boundary-cross) — the diagnostic has no condition under which it would fire without distinct dispatch.
-- **Per-call-site assertion gating in rigor-sorbet** — the last ADR-11 deferred item. The `enforce_sigil` knob currently gates sig recognition at catalog-harvest time; per-call-site gating would suppress recognised sigs based on the CALLER's sigil at the dispatch site.
 - **Tier 3 plugins remaining**: `rigor-graphql`, `rigor-activestorage`. Author when there is concrete user demand.
 - **rigor-activerecord extensions**: associations, enums, scopes, validations, callbacks. Each ships as a 0.2.0+ minor bump per the roadmap.
 - **dry-rb ecosystem plugins** ([`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md)) — packaging strategy (single gem vs. family vs. mid-grain bundles) needs an explicit ADR-12 decision before any individual plugin can be authored.

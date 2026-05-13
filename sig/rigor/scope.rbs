@@ -16,10 +16,12 @@ module Rigor
     attr_reader discovered_methods: Hash[String, Hash[Symbol, Symbol]]
     attr_reader discovered_def_nodes: Hash[String, Hash[Symbol, untyped]]
     attr_reader discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]]
+    attr_reader source_path: String?
 
-    def self.empty: (?environment: Environment) -> Scope
+    def self.empty: (?environment: Environment, ?source_path: String?) -> Scope
 
-    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?declared_types: Hash[untyped, Type::t], ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t]) -> void
+    def initialize: (environment: Environment, locals: Hash[Symbol, Type::t], ?fact_store: Analysis::FactStore, ?self_type: Type::t?, ?declared_types: Hash[untyped, Type::t], ?ivars: Hash[Symbol, Type::t], ?cvars: Hash[Symbol, Type::t], ?globals: Hash[Symbol, Type::t], ?source_path: String?) -> void
+    def with_source_path: (String? path) -> Scope
     def local: (String | Symbol name) -> Type::t?
     def ivar: (String | Symbol name) -> Type::t?
     def cvar: (String | Symbol name) -> Type::t?

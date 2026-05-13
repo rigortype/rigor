@@ -23,7 +23,7 @@ def assert_present!: (String value) -> void
 def check: (untyped value) -> bool
 ```
 
-The right-hand side of `return:`, `param:`, `assert*`, and `predicate-if-*` accepts either an RBS-style class name (`String`, `::Foo::Bar`) or a kebab-case refinement payload from the imported-built-in catalogue ([`imported-built-in-types.md`](imported-built-in-types.md)). The refinement payload supports the parameterised forms `non-empty-array[Integer]`, `non-empty-hash[Symbol, Integer]`, and `int<min, max>` through `Builtins::ImportedRefinements::Parser`. Class-name directives MAY use `~T` negation; refinement-form directives currently MUST NOT (the difference-against-refinement algebra is reserved for a future slice).
+The right-hand side of `return:`, `param:`, `assert*`, and `predicate-if-*` accepts either an RBS-style class name (`String`, `::Foo::Bar`) or a kebab-case refinement payload from the imported-built-in catalogue ([`imported-built-in-types.md`](imported-built-in-types.md)). The refinement payload supports the parameterised forms `non-empty-array[Integer]`, `non-empty-hash[Symbol, Integer]`, and `int<min, max>` through `Builtins::ImportedRefinements::Parser`. Type-arg positions also accept Symbol and String literal tokens (`:name` / `"name"`) and unions of them with `|` (`:a | :b | "c"`); the parser lifts each literal to a `Constant<value>` and folds unions via `Type::Combinator.union`, so shape-projection heads like `pick_of[T, :a | :b]` or plugin-supplied `Pick[T, "name" | "email"]` round-trip without a synthetic-AST work-around. Class-name directives MAY use `~T` negation; refinement-form directives currently MUST NOT (the difference-against-refinement algebra is reserved for a future slice).
 
 ## Authoring rules
 

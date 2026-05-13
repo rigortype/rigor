@@ -400,5 +400,55 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         expect(described_class.parse("Pick[Address]")).to eq(expected)
       end
     end
+
+    describe "literal-key tokens at type-arg position (ADR-13 follow-up)" do
+      def parse_to_ast(input)
+        parser = Rigor::Builtins::ImportedRefinements.const_get(:Parser).new(input)
+        parser.send(:parse_type_ast)
+      end
+
+      it "tokenises a bare symbol literal inside the type-arg list" do
+        ast = parse_to_ast("non-empty-array[:foo]")
+        expect(ast.head).to eq("non-empty-array")
+        expect(ast.args).to eq([Rigor::TypeNode::SymbolLiteral.new(value: :foo)])
+      end
+
+      it "tokenises a bare double-quoted string literal" do
+        ast = parse_to_ast("non-empty-array[\"foo\"]")
+        expect(ast.args).to eq([Rigor::TypeNode::StringLiteral.new(value: "foo")])
+      end
+
+      it "tokenises a union of symbol literals via `|`" do
+        ast = parse_to_ast("non-empty-array[:a | :b]")
+        expect(ast.args.first).to be_a(Rigor::TypeNode::Union)
+        expect(ast.args.first.nodes).to eq([
+                                             Rigor::TypeNode::SymbolLiteral.new(value: :a),
+                                             Rigor::TypeNode::SymbolLiteral.new(value: :b)
+                                           ])
+      end
+
+      it "tokenises a mixed Symbol / String union" do
+        ast = parse_to_ast("non-empty-array[:a | \"b\" | :c]")
+        members = ast.args.first.nodes
+        expect(members).to eq([
+                                Rigor::TypeNode::SymbolLiteral.new(value: :a),
+                                Rigor::TypeNode::StringLiteral.new(value: "b"),
+                                Rigor::TypeNode::SymbolLiteral.new(value: :c)
+                              ])
+      end
+
+      it "resolves a `pick_of[Foo, :a | :b]` payload end-to-end (Nominal source degrades to input)" do
+        # The TypeScript-utility-types plugin is the canonical
+        # consumer; a direct synthetic payload exercises the
+        # parser → resolver path without a plugin chain. Before
+        # the literal-token addition this payload would not
+        # tokenise; with it, the resolver returns a non-nil
+        # carrier (Nominal sources degrade to the input itself
+        # — Phase B / `shape_projection_lossy?` covers the
+        # diagnostic emission separately).
+        result = described_class.parse("pick_of[Foo, :a | :b]")
+        expect(result).not_to be_nil
+      end
+    end
   end
 end

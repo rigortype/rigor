@@ -20,7 +20,10 @@ end
 
 require_relative "type_node/identifier"
 require_relative "type_node/integer_literal"
+require_relative "type_node/symbol_literal"
+require_relative "type_node/string_literal"
 require_relative "type_node/generic"
 require_relative "type_node/indexed_access"
+require_relative "type_node/union"
 require_relative "type_node/name_scope"
 require_relative "type_node/resolver_chain"

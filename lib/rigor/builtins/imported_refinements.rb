@@ -3,6 +3,7 @@
 require "strscan"
 
 require_relative "../type"
+require_relative "../type_node"
 
 module Rigor
   module Builtins
@@ -296,7 +297,16 @@ module Rigor
         SIMPLE_NAME = /[a-z][a-z0-9_-]*/
         CLASS_NAME = /[A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*/
         SIGNED_INT = /-?\d+/
-        private_constant :SIMPLE_NAME, :CLASS_NAME, :SIGNED_INT
+        # ADR-13 follow-up — literal-key tokens at type-arg
+        # position. Symbol literals match Ruby's bare-symbol
+        # identifier shape (`:name`); string literals are
+        # double-quoted without escape sequences (the most
+        # common TS-style key-union shape). The `?<value>`
+        # capture lets the parser pull the inner text without
+        # post-stripping the delimiter.
+        SYMBOL_LITERAL = /:(?<value>[a-zA-Z_][a-zA-Z0-9_]*[?!=]?)/
+        STRING_LITERAL = /"(?<value>[^"\\]*)"/
+        private_constant :SIMPLE_NAME, :CLASS_NAME, :SIGNED_INT, :SYMBOL_LITERAL, :STRING_LITERAL
 
         def parse_type_ast
           if (class_name = @scanner.scan(CLASS_NAME))
@@ -373,12 +383,45 @@ module Rigor
           items
         end
 
+        # ADR-13 follow-up — admits `:a | "b"` literal-union
+        # forms by parsing a single arg first, then optionally
+        # folding a chain of `| <single_arg>` into a
+        # {TypeNode::Union}. Leaves the existing single-arg
+        # path bit-for-bit untouched when no `|` follows.
         def parse_type_arg_ast
           skip_ws
+          first = parse_single_type_arg_ast
+          return nil if first.nil?
+
+          members = [first]
+          loop do
+            skip_ws
+            break unless @scanner.peek(1) == "|"
+
+            @scanner.getch
+            skip_ws
+            following = parse_single_type_arg_ast
+            return nil if following.nil?
+
+            members << following
+          end
+
+          # Engine cannot see the `members << following`
+          # mutation inside the loop, so it folds the
+          # `size == 1` guard to a constant; the loop body
+          # actually grows the tuple, so the guard is real.
+          members.size == 1 ? first : TypeNode::Union.new(nodes: members) # rigor:disable flow.always-truthy-condition
+        end
+
+        def parse_single_type_arg_ast
           if (class_name = @scanner.scan(CLASS_NAME))
             parse_class_arg_tail_ast(class_name)
           elsif (literal = @scanner.scan(SIGNED_INT))
             TypeNode::IntegerLiteral.new(value: Integer(literal))
+          elsif @scanner.scan(SYMBOL_LITERAL)
+            TypeNode::SymbolLiteral.new(value: @scanner[:value].to_sym)
+          elsif @scanner.scan(STRING_LITERAL)
+            TypeNode::StringLiteral.new(value: @scanner[:value])
           else
             parse_type_ast
           end
@@ -429,7 +472,7 @@ module Rigor
       # Returns `nil` when every step declined — preserves the
       # parser's fail-soft contract so callers fall back to the
       # RBS-declared type instead of raising.
-      class Resolver
+      class Resolver # rubocop:disable Metrics/ClassLength
         # ADR-13 slice 3b — heads that consume a shape-bearing
         # first argument. When the first arg is not a `HashShape`
         # / `Tuple` (per {Rigor::Type::Combinator.shape_projection_lossy?}),
@@ -447,13 +490,37 @@ module Rigor
           @source_location = source_location
         end
 
+        # ADR-13 follow-up — every leaf-literal AST node
+        # (`IntegerLiteral` / `SymbolLiteral` / `StringLiteral`)
+        # carries a Ruby value that lifts directly to a
+        # `Constant<value>` carrier through the same helper.
+        LITERAL_AST_NODES = [
+          TypeNode::IntegerLiteral, TypeNode::SymbolLiteral, TypeNode::StringLiteral
+        ].freeze
+        private_constant :LITERAL_AST_NODES
+
         def resolve_ast(node)
           case node
-          when TypeNode::Identifier     then resolve_identifier(node)
-          when TypeNode::Generic        then resolve_generic(node)
-          when TypeNode::IntegerLiteral then Type::Combinator.constant_of(node.value)
-          when TypeNode::IndexedAccess  then resolve_indexed_access(node)
+          when TypeNode::Identifier    then resolve_identifier(node)
+          when TypeNode::Generic       then resolve_generic(node)
+          when TypeNode::IndexedAccess then resolve_indexed_access(node)
+          when TypeNode::Union         then resolve_union(node)
+          when *LITERAL_AST_NODES      then Type::Combinator.constant_of(node.value)
           end
+        end
+
+        # ADR-13 follow-up — resolves each node recursively and
+        # folds into a `Type::Combinator.union(...)`. When any
+        # node resolves to `nil` (unknown name, plugin decline,
+        # RBS Nominal fallback miss), the whole union collapses
+        # to `nil` so the caller falls back to the underlying
+        # RBS-declared type rather than a half-resolved Union
+        # carrier.
+        def resolve_union(node)
+          resolved = node.nodes.map { |child| resolve_ast(child) }
+          return nil if resolved.any?(&:nil?)
+
+          Type::Combinator.union(*resolved)
         end
 
         # Public {Rigor::Plugin::TypeNodeResolver}-shaped interface

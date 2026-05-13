@@ -46,11 +46,16 @@ module Rigor
       # ADR-13 slice 3 expanded the accepted set to include
       # {IntegerLiteral} so the parser can emit a uniform AST for
       # `int<5, 10>` (angle bounds) and `int_mask[1, 2, 4]`
-      # (square-bracketed bitflag union). Slice 1 originally
-      # accepted only `Identifier` / `Generic`; this addition is
+      # (square-bracketed bitflag union). The follow-up further
+      # admits {SymbolLiteral} / {StringLiteral} / {IndexedAccess}
+      # / {Union} so `Pick[T, :a | "b"]` carries through to the
+      # resolver as a uniform AST. Slice 1 originally accepted
+      # only `Identifier` / `Generic`; every later addition stays
       # additive — every slice-1-shape Generic remains valid.
       def valid_arg?(arg)
-        arg.is_a?(Identifier) || arg.is_a?(Generic) || arg.is_a?(IntegerLiteral)
+        arg.is_a?(Identifier) || arg.is_a?(Generic) || arg.is_a?(IntegerLiteral) ||
+          arg.is_a?(SymbolLiteral) || arg.is_a?(StringLiteral) ||
+          arg.is_a?(IndexedAccess) || arg.is_a?(Union)
       end
     end
   end

@@ -20,7 +20,8 @@ module Rigor
                 :ivars, :cvars, :globals,
                 :class_ivars, :class_cvars, :program_globals,
                 :discovered_classes, :in_source_constants, :discovered_methods,
-                :discovered_def_nodes, :discovered_method_visibilities
+                :discovered_def_nodes, :discovered_method_visibilities,
+                :source_path
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
@@ -28,8 +29,9 @@ module Rigor
     private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS, :EMPTY_CLASS_BINDINGS
 
     class << self
-      def empty(environment: Environment.default)
-        new(environment: environment, locals: {}.freeze, fact_store: Analysis::FactStore.empty)
+      def empty(environment: Environment.default, source_path: nil)
+        new(environment: environment, locals: {}.freeze,
+            fact_store: Analysis::FactStore.empty, source_path: source_path)
       end
     end
 
@@ -48,7 +50,8 @@ module Rigor
       in_source_constants: EMPTY_VAR_BINDINGS,
       discovered_methods: EMPTY_CLASS_BINDINGS,
       discovered_def_nodes: EMPTY_CLASS_BINDINGS,
-      discovered_method_visibilities: EMPTY_CLASS_BINDINGS
+      discovered_method_visibilities: EMPTY_CLASS_BINDINGS,
+      source_path: nil
     )
       @environment = environment
       @locals = locals
@@ -66,6 +69,7 @@ module Rigor
       @discovered_methods = discovered_methods
       @discovered_def_nodes = discovered_def_nodes
       @discovered_method_visibilities = discovered_method_visibilities
+      @source_path = source_path
       freeze
     end
 
@@ -90,6 +94,16 @@ module Rigor
     # `Prism::CallNode` receivers.
     def with_self_type(type)
       rebuild(self_type: type)
+    end
+
+    # ADR-11 per-call-site assertion gating prerequisite. The
+    # analyzer's per-file boundary stamps the current source
+    # file's path onto the seed scope; nested rebuilds carry
+    # the value through so plugin hooks like
+    # `flow_contribution_for` can resolve "which file does
+    # this call site belong to?" without thread-locals.
+    def with_source_path(path)
+      rebuild(source_path: path)
     end
 
     # Slice A-declarations. Returns a scope that carries an
@@ -357,7 +371,8 @@ module Rigor
       class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals,
       discovered_classes: @discovered_classes, in_source_constants: @in_source_constants,
       discovered_methods: @discovered_methods, discovered_def_nodes: @discovered_def_nodes,
-      discovered_method_visibilities: @discovered_method_visibilities
+      discovered_method_visibilities: @discovered_method_visibilities,
+      source_path: @source_path
     )
       self.class.new(
         environment: environment, locals: locals,
@@ -370,7 +385,8 @@ module Rigor
         in_source_constants: in_source_constants,
         discovered_methods: discovered_methods,
         discovered_def_nodes: discovered_def_nodes,
-        discovered_method_visibilities: discovered_method_visibilities
+        discovered_method_visibilities: discovered_method_visibilities,
+        source_path: source_path
       )
     end
 
@@ -396,7 +412,8 @@ module Rigor
         in_source_constants: in_source_constants,
         discovered_methods: discovered_methods,
         discovered_def_nodes: discovered_def_nodes,
-        discovered_method_visibilities: discovered_method_visibilities
+        discovered_method_visibilities: discovered_method_visibilities,
+        source_path: source_path
       )
     end
   end

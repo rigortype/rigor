@@ -53,6 +53,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     locals()
     program_globals()
     self_type()
+    source_path()
     top_level_def_for(req:method_name)
     type_of(req:node,key:tracer)
     user_def_for(req:class_name,req:method_name)
@@ -71,9 +72,10 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     with_local(req:name,req:type)
     with_program_globals(req:table)
     with_self_type(req:type)
+    with_source_path(req:path)
   ].freeze
 
-  SCOPE_SINGLETON = %w[empty(key:environment)].freeze
+  SCOPE_SINGLETON = %w[empty(key:environment,key:source_path)].freeze
 
   ENVIRONMENT_INSTANCE = %w[
     class_known?(req:name)
@@ -268,10 +270,16 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   TYPE_NODE_INTEGER_LITERAL_INSTANCE = %w[value()].freeze
 
+  TYPE_NODE_SYMBOL_LITERAL_INSTANCE = %w[value()].freeze
+
+  TYPE_NODE_STRING_LITERAL_INSTANCE = %w[value()].freeze
+
   TYPE_NODE_INDEXED_ACCESS_INSTANCE = %w[
     key()
     receiver()
   ].freeze
+
+  TYPE_NODE_UNION_INSTANCE = %w[nodes()].freeze
 
   TYPE_NODE_NAME_SCOPE_INSTANCE = %w[
     class_context()
@@ -299,7 +307,10 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::TypeNode::Identifier
     Rigor::TypeNode::Generic
     Rigor::TypeNode::IntegerLiteral
+    Rigor::TypeNode::SymbolLiteral
+    Rigor::TypeNode::StringLiteral
     Rigor::TypeNode::IndexedAccess
+    Rigor::TypeNode::Union
     Rigor::TypeNode::NameScope
     Rigor::TypeNode::ResolverChain
     Rigor::RbsExtended::Reporter
@@ -551,10 +562,34 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
     end
   end
 
+  describe "Rigor::TypeNode::SymbolLiteral" do
+    it "exposes the expected ADR-13 follow-up symbol-literal AST surface" do
+      expect(instance_signatures(Rigor::TypeNode::SymbolLiteral)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_SYMBOL_LITERAL_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::TypeNode::StringLiteral" do
+    it "exposes the expected ADR-13 follow-up string-literal AST surface" do
+      expect(instance_signatures(Rigor::TypeNode::StringLiteral)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_STRING_LITERAL_INSTANCE
+      )
+    end
+  end
+
   describe "Rigor::TypeNode::IndexedAccess" do
     it "exposes the expected ADR-13 slice-3 indexed-access AST surface" do
       expect(instance_signatures(Rigor::TypeNode::IndexedAccess)).to eq(
         PublicApiDriftSnapshots::TYPE_NODE_INDEXED_ACCESS_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::TypeNode::Union" do
+    it "exposes the expected ADR-13 follow-up union AST surface" do
+      expect(instance_signatures(Rigor::TypeNode::Union)).to eq(
+        PublicApiDriftSnapshots::TYPE_NODE_UNION_INSTANCE
       )
     end
   end

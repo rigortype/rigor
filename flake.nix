@@ -20,7 +20,13 @@
       devShells = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
-          ruby = pkgs.ruby_4_0 or (throw "ruby_4_0 is not available in this nixpkgs revision; update nixpkgs or add a Ruby 4.0 overlay.");
+          ruby = (pkgs.mkRuby {
+            version = pkgs.mkRubyVersion "4" "0" "4" "";
+            hash = "sha256-819u36Pauz9yP50M8ZBsZRKud/TkEqseaMxukdIw+oA=";
+            cargoHash = "sha256-z7NwWc4TaR042hNx0xgRkh/BQEpEJtE53cfrN0qNiE0=";
+          }).override {
+            docSupport = false;
+          };
           rubyEnv = ruby.withPackages (ps: [
             ps.rake
           ]);

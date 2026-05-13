@@ -130,46 +130,54 @@ module Rigor
         end.join("\n")
       end
 
-      # Emits a class declaration wrapped in nested `module`
-      # blocks for every namespace segment, matching the
-      # canonical RBS layout in this project's `sig/`.
-      # `Rigor::Analysis::DependencySourceInference::GemResolver`
+      # Emits a class/module declaration wrapped in nested
+      # `module` / `class` blocks for every namespace segment,
+      # matching the canonical RBS layout in this project's
+      # `sig/`. `Rigor::Analysis::DependencySourceInference::GemResolver`
       # becomes:
       #
       #     module Rigor
       #       module Analysis
       #         module DependencySourceInference
-      #           class GemResolver
+      #           module GemResolver
       #             ...method declarations...
       #           end
       #         end
       #       end
       #     end
       #
-      # The nested form (vs the flat `class Rigor::A::B::C`
-      # spelling) ensures Steep's constant resolver sees a
-      # parent-module declaration for every intermediate
-      # segment. Flat syntax leaves intermediate modules
-      # undeclared and triggers `RBS::UnknownTypeName` on
-      # type-check.
+      # ADR-14 gap-#3 follow-up: each segment's keyword
+      # (`module` vs `class`) is looked up in the candidate's
+      # `namespace_kinds` map (populated by the generator from
+      # the source AST). Unknown segments default to `module`
+      # — safer than `class` because RBS allows multiple
+      # `module Foo` declarations to merge but rejects
+      # duplicate `class Foo` declarations as
+      # `RBS::DuplicatedDeclarationError`.
       def render_nested_class(class_name, methods)
         segments = class_name.split("::")
         leaf = segments.last
         prefix = segments[0..-2]
+        kinds = methods.first.namespace_kinds || {}
+        leaf_keyword = kinds[class_name] || :class
 
         body_lines = methods.map(&:rbs)
-        wrap_in_modules(prefix, "class #{leaf}", body_lines, 0)
+        wrap_in_modules(prefix, "#{leaf_keyword} #{leaf}", body_lines, [], kinds, 0)
       end
 
-      def wrap_in_modules(prefix, leaf_header, body_lines, depth)
+      def wrap_in_modules(prefix, leaf_header, body_lines, accumulated, kinds, depth) # rubocop:disable Metrics/ParameterLists
         indent = INDENT * depth
         if prefix.empty?
           inner_indent = INDENT * (depth + 1)
           lines = body_lines.map { |line| "#{inner_indent}#{line}" }
           "#{indent}#{leaf_header}\n#{lines.join("\n")}\n#{indent}end\n"
         else
-          inner = wrap_in_modules(prefix.drop(1), leaf_header, body_lines, depth + 1)
-          "#{indent}module #{prefix.first}\n#{inner}#{indent}end\n"
+          seg = prefix.first
+          new_accumulated = accumulated + [seg]
+          full = new_accumulated.join("::")
+          keyword = kinds[full] || :module
+          inner = wrap_in_modules(prefix.drop(1), leaf_header, body_lines, new_accumulated, kinds, depth + 1)
+          "#{indent}#{keyword} #{seg}\n#{inner}#{indent}end\n"
         end
       end
 

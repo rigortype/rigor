@@ -110,6 +110,48 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  describe "namespace kind + module_function tracking (gap #3 a/b)" do
+    it "records `:module` vs `:class` for every walked segment" do
+      src = "module Outer\n  class Inner\n    def m; 1; end\n  end\nend\n"
+      path = write_fixture("lib/x.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.namespace_kinds["Outer"]).to eq(:module)
+      expect(candidate.namespace_kinds["Outer::Inner"]).to eq(:class)
+    end
+
+    it "emits `def self?.name` for methods inside a module_function region" do
+      src = "module Helper\n  module_function\n  def go; \"ok\"; end\nend\n"
+      path = write_fixture("lib/x.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :go }
+
+      expect(candidate.rbs).to eq(%(def self?.go: () -> "ok"))
+    end
+
+    it "does not flag methods declared BEFORE module_function as module_function" do
+      src = "module Helper\n  def before_mf; 1; end\n  module_function\n  def after_mf; 2; end\nend\n"
+      path = write_fixture("lib/x.rb", src)
+
+      run = generator(paths: [path]).run
+      before = run.find { |c| c.method_name == :before_mf }
+      after = run.find { |c| c.method_name == :after_mf }
+
+      expect(before.rbs).to start_with("def before_mf:")
+      expect(after.rbs).to start_with("def self?.after_mf:")
+    end
+
+    it "does not propagate module_function across class boundaries inside a module" do
+      src = "module Helper\n  module_function\n  class Inner\n    def m; 1; end\n  end\nend\n"
+      path = write_fixture("lib/x.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :m }
+
+      expect(candidate.rbs).to start_with("def m:")
+    end
+  end
+
   describe "visibility-aware emission (post-dogfood)" do
     it "skips private methods by default" do
       src = "class Box\n  def public_one; \"x\"; end\n  private\n  def private_one; \"y\"; end\nend\n"

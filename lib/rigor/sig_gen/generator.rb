@@ -102,6 +102,8 @@ module Rigor
         base_scope = Scope.empty(environment: environment)
         scope_index = Inference::ScopeIndexer.index(parse_result.value, default_scope: base_scope)
 
+        @namespace_kinds = {}
+        @module_function_methods = Set.new
         defs = collect_method_definitions(parse_result.value)
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
           classify_def(path, def_node, class_name, kind, scope_index)
@@ -116,40 +118,117 @@ module Rigor
       # singleton-side methods via `def self.foo` and
       # `class << self; def foo; end`; top-level / DSL-block
       # defs still degrade silently (no nameable receiver).
+      #
+      # ADR-14 gap-#3 follow-up tracks two extra pieces during
+      # the same walk so the Writer can emit kind-correct RBS
+      # without guessing:
+      #
+      # - `@namespace_kinds[qualified_name]` records whether
+      #   each segment came from `class Foo` (`:class`) or
+      #   `module Foo` (`:module`). Used by the writer's
+      #   `wrap_in_modules` step to emit the right keyword for
+      #   each intermediate segment AND the leaf.
+      # - `@module_function_methods` records `(class_name,
+      #   method_name)` pairs where a `module_function` (no
+      #   args) call preceded the `def` inside a module body.
+      #   The renderer emits `def self?.name` for these, the
+      #   RBS spelling that matches the dual instance +
+      #   singleton dispatch the runtime produces.
       def collect_method_definitions(root)
         out = []
-        walk_defs(root, [], false, out)
+        walk_defs(root, [], false, false, out)
         out
       end
 
-      def walk_defs(node, prefix, in_singleton_class, out) # rubocop:disable Metrics/CyclomaticComplexity
+      def walk_defs(node, prefix, in_singleton_class, module_function_active, out) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
           name = qualified_constant_path(node.constant_path)
           if name
-            walk_defs(node.body, prefix + [name], false, out) if node.body
+            full = (prefix + [name]).join("::")
+            @namespace_kinds[full] = node.is_a?(Prism::ClassNode) ? :class : :module
+            walk_namespace_body(node, prefix + [name], out)
             return
           end
         when Prism::SingletonClassNode
           if node.expression.is_a?(Prism::SelfNode) && node.body
-            walk_defs(node.body, prefix, true, out)
+            walk_defs(node.body, prefix, true, false, out)
             return
           end
         when Prism::DefNode
-          collect_def_node(node, prefix, in_singleton_class, out)
+          collect_def_node(node, prefix, in_singleton_class, module_function_active, out)
+          return
+        when Prism::StatementsNode
+          walk_statements(node, prefix, in_singleton_class, module_function_active, out)
           return
         end
 
-        node.compact_child_nodes.each { |child| walk_defs(child, prefix, in_singleton_class, out) }
+        node.compact_child_nodes.each do |child|
+          walk_defs(child, prefix, in_singleton_class, module_function_active, out)
+        end
       end
 
-      def collect_def_node(node, prefix, in_singleton_class, out)
+      # Module / class bodies are walked through the
+      # `walk_statements` path so `module_function` (no-args)
+      # encountered as one statement applies to every
+      # subsequent sibling def in the same body. The
+      # directive is module-scoped semantically — classes
+      # inherit `module_function` via `Module`'s ancestor
+      # chain but don't honour it the same way at runtime, so
+      # tracking is only meaningful inside `ModuleNode`
+      # bodies. Generator emits `def self?.name` for the
+      # marked defs.
+      def walk_namespace_body(namespace_node, prefix, out)
+        return if namespace_node.body.nil?
+
+        walk_defs(namespace_node.body, prefix, false, false, out)
+      end
+
+      def walk_statements(stmts_node, prefix, in_singleton_class, module_function_active, out)
+        stmts_node.body.each do |stmt|
+          if module_function_directive?(stmt)
+            module_function_active = true
+            next
+          end
+          walk_defs(stmt, prefix, in_singleton_class, module_function_active, out)
+        end
+      end
+
+      def module_function_directive?(node)
+        return false unless node.is_a?(Prism::CallNode)
+        return false unless node.name == :module_function && node.receiver.nil?
+
+        (node.arguments&.arguments || []).empty?
+      end
+
+      def collect_def_node(node, prefix, in_singleton_class, module_function_active, out)
         return if prefix.empty?
 
         kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
-        out << [node, prefix.join("::"), kind]
+        class_name = prefix.join("::")
+        @module_function_methods << [class_name, node.name] if module_function_active && kind == :instance
+        out << [node, class_name, kind]
+      end
+
+      # Wraps `MethodCandidate.new` so every candidate carries
+      # the per-file `@namespace_kinds` map — the Writer's
+      # nested-syntax emission consults it to pick `module`
+      # vs `class` for each segment.
+      def build_candidate(**)
+        MethodCandidate.new(namespace_kinds: @namespace_kinds || {}, **)
+      end
+
+      # Returns "def self." (kind: :singleton),
+      # "def self?." (instance method declared inside a
+      # `module_function` region — both instance + singleton
+      # dispatch at runtime), or "def " (plain instance).
+      def method_def_prefix(class_name, method_name, kind)
+        return "def self." if kind == :singleton
+        return "def self?." if @module_function_methods&.include?([class_name, method_name])
+
+        "def "
       end
 
       # Slice-4 follow-up surfaced by the Rigor self-dogfood:
@@ -232,7 +311,7 @@ module Rigor
       # ADR-5 clause 2.
       def initialize_stub_candidate(path, def_node, class_name)
         rbs = "def initialize: (#{render_initialize_param_list(def_node.parameters, class_name)}) -> void"
-        MethodCandidate.new(
+        build_candidate(
           path: path, class_name: class_name, method_name: :initialize,
           kind: :instance, classification: Classification::NEW_METHOD,
           inferred_return: Type::Combinator.untyped, rbs: rbs
@@ -451,7 +530,7 @@ module Rigor
       end
 
       def new_method_candidate(path, def_node, class_name, kind, inferred)
-        MethodCandidate.new(
+        build_candidate(
           path: path,
           class_name: class_name,
           method_name: def_node.name,
@@ -475,7 +554,7 @@ module Rigor
           return equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
         end
 
-        MethodCandidate.new(
+        build_candidate(
           path: path,
           class_name: class_name,
           method_name: def_node.name,
@@ -627,7 +706,7 @@ module Rigor
       end
 
       def equivalent(path, def_node, class_name, kind, inferred, declared_rbs) # rubocop:disable Metrics/ParameterLists
-        MethodCandidate.new(
+        build_candidate(
           path: path,
           class_name: class_name,
           method_name: def_node.name,
@@ -639,7 +718,7 @@ module Rigor
       end
 
       def skipped(path, def_node, class_name, kind, reason)
-        MethodCandidate.new(
+        build_candidate(
           path: path,
           class_name: class_name,
           method_name: def_node.name,
@@ -652,7 +731,7 @@ module Rigor
       def render_rbs_line(def_node, inferred, class_name, kind)
         arity = required_arity(def_node)
         head = arity.zero? ? "()" : "(#{render_param_list(class_name, def_node.name, arity)})"
-        prefix = kind == :singleton ? "def self." : "def "
+        prefix = method_def_prefix(class_name, def_node.name, kind)
         "#{prefix}#{def_node.name}: #{head} -> #{paren_wrap_union(elaborated_rbs(inferred))}"
       end
 
@@ -849,7 +928,7 @@ module Rigor
       end
 
       def attr_new_candidate(path, class_name, method_name, variant, ivar_type)
-        MethodCandidate.new(
+        build_candidate(
           path: path,
           class_name: class_name,
           method_name: method_name,
@@ -869,7 +948,7 @@ module Rigor
           return attr_equivalent(path, class_name, method_name, ivar_type, declared_rbs)
         end
 
-        MethodCandidate.new(
+        build_candidate(
           path: path, class_name: class_name, method_name: method_name,
           kind: :instance, classification: Classification::TIGHTER_RETURN,
           inferred_return: ivar_type, declared_return_rbs: declared_rbs,
@@ -878,7 +957,7 @@ module Rigor
       end
 
       def attr_equivalent(path, class_name, method_name, ivar_type, declared_rbs)
-        MethodCandidate.new(
+        build_candidate(
           path: path, class_name: class_name, method_name: method_name,
           kind: :instance, classification: Classification::EQUIVALENT,
           inferred_return: ivar_type, declared_return_rbs: declared_rbs
@@ -886,7 +965,7 @@ module Rigor
       end
 
       def attr_skipped(path, class_name, method_name, reason)
-        MethodCandidate.new(
+        build_candidate(
           path: path, class_name: class_name, method_name: method_name,
           kind: :instance, classification: Classification::SKIPPED, skip_reason: reason
         )

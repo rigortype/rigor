@@ -24,10 +24,12 @@ module Rigor
     #   keys when classification is `:skipped`, else `nil`.
     class MethodCandidate
       attr_reader :path, :class_name, :method_name, :kind, :classification,
-                  :inferred_return, :declared_return_rbs, :rbs, :skip_reason
+                  :inferred_return, :declared_return_rbs, :rbs, :skip_reason,
+                  :namespace_kinds
 
       def initialize(path:, class_name:, method_name:, kind:, classification:, # rubocop:disable Metrics/ParameterLists
-                     inferred_return: nil, declared_return_rbs: nil, rbs: nil, skip_reason: nil)
+                     inferred_return: nil, declared_return_rbs: nil, rbs: nil, skip_reason: nil,
+                     namespace_kinds: {})
         @path = path
         @class_name = class_name
         @method_name = method_name
@@ -37,6 +39,7 @@ module Rigor
         @declared_return_rbs = declared_return_rbs
         @rbs = rbs
         @skip_reason = skip_reason
+        @namespace_kinds = namespace_kinds.freeze
         freeze
       end
 

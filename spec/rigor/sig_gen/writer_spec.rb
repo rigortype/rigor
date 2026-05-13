@@ -194,6 +194,43 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
+  describe "kind-aware nested emission (gap #3 a)" do
+    it "uses `class` / `module` per segment kind from the candidate's namespace_kinds" do
+      mapper = Rigor::SigGen::PathMapper.new(configuration: configuration, project_root: tmpdir)
+      writer = described_class.new(path_mapper: mapper, overwrite: false)
+      module_resolver_candidate = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/foo.rb", class_name: "Foo::Bar::Baz",
+        method_name: :m, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def m: () -> Integer",
+        namespace_kinds: { "Foo" => :module, "Foo::Bar" => :class, "Foo::Bar::Baz" => :module }
+      )
+
+      writer.write("lib/foo.rb", [module_resolver_candidate])
+      output = File.read(File.join(tmpdir, "sig/foo.rbs"))
+
+      expect(output).to match(/module Foo\b/)
+      expect(output).to match(/class Bar\b/)
+      expect(output).to match(/module Baz\b/)
+    end
+
+    it "defaults to `module` for segments with no namespace_kinds entry" do
+      mapper = Rigor::SigGen::PathMapper.new(configuration: configuration, project_root: tmpdir)
+      writer = described_class.new(path_mapper: mapper, overwrite: false)
+      bare = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/x.rb", class_name: "A::B::C",
+        method_name: :m, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def m: () -> Integer"
+      )
+
+      writer.write("lib/x.rb", [bare])
+      output = File.read(File.join(tmpdir, "sig/x.rbs"))
+
+      expect(output).to include("module A", "module B", "class C")
+    end
+  end
+
   describe "consolidated layout routing via LayoutIndex" do
     def write_consolidated(content)
       consolidated = File.join(tmpdir, "sig/all.rbs")

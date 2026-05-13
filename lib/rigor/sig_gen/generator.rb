@@ -104,6 +104,7 @@ module Rigor
 
         @namespace_kinds = {}
         @module_function_methods = Set.new
+        @class_shells = Set.new
         defs = collect_method_definitions(parse_result.value)
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
           classify_def(path, def_node, class_name, kind, scope_index)
@@ -140,18 +141,12 @@ module Rigor
         out
       end
 
-      def walk_defs(node, prefix, in_singleton_class, module_function_active, out) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def walk_defs(node, prefix, in_singleton_class, module_function_active, out) # rubocop:disable Metrics/CyclomaticComplexity
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ClassNode, Prism::ModuleNode
-          name = qualified_constant_path(node.constant_path)
-          if name
-            full = (prefix + [name]).join("::")
-            @namespace_kinds[full] = node.is_a?(Prism::ClassNode) ? :class : :module
-            walk_namespace_body(node, prefix + [name], out)
-            return
-          end
+          return if descend_into_namespace?(node, prefix, out)
         when Prism::SingletonClassNode
           if node.expression.is_a?(Prism::SelfNode) && node.body
             walk_defs(node.body, prefix, true, false, out)
@@ -160,6 +155,10 @@ module Rigor
         when Prism::DefNode
           collect_def_node(node, prefix, in_singleton_class, module_function_active, out)
           return
+        when Prism::ConstantWriteNode
+          register_data_struct_shell(node, prefix)
+          # fall through to recurse into the RHS so a trailing
+          # `do ... end` block carrying defs is still walked.
         when Prism::StatementsNode
           walk_statements(node, prefix, in_singleton_class, module_function_active, out)
           return
@@ -168,6 +167,57 @@ module Rigor
         node.compact_child_nodes.each do |child|
           walk_defs(child, prefix, in_singleton_class, module_function_active, out)
         end
+      end
+
+      def descend_into_namespace?(node, prefix, out)
+        name = qualified_constant_path(node.constant_path)
+        return false unless name
+
+        full = (prefix + [name]).join("::")
+        @namespace_kinds[full] = node.is_a?(Prism::ClassNode) ? :class : :module
+        walk_namespace_body(node, prefix + [name], out)
+        true
+      end
+
+      # ADR-14 gap-#3 (e): recognises
+      # `Const = Data.define(...)` and
+      # `Const = Struct.new(...)` as class declarations.
+      # The runtime side stamps a brand-new anonymous class
+      # at the RHS and binds it to `Const`, so the generated
+      # RBS needs an explicit `class Const` declaration even
+      # though no `class Const ... end` block appears in
+      # source. Without it, references to `Const` in return
+      # types fail to resolve under Steep (the canonical case
+      # is `GemResolver::Resolved | GemResolver::Unresolvable`
+      # where `Unresolvable = Data.define(:gem_name, :reason)`).
+      #
+      # The walker records the fully-qualified constant name
+      # in `@class_shells` (carried through to every
+      # candidate so the writer's tree-builder picks it up)
+      # AND in `@namespace_kinds` so the leaf's `class`
+      # keyword wins over the intermediate-segment `module`
+      # default.
+      def register_data_struct_shell(node, prefix)
+        return unless data_or_struct_call?(node.value)
+
+        full = (prefix + [node.name.to_s]).join("::")
+        @class_shells << full
+        @namespace_kinds[full] = :class
+      end
+
+      DATA_STRUCT_SHELL_HEADS = {
+        "Data" => :define,
+        "Struct" => :new
+      }.freeze
+      private_constant :DATA_STRUCT_SHELL_HEADS
+
+      def data_or_struct_call?(value)
+        return false unless value.is_a?(Prism::CallNode)
+
+        receiver = value.receiver
+        return false unless receiver.is_a?(Prism::ConstantReadNode)
+
+        DATA_STRUCT_SHELL_HEADS[receiver.name.to_s] == value.name
       end
 
       # Module / class bodies are walked through the
@@ -213,11 +263,17 @@ module Rigor
       end
 
       # Wraps `MethodCandidate.new` so every candidate carries
-      # the per-file `@namespace_kinds` map — the Writer's
-      # nested-syntax emission consults it to pick `module`
-      # vs `class` for each segment.
+      # the per-file `@namespace_kinds` map AND the
+      # `@class_shells` set — the Writer's nested-syntax
+      # emission consults both to pick `module` vs `class`
+      # for each segment and to emit empty
+      # `Const = Data.define(...)` declarations.
       def build_candidate(**)
-        MethodCandidate.new(namespace_kinds: @namespace_kinds || {}, **)
+        MethodCandidate.new(
+          namespace_kinds: @namespace_kinds || {},
+          class_shells: (@class_shells || Set.new).to_a,
+          **
+        )
       end
 
       # Returns "def self." (kind: :singleton),

@@ -124,61 +124,113 @@ module Rigor
                         action: :created, applied: candidates)
       end
 
+      # ADR-14 gap-#3 follow-up (c): when one candidate's
+      # `class_name` is a strict prefix of another's, emit a
+      # single nested tree instead of two flat sibling
+      # blocks. The third-round self-dogfood surfaced
+      # `Analysis::DependencySourceInference::GemResolver`
+      # containing `class Resolved < Data.define(...)` — the
+      # earlier `group_by(&:class_name)` flattened that into
+      # two top-level wraps (one for GemResolver's own
+      # methods, one for GemResolver::Resolved's), which
+      # Steep accepted but is not the canonical layout in
+      # this project's `sig/`.
+      #
+      # The writer now builds a tree keyed by qualified-name
+      # segments. Each tree node carries (qualified_name,
+      # methods, shells, children); rendering walks the tree
+      # so every nested class appears inside its parent's
+      # block. Empty class shells (gap-#3 follow-up (e), e.g.
+      # `Unresolvable = Data.define(...)`) participate as
+      # zero-method tree nodes — they emit `class Foo\nend`
+      # at their position.
       def render_new_file(candidates)
-        candidates.group_by(&:class_name).map do |class_name, methods|
-          render_nested_class(class_name, methods)
-        end.join("\n")
+        shells = collect_class_shells(candidates)
+        tree = build_namespace_tree(candidates, shells)
+        kinds = merged_namespace_kinds(candidates)
+        render_tree_nodes(tree, kinds, 0)
       end
 
-      # Emits a class/module declaration wrapped in nested
-      # `module` / `class` blocks for every namespace segment,
-      # matching the canonical RBS layout in this project's
-      # `sig/`. `Rigor::Analysis::DependencySourceInference::GemResolver`
-      # becomes:
-      #
-      #     module Rigor
-      #       module Analysis
-      #         module DependencySourceInference
-      #           module GemResolver
-      #             ...method declarations...
-      #           end
-      #         end
-      #       end
-      #     end
-      #
-      # ADR-14 gap-#3 follow-up: each segment's keyword
-      # (`module` vs `class`) is looked up in the candidate's
-      # `namespace_kinds` map (populated by the generator from
-      # the source AST). Unknown segments default to `module`
-      # — safer than `class` because RBS allows multiple
-      # `module Foo` declarations to merge but rejects
-      # duplicate `class Foo` declarations as
-      # `RBS::DuplicatedDeclarationError`.
-      def render_nested_class(class_name, methods)
-        segments = class_name.split("::")
-        leaf = segments.last
-        prefix = segments[0..-2]
-        kinds = methods.first.namespace_kinds || {}
-        leaf_keyword = kinds[class_name] || :class
-
-        body_lines = methods.map(&:rbs)
-        wrap_in_modules(prefix, "#{leaf_keyword} #{leaf}", body_lines, [], kinds, 0)
+      # Drains `class_shells` from every candidate; the
+      # generator's walker populates the same set on every
+      # candidate produced from a given file (gap-#3 (e)).
+      def collect_class_shells(candidates)
+        shells = Set.new
+        candidates.each { |c| shells.merge(c.class_shells) if c.respond_to?(:class_shells) }
+        shells
       end
 
-      def wrap_in_modules(prefix, leaf_header, body_lines, accumulated, kinds, depth) # rubocop:disable Metrics/ParameterLists
-        indent = INDENT * depth
-        if prefix.empty?
-          inner_indent = INDENT * (depth + 1)
-          lines = body_lines.map { |line| "#{inner_indent}#{line}" }
-          "#{indent}#{leaf_header}\n#{lines.join("\n")}\n#{indent}end\n"
-        else
-          seg = prefix.first
-          new_accumulated = accumulated + [seg]
-          full = new_accumulated.join("::")
-          keyword = kinds[full] || :module
-          inner = wrap_in_modules(prefix.drop(1), leaf_header, body_lines, new_accumulated, kinds, depth + 1)
-          "#{indent}#{keyword} #{seg}\n#{inner}#{indent}end\n"
+      def merged_namespace_kinds(candidates)
+        merged = {}
+        candidates.each do |c|
+          (c.namespace_kinds || {}).each { |k, v| merged[k] = v }
         end
+        merged
+      end
+
+      # Tree node: { name:, children: Hash{String => node},
+      # methods: Array<MethodCandidate>, shell: Boolean }.
+      # `shell` flags nodes that came in via `class_shells`
+      # only (no methods of their own); rendering uses it to
+      # default the keyword to `:class` for the `class Const`
+      # = `Data.define(...)` case.
+      def build_namespace_tree(candidates, shells)
+        root = { name: nil, children: {}, methods: [], shell: false }
+        candidates.group_by(&:class_name).each do |class_name, methods|
+          insert_into_tree(root, class_name.split("::"), methods: methods)
+        end
+        shells.each { |name| insert_into_tree(root, name.split("::"), shell: true) }
+        root
+      end
+
+      def insert_into_tree(node, segments, methods: nil, shell: false)
+        return if segments.empty?
+
+        head, *rest = segments
+        child = node[:children][head] ||= { name: head, children: {}, methods: [], shell: false }
+        if rest.empty?
+          child[:methods].concat(methods) if methods
+          child[:shell] ||= shell
+        else
+          insert_into_tree(child, rest, methods: methods, shell: shell)
+        end
+      end
+
+      def render_tree_nodes(node, kinds, depth)
+        node[:children].values.map { |child| render_tree_node(child, kinds, depth, [node[:name]].compact) }.join("\n")
+      end
+
+      def render_tree_node(node, kinds, depth, prefix)
+        indent = INDENT * depth
+        qualified = (prefix + [node[:name]]).join("::")
+        keyword = node_keyword(node, kinds, qualified)
+        body = render_tree_node_body(node, kinds, depth, prefix)
+        "#{indent}#{keyword} #{node[:name]}\n#{body}#{indent}end\n"
+      end
+
+      def render_tree_node_body(node, kinds, depth, prefix)
+        inner_indent = INDENT * (depth + 1)
+        method_lines = node[:methods].map { |c| "#{inner_indent}#{c.rbs}\n" }.join
+        child_blocks = node[:children].values.map do |child|
+          render_tree_node(child, kinds, depth + 1, prefix + [node[:name]])
+        end.join
+        method_lines + child_blocks
+      end
+
+      # Per ADR-14 gap-#3 (a) the keyword for a segment comes
+      # from `namespace_kinds` when known. The default for an
+      # explicit class shell (gap-#3 (e), `Const =
+      # Data.define(...)`) is `:class`; otherwise default to
+      # `:class` for a method-bearing leaf node and `:module`
+      # for an intermediate (children-only) segment. Defaulting
+      # intermediates to `:module` matches RBS's "multiple
+      # `module Foo` declarations merge" rule.
+      def node_keyword(node, kinds, qualified)
+        return kinds.fetch(qualified) if kinds.key?(qualified)
+        return :class if node[:shell]
+        return :class if node[:methods].any? && node[:children].empty?
+
+        :module
       end
 
       def update_existing(source_path, target, candidates)
@@ -188,11 +240,86 @@ module Rigor
 
         state = MergeState.new(source: source, decls: decls, applied: [], skipped: [])
         candidates.group_by(&:class_name).each { |class_name, methods| merge_class(state, class_name, methods) }
+        merge_class_shells(state, collect_class_shells(candidates), merged_namespace_kinds(candidates))
 
         action = state.applied.empty? ? :noop : :updated
         target.write(state.source) if action == :updated
         WriteResult.new(source_path: source_path, target_path: target,
                         action: action, applied: state.applied, skipped: state.skipped)
+      end
+
+      # ADR-14 gap-#3 (e): for every requested class shell
+      # that isn't already declared in the target file,
+      # insert an empty `class Const\nend` block inside the
+      # nearest existing ancestor. Shells already covered by
+      # an existing declaration are silently a no-op. The
+      # `applied` accumulator does NOT grow — shells are
+      # structural declarations, not methods, so the
+      # action-count surface (`updated +N`) keeps
+      # reflecting method changes only.
+      def merge_class_shells(state, shells, kinds)
+        shells.each do |qualified|
+          next if find_class_decl(state.decls, qualified)
+
+          insert_class_shell(state, qualified, kinds)
+        end
+      end
+
+      def insert_class_shell(state, qualified, kinds)
+        segments = qualified.split("::")
+        anchor_segs, missing = split_at_existing_ancestor(state.decls, segments)
+        anchor_decl = anchor_segs.empty? ? nil : find_class_decl(state.decls, anchor_segs.join("::"))
+        depth = anchor_decl ? anchor_decl_indent_depth(anchor_decl) : 0
+        snippet = build_shell_snippet(missing, anchor_segs, kinds, depth)
+        state.source = if anchor_decl
+                         insert_before_end(state.source, anchor_decl, snippet)
+                       else
+                         append_top_level(state.source, snippet)
+                       end
+        state.decls = parse_signature(state.source) || state.decls
+      end
+
+      def split_at_existing_ancestor(decls, segments)
+        (segments.size - 1).downto(0).each do |i|
+          ancestor = segments[0...i].join("::")
+          return [segments[0...i], segments[i..]] if i.zero? || find_class_decl(decls, ancestor)
+        end
+        [[], segments]
+      end
+
+      # Pulls the indent depth (in `INDENT` units) one level
+      # deeper than the anchor decl's own column. Pre-
+      # existing members might be missing (an empty
+      # `class Foo; end`) so the keyword column is the
+      # robust signal.
+      def anchor_decl_indent_depth(decl)
+        decl_column = decl.location[:keyword].start_column
+        (decl_column / INDENT.size) + 1
+      end
+
+      def build_shell_snippet(missing, anchor_segs, kinds, depth)
+        return "" if missing.empty?
+
+        head, *rest = missing
+        qualified = (anchor_segs + [head]).join("::")
+        indent = INDENT * depth
+        if rest.empty?
+          keyword = kinds[qualified] || :class
+          "#{indent}#{keyword} #{head}\n#{indent}end\n"
+        else
+          inner = build_shell_snippet(rest, anchor_segs + [head], kinds, depth + 1)
+          keyword = kinds[qualified] || :module
+          "#{indent}#{keyword} #{head}\n#{inner}#{indent}end\n"
+        end
+      end
+
+      def insert_before_end(source, decl, snippet)
+        end_pos = decl.location[:end].start_pos
+        source[0...end_pos] + snippet + source[end_pos..]
+      end
+
+      def append_top_level(source, snippet)
+        ends_with_newline?(source) ? source + snippet : "#{source}\n#{snippet}"
       end
 
       def parse_signature(source)

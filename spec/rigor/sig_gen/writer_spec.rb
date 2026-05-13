@@ -231,6 +231,69 @@ RSpec.describe Rigor::SigGen::Writer do
     end
   end
 
+  describe "nested-class-inside-class emission (gap #3 c)" do
+    let(:nest_kinds) do
+      { "Outer" => :module, "Outer::Parent" => :module, "Outer::Parent::Child" => :class }
+    end
+
+    def nest_candidate(class_name, method_name, rbs)
+      Rigor::SigGen::MethodCandidate.new(
+        path: "lib/n.rb", class_name: class_name,
+        method_name: method_name, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: rbs, namespace_kinds: nest_kinds
+      )
+    end
+
+    it "nests a strict-prefix child class inside the parent block rather than emitting siblings" do
+      parent = nest_candidate("Outer::Parent", :p, "def p: () -> Integer")
+      child = nest_candidate("Outer::Parent::Child", :c, "def c: () -> String")
+
+      writer.write("lib/n.rb", [parent, child])
+      output = File.read(File.join(tmpdir, "sig/n.rbs"))
+
+      expect(output.scan(/^module Outer\b/).size).to eq(1)
+      expect(output.scan(/module Parent\b/).size).to eq(1)
+      expect(output).to match(/def p: \(\) -> Integer.*class Child.*def c: \(\) -> String/m)
+    end
+
+    it "emits empty `class Foo; end` shells supplied via class_shells (gap #3 e)" do
+      kinds = { "Outer" => :module, "Outer::Wrap" => :module, "Outer::Wrap::Shell" => :class }
+      method_in_wrap = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/s.rb", class_name: "Outer::Wrap",
+        method_name: :w, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def w: () -> Integer",
+        namespace_kinds: kinds,
+        class_shells: ["Outer::Wrap::Shell"]
+      )
+
+      writer.write("lib/s.rb", [method_in_wrap])
+      output = File.read(File.join(tmpdir, "sig/s.rbs"))
+
+      expect(output).to include("def w: () -> Integer")
+      expect(output).to match(/class Shell\s*\n\s*end/)
+    end
+
+    it "injects a missing class shell into the nearest existing ancestor when updating an existing sig" do
+      write_target("module Outer\n  module Wrap\n    def w: () -> Integer\n  end\nend\n")
+      shell_carrier = Rigor::SigGen::MethodCandidate.new(
+        path: "lib/foo.rb", class_name: "Outer::Wrap",
+        method_name: :added, kind: :instance,
+        classification: Rigor::SigGen::Classification::NEW_METHOD,
+        rbs: "def added: () -> String",
+        namespace_kinds: { "Outer" => :module, "Outer::Wrap" => :module, "Outer::Wrap::Shell" => :class },
+        class_shells: ["Outer::Wrap::Shell"]
+      )
+
+      writer.write("lib/foo.rb", [shell_carrier])
+      output = File.read(File.join(tmpdir, "sig/foo.rbs"))
+
+      expect(output).to include("def added: () -> String")
+      expect(output).to match(/module Wrap\b.*class Shell\b/m)
+    end
+  end
+
   describe "consolidated layout routing via LayoutIndex" do
     def write_consolidated(content)
       consolidated = File.join(tmpdir, "sig/all.rbs")

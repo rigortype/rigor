@@ -960,6 +960,30 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     end
   end
 
+  describe "`&:symbol` block-pass dispatcher recognition (ADR-14 gap #3 d)" do
+    let(:project_scope) { Rigor::Scope.empty(environment: Rigor::Environment.for_project) }
+
+    it "selects the block-bearing overload of Hash#transform_values for &:freeze" do
+      type = project_scope.type_of(parse_expression('{ a: "x" }.transform_values(&:freeze)'))
+
+      # Without the gap-(d) fix, this resolves to
+      # `Enumerator[...]` via the no-block overload.
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Hash")
+    end
+
+    it "selects the block-bearing overload of Array#map for &:to_s" do
+      type = project_scope.type_of(parse_expression("[1, 2, 3].map(&:to_s)"))
+
+      # `Tuple[Constant<1..3>]#map(&:to_s)` flows through
+      # the RBS tier (the per-element fold declines on
+      # BlockArgumentNode); the block-bearing overload
+      # produces `Array[String]`.
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Array")
+    end
+  end
+
   describe "control flow (Slice 3 phase 1)" do
     let(:tracer) { Rigor::Inference::FallbackTracer.new }
 

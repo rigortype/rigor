@@ -1174,9 +1174,20 @@ module Rigor
       # when typing the body raises (defensive against malformed
       # subtrees); the dispatcher then runs in its no-block-aware
       # path.
+      #
+      # ADR-14 gap-#3 (d): a `Prism::BlockArgumentNode` carrying
+      # `&:symbol` (the Symbol#to_proc shorthand) is treated as
+      # a block. The block's return type is computed by
+      # dispatching `:symbol` on the expected block param type
+      # (per `Symbol#to_proc`'s `{ |x| x.symbol }` semantics).
+      # A precise inner dispatch produces the right return; any
+      # failure step falls back to `Dynamic[Top]` so the
+      # dispatcher still SEES a block — selecting the block-
+      # bearing overload of e.g. `Hash#transform_values` over
+      # the no-block overload that returns `Enumerator`.
       def block_return_type_for(call_node, receiver_type, arg_types)
-        block_node = call_node.block
-        return nil unless block_node.is_a?(Prism::BlockNode)
+        block_arg = call_node.block
+        return nil if block_arg.nil?
         return nil if receiver_type.nil?
 
         expected = MethodDispatcher.expected_block_param_types(
@@ -1185,11 +1196,48 @@ module Rigor
           arg_types: arg_types,
           environment: scope.environment
         )
-        bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_node)
-        block_scope = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
-        type_block_body(block_node, block_scope)
+        block_return_for(block_arg, expected)
       rescue StandardError
         nil
+      end
+
+      def block_return_for(block_arg, expected)
+        case block_arg
+        when Prism::BlockNode
+          bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_arg)
+          block_scope = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+          type_block_body(block_arg, block_scope)
+        when Prism::BlockArgumentNode
+          symbol_block_return_type(block_arg, expected)
+        end
+      end
+
+      # `&:symbol` desugars to a one-arg Proc that dispatches
+      # `symbol` against its argument. When the param type is
+      # known and the resulting inner dispatch is precise,
+      # this returns the precise carrier; otherwise it
+      # returns `Dynamic[Top]` (still non-nil) so the outer
+      # dispatcher selects the block-bearing overload.
+      # `&proc_local` / `&method(:foo)` and friends — anything
+      # not a bare SymbolNode — still resolve to
+      # `Dynamic[Top]` for the same block-presence signal.
+      def symbol_block_return_type(block_arg, expected_param_types)
+        expression = block_arg.expression
+        return dynamic_top unless expression.is_a?(Prism::SymbolNode)
+
+        param_type = expected_param_types&.first
+        return dynamic_top if param_type.nil?
+
+        result = MethodDispatcher.dispatch(
+          receiver_type: param_type,
+          method_name: expression.unescaped.to_sym,
+          arg_types: [],
+          block_type: nil,
+          environment: scope.environment,
+          call_node: block_arg,
+          scope: scope
+        )
+        result || dynamic_top
       end
 
       def type_block_body(block_node, block_scope)

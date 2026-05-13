@@ -152,6 +152,53 @@ RSpec.describe Rigor::SigGen::Generator do
     end
   end
 
+  describe "Const = Data.define / Struct.new shell recognition (gap #3 e)" do
+    it "records `Const = Data.define(...)` as a class shell carried on every candidate" do
+      src = <<~RUBY
+        module Outer
+          Shell = Data.define(:a, :b)
+          def self.go; 1; end
+        end
+      RUBY
+      path = write_fixture("lib/shells.rb", src)
+
+      run = generator(paths: [path]).run
+      candidate = run.find { |c| c.method_name == :go }
+
+      expect(candidate.class_shells).to include("Outer::Shell")
+      expect(candidate.namespace_kinds["Outer::Shell"]).to eq(:class)
+    end
+
+    it "records `Const = Struct.new(...)` as a class shell" do
+      src = <<~RUBY
+        module Outer
+          Shell = Struct.new(:a)
+          def self.go; 1; end
+        end
+      RUBY
+      path = write_fixture("lib/shells.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :go }
+
+      expect(candidate.class_shells).to include("Outer::Shell")
+    end
+
+    it "does not register unrelated Const = <expr> assignments" do
+      src = <<~RUBY
+        module Outer
+          Other = [1, 2, 3]
+          NotAShell = Set.new
+          def self.go; 1; end
+        end
+      RUBY
+      path = write_fixture("lib/shells.rb", src)
+
+      candidate = generator(paths: [path]).run.find { |c| c.method_name == :go }
+
+      expect(candidate.class_shells).to be_empty
+    end
+  end
+
   describe "visibility-aware emission (post-dogfood)" do
     it "skips private methods by default" do
       src = "class Box\n  def public_one; \"x\"; end\n  private\n  def private_one; \"y\"; end\nend\n"

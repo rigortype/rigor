@@ -6,10 +6,6 @@ module Rigor
           def descriptor_key: () -> Array[untyped]
         end
 
-        # `Unresolvable = Data.define(:gem_name, :reason)` —
-        # hand-added until sig-gen recognises top-level
-        # `Const = Data.define(...)` assignment as a class
-        # declaration (queued as an ADR-14 follow-up).
         class Unresolvable
         end
       end

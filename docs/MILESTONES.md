@@ -339,6 +339,10 @@ ADR-13 lands the `Plugin::TypeNodeResolver` extension point, five Rigor-canonica
 
 ### Out of scope for v0.1.3 (deferred to v0.1.4 or beyond)
 
+- **ADR-14 sig-gen remaining gaps** — three follow-ups from the `lib/rigor/analysis/` self-dogfood, queued in `docs/CURRENT_WORK.md` Open Engineering Items #3 with implementation sketches:
+  - **(c) Nested-class-inside-class emission.** Writer should detect when one candidate's `class_name` is a strict prefix of another and emit a single tree (outer block containing the inner block) instead of a flat sibling layout. Affects `Class < Data.define(...)`-nested classes like `GemResolver::Resolved`.
+  - **(d) `&:freeze` block-pass dispatcher recognition.** `Hash#transform_values(&:freeze)` dispatches against the no-block overload today, returning `Enumerator` instead of `Hash`. Inference engine fix (broader than sig-gen).
+  - **(e) `Const = Data.define(...)` recognition.** `Unresolvable = Data.define(...)` doesn't get emitted as a class declaration. Walker enhancement to record `ConstantWriteNode` whose RHS is a `Data.define` / `Struct.new` call.
 - **`mode: full` distinct dispatch** — gem-source contributing alongside RBS with merger conflict resolution. Prerequisite for ADR-10 5c (boundary-cross) — the diagnostic has no condition under which it would fire without distinct dispatch.
 - **Per-call-site assertion gating in rigor-sorbet** — the last ADR-11 deferred item. The `enforce_sigil` knob currently gates sig recognition at catalog-harvest time; per-call-site gating would suppress recognised sigs based on the CALLER's sigil at the dispatch site.
 - **Tier 3 plugins remaining**: `rigor-graphql`, `rigor-activestorage`. Author when there is concrete user demand.

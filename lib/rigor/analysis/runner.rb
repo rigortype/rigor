@@ -16,6 +16,7 @@ require_relative "check_rules"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
 require_relative "result"
+require_relative "run_stats"
 require_relative "worker_session"
 
 module Rigor
@@ -43,14 +44,22 @@ module Rigor
       #   unchanged. Phase 4c will wire the CLI / `.rigor.yml`
       #   surface that produces non-zero values; this slice
       #   leaves the parameter as a programmatic opt-in only.
+      # @param collect_stats [Boolean] when true (default), `#run`
+      #   builds a {RunStats} summary exposed via `result.stats`
+      #   — this forces the RBS env build at end-of-run so the
+      #   `class_decl_paths` snapshot has real source attribution.
+      #   Set to false to skip the stats summary entirely; the
+      #   CLI's `--no-stats` threads `false` through to keep
+      #   trivial-fixture runs from warming `.rigor/cache`.
       def initialize(configuration:, explain: false,
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
-                     plugin_requirer: nil, workers: 0)
+                     plugin_requirer: nil, workers: 0, collect_stats: true)
         @configuration = configuration
         @explain = explain
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
         @workers = workers
+        @collect_stats = collect_stats
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
         @rbs_extended_reporter = RbsExtended::Reporter.new
@@ -69,19 +78,26 @@ module Rigor
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
 
+        wall_started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
         target_ruby_error = validate_target_ruby
         return Result.new(diagnostics: [target_ruby_error]) if target_ruby_error
 
         @plugin_registry = load_plugins
         @dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
         expansion = expand_paths(paths)
+        @class_decl_paths_snapshot = {}.freeze
+        @signature_paths_snapshot = []
 
         diagnostics = pre_file_diagnostics(expansion)
         diagnostics += analyze_files(expansion.fetch(:files))
         diagnostics += rbs_extended_reporter_diagnostics
         diagnostics += boundary_cross_diagnostics
 
-        Result.new(diagnostics: apply_severity_profile(diagnostics))
+        Result.new(
+          diagnostics: apply_severity_profile(diagnostics),
+          stats: @collect_stats ? build_run_stats(wall_started_at: wall_started_at, expansion: expansion) : nil
+        )
       end
 
       # ADR-15 Phase 4b — routes per-file analysis to either the
@@ -92,6 +108,15 @@ module Rigor
       # pool path is the substrate exercised by phase 4c when
       # `RIGOR_RACTOR_WORKERS` / `.rigor.yml` `parallel.workers:`
       # is wired.
+      #
+      # Sequential mode also snapshots `class_decl_paths` from the
+      # local environment after the per-file loop completes so
+      # `RunStats` can attribute the RBS class universe between
+      # project-sig and bundled sources. The env stays a LOCAL
+      # variable (not an ivar) so it goes GC-eligible when the
+      # method returns — holding it as long-lived state added
+      # memory pressure that surfaced as a Bus Error during the
+      # spec suite under Ruby 4.0 + rbs 4.0.2.
       def analyze_files(files)
         return [] if files.empty?
 
@@ -99,7 +124,13 @@ module Rigor
           analyze_files_in_pool(files)
         else
           environment = build_runner_environment
-          files.flat_map { |path| analyze_file(path, environment) }
+          result = files.flat_map { |path| analyze_file(path, environment) }
+          if @collect_stats
+            loader = environment.rbs_loader
+            @class_decl_paths_snapshot = loader&.class_decl_paths || {}.freeze
+            @signature_paths_snapshot = loader&.signature_paths || [].freeze
+          end
+          result
         end
       end
 
@@ -267,6 +298,35 @@ module Rigor
         pool.each(&:join)
 
         Array(prepare_diagnostics) + files.flat_map { |path| results_by_path.fetch(path, []) }
+      end
+
+      # End-of-run telemetry. Walks the cached
+      # `class_decl_paths` snapshot (sequential mode: from
+      # the coordinator's environment; pool mode: from the
+      # first worker's `:prepare` payload) and partitions the
+      # RBS class universe into "project sig/" (paths under
+      # `signature_paths`) vs "bundled" (everything else).
+      # Gem source-walk counts come from `dependency_source_index`
+      # which is already constructed regardless of pool mode.
+      # Wall + RSS are single syscalls; total cost is bounded
+      # by the snapshot size (~1000-2000 entries).
+      def build_run_stats(wall_started_at:, expansion:)
+        snapshot = @class_decl_paths_snapshot || {}.freeze
+        project_sig, bundled = RunStats.partition_classes(
+          class_decl_paths: snapshot,
+          signature_paths: @signature_paths_snapshot
+        )
+        RunStats.new(
+          wall_seconds: Process.clock_gettime(Process::CLOCK_MONOTONIC) - wall_started_at,
+          peak_rss_bytes: RunStats.peak_rss_bytes,
+          target_files: expansion.fetch(:files).size,
+          rbs_classes_total: snapshot.size,
+          rbs_classes_project_sig: project_sig,
+          rbs_classes_bundled: bundled,
+          rbs_attribution_available: RunStats.attribution_available?(class_decl_paths: snapshot),
+          gem_walk_classes: @dependency_source_index.class_to_gem.size,
+          gem_walk_gems: @dependency_source_index.resolved_gems.size
+        )
       end
 
       def merge_worker_reporters(drained)

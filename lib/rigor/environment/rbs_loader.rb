@@ -133,6 +133,36 @@ module Rigor
         # v0.0.9 cache `Cache::Descriptor` regression did.
       end
 
+      # Returns a frozen `Hash<String, String>` mapping each loaded
+      # class / module name (top-level prefixed) to the file path of
+      # its FIRST declaration's RBS source. Used by
+      # {Rigor::Analysis::RunStats} to attribute the type universe
+      # between "project sig/" (paths under the configured
+      # `signature_paths`) and "bundled" (everything else — RBS
+      # core, stdlib libraries, gem-bundled RBS). Each value is a
+      # frozen `String` so the whole result is `Ractor.shareable?`
+      # — the Phase 4b worker pool ships a snapshot back to the
+      # coordinator on the first `:prepare` message.
+      def class_decl_paths
+        result = {}
+        env.class_decls.each do |rbs_name, entry|
+          decl = entry.primary_decl
+          next if decl.nil?
+
+          location = decl.location
+          next if location.nil?
+
+          buffer = location.buffer
+          name = buffer.respond_to?(:name) ? buffer.name : nil
+          next if name.nil?
+
+          result[rbs_name.to_s.dup.freeze] = name.to_s.dup.freeze
+        end
+        result.freeze
+      rescue ::RBS::BaseError
+        {}.freeze
+      end
+
       # @return [RBS::Definition, nil] the resolved instance definition
       #   for `class_name`, or nil when the class is unknown or its
       #   definition cannot be built (RBS may raise on broken hierarchies;

@@ -74,6 +74,14 @@ doctor-submodules:
 test:
 	bundle exec rspec
 
+# ADR-15 Phase 4b — runs `spec/rigor/analysis/runner_pool_spec.rb`
+# in isolation. Excluded from the default `test` target because
+# Ractor cleanup interacts with the RBS C-extension state and
+# occasionally surfaces as a Bus Error in later sequential
+# specs (see `spec/spec_helper.rb`).
+test-ractor-pool:
+	RIGOR_INCLUDE_RACTOR_POOL=1 bundle exec rspec spec/rigor/analysis/runner_pool_spec.rb
+
 # Spec suite via `parallel_tests`, splitting files across
 # multiple worker processes. `PARALLEL_TEST_PROCESSORS=N`
 # pins the worker count; default is the CPU count.

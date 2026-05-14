@@ -82,11 +82,13 @@ module Rigor
       runner = Analysis::Runner.new(
         configuration: configuration,
         explain: options.fetch(:explain),
-        cache_store: cache_store
+        cache_store: cache_store,
+        collect_stats: options.fetch(:stats)
       )
       result = runner.run(paths)
 
       write_result(result, options.fetch(:format))
+      write_run_stats(result.stats) if result.stats
       write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
       result.success? ? 0 : 1
     end
@@ -100,7 +102,14 @@ module Rigor
         explain: false,
         cache_stats: false,
         clear_cache: false,
-        no_cache: false
+        no_cache: false,
+        # Run-stats summary (target files, RBS class universe
+        # breakdown, wall time, peak RSS) is on by default
+        # because collection is ~free (single syscall for RSS,
+        # one walk of `class_decl_paths` for the breakdown).
+        # `--no-stats` suppresses it for callers that want a
+        # diagnostic-only output stream.
+        stats: true
       }
       parser = OptionParser.new do |opts|
         opts.banner = "Usage: rigor check [options] [paths]"
@@ -110,6 +119,10 @@ module Rigor
         opts.on("--cache-stats", "Print on-disk cache inventory at end of run") { options[:cache_stats] = true }
         opts.on("--clear-cache", "Remove the .rigor/cache directory before running") { options[:clear_cache] = true }
         opts.on("--no-cache", "Disable the persistent cache for this run") { options[:no_cache] = true }
+        opts.on("--[no-]stats",
+                "Print run summary (files, classes, memory, wall time) to stderr (default: on)") do |value|
+          options[:stats] = value
+        end
       end
       parser.parse!(@argv)
       options
@@ -122,6 +135,15 @@ module Rigor
       else
         @out.puts("Cache already empty: #{cache_root}")
       end
+    end
+
+    # Emits the {Analysis::RunStats} summary to STDERR so it
+    # doesn't interleave with the diagnostic stream (text or
+    # JSON) on STDOUT. JSON consumers can pipe stdout cleanly;
+    # interactive users still see the summary on their tty.
+    def write_run_stats(stats)
+      @err.puts("")
+      stats.format(@err)
     end
 
     def write_cache_stats(cache_root, runtime_store)

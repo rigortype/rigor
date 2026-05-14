@@ -257,7 +257,11 @@ RSpec.describe Rigor::CLI do
     it "prints '(empty)' under --cache-stats when no cache directory exists" do
       write_check_fixture("a.rb", "1\n")
       Dir.chdir(tmpdir) do
-        status, out, _err = run_cli("check", "--cache-stats", "a.rb")
+        # `--no-stats` is required because the default stats
+        # summary forces `class_decl_paths` to build the RBS
+        # env, which warms `.rigor/cache` and would defeat
+        # the "no cache directory exists" assertion.
+        status, out, _err = run_cli("check", "--cache-stats", "--no-stats", "a.rb")
         expect(status).to eq(0)
         expect(out).to include("Cache (root: .rigor/cache)")
         expect(out).to include("schema_version: absent")
@@ -307,7 +311,10 @@ RSpec.describe Rigor::CLI do
         FileUtils.mkdir_p(cache_root)
         File.write(File.join(cache_root, "schema_version.txt"), "1\n")
 
-        status, out, _err = run_cli("check", "--clear-cache", "a.rb")
+        # `--no-stats` (see the sibling spec): the stats
+        # summary would re-warm the cache and re-create the
+        # directory we're asserting got deleted.
+        status, out, _err = run_cli("check", "--clear-cache", "--no-stats", "a.rb")
         expect(status).to eq(0)
         expect(out).to include("Cleared cache: .rigor/cache")
         expect(File.directory?(cache_root)).to be false
@@ -370,6 +377,53 @@ RSpec.describe Rigor::CLI do
         expect(status).to eq(0)
         expect(captured.fetch(:cache_store).root).to eq("tmp/custom-cache")
         expect(out).to include("Cache (root: tmp/custom-cache)")
+      end
+    end
+  end
+
+  describe "check --stats / --no-stats" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write_stats_fixture(name, contents)
+      path = File.join(tmpdir, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      path
+    end
+
+    it "prints the run summary on stderr by default (target files + RBS universe + memory)" do
+      write_stats_fixture("a.rb", "x = 1\n")
+      Dir.chdir(tmpdir) do
+        status, out, err = run_cli("check", "a.rb")
+        expect(status).to eq(0)
+        expect(err).to include("Check targets")
+        expect(err).to include("Ruby source files: 1")
+        expect(err).to include("Type universe")
+        expect(err).to include("RBS classes available:")
+        expect(err).to include("Wall time:")
+        expect(err).to include("Memory peak:")
+        expect(out).not_to include("Check targets")
+      end
+    end
+
+    it "suppresses the run summary under --no-stats" do
+      write_stats_fixture("a.rb", "x = 1\n")
+      Dir.chdir(tmpdir) do
+        status, _out, err = run_cli("check", "--no-stats", "a.rb")
+        expect(status).to eq(0)
+        expect(err).not_to include("Check targets")
+        expect(err).not_to include("Wall time:")
+      end
+    end
+
+    it "still prints the run summary under --stats explicit form" do
+      write_stats_fixture("a.rb", "x = 1\n")
+      Dir.chdir(tmpdir) do
+        status, _out, err = run_cli("check", "--stats", "a.rb")
+        expect(status).to eq(0)
+        expect(err).to include("Check targets")
       end
     end
   end

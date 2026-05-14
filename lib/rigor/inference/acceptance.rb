@@ -327,8 +327,42 @@ module Rigor
           )
           return class_result if class_result.no?
 
-          args_result = accepts_nominal_args(self_type, other_type, mode)
+          # Parametrized-ancestor projection. When `actual <:= target`
+          # holds at the class level but the type-arg arities differ,
+          # the actual's parametrization has to be projected into the
+          # target's view before the element-wise covariance check.
+          # The canonical case is `Hash[K, V] <:= Enumerable[[K, V]]`:
+          # Hash carries two type_args, Enumerable carries one, and
+          # the inherited parametrization at the Enumerable boundary
+          # is `Tuple[K, V]`. RBS encodes this as
+          # `include Enumerable[[K, V]]` in `Hash`'s definition.
+          projected_other = project_to_target_arity(self_type, other_type) || other_type
+          args_result = accepts_nominal_args(self_type, projected_other, mode)
           combine_results(class_result, args_result, mode)
+        end
+
+        # Returns `other_type` rewritten so its type_args have the
+        # same arity as `self_type.type_args`, or `nil` if no
+        # projection is known. Today only the Hash → Enumerable
+        # projection is hand-rolled; a general RBS-driven
+        # implementation that consults `definition.ancestors[i].args`
+        # for arbitrary subclass / module-include relations is the
+        # principled follow-up.
+        def project_to_target_arity(self_type, other_type)
+          return nil if self_type.type_args.size == other_type.type_args.size
+          return nil if self_type.type_args.empty? || other_type.type_args.empty?
+
+          if self_type.class_name == "Enumerable" &&
+             other_type.class_name == "Hash" &&
+             self_type.type_args.size == 1 &&
+             other_type.type_args.size == 2
+            return Type::Combinator.nominal_of(
+              "Hash",
+              type_args: [Type::Combinator.tuple_of(*other_type.type_args)]
+            )
+          end
+
+          nil
         end
 
         def project_tuple_to_nominal(tuple)

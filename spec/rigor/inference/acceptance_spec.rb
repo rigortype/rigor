@@ -215,6 +215,42 @@ RSpec.describe Rigor::Inference::Acceptance do
       b = Rigor::Type::Combinator.nominal_of(Hash, type_args: [int_nominal])
       expect(accepts(a, b)).to be_no
     end
+
+    # Parametrized-ancestor projection: `Hash[K, V]` is
+    # `Enumerable[[K, V]]` per RBS (`include Enumerable[[K, V]]` in
+    # Hash's class body). Without projection the arity check would
+    # reject because Hash carries two type_args and Enumerable only
+    # one; with projection the actual is rewritten to `Enumerable
+    # [Tuple[K, V]]` and the element-wise covariance succeeds.
+    # Surfaced on Discourse via `URI.encode_www_form(hash)` calls
+    # that the parameter binder previously flagged as type
+    # mismatches.
+    it "accepts Hash[K, V] against Enumerable[Tuple[K, V]] via ancestor projection" do
+      tuple = Rigor::Type::Combinator.tuple_of(
+        Rigor::Type::Combinator.nominal_of(Symbol),
+        int_nominal
+      )
+      enum = Rigor::Type::Combinator.nominal_of(Enumerable, type_args: [tuple])
+      hash = Rigor::Type::Combinator.nominal_of(
+        Hash,
+        type_args: [Rigor::Type::Combinator.nominal_of(Symbol), int_nominal]
+      )
+      expect(accepts(enum, hash)).to be_yes
+    end
+
+    it "still rejects Hash[K, V] vs Enumerable[T] when the projected Tuple is rejected" do
+      enum_str_pair = Rigor::Type::Combinator.nominal_of(
+        Enumerable,
+        type_args: [
+          Rigor::Type::Combinator.tuple_of(str_nominal, str_nominal)
+        ]
+      )
+      hash_int = Rigor::Type::Combinator.nominal_of(
+        Hash,
+        type_args: [int_nominal, int_nominal]
+      )
+      expect(accepts(enum_str_pair, hash_int)).to be_no
+    end
   end
 
   describe "Tuple acceptance (Slice 5 phase 1)" do

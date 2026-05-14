@@ -79,6 +79,12 @@ bundle exec rigor type-of lib/foo.rb:10:5
 # Report Scope#type_of coverage across a tree (handy when
 # diagnosing why a particular call site reads as `untyped`).
 bundle exec rigor type-scan lib
+
+# Emit RBS skeletons from inference results — review with
+# `--diff`, write to `sig/` with `--write`. ADR-14 sig-gen.
+bundle exec rigor sig-gen --print lib/foo.rb
+bundle exec rigor sig-gen --diff  lib/foo.rb
+bundle exec rigor sig-gen --write lib/foo.rb
 ```
 
 ### Sample output
@@ -145,6 +151,7 @@ out of the box, without you writing a single annotation.
 | **Intersection** (`Type::Intersection`) | Composition of multiple refinements | `non-empty-lowercase-string = non-empty-string ∩ lowercase-string` |
 | **Tuple / HashShape** | Heterogeneous arrays / known-key hashes that carry per-position / per-key types | `[1, "two", :three]` types as `Tuple[Constant<1>, Constant<"two">, Constant<:three>]`; `{name: "Alice", age: 30}` as `HashShape{name: Constant<"Alice">, age: Constant<30>}` |
 | **Union** (`Type::Union`) | "One of these literal values" — finite enums Rigor can enumerate | `Constant<:zero> \| Constant<:small> \| Constant<:large>` |
+| **`Method` binding** (`Type::BoundMethod`) | The receiver / method-name pair `Object#method(:sym)` produces, so `.call` / `.()` / `[]` recover the precise backing dispatch | `"1".method(:to_i).call` resolves to `Constant<1>` instead of `untyped` |
 | **`Dynamic[T]`** | The gradual carrier — wraps a static facet with a "could be anything" admission | `Dynamic[Top]` is the conservative fallback Rigor uses when it cannot prove a narrower type |
 
 Each refinement / range / literal carrier **erases to its base
@@ -187,6 +194,12 @@ label = case n
         end
 label                          # Constant<:zero> | Constant<:small>
                                #   | Constant<:large>
+
+# Method bindings keep their receiver — `.method(:sym).call`
+# round-trips through the original dispatch.
+[:to_i, :to_f, :to_sym].map { |m| "1".method(m).call }
+                       # Tuple[Constant<1>, Constant<1.0>, Constant<:"1">]
+                       # — per-element fold + BoundMethod backward fold
 
 # RBS::Extended directives let you tighten beyond what RBS expresses.
 class Slug
@@ -353,6 +366,10 @@ sees `id` as `non-empty-string` (so `id.empty?` reduces to
   optional policies, per-element block fold over
   `map`, `select`, `filter_map`, `flat_map`, `find` /
   `find_index`, `count`, `any?` / `all?` / `none?`, `zip`.
+  `&:symbol` block-pass on these methods is treated as
+  `{ |x| x.symbol }` and dispatches against the element type
+  so `Hash#transform_values(&:freeze)` returns `Hash[K, V]`
+  instead of `Enumerator[...]`.
 - **Constant folding** — aggressive arithmetic / string /
   Symbol / Tuple-shaped `divmod` folding, cartesian fold over
   `Union[Constant…]`, integer-range arithmetic
@@ -370,26 +387,48 @@ sees `id` as `non-empty-string` (so `id.empty?` reduces to
 - **Refinement carriers** — `Type::Difference`,
   `Type::Refined`, `Type::Intersection` provide the
   imported-built-in catalogue end-to-end through
-  `Builtins::ImportedRefinements`.
+  `Builtins::ImportedRefinements`. The parser accepts Symbol
+  / String literals and `|`-unions at type-arg position
+  (`pick_of[Shape, :a | :b]`, `Pick[T, "name" | "email"]`).
+- **`Method` carrier (`Type::BoundMethod`)** —
+  `Object#method(:sym)` lifts into a binding carrier so
+  `.call` / `.()` / `[]` recover the precise dispatch
+  (`"1".method(:to_i).call` resolves to `Constant<1>`).
+  Reflective Method members (`#owner` / `#name` / `#arity`)
+  still resolve via the Method RBS sig.
 - **`RBS::Extended` directive routes** — `return:`, `param:`
   (call-site + body-side), `assert:` /
   `predicate-if-(true|false)` accept refinement payloads, and
   roll up into a single `Rigor::FlowContribution` bundle per
   method (the v0.1.0 plugin contribution merger reads bundles
   directly).
+- **Opt-in gem-source inference (ADR-10)** — gems listed under
+  `dependencies.source_inference:` have their `lib/` walked.
+  Per-gem budget, per-gem-version cache slice,
+  `dynamic.dependency-source.*` diagnostic family covering
+  gem-not-found / budget-exceeded / config-conflict /
+  boundary-cross (the last surfaces RBS+gem-source overlap
+  on `mode: :full` gems for audit).
 
 The full per-release surface lives in
 [`CHANGELOG.md`](CHANGELOG.md). The internal contracts the
 analyzer guarantees live under
 [`docs/internal-spec/`](docs/internal-spec/).
 
-## Plugins (v0.1.0)
+## Plugins
 
-`v0.1.0` adds an extension API so projects can teach Rigor about
-their own DSLs. Seven worked examples ship under
-[`examples/`](examples/) — each is a fully-shaped plugin gem
-with a runnable demo and an end-to-end integration spec, and
-each spotlights a different facet of the plugin contract:
+`v0.1.0` introduced the extension API; `v0.1.x` rounds it out
+with the [ADR-9](docs/adr/9-cross-plugin-api.md) cross-plugin
+fact channel (one plugin publishes a fact like `:model_index`,
+another consumes it), [ADR-11](docs/adr/11-sorbet-input-adapter.md)
+Sorbet ingestion, and [ADR-13](docs/adr/13-typenode-resolver-plugin.md)
+plugin-supplied type-vocabulary resolvers. **Nineteen worked
+examples** ship under [`examples/`](examples/) — each is a
+fully-shaped plugin gem with a runnable demo and an end-to-end
+integration spec.
+
+**Plugin-contract teaching examples** (focus on a single
+extension-point):
 
 - [`rigor-deprecations`](examples/rigor-deprecations/) —
   smallest possible plugin (~80 lines); config-driven rules.
@@ -403,21 +442,45 @@ each spotlights a different facet of the plugin contract:
 - [`rigor-units`](examples/rigor-units/) — local-variable flow
   tracking through arithmetic.
 - [`rigor-routes`](examples/rigor-routes/) — `Plugin::IoBoundary`
-  reads under `TrustPolicy` plus cache producers (slice 2 +
-  slice 6).
-- [`rigor-activerecord`](examples/rigor-activerecord/) —
-  validates `Model.find` / `.find_by` / `.where` against
-  `db/schema.rb` and discovered AR model classes; combines
-  DSL interpretation, multi-file `IoBoundary`, and chained
-  cache producers — the most architecturally complete example.
+  reads under `TrustPolicy` plus cache producers.
+- [`rigor-typescript-utility-types`](examples/rigor-typescript-utility-types/)
+  — `Plugin::TypeNodeResolver` chain wiring TS-canonical names
+  (`Pick` / `Omit` / `Partial` / `Required` / `Readonly`) onto
+  Rigor's shape-projection type functions.
+
+**Rails ecosystem plugins** (Tier 1 + Tier 2 + Tier 3 + Sorbet):
+
+- Tier 1: [`rigor-rails-routes`](examples/rigor-rails-routes/),
+  [`rigor-rails-i18n`](examples/rigor-rails-i18n/),
+  [`rigor-actionmailer`](examples/rigor-actionmailer/),
+  [`rigor-activejob`](examples/rigor-activejob/).
+- Tier 2: [`rigor-actionpack`](examples/rigor-actionpack/)
+  (4 phases — routes / filters / renders / strong-params),
+  [`rigor-factorybot`](examples/rigor-factorybot/),
+  [`rigor-activerecord`](examples/rigor-activerecord/) —
+  publishes `:model_index` via ADR-9 for the other two
+  to consume.
+- Tier 3: [`rigor-pundit`](examples/rigor-pundit/),
+  [`rigor-sidekiq`](examples/rigor-sidekiq/),
+  [`rigor-rspec`](examples/rigor-rspec/),
+  [`rigor-actioncable`](examples/rigor-actioncable/).
+- Parallel: [`rigor-sorbet`](examples/rigor-sorbet/) — ingests
+  Sorbet `sig` / `T.let` / `T.cast` / `T.must` / `T.bind` /
+  `T.assert_type!` / `T.reveal_type` / `T.absurd` and RBI
+  files as type sources.
 
 [`examples/README.md`](examples/README.md) is the plugin
 authoring landing page — comparison table, recommended reading
 order, and the architectural map of which surface each example
 exercises. The binding contract for the plugin API lives in
-[`docs/adr/2-extension-api.md`](docs/adr/2-extension-api.md)
-and the slice-by-slice normative specs under
-[`docs/internal-spec/plugin*.md`](docs/internal-spec/).
+[`docs/adr/2-extension-api.md`](docs/adr/2-extension-api.md);
+the slice-by-slice normative specs are under
+[`docs/internal-spec/plugin*.md`](docs/internal-spec/); the
+sibling ADRs that extend it ride the same surface
+([ADR-9](docs/adr/9-cross-plugin-api.md) cross-plugin facts,
+[ADR-11](docs/adr/11-sorbet-input-adapter.md) Sorbet adapter,
+[ADR-13](docs/adr/13-typenode-resolver-plugin.md) TypeNode
+resolver).
 
 ## Configuration
 
@@ -447,22 +510,53 @@ Common knobs the file exposes:
 
 ## Status
 
-Current released version: **`v0.0.8`** (the eighth preview).
-The analyzer is usable on real Ruby code today but the rule
-catalogue is deliberately narrow — Rigor's stance is to surface
-zero false positives while the inference surface stabilises.
-The roadmap is tracked in
-[`docs/MILESTONES.md`](docs/MILESTONES.md); release-by-release
+Current released version: **`v0.1.2`**. The analyzer is usable
+on real Ruby code today; the rule catalogue is deliberately
+narrow — Rigor's stance is to surface zero false positives
+while the inference surface stabilises. The roadmap is tracked
+in [`docs/MILESTONES.md`](docs/MILESTONES.md); release-by-release
 detail lives in [`CHANGELOG.md`](CHANGELOG.md).
 
-`v0.0.9` is the active development cluster on `master` and
-covers the persistent cache infrastructure (`.rigor/cache/`,
-`--cache-stats`, `--clear-cache`, `--no-cache`),
-paired-complement Refined narrowing, `literal-string` flow
-tracking, the `Rigor::FlowContribution` bundle struct, and
-six additional built-in catalogues (Random, Struct, Encoding,
-Regexp + MatchData, Proc / Method / UnboundMethod, Exception).
-The next release after `0.0.9` will be `0.1.0`.
+`v0.1.4` is the active development cluster on `master` and
+delivers:
+
+- **[ADR-10](docs/adr/10-dependency-source-inference.md) closed
+  end-to-end** — opt-in gem-source inference, per-gem budget,
+  cache slice, and the `dynamic.dependency-source.boundary-cross`
+  `:info` diagnostic that surfaces RBS / gem-source overlap
+  under `mode: :full`.
+- **[ADR-11](docs/adr/11-sorbet-input-adapter.md) primary surface
+  + per-call-site assertion gating** — `rigor-sorbet` ingests
+  Sorbet `sig { ... }` blocks, `T.let` / `T.cast` / `T.must` /
+  `T.bind` / `T.assert_type!` / `T.reveal_type` / `T.absurd`,
+  and RBI files. Per-call-site `enforce_sigil` gates assertion
+  recognisers by the caller file's `# typed:` sigil.
+- **[ADR-13](docs/adr/13-typenode-resolver-plugin.md) plugin
+  TypeNode resolver + TypeScript-utility-type adapter** —
+  `Plugin::TypeNodeResolver` extension point + five
+  Rigor-canonical shape-projection type functions
+  (`pick_of` / `omit_of` / `partial_of` / `required_of` /
+  `readonly_of`) + the opt-in `rigor-typescript-utility-types`
+  plugin mapping TS spellings onto the core functions.
+  `Pick[T, :a | :b]` round-trips through the directive grammar.
+- **[ADR-14](docs/adr/14-rbs-sig-generation.md) — `rigor sig-gen`
+  CLI** — emits RBS from inference results across five
+  classifications (`new-file` / `new-method` / `tighter-return`
+  / `equivalent` / `skipped`); `--params=untyped` default,
+  `--params=observed` opt-in via `--observe=PATH`.
+- **`Method` carrier (`Type::BoundMethod`)** —
+  `Object#method(:sym).call` / `.()` / `[]` round-trip with
+  full precision instead of collapsing to `untyped`.
+- **Rails ecosystem (Tier 1 + Tier 2)** — `rigor-rails-routes`,
+  `rigor-rails-i18n`, `rigor-actionmailer`, `rigor-activejob`,
+  `rigor-actionpack` (4 phases), `rigor-factorybot`, and
+  `rigor-activerecord` publishing `:model_index` via the
+  ADR-9 cross-plugin fact channel.
+
+Nineteen worked plugin examples now ship under
+[`examples/`](examples/) — see
+[`examples/README.md`](examples/README.md) for the comparison
+table.
 
 ## Contributing
 

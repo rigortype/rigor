@@ -36,6 +36,16 @@ module Rigor
         @misses = 0
         @writes = 0
         @by_producer = Hash.new { |h, k| h[k] = { hits: 0, misses: 0, writes: 0 } }
+        # Process-level in-memory layer keyed by
+        # `(producer_id, cache_key)`. Avoids the disk read +
+        # `Marshal.load` cost (the dominant share of repeated
+        # cache-hit calls per stackprof) when many short-lived
+        # `Analysis::Runner` instances share one `Store` — the
+        # spec process, the LSP daemon's repeated re-check
+        # path, and any other "many runs, same project" loop.
+        # Keys are content-derived (descriptor digests), so
+        # cross-fixture contamination is impossible.
+        @memo = {}
       end
 
       attr_reader :root
@@ -128,11 +138,17 @@ module Rigor
         ensure_schema_version!
 
         key = descriptor.cache_key_for(producer_id: producer_id, params: params)
-        path = entry_path(producer_id, key)
+        memo_key = [producer_id, key].freeze
+        if @memo.key?(memo_key)
+          record(:hits, producer_id)
+          return @memo[memo_key]
+        end
 
+        path = entry_path(producer_id, key)
         cached = read_entry(path, deserialize: deserialize)
         unless cached.nil?
           record(:hits, producer_id)
+          @memo[memo_key] = cached.value
           return cached.value
         end
 
@@ -140,6 +156,7 @@ module Rigor
         value = block.call
         write_entry(path, descriptor, value, serialize: serialize)
         record(:writes, producer_id)
+        @memo[memo_key] = value
         value
       end
 

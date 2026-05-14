@@ -14,6 +14,46 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **Parallel test runner via `parallel_tests`.** New
+  `bundle exec rake spec_parallel` task and the matching
+  `make test-parallel` / `make verify-parallel` Makefile
+  targets split the spec suite across worker processes for
+  developer iteration. `PARALLEL_TEST_PROCESSORS=N` pins the
+  worker count; defaults to the CPU count. Plugin registry
+  state stays isolated per worker because `parallel_tests`
+  uses separate processes. Sequential `make test` /
+  `make verify` is unchanged so CI reproducibility is
+  preserved.
+
+### Changed
+
+- **`Cache::Store` now memoises in-process** so repeated
+  `fetch_or_compute` calls in the same process skip the
+  disk read AND the `Marshal.load` deserialise step. The
+  memo is keyed by `(producer_id, cache_key)` — content-
+  derived, so cross-fixture contamination is impossible.
+  Stackprof on the spec workload identified `Marshal.load`
+  as 82% of wall time for repeated `Analysis::Runner`
+  invocations; the in-process layer eliminates that on the
+  second-and-later hit. The disk-corruption-tolerance specs
+  in `spec/rigor/cache/store_spec.rb` now construct a fresh
+  `Store` after corruption (mirroring the "process restart"
+  scenario the tolerance contract applies to) so the memo
+  does not mask the disk-read path under test.
+
+### Performance
+
+- **Spec suite wall-clock 162s → 27s** (about 6× on a
+  12-core dev machine; about 1.6× sequential) through three
+  compounding changes: per-process shared `Cache::Store` in
+  `RunnerHelpers#analyze` (so RBS core/stdlib resolution
+  stays warm across examples), the in-process memo layer
+  above, and the `parallel_tests` runner. The `Rigor::Analysis::Runner`
+  spec — the dominant 132-example group at 82s/run — drops
+  to 20s.
+
 ## [0.1.4] - 2026-05-14
 
 The fourteenth preview. Theme: **finish the ADR-10 / ADR-11 / ADR-13 deferred queues, land ADR-14 `rigor sig-gen` end-to-end, and add the `Type::BoundMethod` carrier so `Object#method(:sym).call` round-trips with precision**. v0.1.3 cut the ADR-10 / ADR-11 / ADR-13 primary surfaces; v0.1.4 closes every remaining "Open questions" follow-up (ADR-10 slice 5c `dynamic.dependency-source.boundary-cross` under `mode: :full`; ADR-11 per-call-site assertion gating; ADR-13 parser admits Symbol / String literals + `|`-unions at type-arg position). ADR-14 `rigor sig-gen` ships all five slices plus four rounds of self-dogfood follow-ups, ending in clean `make verify` against Rigor's own `sig/`. The new `Type::BoundMethod` precision tier covers `Object#method(:sym).call` / `.()` / `[]`. The eighteen worked plugin examples land in `examples/` (Rails Tier 1 + Tier 2 + Tier 3 + `rigor-sorbet` + `rigor-typescript-utility-types`). Lint-side, `.rubocop.yml` Maxes were calibrated against the working code so ~310 in-file `# rubocop:disable` markers dropped to ~157.

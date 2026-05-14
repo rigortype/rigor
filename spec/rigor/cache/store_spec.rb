@@ -104,8 +104,14 @@ RSpec.describe Rigor::Cache::Store do
       store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :first }
       File.write(File.join(cache_root, "schema_version.txt"), "999")
 
+      # The disk-level schema-mismatch recovery applies on
+      # the disk-read path. A fresh `Store` (process restart
+      # / new CLI invocation) is the scenario that triggers
+      # it; the same-instance in-memory memo would skip the
+      # disk read entirely.
+      fresh_store = described_class.new(root: cache_root)
       called = 0
-      result = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = fresh_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
         called += 1
         :second
       end
@@ -164,7 +170,11 @@ RSpec.describe Rigor::Cache::Store do
         producer_id: "demo", params: {}, descriptor: descriptor,
         serialize: identity, deserialize: identity
       ) { "first" }
-      result = store.fetch_or_compute(
+      # `Store#fetch_or_compute` memoises the produced value
+      # in-process; the disk-read deserialise path is exercised
+      # by a fresh `Store` ("process restart" scenario).
+      fresh_store = described_class.new(root: cache_root)
+      result = fresh_store.fetch_or_compute(
         producer_id: "demo", params: {}, descriptor: descriptor,
         serialize: identity, deserialize: raising
       ) { "second" }
@@ -252,12 +262,26 @@ RSpec.describe Rigor::Cache::Store do
       store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :first }
     end
 
+    # The corruption-tolerance cases simulate the disk being
+    # mutated externally (e.g. by a buggy editor or a crash
+    # mid-write). The fault-tolerance guarantee is "a fresh
+    # process reading the corrupt entry treats it as a miss";
+    # an in-process `Store` that already produced the value
+    # legitimately keeps it in memory and never touches disk.
+    # Each test re-creates the `Store` post-corruption to
+    # exercise the fault-tolerance path.
+    def fresh_store_after_corruption
+      described_class.new(root: cache_root)
+    end
+
     it "treats a truncated entry file as a cache miss" do
       bytes = File.binread(entry_path)
       File.binwrite(entry_path, bytes[0, bytes.bytesize - 5])
 
       called = 0
-      result = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = fresh_store_after_corruption.fetch_or_compute(
+        producer_id: "p", params: {}, descriptor: descriptor
+      ) do
         called += 1
         :second
       end
@@ -269,7 +293,9 @@ RSpec.describe Rigor::Cache::Store do
       File.binwrite(entry_path, "GARBAGE\x00\x01#{"\x00" * 64}")
 
       called = 0
-      result = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = fresh_store_after_corruption.fetch_or_compute(
+        producer_id: "p", params: {}, descriptor: descriptor
+      ) do
         called += 1
         :second
       end
@@ -283,7 +309,9 @@ RSpec.describe Rigor::Cache::Store do
       File.binwrite(entry_path, bytes)
 
       called = 0
-      result = store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+      result = fresh_store_after_corruption.fetch_or_compute(
+        producer_id: "p", params: {}, descriptor: descriptor
+      ) do
         called += 1
         :second
       end

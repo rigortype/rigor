@@ -46,6 +46,48 @@ module Rigor
           word
         end
 
+        # `users` → `User`, `blog_posts` → `BlogPost`.
+        # Used by the association detector to map an
+        # association NAME (`has_many :posts` → `Post`) to the
+        # target class without requiring an explicit
+        # `class_name:` option. Singularises the word first,
+        # then camel-cases. Recognises the same irregular
+        # plurals as {.pluralize}.
+        def classify(word)
+          camelize(singularize(word.to_s))
+        end
+
+        # `posts` → `post`, `categories` → `category`,
+        # `wolves` → `wolf`, `buses` → `bus`. The inverse of
+        # {.pluralize} for the regular cases this module
+        # recognises. Irregular forms (`people` → `person`)
+        # round-trip via {IRREGULAR_PLURALS}.
+        def singularize(word)
+          IRREGULAR_PLURALS.each { |singular, plural| return singular if word == plural }
+
+          case word
+          when /(.*[bcdfghjklmnpqrstvwxz])ies\z/
+            "#{Regexp.last_match(1)}y"
+          when /(.*[sxz]|.*[cs]h)es\z/
+            Regexp.last_match(0)[0..-3]
+          when /(.*)ves\z/
+            "#{Regexp.last_match(1)}f"
+          when /(.+)s\z/
+            Regexp.last_match(1)
+          else
+            word
+          end
+        end
+
+        # `blog_post` → `BlogPost`. Camelizes around `_` and
+        # `/` separators; the latter promotes namespace boundaries
+        # to `::` (Rails-style).
+        def camelize(snake)
+          snake.to_s.split("/").map do |segment|
+            segment.split("_").map { |part| part.empty? ? part : part[0].upcase + part[1..] }.join
+          end.join("::")
+        end
+
         # `user` → `users`, `category` → `categories`,
         # `bus` → `buses`, `wolf` → `wolves`. Falls back to a
         # plain `+ "s"` for unrecognised endings.

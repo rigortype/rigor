@@ -153,20 +153,15 @@ module Rigor
       # deferred — they return relations, and Rigor does not yet
       # carry an Enumerable-backed relation shape that would be
       # more precise than the RBS envelope.
-      def flow_contribution_for(call_node:, scope:) # rubocop:disable Lint/UnusedMethodArgument
+      def flow_contribution_for(call_node:, scope:)
         return nil unless call_node.is_a?(Prism::CallNode)
         return nil if call_node.receiver.nil?
 
         index = model_index
         return nil if index.nil? || index.empty?
 
-        model_name = constant_receiver_name(call_node.receiver)
-        return nil if model_name.nil?
-
-        entry = index.find(model_name) || index.find("::#{model_name}")
-        return nil if entry.nil?
-
-        return_type = return_type_for(call_node, entry)
+        return_type = class_call_return_type(call_node, index) ||
+                      instance_call_return_type(call_node, scope, index)
         return nil if return_type.nil?
 
         Rigor::FlowContribution.new(
@@ -182,7 +177,13 @@ module Rigor
 
       private
 
-      def return_type_for(call_node, entry)
+      def class_call_return_type(call_node, index)
+        model_name = constant_receiver_name(call_node.receiver)
+        return nil if model_name.nil?
+
+        entry = index.find(model_name) || index.find("::#{model_name}")
+        return nil if entry.nil?
+
         case call_node.name
         when :find
           return nil if call_argument_count(call_node).zero?
@@ -194,6 +195,37 @@ module Rigor
             Rigor::Type::Combinator.constant_of(nil)
           )
         end
+      end
+
+      # Instance-side navigation: when the call's receiver
+      # resolves to `Nominal[Model]` and the method name
+      # matches a discovered `belongs_to` / `has_one`
+      # association, the return type narrows to
+      # `Nominal[Target] | nil`. `has_many` associations are
+      # intentionally NOT contributed — relation types are a
+      # future track and the RBS-erased return is the
+      # honest fall-back. Calls with arguments are skipped
+      # (the association accessor takes no args; argument
+      # forms like `user.posts(limit: 10)` route through
+      # other Rails APIs that this slice doesn't model).
+      def instance_call_return_type(call_node, scope, index)
+        return nil unless call_node.arguments.nil?
+
+        receiver_type = scope.type_of(call_node.receiver)
+        return nil unless receiver_type.is_a?(Rigor::Type::Nominal)
+
+        entry = index.find(receiver_type.class_name) ||
+                index.find("::#{receiver_type.class_name}")
+        return nil if entry.nil?
+
+        association = entry.association(call_node.name)
+        return nil if association.nil?
+        return nil unless association[:kind] == :singular
+
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.nominal_of(association[:target]),
+          Rigor::Type::Combinator.constant_of(nil)
+        )
       end
 
       def constant_receiver_name(node)
@@ -232,7 +264,12 @@ module Rigor
         index.entries.transform_values do |entry|
           {
             table: entry.table_name,
-            columns: entry.columns.map(&:name).freeze
+            columns: entry.columns.map(&:name).freeze,
+            associations: entry.associations,
+            enums: entry.enums,
+            scopes: entry.scopes,
+            validations: entry.validated_attributes,
+            callbacks: entry.callbacks
           }.freeze
         end.freeze
       end

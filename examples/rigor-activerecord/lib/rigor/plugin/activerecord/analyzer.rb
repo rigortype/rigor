@@ -77,14 +77,16 @@ module Rigor
         end
 
         def validate_column_hash_call(node, entry)
-          keyword_keys = keyword_argument_keys(node)
-          return push_recognised(node, entry) if keyword_keys.empty?
+          keyword_pairs = keyword_argument_pairs(node)
+          return push_recognised(node, entry) if keyword_pairs.empty?
 
-          unknown = keyword_keys.reject { |k| entry.column?(k) }
+          unknown = keyword_pairs.reject { |pair| entry.column?(pair[:key]) }
           if unknown.empty?
-            push_recognised(node, entry, keyword_keys)
+            keyword_pairs.each { |pair| validate_enum_value(node, entry, pair) }
+            push_recognised(node, entry, keyword_pairs.map { |p| p[:key] })
           else
-            unknown.each do |key|
+            unknown.each do |pair|
+              key = pair[:key]
               suggestion = closest_column(key, entry.column_names)
               hint = suggestion ? " (did you mean `:#{suggestion}`?)" : ""
               push_error(node, "unknown-column",
@@ -92,6 +94,28 @@ module Rigor
                          "unknown column `#{key}` on table `#{entry.table_name}`#{hint}")
             end
           end
+        end
+
+        # When the column is an enum-bearing column AND the
+        # passed value is a Symbol literal, the value MUST be
+        # one of the declared enum values. Non-Symbol values
+        # (variables, expressions) decline so dynamic call
+        # sites stay silent. Sequences (`status: [:active,
+        # :archived]`) are intentionally NOT walked here —
+        # the relation-shape check belongs in a future track.
+        def validate_enum_value(node, entry, pair)
+          return unless entry.enum?(pair[:key])
+          return unless pair[:value].is_a?(Prism::SymbolNode)
+
+          value = pair[:value].unescaped
+          values = entry.enum_values(pair[:key])
+          return if values.include?(value)
+
+          suggestion = closest_column(value, values)
+          hint = suggestion ? " (did you mean `:#{suggestion}`?)" : ""
+          push_error(node, "unknown-enum-value",
+                     "`#{entry.class_name}.#{node.name}(#{pair[:key]}: :#{value})` references " \
+                     "unknown enum value `:#{value}` (declared: #{values.map { |v| ":#{v}" }.join(', ')})#{hint}")
         end
 
         def push_recognised(node, entry, keys = nil)
@@ -131,24 +155,27 @@ module Rigor
           node.arguments.arguments.size
         end
 
-        # Returns the symbol keys of any KeywordHashNode argument.
-        # Plain hash-literal arguments (`Model.where({a: 1})`) are
-        # NOT walked — Rails accepts both, but the keyword form is
-        # the idiomatic one.
-        def keyword_argument_keys(node)
+        # Returns the symbol-keyed pairs of any KeywordHashNode
+        # argument as `{ key:, value: }` rows. Plain hash-literal
+        # arguments (`Model.where({a: 1})`) are NOT walked —
+        # Rails accepts both, but the keyword form is the
+        # idiomatic one. The `value` Prism node is preserved so
+        # the enum check downstream can recognise Symbol
+        # literals without re-walking the call.
+        def keyword_argument_pairs(node)
           return [] if node.arguments.nil?
 
-          keys = []
+          pairs = []
           node.arguments.arguments.each do |arg|
             next unless arg.is_a?(Prism::KeywordHashNode)
 
             arg.elements.each do |pair|
               next unless pair.is_a?(Prism::AssocNode) && pair.key.is_a?(Prism::SymbolNode)
 
-              keys << pair.key.unescaped
+              pairs << { key: pair.key.unescaped, value: pair.value }
             end
           end
-          keys
+          pairs
         end
 
         def closest_column(name, candidates)

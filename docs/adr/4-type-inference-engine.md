@@ -414,6 +414,36 @@ end
 
 The Slice 1 surface is consistent with the method-surface contract in [`internal-type-api.md`](../internal-spec/internal-type-api.md). Subsequent slices add to `Rigor::Type::Combinator` and to `Rigor::Inference::*` without changing `Scope#type_of`'s shape.
 
+## Boundary with ADR-15 (Ractor concurrency model)
+
+[ADR-15](15-ractor-concurrency.md) commits to a staged
+Ractor-based concurrency model for the analyzer. Phase 2b
+of that migration splits `Rigor::Environment::RbsLoader`
+into:
+
+- **`Environment::Reflection`** — the read-only RBS query
+  surface (`class_known?`, `instance_definition`,
+  `singleton_definition`, `class_ordering`, …). Frozen
+  after construction. Shared across Ractors.
+- **`Environment::CacheLayer`** — the per-Ractor mutable
+  memoisation Hash (`@class_known_cache`,
+  `@instance_definition_cache`, …) wrapping the
+  reflection facade. Each Ractor owns its own; the layer
+  feeds from the cross-Ractor `Cache::Store` so warm-up
+  amortises across the worker pool.
+
+The Scope contract documented above is unchanged.
+`Scope#environment` continues to expose the same public
+read API (`class_known?`, `instance_definition`,
+`singleton_definition`, …); the dispatch goes through the
+cache layer, which lazily routes through the reflection
+facade. Plugin authors reading `scope.environment.*` see
+identical return values across the refactor.
+
+This boundary is documented here so readers tracing the
+Scope-to-Environment plumbing find the Phase 2b split
+context one click away.
+
 ## Risks and Mitigations
 
 - **Tentative OQ answers may flip later.** Production code paths route through `Type::Combinator`; direct type-class constructors are an internal-only escape hatch. CI lint guards `?`-suffixed methods against returning `Trinary`. Capability predicates added in Slice 1 are minimal so a rename is mechanical.
@@ -427,6 +457,7 @@ The Slice 1 surface is consistent with the method-surface contract in [`internal
 - [`docs/adr/1-types.md`](1-types.md) — type-model semantics.
 - [`docs/adr/2-extension-api.md`](2-extension-api.md) — extension surface that consumes type values.
 - [`docs/adr/3-type-representation.md`](3-type-representation.md) — type-object representation and OQ1/OQ2 rationale.
+- [`docs/adr/15-ractor-concurrency.md`](15-ractor-concurrency.md) — Environment-split / Ractor-pool migration plan.
 - [`docs/internal-spec/internal-type-api.md`](../internal-spec/internal-type-api.md) — type-object public contract.
 - [`docs/internal-spec/implementation-expectations.md`](../internal-spec/implementation-expectations.md) — engine-surface contract.
 - [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md) — `Scope#type_of` public contract.

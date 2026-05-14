@@ -133,13 +133,45 @@ slice tractable.
 
 ### 6. Concurrency model
 
-v0.0.8 ships with a single-writer model: one `rigor check` run
-at a time per project. Concurrent runs MAY use the same cache
-directory, but per-file locks serialise writes and the result
-is correct (every reader gets either a committed entry or a
-miss). No coordinator process; no shared in-memory state.
+v0.0.8 shipped with a single-writer model: one `rigor check`
+run at a time per project. Concurrent runs MAY use the same
+cache directory, but per-file locks serialise writes and the
+result is correct (every reader gets either a committed entry
+or a miss). No coordinator process; no shared in-memory state.
 
-Long-running daemons / LSP-mode is a separate v0.1.0+ surface.
+**v0.1.4 in-process layer.** `Cache::Store` now keeps a
+process-local in-memory memo (commit `5c30b37`) so repeated
+`fetch_or_compute` calls in the same process skip the disk
+read AND the `Marshal.load` deserialise step on the warm
+path. A re-entrant `Monitor` (commit `31e95c8`) guards the
+memo + the hit / miss / write counters so the Store is safe
+under concurrent access from worker threads or Ractors.
+
+**ADR-15 boundary — cross-Ractor sharing.**
+[ADR-15](15-ractor-concurrency.md) designates `Cache::Store`
+as **the** cross-Ractor sharing point for cached values: each
+Ractor in the worker pool holds its own per-process inference
+cache (Environment cache layer), but reads through a shared
+`Cache::Store`. The current implementation isn't yet
+`Ractor.shareable?` (Monitor + Hash + counter ivars block it);
+Phase 4 of the migration will decide whether to:
+
+(a) make `Cache::Store` directly `Ractor.shareable?` by
+    replacing the Monitor with a Ractor-friendly primitive,
+(b) wrap it in a thin `Ractor.shareable?` proxy that forwards
+    calls into the underlying Store via `Ractor.send`, or
+(c) shard the Store into one per-Ractor mutable instance
+    sharing a frozen on-disk root (the simplest path; see
+    ADR-15 § OQ1).
+
+The decision will land in Phase 4 of the Ractor migration;
+this entry records the constraint so future Cache::Store work
+does not accidentally move the design AWAY from
+shareability.
+
+Long-running daemons / LSP-mode is a separate v0.1.0+ surface
+that benefits from both the in-process memo (already in
+place) and the Phase 4 cross-Ractor shareability work.
 
 ### 7. Producer API surface
 
@@ -208,6 +240,15 @@ once a real cold-start regression motivates the work.
 
 ## Open Questions
 
+- **`Cache::Store` `Ractor.shareable?` compliance.** Phase 4 of
+  the [ADR-15](15-ractor-concurrency.md) Ractor migration
+  needs the Store to be Ractor-shareable so multiple worker
+  Ractors can read through it. The current implementation is
+  Monitor-safe but not Ractor-shareable. Decision deferred to
+  Phase 4 (see ADR-15 § OQ1 for the three candidate
+  approaches). The constraint is recorded so future Cache::Store
+  work does not silently move the design AWAY from
+  shareability.
 - **Filesystem case sensitivity.** Producer ids and cache keys
   use only `[a-z0-9._-]` so case-insensitive filesystems (macOS
   HFS+, NTFS) do not cause collisions. The cache layer

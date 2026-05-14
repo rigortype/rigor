@@ -364,6 +364,24 @@ Working response: the first public plugin milestone should defer broad expressio
 
 ## Open Questions
 
+- **Plugin contract under Ractor isolation
+  ([ADR-15](15-ractor-concurrency.md) Phase 3).** When the
+  `Analysis::Runner` Ractor worker pool lands (Phase 4),
+  plugin instances need to be per-Ractor: each worker
+  instantiates its own plugin from the shared registry's
+  frozen factory + manifest metadata. Plugins that
+  accumulate per-run mutable state in their
+  `flow_contribution_for` / `diagnostics_for_file` hooks
+  (the `rigor-sorbet`
+  `@reachable_absurd_nodes` /
+  `@reveal_type_calls` /
+  `@assert_type_mismatches` `compare_by_identity` Hashes
+  are the canonical examples) MUST either route that state
+  through `Plugin::FactStore` (already
+  cross-Ractor-coordinated) or accept per-Ractor isolation.
+  The Phase 3 amendment to ADR-2 will pin the chosen
+  shape; the three candidates currently on the table are
+  recorded in ADR-15 § OQ2.
 - Should dynamic return extensions match by nominal receiver type only at first, or also by structural interface and object shape?
 - What is the initial plugin manifest format and configuration schema language?
 - Should Rigor expose synthetic or virtual AST nodes to rules in the first custom-rule milestone?

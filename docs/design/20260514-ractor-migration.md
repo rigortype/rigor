@@ -288,10 +288,63 @@ Equivalence + plugin replay + prepare-dedup proven by
 coverage in `spec/rigor/ractor_readiness_spec.rb`
 § "Phase 4b — Ractor pool readiness".
 
-**Phase 4c — Defaults + flag.** `RIGOR_RACTOR_WORKERS` env
-var (`0` = sequential, default; `N` = N workers); honour
-`.rigor.yml` `parallel: { workers: N }` (matches ADR-15
-§ OQ3). Benchmark + decide default.
+**Phase 4c (LANDED) — Defaults + flag.** Three opt-in
+surfaces, in precedence order CLI > env > config > 0:
+
+- `rigor check --workers=N` — explicit CLI override.
+- `RIGOR_RACTOR_WORKERS=N` — env var, useful in CI.
+- `.rigor.yml` `parallel: { workers: N }` — project default.
+
+`Configuration#parallel_workers` (default `0` = sequential)
+reads the YAML; the CLI's `resolve_workers` private method
+threads the precedence chain into `Runner.new(workers:)`.
+Negative env-var values clamp to `0` so a stray `-1` doesn't
+crash the pool spawn loop. Non-numeric config values raise
+`ArgumentError` so typos fail loudly.
+
+Sequential remains the documented default. Benchmarking
+sequential vs pool wall-clock is deferred to Phase 4b.x
+because the current pool path only handles trivial source
+files reliably (RBS / RubyGems C-extension state trips
+`Ractor::IsolationError` on first non-trivial env access
+inside a worker).
+
+### Phase 4b.x — Worker-side env-build stability (DEFERRED)
+
+The Phase 4b pool's worker `RBS::EnvironmentLoader.new` path
+references a chain of non-shareable module constants
+(`RBS::EnvironmentLoader::DEFAULT_CORE_ROOT`,
+`RBS::Repository::DEFAULT_STDLIB_ROOT`,
+`Gem::Requirement::DefaultRequirement`). Each one trips
+`Ractor::IsolationError` when accessed from a worker
+Ractor. Pre-running `Ractor.make_shareable` on the leaves
+deep-freezes Pathnames that RBS subsequently tries to use
+through C-extension paths, producing a Bus Error rather
+than a clean Isolation raise (observed under Ruby 4.0.4 +
+rbs 4.0.2 on macOS arm64).
+
+Three candidate fixes, each a separate sub-phase:
+
+- **(a) Coordinator-side env + cross-Ractor handle.** Build
+  the env once on the main Ractor, expose a Ractor-shareable
+  query facade (frozen subset of `Environment::Reflection`)
+  that workers consult via `Ractor.main.send` round-trips.
+  Cost: cross-Ractor RPC per class lookup; latency-prohibitive
+  for hot dispatch paths.
+
+- **(b) RubyGems / RBS upstream patches.** Make the
+  offending constants shareable in upstream code. Highest-
+  leverage long-term, requires coordinating two upstream
+  repos.
+
+- **(c) Fork-based parallelism instead.** Skip Ractors;
+  use `Process.fork` so each worker gets its own process
+  with full RBS / RubyGems state. Discarded earlier in this
+  doc as a parallel option to Ractor; revisit if (a) / (b)
+  prove intractable.
+
+Default sequential mode is the production path until one of
+these lands.
 
 ### Open design points for Phase 4a
 
@@ -371,9 +424,15 @@ Items #7) while Ractor phases progress incrementally.
 7. ✅ Phase 4b — Ractor pool around `WorkerSession` in
    `Runner#analyze_files` (programmatic `workers: N`
    opt-in; sequential remains default).
-8. ⏭ Phase 4c — User-facing opt-in flag
+8. ✅ Phase 4c — User-facing opt-in flag
    (`RIGOR_RACTOR_WORKERS` env + `.rigor.yml`
-   `parallel.workers:`).
+   `parallel.workers:` + CLI `--workers=N`).
+9. ⏭ Phase 4b.x — Worker-side env-build stability
+   (RubyGems / RBS module-constant isolation). Pool
+   mode currently only handles trivial source files
+   reliably; non-trivial files trip `Ractor::IsolationError`
+   on first env access. Default sequential mode is
+   the production path until this lands.
 
 Each subsequent phase reads from the prior phase's audit spec
 to confirm prerequisites. The audit spec is the contract

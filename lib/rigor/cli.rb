@@ -83,7 +83,8 @@ module Rigor
         configuration: configuration,
         explain: options.fetch(:explain),
         cache_store: cache_store,
-        collect_stats: options.fetch(:stats)
+        collect_stats: options.fetch(:stats),
+        workers: resolve_workers(options, configuration)
       )
       result = runner.run(paths)
 
@@ -91,6 +92,24 @@ module Rigor
       write_run_stats(result.stats) if result.stats
       write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
       result.success? ? 0 : 1
+    end
+
+    # ADR-15 Phase 4c — resolves the worker count by
+    # precedence: CLI `--workers=N` (most explicit) > env
+    # `RIGOR_RACTOR_WORKERS` > config `.rigor.yml`
+    # `parallel.workers:` > 0 (sequential default). Returns
+    # an Integer; non-numeric values raise so typos fail
+    # loudly. CLI / env may pass a negative value — clamped
+    # to 0 (sequential) so a stray `-1` doesn't crash the
+    # pool spawn loop.
+    def resolve_workers(options, configuration)
+      cli_value = options[:workers]
+      return [Integer(cli_value), 0].max if cli_value
+
+      env_value = ENV.fetch("RIGOR_RACTOR_WORKERS", nil)
+      return [Integer(env_value), 0].max if env_value && !env_value.empty?
+
+      configuration.parallel_workers
     end
 
     def parse_check_options
@@ -109,7 +128,12 @@ module Rigor
         # one walk of `class_decl_paths` for the breakdown).
         # `--no-stats` suppresses it for callers that want a
         # diagnostic-only output stream.
-        stats: true
+        stats: true,
+        # ADR-15 Phase 4c — when nil, falls back to
+        # `RIGOR_RACTOR_WORKERS` then `.rigor.yml`
+        # `parallel.workers:` then 0 (sequential). See
+        # `resolve_workers` for the precedence chain.
+        workers: nil
       }
       parser = OptionParser.new do |opts|
         opts.banner = "Usage: rigor check [options] [paths]"
@@ -122,6 +146,10 @@ module Rigor
         opts.on("--[no-]stats",
                 "Print run summary (files, classes, memory, wall time) to stderr (default: on)") do |value|
           options[:stats] = value
+        end
+        opts.on("--workers=N", Integer,
+                "Dispatch per-file analysis across N Ractor workers (default: 0; sequential)") do |value|
+          options[:workers] = value
         end
       end
       parser.parse!(@argv)

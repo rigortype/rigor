@@ -63,6 +63,16 @@ module Rigor
       "dependencies" => {
         "source_inference" => [],
         "budget_per_gem" => Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM
+      },
+      "parallel" => {
+        # ADR-15 Phase 4c — when greater than zero, `rigor check`
+        # dispatches per-file analysis across N Ractor workers
+        # built around {Rigor::Analysis::WorkerSession}.
+        # `0` (default) keeps the sequential coordinator path
+        # bit-for-bit unchanged. The CLI's `--workers=N` flag
+        # and the `RIGOR_RACTOR_WORKERS` env var both override
+        # this setting; precedence is CLI > env > config > 0.
+        "workers" => 0
       }
     }.freeze
 
@@ -78,7 +88,7 @@ module Rigor
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
                 :severity_profile, :severity_overrides,
-                :dependencies
+                :dependencies, :parallel_workers
 
     # Loads a configuration file.
     #
@@ -214,7 +224,7 @@ module Rigor
     private_class_method :load_with_includes, :merge_includes, :resolve_paths_in, :deep_merge,
                          :merge_value, :merge_dependencies_hash
 
-    # rubocop:disable Metrics/AbcSize
+    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     def initialize(data = DEFAULTS)
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
@@ -246,6 +256,8 @@ module Rigor
       @dependencies = Dependencies.from_h(
         data.fetch("dependencies", DEFAULTS.fetch("dependencies"))
       )
+      parallel = DEFAULTS.fetch("parallel").merge(data.fetch("parallel", {}))
+      @parallel_workers = coerce_parallel_workers(parallel.fetch("workers"))
       # Ractor migration Phase 2a: deep-freeze the
       # Configuration so it is `Ractor.shareable?`. Every
       # ivar above is now either a frozen value (Symbol /
@@ -257,7 +269,7 @@ module Rigor
       # `docs/design/20260514-ractor-migration.md`.
       freeze
     end
-    # rubocop:enable Metrics/AbcSize
+    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 
     def to_h
       {
@@ -279,7 +291,10 @@ module Rigor
         },
         "severity_profile" => severity_profile.to_s,
         "severity_overrides" => severity_overrides.to_h { |k, v| [k, v.to_s] },
-        "dependencies" => dependencies.to_h
+        "dependencies" => dependencies.to_h,
+        "parallel" => {
+          "workers" => parallel_workers
+        }
       }
     end
 
@@ -336,6 +351,20 @@ module Rigor
     # `lib/rigor.rb`); the two stay in lockstep via spec.
     VALID_NETWORK_POLICIES = %i[disabled allowlist].freeze
     private_constant :VALID_NETWORK_POLICIES
+
+    # ADR-15 Phase 4c — accepts a non-negative Integer (or a
+    # string-shaped one from YAML files that miss type
+    # annotations). Negative / non-integer values raise so
+    # typos / bad YAML fail loudly rather than silently
+    # disabling parallelism.
+    def coerce_parallel_workers(value)
+      integer = Integer(value)
+      raise ArgumentError, "parallel.workers must be >= 0, got #{value.inspect}" if integer.negative?
+
+      integer
+    rescue TypeError, ArgumentError => e
+      raise ArgumentError, "parallel.workers must be a non-negative Integer, got #{value.inspect} (#{e.message})"
+    end
 
     def coerce_network_policy(value)
       sym = value.to_sym

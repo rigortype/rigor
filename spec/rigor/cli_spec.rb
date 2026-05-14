@@ -381,6 +381,120 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  describe "check --workers / RIGOR_RACTOR_WORKERS / parallel.workers: (ADR-15 Phase 4c)" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write_workers_fixture(name, contents)
+      path = File.join(tmpdir, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      path
+    end
+
+    it "threads --workers=N through to Runner.new(workers:)" do
+      write_workers_fixture("a.rb", "x = 1\n")
+      Dir.chdir(tmpdir) do
+        captured = nil
+        allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured = kwargs
+          original.call(**kwargs)
+        end
+        status, _out, _err = run_cli("check", "--workers=3", "--no-stats", "a.rb")
+        expect(status).to eq(0)
+        expect(captured.fetch(:workers)).to eq(3)
+      end
+    end
+
+    it "falls back to RIGOR_RACTOR_WORKERS when --workers is absent" do
+      write_workers_fixture("a.rb", "x = 1\n")
+      Dir.chdir(tmpdir) do
+        captured = nil
+        allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured = kwargs
+          original.call(**kwargs)
+        end
+        ENV["RIGOR_RACTOR_WORKERS"] = "2"
+        begin
+          status, _out, _err = run_cli("check", "--no-stats", "a.rb")
+          expect(status).to eq(0)
+          expect(captured.fetch(:workers)).to eq(2)
+        ensure
+          ENV.delete("RIGOR_RACTOR_WORKERS")
+        end
+      end
+    end
+
+    it "falls back to .rigor.yml `parallel.workers:` when --workers and env are absent" do
+      write_workers_fixture("a.rb", "x = 1\n")
+      write_workers_fixture(".rigor.yml", "paths: [a.rb]\nparallel:\n  workers: 5\n")
+      Dir.chdir(tmpdir) do
+        captured = nil
+        allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured = kwargs
+          original.call(**kwargs)
+        end
+        status, _out, _err = run_cli("check", "--no-stats")
+        expect(status).to eq(0)
+        expect(captured.fetch(:workers)).to eq(5)
+      end
+    end
+
+    it "prefers --workers over both env and config" do
+      write_workers_fixture("a.rb", "x = 1\n")
+      write_workers_fixture(".rigor.yml", "paths: [a.rb]\nparallel:\n  workers: 5\n")
+      Dir.chdir(tmpdir) do
+        captured = nil
+        allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured = kwargs
+          original.call(**kwargs)
+        end
+        ENV["RIGOR_RACTOR_WORKERS"] = "2"
+        begin
+          status, _out, _err = run_cli("check", "--workers=7", "--no-stats", "a.rb")
+          expect(status).to eq(0)
+          expect(captured.fetch(:workers)).to eq(7)
+        ensure
+          ENV.delete("RIGOR_RACTOR_WORKERS")
+        end
+      end
+    end
+
+    it "defaults to 0 (sequential) when no override is configured" do
+      write_workers_fixture("a.rb", "x = 1\n")
+      Dir.chdir(tmpdir) do
+        captured = nil
+        allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured = kwargs
+          original.call(**kwargs)
+        end
+        status, _out, _err = run_cli("check", "--no-stats", "a.rb")
+        expect(status).to eq(0)
+        expect(captured.fetch(:workers)).to eq(0)
+      end
+    end
+
+    it "clamps a negative env override to 0" do
+      write_workers_fixture("a.rb", "x = 1\n")
+      Dir.chdir(tmpdir) do
+        captured = nil
+        allow(Rigor::Analysis::Runner).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured = kwargs
+          original.call(**kwargs)
+        end
+        ENV["RIGOR_RACTOR_WORKERS"] = "-1"
+        begin
+          status, _out, _err = run_cli("check", "--no-stats", "a.rb")
+          expect(status).to eq(0)
+          expect(captured.fetch(:workers)).to eq(0)
+        ensure
+          ENV.delete("RIGOR_RACTOR_WORKERS")
+        end
+      end
+    end
+  end
+
   describe "check --stats / --no-stats" do
     let(:tmpdir) { Dir.mktmpdir }
 

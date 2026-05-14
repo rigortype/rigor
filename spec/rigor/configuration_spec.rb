@@ -317,6 +317,43 @@ RSpec.describe Rigor::Configuration do
     end
   end
 
+  describe "parallel.workers (ADR-15 Phase 4c)" do
+    it "defaults to 0 when the config is unspecified" do
+      expect(described_class.new.parallel_workers).to eq(0)
+    end
+
+    it "reads `parallel.workers:` from .rigor.yml" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, ".rigor.yml")
+        File.write(path, "parallel:\n  workers: 4\n")
+        expect(described_class.load(path).parallel_workers).to eq(4)
+      end
+    end
+
+    it "round-trips through to_h" do
+      configuration = described_class.new(
+        Rigor::Configuration::DEFAULTS.merge("parallel" => { "workers" => 6 })
+      )
+      expect(configuration.to_h.fetch("parallel")).to eq("workers" => 6)
+    end
+
+    it "raises a useful error when `parallel.workers:` is non-numeric" do
+      expect do
+        described_class.new(
+          Rigor::Configuration::DEFAULTS.merge("parallel" => { "workers" => "many" })
+        )
+      end.to raise_error(ArgumentError, /parallel\.workers/)
+    end
+
+    it "raises when `parallel.workers:` is negative" do
+      expect do
+        described_class.new(
+          Rigor::Configuration::DEFAULTS.merge("parallel" => { "workers" => -1 })
+        )
+      end.to raise_error(ArgumentError, /parallel\.workers must be >= 0/)
+    end
+  end
+
   describe ".discover" do
     it "prefers `.rigor.yml` over `.rigor.dist.yml` when both are present" do
       Dir.mktmpdir do |dir|

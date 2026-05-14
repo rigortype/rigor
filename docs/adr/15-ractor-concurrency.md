@@ -184,9 +184,16 @@ migration documented in
      `Ractor::IsolationError`. The CLI surface remains
      untouched — `workers:` is a programmatic opt-in only
      in this slice. Phase 4c wires the user-facing flag.
-   - **Phase 4c (DEFERRED)**: `RIGOR_RACTOR_WORKERS` env
-     var + `.rigor.yml` `parallel.workers:` entry; default
-     remains sequential.
+   - **Phase 4c (LANDED)**: `Configuration#parallel_workers`
+     (default `0`) reads `.rigor.yml` `parallel.workers:`;
+     the CLI's `--workers=N` flag and `RIGOR_RACTOR_WORKERS`
+     env var override it. Precedence: CLI > env > config >
+     `0`. Default remains sequential — pool mode stays
+     opt-in until the worker-side env-build stability work
+     (Phase 4b.x; see § "Known limitations" below) lands.
+     Pool spec gated behind `RIGOR_INCLUDE_RACTOR_POOL=1`
+     so default `make verify` is deterministic; `make
+     test-ractor-pool` runs it in isolation.
 
 The audit-spec at
 [`spec/rigor/ractor_readiness_spec.rb`](../../spec/rigor/ractor_readiness_spec.rb)
@@ -584,9 +591,23 @@ spec suite.
 7. ✅ Phase 4b — Runner Ractor pool around `WorkerSession`
    (programmatic `workers:` keyword; sequential remains
    default; CLI / `.rigor.yml` opt-in deferred to 4c).
-8. ⏭ Phase 4c — `RIGOR_RACTOR_WORKERS` opt-in flag +
-   `.rigor.yml` `parallel.workers:` entry. (The
-   per-worker `Cache::Store`-shared facade per § OQ1 is
-   a separate optimisation; 4c wires the user-visible
-   knob first, then OQ1's facade lands as a follow-up
-   when the wall-clock benefit is measured.)
+8. ✅ Phase 4c — `RIGOR_RACTOR_WORKERS` opt-in flag +
+   `.rigor.yml` `parallel.workers:` entry +
+   `Configuration#parallel_workers` accessor + CLI
+   `--workers=N` flag (precedence: CLI > env > config >
+   `0`). Default remains sequential. Pool spec excluded
+   from default suite (see § "Known limitations").
+9. ⏭ Phase 4b.x — worker-side env-build stability so
+   pool mode handles real-world (non-trivial) source
+   files. Currently the worker `RBS::EnvironmentLoader.new`
+   path trips `Ractor::IsolationError` on a chain of
+   RubyGems / RBS module constants
+   (`DEFAULT_CORE_ROOT`, `DEFAULT_STDLIB_ROOT`,
+   `Gem::Requirement::DefaultRequirement`). Until then,
+   pool mode is correctness-bound by file content
+   triviality; default sequential mode is the
+   documented production path.
+10. ⏭ Phase 4c+ — per-worker `Cache::Store`-shared facade
+    per § OQ1; benchmark sequential vs pool wall-clock
+    and revisit the default once Phase 4b.x stabilises
+    worker env builds.

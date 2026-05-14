@@ -122,6 +122,19 @@
           "default": "walker_cap"
         }
       }
+    },
+    "parallel": {
+      "description": "ADR-15 Phase 4c — opt-in parallel analysis. When `workers` is greater than zero, `rigor check` dispatches per-file analysis across N Ractor workers. Default `0` keeps the sequential coordinator path. The CLI's `--workers=N` flag and the `RIGOR_RACTOR_WORKERS` env var both override this setting; precedence is CLI > env > config > 0.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "workers": {
+          "description": "Number of Ractor workers. `0` (default) runs sequentially; `N > 0` dispatches per-file analysis across N workers. Pool mode is currently bound by file-content triviality (Phase 4b.x worker-side env-build stability is the next sub-phase).",
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        }
+      }
     }
   },
   "$defs": {

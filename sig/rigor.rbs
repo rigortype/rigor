@@ -104,7 +104,7 @@ module Rigor
       # otherwise raises `RBS::UnknownTypeName` for the named type.
       attr_reader cache_store: untyped
       attr_reader plugin_registry: untyped
-      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped) -> void
+      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped, ?workers: Integer, ?collect_stats: bool) -> void
       def run: (?Array[String] paths) -> Result
     end
   end

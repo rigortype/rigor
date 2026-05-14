@@ -155,13 +155,13 @@ module Rigor
         # tier ahead of RBS sees the more precise carrier so
         # downstream narrowing (`if size > 0; …`) actually has a
         # range to intersect with.
-        SIZE_RETURNING_NOMINALS = {
-          "Array" => %i[size length count],
-          "String" => %i[length size bytesize],
-          "Hash" => %i[size length count],
-          "Set" => %i[size length count],
-          "Range" => %i[size length count]
-        }.freeze
+        SIZE_RETURNING_NOMINALS = Ractor.make_shareable({
+                                                          "Array" => %i[size length count],
+                                                          "String" => %i[length size bytesize],
+                                                          "Hash" => %i[size length count],
+                                                          "Set" => %i[size length count],
+                                                          "Range" => %i[size length count]
+                                                        })
         private_constant :SIZE_RETURNING_NOMINALS
 
         # When the difference removes the empty value of the

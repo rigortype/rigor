@@ -47,9 +47,14 @@ module Rigor
       attr_reader :facts
 
       class << self
-        def empty
-          @empty ||= new
-        end
+        # ADR-15 Phase 4b.x — return the eagerly-loaded
+        # singleton-class `@empty` ivar. Lazy `@empty ||= new`
+        # would write to a class/module ivar from non-main
+        # Ractors and trip `Ractor::IsolationError`. The
+        # `@empty = new.freeze` at module body below
+        # pre-populates the ivar on the main Ractor at load
+        # time.
+        attr_reader :empty
       end
 
       def initialize(facts: [])
@@ -136,6 +141,13 @@ module Rigor
 
         [target]
       end
+
+      # ADR-15 Phase 4b.x — eager-load the singleton `@empty`
+      # on the main Ractor at module-load time. Workers then
+      # READ the populated ivar without ever attempting a
+      # class/module ivar WRITE (which non-main Ractors are
+      # forbidden from doing).
+      @empty = new.freeze
     end
   end
 end

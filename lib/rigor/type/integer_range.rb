@@ -78,13 +78,13 @@ module Rigor
         Float::INFINITY
       end
 
-      ALIAS_NAMES = {
-        [NEG_INFINITY, POS_INFINITY] => "int",
-        [1, POS_INFINITY] => "positive-int",
-        [0, POS_INFINITY] => "non-negative-int",
-        [NEG_INFINITY, -1] => "negative-int",
-        [NEG_INFINITY, 0] => "non-positive-int"
-      }.freeze
+      ALIAS_NAMES = Ractor.make_shareable({
+                                            [NEG_INFINITY, POS_INFINITY] => "int",
+                                            [1, POS_INFINITY] => "positive-int",
+                                            [0, POS_INFINITY] => "non-negative-int",
+                                            [NEG_INFINITY, -1] => "negative-int",
+                                            [NEG_INFINITY, 0] => "non-positive-int"
+                                          })
 
       def describe(_verbosity = :short)
         ALIAS_NAMES[[min, max]] || generic_description

@@ -211,20 +211,30 @@ module Rigor
       # (`?by:`) while the Ruby `def` lists it as required (or vice
       # versa); the binding is by-name regardless of which side
       # defines it.
-      KEYWORD_PROVIDER = lambda do |fn, slot|
+      KEYWORD_PROVIDER = Ractor.make_shareable(lambda do |fn, slot|
         fn.required_keywords[slot.name]&.type || fn.optional_keywords[slot.name]&.type
-      end
+      end)
       private_constant :KEYWORD_PROVIDER
 
-      RBS_TYPE_PROVIDERS = {
-        required_positional: ->(fn, slot) { fn.required_positionals[slot.index]&.type },
-        optional_positional: ->(fn, slot) { fn.optional_positionals[slot.index]&.type },
-        rest_positional: ->(fn, _slot) { fn.rest_positionals&.type },
-        trailing_positional: ->(fn, slot) { fn.trailing_positionals[slot.index]&.type },
-        required_keyword: KEYWORD_PROVIDER,
-        optional_keyword: KEYWORD_PROVIDER,
-        rest_keyword: ->(fn, _slot) { fn.rest_keywords&.type }
-      }.freeze
+      RBS_TYPE_PROVIDERS = Ractor.make_shareable({
+                                                   required_positional: Ractor.make_shareable(lambda { |fn, slot|
+                                                     fn.required_positionals[slot.index]&.type
+                                                   }),
+                                                   optional_positional: Ractor.make_shareable(lambda { |fn, slot|
+                                                     fn.optional_positionals[slot.index]&.type
+                                                   }),
+                                                   rest_positional: Ractor.make_shareable(lambda { |fn, _slot|
+                                                     fn.rest_positionals&.type
+                                                   }),
+                                                   trailing_positional: Ractor.make_shareable(lambda { |fn, slot|
+                                                     fn.trailing_positionals[slot.index]&.type
+                                                   }),
+                                                   required_keyword: KEYWORD_PROVIDER,
+                                                   optional_keyword: KEYWORD_PROVIDER,
+                                                   rest_keyword: Ractor.make_shareable(lambda { |fn, _slot|
+                                                     fn.rest_keywords&.type
+                                                   })
+                                                 })
       private_constant :RBS_TYPE_PROVIDERS
 
       def rbs_type_for_slot(function, slot)

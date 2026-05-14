@@ -68,15 +68,19 @@ module Rigor
           # Used by tests to drop the cached catalog so a different
           # path or content can be exercised. Production code MUST
           # NOT call this during normal operation.
+          #
+          # ADR-15 Phase 4b.x — reset re-loads eagerly so the
+          # singleton-class `@catalog` ivar stays populated;
+          # writing to a class/module ivar from a non-main Ractor
+          # (e.g. via the lazy `@catalog ||= load_catalog` we
+          # previously held here) raises `Ractor::IsolationError`.
           def reset!
-            @catalog = nil
+            @catalog = load_catalog
           end
 
           private
 
-          def catalog
-            @catalog ||= load_catalog
-          end
+          attr_reader :catalog
 
           def load_catalog
             return EMPTY_CATALOG unless File.exist?(CATALOG_PATH)
@@ -87,6 +91,11 @@ module Rigor
             EMPTY_CATALOG
           end
         end
+
+        # ADR-15 Phase 4b.x — eager-load on the main Ractor at
+        # module-load time so worker Ractors only READ the
+        # populated singleton-class `@catalog` ivar.
+        reset!
       end
     end
   end

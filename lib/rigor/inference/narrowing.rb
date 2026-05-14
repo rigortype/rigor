@@ -916,12 +916,12 @@ module Rigor
         # zero-arg predicates on `Numeric`. We model them as
         # comparisons against the literal 0 so the existing range
         # narrowing handles them uniformly.
-        ZERO_CLASS_PREDICATE_RULES = {
-          positive?: { truthy: [:>, 0],  falsey: [:<=, 0] },
-          negative?: { truthy: [:<, 0],  falsey: [:>=, 0] },
-          zero?: { truthy: [:eq, 0], falsey: [:ne, 0] },
-          nonzero?: { truthy: [:ne, 0], falsey: [:eq, 0] }
-        }.freeze
+        ZERO_CLASS_PREDICATE_RULES = Ractor.make_shareable({
+                                                             positive?: { truthy: [:>, 0], falsey: [:<=, 0] },
+                                                             negative?: { truthy: [:<, 0], falsey: [:>=, 0] },
+                                                             zero?: { truthy: [:eq, 0], falsey: [:ne, 0] },
+                                                             nonzero?: { truthy: [:ne, 0], falsey: [:eq, 0] }
+                                                           })
         private_constant :ZERO_CLASS_PREDICATE_RULES
 
         def analyse_zero_class_predicate(node, scope, predicate:)

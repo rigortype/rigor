@@ -10,18 +10,16 @@ module Rigor
   class Trinary
     VALUES = %i[yes no maybe].freeze
 
+    # ADR-15 Phase 4b.x — eager singleton instances so the
+    # class-level `@yes` / `@no` / `@maybe` ivars are populated
+    # on the main Ractor at load time. Workers READ the ivars
+    # via `Trinary.yes` etc. without performing the `||=`
+    # write that non-main Ractors are forbidden from doing.
+    # The actual `@yes = new(:yes).freeze` allocation happens
+    # at the bottom of the file, AFTER `def initialize` is
+    # defined.
     class << self
-      def yes
-        @yes ||= new(:yes).freeze
-      end
-
-      def no
-        @no ||= new(:no).freeze
-      end
-
-      def maybe
-        @maybe ||= new(:maybe).freeze
-      end
+      attr_reader :yes, :no, :maybe
 
       def from_symbol(symbol)
         case symbol
@@ -104,5 +102,11 @@ module Rigor
 
       raise TypeError, "expected Rigor::Trinary, got #{other.class}"
     end
+
+    # ADR-15 Phase 4b.x eager singletons (see `class << self`
+    # above). Allocated after `initialize` is defined.
+    @yes = new(:yes).freeze
+    @no = new(:no).freeze
+    @maybe = new(:maybe).freeze
   end
 end

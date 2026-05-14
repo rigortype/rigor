@@ -8,10 +8,13 @@ module Rigor
     # expressions that cannot terminate normally. See
     # docs/type-specification/special-types.md.
     class Bot
+      # ADR-15 Phase 4b.x — eager singleton so workers READ
+      # `@instance` without performing the lazy `||=` write
+      # that non-main Ractors are forbidden from doing.
+      @instance = new.freeze
+
       class << self
-        def instance
-          @instance ||= new.freeze
-        end
+        attr_reader :instance
 
         private :new
       end

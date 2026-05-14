@@ -36,8 +36,14 @@ module Rigor
         Bot.instance
       end
 
+      # ADR-15 Phase 4b.x — read the eagerly-allocated
+      # `@untyped` ivar instead of `||=`. The singleton-class
+      # `@untyped = Dynamic.new(top)` initializer runs at module
+      # body (below) on the main Ractor at load time. Workers
+      # READ the populated ivar without performing the lazy
+      # write that non-main Ractors are forbidden from doing.
       def untyped
-        @untyped ||= Dynamic.new(top)
+        @untyped
       end
 
       # Wraps the static facet in a Dynamic[T] carrier. Idempotent on the
@@ -809,6 +815,11 @@ module Rigor
           members.sort_by { |m| m.describe(:short) }
         end
       end
+
+      # ADR-15 Phase 4b.x — eager-allocate the singleton
+      # `Dynamic[Top]` carrier on the main Ractor at load time.
+      # The `untyped` reader above just returns this ivar.
+      @untyped = Dynamic.new(Top.instance)
     end
   end
 end

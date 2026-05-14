@@ -7,10 +7,11 @@ module Rigor
     # The top of the value lattice: contains every value, including untyped
     # boundaries. See docs/type-specification/special-types.md.
     class Top
+      # ADR-15 Phase 4b.x — eager singleton (see Bot.rb).
+      @instance = new.freeze
+
       class << self
-        def instance
-          @instance ||= new.freeze
-        end
+        attr_reader :instance
 
         private :new
       end

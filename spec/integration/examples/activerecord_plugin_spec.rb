@@ -11,7 +11,14 @@ require "spec_helper"
 require "fileutils"
 require "tmpdir"
 
-ACTIVERECORD_PLUGIN_LIB = File.expand_path("../../../examples/rigor-activerecord/lib", __dir__)
+# `ACTIVERECORD_PLUGIN_LIB` is also defined by
+# `factorybot_plugin_spec.rb` (which consumes the activerecord
+# plugin's `:model_index` facts). Guard against the double
+# definition so running both specs in the same process does
+# not warn `already initialized constant`.
+unless defined?(ACTIVERECORD_PLUGIN_LIB)
+  ACTIVERECORD_PLUGIN_LIB = File.expand_path("../../../examples/rigor-activerecord/lib", __dir__)
+end
 $LOAD_PATH.unshift(ACTIVERECORD_PLUGIN_LIB) unless $LOAD_PATH.include?(ACTIVERECORD_PLUGIN_LIB)
 require "rigor-activerecord"
 

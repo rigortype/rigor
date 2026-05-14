@@ -427,12 +427,13 @@ Items #7) while Ractor phases progress incrementally.
 8. ✅ Phase 4c — User-facing opt-in flag
    (`RIGOR_RACTOR_WORKERS` env + `.rigor.yml`
    `parallel.workers:` + CLI `--workers=N`).
-9. ⏭ Phase 4b.x — Worker-side env-build stability
-   (RubyGems / RBS module-constant isolation). Pool
-   mode currently only handles trivial source files
-   reliably; non-trivial files trip `Ractor::IsolationError`
-   on first env access. Default sequential mode is
-   the production path until this lands.
+9. ✅ Phase 4b.x — Worker-side env-build stability via
+   cache pre-warm. `Runner` warms every cached RBS
+   producer on the main Ractor before pool spawn; workers
+   serve every reflection query from the Marshal blob on
+   disk, sidestepping the RubyGems / RBS module-constant
+   isolation chain. Rigor's own dispatch constants
+   shareable; `MethodCatalog` eager-loads YAML.
 
 Each subsequent phase reads from the prior phase's audit spec
 to confirm prerequisites. The audit spec is the contract

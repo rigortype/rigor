@@ -329,6 +329,38 @@ module Rigor
         nil
       end
 
+      # ADR-15 Phase 4b.x — eagerly drives every cached
+      # producer so a subsequent worker Ractor can serve all
+      # of its RBS queries from the Marshal blob on disk
+      # without ever calling `RBS::EnvironmentLoader.new`.
+      # The loader path that calls `EnvironmentLoader.new`
+      # transitively reads a chain of non-`Ractor.shareable?`
+      # module constants
+      # (`RBS::EnvironmentLoader::DEFAULT_CORE_ROOT`,
+      # `RBS::Repository::DEFAULT_STDLIB_ROOT`,
+      # `Gem::Requirement::DefaultRequirement`, …) and trips
+      # `Ractor::IsolationError`. Pre-warming the cache on
+      # the main Ractor and letting workers consult ONLY the
+      # Marshal-loaded blob sidesteps the whole chain.
+      #
+      # No-op when `cache_store` is nil — without a Store the
+      # worker has no choice but to build env via the loader,
+      # so the caller MUST ensure pool mode runs with caching
+      # enabled. Returns `self` so the call chains cleanly
+      # from the `Runner` pre-spawn hook.
+      def prewarm
+        return self if cache_store.nil?
+
+        env
+        known_class_names_set
+        constant_type_table
+        type_param_names_table
+        ancestor_names_table
+        instance_definitions_table
+        singleton_definitions_table
+        self
+      end
+
       # ADR-15 Phase 2b — return the loader's read-only
       # query surface as a frozen, `Ractor.shareable?`
       # {Reflection} value object. Built lazily on first

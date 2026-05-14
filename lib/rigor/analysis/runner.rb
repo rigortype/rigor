@@ -247,6 +247,23 @@ module Rigor
         # before any worker reads.
         Environment::ClassRegistry.default
 
+        # ADR-15 Phase 4b.x — pre-warm the RBS cache so
+        # workers serve every reflection query from the
+        # Marshal blob on disk. Without this, the first
+        # cache MISS inside a worker falls through to
+        # `RBS::EnvironmentLoader.new`, which reads a chain
+        # of non-`Ractor.shareable?` RubyGems / RBS module
+        # constants and raises `Ractor::IsolationError`.
+        # Pre-warming requires a `cache_store`; the run aborts
+        # to sequential mode otherwise. See ADR-15 Phase 4b.x
+        # for the full chain of failing constants.
+        if @cache_store.nil?
+          return analyze_files_sequentially_fallback(
+            files, reason: "pool mode requires a cache_store (--no-cache disables pool)"
+          )
+        end
+        prewarm_rbs_cache_for_pool
+
         configuration = @configuration
         cache_root = @cache_store&.root
         blueprints = @plugin_registry.blueprints
@@ -326,6 +343,47 @@ module Rigor
           rbs_attribution_available: RunStats.attribution_available?(class_decl_paths: snapshot),
           gem_walk_classes: @dependency_source_index.class_to_gem.size,
           gem_walk_gems: @dependency_source_index.resolved_gems.size
+        )
+      end
+
+      # ADR-15 Phase 4b.x — drives every cached RBS producer
+      # on the main Ractor so each worker can serve all
+      # reflection queries from disk (Marshal-load only).
+      # Builds a single coordinator-side {Environment} for
+      # this purpose; the env object is discarded immediately
+      # after the cache is warm — workers build their own
+      # `Environment.for_project` inside the Ractor body,
+      # which then routes through `cached_env` instead of
+      # `RBS::EnvironmentLoader.new`.
+      def prewarm_rbs_cache_for_pool
+        warm_env = Environment.for_project(
+          libraries: @configuration.libraries,
+          signature_paths: @configuration.signature_paths,
+          cache_store: @cache_store
+        )
+        warm_env.rbs_loader&.prewarm
+      end
+
+      # ADR-15 Phase 4b.x — pool-mode safety net. When pool
+      # mode is configured but a precondition fails (currently:
+      # `--no-cache` would force workers through
+      # `EnvironmentLoader.new`), degrade to sequential
+      # analysis with a `:warning` `pool-degraded` diagnostic
+      # at run start. The actual per-file analysis runs on
+      # the coordinator, identical to the default sequential
+      # path.
+      def analyze_files_sequentially_fallback(files, reason:)
+        environment = build_runner_environment
+        diagnostics = files.flat_map { |path| analyze_file(path, environment) }
+        loader = environment.rbs_loader
+        @class_decl_paths_snapshot = loader&.class_decl_paths || {}.freeze
+        @signature_paths_snapshot = loader&.signature_paths || [].freeze
+        diagnostics.unshift(
+          Diagnostic.new(
+            path: ".rigor.yml", line: 1, column: 1,
+            message: "pool mode degraded to sequential: #{reason}",
+            severity: :warning, rule: "pool-degraded", source_family: :builtin
+          )
         )
       end
 

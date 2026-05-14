@@ -597,16 +597,23 @@ spec suite.
    `--workers=N` flag (precedence: CLI > env > config >
    `0`). Default remains sequential. Pool spec excluded
    from default suite (see § "Known limitations").
-9. ⏭ Phase 4b.x — worker-side env-build stability so
-   pool mode handles real-world (non-trivial) source
-   files. Currently the worker `RBS::EnvironmentLoader.new`
-   path trips `Ractor::IsolationError` on a chain of
-   RubyGems / RBS module constants
-   (`DEFAULT_CORE_ROOT`, `DEFAULT_STDLIB_ROOT`,
-   `Gem::Requirement::DefaultRequirement`). Until then,
-   pool mode is correctness-bound by file content
-   triviality; default sequential mode is the
-   documented production path.
+9. ✅ Phase 4b.x — worker-side env-build stability via
+   cache pre-warm. `Runner#analyze_files_in_pool` now
+   drives every cached RBS producer on the main Ractor
+   before spawning workers (`RbsLoader#prewarm`), so the
+   workers serve every reflection query from the Marshal
+   blob on disk and never touch
+   `RBS::EnvironmentLoader.new` — the chain of
+   non-shareable RubyGems / RBS module constants stays
+   in the main Ractor only. Rigor's own dispatch
+   constants (`MethodDispatcher::ConstantFolding::CATALOG_BY_CLASS`
+   etc.) became `Ractor.make_shareable`; `Builtins::MethodCatalog`
+   loads YAML eagerly so the make_shareable freeze
+   doesn't trip the lazy `@catalog ||= load_catalog`
+   write. Pool mode without a `cache_store` degrades to
+   sequential with a `pool-degraded` `:warning`
+   diagnostic — the `--no-cache` path keeps the legacy
+   semantics.
 10. ⏭ Phase 4c+ — per-worker `Cache::Store`-shared facade
     per § OQ1; benchmark sequential vs pool wall-clock
     and revisit the default once Phase 4b.x stabilises

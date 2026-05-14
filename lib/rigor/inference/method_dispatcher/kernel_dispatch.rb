@@ -36,10 +36,10 @@ module Rigor
         # the result into a `Constant<Rational>` / `Constant<Complex>`.
         # The factory accepts the same shapes as Ruby:
         # `Rational(a)`, `Rational(a, b)`, `Complex(a)`, `Complex(a, b)`.
-        NUMERIC_CONSTRUCTORS = {
-          Rational: ->(*args) { Rational(*args) },
-          Complex: ->(*args) { Complex(*args) }
-        }.freeze
+        NUMERIC_CONSTRUCTORS = Ractor.make_shareable({
+                                                       Rational: Ractor.make_shareable(->(*args) { Rational(*args) }),
+                                                       Complex: Ractor.make_shareable(->(*args) { Complex(*args) })
+                                                     })
         private_constant :NUMERIC_CONSTRUCTORS
 
         # `Kernel#Integer(s)` predicate-aware refinement set

@@ -43,7 +43,8 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         configuration = Rigor::Configuration.new("paths" => [dir])
         result = Dir.chdir(dir) do
           Rigor::Analysis::Runner.new(
-            configuration: configuration, cache_store: nil, workers: 2
+            configuration: configuration, cache_store: Rigor::Cache::Store.new(root: File.join(dir,
+                                                                                               ".rigor")), workers: 2
           ).run
         end
 
@@ -64,7 +65,8 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         end
         pool = Dir.chdir(dir) do
           Rigor::Analysis::Runner.new(
-            configuration: configuration, cache_store: nil, workers: 1
+            configuration: configuration, cache_store: Rigor::Cache::Store.new(root: File.join(dir,
+                                                                                               ".rigor")), workers: 1
           ).run.diagnostics
         end
 
@@ -88,11 +90,70 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
         end
         pool = Dir.chdir(dir) do
           Rigor::Analysis::Runner.new(
-            configuration: configuration, cache_store: nil, workers: 4
+            configuration: configuration, cache_store: Rigor::Cache::Store.new(root: File.join(dir,
+                                                                                               ".rigor")), workers: 4
           ).run.diagnostics
         end
 
         expect(diag_keys(pool)).to eq(diag_keys(sequential))
+      end
+    end
+
+    it "handles non-trivial source that exercises the RBS dispatch chain (Phase 4b.x)" do
+      # Without the Phase 4b.x cache pre-warm, the worker
+      # would call `RBS::EnvironmentLoader.new` on first
+      # class lookup and trip
+      # `Ractor::IsolationError` reading
+      # `RBS::EnvironmentLoader::DEFAULT_CORE_ROOT` etc.
+      # The pre-warm ensures every cached producer is warm
+      # on the main Ractor first, so the worker's
+      # `cached_env` Marshal-load path serves every query
+      # without ever touching `EnvironmentLoader.new`.
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "code.rb")
+        File.write(path, <<~RUBY)
+          "hello".no_such_method
+          [1, 2, 3].rotate(1, 2, 3)
+        RUBY
+        configuration = Rigor::Configuration.new("paths" => [path])
+
+        sequential = Dir.chdir(dir) do
+          Rigor::Analysis::Runner.new(
+            configuration: configuration,
+            cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor-seq"))
+          ).run.diagnostics
+        end
+        pool = Dir.chdir(dir) do
+          Rigor::Analysis::Runner.new(
+            configuration: configuration,
+            cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor-pool")), workers: 2
+          ).run.diagnostics
+        end
+
+        # Both runs MUST flag the same `call.undefined-method`
+        # / `call.wrong-arity` diagnostics — proves the
+        # worker dispatched through RBS without crashing.
+        expect(diag_keys(pool).select { |k| %w[call.undefined-method call.wrong-arity].include?(k[3]) }).to eq(
+          diag_keys(sequential).select { |k| %w[call.undefined-method call.wrong-arity].include?(k[3]) }
+        )
+      end
+    end
+
+    it "degrades gracefully to sequential when pool mode is configured without a cache_store" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "code.rb")
+        File.write(path, "x = 1\n")
+        configuration = Rigor::Configuration.new("paths" => [path])
+        result = Dir.chdir(dir) do
+          Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil, workers: 2
+          ).run
+        end
+
+        degraded = result.diagnostics.find { |d| d.rule == "pool-degraded" }
+        expect(degraded).not_to be_nil
+        expect(degraded.severity).to eq(:warning)
+        expect(degraded.message).to include("requires a cache_store")
       end
     end
 
@@ -111,7 +172,8 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
 
         pool = Dir.chdir(dir) do
           Rigor::Analysis::Runner.new(
-            configuration: configuration, cache_store: nil, workers: 3
+            configuration: configuration, cache_store: Rigor::Cache::Store.new(root: File.join(dir,
+                                                                                               ".rigor")), workers: 3
           ).run.diagnostics
         end
 
@@ -145,7 +207,7 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
 
     after { Rigor::Plugin.unregister! }
 
-    it "stamps plugin-emitted diagnostics from per-worker instances" do
+    it "stamps plugin-emitted diagnostics from per-worker instances" do # rubocop:disable RSpec/ExampleLength
       Dir.mktmpdir do |dir|
         paths = Array.new(3) do |i|
           path = File.join(dir, "file_#{i}.rb")
@@ -163,7 +225,8 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
 
         result = Dir.chdir(dir) do
           Rigor::Analysis::Runner.new(
-            configuration: configuration, cache_store: nil,
+            configuration: configuration,
+            cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor")),
             plugin_requirer: requirer, workers: 2
           ).run
         end
@@ -199,7 +262,8 @@ RSpec.describe "Rigor::Analysis::Runner with Ractor pool (Phase 4b)" do
 
         result = Dir.chdir(dir) do
           Rigor::Analysis::Runner.new(
-            configuration: configuration, cache_store: nil,
+            configuration: configuration,
+            cache_store: Rigor::Cache::Store.new(root: File.join(dir, ".rigor")),
             plugin_requirer: requirer, workers: 3
           ).run
         end

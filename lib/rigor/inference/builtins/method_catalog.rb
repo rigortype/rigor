@@ -30,7 +30,16 @@ module Rigor
         def initialize(path:, mutating_selectors: {})
           @path = path
           @mutating_selectors = mutating_selectors.transform_values(&:freeze).freeze
-          @catalog = nil
+          # ADR-15 Phase 4b.x — eager-load so the instance is
+          # safe to `Ractor.make_shareable`. Lazy init via
+          # `@catalog ||= load_catalog` would write to a
+          # potentially-frozen instance the first time a
+          # worker Ractor consults the catalog, raising
+          # `FrozenError`. The YAML parse is a once-per-process
+          # cost and the catalogs are constructed at module
+          # load time anyway, so eager init is free in
+          # practice.
+          @catalog = load_catalog
         end
 
         def safe_for_folding?(class_name, selector, kind: :instance)
@@ -52,7 +61,7 @@ module Rigor
         end
 
         def reset!
-          @catalog = nil
+          @catalog = load_catalog
         end
 
         private
@@ -72,9 +81,7 @@ module Rigor
           per_class.include?(selector.to_sym) || per_class.include?(selector_str.to_sym)
         end
 
-        def catalog
-          @catalog ||= load_catalog
-        end
+        attr_reader :catalog
 
         def load_catalog
           return EMPTY_CATALOG unless File.exist?(@path)

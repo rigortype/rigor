@@ -1028,10 +1028,10 @@ module Rigor
         # class's ancestor chain at lookup time; the catalog
         # corresponds to the module-mode YAML at
         # `data/builtins/ruby_core/<topic>.yml`.
-        MODULE_CATALOGS = [
-          [Comparable, Builtins::COMPARABLE_CATALOG, "Comparable"],
-          [Enumerable, Builtins::ENUMERABLE_CATALOG, "Enumerable"]
-        ].freeze
+        MODULE_CATALOGS = Ractor.make_shareable([
+                                                  [Comparable, Builtins::COMPARABLE_CATALOG, "Comparable"],
+                                                  [Enumerable, Builtins::ENUMERABLE_CATALOG, "Enumerable"]
+                                                ])
         private_constant :MODULE_CATALOGS
 
         # Returns the `(catalog, class_name)` pairs for every
@@ -1057,31 +1057,31 @@ module Rigor
         # Otherwise a `DateTime` receiver would match the `Date`
         # arm first and the catalog would consult the Date entry
         # in `DATE_CATALOG` for the wrong class.
-        CATALOG_BY_CLASS = [
-          [Integer,  [Builtins::NumericCatalog, "Integer"]],
-          [Float,    [Builtins::NumericCatalog, "Float"]],
-          [String,   [Builtins::STRING_CATALOG, "String"]],
-          [Symbol,   [Builtins::STRING_CATALOG, "Symbol"]],
-          [Array,    [Builtins::ARRAY_CATALOG,  "Array"]],
-          [Hash,     [Builtins::HASH_CATALOG,   "Hash"]],
-          [Range,    [Builtins::RANGE_CATALOG,  "Range"]],
-          [::Set,    [Builtins::SET_CATALOG,    "Set"]],
-          [Time,     [Builtins::TIME_CATALOG,   "Time"]],
-          [DateTime, [Builtins::DATE_CATALOG,   "DateTime"]],
-          [Date,     [Builtins::DATE_CATALOG,   "Date"]],
-          [Rational, [Builtins::RATIONAL_CATALOG, "Rational"]],
-          [Complex,  [Builtins::COMPLEX_CATALOG,  "Complex"]],
-          [Pathname, [Builtins::PATHNAME_CATALOG, "Pathname"]],
-          [Random, [Builtins::RANDOM_CATALOG, "Random"]],
-          [Struct, [Builtins::STRUCT_CATALOG, "Struct"]],
-          [Encoding, [Builtins::ENCODING_CATALOG, "Encoding"]],
-          [Regexp, [Builtins::REGEXP_CATALOG, "Regexp"]],
-          [MatchData, [Builtins::REGEXP_CATALOG, "MatchData"]],
-          [Proc, [Builtins::PROC_CATALOG, "Proc"]],
-          [Method, [Builtins::PROC_CATALOG, "Method"]],
-          [UnboundMethod, [Builtins::PROC_CATALOG, "UnboundMethod"]],
-          [Exception, [Builtins::EXCEPTION_CATALOG, "Exception"]]
-        ].freeze
+        CATALOG_BY_CLASS = Ractor.make_shareable([
+                                                   [Integer, [Builtins::NumericCatalog, "Integer"]],
+                                                   [Float,    [Builtins::NumericCatalog, "Float"]],
+                                                   [String,   [Builtins::STRING_CATALOG, "String"]],
+                                                   [Symbol,   [Builtins::STRING_CATALOG, "Symbol"]],
+                                                   [Array,    [Builtins::ARRAY_CATALOG,  "Array"]],
+                                                   [Hash,     [Builtins::HASH_CATALOG,   "Hash"]],
+                                                   [Range,    [Builtins::RANGE_CATALOG,  "Range"]],
+                                                   [::Set,    [Builtins::SET_CATALOG,    "Set"]],
+                                                   [Time,     [Builtins::TIME_CATALOG,   "Time"]],
+                                                   [DateTime, [Builtins::DATE_CATALOG,   "DateTime"]],
+                                                   [Date,     [Builtins::DATE_CATALOG,   "Date"]],
+                                                   [Rational, [Builtins::RATIONAL_CATALOG, "Rational"]],
+                                                   [Complex,  [Builtins::COMPLEX_CATALOG,  "Complex"]],
+                                                   [Pathname, [Builtins::PATHNAME_CATALOG, "Pathname"]],
+                                                   [Random, [Builtins::RANDOM_CATALOG, "Random"]],
+                                                   [Struct, [Builtins::STRUCT_CATALOG, "Struct"]],
+                                                   [Encoding, [Builtins::ENCODING_CATALOG, "Encoding"]],
+                                                   [Regexp, [Builtins::REGEXP_CATALOG, "Regexp"]],
+                                                   [MatchData, [Builtins::REGEXP_CATALOG, "MatchData"]],
+                                                   [Proc, [Builtins::PROC_CATALOG, "Proc"]],
+                                                   [Method, [Builtins::PROC_CATALOG, "Method"]],
+                                                   [UnboundMethod, [Builtins::PROC_CATALOG, "UnboundMethod"]],
+                                                   [Exception, [Builtins::EXCEPTION_CATALOG, "Exception"]]
+                                                 ])
         private_constant :CATALOG_BY_CLASS
 
         # Returns `[catalog, class_name]` for receivers we have a

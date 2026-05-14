@@ -183,7 +183,7 @@ module Rigor
           # Slice 5 phase 1 projects Tuple/HashShape receivers to
           # their underlying Array/Hash nominal so dispatch reuses the
           # generic-typed pipeline.
-          def receiver_descriptor(receiver)
+          def receiver_descriptor(receiver) # rubocop:disable Metrics/CyclomaticComplexity
             case receiver
             when Type::Constant
               [receiver.value.class.name, :instance, []]
@@ -195,6 +195,18 @@ module Rigor
               ["Array", :instance, tuple_type_args(receiver)]
             when Type::HashShape
               ["Hash", :instance, hash_shape_type_args(receiver)]
+            when Type::BoundMethod
+              # `BoundMethod` is a precision-bearing alias for
+              # `Nominal[Method]`: it carries the
+              # `(receiver, method_name)` binding that
+              # `MethodFolding.try_backward` consumes at
+              # `.call` / `.()` / `[]`, but every other call
+              # site (`.owner` / `.name` / `.arity` / …) must
+              # still resolve through Method's RBS contract.
+              # Routing here keeps reflective Method methods
+              # working without forcing the carrier to
+              # collapse to a plain Nominal at construction.
+              ["Method", :instance, []]
             when Type::Dynamic
               receiver_descriptor(receiver.static_facet)
             end

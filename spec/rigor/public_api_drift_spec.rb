@@ -324,6 +324,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   COMBINATOR_SINGLETON = %w[
     bot()
+    bound_method_of(req:receiver_type,req:method_name)
     constant_of(req:value)
     decimal_int_string()
     difference(req:base,req:removed)

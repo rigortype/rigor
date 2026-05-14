@@ -37,7 +37,14 @@ assert_type("false | true", prc.lambda?)
 # parameterised on the receiver type; here we just check the
 # carrier resolves.
 m = 5.method(:+)
-assert_type("Method", m)
+# `Object#method(:sym)` lifts into a `Type::BoundMethod`
+# carrier whose `.describe` includes the bound receiver and
+# method name so `.call` / `.()` / `[]` can substitute the
+# original dispatch. The carrier erases to plain `Method`
+# at the RBS boundary; reflective members
+# (`#owner` / `#name` / `#arity` below) still resolve
+# through `Nominal[Method]`'s RBS sig.
+assert_type("Method<5#+>", m)
 # `#owner` on Method returns the `Module` / `Class` that
 # defined the method. RBS exposes this as `Class | Module`.
 assert_type("Class | Module", m.owner)

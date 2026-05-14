@@ -156,6 +156,21 @@ module Rigor
       def inspect: () -> String
     end
 
+    class BoundMethod
+      attr_reader receiver_type: Type::t
+      attr_reader method_name: Symbol
+      def initialize: (receiver_type: Type::t, method_name: Symbol) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
     class Intersection
       attr_reader members: Array[Type::t]
       def initialize: (Array[Type::t] members) -> void
@@ -232,6 +247,7 @@ module Rigor
       def self?.nominal_of: (Module | String class_name_or_object, ?type_args: Array[Type::t]) -> Nominal
       def self?.singleton_of: (Module | String class_name_or_object) -> Singleton
       def self?.constant_of: (untyped value) -> Constant
+      def self?.bound_method_of: (Type::t receiver_type, Symbol method_name) -> BoundMethod
       def self?.difference: (Type::t base, Type::t removed) -> Difference
       def self?.non_empty_string: () -> Difference
       def self?.non_zero_int: () -> Difference

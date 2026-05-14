@@ -12,6 +12,7 @@ require_relative "method_dispatcher/iterator_dispatch"
 require_relative "method_dispatcher/block_folding"
 require_relative "method_dispatcher/file_folding"
 require_relative "method_dispatcher/kernel_dispatch"
+require_relative "method_dispatcher/method_folding"
 
 module Rigor
   module Inference
@@ -61,10 +62,17 @@ module Rigor
       # @param environment [Rigor::Environment, nil] required for
       #   RBS-backed dispatch; when nil only constant folding can fire.
       # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
-      def dispatch(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/ParameterLists
+      def dispatch(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/ParameterLists,Metrics/CyclomaticComplexity
                    block_type: nil, environment: nil,
                    call_node: nil, scope: nil)
         return nil if receiver_type.nil?
+
+        bound_method_result = MethodFolding.try_backward(
+          receiver: receiver_type, method_name: method_name, args: arg_types,
+          block_type: block_type, environment: environment,
+          call_node: call_node, scope: scope
+        )
+        return bound_method_result if bound_method_result
 
         precise = dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type)
         return precise if precise
@@ -368,7 +376,7 @@ module Rigor
       # its rules apply only to block-taking calls, so the cheaper
       # arity-based fold tiers above it filter out the common
       # cases first. When `block_type` is nil the tier is a no-op.
-      def dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type = nil)
+      def dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type = nil) # rubocop:disable Metrics/CyclomaticComplexity
         meta_result = try_meta_introspection(receiver_type, method_name, arg_types)
         return meta_result if meta_result
 
@@ -377,6 +385,7 @@ module Rigor
           ShapeDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           KernelDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          MethodFolding.try_forward(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           BlockFolding.try_fold(
             receiver: receiver_type, method_name: method_name, args: arg_types, block_type: block_type
           )

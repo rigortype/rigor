@@ -13,6 +13,7 @@ require_relative "union"
 require_relative "difference"
 require_relative "refined"
 require_relative "intersection"
+require_relative "bound_method"
 
 module Rigor
   module Type
@@ -67,6 +68,14 @@ module Rigor
 
       def constant_of(value)
         Constant.new(value)
+      end
+
+      # `Object#method(:name)` carrier. Stores the bound
+      # `(receiver, method_name)` pair so the dispatcher can
+      # substitute the original dispatch at `.call` / `.()` /
+      # `[]` time. See {Type::BoundMethod}.
+      def bound_method_of(receiver_type, method_name)
+        BoundMethod.new(receiver_type: receiver_type, method_name: method_name)
       end
 
       # Bounded-integer carrier. Each bound is either an `Integer` or

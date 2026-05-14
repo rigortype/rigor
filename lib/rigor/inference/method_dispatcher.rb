@@ -469,9 +469,25 @@ module Rigor
         Type::Combinator.nominal_of(receiver_type.class_name)
       end
 
-      CONSTANT_CONSTRUCTORS = {
-        "Pathname" => ->(arg) { Pathname.new(arg) }
-      }.freeze
+      # ADR-15 Phase 4b.x — `Ractor.make_shareable` on both the
+      # outer Hash and each lambda value. A plain `.freeze` leaves
+      # the Procs unshareable; reading `CONSTANT_CONSTRUCTORS[class]`
+      # from a worker Ractor would raise `Ractor::IsolationError`,
+      # which the `rescue StandardError` in
+      # `constant_constructor_lift` silently swallows — `meta_new`
+      # then falls back to `Nominal[Pathname]` in pool mode while
+      # sequential builds the `Constant<Pathname>` lift. The
+      # divergence surfaces downstream as a spurious
+      # `call.argument-type-mismatch` (sequential's
+      # `argument_type_diagnostic` short-circuits on Constant<Pathname>
+      # because Pathname is not in its CONSTANT_CLASSES table; pool's
+      # Nominal[Pathname] doesn't short-circuit). Surfaced on GitLab
+      # FOSS via `lib/gitlab/mail_room.rb:17`.
+      CONSTANT_CONSTRUCTORS = Ractor.make_shareable({
+                                                      "Pathname" => Ractor.make_shareable(lambda { |arg|
+                                                                                            Pathname.new(arg)
+                                                                                          })
+                                                    })
       private_constant :CONSTANT_CONSTRUCTORS
 
       def constant_constructor_lift(class_name, arg_types)

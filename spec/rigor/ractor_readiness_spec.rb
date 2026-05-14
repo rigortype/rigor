@@ -347,5 +347,19 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       table = Rigor::Inference::MethodDispatcher::ShapeDispatch.singleton_class.const_get(:REFINED_STRING_PROJECTIONS)
       expect(shareable?(table)).to be(true)
     end
+
+    # `CONSTANT_CONSTRUCTORS` carries `Proc` values; a shallow
+    # `.freeze` leaves the lambdas non-shareable and
+    # `constant_constructor_lift`'s `rescue StandardError` quietly
+    # swallows the resulting `Ractor::IsolationError`. The result
+    # is a precision divergence (`Constant<Pathname>` under
+    # sequential, `Nominal[Pathname]` under pool), which then
+    # surfaces downstream as a spurious `call.argument-type-mismatch`
+    # diagnostic. Surfaced on GitLab FOSS via
+    # `lib/gitlab/mail_room.rb:17`.
+    it "MethodDispatcher::CONSTANT_CONSTRUCTORS is Ractor.shareable? (Proc values + outer Hash)" do
+      table = Rigor::Inference::MethodDispatcher.const_get(:CONSTANT_CONSTRUCTORS)
+      expect(shareable?(table)).to be(true)
+    end
   end
 end

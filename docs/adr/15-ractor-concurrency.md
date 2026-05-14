@@ -172,8 +172,18 @@ migration documented in
      equivalent of `Runner#analyze_file`. NO Ractor in the
      loop yet — the substrate exists so the per-worker
      ownership boundary is testable in isolation.
-   - **Phase 4b (DEFERRED)**: `Runner` delegates per-file
-     analysis to a Ractor pool around `WorkerSession`.
+   - **Phase 4b (LANDED)**: `Runner` gains a `workers: N`
+     constructor keyword (default `0` = sequential). When
+     `N > 0`, per-file analysis dispatches across N Ractors
+     each running a WorkerSession. Workers write back via
+     `Ractor.main.send` (Ruby 4.0+ mailbox model — yield
+     was removed). Coordinator merges per-worker reporters
+     and re-orders diagnostics by original path order.
+     `Environment::ClassRegistry.default` made
+     `Ractor.make_shareable` so workers can read it without
+     `Ractor::IsolationError`. The CLI surface remains
+     untouched — `workers:` is a programmatic opt-in only
+     in this slice. Phase 4c wires the user-facing flag.
    - **Phase 4c (DEFERRED)**: `RIGOR_RACTOR_WORKERS` env
      var + `.rigor.yml` `parallel.workers:` entry; default
      remains sequential.
@@ -571,10 +581,12 @@ spec suite.
 6. ✅ Phase 4a — `Analysis::WorkerSession` value carrier;
    per-worker substrate with no Ractor in the loop yet.
    See § Phase 4 design + design doc § Phase 4a.
-7. ⏭ Phase 4b — Runner delegates per-file analysis to a
-   Ractor pool around `WorkerSession`.
-8. ⏭ Phase 4c — `RIGOR_RACTOR_WORKERS` opt-in flag (each
-   worker builds its own Reflection from the shared
-   `Cache::Store` and materialises plugins from the shared
-   blueprint set; the Store gains a Ractor-shareable
-   facade per § OQ1).
+7. ✅ Phase 4b — Runner Ractor pool around `WorkerSession`
+   (programmatic `workers:` keyword; sequential remains
+   default; CLI / `.rigor.yml` opt-in deferred to 4c).
+8. ⏭ Phase 4c — `RIGOR_RACTOR_WORKERS` opt-in flag +
+   `.rigor.yml` `parallel.workers:` entry. (The
+   per-worker `Cache::Store`-shared facade per § OQ1 is
+   a separate optimisation; 4c wires the user-visible
+   knob first, then OQ1's facade lands as a follow-up
+   when the wall-clock benefit is measured.)

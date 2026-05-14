@@ -282,4 +282,37 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       expect(session_a.boundary_cross_reporter).not_to equal(session_b.boundary_cross_reporter)
     end
   end
+
+  # Phase 4b (LANDED): the Runner now ships per-file analysis
+  # to a Ractor pool around `WorkerSession` when constructed
+  # with `workers: N > 0`. The class-level lazy memos every
+  # worker reads on its first `Environment.for_project` call
+  # MUST be `Ractor.shareable?` — `Environment::ClassRegistry.default`
+  # in particular, since lazy-initialising a class @ivar from
+  # a non-main Ractor would trip `Ractor::IsolationError`.
+  # Pre-warming the registry on the main Ractor is the
+  # `Runner#analyze_files_in_pool` contract; this audit
+  # asserts the underlying invariant.
+  describe "Phase 4b — Ractor pool readiness" do
+    it "Environment::ClassRegistry.default is Ractor.shareable?" do
+      expect(shareable?(Rigor::Environment::ClassRegistry.default)).to be(true)
+    end
+
+    it "the Phase 4b worker-payload tuple crosses a Ractor boundary without raising" do
+      configuration = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      cache_root = nil
+      blueprints = [].freeze
+      explain = false
+
+      ractor = Ractor.new(configuration, cache_root, blueprints, explain) do |c, _r, b, e|
+        # Touch each input on the receiving side so the
+        # boundary crossing is exercised in full; return a
+        # Ractor.shareable? digest so the assertion compares
+        # apples to apples.
+        [c.frozen?, b.frozen?, e == false].freeze
+      end
+
+      expect(ractor.value).to eq([true, true, true])
+    end
+  end
 end

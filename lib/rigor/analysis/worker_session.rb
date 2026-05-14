@@ -93,13 +93,13 @@ module Rigor
         @cache_store = cache_store
         @explain = explain
 
-        # Process-global side-effect mirrors what Runner sets in
-        # `#run` before per-file iteration. Idempotent for the
-        # same value; the session sets it so the substrate is
-        # self-contained when called outside a Runner.
-        Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
-          configuration.fold_platform_specific_paths
-
+        # NOTE: `Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths`
+        # is process-global state. Writing it from a non-main
+        # Ractor would raise `Ractor::IsolationError`, so the
+        # session does NOT touch it — the CALLER (typically
+        # {Rigor::Analysis::Runner#run}) is responsible for
+        # setting it on the main Ractor before spawning the
+        # pool. The substrate stays Ractor-safe by construction.
         @rbs_extended_reporter = RbsExtended::Reporter.new
         @boundary_cross_reporter = DependencySourceInference::BoundaryCrossReporter.new
         @dependency_source_index = DependencySourceInference::Builder.build(configuration.dependencies)

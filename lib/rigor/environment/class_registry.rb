@@ -67,10 +67,19 @@ module Rigor
 
         private
 
+        # ADR-15 Phase 4b — the default registry MUST be
+        # `Ractor.shareable?` so worker Ractors that consult
+        # `Environment.for_project`'s default `class_registry:`
+        # don't trip `Ractor::IsolationError`. The internal
+        # `@nominals` / `@class_objects` Hashes are populated
+        # via `register`, then `Ractor.make_shareable`
+        # recursively freezes the registry, the two Hashes,
+        # and confirms every entry (Type::Nominal carriers +
+        # core Ruby classes) is itself shareable.
         def build_default
-          new.tap do |registry|
-            CORE_BUILT_INS.each { |klass| registry.register(klass) }
-          end.freeze
+          registry = new
+          CORE_BUILT_INS.each { |klass| registry.register(klass) }
+          Ractor.make_shareable(registry)
         end
       end
 

@@ -16,6 +16,7 @@ require_relative "check_rules"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
 require_relative "result"
+require_relative "worker_session"
 
 module Rigor
   module Analysis
@@ -35,13 +36,21 @@ module Rigor
       #   run; the CLI's `--no-cache` flag wires `nil` through.
       #   v0.0.9 group A slice 1 introduces the surface; later
       #   slices route real producers through it.
+      # @param workers [Integer] ADR-15 Phase 4b — when greater
+      #   than zero, per-file analysis dispatches across a pool of
+      #   N Ractor workers built around {WorkerSession}. Default
+      #   `0` keeps the sequential code path bit-for-bit
+      #   unchanged. Phase 4c will wire the CLI / `.rigor.yml`
+      #   surface that produces non-zero values; this slice
+      #   leaves the parameter as a programmatic opt-in only.
       def initialize(configuration:, explain: false,
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
-                     plugin_requirer: nil)
+                     plugin_requirer: nil, workers: 0)
         @configuration = configuration
         @explain = explain
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
+        @workers = workers
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
         @rbs_extended_reporter = RbsExtended::Reporter.new
@@ -65,23 +74,33 @@ module Rigor
 
         @plugin_registry = load_plugins
         @dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
-        environment = Environment.for_project(
-          libraries: @configuration.libraries,
-          signature_paths: @configuration.signature_paths,
-          cache_store: @cache_store,
-          plugin_registry: @plugin_registry,
-          dependency_source_index: @dependency_source_index,
-          rbs_extended_reporter: @rbs_extended_reporter,
-          boundary_cross_reporter: @boundary_cross_reporter
-        )
         expansion = expand_paths(paths)
 
         diagnostics = pre_file_diagnostics(expansion)
-        diagnostics += expansion.fetch(:files).flat_map { |path| analyze_file(path, environment) }
+        diagnostics += analyze_files(expansion.fetch(:files))
         diagnostics += rbs_extended_reporter_diagnostics
         diagnostics += boundary_cross_diagnostics
 
         Result.new(diagnostics: apply_severity_profile(diagnostics))
+      end
+
+      # ADR-15 Phase 4b — routes per-file analysis to either the
+      # sequential coordinator-side Environment (legacy path,
+      # default) or a Ractor worker pool built around
+      # {WorkerSession} (opt-in via `workers:`). The sequential
+      # path is bit-for-bit unchanged from v0.1.4 / earlier; the
+      # pool path is the substrate exercised by phase 4c when
+      # `RIGOR_RACTOR_WORKERS` / `.rigor.yml` `parallel.workers:`
+      # is wired.
+      def analyze_files(files)
+        return [] if files.empty?
+
+        if pool_mode?
+          analyze_files_in_pool(files)
+        else
+          environment = build_runner_environment
+          files.flat_map { |path| analyze_file(path, environment) }
+        end
       end
 
       # Pre-file diagnostic streams that fire once per run rather
@@ -90,9 +109,21 @@ module Rigor
       # `expand_paths` errors for `paths:` entries that don't
       # exist or aren't `.rb`. Aggregated here so `#run` stays
       # under the ABC budget.
+      #
+      # ADR-15 Phase 4b — `plugin_prepare_diagnostics` runs on
+      # the coordinator's plugin registry under sequential mode;
+      # under pool mode each worker re-runs `prepare` against
+      # its own plugin instances, so the pool path drains the
+      # first worker's prepare-diagnostic snapshot into the
+      # aggregated diagnostic stream instead (see
+      # {#analyze_files_in_pool}). Skipping the coordinator
+      # prepare in pool mode avoids double-running `#prepare`
+      # against the coordinator-side plugin instances (which
+      # the pool path never consults for per-file analysis).
       def pre_file_diagnostics(expansion)
+        prepare = pool_mode? ? [] : plugin_prepare_diagnostics
         plugin_load_diagnostics +
-          plugin_prepare_diagnostics +
+          prepare +
           dependency_source_diagnostics +
           dependency_source_budget_diagnostics +
           dependency_source_config_conflict_diagnostics +
@@ -119,6 +150,146 @@ module Rigor
       end
 
       private
+
+      def pool_mode?
+        @workers.is_a?(Integer) && @workers.positive?
+      end
+
+      # Coordinator-side Environment used by the sequential code
+      # path. Pool mode builds one Environment per worker inside
+      # the worker Ractor's body instead.
+      def build_runner_environment
+        Environment.for_project(
+          libraries: @configuration.libraries,
+          signature_paths: @configuration.signature_paths,
+          cache_store: @cache_store,
+          plugin_registry: @plugin_registry,
+          dependency_source_index: @dependency_source_index,
+          rbs_extended_reporter: @rbs_extended_reporter,
+          boundary_cross_reporter: @boundary_cross_reporter
+        )
+      end
+
+      # ADR-15 Phase 4b — Ractor pool around {WorkerSession}.
+      # Spawns `@workers` Ractors; each takes the shareable
+      # payload (Configuration, cache_root String, plugin
+      # Blueprint Array, explain Boolean) and builds its OWN
+      # WorkerSession internally. Files are distributed
+      # round-robin across the pool; each worker writes back to
+      # the main Ractor's mailbox via `Ractor.main.send` with
+      # one of three message kinds:
+      #
+      # - `[:prepare, diagnostics]` — once at startup, the
+      #   session's `prepare_diagnostics` snapshot. The
+      #   coordinator keeps the FIRST worker's snapshot only
+      #   (plugin `#prepare` is deterministic per plugin, so
+      #   each worker produces the same diagnostic set; surfacing
+      #   them once avoids N× duplication).
+      # - `[:file, path, diagnostics]` — one per analysed file.
+      # - `[:done, drained_reporters]` — once at exit, the
+      #   per-worker reporter snapshots for end-of-pool merge.
+      #
+      # The Ruby 4.0+ Ractor model uses a single per-Ractor
+      # mailbox (no `Ractor.yield`); workers push back via
+      # `Ractor.main.send`. The coordinator drains its mailbox
+      # via `Ractor.receive` until it has counted exactly
+      # `pool.size` `:done` messages.
+      #
+      # Diagnostic order: original path order. Workers may
+      # complete files out of order; the coordinator re-orders
+      # via the `results_by_path` Hash before flattening.
+      #
+      # Reporter merge: per-worker `RbsExtended::Reporter` and
+      # `BoundaryCrossReporter` entries are replayed into the
+      # runner-side accumulators via their `record_*` APIs,
+      # which dedupe on the same keys as a single-session run
+      # would. Net result: reporter state is identical to the
+      # sequential path.
+      def analyze_files_in_pool(files) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity
+        # Pre-warm class-level lazy memos on the MAIN Ractor.
+        # `Environment::ClassRegistry.default` is the
+        # default kwarg threaded through `Environment.new`
+        # inside each worker session; lazy-initialising it
+        # from a non-main Ractor would trip
+        # `Ractor::IsolationError`. Touching it here forces
+        # the (shareable) registry into the class-ivar cache
+        # before any worker reads.
+        Environment::ClassRegistry.default
+
+        configuration = @configuration
+        cache_root = @cache_store&.root
+        blueprints = @plugin_registry.blueprints
+        explain = @explain
+
+        pool = Array.new(@workers) do
+          Ractor.new(configuration, cache_root, blueprints, explain) do |configuration, cache_root, blueprints, explain|
+            cache_store = cache_root ? Rigor::Cache::Store.new(root: cache_root) : nil
+            session = Rigor::Analysis::WorkerSession.new(
+              configuration: configuration,
+              cache_store: cache_store,
+              plugin_blueprints: blueprints,
+              explain: explain
+            )
+            main = Ractor.main
+            main.send([:prepare, session.prepare_diagnostics])
+
+            loop do
+              msg = Ractor.receive
+              break if msg.nil?
+
+              main.send([:file, msg, session.analyze(msg)])
+            end
+
+            main.send([:done, session.drain_reporters])
+          end
+        end
+
+        files.each_with_index { |path, index| pool[index % pool.size].send(path) }
+        pool.each { |worker| worker.send(nil) }
+
+        prepare_diagnostics = nil
+        results_by_path = {}
+        done_count = 0
+
+        while done_count < pool.size
+          message = Ractor.receive
+          case message.first
+          when :prepare
+            prepare_diagnostics ||= message.last
+          when :file
+            results_by_path[message[1]] = message[2]
+          when :done
+            merge_worker_reporters(message.last)
+            done_count += 1
+          end
+        end
+
+        pool.each(&:join)
+
+        Array(prepare_diagnostics) + files.flat_map { |path| results_by_path.fetch(path, []) }
+      end
+
+      def merge_worker_reporters(drained)
+        rbs = drained.fetch(:rbs_extended)
+        rbs.fetch(:unresolved_payloads).each do |entry|
+          @rbs_extended_reporter.record_unresolved(
+            payload: entry.payload, source_location: entry.source_location
+          )
+        end
+        rbs.fetch(:lossy_projections).each do |entry|
+          @rbs_extended_reporter.record_lossy_projection(
+            head: entry.head, source_location: entry.source_location
+          )
+        end
+        drained.fetch(:boundary_cross).each do |entry|
+          @boundary_cross_reporter.record(
+            class_name: entry.class_name,
+            method_name: entry.method_name,
+            gem_name: entry.gem_name,
+            rbs_display: entry.rbs_display
+          )
+        end
+      end
 
       # Loads project-configured plugins through {Rigor::Plugin::Loader}
       # and returns the resulting {Rigor::Plugin::Registry}. Loader

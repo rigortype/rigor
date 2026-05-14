@@ -256,13 +256,37 @@ N worker Ractors holding N sessions.
 
 NO Ractor in the loop yet — this is the substrate.
 
-**Phase 4b — Ractor pool around `WorkerSession`.** A new
-`Analysis::Runner#analyze_files_in_pool` opt-in path.
-`Ractor.new(payload) do |inputs|; session =
-WorkerSession.new(...); loop { path = Ractor.receive; break
-if path.nil?; Ractor.yield([path, session.analyze(path)])
-}; end`. Result-by-path bookkeeping for deterministic
-output order. Reporter aggregation after the pool drains.
+**Phase 4b (LANDED) — Ractor pool around `WorkerSession`.**
+`Analysis::Runner#initialize` gains a `workers: N` keyword
+(default `0` = sequential, the documented v0.1.4-and-earlier
+behaviour). When `N > 0`, `Runner#analyze_files` dispatches
+to the new private `#analyze_files_in_pool(files)` which
+spawns N Ractors. Each worker takes the shareable payload
+(Configuration, cache_root String, Plugin::Blueprint Array,
+explain Boolean), builds its own WorkerSession internally,
+and writes back to the main Ractor's mailbox via
+`Ractor.main.send` (Ruby 4.0 dropped `Ractor.yield`; the
+mailbox model is now bidirectional). Three message kinds:
+`[:prepare, diagnostics]` (coordinator keeps the FIRST
+worker's snapshot), `[:file, path, diagnostics]` (one per
+analysed file), `[:done, drained_reporters]` (one per worker
+at exit). Diagnostic order is reconstructed by re-flowing
+the per-path result Hash through the original input order.
+Per-worker reporter snapshots merge into the runner-side
+accumulators via the existing `record_*` APIs (dedup
+naturally). `Environment::ClassRegistry.default` made
+`Ractor.make_shareable` so workers can lazy-read it without
+`Ractor::IsolationError`; `Runner#analyze_files_in_pool`
+pre-warms it on the main Ractor first. `WorkerSession`
+constructor no longer writes the
+`MethodDispatcher::FileFolding.fold_platform_specific_paths`
+process-global (non-main writes raise) — the Runner sets it
+once on the main Ractor before pool spawn.
+
+Equivalence + plugin replay + prepare-dedup proven by
+`spec/rigor/analysis/runner_pool_spec.rb`. Audit-spec
+coverage in `spec/rigor/ractor_readiness_spec.rb`
+§ "Phase 4b — Ractor pool readiness".
 
 **Phase 4c — Defaults + flag.** `RIGOR_RACTOR_WORKERS` env
 var (`0` = sequential, default; `N` = N workers); honour
@@ -344,10 +368,12 @@ Items #7) while Ractor phases progress incrementally.
    contract (DEFERRED until Phase 4).
 6. ✅ Phase 4a — `WorkerSession` value carrier (no Ractor
    yet; substrate for the pool).
-7. ⏭ Phase 4b — Ractor pool around `WorkerSession` in
-   `Runner#analyze_files`.
-8. ⏭ Phase 4c — Default + opt-in flag
-   (`RIGOR_RACTOR_WORKERS`).
+7. ✅ Phase 4b — Ractor pool around `WorkerSession` in
+   `Runner#analyze_files` (programmatic `workers: N`
+   opt-in; sequential remains default).
+8. ⏭ Phase 4c — User-facing opt-in flag
+   (`RIGOR_RACTOR_WORKERS` env + `.rigor.yml`
+   `parallel.workers:`).
 
 Each subsequent phase reads from the prior phase's audit spec
 to confirm prerequisites. The audit spec is the contract

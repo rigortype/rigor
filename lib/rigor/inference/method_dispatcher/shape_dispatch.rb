@@ -323,39 +323,45 @@ module Rigor
           # `dispatch_nominal_size` so size-returning calls on
           # a `Refined[String, *]` still tighten to
           # `non_negative_int`.
-          REFINED_STRING_PROJECTIONS = {
-            %i[lowercase downcase] => :refined_self,
-            %i[lowercase upcase] => :uppercase_string,
-            %i[uppercase upcase] => :refined_self,
-            %i[uppercase downcase] => :lowercase_string,
-            %i[numeric downcase] => :refined_self,
-            %i[numeric upcase] => :refined_self,
-            # Digit-only strings are case-invariant; the prefix
-            # letters in `0o…` / `0x…` are accepted by the
-            # predicate in either case so the predicate-subset
-            # is preserved across `#downcase` / `#upcase` even
-            # though the value-set element changes.
-            %i[decimal_int downcase] => :refined_self,
-            %i[decimal_int upcase] => :refined_self,
-            %i[octal_int downcase] => :refined_self,
-            %i[octal_int upcase] => :refined_self,
-            %i[hex_int downcase] => :refined_self,
-            %i[hex_int upcase] => :refined_self,
-            # v0.1.1 Track 1 slice 2 — `to_i` / `to_int` on a
-            # known digit-only string. `decimal-int-string`
-            # (`/\A\d+\z/`) and `numeric-string` (Rigor's
-            # numeric-string predicate, ASCII digits) are
-            # predicates over digit-only strings, so the parse
-            # is total over the carrier domain and the result
-            # is always `>= 0`. `non-negative-int` is the
-            # tightest carrier that captures both the lower
-            # bound and the integer-ness without inventing a
-            # narrower carrier.
-            %i[decimal_int to_i] => :non_negative_int,
-            %i[decimal_int to_int] => :non_negative_int,
-            %i[numeric to_i] => :non_negative_int,
-            %i[numeric to_int] => :non_negative_int
-          }.freeze
+          # ADR-15 Phase 4b.x — `Ractor.make_shareable` (not `.freeze`)
+          # because the keys are two-element Symbol arrays whose
+          # inner arrays are unfrozen under shallow `.freeze`.
+          # Surfaced on Discourse via `Ractor::IsolationError` when
+          # the dispatch loop's `REFINED_STRING_PROJECTIONS[[id, sym]]`
+          # lookup ran from a worker Ractor.
+          REFINED_STRING_PROJECTIONS = Ractor.make_shareable({
+                                                               %i[lowercase downcase] => :refined_self,
+                                                               %i[lowercase upcase] => :uppercase_string,
+                                                               %i[uppercase upcase] => :refined_self,
+                                                               %i[uppercase downcase] => :lowercase_string,
+                                                               %i[numeric downcase] => :refined_self,
+                                                               %i[numeric upcase] => :refined_self,
+                                                               # Digit-only strings are case-invariant; the prefix
+                                                               # letters in `0o…` / `0x…` are accepted by the
+                                                               # predicate in either case so the predicate-subset
+                                                               # is preserved across `#downcase` / `#upcase` even
+                                                               # though the value-set element changes.
+                                                               %i[decimal_int downcase] => :refined_self,
+                                                               %i[decimal_int upcase] => :refined_self,
+                                                               %i[octal_int downcase] => :refined_self,
+                                                               %i[octal_int upcase] => :refined_self,
+                                                               %i[hex_int downcase] => :refined_self,
+                                                               %i[hex_int upcase] => :refined_self,
+                                                               # v0.1.1 Track 1 slice 2 — `to_i` / `to_int` on a
+                                                               # known digit-only string. `decimal-int-string`
+                                                               # (`/\A\d+\z/`) and `numeric-string` (Rigor's
+                                                               # numeric-string predicate, ASCII digits) are
+                                                               # predicates over digit-only strings, so the parse
+                                                               # is total over the carrier domain and the result
+                                                               # is always `>= 0`. `non-negative-int` is the
+                                                               # tightest carrier that captures both the lower
+                                                               # bound and the integer-ness without inventing a
+                                                               # narrower carrier.
+                                                               %i[decimal_int to_i] => :non_negative_int,
+                                                               %i[decimal_int to_int] => :non_negative_int,
+                                                               %i[numeric to_i] => :non_negative_int,
+                                                               %i[numeric to_int] => :non_negative_int
+                                                             })
           private_constant :REFINED_STRING_PROJECTIONS
 
           def dispatch_refined(refined, method_name, args)

@@ -339,5 +339,13 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       rules = Rigor::Builtins::RegexRefinement.const_get(:RULES)
       expect(shareable?(rules)).to be(true)
     end
+
+    it "MethodDispatcher::ShapeDispatch::REFINED_STRING_PROJECTIONS is Ractor.shareable?" do
+      # Defined inside `class << self`, so it lives on the
+      # singleton class of `ShapeDispatch`, not directly on the
+      # module. `singleton_class.const_get` is the access path.
+      table = Rigor::Inference::MethodDispatcher::ShapeDispatch.singleton_class.const_get(:REFINED_STRING_PROJECTIONS)
+      expect(shareable?(table)).to be(true)
+    end
   end
 end

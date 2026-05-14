@@ -1,0 +1,4 @@
+paths:
+  - demo.rb
+signature_paths:
+  - ../sig

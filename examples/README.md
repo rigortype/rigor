@@ -1,5 +1,13 @@
 # Rigor plugin examples
 
+Twenty-one entries — twenty worked plugins of the **v0.1.0 plugin
+authoring surface** plus one RBS-only bundle
+(`rigor-activesupport-core-ext`).
+
+(The earlier "eighteen worked examples" paragraph reflected the
+state on 2026-05-11; subsequent additions are listed in the tables
+below.)
+
 Eighteen worked examples of the **v0.1.0 plugin authoring
 surface**. Each one is a fully-shaped plugin gem (manifest
 + `lib/` + gemspec) with a runnable demo (`demo/.rigor.yml`,
@@ -47,6 +55,16 @@ ADR-9's cross-plugin fact store.
 | [`rigor-actionpack`](rigor-actionpack/) | 2 | **Phase 4** — route-helper consumption (first concrete ADR-9 consumer); **Phase 2** — filter chain validation (`before_action :name` against the controller's effective method set, including one level of inheritance); **Phase 3** — render-target validation (`render :show` → `app/views/<controller_path>/show.html.erb`) | Ruby (`app/controllers/`) + view templates | ✅ | 21 |
 | [`rigor-factorybot`](rigor-factorybot/) | 2 | **Phase 1 (a)** — self-contained validation of `FactoryBot.create(:name, key: ...)` / `.build` / `.attributes_for` / `*_list` against a per-run factory index built from `spec/factories/`. Phase 1 (c) AR column cross-check is queued | Ruby (`spec/factories/`) | ✅ | 10 |
 | [`rigor-activestorage`](rigor-activestorage/) | 3E | `has_one_attached :avatar` / `has_many_attached :photos` macro discovery on AR models + return-type narrowing to `Nominal[ActiveStorage::Attached::One]` / `::Many` via `flow_contribution_for` (instance navigation tier) | Ruby (`app/models/`) | ✅ | 11 |
+
+### RBS-only community bundles
+
+Not "plugins" in the v0.1.0 plugin-contract sense (no `Rigor::Plugin::Base`
+subclass, no `manifest(...)`); shipped instead as opt-in `sig/`
+directories that the user wires into `.rigor.yml`'s `signature_paths:`.
+
+| Bundle | Scope | Coverage |
+| --- | --- | --- |
+| [`rigor-activesupport-core-ext`](rigor-activesupport-core-ext/) | Top ~40 ActiveSupport `core_ext` selectors that dominated the four-project Rails survey (`docs/notes/20260515-real-world-rails-survey.md`). | `Integer`/`Float` Duration & Bytes multipliers; `Time`/`Date` calculations; `String` inflections / filters; `Array.wrap` + `Array#to_sentence` / `#in_groups_of` etc.; `Hash#deep_dup` / `#deep_merge` / `#symbolize_keys` family; `Object#blank?` / `#present?` / `#presence` / `#try`. Measured impact: total diagnostics across the four survey projects 5,281 → 1,333 (−75%). |
 
 All twenty rely on **slice 5**
 (`Plugin::Base#diagnostics_for_file`) to surface

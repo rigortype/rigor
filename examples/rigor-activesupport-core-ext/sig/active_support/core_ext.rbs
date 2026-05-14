@@ -1,0 +1,368 @@
+# ActiveSupport core_ext — community-maintained RBS bundle.
+#
+# Scope: the most-frequently-flagged ActiveSupport extension methods
+# from a four-project Rails survey (Redmine, Discourse, Mastodon,
+# GitLab FOSS — see `docs/notes/20260515-real-world-rails-survey.md`).
+# Roughly the top ~40 selectors by `call.undefined-method` frequency,
+# which together account for the bulk of the Rails-extension long
+# tail.
+#
+# This file is opt-in: enable by adding the gem's `sig/` directory
+# to `.rigor.yml`'s `signature_paths:`:
+#
+#     # .rigor.yml
+#     signature_paths:
+#       - sig
+#       - path/to/rigor-activesupport-core-ext/sig
+#
+# Not exhaustive. ActiveSupport ships many more extensions across
+# Hash / Array / String / Object / Date / Time / Integer / Module
+# than this file covers; PRs welcome to extend.
+
+# ---------------------------------------------------------------
+# Object — universal predicates and helpers
+# ---------------------------------------------------------------
+
+class Object
+  # @return [bool]
+  def blank?: () -> bool
+
+  # @return [bool]
+  def present?: () -> bool
+
+  # @return [self?]
+  def presence: () -> self?
+
+  # `try` swallows NoMethodError; declared return is `untyped`
+  # because the called method's signature is not known to RBS
+  # at this call site.
+  def try: (Symbol | String) -> untyped
+         | (Symbol | String, *untyped) -> untyped
+         | (Symbol | String, *untyped) { (?) -> untyped } -> untyped
+
+  def try!: (Symbol | String) -> untyped
+          | (Symbol | String, *untyped) -> untyped
+          | (Symbol | String, *untyped) { (?) -> untyped } -> untyped
+
+  # `acts_like?(:string)` / `acts_like?(:date)` / `acts_like?(:time)`
+  # is ActiveSupport's "duck-typing helper" predicate.
+  def acts_like?: (Symbol | String) -> bool
+end
+
+# `nil.blank?` / `nil.present?` / `nil.try` are the most frequent
+# call sites the survey turned up.
+class NilClass
+  def blank?: () -> true
+  def present?: () -> false
+  def presence: () -> nil
+  def try: (*untyped) -> nil
+  def try!: (*untyped) -> nil
+end
+
+class TrueClass
+  def blank?: () -> false
+  def present?: () -> true
+end
+
+class FalseClass
+  def blank?: () -> true
+  def present?: () -> false
+end
+
+# ---------------------------------------------------------------
+# String — ActiveSupport `core_ext/string/*`
+# ---------------------------------------------------------------
+
+class String
+  # `core_ext/string/inflections`
+  def underscore: () -> String
+  def camelize: (?Symbol upper_case_first) -> String
+  def camelcase: (?Symbol upper_case_first) -> String
+  def classify: () -> String
+  def constantize: () -> untyped
+  def safe_constantize: () -> untyped
+  def demodulize: () -> String
+  def deconstantize: () -> String
+  def titleize: () -> String
+  def parameterize: (?separator: String, ?preserve_case: bool, ?locale: Symbol?) -> String
+  def tableize: () -> String
+  def foreign_key: (?bool separate_class_name_and_id_with_underscore) -> String
+  def pluralize: (?Integer count, ?Symbol locale) -> String
+  def singularize: (?Symbol locale) -> String
+  def humanize: (?capitalize: bool, ?keep_id_suffix: bool) -> String
+
+  # `core_ext/string/filters`
+  def squish: () -> String
+  def squish!: () -> String
+  def truncate: (Integer truncate_at, ?omission: String, ?separator: String | Regexp | nil) -> String
+  def truncate_bytes: (Integer truncate_at, ?omission: String) -> String
+  def truncate_words: (Integer words_count, ?omission: String, ?separator: String | Regexp | nil) -> String
+
+  # `core_ext/string/output_safety` — `html_safe` returns an
+  # `ActiveSupport::SafeBuffer` (a String subclass). The closest
+  # RBS-canonical carrier is plain `String`; precision lost is the
+  # `html_safe?` predicate value.
+  def html_safe: () -> String
+  def html_safe?: () -> bool
+
+  # `core_ext/string/indent`
+  def indent: (Integer amount, ?String indent_string, ?bool indent_empty_lines) -> String
+  def indent!: (Integer amount, ?String indent_string, ?bool indent_empty_lines) -> String?
+
+  # `core_ext/string/starts_ends_with` — also covered by core
+  # `start_with?` / `end_with?`; these are the ActiveSupport aliases.
+  def starts_with?: (*String prefixes) -> bool
+  def ends_with?: (*String suffixes) -> bool
+
+  # `core_ext/string/conversions` — `to_time` / `to_date` /
+  # `to_datetime` return Time / Date / DateTime.
+  def to_time: (?Symbol form) -> Time?
+  def to_date: () -> Date?
+  def to_datetime: () -> DateTime
+  def to_hours: () -> Float
+
+  # `core_ext/string/access`
+  def at: (Integer | Range[Integer] | Regexp position) -> String?
+  def from: (Integer position) -> String
+  def to: (Integer position) -> String
+  def first: (?Integer limit) -> String
+  def last: (?Integer limit) -> String
+
+  # `core_ext/string/strip` — leading-blank strip with shared margin.
+  def strip_heredoc: () -> String
+
+  # `core_ext/string/multibyte`
+  def mb_chars: () -> untyped
+
+  # `core_ext/string/inquiry`
+  def inquiry: () -> untyped # ActiveSupport::StringInquirer
+end
+
+# ---------------------------------------------------------------
+# Integer — `core_ext/integer/*`
+# ---------------------------------------------------------------
+
+class Integer
+  # `core_ext/numeric/time` — Duration multipliers.
+  def second: () -> untyped # ActiveSupport::Duration
+  def seconds: () -> untyped
+  def minute: () -> untyped
+  def minutes: () -> untyped
+  def hour: () -> untyped
+  def hours: () -> untyped
+  def day: () -> untyped
+  def days: () -> untyped
+  def week: () -> untyped
+  def weeks: () -> untyped
+  def fortnight: () -> untyped
+  def fortnights: () -> untyped
+  def month: () -> untyped
+  def months: () -> untyped
+  def year: () -> untyped
+  def years: () -> untyped
+
+  # `core_ext/numeric/bytes`
+  def byte: () -> Integer
+  def bytes: () -> Integer
+  def kilobyte: () -> Integer
+  def kilobytes: () -> Integer
+  def megabyte: () -> Integer
+  def megabytes: () -> Integer
+  def gigabyte: () -> Integer
+  def gigabytes: () -> Integer
+  def terabyte: () -> Integer
+  def terabytes: () -> Integer
+  def petabyte: () -> Integer
+  def petabytes: () -> Integer
+  def exabyte: () -> Integer
+  def exabytes: () -> Integer
+
+  # `core_ext/integer/multiple`
+  def multiple_of?: (Integer) -> bool
+
+  # `core_ext/integer/inflections`
+  def ordinal: () -> String
+  def ordinalize: () -> String
+end
+
+# ---------------------------------------------------------------
+# Float — same Duration / Bytes pattern as Integer
+# ---------------------------------------------------------------
+
+class Float
+  def second: () -> untyped
+  def seconds: () -> untyped
+  def minute: () -> untyped
+  def minutes: () -> untyped
+  def hour: () -> untyped
+  def hours: () -> untyped
+  def day: () -> untyped
+  def days: () -> untyped
+  def week: () -> untyped
+  def weeks: () -> untyped
+  def month: () -> untyped
+  def months: () -> untyped
+  def year: () -> untyped
+  def years: () -> untyped
+
+  def byte: () -> Float
+  def bytes: () -> Float
+  def kilobyte: () -> Float
+  def kilobytes: () -> Float
+  def megabyte: () -> Float
+  def megabytes: () -> Float
+  def gigabyte: () -> Float
+  def gigabytes: () -> Float
+end
+
+# ---------------------------------------------------------------
+# Time — singleton + instance extensions
+# ---------------------------------------------------------------
+
+class Time
+  def self.current: () -> Time
+  def self.zone: () -> untyped # ActiveSupport::TimeZone | nil
+  def self.zone=: (String | Symbol | untyped) -> untyped
+
+  # `core_ext/time/conversions` — also `Time.parse` from stdlib
+  # `time`, which is already in core RBS.
+  def self.httpdate: (String) -> Time
+  def self.iso8601: (String) -> Time
+
+  # `core_ext/time/calculations`
+  def yesterday: () -> Time
+  def tomorrow: () -> Time
+  def beginning_of_day: () -> Time
+  def end_of_day: () -> Time
+  def beginning_of_hour: () -> Time
+  def end_of_hour: () -> Time
+  def beginning_of_minute: () -> Time
+  def end_of_minute: () -> Time
+  def beginning_of_week: (?Symbol start_day) -> Time
+  def end_of_week: (?Symbol start_day) -> Time
+  def beginning_of_month: () -> Time
+  def end_of_month: () -> Time
+  def beginning_of_year: () -> Time
+  def end_of_year: () -> Time
+  def ago: (Numeric seconds) -> Time
+  def since: (Numeric seconds) -> Time
+  def in: (Numeric seconds) -> Time
+  def change: (**untyped) -> Time
+  def at_beginning_of_day: () -> Time
+  def at_end_of_day: () -> Time
+  def at_beginning_of_week: () -> Time
+  def at_end_of_week: () -> Time
+  def at_midnight: () -> Time
+  def at_noon: () -> Time
+  def midday: () -> Time
+  def midnight: () -> Time
+  def noon: () -> Time
+  def utc?: () -> bool
+  def acts_like_time?: () -> true
+end
+
+# ---------------------------------------------------------------
+# Date — `core_ext/date/*`
+# ---------------------------------------------------------------
+
+class Date
+  def self.current: () -> Date
+  def self.yesterday: () -> Date
+  def self.tomorrow: () -> Date
+  def self.beginning_of_week: () -> Date
+  def self.end_of_week: () -> Date
+  def self.beginning_of_month: () -> Date
+  def self.end_of_month: () -> Date
+  def self.beginning_of_year: () -> Date
+  def self.end_of_year: () -> Date
+
+  def yesterday: () -> Date
+  def tomorrow: () -> Date
+  def beginning_of_week: (?Symbol start_day) -> Date
+  def end_of_week: (?Symbol start_day) -> Date
+  def beginning_of_month: () -> Date
+  def end_of_month: () -> Date
+  def beginning_of_year: () -> Date
+  def end_of_year: () -> Date
+  def ago: (Numeric seconds) -> Time
+  def since: (Numeric seconds) -> Time
+  def acts_like_date?: () -> true
+end
+
+# ---------------------------------------------------------------
+# Array — singleton wrapper + instance extensions
+# ---------------------------------------------------------------
+
+class Array[unchecked out Elem]
+  # `Array.wrap(x)` is the dominant Rails idiom: `nil → []`,
+  # `Array x → x`, `else → [x]`.
+  def self.wrap: (untyped) -> Array[untyped]
+
+  # `core_ext/array/access`
+  def from: (Integer position) -> Array[Elem]
+  def to: (Integer position) -> Array[Elem]
+  def second: () -> Elem?
+  def third: () -> Elem?
+  def fourth: () -> Elem?
+  def fifth: () -> Elem?
+  def forty_two: () -> Elem?
+
+  # `core_ext/array/grouping`
+  def in_groups_of: (Integer number, ?untyped fill_with) -> Array[Array[Elem]]
+                  | (Integer number, ?untyped fill_with) { (Array[Elem]) -> void } -> Array[Elem]
+  def in_groups: (Integer number, ?untyped fill_with) -> Array[Array[Elem]]
+               | (Integer number, ?untyped fill_with) { (Array[Elem]) -> void } -> Array[Elem]
+  def split: (?untyped value) -> Array[Array[Elem]]
+           | () { (Elem) -> bool } -> Array[Array[Elem]]
+
+  # `core_ext/array/conversions`
+  def to_sentence: (?two_words_connector: String, ?last_word_connector: String, ?words_connector: String, ?locale: Symbol?) -> String
+  def to_formatted_s: (?Symbol format) -> String
+  def to_fs: (?Symbol format) -> String
+  def to_xml: (**untyped) -> String
+
+  # `core_ext/array/inquiry`
+  def inquiry: () -> untyped # ActiveSupport::ArrayInquirer
+
+  # `core_ext/array/extract`
+  def extract!: () { (Elem) -> bool } -> Array[Elem]
+end
+
+# ---------------------------------------------------------------
+# Hash — `core_ext/hash/*`
+# ---------------------------------------------------------------
+
+class Hash[unchecked out K, unchecked out V]
+  # `core_ext/hash/keys`
+  def symbolize_keys: () -> Hash[Symbol, V]
+  def symbolize_keys!: () -> self
+  def deep_symbolize_keys: () -> Hash[untyped, untyped]
+  def deep_symbolize_keys!: () -> self
+  def stringify_keys: () -> Hash[String, V]
+  def stringify_keys!: () -> self
+  def deep_stringify_keys: () -> Hash[untyped, untyped]
+  def deep_stringify_keys!: () -> self
+  def assert_valid_keys: (*K | Array[K]) -> self
+  def deep_transform_keys: () { (K) -> K } -> Hash[K, untyped]
+
+  # `core_ext/hash/deep_dup`
+  def deep_dup: () -> Hash[K, V]
+
+  # `core_ext/hash/deep_merge`
+  def deep_merge: (Hash[K, V]) -> Hash[K, V]
+                | (Hash[K, V]) { (K, V, V) -> V } -> Hash[K, V]
+  def deep_merge!: (Hash[K, V]) -> self
+                 | (Hash[K, V]) { (K, V, V) -> V } -> self
+
+  # `core_ext/hash/except` — `Hash#except` is in core RBS as of
+  # Ruby 3.0+; `except!` is ActiveSupport-only.
+  def except!: (*K) -> self
+
+  # `core_ext/hash/conversions`
+  def to_query: (?String namespace) -> String
+  def to_param: (?String namespace) -> String
+  def to_xml: (**untyped) -> String
+
+  # `core_ext/hash/indifferent_access`
+  def with_indifferent_access: () -> untyped
+end

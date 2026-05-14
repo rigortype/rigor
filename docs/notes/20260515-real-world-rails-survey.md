@@ -397,11 +397,33 @@ would close the project-private remainder.
 
 ### Open items consolidated
 
-| ID | Item |
-| --- | --- |
-| O1 | `active_support/core_ext` plugin. |
-| O2 | Macro-template / heredoc-Ruby expansion. |
-| O3 | `next if x.nil?` / `return if x.nil?` flow-tracked narrowing. |
-| O4 | Target-project Bundler awareness (load gems' RBS from the analysed project's `Gemfile.lock`). |
-| O5 | `Hash <: Enumerable[[K, V]]` subtyping in the parameter binder. |
-| O6 | Pool vs sequential precision divergence at the constant-fold / RBS-dispatch boundary (Pathname). |
+| ID | Status | Item |
+| --- | --- | --- |
+| O1 | landed (MVP) | `examples/rigor-activesupport-core-ext/` — community RBS bundle covering the top ~40 ActiveSupport core-ext selectors. Opt-in via `signature_paths`. |
+| O2 | queued | Macro-template / heredoc-Ruby expansion. |
+| O3 | not-an-issue | `next if x.nil?` / `return if x.nil?` already narrowed — survey-residual nil-receivers are mostly `Object#blank?` / `#present?` / `#try` ActiveSupport extensions, which O1's RBS bundle covers. |
+| O4 | queued | Target-project Bundler awareness (load gems' RBS from the analysed project's `Gemfile.lock`). |
+| O5 | landed (`ac14c45`) | `Hash <: Enumerable[[K, V]]` subtyping in the parameter binder. |
+| O6 | landed (`4698437`) | Pool vs sequential precision divergence at the constant-fold / RBS-dispatch boundary (Pathname). |
+
+### Post-O1 quantitative impact
+
+After opting into the new RBS bundle (sequential warm cache):
+
+| Project | Before O1 | After O1 | Δ total | `call.undefined-method` before → after |
+| --- | ---: | ---: | ---: | --- |
+| Redmine | 343 | 160 | **−183 (−53%)** | 243 → 62 (−74%) |
+| Discourse | 1,435 | 452 | **−983 (−68%)** | 1,078 → 148 (−86%) |
+| Mastodon | 521 | 142 | **−379 (−73%)** | 414 → 40 (−90%) |
+| GitLab FOSS | 2,982 | 579 | **−2,403 (−81%)** | 2,676 → 286 (−89%) |
+| **Total** | **5,281** | **1,333** | **−3,948 (−75%)** | **4,411 → 536 (−88%)** |
+
+The remaining `call.undefined-method` instances are mostly:
+
+- Project-private monkey-patches (Discourse / GitLab ship their own
+  `String` / `Array` extensions).
+- Gem-specific methods absent from the analyzer's RBS env (the
+  target's `Gemfile.lock` gems aren't loaded — open item O4).
+- Concentrated nil-receiver patterns the survey already noted.
+- Other Rails core_ext methods outside the bundle's ~40-selector
+  scope.

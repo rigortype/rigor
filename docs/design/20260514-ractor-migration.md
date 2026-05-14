@@ -223,15 +223,38 @@ sidestep:
 
 ### Phase 4 sub-phase decomposition
 
-**Phase 4a — `WorkerSession` value carrier (no Ractor yet).**
-A class that takes the shareable inputs above and builds a
-fresh Environment + Plugin::Registry (via
-`Registry.materialize`) + reporters internally. Exposes
-`#analyze(path)` returning `Array<Diagnostic>` plus a
-`#drain_reporters` returning the per-worker reporter entries.
-Spec proves: WorkerSession on the same inputs produces the
-same diagnostics as `Runner#analyze_file`. NO Ractor in the
-loop yet — this is the substrate.
+**Phase 4a (LANDED) — `WorkerSession` value carrier (no Ractor yet).**
+{Rigor::Analysis::WorkerSession} takes the shareable inputs
+above (`configuration`, `cache_store` / cache_root, `Array<Plugin::Blueprint>`,
+`explain`) and builds a fresh `Plugin::Services` +
+`Plugin::Registry` (via `Registry.materialize`) +
+`DependencySourceInference::Index` + `Environment` + per-session
+`RbsExtended::Reporter` + `BoundaryCrossReporter` internally.
+Plugin `#prepare` runs once at construction; raises are
+captured into `#prepare_diagnostics` so the caller can drain
+them alongside the per-file diagnostic stream. Exposes
+`#analyze(path)` returning the per-file diagnostic stream
+(equivalent of `Runner#analyze_file` + `plugin_emitted_diagnostics`
++ `explain_diagnostics`) plus `#drain_reporters` returning
+frozen reporter snapshots for end-of-pool merge.
+
+Equivalence with `Runner#analyze_file` is proven by
+`spec/rigor/analysis/worker_session_spec.rb`: same
+configuration + cache_store + plugin_blueprints, same
+per-file diagnostic stream (modulo severity-profile
+re-stamping, which the session leaves to the caller as a
+per-run aggregate concern). Plugin lifecycle (init, prepare,
+diagnostics_for_file) replays through the blueprint path
+with the same runtime-error-isolation envelope the Runner
+applies today.
+
+The substrate is intentionally additive: `Runner` still
+drives per-file analysis itself for v0.1.4 and earlier
+releases. Phase 4b changes `Runner` to delegate per-file
+analysis to one (no-Ractor) WorkerSession; phase 4c spawns
+N worker Ractors holding N sessions.
+
+NO Ractor in the loop yet — this is the substrate.
 
 **Phase 4b — Ractor pool around `WorkerSession`.** A new
 `Analysis::Runner#analyze_files_in_pool` opt-in path.
@@ -319,7 +342,7 @@ Items #7) while Ractor phases progress incrementally.
    + `Registry.materialize` factory.
 5. ⏭ Phase 3b — cross-Ractor plugin aggregate-state
    contract (DEFERRED until Phase 4).
-6. ⏭ Phase 4a — `WorkerSession` value carrier (no Ractor
+6. ✅ Phase 4a — `WorkerSession` value carrier (no Ractor
    yet; substrate for the pool).
 7. ⏭ Phase 4b — Ractor pool around `WorkerSession` in
    `Runner#analyze_files`.

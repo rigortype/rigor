@@ -153,11 +153,30 @@ migration documented in
    per worker, never share instances. Phase 3b (cross-
    Ractor plugin aggregate state — see § OQ2) is deferred
    until Phase 4 measures actual usage.
-5. **Phase 4 — Ractor worker pool (DEFERRED).**
+5. **Phase 4 — Ractor worker pool.**
    `Analysis::Runner#analyze_files` dispatches across a
    `Ractor.new`-allocated pool sharing the frozen
    `Environment`. Result re-assembly preserves original
    path order so the diagnostic stream stays deterministic.
+   Decomposed into three sub-phases (full plan in
+   [`docs/design/20260514-ractor-migration.md`](../design/20260514-ractor-migration.md)
+   § Phase 4):
+   - **Phase 4a (LANDED)**: `Analysis::WorkerSession` value
+     carrier. Per-worker substrate that takes
+     `Ractor.shareable?` inputs (`Configuration`,
+     `cache_store`, `Array<Plugin::Blueprint>`) and builds
+     its own plugin services + materialised registry +
+     `DependencySourceInference::Index` + `Environment` +
+     per-session `RbsExtended::Reporter` +
+     `BoundaryCrossReporter`. `#analyze(path)` is the
+     equivalent of `Runner#analyze_file`. NO Ractor in the
+     loop yet — the substrate exists so the per-worker
+     ownership boundary is testable in isolation.
+   - **Phase 4b (DEFERRED)**: `Runner` delegates per-file
+     analysis to a Ractor pool around `WorkerSession`.
+   - **Phase 4c (DEFERRED)**: `RIGOR_RACTOR_WORKERS` env
+     var + `.rigor.yml` `parallel.workers:` entry; default
+     remains sequential.
 
 The audit-spec at
 [`spec/rigor/ractor_readiness_spec.rb`](../../spec/rigor/ractor_readiness_spec.rb)
@@ -549,8 +568,13 @@ spec suite.
 5. ⏭ Phase 3b — cross-Ractor plugin aggregate-state contract
    (see § OQ2). Deferred until Phase 4 measures the actual
    shape of per-worker plugin state.
-6. ⏭ Phase 4 — Ractor worker pool in `Analysis::Runner`
-   (each worker builds its own Reflection from the shared
+6. ✅ Phase 4a — `Analysis::WorkerSession` value carrier;
+   per-worker substrate with no Ractor in the loop yet.
+   See § Phase 4 design + design doc § Phase 4a.
+7. ⏭ Phase 4b — Runner delegates per-file analysis to a
+   Ractor pool around `WorkerSession`.
+8. ⏭ Phase 4c — `RIGOR_RACTOR_WORKERS` opt-in flag (each
+   worker builds its own Reflection from the shared
    `Cache::Store` and materialises plugins from the shared
    blueprint set; the Store gains a Ractor-shareable
    facade per § OQ1).

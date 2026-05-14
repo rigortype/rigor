@@ -237,4 +237,49 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       expect(Rigor::Plugin::Registry::EMPTY).to be_frozen
     end
   end
+
+  # Phase 4a (LANDED): the per-worker analysis substrate
+  # {Rigor::Analysis::WorkerSession}. The session itself is
+  # NOT `Ractor.shareable?` — it intentionally owns mutable
+  # state (per-session reporters, materialised plugin
+  # instances with their accumulators). The contract is:
+  # the session's CONSTRUCTOR INPUTS are all
+  # `Ractor.shareable?` so a Phase 4b worker Ractor can
+  # receive them across the boundary, then build its own
+  # session inside the Ractor body.
+  describe "Phase 4a — WorkerSession constructor inputs" do
+    require "rigor/analysis/worker_session"
+
+    let(:configuration) { Rigor::Configuration.new(Rigor::Configuration::DEFAULTS) }
+    let(:blueprint) do
+      Rigor::Plugin::Blueprint.new(klass_name: "RigorRactorReadinessSpecPlugin")
+    end
+
+    it "Configuration is Ractor.shareable? (Phase 2a)" do
+      expect(shareable?(configuration)).to be(true)
+    end
+
+    it "Plugin::Blueprint Array is Ractor.shareable? (Phase 3a)" do
+      blueprints = [blueprint].freeze
+      expect(shareable?(blueprints)).to be(true)
+    end
+
+    it "WorkerSession itself is intentionally NOT Ractor.shareable?" do
+      session = Rigor::Analysis::WorkerSession.new(
+        configuration: configuration, cache_store: nil
+      )
+      expect(shareable?(session)).to be(false)
+    end
+
+    it "WorkerSession owns its own per-session reporters (no cross-session aliasing)" do
+      session_a = Rigor::Analysis::WorkerSession.new(
+        configuration: configuration, cache_store: nil
+      )
+      session_b = Rigor::Analysis::WorkerSession.new(
+        configuration: configuration, cache_store: nil
+      )
+      expect(session_a.rbs_extended_reporter).not_to equal(session_b.rbs_extended_reporter)
+      expect(session_a.boundary_cross_reporter).not_to equal(session_b.boundary_cross_reporter)
+    end
+  end
 end

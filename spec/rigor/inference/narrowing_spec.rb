@@ -298,6 +298,48 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey).to eq(scope)
     end
 
+    # `if x = expr` — `StatementEvaluator#eval_local_write`
+    # binds `x` in `post_pred` before narrowing runs, so the
+    # write narrows the bound local on truthy/falsey edges the
+    # same way a bare local read does.
+    it "narrows the bound local through a bare assignment predicate" do
+      bound = scope.with_local(:x, union_int_nil)
+      pred = parse_predicate("x = recv()")
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:x)).to eq(integer_nominal)
+      expect(falsey.local(:x)).to eq(constant_nil)
+    end
+
+    # `if y && (x = expr)` — the Redmine-style guard. `&&`
+    # threads `truthy_left` into the right side, and the
+    # `LocalVariableWriteNode` (wrapped in ParenthesesNode) now
+    # narrows `x` on both edges so callers inside the truthy
+    # block see the non-falsey fragment.
+    it "narrows the bound local through `cond && (var = expr)`" do
+      bound = scope
+              .with_local(:x, union_int_nil)
+              .with_local(:y, integer_nominal)
+      pred = parse_predicate("y && (x = recv())")
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:x)).to eq(integer_nominal)
+      # Falsey edge: LHS falsey OR (LHS truthy AND RHS falsey)
+      # — `x` falls back to its joined post-predicate binding.
+      expect(falsey.local(:x)).not_to eq(integer_nominal)
+    end
+
+    # `if y && x = expr` (no parens). Ruby parses this as
+    # `y && (x = expr)` (`=` ends a complete expression
+    # inside `&&`'s RHS), so the AST shape is the same as the
+    # parenthesised form modulo the wrapping ParenthesesNode.
+    it "narrows the bound local through `cond && var = expr` (no parens)" do
+      bound = scope
+              .with_local(:x, union_int_nil)
+              .with_local(:y, integer_nominal)
+      pred = parse_predicate("y && x = recv()")
+      truthy, _falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:x)).to eq(integer_nominal)
+    end
+
     it "narrows equality against a literal inside a finite domain" do
       literal_a = Rigor::Type::Combinator.constant_of("a")
       literal_b = Rigor::Type::Combinator.constant_of("b")

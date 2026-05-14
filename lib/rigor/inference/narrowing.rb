@@ -384,6 +384,14 @@ module Rigor
           analyse_statements(node, scope)
         when Prism::LocalVariableReadNode
           analyse_local_read(node, scope)
+        when Prism::LocalVariableWriteNode
+          analyse_local_write(node, scope)
+        when Prism::InstanceVariableWriteNode
+          analyse_ivar_write(node, scope)
+        when Prism::ClassVariableWriteNode
+          analyse_cvar_write(node, scope)
+        when Prism::GlobalVariableWriteNode
+          analyse_global_write(node, scope)
         when Prism::CallNode
           analyse_call(node, scope)
         when Prism::AndNode
@@ -733,6 +741,59 @@ module Rigor
           [
             scope.with_local(node.name, narrow_truthy(current)),
             scope.with_local(node.name, narrow_falsey(current))
+          ]
+        end
+
+        # Assignment-in-condition: `if name = expr` and the more
+        # frequent `if cond && (name = expr)` / `if cond && name =
+        # expr` Redmine-style guard. By the time narrowing runs,
+        # `StatementEvaluator#eval_local_write` has already bound
+        # the assigned local in `scope` to the rvalue type. The
+        # write's own truthiness IS the assigned value's
+        # truthiness, so the truthy edge narrows the local by
+        # `narrow_truthy(current)` and the falsey edge by
+        # `narrow_falsey(current)`. Mirrors `analyse_local_read`
+        # because the only meaningful difference between
+        # "predicate is `var`" and "predicate is `var = expr`" is
+        # which scope holds the just-bound value; the narrowing
+        # contract on the surrounding `if` is the same.
+        def analyse_local_write(node, scope)
+          current = scope.local(node.name)
+          return nil if current.nil?
+
+          [
+            scope.with_local(node.name, narrow_truthy(current)),
+            scope.with_local(node.name, narrow_falsey(current))
+          ]
+        end
+
+        def analyse_ivar_write(node, scope)
+          current = scope.ivar(node.name)
+          return nil if current.nil?
+
+          [
+            scope.with_ivar(node.name, narrow_truthy(current)),
+            scope.with_ivar(node.name, narrow_falsey(current))
+          ]
+        end
+
+        def analyse_cvar_write(node, scope)
+          current = scope.cvar(node.name)
+          return nil if current.nil?
+
+          [
+            scope.with_cvar(node.name, narrow_truthy(current)),
+            scope.with_cvar(node.name, narrow_falsey(current))
+          ]
+        end
+
+        def analyse_global_write(node, scope)
+          current = scope.global(node.name)
+          return nil if current.nil?
+
+          [
+            scope.with_global(node.name, narrow_truthy(current)),
+            scope.with_global(node.name, narrow_falsey(current))
           ]
         end
 

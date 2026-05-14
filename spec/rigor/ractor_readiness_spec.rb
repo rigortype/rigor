@@ -315,4 +315,29 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       expect(ractor.value).to eq([true, true, true])
     end
   end
+
+  # Phase 4b.x: module-level catalogs and canonical-name tables
+  # that worker Ractors read during ordinary dispatch. Each
+  # MUST be deep-`Ractor.shareable?`; a shallow `.freeze` is
+  # insufficient when the value graph contains nested Hash /
+  # Array / parsed-YAML payloads (whose inner nodes start out
+  # unfrozen). A regression here surfaces on real-world target
+  # projects as `Ractor::IsolationError` while reading the
+  # singleton-class ivar or constant from a non-main Ractor.
+  describe "Phase 4b.x — module catalog shareability" do
+    it "NumericCatalog @catalog (singleton-class ivar) is Ractor.shareable?" do
+      catalog = Rigor::Inference::Builtins::NumericCatalog.instance_variable_get(:@catalog)
+      expect(shareable?(catalog)).to be(true)
+    end
+
+    it "Type::Refined::CANONICAL_NAMES is Ractor.shareable?" do
+      table = Rigor::Type::Refined.const_get(:CANONICAL_NAMES)
+      expect(shareable?(table)).to be(true)
+    end
+
+    it "Builtins::RegexRefinement::RULES is Ractor.shareable?" do
+      rules = Rigor::Builtins::RegexRefinement.const_get(:RULES)
+      expect(shareable?(rules)).to be(true)
+    end
+  end
 end

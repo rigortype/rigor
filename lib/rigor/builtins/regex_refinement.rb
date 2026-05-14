@@ -47,17 +47,22 @@ module Rigor
       QUANTIFIER_SOURCE = '(?:\+|\{\d+(?:,\d+)?\})'
       private_constant :QUANTIFIER_SOURCE
 
-      RULES = [
-        [/\A\\d#{QUANTIFIER_SOURCE}\z/, :decimal_int_string],
-        [/\A\\h#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
-        [/\A\[0-9a-fA-F\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
-        [/\A\[0-9a-f\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
-        [/\A\[0-9A-F\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
-        [/\A\[0-7\]#{QUANTIFIER_SOURCE}\z/, :octal_int_string],
-        [/\A\[a-z\]#{QUANTIFIER_SOURCE}\z/, :lowercase_string],
-        [/\A\[A-Z\]#{QUANTIFIER_SOURCE}\z/, :uppercase_string],
-        [/\A\[\[:digit:\]\]#{QUANTIFIER_SOURCE}\z/, :numeric_string]
-      ].freeze
+      # ADR-15 Phase 4b.x — `Ractor.make_shareable` (not `.freeze`)
+      # because the outer Array contains two-element `[Regexp, Symbol]`
+      # rows whose inner Arrays are not frozen by the outer freeze.
+      # A worker Ractor iterating `RULES.find { ... }` would trip
+      # `Ractor::IsolationError` on the first row access.
+      RULES = Ractor.make_shareable([
+                                      [/\A\\d#{QUANTIFIER_SOURCE}\z/, :decimal_int_string],
+                                      [/\A\\h#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
+                                      [/\A\[0-9a-fA-F\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
+                                      [/\A\[0-9a-f\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
+                                      [/\A\[0-9A-F\]#{QUANTIFIER_SOURCE}\z/, :hex_int_string],
+                                      [/\A\[0-7\]#{QUANTIFIER_SOURCE}\z/, :octal_int_string],
+                                      [/\A\[a-z\]#{QUANTIFIER_SOURCE}\z/, :lowercase_string],
+                                      [/\A\[A-Z\]#{QUANTIFIER_SOURCE}\z/, :uppercase_string],
+                                      [/\A\[\[:digit:\]\]#{QUANTIFIER_SOURCE}\z/, :numeric_string]
+                                    ])
       private_constant :RULES
 
       BOUND_RE = /\{(\d+)(?:,(\d+))?\}\z/

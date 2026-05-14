@@ -70,12 +70,14 @@ module Rigor
           # NOT call this during normal operation.
           #
           # ADR-15 Phase 4b.x — reset re-loads eagerly so the
-          # singleton-class `@catalog` ivar stays populated;
-          # writing to a class/module ivar from a non-main Ractor
-          # (e.g. via the lazy `@catalog ||= load_catalog` we
-          # previously held here) raises `Ractor::IsolationError`.
+          # singleton-class `@catalog` ivar stays populated, and
+          # the loaded Hash is deep-shared via `Ractor.make_shareable`
+          # so a worker Ractor reading the ivar via `catalog.dig(...)`
+          # does not trip `Ractor::IsolationError`. Plain `.freeze`
+          # is insufficient: YAML parses to a nested Hash/Array/String
+          # graph and only the outer Hash would be frozen.
           def reset!
-            @catalog = load_catalog
+            @catalog = Ractor.make_shareable(load_catalog)
           end
 
           private

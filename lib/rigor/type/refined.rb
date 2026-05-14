@@ -165,18 +165,24 @@ module Rigor
       # kebab-case canonical name. Registered shapes print
       # through `describe`; unregistered combinations fall back
       # to the operator form.
-      CANONICAL_NAMES = {
-        ["String", :lowercase] => "lowercase-string",
-        ["String", :not_lowercase] => "non-lowercase-string",
-        ["String", :uppercase] => "uppercase-string",
-        ["String", :not_uppercase] => "non-uppercase-string",
-        ["String", :numeric] => "numeric-string",
-        ["String", :not_numeric] => "non-numeric-string",
-        ["String", :decimal_int] => "decimal-int-string",
-        ["String", :octal_int] => "octal-int-string",
-        ["String", :hex_int] => "hex-int-string",
-        ["String", :literal_string] => "literal-string"
-      }.freeze
+      #
+      # ADR-15 Phase 4b.x — `Ractor.make_shareable` (not `.freeze`)
+      # because the keys are nested two-element Arrays. Plain
+      # `.freeze` would leave the inner arrays mutable, so a
+      # worker Ractor reading `CANONICAL_NAMES[[base, predicate]]`
+      # would trip `Ractor::IsolationError`.
+      CANONICAL_NAMES = Ractor.make_shareable({
+                                                ["String", :lowercase] => "lowercase-string",
+                                                ["String", :not_lowercase] => "non-lowercase-string",
+                                                ["String", :uppercase] => "uppercase-string",
+                                                ["String", :not_uppercase] => "non-uppercase-string",
+                                                ["String", :numeric] => "numeric-string",
+                                                ["String", :not_numeric] => "non-numeric-string",
+                                                ["String", :decimal_int] => "decimal-int-string",
+                                                ["String", :octal_int] => "octal-int-string",
+                                                ["String", :hex_int] => "hex-int-string",
+                                                ["String", :literal_string] => "literal-string"
+                                              })
       private_constant :CANONICAL_NAMES
 
       # Bidirectional `predicate_id ↔ complement_predicate_id`

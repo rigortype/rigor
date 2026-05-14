@@ -626,7 +626,6 @@ module Rigor
           # (so it can serve as a Hash key). Produces a closed
           # `HashShape` whose entries mirror the per-position
           # pairs. Empty Tuples fold to the empty HashShape.
-          # rubocop:disable Metrics/CyclomaticComplexity
           def tuple_to_h(tuple, _method_name, args)
             return nil unless args.empty?
             return Type::Combinator.hash_shape_of({}) if tuple.elements.empty?
@@ -637,7 +636,6 @@ module Rigor
 
             Type::Combinator.hash_shape_of(pairs.to_h)
           end
-          # rubocop:enable Metrics/CyclomaticComplexity
 
           def tuple_to_h_pair(element)
             return nil unless element.is_a?(Type::Tuple)
@@ -865,7 +863,6 @@ module Rigor
           # `HashShape` accepts as keys). Duplicate values would
           # alias under inversion, so Rigor declines on
           # collisions rather than silently dropping entries.
-          # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           def hash_invert(shape, _method_name, args)
             return nil unless args.empty?
             return nil unless shape.closed?
@@ -880,7 +877,6 @@ module Rigor
             end
             Type::Combinator.hash_shape_of(inverted)
           end
-          # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
           # `shape.first` — returns the first `[k, v]` pair as a
           # 2-Tuple, or `Constant[nil]` when the shape is empty.

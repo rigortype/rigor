@@ -55,7 +55,7 @@ USER_RBS_FOR_NARROWING = <<~RBS
   end
 RBS
 
-RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-activerecord" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
@@ -298,7 +298,7 @@ RSpec.describe "examples/rigor-activerecord" do # rubocop:disable RSpec/Describe
       klass
     end
 
-    def run_two_plugins(source, schema:, models:) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+    def run_two_plugins(source, schema:, models:)
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "db"))
         FileUtils.mkdir_p(File.join(dir, "app", "models"))

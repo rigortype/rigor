@@ -376,7 +376,7 @@ module Rigor
       # the predicate shape is recognised, or `nil` to signal "no
       # narrowing" so the public surface can fall back to the entry
       # scope.
-      def analyse(node, scope) # rubocop:disable Metrics/CyclomaticComplexity
+      def analyse(node, scope)
         case node
         when Prism::ParenthesesNode
           analyse_parentheses(node, scope)
@@ -445,7 +445,6 @@ module Rigor
         # intersects each half with the integer-domain parts of
         # `current_type`. Non-integer parts of a Union receiver
         # (nil, String, …) survive unchanged.
-        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         def complement_integer_range(current_type, range)
           halves = integer_range_complement_halves(range)
           parts = current_type.is_a?(Type::Union) ? current_type.members : [current_type]
@@ -466,7 +465,6 @@ module Rigor
 
           Type::Combinator.union(*survivors)
         end
-        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
         # Returns the two open halves of an IntegerRange's
         # complement: the left half `int<-∞, a-1>` (when `a` is

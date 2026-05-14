@@ -47,7 +47,7 @@ module Rigor
         #   classes belong to the first gem they appeared in
         #   per `class_to_gem`; `mode_for(class_name)` chains
         #   the two lookups.
-        def initialize( # rubocop:disable Metrics/ParameterLists
+        def initialize(
           resolved_gems: [], unresolvable: [], method_catalog: {},
           budget_exceeded: [], class_to_gem: {},
           budget_overrun_strategy: :walker_cap, gem_modes: {}

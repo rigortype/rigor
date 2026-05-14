@@ -179,7 +179,7 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         expect(described_class.parse("key_of[]")).to be_nil
       end
 
-      describe "T[K] indexed-access (v0.0.7)" do # rubocop:disable RSpec/NestedGroups
+      describe "T[K] indexed-access (v0.0.7)" do
         it "parses Hash[Symbol, Integer][Symbol] to Integer" do
           expect(described_class.parse("Hash[Symbol, Integer][Symbol]"))
             .to eq(Rigor::Type::Combinator.nominal_of("Integer"))
@@ -203,7 +203,7 @@ RSpec.describe Rigor::Builtins::ImportedRefinements do
         end
       end
 
-      describe "int_mask / int_mask_of" do # rubocop:disable RSpec/NestedGroups
+      describe "int_mask / int_mask_of" do
         it "parses int_mask[1, 2] to the closure {0, 1, 2, 3}" do
           result = described_class.parse("int_mask[1, 2]")
           expect(result).to be_a(Rigor::Type::Union)

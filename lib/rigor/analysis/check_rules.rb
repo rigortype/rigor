@@ -262,7 +262,7 @@ module Rigor
       # errors, internal analyzer errors) are NEVER
       # suppressed — they represent failures the user cannot
       # silence away.
-      def filter_suppressed(diagnostics, comments:, disabled_rules:) # rubocop:disable Metrics/CyclomaticComplexity
+      def filter_suppressed(diagnostics, comments:, disabled_rules:)
         line_suppressions, file_suppressions = parse_suppression_comments(comments)
         disabled = expand_rule_tokens(disabled_rules)
 
@@ -329,7 +329,7 @@ module Rigor
       class << self
         private
 
-        def undefined_method_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def undefined_method_diagnostic(path, call_node, scope_index)
           return nil if call_node.receiver.nil?
 
           scope = scope_index[call_node]
@@ -429,7 +429,7 @@ module Rigor
         # by `undefined_method_diagnostic`; it returns nil
         # when the call's receiver / RBS coverage / call shape
         # disqualifies the rule.
-        # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         def wrong_arity_diagnostic(path, call_node, scope_index)
           return nil if call_node.receiver.nil?
           return nil unless plain_positional_call?(call_node)
@@ -459,7 +459,7 @@ module Rigor
 
           build_arity_diagnostic(path, call_node, class_name, min, max, actual)
         end
-        # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
         def plain_positional_call?(call_node)
           arguments = call_node.arguments
@@ -534,7 +534,7 @@ module Rigor
         # and union receivers where every member already
         # disqualifies the call (avoid duplicating the
         # undefined-method diagnostic).
-        def nil_receiver_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def nil_receiver_diagnostic(path, call_node, scope_index)
           return nil if call_node.receiver.nil?
           # Safe-navigation calls (`recv&.method`) already
           # short-circuit on nil at runtime, so a nil-bearing
@@ -615,7 +615,7 @@ module Rigor
         # The diagnostic does NOT count toward `Result#error_count`
         # so a fixture peppered with `dump_type` calls still
         # passes `rigor check`.
-        def dump_type_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity
+        def dump_type_diagnostic(path, call_node, scope_index)
           return nil unless rigor_testing_call?(call_node, :dump_type)
           return nil if call_node.arguments.nil? || call_node.arguments.arguments.empty?
 
@@ -644,7 +644,7 @@ module Rigor
         # is emitted; matching calls produce no output. This
         # lets a fixture document its expected types inline:
         # subsequent `rigor check` runs flag any drift.
-        def assert_type_diagnostic(path, call_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def assert_type_diagnostic(path, call_node, scope_index)
           return nil unless rigor_testing_call?(call_node, :assert_type)
           return nil if call_node.arguments.nil? || call_node.arguments.arguments.size < 2
 
@@ -972,7 +972,6 @@ module Rigor
           )
         end
 
-        # rubocop:disable Metrics/ParameterLists
         def build_ivar_write_mismatch_diagnostic(path, node, class_name, ivar_name, first_class, other_class)
           location = node.name_loc || node.location
           Diagnostic.new(
@@ -985,7 +984,6 @@ module Rigor
             severity: :error
           )
         end
-        # rubocop:enable Metrics/ParameterLists
 
         # Returns the dead-branch node for a literal-predicate
         # if/unless, or nil when no observable branch is dead.
@@ -1034,7 +1032,6 @@ module Rigor
         #   (no splat / kw / block-pass / forwarded).
         # - Per-argument: skip when EITHER side is `Dynamic`
         #   (the call cannot be statically refuted).
-        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
         def argument_type_diagnostic(path, call_node, scope_index)
           return nil if call_node.receiver.nil?
           return nil unless plain_positional_call?(call_node)
@@ -1065,9 +1062,7 @@ module Rigor
 
           build_argument_type_diagnostic(path, call_node, class_name, mismatch)
         end
-        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
 
-        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
         def first_argument_mismatch(method_type, call_node, scope, param_overrides)
           function = method_type.type
           return nil unless argument_check_eligible?(function)
@@ -1094,7 +1089,6 @@ module Rigor
           end
           nil
         end
-        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
 
         def argument_check_eligible?(function)
           # See `arity_eligible?`: `UntypedFunction` lacks
@@ -1132,7 +1126,6 @@ module Rigor
           )
         end
 
-        # rubocop:disable Metrics/ParameterLists
         def build_arity_diagnostic(path, call_node, class_name, min, max, actual)
           location = call_node.message_loc || call_node.location
           range = min == max ? min.to_s : "#{min}..#{max}"
@@ -1147,7 +1140,6 @@ module Rigor
             severity: :error
           )
         end
-        # rubocop:enable Metrics/ParameterLists
 
         def build_undefined_method_diagnostic(path, call_node, receiver_type)
           location = call_node.message_loc || call_node.location
@@ -1186,7 +1178,7 @@ module Rigor
         #     :maybe → emit at :warning. Promoted to :error
         #              under `severity_profile: strict` per
         #              ADR-8 § "Severity profile".
-        def return_type_mismatch_diagnostic(path, def_node, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        def return_type_mismatch_diagnostic(path, def_node, scope_index)
           return nil if def_node.body.nil?
 
           last_expr = body_last_expression(def_node.body)

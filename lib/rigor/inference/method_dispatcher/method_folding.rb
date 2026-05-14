@@ -72,7 +72,6 @@ module Rigor
         # well-defined type (the gradual-safety net mirrors
         # the engine's "BoundMethod erases to `Method`,
         # `Method#call: (*untyped) -> untyped`" RBS fallback).
-        # rubocop:disable Metrics/ParameterLists
         def try_backward(receiver:, method_name:, args:, block_type:, environment:, call_node:, scope:)
           return nil unless receiver.is_a?(Type::BoundMethod)
           return nil unless backward_method?(method_name)
@@ -87,8 +86,6 @@ module Rigor
             scope: scope
           ) || Type::Combinator.untyped
         end
-        # rubocop:enable Metrics/ParameterLists
-
         # `Method#call` / `Method#()` and `Method#[]` are the
         # invocation entry points on the `Method` API; the
         # alias `===` is also `call` semantically but is more

@@ -27,7 +27,7 @@ DEFAULT_ROUTES_YAML = <<~YAML
     path: /posts/:post_id/comments/:id
 YAML
 
-RSpec.describe "examples/rigor-routes" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-routes" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
@@ -157,7 +157,7 @@ RSpec.describe "examples/rigor-routes" do # rubocop:disable RSpec/DescribeClass
       expect(stats[:writes]).to eq(1)
     end
 
-    it "invalidates the cache when routes.yml content changes" do # rubocop:disable RSpec/ExampleLength
+    it "invalidates the cache when routes.yml content changes" do
       plugin_diags_v2 = nil
 
       Dir.mktmpdir do |dir|

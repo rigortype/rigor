@@ -65,7 +65,7 @@ module Rigor
     #   sources the dispatcher consults BELOW RBS dispatch.
     #   When nil (the default), no dep-source contribution
     #   participates and the dispatcher tier is a no-op.
-    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil, # rubocop:disable Metrics/ParameterLists
+    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil,
                    plugin_registry: nil, dependency_source_index: nil,
                    rbs_extended_reporter: nil, boundary_cross_reporter: nil)
       @class_registry = class_registry

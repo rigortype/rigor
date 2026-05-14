@@ -70,7 +70,7 @@ RSpec.describe Rigor::Cache::Descriptor do
     end
   end
 
-  describe ".compose" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+  describe ".compose" do
     let(:file_a_digest) { described_class::FileEntry.new(path: "a.rb", comparator: :digest, value: "abc") }
     let(:file_a_mtime) do
       described_class::FileEntry.new(path: "a.rb", comparator: :mtime, value: "2026-05-05T00:00:00Z")

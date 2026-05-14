@@ -18,19 +18,61 @@ Style/StringLiterals:
 Style/Documentation:
   Enabled: false
 
+# Metric defaults are too tight for the inference engine
+# (dispatcher chains, scope rebuild paths) and the catalog
+# extractor. Maxes are calibrated against the working code
+# rather than the cop's defaults so well-factored methods
+# do not need per-call-site `# rubocop:disable` comments.
+# Anything substantially over these caps is a real
+# refactoring signal; the cop still fires there.
 Metrics/AbcSize:
-  Max: 25
+  Max: 30
 
 Metrics/MethodLength:
-  Max: 25
+  Max: 30
+
+Metrics/ClassLength:
+  Max: 200
+
+Metrics/ModuleLength:
+  Max: 200
+
+Metrics/ParameterLists:
+  Max: 7
+
+Metrics/CyclomaticComplexity:
+  Max: 12
+
+Metrics/PerceivedComplexity:
+  Max: 12
 
 Gemspec/DevelopmentDependencies:
   Enabled: false
 
+# RSpec metric defaults are likewise tight for integration
+# specs that materialise a fixture project, drive Runner
+# through it, and assert across multiple diagnostics in one
+# example. Same calibration discipline as the engine
+# metrics above.
 RSpec/ExampleLength:
-  Max: 15
+  Max: 25
 
 RSpec/MultipleExpectations:
+  Enabled: false
+
+RSpec/NestedGroups:
+  Max: 5
+
+RSpec/MultipleMemoizedHelpers:
+  Max: 8
+
+# Integration specs intentionally describe behaviour rather
+# than a single class (e.g. "examples/rigor-routes plugin"
+# spans the plugin gem + its demo + its cache layout). The
+# cop's "describe a class" rule is a poor fit for those
+# specs and disabling it project-wide removes 22 per-file
+# `# rubocop:disable` comments.
+RSpec/DescribeClass:
   Enabled: false
 
 # Relaxed rules for the worked plugin examples. Each example is a

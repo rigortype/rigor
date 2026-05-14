@@ -21,7 +21,7 @@ module Rigor
     # next write replaces the bad entry. The trailing SHA-256 catches
     # accidental corruption (partial writes, FS errors); it is **not**
     # a security boundary, per ADR-2's trusted-gem trust model.
-    class Store # rubocop:disable Metrics/ClassLength
+    class Store
       # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte
       # format version. Bumped on incompatible on-disk format changes
       # (independent of {Descriptor::SCHEMA_VERSION}, which covers

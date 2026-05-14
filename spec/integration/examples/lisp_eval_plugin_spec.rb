@@ -17,7 +17,7 @@ PLUGIN_LIB = File.expand_path("../../../examples/rigor-lisp-eval/lib", __dir__)
 $LOAD_PATH.unshift(PLUGIN_LIB) unless $LOAD_PATH.include?(PLUGIN_LIB)
 require "rigor-lisp-eval"
 
-RSpec.describe "examples/rigor-lisp-eval" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-lisp-eval" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

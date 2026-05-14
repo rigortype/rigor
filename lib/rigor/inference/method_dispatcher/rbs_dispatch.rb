@@ -183,7 +183,7 @@ module Rigor
           # Slice 5 phase 1 projects Tuple/HashShape receivers to
           # their underlying Array/Hash nominal so dispatch reuses the
           # generic-typed pipeline.
-          def receiver_descriptor(receiver) # rubocop:disable Metrics/CyclomaticComplexity
+          def receiver_descriptor(receiver)
             case receiver
             when Type::Constant
               [receiver.value.class.name, :instance, []]
@@ -254,7 +254,6 @@ module Rigor
             param_names.zip(receiver_args).to_h
           end
 
-          # rubocop:disable Metrics/ParameterLists
           def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:,
                                     environment: nil)
             # Slice 4b-3 (ADR-7 § "Slice 4-A/4-B") — read the
@@ -293,7 +292,6 @@ module Rigor
               type_vars: full_type_vars
             )
           end
-          # rubocop:enable Metrics/ParameterLists
 
           # ADR-7 § "Slice 4-A/4-B" — folds the
           # `RBS::Extended` `return:` directive (and any
@@ -399,8 +397,8 @@ module Rigor
             []
           end
 
-          # rubocop:disable Metrics/ParameterLists
-          def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:, environment: nil)
+          def extract_block_param_types(method_definition, class_name:, kind:, args:, type_vars:,
+                                        environment: nil)
             instance_type = Type::Combinator.nominal_of(class_name)
             self_type =
               case kind
@@ -429,7 +427,6 @@ module Rigor
               type_vars: type_vars
             )
           end
-          # rubocop:enable Metrics/ParameterLists
 
           # `RBS::Types::Block#type` is normally an `RBS::Types::Function`
           # carrying the block's parameter list; some signatures use

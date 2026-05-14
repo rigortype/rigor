@@ -277,7 +277,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to be_nil
       end
 
-      it "drops a plugin contribution that raises and continues with the rest of the chain" do # rubocop:disable RSpec/ExampleLength
+      it "drops a plugin contribution that raises and continues with the rest of the chain" do
         services = services_for_test
         plugin_class = Class.new(Rigor::Plugin::Base) do
           manifest(id: "raising-contributor", version: "0.1.0")

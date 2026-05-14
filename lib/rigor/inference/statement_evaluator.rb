@@ -889,7 +889,7 @@ module Rigor
       # or nil otherwise. Centralised so each per-matcher
       # decoder can short-circuit on a non-matching outer
       # call.
-      def rspec_expectation_target(call_node) # rubocop:disable Metrics/CyclomaticComplexity
+      def rspec_expectation_target(call_node)
         receiver = call_node.receiver
         return nil unless receiver.is_a?(Prism::CallNode) && receiver.name == :expect
         return nil unless receiver.receiver.nil?
@@ -1034,7 +1034,7 @@ module Rigor
         end
       end
 
-      def resolve_call_method(call_node, current_scope) # rubocop:disable Metrics/PerceivedComplexity
+      def resolve_call_method(call_node, current_scope)
         receiver_node = call_node.receiver
         receiver_type =
           if receiver_node
@@ -1120,7 +1120,7 @@ module Rigor
         end
       end
 
-      def lookup_post_return_arg(call_node, method_def, target_name) # rubocop:disable Metrics/CyclomaticComplexity
+      def lookup_post_return_arg(call_node, method_def, target_name)
         # Plugin-source contributions arrive without an
         # authoritative method_def (the plugin recognised the
         # call shape directly). Parameter-targeting falls back
@@ -1386,7 +1386,7 @@ module Rigor
       # ScopeIndexer-populated declaration overrides
       # (`Prism::ConstantReadNode` for `module Foo` headers, etc.)
       # remain reachable from inside nested bodies.
-      def build_fresh_body_scope # rubocop:disable Metrics/AbcSize
+      def build_fresh_body_scope
         Scope.empty(environment: scope.environment)
              .with_declared_types(scope.declared_types)
              .with_discovered_classes(scope.discovered_classes)
@@ -1503,7 +1503,7 @@ module Rigor
       EXIT_CALL_NAMES = %i[raise throw exit abort fail].freeze
       private_constant :EXIT_CALL_NAMES
 
-      def branch_unconditionally_exits?(node) # rubocop:disable Metrics/CyclomaticComplexity
+      def branch_unconditionally_exits?(node)
         return false if node.nil?
 
         case node
@@ -1609,7 +1609,6 @@ module Rigor
       # Returns an array of `[Symbol, Rigor::Type]` pairs for every
       # variable captured by `pattern`. Unrecognised pattern nodes
       # contribute no bindings (fail-soft).
-      # rubocop:disable Metrics/CyclomaticComplexity
       def collect_in_pattern_bindings(subject, pattern, scope)
         case pattern
         when Prism::CapturePatternNode
@@ -1631,7 +1630,6 @@ module Rigor
           []
         end
       end
-      # rubocop:enable Metrics/CyclomaticComplexity
 
       def collect_array_pattern_bindings(pattern, scope)
         bindings = [*pattern.requireds, *pattern.posts].flat_map do |elem|

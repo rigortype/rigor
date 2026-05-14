@@ -81,7 +81,7 @@ module Rigor
       #   "rigor-rails"
       #   { "gem" => "rigor-rails", "id" => "rails", "config" => {...} }
       #   { gem: "rigor-rails", id: "rails", config: {...} }
-      def normalise_entry(raw, index) # rubocop:disable Metrics/CyclomaticComplexity
+      def normalise_entry(raw, index)
         case raw
         when String
           { gem: raw, id: nil, config: {} }
@@ -136,7 +136,7 @@ module Rigor
         )
       end
 
-      def lookup_plugin_class!(entry, newly_registered) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+      def lookup_plugin_class!(entry, newly_registered)
         if entry[:id]
           plugin_class = Plugin.registered_for(entry[:id])
           unless plugin_class

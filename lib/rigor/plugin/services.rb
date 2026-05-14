@@ -42,7 +42,7 @@ module Rigor
     class Services
       attr_reader :reflection, :type, :configuration, :cache_store, :trust_policy, :fact_store
 
-      def initialize( # rubocop:disable Metrics/ParameterLists
+      def initialize(
         reflection:, type:, configuration:,
         cache_store: nil, trust_policy: nil, fact_store: nil
       )

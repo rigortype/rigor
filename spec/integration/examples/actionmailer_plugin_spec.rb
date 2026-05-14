@@ -36,7 +36,7 @@ DEFAULT_MAILERS = {
   "app/views/user_mailer/digest.html.erb" => "<p>Digest</p>\n"
 }.freeze
 
-RSpec.describe "examples/rigor-actionmailer" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-actionmailer" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

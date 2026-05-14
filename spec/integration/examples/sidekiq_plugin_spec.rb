@@ -38,7 +38,7 @@ DEFAULT_WORKERS = {
   RUBY
 }.freeze
 
-RSpec.describe "examples/rigor-sidekiq" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-sidekiq" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

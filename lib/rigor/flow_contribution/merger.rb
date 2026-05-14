@@ -55,7 +55,7 @@ module Rigor
     # In every conflict case the result keeps the higher-tier value
     # for that slot, records a {Conflict} with both provenances, and
     # continues processing the remaining slots / contributions.
-    module Merger # rubocop:disable Metrics/ModuleLength
+    module Merger
       AUTHORITY_TIERS = {
         builtin: 0,
         rbs_extended: 1,
@@ -112,7 +112,7 @@ module Rigor
           fold_role_conformance(state, contribution)
         end
 
-        def fold_return_type(state, contribution, tier) # rubocop:disable Metrics/AbcSize
+        def fold_return_type(state, contribution, tier)
           incoming = contribution.return_type
           return if incoming.nil?
 
@@ -202,7 +202,7 @@ module Rigor
           end
         end
 
-        def build_conflict(target:, edge:, kind:, reason:, provenances:, message:) # rubocop:disable Metrics/ParameterLists
+        def build_conflict(target:, edge:, kind:, reason:, provenances:, message:)
           Conflict.new(target: target, edge: edge, kind: kind, reason: reason,
                        provenances: provenances, message: message)
         end

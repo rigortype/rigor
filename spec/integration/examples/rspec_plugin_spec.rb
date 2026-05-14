@@ -13,7 +13,7 @@ RSPEC_PLUGIN_LIB = File.expand_path("../../../examples/rigor-rspec/lib", __dir__
 $LOAD_PATH.unshift(RSPEC_PLUGIN_LIB) unless $LOAD_PATH.include?(RSPEC_PLUGIN_LIB)
 require "rigor-rspec"
 
-RSpec.describe "examples/rigor-rspec" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-rspec" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

@@ -54,7 +54,7 @@ module Rigor
     # belt-and-braces is harmless and surfaces the lifecycle
     # for readers.
     module PluginHelpers
-      def run_plugin(source:, plugin_entry: nil, cache_store: nil, files: {}, paths: nil, signature_paths: nil) # rubocop:disable Metrics/ParameterLists
+      def run_plugin(source:, plugin_entry: nil, cache_store: nil, files: {}, paths: nil, signature_paths: nil)
         Rigor::Plugin.unregister!
         Dir.mktmpdir do |dir|
           run_plugin_in_dir(
@@ -69,9 +69,9 @@ module Rigor
         end
       end
 
-      # rubocop:disable Metrics/ParameterLists, Layout/LineLength
+      # rubocop:disable Layout/LineLength
       def run_plugin_in_dir(dir:, source:, plugin_entry: nil, cache_store: nil, files: {}, paths: nil, signature_paths: nil)
-        # rubocop:enable Metrics/ParameterLists, Layout/LineLength
+        # rubocop:enable Layout/LineLength
         materialize_files(dir, files)
         File.write(File.join(dir, "demo.rb"), source)
         configuration = build_plugin_configuration(

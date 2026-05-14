@@ -12,7 +12,7 @@ UNITS_PLUGIN_LIB = File.expand_path("../../../examples/rigor-units/lib", __dir__
 $LOAD_PATH.unshift(UNITS_PLUGIN_LIB) unless $LOAD_PATH.include?(UNITS_PLUGIN_LIB)
 require "rigor-units"
 
-RSpec.describe "examples/rigor-units" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-units" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

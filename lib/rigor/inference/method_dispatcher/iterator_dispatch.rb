@@ -27,12 +27,11 @@ module Rigor
       # - `a.downto(b) { |i| … }` yields the same domain `[b, a]`,
       #   just iterated in reverse. Lower bound from the
       #   argument, upper bound from the receiver.
-      module IteratorDispatch # rubocop:disable Metrics/ModuleLength
+      module IteratorDispatch
         module_function
 
         # @return [Array<Rigor::Type>, nil] block-param types, or
         #   nil to fall through to the next tier.
-        # rubocop:disable Metrics/CyclomaticComplexity
         def block_param_types(receiver:, method_name:, args:)
           case method_name
           when :times then times_block_params(receiver)
@@ -45,7 +44,6 @@ module Rigor
           when :each_slice, :each_cons then slice_block_params(receiver)
           end
         end
-        # rubocop:enable Metrics/CyclomaticComplexity
 
         def times_block_params(receiver)
           return nil unless integer_rooted?(receiver)

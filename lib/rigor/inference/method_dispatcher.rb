@@ -62,7 +62,7 @@ module Rigor
       # @param environment [Rigor::Environment, nil] required for
       #   RBS-backed dispatch; when nil only constant folding can fire.
       # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
-      def dispatch(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/ParameterLists,Metrics/CyclomaticComplexity
+      def dispatch(receiver_type:, method_name:, arg_types:,
                    block_type: nil, environment: nil,
                    call_node: nil, scope: nil)
         return nil if receiver_type.nil?
@@ -376,7 +376,7 @@ module Rigor
       # its rules apply only to block-taking calls, so the cheaper
       # arity-based fold tiers above it filter out the common
       # cases first. When `block_type` is nil the tier is a no-op.
-      def dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type = nil) # rubocop:disable Metrics/CyclomaticComplexity
+      def dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type = nil)
         meta_result = try_meta_introspection(receiver_type, method_name, arg_types)
         return meta_result if meta_result
 

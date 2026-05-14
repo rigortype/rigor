@@ -945,7 +945,6 @@ module Rigor
       # for the CallNode itself (the inner type_of calls already record
       # their own fallbacks for unrecognised receivers/args, so the tracer
       # captures both the immediate dispatch miss and the deeper cause).
-      # rubocop:disable Metrics/CyclomaticComplexity
       def call_type_for(node)
         receiver = call_receiver_type_for(node)
         arg_types = call_arg_types(node)
@@ -1018,7 +1017,6 @@ module Rigor
 
         fallback_for(node, family: :prism)
       end
-      # rubocop:enable Metrics/CyclomaticComplexity
 
       # v0.0.2 #5 — re-types the body of a user-defined
       # instance method with the call site's argument types
@@ -1275,7 +1273,6 @@ module Rigor
       PER_ELEMENT_RANGE_LIMIT = 8
       private_constant :PER_ELEMENT_RANGE_LIMIT
 
-      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       def try_per_element_block_fold(call_node, receiver_type)
         return nil unless PER_ELEMENT_TUPLE_METHODS.include?(call_node.name)
         return nil if find_family_with_args?(call_node)
@@ -1293,7 +1290,6 @@ module Rigor
 
         assemble_per_element_result(call_node.name, per_position, element_types)
       end
-      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       # Returns the per-position element types for a finite,
       # statically-known receiver shape — or nil when the
@@ -1316,7 +1312,6 @@ module Rigor
         end
       end
 
-      # rubocop:disable Metrics/CyclomaticComplexity
       def constant_range_elements(value)
         return nil unless value.is_a?(Range)
         return nil unless value.begin.is_a?(Integer) && value.end.is_a?(Integer)
@@ -1326,7 +1321,6 @@ module Rigor
 
         value.to_a.map { |v| Type::Combinator.constant_of(v) }
       end
-      # rubocop:enable Metrics/CyclomaticComplexity
 
       # `index(value)` and `find_index(value)` carry a positional
       # argument and search by `==` rather than running the block.

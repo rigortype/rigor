@@ -49,7 +49,7 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.load_errors).to be_empty
     end
 
-    it "preserves configuration order across multiple plugins" do # rubocop:disable RSpec/ExampleLength
+    it "preserves configuration order across multiple plugins" do
       requirer = lambda { |name|
         case name
         when "rigor-beta" then Rigor::Plugin.register(plugin_class_b)
@@ -71,7 +71,7 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.ids).to eq(%w[beta alpha])
     end
 
-    it "calls #init on every loaded plugin with the service container" do # rubocop:disable RSpec/ExampleLength
+    it "calls #init on every loaded plugin with the service container" do
       captured = []
       tracking_class = Class.new(Rigor::Plugin::Base) do
         manifest(id: "tracker", version: "0.1.0")
@@ -97,7 +97,7 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(captured).to eq([services])
     end
 
-    it "passes user config into the plugin instance after schema validation" do # rubocop:disable RSpec/ExampleLength
+    it "passes user config into the plugin instance after schema validation" do
       requirer = lambda { |_name|
         Rigor::Plugin.register(plugin_class_a)
         true
@@ -151,7 +151,7 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.load_errors.first.message).to match(/registered multiple plugins/)
     end
 
-    it "resolves an explicit `id:` even when the gem registers multiple plugins" do # rubocop:disable RSpec/ExampleLength
+    it "resolves an explicit `id:` even when the gem registers multiple plugins" do
       requirer = lambda { |_name|
         Rigor::Plugin.register(plugin_class_a)
         Rigor::Plugin.register(plugin_class_b)
@@ -172,7 +172,7 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.ids).to eq(["alpha"])
     end
 
-    it "rejects duplicate plugin ids in the configuration" do # rubocop:disable RSpec/ExampleLength
+    it "rejects duplicate plugin ids in the configuration" do
       requirer = lambda { |_name|
         Rigor::Plugin.register(plugin_class_a)
         true
@@ -193,7 +193,7 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.load_errors.first.message).to match(/appeared twice/)
     end
 
-    it "surfaces config schema violations as load errors" do # rubocop:disable RSpec/ExampleLength
+    it "surfaces config schema violations as load errors" do
       requirer = lambda { |_name|
         Rigor::Plugin.register(plugin_class_a)
         true
@@ -214,7 +214,7 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.load_errors.first.message).to match(/expected boolean/)
     end
 
-    it "surfaces #init exceptions as load errors without crashing the loader" do # rubocop:disable RSpec/ExampleLength
+    it "surfaces #init exceptions as load errors without crashing the loader" do
       bomb_class = Class.new(Rigor::Plugin::Base) do
         manifest(id: "bomb", version: "0.1.0")
       end
@@ -251,7 +251,7 @@ RSpec.describe Rigor::Plugin::Loader do
     end
   end
 
-  describe "topological sort + missing-producer (ADR-9 slice 5)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+  describe "topological sort + missing-producer (ADR-9 slice 5)" do
     let(:producer_class) do
       klass = Class.new(Rigor::Plugin::Base) do
         manifest(id: "activerecord", version: "0.1.0", produces: [:model_index])
@@ -293,7 +293,7 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(registry.load_errors).to be_empty
     end
 
-    it "emits :missing-producer when a non-optional consume has no matching producer" do # rubocop:disable RSpec/ExampleLength
+    it "emits :missing-producer when a non-optional consume has no matching producer" do
       requirer = lambda { |_name|
         Rigor::Plugin.register(consumer_class)
         true
@@ -314,7 +314,7 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(err.message).to include("model_index")
     end
 
-    it "skips :missing-producer validation for optional consumes" do # rubocop:disable RSpec/ExampleLength
+    it "skips :missing-producer validation for optional consumes" do
       optional_consumer = Class.new(Rigor::Plugin::Base) do
         manifest(
           id: "factorybot",

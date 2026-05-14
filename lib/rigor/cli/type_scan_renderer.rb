@@ -10,7 +10,7 @@ module Rigor
     # branches share a single source of truth (the `Report` value object) so
     # the two formats stay in lockstep; that pairing is why this class is a
     # bit longer than the default class-length budget.
-    class TypeScanRenderer # rubocop:disable Metrics/ClassLength
+    class TypeScanRenderer
       def initialize(out:)
         @out = out
       end

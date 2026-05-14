@@ -45,7 +45,6 @@ module Rigor
     # scope MUST NOT observe them and the binder leaves them unbound.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
-    # rubocop:disable Metrics/ClassLength
     class BlockParameterBinder
       # @param expected_param_types [Array<Rigor::Type>] positional block
       #   parameter types in order. Indices the binder cannot fill from
@@ -208,6 +207,5 @@ module Rigor
         @expected_param_types[index] || Type::Combinator.untyped
       end
     end
-    # rubocop:enable Metrics/ClassLength
   end
 end

@@ -15,7 +15,7 @@ TYPESCRIPT_UTILITY_TYPES_PLUGIN_LIB =
 $LOAD_PATH.unshift(TYPESCRIPT_UTILITY_TYPES_PLUGIN_LIB) unless $LOAD_PATH.include?(TYPESCRIPT_UTILITY_TYPES_PLUGIN_LIB)
 require "rigor-typescript-utility-types"
 
-RSpec.describe "examples/rigor-typescript-utility-types" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-typescript-utility-types" do
   let(:plugin_class) { Rigor::Plugin::TypescriptUtilityTypes }
 
   let(:name_scope) do

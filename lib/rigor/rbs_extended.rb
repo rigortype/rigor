@@ -575,7 +575,7 @@ module Rigor
       build_flow_contribution(predicate_effects, assert_effects, return_override)
     end
 
-    def build_flow_contribution(predicate_effects, assert_effects, return_override) # rubocop:disable Metrics/CyclomaticComplexity
+    def build_flow_contribution(predicate_effects, assert_effects, return_override)
       truthy = predicate_effects.select(&:truthy_only?).map(&:to_fact)
       falsey = predicate_effects.select(&:falsey_only?).map(&:to_fact)
       post_return = []

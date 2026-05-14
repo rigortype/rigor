@@ -214,7 +214,7 @@ module Rigor
     private_class_method :load_with_includes, :merge_includes, :resolve_paths_in, :deep_merge,
                          :merge_value, :merge_dependencies_hash
 
-    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
+    # rubocop:disable Metrics/AbcSize
     def initialize(data = DEFAULTS)
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
@@ -247,7 +247,7 @@ module Rigor
         data.fetch("dependencies", DEFAULTS.fetch("dependencies"))
       )
     end
-    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
+    # rubocop:enable Metrics/AbcSize
 
     def to_h
       {

@@ -376,7 +376,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 end
 
-RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "Public API drift", :public_api_drift do
   def signature(method)
     params = method.parameters.map { |kind, name| "#{kind}:#{name}" }.join(",")
     "#{method.name}(#{params})"
@@ -659,7 +659,6 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
       { instance: instance, singleton: singleton }
     end
 
-    # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity
     def collect_method_member(member, instance, singleton)
       case member
       when RBS::AST::Members::MethodDefinition
@@ -684,7 +683,6 @@ RSpec.describe "Public API drift", :public_api_drift do # rubocop:disable RSpec/
         bucket << member.new_name.to_s
       end
     end
-    # rubocop:enable Metrics/AbcSize,Metrics/CyclomaticComplexity
 
     def names_from_snapshot(snapshot)
       snapshot.map { |s| s.split("(").first }

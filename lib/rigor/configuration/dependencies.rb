@@ -13,7 +13,7 @@ module Rigor
     # is read, but no analyzer machinery consumes it yet. Slice 2
     # wires `Analysis::DependencySourceInference` against this
     # value object.
-    class Dependencies # rubocop:disable Metrics/ClassLength
+    class Dependencies
       # Walking modes per
       # [ADR-10 § "Decision"](../../../docs/adr/10-dependency-source-inference.md#decision).
       VALID_MODES = %i[disabled when_missing full].freeze

@@ -69,7 +69,7 @@ RSpec.describe Rigor::Plugin::IoBoundary do
       end
     end
 
-    describe "with an :allowlist network policy (v0.1.2)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+    describe "with an :allowlist network policy (v0.1.2)" do
       let(:fake_responses) { {} }
       let(:fake_http) do
         responses = fake_responses

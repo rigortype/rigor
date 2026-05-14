@@ -12,7 +12,7 @@
 require "spec_helper"
 require_relative "support/fixture_harness"
 
-RSpec.describe "Rigor type construction (integration)" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "Rigor type construction (integration)" do
   def harness_for(name)
     Rigor::IntegrationSupport::FixtureHarness.new(name)
   end

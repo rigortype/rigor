@@ -347,7 +347,7 @@ module Rigor
       build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other)
     end
 
-    def ==(other) # rubocop:disable Metrics/CyclomaticComplexity
+    def ==(other)
       other.is_a?(Scope) &&
         environment.equal?(other.environment) &&
         @locals == other.locals &&

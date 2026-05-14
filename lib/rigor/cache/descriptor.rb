@@ -21,7 +21,7 @@ module Rigor
     # See ADR-2 § "Registration, Configuration, and Caching" for
     # the design rationale and ADR-6 for the storage backend
     # decisions that consume this schema.
-    class Descriptor # rubocop:disable Metrics/ClassLength
+    class Descriptor
       # Bumped on incompatible schema changes. The storage layer
       # mixes this into the cache key, so a bump implicitly
       # invalidates every cached value. v2 added the

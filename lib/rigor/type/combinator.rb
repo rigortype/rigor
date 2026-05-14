@@ -356,7 +356,6 @@ module Rigor
       INT_MASK_UNION_LIMIT = 16
       private_constant :INT_MASK_FLAG_LIMIT, :INT_MASK_UNION_LIMIT
 
-      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       def int_mask(flags)
         return nil unless flags.is_a?(Array) && flags.all?(Integer)
         return nil if flags.any?(&:negative?)
@@ -371,7 +370,6 @@ module Rigor
           integer_range(values.min, values.max)
         end
       end
-      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
       # `int_mask_of[T]` — derives the int_mask closure from
       # a finite integer-literal type:

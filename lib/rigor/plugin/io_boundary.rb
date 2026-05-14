@@ -137,7 +137,6 @@ module Rigor
     # to the same `#get(url, timeout:, max_bytes:)` shape so the
     # tests don't require network access.
     class DefaultHttpClient
-      # rubocop:disable Metrics/MethodLength
       def get(url, timeout:, max_bytes:)
         require "net/http"
         require "uri"
@@ -169,7 +168,6 @@ module Rigor
         end
         body
       end
-      # rubocop:enable Metrics/MethodLength
     end
   end
 end

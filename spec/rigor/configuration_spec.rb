@@ -270,7 +270,7 @@ RSpec.describe Rigor::Configuration do
       end
     end
 
-    it "round-trips dependencies: through #to_h" do # rubocop:disable RSpec/ExampleLength
+    it "round-trips dependencies: through #to_h" do
       Dir.mktmpdir do |dir|
         path = File.join(dir, ".rigor.yml")
         File.write(path, <<~YAML)

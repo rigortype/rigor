@@ -29,7 +29,7 @@ module Rigor
       end
 
       class Fact < Data.define(:bucket, :target, :predicate, :payload, :polarity, :stability)
-        def initialize(bucket:, target:, predicate:, payload: nil, polarity: :positive, stability: :local_binding) # rubocop:disable Metrics/ParameterLists
+        def initialize(bucket:, target:, predicate:, payload: nil, polarity: :positive, stability: :local_binding)
           bucket = bucket.to_sym
           raise ArgumentError, "unknown fact bucket #{bucket.inspect}" unless BUCKETS.include?(bucket)
 

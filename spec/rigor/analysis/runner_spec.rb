@@ -212,7 +212,7 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.severity).to eq(:warning)
     end
 
-    it "respects the per-receiver plugin veto (ADR-10 5a)" do # rubocop:disable RSpec/ExampleLength
+    it "respects the per-receiver plugin veto (ADR-10 5a)" do
       # When a plugin declares manifest(owns_receivers: [...])
       # and the dispatcher's receiver IS owned by the plugin,
       # try_dependency_source must decline so the plugin
@@ -265,7 +265,7 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.message).to include("prism")
     end
 
-    it "surfaces a budget-exceeded gem as `dynamic.dependency-source.budget-exceeded` exactly once (ADR-10 slice 4)" do # rubocop:disable RSpec/ExampleLength
+    it "surfaces a budget-exceeded gem as `dynamic.dependency-source.budget-exceeded` exactly once (ADR-10 slice 4)" do
       configuration = Rigor::Configuration.new(
         "paths" => [],
         "dependencies" => {
@@ -420,7 +420,7 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(result).to be_success
       end
 
-      describe "diagnostic suppression (v0.0.2 #6)" do # rubocop:disable RSpec/NestedGroups
+      describe "diagnostic suppression (v0.0.2 #6)" do
         it "skips rules listed in `disable:` of the configuration" do
           result = analyze("\"x\".no_method\n", config: { "disable" => ["call.undefined-method"] })
 
@@ -518,7 +518,7 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       # ADR-8 § "`def.return-type-mismatch` rule"
-      describe "def.return-type-mismatch rule" do # rubocop:disable RSpec/NestedGroups
+      describe "def.return-type-mismatch rule" do
         let(:demo_sig) do
           { "demo.rbs" => <<~RBS }
             class Demo
@@ -591,7 +591,7 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(result.diagnostics.find { |d| d.rule == "def.return-type-mismatch" }).to be_nil
         end
 
-        describe "refinement carrier override (v0.1.2)" do # rubocop:disable RSpec/NestedGroups
+        describe "refinement carrier override (v0.1.2)" do
           let(:refined_sig) do
             { "refined.rbs" => <<~RBS }
               class Refined
@@ -659,8 +659,8 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       # ADR-8 § "Severity profile"
-      describe "severity profile re-stamping (v0.1.0+)" do # rubocop:disable RSpec/NestedGroups
-        it "lenient profile drops call.argument-type-mismatch to :warning" do # rubocop:disable RSpec/ExampleLength
+      describe "severity profile re-stamping (v0.1.0+)" do
+        it "lenient profile drops call.argument-type-mismatch to :warning" do
           Dir.mktmpdir do |dir|
             File.write(File.join(dir, "demo.rbs"), <<~RBS)
               class Demo
@@ -706,7 +706,7 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
-      describe "argument-type-mismatch rule (v0.0.2 #4)" do # rubocop:disable RSpec/NestedGroups
+      describe "argument-type-mismatch rule (v0.0.2 #4)" do
         # `Demo#take_string: (String) -> String` fixture, paired
         # with the matching `def`. `analyze` writes the sig under
         # `sig/` and chdirs so `Environment.for_project` discovers
@@ -741,7 +741,7 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
-      describe "dump_type / assert_type rules (Slice 7 phase 19)" do # rubocop:disable RSpec/NestedGroups
+      describe "dump_type / assert_type rules (Slice 7 phase 19)" do
         it "emits an info-severity diagnostic for `dump_type(value)`" do
           result = analyze(<<~RUBY)
             require "rigor/testing"
@@ -758,7 +758,7 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(result).to be_success
         end
 
-        it "errors on `assert_type` mismatch and stays silent on a match" do # rubocop:disable RSpec/ExampleLength
+        it "errors on `assert_type` mismatch and stays silent on a match" do
           result = analyze(files: {
                              "match.rb" => <<~RUBY,
                                require "rigor/testing"
@@ -782,7 +782,7 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
-      describe "nil-receiver rule (Slice 7 phase 14)" do # rubocop:disable RSpec/NestedGroups
+      describe "nil-receiver rule (Slice 7 phase 14)" do
         let(:maybe_nil_string) do
           <<~RUBY
             x = if rand < 0.5
@@ -1072,7 +1072,7 @@ RSpec.describe Rigor::Analysis::Runner do
         result.diagnostics.select { |d| d.rule == "def.method-visibility-mismatch" }
       end
 
-      it "flags an explicit-receiver call to a method declared under `private`" do # rubocop:disable RSpec/ExampleLength
+      it "flags an explicit-receiver call to a method declared under `private`" do
         result = analyze(<<~RUBY)
           class Foo
             def bar
@@ -1300,7 +1300,7 @@ RSpec.describe Rigor::Analysis::Runner do
         result.diagnostics.select { |d| d.rule == "def.ivar-write-mismatch" }
       end
 
-      it "flags a String → Integer ivar drift in the same class" do # rubocop:disable RSpec/ExampleLength
+      it "flags a String → Integer ivar drift in the same class" do
         result = analyze(<<~RUBY)
           class Foo
             def initialize
@@ -1783,7 +1783,7 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(undef_calls).to be_empty
     end
 
-    it "leaves the rest of the program unchanged when the plugin contributes no facts" do # rubocop:disable RSpec/ExampleLength
+    it "leaves the rest of the program unchanged when the plugin contributes no facts" do
       noop = Class.new(Rigor::Plugin::Base) { manifest(id: "noop-narrower", version: "0.1.0") }
       stub_const("FakeNoopNarrowingPlugin", noop)
       Dir.mktmpdir do |dir|

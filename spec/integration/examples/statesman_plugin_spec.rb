@@ -10,7 +10,7 @@ STATESMAN_PLUGIN_LIB = File.expand_path("../../../examples/rigor-statesman/lib",
 $LOAD_PATH.unshift(STATESMAN_PLUGIN_LIB) unless $LOAD_PATH.include?(STATESMAN_PLUGIN_LIB)
 require "rigor-statesman"
 
-RSpec.describe "examples/rigor-statesman" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-statesman" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
@@ -74,7 +74,7 @@ RSpec.describe "examples/rigor-statesman" do # rubocop:disable RSpec/DescribeCla
   end
 
   describe "configurable DSL keywords" do
-    it "treats configured `dsl_method` / `state_method` / `transition_method` as the DSL" do # rubocop:disable RSpec/ExampleLength
+    it "treats configured `dsl_method` / `state_method` / `transition_method` as the DSL" do
       source = <<~RUBY
         class Order
           aasm do
@@ -104,7 +104,7 @@ RSpec.describe "examples/rigor-statesman" do # rubocop:disable RSpec/DescribeCla
   end
 
   describe "multiple state machines in the same file" do
-    it "unions the state sets across all state_machine blocks" do # rubocop:disable RSpec/ExampleLength
+    it "unions the state sets across all state_machine blocks" do
       diags = plugin_diagnostics(run_statesman(<<~RUBY))
         class Order
           state_machine do

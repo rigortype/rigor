@@ -98,7 +98,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
     end
   end
 
-  describe "Array#join (Tuple receiver lift)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+  describe "Array#join (Tuple receiver lift)" do
     let(:tuple_of_literals) { Rigor::Type::Combinator.tuple_of(literal_string, string_const) }
     let(:tuple_with_nominal) { Rigor::Type::Combinator.tuple_of(literal_string, nominal_string) }
     let(:empty_tuple) { Rigor::Type::Combinator.tuple_of }
@@ -146,7 +146,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
     end
   end
 
-  describe "Kernel#format / Kernel#sprintf (template + value args)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+  describe "Kernel#format / Kernel#sprintf (template + value args)" do
     let(:int_arg) { int_const }
     let(:singleton_kernel) { Rigor::Type::Combinator.singleton_of("Kernel") }
 

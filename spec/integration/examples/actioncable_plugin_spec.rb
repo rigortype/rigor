@@ -52,7 +52,7 @@ DEFAULT_PLUGIN_ENTRY = {
   "config" => { "channel_base_classes" => ["ApplicationCable::Channel"] }
 }.freeze
 
-RSpec.describe "examples/rigor-actioncable" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-actioncable" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

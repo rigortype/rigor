@@ -26,7 +26,7 @@ DEFAULT_ROUTES_RB = <<~RUBY
   end
 RUBY
 
-RSpec.describe "examples/rigor-rails-routes" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-rails-routes" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

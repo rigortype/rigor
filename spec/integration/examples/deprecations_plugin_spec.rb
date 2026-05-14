@@ -9,7 +9,7 @@ DEPRECATIONS_PLUGIN_LIB = File.expand_path("../../../examples/rigor-deprecations
 $LOAD_PATH.unshift(DEPRECATIONS_PLUGIN_LIB) unless $LOAD_PATH.include?(DEPRECATIONS_PLUGIN_LIB)
 require "rigor-deprecations"
 
-RSpec.describe "examples/rigor-deprecations" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-deprecations" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

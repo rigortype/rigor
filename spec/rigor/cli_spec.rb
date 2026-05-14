@@ -352,7 +352,7 @@ RSpec.describe Rigor::CLI do
       end
     end
 
-    it "honours `cache.path:` from .rigor.yml when constructing the Cache::Store" do # rubocop:disable RSpec/ExampleLength
+    it "honours `cache.path:` from .rigor.yml when constructing the Cache::Store" do
       write_check_fixture("a.rb", "1\n")
       write_check_fixture(".rigor.yml", <<~YAML)
         paths:

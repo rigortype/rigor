@@ -146,7 +146,7 @@ RSpec.describe Rigor::Configuration::Dependencies do
   end
 
   describe "#to_h" do
-    it "round-trips through Configuration::Dependencies.from_h" do # rubocop:disable RSpec/ExampleLength
+    it "round-trips through Configuration::Dependencies.from_h" do
       original = described_class.from_h(
         "source_inference" => [
           { "gem" => "rack", "mode" => "full", "roots" => %w[lib bin] },

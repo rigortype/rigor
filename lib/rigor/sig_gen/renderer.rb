@@ -19,7 +19,7 @@ module Rigor
     #   `--write` merge.
     # - `:json` — machine-readable payload with the same
     #   classification table as `:print`.
-    class Renderer # rubocop:disable Metrics/ClassLength
+    class Renderer
       def initialize(out:)
         @out = out
       end

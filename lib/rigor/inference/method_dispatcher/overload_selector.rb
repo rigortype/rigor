@@ -41,7 +41,7 @@ module Rigor
       # (instance vs singleton). Both kinds share the same arity and
       # acceptance shape; the difference is only in which `Definition`
       # the caller fetched.
-      module OverloadSelector # rubocop:disable Metrics/ModuleLength
+      module OverloadSelector
         module_function
 
         # @param method_definition [RBS::Definition::Method]
@@ -64,7 +64,6 @@ module Rigor
         #   back to the first declaration.
         # @return [RBS::MethodType, nil] the chosen overload, or nil
         #   when the definition has no method types at all.
-        # rubocop:disable Metrics/ParameterLists
         def select(method_definition, arg_types:, self_type:, instance_type:, type_vars: {}, block_required: false,
                    environment: nil)
           overloads = method_definition.method_types
@@ -114,7 +113,6 @@ module Rigor
 
           overloads.first
         end
-        # rubocop:enable Metrics/ParameterLists
 
         def overload_has_block?(method_type)
           method_type.respond_to?(:block) && method_type.block
@@ -123,7 +121,7 @@ module Rigor
         class << self
           private
 
-          # rubocop:disable Metrics/ParameterLists, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+          # rubocop:disable Metrics/ParameterLists
           def find_matching_overload(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:,
                                      param_overrides:, strict:)
             return nil if strict && arg_types.any? { |t| untyped_arg?(t) }
@@ -142,7 +140,7 @@ module Rigor
               )
             end
           end
-          # rubocop:enable Metrics/ParameterLists, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+          # rubocop:enable Metrics/ParameterLists
 
           # Treats the literal `untyped` carrier (`Dynamic[Top]`)
           # as too imprecise to drive a strict-pass match. Other
@@ -195,7 +193,6 @@ module Rigor
             end
           end
 
-          # rubocop:disable Metrics/ParameterLists
           def matches?(method_type, arg_types, self_type:, instance_type:, type_vars:, param_overrides:)
             return false if method_type.respond_to?(:type_params) && rejects_keyword_required?(method_type)
 
@@ -214,7 +211,6 @@ module Rigor
               )
             end
           end
-          # rubocop:enable Metrics/ParameterLists
 
           # Slice 4 phase 2c does not pass keyword arguments through the
           # call site (caller passes only positional `arg_types`). An
@@ -259,7 +255,6 @@ module Rigor
             head
           end
 
-          # rubocop:disable Metrics/ParameterLists
           def accepts_param?(param, arg, self_type:, instance_type:, type_vars:, param_overrides:)
             param_type = param_overrides[param.name] || RbsTypeTranslator.translate(
               param.type,
@@ -270,7 +265,6 @@ module Rigor
             result = param_type.accepts(arg, mode: :gradual)
             result.yes? || result.maybe?
           end
-          # rubocop:enable Metrics/ParameterLists
         end
       end
     end

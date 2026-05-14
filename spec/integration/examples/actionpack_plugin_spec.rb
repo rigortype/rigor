@@ -51,11 +51,11 @@ DEFAULT_AP_ROUTES_RB = <<~RUBY
   end
 RUBY
 
-RSpec.describe "examples/rigor-actionpack" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-actionpack" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
-  def with_demo(controller_source, routes: DEFAULT_AP_ROUTES_RB) # rubocop:disable Metrics/MethodLength
+  def with_demo(controller_source, routes: DEFAULT_AP_ROUTES_RB)
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "config"))
       FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
@@ -208,7 +208,7 @@ RSpec.describe "examples/rigor-actionpack" do # rubocop:disable RSpec/DescribeCl
   end
 
   describe "filter chains (Phase 2)" do
-    def with_controllers(controllers:, routes: DEFAULT_AP_ROUTES_RB) # rubocop:disable Metrics/MethodLength
+    def with_controllers(controllers:, routes: DEFAULT_AP_ROUTES_RB)
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "config"))
         FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
@@ -328,7 +328,7 @@ RSpec.describe "examples/rigor-actionpack" do # rubocop:disable RSpec/DescribeCl
   end
 
   describe "render targets (Phase 3)" do
-    def with_render_demo(controller_source, views: {}) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+    def with_render_demo(controller_source, views: {})
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "config"))
         FileUtils.mkdir_p(File.join(dir, "app", "controllers"))
@@ -437,7 +437,7 @@ RSpec.describe "examples/rigor-actionpack" do # rubocop:disable RSpec/DescribeCl
   end
 
   describe "strong parameters (Phase 1)" do
-    def with_strong_params(controller_source) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+    def with_strong_params(controller_source)
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "config"))
         FileUtils.mkdir_p(File.join(dir, "app", "controllers"))

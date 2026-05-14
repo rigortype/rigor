@@ -149,7 +149,6 @@ module Rigor
         #   and runs the format. Symbol keys are kept as
         #   Symbols (matching Ruby's `%{key}` resolution).
         # Anything else declines so the RBS tier widens.
-        # rubocop:disable Metrics/CyclomaticComplexity
         def try_fold_string_format(receiver, method_name, args)
           return nil unless method_name == :%
           return nil unless args.size == 1
@@ -166,7 +165,6 @@ module Rigor
         rescue StandardError
           nil
         end
-        # rubocop:enable Metrics/CyclomaticComplexity
 
         def format_argument_value(arg)
           case arg
@@ -275,7 +273,6 @@ module Rigor
           [result]
         end
 
-        # rubocop:disable Metrics/CyclomaticComplexity
         def try_fold_unary_set(receiver_values, method_name)
           range_lift = try_fold_range_constant_unary(receiver_values, method_name)
           return range_lift if range_lift
@@ -299,8 +296,6 @@ module Rigor
           end
           build_constant_type(results, source: receiver_values)
         end
-        # rubocop:enable Metrics/CyclomaticComplexity
-
         # v0.0.7 — `Constant<Range>#to_a` and the no-arg
         # `first` / `last` / `min` / `max` short-circuit through a
         # Range-specific arm that catalog dispatch cannot reach:
@@ -353,7 +348,6 @@ module Rigor
           Type::Combinator.constant_of(edge == :first ? values.first : values.last)
         end
 
-        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         def try_fold_binary_set(receiver_values, method_name, arg_values)
           string_lift = try_fold_string_array_binary(receiver_values, method_name, arg_values)
           return string_lift if string_lift
@@ -369,8 +363,6 @@ module Rigor
           end
           build_constant_type(results, source: receiver_values + arg_values)
         end
-        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-
         # v0.0.7 — `Constant<String>#chars` / `bytes` / `lines` /
         # `split` (no-arg) return a Ruby Array of foldable
         # scalars; `foldable_constant_value?` rejects Array
@@ -425,7 +417,6 @@ module Rigor
           nil
         end
 
-        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         def try_fold_pathname_binary(receiver_values, method_name, arg_values)
           return nil unless PATHNAME_PURE_BINARY.include?(method_name)
           return nil unless receiver_values.size == 1 && arg_values.size == 1
@@ -442,7 +433,6 @@ module Rigor
         rescue StandardError
           nil
         end
-        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
         def try_fold_string_array_unary(receiver_values, method_name)
           return nil unless STRING_ARRAY_UNARY_METHODS.include?(method_name)
@@ -459,7 +449,6 @@ module Rigor
         # `Constant<String>#split(arg)` / `#scan(arg)` — lift the
         # Array result to a Tuple when both sides are statically
         # known and the cardinality fits.
-        # rubocop:disable Metrics/CyclomaticComplexity
         def try_fold_string_array_binary(receiver_values, method_name, arg_values)
           return nil unless STRING_ARRAY_BINARY_METHODS.include?(method_name)
           return nil unless receiver_values.size == 1 && arg_values.size == 1
@@ -473,7 +462,6 @@ module Rigor
         rescue StandardError
           nil
         end
-        # rubocop:enable Metrics/CyclomaticComplexity
 
         def lift_array_result(result)
           return nil unless result.is_a?(Array)

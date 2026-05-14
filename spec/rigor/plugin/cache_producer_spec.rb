@@ -66,7 +66,7 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
     end
   end
 
-  describe "#cache_for callable" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+  describe "#cache_for callable" do
     let(:plugin_class) do
       Class.new(described_class) do
         manifest(id: "alpha", version: "0.1.0")
@@ -129,7 +129,7 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
       expect(b.cache_for(:value, params: {}).call).to eq("disabled")
     end
 
-    it "bypasses the cache when services.cache_store is nil (--no-cache)" do # rubocop:disable RSpec/ExampleLength
+    it "bypasses the cache when services.cache_store is nil (--no-cache)" do
       no_cache_services = Rigor::Plugin::Services.new(
         reflection: Rigor::Reflection,
         type: Rigor::Type::Combinator,
@@ -163,7 +163,7 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
       expect(result).to eq("hello")
     end
 
-    it "composes a plugin-author-supplied descriptor with the auto-built one" do # rubocop:disable RSpec/ExampleLength
+    it "composes a plugin-author-supplied descriptor with the auto-built one" do
       called = 0
       klass = Class.new(described_class) do
         manifest(id: "alpha", version: "0.1.0")
@@ -206,7 +206,7 @@ RSpec.describe Rigor::Plugin::Base, # rubocop:disable RSpec/SpecFilePathFormat
       end.to raise_error(Rigor::Cache::Descriptor::Conflict)
     end
 
-    it "invalidates when files read via io_boundary BEFORE cache_for change between calls" do # rubocop:disable RSpec/ExampleLength
+    it "invalidates when files read via io_boundary BEFORE cache_for change between calls" do
       file = File.join(tmpdir, "data.txt")
       File.write(file, "v1")
 

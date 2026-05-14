@@ -345,7 +345,7 @@ module Rigor
       # forwarded / block arguments still abort the
       # observation (`nil`) — those don't map cleanly to a
       # single per-position type the renderer can union.
-      def collect_args(call_node, scope) # rubocop:disable Metrics/CyclomaticComplexity
+      def collect_args(call_node, scope)
         positional = []
         keyword = {}
         args = call_node.arguments&.arguments || []

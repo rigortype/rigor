@@ -50,7 +50,7 @@ module Rigor
       #   `root`'s subtree.
       # @return [Hash{Prism::Node => Rigor::Scope}] identity-comparing
       #   table whose default value is `default_scope`.
-      def index(root, default_scope:) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+      def index(root, default_scope:) # rubocop:disable Metrics/AbcSize
         # Slice A-declarations. Build the declaration overrides
         # first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through
@@ -310,7 +310,7 @@ module Rigor
         accumulator.freeze
       end
 
-      def walk_constant_writes(node, qualified_prefix, default_scope, accumulator) # rubocop:disable Metrics/CyclomaticComplexity
+      def walk_constant_writes(node, qualified_prefix, default_scope, accumulator)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -358,7 +358,7 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength
       def walk_methods(node, qualified_prefix, in_singleton_class, accumulator)
         return unless node.is_a?(Prism::Node)
 
@@ -395,7 +395,7 @@ module Rigor
           walk_methods(child, qualified_prefix, in_singleton_class, accumulator)
         end
       end
-      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity, Metrics/AbcSize
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength
 
       # v0.1.2 — when a `Const = Data.define(*sym) do ... end`
       # / `Const = Struct.new(*sym) do ... end` constant write
@@ -440,7 +440,6 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
       def walk_def_nodes(node, qualified_prefix, in_singleton_class, accumulator)
         return unless node.is_a?(Prism::Node)
 
@@ -472,8 +471,6 @@ module Rigor
           walk_def_nodes(child, qualified_prefix, in_singleton_class, accumulator)
         end
       end
-      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-
       # v0.0.3 A — sentinel key under which `record_def_node`
       # files DefNodes that live outside any class / module
       # body (top-level helpers, `def`s nested inside DSL
@@ -656,7 +653,6 @@ module Rigor
 
       # Builds a map `{class_name => {new_name_sym => old_name_sym}}` by
       # walking the tree for `AliasMethodNode` nodes inside class bodies.
-      # rubocop:disable Metrics/CyclomaticComplexity
       def collect_class_alias_map(node, qualified_prefix, accumulator)
         return accumulator unless node.is_a?(Prism::Node)
 
@@ -677,7 +673,6 @@ module Rigor
         node.compact_child_nodes.each { |child| collect_class_alias_map(child, qualified_prefix, accumulator) }
         accumulator
       end
-      # rubocop:enable Metrics/CyclomaticComplexity
 
       def record_alias_map_entry(alias_node, qualified_prefix, accumulator)
         return if qualified_prefix.empty?

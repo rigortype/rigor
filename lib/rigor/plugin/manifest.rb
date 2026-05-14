@@ -11,7 +11,7 @@ module Rigor
     # The fields are pinned by ADR-2 § "Registration, Configuration,
     # and Caching"; the v0.1.0 plugin contract surface treats this
     # struct as the public manifest shape.
-    class Manifest # rubocop:disable Metrics/ClassLength
+    class Manifest
       # Same regex {Rigor::Cache::Store::VALID_PRODUCER_ID} uses,
       # so plugin ids round-trip through cache producer ids and
       # `plugin.<id>.<rule>` diagnostic identifiers without escape.
@@ -60,7 +60,7 @@ module Rigor
 
       private
 
-      # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize
+      # rubocop:disable Metrics/ParameterLists
       def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
                         type_node_resolvers)
         @id = id.dup.freeze
@@ -73,7 +73,7 @@ module Rigor
         @owns_receivers = owns_receivers.map { |c| c.to_s.dup.freeze }.freeze
         @type_node_resolvers = type_node_resolvers.dup.freeze
       end
-      # rubocop:enable Metrics/ParameterLists,Metrics/AbcSize
+      # rubocop:enable Metrics/ParameterLists
 
       public
 

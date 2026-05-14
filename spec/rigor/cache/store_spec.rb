@@ -116,7 +116,7 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
-  describe "custom serialize: / deserialize: (v0.0.9 C1)" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+  describe "custom serialize: / deserialize: (v0.0.9 C1)" do
     let(:upcase_serialize) { :upcase.to_proc }
     let(:downcase_deserialize) { :downcase.to_proc }
 
@@ -244,7 +244,7 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
-  describe "corruption tolerance" do # rubocop:disable RSpec/MultipleMemoizedHelpers
+  describe "corruption tolerance" do
     let(:key) { descriptor.cache_key_for(producer_id: "p", params: {}) }
     let(:entry_path) { File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry") }
 

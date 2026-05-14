@@ -48,7 +48,7 @@ DEFAULT_USERS_FACTORY_RB = <<~RUBY
   end
 RUBY
 
-RSpec.describe "examples/rigor-factorybot" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-factorybot" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
@@ -159,7 +159,7 @@ RSpec.describe "examples/rigor-factorybot" do # rubocop:disable RSpec/DescribeCl
       expect(info).not_to be_nil
     end
 
-    it "skips `add_attribute` and method_missing forms inside trait blocks (Phase 1 (a) limitation)" do # rubocop:disable RSpec/ExampleLength
+    it "skips `add_attribute` and method_missing forms inside trait blocks (Phase 1 (a) limitation)" do
       result = run_plugin(
         source: "FactoryBot.create(:user, only_in_trait: true)\n",
         files: {
@@ -184,7 +184,7 @@ RSpec.describe "examples/rigor-factorybot" do # rubocop:disable RSpec/DescribeCl
   end
 
   describe "Phase 1 (c) AR column cross-check" do
-    def run_factorybot_with_ar(source) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize
+    def run_factorybot_with_ar(source)
       Rigor::Plugin.unregister!
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "spec", "factories"))

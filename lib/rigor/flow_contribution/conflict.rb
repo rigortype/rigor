@@ -29,7 +29,7 @@ module Rigor
     ].freeze
 
     class Conflict < Data.define(:target, :edge, :kind, :reason, :provenances, :message)
-      def initialize(target:, edge:, kind:, reason:, provenances:, message:) # rubocop:disable Metrics/ParameterLists
+      def initialize(target:, edge:, kind:, reason:, provenances:, message:)
         unless CONFLICT_VALID_REASONS.include?(reason)
           raise ArgumentError,
                 "FlowContribution::Conflict reason must be one of " \

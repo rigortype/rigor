@@ -34,7 +34,7 @@ module Rigor
     # `--params=observed-strict` stays reserved-but-inert until
     # the capability-role catalog ships (rejected with a usage
     # error so the surface stays stable).
-    class SigGenCommand # rubocop:disable Metrics/ClassLength
+    class SigGenCommand
       USAGE = "Usage: rigor sig-gen [options] [paths]"
 
       VALID_MODES = %w[print diff write].freeze
@@ -122,7 +122,7 @@ module Rigor
         nil
       end
 
-      def build_option_parser(options) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+      def build_option_parser(options) # rubocop:disable Metrics/AbcSize
         OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
           opts.banner = USAGE
           opts.on("--print", "Write RBS skeletons to stdout (default)") { options[:mode] = "print" }

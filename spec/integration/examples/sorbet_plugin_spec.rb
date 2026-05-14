@@ -22,7 +22,7 @@ SIG_STUB = <<~RUBY
   end
 RUBY
 
-RSpec.describe "examples/rigor-sorbet" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-sorbet" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

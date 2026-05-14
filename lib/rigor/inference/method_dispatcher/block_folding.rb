@@ -37,7 +37,7 @@ module Rigor
       # tuple — element-wise block re-evaluation against
       # `Constant<Array>` receivers (the `map` / `filter_map` /
       # `flat_map` precision tier) is reserved for a later slice.
-      module BlockFolding # rubocop:disable Metrics/ModuleLength
+      module BlockFolding
         module_function
 
         FILTER_KEEP_ON_TRUTHY = Set[:select, :filter, :take_while].freeze
@@ -69,7 +69,6 @@ module Rigor
         #   the call's block. `nil` means "no block at the call site"
         #   and disqualifies every rule here.
         # @return [Rigor::Type, nil]
-        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         def try_fold(receiver:, method_name:, args:, block_type:)
           return nil if receiver.nil? || block_type.nil?
 
@@ -86,7 +85,6 @@ module Rigor
             fold_count(receiver, truthiness, args)
           end
         end
-        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
         def filter_method?(method_name)
           FILTER_KEEP_ON_TRUTHY.include?(method_name) ||
@@ -154,7 +152,7 @@ module Rigor
         end
 
         # @return [:always_true, :always_false, :bool, nil]
-        # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        # rubocop:disable Metrics/CyclomaticComplexity
         def predicate_decision(method_name, truthiness, emptiness)
           case method_name
           when :all?
@@ -177,7 +175,7 @@ module Rigor
             :bool
           end
         end
-        # rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        # rubocop:enable Metrics/CyclomaticComplexity
 
         def bool_union
           Type::Combinator.union(

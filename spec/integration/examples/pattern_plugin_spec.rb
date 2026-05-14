@@ -12,7 +12,7 @@ PATTERN_PLUGIN_LIB = File.expand_path("../../../examples/rigor-pattern/lib", __d
 $LOAD_PATH.unshift(PATTERN_PLUGIN_LIB) unless $LOAD_PATH.include?(PATTERN_PLUGIN_LIB)
 require "rigor-pattern"
 
-RSpec.describe "examples/rigor-pattern" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-pattern" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

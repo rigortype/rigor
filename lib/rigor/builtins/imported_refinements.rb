@@ -44,7 +44,7 @@ module Rigor
     #   `PARAMETERISED_TYPE_BUILDERS` (square-bracket form, type
     #   args) and `PARAMETERISED_INT_BUILDERS` (angle-bracket form,
     #   integer bounds).
-    module ImportedRefinements # rubocop:disable Metrics/ModuleLength
+    module ImportedRefinements
       REGISTRY = {
         "non-empty-string" => -> { Type::Combinator.non_empty_string },
         "non-zero-int" => -> { Type::Combinator.non_zero_int },
@@ -261,7 +261,7 @@ module Rigor
       # the plugin {Rigor::TypeNode::ResolverChain}, and finally
       # the RBS Nominal fallback in that order. Plugin resolvers
       # never see partial parses.
-      class Parser # rubocop:disable Metrics/ClassLength
+      class Parser
         def initialize(input, name_scope: nil, reporter: nil, source_location: nil)
           @scanner = StringScanner.new(input.strip)
           @resolver = Resolver.new(
@@ -472,7 +472,7 @@ module Rigor
       # Returns `nil` when every step declined — preserves the
       # parser's fail-soft contract so callers fall back to the
       # RBS-declared type instead of raising.
-      class Resolver # rubocop:disable Metrics/ClassLength
+      class Resolver
         # ADR-13 slice 3b — heads that consume a shape-bearing
         # first argument. When the first arg is not a `HashShape`
         # / `Tuple` (per {Rigor::Type::Combinator.shape_projection_lossy?}),

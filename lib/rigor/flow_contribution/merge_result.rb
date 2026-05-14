@@ -42,7 +42,7 @@ module Rigor
         !@conflicts.empty?
       end
 
-      def empty? # rubocop:disable Metrics/CyclomaticComplexity
+      def empty?
         @return_type.nil? && @truthy_facts.empty? && @falsey_facts.empty? &&
           @post_return_facts.empty? && @mutations.empty? && @invalidations.empty? &&
           @exceptional.nil? && @role_conformance.empty?

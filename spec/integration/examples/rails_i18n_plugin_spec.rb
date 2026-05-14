@@ -36,7 +36,7 @@ DEFAULT_LOCALES = {
 }.freeze
 # rubocop:enable Style/FormatStringToken
 
-RSpec.describe "examples/rigor-rails-i18n" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-rails-i18n" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

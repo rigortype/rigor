@@ -22,7 +22,6 @@ module Rigor
     #
     # See docs/type-specification/rbs-compatible-types.md (records) and
     # docs/type-specification/rigor-extensions.md (hash shape).
-    # rubocop:disable Metrics/ClassLength
     class HashShape
       ALLOWED_KEY_CLASSES = [Symbol, String].freeze
       EXTRA_KEY_POLICIES = %i[open closed].freeze
@@ -241,6 +240,5 @@ module Rigor
         Type::Combinator.union(*key_types)
       end
     end
-    # rubocop:enable Metrics/ClassLength
   end
 end

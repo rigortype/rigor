@@ -61,7 +61,7 @@ module Rigor
         options
       end
 
-      def execute(target:, options:) # rubocop:disable Metrics/AbcSize
+      def execute(target:, options:)
         file, line, column = target
         return 1 unless file_exists?(file)
 

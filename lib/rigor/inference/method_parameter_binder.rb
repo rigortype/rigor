@@ -32,7 +32,6 @@ module Rigor
     # `#singleton_method`.
     #
     # See docs/internal-spec/inference-engine.md for the binding contract.
-    # rubocop:disable Metrics/ClassLength
     class MethodParameterBinder
       # @param environment [Rigor::Environment]
       # @param class_path [String, nil] the qualified name of the class
@@ -275,6 +274,5 @@ module Rigor
         end
       end
     end
-    # rubocop:enable Metrics/ClassLength
   end
 end

@@ -8,7 +8,7 @@ require "rigor/configuration/severity_profile"
 require "rigor/analysis/check_rules"
 require "rigor/plugin/trust_policy"
 
-RSpec.describe "Rigor configuration JSON Schema" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "Rigor configuration JSON Schema" do
   let(:schema_path) { File.expand_path("../../schemas/rigor-config.schema.json", __dir__) }
   let(:schema) { JSON.parse(File.read(schema_path, encoding: "UTF-8")) }
 

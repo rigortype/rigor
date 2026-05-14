@@ -29,7 +29,7 @@ module Rigor
     # is `1` when any new diagnostic appears, `0` otherwise —
     # so adding new errors fails CI but legacy errors recorded
     # in the baseline don't.
-    class DiffCommand # rubocop:disable Metrics/ClassLength
+    class DiffCommand
       USAGE = "Usage: rigor diff [options] <baseline.json> [paths...]"
 
       def initialize(argv:, out:, err:)

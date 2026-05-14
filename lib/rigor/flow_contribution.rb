@@ -122,7 +122,7 @@ module Rigor
     # | role_conformance    | normal        | role                | (per-role target)       |
     #
     # @return [Array<Element>]
-    def to_element_list # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+    def to_element_list # rubocop:disable Metrics/AbcSize
       elements = []
       elements << element_for(:return, :normal, :return_type, return_type) unless return_type.nil?
       Array(truthy_facts).each { |fact| elements << element_for(fact_target(fact), :truthy, :truthy_fact, fact) }

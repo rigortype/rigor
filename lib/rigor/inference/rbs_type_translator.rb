@@ -41,7 +41,6 @@ module Rigor
     #   `Nominal[C]` regardless of which method body we are in.
     # When either argument is omitted, the corresponding token degrades
     # to Dynamic[Top].
-    # rubocop:disable Metrics/ModuleLength
     module RbsTypeTranslator
       # Hash-based dispatch keeps `translate` linear and dodges the
       # bookkeeping costs of a 20-arm `case` (RuboCop AbcSize/CCN/Length
@@ -214,6 +213,5 @@ module Rigor
         end
       end
     end
-    # rubocop:enable Metrics/ModuleLength
   end
 end

@@ -141,7 +141,7 @@ module Rigor
         out
       end
 
-      def walk_defs(node, prefix, in_singleton_class, module_function_active, out) # rubocop:disable Metrics/CyclomaticComplexity
+      def walk_defs(node, prefix, in_singleton_class, module_function_active, out)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -374,7 +374,7 @@ module Rigor
         )
       end
 
-      def render_initialize_param_list(params, class_name) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+      def render_initialize_param_list(params, class_name)
         return "" unless params.is_a?(Prism::ParametersNode)
 
         observations = initialize_observations(class_name, params)
@@ -436,7 +436,7 @@ module Rigor
         end
       end
 
-      def classify_def(path, def_node, class_name, kind, scope_index) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      def classify_def(path, def_node, class_name, kind, scope_index)
         return nil if visibility_excludes?(def_node, class_name, kind, scope_index)
         return nil if initialize_excludes?(def_node, kind)
         return initialize_stub_candidate(path, def_node, class_name) if non_trivial_initialize?(def_node, kind)
@@ -535,7 +535,7 @@ module Rigor
         node.compact_child_nodes.each { |c| collect_return_types(c, scope_index, out) }
       end
 
-      def type_return_node(return_node, scope_index, out) # rubocop:disable Metrics/CyclomaticComplexity
+      def type_return_node(return_node, scope_index, out)
         args = return_node.arguments&.arguments || []
         if args.empty?
           out << Type::Combinator.constant_of(nil)
@@ -597,7 +597,7 @@ module Rigor
         )
       end
 
-      def compare_against_declared(path, def_node, class_name, kind, inferred, method_def) # rubocop:disable Metrics/ParameterLists
+      def compare_against_declared(path, def_node, class_name, kind, inferred, method_def)
         declared = build_declared_return(method_def)
         declared_rbs = declared&.erase_to_rbs
         inferred_rbs = inferred.erase_to_rbs
@@ -761,7 +761,7 @@ module Rigor
         end
       end
 
-      def equivalent(path, def_node, class_name, kind, inferred, declared_rbs) # rubocop:disable Metrics/ParameterLists
+      def equivalent(path, def_node, class_name, kind, inferred, declared_rbs)
         build_candidate(
           path: path,
           class_name: class_name,
@@ -812,7 +812,7 @@ module Rigor
         top_level_union?(rendered) ? "(#{rendered})" : rendered
       end
 
-      def top_level_union?(rendered) # rubocop:disable Metrics/CyclomaticComplexity
+      def top_level_union?(rendered)
         return false unless rendered.include?(" | ")
 
         depth = 0
@@ -898,7 +898,7 @@ module Rigor
         ctx.out
       end
 
-      def walk_attr_calls(node, prefix, in_singleton_class, ctx) # rubocop:disable Metrics/CyclomaticComplexity
+      def walk_attr_calls(node, prefix, in_singleton_class, ctx)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -995,7 +995,7 @@ module Rigor
         )
       end
 
-      def attr_compare_against_declared(path, class_name, method_name, variant, ivar_type, method_def) # rubocop:disable Metrics/ParameterLists
+      def attr_compare_against_declared(path, class_name, method_name, variant, ivar_type, method_def)
         declared = build_declared_return(method_def)
         declared_rbs = declared&.erase_to_rbs
         inferred_rbs = ivar_type.erase_to_rbs

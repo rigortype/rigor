@@ -163,7 +163,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     # this, the block-body `def initialize(...)` override is
     # invisible to `Reflection.user_def_for` / `discovered_method?`
     # and the canonical-sig contract is missing.
-    it "registers Data.define block-body methods under the constant's name" do # rubocop:disable RSpec/ExampleLength
+    it "registers Data.define block-body methods under the constant's name" do
       program = parse(<<~RUBY)
         Point = Data.define(:x, :y) do
           def initialize(x:, y:)

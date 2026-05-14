@@ -33,7 +33,7 @@ DEFAULT_JOBS = {
   RUBY
 }.freeze
 
-RSpec.describe "examples/rigor-activejob" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-activejob" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

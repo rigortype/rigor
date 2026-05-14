@@ -74,7 +74,7 @@ module Rigor
         private_constant :CONCAT_METHODS, :FORMAT_METHODS,
                          :LITERAL_PRESERVING_METHODS, :WIDTH_PADDING_METHODS
 
-        def try_dispatch(receiver:, method_name:, args:, **) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+        def try_dispatch(receiver:, method_name:, args:, **)
           return fold_array_join(receiver, args) if method_name == :join
           return fold_format(args) if FORMAT_METHODS.include?(method_name)
 

@@ -41,7 +41,7 @@ DEFAULT_POLICIES = {
   RUBY
 }.freeze
 
-RSpec.describe "examples/rigor-pundit" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "examples/rigor-pundit" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 

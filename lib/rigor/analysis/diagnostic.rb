@@ -24,10 +24,8 @@ module Rigor
       # ADR-2 § "Plugin Diagnostic Provenance") let consumers
       # distinguish where a diagnostic originated without committing
       # to the plugin API itself.
-      # rubocop:disable Metrics/ParameterLists
       def initialize(path:, line:, column:, message:, severity: :error, rule: nil,
                      source_family: DEFAULT_SOURCE_FAMILY)
-        # rubocop:enable Metrics/ParameterLists
         @path = path
         @line = line
         @column = column

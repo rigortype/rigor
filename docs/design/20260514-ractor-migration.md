@@ -174,36 +174,111 @@ the chosen shape).
 Goal: `Analysis::Runner#analyze_files` dispatches files across
 a pool of Ractors.
 
-Prerequisites: Phases 1-3. With those landed, the worker
-implementation is straightforward:
+Prerequisites: Phases 1-3a. With those landed, the missing
+pieces are:
 
-```ruby
-def analyze_files(files, environment)
-  return sequential(files, environment) if @worker_count <= 1
+### What CAN cross the Ractor boundary today
 
-  pool = Array.new(@worker_count) do
-    Ractor.new(environment, configuration: @configuration) do |env, configuration:|
-      loop do
-        path = Ractor.receive
-        break if path.nil?
+After Phase 3a, the cross-boundary payload is fully
+`Ractor.shareable?`:
 
-        result = analyze_one(path, env, configuration)
-        Ractor.yield(result)
-      end
-    end
-  end
+- `Rigor::Configuration` (Phase 2a — frozen + shareable)
+- `cache_root` (`String`, frozen — the Cache::Store directory
+  path; each worker builds its OWN Store at that root)
+- `libraries`, `signature_paths` (frozen Arrays of frozen
+  Strings)
+- `Array<Rigor::Plugin::Blueprint>` (Phase 3a — frozen +
+  shareable)
+- `Array<String>` of file paths (frozen)
 
-  files.each_with_index { |path, idx| pool[idx % @worker_count].send(path) }
-  @worker_count.times { |i| pool[i].send(nil) }
-  Array.new(files.size) { pool.first.take } # collect in completion order
-end
-```
+### What CANNOT cross the Ractor boundary
 
-The actual implementation will need result-by-path bookkeeping
-for deterministic output order; the sketch above just
-demonstrates the data-flow shape.
+The fact-finding audit (commit subsequent to Phase 3a)
+identified three blockers that the worker design has to
+sidestep:
 
-Estimated size: small once prerequisites land (~50 LoC).
+1. **`Rigor::Environment`** is NOT shareable —
+   `RbsLoader` carries mutable `@class_known_cache` /
+   `@instance_definition_cache` / `@singleton_definition_cache`
+   plus the upstream `RBS::Environment` (mutable, C-extension
+   state). Each worker MUST build its own `Environment` via
+   `Environment.for_project(libraries:, signature_paths:,
+   cache_store:, ...)` inside its Ractor body.
+2. **`Cache::Store`** is NOT shareable — Monitor + counter
+   ivars + Hash with default_proc all violate the contract.
+   Phase 4a sidesteps this by having each worker construct
+   its own Store pointing at the same on-disk directory.
+   The in-process memo benefit is lost cross-Ractor, but
+   the disk-backed cache is shared (filesystem is the
+   coordination point). Future work (Phase 4b? deferred):
+   either make Store shareable directly, or wrap it in a
+   Ractor-shareable proxy that channels memo accesses
+   through a single owner Ractor.
+3. **`RbsExtended::Reporter` + `BoundaryCrossReporter`** use
+   `Mutex` — thread-safe but NOT Ractor-shareable. Each
+   worker MUST construct its own reporters; the runner
+   merges entries at the end via the reporters' existing
+   dedup logic (per-key entry append is idempotent on
+   `(payload, source_location)` so post-hoc merge is safe).
+
+### Phase 4 sub-phase decomposition
+
+**Phase 4a — `WorkerSession` value carrier (no Ractor yet).**
+A class that takes the shareable inputs above and builds a
+fresh Environment + Plugin::Registry (via
+`Registry.materialize`) + reporters internally. Exposes
+`#analyze(path)` returning `Array<Diagnostic>` plus a
+`#drain_reporters` returning the per-worker reporter entries.
+Spec proves: WorkerSession on the same inputs produces the
+same diagnostics as `Runner#analyze_file`. NO Ractor in the
+loop yet — this is the substrate.
+
+**Phase 4b — Ractor pool around `WorkerSession`.** A new
+`Analysis::Runner#analyze_files_in_pool` opt-in path.
+`Ractor.new(payload) do |inputs|; session =
+WorkerSession.new(...); loop { path = Ractor.receive; break
+if path.nil?; Ractor.yield([path, session.analyze(path)])
+}; end`. Result-by-path bookkeeping for deterministic
+output order. Reporter aggregation after the pool drains.
+
+**Phase 4c — Defaults + flag.** `RIGOR_RACTOR_WORKERS` env
+var (`0` = sequential, default; `N` = N workers); honour
+`.rigor.yml` `parallel: { workers: N }` (matches ADR-15
+§ OQ3). Benchmark + decide default.
+
+### Open design points for Phase 4a
+
+- **Plugin `#prepare` timing.** `prepare_plugins` runs once
+  per run BEFORE any file analysis (runner.rb:424) and
+  expects each plugin to publish facts to its services'
+  fact_store. Under Ractor isolation, each worker has its
+  OWN plugin instance with its OWN services / fact_store —
+  but the fact_store can't be Mutex-shared cross-Ractor.
+  Options: (a) run `prepare` once on the coordinator, dump
+  the produced facts as a shareable Hash, ship to workers
+  for replay; (b) accept that `prepare` runs per-worker
+  (most plugins re-read the same disk inputs — duplicate
+  work but correct). 4a should pick one; (a) is the lower-
+  cost option assuming fact_store contents are Marshal-able.
+
+- **`dependency_source_index`.** Already constructed
+  per-run; need to verify shareability or reconstruct
+  per-worker.
+
+- **`scope_indexer.discovered_classes` cross-file seeding.**
+  Some flows pre-seed scope with discovered classes from
+  prior files (ADR-14 ObservationCollector). If parallel
+  workers process files concurrently, this cross-file
+  seeding breaks. Pin: workers run independent per-file
+  analyses; the ObservationCollector path stays sequential
+  (it's a separate code path, not the default
+  `analyze_file`).
+
+Estimated size:
+
+- Phase 4a: ~200-300 LoC (WorkerSession + spec)
+- Phase 4b: ~150-250 LoC (Runner integration + spec)
+- Phase 4c: ~50 LoC (flag + docs)
 
 Expected benefit: at 4 workers + RBS cache warm, wall-clock
 should drop ~3× for projects with hundreds of files (where
@@ -244,7 +319,12 @@ Items #7) while Ractor phases progress incrementally.
    + `Registry.materialize` factory.
 5. ⏭ Phase 3b — cross-Ractor plugin aggregate-state
    contract (DEFERRED until Phase 4).
-6. ⏭ Phase 4 — Ractor worker pool.
+6. ⏭ Phase 4a — `WorkerSession` value carrier (no Ractor
+   yet; substrate for the pool).
+7. ⏭ Phase 4b — Ractor pool around `WorkerSession` in
+   `Runner#analyze_files`.
+8. ⏭ Phase 4c — Default + opt-in flag
+   (`RIGOR_RACTOR_WORKERS`).
 
 Each subsequent phase reads from the prior phase's audit spec
 to confirm prerequisites. The audit spec is the contract

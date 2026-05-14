@@ -299,26 +299,77 @@ module Rigor
         nil
       end
 
+      # ADR-15 Phase 2b — return the loader's read-only
+      # query surface as a frozen, `Ractor.shareable?`
+      # {Reflection} value object. Built lazily on first
+      # access; the loader memoises so repeated calls return
+      # the same instance.
+      #
+      # The Reflection consumes the loader's already-warmed
+      # cache producers (or, when no `cache_store` is set,
+      # eagerly walks the env). Once constructed, the
+      # Reflection carries the derived tables independently
+      # and never re-consults the loader — making it safe to
+      # share across Ractors while the loader stays per-
+      # process / per-Ractor for write-path operations.
+      def reflection
+        @state[:reflection] ||= begin
+          require_relative "reflection"
+          Environment::Reflection.new(
+            known_class_names: known_class_names_set,
+            instance_definitions: instance_definitions_table,
+            singleton_definitions: singleton_definitions_table,
+            type_param_names: type_param_names_table,
+            constant_types: constant_type_table,
+            ancestor_names: ancestor_names_table
+          )
+        end
+      end
+
       private
 
       def constant_type_table
         @constant_type_table ||= begin
           require_relative "../cache/rbs_constant_table"
-          Cache::RbsConstantTable.fetch(loader: self, store: cache_store)
+          fetch_or_compute_producer(Cache::RbsConstantTable)
         end
       end
 
       def known_class_names_set
         @known_class_names_set ||= begin
           require_relative "../cache/rbs_known_class_names"
-          Cache::RbsKnownClassNames.fetch(loader: self, store: cache_store)
+          fetch_or_compute_producer(Cache::RbsKnownClassNames)
         end
       end
 
       def type_param_names_table
         @type_param_names_table ||= begin
           require_relative "../cache/rbs_class_type_param_names"
-          Cache::RbsClassTypeParamNames.fetch(loader: self, store: cache_store)
+          fetch_or_compute_producer(Cache::RbsClassTypeParamNames)
+        end
+      end
+
+      # ADR-15 Phase 2b — the `Reflection` build path
+      # consumes these tables even when `cache_store` is nil
+      # (e.g. tests that build a `Reflection` without a
+      # persistent cache). The helper routes through the
+      # producer's `.fetch` when a store IS available, and
+      # falls back to the producer's `.compute` otherwise.
+      def fetch_or_compute_producer(producer)
+        return producer.fetch(loader: self, store: cache_store) if cache_store
+
+        producer.send(:compute, self)
+      end
+
+      # ADR-15 Phase 2b — `Hash<String, Array<String>>` of
+      # normalised ancestor chains per class. Consumes the
+      # existing `RbsClassAncestorTable` producer when
+      # `cache_store` is set; falls back to the producer's
+      # `compute` otherwise. Used by {#reflection}.
+      def ancestor_names_table
+        @ancestor_names_table ||= begin
+          require_relative "../cache/rbs_class_ancestor_table"
+          fetch_or_compute_producer(Cache::RbsClassAncestorTable)
         end
       end
 
@@ -362,7 +413,7 @@ module Rigor
       def instance_definitions_table
         @state[:instance_definitions_table] ||= begin
           require_relative "../cache/rbs_instance_definitions"
-          Cache::RbsInstanceDefinitions.fetch(loader: self, store: cache_store)
+          fetch_or_compute_producer(Cache::RbsInstanceDefinitions)
         end
       end
 
@@ -373,7 +424,7 @@ module Rigor
       def singleton_definitions_table
         @state[:singleton_definitions_table] ||= begin
           require_relative "../cache/rbs_instance_definitions"
-          Cache::RbsSingletonDefinitions.fetch(loader: self, store: cache_store)
+          fetch_or_compute_producer(Cache::RbsSingletonDefinitions)
         end
       end
 

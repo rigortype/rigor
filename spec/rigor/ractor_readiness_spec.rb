@@ -149,16 +149,39 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       expect(shareable?(Rigor::Configuration.new(Rigor::Configuration::DEFAULTS))).to be(true)
     end
 
-    # Phase 2b targets — still pending. The blockers are
-    # documented in `docs/design/20260514-ractor-migration.md`;
-    # `skip` keeps the gap visible in `make verify` output.
+    # Phase 2b (LANDED): `Environment::Reflection` extracts
+    # the loader's read-only RBS query surface into a
+    # frozen carrier. NOT `Ractor.shareable?` because the
+    # cached `RBS::Definition` objects transitively
+    # reference `RBS::Location` (C-extension state that
+    # `Ractor.make_shareable` rejects). The Phase 4 worker
+    # pool sidesteps the constraint by building one
+    # Reflection per worker from the shared `Cache::Store`;
+    # the cross-Ractor sharing point is the Store, NOT the
+    # Reflection.
+    it "Rigor::Environment::Reflection is frozen (Phase 2b)" do
+      reflection = Rigor::Environment.for_project.reflection
+      expect(reflection).not_to be_nil
+      expect(reflection).to be_frozen
+    end
+
+    it "Rigor::Environment::Reflection is NOT Ractor.shareable? (RBS::Location upstream constraint)" do
+      reflection = Rigor::Environment.for_project.reflection
+      expect(shareable?(reflection)).to be(false)
+    end
+
+    # Phase 2b residual targets — still pending. The
+    # blockers are documented in
+    # `docs/design/20260514-ractor-migration.md` and
+    # ADR-15; `skip` keeps the gap visible in
+    # `make verify` output.
     it "Rigor::Scope.empty" do
-      skip "Phase 2b: depends on Environment / RbsLoader shareability"
+      skip "Phase 2b residual: Scope.environment carries the non-shareable RbsLoader"
       expect(shareable?(Rigor::Scope.empty)).to be(true)
     end
 
     it "Rigor::Environment.default" do
-      skip "Phase 2b: RbsLoader holds mutable @class_known_cache / @instance_definition_cache"
+      skip "Phase 2b residual: RbsLoader holds mutable @class_known_cache (per-Ractor accelerator)"
       expect(shareable?(Rigor::Environment.default)).to be(true)
     end
   end

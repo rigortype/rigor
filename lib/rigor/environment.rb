@@ -2,6 +2,7 @@
 
 require_relative "environment/class_registry"
 require_relative "environment/rbs_loader"
+require_relative "environment/reflection"
 require_relative "type_node/name_scope"
 require_relative "type_node/resolver_chain"
 
@@ -183,6 +184,17 @@ module Rigor
       return true if class_registry.nominal_for_name(name)
 
       class_known_in_rbs?(name)
+    end
+
+    # ADR-15 Phase 2b — returns the loader's read-only,
+    # `Ractor.shareable?` query surface as a frozen
+    # {Environment::Reflection}. Built lazily on first
+    # access; subsequent calls return the same instance.
+    # Returns `nil` when the environment carries no RBS
+    # loader (test-only `Environment.new` without
+    # `rbs_loader:`).
+    def reflection
+      @rbs_loader&.reflection
     end
 
     # Compares two class/module names using analyzer-owned class data.

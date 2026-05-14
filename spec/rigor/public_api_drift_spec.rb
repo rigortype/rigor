@@ -89,6 +89,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     plugin_registry()
     rbs_extended_reporter()
     rbs_loader()
+    reflection()
     singleton_for_name(req:name)
   ].freeze
 
@@ -320,6 +321,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::RbsExtended::Reporter::LossyProjectionEntry
     Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter
     Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter::Entry
+    Rigor::Environment::Reflection
   ].freeze
 
   COMBINATOR_SINGLETON = %w[

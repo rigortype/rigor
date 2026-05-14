@@ -202,8 +202,11 @@ Items #7) while Ractor phases progress incrementally.
 
 1. ✅ Phase 1 — value-object shareability.
 2. ✅ Phase 2a — `Configuration` deep-freeze.
-3. ⏭ Phase 2b — `RbsLoader` split (large, needs design
-   review).
+3. ✅ Phase 2b — `Environment::Reflection` extracted
+   (frozen read-only facade; NOT Ractor-shareable due to
+   the upstream `RBS::Location` C-extension constraint;
+   each Phase 4 worker will build its own Reflection from
+   the shared `Cache::Store`).
 4. ⏭ Phase 3 — Plugin contract refactor.
 5. ⏭ Phase 4 — Ractor worker pool.
 

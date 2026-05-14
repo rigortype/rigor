@@ -121,13 +121,19 @@ migration documented in
    `Configuration#initialize` freezes its `@paths` Array
    and calls `freeze` on `self`. Two-line change, no
    behaviour shift.
-3. **Phase 2b — Environment / RbsLoader split (NEXT).**
-   `RbsLoader` divides into a **frozen reflection facade**
-   (read-only RBS query surface) and a **per-Ractor cache
-   layer** wrapping it. The Environment carries the
-   reflection facade; each Ractor builds its own cache
-   layer pointed at the shared `Cache::Store` (already
-   thread-safe).
+3. **Phase 2b — Environment / RbsLoader split (LANDED).**
+   New `Rigor::Environment::Reflection` value object holds
+   the loader's read-only RBS query surface (5 frozen
+   tables + ancestor names) and answers `class_known?` /
+   `instance_definition` / `singleton_definition` /
+   `class_type_param_names` / `constant_type` /
+   `class_ordering` from pure Hash / Set lookups.
+   `RbsLoader#reflection` builds + memoises one; the new
+   `Environment#reflection` delegates. Reflection is
+   `frozen?` but NOT `Ractor.shareable?` (see WD6 below).
+   Each Ractor worker (Phase 4) builds its own Reflection
+   from the shared `Cache::Store`; Reflection itself does
+   NOT cross Ractor boundaries.
 4. **Phase 3 — plugin contract (DEFERRED).** Plugin
    instances become per-Ractor; the `Plugin::Registry`
    refactors into a frozen factory + ID table. Plugins with
@@ -282,6 +288,38 @@ under Ractor isolation. Specifically:
 Opt-in means the early adopters pay attention to the
 trade-offs; default-on means everyone pays. We default-on
 when the validation data justifies it.
+
+### WD6 — Why isn't `Environment::Reflection` `Ractor.shareable?`?
+
+Discovered during Phase 2b implementation: the cached
+`instance_definitions` / `singleton_definitions` tables hold
+upstream `RBS::Definition` objects that transitively reference
+`RBS::Location`. `RBS::Location` is C-extension state that
+`Ractor.make_shareable` rejects (the same constraint that
+forced the `RBS::Environment` Marshal patch in
+`lib/rigor/cache/rbs_environment_marshal_patch.rb`).
+
+Resolution: Reflection IS frozen + read-only — the
+immutability win — but NOT `Ractor.shareable?`. The Ractor
+worker pool (Phase 4) sidesteps the constraint by having
+each worker build its OWN Reflection from the shared
+`Cache::Store`. The cross-Ractor sharing point is the
+Store's disk + in-process-memo layer (already
+Monitor-safe); each Ractor's Reflection is a per-Ractor
+immutable read-side view of the same underlying data.
+
+If a future RBS release makes `RBS::Location` Ractor-
+shareable, the one-line addition of
+`Ractor.make_shareable(self)` to Reflection's `initialize`
+makes the whole carrier cross-Ractor-shareable. Until
+then, the per-worker-Reflection pattern is the contract.
+
+The audit-spec
+([`spec/rigor/ractor_readiness_spec.rb`](../../spec/rigor/ractor_readiness_spec.rb))
+documents both properties explicitly: a `be_frozen`
+assertion and a `not_to be(Ractor.shareable?)` assertion
+that fails the day RBS lifts the constraint, prompting the
+one-line upgrade.
 
 ### WD5 — Should we deprecate Thread-based concurrency entirely?
 
@@ -486,3 +524,18 @@ spec suite.
   blocking. The M:N scheduler exists but its CPU-parallelism
   story under MRI is still evolving. Ractors are committed
   and stable today.
+
+## Recommended order
+
+1. ✅ Phase 1 — value-object shareability.
+2. ✅ Phase 2a — `Configuration` deep-freeze.
+3. ✅ Phase 2b — `Environment::Reflection` extracted (frozen,
+   NOT yet Ractor-shareable; see WD6 for the
+   `RBS::Location` constraint).
+4. ⏭ Phase 3 — Plugin contract refactor (per-Ractor plugin
+   instances; `Plugin::Registry` refactored into a frozen
+   factory + ID table).
+5. ⏭ Phase 4 — Ractor worker pool in `Analysis::Runner`
+   (each worker builds its own Reflection from the shared
+   `Cache::Store`; the Store gains a Ractor-shareable
+   facade per § OQ1).

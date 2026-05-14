@@ -21,6 +21,7 @@ module Rigor
     def constant_for_name: (String | Symbol name) -> Type::t?
     def class_known?: (String | Symbol name) -> bool
     def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
+    def reflection: () -> untyped?
 
     class ClassRegistry
       def self.default: () -> ClassRegistry

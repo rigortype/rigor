@@ -140,26 +140,25 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
     end
   end
 
-  describe "Phase 2 targets (currently NOT shareable; tracked by CURRENT_WORK #8)" do
-    # These specs document the gap so it stays visible. They
-    # are intentionally `skip`-marked rather than `pending` so
-    # `make verify` stays green AND so the audit reads
-    # honestly when scanning the output: "Phase 2 not yet
-    # done." A future commit that makes one of these
-    # shareable replaces the `skip` with a `be(true)`
-    # expectation.
-    it "Rigor::Configuration" do
-      skip "Phase 2: needs `freeze` post-init + frozen severity_overrides Hash"
+  describe "Phase 2 — Configuration / Scope / Environment" do
+    # Phase 2a (LANDED): `Configuration` deep-freezes its
+    # `@paths` Array + calls `freeze` on `self` at the end
+    # of `initialize`. Backward-compatible — every reader
+    # path treats the Configuration as immutable already.
+    it "Rigor::Configuration (Phase 2a)" do
       expect(shareable?(Rigor::Configuration.new(Rigor::Configuration::DEFAULTS))).to be(true)
     end
 
+    # Phase 2b targets — still pending. The blockers are
+    # documented in `docs/design/20260514-ractor-migration.md`;
+    # `skip` keeps the gap visible in `make verify` output.
     it "Rigor::Scope.empty" do
-      skip "Phase 2: depends on Environment / RbsLoader shareability"
+      skip "Phase 2b: depends on Environment / RbsLoader shareability"
       expect(shareable?(Rigor::Scope.empty)).to be(true)
     end
 
     it "Rigor::Environment.default" do
-      skip "Phase 2: RbsLoader holds mutable @class_known_cache / @instance_definition_cache"
+      skip "Phase 2b: RbsLoader holds mutable @class_known_cache / @instance_definition_cache"
       expect(shareable?(Rigor::Environment.default)).to be(true)
     end
   end

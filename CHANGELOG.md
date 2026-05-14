@@ -29,6 +29,14 @@ cycles live in dedicated archives:
 
 ### Changed
 
+- **Ractor migration — Phase 2a: `Configuration` deep-freeze.**
+  `Configuration#initialize` now `.freeze`s its `@paths` Array
+  + calls `freeze` on `self` at the end, so
+  `Rigor::Configuration.new(...)` is `Ractor.shareable?` at
+  construction time. The audit-spec's
+  `Rigor::Configuration` example flips from `skip` to a
+  passing assertion. Backward-compatible — no production
+  code mutates a Configuration post-construction.
 - **Ractor migration — Phase 1: value-object shareability.** Every
   `Rigor::Type::*` carrier (16 classes), every `Rigor::TypeNode::*`
   parser AST node, `Cache::Descriptor`, `Analysis::FactStore`, and

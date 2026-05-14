@@ -46,17 +46,20 @@ shareable.
 
 Three classes block this:
 
-### `Rigor::Configuration`
+### `Rigor::Configuration` (LANDED — Phase 2a)
 
-Why not shareable: not frozen after `initialize`. Some fields
-(`@severity_overrides` Hash) are mutable.
+Why was not shareable: the `@paths` Array was not frozen and
+`Configuration#initialize` did not call `freeze` on `self`.
+Every other ivar was already frozen (Symbol / nil / Boolean,
+or explicitly frozen collection / value object).
 
-Fix: deep-freeze in `initialize` after the last assignment.
-Audit any code that mutates the Configuration post-construction
-— none should exist; if any does, that's a bug regardless of
-Ractor goals.
-
-Estimated size: small (~10 LoC + spec).
+Fix landed: append `.freeze` to the `@paths` build and add a
+final `freeze` line at the end of `initialize`. Backward-
+compatible — no production code mutates a Configuration post-
+construction, and the audit-spec passes immediately after the
+two-line change. `spec/rigor/ractor_readiness_spec.rb`'s
+`Rigor::Configuration` example flips from `skip` to a passing
+assertion.
 
 ### `Rigor::Scope`
 
@@ -197,8 +200,8 @@ Items #7) while Ractor phases progress incrementally.
 
 ## Recommended order
 
-1. ✅ Phase 1 (this commit) — value-object shareability.
-2. ⏭ Phase 2a — `Configuration` deep-freeze (small, isolated).
+1. ✅ Phase 1 — value-object shareability.
+2. ✅ Phase 2a — `Configuration` deep-freeze.
 3. ⏭ Phase 2b — `RbsLoader` split (large, needs design
    review).
 4. ⏭ Phase 3 — Plugin contract refactor.

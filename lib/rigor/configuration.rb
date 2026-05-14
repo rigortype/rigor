@@ -220,7 +220,7 @@ module Rigor
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
 
       @target_ruby = coerce_target_ruby(data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")))
-      @paths = Array(data.fetch("paths", DEFAULTS.fetch("paths"))).map(&:to_s)
+      @paths = Array(data.fetch("paths", DEFAULTS.fetch("paths"))).map(&:to_s).freeze
       user_excludes = Array(data.fetch("exclude", DEFAULTS.fetch("exclude"))).map(&:to_s)
       @exclude_patterns = (BUILTIN_EXCLUDES + user_excludes).uniq.freeze
       @plugins = Array(data.fetch("plugins", DEFAULTS.fetch("plugins"))).map do |entry|
@@ -246,6 +246,16 @@ module Rigor
       @dependencies = Dependencies.from_h(
         data.fetch("dependencies", DEFAULTS.fetch("dependencies"))
       )
+      # Ractor migration Phase 2a: deep-freeze the
+      # Configuration so it is `Ractor.shareable?`. Every
+      # ivar above is now either a frozen value (Symbol /
+      # nil / Boolean) or an explicitly frozen
+      # collection / value object; freezing `self` makes the
+      # whole carrier safe to send across Ractor boundaries
+      # (and catches accidental post-init mutation in any
+      # caller). See
+      # `docs/design/20260514-ractor-migration.md`.
+      freeze
     end
     # rubocop:enable Metrics/AbcSize
 

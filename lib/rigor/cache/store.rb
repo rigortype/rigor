@@ -3,6 +3,7 @@
 require "digest"
 require "fileutils"
 require "json"
+require "monitor"
 require "securerandom"
 
 require_relative "descriptor"
@@ -21,7 +22,7 @@ module Rigor
     # next write replaces the bad entry. The trailing SHA-256 catches
     # accidental corruption (partial writes, FS errors); it is **not**
     # a security boundary, per ADR-2's trusted-gem trust model.
-    class Store
+    class Store # rubocop:disable Metrics/ClassLength
       # Header literal: 5-byte ASCII magic, 1-byte separator, 1-byte
       # format version. Bumped on incompatible on-disk format changes
       # (independent of {Descriptor::SCHEMA_VERSION}, which covers
@@ -46,6 +47,14 @@ module Rigor
         # Keys are content-derived (descriptor digests), so
         # cross-fixture contamination is impossible.
         @memo = {}
+        # `Analysis::Runner` walks files concurrently (file-
+        # level parallelism); the per-file workers share one
+        # Store. The monitor guards `@memo` + the counter
+        # hashes against concurrent writes. The Monitor is
+        # re-entrant so producer blocks can recursively
+        # consult the Store (e.g. one cache layer building on
+        # another) without dead-locking.
+        @monitor = Monitor.new
       end
 
       attr_reader :root
@@ -59,8 +68,10 @@ module Rigor
       #
       # @return [Hash] `{ hits:, misses:, writes:, by_producer: { id => { hits:, misses:, writes: } } }`
       def stats
-        per_producer = @by_producer.transform_values { |counts| counts.dup.freeze }.freeze
-        { hits: @hits, misses: @misses, writes: @writes, by_producer: per_producer }.freeze
+        @monitor.synchronize do
+          per_producer = @by_producer.transform_values { |counts| counts.dup.freeze }.freeze
+          { hits: @hits, misses: @misses, writes: @writes, by_producer: per_producer }.freeze
+        end
       end
 
       # Walks the on-disk cache rooted at `root` and reports a
@@ -139,24 +150,29 @@ module Rigor
 
         key = descriptor.cache_key_for(producer_id: producer_id, params: params)
         memo_key = [producer_id, key].freeze
-        if @memo.key?(memo_key)
-          record(:hits, producer_id)
-          return @memo[memo_key]
+        memoed = @monitor.synchronize { @memo[memo_key] if @memo.key?(memo_key) }
+        unless memoed.nil?
+          @monitor.synchronize { record(:hits, producer_id) }
+          return memoed
         end
 
         path = entry_path(producer_id, key)
         cached = read_entry(path, deserialize: deserialize)
         unless cached.nil?
-          record(:hits, producer_id)
-          @memo[memo_key] = cached.value
+          @monitor.synchronize do
+            record(:hits, producer_id)
+            @memo[memo_key] = cached.value
+          end
           return cached.value
         end
 
-        record(:misses, producer_id)
         value = block.call
         write_entry(path, descriptor, value, serialize: serialize)
-        record(:writes, producer_id)
-        @memo[memo_key] = value
+        @monitor.synchronize do
+          record(:misses, producer_id)
+          record(:writes, producer_id)
+          @memo[memo_key] = value
+        end
         value
       end
 

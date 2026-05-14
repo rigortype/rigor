@@ -29,6 +29,12 @@ cycles live in dedicated archives:
 
 ### Changed
 
+- **`Cache::Store` is now thread-safe.** A re-entrant `Monitor`
+  guards `@memo` and the hit / miss / write counters, so a
+  future fork / Ractor / file-walk-parallel runner can share
+  one `Store` across workers without races. Backwards-compatible
+  — the lock is uncontended in the single-threaded default
+  path.
 - **`Cache::Store` now memoises in-process** so repeated
   `fetch_or_compute` calls in the same process skip the
   disk read AND the `Marshal.load` deserialise step. The

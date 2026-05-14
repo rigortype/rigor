@@ -22,7 +22,10 @@ module Rigor
                 "got #{value.inspect}"
         end
 
-        super
+        # Freeze the String field so the Data object is
+        # `Ractor.shareable?` regardless of caller frozen-
+        # string-literal state.
+        super(value: value.frozen? ? value : value.dup.freeze)
       end
     end
   end

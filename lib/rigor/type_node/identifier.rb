@@ -23,7 +23,15 @@ module Rigor
                 "got #{name.inspect}"
         end
 
-        super
+        # Freeze the String field so the resulting Data object
+        # is `Ractor.shareable?` regardless of whether the
+        # caller passed a `# frozen_string_literal: true`
+        # constant or a dynamically built String. The same
+        # discipline applies to every other TypeNode value
+        # object — they live in the parser's hot path and are
+        # the natural carriers to flow through future Ractor
+        # boundaries (see CURRENT_WORK Open Items #8).
+        super(name: name.frozen? ? name : name.dup.freeze)
       end
     end
   end

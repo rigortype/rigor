@@ -29,6 +29,23 @@ cycles live in dedicated archives:
 
 ### Changed
 
+- **Ractor migration — Phase 1: value-object shareability.** Every
+  `Rigor::Type::*` carrier (16 classes), every `Rigor::TypeNode::*`
+  parser AST node, `Cache::Descriptor`, `Analysis::FactStore`, and
+  `FlowContribution` is now `Ractor.shareable?` at construction
+  time. The TypeNode constructors freeze their internal `String` /
+  `Array` fields so the result stays shareable even when callers
+  pass non-frozen strings (e.g. parser output, dynamic key
+  construction). Regression guard at
+  `spec/rigor/ractor_readiness_spec.rb` enumerates the assertion
+  per carrier so a future addition without matching audit coverage
+  is flagged. Phase 2 (`Configuration` deep-freeze;
+  `Environment` / `RbsLoader` split into frozen reflection + per-
+  Ractor cache layer), Phase 3 (plugin contract), and Phase 4
+  (Ractor worker pool in `Analysis::Runner`) are documented in the
+  new `docs/design/20260514-ractor-migration.md` design doc;
+  each phase is independently useful + independently
+  revert-able. No runtime behaviour change for any consumer.
 - **`Cache::Store` is now thread-safe.** A re-entrant `Monitor`
   guards `@memo` and the hit / miss / write counters, so a
   future fork / Ractor / file-walk-parallel runner can share

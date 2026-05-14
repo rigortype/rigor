@@ -38,7 +38,13 @@ module Rigor
                 "TypeNode::IntegerLiteral, got #{args.inspect}"
         end
 
-        super(head: head, args: args.freeze)
+        # Freeze the String head + Array args so the Data
+        # object is `Ractor.shareable?`. Each `a` is already a
+        # shareable TypeNode value object (checked above), so
+        # freezing the wrapping Array is sufficient.
+        frozen_head = head.frozen? ? head : head.dup.freeze
+        frozen_args = args.frozen? ? args : args.dup.freeze
+        super(head: frozen_head, args: frozen_args)
       end
 
       private

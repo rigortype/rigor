@@ -76,6 +76,21 @@ module Rigor
           return nil unless receiver.is_a?(Type::BoundMethod)
           return nil unless backward_method?(method_name)
 
+          # `Method#curry` is treated as identity on the carrier
+          # — `<bound>.curry` keeps the same
+          # `(receiver_type, method_name)` so a subsequent
+          # `<curried>.call` still routes through the recursive
+          # dispatch below. This is correct for the dominant
+          # no-arg form (`.curry.call`); partially-applied
+          # forms (`.curry(n).call(a)`) lose precision and fall
+          # through to RBS via the trailing
+          # `Type::Combinator.untyped`. A faithful
+          # `Type::CurriedBoundMethod(receiver_type,
+          # method_name, accumulated_args)` carrier is reserved
+          # for a future slice when concrete user demand
+          # surfaces.
+          return receiver if method_name == :curry
+
           MethodDispatcher.dispatch(
             receiver_type: receiver.receiver_type,
             method_name: receiver.method_name,
@@ -92,7 +107,9 @@ module Rigor
         # commonly used as a case-equality predicate, so we
         # do NOT fold through it (the case/when narrowing path
         # already special-cases `===` for branch typing).
-        BACKWARD_METHOD_NAMES = %i[call []].freeze
+        # `Method#curry` rides through as identity (see the
+        # comment in `try_backward`).
+        BACKWARD_METHOD_NAMES = %i[call [] curry].freeze
         private_constant :BACKWARD_METHOD_NAMES
 
         def backward_method?(method_name)

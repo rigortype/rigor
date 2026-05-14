@@ -69,4 +69,41 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MethodFolding do
                                   ])
     end
   end
+
+  describe "Method#curry — identity on the carrier (Open Item #5 — Option A)" do
+    it "keeps the BoundMethod carrier through `.curry` so a subsequent `.call` still folds" do
+      type = scope.type_of(parse_expression('"1".method(:to_i).curry'))
+
+      expect(type).to be_a(Rigor::Type::BoundMethod)
+      expect(type.receiver_type).to eq(Rigor::Type::Combinator.constant_of("1"))
+      expect(type.method_name).to eq(:to_i)
+    end
+
+    it "routes `.curry.call` through the bound dispatch (zero-arg form)" do
+      type = scope.type_of(parse_expression('"1".method(:to_i).curry.call'))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(1))
+    end
+
+    it "preserves Tuple per-element precision through `.curry.call` over a Symbol Array" do
+      # The pre-Option-A behaviour for this expression was
+      # `Tuple[Dynamic[Top]×3]` because `Method#curry`
+      # collapsed to `Nominal[Proc]` and `Proc#call` then
+      # fell through to `Dynamic[Top]`. Option A keeps the
+      # `BoundMethod` carrier through `.curry`, so the
+      # backward fold's recursive dispatch on the bound
+      # `(receiver_type, method_name)` pair runs as if the
+      # `.curry` were never written.
+      type = scope.type_of(parse_expression(
+                             '[:to_i, :to_f, :to_sym].map { |m| "1".method(m).curry.call }'
+                           ))
+
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements).to eq([
+                                    Rigor::Type::Combinator.constant_of(1),
+                                    Rigor::Type::Combinator.constant_of(1.0),
+                                    Rigor::Type::Combinator.constant_of(:"1")
+                                  ])
+    end
+  end
 end

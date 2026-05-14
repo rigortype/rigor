@@ -15,6 +15,8 @@ GEM
     lint_roller (1.1.0)
     logger (1.7.0)
     parallel (2.1.0)
+    parallel_tests (5.7.0)
+      parallel
     parser (3.3.11.1)
       ast (~> 2.4.1)
       racc
@@ -71,6 +73,7 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  parallel_tests (>= 4.0, < 6.0)
   rake (>= 13.0, < 15.0)
   rigortype!
   rspec (>= 3.13, < 4.0)
@@ -87,6 +90,7 @@ CHECKSUMS
   lint_roller (1.1.0) sha256=2c0c845b632a7d172cb849cc90c1bce937a28c5c8ccccb50dfd46a485003cc87
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
   parallel (2.1.0) sha256=b35258865c2e31134c5ecb708beaaf6772adf9d5efae28e93e99260877b09356
+  parallel_tests (5.7.0) sha256=3f1762c46ca2c223b8af8ef877217f9d76974e191bfa934f2580b58bcf1d005c
   parser (3.3.11.1) sha256=d17ace7aabe3e72c3cc94043714be27cc6f852f104d81aa284c2281aecc65d54
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
   racc (1.8.1) sha256=4a7f6929691dbec8b5209a0b373bc2614882b55fc5d2e447a21aaa691303d62f

@@ -39,6 +39,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "prism", ">= 1.0", "< 2.0"
   spec.add_dependency "rbs", ">= 3.0", "< 5.0"
 
+  spec.add_development_dependency "parallel_tests", ">= 4.0", "< 6.0"
   spec.add_development_dependency "rake", ">= 13.0", "< 15.0"
   spec.add_development_dependency "rspec", ">= 3.13", "< 4.0"
   spec.add_development_dependency "rubocop", ">= 1.70", "< 2.0"

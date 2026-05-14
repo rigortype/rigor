@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test lint check verify check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel lint check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -74,6 +74,12 @@ doctor-submodules:
 test:
 	bundle exec rspec
 
+# Spec suite via `parallel_tests`, splitting files across
+# multiple worker processes. `PARALLEL_TEST_PROCESSORS=N`
+# pins the worker count; default is the CPU count.
+test-parallel:
+	bundle exec rake spec_parallel
+
 lint:
 	bundle exec rubocop
 
@@ -84,6 +90,10 @@ check-json:
 	bundle exec exe/rigor check --format=json lib
 
 verify: test lint check
+
+# Parallel variant of `verify`. Swaps `test` for
+# `test-parallel`; `lint` / `check` are already fast.
+verify-parallel: test-parallel lint check
 
 extract-builtin-catalogs:
 	bundle exec ruby tool/extract_builtin_catalog.rb

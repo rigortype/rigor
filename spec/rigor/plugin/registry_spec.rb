@@ -48,6 +48,32 @@ RSpec.describe Rigor::Plugin::Registry do
     expect(registry).to be_any_load_errors
   end
 
+  describe "ADR-15 Phase 3 — blueprints + materialize" do
+    it "exposes the supplied blueprints (frozen, Ractor-shareable)" do
+      blueprint = Rigor::Plugin::Blueprint.new(klass_name: "RigorPluginBlueprintSpecPlugin")
+      registry = described_class.new(blueprints: [blueprint])
+      expect(registry.blueprints).to eq([blueprint])
+      expect(registry.blueprints).to be_frozen
+    end
+
+    it ".materialize replays blueprints into a fresh registry" do
+      blueprint = Rigor::Plugin::Blueprint.new(klass_name: "RigorPluginBlueprintSpecPlugin")
+      materialised = described_class.materialize(blueprints: [blueprint], services: services)
+
+      expect(materialised.plugins.size).to eq(1)
+      expect(materialised.plugins.first).to be_a(RigorPluginBlueprintSpecPlugin)
+      expect(materialised.blueprints).to eq([blueprint])
+      expect(materialised.load_errors).to eq([])
+    end
+
+    it ".materialize produces NEW plugin instances on every call" do
+      blueprint = Rigor::Plugin::Blueprint.new(klass_name: "RigorPluginBlueprintSpecPlugin")
+      first = described_class.materialize(blueprints: [blueprint], services: services)
+      second = described_class.materialize(blueprints: [blueprint], services: services)
+      expect(first.plugins.first).not_to equal(second.plugins.first)
+    end
+  end
+
   describe "#type_node_resolvers (ADR-13 slice 2)" do
     let(:resolver_class) { Class.new(Rigor::Plugin::TypeNodeResolver) }
 

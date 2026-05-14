@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "blueprint"
+
 module Rigor
   module Plugin
     # Read-side query API over the plugins loaded for a single
@@ -13,18 +15,46 @@ module Rigor
     # the order in which {Rigor::Plugin::Loader} resolved
     # configuration entries, which is project-config order with
     # plugin-id alphabetical as the tie-breaker.
+    #
+    # ADR-15 Phase 3 — alongside the instantiated `plugins`, the
+    # registry carries `blueprints`: a frozen, Ractor-shareable
+    # `Array<Blueprint>` that records how to re-instantiate the
+    # same plugin set in a worker Ractor. The eventual Phase 4
+    # pool ships `blueprints` across the boundary and calls
+    # {.materialize} per-Ractor; the live `plugins` carriage on
+    # the coordinator registry stays unchanged.
     class Registry
-      attr_reader :plugins, :load_errors
+      attr_reader :plugins, :load_errors, :blueprints
 
       # @param plugins [Array<Rigor::Plugin::Base>] instantiated
       #   plugin instances in deterministic order.
       # @param load_errors [Array<Rigor::Plugin::LoadError>] failures
       #   surfaced during loading. Each error is also turned into a
       #   diagnostic by the runner.
-      def initialize(plugins: [], load_errors: [])
+      # @param blueprints [Array<Rigor::Plugin::Blueprint>] frozen,
+      #   Ractor-shareable replay descriptors aligned 1:1 with
+      #   `plugins`. The loader fills this in; callers that
+      #   construct Registry manually MAY pass `[]` and accept
+      #   that {.materialize} cannot replay the set.
+      def initialize(plugins: [], load_errors: [], blueprints: [])
         @plugins = plugins.dup.freeze
         @load_errors = load_errors.dup.freeze
+        @blueprints = blueprints.dup.freeze
         freeze
+      end
+
+      # ADR-15 Phase 3 — build a fresh Registry from the supplied
+      # blueprint set by replaying {Blueprint#materialize} per
+      # entry against `services`. The returned registry carries
+      # NEW plugin instances (mutable per-Ractor accumulators
+      # included) and the same blueprint set, so a worker can
+      # hand the materialised registry to Environment without
+      # losing the replay handle. `load_errors` is intentionally
+      # empty: load-time failures already surfaced in the
+      # coordinator registry and don't repeat per worker.
+      def self.materialize(blueprints:, services:)
+        plugins = blueprints.map { |bp| bp.materialize(services: services) }
+        new(plugins: plugins, blueprints: blueprints, load_errors: [])
       end
 
       def find(id)

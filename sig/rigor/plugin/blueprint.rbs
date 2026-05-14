@@ -1,0 +1,7 @@
+class Rigor::Plugin::Blueprint
+  attr_reader klass_name: String
+  attr_reader config: Hash[untyped, untyped]
+
+  def initialize: (klass_name: String | Module, ?config: Hash[untyped, untyped]) -> void
+  def materialize: (services: untyped) -> Rigor::Plugin::Base
+end

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "blueprint"
 require_relative "registry"
 require_relative "load_error"
 
@@ -72,7 +73,8 @@ module Rigor
         plugins, sort_errors = topo_sort_plugins(plugins)
         load_errors.concat(sort_errors)
 
-        Registry.new(plugins: plugins, load_errors: load_errors)
+        blueprints = plugins.map { |plugin| Blueprint.new(klass_name: plugin.class.name, config: plugin.config) }
+        Registry.new(plugins: plugins, blueprints: blueprints, load_errors: load_errors)
       end
 
       private

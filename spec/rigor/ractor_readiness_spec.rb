@@ -185,4 +185,56 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       expect(shareable?(Rigor::Environment.default)).to be(true)
     end
   end
+
+  # Phase 3 (LANDED in part): the plugin contract carries a
+  # Ractor-shareable {Rigor::Plugin::Blueprint} replay carrier
+  # alongside live (mutable) plugin instances. A worker Ractor
+  # ships `blueprints` across the boundary, then calls
+  # {Rigor::Plugin::Registry.materialize} once at startup so the
+  # per-Ractor plugin instance (with its mutable accumulators)
+  # never escapes its owning Ractor.
+  #
+  # Plugin instances themselves are intentionally NOT
+  # `Ractor.shareable?` — they accumulate per-run state in
+  # ivars (`rigor-sorbet`'s `@reachable_absurd_nodes`,
+  # `@reveal_type_calls`, `@assert_type_mismatches` are the
+  # canonical examples). The blueprint+materialize pattern
+  # sidesteps that constraint without forcing every plugin
+  # author to refactor.
+  # Self-contained reference class so this spec doesn't depend
+  # on blueprint_spec.rb being loaded in the same run.
+  unless defined?(RigorRactorReadinessSpecPlugin)
+    class ::RigorRactorReadinessSpecPlugin < Rigor::Plugin::Base
+      manifest(id: "ractor-audit", version: "0.1.0")
+    end
+  end
+
+  describe "Phase 3 — Plugin contract" do
+    let(:blueprint) do
+      Rigor::Plugin::Blueprint.new(klass_name: "RigorRactorReadinessSpecPlugin")
+    end
+
+    it "Rigor::Plugin::Blueprint is frozen + Ractor.shareable?" do
+      expect(blueprint).to be_frozen
+      expect(shareable?(blueprint)).to be(true)
+    end
+
+    it "Rigor::Plugin::Blueprint with a nested-Hash config is Ractor.shareable?" do
+      bp = Rigor::Plugin::Blueprint.new(
+        klass_name: "RigorRactorReadinessSpecPlugin",
+        config: { "factories" => [{ "path" => "spec/factories" }] }
+      )
+      expect(shareable?(bp)).to be(true)
+    end
+
+    it "Rigor::Plugin::Registry blueprints Array is Ractor.shareable? when populated by the loader" do
+      registry = Rigor::Plugin::Registry.new(blueprints: [blueprint])
+      expect(registry.blueprints).to be_frozen
+      expect(shareable?(registry.blueprints)).to be(true)
+    end
+
+    it "Rigor::Plugin::Registry::EMPTY is frozen" do
+      expect(Rigor::Plugin::Registry::EMPTY).to be_frozen
+    end
+  end
 end

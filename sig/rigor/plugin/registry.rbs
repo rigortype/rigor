@@ -1,3 +1,16 @@
 class Rigor::Plugin::Registry
-  def initialize: (?plugins: untyped, ?load_errors: untyped) -> void
+  attr_reader plugins: untyped
+  attr_reader load_errors: untyped
+  attr_reader blueprints: untyped
+
+  EMPTY: Rigor::Plugin::Registry
+
+  def self.materialize: (blueprints: untyped, services: untyped) -> Rigor::Plugin::Registry
+
+  def initialize: (?plugins: untyped, ?load_errors: untyped, ?blueprints: untyped) -> void
+  def find: (String | Symbol id) -> untyped
+  def ids: () -> Array[String]
+  def empty?: () -> bool
+  def any_load_errors?: () -> bool
+  def type_node_resolvers: () -> Array[untyped]
 end

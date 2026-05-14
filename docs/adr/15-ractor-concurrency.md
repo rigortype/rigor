@@ -134,15 +134,25 @@ migration documented in
    Each Ractor worker (Phase 4) builds its own Reflection
    from the shared `Cache::Store`; Reflection itself does
    NOT cross Ractor boundaries.
-4. **Phase 3 — plugin contract (DEFERRED).** Plugin
-   instances become per-Ractor; the `Plugin::Registry`
-   refactors into a frozen factory + ID table. Plugins with
-   per-run mutable state (the `rigor-sorbet`
-   `@reachable_absurd_nodes` /
-   `@reveal_type_calls` /
-   `@assert_type_mismatches` Hashes are the canonical
-   examples) either move state to `Plugin::FactStore`
-   (cross-Ractor coordination) or stay per-Ractor.
+4. **Phase 3 — plugin contract (Phase 3a LANDED).**
+   `Plugin::Blueprint` (new) is a frozen, Ractor-shareable
+   replay descriptor carrying `klass_name` + deep-frozen
+   `config`. `Plugin::Registry` now exposes `blueprints` as
+   an aligned, Ractor-shareable `Array<Blueprint>` and adds
+   `Registry.materialize(blueprints:, services:)` that builds
+   a fresh registry by replaying each blueprint via
+   `Object.const_get + klass.new + #init(services)`. Plugin
+   gems are required from the main Ractor BEFORE any worker
+   spawns, so blueprint resolution succeeds inside workers
+   without re-loading gems. Plugin INSTANCES intentionally
+   stay non-shareable — they accumulate per-run state in
+   ivars (`rigor-sorbet`'s `@reachable_absurd_nodes` /
+   `@reveal_type_calls` / `@assert_type_mismatches` are the
+   canonical examples). The Phase 4 worker pattern is:
+   ship blueprints across the boundary, materialise once
+   per worker, never share instances. Phase 3b (cross-
+   Ractor plugin aggregate state — see § OQ2) is deferred
+   until Phase 4 measures actual usage.
 5. **Phase 4 — Ractor worker pool (DEFERRED).**
    `Analysis::Runner#analyze_files` dispatches across a
    `Ractor.new`-allocated pool sharing the frozen
@@ -532,10 +542,15 @@ spec suite.
 3. ✅ Phase 2b — `Environment::Reflection` extracted (frozen,
    NOT yet Ractor-shareable; see WD6 for the
    `RBS::Location` constraint).
-4. ⏭ Phase 3 — Plugin contract refactor (per-Ractor plugin
-   instances; `Plugin::Registry` refactored into a frozen
-   factory + ID table).
-5. ⏭ Phase 4 — Ractor worker pool in `Analysis::Runner`
+4. ✅ Phase 3a — `Plugin::Blueprint` + `Registry#blueprints`
+   + `Registry.materialize` factory. Live plugin instances
+   are intentionally NOT shareable; the blueprint set is
+   the cross-Ractor handle.
+5. ⏭ Phase 3b — cross-Ractor plugin aggregate-state contract
+   (see § OQ2). Deferred until Phase 4 measures the actual
+   shape of per-worker plugin state.
+6. ⏭ Phase 4 — Ractor worker pool in `Analysis::Runner`
    (each worker builds its own Reflection from the shared
-   `Cache::Store`; the Store gains a Ractor-shareable
+   `Cache::Store` and materialises plugins from the shared
+   blueprint set; the Store gains a Ractor-shareable
    facade per § OQ1).

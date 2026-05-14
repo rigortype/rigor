@@ -111,30 +111,63 @@ file. Profile-confirm before committing to the design.
 
 Goal: plugins can run from a Ractor worker.
 
-Two blockers:
+### Phase 3a — `Plugin::Blueprint` + materialise factory (LANDED)
 
-1. **`Plugin::Base#init(services)`** — services contain
-   non-shareable references (`Cache::Store` is monitor-safe
-   but not yet Ractor-shareable). Plugins themselves
-   accumulate mutable state in instance variables (the
-   `rigor-sorbet` `@reachable_absurd_nodes` /
-   `@reveal_type_calls` / `@assert_type_mismatches`
-   `compare_by_identity` Hashes are the canonical examples).
-2. **`Plugin::Registry`** — accumulates plugin instances in a
-   Hash that's not frozen.
+The minimal cross-Ractor handle for plugin replay landed
+without changing the live coordinator path. New surface:
 
-Resolution sketch:
+- **`Rigor::Plugin::Blueprint`** — frozen, `Ractor.shareable?`
+  value object carrying `klass_name` (String — the constant
+  path) plus a deep-copied, `Ractor.make_shareable`-treated
+  `config` Hash. Construction takes a `String` or a `Module`;
+  the Module form stores `klass.name`.
+- **`Plugin::Blueprint#materialize(services:)`** — replays
+  `Object.const_get(klass_name).new(services:, config:)` then
+  `#init(services)`. Bit-for-bit equivalent to
+  `Loader#instantiate` so the blueprint path is consistent
+  with the configuration path.
+- **`Plugin::Registry#blueprints`** — frozen
+  `Array<Blueprint>` aligned 1:1 with `plugins`. The loader
+  derives it from the post-topo-sort plugin list via
+  `plugin.class.name + plugin.config`.
+- **`Plugin::Registry.materialize(blueprints:, services:)`** —
+  builds a NEW Registry by mapping each blueprint to a fresh
+  plugin instance. `load_errors` is intentionally empty (load
+  failures already surfaced on the coordinator registry; they
+  don't repeat per worker).
 
-- Per-Ractor plugin instance: each worker instantiates its
-  own plugin objects from the shared `Plugin::Registry`
-  metadata (manifest + class names). Plugins that need
-  cross-Ractor coordination publish through `Plugin::FactStore`
-  (which is already monitor-friendly).
-- Refactor `Plugin::Registry` to be a frozen "factory + ID
-  table" rather than a mutable instance pool.
+Plugin INSTANCES intentionally stay non-shareable. They carry
+per-run mutable accumulator state in ivars (`rigor-sorbet`'s
+`@reachable_absurd_nodes` / `@reveal_type_calls` /
+`@assert_type_mismatches`; the `*_index` Hashes in most Rails
+plugins). The per-Ractor pattern sidesteps the constraint
+without forcing every plugin author to refactor: ship
+blueprints across the boundary, materialise once per worker,
+each worker owns its instances for its lifetime.
 
-Estimated size: medium (~150-250 LoC + spec coverage across
-the worked example plugins).
+Audit coverage: four `Ractor.shareable?` / `frozen?`
+assertions in `spec/rigor/ractor_readiness_spec.rb` under the
+new "Phase 3 — Plugin contract" describe.
+
+### Phase 3b — cross-Ractor plugin aggregate state (DEFERRED)
+
+The per-Ractor pattern slices each plugin's view of per-run
+observations. `rigor-sorbet`-style aggregate tracking
+(absurd-reachable, reveal-type, assert-type-mismatch across
+ALL files) would need a coordination protocol when Phase 4
+ships. Three candidate shapes documented in ADR-15 § OQ2:
+
+1. Move state to `Plugin::FactStore` publish/consume.
+2. Result-merge per-plugin at the runner.
+3. Plugin opt-out of parallelism (`manifest(serial: true)`).
+
+Phase 3b decision deferred until Phase 4 measures actual
+usage. None of the bundled plugins need cross-Ractor
+aggregation if the runner stays sequential (Phase 4 opt-in
+default).
+
+Estimated size: small once Phase 4 lands (~50-100 LoC for
+the chosen shape).
 
 ## Phase 4 — Ractor-isolated file workers
 
@@ -207,8 +240,11 @@ Items #7) while Ractor phases progress incrementally.
    the upstream `RBS::Location` C-extension constraint;
    each Phase 4 worker will build its own Reflection from
    the shared `Cache::Store`).
-4. ⏭ Phase 3 — Plugin contract refactor.
-5. ⏭ Phase 4 — Ractor worker pool.
+4. ✅ Phase 3a — `Plugin::Blueprint` + `Registry#blueprints`
+   + `Registry.materialize` factory.
+5. ⏭ Phase 3b — cross-Ractor plugin aggregate-state
+   contract (DEFERRED until Phase 4).
+6. ⏭ Phase 4 — Ractor worker pool.
 
 Each subsequent phase reads from the prior phase's audit spec
 to confirm prerequisites. The audit spec is the contract

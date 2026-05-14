@@ -176,6 +176,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   PLUGIN_REGISTRY_INSTANCE = %w[
     any_load_errors?()
+    blueprints()
     empty?()
     find(req:id)
     ids()
@@ -185,6 +186,12 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   PLUGIN_TYPE_NODE_RESOLVER_INSTANCE = %w[resolve(req:node,req:scope)].freeze
+
+  PLUGIN_BLUEPRINT_INSTANCE = %w[
+    config()
+    klass_name()
+    materialize(keyreq:services)
+  ].freeze
 
   PLUGIN_TRUST_POLICY_INSTANCE = %w[
     allow_read?(req:path)
@@ -470,6 +477,12 @@ RSpec.describe "Public API drift", :public_api_drift do
   describe "Rigor::Plugin::Registry" do
     it "exposes the expected read-side surface" do
       expect(instance_signatures(Rigor::Plugin::Registry)).to eq(PublicApiDriftSnapshots::PLUGIN_REGISTRY_INSTANCE)
+    end
+  end
+
+  describe "Rigor::Plugin::Blueprint" do
+    it "exposes the expected materialise surface (ADR-15 Phase 3)" do
+      expect(instance_signatures(Rigor::Plugin::Blueprint)).to eq(PublicApiDriftSnapshots::PLUGIN_BLUEPRINT_INSTANCE)
     end
   end
 

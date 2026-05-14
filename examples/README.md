@@ -46,8 +46,9 @@ ADR-9's cross-plugin fact store.
 | [`rigor-rspec`](rigor-rspec/) | 3A | Duplicate `let` / `subject` + self-referencing let detection (deliberately minimal — mock-target validation + let-typo deferred) | — | — | 11 |
 | [`rigor-actionpack`](rigor-actionpack/) | 2 | **Phase 4** — route-helper consumption (first concrete ADR-9 consumer); **Phase 2** — filter chain validation (`before_action :name` against the controller's effective method set, including one level of inheritance); **Phase 3** — render-target validation (`render :show` → `app/views/<controller_path>/show.html.erb`) | Ruby (`app/controllers/`) + view templates | ✅ | 21 |
 | [`rigor-factorybot`](rigor-factorybot/) | 2 | **Phase 1 (a)** — self-contained validation of `FactoryBot.create(:name, key: ...)` / `.build` / `.attributes_for` / `*_list` against a per-run factory index built from `spec/factories/`. Phase 1 (c) AR column cross-check is queued | Ruby (`spec/factories/`) | ✅ | 10 |
+| [`rigor-activestorage`](rigor-activestorage/) | 3E | `has_one_attached :avatar` / `has_many_attached :photos` macro discovery on AR models + return-type narrowing to `Nominal[ActiveStorage::Attached::One]` / `::Many` via `flow_contribution_for` (instance navigation tier) | Ruby (`app/models/`) | ✅ | 11 |
 
-All sixteen rely on **slice 5**
+All twenty rely on **slice 5**
 (`Plugin::Base#diagnostics_for_file`) to surface
 diagnostics. The "headline facet" column names the
 *additional* surface each example spotlights — that is the

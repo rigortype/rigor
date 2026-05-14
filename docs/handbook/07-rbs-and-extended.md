@@ -135,6 +135,7 @@ A short reference:
 | String predicates | `lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`, `literal-string` |
 | Paired complements | `non-lowercase-string`, `non-uppercase-string`, `non-numeric-string` |
 | Composed | `non-empty-lowercase-string`, `non-empty-uppercase-string`, `non-empty-literal-string` |
+| Shape projections | `pick_of[T, K]`, `omit_of[T, K]`, `partial_of[T]`, `required_of[T]`, `readonly_of[T]` — derive new `HashShape` / `Tuple` carriers from existing ones. See [chapter 4 § "Deriving new shapes"](04-tuples-and-shapes.md#deriving-new-shapes--pick_of--omit_of--partial_of--required_of--readonly_of). |
 
 ## Worked example: an assertion gate
 

@@ -37,6 +37,10 @@ this handbook disagrees.
 4. [**Tuples and hash shapes**](04-tuples-and-shapes.md) — the
    structural carriers Ruby's `[a, b, c]` literals and
    `{key: value}` hashes get when Rigor can prove their layout.
+   Includes the **shape-projection functions** (`pick_of` /
+   `omit_of` / `partial_of` / `required_of` / `readonly_of`)
+   that mirror TypeScript's `Pick` / `Omit` / `Partial` /
+   `Required` / `Readonly` utility types.
 5. [**Methods and blocks**](05-methods-and-blocks.md) — argument
    typing, return-type inference, block parameters, arity.
 6. [**Classes**](06-classes.md) — instance-side vs class-side,

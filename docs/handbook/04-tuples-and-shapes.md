@@ -225,6 +225,94 @@ The same goes for hashes whose keys are not provably symbol /
 string literals — Rigor produces `Hash[K, V]` rather than
 `HashShape`.
 
+## Deriving new shapes — `pick_of` / `omit_of` / `partial_of` / `required_of` / `readonly_of`
+
+When you have a `HashShape` (or a `Tuple`) and want a derived
+shape that keeps some fields, drops others, or flips the
+required-ness, Rigor exposes five **shape-projection type
+functions** on `Type::Combinator`. They mirror TypeScript's
+`Pick` / `Omit` / `Partial` / `Required` / `Readonly` utility
+types but are first-class Rigor operations — not a TS bolt-on.
+Each preserves the source's existing classification (required /
+optional / read-only / extra-keys policy) on the entries it
+keeps.
+
+| Projection | What it does | TypeScript analogue |
+| --- | --- | --- |
+| `pick_of[T, K]` | Keep only the entries whose key is in the literal-key union `K`. On `Tuple`, `K` is an integer-index union. | `Pick<T, K>` |
+| `omit_of[T, K]` | Drop the entries whose key is in `K`; keep the rest. | `Omit<T, K>` |
+| `partial_of[T]` | Flip every required entry to optional. **Does not** widen value types to `nil` — Rigor distinguishes "key absent" from "key present with `nil` value". | `Partial<T>` |
+| `required_of[T]` | Inverse of `partial_of`. Every optional entry becomes required. | `Required<T>` |
+| `readonly_of[T]` | Mark every entry as read-only in the current view. Does NOT prove the underlying object is frozen — it is a view-level marker. | `Readonly<T>` |
+
+These show up in two surfaces:
+
+### As `RBS::Extended` directive payloads
+
+The projection name is part of the directive grammar — the
+parser accepts Symbol / String literals and `|`-unions inside
+the type-arg position, so you can author the key set inline:
+
+```rbs
+class UserView
+  # The runtime returns the full user hash; the view exposes
+  # only :name and :email to its caller. The directive narrows
+  # the return-side HashShape to those two entries.
+  %a{rigor:v1:return: pick_of[UserHash, :name | :email]}
+  def public_attrs: () -> ::Hash[::Symbol, ::String]
+end
+```
+
+Inside an analysed file, the call site's result type is the
+projected HashShape rather than the raw `Hash[Symbol, String]`
+the underlying RBS sig advertises.
+
+### Through the opt-in TypeScript-utility-types plugin
+
+If you prefer the TS spellings (`Pick<T, K>` etc.) in
+directives, opt into the
+[`rigor-typescript-utility-types`](../../examples/rigor-typescript-utility-types/)
+plugin. The plugin registers a `Plugin::TypeNodeResolver` that
+translates each TS name onto the canonical projection:
+
+```yaml
+# .rigor.yml
+plugins:
+  - gem: rigor-typescript-utility-types
+```
+
+```rbs
+%a{rigor:v1:return: Pick[UserHash, "name" | "email"]}
+```
+
+The plugin chain resolves `Pick[…]` to `pick_of[…]` before the
+analyzer sees it — the inferred result is identical to the
+direct `pick_of` spelling. The plugin is purely a naming
+convenience.
+
+### Lossy projection
+
+The projections fire only on carriers that preserve shape
+information (`HashShape` and, for `pick_of` / `omit_of`,
+`Tuple`). Applying them to a plain `Hash[K, V]` or any other
+non-shape input is **lossy** — the projection silently
+degrades to the input type and Rigor records a
+[`dynamic.shape.lossy-projection`](../type-specification/diagnostic-policy.md)
+`:info` diagnostic so you can audit the call site.
+
+```rbs
+class C
+  # `User` here is `Nominal[User]`, not a HashShape, so the
+  # projection cannot narrow anything. The directive is
+  # accepted but `:info` records the lossy degrade.
+  %a{rigor:v1:return: pick_of[User, :name]}
+  def render: () -> ::User
+end
+```
+
+The fix is usually to author a `HashShape` carrier (or use
+`Data.define` / a `Struct`) instead of a bare `Nominal`.
+
 ## What's next
 
 Chapter 5 covers the function side: how Rigor types method

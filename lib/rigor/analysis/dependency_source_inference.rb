@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "dependency_source_inference/boundary_cross_reporter"
 require_relative "dependency_source_inference/gem_resolver"
 require_relative "dependency_source_inference/index"
 require_relative "dependency_source_inference/walker"

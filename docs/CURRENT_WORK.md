@@ -6,9 +6,9 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 **v0.1.2 released.** All v0.1.2 tracks landed and the version cut. Slice-by-slice recap in `CHANGELOG.md` § `[0.1.2]` and `docs/MILESTONES.md` § "v0.1.2 — Planned".
 
-**v0.1.3 in progress, release pending.** Theme: **deliver [ADR-10](adr/10-dependency-source-inference.md) end-to-end, absorb ADR-11 / Rails plugin Phase work, land ADR-13, and close the ADR-14 sig-gen self-dogfood gaps.** Five tracks closed; **ADR-13 slices 1–7 all landed on `master`**; **ADR-14 gaps (c) / (d) / (e) closed this session** — nothing on the committed v0.1.3 list is deferred:
+**v0.1.3 in progress, release pending.** Theme: **deliver [ADR-10](adr/10-dependency-source-inference.md) end-to-end (including slice 5c boundary-cross under `mode: :full`), absorb ADR-11 / Rails plugin Phase work, land ADR-13, and close the ADR-14 sig-gen self-dogfood gaps.** Every committed track is closed; no v0.1.3 commitment remains deferred:
 
-- **ADR-10 fully implemented.** Five-slice envelope (config plumbing → walker + dispatcher tier → cache descriptor → per-gem budget → docs) plus four "Open questions" follow-ups (5a per-receiver plugin veto / 5b β budget semantics / 5d config-conflict diagnostic; 5c boundary-cross deferred behind `mode: full` distinct dispatch).
+- **ADR-10 fully implemented.** Five-slice envelope (config plumbing → walker + dispatcher tier → cache descriptor → per-gem budget → docs) plus all five "Open questions" follow-ups (5a per-receiver plugin veto / 5b β budget semantics / 5c boundary-cross diagnostic under `mode: :full` / 5d config-conflict diagnostic). Slice 5c (boundary-cross) closed this session.
 - **ADR-11 (rigor-sorbet) primary surface complete.** Slices 1–6 + 8 plus light follow-ups (`T.must_because`, `T.reveal_type`, `T.assert_type!`, `T.bind`, `enforce_sigil` per-file gating). Only per-call-site assertion gating remains.
 - **PHPStan-style Type-Specifying Extensions substrate landed.** `Inference::StatementEvaluator#apply_plugin_assertions` wires plugin-side `truthy_facts` / `falsey_facts` / `post_return_facts` through the narrowing engine; closes ADR-7 § "Slice 4-A"'s plugin half.
 - **Rails Tier 2 ecosystem complete.** `rigor-actionpack` (4 phases), `rigor-factorybot` (Phase 1 (a)+(c)), `rigor-activerecord` (publishes `:model_index` via ADR-9). First "publish-and-consume" cycle exercising ADR-9 end-to-end.
@@ -17,6 +17,7 @@ This is a transient bookmark used to break a long implementation thread into rev
 - **ADR-14 sig-gen self-dogfood gaps (c) / (d) / (e) closed.** `Writer#render_new_file` now builds a namespace tree and nests strict-prefix child classes inside their parent block instead of emitting flat siblings; `Writer#merge_class_shells` injects missing `Const = Data.define(...)` / `Struct.new(...)` shells into the nearest existing ancestor in the `update_existing` path. `Generator#walk_defs` recognises `Prism::ConstantWriteNode` whose RHS is `Data.define` / `Struct.new` and threads the qualified constant name through every candidate via the new `MethodCandidate#class_shells` slot. `Inference::ExpressionTyper#block_return_for` handles `Prism::BlockArgumentNode` carrying a `SymbolNode` by dispatching the symbol on the expected block param type — `Hash#transform_values(&:freeze)` now routes through the block-bearing overload and returns `Hash[K, V]` instead of `Enumerator[...]`.
 - **rigor-sorbet — per-call-site assertion gating closed.** New `Rigor::Scope#source_path` slot (set once per file at `Analysis::Runner#analyze_file` and propagated through every `with_*` rebuild + `build_joined_scope` + `with_source_path` builder) lets plugin hooks resolve "which file does this call site belong to?" without thread-locals. rigor-sorbet now caches the per-file sigil in `@sigil_by_path` during harvest; `flow_contribution_for` gates the assertion recogniser path through `assertion_enforced_here?(scope)` so `T.let` / `T.cast` / `T.must` / `T.bind` / `T.assert_type!` / `T.reveal_type` only fire in files Sorbet itself would enforce (`# typed: true` / `:strict` / `:strong`). The existing `enforce_sigil: false` opt-out keeps the gate fully open for users who relied on the pre-feature behaviour.
 - **RBS::Extended Symbol / String literal tokens + literal unions closed.** Three new `TypeNode` AST nodes (`SymbolLiteral` / `StringLiteral` / `Union`) plus parser additions (`SYMBOL_LITERAL` / `STRING_LITERAL` regexes + `parse_single_type_arg_ast` + literal-union folding via `|`) let `pick_of[T, :a | :b]` / `Pick[T, "a" | "b"]` round-trip end-to-end through `ImportedRefinements.parse`. The resolver translates each literal node to a `Type::Constant<value>` and folds union nodes via `Type::Combinator.union`. ADR-13 slice 6's integration spec no longer needs the synthetic-AST workaround for literal-key payloads.
+- **ADR-10 slice 5c (boundary-cross under `mode: :full`) closed.** `Index#mode_for(class_name)` / `#full_mode?(class_name)` expose per-class mode awareness by chaining `class_to_gem` + the new `gem_modes` table the Builder threads through from each `Resolved#mode`. After RBS dispatch resolves a call, `MethodDispatcher` records a `dynamic.dependency-source.boundary-cross` event through the new `Environment#boundary_cross_reporter` whenever the receiver belongs to a `mode: :full` gem AND that gem's source catalog has the same `(class_name, method_name)`. RBS still wins on the dispatch result — the `:info` diagnostic is purely advisory and deduped per `(class_name, method_name, gem_name)`. Runner drains the reporter at end-of-run.
 
 **Nineteen worked example plugins now land under `examples/`** (the eighteen pre-ADR-13 examples plus `rigor-typescript-utility-types`). See [`examples/README.md`](../examples/README.md) for the comparison table.
 
@@ -39,7 +40,7 @@ This is a transient bookmark used to break a long implementation thread into rev
 
 v0.1.3's four primary tracks are closed; **ADR-13 slices 1–7 all landed on `master`**. Nothing ADR-13-shaped is deferred:
 
-- **ADR-10**: Five-slice envelope + 5a / 5b / 5d open-question follow-ups all landed; 5c boundary-cross is deferred behind a `mode: full` distinct-dispatch prerequisite.
+- **ADR-10**: Five-slice envelope + every "Open questions" follow-up (5a per-receiver plugin veto, 5b β budget semantics, 5c boundary-cross under `mode: :full`, 5d config-conflict) all landed.
 - **ADR-11 (rigor-sorbet)**: Slices 1–6 + 8 + light follow-ups all landed. Only per-call-site assertion gating remains.
 - **Rails ecosystem (Tier 2)**: rigor-actionpack 4 phases + rigor-factorybot Phase 1 (a)+(c) all landed. ADR-9 cross-plugin chain proven end-to-end with `:helper_table` (rails-routes → actionpack) and `:model_index` (activerecord → actionpack + factorybot).
 - **ADR-13**: Slices 1–7 (incl. 3b) all landed — core machinery, opt-in plugin, caller-side diagnostic threading, and handbook TypeScript appendix update.
@@ -47,10 +48,9 @@ v0.1.3's four primary tracks are closed; **ADR-13 slices 1–7 all landed on `ma
 The next session can:
 1. **Cut a release** (`bundle exec rake release` per [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md), awaiting explicit user authorisation). v0.1.3 has accumulated substantial work and every committed track is closed.
 2. **Continue with deferred queue items**:
-   - `mode: full` distinct dispatch (unblocks ADR-10 5c boundary-cross).
-   - Per-call-site assertion gating in rigor-sorbet.
    - Tier 3 ecosystem plugins still pending: `rigor-graphql`, `rigor-activestorage`.
    - rigor-activerecord extensions: associations, enums, scopes, validations, callbacks.
+   - Per-call return-type precision from gem source (walker enhancement; until then `mode: :full` contributes only the boundary-cross diagnostic).
 3. **New ecosystem work**: ADR-12 candidate plugins (dry-rb adapters per [`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md)).
 
 ### Rails ecosystem plugins (parallel running track)
@@ -81,7 +81,7 @@ Persistent items that have come up across v0.0.x slices and that the next implem
 
 ## Reading Order for a Returning Implementer
 
-The default goal for the next session is "cut the v0.1.3 release" (substantial work accumulated, every ADR-13 slice closed). If continuing implementation instead, the natural entry is one of the deferred queue items under "Where the Work Resumes" — `mode: full` distinct dispatch (unblocks ADR-10 5c), per-call-site assertion gating in rigor-sorbet, or one of the deferred Tier 3 Rails plugins. Read in this order:
+The default goal for the next session is "cut the v0.1.3 release" (substantial work accumulated, every committed track closed). If continuing implementation instead, the natural entry is one of the deferred queue items under "Where the Work Resumes" — Tier 3 Rails plugins, rigor-activerecord extensions, or the per-call return-type precision follow-up. Read in this order:
 
 1. `CHANGELOG.md` `[Unreleased]` section — accumulates v0.1.3 work as it lands.
 2. [`docs/MILESTONES.md`](MILESTONES.md) — release-by-release commitment envelope; v0.1.2 is the latest released milestone, v0.1.3 carries ADR-10 / ADR-11 / Rails Tier 2 / ADR-13.

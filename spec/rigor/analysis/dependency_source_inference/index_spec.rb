@@ -52,6 +52,35 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
     end
   end
 
+  describe "#mode_for / #full_mode? (ADR-10 slice 5c)" do
+    it "chains class_to_gem and gem_modes to expose the per-class mode" do
+      index = described_class.new(
+        class_to_gem: { "Rack::Request" => "rack", "Faraday::Connection" => "faraday" },
+        gem_modes: { "rack" => :when_missing, "faraday" => :full }
+      )
+
+      expect(index.mode_for("Rack::Request")).to eq(:when_missing)
+      expect(index.mode_for("Faraday::Connection")).to eq(:full)
+    end
+
+    it "returns nil for classes owned by no listed gem" do
+      index = described_class.new(gem_modes: { "rack" => :full })
+
+      expect(index.mode_for("Unknown")).to be_nil
+      expect(index).not_to be_full_mode("Unknown")
+    end
+
+    it "#full_mode? is true exactly when the owning gem's mode is :full" do
+      index = described_class.new(
+        class_to_gem: { "Rack" => "rack", "Faraday" => "faraday" },
+        gem_modes: { "rack" => :when_missing, "faraday" => :full }
+      )
+
+      expect(index.full_mode?("Faraday")).to be true
+      expect(index.full_mode?("Rack")).to be false
+    end
+  end
+
   describe "#contribution_for" do
     it "returns nil for any (class_name, method_name) when no catalog is supplied" do
       index = described_class.new

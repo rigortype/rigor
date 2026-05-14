@@ -78,6 +78,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   SCOPE_SINGLETON = %w[empty(key:environment,key:source_path)].freeze
 
   ENVIRONMENT_INSTANCE = %w[
+    boundary_cross_reporter()
     class_known?(req:name)
     class_ordering(req:lhs,req:rhs)
     class_registry()
@@ -94,7 +95,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ENVIRONMENT_SINGLETON = [
     "default()",
     "for_project(key:root,key:libraries,key:signature_paths,key:cache_store," \
-    "key:plugin_registry,key:dependency_source_index,key:rbs_extended_reporter)"
+    "key:plugin_registry,key:dependency_source_index,key:rbs_extended_reporter," \
+    "key:boundary_cross_reporter)"
   ].freeze
 
   REFLECTION_SINGLETON = %w[
@@ -316,6 +318,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     Rigor::RbsExtended::Reporter
     Rigor::RbsExtended::Reporter::UnresolvedEntry
     Rigor::RbsExtended::Reporter::LossyProjectionEntry
+    Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter
+    Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter::Entry
   ].freeze
 
   COMBINATOR_SINGLETON = %w[

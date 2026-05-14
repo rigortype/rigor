@@ -23,7 +23,8 @@ module Rigor
       RUBY_GLOB = "**/*.rb"
       DEFAULT_CACHE_ROOT = ".rigor/cache"
 
-      attr_reader :cache_store, :plugin_registry, :dependency_source_index, :rbs_extended_reporter
+      attr_reader :cache_store, :plugin_registry, :dependency_source_index,
+                  :rbs_extended_reporter, :boundary_cross_reporter
 
       # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events
@@ -44,6 +45,7 @@ module Rigor
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
         @rbs_extended_reporter = RbsExtended::Reporter.new
+        @boundary_cross_reporter = DependencySourceInference::BoundaryCrossReporter.new
       end
 
       # Walks every Ruby file under `paths`, parses it, builds a
@@ -69,13 +71,15 @@ module Rigor
           cache_store: @cache_store,
           plugin_registry: @plugin_registry,
           dependency_source_index: @dependency_source_index,
-          rbs_extended_reporter: @rbs_extended_reporter
+          rbs_extended_reporter: @rbs_extended_reporter,
+          boundary_cross_reporter: @boundary_cross_reporter
         )
         expansion = expand_paths(paths)
 
         diagnostics = pre_file_diagnostics(expansion)
         diagnostics += expansion.fetch(:files).flat_map { |path| analyze_file(path, environment) }
         diagnostics += rbs_extended_reporter_diagnostics
+        diagnostics += boundary_cross_diagnostics
 
         Result.new(diagnostics: apply_severity_profile(diagnostics))
       end
@@ -340,6 +344,40 @@ module Rigor
         end
 
         unresolved + lossy
+      end
+
+      # ADR-10 slice 5c — drains the per-run
+      # {DependencySourceInference::BoundaryCrossReporter} into
+      # `dynamic.dependency-source.boundary-cross` `:info`
+      # diagnostics. Each event flags a call site where RBS
+      # dispatch produced a concrete answer AND a `mode: :full`
+      # opt-in gem's source catalog ALSO contains an entry for
+      # the same `(class_name, method_name)` — i.e., both
+      # contracts have an opinion. RBS still wins on the
+      # dispatch result; the diagnostic is purely advisory so
+      # the user can verify the two contracts haven't drifted.
+      #
+      # Severity profile re-stamps the rule per project taste.
+      # The diagnostic carries no `path` / `line` / `column`
+      # because the crossing is per-method-per-gem, not
+      # per-call-site — the diagnostic anchors at `.rigor.yml`
+      # like the other `dependency-source.*` diagnostics that
+      # report on opt-in configuration.
+      def boundary_cross_diagnostics
+        return [] if @boundary_cross_reporter.empty?
+
+        @boundary_cross_reporter.entries.map do |entry|
+          Diagnostic.new(
+            path: ".rigor.yml", line: 1, column: 1,
+            message: "`#{entry.class_name}##{entry.method_name}` is contributed by both " \
+                     "RBS (#{entry.rbs_display}) and the `mode: :full` opt-in gem " \
+                     "`#{entry.gem_name}`. RBS wins on dispatch; verify the gem source " \
+                     "has not drifted from its RBS contract.",
+            severity: :info,
+            rule: "dynamic.dependency-source.boundary-cross",
+            source_family: :builtin
+          )
+        end
       end
 
       def build_reporter_diagnostic(source_location, rule:, message:)

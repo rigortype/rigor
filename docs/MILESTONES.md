@@ -294,7 +294,7 @@ ADR-10's five-slice implementation envelope plus four "Open questions" follow-up
 5. ✅ **Slice 5 (documentation)** — `docs/internal-spec/dependency-source-inference.md` normative spec.
 6. ✅ **5a (per-receiver plugin veto)** — `manifest(owns_receivers:)` declaration; subclass-aware via `Environment#class_ordering`.
 7. ✅ **5b (β budget semantics)** — opt-in `dependencies.budget_overrun_strategy: dependency_silence` returns `Dynamic[top]` on catalog misses for budget-exceeded gems via `Index#class_to_gem` reverse lookup. Default stays `:walker_cap`.
-8. ⏸ **5c (boundary-cross diagnostic)** — deferred behind a `mode: full` distinct-dispatch prerequisite; spec doc explains the dependency.
+8. ✅ **5c (boundary-cross diagnostic)** — `Index#mode_for(class_name)` / `#full_mode?(class_name)` exposes per-class mode awareness; `MethodDispatcher.dispatch` records a `dynamic.dependency-source.boundary-cross` `:info` event through the new `Environment#boundary_cross_reporter` whenever RBS resolves to a non-`Dynamic[Top]` carrier AND a `mode: :full` opt-in gem's source catalog contains the same `(class_name, method_name)`. RBS still wins on dispatch. Reporter dedupes per `(class_name, method_name, gem_name)`. Runner drains at end-of-run.
 9. ✅ **5d (config-conflict diagnostic)** — `dynamic.dependency-source.config-conflict` `:warning` on `includes:`-chain mode disagreements; per-gem dedupe with later-wins + roots union.
 
 ### Track 2 — ADR-11 (rigor-sorbet plugin)
@@ -354,7 +354,7 @@ The third-round `lib/rigor/analysis/` self-dogfood (`343a475`) surfaced four int
 3. ✅ **Gap (e) — `Const = Data.define(...)` / `Struct.new(...)` recognition.** `Generator#walk_defs` recognises `Prism::ConstantWriteNode` whose RHS is `Data.define` / `Struct.new`, records the fully-qualified name in `@class_shells` (carried via the new `MethodCandidate#class_shells` slot) and `@namespace_kinds`. The writer renders an empty `class Foo\nend` block at the correct nested position in `create_new`; `Writer#merge_class_shells` injects missing shells into the nearest existing ancestor in `update_existing`. The hand-stub `class Unresolvable; end` in `sig/rigor/analysis/dependency_source_inference/gem_resolver.rbs` is no longer required.
 
 ### Out of scope for v0.1.3 (deferred to v0.1.4 or beyond)
-- **`mode: full` distinct dispatch** — gem-source contributing alongside RBS with merger conflict resolution. Prerequisite for ADR-10 5c (boundary-cross) — the diagnostic has no condition under which it would fire without distinct dispatch.
+- **Per-call return-type precision from gem source** — the walker still catalogs only `(class_name, method_name) → kind` triples. Inferring per-method return types from gem source (so `mode: :full` could contribute richer than `Dynamic[Top]`) is a larger walker enhancement deferred until concrete user demand surfaces.
 - **Tier 3 plugins remaining**: `rigor-graphql`, `rigor-activestorage`. Author when there is concrete user demand.
 - **rigor-activerecord extensions**: associations, enums, scopes, validations, callbacks. Each ships as a 0.2.0+ minor bump per the roadmap.
 - **dry-rb ecosystem plugins** ([`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md)) — packaging strategy (single gem vs. family vs. mid-grain bundles) needs an explicit ADR-12 decision before any individual plugin can be authored.

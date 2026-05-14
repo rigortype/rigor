@@ -84,7 +84,10 @@ module Rigor
           receiver: receiver_type, method_name: method_name, args: arg_types,
           environment: environment, block_type: block_type
         )
-        return rbs_result if rbs_result
+        if rbs_result
+          record_boundary_cross_if_applicable(receiver_type, method_name, rbs_result, environment)
+          return rbs_result
+        end
 
         # ADR-10 slice 2b-ii — dependency-source inference tier.
         # Sits BELOW RBS dispatch (RBS / RBS::Inline / generated
@@ -242,6 +245,71 @@ module Rigor
         # methods Rigor's catalog couldn't reach because the
         # walker hit its cap.
         budget_silence_result(class_name, index, environment)
+      end
+
+      # ADR-10 slice 5c — record a
+      # `dynamic.dependency-source.boundary-cross` event when
+      # RBS dispatch resolves a call AND the receiver class
+      # belongs to a `mode: :full` opt-in gem whose Walker
+      # also catalogued the same `(class_name, method_name)`.
+      # The dispatcher still returns the RBS answer (per
+      # ADR-10's tier order: authoritative-source wins), but
+      # the reporter accumulates the crossing for end-of-run
+      # audit diagnostics.
+      #
+      # Five honest fall-throughs keep the gate narrow:
+      #
+      # - environment / index / reporter missing — slice 5c
+      #   needs all three.
+      # - receiver has no nominal class name (Dynamic-only
+      #   carriers) — nothing to look up.
+      # - receiver class doesn't belong to a `mode: :full` gem
+      #   — the user didn't opt this gem into the distinct
+      #   dispatch path.
+      # - the gem-source catalog has no entry for the method —
+      #   only RBS knows about it; nothing to cross.
+      # - the RBS-side result is itself `Dynamic[Top]` — the
+      #   "agreement" is trivially `untyped ≈ untyped`, no
+      #   meaningful divergence to flag.
+      def record_boundary_cross_if_applicable(receiver_type, method_name, rbs_result, environment)
+        class_name = boundary_cross_class_name(receiver_type, environment, rbs_result)
+        return if class_name.nil?
+
+        index = environment.dependency_source_index
+        return unless index.full_mode?(class_name)
+        return unless index.contribution_for(class_name: class_name, method_name: method_name)
+
+        environment.boundary_cross_reporter.record(
+          class_name: class_name, method_name: method_name,
+          gem_name: index.gem_for(class_name),
+          rbs_display: rbs_display_for(rbs_result)
+        )
+      end
+
+      # Composite preflight for {#record_boundary_cross_if_applicable}.
+      # Returns the receiver class name only when every prerequisite
+      # for emitting the diagnostic is satisfied (environment carries
+      # an index + reporter, receiver is a nominal carrier, RBS-side
+      # result is not the trivial `Dynamic[Top]` envelope). Returns
+      # `nil` to short-circuit otherwise.
+      def boundary_cross_class_name(receiver_type, environment, rbs_result)
+        return nil if environment.nil?
+        return nil if environment.dependency_source_index.nil?
+        return nil if environment.dependency_source_index.empty?
+        return nil if environment.boundary_cross_reporter.nil?
+        return nil if rbs_result_untyped?(rbs_result)
+
+        dep_source_class_name(receiver_type)
+      end
+
+      def rbs_result_untyped?(rbs_result)
+        rbs_result.is_a?(Type::Dynamic) && rbs_result.static_facet.is_a?(Type::Top)
+      end
+
+      def rbs_display_for(rbs_result)
+        return "untyped" if rbs_result.nil?
+
+        rbs_result.respond_to?(:describe) ? rbs_result.describe : rbs_result.inspect
       end
 
       def budget_silence_result(class_name, index, _environment)

@@ -44,7 +44,7 @@ module Rigor
     ].freeze
 
     attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index,
-                :rbs_extended_reporter, :name_scope
+                :rbs_extended_reporter, :boundary_cross_reporter, :name_scope
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
     # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the
@@ -65,14 +65,15 @@ module Rigor
     #   sources the dispatcher consults BELOW RBS dispatch.
     #   When nil (the default), no dep-source contribution
     #   participates and the dispatcher tier is a no-op.
-    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil,
+    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil, # rubocop:disable Metrics/ParameterLists
                    plugin_registry: nil, dependency_source_index: nil,
-                   rbs_extended_reporter: nil)
+                   rbs_extended_reporter: nil, boundary_cross_reporter: nil)
       @class_registry = class_registry
       @rbs_loader = rbs_loader
       @plugin_registry = plugin_registry
       @dependency_source_index = dependency_source_index
       @rbs_extended_reporter = rbs_extended_reporter
+      @boundary_cross_reporter = boundary_cross_reporter
       @name_scope = build_name_scope
       freeze
     end
@@ -105,7 +106,7 @@ module Rigor
       # @return [Rigor::Environment]
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, # rubocop:disable Metrics/ParameterLists
                       plugin_registry: nil, dependency_source_index: nil,
-                      rbs_extended_reporter: nil)
+                      rbs_extended_reporter: nil, boundary_cross_reporter: nil)
         resolved_paths = signature_paths || default_signature_paths(root)
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
         loader = RbsLoader.new(
@@ -117,7 +118,8 @@ module Rigor
           rbs_loader: loader,
           plugin_registry: plugin_registry,
           dependency_source_index: dependency_source_index,
-          rbs_extended_reporter: rbs_extended_reporter
+          rbs_extended_reporter: rbs_extended_reporter,
+          boundary_cross_reporter: boundary_cross_reporter
         )
       end
 

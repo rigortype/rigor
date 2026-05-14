@@ -23,37 +23,63 @@ module Rigor
 
         # @param dependencies [Rigor::Configuration::Dependencies]
         # @return [Index]
-        def build(dependencies) # rubocop:disable Metrics/MethodLength
+        def build(dependencies)
           return Index::EMPTY if dependencies.empty?
 
-          resolved = []
-          unresolvable = []
-          catalog = {}
-          class_to_gem = {}
-          budget_exceeded = []
-          budget = dependencies.budget_per_gem
-
+          state = BuildState.new
           dependencies.source_inference.each do |entry|
             next if entry.disabled?
 
-            outcome = GemResolver.resolve(entry)
+            state.absorb(GemResolver.resolve(entry), dependencies.budget_per_gem, self)
+          end
+
+          state.to_index(dependencies)
+        end
+
+        # Per-build mutable accumulator. The original inline
+        # variables (`resolved` / `unresolvable` / `catalog` /
+        # `class_to_gem` / `budget_exceeded` / `gem_modes`)
+        # pushed the method past the AbcSize budget; the
+        # struct collects the same fields, narrows
+        # `absorb`'s branching, and yields one
+        # `Index.new(...)` call from `to_index`.
+        class BuildState
+          def initialize
+            @resolved = []
+            @unresolvable = []
+            @catalog = {}
+            @class_to_gem = {}
+            @budget_exceeded = []
+            @gem_modes = {}
+          end
+
+          def absorb(outcome, budget, builder)
             case outcome
             when GemResolver::Resolved
-              resolved << outcome
-              walked = walker_outcome_for(outcome, budget)
-              catalog.merge!(walked.catalog)
-              record_class_to_gem(walked.catalog, outcome.gem_name, class_to_gem)
-              budget_exceeded << outcome.gem_name if walked.truncated?
-            when GemResolver::Unresolvable then unresolvable << outcome
+              absorb_resolved(outcome, budget, builder)
+            when GemResolver::Unresolvable
+              @unresolvable << outcome
             end
           end
 
-          Index.new(
-            resolved_gems: resolved, unresolvable: unresolvable,
-            method_catalog: catalog, budget_exceeded: budget_exceeded,
-            class_to_gem: class_to_gem,
-            budget_overrun_strategy: dependencies.budget_overrun_strategy
-          )
+          def absorb_resolved(resolved, budget, builder)
+            @resolved << resolved
+            @gem_modes[resolved.gem_name] = resolved.mode
+            walked = builder.walker_outcome_for(resolved, budget)
+            @catalog.merge!(walked.catalog)
+            builder.record_class_to_gem(walked.catalog, resolved.gem_name, @class_to_gem)
+            @budget_exceeded << resolved.gem_name if walked.truncated?
+          end
+
+          def to_index(dependencies)
+            Index.new(
+              resolved_gems: @resolved, unresolvable: @unresolvable,
+              method_catalog: @catalog, budget_exceeded: @budget_exceeded,
+              class_to_gem: @class_to_gem,
+              budget_overrun_strategy: dependencies.budget_overrun_strategy,
+              gem_modes: @gem_modes
+            )
+          end
         end
 
         # ADR-10 5b — per-class reverse-lookup table (β budget

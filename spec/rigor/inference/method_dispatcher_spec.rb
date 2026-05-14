@@ -358,5 +358,82 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to be_nil
       end
     end
+
+    describe "boundary-cross recording on RBS dispatch (ADR-10 slice 5c)" do
+      let(:reporter) { Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new }
+
+      def env_with_full_mode_index(class_to_gem:, gem_modes:, method_catalog:, reporter:)
+        resolver = Rigor::Analysis::DependencySourceInference::GemResolver
+        resolved = gem_modes.map do |gem_name, mode|
+          resolver::Resolved.new(
+            gem_name: gem_name, version: "1.0.0",
+            gem_dir: "/fake/#{gem_name}", mode: mode, roots: %w[lib]
+          )
+        end
+        index = Rigor::Analysis::DependencySourceInference::Index.new(
+          resolved_gems: resolved, method_catalog: method_catalog,
+          class_to_gem: class_to_gem, gem_modes: gem_modes
+        )
+        Rigor::Environment.for_project(
+          dependency_source_index: index,
+          boundary_cross_reporter: reporter
+        )
+      end
+
+      it "records a boundary-cross entry when RBS resolves an Integer call on a `mode: :full` gem class" do
+        # Integer is in core RBS so `RbsDispatch.try_dispatch`
+        # resolves `1.bit_length` to `Integer`. The pretend-
+        # to-own-Integer gem-source catalog turns the call site
+        # into a `mode: :full` boundary crossing.
+        env = env_with_full_mode_index(
+          class_to_gem: { "Integer" => "core_shim" },
+          gem_modes: { "core_shim" => :full },
+          method_catalog: { ["Integer", :bit_length] => :instance },
+          reporter: reporter
+        )
+
+        described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Integer"),
+          method_name: :bit_length, arg_types: [], environment: env
+        )
+
+        expect(reporter.entries.size).to eq(1)
+        expect(reporter.entries.first).to have_attributes(
+          class_name: "Integer", method_name: :bit_length, gem_name: "core_shim"
+        )
+      end
+
+      it "does NOT record when the owning gem's mode is :when_missing" do
+        env = env_with_full_mode_index(
+          class_to_gem: { "Integer" => "core_shim" },
+          gem_modes: { "core_shim" => :when_missing },
+          method_catalog: { ["Integer", :bit_length] => :instance },
+          reporter: reporter
+        )
+
+        described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Integer"),
+          method_name: :bit_length, arg_types: [], environment: env
+        )
+
+        expect(reporter).to be_empty
+      end
+
+      it "does NOT record when the catalog has no entry for the method" do
+        env = env_with_full_mode_index(
+          class_to_gem: { "Integer" => "core_shim" },
+          gem_modes: { "core_shim" => :full },
+          method_catalog: {},
+          reporter: reporter
+        )
+
+        described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Integer"),
+          method_name: :bit_length, arg_types: [], environment: env
+        )
+
+        expect(reporter).to be_empty
+      end
+    end
   end
 end

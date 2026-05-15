@@ -1,11 +1,12 @@
 # Rigor plugin examples
 
-Twenty-two entries — twenty-one worked plugins of the **v0.1.0
+Twenty-three entries — twenty-two worked plugins of the **v0.1.0
 plugin authoring surface** plus one RBS-only bundle
-(`rigor-activesupport-core-ext`). `rigor-sinatra` is the first
-worked consumer of the **ADR-16 macro expansion substrate** —
-its body is purely a declarative `Plugin::Macro::BlockAsMethod`
-manifest entry, with no walker code.
+(`rigor-activesupport-core-ext`). `rigor-sinatra` and
+`rigor-dry-struct` are the first worked consumers of the
+**ADR-16 macro expansion substrate** — their bodies are purely
+declarative `Plugin::Macro::*` manifest entries (Tier A and
+Tier C respectively), with no walker code.
 
 (The earlier "eighteen worked examples" paragraph reflected the
 state on 2026-05-11; subsequent additions are listed in the tables
@@ -43,6 +44,7 @@ ADR-9's cross-plugin fact store.
 | [`rigor-sorbet`](rigor-sorbet/) | **External type DSL adapter** — reads inline `sig { params(...).returns(T) }` blocks and contributes return types via `flow_contribution_for` | ~900 | Ruby (`sig` blocks across `paths:`) | ✅ | — | 30+ |
 | [`rigor-typescript-utility-types`](rigor-typescript-utility-types/) | **Type-language vocabulary extension** via `Plugin::TypeNodeResolver` (ADR-13) — maps `Pick<T, K>` / `Omit<T, K>` / `Partial<T>` / `Required<T>` / `Readonly<T>` onto the Rigor-canonical shape-projection type functions | ~150 | — | — | — | 14 |
 | [`rigor-sinatra`](rigor-sinatra/) | **Macro expansion substrate, Tier A** (ADR-16) — declarative `Plugin::Macro::BlockAsMethod` manifest entry narrows the block body's `self_type` for `get` / `post` / `put` / `delete` / `head` / `options` / `patch` / `link` / `unlink` against `Sinatra::Base` subclasses. First worked consumer of the macro expansion substrate; the plugin body is purely declarative — no walker, no `diagnostics_for_file`. | ~60 | — | — | — | 2 |
+| [`rigor-dry-struct`](rigor-dry-struct/) | **Macro expansion substrate, Tier C** (ADR-16) — declarative `Plugin::Macro::HeredocTemplate` manifest entry synthesises an instance reader on every `Dry::Struct` subclass for each `attribute :name, T` / `attribute? :name, T` call. First worked consumer of `HeredocTemplate`; per WD13 the floor ships `Dynamic[T]` returns + cross-file dispatch resolution. | ~70 | — | — | — | 2 |
 
 ### Rails ecosystem family
 

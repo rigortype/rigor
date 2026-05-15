@@ -1,0 +1,26 @@
+# Minimal Dry::Struct RBS stub for the rigor-dry-struct demo.
+#
+# `attribute` / `attribute?` are recorded as class methods so the
+# pre-pass scanner has a defined call shape to match. The substrate
+# is what makes the synthesised readers visible to cross-file
+# dispatch — slice 2c floor returns Dynamic[T] for those readers.
+#
+# A real project depending on `dry-struct` would replace this with
+# the upstream gem's own RBS (or a vendored sig discovered by
+# rigor's Bundler-awareness path).
+
+module Dry
+  class Struct
+    def self.attribute: (Symbol, untyped) -> void
+    def self.attribute?: (Symbol, untyped) -> void
+
+    def to_h: () -> Hash[Symbol, untyped]
+    def []: (Symbol) -> untyped
+  end
+end
+
+module Types
+  String: untyped
+  Bool: untyped
+  Integer: untyped
+end

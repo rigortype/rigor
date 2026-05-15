@@ -1,0 +1,17 @@
+paths:
+  - demo.rb
+  - consumer.rb
+
+plugins:
+  - rigor-dry-struct
+
+signature_paths:
+  # Minimal Dry::Struct RBS stub local to the demo. Covers the
+  # subset the demo touches (`attribute` / `attribute?` class
+  # methods + Struct's #to_h / #[] instance methods). A real
+  # project depending on `dry-struct` would expose its own RBS
+  # through bundler auto-discovery (rigor's O4 layer-1/2 path).
+  - sig
+
+cache:
+  path: tmp/.rigor/cache

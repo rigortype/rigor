@@ -97,16 +97,18 @@ module Rigor
           return rbs_result
         end
 
-        # ADR-16 Tier C — synthetic-method tier. Sits BELOW RBS
-        # dispatch (per WD13: user-authored RBS overrides
+        # ADR-16 Tier B / Tier C — synthetic-method tier. Sits
+        # BELOW RBS dispatch (per WD13: user-authored RBS overrides
         # substrate synthesis) and ABOVE the dependency-source
         # inference tier so a plugin's declared emit table beats
-        # the generic gem-source fallback for the same class. The
-        # recorded `return_type` string is preserved on the
-        # `SyntheticMethod`; slice 2b emits `Dynamic[T]` per WD13
-        # floor, with precision promotion via ADR-13 reserved for
-        # a later iteration.
-        synthetic_result = try_synthetic_method(receiver_type, method_name, environment)
+        # the generic gem-source fallback for the same class. Slice
+        # 6a-TierB (origin_module dispatch) lands precise return
+        # types for Tier B emissions; Tier C emissions still return
+        # `Dynamic[T]` at this tier (slice 6b is the Tier C
+        # promotion via ADR-13's resolver chain).
+        synthetic_result = try_synthetic_method(
+          receiver_type, method_name, arg_types, block_type, environment
+        )
         return synthetic_result if synthetic_result
 
         # ADR-10 slice 2b-ii — dependency-source inference tier.
@@ -237,15 +239,19 @@ module Rigor
       # publish as ground-truth `T`). Returns `nil` when the
       # environment carries no index, the index has no entry, or
       # the receiver has no nominal class to look up.
-      # ADR-16 Tier C — synthetic-method tier. Slice 2b ships at
-      # the WD13 floor: a match returns `Type::Combinator.untyped`
-      # (Dynamic[T]) so the dispatcher loop short-circuits at the
-      # correct precedence (RBS overrides; dep-source / discovered
-      # / user-class-fallback do NOT fire) but no precise return
-      # type is asserted. The recorded `return_type` string stays
-      # available on the `SyntheticMethod` for the precision-
-      # promotion slice (slice 6) without re-walking.
-      def try_synthetic_method(receiver_type, method_name, environment)
+      # ADR-16 synthetic-method tier. Slice 2b shipped the floor —
+      # a match short-circuits at the right precedence (above
+      # dep-source / discovered / user-class-fallback; below RBS)
+      # and returns `Dynamic[T]`. Slice 6a-TierB promotes Tier B
+      # matches: when the SyntheticMethod records its
+      # `origin_module` in provenance, redispatch the call on
+      # `Nominal[origin_module]` via the existing `RbsDispatch`
+      # so Devise's `valid_password?` returns the module-authored
+      # `bool` instead of `Dynamic[T]`. Tier C matches (no
+      # `origin_module`) still return `Dynamic[T]` until slice 6b
+      # routes their `return_type:` strings through ADR-13's
+      # `Plugin::TypeNodeResolver` chain.
+      def try_synthetic_method(receiver_type, method_name, arg_types, block_type, environment)
         index = environment&.synthetic_method_index
         return nil if index.nil? || index.empty?
 
@@ -258,7 +264,32 @@ module Rigor
                   end
         return nil if matches.empty?
 
-        Type::Combinator.untyped
+        promoted = promote_from_origin_module(matches, method_name, arg_types, block_type, environment)
+        promoted || Type::Combinator.untyped
+      end
+
+      # Slice 6a-TierB. For Tier B emissions (origin_module
+      # recorded in provenance), redispatch the call on the
+      # included module's `Nominal[...]` type via `RbsDispatch`.
+      # First-wins by registration order — the first match whose
+      # `origin_module` resolves to a non-nil RBS dispatch wins.
+      # Returns nil when no Tier B match resolves (caller falls
+      # back to Dynamic[T] per the WD13 floor).
+      def promote_from_origin_module(matches, method_name, arg_types, block_type, environment)
+        return nil if environment.nil?
+
+        matches.each do |synthetic|
+          module_name = synthetic.provenance[:origin_module]
+          next unless module_name
+
+          module_type = Type::Combinator.nominal_of(module_name)
+          rbs_result = RbsDispatch.try_dispatch(
+            receiver: module_type, method_name: method_name, args: arg_types,
+            environment: environment, block_type: block_type
+          )
+          return rbs_result if rbs_result
+        end
+        nil
       end
 
       def synthetic_method_class_name(receiver_type)

@@ -97,7 +97,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     "default()",
     "for_project(key:root,key:libraries,key:signature_paths,key:cache_store," \
     "key:plugin_registry,key:dependency_source_index,key:rbs_extended_reporter," \
-    "key:boundary_cross_reporter)"
+    "key:boundary_cross_reporter,key:bundler_bundle_path,key:bundler_auto_detect)"
   ].freeze
 
   REFLECTION_SINGLETON = %w[

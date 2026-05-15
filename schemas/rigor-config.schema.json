@@ -135,6 +135,23 @@
           "default": 0
         }
       }
+    },
+    "bundler": {
+      "description": "Open item O4 — target-project Bundler awareness. When `bundle_path:` is set (or `auto_detect:` succeeds), Rigor walks `<bundle_path>/ruby/*/gems/*/sig/` and adds each gem-shipped sig directory to the loader's `signature_paths`. Conflicts with rigor's bundled stdlib RBS degrade gracefully to `Dynamic[top]` with a one-line warning (per the O7 failure-memo in `RbsLoader#env`).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bundle_path": {
+          "description": "Explicit path to the bundler install root (relative paths resolve from the project root). Typical values: `\"vendor/bundle\"` for an in-tree install, or an absolute path for a Docker-mounted bundle. When `null` (default) and `auto_detect` is true, Rigor reads `.bundle/config`'s `BUNDLE_PATH:` and falls back to `vendor/bundle/`.",
+          "type": ["string", "null"],
+          "default": null
+        },
+        "auto_detect": {
+          "description": "When `bundle_path` is unset, search `.bundle/config` and `vendor/bundle/` under the project root. Setting `false` disables bundle sig discovery entirely.",
+          "type": "boolean",
+          "default": true
+        }
+      }
     }
   },
   "$defs": {

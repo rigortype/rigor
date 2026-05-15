@@ -121,7 +121,9 @@ module Rigor
           plugin_registry: @plugin_registry,
           dependency_source_index: @dependency_source_index,
           rbs_extended_reporter: @rbs_extended_reporter,
-          boundary_cross_reporter: @boundary_cross_reporter
+          boundary_cross_reporter: @boundary_cross_reporter,
+          bundler_bundle_path: configuration.bundler_bundle_path,
+          bundler_auto_detect: configuration.bundler_auto_detect
         )
         @prepare_diagnostics = run_plugin_prepare.freeze
       end

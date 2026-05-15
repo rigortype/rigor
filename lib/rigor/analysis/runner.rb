@@ -197,7 +197,9 @@ module Rigor
           plugin_registry: @plugin_registry,
           dependency_source_index: @dependency_source_index,
           rbs_extended_reporter: @rbs_extended_reporter,
-          boundary_cross_reporter: @boundary_cross_reporter
+          boundary_cross_reporter: @boundary_cross_reporter,
+          bundler_bundle_path: @configuration.bundler_bundle_path,
+          bundler_auto_detect: @configuration.bundler_auto_detect
         )
       end
 
@@ -359,7 +361,9 @@ module Rigor
         warm_env = Environment.for_project(
           libraries: @configuration.libraries,
           signature_paths: @configuration.signature_paths,
-          cache_store: @cache_store
+          cache_store: @cache_store,
+          bundler_bundle_path: @configuration.bundler_bundle_path,
+          bundler_auto_detect: @configuration.bundler_auto_detect
         )
         warm_env.rbs_loader&.prewarm
       end

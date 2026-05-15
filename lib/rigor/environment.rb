@@ -3,6 +3,7 @@
 require_relative "environment/class_registry"
 require_relative "environment/rbs_loader"
 require_relative "environment/reflection"
+require_relative "environment/bundle_sig_discovery"
 require_relative "type_node/name_scope"
 require_relative "type_node/resolver_chain"
 
@@ -107,12 +108,26 @@ module Rigor
       # @return [Rigor::Environment]
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, # rubocop:disable Metrics/ParameterLists
                       plugin_registry: nil, dependency_source_index: nil,
-                      rbs_extended_reporter: nil, boundary_cross_reporter: nil)
+                      rbs_extended_reporter: nil, boundary_cross_reporter: nil,
+                      bundler_bundle_path: nil, bundler_auto_detect: false)
         resolved_paths = signature_paths || default_signature_paths(root)
+        # O4 MVP — append per-gem `sig/` directories discovered
+        # under the target project's bundler install root. Empty
+        # array when neither an explicit path nor auto-detection
+        # finds a bundle. Order: user `signature_paths:` win first
+        # (semantic precedence inside `RbsLoader.build_env_for`);
+        # gem-shipped sigs append last so user overrides stay
+        # authoritative.
+        gem_sig_paths = BundleSigDiscovery.discover(
+          bundle_path: bundler_bundle_path,
+          project_root: root,
+          auto_detect: bundler_auto_detect
+        ).map(&:to_s)
+        loader_signature_paths = resolved_paths + gem_sig_paths
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
         loader = RbsLoader.new(
           libraries: merged_libraries,
-          signature_paths: resolved_paths,
+          signature_paths: loader_signature_paths,
           cache_store: cache_store
         )
         new(

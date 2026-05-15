@@ -13,7 +13,7 @@ module Rigor
     attr_reader name_scope: untyped?
 
     def self.default: () -> Environment
-    def self.for_project: (?root: String, ?libraries: Array[String], ?signature_paths: Array[String | _ToPath]?, ?cache_store: untyped?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?, ?rbs_extended_reporter: untyped?, ?boundary_cross_reporter: untyped?) -> Environment
+    def self.for_project: (?root: String, ?libraries: Array[String], ?signature_paths: Array[String | _ToPath]?, ?cache_store: untyped?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?, ?rbs_extended_reporter: untyped?, ?boundary_cross_reporter: untyped?, ?bundler_bundle_path: String?, ?bundler_auto_detect: bool) -> Environment
 
     def initialize: (?class_registry: ClassRegistry, ?rbs_loader: RbsLoader?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?, ?rbs_extended_reporter: untyped?, ?boundary_cross_reporter: untyped?) -> void
     def nominal_for_name: (String | Symbol name) -> Type::Nominal?

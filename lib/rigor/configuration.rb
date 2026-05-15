@@ -73,6 +73,31 @@ module Rigor
         # and the `RIGOR_RACTOR_WORKERS` env var both override
         # this setting; precedence is CLI > env > config > 0.
         "workers" => 0
+      },
+      "bundler" => {
+        # Open item O4 — target-project Bundler awareness.
+        # When `bundle_path:` is set (or auto-detected), Rigor
+        # walks `<bundle_path>/ruby/*/gems/*/sig/` and adds each
+        # gem-shipped sig directory to `signature_paths:`. With
+        # O7's failure-memo in place, conflicts (a vendored sig
+        # already declares the same constant) degrade gracefully
+        # to "no RBS env" with a single-line warning naming the
+        # offending file, rather than hanging.
+        #
+        # `bundle_path:` (String, optional): explicit path to the
+        # bundler install root (e.g., "vendor/bundle" or an
+        # absolute path). Resolved relative to the project root
+        # (`paths:`'s base) when relative.
+        #
+        # `auto_detect:` (Boolean, default true): when no
+        # explicit `bundle_path:` is set, try `.bundle/config`'s
+        # `BUNDLE_PATH:` first; fall back to `vendor/bundle/`
+        # under the project root if it exists. When neither is
+        # found, no extra sigs are added — the analyzer sees
+        # only rigor's vendored RBS and the user's
+        # `signature_paths:`.
+        "bundle_path" => nil,
+        "auto_detect" => true
       }
     }.freeze
 
@@ -88,7 +113,8 @@ module Rigor
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
                 :severity_profile, :severity_overrides,
-                :dependencies, :parallel_workers
+                :dependencies, :parallel_workers,
+                :bundler_bundle_path, :bundler_auto_detect
 
     # Loads a configuration file.
     #
@@ -258,6 +284,10 @@ module Rigor
       )
       parallel = DEFAULTS.fetch("parallel").merge(data.fetch("parallel", {}))
       @parallel_workers = coerce_parallel_workers(parallel.fetch("workers"))
+      bundler = DEFAULTS.fetch("bundler").merge(data.fetch("bundler", {}))
+      bp = bundler.fetch("bundle_path")
+      @bundler_bundle_path = bp.nil? ? nil : bp.to_s.dup.freeze
+      @bundler_auto_detect = bundler.fetch("auto_detect") == true
       # Ractor migration Phase 2a: deep-freeze the
       # Configuration so it is `Ractor.shareable?`. Every
       # ivar above is now either a frozen value (Symbol /
@@ -294,6 +324,10 @@ module Rigor
         "dependencies" => dependencies.to_h,
         "parallel" => {
           "workers" => parallel_workers
+        },
+        "bundler" => {
+          "bundle_path" => bundler_bundle_path,
+          "auto_detect" => bundler_auto_detect
         }
       }
     end

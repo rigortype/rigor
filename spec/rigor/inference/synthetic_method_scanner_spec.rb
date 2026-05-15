@@ -266,4 +266,99 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
       expect(index).to be_empty
     end
   end
+
+  describe ".scan — Concern re-targeting (slice 4)" do
+    let(:dry_struct_plugin) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "drystructfixture",
+          version: "0.1.0",
+          heredoc_templates: [
+            Rigor::Plugin::Macro::HeredocTemplate.new(
+              receiver_constraint: "Dry::Struct",
+              method_name: :attribute,
+              symbol_arg_position: 0,
+              emit: [{ name: "\#{name}", returns: "Object" }]
+            )
+          ]
+        )
+      end
+    end
+
+    it "replays an included-do DSL call against the including class" do
+      registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
+      _, paths = write_files(
+        "audited.rb" => <<~RUBY,
+          module Audited
+            extend ActiveSupport::Concern
+            included do
+              attribute :audited_at, Types::Time
+            end
+          end
+        RUBY
+        "address.rb" => <<~RUBY
+          class Address < Dry::Struct
+            include Audited
+            attribute :city, Types::String
+          end
+        RUBY
+      )
+      index = described_class.scan(
+        plugin_registry: registry, paths: paths, environment: stub_environment_for
+      )
+      expect(index.lookup_instance("Address", :city).size).to eq(1)
+      expect(index.lookup_instance("Address", :audited_at).size).to eq(1)
+    end
+
+    it "ignores modules that do not extend ActiveSupport::Concern" do
+      registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
+      _, paths = write_files(
+        "audited.rb" => <<~RUBY,
+          module Audited
+            # NOT extending ActiveSupport::Concern — the `included do`
+            # block has no special semantic here.
+            included do
+              attribute :audited_at, Types::Time
+            end
+          end
+        RUBY
+        "address.rb" => <<~RUBY
+          class Address < Dry::Struct
+            include Audited
+          end
+        RUBY
+      )
+      index = described_class.scan(
+        plugin_registry: registry, paths: paths, environment: stub_environment_for
+      )
+      expect(index.lookup_instance("Address", :audited_at)).to be_empty
+    end
+
+    it "skips concerns with no included-do DSL calls" do
+      registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
+      _, paths = write_files(
+        "noop.rb" => <<~RUBY,
+          module Noop
+            extend ActiveSupport::Concern
+          end
+        RUBY
+        "address.rb" => "class Address < Dry::Struct\n  include Noop\nend\n"
+      )
+      index = described_class.scan(
+        plugin_registry: registry, paths: paths, environment: stub_environment_for
+      )
+      expect(index).to be_empty
+    end
+
+    it "skips non-constant include arguments" do
+      registry = Rigor::Plugin::Registry.new(plugins: [dry_struct_plugin.new(services: services)])
+      _, paths = write_files(
+        "address.rb" => "class Address < Dry::Struct\n  include some_dynamic\nend\n"
+      )
+      index = described_class.scan(
+        plugin_registry: registry, paths: paths, environment: stub_environment_for
+      )
+      expect(index).to be_empty
+    end
+  end
 end

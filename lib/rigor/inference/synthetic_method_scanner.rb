@@ -61,12 +61,17 @@ module Rigor
 
         asts = parse_paths(paths)
         hierarchy = build_hierarchy(asts)
+        concern_index = build_concern_index(asts)
 
         entries = []
         asts.each do |path, ast|
           walk_class_bodies(ast) do |class_name, call_node|
             collect_entries(entries, templates, class_name, call_node, hierarchy, environment, path)
             collect_trait_entries(entries, registries, class_name, call_node, hierarchy, environment, path)
+            collect_concern_re_targeted_entries(
+              entries, call_node, class_name, concern_index,
+              templates, registries, hierarchy, environment, path
+            )
           end
         end
 
@@ -108,6 +113,116 @@ module Rigor
           [path, Prism.parse(source).value]
         rescue StandardError
           [path, nil]
+        end
+      end
+
+      # ADR-16 slice 4 — Concern re-targeting index.
+      #
+      # Walks every top-level / nested `module M` decl looking for
+      # the ActiveSupport::Concern shape:
+      #
+      #     module M
+      #       extend ActiveSupport::Concern
+      #       included do
+      #         # deferred DSL calls — fire on the *includer*, not on M
+      #         devise :database_authenticatable
+      #         has_one_attached :avatar
+      #       end
+      #     end
+      #
+      # The returned Hash maps `module_name => [deferred_call_node, ...]`.
+      # When a class body later contains `include M`, the substrate
+      # replays each deferred call against the including class.
+      #
+      # Slice 4 scope (floor):
+      # - constant-path `include M` only (not `include some_var`).
+      # - one-hop: nested concerns (M's `included do; include N; end`)
+      #   are NOT transitively replayed; deferred. Concrete demand
+      #   is the trigger for adding the second hop.
+      # - `class_methods do ... end` blocks are NOT yet handled —
+      #   singleton-level emission is out of scope per the slice-3
+      #   floor framing.
+      CONCERN_NAME = "ActiveSupport::Concern"
+
+      def build_concern_index(asts)
+        index = {}
+        asts.each_value do |ast|
+          next if ast.nil?
+
+          walk_module_decls(ast, []) do |module_name, body|
+            next if module_name.nil? || body.nil?
+            next unless concern_module_body?(body)
+
+            deferred_calls = collect_included_do_calls(body)
+            index[module_name] = deferred_calls.freeze if deferred_calls.any?
+          end
+        end
+        index.freeze
+      end
+
+      def walk_module_decls(node, scope_stack, &)
+        return unless node.respond_to?(:compact_child_nodes)
+
+        case node
+        when Prism::ModuleNode
+          name = class_name_from(node, scope_stack)
+          yield name, node.body
+          new_stack = scope_stack + [node]
+          node.body&.compact_child_nodes&.each { |child| walk_module_decls(child, new_stack, &) }
+        when Prism::ClassNode
+          new_stack = scope_stack + [node]
+          node.body&.compact_child_nodes&.each { |child| walk_module_decls(child, new_stack, &) }
+        else
+          node.compact_child_nodes.each { |child| walk_module_decls(child, scope_stack, &) }
+        end
+      end
+
+      # Recognises a module body that begins with (or contains at
+      # top level) an `extend ActiveSupport::Concern` statement.
+      def concern_module_body?(body)
+        return false unless body.respond_to?(:body)
+
+        body.body.any? do |stmt|
+          next false unless stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? && stmt.name == :extend
+
+          args = stmt.arguments&.arguments || []
+          args.any? { |arg| const_name_string(arg) == CONCERN_NAME }
+        end
+      end
+
+      def collect_included_do_calls(body)
+        body.body.flat_map do |stmt|
+          next [] unless stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? && stmt.name == :included && stmt.block
+
+          block_body = stmt.block.body
+          next [] unless block_body.respond_to?(:body)
+
+          block_body.body.select { |inner| inner.is_a?(Prism::CallNode) && inner.receiver.nil? }
+        end
+      end
+
+      # Slice 4 hook. When the current class body contains
+      # `include M` and M is a Concern with deferred DSL calls,
+      # replay each deferred call against the including class.
+      # Acts as a re-targeting walker — no new manifest entries
+      # needed; downstream `collect_entries` /
+      # `collect_trait_entries` fire just as if the calls had been
+      # written directly in X's body.
+      def collect_concern_re_targeted_entries(entries, call_node, class_name, concern_index, # rubocop:disable Metrics/ParameterLists
+                                              templates, registries, hierarchy, environment, path)
+        return unless call_node.name == :include && call_node.receiver.nil?
+        return if concern_index.empty?
+
+        args = call_node.arguments&.arguments || []
+        args.each do |arg|
+          name = const_name_string(arg)
+          deferred = name && concern_index[name]
+          next unless deferred
+
+          deferred.each do |inner_call|
+            collect_entries(entries, templates, class_name, inner_call, hierarchy, environment, path)
+            collect_trait_entries(entries, registries, class_name, inner_call, hierarchy, environment, path)
+          end
         end
       end
 

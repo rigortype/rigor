@@ -28,7 +28,9 @@ module Rigor
       end
 
       def self.file_entries(loader)
-        loader.signature_paths.flat_map do |root|
+        roots = loader.signature_paths +
+                Rigor::Environment::RbsLoader.vendored_gem_sig_paths
+        roots.flat_map do |root|
           next [] unless root.directory?
 
           Dir.glob(root.join("**", "*.rbs")).map do |path|

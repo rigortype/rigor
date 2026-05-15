@@ -1,0 +1,10 @@
+Source: hand-written by Rigor maintainers (no upstream RBS available
+        in `ruby/gem_rbs_collection` as of 2026-05-15).
+Reference: PostgreSQL `pg` gem README + libpq documentation.
+License: MPL-2.0 (matches the rest of Rigor).
+
+This stub covers the `PG.connect` / `PG::Connection` / `PG::Result`
+surface that real-world Rails projects actually call (Mastodon,
+GitLab FOSS, OpenProject, Diaspora, etc.). The full libpq surface
+is intentionally not covered. PRs to extend the coverage are
+welcome.

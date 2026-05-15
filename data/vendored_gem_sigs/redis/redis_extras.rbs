@@ -1,0 +1,130 @@
+# Rigor-side patches on top of the gem_rbs_collection's
+# redis/4.2/ surface to cover common methods the vendored 4.2
+# snapshot lacks. Real-world Rails projects (Discourse / Forem /
+# Canvas) call these from cache layers and Sidekiq integration.
+#
+# Source: hand-written by Rigor maintainers.
+# License: MPL-2.0 (matches the rest of Rigor).
+#
+# Add new entries when a project flags `call.undefined-method`
+# for a Redis instance method that should exist.
+
+class Redis
+  # Generic key operations.
+  def exists: (*arg keys) -> Integer
+  def exists?: (*arg keys) -> bool
+  def keys: (?String pattern) -> Array[String]
+  def type: (arg key) -> String
+  def ttl: (arg key) -> Integer
+  def pttl: (arg key) -> Integer
+  def expireat: (arg key, Integer unix_time) -> bool
+  def pexpire: (arg key, Integer milliseconds) -> bool
+  def pexpireat: (arg key, Integer unix_time_ms) -> bool
+  def persist: (arg key) -> bool
+  def rename: (arg from, arg to) -> String
+  def renamex: (arg from, arg to) -> bool
+  def renamenx: (arg from, arg to) -> bool
+  def randomkey: () -> String?
+  def touch: (*arg keys) -> Integer
+  def unlink: (*arg keys) -> Integer
+  def dump: (arg key) -> String?
+  def restore: (arg key, Integer ttl, String serialized, **untyped) -> String
+
+  # Cursor scans.
+  def scan: (?Integer cursor, ?match: String, ?count: Integer, ?type: String) -> [String, Array[String]]
+  def scan_each: (?match: String, ?count: Integer, ?type: String) { (String) -> void } -> self
+              | (?match: String, ?count: Integer, ?type: String) -> Enumerator[String, self]
+  def sscan: (arg key, ?Integer cursor, ?match: String, ?count: Integer) -> [String, Array[String]]
+  def sscan_each: (arg key, ?match: String, ?count: Integer) { (String) -> void } -> self
+              | (arg key, ?match: String, ?count: Integer) -> Enumerator[String, self]
+  def hscan: (arg key, ?Integer cursor, ?match: String, ?count: Integer) -> [String, Array[[String, String]]]
+  def hscan_each: (arg key, ?match: String, ?count: Integer) { ([String, String]) -> void } -> self
+              | (arg key, ?match: String, ?count: Integer) -> Enumerator[[String, String], self]
+  def zscan: (arg key, ?Integer cursor, ?match: String, ?count: Integer) -> [String, Array[[String, Float]]]
+
+  # String / counter / set operations the curated 4.2 snapshot
+  # didn't cover (real-world projects call them).
+  def append: (arg key, String value) -> Integer
+  def getset: (arg key, String value) -> String?
+  def strlen: (arg key) -> Integer
+  def getrange: (arg key, Integer start, Integer stop) -> String
+  def setrange: (arg key, Integer offset, String value) -> Integer
+  def bitcount: (arg key, ?Integer start, ?Integer stop) -> Integer
+  def bitop: (String operation, arg destkey, *arg keys) -> Integer
+
+  # Lists.
+  def lpush: (arg key, *untyped values) -> Integer
+  def rpush: (arg key, *untyped values) -> Integer
+  def lpop: (arg key, ?Integer count) -> (String | Array[String] | nil)
+  def rpop: (arg key, ?Integer count) -> (String | Array[String] | nil)
+  def lrange: (arg key, Integer start, Integer stop) -> Array[String]
+  def llen: (arg key) -> Integer
+  def lindex: (arg key, Integer index) -> String?
+  def lrem: (arg key, Integer count, untyped value) -> Integer
+  def ltrim: (arg key, Integer start, Integer stop) -> String
+  def lset: (arg key, Integer index, untyped value) -> String
+  def blpop: (*untyped, ?timeout: Numeric) -> [String, String]?
+  def brpop: (*untyped, ?timeout: Numeric) -> [String, String]?
+
+  # Sets.
+  def sadd: (arg key, *untyped members) -> Integer
+  def srem: (arg key, *untyped members) -> Integer
+  def smembers: (arg key) -> Array[String]
+  def scard: (arg key) -> Integer
+  def sismember: (arg key, untyped member) -> bool
+  def sinter: (*arg keys) -> Array[String]
+  def sunion: (*arg keys) -> Array[String]
+  def sdiff: (*arg keys) -> Array[String]
+  def spop: (arg key, ?Integer count) -> (String | Array[String] | nil)
+  def srandmember: (arg key, ?Integer count) -> (String | Array[String] | nil)
+
+  # Sorted sets the curated snapshot only partially covered.
+  def zrange: (arg key, Integer start, Integer stop, ?withscores: bool, ?rev: bool, ?limit: Array[Integer]) -> (Array[String] | Array[[String, Float]])
+  def zrangebyscore: (arg key, untyped min, untyped max, ?withscores: bool, ?limit: Array[Integer]) -> (Array[String] | Array[[String, Float]])
+  def zrevrange: (arg key, Integer start, Integer stop, ?withscores: bool) -> (Array[String] | Array[[String, Float]])
+  def zrevrangebyscore: (arg key, untyped max, untyped min, ?withscores: bool, ?limit: Array[Integer]) -> (Array[String] | Array[[String, Float]])
+  def zscore: (arg key, String member) -> Float?
+  def zrank: (arg key, String member) -> Integer?
+  def zrevrank: (arg key, String member) -> Integer?
+  def zcount: (arg key, untyped min, untyped max) -> Integer
+  def zpopmin: (arg key, ?Integer count) -> (Array[[String, Float]] | [String, Float] | nil)
+  def zpopmax: (arg key, ?Integer count) -> (Array[[String, Float]] | [String, Float] | nil)
+
+  # Pub/Sub.
+  def publish: (String channel, String message) -> Integer
+  def subscribe: (*String channels) { (untyped) -> void } -> void
+  def unsubscribe: (*String channels) -> void
+  def psubscribe: (*String patterns) { (untyped) -> void } -> void
+  def punsubscribe: (*String patterns) -> void
+
+  # Server / connection.
+  def info: (?String section) -> Hash[String, String]
+  def dbsize: () -> Integer
+  def flushdb: () -> String
+  def flushall: () -> String
+  def select: (Integer db) -> String
+  def auth: (String password) -> String
+  def wait: (Integer numreplicas, Integer timeout) -> Integer
+  def time: () -> [String, String]
+  def lastsave: () -> Integer
+  def echo: (String value) -> String
+  def shutdown: (?String save_mode) -> nil
+  def client: (String command, *untyped) -> untyped
+
+  # Scripting.
+  def eval: (String script, ?Array[String] keys, ?Array[String] argv, ?keys: Array[String], ?argv: Array[String]) -> untyped
+end
+
+# Redis::Cluster - used by gitlab / canvas.
+class Redis::Cluster
+  def _client: () -> untyped
+end
+
+# Redis singleton class methods.
+class Redis
+  def self.patch: (*untyped) -> untyped
+  def self.exists_returns_integer: () -> bool
+  def self.exists_returns_integer=: (bool) -> bool
+  def self.current: () -> Redis
+  def self.current=: (Redis) -> Redis
+end

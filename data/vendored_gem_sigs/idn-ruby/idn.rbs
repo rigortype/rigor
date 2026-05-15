@@ -1,0 +1,54 @@
+# Minimal hand-authored RBS stub for the `idn-ruby` gem
+# (libidn binding for Internationalised Domain Names).
+#
+# `idn-ruby` is not in `ruby/gem_rbs_collection` as of 2026-05-15.
+# Authorship: hand-written by Rigor maintainers based on the
+# upstream README (https://github.com/idnruby/idn-ruby).
+
+module IDN
+  VERSION: String
+
+  class Error < StandardError
+  end
+
+  class Stringprep
+    class StringprepError < IDN::Error
+    end
+
+    NAMEPREP: String
+    ISCSIPREP: String
+    NODEPREP: String
+    RESOURCEPREP: String
+    PLAIN: String
+    TRACE: String
+    SASLPREP: String
+
+    def self.with_profile: (String profile, String input) -> String
+    def self.nameprep: (String input) -> String
+    def self.iscsiprep: (String input) -> String
+    def self.nodeprep: (String input) -> String
+    def self.resourceprep: (String input) -> String
+    def self.plain: (String input) -> String
+    def self.trace: (String input) -> String
+    def self.saslprep: (String input) -> String
+  end
+
+  class Punycode
+    class PunycodeError < IDN::Error
+    end
+
+    def self.encode: (String input) -> String
+    def self.decode: (String input) -> String
+  end
+
+  class Idna
+    class IdnaError < IDN::Error
+    end
+
+    ALLOW_UNASSIGNED: Integer
+    USE_STD3_ASCII_RULES: Integer
+
+    def self.toASCII: (String input, ?Integer flags) -> String
+    def self.toUnicode: (String input, ?Integer flags) -> String
+  end
+end

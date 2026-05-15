@@ -1,0 +1,8 @@
+Source: hand-written by Rigor maintainers (no upstream RBS available
+        in `ruby/gem_rbs_collection` as of 2026-05-15).
+Reference: https://github.com/idnruby/idn-ruby README + libidn API.
+License: MPL-2.0 (matches the rest of Rigor).
+
+This stub covers the `IDN::Idna.toASCII` / `.toUnicode` /
+`IDN::Punycode.encode` / `.decode` / `IDN::Stringprep.*` surface,
+which is the entire public API the gem ships.

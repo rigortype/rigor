@@ -1,0 +1,212 @@
+# Minimal hand-authored RBS stub for the `pg` gem (PostgreSQL native
+# extension). Covers the surface that real-world Rails projects
+# (Mastodon, GitLab FOSS, OpenProject, Diaspora, etc.) actually call
+# rather than the entire libpq surface; PRs to extend are welcome.
+#
+# `pg` is not in `ruby/gem_rbs_collection` as of 2026-05-15.
+# Authorship: hand-written by Rigor maintainers based on the
+# upstream README + libpq documentation.
+
+module PG
+  VERSION: String
+  REVISION: String
+
+  # Connection-establishment shortcut: `PG.connect(...)` is an alias for
+  # `PG::Connection.new(...)`.
+  def self.connect: (*untyped) -> PG::Connection
+
+  # Quoting helpers.
+  def self.quote_connstr: (String value) -> String
+  def self.escape_string: (String value) -> String
+
+  class Error < StandardError
+    def connection: () -> PG::Connection?
+    def result: () -> PG::Result?
+    def error: () -> String?
+    def severity: () -> String?
+    def sql_state: () -> String?
+  end
+
+  class ConnectionBad < Error
+  end
+
+  class UnableToSend < Error
+  end
+
+  class ServerError < Error
+  end
+
+  class Connection
+    INVALID_OID: Integer
+
+    def self.new: (?untyped, *untyped) -> instance
+    def self.open: (?untyped, *untyped) -> instance
+    def self.connect: (?untyped, *untyped) -> instance
+    def self.connect_start: (*untyped) -> instance
+    def self.escape_string: (String) -> String
+    def self.escape_bytea: (String) -> String
+    def self.unescape_bytea: (String) -> String
+    def self.quote_ident: (String | Symbol | Array[String | Symbol]) -> String
+    def self.connect_hash_to_string: (Hash[Symbol, untyped]) -> String
+
+    def initialize: (?untyped, *untyped) -> void
+
+    # Query execution.
+    def exec: (String sql, ?Array[untyped] params) -> PG::Result
+            | (String sql, ?Array[untyped] params) { (PG::Result) -> untyped } -> untyped
+    alias query exec
+    alias async_exec exec
+
+    def exec_params: (String sql, Array[untyped] params, ?Integer result_format) -> PG::Result
+                   | (String sql, Array[untyped] params, ?Integer result_format) { (PG::Result) -> untyped } -> untyped
+    alias async_exec_params exec_params
+
+    def exec_prepared: (String stmt_name, ?Array[untyped] params, ?Integer result_format) -> PG::Result
+                     | (String stmt_name, ?Array[untyped] params, ?Integer result_format) { (PG::Result) -> untyped } -> untyped
+    alias async_exec_prepared exec_prepared
+
+    def prepare: (String name, String sql, ?Array[Integer] param_types) -> PG::Result
+    alias async_prepare prepare
+
+    def describe_prepared: (String name) -> PG::Result
+    def describe_portal: (String name) -> PG::Result
+
+    # Connection state.
+    def reset: () -> void
+    def reset_start: () -> void
+    def reset_poll: () -> Integer
+    def close: () -> void
+    alias finish close
+    def finished?: () -> bool
+    def status: () -> Integer
+    def error_message: () -> String?
+    def db: () -> String
+    def user: () -> String
+    def host: () -> String
+    def hostaddr: () -> String
+    def port: () -> Integer
+    def server_version: () -> Integer
+    def protocol_version: () -> Integer
+    def transaction_status: () -> Integer
+    def parameter_status: (String name) -> String?
+
+    # Quoting / escaping.
+    def escape_string: (String) -> String
+    alias escape escape_string
+    def escape_bytea: (String) -> String
+    def unescape_bytea: (String) -> String
+    def quote_ident: (String | Symbol | Array[String | Symbol]) -> String
+
+    # Transaction helper.
+    def transaction: () { (self) -> untyped } -> untyped
+
+    # Notifications / LISTEN / NOTIFY.
+    def notifies: () -> Hash[Symbol, untyped]?
+    def wait_for_notify: (?Numeric timeout) ?{ (String, Integer, String?) -> void } -> String?
+    alias notifies_wait wait_for_notify
+
+    # COPY.
+    def put_copy_data: (String, ?untyped encoder) -> bool
+    def put_copy_end: (?String error_message) -> bool
+    def get_copy_data: (?bool async, ?untyped decoder) -> String?
+
+    # Misc.
+    def encrypt_password: (String password, String username, ?String? algorithm) -> String
+    def cancel: () -> String?
+    def trace: (IO) -> void
+    def untrace: () -> void
+    def encoding: () -> Encoding?
+    def set_client_encoding: (String) -> Integer
+    alias client_encoding set_client_encoding
+
+    def type_map_for_queries: () -> untyped
+    def type_map_for_queries=: (untyped) -> untyped
+    def type_map_for_results: () -> untyped
+    def type_map_for_results=: (untyped) -> untyped
+  end
+
+  class Result
+    include Enumerable[Hash[String, untyped]]
+
+    def each: () { (Hash[String, untyped]) -> void } -> self
+    def each_row: () { (Array[untyped]) -> void } -> self
+    def []: (Integer | String row_or_column) -> untyped
+    def values: () -> Array[Array[untyped]]
+    def to_a: () -> Array[Hash[String, untyped]]
+
+    def ntuples: () -> Integer
+    alias num_tuples ntuples
+    alias count ntuples
+
+    def nfields: () -> Integer
+    alias num_fields nfields
+
+    def fname: (Integer column) -> String
+    def fnumber: (String column) -> Integer
+    def ftype: (Integer column) -> Integer
+    def getvalue: (Integer row, Integer column) -> untyped
+    def fields: () -> Array[String]
+    def field_values: (String column) -> Array[untyped]
+    def column_values: (Integer column) -> Array[untyped]
+
+    def cmd_status: () -> String?
+    def cmd_tuples: () -> Integer
+    alias cmdtuples cmd_tuples
+
+    def oid_value: () -> Integer?
+    def res_status: (?Integer status) -> String
+    def result_status: () -> Integer
+    def error_message: () -> String?
+    alias error error_message
+
+    def clear: () -> void
+    def cleared?: () -> bool
+    def autoclear?: () -> bool
+
+    def check: () -> void
+    alias check_result check
+  end
+
+  class TextEncoder
+    class Boolean
+    end
+    class Integer
+    end
+    class Float
+    end
+    class String
+    end
+    class Date
+    end
+    class TimestampWithoutTimeZone
+    end
+    class TimestampWithTimeZone
+    end
+    class Bytea
+    end
+  end
+
+  class TextDecoder
+    class Boolean
+    end
+    class Integer
+    end
+    class Float
+    end
+    class String
+    end
+    class Date
+    end
+    class TimestampWithoutTimeZone
+    end
+    class TimestampWithTimeZone
+    end
+    class Bytea
+    end
+  end
+
+  class BasicTypeRegistry
+    def self.alias_type: (Symbol format, String name, String alias_name) -> void
+    def self.register_type: (Symbol format, String name, untyped enc, untyped dec) -> void
+  end
+end

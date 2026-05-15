@@ -1,0 +1,47 @@
+# Rigor-side patches on top of the gem_rbs_collection's
+# nokogiri/1.11/ surface to cover API added in later nokogiri
+# releases that real-world Rails projects actually use.
+#
+# Source: hand-written by Rigor maintainers.
+# License: MPL-2.0 (matches the rest of Rigor).
+#
+# Add new entries here when a project flags
+# `call.undefined-method` for a Nokogiri method that should exist.
+# Each addition SHOULD be a real public method in upstream Nokogiri.
+
+# Top-level Nokogiri::HTML5 entry - nokogiri 1.12+ shipped its own
+# spec-conformant HTML5 parser at the top level. Calls are
+# `Nokogiri::HTML5(html_string)` (which dispatches to
+# `Nokogiri.HTML5(...)`) and `Nokogiri::HTML5.parse(...)` /
+# `.fragment(...)`.
+module Nokogiri
+  def self.HTML5: (String html, ?untyped url, ?untyped encoding, **untyped options) -> Nokogiri::HTML5::Document
+end
+
+module Nokogiri::HTML5
+  def self.parse: (String html, ?untyped url, ?untyped encoding, **untyped options) -> Nokogiri::HTML5::Document
+  def self.fragment: (String html, ?untyped encoding, **untyped options) -> Nokogiri::HTML5::DocumentFragment
+  def self.get: (String uri, **untyped options) -> Nokogiri::HTML5::Document
+  def self.read_and_encode: (untyped string, untyped encoding) -> String
+end
+
+class Nokogiri::HTML5::Document < Nokogiri::HTML::Document
+  def self.parse: (String html, ?untyped url, ?untyped encoding, **untyped options) -> Nokogiri::HTML5::Document
+  def self.read_io: (untyped, untyped, untyped, untyped) -> Nokogiri::HTML5::Document
+  def self.read_memory: (untyped, untyped, untyped, untyped) -> Nokogiri::HTML5::Document
+
+  def fragment: (?String tags) -> Nokogiri::HTML5::DocumentFragment
+  def quirks_mode: () -> Symbol
+end
+
+class Nokogiri::HTML5::DocumentFragment < Nokogiri::HTML::DocumentFragment
+  def self.parse: (String html, ?untyped encoding, **untyped options) -> Nokogiri::HTML5::DocumentFragment
+end
+
+# nokogiri 1.12+ adds element-sibling accessors on Nokogiri::XML::Node;
+# the gem_rbs_collection 1.11 snapshot pre-dates them.
+class Nokogiri::XML::Node
+  def previous_element_sibling: () -> Nokogiri::XML::Element?
+  def next_element_sibling: () -> Nokogiri::XML::Element?
+  def wrap_node: (untyped html) -> Nokogiri::XML::Element
+end

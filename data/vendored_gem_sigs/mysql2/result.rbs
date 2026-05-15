@@ -1,0 +1,31 @@
+module Mysql2
+  type row_value_type = String | Integer | BigDecimal | Float | Time | Date | nil
+
+  class ResultAsHash
+    attr_reader server_flags: untyped
+
+    # NOTE:
+    #   The type of key is controlled by `symbolize_keys` option of `Mysql2::Client.new`.
+    #   It can be expressed using a type argument such as `Client[ResultType]`,
+    #   but since the state becomes complicated. So `String | Symbol` is allowed.
+    type key_type = String | Symbol
+
+    include Enumerable[Hash[key_type, row_value_type]]
+
+    def each: () { (Hash[key_type, row_value_type]) -> void } -> void
+    def count: () -> Integer
+    def to_a: () -> Array[untyped]
+    alias size count
+  end
+
+  class ResultAsArray
+    attr_reader server_flags: untyped
+
+    include Enumerable[Array[row_value_type]]
+
+    def each: () { (Array[row_value_type]) -> void } -> void
+    def count: () -> Integer
+    def to_a: () -> Array[untyped]
+    alias size count
+  end
+end

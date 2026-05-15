@@ -49,6 +49,13 @@ module Rigor
         # miss without holding a loader instance, and the
         # instance-side {#build_env} delegates here so the
         # implementation stays single-rooted.
+        #
+        # Vendored gem stubs (`data/vendored_gem_sigs/<gem>/`) are
+        # loaded on top of `signature_paths` so the per-gem RBS
+        # bundled with Rigor itself is in scope for every analysis
+        # run. The gem stubs are intentionally read-only and
+        # appended LAST so user-supplied `signature_paths` win on
+        # name conflicts.
         def build_env_for(libraries:, signature_paths:)
           rbs_loader = RBS::EnvironmentLoader.new
           libraries.each do |library|
@@ -60,7 +67,31 @@ module Rigor
             path = Pathname(path) unless path.is_a?(Pathname)
             rbs_loader.add(path: path) if path.directory?
           end
+          vendored_gem_sig_paths.each do |path|
+            rbs_loader.add(path: path) if path.directory?
+          end
           RBS::Environment.from_loader(rbs_loader).resolve_type_names
+        end
+
+        # Per-gem `data/vendored_gem_sigs/<gem>/` directories that
+        # ship with Rigor. Each subdirectory is one gem's RBS surface
+        # (the `<gem>.rbs` file is the typical content; `LICENSE.upstream`
+        # records provenance). Coverage is deliberately scoped to the
+        # native-extension and "everywhere in Rails" gems whose absence
+        # dominated `call.undefined-method` noise in the real-world
+        # survey at `docs/notes/20260515-real-world-rails-survey.md`.
+        VENDORED_GEM_SIGS_ROOT = File.expand_path(
+          "../../../data/vendored_gem_sigs",
+          __dir__
+        )
+        private_constant :VENDORED_GEM_SIGS_ROOT
+
+        def vendored_gem_sig_paths
+          return [] unless File.directory?(VENDORED_GEM_SIGS_ROOT)
+
+          Dir.children(VENDORED_GEM_SIGS_ROOT).map do |gem_dir|
+            Pathname(File.join(VENDORED_GEM_SIGS_ROOT, gem_dir))
+          end
         end
       end
 

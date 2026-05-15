@@ -532,7 +532,7 @@ Common knobs the file exposes:
 
 ## Status
 
-Current released version: **`v0.1.4`**. The analyzer is usable
+Current released version: **`v0.1.5`**. The analyzer is usable
 on real Ruby code today; the rule catalogue is deliberately
 narrow — Rigor's stance is to surface zero false positives
 while the inference surface stabilises. Forward-looking commitments
@@ -540,50 +540,19 @@ while the inference surface stabilises. Forward-looking commitments
 [`docs/ROADMAP.md`](docs/ROADMAP.md); the release-by-release
 "what shipped" record is [`CHANGELOG.md`](CHANGELOG.md).
 
-`v0.1.4` (released 2026-05-14) delivered:
+`v0.1.5` (released 2026-05-16) delivered (full slice list in `CHANGELOG.md` § `[0.1.5]`):
 
-- **[ADR-10](docs/adr/10-dependency-source-inference.md) closed
-  end-to-end** — opt-in gem-source inference, per-gem budget,
-  cache slice, and the `dynamic.dependency-source.boundary-cross`
-  `:info` diagnostic that surfaces RBS / gem-source overlap
-  under `mode: :full`.
-- **[ADR-11](docs/adr/11-sorbet-input-adapter.md) primary surface
-  + per-call-site assertion gating** — `rigor-sorbet` ingests
-  Sorbet `sig { ... }` blocks, `T.let` / `T.cast` / `T.must` /
-  `T.bind` / `T.assert_type!` / `T.reveal_type` / `T.absurd`,
-  and RBI files. Per-call-site `enforce_sigil` gates assertion
-  recognisers by the caller file's `# typed:` sigil.
-- **[ADR-13](docs/adr/13-typenode-resolver-plugin.md) plugin
-  TypeNode resolver + TypeScript-utility-type adapter** —
-  `Plugin::TypeNodeResolver` extension point + five
-  Rigor-canonical shape-projection type functions
-  (`pick_of` / `omit_of` / `partial_of` / `required_of` /
-  `readonly_of`) + the opt-in `rigor-typescript-utility-types`
-  plugin mapping TS spellings onto the core functions.
-  `Pick[T, :a | :b]` round-trips through the directive grammar.
-- **[ADR-14](docs/adr/14-rbs-sig-generation.md) — `rigor sig-gen`
-  CLI** — emits RBS from inference results across five
-  classifications (`new-file` / `new-method` / `tighter-return`
-  / `equivalent` / `skipped`); `--params=untyped` default,
-  `--params=observed` opt-in via `--observe=PATH`.
-- **`Method` carrier (`Type::BoundMethod`)** —
-  `Object#method(:sym).call` / `.()` / `[]` round-trip with
-  full precision instead of collapsing to `untyped`.
-- **Rails ecosystem (Tier 1 + Tier 2)** — `rigor-rails-routes`,
-  `rigor-rails-i18n`, `rigor-actionmailer`, `rigor-activejob`,
-  `rigor-actionpack` (4 phases), `rigor-factorybot`, and
-  `rigor-activerecord` publishing `:model_index` via the
-  ADR-9 cross-plugin fact channel.
+- **ADR-15 Ractor migration end-to-end** (Phases 1–4c + 4b.x) — opt-in `rigor check --workers=N` parallelism; pool ≡ sequential proven on 14 real-world projects (31,840 files); spec-suite wall-clock 162s → 27s on 12 cores via `parallel_tests`.
+- **[ADR-16](docs/adr/16-macro-expansion.md) macro / DSL expansion substrate** — four-tier declarative manifest contract (block-as-method, trait-inlining registry, heredoc-template, external-file) with Tier B/C precision promotion and three worked consumer plugins (`rigor-sinatra`, `rigor-devise`, `rigor-dry-struct`). Closes ROADMAP O2 at the WD13 floor.
+- **Real-world Rails / Ruby survey** — fourteen projects swept; opt-in `rigor-activesupport-core-ext` RBS bundle delivers `−75 %` total diagnostics; built-in vendored gem RBS for six native-extension gems (`pg` / `mysql2` / `nokogiri` / `bcrypt` / `redis` / `idn-ruby`); Bundler-aware sig discovery; `RbsLoader#env` failure-memo (~550× speedup on a conflicting sig).
+- **O4 Layer 3 target-project RBS source discovery (slices 1+2+3)** — `Gemfile.lock` parse + bundle-sig filter, `rbs_collection.lock.yaml` awareness, missing-gem `:info` diagnostic.
+- **DEFAULT_LIBRARIES stdlib coverage expansion** — out-of-the-box RBS classes available 1,273 → 1,427 (+154); 31 additional stdlib libraries auto-load.
+- **`is_a?(C)` lexical-nesting constant resolution** — predicate-narrowing now mirrors Ruby's `Module.nesting`-driven lookup.
 
 Twenty-four worked plugin examples now ship under
 [`examples/`](examples/) — see
 [`examples/README.md`](examples/README.md) for the comparison
-table. The current `[Unreleased]` cycle on `master` (release
-pending) also delivered the [ADR-16](docs/adr/16-macro-expansion.md)
-macro / DSL expansion substrate (four-tier declarative
-manifest contract + engine integration + Tier B/C precision
-promotion); see `CHANGELOG.md` `[Unreleased]` for the full
-landing notes.
+table.
 
 ## Contributing
 
@@ -594,5 +563,3 @@ skill documentation contributors should know about.
 ## License
 
 Mozilla Public License Version 2.0. See [`LICENSE`](LICENSE).
-</content>
-</invoke>

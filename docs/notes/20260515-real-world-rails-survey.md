@@ -181,7 +181,55 @@ The natural follow-up to the survey: can rigor analyse a project
 resolves to ActiveRecord's `where`, `Sidekiq::Worker#perform`
 matches Sidekiq's RBS, and so on?
 
-### What works today
+### Latest status (after vendored RBS landed in commit `f9b94d2`)
+
+Rigor now ships **built-in RBS stubs for six common native-extension
+gems** (`pg` / `mysql2` / `nokogiri` / `bcrypt` / `redis` / `idn-ruby`).
+The stubs live under `data/vendored_gem_sigs/<gem>/` and load
+automatically — no `signature_paths:` configuration required. Out of
+the box, RBS classes available rose from 1,134 to **1,273 (+139)**.
+
+Quantitative impact across the 14 survey projects:
+
+| Project | Baseline | with O1 v2 | + vendored stubs |
+| --- | ---: | ---: | ---: |
+| Redmine | 389 | 157 | 157 |
+| Discourse | 1,439 | 423 | 429 |
+| Mastodon | 521 | 124 | 124 |
+| GitLab FOSS | 2,982 | 489 | 491 |
+| Forem | 691 | 146 | 149 |
+| Solidus | 528 | 42 | 42 |
+| Chatwoot | 300 | 19 | 21 |
+| Canvas LMS | 3,296 | 1,496 | 1,506 |
+| OpenProject | 2,356 | 175 | 176 |
+| Loomio | 207 | 63 | 63 |
+| Publify | 0 | 0 | 0 |
+| Diaspora | 65 | 5 | 5 |
+| Dependabot Core | 205 | 58 | 58 |
+| tDiary Core | 111 | 106 | 106 |
+| **Total** | **13,090** | **3,303** | **3,327** |
+
+The vendored stubs produce a +24 net increase — the precision /
+coverage trade-off where added RBS catches both real new issues
+AND incomplete-stub false positives. Most projects see +0; the
+small bumps cluster on Canvas LMS (+10), Discourse (+6), Forem
+(+3), GitLab FOSS (+2), and Chatwoot (+2), all of which exercise
+gem APIs absent from the vendored 4.2 / 1.11 snapshots. Closing
+those gaps is incremental via the per-gem `<gem>_extras.rbs` files
+(`nokogiri_html5.rbs` and `redis_extras.rbs` are the first two).
+
+The bigger-picture wins:
+
+- **`Mysql2::Client` / `PG::Connection` / `Nokogiri::XML::Node`
+  receivers stop being `Dynamic[top]`** — every call site now has
+  precise dispatch.
+- **Mastodon's `idn-ruby` blocker is moot for static analysis.**
+  Users no longer need `libidn` system-installed to get useful
+  Mastodon analysis.
+- **Out-of-the-box config**: end users no longer have to wire each
+  gem's RBS into `signature_paths:` manually.
+
+### What works today (BEFORE vendoring — kept for context)
 
 Two paths exist without any new analyzer code:
 

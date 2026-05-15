@@ -174,6 +174,106 @@ assignment narrowing":
 
 ---
 
+## Bundler-aware analysis — exploring O4 today
+
+The natural follow-up to the survey: can rigor analyse a project
+**with the project's gems also in scope** — so `User.where(...)`
+resolves to ActiveRecord's `where`, `Sidekiq::Worker#perform`
+matches Sidekiq's RBS, and so on?
+
+### What works today
+
+Two paths exist without any new analyzer code:
+
+1. **Run rigor INSIDE the target project's Bundler context.**
+   `BUNDLE_GEMFILE=<target>/Gemfile bundle exec rigor check ...`
+   makes `RBS::EnvironmentLoader.add(library: gem_name)` find every
+   gem with bundled `sig/`. Today's `RbsLoader.build_env_for` does
+   honour this via the `libraries:` config — but the user has to
+   enumerate the libraries explicitly; rigor doesn't yet
+   auto-discover them from the target's `Gemfile.lock`.
+2. **Add gem RBS to `signature_paths:`.**
+   [`gem_rbs_collection`](https://github.com/ruby/gem_rbs_collection)
+   is the community RBS repository — 172 gems as of 2026-05-15,
+   versioned per-gem (e.g. `gems/activerecord/{6.0, 6.1, 7.0, 7.1,
+   7.2, 8.0}`). Add the relevant per-version paths to
+   `.rigor.yml`'s `signature_paths:` and rigor will pick them up.
+
+### Practical hurdles encountered
+
+- **Native gem builds.** `bundle install` against Mastodon failed on
+  `idn-ruby` (libidn missing in the Nix shell). Rails projects
+  routinely depend on `pg` / `mysql2` / `nokogiri` / `idn-ruby` /
+  `ffi` etc. that need system libraries. End users would resolve
+  this by running rigor on their own dev / CI machine where the
+  Bundler context already builds; the survey machine doesn't.
+- **Ruby version mismatches.** Most of the 14 surveyed projects
+  pin Ruby 3.3 / 3.4 in `.ruby-version`; rigor's Flake provides
+  4.0.4. Bundler refuses to install when the version mismatches.
+  Mastodon (`ruby '>= 3.3.0', '< 4.1.0'`) was the only project in
+  the survey with a Ruby version range that admitted 4.0.4.
+- **`gem_rbs_collection` version pinning.** Because the collection
+  is structured `gems/<name>/<version>/`, the user has to pick
+  the right version per gem. Rigor doesn't do this resolution
+  itself — that's the missing piece O4 would close.
+
+### Quantitative experiment (Diaspora + Mastodon, medium gem subset)
+
+For Diaspora (Rails 6.1) with O1 v2 + the five-gem subset
+(`activerecord/6.1` + `activesupport/7.0` + `activemodel/7.1` +
+`actionpack/7.2` + `activejob/6.0`):
+
+| Metric | O1 v2 only | + 5-gem RBS subset |
+| --- | ---: | ---: |
+| RBS classes available | 1,039 | **2,478** |
+| Cold wall time | 1.35 s | 9.47 s |
+| Warm wall time | (n/a) | 1.05 s |
+| Diagnostics | 5 | **3** |
+
+For Mastodon (Rails 8) with O1 v2 + the same subset:
+
+| Metric | Baseline | O1 v2 | + 5-gem RBS subset |
+| --- | ---: | ---: | ---: |
+| RBS classes available | 1,039 | 1,039 | **2,505** |
+| Cold wall time | 3.31 s | (similar) | 12.39 s |
+| Diagnostics | 521 | 124 | **128** |
+
+Mastodon's diagnostic count slightly **increased** under the gem
+subset — a textbook **precision/coverage trade-off**: more known
+RBS means more methods can be checked (so the residual
+`call.undefined-method` for AR / AS-Inflector etc. drops to ~0)
+**and** more nullable-receiver narrowing fires correctly (lifting
+`call.possible-nil-receiver` from ~70 to 97). Some of the new
+diagnostics will be real bugs rigor previously couldn't see; some
+will be false positives where the gem RBS itself is too strict
+(typically inputs declared `String` that real callers also pass
+`ActiveSupport::SafeBuffer` etc.).
+
+### Open performance issue (item O7 above)
+
+Loading >10 gem RBS sigs at once into `signature_paths:` cold-loaded
+for 11+ minutes on Diaspora before being killed. The same workload
+with 5 paths completes in 7-9 s. Likely a non-linear interaction
+in `RBS::Environment.from_loader` / `resolve_type_names` when many
+overlapping namespaces converge. Worth investigating before O4 lands
+— a real-world Rails project's `Gemfile.lock` typically lists
+50-150 gems, not 5.
+
+### What O4 would add on top
+
+- Auto-discover `Gemfile.lock` next to the analysed paths.
+- Per-gem version resolution: `Bundler.locked_gems.specs.find { |s|
+  s.name == "activerecord" }.version` -> match to
+  `gem_rbs_collection`'s available versions or fall back to "raw"
+  RBS env.
+- Per-gem RBS source resolution: prefer in-gem `sig/` (some gems
+  ship their own); fall back to `gem_rbs_collection`; final fallback
+  to the ADR-10 `dependencies.source_inference` walker.
+- Caching: each Gemfile.lock digest gets one `RBS::Environment` cache
+  slot, keyed by the per-gem-version tuple.
+- A graceful degradation message when a gem's RBS isn't available
+  (so users know to install it or opt into source-inference).
+
 ## Round-3 projects (Loomio / Publify / Diaspora / Dependabot Core / tDiary Core)
 
 Third-round sweep. Includes three Rails apps (Loomio / Publify /
@@ -556,12 +656,13 @@ would close the project-private remainder.
 
 | ID | Status | Item |
 | --- | --- | --- |
-| O1 | landed (MVP) | `examples/rigor-activesupport-core-ext/` — community RBS bundle covering the top ~40 ActiveSupport core-ext selectors. Opt-in via `signature_paths`. |
-| O2 | queued | Macro-template / heredoc-Ruby expansion. |
+| O1 | landed (MVP, v2) | `examples/rigor-activesupport-core-ext/` — community RBS bundle covering the top ~50 ActiveSupport core-ext selectors. Opt-in via `signature_paths`. |
+| O2 | queued | Macro-template / heredoc-Ruby expansion. **tDiary's `instance_eval` plugin pattern (round 3) is a concrete motivating case** alongside Rails-generator `.rb`-as-ERB templates. |
 | O3 | not-an-issue | `next if x.nil?` / `return if x.nil?` already narrowed — survey-residual nil-receivers are mostly `Object#blank?` / `#present?` / `#try` ActiveSupport extensions, which O1's RBS bundle covers. |
-| O4 | queued | Target-project Bundler awareness (load gems' RBS from the analysed project's `Gemfile.lock`). |
+| O4 | partially explorable today | Target-project Bundler awareness (load gems' RBS from the analysed project's `Gemfile.lock`). See "Bundler-aware analysis" section below for what works today via `gem_rbs_collection` + `signature_paths:` and where the gaps are. |
 | O5 | landed (`ac14c45`) | `Hash <: Enumerable[[K, V]]` subtyping in the parameter binder. |
 | O6 | landed (`4698437`) | Pool vs sequential precision divergence at the constant-fold / RBS-dispatch boundary (Pathname). |
+| O7 | new (queued) | RBS env-build performance falls off a cliff when many gem RBS sigs are loaded together. The Diaspora "full" experiment with 16 `signature_paths:` entries (rigor + 15 gem_rbs_collection paths) cold-loaded for 11+ minutes before being killed; the same workload with 5 paths completes in 7-9 s (cold) / 1 s (warm). Likely a quadratic interaction in `RBS::Environment.from_loader` / `resolve_type_names`. Investigate before recommending end-users wire 10+ gems into `signature_paths:`. |
 
 ### Post-O1 quantitative impact
 

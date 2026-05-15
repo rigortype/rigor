@@ -1,0 +1,30 @@
+# Minimal Sinatra::Base RBS stub for the rigor-sinatra demo. Covers
+# only the surface the demo exercises — `params`, `redirect`, `halt`
+# at the instance level, and the nine class-level HTTP verb methods
+# the manifest declares. A real project depending on `sinatra` would
+# replace this with the upstream gem's own RBS (or vendored sigs
+# discovered by rigor's Bundler-awareness path).
+
+module Sinatra
+  class Base
+    def self.get: (String) ?{ () -> untyped } -> void
+    def self.post: (String) ?{ () -> untyped } -> void
+    def self.put: (String) ?{ () -> untyped } -> void
+    def self.delete: (String) ?{ () -> untyped } -> void
+    def self.head: (String) ?{ () -> untyped } -> void
+    def self.options: (String) ?{ () -> untyped } -> void
+    def self.patch: (String) ?{ () -> untyped } -> void
+    def self.link: (String) ?{ () -> untyped } -> void
+    def self.unlink: (String) ?{ () -> untyped } -> void
+
+    def params: () -> Hash[String, untyped]
+    def redirect: (String) -> void
+    def halt: (Integer, ?String) -> void
+    def session: () -> Hash[String, untyped]
+    def headers: () -> Hash[String, String]
+    def content_type: (String) -> void
+    def body: (?String) -> String?
+    def status: (?Integer) -> Integer
+    def erb: (Symbol, ?Hash[Symbol, untyped]) -> String
+  end
+end

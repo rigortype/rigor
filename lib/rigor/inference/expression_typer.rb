@@ -6,6 +6,7 @@ require_relative "../type"
 require_relative "../ast"
 require_relative "block_parameter_binder"
 require_relative "fallback"
+require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
 
 module Rigor
@@ -1194,16 +1195,25 @@ module Rigor
           arg_types: arg_types,
           environment: scope.environment
         )
-        block_return_for(block_arg, expected)
+        # ADR-16 Tier A: when a registered plugin's `block_as_methods`
+        # entry matches `(receiver_type, call_node.name)`, narrow the
+        # block body's `self_type` to the receiver class's instance
+        # type. The narrowing is `nil` for unmatched calls, leaving
+        # the existing scope contract unchanged.
+        narrowed_self = MacroBlockSelfType.narrow_self_type_for(
+          scope: scope, call_node: call_node, receiver_type: receiver_type
+        )
+        block_return_for(block_arg, expected, narrowed_self_type: narrowed_self)
       rescue StandardError
         nil
       end
 
-      def block_return_for(block_arg, expected)
+      def block_return_for(block_arg, expected, narrowed_self_type: nil)
         case block_arg
         when Prism::BlockNode
           bindings = BlockParameterBinder.new(expected_param_types: expected).bind(block_arg)
           block_scope = bindings.reduce(scope) { |acc, (name, type)| acc.with_local(name, type) }
+          block_scope = block_scope.with_self_type(narrowed_self_type) if narrowed_self_type
           type_block_body(block_arg, block_scope)
         when Prism::BlockArgumentNode
           symbol_block_return_type(block_arg, expected)

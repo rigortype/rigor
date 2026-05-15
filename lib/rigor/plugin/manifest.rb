@@ -39,13 +39,13 @@ module Rigor
 
       attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
                   :owns_receivers, :type_node_resolvers, :block_as_methods, :heredoc_templates,
-                  :trait_registries
+                  :trait_registries, :external_files
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
         produces: [], consumes: [], owns_receivers: [], type_node_resolvers: [],
-        block_as_methods: [], heredoc_templates: [], trait_registries: []
+        block_as_methods: [], heredoc_templates: [], trait_registries: [], external_files: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -57,9 +57,10 @@ module Rigor
         validate_block_as_methods!(block_as_methods)
         validate_heredoc_templates!(heredoc_templates)
         validate_trait_registries!(trait_registries)
+        validate_external_files!(external_files)
 
         assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
-                      type_node_resolvers, block_as_methods, heredoc_templates, trait_registries)
+                      type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files)
         freeze
       end
 
@@ -67,7 +68,7 @@ module Rigor
 
       # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
       def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
-                        type_node_resolvers, block_as_methods, heredoc_templates, trait_registries)
+                        type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
@@ -80,6 +81,7 @@ module Rigor
         @block_as_methods = block_as_methods.dup.freeze
         @heredoc_templates = heredoc_templates.dup.freeze
         @trait_registries = trait_registries.dup.freeze
+        @external_files = external_files.dup.freeze
       end
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
@@ -121,7 +123,8 @@ module Rigor
           "type_node_resolvers" => type_node_resolvers.map { |r| r.class.name },
           "block_as_methods" => block_as_methods.map(&:to_h),
           "heredoc_templates" => heredoc_templates.map(&:to_h),
-          "trait_registries" => trait_registries.map(&:to_h)
+          "trait_registries" => trait_registries.map(&:to_h),
+          "external_files" => external_files.map(&:to_h)
         }
       end
 
@@ -257,6 +260,23 @@ module Rigor
         raise ArgumentError,
               "plugin manifest trait_registries must be an Array of " \
               "Rigor::Plugin::Macro::TraitRegistry instances, got #{entries.inspect}"
+      end
+
+      # ADR-16 slice 5a — `external_files:` declares the Tier D
+      # substrate entries (external-Ruby-file inclusion under a
+      # declared `self`). Slice 5a carries the declarations on
+      # the manifest; the engine integration that walks the
+      # matched files + narrows their entry scope is **queued for
+      # slice 5b**, gated on demonstrated demand from concrete
+      # plugin targets (Redmine webhook payloads, tDiary plugin
+      # loader, etc.). Plugin authors MAY declare entries today;
+      # the substrate does not yet act on them.
+      def validate_external_files!(entries)
+        return if entries.is_a?(Array) && entries.all?(Macro::ExternalFile)
+
+        raise ArgumentError,
+              "plugin manifest external_files must be an Array of " \
+              "Rigor::Plugin::Macro::ExternalFile instances, got #{entries.inspect}"
       end
 
       def coerce_consumes(consumes)

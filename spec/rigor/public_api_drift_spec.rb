@@ -150,6 +150,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     consumes()
     description()
     eql?(req:other)
+    external_files()
     hash()
     heredoc_templates()
     id()
@@ -233,6 +234,16 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     modules_by_symbol()
     receiver_constraint()
     symbol_arg_position()
+    to_h()
+  ].freeze
+
+  PLUGIN_MACRO_EXTERNAL_FILE_INSTANCE = %w[
+    ==(req:other)
+    bound_ivars()
+    eql?(req:other)
+    glob()
+    hash()
+    receiver_type()
     to_h()
   ].freeze
 
@@ -715,6 +726,14 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "exposes the expected ADR-16 slice-3a value-class surface" do
       expect(instance_signatures(Rigor::Plugin::Macro::TraitRegistry)).to eq(
         PublicApiDriftSnapshots::PLUGIN_MACRO_TRAIT_REGISTRY_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::Macro::ExternalFile" do
+    it "exposes the expected ADR-16 slice-5a value-class surface" do
+      expect(instance_signatures(Rigor::Plugin::Macro::ExternalFile)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_MACRO_EXTERNAL_FILE_INSTANCE
       )
     end
   end

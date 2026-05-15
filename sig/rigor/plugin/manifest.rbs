@@ -3,7 +3,7 @@ class Rigor::Plugin::Manifest::Consumption
 end
 
 class Rigor::Plugin::Manifest
-  def initialize: (id: untyped, version: untyped, ?description: untyped, ?protocols: untyped, ?config_schema: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?trait_registries: untyped) -> void
+  def initialize: (id: untyped, version: untyped, ?description: untyped, ?protocols: untyped, ?config_schema: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?trait_registries: untyped, ?external_files: untyped) -> void
   def validate_config: (untyped) -> Array[String]
   def to_h: () -> Hash[String, untyped]
 end

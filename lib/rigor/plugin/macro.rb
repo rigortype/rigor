@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "macro/block_as_method"
+require_relative "macro/external_file"
 require_relative "macro/heredoc_template"
 require_relative "macro/trait_registry"
 

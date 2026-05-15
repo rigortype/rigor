@@ -396,7 +396,7 @@ receiver type.
 class RigorRedminePayloads < Rigor::Plugin::Base
   manifest(
     id: "redmine-webhook-payloads",
-    external_file_inclusions: [
+    external_files: [
       Macro::ExternalFile.new(
         glob: "config/webhooks/*.rb",
         receiver_type: "Redmine::WebhookPayload",
@@ -519,7 +519,7 @@ Each tier shares an invariant set:
 **ADR-2** (extension API). The substrate is *under* the existing
 `Plugin::Base#flow_contribution_for` / `dynamic_return_type` /
 `type_specifying` hooks. The new manifest entries (`block_as_methods`,
-`trait_registries`, `heredoc_templates`, `external_file_inclusions`) are
+`trait_registries`, `heredoc_templates`, `external_files`) are
 declarative shortcuts that synthesise the equivalent hand-rolled
 walker. A plugin MAY mix declarative manifest entries with hand-rolled
 `flow_contribution_for` callbacks; the substrate is opt-in per entry.
@@ -561,7 +561,7 @@ This ADR adds (when implementation lands):
 - `Rigor::Plugin::Macro::ExternalFile` (new frozen value class).
 - `Rigor::Plugin::Macro::Provenance` (new frozen value class).
 - `Rigor::Plugin::Manifest#block_as_methods`,
-  `#trait_registries`, `#heredoc_templates`, `#external_file_inclusions`
+  `#trait_registries`, `#heredoc_templates`, `#external_files`
   (four new attr_readers; defaults `[]`).
 - `Rigor::Type::Method#synthetic?` (new attr; default `false`).
 - New diagnostic identifiers:

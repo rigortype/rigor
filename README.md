@@ -510,15 +510,15 @@ Common knobs the file exposes:
 
 ## Status
 
-Current released version: **`v0.1.2`**. The analyzer is usable
+Current released version: **`v0.1.4`**. The analyzer is usable
 on real Ruby code today; the rule catalogue is deliberately
 narrow — Rigor's stance is to surface zero false positives
-while the inference surface stabilises. The roadmap is tracked
-in [`docs/MILESTONES.md`](docs/MILESTONES.md); release-by-release
-detail lives in [`CHANGELOG.md`](CHANGELOG.md).
+while the inference surface stabilises. Forward-looking commitments
+(in-flight cycle + queued work) live in
+[`docs/ROADMAP.md`](docs/ROADMAP.md); the release-by-release
+"what shipped" record is [`CHANGELOG.md`](CHANGELOG.md).
 
-`v0.1.4` is the active development cluster on `master` and
-delivers:
+`v0.1.4` (released 2026-05-14) delivered:
 
 - **[ADR-10](docs/adr/10-dependency-source-inference.md) closed
   end-to-end** — opt-in gem-source inference, per-gem budget,

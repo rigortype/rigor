@@ -175,7 +175,7 @@ digest and the cache would never invalidate.
 This plugin will be extracted to its own repository
 (`rigortype/rigor-activerecord`) once the v0.1.0 plugin API
 shape stabilises against this real consumer — see
-[`docs/MILESTONES.md`](../../docs/MILESTONES.md) and the
+[`docs/ROADMAP.md`](../../docs/ROADMAP.md) and the
 relevant CHANGELOG `[Unreleased]` entry. The extraction process
 is recorded in
 [`.codex/skills/rigor-plugin-author/SKILL.md`](../../.codex/skills/rigor-plugin-author/SKILL.md).

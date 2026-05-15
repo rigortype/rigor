@@ -1,10 +1,10 @@
 # Current Work — Inference Engine Checkpoint
 
-This is a transient bookmark used to break a long implementation thread into reviewable chunks. The **normative** contracts and slice roadmap remain in [`docs/internal-spec/inference-engine.md`](internal-spec/inference-engine.md) and [`docs/adr/4-type-inference-engine.md`](adr/4-type-inference-engine.md). The release-by-release commitment envelope lives in [`docs/MILESTONES.md`](MILESTONES.md). If this file disagrees with any of those, the spec / ADR / milestone binds and this file is out of date.
+This is a transient bookmark used to break a long implementation thread into reviewable chunks. The **normative** contracts and slice roadmap remain in [`docs/internal-spec/inference-engine.md`](internal-spec/inference-engine.md) and [`docs/adr/4-type-inference-engine.md`](adr/4-type-inference-engine.md). The forward-looking commitment envelope (active cycle + queued work) lives in [`docs/ROADMAP.md`](ROADMAP.md); the released-version record is `CHANGELOG.md`. If this file disagrees with any of those, the spec / ADR / roadmap binds and this file is out of date.
 
 ## Status
 
-**v0.1.4 released (2026-05-14).** Slice-by-slice recap in `CHANGELOG.md` § `[0.1.4]`. The v0.1.0 → v0.1.4 release log lives in `docs/MILESTONES.md`.
+**v0.1.4 released (2026-05-14).** Slice-by-slice recap in `CHANGELOG.md` § `[0.1.4]`. The full v0.1.0 → v0.1.4 release log lives in `CHANGELOG.md`; the planning envelopes that shaped each cut are preserved in git history (see `docs/MILESTONES.md` at the commit that renamed it to `ROADMAP.md`).
 
 **v0.1.5 accumulating on `master` (release pending).** Two interlocking themes:
 
@@ -29,11 +29,11 @@ If continuing implementation instead of releasing, the natural entries are:
 
 ## Open Engineering Items
 
-Persistent items the next implementer benefits from seeing without re-reading the full thread. Items already absorbed into a released milestone are referenced through `MILESTONES.md` rather than restated.
+Persistent items the next implementer benefits from seeing without re-reading the full thread. Items already absorbed into a released milestone are referenced through `CHANGELOG.md` rather than restated.
 
 ### Survey-driven (v0.1.5 cycle)
 
-The fourteen-project real-world Rails survey ran through three rounds during the v0.1.5 cycle. Items O1, O5, O6, O7 are closed (see `MILESTONES.md` § "v0.1.5 — accumulating on master"); O4 layers 1+2 landed and Layer 3 stays queued; O2 stays queued; O3 turned out to be not-an-issue (the early-exit narrowing already worked — survey residuals were Object#blank? / present? / try, which O1's RBS bundle covers).
+The fourteen-project real-world Rails survey ran through three rounds during the v0.1.5 cycle. Items O1, O5, O6, O7 are closed (see `docs/ROADMAP.md` § "v0.1.5 — accumulating on master"); O4 layers 1+2 landed and Layer 3 stays queued; O2 stays queued; O3 turned out to be not-an-issue (the early-exit narrowing already worked — survey residuals were Object#blank? / present? / try, which O1's RBS bundle covers).
 
 | ID | Status | Item |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ The default goal for the next session is "cut the v0.1.5 release". Read in this 
 
 1. `CHANGELOG.md` `[Unreleased]` section — accumulates v0.1.5 work as it lands.
 2. [`docs/notes/20260515-real-world-rails-survey.md`](notes/20260515-real-world-rails-survey.md) — fourteen-project real-world survey + open items + per-round measurements.
-3. [`docs/MILESTONES.md`](MILESTONES.md) § "v0.1.5 — accumulating on master" — full v0.1.5 envelope (Ractor migration + survey + production-rigor improvements).
+3. [`docs/ROADMAP.md`](ROADMAP.md) § "v0.1.5 — accumulating on master" — full v0.1.5 envelope (Ractor migration + survey + production-rigor improvements).
 4. [`docs/adr/15-ractor-concurrency.md`](adr/15-ractor-concurrency.md) + [`docs/design/20260514-ractor-migration.md`](design/20260514-ractor-migration.md) — binding contract + staged plan for the Ractor migration.
 5. [`docs/adr/10-dependency-source-inference.md`](adr/10-dependency-source-inference.md) — design rationale for the dependency-source inference tier; Layer 3 of O4 (Gemfile.lock + gem_rbs_collection matching) extends this surface.
 6. [`docs/adr/9-cross-plugin-api.md`](adr/9-cross-plugin-api.md), [`docs/adr/11-sorbet-input-adapter.md`](adr/11-sorbet-input-adapter.md), [`docs/adr/13-typenode-resolver-plugin.md`](adr/13-typenode-resolver-plugin.md), [`docs/adr/14-rbs-sig-generation.md`](adr/14-rbs-sig-generation.md) — sibling ADRs landed in v0.1.x.

@@ -92,8 +92,9 @@ bundle exec rspec spec/rigor/type/refined_spec.rb  # one file
   resume bookmark for the next implementer (highest-leverage
   open slices, parallel-safe entry points, open engineering
   items).
-- [`docs/MILESTONES.md`](docs/MILESTONES.md) — the
-  release-by-release commitment envelope.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — the
+  forward-looking commitment envelope (active cycle + queued
+  work). The released-version record is `CHANGELOG.md`.
 - [`docs/adr/`](docs/adr/) — architecture decision records.
 - [`docs/type-specification/`](docs/type-specification/) — the
   normative type-language specification.

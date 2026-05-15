@@ -2,7 +2,7 @@
 
 Status: **proposed, 2026-05-09.** Design fixed here so v0.1.x core
 work can refer to it; implementation queued behind ADR-9 Track 2
-in `docs/MILESTONES.md` (target: v0.1.3 or later — not committed
+in `docs/ROADMAP.md` (target: v0.1.3 or later — not committed
 to a specific release yet).
 
 ## Context

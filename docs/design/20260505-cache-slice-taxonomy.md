@@ -1,7 +1,7 @@
 # Cache slice taxonomy — pre-v0.1.0 design notes
 
 Status: **Draft.** Not normative. Captures the cache descriptor
-schema that v0.1.0's persistent on-disk cache (per [MILESTONES.md](../MILESTONES.md)
+schema that v0.1.0's persistent on-disk cache (per [ROADMAP.md](../ROADMAP.md)
 and [ADR-2 § "Registration, Configuration, and Caching"](../adr/2-extension-api.md))
 will be built against. Pure design output — no code changes flow
 from this document. The successor to this draft will be a normative

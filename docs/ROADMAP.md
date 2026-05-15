@@ -1,382 +1,33 @@
-# Release Milestones
-
-Tracks the deliberately-scoped envelope around each preview release. Items inside a milestone are commitments; items outside it are deferred. The line between "in" and "out" is what makes each release shippable.
-
-This file is informational, not normative. The binding contracts live in [`docs/adr/`](adr/) and [`docs/type-specification/`](type-specification/). When this file disagrees with an ADR or spec, the ADR / spec binds and this file is out of date.
-
-## v0.0.3 — Released 2026-05-02
-
-The third preview. Theme: **see literal values where the analyzer can prove them**, across a wide enough surface that real Ruby programs benefit without per-call-site annotation. See `CHANGELOG.md` for the full added/fixed list.
-
-Major surfaces landed:
-
-- Aggressive constant folding (unary + binary + Union[Constant…] cartesian + integer-range arithmetic + Tuple-shaped divmod).
-- `Type::IntegerRange` carrier with the PHPStan-style `int<min, max>` family (`positive-int`, `negative-int`, `non-negative-int`, `non-positive-int`, `int<a, b>`).
-- Built-in method catalog extraction pipeline (`tool/extract_builtin_catalog.rb`) covering Numeric / Integer / Float / String / Symbol / Array / IO / File. Generated YAML under `data/builtins/ruby_core/`. Catalog-driven dispatch with per-class mutator blocklists.
-- Scope-level integer-range narrowing through `<` / `<=` / `>` / `>=` / `positive?` / `negative?` / `zero?` / `nonzero?` / `between?`.
-- `case/when` integer-range and integer-literal narrowing.
-- Iterator block-parameter typing for `times` / `upto` / `downto`.
-- Branch elision on provably-truthy/falsey predicates.
-- `Tuple`-shaped `Integer#divmod` / `Float#divmod` folds.
-- `Type::Difference` carrier (point-removal half of OQ3); `non-empty-string`, `non-zero-int`, `non-empty-array[T]`, `non-empty-hash[K, V]` reachable through `RBS::Extended`'s new `rigor:v1:return:` directive.
-- `always-raises` diagnostic for provable Integer division-by-zero.
-- `File` path-manipulation folding gated behind `fold_platform_specific_paths` config (default off, platform-agnostic).
-- ADR-5 (robustness principle) and the OQ1 / OQ2 / OQ3 working decisions in ADR-3.
-
-## v0.0.4 — Released 2026-05-02
-
-The fourth preview. Theme: **finish the OQ3 refinement-carrier strategy and broaden the RBS::Extended directive surface**. See `CHANGELOG.md`'s `[0.0.4]` section for the full added/changed/fixed list.
-
-Major surfaces landed:
-
-- `Type::Refined` carrier (OQ3 predicate-subset half) and `Type::Intersection` carrier (composed refinement names) — together with `Type::Difference` from v0.0.3, the OQ3 carrier triple is feature-complete.
-- Fourteen imported built-in refinement names resolvable through `Builtins::ImportedRefinements`: the v0.0.3 point-removal four, the v0.0.3 IntegerRange-aliased four, the new predicate six (`lowercase-string`, `uppercase-string`, `numeric-string`, `decimal-int-string`, `octal-int-string`, `hex-int-string`), and the new composed two (`non-empty-lowercase-string`, `non-empty-uppercase-string`).
-- `RBS::Extended` directive surface complete on both sides of the boundary: `rigor:v1:return:` (now accepts parameterised payloads), `rigor:v1:param:` (call-site argument-type-mismatch rule + body-side `MethodParameterBinder` narrowing), `rigor:v1:assert:` and `rigor:v1:predicate-if-*:` (now accept refinement payloads in addition to class names).
-- Hash / Range / Set / Time built-in catalog imports through `tool/extract_builtin_catalog.rb`. `MethodDispatcher::ConstantFolding#catalog_for` is now table-driven (`CATALOG_BY_CLASS`) so further imports cost one row.
-- Enumerable-aware `#each_with_index` block-parameter typing in `IteratorDispatch` — element type is projected per receiver shape, index slot tightens to `non-negative-int`.
-- `tool/scaffold_builtin_catalog.rb` automates the mechanical 70 % of new built-in catalog imports (Stage 0 of the `rigor-builtin-import` skill).
-- CLI `type-of` regression specs binding the kebab-case canonical-name display contract for refinement-bearing types in both human-readable and `--format=json` output.
-
-## v0.0.5 — Released 2026-05-03
-
-Theme: **continue catalog coverage, broaden the Enumerable-aware projections, and absorb the Steep cross-checker triage follow-ups**. See `CHANGELOG.md`'s `[0.0.5]` section for the full added/changed list.
-
-Major surfaces landed:
-
-- Comparable / Enumerable module catalog imports + `tool/scaffold_builtin_catalog.rb --module` mode.
-- Date / DateTime catalog imports (stdlib gems under `references/ruby/ext/date/`).
-- Rational and Complex catalog imports — landed via parallel worktree-isolated agents.
-- Include-aware module-catalog fallthrough in `MethodDispatcher::ConstantFolding#catalog_allows?` activates the Comparable / Enumerable imports for direct (non-redefined) callers.
-- 2-argument constant-fold dispatch (`try_fold_ternary`) folds `Comparable#between?(min, max)`, `Comparable#clamp(min, max)`, `Integer#pow(exp, mod)`.
-- `narrow_not_refinement` extended to IntegerRange (paired-bound complement) and Intersection (De Morgan); refinement negation (`~T`) now accepted as the RHS of `assert` / `predicate-if-*` directives.
-- C-body classifier — pure `rb_check_frozen` wrapper detection reclassifies `Time#gmtime` / `Time#utc` from `:leaf` to `:mutates_self`.
-- `tool/catalog_diff.rb` + `make catalog-diff` target for surface-level diffs between two YAML snapshots.
-- **Steep cross-checker scaffolding.** `tool/steep/` ships Steep 2.0 as an isolated sibling Bundler (`make steep-check`) for sig / impl drift detection. Triage report and category breakdown in [`docs/notes/20260503-steep-cross-check-triage.md`](notes/20260503-steep-cross-check-triage.md). The triage's mechanical fixes (A-1 through A-5: predicate sigs, IntegerRange narrowing, scope_indexer arity, env duplication, CLI kwarg defaults) all landed.
-- **Branch-aware scope propagation for expression-position conditionals.** `Inference::ScopeIndexer.propagate` now routes IfNode / UnlessNode branches through `Narrowing.predicate_scopes`, fixing a class of false-positives where an `if` / `unless` buried inside a CallNode argument or `[]=` RHS never reached `eval_if`'s narrowing path.
-- **`Kernel#Array` precision tier (`MethodDispatcher::KernelDispatch`).** Folds `Array(arg)` into a precise `Array[E]` whenever the argument's value-lattice shape lets us prove the element type. Distributes element-wise over unions and unifies.
-- **`Const = Data.define(*Symbol)` discovery.** `Inference::ScopeIndexer.record_declarations` registers `Const` (qualified by the surrounding path) as a discovered class so `Const.new(...)` resolves to `Nominal[<qualified>]` via `meta_new`. Override-aware initializer-signature dispatch (using the block's `def initialize(...)` as the canonical sig) remains open as a follow-up.
-
-## v0.0.6 — Released 2026-05-05
-
-The sixth preview. Theme: **fold block-taking Enumerable methods through the constant-folding tier** so iterator-shaped expressions over literal collections produce precise carriers instead of widening through RBS. See `CHANGELOG.md`'s `[0.0.6]` section for the full added / fixed list.
-
-Major surfaces landed:
-
-- **`MethodDispatcher::BlockFolding` precision tier.** `dispatch_precise_tiers` consumes the existing `block_type:` and folds the constant-block side of `select` / `filter` / `reject` / `take_while` / `drop_while` / `all?` / `any?` / `none?` / `find` / `detect` / `find_index` / `index` / `count`. Filter methods collapse to either the receiver or `Tuple[]`; predicate methods produce `Constant[bool]` whenever the receiver-emptiness × block-truthiness combination is unconditional in Ruby's semantics; find-family methods fold to `Constant[nil]` on the falsey side and to `Constant[size]` / `Constant[0]` for `count`.
-- **`ExpressionTyper#try_per_element_block_fold` over Tuple receivers** for `map` / `collect` / `filter_map` / `flat_map` / `find` / `detect` / `find_index` / `index`. The block body is type-checked once per Tuple position, then assembled per-method into a precise Tuple. Numbered parameters (`_1`) participate identically.
-- **Per-element fold over short `Constant<Range>` receivers**, capped at 8 elements so `(1..3).map { |n| n.to_s }` resolves to `["1", "2", "3"]` without exploding for million-element ranges.
-- **Branch elision for expression-position conditionals.** `if` / `unless` / ternary expressions whose predicate folds to a `Type::Constant` drop the unreachable branch. `&&` / `||` short-circuit on Constant-shaped left operands following Ruby's actual semantics. Composes through three layers so `[1, 2, 3].filter_map { |n| n.even? ? n.to_s : nil }` resolves to `Tuple[Constant["2"]]`.
-- **IntegerRange-aware ternary fold.** The 2-arg `try_fold_ternary` path accepts `IntegerRange` receivers paired with scalar `Constant<Integer>` args for `Comparable#between?` / `Comparable#clamp`. `int<3, 7>.between?(0, 10)` folds to `Constant[true]`; `int<3, 7>.clamp(4, 6)` folds to `int<4, 6>`.
-- **Empty array literal carrier — `[]` → `Tuple[]`.** Pins the literal's known arity so `:flat_map` can concatenate cleanly across all-empty per-position results.
-- **Pathname catalog import** (102 instance methods, 2 singletons, 5 aliases) via `tool/scaffold_builtin_catalog.rb --init-fn InitVM_pathname`. Pathname is a thin wrapper that mostly delegates to File / Dir / FileTest, so the user-visible payoff is narrower than Numeric or String — the import buys receiver-class recognition, a defensive `:initialize_copy` blocklist entry, and `:leaf` folding for `<=>`.
-- **Extractor BeginNode-bodied-`def` classifier fix.** `PreludeParser#analyse_body` previously raised on the rescue-on-def idiom (`def foo; …; rescue; …; end`). The classifier now descends into the begin-block's `statements`. Surfaced importing Pathname; every catalog regenerates cleanly under `make extract-builtin-catalogs`.
-
-## v0.0.7 — Released 2026-05-05
-
-Theme: **pre-plugin coverage push**. Close the gap between what the type-language and built-in-coverage specs already commit to and what the analyzer actually implements, so the plugin API designed against this surface in v0.1.0 has a complete substrate to attach to. Breadth-over-depth: sixteen feature slices plus three pre-v0.1.0 substrate slices (Reflection facade, consumer migration, two design docs).
-
-See `CHANGELOG.md`'s `[0.0.7]` section for the full added list. Major surfaces landed:
-
-- **Type-language type functions.** `key_of[T]` / `value_of[T]`, `int_mask[…]` / `int_mask_of[T]`, and the `T[K]` indexed-access operator — all spec-listed but previously unimplemented. Reachable from RBS::Extended directive payloads; the parser accepts integer-literal arguments and class-name-headed types directly.
-- **Constant carriers expanded.** `Rational` / `Complex` (literal nodes + Kernel-call folds), `Regexp` (non-interpolated literal lift), and `Pathname` (constructor lift + 14-method unary / 8-method binary fold table covering pure path manipulation; filesystem-touching methods stay declined).
-- **`Constant<Range>` unary precision.** `to_a` lifts to per-position Tuple (capped at 16); `first` / `last` / `min` / `max` / `count` / `size` / `length` fold to precise constants.
-- **Tuple precision (eleven new handlers).** `empty?`, `any?`, `all?`, `none?`, `include?`, `sum`, `min`, `max`, `sort`, `reverse`, `to_a`, `zip`. Per-position semantics preserved; non-Constant elements decline.
-- **HashShape projections.** `keys`, `values`, `count`, `length`, `empty?`, `any?`, `first`, `flatten`, `compact`, plus the Tuple ↔ HashShape conversion folds (`to_h`, `to_a`, `invert`, `merge`).
-- **String precision.** `String#%` over Tuple / HashShape arguments; `Constant<String>#chars` / `#bytes` / `#lines` / `#split` / `#scan` lift Array results to per-position Tuples.
-- **Refinement narrowing.** `~Refined[base, predicate]` narrows through `Difference[base, refined]` instead of falling back to `current_type` unchanged.
-- **Empty literal carriers.** `{}` resolves to `HashShape{}`; `Array.new(n)` / `Array.new(n, value)` lift to per-position Tuples.
-
-Pre-v0.1.0 substrate that landed in the v0.0.7 cycle:
-
-- **`Rigor::Reflection` facade** — unified read API over `ClassRegistry` + `RbsLoader` + `Scope` discovered facts. Public read shape for v0.1.0 plugin-API readiness; spec at [`docs/internal-spec/reflection.md`](internal-spec/reflection.md).
-- **Engine-internal consumer migration** to the facade. Mechanical refactor; no behaviour change.
-- **v0.1.0 readiness design doc** at [`docs/design/20260505-v0.1.0-readiness.md`](design/20260505-v0.1.0-readiness.md).
-- **Cache slice taxonomy design doc** at [`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md).
-
-## v0.0.8 — Released 2026-05-04
-
-Theme: **first cache-related code slice**. Landed the persistence layer the v0.0.7 cache slice taxonomy design doc ([`docs/design/20260505-cache-slice-taxonomy.md`](design/20260505-cache-slice-taxonomy.md)) commits to, plus a Marshal-clean producer wired through it end-to-end. Backend per [ADR-6](adr/6-cache-persistence-backend.md): a sharded directory of binary entries written through a custom canonical format, zero new gem dependencies.
-
-Slices (in commit order):
-
-1. **`Rigor::Cache::Descriptor` value object.** The taxonomy doc's typed-slot schema (`FileEntry`, `GemEntry`, `PluginEntry`, `ConfigEntry`); composition (`union-by-key`, stricter-comparator-wins for `files`, `Conflict` on disagreement); canonical serialisation; SHA-256 cache-key derivation. Pure value object, spec-tested in isolation.
-2. **`Rigor::Cache::Store` filesystem backend.** `<root>/<producer-id>/<2-prefix>/<62-suffix>.entry` layout; `"RIGOR\x00\x01"` magic + varint-prefixed descriptor + value + trailing SHA-256 file format; rename-into-place atomicity with `flock(LOCK_EX)` on the destination; schema-version marker at `<root>/schema_version.txt` (mismatch wipes the directory). Read failures (missing, short, bad magic, bad checksum, malformed varint, unmarshal-able) silently fall through to a cache miss. Producer ids constrained to `[a-z][a-z0-9._-]*` for filesystem safety.
-3. **First cached producer — `Rigor::Cache::RbsConstantTable`.** Caches a `Hash<String, Rigor::Type>` mapping every RBS-declared constant to its translated `Rigor::Type`. The slice plan originally named the RBS environment loader as the first producer; implementation discovered `RBS::Environment` is not Marshal-clean (transitive `RBS::Location` lacks `_dump_data`). [ADR-6 § 8](adr/6-cache-persistence-backend.md) documents the finding; the slice caches a post-translation artefact instead. Adds `RbsLoader#constant_names` so the producer can enumerate constants through the public surface.
-4. **`rigor check --cache-stats` and `--clear-cache`.** `--cache-stats` prints an on-disk inventory at end-of-run (per-producer entry counts, total bytes, schema version) sourced from `Store.disk_inventory`. `--clear-cache` wipes `.rigor/cache` before the run. Per-run hit/miss counters deferred until production code wires the cache.
-5. **Diagnostic source-family provenance.** `Rigor::Analysis::Diagnostic` gains `source_family:` (default `:builtin`) and `qualified_rule` (`"#{source_family}.#{rule}"` for non-default families). JSON output carries both `source_family` and the bare `rule` side-by-side. Prepares ADR-2's plugin-observability story without committing to the plugin API itself.
-
-## v0.0.9 — Released 2026-05-05
-
-Per the single-digit version-component policy (next release after `0.0.9` is `0.1.0`, not `0.0.10`), every pre-`0.1.0` slice continues to land inside `0.0.9` until the user authorises a release. The cluster combines the original "wire the cache into `rigor check`" slate with the cache-surface completion and three pieces of type-language work (FlowContribution producer wiring, paired-complement narrowing for Refined predicates, literal-string flow tracking through interpolation and concat).
-
-Commits in chronological order:
-
-- 9378df2 — **A1**: `Analysis::Runner.cache_store` surface + `rigor check --no-cache`. Runner defaults to a `Cache::Store` rooted at `.rigor/cache`; the CLI flag threads `nil` through to disable.
-- ee021a2 — **A2**: `RbsLoader#constant_type` routes through `RbsConstantTable` when `cache_store` is set; `Environment.for_project(cache_store:)` plumbs the Store down. First end-to-end cold/warm-start gap.
-- 1407225 — **A3**: `Cache::Store#stats` (in-process hits / misses / writes counters); `rigor check --cache-stats` adds a "this run:" section alongside the disk inventory.
-- e764565 — **A4**: `Reflection.constant_type_for` confirmed cached end-to-end; "Constant-lookup path under `cache_store`" docs added.
-- c48f05f — **B**: `Rigor::FlowContribution` bundle struct (8 content slots + `Provenance`). Public read shape per ADR-2 § "Flow Contribution Bundle"; element-list flattening deferred to v0.1.0 alongside the contribution merger.
-- 8a94e7a — **C**: `Rigor::Cache::RbsKnownClassNames` (`Set<String>`) + `Rigor::Cache::RbsDescriptor` shared builder; `RbsLoader#class_known?` consults the cached set.
-- 41aec51 — **D**: `Rigor::RbsExtended.read_flow_contribution(method_def)` rolls every recognised directive on a single method into a `Rigor::FlowContribution` bundle (`:rbs_extended` source family). Internal narrowing keeps the typed Data carriers.
-- 3ae65e2 — **E**: paired-complement registry on `Type::Refined` (`COMPLEMENT_PAIRS`). First pair: `lowercase ↔ not_lowercase`. `~lowercase-string` narrows `String` to `non-lowercase-string` instead of `Difference[String, lowercase-string]`.
-- 908eb08 — **F**: `literal-string` and `non-empty-literal-string` carriers; `ExpressionTyper` lifts an interpolated string to `literal-string` when every part is literal-bearing.
-- 8951c1d — **C1**: `Store#fetch_or_compute(serialize:, deserialize:)` callable surface. Defaults to `Marshal.dump` / `Marshal.load`. Pair must round-trip; deserialiser exceptions become cache misses.
-- 9b50e2b — **B (cache producer)**: `Rigor::Cache::RbsClassAncestorTable` (`Hash<String, Array<String>>`). `RbsHierarchy#ancestor_names` consults the cached table; `class_ordering` benefits transitively.
-- c601f40 — **A (cache producer)**: `Rigor::Cache::RbsClassTypeParamNames` (`Hash<String, Array<Symbol>>`). `RbsLoader#class_type_param_names` consults the cached table.
-- d662d4a — **E follow-up**: registers `uppercase ↔ not_uppercase` and `numeric ↔ not_numeric` pairs alongside `non-uppercase-string` and `non-numeric-string` carriers.
-- 5600efc — **F follow-up**: `LiteralStringFolding` dispatcher tier between ConstantFolding and ShapeDispatch. `String#+` and `String#*` lift to `literal-string` when every operand is itself literal-bearing.
-- 8f7c32c — **C2**: `Rigor::Cache::RbsEnvironment` caches the full `RBS::Environment` via the C1 callable surface. Adds `lib/rigor/cache/rbs_environment_marshal_patch.rb` — a minimal `_dump` / `_load` patch on `RBS::Location` so the env round-trips through Marshal. Biggest cold-start win in the cluster.
-
-## v0.1.0 — Released 2026-05-07
-
-Theme: **first plugin contract**. ADR-2 § "Extension API" fixes the design surface; v0.1.0 ships the implementation. The pre-v0.1.0 substrate landed in v0.0.3 → v0.0.9 — type vocabulary, inference engine, persistent cache layer wired through `rigor check`, `Rigor::Reflection` facade, `Rigor::FlowContribution` bundle, public-API drift pins (`Scope` / `Environment` / `Type::Combinator` / `Reflection`), `Diagnostic#source_family`, RBS::Extended directive plumbing — leaving v0.1.0 as a finite assembly job rather than an open architectural exercise.
-
-The public surface plugins attach to is documented in [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) and pinned by `spec/rigor/public_api_drift_spec.rb`. Slices that extend a pinned namespace update the drift spec in the same commit.
-
-Slice plan — **all six landed (unreleased on `master`)**:
-
-1. **Plugin registration / loading.** ✅ `Rigor::Plugin` namespace (Base / Manifest / Services / Registry / Loader / LoadError) per ADR-2 § "Registration, Configuration, and Caching". Spec [`docs/internal-spec/plugin.md`](internal-spec/plugin.md).
-2. **Plugin trust / I/O policy.** ✅ `Plugin::TrustPolicy` + `Plugin::IoBoundary` + `Plugin::AccessDeniedError` + `.rigor.yml` `plugins_io:` section. Spec [`docs/internal-spec/plugin-trust.md`](internal-spec/plugin-trust.md).
-3. **Plugin contribution merger.** ✅ `FlowContribution::Merger` + `Element` flattening + `MergeResult` + `Conflict`. Spec [`docs/internal-spec/flow-contribution-merger.md`](internal-spec/flow-contribution-merger.md).
-4. **FlowContribution wiring through internal narrowing.** ✅ Slice 4a (substrate — `Fact` value object + carrier translations) + slice 4b (three consumer call sites — `analyse_rbs_extended_contribution`, post-return assertion, return-type override). Working decisions in [ADR-7 § "Slice 4"](adr/7-v0.1.0-slice-decisions.md).
-5. **Plugin diagnostic emission protocol.** ✅ `Plugin::Base#diagnostics_for_file` per-file hook + `Analysis::Runner` auto-stamps `source_family: "plugin.<id>"` + `Conflict#to_diagnostic`.
-6. **Plugin-side cache producers.** ✅ `Plugin::Base.producer` DSL + `Plugin::Base#cache_for` callable + auto-prefixed `plugin.<manifest.id>.` ids + auto-assembled `Cache::Descriptor`. Spec [`docs/internal-spec/plugin-cache-producers.md`](internal-spec/plugin-cache-producers.md).
-
-V0.1.0 polish work that landed alongside the six slices:
-
-- **Seven worked plugin examples** under [`examples/`](../examples/README.md) — `rigor-deprecations`, `rigor-lisp-eval`, `rigor-pattern`, `rigor-routes`, `rigor-statesman`, `rigor-units`, plus `rigor-activerecord` (the most architecturally complete: DSL interpretation + multi-file `IoBoundary` + chained cache producers + two-pass discover-then-validate). 67 integration examples across `spec/integration/examples/`.
-- **Nine-chapter end-user handbook** under [`docs/handbook/`](handbook/README.md).
-- **Two precision improvements** — named-capture regex narrowing through `if /(?<x>...)/ =~ str`; `;`-prefixed block-local `Constant[nil]` shadow.
-- **Per-method Reflection caches** (carry-over from v0.0.9). `Rigor::Cache::RbsInstanceDefinitions` / `Rigor::Cache::RbsSingletonDefinitions` per-class producers landed; the v0.0.9 fail-soft `NameError` regression diagnosed and fixed (missing `require_relative "descriptor"` in two cache files).
-
-`Rigor::VERSION` was bumped to `"0.1.0"` and `CHANGELOG.md` reorganised into the `[0.1.0] - 2026-05-07` section in commit `6170832`. Release tagged + published per [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md).
-
-## v0.1.1 — Released 2026-05-08
-
-Theme: **deepen the literal-string narrowing surface, ship the cross-plugin API, and stabilise the plugin authoring DX**. v0.1.0 closed the plugin contract (six slices) and shipped seven worked plugin examples; v0.1.1 extends the substrate in two directions and cleans up persistent maintenance items.
-
-### Track 1 — Literal-string / refinement narrowing depth (theme)
-
-1. ✅ **Regex pattern → refinement-name recogniser** — landed unreleased. `Rigor::Builtins::RegexRefinement` (a curated table of canonical sub-patterns: `\d+`, `\d{N}`, `\d{N,M}`, `\h+`, `[0-9a-fA-F]+`, `[0-9a-f]+`, `[0-9A-F]+`, `[0-7]+`, `[a-z]+`, `[A-Z]+`, `[[:digit:]]+`, all admitting `+` / `{n}` / `{n,m}` quantifiers with `n >= 1`) is consulted from `Inference::Narrowing.analyse_match_write` so the truthy branch of `if /(?<year>\d+)/ =~ str` narrows `year` to `decimal-int-string` instead of plain `String`. Bodies that admit zero-length matches (`*`, `?`, `{0,N}`) or sit outside the audited table fall back to plain `String`. Whole-regex anchored forms (`/\A\d+\z/.match?(str)` narrowing `str` itself) are deferred — the v0.1.1 hook is named-capture only, since anchored-whole-regex narrowing requires a separate consumer site (probably `String#match?` predicate narrowing) that is not yet wired.
-
-2. ✅ **`numeric-string` / `decimal-int-string` propagation through Integer-conversion predicates** — landed unreleased. Two consumer sites tightened:
-   - **2a — `String#to_i` / `#to_int`.** `MethodDispatcher::ShapeDispatch.dispatch_refined` recognises `decimal-int-string` (`/\A\d+\z/`) and `numeric-string` (Rigor's numeric-string predicate) receivers and projects `to_i` / `to_int` (no args) to `non-negative-int`. Both refinements describe digit-only ASCII strings, so the parse is total over the carrier domain.
-   - **2b — `Kernel#Integer`.** `MethodDispatcher::KernelDispatch.try_integer_from_refinement` mirrors the same rule for the `Kernel#Integer(s)` (single-arg) form.
-   - End-to-end, `if /(?<year>\d+)/ =~ str; year.to_i; end` and `… Integer(year); end` both fold to `non-negative-int`. `Float(s)` / `s.to_f` are deferred — Rigor has no FloatRange carrier to express tighter Float precision than the RBS baseline.
-
-3. ✅ **`self`-narrowing in `predicate-if-*` / `assert-if-*` / `assert` directives** — landed unreleased. Four receiver shapes now narrow self-targeted facts: `LocalVariableReadNode` (already worked in v0.1.0), `InstanceVariableReadNode` (new — narrows the ivar via `Scope#with_ivar`), `Prism::SelfNode` (new — narrows `scope.self_type`), and the implicit-self call (nil receiver, new — narrows `scope.self_type`; `Inference::Narrowing#analyse_call` was relaxed so nil-receiver shapes can flow into the RBS::Extended path). Same handling for `assert self is T` post-return facts in `StatementEvaluator#apply_self_post_return_fact`. Spec at [`docs/internal-spec/inference-engine.md`](internal-spec/inference-engine.md) updated.
-
-4. ✅ **Additional `String` predicate narrowing** — landed unreleased as a FactStore-based flow fact (the lightweight option). `Inference::Narrowing#analyse_string_predicate` matches `s.start_with?("foo")`, `s.end_with?(...)`, `s.include?(...)` against a `Prism::LocalVariableReadNode` receiver and a `Constant<String>` needle, attaching a `bucket: :relational` Fact with `predicate: <method_name>`, `payload: <needle>`, polarity `:positive` on the truthy edge and `:negative` on the falsey edge. No type narrowing — Rigor has no "starts-with-X" refinement carrier today, so the receiver's type stays unchanged on both edges. The lightweight form lets downstream consumers (a future plugin's `prepare(services)` hook, internal post-narrowing rules) read the predicate semantics; if a heavier carrier-based form turns out to be needed, it can be added later without breaking the fact contract.
-
-5. ✅ **`literal-string` propagation through additional methods** — three sub-slices landed unreleased.
-   - **5a — `String#strip` / `#lstrip` / `#rstrip` / `#chomp` (no-arg) / `#chop` / `#scrub` (no-arg).** `LITERAL_PRESERVING_METHODS` in `LiteralStringFolding`. Each strips a known character subset from the ends (or replaces invalid bytes), so a literal-bearing receiver stays literal-bearing. `non-empty-literal-string` collapses to plain `literal-string` because `"   ".strip == ""`.
-   - **5b — `Integer#to_s(base)` on non-negative `IntegerRange`.** `MethodDispatcher::ShapeDispatch.dispatch_integer_range` recognises an `IntegerRange` receiver with `lower >= 0` and lifts `to_s` (no args, default base 10) → `decimal-int-string`, `to_s(8)` → `octal-int-string`, `to_s(16)` → `hex-int-string`. Bases without a digit-only refinement (2, 36, …) and signed ranges (whose `to_s` could carry a leading `-`) decline.
-   - **5c — `String#center` / `#ljust` / `#rjust`.** `LiteralStringFolding.fold_width_pad`. Width arg MUST be Integer-typed; optional padding arg MUST be literal-bearing (the default-padding form passes through). The result is `literal-string`.
-   - **`Numeric#to_s` (no args)** is not implemented; the bullet doesn't fit cleanly because `Float#to_s` produces a `.`-bearing string that no Rigor refinement currently captures, and `Integer#to_s` on signed ranges leaks a `-` sign. The non-negative-Integer case is covered by 5b.
-
-### Track 2 — Cross-plugin API + return-type contributions (parallel)
-
-6. ✅ **ADR-9 cross-plugin API — slices 1 → 5** all landed unreleased.
-   - **Slice 1** — `Plugin::FactStore` value object (`#publish` / `#read` / `#published?` / `#each_fact`, plus the `Fact = Data.define(:plugin_id, :name, :value)` shape and `Conflict` exception). Thread-safe; canonicalises `plugin_id` to String and `name` to Symbol.
-   - **Slice 2** — `Plugin::Services#fact_store` accessor. A fresh `FactStore` is constructed per Services when none is supplied; the runner threads its own per-run instance through.
-   - **Slice 3** — `Plugin::Base#prepare(services)` default-no-op hook. `Analysis::Runner.run` invokes `#prepare` on every loaded plugin once per run, after `#init` and before per-file iteration; failures isolate as `:plugin_loader runtime-error` diagnostics.
-   - **Slice 4** — `manifest(produces: [...])` / `manifest(consumes: [{plugin_id:, name:, optional:}])` declarations + the `Manifest::Consumption` Data shape. The loader doesn't yet enforce them in slice 4.
-   - **Slice 5** — `Plugin::Loader.load` topologically sorts plugins by `consumes:` (configuration-order tie-break), emits `Plugin::LoadError(reason: :"missing-producer")` when a non-optional consume names a `(plugin_id, name)` no loaded plugin produces, and `Plugin::LoadError(reason: :"dependency-cycle")` when consumes form a cycle. `Plugin::LoadError` gains an optional `reason:` field for the new codes. Topo sort skips entirely when no loaded plugin declares a `consumes:` entry, preserving v0.1.0 observable behaviour for projects that don't opt into the cross-plugin API.
-   - Tier 2 Rails plugins (`rigor-actionpack` Phase 1, `rigor-factorybot`) are now unblocked.
-
-7. ✅ **Plugin return-type contributions slice 1** — landed unreleased. New `Plugin::Base#flow_contribution_for(call_node:, scope:)` default-no-op hook returns a `Rigor::FlowContribution`. `MethodDispatcher.dispatch` gains optional `call_node:` / `scope:` keywords; when both are present and the scope's environment carries a non-empty `Plugin::Registry`, a new dispatcher tier between precision tiers and `RbsDispatch` walks every plugin's hook, merges contributions via `FlowContribution::Merger`, and uses the merged `return_type`. `Environment#plugin_registry` new optional reader; `Analysis::Runner` threads its per-run registry through `Environment.for_project(plugin_registry:)`. Plugin-side raises in `flow_contribution_for` are silently dropped per-call so the dispatch chain continues. Migrating the seven example plugins from "info diagnostic only" to "narrowed return type" is deferred — slice 7 lands the substrate; per-plugin migration is incremental follow-up.
-
-### Track 3 — Plugin authoring DX (parallel)
-
-8. **Plugin spec helper module extraction.** ✅ **landed (commit `ce64bb6`).** `Rigor::IntegrationSupport::PluginHelpers` extracted to `spec/integration/examples/support/plugin_helpers.rb`; seven plugin specs migrated; `rigor-plugin-author` SKILL Phase 6 updated with the slimmed boilerplate.
-
-9. ✅ **Demo cache directory handling** — landed unreleased as the explicit-config form (no "demo mode" concept in the CLI). Each `examples/rigor-*/demo/.rigor.yml` sets `cache.path: tmp/.rigor/cache`; each demo carries a `/tmp/`-only `.gitignore` so the cache stays out of git automatically. `Rigor::CLI#run_check` previously hardcoded `cache_root = ".rigor/cache"` and ignored `.rigor.yml`'s `cache.path:` setting; the CLI now consults `configuration.cache_path` so demo configs actually take effect. The `tmp/`-anchored layout matters for the eventual `git subtree split` per the `rigor-plugin-author` SKILL — discipline survives the split without depending on the parent repo's `.gitignore`. SKILL Phase 5 template updated.
-
-10. ✅ **Examples RuboCop relaxation** — landed unreleased. `.rubocop.yml` removed the blanket `examples/**/*` exclusion and added a documented relaxation block: `Metrics/*` and `Naming/FileName` disabled (kebab-case file names are part of the gem-id convention; mid-sized example methods keep illustrations end-to-end legible), `Style/TopLevelMethodDefinition` and `Style/OneClassPerFile` relaxed for `examples/*/demo/**/*` (demos run as scripts and pack a small ad-hoc class hierarchy into one file), `Lint/StructNewOverride` / `Layout/LineLength` / `Lint/DuplicateBranch` / `Style/EmptyElse` excluded for `examples/**/*` (deliberate domain words like the `:method` Struct member, message strings that exceed 120 cols for readability, multi-arm switches that share a body for documentation, comment-bearing trailing `else` extension points). Autocorrect ran on the touched files (`require "set"` removal, block-pass shorthand `&`, redundant Metrics suppressions cleared, etc.). RuboCop now inspects 262 files / 0 offenses (was 210).
-
-### Track 4 — Maintenance (any v0.1.x release)
-
-11. ✅ **Three `lib/` sig drifts** — landed unreleased. `Trinary#negate` collapsed the `:maybe` arm into `else` so the case is exhaustive without changing semantics (the constructor invariant `value ∈ [:yes, :no, :maybe]` already guaranteed the third path). `IntegerRange#lower` / `IntegerRange#upper` rewrote the `is_a?(Symbol) ? ∞ : m` ternary as an `is_a?(Integer)` early return, so the analyzer's narrowing path produces `Integer | Float` directly without leaking the Symbol branch. `bundle exec exe/rigor check lib` now reports `No diagnostics`. Categories A-1 / A-2 in [`docs/notes/20260503-steep-cross-check-triage.md`](notes/20260503-steep-cross-check-triage.md) closed.
-
-12. ✅ **`spec/rigor/source/node_locator_spec.rb:82` — `String#index + 1` unguarded** — no longer surfaces as a diagnostic. Constant-folding on `Constant<String>#index(Constant<String>)` (added in v0.0.7's "Constant carriers expanded" wave) produces a `Constant<Integer>` for `source.index("\"")`, so the `+ 1` receiver is a known `Integer` and `possible-nil-receiver` does not fire. The maintenance item is moot; the spec line is unchanged.
-
-13. ✅ **`numeric.yml` `Integer#ceildiv` `unknown` entry** — landed unreleased. `tool/extract_builtin_catalog.rb` `classify_purity` now classifies `body_kind: composed` prelude bodies as `dispatch` instead of `unknown`. `composed` means the body is neither `Primitive.attr!(:leaf)`, a literal return, nor `self`, so it invariably ends in a Ruby method dispatch (and Ruby methods are all user-overridable). Both `unknown` and `dispatch` are non-foldable per `FOLDABLE_PURITIES`, so folding behaviour is unchanged; the rename is purely catalog self-documentation cleanup. Catalogs regenerated via `make extract-builtin-catalogs`.
-
-Out of scope for v0.1.1 (deferred to v0.1.2 or beyond):
-
-- **New CheckRules rule families.** ~~`flow.unreachable-branch`~~ (closed in v0.1.2 Track 2; literal-only envelope), ~~`flow.dead-assignment`~~ (closed in v0.1.2 Track 2; never-read-in-def envelope), ~~`flow.always-truthy-condition`~~ (closed in v0.1.2 Track 2; loop / block / defensive-predicate skip), ~~`def.ivar-write-mismatch`~~ (closed in v0.1.2 Track 2; concrete-class drift), ~~`def.method-visibility-mismatch`~~ (closed in v0.1.2 Track 2; user-class private only), ~~`def.return-type-mismatch` for type-carrier predicates~~ (closed in v0.1.2 Track 2; consults `rigor:v1:return:` refinement override). Each needed careful false-positive triage.
-- **C-body classifier wider transitive mutator scan.** Long-deferred catalog-extractor work that needs to track `str_modifiable` / `time_modify` / similar helpers without over-flagging legitimate non-mutators (the `Array#to_a` regression that gated the v0.0.5 fix).
-- ~~`Data.define` override-aware initializer dispatch.~~ Closed in v0.1.2 Track 2 — see below.
-- ~~`Plugin::IoBoundary#open_url` allowlist.~~ Closed in v0.1.2 Track 2 — see entry 17.
-- **`rigor:v1:conforms-to` directive.** Needs a real structural-conformance checker.
-- **DX tooling track.** ~~`rigor explain <rule-id>`~~, ~~`rigor diff <baseline>`~~, ~~`# rigor:disable-file <rule>`~~, ~~`.rigor.yml` JSON schema~~ — all four closed in v0.1.2 Track 2.
-- **LSP / long-running daemon mode.** Requires concurrent multi-process safety beyond the per-file `flock` model. Increasingly relevant as the plugin ecosystem grows, but still substantial.
-- **Cache eviction / LRU / size cap.** Cache stays unbounded; users run `--clear-cache` if needed.
-- **Cross-machine cache sharing.**
-- **ObjectSpace / URI / Kernel catalog imports.** ObjectSpace needs a singleton-module dispatch path the catalog tier does not yet provide. URI is a pure-Ruby stdlib gem with no C surface; Kernel methods scatter across 20+ C files with no single Init function. Both need hand-rolled or custom-scaffold approaches.
-- **Pathname / URI delegation rules.** Wider refactor (Pathname facade routing through File projections).
-- **Lightweight HKT / type-level type computation.** Conditional and indexed-access types per [`docs/type-specification/rigor-extensions.md`](type-specification/rigor-extensions.md) rows 22 / 51. Sketched in `examples/rigor-lisp-eval/demo/sig/lisp.rbs` and `examples/rigor-units/demo/sig/units.rbs`. Larger surface; not a single-slice item.
-- ~~Interface-strictness on overload selection.~~ Closed in v0.1.2 Track 2 — see below.
-
-## v0.1.2 — Released 2026-05-09
-
-Theme: **migrate the example plugin family to the v0.1.1 `flow_contribution_for` substrate.** v0.1.1 landed the cross-plugin API and the per-call return-type contribution tier; v0.1.2 puts that substrate to work — the four example plugins whose runtime returns a typeable value migrate from "info diagnostic only" to "narrowed return type", so chained calls resolve through the analyzer's normal dispatch instead of the RBS-level `untyped` envelope. The diagnostic trace stays — both channels run from the same interpretation.
-
-### Track 1 — Example plugin return-type migration
-
-1. ✅ **`rigor-lisp-eval`** — `Lisp.eval(literal)` narrows to the carrier the literal interpreter produces (`Nominal[Integer]`, `Nominal[Float]`, `Union[Constant[true], Constant[false]]`, or unions across `:if` branches). Type-error and unknown-expression cases stay at the RBS untyped envelope so the existing `:error` / silent fall-through behaviour is unchanged.
-
-2. ✅ **`rigor-pattern`** — `validate(:name, value)` narrows to the value argument's type on a successful match (typically `Constant<String>` after Rigor's literal-string folding). Mismatches keep the `literal-mismatch` diagnostic and stay untyped — propagating `bot` would silence the diagnostic-driven feedback the README centres on.
-
-3. ✅ **`rigor-units`** — Dimensional arithmetic / chained constructors / queries narrow through the existing `MethodTable` dispatch (`Distance / Time -> Speed`, `Distance + Distance -> Distance`, `Speed * Time -> Distance`, `.in_<unit>` queries return `Float`, etc.). `dimension_for_type` folds Rigor's nominal carriers back into the table's dimension Symbols and `DIMENSION_NOMINALS` translates the result back.
-
-4. ✅ **`rigor-activerecord`** — `Model.find(id)` narrows to `Nominal[Model]`; `Model.find_by(...)` narrows to `Nominal[Model] | nil`. `where` / `find_or_*` are intentionally deferred (relations need a richer carrier than the current Nominal/Tuple shapes carry).
-
-The other three example plugins (`rigor-deprecations`, `rigor-statesman`, `rigor-routes`) stay diagnostic-only by design: deprecation reports and state-machine declarations have no return-type fit, and route helpers are already RBS-expressible.
-
-### Plugin authoring DX
-
-5. ✅ **`spec/integration/examples/support/plugin_helpers.rb` accepts `signature_paths:` keyword.** Lets a plugin integration spec materialise an RBS sig file under the per-test tmpdir and thread its directory through `Configuration#signature_paths`. The new narrowing tests use this to provide minimal sigs for user-defined classes (`User` for `rigor-activerecord`, the `Distance / Time / Speed` family for `rigor-units`) so `call.undefined-method` can fire on them — the rule's `rbs_class_known?` gate would otherwise silence the diagnostic.
-
-### Track 2 — Engine depth follow-up
-
-6. ✅ **Interface-strictness on overload selection** — landed unreleased. `OverloadSelector` now runs a two-pass match: pass 1 considers only overloads whose param types stay strictly typed (no `RBS::Types::Alias` / `Interface` / `Intersection` / `Bases::Any`-translated `Dynamic[Top]`), pass 2 falls back to the existing gradual matcher. The strict pass is also skipped when any arg is itself `Dynamic[Top]` (literal `untyped`) so gradual acceptance against an untyped arg doesn't arbitrarily lock in a strict overload. Closes the v0.1.1 self-analysis miss (`Array[String]#[](Range)` now returns `Array[String]?` via the `(::Range[::Integer?]) -> ::Array[Elem]?` overload instead of `String` via the `(::int) -> Elem` alias-typed overload that previously won by coming first); the `# rigor:disable call.undefined-method` workaround at `tool/extract_builtin_catalog.rb:750` is removed.
-
-7. ✅ **`def.ivar-write-mismatch` rule** — landed unreleased. New `Analysis::CheckRules::IvarWriteCollector` walks every class / module body and gathers per-class instance-method `@var = ...` writes with their rvalue types. The rule emits when a later write's concrete class (Nominal / Singleton / Constant / Tuple → "Array" / HashShape → "Hash") disagrees with the first write's. `NilClass` is allowlisted for the intentional `@cache = nil`-to-clear idiom; Union / Dynamic / IntegerRange / shape-varied carriers fall through. Authored `:error`; severity profile entries: `:warning` (lenient and balanced), `:error` (strict).
-
-9. ✅ **`def.method-visibility-mismatch` rule** — landed unreleased. New `Scope#discovered_method_visibilities` table populated by `Inference::ScopeIndexer` from the surrounding class body; modifier blocks (`private` / `protected` / `public` with no args switch the running default for subsequent `def`s) and the named-argument form (`private :foo, :bar` back-patches specific names) both feed the table. The CheckRule fires when an explicit-receiver `Prism::CallNode` targets a `Nominal[X]` whose `discovered_method_visibilities[X][name] == :private`. Implicit-self calls and `self.foo` are skipped (Ruby 2.7+ permits `self.private_method`). Authored `:error`; severity profile entries: `:warning` (lenient), `:error` (balanced and strict). The `:protected` arm and the RBS-known-class surface are intentionally deferred (subclass tracking / per-call-site triage needed).
-
-10. ✅ **`flow.unreachable-branch` rule** — landed unreleased. Fires when an `if` / `unless` / ternary's predicate is a syntactic literal (`true` / `false` / `nil` / Integer / Float / String / Symbol / Regexp) AND the corresponding dead branch is non-empty. Points at the dead branch's location. Authored `:warning`; `severity_profile` table re-stamps to `:info` (lenient) / `:warning` (balanced) / `:error` (strict). The literal-only envelope is deliberate v0.1.2 conservatism — inferred-constant predicates (defensive `Module#name.nil?` checks against anonymous-class nil that the RBS `Module#name -> String` sig hides; accumulator `arr.empty?` patterns whose `<<` mutation Rigor doesn't widen) would surface false positives until the loop / mutation / RBS-strictness modelling improves. Broadening is queued for a later v0.1.x release.
-
-11. ✅ **`Data.define` / `Struct.new` block-body method discovery** — landed unreleased. `ScopeIndexer.walk_methods` and `walk_def_nodes` now recurse into the block body of a `Const = Data.define(*sym) do ... end` / `Const = Struct.new(*sym) do ... end` write with `Const`'s qualified name pushed onto the prefix. Block-body `def initialize(...)` and any other override defs are registered under the constant's name in both `discovered_methods` and `discovered_def_nodes`, so a `Point.new` whose `Point` constant is RBS-known no longer surfaces a false-positive `call.undefined-method` for block-defined accessors. Closes the v0.0.5 follow-up "override-aware initializer-signature dispatch (using the block's `def initialize(...)` as the canonical sig)".
-
-12. ✅ **`rigor explain <rule>` CLI command** — landed unreleased. New `Rigor::Analysis::RuleCatalog` is the single-source-of-truth metadata table (summary / fires-when / does-not-fire-when / suppression / authored severity / severity-by-profile / since-version per rule). `Rigor::CLI::ExplainCommand` resolves canonical / legacy-alias / family-wildcard tokens through `RuleCatalog.resolve` and renders `text` (default) or `json` (`--format=json`) output. Without arguments prints an index of every rule. Closes the DX-tooling track item "rigor explain <rule>".
-
-13. ✅ **`# rigor:disable-file <rule>` file-scope suppression** — landed unreleased. Extends `Analysis::CheckRules.parse_suppression_comments` with a separate `FILE_SUPPRESSION_PATTERN`; the file-scope set composes with the existing per-line set in `filter_suppressed`. Anywhere-in-file placement works (no top-of-file requirement). `# rigor:disable-file all` suppresses every rule; family wildcards and legacy unprefixed names follow the same expansion rules as the line-scope form. Closes the DX-tooling track item "`# rigor:disable-file <rule>`".
-
-14. ✅ **`rigor diff <baseline.json>` CLI command** — landed unreleased. New `Rigor::CLI::DiffCommand` compares current `rigor check` diagnostics against a saved baseline JSON and prints the new / fixed delta. Identity for matching is `(path, line, column, rule, source_family, message)`. Two modes: default runs `rigor check` for the current side; `--current=<path>` compares two saved JSON files without invoking the analyzer. `--format=json` for editor / dashboard consumption. Exit code `1` when new diagnostics appear, `0` otherwise — CI fails on regressions but tolerates baseline-recorded legacy diagnostics. Closes the DX-tooling track item "rigor diff <baseline>".
-
-15. ✅ **`schemas/rigor-config.schema.json` — JSON Schema for `.rigor.yml`** — landed unreleased. JSON Schema 2020-12 descriptor for every key the loader recognises plus the load-time `includes:` directive. Constants are sourced from `Configuration::DEFAULTS`, `SeverityProfile::VALID_PROFILES`, `SeverityProfile::VALID_SEVERITIES`, and the plugin-entry coercion rules; a spec pins the schema-vs-loader contract so the two cannot drift apart silently. The committed `.rigor.dist.yml` carries the `# yaml-language-server: $schema=...` magic comment (relative path); `rigor init` writes the same comment with an absolute GitHub URL. Closes the DX-tooling track item ".rigor.yml JSON schema for editor autocomplete".
-
-16. ✅ **`flow.dead-assignment` rule** — landed unreleased. New `Analysis::CheckRules::DeadAssignmentCollector` walks every `DefNode` body and finds plain `LocalVariableWriteNode`s whose target name is never read in the same body. Conservative envelope: top-level / class-body assignments, names starting with `_`, operator- / and- / or-writes, `MultiWriteNode` destructures, and the trailing assignment of a body (Ruby's implicit return) all bypass the rule. Reads count from the entire def subtree, including nested blocks. Authored `:warning`; severity profile entries: `:info` (lenient), `:warning` (balanced), `:error` (strict). Closes the v0.1.1 "Out of scope" `flow.dead-assignment` item.
-
-17. ✅ **`Plugin::IoBoundary#open_url` allowlist** — landed unreleased. v0.1.0 shipped `#open_url` as an always-deny stub. v0.1.2 lifts the gate behind a host allowlist: `TrustPolicy` accepts `network_policy: :allowlist` plus an `allowed_url_hosts:` array; `IoBoundary#open_url` performs a GET-only HTTPS fetch when `policy.allow_url?(url)` returns true (HTTPS scheme + exact-match hostname). Caps: 10 s timeout, 10 MB body. The fetcher is dependency-injected via `http_client:` so specs run without the network. Successful fetches record a `Cache::Descriptor::ConfigEntry` keyed `"url:<url>"` with the body's SHA-256. Configuration / JSON schema gain `plugins_io.allowed_url_hosts:` and the `allowlist` value on `plugins_io.network`. Wildcard hostnames are intentionally deferred. Closes the v0.1.1 "Out of scope" `Plugin::IoBoundary#open_url` allowlist item.
-
-18. ✅ **`flow.always-truthy-condition` rule** — landed unreleased. Inferred-constant counterpart to the literal-only `flow.unreachable-branch`. Two surgical skips bring the inferred case in without resurfacing the false positives that prompted v0.1.2's first-cut conservatism: (1) predicate inside a `WhileNode` / `UntilNode` / `ForNode` / `BlockNode` ancestor (mutation tracking through loop bodies is incomplete), (2) defensive predicate calls (`.nil?` / `.empty?` / `.zero?` / `.any?` / `.none?` / `.all?` / `.respond_to?` — these typically fire when the user is being more cautious than the RBS strict-on-returns sig admits). Diagnostic points at the predicate (the user's claim) rather than the dead branch (which `flow.unreachable-branch` already covers). Authored `:warning`; severity profile entries: `:info` (lenient), `:warning` (balanced), `:error` (strict). New `Analysis::CheckRules::AlwaysTruthyConditionCollector` does the work. Closes the v0.1.1 "Out of scope" `flow.always-truthy-condition` item.
-
-19. ✅ **`def.return-type-mismatch` honours `%a{rigor:v1:return: <refinement>}`** — landed unreleased. `Analysis::CheckRules.declared_return_type` now consults `RbsExtended.read_return_type_override(method_def)` and prefers the refinement carrier (`non-empty-string`, `positive-int`, `non-empty-array[Integer]`, etc.) over the bare RBS-declared return type. The acceptance check fires when the body's inferred type fails the refinement even if the underlying RBS class would have accepted it. Closes the v0.1.1 "Out of scope" `def.return-type-mismatch` for type-carrier predicates item.
-
-20. ✅ **C-body classifier `_modify` / `_modifiable` naming-convention seed** — landed unreleased. The v0.0.5 mutator-helper recogniser only caught bodies that were exactly `{ rb_check_frozen(arg); }`. v0.1.2 extends the seed to also pick up functions whose name matches the `_modify` / `_modifiable` convention AND whose body issues a `rb_check_frozen` / `rb_check_lockedtmp` call. Catches `str_modifiable`, `rb_struct_modify`, `range_modify`, `rb_class_modify_check`, etc. — gates the strict regex missed. Catalog regen flips `String#replace`, `String#initialize_copy`, `String#chomp!`, `String#delete_suffix!`, `String#force_encoding`, `Range#initialize`, `Range#initialize_copy` to `mutates_self`. A transitive-closure-on-first-arg-formal-param approach was explored but reverted — it false-positived on functions where the first arg is a formal yet the helper doesn't actually mutate that arg (`rb_ary_reject` → `ary_reject` iterates without mutating). Per-class blocklists in `*_catalog.rb` still absorb the remaining cases. Closes the long-standing "C-body classifier indirect mutators" deferred item from `docs/CURRENT_WORK.md`.
-
-### Out of scope for v0.1.2 (deferred to v0.1.3 or beyond)
-
-The full "Out of scope for v0.1.1" list above applies (minus the now-closed interface-strictness and `Data.define` items) — new `flow.*` / `def.*` rule families, `Plugin::IoBoundary#open_url`, `rigor:v1:conforms-to`, DX tooling track, LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT.
-
-**New deferred item (queued; not yet committed to a release):**
-
-- **Opt-in dependency-source inference.** Walk the Ruby implementation of opt-in gems (those with no RBS / RBS::Inline) instead of degrading to `Dynamic[top]` at the dependency boundary. Design fixed in [ADR-10](adr/10-dependency-source-inference.md): `dependencies.source_inference` config axis, `Dynamic[T]`-wrapped returns, dispatcher tier strictly below plugins, per-gem budget pools, per-gem-version cache slice via new `Cache::Descriptor::DependencyEntry`. Five implementation slices (config plumbing → walker → cache descriptor → per-gem budget → docs). Earliest target v0.1.3, but not committed there; entry depends on the v0.1.x core branch's bandwidth after the Rails plugin parallel track stabilises.
-- **`rigor-sorbet` plugin adapter (ecosystem plugin track).** Read Sorbet `sig { ... }` blocks, `T.let` / `T.cast` / `T.must` / `T.bind` / `T.absurd`, and RBI files as type sources. Plugin-side translation at the Sorbet → Rigor boundary; core stays RBS-canonical per ADR-0 / ADR-1. Runtime enforcement remains `sorbet-runtime`'s job (Rigor doesn't execute application code). Design fixed in [ADR-11](adr/11-sorbet-input-adapter.md). Seven implementation slices (`sig` parser → `T.*` flow primitives → type vocabulary translator → RBI walker → sigil honoring + tier ordering → `T.absurd` exhaustiveness → docs). Lives under `examples/rigor-sorbet/` until the contract stabilises, then extracts via `git subtree split`. Sits parallel to the Rails plugin track; not committed to a specific release.
-
-## v0.1.3 — absorbed into v0.1.4 release (2026-05-14)
-
-The v0.1.3 envelope was published as **v0.1.4** (the v0.1.3 cycle absorbed several extra tracks before cut). See the v0.1.4 § below for the released summary; the original v0.1.3 commitment envelope is preserved here for traceability.
-
-Theme: **deliver ADR-10 end-to-end, absorb ADR-11 + Rails Tier 2 work, land ADR-13 (plugin TypeNode resolver + TS-utility-type adapter), close the ADR-14 sig-gen self-dogfood gaps, finish ADR-11's per-call-site assertion gating, and close the literal-token follow-up the ADR-13 slice-6 integration spec needed to work around.** v0.1.2 closed the Engine-depth follow-up sweep and migrated four example plugins to the v0.1.1 `flow_contribution_for` substrate; v0.1.3 turns to the queued ADR work, the Rails plugin family that depends on the cross-plugin API, the type-language vocabulary extension surface, the residual self-dogfood gaps, and the parser-side literal-token gap.
-
-### Track 1 — ADR-10 (Opt-in dependency-source inference)
-
-ADR-10's five-slice implementation envelope plus four "Open questions" follow-ups:
-
-1. ✅ **Slice 1 (Configuration plumbing)** — `Configuration::Dependencies` value object + `Entry(gem:, mode:, roots:)` + `.rigor.yml` `dependencies.source_inference[]` section + JSON schema.
-2. ✅ **Slice 2 (Resolver + walker + dispatcher tier)** — `GemResolver`, `Walker.walk`, `Index#contribution_for`, `MethodDispatcher.try_dependency_source`. New tier strictly below plugins / RBS, returning `Dynamic[top]` on hits.
-3. ✅ **Slice 3 (Cache descriptor)** — `Cache::Descriptor::DependencyEntry(gem_name:, gem_version:, mode:)` + new `dependencies:` slot + per-gem-version invalidation primitive via `Index#cache_descriptor`.
-4. ✅ **Slice 4 (per-gem budget)** — `dependencies.budget_per_gem` (default 5000, range 1250..20000); `Walker.walk(budget:)` returns `Outcome(catalog:, truncated:)`; `dynamic.dependency-source.budget-exceeded` `:warning` once per tripped gem.
-5. ✅ **Slice 5 (documentation)** — `docs/internal-spec/dependency-source-inference.md` normative spec.
-6. ✅ **5a (per-receiver plugin veto)** — `manifest(owns_receivers:)` declaration; subclass-aware via `Environment#class_ordering`.
-7. ✅ **5b (β budget semantics)** — opt-in `dependencies.budget_overrun_strategy: dependency_silence` returns `Dynamic[top]` on catalog misses for budget-exceeded gems via `Index#class_to_gem` reverse lookup. Default stays `:walker_cap`.
-8. ✅ **5c (boundary-cross diagnostic)** — `Index#mode_for(class_name)` / `#full_mode?(class_name)` exposes per-class mode awareness; `MethodDispatcher.dispatch` records a `dynamic.dependency-source.boundary-cross` `:info` event through the new `Environment#boundary_cross_reporter` whenever RBS resolves to a non-`Dynamic[Top]` carrier AND a `mode: :full` opt-in gem's source catalog contains the same `(class_name, method_name)`. RBS still wins on dispatch. Reporter dedupes per `(class_name, method_name, gem_name)`. Runner drains at end-of-run.
-9. ✅ **5d (config-conflict diagnostic)** — `dynamic.dependency-source.config-conflict` `:warning` on `includes:`-chain mode disagreements; per-gem dedupe with later-wins + roots union.
-
-### Track 2 — ADR-11 (rigor-sorbet plugin)
-
-The full plugin lives under `examples/rigor-sorbet/`. ADR-11 slices 1–6 + 8 plus light follow-ups:
-
-1. ✅ **Slice 1** — sig parser, vocabulary translation (`Nominal` / `T.untyped` / `T.nilable` / `T.any` / `T::Boolean` / etc.).
-2. ✅ **Slice 2** — `T.let` / `T.cast` / `T.must` / `T.unsafe` recognisers.
-3. ✅ **Slice 3** — widened type vocabulary (`T::Array[E]`, `T::Hash[K, V]`, `T.class_of(C)`, tuple / shape literals in sig position).
-4. ✅ **Slice 4** — RBI tree walker (`sorbet/rbi/**/*.rbi`).
-5. ✅ **Slice 5** — `# typed:` sigil detection at catalog harvest.
-6. ✅ **Slice 6** — `T.absurd(x)` exhaustiveness composition with `flow.unreachable-branch`.
-7. ✅ **Slice 7** — handbook chapter 10 + plugin README.
-8. ✅ **Slice 8** — Tapioca DSL mixin chain resolution.
-9. ✅ **Light follow-ups** — `T.must_because` (alias of `T.must`), `T.reveal_type` (info diagnostic), `T.assert_type!` (return + subtype check), `T.bind(self, T)` (block-scope self narrowing via `post_return_facts(target_kind: :self)`).
-10. ✅ **`enforce_sigil` per-file gating** — default `true`; `# typed: false` / sigil-less files have sigs harvested but not contributed; assertion recognisers (the `T.let` / `T.cast` family) stay live regardless of sigil.
-
-### Track 3 — Cross-plugin substrate (ADR-7 § "Slice 4-A" closure)
-
-`Inference::StatementEvaluator#apply_plugin_assertions` wires plugin-side `truthy_facts` / `falsey_facts` / `post_return_facts` through the narrowing engine. This is the substrate T.bind uses, AND the substrate PHPStan-style Type-Specifying Extensions need — call-shape recognition that narrows argument variables / self after the call returns is now authorable from any Rigor plugin without engine changes. Closes ADR-7 § "Slice 4-A" 's plugin half.
-
-Handbook chapter 7 gains a `@phpstan-assert` correspondence table mapping each PHPStan PHPDoc annotation to its `RBS::Extended` directive equivalent (`%a{rigor:v1:assert: x is T}` ⇄ `@phpstan-assert T $x` etc.).
-
-### Track 4 — Rails ecosystem plugins (Tier 2)
-
-- ✅ **`rigor-actionpack`** — Phase 4 (route helpers via the `:helper_table` ADR-9 fact from `rigor-rails-routes`) + Phase 2 (filter chains + parent-class one-level inheritance lookup) + Phase 3 (render targets `render :action` / `render partial:` against `view_search_paths`) + Phase 1 (strong parameters `params.require(:user).permit(:name)` against the `:model_index` ADR-9 fact from `rigor-activerecord`).
-- ✅ **`rigor-factorybot`** — Phase 1 (a) self-contained factory + attribute key validation; Phase 1 (c) AR column cross-check via the `:model_index` ADR-9 fact.
-- ✅ **`rigor-activerecord`** — `manifest(produces: [:model_index])` + `prepare(services)` hook publishes the per-run model index. First publish-and-consume cycle exercising ADR-9 end-to-end with two consumers (`rigor-actionpack` Phase 1 + `rigor-factorybot` Phase 1 (c)).
-
-### Track 5 — ADR-13 (Plugin TypeNode resolver + TS-utility-type adapter)
-
-ADR-13 lands the `Plugin::TypeNodeResolver` extension point, five Rigor-canonical shape-projection type functions on `Type::Combinator`, and the opt-in `rigor-typescript-utility-types` example plugin. All eight slices landed.
-
-1. ✅ **Slice 1** — `Rigor::TypeNode::Identifier(name:)` / `Generic(head:, args:)` value-object AST. Drift snapshots pinned.
-2. ✅ **Slice 2** — `Rigor::Plugin::TypeNodeResolver` base class, `Plugin::Manifest#type_node_resolvers` optional keyword, `Plugin::Registry#type_node_resolvers` aggregator (registration order; first non-nil wins per ADR-13 WD3 / WD5).
-3. ✅ **Slice 3** — Parser refactor from inline scan+resolve into "scan to AST" + sibling `Resolver` pass. New AST nodes `IntegerLiteral` / `IndexedAccess`, scope companions `NameScope(resolver:, class_context:, type_alias_table:)` + `ResolverChain`. `ImportedRefinements.parse(payload, name_scope: nil)` accepts the optional scope; `nil` (default) preserves slice-2 behaviour bit-for-bit.
-4. ✅ **Slice 4** — phase A: `Type::Combinator.pick_of` / `omit_of` / `partial_of` / `required_of` / `readonly_of` on `HashShape`. `PARAMETERISED_TYPE_BUILDERS` grows the five new heads. `partial_of` does NOT widen value types to nil — Rigor's HashShape distinguishes "key absent" from "key present with nil value".
-5. ✅ **Slice 5** — phase B: Tuple support for `pick_of` / `omit_of` (integer-index `K`); `shape_projection_lossy?(type)` predicate (`true` for non-HashShape / non-Tuple inputs); `partial_of` / `required_of` / `readonly_of` stay HashShape-only on Tuple (no native required/optional/readonly carrier).
-6. ✅ **Slice 6** — `examples/rigor-typescript-utility-types/` plugin maps `Pick` / `Omit` / `Partial` / `Required` / `Readonly` onto the core functions. Resolver scope-handle fix landed alongside: `NameScope#resolver` now points at the full `Resolver` (built-in registry → chain → RBS Nominal fallback), so plugin authors recursively resolve sub-args via `scope.resolver.resolve(arg, scope)` without re-implementing name resolution.
-7. ✅ **Slice 3b** — Caller-side threading from `RbsExtended` (`resolve_directive_rhs` / `parse_*_annotation` / every `read_*` reader) + new `Rigor::RbsExtended::Reporter` per-run accumulator. `Environment` exposes `name_scope` (built from `plugin_registry.type_node_resolvers` via `TypeNode::ResolverChain` + `NameScope`) and `rbs_extended_reporter`. The seven analyzer-surface call sites (`Analysis::CheckRules` × 2, `Inference::StatementEvaluator` / `Narrowing` / `MethodParameterBinder` / `MethodDispatcher::OverloadSelector` / `MethodDispatcher::RbsDispatch`) pass `environment:`. Runner drains the reporter at end-of-run into `dynamic.rbs-extended.unresolved` (whole-payload resolution failure) and `dynamic.shape.lossy-projection` (consults `shape_projection_lossy?` at projection-authoring sites in the parser's Resolver) `:info` diagnostics; severity profile re-stamps both.
-8. ✅ **Slice 7** — handbook TypeScript appendix update. The five mapped-type rows for `Readonly` / `Partial` / `Required` / `Pick` / `Omit` in [`docs/handbook/appendix-typescript.md`](handbook/appendix-typescript.md) now name the opt-in `rigor-typescript-utility-types` plugin alongside the matching core type functions (`readonly_of` / `partial_of` / `required_of` / `pick_of` / `omit_of`); the migration vignette gains a sibling RBS snippet showing the plugin-supplied `%a{rigor:v1:return: Pick[T, K]}` annotation.
-
-### Track 7 — rigor-sorbet per-call-site assertion gating
-
-Closes the last ADR-11 deferred item. New `Rigor::Scope#source_path` slot is set once per file in `Analysis::Runner#analyze_file` and propagated through every `with_*` rebuild + `build_joined_scope`. `rigor-sorbet` caches the per-file sigil during catalog harvest (`@sigil_by_path`); `flow_contribution_for` gates the assertion-recogniser path via `assertion_enforced_here?(scope)` so `T.let` / `T.cast` / `T.must` / `T.bind` / `T.assert_type!` / `T.reveal_type` only fire in files Sorbet itself would enforce. `enforce_sigil: false` opens the gate everywhere for backwards compat.
-
-### Track 8 — RBS::Extended Symbol / String literal tokens
-
-Closes the `docs/CURRENT_WORK.md` engineering item that ADR-13 slice 6's integration spec worked around with synthetic AST. Three new `TypeNode` AST nodes (`SymbolLiteral` / `StringLiteral` / `Union`) + `ImportedRefinements::Parser` recognises `:name` / `"name"` at type-arg position + literal-union folding via `|`. `pick_of[T, :a | :b]` / `Pick[T, "a" | "b"]` now round-trip end-to-end through `ImportedRefinements.parse`; the resolver translates literals to `Type::Constant<value>` and unions via `Type::Combinator.union`.
-
-### Track 6 — ADR-14 sig-gen self-dogfood gap closure
-
-The third-round `lib/rigor/analysis/` self-dogfood (`343a475`) surfaced four interacting gaps (a) – (e). Gaps (a) / (b) landed in `b6d3286`; gaps (c) / (d) / (e) close this track.
-
-1. ✅ **Gap (c) — Nested-class-inside-class emission.** `Writer#render_new_file` builds a namespace tree keyed by qualified-name segments (with intermediate ancestors inserted automatically) instead of `group_by(&:class_name)`. Strict-prefix child classes nest inside their parent's block: `Rigor::Analysis::DependencySourceInference::GemResolver::Resolved` and `GemResolver`'s own methods now share one `module GemResolver` block.
-2. ✅ **Gap (d) — `&:symbol` block-pass dispatcher recognition.** `Inference::ExpressionTyper#block_return_for` dispatches the symbol on the expected block param type when the call carries `Prism::BlockArgumentNode(SymbolNode)`. Falls back to `Dynamic[Top]` when the inner dispatch declines so the outer overload selector still sees a block. `Hash#transform_values(&:freeze)` now routes through the block-bearing overload (returns `Hash[K, V]`) instead of the no-block one (returned `Enumerator[V, Hash[K, untyped]]`).
-3. ✅ **Gap (e) — `Const = Data.define(...)` / `Struct.new(...)` recognition.** `Generator#walk_defs` recognises `Prism::ConstantWriteNode` whose RHS is `Data.define` / `Struct.new`, records the fully-qualified name in `@class_shells` (carried via the new `MethodCandidate#class_shells` slot) and `@namespace_kinds`. The writer renders an empty `class Foo\nend` block at the correct nested position in `create_new`; `Writer#merge_class_shells` injects missing shells into the nearest existing ancestor in `update_existing`. The hand-stub `class Unresolvable; end` in `sig/rigor/analysis/dependency_source_inference/gem_resolver.rbs` is no longer required.
-
-### Out of scope for v0.1.3 (deferred to v0.1.4 or beyond)
-- **Per-call return-type precision from gem source** — the walker still catalogs only `(class_name, method_name) → kind` triples. Inferring per-method return types from gem source (so `mode: :full` could contribute richer than `Dynamic[Top]`) is a larger walker enhancement deferred until concrete user demand surfaces.
-- **Tier 3 plugins remaining**: `rigor-graphql`, `rigor-activestorage`. Author when there is concrete user demand. **(`rigor-activestorage` closed in v0.1.5 cycle.)**
-- **rigor-activerecord extensions**: associations, enums, scopes, validations, callbacks. Each ships as a 0.2.0+ minor bump per the roadmap. **(Closed in v0.1.5 cycle.)**
-- **dry-rb ecosystem plugins** ([`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md)) — packaging strategy (single gem vs. family vs. mid-grain bundles) needs an explicit ADR-12 decision before any individual plugin can be authored.
-- All earlier "Out of scope" items from v0.1.1 / v0.1.2 still apply: LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT, `rigor:v1:conforms-to`.
-
-## v0.1.4 — Released 2026-05-14
-
-Theme: **finish the ADR-10 / ADR-11 / ADR-13 deferred queues, land ADR-14 `rigor sig-gen` end-to-end, and add the `Type::BoundMethod` carrier so `Object#method(:sym).call` round-trips with precision**. The v0.1.3 commitment envelope (above) was published as v0.1.4 because the cycle absorbed several extra tracks before cut.
-
-Slice-by-slice recap lives in `CHANGELOG.md` § `[0.1.4]`. Headline tracks:
-
-- **ADR-10 every "Open questions" follow-up closed** — 5a per-receiver plugin veto, 5b β budget semantics, 5c boundary-cross diagnostic under `mode: :full`, 5d config-conflict diagnostic.
-- **ADR-11 (rigor-sorbet) per-call-site assertion gating closed** — completes the slice 7 follow-up. `Rigor::Scope#source_path` propagates the per-file path so the plugin's `assertion_enforced_here?` can gate `T.let` / `T.cast` / `T.must` / `T.bind` / `T.assert_type!` / `T.reveal_type` on the file's Sorbet `# typed:` sigil. `enforce_sigil: false` keeps the legacy "always-on" path.
-- **ADR-13 literal-token gap closed** — RBS::Extended parser admits `:sym` / `"str"` Symbol-and-String literal tokens at type-arg position plus `|`-unions; `pick_of[T, :a | :b]` / `Pick[T, "a" | "b"]` round-trip end-to-end.
-- **ADR-14 `rigor sig-gen` end-to-end** — all five slices plus four rounds of self-dogfood follow-ups (kind-aware namespace emission, `module_function` recognition, nested-class layout, `&:symbol` block-pass dispatch, `Const = Data.define(...)` / `Struct.new(...)` discovery). Clean `make verify` against rigor's own `sig/` after sig-gen self-dogfood.
-- **`Type::BoundMethod` carrier** — `Object#method(:sym).call` round-trips with full precision through the forward-fold / backward-fold pair in `MethodFolding`. `[:to_i, :to_f, :to_sym].map { |m| "1".method(m).call }` infers to `Tuple[Constant<1>, Constant<1.0>, Constant<:"1">]`.
-- **Eighteen worked plugin examples land under `examples/`** (Rails Tier 1 + Tier 2 + Tier 3 + `rigor-sorbet` + `rigor-typescript-utility-types`).
-- **Lint-side rubocop calibration** — `.rubocop.yml` Maxes calibrated against the working code so ~310 in-file `# rubocop:disable` markers dropped to ~157.
+# Rigor Roadmap
+
+Forward-looking commitments: what's actively in flight, what's
+planned next, what's deliberately out of scope.
+
+This file is **planning material**, not a release log. For the
+"what shipped" record, see [`CHANGELOG.md`](../CHANGELOG.md)
+(active `0.1.x` cycle) and
+[`docs/CHANGELOG-0.0.x.md`](CHANGELOG-0.0.x.md) (archived `0.0.x`).
+
+When this file disagrees with an ADR or spec, the ADR / spec
+binds and this file is out of date.
+
+## Released milestones (pointers only)
+
+Full release notes live in `CHANGELOG.md`; the planning envelopes
+that shaped each cut are preserved in git history (see
+`docs/MILESTONES.md` at the commit that renamed it to `ROADMAP.md`).
+
+| Version | Released | Theme |
+| --- | --- | --- |
+| v0.0.3 — v0.0.9 | 2026-05-02 → 2026-05-05 | Type vocabulary, inference engine, persistent cache. See [`docs/CHANGELOG-0.0.x.md`](CHANGELOG-0.0.x.md). |
+| v0.1.0 | 2026-05-07 | First plugin contract (six slices); seven worked examples. See `CHANGELOG.md` § `[0.1.0]`. |
+| v0.1.1 | 2026-05-08 | Literal-string narrowing depth, cross-plugin API, plugin authoring DX. See `CHANGELOG.md` § `[0.1.1]`. |
+| v0.1.2 | 2026-05-09 | Example plugin return-type migration, engine depth follow-up. See `CHANGELOG.md` § `[0.1.2]`. |
+| v0.1.4 | 2026-05-14 | ADR-10 / ADR-11 / ADR-13 deferred queues, ADR-14 `rigor sig-gen` end-to-end, `Type::BoundMethod` carrier, eighteen worked plugin examples. (The v0.1.3 commitment envelope absorbed extra tracks before cut and shipped as v0.1.4.) See `CHANGELOG.md` § `[0.1.4]`. |
 
 ## v0.1.5 — accumulating on `master` (release pending)
 
-Theme: **kick off the [ADR-15](adr/15-ractor-concurrency.md) Ractor migration end-to-end, bank the spec-suite performance wins (6× wall-clock), close the v0.1.3/v0.1.4 deferred-queue ecosystem items, and prove out the analyzer against fourteen real-world Rails / Ruby projects — driving production-rigor improvements (built-in vendored gem RBS, target-project Bundler awareness, several engine fixes).**
+Theme: **kick off the [ADR-15](adr/15-ractor-concurrency.md) Ractor migration end-to-end, bank the spec-suite performance wins (6× wall-clock), close the v0.1.3 / v0.1.4 deferred-queue ecosystem items, and prove out the analyzer against fourteen real-world Rails / Ruby projects — driving production-rigor improvements (built-in vendored gem RBS, target-project Bundler awareness, several engine fixes).**
 
 Every committed v0.1.5 track is purely additive (no behaviour change for existing CLI consumers); the Ractor work is staged so each phase is independently revert-able.
 
@@ -446,9 +97,37 @@ Three rounds of project sweeps (recorded in [`docs/notes/20260515-real-world-rai
 ### Out of scope for v0.1.5
 
 - **O2** (macro template / heredoc-Ruby expansion) — large design, deferred.
-- **O4 Layer 3** (Gemfile.lock + gem_rbs_collection version matching) — queued.
+- **O4 Layer 3** (Gemfile.lock + gem_rbs_collection version matching) — queued for v0.1.6+ (no committed milestone).
 - **`rigor-graphql`** (Tier 3 plugin) — author when there is concrete user demand.
 - **dry-rb ecosystem plugins** — ADR-12 packaging decision pending.
+
+## Future cycles (not committed to a specific release)
+
+Items that have surfaced across v0.1.x work and that the next implementer benefits from seeing without re-reading the full thread.
+
+### Type-language / engine
+- **O2 — macro-template + heredoc-Ruby expansion.** Two related shapes: `.rb` files that are actually ERB-style code-generator templates (Rails generator output), and `class_eval <<~RUBY` heredoc-embedded Ruby. Both need parser-boundary changes that aren't a single-slice job. tDiary Core's `instance_eval`'d plugin files are the concrete motivating case (35 FP / file on legacy plugins).
+- **Lightweight HKT (higher-kinded types) in DSL signatures.** Replace `untyped` boundaries with type-level `eval` per the `docs/type-specification/rigor-extensions.md` conditional / indexed-access rows. First reference site is the rigor-lisp-eval demo. Exploratory, no committed milestone.
+- **`rigor:v1:conforms-to` directive.** Originally queued for v0.1.1's "Out of scope"; still open. Lets a method param accept any value satisfying a named structural interface.
+- **LRU eviction for `Cache::Store`.** Per [ADR-6](adr/6-cache-persistence-backend.md), the persistent cache is sharded "no eviction" by design. Long-lived clones with config / dependency churn accumulate stale slots that only `make cache-clean` releases. LRU is queued, not committed.
+
+### Plugins / ecosystem
+- **`rigor-graphql`** — last remaining Tier 3 plugin. GraphQL schema DSL parsing is non-trivial; author when there is concrete user demand.
+- **dry-rb adapter plugins** — packaging strategy (single gem vs family vs mid-grain bundles) needs an explicit ADR-12 decision before any individual plugin can be authored. Survey under [`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md).
+- **ADR-10 — per-call return-type precision from gem source.** Walker currently catalogs only `(class_name, method_name) → kind` triples. Inferring per-method return types from gem source (so `mode: :full` could contribute richer than `Dynamic[Top]`) is a larger walker enhancement deferred until concrete user demand surfaces.
+- **`rigor-sorbet` follow-ups beyond per-call-site sigil gating** — landed in v0.1.4. No outstanding queue items.
+
+### Performance / scalability
+- **O4 Layer 3 — `Gemfile.lock` parse + `gem_rbs_collection` version matching.** Sits on top of v0.1.5's `BundleSigDiscovery` MVP. The MVP's auto-skip list (`SKIPPED_GEMS_BY_DEFAULT`) becomes a versioned resolution table; rigor consumes `Bundler::LockfileParser` output + queries `ruby/gem_rbs_collection` for the best-matching version. Unblocked by O7's failure-memo (conflicts now warn rather than hang).
+- **Fork-based file-level parallelism for `rigor check`.** Stackprof of warm `rigor check lib` shows ~50% inference, ~22% `Marshal.load`, ~17% GC. The Phase 4b Ractor path is the v0.1.5 parallelism story; a fork-based path remains a parallel (non-exclusive) option for hosts where Ractors are unavailable or where COW sharing of pre-warmed `Environment` blobs would beat per-Ractor env build.
+- **In-memory `Analysis::Runner.run_source` entry point (test-only).** The `RunnerHelpers#analyze` test helper materialises a tmpdir per call. At ~25-50ms per call × hundreds of runner-spec calls, an in-memory entry point could shave ~5% sequential / ~3% parallel from the suite. Not worth doing standalone, but a natural complement if test-suite expansion continues.
+
+### Sig-gen (ADR-14)
+- **`update_existing` does not yet collapse sibling parent / child class blocks.** Gap (c)'s tree-builder fix lives in `Writer#render_new_file` (the create-new path). When updating an existing target file, `merge_class` resolves each candidate's `class_name` independently — flat-sibling layouts stay flat. Re-flowing an existing file into the nested layout would require parsing the existing decl tree and rewriting it, which is out of scope for a follow-up fix. Users who want the canonical nested layout regenerate from scratch (delete the target sig file and rerun).
+
+### Open research questions queued in ADRs
+- **ADR-15 § OQ1** — per-Ractor `Cache::Store`-shared facade. Today each worker builds its own RBS env from cache; OQ1 explores sharing the in-memory env across workers via a shareable facade. Would lower the pool wall-clock crossover with sequential (currently around 1.3–1.8 K files).
+- **ADR-13 § "Open questions"** — extending the shape-projection surface beyond the five core functions (`pick_of` / `omit_of` / `partial_of` / `required_of` / `readonly_of`). Authoritative when adding new mapped-type vocabulary.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 
@@ -467,4 +146,4 @@ The full roadmap is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/
 
 Each plugin is staged in `examples/rigor-<id>/` per the [`rigor-plugin-author`](../.codex/skills/rigor-plugin-author/SKILL.md) SKILL discipline and extracted via `git subtree split` once its contract is stable. The eventual `rigor-rails` meta-gem will declare the Tier 1+2 plugins as gem dependencies so a single Gemfile line opts the user into the whole stack.
 
-[ADR-9](adr/9-cross-plugin-api.md) is queued for v0.1.x — Tier 1 does not block on it; Tier 2 does. Slicing per ADR-9 § "Implementation slicing" allows partial landings.
+[ADR-9](adr/9-cross-plugin-api.md) (cross-plugin API) landed in v0.1.4 via the `:helper_table` (rails-routes → actionpack) and `:model_index` (activerecord → actionpack + factorybot) publish-and-consume cycles. Slicing per ADR-9 § "Implementation slicing" allows partial landings.

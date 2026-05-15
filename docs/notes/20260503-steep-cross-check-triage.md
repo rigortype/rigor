@@ -243,7 +243,7 @@ nix develop --command make steep ARGS="check --severity-level=error"
 
 ## v0.1.1 リリース直前 follow-up (2026-05-08)
 
-A-1〜A-5 はすべて v0.1.x の Track 4 で着地済 (`docs/MILESTONES.md` v0.1.1
+A-1〜A-5 はすべて v0.1.x の Track 4 で着地済 (`docs/ROADMAP.md` v0.1.1
 Track 4 item 11 / 13 / 12 参照)。再走 (`make steep-check`) の結果を
 v0.1.1 リリース直前に再分類:
 

@@ -219,7 +219,7 @@ end
 (In a future release the truthy edge will narrow further to
 specific refinement carriers — `\d{4}` would produce
 `decimal-int-string`. Tracked under
-[`docs/MILESTONES.md`](../MILESTONES.md) § "v0.1.1 — Planned".)
+[`docs/ROADMAP.md`](../ROADMAP.md) § "v0.1.1 — Planned".)
 
 ## `!=` and `unless`
 

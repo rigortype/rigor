@@ -610,7 +610,7 @@ work:
   needing dry-system's container map). Strategy 1 sidesteps it;
   Strategies 2 and 3 are blocked on it for the cross-plugin handoffs.
 - **v0.1.1 regex → refinement-name recogniser**
-  (see [`docs/MILESTONES.md`](../MILESTONES.md))
+  (see [`docs/ROADMAP.md`](../ROADMAP.md))
   — slice 1 has landed unreleased. Once the full recogniser ships,
   dry-schema predicates like `gt?: 18` and `format?: /\A.../` map to
   built-in refinement names cleanly. Until then, predicate facts

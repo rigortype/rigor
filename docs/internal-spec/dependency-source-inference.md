@@ -11,7 +11,7 @@ on ADR-10 § "Open questions".
 The binding design surface is
 [ADR-10](../adr/10-dependency-source-inference.md); the
 release-by-release commitment envelope is in
-[`docs/MILESTONES.md`](../MILESTONES.md). When this spec
+[`docs/ROADMAP.md`](../ROADMAP.md). When this spec
 disagrees with ADR-10, the ADR binds and this document is out of
 date.
 

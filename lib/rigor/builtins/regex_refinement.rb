@@ -9,7 +9,7 @@ module Rigor
     # (`decimal-int-string`, `hex-int-string`, `octal-int-string`,
     # `lowercase-string`, `uppercase-string`, `numeric-string`).
     # See `docs/type-specification/imported-built-in-types.md` for
-    # the registry the refinements come from and `docs/MILESTONES.md`
+    # the registry the refinements come from and `docs/ROADMAP.md`
     # § "v0.1.1 — Planned" Track 1 slice 1 for the binding scope of
     # this recogniser.
     #

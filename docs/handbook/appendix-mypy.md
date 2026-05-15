@@ -340,7 +340,7 @@ def shout: (String s) -> non-empty-string
 You gain: `s.empty?` is a recognised refinement narrower (no
 need for `assert s`). `match?(/\A\d+\z/)` does not yet narrow
 to `numeric-string` (this is on the v0.1.1 roadmap — see
-[`docs/MILESTONES.md`](../MILESTONES.md)), but the eventual
+[`docs/ROADMAP.md`](../ROADMAP.md)), but the eventual
 behaviour will mirror `s.isdigit()` narrowing in Pyright.
 
 ## What's next

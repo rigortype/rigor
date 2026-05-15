@@ -181,6 +181,51 @@ The natural follow-up to the survey: can rigor analyse a project
 resolves to ActiveRecord's `where`, `Sidekiq::Worker#perform`
 matches Sidekiq's RBS, and so on?
 
+### Docker-based bundle install demonstration (Mastodon, 2026-05-15)
+
+Following up on the bundle-install hurdles, we ran a real `bundle install`
+of Mastodon inside `ruby:4.0.3-slim-trixie` (Docker). Worked end to end
+— apt deps installed (`libpq-dev`, `libidn-dev`, `libxml2-dev`,
+`libxslt-dev`, `libvips-dev`, `libjemalloc-dev`, `git`, etc.; one
+package rename: Trixie ships `libpcre2-dev`, not `libpcre3-dev`),
+Bundler 4.0.11 installed, and `bundle install --jobs=8` resolved
+all 343 gems and unpacked them under `/tmp/mastodon-bundle` (271 MB).
+
+**Critical finding: of the 343 installed gems, only 10 ship a
+`sig/` directory in their gem package (~3%).** The full list:
+
+```
+prism, aws-sdk-s3, aws-sdk-kms, aws-sdk-core,
+playwright-ruby-client, mutex_m, webrick, base64,
+stoplight, ffi
+```
+
+All of `pg`, `mysql2`, `nokogiri`, `bcrypt`, `redis`, `idn-ruby`,
+`actionpack`, `activerecord`, `activesupport`, `sidekiq`, `devise`,
+`pundit`, `kaminari`, `puma`, and the rest of the popular Rails /
+auth / cache / queue family ship NO `sig/` in their gem package.
+`gem_rbs_collection` is the de facto source of typed contracts for
+those gems.
+
+This data point reinforces the design decision behind commit
+`f9b94d2`: shipping vendored RBS for the half-dozen most-common
+native-extension gems inside rigor itself is the realistic
+"out-of-the-box" path. End users would otherwise need to wire
+`gem_rbs_collection` into their `signature_paths:` per-gem-version
+manually — and that wiring hits O7 (see below) anyway.
+
+**Open item O7 (RBS env-build cliff) is more severe than initially
+characterised.** Adding even ONE gem-shipped `sig/` directory
+(specifically: prism's sig, ~19 .rbs files) on top of rigor's own
+loaded sigs causes `RBS::Environment.from_loader` to hang for >5
+minutes (killed). The Diaspora 16-paths-cold experiment (11+ min)
+is the same symptom but at higher path count. Plausibly: prism's
+sig declares classes that overlap with rigor's pre-loaded prism
+RBS (rigor uses prism internally), and the resolver explodes on
+duplicate-class graph traversal. **Until O7 is fixed, the
+gem-shipped sig path is not usable** even when bundle install
+succeeds.
+
 ### Latest status (after vendored RBS landed in commit `f9b94d2`)
 
 Rigor now ships **built-in RBS stubs for six common native-extension
@@ -710,7 +755,7 @@ would close the project-private remainder.
 | O4 | partially explorable today | Target-project Bundler awareness (load gems' RBS from the analysed project's `Gemfile.lock`). See "Bundler-aware analysis" section below for what works today via `gem_rbs_collection` + `signature_paths:` and where the gaps are. |
 | O5 | landed (`ac14c45`) | `Hash <: Enumerable[[K, V]]` subtyping in the parameter binder. |
 | O6 | landed (`4698437`) | Pool vs sequential precision divergence at the constant-fold / RBS-dispatch boundary (Pathname). |
-| O7 | new (queued) | RBS env-build performance falls off a cliff when many gem RBS sigs are loaded together. The Diaspora "full" experiment with 16 `signature_paths:` entries (rigor + 15 gem_rbs_collection paths) cold-loaded for 11+ minutes before being killed; the same workload with 5 paths completes in 7-9 s (cold) / 1 s (warm). Likely a quadratic interaction in `RBS::Environment.from_loader` / `resolve_type_names`. Investigate before recommending end-users wire 10+ gems into `signature_paths:`. |
+| O7 | new (queued) | RBS env-build performance falls off a cliff when many gem RBS sigs are loaded together. The Diaspora "full" experiment with 16 `signature_paths:` entries (rigor + 15 gem_rbs_collection paths) cold-loaded for 11+ minutes before being killed; the same workload with 5 paths completes in 7-9 s (cold) / 1 s (warm). Likely a quadratic interaction in `RBS::Environment.from_loader` / `resolve_type_names`. **Update 2026-05-15 evening**: Mastodon Docker bundle-install experiment found the cliff is even more severe — adding ONE gem-shipped sig (prism, ~19 .rbs files) to a rigor analysis hangs env build for >5 minutes. Likely overlaps with rigor's pre-loaded prism RBS (rigor uses prism internally) trigger a duplicate-class resolver explosion. **Until O7 is fixed, the gem-shipped sig path is not usable for new bundles** even when bundle install itself succeeds. |
 
 ### Post-O1 quantitative impact
 

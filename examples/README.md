@@ -64,7 +64,7 @@ directories that the user wires into `.rigor.yml`'s `signature_paths:`.
 
 | Bundle | Scope | Coverage |
 | --- | --- | --- |
-| [`rigor-activesupport-core-ext`](rigor-activesupport-core-ext/) | Top ~40 ActiveSupport `core_ext` selectors that dominated the four-project Rails survey (`docs/notes/20260515-real-world-rails-survey.md`). | `Integer`/`Float` Duration & Bytes multipliers; `Time`/`Date` calculations; `String` inflections / filters; `Array.wrap` + `Array#to_sentence` / `#in_groups_of` etc.; `Hash#deep_dup` / `#deep_merge` / `#symbolize_keys` family; `Object#blank?` / `#present?` / `#presence` / `#try`. Measured impact: total diagnostics across the four survey projects 5,281 → 1,333 (−75%). |
+| [`rigor-activesupport-core-ext`](rigor-activesupport-core-ext/) | Top ~50 ActiveSupport `core_ext` selectors that dominated the nine-project Rails survey (`docs/notes/20260515-real-world-rails-survey.md`). | `Integer`/`Float` Duration & Bytes multipliers; `Time`/`Date`/`DateTime` calculations; `String` inflections / filters / `#exclude?`; `Array.wrap` + `Array#to_sentence` / `#in_groups_of` / `#compact_blank` / `#exclude?` / `Enumerable#index_with` / `#index_by` / `#pluck` / `#pick`; `Hash#deep_dup` / `#deep_merge` / `#symbolize_keys` family / `Hash.from_xml` / `#compact_blank` / `#reverse_merge`; `Object#blank?` / `#present?` / `#presence` / `#try`. Measured impact: total diagnostics across the nine survey projects 12,502 → 3,071 (−75%). |
 
 All twenty rely on **slice 5**
 (`Plugin::Base#diagnostics_for_file`) to surface

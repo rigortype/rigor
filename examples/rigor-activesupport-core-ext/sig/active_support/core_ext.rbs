@@ -326,6 +326,34 @@ class Array[unchecked out Elem]
 
   # `core_ext/array/extract`
   def extract!: () { (Elem) -> bool } -> Array[Elem]
+
+  # `core_ext/object/blank` / `core_ext/enumerable` — both
+  # ActiveSupport additions, shipped on Array specifically.
+  def compact_blank: () -> Array[Elem]
+  def compact_blank!: () -> self
+  def exclude?: (Elem) -> bool
+end
+
+# ---------------------------------------------------------------
+# Enumerable — `core_ext/enumerable`
+# ---------------------------------------------------------------
+
+module Enumerable[unchecked out Elem]
+  def index_by: () { (Elem) -> untyped } -> Hash[untyped, Elem]
+  def index_with: (?untyped default) { (Elem) -> untyped } -> Hash[Elem, untyped]
+                | (untyped default) -> Hash[Elem, untyped]
+  def exclude?: (Elem) -> bool
+  def including: (*Elem) -> Array[Elem]
+  def excluding: (*Elem) -> Array[Elem]
+  def without: (*Elem) -> Array[Elem]
+  def pluck: (Symbol | String) -> Array[untyped]
+           | (*Symbol | String) -> Array[Array[untyped]]
+  def pick: (Symbol | String) -> untyped
+          | (*Symbol | String) -> Array[untyped]?
+  def maximum: (Symbol | String) -> untyped
+  def minimum: (Symbol | String) -> untyped
+  def sole: () -> Elem
+  def compact_blank: () -> Array[Elem]
 end
 
 # ---------------------------------------------------------------
@@ -365,4 +393,53 @@ class Hash[unchecked out K, unchecked out V]
 
   # `core_ext/hash/indifferent_access`
   def with_indifferent_access: () -> untyped
+
+  # `core_ext/hash/conversions`
+  def self.from_xml: (String, ?Symbol disallowed_types) -> Hash[String, untyped]
+  def self.from_trusted_xml: (String) -> Hash[String, untyped]
+
+  # `core_ext/object/blank` / `core_ext/hash`
+  def compact_blank: () -> Hash[K, V]
+  def compact_blank!: () -> self
+
+  # `core_ext/hash/reverse_merge`
+  def reverse_merge: (Hash[K, V]) -> Hash[K, V]
+  def reverse_merge!: (Hash[K, V]) -> self
+
+  # `core_ext/hash/slice` — `Hash#except` is in core RBS (Ruby 3.0+);
+  # `Hash#slice` is in core RBS (Ruby 2.5+); the bang variants are
+  # ActiveSupport-only.
+  def slice!: (*K) -> Hash[K, V]
+end
+
+# ---------------------------------------------------------------
+# DateTime — `core_ext/date_time/*`
+# ---------------------------------------------------------------
+
+class DateTime
+  def utc: () -> Time
+  def to_time: () -> Time
+  def in_time_zone: (?String | Symbol zone) -> untyped
+  def yesterday: () -> DateTime
+  def tomorrow: () -> DateTime
+  def ago: (Numeric seconds) -> DateTime
+  def since: (Numeric seconds) -> DateTime
+  def beginning_of_day: () -> DateTime
+  def end_of_day: () -> DateTime
+  def beginning_of_hour: () -> DateTime
+  def end_of_hour: () -> DateTime
+  def beginning_of_minute: () -> DateTime
+  def end_of_minute: () -> DateTime
+  def acts_like_time?: () -> true
+end
+
+# ---------------------------------------------------------------
+# String — `core_ext/string/exclude` (an ActiveSupport addition)
+# ---------------------------------------------------------------
+
+# (Re-opens String to add `#exclude?`. Listed here rather than in the
+# main String block above because it's a less-common method whose
+# coverage was added after a second-round survey.)
+class String
+  def exclude?: (String) -> bool
 end

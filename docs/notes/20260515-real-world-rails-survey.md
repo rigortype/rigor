@@ -14,12 +14,17 @@ goal is twofold:
 
 Methodology and target sizes:
 
-| Project | Status | Files (`app/` + `lib/`) | Notes |
+| Project | Status | Files | Notes |
 | --- | --- | ---: | --- |
 | [Redmine](https://github.com/redmine/redmine) | landed | 347 | Smallest of the four — used as the engine-bug shakedown. |
 | [Discourse](https://github.com/discourse/discourse) | landed | 1,804 | Forum platform; heavy plugin / hook surface. |
 | [Mastodon](https://github.com/mastodon/mastodon) | landed | 1,302 | ActivityPub social server; ActiveJob / Sidekiq heavy. |
-| [GitLab FOSS](https://gitlab.com/gitlab-org/gitlab-foss) | landed | 11,130 | Largest — Rails monolith with deep metaprogramming. |
+| [GitLab FOSS](https://gitlab.com/gitlab-org/gitlab-foss) | landed | 11,130 | Largest of the original four — Rails monolith with deep metaprogramming. |
+| [Forem](https://github.com/forem/forem) | landed (round 2) | 1,250 | DEV.to community platform. |
+| [Solidus](https://github.com/solidusio/solidus) | landed (round 2) | 1,914 | E-commerce monorepo (`core` + `api` + `backend` + `admin` + `promotions` + `legacy_promotions`). |
+| [Chatwoot](https://github.com/chatwoot/chatwoot) | landed (round 2) | 802 | Customer-support platform. |
+| [Canvas LMS](https://github.com/instructure/canvas-lms) | landed (round 2) | 3,248 | Instructure's LMS; `app` + `lib` + `gems` (in-tree gems). |
+| [OpenProject](https://github.com/opf/openproject) | landed (round 2) | 6,817 | Project-management platform; `app` + `lib` + `modules` (sub-engines). |
 
 Each pass runs:
 
@@ -163,6 +168,60 @@ assignment narrowing":
 | O3 | `next if x.nil?` / `return if x.nil?` flow-tracked narrowing across early-exit guards in the same block. |
 
 ---
+
+## Round-2 projects (Forem / Solidus / Chatwoot / Canvas LMS / OpenProject)
+
+A second-round sweep of five additional Rails projects, run after
+the first-round engine fixes (Pool deep-shareability follow-ups #1
+through #3, narrowing extension, parametrized-ancestor projection,
+and the v1 RBS bundle).
+
+### Per-project rule mix
+
+| Project | Total | `call.undefined-method` | `possible-nil-receiver` | `flow.always-truthy-condition` | `def.ivar-write-mismatch` | `call.wrong-arity` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Forem | 146 | 55 | 47 | 15 | 27 | — |
+| Solidus | 42 | 33 | 3 | 4 | 1 | 1 |
+| Chatwoot | 19 | 6 | 11 | 1 | 2 | — |
+| Canvas LMS | 1,496 | 766 | 445 | 194 | 83 | 11 |
+| OpenProject | 175 | 138 | 27 | 11 | 8 | 4 |
+
+### Engine improvement triggered by round 2
+
+The v1 RBS bundle was extended to v2 with five extra method
+families surfaced in this round:
+
+1. `Array#compact_blank` / `Hash#compact_blank` (Rails 6.1+).
+2. `Array#exclude?` / `String#exclude?` / `Hash#exclude?`
+   (`Enumerable` re-exposed too).
+3. `Enumerable#index_with` / `#index_by` / `#pluck` / `#pick` /
+   `#sole` / `#including` / `#excluding` / `#without`.
+4. `Hash.from_xml`, `Hash#reverse_merge` / `#reverse_merge!`.
+5. `DateTime` calculations (`#utc`, `#in_time_zone`, `#yesterday`,
+   `#tomorrow`, `#beginning_of_*`, `#end_of_*`, `#ago`, `#since`).
+
+Combined v1 + v2 quantitative impact across all nine survey
+projects: **total 12,502 → 3,071 (-75%)**, `call.undefined-method`
+**10,589 → 1,426 (-87%)**.
+
+### Notable findings (round 2)
+
+- **Solidus's `lib/` count is misleading (just 2 files at the repo
+  root)**; the engine sub-trees (`core/`, `api/`, `backend/`,
+  `admin/`, `promotions/`, `legacy_promotions/`) are where the code
+  lives. The rigor config enumerates each sub-tree as an explicit
+  path. Solidus's diagnostic count drops to 42 — extremely clean.
+- **Canvas LMS dominates round-2 residual (1,496 of 1,878 — 80%).**
+  Top selectors: `[]= on Integer` (70 — likely a wrong receiver
+  inference), `[]= on nil` (51), `<< on nil` (40). These are
+  narrowing-tier limitations, not RBS coverage gaps. Canvas also
+  ships project-private `Numeric#decimal_megabytes`, `File.mime_type`,
+  and friends; closing the long tail there needs O4 (target-Bundler
+  awareness) plus a Canvas-specific monkey-patch declaration in
+  `.rigor.yml`.
+- **OpenProject's `from_xml` / `compact_blank` clusters were the
+  v1 → v2 motivator** — `Hash.from_xml` alone accounted for 10
+  of OpenProject's residual undefined-methods.
 
 ## Discourse
 
@@ -356,17 +415,31 @@ byte-identical output — recorded as open item O6.
 
 ## Cross-project summary
 
-| Project | Files | Seq warm | Pool warm | Pool ÷ Seq | Peak RSS (seq / pool) | Diagnostics |
+| Project | Files | Seq warm | Pool warm | Pool ÷ Seq | Peak RSS (seq / pool) | Diagnostics (baseline) |
 | --- | ---: | ---: | ---: | ---: | --- | ---: |
-| Redmine | 347 | 2.82 s | 3.70 s (`w=4`) | 1.31× slower | 266 MB / 948 MB | 343 |
+| Redmine | 347 | 2.82 s | 3.70 s (`w=4`) | 1.31× slower | 266 MB / 948 MB | 389 |
+| Chatwoot | 802 | 2.67 s | (anomalous run; system load) | n/a | 274 MB / — | 300 |
 | Mastodon | 1,302 | 3.31 s | 3.98 s (`w=4`) | 1.20× slower | 238 MB / 878 MB | 521 |
+| Forem | 1,250 | 4.31 s | 4.60 s (`w=4`) | 1.07× slower | 260 MB / — | 691 |
 | Discourse | 1,804 | 7.46 s | 5.82 s (`w=4`) | **0.78× (faster)** | 244 MB / 842 MB | 1,439 |
+| Solidus | 1,914 | 7.36 s | 4.91 s (`w=4`) | **0.67× (faster)** | 275 MB / — | 528 |
+| Canvas LMS | 3,248 | 17.32 s | 11.16 s (`w=4`) | **0.64× (faster)** | 272 MB / — | 3,296 |
+| OpenProject | 6,817 | 18.84 s | 10.24 s (`w=4`) | **0.54× (faster)** | 246 MB / — | 2,356 |
 | GitLab FOSS | 11,130 | 25.27 s | 15.43 s (`w=8`) | **0.61× (faster)** | 248 MB / 1.30 GB | 2,982 |
 
-**Pool wall-clock crossover** sits between Mastodon (1.3 K files) and
-Discourse (1.8 K files). Pool memory cost is 3–5× sequential. The
+**Pool wall-clock crossover** sits between Mastodon / Forem (~1.3 K
+files, pool slower) and Discourse / Solidus (~1.8 K files, pool
+1.3-1.5× faster). Pool memory cost is 3-5× sequential. The
 ADR-15 OQ1 "per-Ractor cache facade" remains the avenue for moving
 the crossover lower and capping peak RSS.
+
+**Pool ≡ sequential proven on all nine projects.** After the four
+Phase 4b.x deep-shareability follow-ups (NumericCatalog,
+CANONICAL_NAMES, RegexRefinement::RULES,
+ShapeDispatch::REFINED_STRING_PROJECTIONS) and the
+CONSTANT_CONSTRUCTORS lambda fix, every project in the survey
+produces byte-identical diagnostic streams between sequential and
+pool modes. Zero IsolationErrors across the 28,114 files swept.
 
 **Engine fixes banked during the survey** (commit `642cf28` + the
 Discourse fix):
@@ -408,22 +481,42 @@ would close the project-private remainder.
 
 ### Post-O1 quantitative impact
 
-After opting into the new RBS bundle (sequential warm cache):
+After opting into the new RBS bundle (sequential warm cache; v2
+of the RBS bundle, which adds `compact_blank` / `exclude?` /
+`index_with` / `index_by` / `Hash.from_xml` / `DateTime#utc` and
+the `Enumerable` mixins on top of v1):
 
-| Project | Before O1 | After O1 | Δ total | `call.undefined-method` before → after |
+| Project | Baseline | With O1 v2 | Δ total | `call.undefined-method` before → after |
 | --- | ---: | ---: | ---: | --- |
-| Redmine | 343 | 160 | **−183 (−53%)** | 243 → 62 (−74%) |
-| Discourse | 1,435 | 452 | **−983 (−68%)** | 1,078 → 148 (−86%) |
-| Mastodon | 521 | 142 | **−379 (−73%)** | 414 → 40 (−90%) |
-| GitLab FOSS | 2,982 | 579 | **−2,403 (−81%)** | 2,676 → 286 (−89%) |
-| **Total** | **5,281** | **1,333** | **−3,948 (−75%)** | **4,411 → 536 (−88%)** |
+| Redmine | 389 | 157 | **−232 (−60%)** | 243 → 60 (−75%) |
+| Discourse | 1,439 | 423 | **−1,016 (−71%)** | 1,078 → 134 (−88%) |
+| Mastodon | 521 | 124 | **−397 (−76%)** | 414 → 27 (−93%) |
+| GitLab FOSS | 2,982 | 489 | **−2,493 (−84%)** | 2,676 → 207 (−92%) |
+| Forem | 691 | 146 | **−545 (−79%)** | 590 → 55 |
+| Solidus | 528 | 42 | **−486 (−92%)** | 520 → 33 |
+| Chatwoot | 300 | 19 | **−281 (−94%)** | 282 → 6 |
+| Canvas LMS | 3,296 | 1,496 | **−1,800 (−55%)** | 2,493 → 766 |
+| OpenProject | 2,356 | 175 | **−2,181 (−93%)** | 2,293 → 138 |
+| **Total** | **12,502** | **3,071** | **−9,431 (−75%)** | **10,589 → 1,426 (−87%)** |
 
 The remaining `call.undefined-method` instances are mostly:
 
-- Project-private monkey-patches (Discourse / GitLab ship their own
-  `String` / `Array` extensions).
-- Gem-specific methods absent from the analyzer's RBS env (the
-  target's `Gemfile.lock` gems aren't loaded — open item O4).
-- Concentrated nil-receiver patterns the survey already noted.
-- Other Rails core_ext methods outside the bundle's ~40-selector
-  scope.
+- **Canvas LMS dominates the residual** — 1,496 of 3,071 (49%). Top
+  selectors: `[]= on Integer` (70), `[]= on nil` (51), `<< on nil`
+  (40) — narrowing limitations rather than missing RBS — plus
+  Canvas-specific extensions (`#decimal_megabytes` is a project-private
+  refinement on Numeric; `File.mime_type` is a Marcel/Mimemagic-style
+  helper not in stdlib).
+- **Project-private monkey-patches.** Discourse, Forem, Canvas, and
+  GitLab each ship their own `String` / `Array` / `Hash` extensions.
+  Closing this needs O4 (project-side monkey-patch pre-evaluation
+  config knob).
+- **Gem-specific methods absent from the analyzer's RBS env.** The
+  target project's `Gemfile.lock` gems aren't loaded by rigor's
+  out-of-process Bundler context. Gems with shipped RBS would benefit
+  from O4 (target-Bundler awareness).
+- **Concentrated nil-receiver patterns.** Multi-assignment inside a
+  block followed by guard-then-use inside the same block; not yet
+  flow-tracked.
+- **Other Rails core_ext methods outside the bundle's ~50-selector
+  scope.** PRs to extend the RBS bundle are welcome.

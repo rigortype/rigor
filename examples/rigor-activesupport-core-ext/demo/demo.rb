@@ -48,7 +48,7 @@ Array.wrap([1, 2])            # => [1, 2]
 [10, 20, 30].second           # => 20
 
 # Hash extensions
-{ "a" => 1 }.symbolize_keys   # => {:a => 1}
+{ "a" => 1 }.symbolize_keys # => {:a => 1}
 { a: 1, b: { c: 2 } }.deep_dup
 { a: 1 }.with_indifferent_access
 

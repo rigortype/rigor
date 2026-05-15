@@ -1,11 +1,11 @@
 # ADR-16 — Macro / DSL expansion substrate
 
-Status: **accepted — floor landed (slices 1–7), slice 5b + slice 6 deferred to demand**, 2026-05-15.
+Status: **accepted — floor + precision promotion landed (slices 1–7 + 6a/6b), slice 5b + ADR-13 resolver-chain wiring for utility-type returns deferred to demand**, 2026-05-15.
 Triggered by the per-library survey
 [`docs/notes/20260515-macro-expansion-library-survey.md`](../notes/20260515-macro-expansion-library-survey.md)
 covering Rails (`ActiveSupport::Concern`, ActiveStorage attached macros),
 AASM, Devise, GraphQL-Ruby, factory_bot, Sinatra, Sequel, and Redmine.
-Substrate floor delivered across twelve commits (584ae85…9d54955); ADR-12
+Substrate floor delivered across fourteen commits (584ae85…d7b1943); ADR-12
 (dry-rb packaging) remains reserved; this ADR sits in parallel and does
 not block on it. Status detail per slice in § Implementation slicing.
 
@@ -630,17 +630,32 @@ the ceiling incrementally.
    concrete plugin targets (Redmine webhook payloads, tDiary
    plugin loader). Plugin authors may declare Tier D entries
    today; the substrate does not yet act on them.
-6. **Precision promotion.** ⚠️ **DEFERRED to demand.** Routes
-   Tier C `returns:` strings + Tier B `origin_module:`
-   provenance through ADR-13's `Plugin::TypeNodeResolver`
-   chain so the substrate produces precise return types
-   instead of `Dynamic[T]` where the resolver can. Iterative —
-   each resolved emit-row drops one
-   `macro.tier_c.unresolved-return` provenance marker.
-   Implementation gated on three open design judgments
-   (NameScope supply at dispatch time, Tier B vs Tier C
-   promotion paths, resolve-result caching shape) that the
-   slice-6 plan-out is expected to pin.
+6. **Precision promotion.** ✅ **LANDED at the floor** (slices
+   6a-TierB `d174fff`, 6b-TierC `d7b1943`). Two paths:
+   - **6a-TierB.** When the SyntheticMethod records its
+     `origin_module:` in provenance (Tier B emissions from the
+     slice-3b scanner), redispatch the call on
+     `Nominal[origin_module]` via the existing `RbsDispatch`.
+     The module's authored RBS return type wins; falls back to
+     `Dynamic[T]` when the module is not in the env. Devise's
+     `valid_password?` returns `bool`, not `untyped`.
+   - **6b-TierC.** When the SyntheticMethod records a plain
+     `return_type:` String (Tier C emissions from the
+     manifest's emit table), look it up via
+     `environment.nominal_for_name(return_type)`. The
+     synthesised reader returns `Nominal[<class>]` when the
+     class is in the RBS env; falls back to `Dynamic[T]`
+     otherwise. Tier B's placeholder `"untyped"` and the
+     RBS-style `"void"` are excluded from the Tier C path so
+     they self-route to the Tier B branch or the floor.
+   Parameterised forms (`Array[String]`, `Hash[K, V]`) and
+   plugin-supplied utility-type names (`Pick<T, K>`) require
+   routing through ADR-13's full `Plugin::TypeNodeResolver`
+   chain — still **deferred** because as of ADR-13 slice 3 the
+   chain is wired only for `%a{rigor:v1:…}` payloads, not for
+   substrate manifest `returns:` strings. The follow-up
+   triggers when concrete plugin authors need utility-type-shaped
+   substrate returns.
 7. **Documentation.** ✅ **LANDED** (`0359152`). Handbook
    chapter `docs/handbook/09-plugins.md` § "Macro / DSL
    expansion substrate (ADR-16)" introduces the four tiers
@@ -1164,3 +1179,28 @@ gracefully," not "fabricate precision."
   count bumped from twenty-one to twenty-four. Remaining
   follow-ups (Tier D engine, precision promotion) stay
   demand-driven.
+- 2026-05-15 — **slice 6 precision promotion landed.** Two
+  commits (`d174fff` slice 6a-TierB, `d7b1943` slice 6b-TierC).
+  Tier B emissions promote through their `origin_module:`
+  provenance via the existing `RbsDispatch.try_dispatch` (the
+  module's authored RBS return wins — Devise's `valid_password?`
+  returns `bool` instead of `Dynamic[T]`). Tier C emissions
+  promote through `environment.nominal_for_name(return_type)`
+  for plain class names (synthesised readers return
+  `Nominal[<class>]` when the manifest's `returns:` String
+  resolves in the RBS env). The three open design judgments
+  the deferred-slice notes had pinned (NameScope supply, Tier
+  B vs Tier C promotion paths, caching) resolved through the
+  minimal-scope path: no caching layer beyond the existing
+  RbsDispatch caches, per-match self-routing between origin_module
+  and return_type, and no ADR-13 resolver-chain wiring (plain
+  `nominal_for_name` is sufficient for the current Tier C
+  manifests — `rigor-dry-struct`, ActiveStorage attached, etc.
+  — which use unparameterised class names). Routing
+  parameterised forms (`Array[String]`, `Hash[K, V]`) and
+  plugin-supplied utility-type names (`Pick<T, K>`) through
+  ADR-13's `Plugin::TypeNodeResolver` chain stays a future
+  iteration, gated on concrete demand. Status promoted to
+  "accepted — floor + precision promotion landed (slices 1–7 +
+  6a/6b), slice 5b + ADR-13 resolver-chain wiring for
+  utility-type returns deferred to demand."

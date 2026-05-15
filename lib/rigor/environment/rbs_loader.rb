@@ -153,6 +153,7 @@ module Rigor
       # it never recurses back through {#class_known?}.
       def each_known_class_name
         return enum_for(:each_known_class_name) unless block_given?
+        return if env.nil?
 
         env.class_decls.each_key { |rbs_name| yield rbs_name.to_s }
         env.class_alias_decls.each_key { |rbs_name| yield rbs_name.to_s }
@@ -175,6 +176,8 @@ module Rigor
       # — the Phase 4b worker pool ships a snapshot back to the
       # coordinator on the first `:prepare` message.
       def class_decl_paths
+        return {}.freeze if env.nil?
+
         result = {}
         env.class_decls.each do |rbs_name, entry|
           decl = entry.primary_decl
@@ -311,6 +314,8 @@ module Rigor
       #   materialises the constant-type table; ordinary callers
       #   should keep using {#constant_type} for point lookups.
       def constant_names
+        return [] if env.nil?
+
         env.constant_decls.keys.map(&:to_s)
       rescue ::RBS::BaseError
         []
@@ -323,6 +328,7 @@ module Rigor
       # back into the cache when `cache_store` is set).
       def each_constant_decl
         return enum_for(:each_constant_decl) unless block_given?
+        return if env.nil?
 
         env.constant_decls.each do |rbs_name, entry|
           yield rbs_name.to_s, entry
@@ -476,6 +482,8 @@ module Rigor
       end
 
       def translate_constant_decl(rbs_name)
+        return nil if env.nil?
+
         entry = env.constant_decls[rbs_name]
         return nil unless entry
 
@@ -483,8 +491,41 @@ module Rigor
         translated unless translated.is_a?(Type::Bot)
       end
 
+      # The RBS environment for this loader. Memoised both on
+      # success AND on failure: when the env build raises
+      # (typically `RBS::DuplicatedDeclarationError` because a
+      # `signature_paths:` entry redeclares a constant or class
+      # already shipped by stdlib RBS), retrying on every
+      # subsequent `env` call would re-parse and re-resolve the
+      # whole sig set per AST node touched during analysis,
+      # multiplying per-file analysis cost by ~100x. Failures
+      # short-circuit to `nil` here and are surfaced to the user
+      # via `warn_about_env_build_failure_once` so the broken
+      # `signature_paths:` entry is identifiable.
       def env
-        @state[:env] ||= cache_store ? cached_env : build_env
+        return @state[:env] if @state[:env_loaded]
+
+        @state[:env_loaded] = true
+        @state[:env] = cache_store ? cached_env : build_env
+      rescue ::RBS::BaseError => e
+        warn_about_env_build_failure_once(e)
+        @state[:env] = nil
+      end
+
+      def warn_about_env_build_failure_once(error)
+        return if @state[:env_build_warned]
+
+        @state[:env_build_warned] = true
+        first_line = error.message.to_s.lines.first.to_s.strip
+        warn(
+          "rigor: RBS environment build failed: #{error.class}: #{first_line}\n  " \
+          "Likely cause: a `signature_paths:` entry redeclares a constant or class\n  " \
+          "already shipped by Rigor's bundled RBS (Ruby core / stdlib / gem-bundled\n  " \
+          "RBS / `data/vendored_gem_sigs/`). Rigor will continue analyzing with no\n  " \
+          "RBS env in scope, so most type-of queries will return `Dynamic[top]` and\n  " \
+          "most rule diagnostics will not fire. Remove the conflicting `.rbs` from\n  " \
+          "your `signature_paths:` to restore type coverage."
+        )
       end
 
       def cached_env
@@ -542,6 +583,7 @@ module Rigor
       def build_instance_definition(class_name)
         rbs_name = parse_type_name(class_name)
         return nil unless rbs_name
+        return nil if env.nil?
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_instance(rbs_name)
@@ -552,6 +594,7 @@ module Rigor
       def build_singleton_definition(class_name)
         rbs_name = parse_type_name(class_name)
         return nil unless rbs_name
+        return nil if env.nil?
         return nil unless env.class_decls.key?(rbs_name)
 
         builder.build_singleton(rbs_name)
@@ -572,6 +615,7 @@ module Rigor
       def compute_class_known(name)
         rbs_name = parse_type_name(name)
         return false unless rbs_name
+        return false if env.nil?
 
         # `RBS::Environment#class_decls` after `resolve_type_names`
         # holds entries for both classes AND modules; the gem unifies

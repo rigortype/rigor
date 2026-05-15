@@ -202,6 +202,66 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "env build failure short-circuit (O7)" do
+    # Open item O7 (real-world Rails survey, 2026-05-15):
+    # when a `signature_paths:` entry redeclares a constant or
+    # class already shipped by rigor's bundled RBS,
+    # `RBS::Environment.from_loader(...).resolve_type_names`
+    # raises `RBS::DuplicatedDeclarationError`. Pre-fix, the
+    # `||=` memo in `#env` did not capture the failure, so
+    # every subsequent `env` access (one per AST node touched
+    # during analysis) re-parsed the whole sig set — a ~100x
+    # per-file slowdown for projects that wire a conflicting
+    # gem-shipped `sig/` into `signature_paths:` (the typical
+    # case for prism, which ships its own RBS via the gem
+    # AND via the bundled stdlib RBS in Ruby 4.0+).
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-conflict-spec-") }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "memoises the failure so a duplicated decl rebuilds env only once" do
+      File.write(
+        File.join(tmpdir, "duplicate_prism_version.rbs"),
+        "module Prism\n  VERSION: String\nend\n"
+      )
+      loader = described_class.new(libraries: ["prism"], signature_paths: [tmpdir])
+      allow(described_class).to receive(:build_env_for).and_call_original
+      # Touch env many times; the broken state should be memoised
+      # so build_env_for runs at most once.
+      10.times { loader.send(:env) }
+      expect(described_class).to have_received(:build_env_for).at_most(:once)
+      expect(loader.send(:env)).to be_nil
+    end
+
+    it "emits a single warning identifying the conflicting decl" do
+      File.write(
+        File.join(tmpdir, "duplicate_prism_version.rbs"),
+        "module Prism\n  VERSION: String\nend\n"
+      )
+      loader = described_class.new(libraries: ["prism"], signature_paths: [tmpdir])
+      messages = []
+      allow(loader).to receive(:warn) { |msg| messages << msg }
+      3.times { loader.send(:env) }
+      expect(messages.size).to eq(1)
+      expect(messages.first).to include("RBS environment build failed")
+      expect(messages.first).to include("DuplicatedDeclarationError")
+      expect(messages.first).to include("Prism::VERSION")
+    end
+
+    it "returns empty results from each_known_class_name / class_decl_paths when env is nil" do
+      File.write(
+        File.join(tmpdir, "duplicate_prism_version.rbs"),
+        "module Prism\n  VERSION: String\nend\n"
+      )
+      loader = described_class.new(libraries: ["prism"], signature_paths: [tmpdir])
+      allow(loader).to receive(:warn) # silence
+      expect(loader.each_known_class_name.to_a).to eq([])
+      expect(loader.class_decl_paths).to eq({})
+      expect(loader.constant_names).to eq([])
+      expect(loader.class_known?("String")).to be(false)
+    end
+  end
+
   describe "env via cache_store (v0.0.9 C2)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-env-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

@@ -1,11 +1,13 @@
 # ADR-16 — Macro / DSL expansion substrate
 
-Status: **proposed, 2026-05-15.** Triggered by the per-library survey
+Status: **accepted — floor landed (slices 1–7), slice 5b + slice 6 deferred to demand**, 2026-05-15.
+Triggered by the per-library survey
 [`docs/notes/20260515-macro-expansion-library-survey.md`](../notes/20260515-macro-expansion-library-survey.md)
 covering Rails (`ActiveSupport::Concern`, ActiveStorage attached macros),
 AASM, Devise, GraphQL-Ruby, factory_bot, Sinatra, Sequel, and Redmine.
-Implementation queued, no committed milestone. ADR-12 (dry-rb packaging)
-remains reserved; this ADR sits in parallel and does not block on it.
+Substrate floor delivered across twelve commits (584ae85…9d54955); ADR-12
+(dry-rb packaging) remains reserved; this ADR sits in parallel and does
+not block on it. Status detail per slice in § Implementation slicing.
 
 ## Context
 
@@ -580,53 +582,75 @@ commit as the implementation.
 
 ## Implementation slicing
 
-Recommended order; each slice independently shippable. Each slice
-respects the WD13 floor / ceiling contract: ship the floor first
-(parse + identifier-resolve), promote toward the ceiling
-incrementally.
+Each slice respects the WD13 floor / ceiling contract: ship
+the floor first (parse + identifier-resolve), promote toward
+the ceiling incrementally.
 
-1. **Tier A — block-as-method.** Plugin manifest entry +
-   substrate annotates block scopes. Worked plugin:
-   **new** `examples/rigor-sinatra/` (no competing hand-rolled
-   walker). Smallest tier; validates the manifest / blueprint
-   integration.
-2. **Tier C — heredoc-template expansion (new plugin, not
-   migration).** Tier C is the highest-value tier per the
-   survey count. Worked plugin: **new** `examples/rigor-dry-struct/`
-   — textbook Tier C per the survey (`attribute :name, T` →
-   reader + schema key + `to_h` row + `[:key]` access + `.new`
-   kwarg). Chosen over migrating `rigor-activestorage` because
-   the substrate's initial output quality (per WD13 — names
-   emitted, `returns:` may degrade to `Dynamic[T]`) is below
-   the existing hand-rolled walker's quality; migration would
-   be a regression. `rigor-dry-struct` has no competing
-   walker and uses the substrate as its primary path.
-   Concurrently, **author `rigor-dry-types`** as the shared
-   dependency (per the survey's Composition section): bundled
-   `core.rb` registry mirror + dynamic-return-type rule for
-   `Dry::Types[<literal>]`.
-3. **Tier B — trait-inlining registry.** Worked plugin:
-   **new** `examples/rigor-devise/` model side. Bundled
-   registry mirrors `lib/devise/modules.rb`. Routes side
-   queued behind ADR-9 publish/consume.
-4. **Concern re-targeting walker.** Extends the existing
-   `ActiveSupport::Concern`-aware walker so Tier A/B/C plugins
-   fire correctly when the DSL call is nested inside
-   `included do`.
-5. **Tier D — external-file inclusion.** Worked plugin: a
-   reduced Redmine webhook-payload example, or the tDiary
-   plugin-loader case if the user prefers. Establishes the
-   "stub file" boundary with the cache.
-6. **Precision promotion (deferred, post-MVP).** Route Tier C
-   `returns:` strings through ADR-13's `Plugin::TypeNodeResolver`
-   chain so the substrate produces precise return types instead
-   of `Dynamic[T]` where the resolver can. Iterative — each
-   resolved emit-row drops one `macro.tier_c.unresolved-return`
-   provenance marker.
-7. **Documentation.** Handbook chapter on macro / DSL plugins;
-   `examples/README.md` table grows substrate-using rows;
-   `.codex/skills/rigor-plugin-author/SKILL.md` updates with
-   the substrate decision flow.
+1. **Tier A — block-as-method.** ✅ **LANDED** (slices 1a
+   `584ae85`, 1b `16460b5`, 1c `92d4755`). `Plugin::Macro::BlockAsMethod`
+   value class + `Plugin::Manifest#block_as_methods` field;
+   engine hook (`Rigor::Inference::MacroBlockSelfType`) wired
+   into `ExpressionTyper`'s block-return path; worked plugin
+   `examples/rigor-sinatra/`.
+2. **Tier C — heredoc-template expansion.** ✅ **LANDED** (slices
+   2a `b77c101`, 2b `9251916`, 2c `e65ff9b`). `Plugin::Macro::HeredocTemplate`
+   value class + `Plugin::Manifest#heredoc_templates` field;
+   new `Rigor::Inference::SyntheticMethod` / `SyntheticMethodIndex`
+   / `SyntheticMethodScanner` substrate + new
+   `try_synthetic_method` dispatcher tier between RBS and
+   dep-source; worked plugin `examples/rigor-dry-struct/`. Per
+   WD13 floor: synthetic methods return `Dynamic[T]`; precise
+   return-type promotion is slice-6 work (deferred). `rigor-dry-types`
+   noted as a future companion (a separate Tier-C-as-`const_set`
+   primitive the current substrate does not yet model).
+3. **Tier B — trait-inlining registry.** ✅ **LANDED** (slices
+   3a `26b1fe4`, 3b `17846a7`, 3c `ba1b61a`). `Plugin::Macro::TraitRegistry`
+   value class + `Plugin::Manifest#trait_registries` field;
+   scanner extends with per-method explosion of each included
+   module's RBS instance methods into the existing
+   `SyntheticMethodIndex` (with `origin_module:` provenance for
+   future precision promotion); worked plugin
+   `examples/rigor-devise/` (bundled registry mirrors Devise's
+   `lib/devise/modules.rb` strategy table — 11 entries plus
+   the always-included `Devise::Models::Authenticatable`).
+4. **Concern re-targeting walker.** ✅ **LANDED** (`bdbccdd`).
+   `SyntheticMethodScanner` recognises `extend
+   ActiveSupport::Concern` + `included do ... end` modules;
+   when a class body does `include M`, M's deferred DSL calls
+   replay against the including class. Slice-4 floor:
+   constant-path `include M` only, one-hop only,
+   `class_methods do ... end` deferred.
+5. **Tier D — external-file inclusion.** ⚠️ **CONTRACT ONLY**
+   (slice 5a `56706a5`); slice 5b engine integration **DEFERRED
+   to demand**. `Plugin::Macro::ExternalFile` value class +
+   `Plugin::Manifest#external_files` field landed and round-trip
+   through `Manifest#to_h`; the engine hook that walks matched
+   files + narrows top-level `self_type` + pre-binds
+   `bound_ivars` is queued for a future slice triggered by
+   concrete plugin targets (Redmine webhook payloads, tDiary
+   plugin loader). Plugin authors may declare Tier D entries
+   today; the substrate does not yet act on them.
+6. **Precision promotion.** ⚠️ **DEFERRED to demand.** Routes
+   Tier C `returns:` strings + Tier B `origin_module:`
+   provenance through ADR-13's `Plugin::TypeNodeResolver`
+   chain so the substrate produces precise return types
+   instead of `Dynamic[T]` where the resolver can. Iterative —
+   each resolved emit-row drops one
+   `macro.tier_c.unresolved-return` provenance marker.
+   Implementation gated on three open design judgments
+   (NameScope supply at dispatch time, Tier B vs Tier C
+   promotion paths, resolve-result caching shape) that the
+   slice-6 plan-out is expected to pin.
+7. **Documentation.** ✅ **LANDED** (`0359152`). Handbook
+   chapter `docs/handbook/09-plugins.md` § "Macro / DSL
+   expansion substrate (ADR-16)" introduces the four tiers
+   + Concern re-targeting + floor/ceiling framing + decision
+   matrix; `.codex/skills/rigor-plugin-author/SKILL.md` Phase 2
+   splits into "Step 2A — Try the macro substrate first" /
+   "Step 2B — Hand-rolled walker"; ROADMAP / CURRENT_WORK O2
+   reframed from "queued" to "substrate floor LANDED";
+   `examples/README.md` comparison table grows the three new
+   substrate-consumer rows.
 
 **Out of ADR-16 scope (deferred to future iterations).**
 
@@ -1128,3 +1152,15 @@ gracefully," not "fabricate precision."
   a v0.1.x precision commitment — `returns:` declarations in
   manifest tables are recorded today and unlocked later when
   the resolver hookup lands.
+- 2026-05-15 — **substrate floor landed.** Status promoted
+  from "proposed" to "accepted — floor landed (slices 1–7),
+  slice 5b + slice 6 deferred to demand." Twelve commits
+  (`584ae85` through `9d54955`) deliver Tiers A/B/C engine
+  integration + Tier D contract + Concern re-targeting +
+  three worked consumer plugins (`rigor-sinatra`,
+  `rigor-dry-struct`, `rigor-devise`) + handbook documentation.
+  § Implementation slicing annotates each slice with landed /
+  deferred status and the originating commit. Plugin example
+  count bumped from twenty-one to twenty-four. Remaining
+  follow-ups (Tier D engine, precision promotion) stay
+  demand-driven.

@@ -1,0 +1,16 @@
+paths:
+  - demo.rb
+  - consumer.rb
+
+plugins:
+  - rigor-devise
+
+signature_paths:
+  # Minimal RBS stubs local to the demo. Covers ActiveRecord::Base
+  # + the Devise::Models::* modules the demo exercises. A real
+  # project depending on Devise would consume the upstream gem's
+  # RBS through rigor's Bundler-awareness path.
+  - sig
+
+cache:
+  path: tmp/.rigor/cache

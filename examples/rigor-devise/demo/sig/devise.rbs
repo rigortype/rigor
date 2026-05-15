@@ -1,0 +1,70 @@
+# Minimal RBS stubs for the rigor-devise demo. Covers the subset
+# of `ActiveRecord::Base` + `Devise::Models::*` modules the demo
+# exercises — just enough method names that the substrate's
+# pre-pass scanner can enumerate them and synthesise corresponding
+# entries on User / Admin.
+#
+# A real project depending on Devise would replace this with the
+# upstream gem's RBS (or vendored sig discovered by rigor's
+# Bundler-awareness path).
+
+module ActiveRecord
+  class Base
+    def self.devise: (*Symbol) -> void
+  end
+end
+
+module Devise
+  module Models
+    module Authenticatable
+      def email: () -> String?
+    end
+
+    module DatabaseAuthenticatable
+      def valid_password?: (String) -> bool
+      def update_with_password: (**untyped) -> bool
+      def password: () -> String?
+      def password_confirmation: () -> String?
+    end
+
+    module Recoverable
+      def send_reset_password_instructions: () -> bool
+      def reset_password: (String, String) -> bool
+    end
+
+    module Rememberable
+      def remember_me!: () -> void
+      def forget_me!: () -> void
+    end
+
+    module Trackable
+      def update_tracked_fields!: (untyped) -> void
+      def failed_attempts: () -> Integer
+    end
+
+    module Validatable
+      def password_required?: () -> bool
+    end
+
+    module Confirmable
+      def confirm: () -> bool
+      def confirmed?: () -> bool
+    end
+
+    module Lockable
+      def lock_access!: () -> void
+      def unlock_access!: () -> void
+      def access_locked?: () -> bool
+    end
+
+    module Timeoutable
+      def timedout?: (Time) -> bool
+    end
+
+    module Registerable
+    end
+
+    module Omniauthable
+    end
+  end
+end

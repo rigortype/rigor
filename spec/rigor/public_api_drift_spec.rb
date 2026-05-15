@@ -149,6 +149,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     description()
     eql?(req:other)
     hash()
+    heredoc_templates()
     id()
     owns_receivers()
     produces()
@@ -196,6 +197,27 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     self_type()
     to_h()
     verbs()
+  ].freeze
+
+  PLUGIN_MACRO_HEREDOC_TEMPLATE_INSTANCE = %w[
+    ==(req:other)
+    class_level_emit()
+    emit()
+    eql?(req:other)
+    hash()
+    method_name()
+    receiver_constraint()
+    symbol_arg_position()
+    to_h()
+  ].freeze
+
+  PLUGIN_MACRO_HEREDOC_TEMPLATE_EMIT_INSTANCE = %w[
+    ==(req:other)
+    eql?(req:other)
+    hash()
+    name()
+    returns()
+    to_h()
   ].freeze
 
   PLUGIN_BLUEPRINT_INSTANCE = %w[
@@ -653,6 +675,22 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "exposes the expected ADR-16 slice-1a value-class surface" do
       expect(instance_signatures(Rigor::Plugin::Macro::BlockAsMethod)).to eq(
         PublicApiDriftSnapshots::PLUGIN_MACRO_BLOCK_AS_METHOD_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::Macro::HeredocTemplate" do
+    it "exposes the expected ADR-16 slice-2a value-class surface" do
+      expect(instance_signatures(Rigor::Plugin::Macro::HeredocTemplate)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_MACRO_HEREDOC_TEMPLATE_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::Macro::HeredocTemplate::Emit" do
+    it "exposes the expected ADR-16 slice-2a emit-row surface" do
+      expect(instance_signatures(Rigor::Plugin::Macro::HeredocTemplate::Emit)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_MACRO_HEREDOC_TEMPLATE_EMIT_INSTANCE
       )
     end
   end

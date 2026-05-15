@@ -310,4 +310,65 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(a.hash).to eq(b.hash)
     end
   end
+
+  describe "heredoc_templates (ADR-16 slice 2a)" do
+    let(:dry_struct_entry) do
+      Rigor::Plugin::Macro::HeredocTemplate.new(
+        receiver_constraint: "Dry::Struct",
+        method_name: :attribute,
+        symbol_arg_position: 0,
+        emit: [{ name: "\#{name}", returns: "Object" }]
+      )
+    end
+
+    it "defaults to an empty Array" do
+      m = described_class.new(id: "drystruct", version: "0.1.0")
+      expect(m.heredoc_templates).to eq([])
+      expect(m.heredoc_templates).to be_frozen
+    end
+
+    it "stores HeredocTemplate entries in declaration order" do
+      m = described_class.new(
+        id: "drystruct", version: "0.1.0",
+        heredoc_templates: [dry_struct_entry]
+      )
+      expect(m.heredoc_templates).to eq([dry_struct_entry])
+      expect(m.heredoc_templates).to be_frozen
+    end
+
+    it "rejects a non-Array heredoc_templates argument" do
+      expect do
+        described_class.new(id: "drystruct", version: "0.1.0", heredoc_templates: dry_struct_entry)
+      end.to raise_error(ArgumentError, /heredoc_templates must be an Array/)
+    end
+
+    it "rejects entries that are not HeredocTemplate instances" do
+      expect do
+        described_class.new(id: "drystruct", version: "0.1.0", heredoc_templates: ["not-an-entry"])
+      end.to raise_error(ArgumentError, /HeredocTemplate instances/)
+    end
+
+    it "serialises entries as stable Hashes through #to_h" do
+      m = described_class.new(
+        id: "drystruct", version: "0.1.0",
+        heredoc_templates: [dry_struct_entry]
+      )
+      expect(m.to_h["heredoc_templates"]).to eq(
+        [{
+          "receiver_constraint" => "Dry::Struct",
+          "method_name" => "attribute",
+          "symbol_arg_position" => 0,
+          "emit" => [{ "name" => "\#{name}", "returns" => "Object" }],
+          "class_level_emit" => []
+        }]
+      )
+    end
+
+    it "treats two manifests with equal heredoc_templates as equal" do
+      a = described_class.new(id: "drystruct", version: "0.1.0", heredoc_templates: [dry_struct_entry])
+      b = described_class.new(id: "drystruct", version: "0.1.0", heredoc_templates: [dry_struct_entry])
+      expect(a).to eq(b)
+      expect(a.hash).to eq(b.hash)
+    end
+  end
 end

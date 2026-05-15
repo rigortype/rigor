@@ -128,6 +128,10 @@ module Rigor
       # variants like `ffi-1.17.4-aarch64-linux-gnu/` keep their
       # platform suffix in the version part, so the first hyphen
       # from the right is still the name boundary.)
+      #
+      # Public so the O4 Layer 3 slice-3 coverage report
+      # (`RbsCoverageReport`) can classify discovered bundle sigs
+      # against locked gem names without re-running discovery.
       def self.gem_name_from_sig_path(sig_dir)
         gem_dir = sig_dir.parent.basename.to_s
         # Strip `-<version>` and any platform suffix. The version
@@ -135,7 +139,6 @@ module Rigor
         # `-` followed by a digit.
         gem_dir.sub(/-\d.*\z/, "")
       end
-      private_class_method :gem_name_from_sig_path
 
       # Returns `Pathname` resolved bundle path, or `nil` when
       # neither explicit nor auto-detected. Public for the stats

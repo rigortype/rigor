@@ -168,6 +168,7 @@ module Rigor
           dependency_source_diagnostics +
           dependency_source_budget_diagnostics +
           dependency_source_config_conflict_diagnostics +
+          rbs_coverage_diagnostics +
           expansion.fetch(:errors)
       end
 
@@ -612,6 +613,70 @@ module Rigor
             source_family: :builtin
           )
         end
+      end
+
+      # O4 Layer 3 slice 3 — graceful-degradation coverage
+      # report. When the project has a `Gemfile.lock` (slice 1)
+      # and one or more locked gems are not covered by ANY of
+      # the four RBS resolution paths (`DEFAULT_LIBRARIES`,
+      # `data/vendored_gem_sigs/`, slice-1 bundle-shipped
+      # `sig/`, slice-2 `rbs_collection.lock.yaml`), emit a
+      # single `:info` diagnostic summarising the uncovered set
+      # so the user can act on it (run `rbs collection install`,
+      # opt the gem into `dependencies.source_inference:`, or
+      # accept the `Dynamic[T]` fallback).
+      #
+      # Suppressed when the lockfile is empty, when every gem
+      # is covered, or when slice 1's `bundler.lockfile`
+      # discovery returned nothing (no lockfile to read).
+      def rbs_coverage_diagnostics
+        locked = Environment::LockfileResolver.locked_gems(
+          lockfile_path: @configuration.bundler_lockfile,
+          project_root: Dir.pwd,
+          auto_detect: @configuration.bundler_auto_detect
+        )
+        return [] if locked.empty?
+
+        bundle_sig_paths = Environment::BundleSigDiscovery.discover(
+          bundle_path: @configuration.bundler_bundle_path,
+          project_root: Dir.pwd,
+          auto_detect: @configuration.bundler_auto_detect,
+          locked_gems: locked
+        )
+        collection_paths = Environment::RbsCollectionDiscovery.discover(
+          lockfile_path: @configuration.rbs_collection_lockfile,
+          project_root: Dir.pwd,
+          auto_detect: @configuration.rbs_collection_auto_detect
+        )
+        rows = Environment::RbsCoverageReport.classify(
+          locked_gems: locked,
+          default_libraries: Environment::DEFAULT_LIBRARIES,
+          bundle_sig_paths: bundle_sig_paths,
+          rbs_collection_paths: collection_paths
+        )
+        missing = Environment::RbsCoverageReport.missing(rows)
+        return [] if missing.empty?
+
+        [build_rbs_coverage_missing_diagnostic(missing)]
+      end
+
+      def build_rbs_coverage_missing_diagnostic(missing)
+        sample_size = 5
+        sample = missing.first(sample_size).map(&:gem_name)
+        suffix = missing.size > sample_size ? ", and #{missing.size - sample_size} more" : ""
+        Diagnostic.new(
+          path: ".rigor.yml",
+          line: 1,
+          column: 1,
+          message: "#{missing.size} gem(s) in Gemfile.lock have no RBS available: " \
+                   "#{sample.join(', ')}#{suffix}. " \
+                   "Consider `rbs collection install` to fetch community RBS from " \
+                   "`ruby/gem_rbs_collection`, ship `sig/` in the gem itself, or " \
+                   "opt the gem into `dependencies.source_inference:` in `.rigor.yml`.",
+          severity: :info,
+          rule: "rbs.coverage.missing-gem",
+          source_family: :builtin
+        )
       end
 
       # ADR-13 slice 3b — drains the per-run

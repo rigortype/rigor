@@ -11,12 +11,18 @@ RSpec.describe Rigor::Analysis::Runner do
     Dir.mktmpdir do |dir|
       missing = File.join(dir, "ghost.rb")
       configuration = Rigor::Configuration.new("paths" => [missing])
-      result = described_class.new(configuration: configuration).run
+      # chdir into a clean tmpdir so the runner does not pick up
+      # rigor's own `Gemfile.lock` (which would fire the
+      # O4-slice-3 missing-RBS diagnostic ahead of the
+      # file-not-found one).
+      Dir.chdir(dir) do
+        result = described_class.new(configuration: configuration).run
 
-      expect(result).not_to be_success
-      diag = result.diagnostics.first
-      expect(diag.path).to eq(missing)
-      expect(diag.message).to include("no such file")
+        expect(result).not_to be_success
+        diag = result.diagnostics.first
+        expect(diag.path).to eq(missing)
+        expect(diag.message).to include("no such file")
+      end
     end
   end
 
@@ -25,10 +31,15 @@ RSpec.describe Rigor::Analysis::Runner do
       txt = File.join(dir, "notes.txt")
       File.write(txt, "hello")
       configuration = Rigor::Configuration.new("paths" => [txt])
-      result = described_class.new(configuration: configuration).run
+      # See above: chdir away from rigor's repo root so the
+      # missing-RBS diagnostic doesn't surface ahead of the
+      # path-error diagnostic.
+      Dir.chdir(dir) do
+        result = described_class.new(configuration: configuration).run
 
-      expect(result).not_to be_success
-      expect(result.diagnostics.first.message).to include("not a Ruby file")
+        expect(result).not_to be_success
+        expect(result.diagnostics.first.message).to include("not a Ruby file")
+      end
     end
   end
 
@@ -287,6 +298,78 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(budget_diags.first.message).to include("prism")
       expect(budget_diags.first.message).to include("1250")
       expect(budget_diags.first.severity).to eq(:warning)
+    end
+
+    it "surfaces `rbs.coverage.missing-gem` :info exactly once when locked gems have no RBS (O4 slice 3)" do # rubocop:disable RSpec/ExampleLength
+      # Build a tmpdir with Gemfile.lock listing two gems
+      # whose RBS is not covered by ANY of the four resolution
+      # paths (DEFAULT_LIBRARIES / vendored / bundle / collection).
+      Dir.mktmpdir("rigor-rbs-coverage-spec-") do |tmpdir|
+        File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
+          GEM
+            remote: https://rubygems.org/
+            specs:
+              rare_gem_a (1.0)
+              rare_gem_b (2.5)
+
+          PLATFORMS
+            ruby
+
+          DEPENDENCIES
+            rare_gem_a
+            rare_gem_b
+
+          BUNDLED WITH
+             2.5.3
+        LOCK
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [],
+            "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
+          )
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          coverage_diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.missing-gem" }
+
+          expect(coverage_diags.length).to eq(1)
+          expect(coverage_diags.first.severity).to eq(:info)
+          expect(coverage_diags.first.message).to include("rare_gem_a")
+          expect(coverage_diags.first.message).to include("rare_gem_b")
+          expect(coverage_diags.first.message).to include("rbs collection install")
+        end
+      end
+    end
+
+    it "suppresses `rbs.coverage.missing-gem` when every locked gem has RBS coverage (O4 slice 3)" do
+      Dir.mktmpdir("rigor-rbs-coverage-covered-") do |tmpdir|
+        # `json` is in DEFAULT_LIBRARIES; the diagnostic must NOT fire.
+        File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
+          GEM
+            remote: https://rubygems.org/
+            specs:
+              json (2.7.0)
+
+          PLATFORMS
+            ruby
+
+          DEPENDENCIES
+            json
+
+          BUNDLED WITH
+             2.5.3
+        LOCK
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [],
+            "bundler" => { "lockfile" => "Gemfile.lock", "auto_detect" => true }
+          )
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          coverage_diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.missing-gem" }
+
+          expect(coverage_diags).to be_empty
+        end
+      end
     end
   end
 

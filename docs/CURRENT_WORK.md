@@ -47,6 +47,19 @@ The fourteen-project real-world Rails survey ran through three rounds during the
 | O6 | landed (`4698437`) | `MethodDispatcher::CONSTANT_CONSTRUCTORS` deep-share (Proc values were not shareable under shallow `.freeze`). Pool ≡ sequential on GitLab FOSS after fix. |
 | O7 | landed (`3c4a7ff`) | `RbsLoader#env` memoises failure. Pre-fix, a single conflicting `signature_paths:` entry rebuilt env per AST node (390× / file, ~35 s for one controller). Post-fix: 0.15 s for 5 controllers (~550× speedup) with a single user-facing warning naming the offending file. Unblocks O4 Layer 3 — gem-shipped sigs that conflict with stdlib RBS now degrade gracefully. |
 
+### Stdlib coverage expansion — open design questions (2026-05-16)
+
+Driven by the v0.1.5 work to expand `Environment::DEFAULT_LIBRARIES` (commits `0a4ffea` + follow-on). Twenty-three additional stdlib libraries now auto-load (1,273 → 1,412 RBS classes). Two design judgment points surfaced and are deferred:
+
+1. **Stdlib name conflicts with rigor's internal carriers.** `singleton` (stdlib `Singleton` mixin) clashes with `Rigor::Type::Singleton` in lexical scope, surfacing an `undefined-method` false positive on `lib/rigor/type/singleton.rb#==`'s `is_a?(Singleton)` narrowing. The conservative fix was to exclude `singleton` from `DEFAULT_LIBRARIES`; users who need it still opt in via `libraries:` in `.rigor.yml`. Worth a follow-up: should the constant-narrowing logic prefer the lexical-scope `Rigor::Type::Singleton` over the top-level stdlib `Singleton` when the call site is nested inside `Rigor::Type::Singleton`? That is a `Scope#constant_resolution` policy question, not a "do not load the library" question. If the engine fix lands, `singleton` can be auto-loaded.
+
+2. **Stdlib RBS coverage gaps in upstream `rbs` gem.** `strscan` was excluded from Batch 2 because the bundled RBS only declares `StringScanner#[](Integer)`, while real Ruby supports `StringScanner#[](Symbol)` for named captures — which rigor itself uses in `lib/rigor/builtins/imported_refinements.rb:422,424`. Three response paths:
+   - **(a) Skip the library** (what Batch 2 did). Conservative, but users analysing parser code lose precise dispatch on `StringScanner`.
+   - **(b) Hand-author an RBS overlay** under rigor's own `sig/`. Per AGENTS.md § "RBS Authorship" the project policy is to prefer `rigor sig-gen` over hand-authored RBS, but this case is "filling an upstream RBS shim gap" rather than "generating from inference". A small, focused overlay (one `StringScanner` row) is arguably legitimate.
+   - **(c) Upstream the fix to `ruby/rbs`** and bump the gem. Highest-quality long-term path; needs cross-project coordination.
+
+   No committed decision. The same pattern will recur for other stdlib RBS gaps as the library set expands (Batch 3 candidates `csv` / `pstore` / `cgi` / `objspace` etc. likely surface their own gaps).
+
 ### Pre-survey persistent items
 
 1. **Sig-gen `update_existing` does not yet collapse sibling parent / child class blocks.** Gap (c)'s tree-builder fix lives in `Writer#render_new_file` (the create-new path). When updating an existing target file, `merge_class` still resolves each candidate's `class_name` independently — if both `Foo::Bar` and `Foo::Bar::Child` decls already exist as flat siblings, sig-gen leaves them flat. Re-flowing an existing file into the nested layout would require parsing the existing decl tree and rewriting it, which is out of scope for a follow-up fix. Users who want the canonical nested layout regenerate from scratch (delete the target sig file and rerun).

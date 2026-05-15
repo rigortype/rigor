@@ -49,6 +49,8 @@ module Rigor
         "find", "tsort", "shellwords", "benchmark", "base64",
         "did_you_mean", "monitor", "mutex_m", "timeout",
         "open3", "erb", "etc", "ipaddr", "bigdecimal",
+        "bigdecimal-math", "prettyprint",
+        "random-formatter", "time", "open-uri", "resolv",
         "prism", "rbs",
         # data/vendored_gem_sigs/
         "pg", "mysql2", "nokogiri", "bcrypt", "redis", "idn-ruby"

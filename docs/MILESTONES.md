@@ -127,7 +127,7 @@ Commits in chronological order:
 - 5600efc — **F follow-up**: `LiteralStringFolding` dispatcher tier between ConstantFolding and ShapeDispatch. `String#+` and `String#*` lift to `literal-string` when every operand is itself literal-bearing.
 - 8f7c32c — **C2**: `Rigor::Cache::RbsEnvironment` caches the full `RBS::Environment` via the C1 callable surface. Adds `lib/rigor/cache/rbs_environment_marshal_patch.rb` — a minimal `_dump` / `_load` patch on `RBS::Location` so the env round-trips through Marshal. Biggest cold-start win in the cluster.
 
-## v0.1.0 — Version-bumped on `master` (release pending)
+## v0.1.0 — Released 2026-05-07
 
 Theme: **first plugin contract**. ADR-2 § "Extension API" fixes the design surface; v0.1.0 ships the implementation. The pre-v0.1.0 substrate landed in v0.0.3 → v0.0.9 — type vocabulary, inference engine, persistent cache layer wired through `rigor check`, `Rigor::Reflection` facade, `Rigor::FlowContribution` bundle, public-API drift pins (`Scope` / `Environment` / `Type::Combinator` / `Reflection`), `Diagnostic#source_family`, RBS::Extended directive plumbing — leaving v0.1.0 as a finite assembly job rather than an open architectural exercise.
 
@@ -149,11 +149,9 @@ V0.1.0 polish work that landed alongside the six slices:
 - **Two precision improvements** — named-capture regex narrowing through `if /(?<x>...)/ =~ str`; `;`-prefixed block-local `Constant[nil]` shadow.
 - **Per-method Reflection caches** (carry-over from v0.0.9). `Rigor::Cache::RbsInstanceDefinitions` / `Rigor::Cache::RbsSingletonDefinitions` per-class producers landed; the v0.0.9 fail-soft `NameError` regression diagnosed and fixed (missing `require_relative "descriptor"` in two cache files).
 
-`Rigor::VERSION` was bumped to `"0.1.0"` and `CHANGELOG.md` reorganised into the `[0.1.0] - 2026-05-07` section in commit `6170832`. Per the no-autonomous-version-bump rule in [`AGENTS.md`](../AGENTS.md), `bundle exec rake release` (which tags `v0.1.0`, pushes to origin, and publishes to RubyGems) waits for explicit user authorisation. Follow [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md) when the cut is authorised.
+`Rigor::VERSION` was bumped to `"0.1.0"` and `CHANGELOG.md` reorganised into the `[0.1.0] - 2026-05-07` section in commit `6170832`. Release tagged + published per [`.codex/skills/rigor-release-prep/SKILL.md`](../.codex/skills/rigor-release-prep/SKILL.md).
 
-Items deferred past v0.1.0 are tracked in the [v0.1.1 section](#v011--planned) below (Tracks 1–4 plus the v0.1.1 "Out of scope" list at the end). Items still queued past v0.1.1 (LSP / long-running daemon, LRU eviction, cross-machine cache sharing, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation rules, `rigor:v1:conforms-to`, broader CheckRules rule families) are listed there.
-
-## v0.1.1 — Planned
+## v0.1.1 — Released 2026-05-08
 
 Theme: **deepen the literal-string narrowing surface, ship the cross-plugin API, and stabilise the plugin authoring DX**. v0.1.0 closed the plugin contract (six slices) and shipped seven worked plugin examples; v0.1.1 extends the substrate in two directions and cleans up persistent maintenance items.
 
@@ -220,7 +218,7 @@ Out of scope for v0.1.1 (deferred to v0.1.2 or beyond):
 - **Lightweight HKT / type-level type computation.** Conditional and indexed-access types per [`docs/type-specification/rigor-extensions.md`](type-specification/rigor-extensions.md) rows 22 / 51. Sketched in `examples/rigor-lisp-eval/demo/sig/lisp.rbs` and `examples/rigor-units/demo/sig/units.rbs`. Larger surface; not a single-slice item.
 - ~~Interface-strictness on overload selection.~~ Closed in v0.1.2 Track 2 — see below.
 
-## v0.1.2 — Planned
+## v0.1.2 — Released 2026-05-09
 
 Theme: **migrate the example plugin family to the v0.1.1 `flow_contribution_for` substrate.** v0.1.1 landed the cross-plugin API and the per-call return-type contribution tier; v0.1.2 puts that substrate to work — the four example plugins whose runtime returns a typeable value migrate from "info diagnostic only" to "narrowed return type", so chained calls resolve through the analyzer's normal dispatch instead of the RBS-level `untyped` envelope. The diagnostic trace stays — both channels run from the same interpretation.
 
@@ -279,7 +277,9 @@ The full "Out of scope for v0.1.1" list above applies (minus the now-closed inte
 - **Opt-in dependency-source inference.** Walk the Ruby implementation of opt-in gems (those with no RBS / RBS::Inline) instead of degrading to `Dynamic[top]` at the dependency boundary. Design fixed in [ADR-10](adr/10-dependency-source-inference.md): `dependencies.source_inference` config axis, `Dynamic[T]`-wrapped returns, dispatcher tier strictly below plugins, per-gem budget pools, per-gem-version cache slice via new `Cache::Descriptor::DependencyEntry`. Five implementation slices (config plumbing → walker → cache descriptor → per-gem budget → docs). Earliest target v0.1.3, but not committed there; entry depends on the v0.1.x core branch's bandwidth after the Rails plugin parallel track stabilises.
 - **`rigor-sorbet` plugin adapter (ecosystem plugin track).** Read Sorbet `sig { ... }` blocks, `T.let` / `T.cast` / `T.must` / `T.bind` / `T.absurd`, and RBI files as type sources. Plugin-side translation at the Sorbet → Rigor boundary; core stays RBS-canonical per ADR-0 / ADR-1. Runtime enforcement remains `sorbet-runtime`'s job (Rigor doesn't execute application code). Design fixed in [ADR-11](adr/11-sorbet-input-adapter.md). Seven implementation slices (`sig` parser → `T.*` flow primitives → type vocabulary translator → RBI walker → sigil honoring + tier ordering → `T.absurd` exhaustiveness → docs). Lives under `examples/rigor-sorbet/` until the contract stabilises, then extracts via `git subtree split`. Sits parallel to the Rails plugin track; not committed to a specific release.
 
-## v0.1.3 — Planned
+## v0.1.3 — absorbed into v0.1.4 release (2026-05-14)
+
+The v0.1.3 envelope was published as **v0.1.4** (the v0.1.3 cycle absorbed several extra tracks before cut). See the v0.1.4 § below for the released summary; the original v0.1.3 commitment envelope is preserved here for traceability.
 
 Theme: **deliver ADR-10 end-to-end, absorb ADR-11 + Rails Tier 2 work, land ADR-13 (plugin TypeNode resolver + TS-utility-type adapter), close the ADR-14 sig-gen self-dogfood gaps, finish ADR-11's per-call-site assertion gating, and close the literal-token follow-up the ADR-13 slice-6 integration spec needed to work around.** v0.1.2 closed the Engine-depth follow-up sweep and migrated four example plugins to the v0.1.1 `flow_contribution_for` substrate; v0.1.3 turns to the queued ADR work, the Rails plugin family that depends on the cross-plugin API, the type-language vocabulary extension surface, the residual self-dogfood gaps, and the parser-side literal-token gap.
 
@@ -355,28 +355,115 @@ The third-round `lib/rigor/analysis/` self-dogfood (`343a475`) surfaced four int
 
 ### Out of scope for v0.1.3 (deferred to v0.1.4 or beyond)
 - **Per-call return-type precision from gem source** — the walker still catalogs only `(class_name, method_name) → kind` triples. Inferring per-method return types from gem source (so `mode: :full` could contribute richer than `Dynamic[Top]`) is a larger walker enhancement deferred until concrete user demand surfaces.
-- **Tier 3 plugins remaining**: `rigor-graphql`, `rigor-activestorage`. Author when there is concrete user demand.
-- **rigor-activerecord extensions**: associations, enums, scopes, validations, callbacks. Each ships as a 0.2.0+ minor bump per the roadmap.
+- **Tier 3 plugins remaining**: `rigor-graphql`, `rigor-activestorage`. Author when there is concrete user demand. **(`rigor-activestorage` closed in v0.1.5 cycle.)**
+- **rigor-activerecord extensions**: associations, enums, scopes, validations, callbacks. Each ships as a 0.2.0+ minor bump per the roadmap. **(Closed in v0.1.5 cycle.)**
 - **dry-rb ecosystem plugins** ([`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md)) — packaging strategy (single gem vs. family vs. mid-grain bundles) needs an explicit ADR-12 decision before any individual plugin can be authored.
 - All earlier "Out of scope" items from v0.1.1 / v0.1.2 still apply: LSP daemon, cache LRU, ObjectSpace / URI / Kernel catalog imports, Pathname / URI delegation, lightweight HKT, `rigor:v1:conforms-to`.
+
+## v0.1.4 — Released 2026-05-14
+
+Theme: **finish the ADR-10 / ADR-11 / ADR-13 deferred queues, land ADR-14 `rigor sig-gen` end-to-end, and add the `Type::BoundMethod` carrier so `Object#method(:sym).call` round-trips with precision**. The v0.1.3 commitment envelope (above) was published as v0.1.4 because the cycle absorbed several extra tracks before cut.
+
+Slice-by-slice recap lives in `CHANGELOG.md` § `[0.1.4]`. Headline tracks:
+
+- **ADR-10 every "Open questions" follow-up closed** — 5a per-receiver plugin veto, 5b β budget semantics, 5c boundary-cross diagnostic under `mode: :full`, 5d config-conflict diagnostic.
+- **ADR-11 (rigor-sorbet) per-call-site assertion gating closed** — completes the slice 7 follow-up. `Rigor::Scope#source_path` propagates the per-file path so the plugin's `assertion_enforced_here?` can gate `T.let` / `T.cast` / `T.must` / `T.bind` / `T.assert_type!` / `T.reveal_type` on the file's Sorbet `# typed:` sigil. `enforce_sigil: false` keeps the legacy "always-on" path.
+- **ADR-13 literal-token gap closed** — RBS::Extended parser admits `:sym` / `"str"` Symbol-and-String literal tokens at type-arg position plus `|`-unions; `pick_of[T, :a | :b]` / `Pick[T, "a" | "b"]` round-trip end-to-end.
+- **ADR-14 `rigor sig-gen` end-to-end** — all five slices plus four rounds of self-dogfood follow-ups (kind-aware namespace emission, `module_function` recognition, nested-class layout, `&:symbol` block-pass dispatch, `Const = Data.define(...)` / `Struct.new(...)` discovery). Clean `make verify` against rigor's own `sig/` after sig-gen self-dogfood.
+- **`Type::BoundMethod` carrier** — `Object#method(:sym).call` round-trips with full precision through the forward-fold / backward-fold pair in `MethodFolding`. `[:to_i, :to_f, :to_sym].map { |m| "1".method(m).call }` infers to `Tuple[Constant<1>, Constant<1.0>, Constant<:"1">]`.
+- **Eighteen worked plugin examples land under `examples/`** (Rails Tier 1 + Tier 2 + Tier 3 + `rigor-sorbet` + `rigor-typescript-utility-types`).
+- **Lint-side rubocop calibration** — `.rubocop.yml` Maxes calibrated against the working code so ~310 in-file `# rubocop:disable` markers dropped to ~157.
+
+## v0.1.5 — accumulating on `master` (release pending)
+
+Theme: **kick off the [ADR-15](adr/15-ractor-concurrency.md) Ractor migration end-to-end, bank the spec-suite performance wins (6× wall-clock), close the v0.1.3/v0.1.4 deferred-queue ecosystem items, and prove out the analyzer against fourteen real-world Rails / Ruby projects — driving production-rigor improvements (built-in vendored gem RBS, target-project Bundler awareness, several engine fixes).**
+
+Every committed v0.1.5 track is purely additive (no behaviour change for existing CLI consumers); the Ractor work is staged so each phase is independently revert-able.
+
+Banked so far on `master`:
+
+### ADR-15 Ractor migration — phases 1–4c + 4b.x all landed
+
+- **Phase 1** (value-object shareability audit). Every `Rigor::Type::*` / `Rigor::TypeNode::*` / `Cache::Descriptor` / `FactStore` / `FlowContribution` is `Ractor.shareable?` at construction. Regression guard at [`spec/rigor/ractor_readiness_spec.rb`](../spec/rigor/ractor_readiness_spec.rb).
+- **Phase 2a** (`Rigor::Configuration` deep-freeze). `Configuration.new(...)` is `Ractor.shareable?` at construction time.
+- **Phase 2b** (`Environment::Reflection` extracted). Frozen RBS-query facade; not Ractor.shareable? (transitive RBS::Location is C-extension state) — the Phase 4 worker pool sidesteps this by having each worker build its OWN Reflection from the shared `Cache::Store`.
+- **Phase 3a** (`Plugin::Blueprint` + `Registry.materialize`). Frozen `Ractor.shareable?` blueprint carrier + per-Ractor materialisation factory; plugin INSTANCES intentionally stay non-shareable.
+- **Phase 4a** (`Analysis::WorkerSession`). Per-worker substrate consuming only `Ractor.shareable?` inputs and building its OWN plugin registry / dependency-source index / environment / reporters internally.
+- **Phase 4b** (`Runner#analyze_files_in_pool`). Actual Ractor pool wiring around WorkerSession. Three message kinds (`[:prepare, …]` / `[:file, path, …]` / `[:done, …]`); diagnostic order preserved via per-path result Hash + original-order re-flow. Equivalence + plugin replay + prepare-dedup proven by [`spec/rigor/analysis/runner_pool_spec.rb`](../spec/rigor/analysis/runner_pool_spec.rb).
+- **Phase 4b.x** (worker-side env-build stability + module-shareability). Four follow-ups against real-world projects fixed the remaining `Ractor::IsolationError` sources: `NumericCatalog#@catalog`, `Type::Refined::CANONICAL_NAMES`, `Builtins::RegexRefinement::RULES`, `MethodDispatcher::ShapeDispatch::REFINED_STRING_PROJECTIONS`, plus `MethodDispatcher::CONSTANT_CONSTRUCTORS` (proc values). `RbsLoader#prewarm` (new) drives every cached RBS producer on the main Ractor before pool spawn so workers serve from the Marshal blob.
+- **Phase 4c** (CLI / env / config opt-in surfaces). `rigor check --workers=N` > `RIGOR_RACTOR_WORKERS` > `.rigor.yml` `parallel.workers:` > `0`. Sequential remains the documented default.
+
+**Pool ≡ sequential proven on 14 real-world projects** (Redmine, Discourse, Mastodon, GitLab FOSS, Forem, Solidus, Chatwoot, Canvas LMS, OpenProject, Loomio, Publify, Diaspora, Dependabot Core, tDiary Core — total 31,840 files swept). Pool wall-clock crossover with sequential sits around 1.3–1.8 K files; GitLab FOSS (11.1 K files) shows pool=8 at 1.64× sequential.
+
+### Real-world Rails / Ruby survey + production-rigor improvements
+
+Three rounds of project sweeps (recorded in [`docs/notes/20260515-real-world-rails-survey.md`](notes/20260515-real-world-rails-survey.md)) drove eight engine / packaging improvements:
+
+- **O1** (`examples/rigor-activesupport-core-ext/`) — opt-in RBS bundle for the top ~50 ActiveSupport `core_ext` selectors. Combined v1 + v2 impact across the 14 survey projects: total diagnostics 12,502 → 3,071 (−75%), `call.undefined-method` 10,589 → 1,426 (−87%).
+- **O5** (`ac14c45`) — `Hash[K, V] <: Enumerable[[K, V]]` parametrized-ancestor projection in `Inference::Acceptance`.
+- **O6** (`4698437`) — `MethodDispatcher::CONSTANT_CONSTRUCTORS` deep-share. Pool ≡ sequential on GitLab FOSS after fix (was 2,983 vs 2,982).
+- **O7** (`3c4a7ff`) — `RbsLoader#env` memoises failure. Adding a single conflicting sig (e.g., gem-shipped `prism/sig/prism.rbs` whose `Prism::VERSION` clashes with rigor's bundled stdlib RBS) pre-fix caused per-file env rebuilds (390× for 1 controller, ~35 s wall). Post-fix: 0.15 s for 5 controllers (~550× speedup) with a single user-facing warning naming the offending file.
+- **Vendored gem RBS** (`f9b94d2`) — `data/vendored_gem_sigs/<gem>/` ships RBS for six native-extension gems by default: `pg` / `mysql2` / `nokogiri` / `bcrypt` / `redis` / `idn-ruby`. Four come from `ruby/gem_rbs_collection` (MIT-vendored with `LICENSE.upstream`); two (`pg`, `idn-ruby`) are minimal hand-written stubs (MPL-2.0). Out-of-the-box RBS classes available: 1,134 → 1,273 (+139). Mastodon's `bundle install` blocker (libidn) is moot for static analysis.
+- **O4 MVP** (`95b923f`) — `bundler.bundle_path` / `bundler.auto_detect` config keys. New `BundleSigDiscovery` module walks the target project's bundler install root and auto-feeds gem-shipped `sig/` directories into `signature_paths:`. Auto-detect reads `.bundle/config`'s `BUNDLE_PATH:` then falls back to `vendor/bundle/`. `SKIPPED_GEMS_BY_DEFAULT` set excludes gems already covered by `DEFAULT_LIBRARIES` + `data/vendored_gem_sigs/` so the prism-class conflict O7 surfaced doesn't recur. Verified on Mastodon: RBS classes 1,178 → 2,136 (+958) from 7 non-skipped gem sigs. Layer 3 (`Gemfile.lock` parse + `gem_rbs_collection` version matching) remains queued.
+- **Engine narrowing** — assignment-in-condition (`if cond && (var = expr)`) now narrows the bound local; on Redmine alone, `call.possible-nil-receiver` 69 → 23 (−46 FPs).
+- **rigor-activesupport-core-ext v2 (`compact_blank` / `exclude?` / `index_with` / `Hash.from_xml` / DateTime calculations)** from the round-2 (Forem / Solidus / Chatwoot / Canvas LMS / OpenProject) survey extension.
+
+### Other v0.1.5 work landed
+
+- **Spec-suite performance** — `Cache::Store` thread-safe + in-process memo + `parallel_tests` runner; suite wall-clock 162s → 27s on a 12-core dev machine (~6×).
+- **`rigor check --stats` (default ON)** — end-of-run summary on stderr (check targets / type universe / gem source-walk / process).
+- **`rigor-activerecord` extensions** — associations / enums / scopes / validations / callbacks all recorded on `ModelIndex::Entry`; `Model.where(enum_col: :unknown)` surfaces `unknown-enum-value`; `belongs_to` / `has_one` contribute `Nominal[Target] | nil` via `flow_contribution_for`.
+- **`Method#curry` precision** through `Type::BoundMethod` (Open Engineering Item #5, Option A).
+- **`rigor-activestorage` (Tier 3E)** — `has_one_attached :avatar` / `has_many_attached :photos` macro recognition + return-type narrowing via `flow_contribution_for`. Twentieth worked plugin under `examples/`.
+
+### Pool / sequential equivalence cross-project summary
+
+| Project | Files | Seq warm | Pool warm | Diagnostics (baseline → with O1 v2 → with vendored RBS) |
+| --- | ---: | ---: | ---: | --- |
+| Redmine | 347 | 2.82s | 3.70s (`w=4`) | 389 → 157 → 157 |
+| Mastodon | 1,302 | 3.31s | 3.98s (`w=4`) | 521 → 124 → 124 |
+| Forem | 1,250 | 4.31s | 4.60s (`w=4`) | 691 → 146 → 149 |
+| Discourse | 1,804 | 7.46s | **5.82s** | 1,439 → 423 → 429 |
+| Solidus | 1,914 | 7.36s | **4.91s** | 528 → 42 → 42 |
+| Canvas LMS | 3,248 | 17.32s | **11.16s** | 3,296 → 1,496 → 1,506 |
+| OpenProject | 6,817 | 18.84s | **10.24s** | 2,356 → 175 → 176 |
+| GitLab FOSS | 11,130 | 25.27s | **15.43s** (`w=8`) | 2,982 → 489 → 491 |
+
+(See survey notes for the remaining six smaller projects — Loomio, Publify, Diaspora, Chatwoot, Dependabot Core, tDiary Core.)
+
+### Open items consolidated (post-survey)
+
+| ID | Status | Item |
+| --- | --- | --- |
+| O1 | landed (MVP, v2) | `examples/rigor-activesupport-core-ext/` opt-in RBS bundle. |
+| O2 | queued | Macro-template / heredoc-Ruby expansion. tDiary's `instance_eval` plugin pattern is the motivating real-world case. |
+| O3 | not-an-issue | Early-exit narrowing (`next if x.nil?` / `return if x.nil?`) already works; survey residuals are mostly Object#blank?/present?/try which O1 covers. |
+| O4 | layers 1+2 landed | Bundler awareness. Layer 3 (`Gemfile.lock` parse + `gem_rbs_collection` matching) queued. |
+| O5 | landed (`ac14c45`) | `Hash[K, V] <: Enumerable[[K, V]]` projection. |
+| O6 | landed (`4698437`) | Pool / seq precision divergence (CONSTANT_CONSTRUCTORS). |
+| O7 | landed (`3c4a7ff`) | RBS env-build failure-memo (per-file slowdown on duplicate-decl). |
+
+### Out of scope for v0.1.5
+
+- **O2** (macro template / heredoc-Ruby expansion) — large design, deferred.
+- **O4 Layer 3** (Gemfile.lock + gem_rbs_collection version matching) — queued.
+- **`rigor-graphql`** (Tier 3 plugin) — author when there is concrete user demand.
+- **dry-rb ecosystem plugins** — ADR-12 packaging decision pending.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 
 The full roadmap is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Summary of the running track:
 
-**Already landed (unreleased on `master`):**
+**Already landed (released through v0.1.4 / accumulating on `master` for v0.1.5):**
 
 - **Tier 1**: [`rigor-rails-routes`](../examples/rigor-rails-routes/) (publishes `:helper_table`), [`rigor-rails-i18n`](../examples/rigor-rails-i18n/), [`rigor-actionmailer`](../examples/rigor-actionmailer/), [`rigor-activejob`](../examples/rigor-activejob/).
-- **Tier 2**: [`rigor-activerecord`](../examples/rigor-activerecord/) (publishes `:model_index`); [`rigor-actionpack`](../examples/rigor-actionpack/) (4 phases: routes / filters / renders / strong-params); [`rigor-factorybot`](../examples/rigor-factorybot/) (Phase 1 (a) + (c)).
-- **Tier 3**: [`rigor-pundit`](../examples/rigor-pundit/), [`rigor-sidekiq`](../examples/rigor-sidekiq/), [`rigor-rspec`](../examples/rigor-rspec/), [`rigor-actioncable`](../examples/rigor-actioncable/).
+- **Tier 2**: [`rigor-activerecord`](../examples/rigor-activerecord/) (publishes `:model_index`; associations / enums / scopes / validations / callbacks all landed in v0.1.5); [`rigor-actionpack`](../examples/rigor-actionpack/) (4 phases: routes / filters / renders / strong-params); [`rigor-factorybot`](../examples/rigor-factorybot/) (Phase 1 (a) + (c)).
+- **Tier 3**: [`rigor-pundit`](../examples/rigor-pundit/), [`rigor-sidekiq`](../examples/rigor-sidekiq/), [`rigor-rspec`](../examples/rigor-rspec/), [`rigor-actioncable`](../examples/rigor-actioncable/), [`rigor-activestorage`](../examples/rigor-activestorage/) (landed v0.1.5).
+- **Opt-in non-plugin bundles**: [`rigor-activesupport-core-ext`](../examples/rigor-activesupport-core-ext/) (v0.1.5; opt-in RBS bundle for top ~50 AS core_ext selectors). [`rigor-typescript-utility-types`](../examples/rigor-typescript-utility-types/) (ADR-13 slice 6).
 
 **Pending Tier 3 (specialised, author when there is concrete user demand):**
 
-- `rigor-graphql`, `rigor-activestorage`.
-
-**Future surface within `rigor-activerecord` (ship as 0.2.0+ minor bumps):**
-
-- Associations (`has_many` / `belongs_to`), enums, scopes, validations, callbacks.
+- `rigor-graphql`.
 
 Each plugin is staged in `examples/rigor-<id>/` per the [`rigor-plugin-author`](../.codex/skills/rigor-plugin-author/SKILL.md) SKILL discipline and extracted via `git subtree split` once its contract is stable. The eventual `rigor-rails` meta-gem will declare the Tier 1+2 plugins as gem dependencies so a single Gemfile line opts the user into the whole stack.
 

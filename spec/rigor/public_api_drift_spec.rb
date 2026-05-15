@@ -91,13 +91,15 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     rbs_loader()
     reflection()
     singleton_for_name(req:name)
+    synthetic_method_index()
   ].freeze
 
   ENVIRONMENT_SINGLETON = [
     "default()",
     "for_project(key:root,key:libraries,key:signature_paths,key:cache_store," \
     "key:plugin_registry,key:dependency_source_index,key:rbs_extended_reporter," \
-    "key:boundary_cross_reporter,key:bundler_bundle_path,key:bundler_auto_detect)"
+    "key:boundary_cross_reporter,key:bundler_bundle_path,key:bundler_auto_detect," \
+    "key:synthetic_method_index)"
   ].freeze
 
   REFLECTION_SINGLETON = %w[

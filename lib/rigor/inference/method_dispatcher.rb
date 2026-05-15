@@ -97,6 +97,18 @@ module Rigor
           return rbs_result
         end
 
+        # ADR-16 Tier C — synthetic-method tier. Sits BELOW RBS
+        # dispatch (per WD13: user-authored RBS overrides
+        # substrate synthesis) and ABOVE the dependency-source
+        # inference tier so a plugin's declared emit table beats
+        # the generic gem-source fallback for the same class. The
+        # recorded `return_type` string is preserved on the
+        # `SyntheticMethod`; slice 2b emits `Dynamic[T]` per WD13
+        # floor, with precision promotion via ADR-13 reserved for
+        # a later iteration.
+        synthetic_result = try_synthetic_method(receiver_type, method_name, environment)
+        return synthetic_result if synthetic_result
+
         # ADR-10 slice 2b-ii — dependency-source inference tier.
         # Sits BELOW RBS dispatch (RBS / RBS::Inline / generated
         # stubs / plugin contracts always win) and ABOVE the
@@ -225,6 +237,36 @@ module Rigor
       # publish as ground-truth `T`). Returns `nil` when the
       # environment carries no index, the index has no entry, or
       # the receiver has no nominal class to look up.
+      # ADR-16 Tier C — synthetic-method tier. Slice 2b ships at
+      # the WD13 floor: a match returns `Type::Combinator.untyped`
+      # (Dynamic[T]) so the dispatcher loop short-circuits at the
+      # correct precedence (RBS overrides; dep-source / discovered
+      # / user-class-fallback do NOT fire) but no precise return
+      # type is asserted. The recorded `return_type` string stays
+      # available on the `SyntheticMethod` for the precision-
+      # promotion slice (slice 6) without re-walking.
+      def try_synthetic_method(receiver_type, method_name, environment)
+        index = environment&.synthetic_method_index
+        return nil if index.nil? || index.empty?
+
+        class_name = synthetic_method_class_name(receiver_type)
+        return nil if class_name.nil?
+
+        matches = case receiver_type
+                  when Type::Singleton then index.lookup_singleton(class_name, method_name)
+                  else index.lookup_instance(class_name, method_name)
+                  end
+        return nil if matches.empty?
+
+        Type::Combinator.untyped
+      end
+
+      def synthetic_method_class_name(receiver_type)
+        case receiver_type
+        when Type::Nominal, Type::Singleton then receiver_type.class_name
+        end
+      end
+
       def try_dependency_source(receiver_type, method_name, environment)
         index = environment&.dependency_source_index
         return nil if index.nil? || index.empty?

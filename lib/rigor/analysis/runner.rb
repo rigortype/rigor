@@ -11,6 +11,7 @@ require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
 require_relative "../inference/scope_indexer"
+require_relative "../inference/synthetic_method_scanner"
 require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
 require_relative "dependency_source_inference"
@@ -88,6 +89,15 @@ module Rigor
         expansion = expand_paths(paths)
         @class_decl_paths_snapshot = {}.freeze
         @signature_paths_snapshot = []
+        # ADR-16 slice 2b — Tier C pre-pass. Built once per run
+        # against the resolved file set + the loaded plugin
+        # registry's `heredoc_templates` so synthetic methods are
+        # visible cross-file when per-file inference dispatches.
+        @synthetic_method_index = Inference::SyntheticMethodScanner.scan(
+          plugin_registry: @plugin_registry,
+          paths: expansion.fetch(:files),
+          environment: nil
+        )
 
         diagnostics = pre_file_diagnostics(expansion)
         diagnostics += analyze_files(expansion.fetch(:files))
@@ -199,7 +209,8 @@ module Rigor
           rbs_extended_reporter: @rbs_extended_reporter,
           boundary_cross_reporter: @boundary_cross_reporter,
           bundler_bundle_path: @configuration.bundler_bundle_path,
-          bundler_auto_detect: @configuration.bundler_auto_detect
+          bundler_auto_detect: @configuration.bundler_auto_detect,
+          synthetic_method_index: @synthetic_method_index
         )
       end
 

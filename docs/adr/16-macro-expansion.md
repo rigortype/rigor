@@ -193,17 +193,18 @@ substrate" path stays a first-class option.
 - **Cacheability.** Expanded synthetic ASTs participate in
   `Cache::Store` with deterministic descriptors per
   [ADR-6](6-cache-persistence-backend.md).
-- **Cost-bounded best-effort emission.** The substrate aspires to the
-  full Tier emit shape (e.g. Tier C's 5-row emit table with precise
-  return types) where that's cheaply achievable. Where precise
-  resolution would require disproportionate analyzer cost or new
-  infrastructure, the substrate degrades gracefully to a minimum
-  acceptable floor: **the substrate-affected code must at least parse
-  cleanly and have its identifiers resolved** (syntax errors and
-  references to undefined methods / constants get caught). Synthetic
-  method names are emitted even when their return types fall to
-  `Dynamic[T]`. WD13 records the rationale and the floor / ceiling
-  contract.
+- **Floor-first emission with a long-range aspiration.** The
+  substrate's **v0.1.x shipping target is the floor**:
+  substrate-affected code parses cleanly and has its identifiers
+  resolved (syntax errors and references to undefined methods /
+  constants get caught); synthetic method *names* are emitted with
+  `Dynamic[T]` returns. The full Tier emit shape (e.g. Tier C's
+  N-row emit table with precise return types) is an **ideal feature
+  line that remains on the roadmap but is not what this ADR commits
+  to delivering initially**. Disproportionate cost spent reaching
+  the ceiling is rejected; reaching the floor is the deliverable.
+  WD13 records the rationale and what the floor / ceiling contract
+  permits.
 
 ## Non-Goals
 
@@ -367,14 +368,16 @@ literal Symbol or String. Non-literal arguments (`has_one_attached(some_method)`
 fall through to the existing plugin walker hooks (or to no handling at
 all).
 
-**Precision floor / ceiling per WD13.** The `emit:` table's `returns:`
-strings are aspirational. The substrate routes them through ADR-13's
-`Plugin::TypeNodeResolver` chain when the chain can resolve them
-cheaply; when resolution fails or is gated on infrastructure not yet
-present, the synthetic method emits `Dynamic[T]` and a
-`macro.tier_c.unresolved-return` `:info` provenance marker. **Method
-names are always emitted** — the floor is "the synthetic method
-exists and resolves on lookup", precise typing is the ceiling.
+**v0.1.x precision posture per WD13.** Tier C ships at the **floor**:
+synthetic method *names* emit unconditionally; the `emit:` table's
+`returns:` strings are **recorded in the manifest but not resolved**.
+Every synthetic method returns `Dynamic[T]` with a
+`macro.tier_c.unresolved-return` `:info` provenance marker. Routing
+`returns:` strings through ADR-13's `Plugin::TypeNodeResolver` chain
+to produce precise returns is the **ceiling** — a roadmap target for
+slice 6 (precision promotion), not a v0.1.x commitment. The author's
+`returns:` declarations cost nothing to write today and unlock
+precision later when the resolver hookup lands.
 
 Reaches: ActiveStorage attached macros, Devise per-mapping helper
 quad (`current_user`, `user_signed_in?`, `authenticate_user!`,
@@ -853,30 +856,16 @@ stands on its own. The secondary purpose ships if and when the
 heuristic clears the performance bound; otherwise the substrate is
 declared-plugin-only.
 
-### WD13 — Graceful degradation under cost discipline (precision floor / ceiling)
+### WD13 — Floor-first delivery; ceiling stays as a long-range aspiration
 
 WD12 covers the secondary heuristic's best-effort posture. WD13
-applies the same cost discipline to the **primary** purpose: even for
-declared plugins, the substrate ships the full Tier emit shape only
-where that's *cheaply* achievable. Where it isn't, the substrate
-degrades gracefully to a defined floor rather than blocking on
-infrastructure that would inflate the implementation cost.
+records the same cost discipline applied to the **primary** purpose:
+**the bar for v0.1.x is deliberately the floor**, not the ceiling.
+The full precise emit shape stays on the roadmap as an ideal feature
+line; this ADR does not commit to reaching it. Disproportionate
+implementation cost spent on precision is rejected.
 
-**Aspirational ceiling (per tier).**
-
-- Tier A — precise `self : ReceiverInstance` scope typing, full
-  declared `scope_methods` surface; block body inferred as if it were
-  a method body of the declared receiver.
-- Tier B — every symbol in the bundled registry resolves to a
-  concrete `Module` constant; every module's `included do` digest
-  contributes precise instance / class method facts.
-- Tier C — full 5-row (or N-row) emit table with precise return
-  types resolved via ADR-13's `Plugin::TypeNodeResolver` chain;
-  parameter types precise where the plugin declared them.
-- Tier D — file body parsed and analysed under the declared
-  receiver / bound-ivar typing context with full precision.
-
-**Acceptable floor (per tier).**
+**The v0.1.x shipping floor (per tier).**
 
 - Across all four tiers, the substrate-affected code must at minimum
   **parse cleanly** and **have its identifiers resolved against the
@@ -886,36 +875,53 @@ infrastructure that would inflate the implementation cost.
   visible methods + the inferred lexical scope; a syntax error or a
   reference to a method that doesn't exist surfaces as a normal
   rigor diagnostic.
-- For Tier C specifically, this means: emit the synthetic method
-  *names* in every case, even when their `returns:` cannot yet be
-  resolved precisely. Unresolved returns degrade to `Dynamic[T]` with
-  a `macro.<tier>.unresolved-return` `:info` provenance marker.
+- For Tier C specifically: emit the synthetic method *names* in
+  every case, with `Dynamic[T]` returns and a
+  `macro.<tier>.unresolved-return` `:info` provenance marker.
   Downstream `user.avatar.foo` calls then fall through the existing
   `Dynamic[T]` rules — not a regression vs. the current "no plugin"
   baseline.
+- For Tier B: registry entries that fail to resolve to a concrete
+  `Module` constant emit `Dynamic[T]` instance / class method
+  contributions with `macro.tier_b.unresolved-module` provenance,
+  rather than dropping the symbol entirely.
+
+This floor is what the substrate's v0.1.x slices ship. It does not
+gate on resolver hookup, generic-parameter handling, or any of the
+infrastructure the ceiling would need.
+
+**The long-range ceiling (roadmap, not commitment).** Full Tier
+emit precision: Tier C's N-row emit table with `returns:` resolved
+via ADR-13's `Plugin::TypeNodeResolver` chain; Tier B's `included do`
+digests contributing precise instance / class method facts; Tier A's
+declared `scope_methods` surface fully typed; Tier D's file body
+analysed at full inference precision under the bound receiver. Each
+of these is *desirable* and individually reachable when an
+implementation slice demonstrates net positive cost / value, but
+**none of them is a delivery requirement of ADR-16**. The ceiling is
+where successor ADRs / future slicing can promote individual rows
+without invalidating this contract.
 
 **Why this contract.** Three reasons.
 
 1. **The user-facing value of the substrate is not all-or-nothing.**
-   Getting the synthetic method names and the parse-checking of
-   eval'd bodies in place captures most of the survey's open
-   diagnostic share (the Redmine 35 FP/file case is dominated by
+   The floor (names emitted + parse-check of eval'd bodies +
+   identifier resolution) captures most of the survey's open
+   diagnostic share (the Redmine 35 FP / file case is dominated by
    missing-method-on-undeclared-receiver, not by precise return
-   typing). Adding precise return types is *desirable* but
-   subordinate to the floor.
-2. **Implementation cost is non-linear.** ADR-13's
-   `Plugin::TypeNodeResolver` already exists for `%a{rigor:v1:…}`
-   payloads; routing emit-table `returns:` strings through the same
-   chain is a slice. But making the resolver robust against every
-   forward-reference / generic-parameter edge case is much more.
-   The floor-vs-ceiling contract lets the slice ship without solving
-   the edge case set in advance.
-3. **Each tier's slicing can target the cheap-precision band first
-   and the expensive-precision band later, without breaking the
-   contract.** Slice 2 (Tier C MVP) ships with names + `Dynamic[T]`
-   returns; later iterations promote rows to precise returns as the
-   resolver hook proves out. No version-N user-visible regressions
-   when version-(N+1) tightens.
+   typing). Precise return types are *desirable* but subordinate to
+   the floor — the bar is genuinely lower than the full emit shape
+   suggested.
+2. **Implementation cost is non-linear.** Routing emit-table
+   `returns:` strings through ADR-13's existing
+   `Plugin::TypeNodeResolver` chain is a slice. Making the resolver
+   robust against every forward-reference / generic-parameter edge
+   case is much more. The floor-first contract lets the substrate
+   ship without committing to solve that edge case set.
+3. **Promotion is forward-compatible.** Slice 2 (Tier C MVP) ships
+   names + `Dynamic[T]` returns. When a later iteration promotes a
+   row to a precise return, no version-N user code regresses —
+   `Dynamic[T]` widens to a concrete type, never the reverse.
 
 **What the contract does NOT permit.** Substrate emissions that
 *silently* produce wrong types. If a tier can't resolve a return
@@ -1111,3 +1117,14 @@ gracefully," not "fabricate precision."
   resolution path, cross-plugin merging, and application-local
   paths (the last explicitly out of scope, to a separate ADR-2
   config-schema decision).
+- 2026-05-15 — reweighted WD13 / Goals / Tier C: floor is the
+  v0.1.x **delivery commitment**, ceiling is a long-range
+  aspiration on the roadmap (not a delivery requirement of
+  this ADR). The earlier formulation ("aspires to ceiling
+  where cheap, degrades to floor where expensive") read as if
+  the ceiling were the default target; the practical
+  interpretation is "the bar IS the floor; the ceiling is
+  where future slicing can promote." No tier emit row carries
+  a v0.1.x precision commitment — `returns:` declarations in
+  manifest tables are recorded today and unlocked later when
+  the resolver hookup lands.

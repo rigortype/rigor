@@ -105,9 +105,52 @@ yet. The answers narrow the architecture choice in Phase 2.
 
 ## Phase 2 — Template selection
 
-Map the answers to one of the six existing examples. Use the chosen
-example as the **structural template** — copy the directory layout
-and adapt the analyser body. Do NOT start from scratch.
+Two authoring paths exist as of v0.1.x:
+
+1. **Macro expansion substrate** (ADR-16) — declarative
+   `manifest` entries; substrate handles AST walking,
+   name-interpolation, and synthesis. Use this when the
+   plugin's job fits one of the four ADR-16 tiers below.
+2. **Hand-rolled walker** — `diagnostics_for_file` +
+   `flow_contribution_for`. Use this when the requirement
+   falls outside the substrate's tier shapes (domain DSLs
+   with argument-shape-dependent return types, cross-file
+   collect-then-validate analyses, external-file parsing,
+   etc.).
+
+### Step 2A — Try the macro substrate first
+
+If the target DSL fits one of these shapes, ship a
+**declarative manifest only** — no walker code is needed.
+
+| If the DSL is… | Substrate tier | Manifest entry | Reference plugin |
+| --- | --- | --- | --- |
+| `<Class>.<verb>(path) do … end` where the block runs as an instance method on `<Class>` (Sinatra-shape) | **Tier A** | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](../../../examples/rigor-sinatra/) |
+| `<Class>.<dsl_method>(:sym_a, :sym_b)` where each symbol maps via a bundled registry to a module that gets `include`d (Devise-shape) | **Tier B** | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](../../../examples/rigor-devise/) |
+| `<Class>.<dsl_method>(:name, T)` where the framework `class_eval`s a heredoc interpolating `name` (dry-struct-shape, ActiveStorage-shape) | **Tier C** | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](../../../examples/rigor-dry-struct/) |
+| External Ruby files `instance_eval`'d under a declared receiver (Redmine webhook payloads / tDiary plugins) | **Tier D** (contract only as of v0.1.x; engine integration demand-driven) | `external_files: [Macro::ExternalFile.new(glob:, receiver_type:, bound_ivars:)]` | — |
+
+`ActiveSupport::Concern.included do ... end` re-targeting is
+handled automatically by the substrate — a Tier B/C call
+inside an `included do` block fires on whoever later
+`include`s the concern, not on the concern module itself.
+
+The substrate floor (per ADR-16 § WD13) is "synthetic methods
+emit by name, return types degrade to `Dynamic[T]`." Precise
+return-type promotion via ADR-13's resolver chain is the
+**ceiling**, deferred to a future slice — declare `returns:`
+strings in the manifest today, unlock precision later without
+changes to the plugin gem.
+
+If the DSL fits a substrate tier, skip the rest of this phase
+and jump to Phase 5 (Demo). The plugin's `lib/rigor/plugin/<id>.rb`
+is a 20-line manifest declaration — no walker.
+
+### Step 2B — Hand-rolled walker (when the substrate does not fit)
+
+Map the answers to one of the six existing hand-rolled examples.
+Use the chosen example as the **structural template** — copy
+the directory layout and adapt the analyser body.
 
 | If the answers look like… | Use template | Why |
 | --- | --- | --- |
@@ -118,11 +161,14 @@ and adapt the analyser body. Do NOT start from scratch.
 | Q1=B, Q2=A/B, Q3=B, Q5=C | [`rigor-pattern`](../../../examples/rigor-pattern/) | Plugin asks the analyser via `Scope#type_of` + `literal_string_compatible?`; matches against a literal value. |
 | Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D | [`rigor-routes`](../../../examples/rigor-routes/) | Reads a project file via `IoBoundary` under `TrustPolicy`; caches the parse via `Plugin::Base.producer`. |
 
-If the requirement falls into NONE of the six, **stop and ask the
-user**. The plugin contract surface in v0.1.0 may not yet expose
-what they need (e.g. plugin-emitted return-type contributions are
-queued for a v0.1.x slice — see the "Future direction" sections in
-the example READMEs). Don't invent a workaround.
+If the requirement fits neither the substrate tiers nor the
+six hand-rolled templates, **stop and ask the user**. The
+v0.1.x plugin contract may not yet expose what they need;
+don't invent a workaround. The
+[per-library survey](../../../docs/notes/20260515-macro-expansion-library-survey.md)
+records which Ruby libraries the substrate covers and which
+fall outside (GraphQL-Ruby is the canonical "schema-graph
+recorder" case that the substrate does NOT fit).
 
 ---
 

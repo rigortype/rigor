@@ -156,4 +156,114 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
       expect(index.lookup_singleton("Address", :find_by_city).size).to eq(1)
     end
   end
+
+  describe ".scan — Tier B (slice 3b)" do
+    let(:devise_plugin) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "devisefixture",
+          version: "0.1.0",
+          trait_registries: [
+            Rigor::Plugin::Macro::TraitRegistry.new(
+              receiver_constraint: "ActiveRecord::Base",
+              method_name: :devise,
+              symbol_arg_position: :rest,
+              modules_by_symbol: {
+                database_authenticatable: "DeviseFixture::Models::DatabaseAuthenticatable",
+                recoverable: "DeviseFixture::Models::Recoverable"
+              },
+              always_included: ["DeviseFixture::Models::Authenticatable"]
+            )
+          ]
+        )
+      end
+    end
+
+    let(:fake_rbs_loader) do
+      module_methods = {
+        "DeviseFixture::Models::Authenticatable" => %i[authenticatable_method],
+        "DeviseFixture::Models::DatabaseAuthenticatable" => %i[valid_password? update_with_password],
+        "DeviseFixture::Models::Recoverable" => %i[send_reset_password_instructions]
+      }
+      loader = instance_double(Rigor::Environment::RbsLoader)
+      module_methods.each do |module_name, names|
+        definition = Object.new
+        method_table = names.to_h { |n| [n, :sentinel] }
+        definition.define_singleton_method(:methods) { method_table }
+        allow(loader).to receive(:instance_definition).with(module_name).and_return(definition)
+      end
+      loader
+    end
+
+    let(:environment_with_devise_modules) do
+      env = stub_environment_for(
+        hierarchy: { "User" => "ApplicationRecord", "ApplicationRecord" => "ActiveRecord::Base" }
+      )
+      allow(env).to receive(:rbs_loader).and_return(fake_rbs_loader)
+      env
+    end
+
+    it "explodes always_included + per-symbol modules' instance methods into the index" do
+      registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
+      _, paths = write_files(
+        "application_record.rb" => "class ApplicationRecord\nend\n",
+        "user.rb" => <<~RUBY
+          class User < ApplicationRecord
+            devise :database_authenticatable, :recoverable
+          end
+        RUBY
+      )
+      index = described_class.scan(
+        plugin_registry: registry, paths: paths, environment: environment_with_devise_modules
+      )
+
+      expect(index.lookup_instance("User", :authenticatable_method).size).to eq(1)
+      expect(index.lookup_instance("User", :valid_password?).size).to eq(1)
+      expect(index.lookup_instance("User", :update_with_password).size).to eq(1)
+      expect(index.lookup_instance("User", :send_reset_password_instructions).size).to eq(1)
+
+      sm = index.lookup_instance("User", :valid_password?).first
+      expect(sm.provenance[:origin_module]).to eq("DeviseFixture::Models::DatabaseAuthenticatable")
+      expect(sm.provenance[:trait_method]).to eq("devise")
+    end
+
+    it "silently skips unknown trait symbols (design decision (2))" do
+      registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
+      _, paths = write_files(
+        "user.rb" => <<~RUBY
+          class User < ActiveRecord::Base
+            devise :database_authenticatable, :unknown_strategy
+          end
+        RUBY
+      )
+      index = described_class.scan(
+        plugin_registry: registry, paths: paths, environment: environment_with_devise_modules
+      )
+      expect(index.lookup_instance("User", :valid_password?).size).to eq(1)
+      expect(index.lookup_instance("User", :nonexistent)).to be_empty
+    end
+
+    it "still includes always_included modules when no trait symbol matches" do
+      registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
+      _, paths = write_files(
+        "user.rb" => "class User < ActiveRecord::Base\n  devise :unknown_strategy\nend\n"
+      )
+      index = described_class.scan(
+        plugin_registry: registry, paths: paths, environment: environment_with_devise_modules
+      )
+      expect(index.lookup_instance("User", :authenticatable_method).size).to eq(1)
+    end
+
+    it "skips classes that do not inherit from the trait registry's receiver_constraint" do
+      registry = Rigor::Plugin::Registry.new(plugins: [devise_plugin.new(services: services)])
+      _, paths = write_files(
+        "lone.rb" => "class Lone\n  devise :database_authenticatable\nend\n"
+      )
+      index = described_class.scan(
+        plugin_registry: registry, paths: paths,
+        environment: stub_environment_for(hierarchy: {})
+      )
+      expect(index).to be_empty
+    end
+  end
 end

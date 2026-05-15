@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "../plugin/macro/heredoc_template"
+require_relative "../plugin/macro/trait_registry"
 require_relative "synthetic_method"
 require_relative "synthetic_method_index"
 
@@ -42,7 +43,7 @@ module Rigor
     # dispatcher's slice-2b tier translates every match to
     # `Dynamic[T]`. Precise resolution via the ADR-13 resolver
     # chain is the ceiling, deferred.
-    module SyntheticMethodScanner
+    module SyntheticMethodScanner # rubocop:disable Metrics/ModuleLength
       module_function
 
       # @param plugin_registry [Rigor::Plugin::Registry]
@@ -55,7 +56,8 @@ module Rigor
       # @return [Rigor::Inference::SyntheticMethodIndex]
       def scan(plugin_registry:, paths:, environment: nil)
         templates = collect_templates(plugin_registry)
-        return SyntheticMethodIndex::EMPTY if templates.empty?
+        registries = collect_trait_registries(plugin_registry)
+        return SyntheticMethodIndex::EMPTY if templates.empty? && registries.empty?
 
         asts = parse_paths(paths)
         hierarchy = build_hierarchy(asts)
@@ -64,6 +66,7 @@ module Rigor
         asts.each do |path, ast|
           walk_class_bodies(ast) do |class_name, call_node|
             collect_entries(entries, templates, class_name, call_node, hierarchy, environment, path)
+            collect_trait_entries(entries, registries, class_name, call_node, hierarchy, environment, path)
           end
         end
 
@@ -80,6 +83,21 @@ module Rigor
           # rigor:disable undefined-method
           plugin.manifest.heredoc_templates.map do |template|
             [plugin.manifest.id, template]
+          end
+        end
+      end
+
+      # ADR-16 Tier B (slice 3b). Aggregates `(plugin_id, registry)`
+      # pairs across every plugin's `manifest.trait_registries` in
+      # registration order. Empty when no plugin contributes Tier B
+      # entries.
+      def collect_trait_registries(plugin_registry)
+        return [] if plugin_registry.nil? || plugin_registry.empty?
+
+        plugin_registry.plugins.flat_map do |plugin|
+          # rigor:disable undefined-method
+          plugin.manifest.trait_registries.map do |registry|
+            [plugin.manifest.id, registry]
           end
         end
       end
@@ -195,6 +213,115 @@ module Rigor
 
           emit_entries_for(entries, class_name, symbol_arg, template, plugin_id, path, call_node)
         end
+      end
+
+      # ADR-16 Tier B (slice 3b). For each matching call like
+      # `<X>.<method_name>(:trait_a, :trait_b)` where X inherits
+      # from the registry's receiver_constraint: collect every
+      # registered trait symbol's module (silently skipping
+      # unknown traits per design decision (2)) plus the
+      # always_included modules, then per-method-explode each
+      # module's RBS instance methods into the index.
+      #
+      # Per slice 3 floor (per user agreement): the synthesised
+      # methods adopt `return_type: "untyped"` (Dynamic[T] at
+      # dispatch). Precision promotion — looking up the module's
+      # actual RBS return type — is reserved for the ceiling slice.
+      def collect_trait_entries(entries, registries, class_name, call_node, hierarchy, environment, path)
+        registries.each do |(plugin_id, registry)|
+          next unless call_node.name == registry.method_name
+          next unless class_inherits_from?(class_name, registry.receiver_constraint, hierarchy, environment)
+
+          modules = resolve_trait_modules(registry, call_node)
+          next if modules.empty?
+
+          emit_trait_module_entries(entries, class_name, modules, registry, plugin_id, path, call_node, environment)
+        end
+      end
+
+      # Resolves the set of modules to include from a Tier B
+      # call site:
+      #
+      # - `always_included` modules (unconditional);
+      # - one module per literal Symbol argument the call carries
+      #   (resolved through `registry.modules_by_symbol`; unknown
+      #   symbols silently skipped per design decision (2)).
+      #
+      # Returns an Array<String> of module names in
+      # `always_included` order followed by argument order.
+      def resolve_trait_modules(registry, call_node)
+        modules = registry.always_included.dup
+        positional_symbols(call_node, registry).each do |symbol|
+          module_name = registry.module_for(symbol)
+          modules << module_name if module_name
+        end
+        modules
+      end
+
+      def positional_symbols(call_node, registry)
+        args_node = call_node.arguments
+        return [] if args_node.nil?
+
+        if registry.symbol_arg_position == Rigor::Plugin::Macro::TraitRegistry::REST_POSITION
+          args_node.arguments.filter_map { |arg| literal_symbol_value(arg) }
+        else
+          symbol_arg = literal_symbol_arg(call_node, registry.symbol_arg_position)
+          symbol_arg ? [symbol_arg] : []
+        end
+      end
+
+      def literal_symbol_value(node)
+        case node
+        when Prism::SymbolNode, Prism::StringNode then node.unescaped.to_sym
+        end
+      end
+
+      def emit_trait_module_entries(entries, class_name, modules, registry, plugin_id, path, call_node, environment) # rubocop:disable Metrics/ParameterLists
+        modules.each do |module_name|
+          method_names = module_instance_method_names(module_name, environment)
+          method_names.each do |method_name|
+            entries << build_trait_synthetic_method(
+              class_name: class_name, method_name: method_name, module_name: module_name,
+              registry: registry, plugin_id: plugin_id, path: path, call_node: call_node
+            )
+          end
+        end
+      end
+
+      # Returns the Symbol method-name list defined on `module_name`'s
+      # RBS instance definition. Empty Array when the module is not
+      # in the RBS env (silent skip — the synthetic emit produces
+      # nothing rather than fabricating method names).
+      def module_instance_method_names(module_name, environment)
+        return [] if environment.nil?
+
+        loader = environment.rbs_loader
+        return [] if loader.nil?
+
+        definition = loader.instance_definition(module_name)
+        return [] if definition.nil?
+
+        definition.methods.keys
+      rescue StandardError
+        []
+      end
+
+      def build_trait_synthetic_method(class_name:, method_name:, module_name:, registry:, plugin_id:, path:,
+                                       call_node:)
+        SyntheticMethod.new(
+          class_name: class_name,
+          method_name: method_name,
+          return_type: "untyped",
+          kind: SyntheticMethod::INSTANCE,
+          provenance: {
+            plugin_id: plugin_id,
+            origin_module: module_name,
+            trait_method: registry.method_name.to_s,
+            template_constraint: registry.receiver_constraint,
+            source_path: path,
+            source_line: call_node.location.start_line
+          }
+        )
       end
 
       def emit_entries_for(entries, class_name, symbol_arg, template, plugin_id, path, call_node)

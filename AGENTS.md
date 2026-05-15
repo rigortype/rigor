@@ -146,13 +146,28 @@ rg PATTERN --no-ignore references/python-typing
 
 ## RBS Authorship
 
-RBS files under `sig/` MUST NOT be authored by AI inference / freehand suggestion. The standard tool for closing RBS coverage gaps in this project is the `rigor sig-gen` CLI introduced in [ADR-14](docs/adr/14-rbs-sig-generation.md). The prohibition is specifically on AI-generated RBS; hand-authored RBS by a human committer remains fine, and reading existing RBS (project `sig/` or `references/`) is always fine.
+The project's **aspiration**: deterministic inference — driven by [`rigor sig-gen`](docs/adr/14-rbs-sig-generation.md) — should be precise enough that AI-authored RBS becomes unnecessary. Each gap that pushes someone toward freehand AI RBS in this repository is information about where the inference engine still has work to do; the preferred response is to extend the deterministic generator rather than route around it. AI assistance for RBS is not strictly forbidden — but it is rarely the right first move in this repo, and any AI-authored RBS lands only after explicit human review.
 
-**Why:** AI-suggested RBS bypasses the soundness guarantees `rigor sig-gen` enforces — the `def.return-type-mismatch` strict-acceptance check, the ADR-5 robustness asymmetry (strict on returns, lenient on parameters), and the `erase_to_rbs` round-trip discipline. Hand-edits for corrections (renames, typos, intentional widening per ADR-5 clause 2) are still acceptable when the user authorises them.
+`rigor sig-gen` is the project's standard authoring tool. It emits RBS from Rigor's inference results, classifies each method as `new-file` / `new-method` / `tighter-return` / `equivalent` / `skipped`, and enforces the soundness disciplines that hand-rolling bypasses:
 
-**When sig-gen contradicts existing RBS** (`tighter-return` classification): the default policy is to **NOT overwrite, even with `--overwrite`.** The dogfood pass on Rigor's own `lib/` (2026-05-12) produced 7 tighter-return candidates and every one turned out to be an inference incompleteness (early-return `return nil unless …` paths missed, two-valued booleans literal-folded to one, `Array[T]` collapsed to `Tuple[T, ...]`) rather than a real precision win. The existing hand-maintained RBS captured branches the inference engine does not yet see, so the existing form is more accurate. Treat any tightening that **loses union members** compared to the declared RBS as a contradiction signal: do not apply, and surface the discrepancy as a follow-up candidate for the inference engine. New methods (no existing RBS) remain freely applicable after review; `equivalent` classifications are no-ops.
+- `def.return-type-mismatch` strict-acceptance check (the generator never emits a tightening the analyzer itself would reject).
+- ADR-5 robustness asymmetry (strict on returns, lenient on parameters; `--params=untyped` default, `observed` opt-in via `--observe=PATH`).
+- `erase_to_rbs` round-trip discipline (every carrier without faithful RBS spelling erases to its nominal envelope).
 
-This rule applies to the rigor repository specifically. Outside this repo, treat AI-generated RBS suggestions normally.
+**How to apply.**
+
+- When a session needs RBS coverage in this repo, propose `rigor sig-gen --print` / `--diff` first. Land hand-edited RBS only when the generator's classification surfaces a real gap that warrants a separate inference-engine improvement, AND the user has reviewed the alternatives.
+- When sig-gen falls short on a method shape (`sig.skipped.complex-shape`, missing carrier, etc.), record the gap as a follow-up candidate for the inference engine. Avoid backfilling with freehand RBS just because it would be quick — the gap is the more valuable signal.
+- Hand-edits to existing `.rbs` files for corrections (renames, typos, intentional widening per ADR-5 clause 2) remain acceptable when authorised.
+- Reading existing RBS (project `sig/`, `data/vendored_gem_sigs/`, `references/`) is always fine.
+
+This is project-internal practice. Outside the rigor repository, treat AI-authored RBS suggestions normally.
+
+### Inference-vs-RBS contradiction rule (sig-gen output)
+
+When `rigor sig-gen` proposes a **`tighter-return`** that contradicts existing RBS, the default policy is to **NOT overwrite, even with `--overwrite`.** The dogfood pass on Rigor's own `lib/` (2026-05-12) produced 7 tighter-return candidates and every one turned out to be an inference incompleteness — early-return `return nil unless …` paths missed, two-valued booleans literal-folded to one, `Array[T]` collapsed to `Tuple[T, ...]` — rather than a real precision win. The existing hand-maintained RBS captured branches the inference engine does not yet see, so the existing form is more accurate.
+
+Treat any tightening that **loses union members** compared to the declared RBS as a contradiction signal: do not apply, and surface the discrepancy as a follow-up candidate for the inference engine. New methods (no existing RBS) remain freely applicable after review; `equivalent` classifications are no-ops.
 
 ## Commit Messages
 

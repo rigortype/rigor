@@ -106,13 +106,19 @@ RSpec.describe Rigor::Inference::MethodDispatcher, ".dispatch" do
     end
   end
 
-  describe "Tier C path (no origin_module)" do
-    it "stays at Dynamic[T] — slice 6b ADR-13 resolver chain is the future precision path" do
-      sm = synthetic_for(
+  describe "Tier C path (return_type nominal lookup, slice 6b)" do
+    def tier_c_synthetic(return_type)
+      Rigor::Inference::SyntheticMethod.new(
         class_name: "Address",
         method_name: :city,
+        return_type: return_type,
+        kind: :instance,
         provenance: { plugin_id: "dry-struct", template_method: "attribute" }
       )
+    end
+
+    it "promotes a plain class-name return_type to Nominal[<class>]" do
+      sm = tier_c_synthetic("String")
       env = environment_with(Rigor::Inference::SyntheticMethodIndex.new(entries: [sm]))
 
       result = described_class.dispatch(
@@ -120,6 +126,46 @@ RSpec.describe Rigor::Inference::MethodDispatcher, ".dispatch" do
         method_name: :city,
         arg_types: [], environment: env
       )
+      # "String" is in core RBS — nominal_for_name resolves to
+      # Nominal[String], NOT the untyped floor.
+      expect(result).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    it "falls back to Dynamic[T] when the return_type is the `untyped` placeholder" do
+      sm = tier_c_synthetic("untyped")
+      env = environment_with(Rigor::Inference::SyntheticMethodIndex.new(entries: [sm]))
+
+      result = described_class.dispatch(
+        receiver_type: Rigor::Type::Combinator.nominal_of("Address"),
+        method_name: :city,
+        arg_types: [], environment: env
+      )
+      expect(result).to eq(Rigor::Type::Combinator.untyped)
+    end
+
+    it "falls back to Dynamic[T] when the return_type class is not in the RBS env" do
+      sm = tier_c_synthetic("Does::Not::Exist")
+      env = environment_with(Rigor::Inference::SyntheticMethodIndex.new(entries: [sm]))
+
+      result = described_class.dispatch(
+        receiver_type: Rigor::Type::Combinator.nominal_of("Address"),
+        method_name: :city,
+        arg_types: [], environment: env
+      )
+      expect(result).to eq(Rigor::Type::Combinator.untyped)
+    end
+
+    it "skips parameterised forms (Array[String]) per slice 6b initial scope" do
+      sm = tier_c_synthetic("Array[String]")
+      env = environment_with(Rigor::Inference::SyntheticMethodIndex.new(entries: [sm]))
+
+      result = described_class.dispatch(
+        receiver_type: Rigor::Type::Combinator.nominal_of("Address"),
+        method_name: :city,
+        arg_types: [], environment: env
+      )
+      # "Array[String]" is not a bare class name — nominal_for_name
+      # returns nil; substrate falls back to the WD13 floor.
       expect(result).to eq(Rigor::Type::Combinator.untyped)
     end
   end

@@ -242,15 +242,24 @@ module Rigor
       # ADR-16 synthetic-method tier. Slice 2b shipped the floor —
       # a match short-circuits at the right precedence (above
       # dep-source / discovered / user-class-fallback; below RBS)
-      # and returns `Dynamic[T]`. Slice 6a-TierB promotes Tier B
-      # matches: when the SyntheticMethod records its
-      # `origin_module` in provenance, redispatch the call on
-      # `Nominal[origin_module]` via the existing `RbsDispatch`
-      # so Devise's `valid_password?` returns the module-authored
-      # `bool` instead of `Dynamic[T]`. Tier C matches (no
-      # `origin_module`) still return `Dynamic[T]` until slice 6b
-      # routes their `return_type:` strings through ADR-13's
-      # `Plugin::TypeNodeResolver` chain.
+      # and returns `Dynamic[T]`. Slice 6 (precision promotion):
+      # - Tier B path (slice 6a, `provenance[:origin_module]`
+      #   recorded by the slice-3b scanner): redispatch on
+      #   `Nominal[origin_module]` via `RbsDispatch` so the
+      #   module's authored RBS return type wins. Devise's
+      #   `valid_password?` returns `bool`, not `Dynamic[T]`.
+      # - Tier C path (slice 6b, plain `return_type:` string from
+      #   the manifest's emit table): look up
+      #   `environment.nominal_for_name(return_type)` so
+      #   `attribute :avatar, Types::String` emits a synthetic
+      #   reader returning `Nominal[ActiveStorage::Attached::One]`
+      #   (when the class is in RBS). Unparameterised class names
+      #   only — parameterised forms (`Array[String]`,
+      #   `Hash[K, V]`) and plugin-supplied utility-type names
+      #   (`Pick<T, K>`) require routing through the full ADR-13
+      #   `Plugin::TypeNodeResolver` chain, which slice 6 does
+      #   not yet wire in (the resolver chain is consulted only
+      #   for `%a{rigor:v1:…}` payloads as of ADR-13 slice 3).
       def try_synthetic_method(receiver_type, method_name, arg_types, block_type, environment)
         index = environment&.synthetic_method_index
         return nil if index.nil? || index.empty?
@@ -264,32 +273,59 @@ module Rigor
                   end
         return nil if matches.empty?
 
-        promoted = promote_from_origin_module(matches, method_name, arg_types, block_type, environment)
+        promoted = promote_synthetic_match(matches, method_name, arg_types, block_type, environment)
         promoted || Type::Combinator.untyped
+      end
+
+      # First non-nil promotion wins. Tier B (origin_module) and
+      # Tier C (return_type nominal lookup) are tried in the
+      # same registration-order pass per WD11 first-wins —
+      # the slice-3b scanner sets `origin_module` for Tier B
+      # entries and leaves it absent for Tier C, so the two
+      # paths self-route per match.
+      def promote_synthetic_match(matches, method_name, arg_types, block_type, environment)
+        return nil if environment.nil?
+
+        matches.each do |synthetic|
+          promoted =
+            promote_via_origin_module(synthetic, method_name, arg_types, block_type, environment) ||
+            promote_via_return_type(synthetic, environment)
+          return promoted if promoted
+        end
+        nil
       end
 
       # Slice 6a-TierB. For Tier B emissions (origin_module
       # recorded in provenance), redispatch the call on the
       # included module's `Nominal[...]` type via `RbsDispatch`.
-      # First-wins by registration order — the first match whose
-      # `origin_module` resolves to a non-nil RBS dispatch wins.
-      # Returns nil when no Tier B match resolves (caller falls
-      # back to Dynamic[T] per the WD13 floor).
-      def promote_from_origin_module(matches, method_name, arg_types, block_type, environment)
-        return nil if environment.nil?
+      # Returns nil when the SyntheticMethod is not a Tier B
+      # entry or when the origin_module is not in the RBS env.
+      def promote_via_origin_module(synthetic, method_name, arg_types, block_type, environment)
+        module_name = synthetic.provenance[:origin_module]
+        return nil unless module_name
 
-        matches.each do |synthetic|
-          module_name = synthetic.provenance[:origin_module]
-          next unless module_name
+        module_type = Type::Combinator.nominal_of(module_name)
+        RbsDispatch.try_dispatch(
+          receiver: module_type, method_name: method_name, args: arg_types,
+          environment: environment, block_type: block_type
+        )
+      end
 
-          module_type = Type::Combinator.nominal_of(module_name)
-          rbs_result = RbsDispatch.try_dispatch(
-            receiver: module_type, method_name: method_name, args: arg_types,
-            environment: environment, block_type: block_type
-          )
-          return rbs_result if rbs_result
-        end
-        nil
+      # Slice 6b-TierC. For Tier C emissions, look up the
+      # manifest-declared `return_type:` string via
+      # `environment.nominal_for_name`. Skips the placeholder
+      # `"untyped"` (Tier B's record-but-do-not-resolve marker
+      # from the slice-3b scanner) and the `"void"` keyword
+      # (RBS-style absent return). Falls back to nil when the
+      # class is not in the env — caller then returns Dynamic[T].
+      TIER_C_PLACEHOLDER_RETURNS = %w[untyped void].freeze
+      private_constant :TIER_C_PLACEHOLDER_RETURNS
+
+      def promote_via_return_type(synthetic, environment)
+        return_type = synthetic.return_type
+        return nil if return_type.nil? || TIER_C_PLACEHOLDER_RETURNS.include?(return_type)
+
+        environment.nominal_for_name(return_type)
       end
 
       def synthetic_method_class_name(receiver_type)

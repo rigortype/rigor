@@ -87,7 +87,7 @@ module Rigor
       #   emits one `:info` `fallback` diagnostic per
       #   directly-unrecognised node, mirroring
       #   {Rigor::Analysis::Runner#explain_diagnostics}.
-      def initialize(configuration:, cache_store: nil,
+      def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength
                      plugin_blueprints: [], explain: false)
         @configuration = configuration
         @cache_store = cache_store
@@ -124,7 +124,9 @@ module Rigor
           boundary_cross_reporter: @boundary_cross_reporter,
           bundler_bundle_path: configuration.bundler_bundle_path,
           bundler_auto_detect: configuration.bundler_auto_detect,
-          bundler_lockfile: configuration.bundler_lockfile
+          bundler_lockfile: configuration.bundler_lockfile,
+          rbs_collection_lockfile: configuration.rbs_collection_lockfile,
+          rbs_collection_auto_detect: configuration.rbs_collection_auto_detect
         )
         @prepare_diagnostics = run_plugin_prepare.freeze
       end

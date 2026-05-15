@@ -115,6 +115,29 @@ module Rigor
         "bundle_path" => nil,
         "auto_detect" => true,
         "lockfile" => nil
+      },
+      "rbs_collection" => {
+        # Open item O4 Layer 3 slice 2 — `rbs collection
+        # install` awareness. When the target project has been
+        # set up with `rbs collection install`, the resulting
+        # `rbs_collection.lock.yaml` carries the resolved (gem,
+        # version, source) triples and `.gem_rbs_collection/`
+        # holds the downloaded `.rbs` files. Rigor parses the
+        # lockfile and auto-feeds each gem's
+        # `<collection_root>/<name>/<version>/` directory into
+        # `RbsLoader`'s `signature_paths:`. Sources of type
+        # `stdlib` are skipped because rigor's bundled
+        # `DEFAULT_LIBRARIES` already covers that surface.
+        #
+        # `lockfile:` (String, optional): explicit path to
+        # `rbs_collection.lock.yaml`. Resolved relative to the
+        # project root when relative.
+        #
+        # `auto_detect:` (Boolean, default true): when no
+        # explicit `lockfile:` is set, look for
+        # `<project_root>/rbs_collection.lock.yaml`.
+        "lockfile" => nil,
+        "auto_detect" => true
       }
     }.freeze
 
@@ -131,7 +154,8 @@ module Rigor
                 :plugins_io_allowed_url_hosts,
                 :severity_profile, :severity_overrides,
                 :dependencies, :parallel_workers,
-                :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile
+                :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile,
+                :rbs_collection_lockfile, :rbs_collection_auto_detect
 
     # Loads a configuration file.
     #
@@ -267,7 +291,7 @@ module Rigor
     private_class_method :load_with_includes, :merge_includes, :resolve_paths_in, :deep_merge,
                          :merge_value, :merge_dependencies_hash
 
-    # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     def initialize(data = DEFAULTS)
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
@@ -307,6 +331,10 @@ module Rigor
       @bundler_auto_detect = bundler.fetch("auto_detect") == true
       lf = bundler.fetch("lockfile")
       @bundler_lockfile = lf.nil? ? nil : lf.to_s.dup.freeze
+      rbs_collection = DEFAULTS.fetch("rbs_collection").merge(data.fetch("rbs_collection", {}))
+      rclf = rbs_collection.fetch("lockfile")
+      @rbs_collection_lockfile = rclf.nil? ? nil : rclf.to_s.dup.freeze
+      @rbs_collection_auto_detect = rbs_collection.fetch("auto_detect") == true
       # Ractor migration Phase 2a: deep-freeze the
       # Configuration so it is `Ractor.shareable?`. Every
       # ivar above is now either a frozen value (Symbol /
@@ -318,9 +346,9 @@ module Rigor
       # `docs/design/20260514-ractor-migration.md`.
       freeze
     end
-    # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
+    # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
 
-    def to_h
+    def to_h # rubocop:disable Metrics/MethodLength
       {
         "target_ruby" => target_ruby,
         "paths" => paths,
@@ -348,6 +376,10 @@ module Rigor
           "bundle_path" => bundler_bundle_path,
           "auto_detect" => bundler_auto_detect,
           "lockfile" => bundler_lockfile
+        },
+        "rbs_collection" => {
+          "lockfile" => rbs_collection_lockfile,
+          "auto_detect" => rbs_collection_auto_detect
         }
       }
     end

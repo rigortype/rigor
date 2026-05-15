@@ -157,6 +157,23 @@
           "default": null
         }
       }
+    },
+    "rbs_collection": {
+      "description": "Open item O4 Layer 3 slice 2 — `rbs collection install` awareness. When the target project has been set up with `rbs collection install`, the resulting `rbs_collection.lock.yaml` records resolved (gem, version, source) triples and `.gem_rbs_collection/<name>/<version>/` carries the downloaded `.rbs` files. Rigor parses the lockfile and auto-feeds each gem's directory into the loader's `signature_paths`. `stdlib`-typed entries are skipped (rigor's bundled `DEFAULT_LIBRARIES` already covers them).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lockfile": {
+          "description": "Explicit path to `rbs_collection.lock.yaml` (relative paths resolve from the project root). When `null` (default) and `auto_detect` is true, Rigor looks for `<project_root>/rbs_collection.lock.yaml`.",
+          "type": ["string", "null"],
+          "default": null
+        },
+        "auto_detect": {
+          "description": "When `lockfile` is unset, search for `rbs_collection.lock.yaml` under the project root. Setting `false` disables collection-sig discovery entirely.",
+          "type": "boolean",
+          "default": true
+        }
+      }
     }
   },
   "$defs": {

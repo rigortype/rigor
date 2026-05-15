@@ -5,6 +5,7 @@ require_relative "environment/rbs_loader"
 require_relative "environment/reflection"
 require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
+require_relative "environment/rbs_collection_discovery"
 require_relative "inference/synthetic_method_index"
 require_relative "type_node/name_scope"
 require_relative "type_node/resolver_chain"
@@ -111,11 +112,13 @@ module Rigor
       #   reflection artefacts) consult the cache. Pass `nil` (the
       #   default) to skip caching for this environment.
       # @return [Rigor::Environment]
-      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil, # rubocop:disable Metrics/ParameterLists
+      # rubocop:disable Metrics/MethodLength, Metrics/ParameterLists
+      def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil,
                       plugin_registry: nil, dependency_source_index: nil,
                       rbs_extended_reporter: nil, boundary_cross_reporter: nil,
                       bundler_bundle_path: nil, bundler_auto_detect: false,
                       bundler_lockfile: nil,
+                      rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
                       synthetic_method_index: nil)
         resolved_paths = signature_paths || default_signature_paths(root)
         # O4 MVP — append per-gem `sig/` directories discovered
@@ -144,7 +147,18 @@ module Rigor
           auto_detect: bundler_auto_detect,
           locked_gems: locked.empty? ? nil : locked
         ).map(&:to_s)
-        loader_signature_paths = resolved_paths + gem_sig_paths
+        # O4 Layer 3 slice 2 — when `rbs collection install`
+        # has been run for the target project, parse the
+        # resulting `rbs_collection.lock.yaml` and feed each
+        # gem's `<collection_path>/<name>/<version>/` directory
+        # into `signature_paths:`. Stdlib-typed entries are
+        # skipped (already covered by `DEFAULT_LIBRARIES`).
+        collection_paths = RbsCollectionDiscovery.discover(
+          lockfile_path: rbs_collection_lockfile,
+          project_root: root,
+          auto_detect: rbs_collection_auto_detect
+        ).map(&:to_s)
+        loader_signature_paths = resolved_paths + gem_sig_paths + collection_paths
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
         loader = RbsLoader.new(
           libraries: merged_libraries,
@@ -160,6 +174,7 @@ module Rigor
           synthetic_method_index: synthetic_method_index
         )
       end
+      # rubocop:enable Metrics/MethodLength, Metrics/ParameterLists
 
       private
 

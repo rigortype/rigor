@@ -211,6 +211,8 @@ module Rigor
           bundler_bundle_path: @configuration.bundler_bundle_path,
           bundler_auto_detect: @configuration.bundler_auto_detect,
           bundler_lockfile: @configuration.bundler_lockfile,
+          rbs_collection_lockfile: @configuration.rbs_collection_lockfile,
+          rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect,
           synthetic_method_index: @synthetic_method_index
         )
       end
@@ -376,7 +378,9 @@ module Rigor
           cache_store: @cache_store,
           bundler_bundle_path: @configuration.bundler_bundle_path,
           bundler_auto_detect: @configuration.bundler_auto_detect,
-          bundler_lockfile: @configuration.bundler_lockfile
+          bundler_lockfile: @configuration.bundler_lockfile,
+          rbs_collection_lockfile: @configuration.rbs_collection_lockfile,
+          rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect
         )
         warm_env.rbs_loader&.prewarm
       end

@@ -14,6 +14,8 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-16
+
 ### Added
 
 - **O2 closed — ADR-16 macro / DSL expansion substrate (floor delivered).** Four-tier substrate landed through twelve slices (commits 584ae85…0359152) that closes [ROADMAP](docs/ROADMAP.md) open item O2 at the WD13 floor. Plugin authors target metaprogramming-shaped DSLs by declaring **manifest entries** instead of writing AST walkers — the substrate handles literal-symbol extraction, name interpolation, registry lookup, per-method synthesis, and cross-file dispatch resolution.
@@ -630,7 +632,8 @@ Each example ships `lib/`, runnable `demo/`, README, and an end-to-end integrati
 - **Cache load order for CLI flow.** `lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`. In CLI flow, the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). Fixed; `--cache-stats` now reports real activity.
 - **Fail-soft `rescue StandardError` was masking analyzer-internal bugs.** Tightened to `rescue ::RBS::BaseError` across the RBS-touching code paths — `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`. Analyzer-internal `NameError` / `NoMethodError` / `LoadError` now propagate so similar bugs surface immediately rather than silently degrading user-visible behaviour.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/rigortype/rigor/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/rigortype/rigor/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/rigortype/rigor/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/rigortype/rigor/compare/v0.1.1...v0.1.2

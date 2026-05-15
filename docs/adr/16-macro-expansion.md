@@ -91,16 +91,30 @@ distinct populations.
 ### Primary purpose
 
 **The substrate is a declarative authoring layer for library
-developers.** Whether the declarations ship in the library's own gem
-(`lib/foo/rigor.rb` or a sidecar config), in a separate `rigor-foo`
-plugin gem, or as community-maintained sidecar configuration, the
-substrate's value is in lowering the cost of authoring those
-declarations. Application authors are not the audience — they install
-plugins, they do not write substrate entries.
+developers.** The canonical delivery vehicle in v0.1.x is a separate
+`rigor-<lib>` plugin gem, enabled by the depending application via
+`.rigor.yml`'s `plugins:` list. Library-bundled declarations
+(`lib/foo/rigor.rb` shipped inside foo's own gem) are a plausible
+future delivery vehicle but are not pursued in this ADR — no upstream
+coordination with library maintainers (dry-rb, AASM, Devise, …) is
+planned for v0.1.x. Automatic enablement via gemspec-dependency
+inspection ("the project depends on `aasm` → auto-enable
+`rigor-aasm`") is a separate deferred decision.
+
+Application authors are not the audience — they install plugins,
+they do not write substrate entries.
 
 The traditional ADR-2 hand-rolled plugin route remains available; the
 substrate is the convenience option for the patterns the survey shows
 recur (Tiers A–D).
+
+**Application-specific homegrown macro DSLs** (e.g. an internal
+`MyCompany::DSL.define_setting`) are **out of scope for ADR-16**. A
+project that wants to type its own homegrown DSL today wraps a
+hand-rolled plugin in a local gem (Bundler `path:` source) — the
+existing ADR-2 path. The question of whether `.rigor.yml` should
+accept a `path:`-shaped plugin entry to ease this is deferred to a
+future ADR; this one does not commit either way.
 
 ### Secondary purpose (best-effort, NOT a requirement)
 
@@ -179,6 +193,17 @@ substrate" path stays a first-class option.
 - **Cacheability.** Expanded synthetic ASTs participate in
   `Cache::Store` with deterministic descriptors per
   [ADR-6](6-cache-persistence-backend.md).
+- **Cost-bounded best-effort emission.** The substrate aspires to the
+  full Tier emit shape (e.g. Tier C's 5-row emit table with precise
+  return types) where that's cheaply achievable. Where precise
+  resolution would require disproportionate analyzer cost or new
+  infrastructure, the substrate degrades gracefully to a minimum
+  acceptable floor: **the substrate-affected code must at least parse
+  cleanly and have its identifiers resolved** (syntax errors and
+  references to undefined methods / constants get caught). Synthetic
+  method names are emitted even when their return types fall to
+  `Dynamic[T]`. WD13 records the rationale and the floor / ceiling
+  contract.
 
 ## Non-Goals
 
@@ -342,10 +367,20 @@ literal Symbol or String. Non-literal arguments (`has_one_attached(some_method)`
 fall through to the existing plugin walker hooks (or to no handling at
 all).
 
+**Precision floor / ceiling per WD13.** The `emit:` table's `returns:`
+strings are aspirational. The substrate routes them through ADR-13's
+`Plugin::TypeNodeResolver` chain when the chain can resolve them
+cheaply; when resolution fails or is gated on infrastructure not yet
+present, the synthetic method emits `Dynamic[T]` and a
+`macro.tier_c.unresolved-return` `:info` provenance marker. **Method
+names are always emitted** — the floor is "the synthetic method
+exists and resolves on lookup", precise typing is the ceiling.
+
 Reaches: ActiveStorage attached macros, Devise per-mapping helper
 quad (`current_user`, `user_signed_in?`, `authenticate_user!`,
 `user_session`), Redmine's `Setting.define_setting`, Redmine
-`acts_as_event` and `LabelledFormBuilder` heredocs.
+`acts_as_event` and `LabelledFormBuilder` heredocs, dry-struct
+`attribute :name, T` (the textbook Tier C consumer).
 
 ### Tier D — External-Ruby-file inclusion under declared `self`
 
@@ -422,20 +457,20 @@ dedicated plugin is configured.
 
 | Plugin | Tier(s) consumed | Survey reference | Status |
 | --- | --- | --- | --- |
-| `rigor-sinatra` | A | Sinatra section | Not yet authored. Substrate slice-1 validation target. |
-| `rigor-devise` | B (model side) + C (per-mapping controller helpers) | Devise section | Not yet authored. Substrate slice-3 validation target. Bundled module registry mirrors `lib/devise/modules.rb`. |
-| `rigor-aasm` | B (state / event method tables) | AASM section | Not yet authored. Sibling of `rigor-statesman` (authored, may itself migrate to Tier B). |
+| `rigor-sinatra` | A | Sinatra section | Not yet authored. **Substrate slice-1 validation target** (new plugin; no competing walker). |
+| `rigor-devise` | B (model side) + C (per-mapping controller helpers) | Devise section | Not yet authored. **Substrate slice-3 validation target.** Bundled module registry mirrors `lib/devise/modules.rb`. |
+| `rigor-aasm` | B (state / event method tables) | AASM section | Not yet authored. Sibling of `rigor-statesman`. |
 | `rigor-sequel` | B (associations + `plugin :name` registry) | Sequel section | Not yet authored. Column accessors deferred to a separate schema-oracle ADR. |
-| `rigor-activestorage` | C (heredoc template; migration from hand-rolled walker) | ActiveStorage section | Authored. Substrate slice-2 validates Tier C reach by re-implementing the existing walker against the manifest. |
+| `rigor-activestorage` | — (migration deferred per WD13) | ActiveStorage section | Authored. **Stays on hand-rolled walker until substrate quality matches.** Survey identifies it as canonical Tier C, but migration would be a regression at substrate v1 (per WD13 floor / ceiling). |
 | `rigor-redmine-payloads` (working name) | D (external `instance_eval`'d Ruby files) | Redmine site E | Not yet authored. Substrate slice-5 validation target. tDiary's plugin loader is the sibling case. |
 | `rigor-redmine-settings` (working name) | C (YAML-driven name set + bundled triplet template) | Redmine site C | Not yet authored. Pairs with the project-side monkey-patch pre-evaluation memory note as a follow-up. |
 | `rigor-graphql` | None — does not consume the substrate | GraphQL-Ruby section | Not yet authored. Uses ADR-2 fact-contribution hooks; macro substrate does not apply (schema-graph recorder). Demand-driven. |
 | `rigor-factorybot` | None — does not consume the substrate | factory_bot section | Authored. Uses ADR-2 + ADR-9 (registry + dynamic return type). No substrate migration planned; the shape doesn't fit. |
-| `rigor-dry-types` | C (constant emit via bundled `core.rb` registry; tier C in `const_set` flavour) + ADR-2 dynamic-return-type for `Dry::Types[<literal>]` + carrier-algebra handling for `\|` `&` `>` `.optional` `.constrained` `.constructor` | dry-types section | Not yet authored. Shared dependency of `rigor-dry-schema` and `rigor-dry-struct` (mirrors the gem dependency graph). Packaging strategy gated on ADR-12 (dry-rb plugins) but the per-library shape is fixed here. |
-| `rigor-dry-struct` | C (`attribute :name, T` → 5-row emit table: reader / schema key / `to_h` row / `[:key]` access / `.new(name:)` kwarg) + Tier A for nested `attribute :x do … end` blocks | dry-struct section | Not yet authored. **Consumes** `rigor-dry-types` for the per-attribute `T` carrier. Cleanest Tier C consumer in the survey; textbook example. |
+| `rigor-dry-types` | C (constant emit via bundled `core.rb` registry; tier C in `const_set` flavour) + ADR-2 dynamic-return-type for `Dry::Types[<literal>]` + carrier-algebra handling for `\|` `&` `>` `.optional` `.constrained` `.constructor` | dry-types section | Not yet authored. **Substrate slice-2 deliverable** (paired with `rigor-dry-struct`). Shared dependency of `rigor-dry-schema` and `rigor-dry-struct`, mirroring the gem dependency graph. Packaging strategy gated on ADR-12. |
+| `rigor-dry-struct` | C (`attribute :name, T` → 5-row emit table: reader / schema key / `to_h` row / `[:key]` access / `.new(name:)` kwarg) + Tier A for nested `attribute :x do … end` blocks | dry-struct section | Not yet authored. **Substrate slice-2 primary validation target** (textbook Tier C, no competing walker). **Consumes** `rigor-dry-types` for the per-attribute `T` carrier. |
 | `rigor-dry-schema` | A (block runs `instance_eval` on `Dry::Schema::DSL`; declare bareword surface — `required` / `optional` / `value` / `filled` / `maybe` / `each` / `array`) + AST recorder building `key → type` map + ADR-2 dynamic-return-type rule on `Processor#call(input) -> Result[T]` | dry-schema section | Not yet authored. **Consumes** `rigor-dry-types` for per-key type resolution. The schema-class itself is not method-extended; the value is in typing the processor's return shape. |
-| `rigor-activerecord` (existing) | B (associations / enums / scopes) — partial migration candidate | — | Authored. Migration to Tier B is a follow-up validation; current hand-rolled walker continues to work. |
-| `rigor-statesman` (existing) | B — partial migration candidate | — | Authored. Same as above. |
+| `rigor-activerecord` (existing) | — (migration deferred per WD13) | — | Authored. Stays on hand-rolled walker. Tier B migration is future work, not part of ADR-16's slicing. |
+| `rigor-statesman` (existing) | — (migration deferred per WD13) | — | Authored. Same. |
 
 Two facts the table makes explicit:
 
@@ -542,20 +577,35 @@ commit as the implementation.
 
 ## Implementation slicing
 
-Recommended order; each slice independently shippable.
+Recommended order; each slice independently shippable. Each slice
+respects the WD13 floor / ceiling contract: ship the floor first
+(parse + identifier-resolve), promote toward the ceiling
+incrementally.
 
 1. **Tier A — block-as-method.** Plugin manifest entry +
    substrate annotates block scopes. Worked plugin:
-   `examples/rigor-sinatra/`. Smallest tier; validates the
-   manifest / blueprint integration.
-2. **Tier C — heredoc-template expansion.** Tier C is the
-   highest-value tier per the survey count. Worked migration:
-   reimplement `examples/rigor-activestorage/` against the
-   declarative manifest. Drift snapshot updated.
+   **new** `examples/rigor-sinatra/` (no competing hand-rolled
+   walker). Smallest tier; validates the manifest / blueprint
+   integration.
+2. **Tier C — heredoc-template expansion (new plugin, not
+   migration).** Tier C is the highest-value tier per the
+   survey count. Worked plugin: **new** `examples/rigor-dry-struct/`
+   — textbook Tier C per the survey (`attribute :name, T` →
+   reader + schema key + `to_h` row + `[:key]` access + `.new`
+   kwarg). Chosen over migrating `rigor-activestorage` because
+   the substrate's initial output quality (per WD13 — names
+   emitted, `returns:` may degrade to `Dynamic[T]`) is below
+   the existing hand-rolled walker's quality; migration would
+   be a regression. `rigor-dry-struct` has no competing
+   walker and uses the substrate as its primary path.
+   Concurrently, **author `rigor-dry-types`** as the shared
+   dependency (per the survey's Composition section): bundled
+   `core.rb` registry mirror + dynamic-return-type rule for
+   `Dry::Types[<literal>]`.
 3. **Tier B — trait-inlining registry.** Worked plugin:
-   `examples/rigor-devise/` model side. Bundled registry
-   mirrors `lib/devise/modules.rb`. Routes side queued behind
-   ADR-9 publish/consume.
+   **new** `examples/rigor-devise/` model side. Bundled
+   registry mirrors `lib/devise/modules.rb`. Routes side
+   queued behind ADR-9 publish/consume.
 4. **Concern re-targeting walker.** Extends the existing
    `ActiveSupport::Concern`-aware walker so Tier A/B/C plugins
    fire correctly when the DSL call is nested inside
@@ -564,16 +614,30 @@ Recommended order; each slice independently shippable.
    reduced Redmine webhook-payload example, or the tDiary
    plugin-loader case if the user prefers. Establishes the
    "stub file" boundary with the cache.
-6. **Migrate existing plugins.** `rigor-activerecord` (Tier B for
-   associations / enums), `rigor-statesman` (Tier B for state /
-   event), `rigor-actionpack` (Tier C for `before_action` /
-   strong-params), `rigor-factorybot` (no migration — already
-   ADR-2 shape). Each migration validates the substrate is
-   actually a win.
+6. **Precision promotion (deferred, post-MVP).** Route Tier C
+   `returns:` strings through ADR-13's `Plugin::TypeNodeResolver`
+   chain so the substrate produces precise return types instead
+   of `Dynamic[T]` where the resolver can. Iterative — each
+   resolved emit-row drops one `macro.tier_c.unresolved-return`
+   provenance marker.
 7. **Documentation.** Handbook chapter on macro / DSL plugins;
    `examples/README.md` table grows substrate-using rows;
    `.codex/skills/rigor-plugin-author/SKILL.md` updates with
    the substrate decision flow.
+
+**Out of ADR-16 scope (deferred to future iterations).**
+
+- **Migration of existing plugins** (`rigor-activestorage`,
+  `rigor-activerecord`, `rigor-statesman`, `rigor-actionpack`).
+  Migration lands when the substrate's output quality matches
+  or exceeds the existing hand-rolled walker's quality (per
+  WD13's "no regression on promotion" contract). The hand-walkers
+  ship working code today; migration is a per-plugin choice
+  contingent on demonstrated equivalence, not a substrate
+  obligation. Tracked as future work, not slice 6+.
+- **Secondary heuristic detector** (§ Audience and purpose,
+  WD12). Its concrete shape (pre-pass vs AST-path gate) is
+  finalised only after slices 1–5 produce usage signal.
 
 ## Working decisions
 
@@ -617,16 +681,46 @@ well-known.
 
 ### WD4 — Where in the pipeline does expansion run?
 
-After parsing, before inference. The substrate runs as a *project-load*
-phase that scans every file once, identifies substrate-eligible call
-sites by manifest shape, and emits synthetic carriers / scope
-annotations / file inclusions before the inference engine starts on
-file-level analysis. This mirrors the existing
-`Environment::Reflection` build phase and lets the inference engine
-treat substrate outputs identically to RBS-sourced carriers.
+**Inline with normal method-call analysis is the default.** Ruby's
+semantics are runtime-dispatch-only (no compilation phase); rigor's
+existing pipeline mirrors that with Configuration → `Environment::Reflection`
+build → `Runner`, and has no explicit project-load phase. Adding a
+preprocess phase would be a structural change requiring its own
+justification — the substrate should not force one.
 
-The pre-pass is keyed in cache by manifest digest + AST descriptor, so
-substrate work is amortised across incremental runs.
+The default emission rule per tier:
+
+- **Tier A** (block-as-method): inline. When the block is seen during
+  per-file analysis, the substrate annotates its lexical scope so
+  the inference engine treats `self` as an instance of the declared
+  receiver class.
+- **Tier B** (trait inlining): inline. When `devise :foo, :bar` is
+  seen, look up modules and contribute facts at the analysis site.
+- **Tier C** (heredoc template emission): **may require a pre-pass**.
+  Synthetic methods emitted by `has_one_attached :avatar` need to be
+  visible to *other* files that call `user.avatar`. File-analysis
+  order matters. The substrate's options: (i) a one-pass scan over
+  the project at startup that collects only Tier C call sites and
+  emits their synthetic carriers before per-file inference; (ii) a
+  two-pass model where the first per-file pass collects Tier C
+  emissions, the second performs full inference; (iii) lazy emit
+  during the first call-site resolution that needs the synthetic
+  method. Implementation slice 2 picks one when concrete cost is
+  measured; the contract says "Tier C synthetic methods are visible
+  cross-file," not which mechanism delivers that.
+- **Tier D** (external file inclusion): one-time scan at startup
+  matching the declared glob; matched files are added to the
+  analysis fileset with the declared receiver typing context.
+
+If a future tier or measurement *does* justify a dedicated preprocess
+phase, the introduction is a separate, narrow decision — not a
+default the substrate carries. WD13 covers the related cost-discipline
+constraint.
+
+The substrate's cache key (per ADR-6) covers whichever emission
+strategy a tier picks. Tier-C-pre-pass output and lazy-emit output
+both produce the same logical synthetic carriers; the cache stores
+the synthetic carriers themselves, not the strategy.
 
 ### WD5 — How does expansion interact with the cache?
 
@@ -759,6 +853,78 @@ stands on its own. The secondary purpose ships if and when the
 heuristic clears the performance bound; otherwise the substrate is
 declared-plugin-only.
 
+### WD13 — Graceful degradation under cost discipline (precision floor / ceiling)
+
+WD12 covers the secondary heuristic's best-effort posture. WD13
+applies the same cost discipline to the **primary** purpose: even for
+declared plugins, the substrate ships the full Tier emit shape only
+where that's *cheaply* achievable. Where it isn't, the substrate
+degrades gracefully to a defined floor rather than blocking on
+infrastructure that would inflate the implementation cost.
+
+**Aspirational ceiling (per tier).**
+
+- Tier A — precise `self : ReceiverInstance` scope typing, full
+  declared `scope_methods` surface; block body inferred as if it were
+  a method body of the declared receiver.
+- Tier B — every symbol in the bundled registry resolves to a
+  concrete `Module` constant; every module's `included do` digest
+  contributes precise instance / class method facts.
+- Tier C — full 5-row (or N-row) emit table with precise return
+  types resolved via ADR-13's `Plugin::TypeNodeResolver` chain;
+  parameter types precise where the plugin declared them.
+- Tier D — file body parsed and analysed under the declared
+  receiver / bound-ivar typing context with full precision.
+
+**Acceptable floor (per tier).**
+
+- Across all four tiers, the substrate-affected code must at minimum
+  **parse cleanly** and **have its identifiers resolved against the
+  enclosing name scope**. Concretely: a heredoc body passed to
+  `class_eval` is at least Prism-parsed; bare-identifier references
+  inside it are checked against the substrate-declared receiver's
+  visible methods + the inferred lexical scope; a syntax error or a
+  reference to a method that doesn't exist surfaces as a normal
+  rigor diagnostic.
+- For Tier C specifically, this means: emit the synthetic method
+  *names* in every case, even when their `returns:` cannot yet be
+  resolved precisely. Unresolved returns degrade to `Dynamic[T]` with
+  a `macro.<tier>.unresolved-return` `:info` provenance marker.
+  Downstream `user.avatar.foo` calls then fall through the existing
+  `Dynamic[T]` rules — not a regression vs. the current "no plugin"
+  baseline.
+
+**Why this contract.** Three reasons.
+
+1. **The user-facing value of the substrate is not all-or-nothing.**
+   Getting the synthetic method names and the parse-checking of
+   eval'd bodies in place captures most of the survey's open
+   diagnostic share (the Redmine 35 FP/file case is dominated by
+   missing-method-on-undeclared-receiver, not by precise return
+   typing). Adding precise return types is *desirable* but
+   subordinate to the floor.
+2. **Implementation cost is non-linear.** ADR-13's
+   `Plugin::TypeNodeResolver` already exists for `%a{rigor:v1:…}`
+   payloads; routing emit-table `returns:` strings through the same
+   chain is a slice. But making the resolver robust against every
+   forward-reference / generic-parameter edge case is much more.
+   The floor-vs-ceiling contract lets the slice ship without solving
+   the edge case set in advance.
+3. **Each tier's slicing can target the cheap-precision band first
+   and the expensive-precision band later, without breaking the
+   contract.** Slice 2 (Tier C MVP) ships with names + `Dynamic[T]`
+   returns; later iterations promote rows to precise returns as the
+   resolver hook proves out. No version-N user-visible regressions
+   when version-(N+1) tightens.
+
+**What the contract does NOT permit.** Substrate emissions that
+*silently* produce wrong types. If a tier can't resolve a return
+type precisely, it MUST emit `Dynamic[T]` and the provenance marker,
+not "best-guess" types from the plugin author's `returns:` string
+without resolution. The asymmetry is per ADR-5 robustness: rigor's
+authored outputs are strict on returns. The floor is "lose precision
+gracefully," not "fabricate precision."
+
 ## Alternatives considered
 
 | Candidate | Status | Reason |
@@ -778,6 +944,23 @@ declared-plugin-only.
 
 ## Open questions
 
+- **Emit-table `returns:` string resolution path.** Tier C emit
+  entries spell return types as strings (`"ActiveStorage::Attached::One"`,
+  `"Dry::Types::Hash::Schema"`). When precise resolution is wanted
+  (per WD13's ceiling), the substrate routes these through ADR-13's
+  `Plugin::TypeNodeResolver` chain — the same chain that resolves
+  `%a{rigor:v1:return: …}` payloads. The substrate's promotion path
+  (slice 6 in § Implementation slicing) is: (a) feed the emit-table
+  string into ADR-13's resolver as if it were an `%a{rigor:v1:return: …}`
+  payload, (b) if the chain returns a concrete `Type`, install it on
+  the synthetic method, (c) otherwise fall back to `Dynamic[T]` and
+  emit `macro.<tier>.unresolved-return`. The substrate **does not**
+  introduce its own string-to-type parser; reusing ADR-13's chain
+  keeps the resolver as the single source of truth for "Rigor name →
+  Type." Open detail: forward-reference resolution (a `returns:`
+  string naming a type not yet loaded) gets the same `LateBoundType`
+  treatment ADR-13 already specifies; documented when slice 6 starts.
+
 - **Should Tier C templates support method bodies, not just signatures?**
   ActiveStorage's `with_attached_avatar` scope has a real body that
   `joins(:avatar_attachment).joins(:avatar_blob)`. Today rigor types
@@ -785,6 +968,26 @@ declared-plugin-only.
   the substrate gain enough by representing body shape? Defer to slice
   2 (Tier C MVP) — start with signature-only emission, revisit if a
   concrete consumer needs body typing.
+
+- **Cross-plugin shape merging.** Two plugins both registering Tier A
+  on `Sinatra::Base` (e.g. `rigor-sinatra` + a hypothetical
+  `rigor-sinatra-extras`) — should `scope_methods` list-merge or
+  first-wins entirely? The current ADR is **first-wins by
+  registration order + `plugin.<id>.macro-shadow` `:info` diagnostic**;
+  the same convention as ADR-13's TypeNode-resolver chain. Specific
+  use-cases for compositional merging haven't materialised yet, so
+  per-field merge semantics (`scope_methods` merges, `modules_by_symbol`
+  first-wins) are deferred. Revisit when a concrete extension plugin
+  surfaces.
+
+- **Application-local plugin paths.** The substrate's primary audience
+  is library developers, not application authors. Today an
+  application that wants its own homegrown DSL typed uses a Bundler
+  `path:`-source local gem with a hand-rolled walker — the existing
+  ADR-2 path. Whether `.rigor.yml` should grow a `path:`-shaped plugin
+  entry to ease this is a separate ADR-2 config-schema decision, not
+  ADR-16's problem. Documented here so the future deciders know the
+  question lives outside this contract.
 
 - **Should Tier B registries support per-symbol *option-driven*
   emission?** Devise's `available_configs` setter (`lib/devise/models.rb:97-103`)
@@ -885,3 +1088,26 @@ declared-plugin-only.
   Updated WD10, added WD11 / WD12, extended Alternatives considered
   with two rejected variants, added two open questions about the
   heuristic's concrete shape and exclusion-set granularity.
+- 2026-05-15 — pinned the cost-bounded best-effort posture
+  (WD13). Substrate aspires to the full Tier emit shape (e.g.
+  Tier C's N-row table with precise return types) where cheap;
+  degrades gracefully to a defined floor — "the
+  substrate-affected code parses cleanly and has its identifiers
+  resolved" — when precise resolution would inflate
+  implementation cost. Synthetic method names emit
+  unconditionally; unresolved return types degrade to
+  `Dynamic[T]` with `macro.<tier>.unresolved-return` `:info`
+  provenance, never fabricated precision (per ADR-5). Updated
+  WD4 (inline-by-default pipeline position, pre-pass only when
+  a tier mandates it). Slicing revised: slice 2 (Tier C MVP)
+  targets **new** `rigor-dry-struct` MVP rather than migrating
+  the existing `rigor-activestorage` walker (migration deferred
+  to a future iteration when substrate quality matches). Slice
+  6 redefined as the **precision-promotion** slice that routes
+  emit-table `returns:` strings through ADR-13's `Plugin::TypeNodeResolver`
+  chain. Existing-plugin migration is no longer ADR-16's
+  obligation; it ships per-plugin when equivalence is
+  demonstrated. Open questions extended for emit-string
+  resolution path, cross-plugin merging, and application-local
+  paths (the last explicitly out of scope, to a separate ADR-2
+  config-schema decision).

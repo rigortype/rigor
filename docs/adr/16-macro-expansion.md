@@ -247,7 +247,7 @@ an instance of that class.
 class RigorSinatra < Rigor::Plugin::Base
   manifest(
     id: "sinatra",
-    block_as_method: [
+    block_as_methods: [
       # When X < Sinatra::Base and X.get(path, &block) is called,
       # the block is an instance method on X with self : X.
       Macro::BlockAsMethod.new(
@@ -518,7 +518,7 @@ Each tier shares an invariant set:
 
 **ADR-2** (extension API). The substrate is *under* the existing
 `Plugin::Base#flow_contribution_for` / `dynamic_return_type` /
-`type_specifying` hooks. The new manifest entries (`block_as_method`,
+`type_specifying` hooks. The new manifest entries (`block_as_methods`,
 `trait_registries`, `heredoc_macros`, `external_file_inclusions`) are
 declarative shortcuts that synthesise the equivalent hand-rolled
 walker. A plugin MAY mix declarative manifest entries with hand-rolled
@@ -560,7 +560,7 @@ This ADR adds (when implementation lands):
 - `Rigor::Plugin::Macro::HeredocTemplate` (new frozen value class).
 - `Rigor::Plugin::Macro::ExternalFile` (new frozen value class).
 - `Rigor::Plugin::Macro::Provenance` (new frozen value class).
-- `Rigor::Plugin::Manifest#block_as_method`,
+- `Rigor::Plugin::Manifest#block_as_methods`,
   `#trait_registries`, `#heredoc_macros`, `#external_file_inclusions`
   (four new attr_readers; defaults `[]`).
 - `Rigor::Type::Method#synthetic?` (new attr; default `false`).

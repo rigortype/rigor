@@ -253,4 +253,61 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(m.to_h["type_node_resolvers"]).to eq(%w[PickResolver OmitResolver])
     end
   end
+
+  describe "block_as_methods (ADR-16 slice 1a)" do
+    let(:sinatra_entry) do
+      Rigor::Plugin::Macro::BlockAsMethod.new(
+        receiver_constraint: "Sinatra::Base",
+        verbs: %i[get post put delete]
+      )
+    end
+
+    it "defaults to an empty Array" do
+      m = described_class.new(id: "sinatra", version: "0.1.0")
+      expect(m.block_as_methods).to eq([])
+      expect(m.block_as_methods).to be_frozen
+    end
+
+    it "stores BlockAsMethod entries in declaration order" do
+      m = described_class.new(
+        id: "sinatra", version: "0.1.0",
+        block_as_methods: [sinatra_entry]
+      )
+      expect(m.block_as_methods).to eq([sinatra_entry])
+      expect(m.block_as_methods).to be_frozen
+    end
+
+    it "rejects a non-Array block_as_methods argument" do
+      expect do
+        described_class.new(id: "sinatra", version: "0.1.0", block_as_methods: sinatra_entry)
+      end.to raise_error(ArgumentError, /block_as_methods must be an Array/)
+    end
+
+    it "rejects entries that are not BlockAsMethod instances" do
+      expect do
+        described_class.new(id: "sinatra", version: "0.1.0", block_as_methods: ["not-an-entry"])
+      end.to raise_error(ArgumentError, /BlockAsMethod instances/)
+    end
+
+    it "serialises entries as stable Hashes through #to_h" do
+      m = described_class.new(
+        id: "sinatra", version: "0.1.0",
+        block_as_methods: [sinatra_entry]
+      )
+      expect(m.to_h["block_as_methods"]).to eq(
+        [{
+          "receiver_constraint" => "Sinatra::Base",
+          "verbs" => %w[get post put delete],
+          "self_type" => "receiver_instance"
+        }]
+      )
+    end
+
+    it "treats two manifests with equal block_as_methods as equal" do
+      a = described_class.new(id: "sinatra", version: "0.1.0", block_as_methods: [sinatra_entry])
+      b = described_class.new(id: "sinatra", version: "0.1.0", block_as_methods: [sinatra_entry])
+      expect(a).to eq(b)
+      expect(a.hash).to eq(b.hash)
+    end
+  end
 end

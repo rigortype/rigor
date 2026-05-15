@@ -143,6 +143,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   PLUGIN_MANIFEST_INSTANCE = %w[
     ==(req:other)
+    block_as_methods()
     config_schema()
     consumes()
     description()
@@ -186,6 +187,16 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   PLUGIN_TYPE_NODE_RESOLVER_INSTANCE = %w[resolve(req:node,req:scope)].freeze
+
+  PLUGIN_MACRO_BLOCK_AS_METHOD_INSTANCE = %w[
+    ==(req:other)
+    eql?(req:other)
+    hash()
+    receiver_constraint()
+    self_type()
+    to_h()
+    verbs()
+  ].freeze
 
   PLUGIN_BLUEPRINT_INSTANCE = %w[
     config()
@@ -634,6 +645,14 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "exposes the expected ADR-13 slice-2 resolver base surface" do
       expect(instance_signatures(Rigor::Plugin::TypeNodeResolver)).to eq(
         PublicApiDriftSnapshots::PLUGIN_TYPE_NODE_RESOLVER_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::Macro::BlockAsMethod" do
+    it "exposes the expected ADR-16 slice-1a value-class surface" do
+      expect(instance_signatures(Rigor::Plugin::Macro::BlockAsMethod)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_MACRO_BLOCK_AS_METHOD_INSTANCE
       )
     end
   end

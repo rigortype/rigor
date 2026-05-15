@@ -50,6 +50,7 @@ module Rigor
       monitor mutex_m timeout
       open3 erb etc ipaddr bigdecimal bigdecimal-math
       prettyprint random-formatter time open-uri resolv
+      csv pstore objspace io-console cgi cgi-escape
       prism rbs
     ].freeze
 

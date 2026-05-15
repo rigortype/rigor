@@ -173,11 +173,13 @@ RSpec.describe Rigor::Environment do
       end
 
       it "merges caller-supplied libraries on top of the defaults, preserving order and de-duplicating" do
-        # `csv` is not in DEFAULT_LIBRARIES; we add it here.
-        env = described_class.for_project(libraries: %w[csv json], signature_paths: [])
+        # `singleton` is not in DEFAULT_LIBRARIES (it conflicts
+        # with `Rigor::Type::Singleton` in lexical scope — see
+        # docs/CURRENT_WORK.md). The user opts in explicitly here.
+        env = described_class.for_project(libraries: %w[singleton json], signature_paths: [])
         loader = env.rbs_loader
         expect(loader.libraries).to start_with(*Rigor::Environment::DEFAULT_LIBRARIES)
-        expect(loader.libraries).to include("csv")
+        expect(loader.libraries).to include("singleton")
         # `json` is in defaults already; the merge MUST NOT duplicate it.
         expect(loader.libraries.count("json")).to eq(1)
       end

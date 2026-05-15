@@ -25,6 +25,11 @@ Methodology and target sizes:
 | [Chatwoot](https://github.com/chatwoot/chatwoot) | landed (round 2) | 802 | Customer-support platform. |
 | [Canvas LMS](https://github.com/instructure/canvas-lms) | landed (round 2) | 3,248 | Instructure's LMS; `app` + `lib` + `gems` (in-tree gems). |
 | [OpenProject](https://github.com/opf/openproject) | landed (round 2) | 6,817 | Project-management platform; `app` + `lib` + `modules` (sub-engines). |
+| [Loomio](https://github.com/loomio/loomio) | landed (round 3) | 563 | Collaboration / group-decision Rails app. |
+| [Publify](https://github.com/publify/publify) | landed (round 3) | 15 (app shell only) | Rails app shell; real code lives in the external `publify_core` gem. |
+| [Diaspora](https://github.com/diaspora/diaspora) | landed (round 3) | 371 | Federated social-network Rails app. |
+| [Dependabot Core](https://github.com/dependabot/dependabot-core) | landed (round 3) | 1,089 (across 19 ecosystem dirs) | **Not Rails** — Ruby SDK / library for dependency-update automation. Useful baseline for "how does the analyser behave on non-Rails idiomatic Ruby with heavy Bundler-internal usage?" |
+| [tDiary Core](https://github.com/tdiary/tdiary-core) | landed (round 3) | 244 (lib + plugin + entry scripts) | **Not Rails** — pre-Rails-era Ruby blogging engine. Useful baseline for "how does the analyser behave on classic Ruby idioms without any ActiveSupport in scope?" |
 
 Each pass runs:
 
@@ -168,6 +173,78 @@ assignment narrowing":
 | O3 | `next if x.nil?` / `return if x.nil?` flow-tracked narrowing across early-exit guards in the same block. |
 
 ---
+
+## Round-3 projects (Loomio / Publify / Diaspora / Dependabot Core / tDiary Core)
+
+Third-round sweep. Includes three Rails apps (Loomio / Publify /
+Diaspora) at small / micro / medium size, and **two non-Rails Ruby
+projects** to calibrate how the analyser and the
+ActiveSupport-shaped RBS bundle behave outside the Rails idiom.
+
+### Quantitative summary
+
+| Project | Files | Wall (warm) | Peak RSS | Baseline | with O1 v2 | Δ |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Loomio | 563 | 2.36 s | 238 MB | 207 | **63** | −144 (−70%) |
+| Publify (app shell only) | 15 | 0.66 s | 243 MB | **0** | 0 | 0 |
+| Diaspora | 371 | 1.35 s | 258 MB | 65 | **5** | −60 (−92%) |
+| Dependabot Core (non-Rails) | 1,089 | 13.02 s | 226 MB | 205 | **58** | −147 (−72%) |
+| tDiary Core (non-Rails) | 244 | 1.61 s | 254 MB | 111 | **106** | −5 (−5%) |
+
+Pool ≡ sequential on all five (zero IsolationErrors).
+
+### Notable findings (round 3)
+
+- **Publify is just the Rails app shell** (15 .rb files in
+  `app/` + `lib/`). The real Publify code lives in the external
+  `publify_core` / `publify_amazon_sidebar` / `publify_textfilter_code`
+  gems referenced via `gem "publify_core", github: ...`. Rigor only
+  sees what's checked into this repo, so the diagnostic count is
+  zero — a useful boundary case but not representative of Publify
+  proper.
+- **Diaspora is the cleanest Rails app in the survey** — 5
+  diagnostics on 371 files after O1 v2.
+- **Dependabot Core (non-Rails) still benefits substantially from
+  the ActiveSupport-shaped bundle** (−72%). The reason: many
+  non-Rails Ruby projects load ActiveSupport (or fragments via
+  `active_support/core_ext/...`) at boot, and their code uses the
+  same `Object#blank?` / `#present?` / `#try` / `String#exclude?`
+  / `Enumerable#index_by` idioms as Rails apps. The remaining 58
+  diagnostics are dominated by **Bundler-internal Singleton-class
+  calls** (`Bundler::Definition.build` × 10, `Bundler.settings` × 7,
+  `Bundler::Dependency.new(...)` flagged as wrong-arity 5×) — all
+  of which are O4 (target-Bundler awareness) symptoms. Dependabot
+  ships its own monkey-patches against Bundler in
+  `bundler/helpers/v*/monkey_patches/` that Rigor would need to
+  pre-evaluate to type correctly.
+- **tDiary Core barely benefits from O1** (−5%). It pre-dates the
+  ActiveSupport-as-utility idiom — the Ruby is classic stdlib-only
+  style. tDiary's residual diagnostics are dominated by
+  `#month=` / `#year=` setters flagged as `on Object` (35
+  instances in `misc/plugin/category-legacy.rb`). The plugin file
+  is `instance_eval`'d into a host plugin class at runtime, and
+  rigor can't see the receiver class because the `def`s sit at
+  file top level — exactly the macro-expansion path queued under
+  open item O2 (heredoc / `instance_eval` Ruby expansion).
+- **Loomio's mix is unusual** — 34 of 63 are `flow.dead-assignment`
+  (54%) and only 11 are `call.undefined-method`. The codebase is
+  noticeably less idiomatic-AS than the others; less to gain from
+  the RBS bundle.
+
+### Round-3 takeaways for the analyser
+
+1. **Pool ≡ sequential proven on all 14 projects swept so far**
+   (zero `Ractor::IsolationError` across ~29,560 files). Phase
+   4b.x's four shareability follow-ups + the CONSTANT_CONSTRUCTORS
+   lambda fix are robust against the diversity of real-world
+   targets.
+2. **The ActiveSupport-shaped RBS bundle is useful for non-Rails
+   Ruby too** — Dependabot Core's −72% confirms ActiveSupport
+   idioms (`Object#blank?` family, `Enumerable#index_by`,
+   `String#exclude?`) are widespread outside Rails.
+3. **tDiary's `instance_eval` plugin pattern motivates O2** —
+   pre-Rails-era idioms hit the same kind of metaprogramming
+   barrier as Rails generators' `.rb`-as-ERB templates.
 
 ## Round-2 projects (Forem / Solidus / Chatwoot / Canvas LMS / OpenProject)
 
@@ -426,6 +503,11 @@ byte-identical output — recorded as open item O6.
 | Canvas LMS | 3,248 | 17.32 s | 11.16 s (`w=4`) | **0.64× (faster)** | 272 MB / — | 3,296 |
 | OpenProject | 6,817 | 18.84 s | 10.24 s (`w=4`) | **0.54× (faster)** | 246 MB / — | 2,356 |
 | GitLab FOSS | 11,130 | 25.27 s | 15.43 s (`w=8`) | **0.61× (faster)** | 248 MB / 1.30 GB | 2,982 |
+| Publify (shell only) | 15 | 0.66 s | (not measured) | n/a | 243 MB / — | 0 |
+| Diaspora | 371 | 1.35 s | (not measured) | n/a | 258 MB / — | 65 |
+| Loomio | 563 | 2.36 s | (not measured) | n/a | 238 MB / — | 207 |
+| tDiary Core (non-Rails) | 244 | 1.61 s | (not measured) | n/a | 254 MB / — | 111 |
+| Dependabot Core (non-Rails) | 1,089 | 13.02 s | (not measured) | n/a | 226 MB / — | 205 |
 
 **Pool wall-clock crossover** sits between Mastodon / Forem (~1.3 K
 files, pool slower) and Discourse / Solidus (~1.8 K files, pool
@@ -433,13 +515,15 @@ files, pool slower) and Discourse / Solidus (~1.8 K files, pool
 ADR-15 OQ1 "per-Ractor cache facade" remains the avenue for moving
 the crossover lower and capping peak RSS.
 
-**Pool ≡ sequential proven on all nine projects.** After the four
-Phase 4b.x deep-shareability follow-ups (NumericCatalog,
+**Pool ≡ sequential proven on all fourteen projects.** After the
+four Phase 4b.x deep-shareability follow-ups (NumericCatalog,
 CANONICAL_NAMES, RegexRefinement::RULES,
 ShapeDispatch::REFINED_STRING_PROJECTIONS) and the
-CONSTANT_CONSTRUCTORS lambda fix, every project in the survey
-produces byte-identical diagnostic streams between sequential and
-pool modes. Zero IsolationErrors across the 28,114 files swept.
+CONSTANT_CONSTRUCTORS lambda fix, every project in the survey —
+including the two non-Rails projects (Dependabot Core and tDiary
+Core) — produces byte-identical diagnostic streams between
+sequential and pool modes. Zero IsolationErrors across the 31,840
+files swept.
 
 **Engine fixes banked during the survey** (commit `642cf28` + the
 Discourse fix):

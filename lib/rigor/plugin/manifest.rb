@@ -38,13 +38,14 @@ module Rigor
       end
 
       attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
-                  :owns_receivers, :type_node_resolvers, :block_as_methods, :heredoc_templates
+                  :owns_receivers, :type_node_resolvers, :block_as_methods, :heredoc_templates,
+                  :trait_registries
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
         produces: [], consumes: [], owns_receivers: [], type_node_resolvers: [],
-        block_as_methods: [], heredoc_templates: []
+        block_as_methods: [], heredoc_templates: [], trait_registries: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -55,9 +56,10 @@ module Rigor
         validate_type_node_resolvers!(type_node_resolvers)
         validate_block_as_methods!(block_as_methods)
         validate_heredoc_templates!(heredoc_templates)
+        validate_trait_registries!(trait_registries)
 
         assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
-                      type_node_resolvers, block_as_methods, heredoc_templates)
+                      type_node_resolvers, block_as_methods, heredoc_templates, trait_registries)
         freeze
       end
 
@@ -65,7 +67,7 @@ module Rigor
 
       # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
       def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
-                        type_node_resolvers, block_as_methods, heredoc_templates)
+                        type_node_resolvers, block_as_methods, heredoc_templates, trait_registries)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
@@ -77,6 +79,7 @@ module Rigor
         @type_node_resolvers = type_node_resolvers.dup.freeze
         @block_as_methods = block_as_methods.dup.freeze
         @heredoc_templates = heredoc_templates.dup.freeze
+        @trait_registries = trait_registries.dup.freeze
       end
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
@@ -117,7 +120,8 @@ module Rigor
           "owns_receivers" => owns_receivers,
           "type_node_resolvers" => type_node_resolvers.map { |r| r.class.name },
           "block_as_methods" => block_as_methods.map(&:to_h),
-          "heredoc_templates" => heredoc_templates.map(&:to_h)
+          "heredoc_templates" => heredoc_templates.map(&:to_h),
+          "trait_registries" => trait_registries.map(&:to_h)
         }
       end
 
@@ -239,6 +243,20 @@ module Rigor
         raise ArgumentError,
               "plugin manifest heredoc_templates must be an Array of " \
               "Rigor::Plugin::Macro::HeredocTemplate instances, got #{entries.inspect}"
+      end
+
+      # ADR-16 slice 3a — `trait_registries:` declares the Tier B
+      # substrate entries (trait-inlining via bundled module
+      # registry). Slice 3a carries the declarations on the
+      # manifest; the scanner + per-method explosion through
+      # `SyntheticMethodIndex` (slice 2b primitive) arrives in
+      # slice 3b.
+      def validate_trait_registries!(entries)
+        return if entries.is_a?(Array) && entries.all?(Macro::TraitRegistry)
+
+        raise ArgumentError,
+              "plugin manifest trait_registries must be an Array of " \
+              "Rigor::Plugin::Macro::TraitRegistry instances, got #{entries.inspect}"
       end
 
       def coerce_consumes(consumes)

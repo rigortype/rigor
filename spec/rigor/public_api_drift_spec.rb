@@ -157,6 +157,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     produces()
     protocols()
     to_h()
+    trait_registries()
     type_node_resolvers()
     validate_config(req:config)
     version()
@@ -219,6 +220,19 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     hash()
     name()
     returns()
+    to_h()
+  ].freeze
+
+  PLUGIN_MACRO_TRAIT_REGISTRY_INSTANCE = %w[
+    ==(req:other)
+    always_included()
+    eql?(req:other)
+    hash()
+    method_name()
+    module_for(req:symbol)
+    modules_by_symbol()
+    receiver_constraint()
+    symbol_arg_position()
     to_h()
   ].freeze
 
@@ -693,6 +707,14 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "exposes the expected ADR-16 slice-2a emit-row surface" do
       expect(instance_signatures(Rigor::Plugin::Macro::HeredocTemplate::Emit)).to eq(
         PublicApiDriftSnapshots::PLUGIN_MACRO_HEREDOC_TEMPLATE_EMIT_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::Macro::TraitRegistry" do
+    it "exposes the expected ADR-16 slice-3a value-class surface" do
+      expect(instance_signatures(Rigor::Plugin::Macro::TraitRegistry)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_MACRO_TRAIT_REGISTRY_INSTANCE
       )
     end
   end

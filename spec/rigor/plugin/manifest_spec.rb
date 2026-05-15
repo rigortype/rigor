@@ -371,4 +371,66 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(a.hash).to eq(b.hash)
     end
   end
+
+  describe "trait_registries (ADR-16 slice 3a)" do
+    let(:devise_entry) do
+      Rigor::Plugin::Macro::TraitRegistry.new(
+        receiver_constraint: "ActiveRecord::Base",
+        method_name: :devise,
+        symbol_arg_position: :rest,
+        modules_by_symbol: { database_authenticatable: "Devise::Models::DatabaseAuthenticatable" },
+        always_included: ["Devise::Models::Authenticatable"]
+      )
+    end
+
+    it "defaults to an empty Array" do
+      m = described_class.new(id: "devise", version: "0.1.0")
+      expect(m.trait_registries).to eq([])
+      expect(m.trait_registries).to be_frozen
+    end
+
+    it "stores TraitRegistry entries in declaration order" do
+      m = described_class.new(
+        id: "devise", version: "0.1.0",
+        trait_registries: [devise_entry]
+      )
+      expect(m.trait_registries).to eq([devise_entry])
+      expect(m.trait_registries).to be_frozen
+    end
+
+    it "rejects a non-Array trait_registries argument" do
+      expect do
+        described_class.new(id: "devise", version: "0.1.0", trait_registries: devise_entry)
+      end.to raise_error(ArgumentError, /trait_registries must be an Array/)
+    end
+
+    it "rejects entries that are not TraitRegistry instances" do
+      expect do
+        described_class.new(id: "devise", version: "0.1.0", trait_registries: ["not-an-entry"])
+      end.to raise_error(ArgumentError, /TraitRegistry instances/)
+    end
+
+    it "serialises entries as stable Hashes through #to_h" do
+      m = described_class.new(
+        id: "devise", version: "0.1.0",
+        trait_registries: [devise_entry]
+      )
+      expect(m.to_h["trait_registries"]).to eq(
+        [{
+          "receiver_constraint" => "ActiveRecord::Base",
+          "method_name" => "devise",
+          "symbol_arg_position" => "rest",
+          "modules_by_symbol" => { "database_authenticatable" => "Devise::Models::DatabaseAuthenticatable" },
+          "always_included" => ["Devise::Models::Authenticatable"]
+        }]
+      )
+    end
+
+    it "treats two manifests with equal trait_registries as equal" do
+      a = described_class.new(id: "devise", version: "0.1.0", trait_registries: [devise_entry])
+      b = described_class.new(id: "devise", version: "0.1.0", trait_registries: [devise_entry])
+      expect(a).to eq(b)
+      expect(a.hash).to eq(b.hash)
+    end
+  end
 end

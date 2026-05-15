@@ -150,6 +150,11 @@
           "description": "When `bundle_path` is unset, search `.bundle/config` and `vendor/bundle/` under the project root. Setting `false` disables bundle sig discovery entirely.",
           "type": "boolean",
           "default": true
+        },
+        "lockfile": {
+          "description": "Explicit path to a `Gemfile.lock` (O4 Layer 3 slice 1). When set (or auto-detected next to the project root via the `auto_detect:` flag), Rigor parses the lockfile and FILTERS the bundle-discovered `sig/` directories so only gems whose `(name, version, platform)` matches a lockfile entry are admitted. Stale gems left in the bundle install tree (out-of-band installs, version drift after `bundle update`) are silently dropped.",
+          "type": ["string", "null"],
+          "default": null
         }
       }
     }

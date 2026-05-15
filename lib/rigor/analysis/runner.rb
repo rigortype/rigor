@@ -210,6 +210,7 @@ module Rigor
           boundary_cross_reporter: @boundary_cross_reporter,
           bundler_bundle_path: @configuration.bundler_bundle_path,
           bundler_auto_detect: @configuration.bundler_auto_detect,
+          bundler_lockfile: @configuration.bundler_lockfile,
           synthetic_method_index: @synthetic_method_index
         )
       end
@@ -374,7 +375,8 @@ module Rigor
           signature_paths: @configuration.signature_paths,
           cache_store: @cache_store,
           bundler_bundle_path: @configuration.bundler_bundle_path,
-          bundler_auto_detect: @configuration.bundler_auto_detect
+          bundler_auto_detect: @configuration.bundler_auto_detect,
+          bundler_lockfile: @configuration.bundler_lockfile
         )
         warm_env.rbs_loader&.prewarm
       end

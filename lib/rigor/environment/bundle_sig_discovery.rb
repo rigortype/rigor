@@ -60,11 +60,23 @@ module Rigor
       #   `vendor/bundle/` under `project_root`.
       # @param skip_gems [Set<String>] gem names to exclude from
       #   discovery. Defaults to {SKIPPED_GEMS_BY_DEFAULT}.
+      # @param locked_gems [Hash{String => LockfileResolver::LockedGem}, nil]
+      #   Optional O4-Layer-3 filter. When non-nil and non-empty,
+      #   only `sig/` directories whose gem `(name, version,
+      #   platform)` tuple matches a lockfile entry are returned.
+      #   Bundle entries absent from the lockfile (or at a drifted
+      #   version) are silently dropped — the lockfile is treated
+      #   as the source of truth for "what gems this project
+      #   actually declares". Pass `nil` (the default) to keep
+      #   the pre-Layer-3 behaviour of returning every non-skipped
+      #   `sig/` under the bundle.
       # @return [Array<Pathname>] every `<gem-dir>/sig` directory
       #   under the resolved bundle path, minus any whose gem
-      #   name is in `skip_gems`.
+      #   name is in `skip_gems` and (when `locked_gems` is
+      #   supplied) minus any whose `(name, version, platform)`
+      #   does not match a lockfile entry.
       def self.discover(bundle_path:, project_root: Dir.pwd, auto_detect: true,
-                        skip_gems: SKIPPED_GEMS_BY_DEFAULT)
+                        skip_gems: SKIPPED_GEMS_BY_DEFAULT, locked_gems: nil)
         resolved = resolve_bundle_path(
           bundle_path: bundle_path,
           project_root: project_root,
@@ -76,8 +88,30 @@ module Rigor
         # canonical bundler layout. `*` on the ruby version dir
         # picks up whichever Ruby the bundle was installed for.
         all = Dir.glob(resolved.join("ruby", "*", "gems", "*", "sig")).map { |d| Pathname.new(d) }
-        all.reject { |sig_dir| skip_gems.include?(gem_name_from_sig_path(sig_dir)) }
+        filtered = all.reject { |sig_dir| skip_gems.include?(gem_name_from_sig_path(sig_dir)) }
+        return filtered if locked_gems.nil? || locked_gems.empty?
+
+        expected_dirs = expected_gem_dirs(locked_gems)
+        filtered.select { |sig_dir| expected_dirs.include?(sig_dir.parent.basename.to_s) }
       end
+
+      # `{name => LockedGem}` → set of canonical bundler gem
+      # directory basenames. Pure-Ruby gems install as
+      # `<name>-<version>`; platform-specific gems install as
+      # `<name>-<version>-<platform>` (e.g. `ffi-1.17.4-aarch64-linux-gnu`).
+      # Lockfile platform `"ruby"` is the pure-Ruby case; any
+      # other value is treated as a platform tag.
+      def self.expected_gem_dirs(locked_gems)
+        locked_gems.each_value.with_object(Set.new) do |locked, set|
+          base = "#{locked.name}-#{locked.version}"
+          set << if locked.platform == "ruby" || locked.platform.empty?
+                   base
+                 else
+                   "#{base}-#{locked.platform}"
+                 end
+        end
+      end
+      private_class_method :expected_gem_dirs
 
       # `<bundle>/ruby/X.Y.Z/gems/<name>-<ver>/sig` → `<name>`.
       # The gem directory follows the canonical

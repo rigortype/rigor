@@ -96,8 +96,25 @@ module Rigor
         # found, no extra sigs are added — the analyzer sees
         # only rigor's vendored RBS and the user's
         # `signature_paths:`.
+        #
+        # O4 Layer 3 keys:
+        #
+        # `lockfile:` (String, optional): explicit path to a
+        # `Gemfile.lock`. Resolved relative to the project root
+        # when relative. When set (or auto-detected via the
+        # `auto_detect:` flag below) Rigor parses the lockfile
+        # and uses it to FILTER the bundle-discovered `sig/`
+        # directories: only gems whose `(name, version,
+        # platform)` matches a lockfile entry are admitted to
+        # `signature_paths:`. Stale or out-of-band gems sitting
+        # in the bundle install tree are silently dropped.
+        #
+        # `auto_detect:` (Boolean, also gates the lockfile
+        # search): when true and `lockfile:` is nil, look for
+        # `<project_root>/Gemfile.lock`.
         "bundle_path" => nil,
-        "auto_detect" => true
+        "auto_detect" => true,
+        "lockfile" => nil
       }
     }.freeze
 
@@ -114,7 +131,7 @@ module Rigor
                 :plugins_io_allowed_url_hosts,
                 :severity_profile, :severity_overrides,
                 :dependencies, :parallel_workers,
-                :bundler_bundle_path, :bundler_auto_detect
+                :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile
 
     # Loads a configuration file.
     #
@@ -288,6 +305,8 @@ module Rigor
       bp = bundler.fetch("bundle_path")
       @bundler_bundle_path = bp.nil? ? nil : bp.to_s.dup.freeze
       @bundler_auto_detect = bundler.fetch("auto_detect") == true
+      lf = bundler.fetch("lockfile")
+      @bundler_lockfile = lf.nil? ? nil : lf.to_s.dup.freeze
       # Ractor migration Phase 2a: deep-freeze the
       # Configuration so it is `Ractor.shareable?`. Every
       # ivar above is now either a frozen value (Symbol /
@@ -327,7 +346,8 @@ module Rigor
         },
         "bundler" => {
           "bundle_path" => bundler_bundle_path,
-          "auto_detect" => bundler_auto_detect
+          "auto_detect" => bundler_auto_detect,
+          "lockfile" => bundler_lockfile
         }
       }
     end

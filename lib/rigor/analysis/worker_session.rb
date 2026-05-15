@@ -123,7 +123,8 @@ module Rigor
           rbs_extended_reporter: @rbs_extended_reporter,
           boundary_cross_reporter: @boundary_cross_reporter,
           bundler_bundle_path: configuration.bundler_bundle_path,
-          bundler_auto_detect: configuration.bundler_auto_detect
+          bundler_auto_detect: configuration.bundler_auto_detect,
+          bundler_lockfile: configuration.bundler_lockfile
         )
         @prepare_diagnostics = run_plugin_prepare.freeze
       end

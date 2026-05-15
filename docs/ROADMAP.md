@@ -87,7 +87,7 @@ Three rounds of project sweeps (recorded in [`docs/notes/20260515-real-world-rai
 | ID | Status | Item |
 | --- | --- | --- |
 | O1 | landed (MVP, v2) | `examples/rigor-activesupport-core-ext/` opt-in RBS bundle. |
-| O2 | queued | Macro-template / heredoc-Ruby expansion. tDiary's `instance_eval` plugin pattern is the motivating real-world case. |
+| O2 | queued — ADR proposed | Macro-template / heredoc-Ruby expansion. tDiary's `instance_eval` plugin pattern is the motivating real-world case. Design now pinned in [ADR-16](adr/16-macro-expansion.md) (four-tier substrate); grounding survey at [`docs/notes/20260515-macro-expansion-library-survey.md`](notes/20260515-macro-expansion-library-survey.md). |
 | O3 | not-an-issue | Early-exit narrowing (`next if x.nil?` / `return if x.nil?`) already works; survey residuals are mostly Object#blank?/present?/try which O1 covers. |
 | O4 | layers 1+2 landed | Bundler awareness. Layer 3 (`Gemfile.lock` parse + `gem_rbs_collection` matching) queued. |
 | O5 | landed (`ac14c45`) | `Hash[K, V] <: Enumerable[[K, V]]` projection. |
@@ -106,7 +106,7 @@ Three rounds of project sweeps (recorded in [`docs/notes/20260515-real-world-rai
 Items that have surfaced across v0.1.x work and that the next implementer benefits from seeing without re-reading the full thread.
 
 ### Type-language / engine
-- **O2 — macro-template + heredoc-Ruby expansion.** Two related shapes: `.rb` files that are actually ERB-style code-generator templates (Rails generator output), and `class_eval <<~RUBY` heredoc-embedded Ruby. Both need parser-boundary changes that aren't a single-slice job. tDiary Core's `instance_eval`'d plugin files are the concrete motivating case (35 FP / file on legacy plugins).
+- **O2 — macro-template + heredoc-Ruby expansion.** Two related shapes: `.rb` files that are actually ERB-style code-generator templates (Rails generator output), and `class_eval <<~RUBY` heredoc-embedded Ruby. Both need parser-boundary changes that aren't a single-slice job. tDiary Core's `instance_eval`'d plugin files are the concrete motivating case (35 FP / file on legacy plugins). Design pinned in [ADR-16](adr/16-macro-expansion.md): four-tier substrate (block-as-method / trait-inlining-registry / heredoc-template / external-file) plus Concern re-targeting walker extension. Grounding survey at [`docs/notes/20260515-macro-expansion-library-survey.md`](notes/20260515-macro-expansion-library-survey.md). Implementation slicing authorised, no committed milestone.
 - **Lightweight HKT (higher-kinded types) in DSL signatures.** Replace `untyped` boundaries with type-level `eval` per the `docs/type-specification/rigor-extensions.md` conditional / indexed-access rows. First reference site is the rigor-lisp-eval demo. Exploratory, no committed milestone.
 - **`rigor:v1:conforms-to` directive.** Originally queued for v0.1.1's "Out of scope"; still open. Lets a method param accept any value satisfying a named structural interface.
 - **LRU eviction for `Cache::Store`.** Per [ADR-6](adr/6-cache-persistence-backend.md), the persistent cache is sharded "no eviction" by design. Long-lived clones with config / dependency churn accumulate stale slots that only `make cache-clean` releases. LRU is queued, not committed.

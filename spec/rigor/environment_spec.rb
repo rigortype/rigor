@@ -173,13 +173,14 @@ RSpec.describe Rigor::Environment do
       end
 
       it "merges caller-supplied libraries on top of the defaults, preserving order and de-duplicating" do
-        # `singleton` is not in DEFAULT_LIBRARIES (it conflicts
-        # with `Rigor::Type::Singleton` in lexical scope — see
-        # docs/CURRENT_WORK.md). The user opts in explicitly here.
-        env = described_class.for_project(libraries: %w[singleton json], signature_paths: [])
+        # `coverage` is not in DEFAULT_LIBRARIES (it's a
+        # test-time-only stdlib library, intentionally kept out
+        # of the default-load set). The user opts in explicitly
+        # here.
+        env = described_class.for_project(libraries: %w[coverage json], signature_paths: [])
         loader = env.rbs_loader
         expect(loader.libraries).to start_with(*Rigor::Environment::DEFAULT_LIBRARIES)
-        expect(loader.libraries).to include("singleton")
+        expect(loader.libraries).to include("coverage")
         # `json` is in defaults already; the merge MUST NOT duplicate it.
         expect(loader.libraries.count("json")).to eq(1)
       end

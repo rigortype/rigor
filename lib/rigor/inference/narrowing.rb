@@ -1263,13 +1263,71 @@ module Rigor
           return nil if node.arguments.nil?
           return nil unless node.arguments.arguments.size == 1
 
-          class_name = static_class_name(node.arguments.arguments.first)
-          return nil if class_name.nil?
+          bare_name = static_class_name(node.arguments.arguments.first)
+          return nil if bare_name.nil?
 
           current = scope.local(node.receiver.name)
           return nil if current.nil?
 
+          # Resolve `bare_name` through the lexical-scope chain
+          # so a name shadowed by the current class / enclosing
+          # module wins over the top-level constant. Mirrors
+          # Ruby's `Module.nesting`-driven constant lookup. The
+          # canonical motivating case: inside
+          # `Rigor::Type::Singleton#==`, `is_a?(Singleton)`
+          # should resolve to `Rigor::Type::Singleton`, not the
+          # top-level stdlib `Singleton` mixin (which would
+          # surface as a spurious `undefined-method` on
+          # subsequent `other.class_name` calls).
+          class_name = resolve_class_name_lexically(bare_name, scope)
           class_predicate_scopes(scope, node.receiver.name, current, class_name, exact: exact)
+        end
+
+        # Walks the lexical-nesting chain derived from
+        # `scope.self_type` and returns the first
+        # `<prefix>::<bare_name>` (or bare `<bare_name>` at the
+        # top level) that the environment recognises. Falls back
+        # to `bare_name` itself when nothing in the chain
+        # resolves; the downstream `narrow_class` then yields
+        # the conservative answer for unknown receivers.
+        def resolve_class_name_lexically(bare_name, scope)
+          return bare_name if bare_name.include?("::") # Already qualified.
+
+          chain = lexical_nesting_for(scope)
+          chain.each do |prefix|
+            candidate = "#{prefix}::#{bare_name}"
+            return candidate if class_known_to_scope?(scope, candidate)
+          end
+          bare_name
+        end
+
+        # Combines the environment's RBS-known set with the
+        # scope's in-source `discovered_classes` table so a
+        # lexical-nesting candidate matches a class the project
+        # declares but has no RBS for.
+        def class_known_to_scope?(scope, candidate)
+          return true if scope.environment.class_known?(candidate)
+
+          scope.discovered_classes.key?(candidate)
+        end
+
+        # Approximates `Module.nesting` from the inferable
+        # `self_type`. Today's implementation handles the common
+        # case: when the surrounding method is a regular
+        # instance method (`self_type = Nominal[T]`) or a
+        # class-body / singleton (`self_type = Singleton[T]`),
+        # the chain is `T`'s namespace path — `Foo::Bar::Baz`
+        # → `["Foo::Bar::Baz", "Foo::Bar", "Foo"]`. Returns an
+        # empty array when `self_type` is unknown.
+        def lexical_nesting_for(scope)
+          self_type = scope.self_type
+          base = case self_type
+                 when Type::Nominal, Type::Singleton then self_type.class_name
+                 end
+          return [] if base.nil? || base.empty?
+
+          parts = base.split("::")
+          parts.each_index.map { |i| parts[0..-(i + 1)].join("::") }
         end
 
         def class_predicate_scopes(scope, name, current, class_name, exact:)

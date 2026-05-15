@@ -46,7 +46,7 @@ module Rigor
       pathname optparse json yaml fileutils tempfile tmpdir
       stringio forwardable digest securerandom
       uri logger date
-      pp delegate observable abbrev find tsort
+      pp delegate observable abbrev find tsort singleton
       shellwords benchmark base64 did_you_mean
       monitor mutex_m timeout
       open3 erb etc ipaddr bigdecimal bigdecimal-math

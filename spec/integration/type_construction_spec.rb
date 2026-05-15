@@ -70,6 +70,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/is_a_lexical_resolution.rb — `is_a?(C)` honours lexical-scope constant lookup" do
+    let(:harness) { harness_for("is_a_lexical_resolution") }
+
+    it "resolves `is_a?(Inner)` inside `Foo::Outer#call` to `Foo::Inner` (not top-level `Inner`)" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/tuple_access.rb — Tuple element typing" do
     let(:harness) { harness_for("tuple_access") }
 

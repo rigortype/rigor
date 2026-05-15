@@ -45,7 +45,7 @@ module Rigor
         "pathname", "optparse", "json", "yaml", "fileutils",
         "tempfile", "tmpdir", "stringio", "forwardable",
         "digest", "securerandom", "uri", "logger", "date",
-        "pp", "delegate", "observable", "abbrev",
+        "pp", "delegate", "singleton", "observable", "abbrev",
         "find", "tsort", "shellwords", "benchmark", "base64",
         "did_you_mean", "monitor", "mutex_m", "timeout",
         "open3", "erb", "etc", "ipaddr", "bigdecimal",

@@ -419,9 +419,13 @@ module Rigor
           elsif (literal = @scanner.scan(SIGNED_INT))
             TypeNode::IntegerLiteral.new(value: Integer(literal))
           elsif @scanner.scan(SYMBOL_LITERAL)
-            TypeNode::SymbolLiteral.new(value: @scanner[:value].to_sym)
+            # StringScanner#[] accepts Symbol for named captures
+            # (Ruby behaviour); upstream RBS shim only declares the
+            # positional-capture (Integer) overload, so the
+            # argument-type-mismatch diagnostic is suppressed.
+            TypeNode::SymbolLiteral.new(value: @scanner[:value].to_sym) # rigor:disable argument-type-mismatch
           elsif @scanner.scan(STRING_LITERAL)
-            TypeNode::StringLiteral.new(value: @scanner[:value])
+            TypeNode::StringLiteral.new(value: @scanner[:value]) # rigor:disable argument-type-mismatch
           else
             parse_type_ast
           end

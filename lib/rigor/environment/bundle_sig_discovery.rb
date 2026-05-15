@@ -52,6 +52,7 @@ module Rigor
         "bigdecimal-math", "prettyprint",
         "random-formatter", "time", "open-uri", "resolv",
         "csv", "pstore", "objspace", "io-console", "cgi", "cgi-escape",
+        "strscan",
         "prism", "rbs",
         # data/vendored_gem_sigs/
         "pg", "mysql2", "nokogiri", "bcrypt", "redis", "idn-ruby"

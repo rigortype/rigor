@@ -51,6 +51,7 @@ module Rigor
       open3 erb etc ipaddr bigdecimal bigdecimal-math
       prettyprint random-formatter time open-uri resolv
       csv pstore objspace io-console cgi cgi-escape
+      strscan
       prism rbs
     ].freeze
 

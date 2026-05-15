@@ -107,4 +107,5 @@ If the Flake shell is unavailable, mention any skipped verification in the final
 - Do NOT bypass the Flake. `bundle`, `rake`, `rspec`, `rubocop`, and `exe/rigor` MUST run inside `nix … develop` per AGENTS.md.
 - Do NOT modify `references/` submodules unless the task is "bump references/<name>". The vendored sources are read-only; engine changes happen against Rigor's own code.
 - Do NOT run `bundle exec rake release` without explicit user authorisation. The release task tags `vx.y.z`, pushes to origin, and publishes to RubyGems.
+- Do NOT author RBS files in `sig/` from AI inference / freehand suggestion. The standard tool is `rigor sig-gen` (ADR-14). Full policy + the inference-vs-RBS contradiction rule (do not overwrite tighter-returns that lose union members) live in [`AGENTS.md`](AGENTS.md) § "RBS Authorship".
 - The reading order for a returning implementer is in [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md). It points back at the relevant ADRs and skills for the version in progress; treat it as the resume bookmark, not as a normative spec.

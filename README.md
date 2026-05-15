@@ -421,11 +421,14 @@ analyzer guarantees live under
 with the [ADR-9](docs/adr/9-cross-plugin-api.md) cross-plugin
 fact channel (one plugin publishes a fact like `:model_index`,
 another consumes it), [ADR-11](docs/adr/11-sorbet-input-adapter.md)
-Sorbet ingestion, and [ADR-13](docs/adr/13-typenode-resolver-plugin.md)
-plugin-supplied type-vocabulary resolvers. **Nineteen worked
-examples** ship under [`examples/`](examples/) — each is a
-fully-shaped plugin gem with a runnable demo and an end-to-end
-integration spec.
+Sorbet ingestion, [ADR-13](docs/adr/13-typenode-resolver-plugin.md)
+plugin-supplied type-vocabulary resolvers, and
+[ADR-16](docs/adr/16-macro-expansion.md) macro / DSL expansion
+substrate (declarative Tier A block-as-method / Tier B
+trait-inlining-registry / Tier C heredoc-template / Tier D
+external-file inclusion). **Twenty-four worked examples** ship
+under [`examples/`](examples/) — each is a fully-shaped plugin
+gem with a runnable demo and an end-to-end integration spec.
 
 **Plugin-contract teaching examples** (focus on a single
 extension-point):
@@ -447,6 +450,25 @@ extension-point):
   — `Plugin::TypeNodeResolver` chain wiring TS-canonical names
   (`Pick` / `Omit` / `Partial` / `Required` / `Readonly`) onto
   Rigor's shape-projection type functions.
+
+**Macro expansion substrate consumers** (ADR-16 — declarative
+manifest entries, no walker code):
+
+- [`rigor-sinatra`](examples/rigor-sinatra/) — **Tier A**
+  block-as-method. Recognises Sinatra's nine class-level HTTP
+  verb methods and narrows the route block's `self_type` so
+  bare `params` / `redirect` / `halt` resolve through
+  `Sinatra::Base`'s RBS.
+- [`rigor-dry-struct`](examples/rigor-dry-struct/) — **Tier C**
+  heredoc-template. Synthesises a reader on every `Dry::Struct`
+  subclass for each `attribute :name, T` / `attribute? :name, T`
+  call.
+- [`rigor-devise`](examples/rigor-devise/) — **Tier B**
+  trait-inlining registry mirroring `lib/devise/modules.rb`.
+  Each `devise :strategy_a, :strategy_b` call explodes the
+  included module's RBS instance methods onto the calling model
+  class (Devise's `user.valid_password?` returns the module's
+  authored `bool`).
 
 **Rails ecosystem plugins** (Tier 1 + Tier 2 + Tier 3 + Sorbet):
 
@@ -553,10 +575,15 @@ while the inference surface stabilises. Forward-looking commitments
   `rigor-activerecord` publishing `:model_index` via the
   ADR-9 cross-plugin fact channel.
 
-Nineteen worked plugin examples now ship under
+Twenty-four worked plugin examples now ship under
 [`examples/`](examples/) — see
 [`examples/README.md`](examples/README.md) for the comparison
-table.
+table. The current `[Unreleased]` cycle on `master` (release
+pending) also delivered the [ADR-16](docs/adr/16-macro-expansion.md)
+macro / DSL expansion substrate (four-tier declarative
+manifest contract + engine integration + Tier B/C precision
+promotion); see `CHANGELOG.md` `[Unreleased]` for the full
+landing notes.
 
 ## Contributing
 

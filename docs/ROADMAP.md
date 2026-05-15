@@ -27,7 +27,7 @@ that shaped each cut are preserved in git history (see
 
 ## v0.1.5 — accumulating on `master` (release pending)
 
-Theme: **kick off the [ADR-15](adr/15-ractor-concurrency.md) Ractor migration end-to-end, bank the spec-suite performance wins (6× wall-clock), close the v0.1.3 / v0.1.4 deferred-queue ecosystem items, and prove out the analyzer against fourteen real-world Rails / Ruby projects — driving production-rigor improvements (built-in vendored gem RBS, target-project Bundler awareness, several engine fixes).**
+Theme: **kick off the [ADR-15](adr/15-ractor-concurrency.md) Ractor migration end-to-end, bank the spec-suite performance wins (6× wall-clock), close the v0.1.3 / v0.1.4 deferred-queue ecosystem items, prove out the analyzer against fourteen real-world Rails / Ruby projects — driving production-rigor improvements (built-in vendored gem RBS, target-project Bundler awareness, several engine fixes), and land the [ADR-16](adr/16-macro-expansion.md) macro / DSL expansion substrate end-to-end (closes ROADMAP O2 at the WD13 floor).**
 
 Every committed v0.1.5 track is purely additive (no behaviour change for existing CLI consumers); the Ractor work is staged so each phase is independently revert-able.
 
@@ -45,6 +45,19 @@ Banked so far on `master`:
 - **Phase 4c** (CLI / env / config opt-in surfaces). `rigor check --workers=N` > `RIGOR_RACTOR_WORKERS` > `.rigor.yml` `parallel.workers:` > `0`. Sequential remains the documented default.
 
 **Pool ≡ sequential proven on 14 real-world projects** (Redmine, Discourse, Mastodon, GitLab FOSS, Forem, Solidus, Chatwoot, Canvas LMS, OpenProject, Loomio, Publify, Diaspora, Dependabot Core, tDiary Core — total 31,840 files swept). Pool wall-clock crossover with sequential sits around 1.3–1.8 K files; GitLab FOSS (11.1 K files) shows pool=8 at 1.64× sequential.
+
+### ADR-16 macro expansion substrate — floor + precision promotion all landed
+
+Closes ROADMAP open item O2 (macro-template / heredoc-Ruby expansion). Sixteen commits (`584ae85`…`53b7db0`) deliver a four-tier declarative substrate that lets plugin authors recognise metaprogramming-shaped DSLs by writing manifest entries instead of AST walkers. Grounding survey at [`docs/notes/20260515-macro-expansion-library-survey.md`](notes/20260515-macro-expansion-library-survey.md) (eleven library subsystems covering Rails AS::Concern + ActiveStorage attached, AASM, Devise, GraphQL-Ruby, factory_bot, Sinatra, Sequel, Redmine, dry-types, dry-schema, dry-struct).
+
+- **Tier A — block-as-method.** `Plugin::Macro::BlockAsMethod` + new `Rigor::Inference::MacroBlockSelfType` engine hook narrows the block body's `self_type` for `<Class>.<verb> do … end` shapes (Sinatra-canonical). Worked plugin: [`rigor-sinatra`](../examples/rigor-sinatra/).
+- **Tier B — trait-inlining via bundled module registry.** `Plugin::Macro::TraitRegistry` + scanner extension per-method-explodes the included modules' RBS instance methods onto the calling class. Slice-6a precision promotion redispatches via `RbsDispatch` on `Nominal[origin_module]` so the module's authored RBS return wins (Devise's `valid_password?` returns `bool`, not `Dynamic[T]`). Worked plugin: [`rigor-devise`](../examples/rigor-devise/) (registry mirrors `lib/devise/modules.rb`).
+- **Tier C — heredoc-template expansion.** `Plugin::Macro::HeredocTemplate` + new `Rigor::Inference::SyntheticMethod` / `SyntheticMethodIndex` / `SyntheticMethodScanner` substrate + new `try_synthetic_method` dispatcher tier (sits BELOW RBS dispatch per WD13 so user-authored RBS overrides synthesis). Pre-pass scans every project source file twice (hierarchy collection + class-body match) before per-file inference starts. Slice-6b precision promotion resolves the manifest's `returns:` String via `environment.nominal_for_name` for plain class names. Worked plugin: [`rigor-dry-struct`](../examples/rigor-dry-struct/).
+- **Tier D — external-Ruby-file inclusion.** `Plugin::Macro::ExternalFile` value class + manifest hook landed as **contract only**; engine integration (top-level `self_type` narrow + `bound_ivars` pre-binding) deferred to slice 5b per the slice-5a deferment. Plugin authors may declare entries today; the substrate does not yet act on them.
+- **Concern (`included do`) re-targeting** handled in the scanner — Tier B/C calls inside `included do … end` blocks replay against the including class (one-hop, constant-path `include M` only; `class_methods do` deferred).
+- **Cost-bounded best-effort posture per WD13.** v0.1.x ships the floor: synthetic method names emit; cross-file dispatch resolves; identifiers inside `class_eval`'d heredocs parse-check. Precision promotion follows the same discipline: Tier B promotes through `origin_module` provenance for the common case (module in RBS); Tier C promotes plain class names via `nominal_for_name`. Parameterised forms (`Array[String]`, `Hash[K, V]`) and plugin-supplied utility-type names (`Pick<T, K>`) stay at `Dynamic[T]` until ADR-13's full `Plugin::TypeNodeResolver` chain is wired into the synthetic-method tier (deferred to demand).
+
+ADR-16 status promoted to "accepted — floor + precision promotion landed (slices 1–7 + 6a/6b), slice 5b + ADR-13 resolver-chain wiring for utility-type returns deferred to demand."
 
 ### Real-world Rails / Ruby survey + production-rigor improvements
 
@@ -66,6 +79,7 @@ Three rounds of project sweeps (recorded in [`docs/notes/20260515-real-world-rai
 - **`rigor-activerecord` extensions** — associations / enums / scopes / validations / callbacks all recorded on `ModelIndex::Entry`; `Model.where(enum_col: :unknown)` surfaces `unknown-enum-value`; `belongs_to` / `has_one` contribute `Nominal[Target] | nil` via `flow_contribution_for`.
 - **`Method#curry` precision** through `Type::BoundMethod` (Open Engineering Item #5, Option A).
 - **`rigor-activestorage` (Tier 3E)** — `has_one_attached :avatar` / `has_many_attached :photos` macro recognition + return-type narrowing via `flow_contribution_for`. Twentieth worked plugin under `examples/`.
+- **Three new ADR-16 substrate consumer plugins.** `rigor-sinatra` (Tier A — block-as-method), `rigor-dry-struct` (Tier C — heredoc template), `rigor-devise` (Tier B — trait-inlining registry). Each is purely declarative (one manifest entry, no walker) — they validate the substrate end-to-end. Example count: 21 → 24.
 
 ### Pool / sequential equivalence cross-project summary
 
@@ -110,6 +124,8 @@ Items that have surfaced across v0.1.x work and that the next implementer benefi
 - **Lightweight HKT (higher-kinded types) in DSL signatures.** Replace `untyped` boundaries with type-level `eval` per the `docs/type-specification/rigor-extensions.md` conditional / indexed-access rows. First reference site is the rigor-lisp-eval demo. Exploratory, no committed milestone.
 - **`rigor:v1:conforms-to` directive.** Originally queued for v0.1.1's "Out of scope"; still open. Lets a method param accept any value satisfying a named structural interface.
 - **LRU eviction for `Cache::Store`.** Per [ADR-6](adr/6-cache-persistence-backend.md), the persistent cache is sharded "no eviction" by design. Long-lived clones with config / dependency churn accumulate stale slots that only `make cache-clean` releases. LRU is queued, not committed.
+- **Project-side monkey-patch pre-evaluation.** A config-driven mechanism in `.rigor.yml` to declare explicit refinements / monkey-patches that the analyzer pre-evaluates before analysing the rest of the project (the way Ruby itself does at boot). Surfaced during the Redmine real-world test as the missing half of the "close the Rails `call.undefined-method` long tail" workstream alongside O1's RBS bundle (landed). Needs an ADR before implementation — open contracts: when does pre-evaluation run, can it crash analysis, scope rules, interaction with ADR-16 Tier D file inclusion. No committed milestone.
+- **ADR-13 resolver-chain wiring for the synthetic-method tier (ADR-16 follow-up).** ADR-13's `Plugin::TypeNodeResolver` chain is wired for `%a{rigor:v1:…}` payloads but NOT for substrate manifest `returns:` strings. Routing the synthetic-method tier through the chain unlocks utility-type-shaped Tier C returns (`Array[String]`, `Hash[K, V]`, `Pick<T, K>`). Deferred to demand from utility-type-shaped substrate consumers.
 
 ### Plugins / ecosystem
 - **`rigor-graphql`** — last remaining Tier 3 plugin. GraphQL schema DSL parsing is non-trivial; author when there is concrete user demand.
@@ -139,11 +155,15 @@ The full roadmap is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/
 - **Tier 2**: [`rigor-activerecord`](../examples/rigor-activerecord/) (publishes `:model_index`; associations / enums / scopes / validations / callbacks all landed in v0.1.5); [`rigor-actionpack`](../examples/rigor-actionpack/) (4 phases: routes / filters / renders / strong-params); [`rigor-factorybot`](../examples/rigor-factorybot/) (Phase 1 (a) + (c)).
 - **Tier 3**: [`rigor-pundit`](../examples/rigor-pundit/), [`rigor-sidekiq`](../examples/rigor-sidekiq/), [`rigor-rspec`](../examples/rigor-rspec/), [`rigor-actioncable`](../examples/rigor-actioncable/), [`rigor-activestorage`](../examples/rigor-activestorage/) (landed v0.1.5).
 - **Opt-in non-plugin bundles**: [`rigor-activesupport-core-ext`](../examples/rigor-activesupport-core-ext/) (v0.1.5; opt-in RBS bundle for top ~50 AS core_ext selectors). [`rigor-typescript-utility-types`](../examples/rigor-typescript-utility-types/) (ADR-13 slice 6).
+- **ADR-16 substrate consumer plugins (v0.1.5)**: [`rigor-sinatra`](../examples/rigor-sinatra/) (Tier A — block-as-method), [`rigor-dry-struct`](../examples/rigor-dry-struct/) (Tier C — heredoc template), [`rigor-devise`](../examples/rigor-devise/) (Tier B — trait-inlining registry). Three purely declarative plugins exercising the macro expansion substrate end-to-end.
 
 **Pending Tier 3 (specialised, author when there is concrete user demand):**
 
 - `rigor-graphql`.
+- `rigor-dry-types` companion (Tier-C-as-`const_set` constant emit). Discussed in [ADR-16](adr/16-macro-expansion.md) survey as the natural follow-up to `rigor-dry-struct`. The current Tier C substrate emits methods, not constants — adding a constant-emit primitive is a separate slice. Gated on demand.
 
 Each plugin is staged in `examples/rigor-<id>/` per the [`rigor-plugin-author`](../.codex/skills/rigor-plugin-author/SKILL.md) SKILL discipline and extracted via `git subtree split` once its contract is stable. The eventual `rigor-rails` meta-gem will declare the Tier 1+2 plugins as gem dependencies so a single Gemfile line opts the user into the whole stack.
 
 [ADR-9](adr/9-cross-plugin-api.md) (cross-plugin API) landed in v0.1.4 via the `:helper_table` (rails-routes → actionpack) and `:model_index` (activerecord → actionpack + factorybot) publish-and-consume cycles. Slicing per ADR-9 § "Implementation slicing" allows partial landings.
+
+[ADR-16](adr/16-macro-expansion.md) (macro / DSL expansion substrate) landed in v0.1.5 (`master`, release pending). Three worked consumers exercise the substrate end-to-end — `rigor-sinatra` (Tier A), `rigor-dry-struct` (Tier C), `rigor-devise` (Tier B). The substrate ships at the WD13 floor + precision promotion for the common cases (Tier B origin-module RBS dispatch, Tier C plain class-name `nominal_for_name`); Tier D engine integration + ADR-13 resolver-chain wiring for utility-type returns stay demand-driven.

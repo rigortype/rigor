@@ -144,6 +144,16 @@ rg PATTERN --no-ignore references/python-typing
 - For any change that touches type-model behavior — normalization, narrowing, erasure, signature handling, diagnostic identifiers, budgets — treat `docs/type-specification/` as the binding specification and `docs/adr/1-types.md` as the design-rationale companion. Update the relevant topical document when behavior changes.
 - For any change that touches analyzer-internal contracts — `Scope`, fact store, effect model, capability-role inference, type-object public surface, factory-routed normalization, diagnostics-display routing — treat `docs/internal-spec/` as the binding specification and `docs/adr/3-type-representation.md` as the design-rationale companion. Update the relevant document when contracts change.
 
+## RBS Authorship
+
+RBS files under `sig/` MUST NOT be authored by AI inference / freehand suggestion. The standard tool for closing RBS coverage gaps in this project is the `rigor sig-gen` CLI introduced in [ADR-14](docs/adr/14-rbs-sig-generation.md). The prohibition is specifically on AI-generated RBS; hand-authored RBS by a human committer remains fine, and reading existing RBS (project `sig/` or `references/`) is always fine.
+
+**Why:** AI-suggested RBS bypasses the soundness guarantees `rigor sig-gen` enforces — the `def.return-type-mismatch` strict-acceptance check, the ADR-5 robustness asymmetry (strict on returns, lenient on parameters), and the `erase_to_rbs` round-trip discipline. Hand-edits for corrections (renames, typos, intentional widening per ADR-5 clause 2) are still acceptable when the user authorises them.
+
+**When sig-gen contradicts existing RBS** (`tighter-return` classification): the default policy is to **NOT overwrite, even with `--overwrite`.** The dogfood pass on Rigor's own `lib/` (2026-05-12) produced 7 tighter-return candidates and every one turned out to be an inference incompleteness (early-return `return nil unless …` paths missed, two-valued booleans literal-folded to one, `Array[T]` collapsed to `Tuple[T, ...]`) rather than a real precision win. The existing hand-maintained RBS captured branches the inference engine does not yet see, so the existing form is more accurate. Treat any tightening that **loses union members** compared to the declared RBS as a contradiction signal: do not apply, and surface the discrepancy as a follow-up candidate for the inference engine. New methods (no existing RBS) remain freely applicable after review; `equivalent` classifications are no-ops.
+
+This rule applies to the rigor repository specifically. Outside this repo, treat AI-generated RBS suggestions normally.
+
 ## Commit Messages
 
 - Use a plain imperative subject in sentence case (e.g. `Add GitHub Actions CI running make verify on Ruby 4.0`, `Bump up version to 0.0.1`).

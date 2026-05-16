@@ -40,7 +40,7 @@ module Rigor
       # skips real work.
       PRE_INITIALIZE_METHODS = %w[initialize shutdown exit].freeze
 
-      attr_reader :state, :exit_code, :buffer_table, :publisher
+      attr_reader :state, :exit_code, :buffer_table, :publisher, :hover_provider
 
       # @param buffer_table [Rigor::LanguageServer::BufferTable]
       #   per-session virtual file table. The default builds a
@@ -53,11 +53,16 @@ module Rigor
       #   table so a `textDocument/publishDiagnostics` notification
       #   is pushed to the client. Nil is the slice 1-3 behaviour:
       #   the table is maintained but no diagnostics fire.
-      def initialize(buffer_table: BufferTable.new, publisher: nil)
+      # @param hover_provider [Rigor::LanguageServer::HoverProvider, nil]
+      #   when present, `textDocument/hover` requests resolve
+      #   through it. Nil keeps hover unadvertised and returns
+      #   `MethodNotFound`.
+      def initialize(buffer_table: BufferTable.new, publisher: nil, hover_provider: nil)
         @state = :uninitialized
         @exit_code = nil
         @buffer_table = buffer_table
         @publisher = publisher
+        @hover_provider = hover_provider
       end
 
       # @return [Boolean] true once the client has called `exit` and
@@ -87,6 +92,7 @@ module Rigor
         when "textDocument/didOpen"   then handle_did_open(params)
         when "textDocument/didChange" then handle_did_change(params)
         when "textDocument/didClose"  then handle_did_close(params)
+        when "textDocument/hover"     then handle_hover(params)
         else
           method_not_found(method)
         end
@@ -145,12 +151,14 @@ module Rigor
       TEXT_DOCUMENT_SYNC_FULL = 1
 
       def advertised_capabilities
-        {
+        caps = {
           textDocumentSync: {
             openClose: true,
             change: TEXT_DOCUMENT_SYNC_FULL
           }
         }
+        caps[:hoverProvider] = true if @hover_provider
+        caps
       end
 
       # `initialized` is a notification — no response body. Slice 7
@@ -206,6 +214,25 @@ module Rigor
         )
         @publisher&.publish_for(uri)
         nil
+      end
+
+      # textDocument/hover REQUEST. Slice 5 returns either a
+      # `Hover` payload (markdown contents wrapping type +
+      # erased-RBS info) or nil when no expression is at the
+      # queried position. Nil maps to `result: null` per LSP
+      # spec; clients suppress the popup. Returns
+      # `MethodNotFound` when no hover_provider is wired (slice
+      # 1-4 behaviour).
+      def handle_hover(params)
+        return method_not_found("textDocument/hover") unless @hover_provider
+
+        doc = params.fetch(:textDocument)
+        pos = params.fetch(:position)
+        @hover_provider.provide(
+          uri: doc.fetch(:uri),
+          line: pos.fetch(:line),
+          character: pos.fetch(:character)
+        )
       end
 
       # textDocument/didClose. Drops the buffer table entry AND

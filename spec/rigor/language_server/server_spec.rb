@@ -192,4 +192,60 @@ RSpec.describe Rigor::LanguageServer::Server do
       expect(publisher.empty_calls).to eq([uri])
     end
   end
+
+  describe "hover provider integration (slice 5)" do
+    let(:uri) { "file:///abs/path/foo.rb" }
+
+    context "when no hover provider is wired" do
+      let(:server) { described_class.new }
+
+      before { server.dispatch("initialize", {}) }
+
+      it "advertises no hoverProvider capability" do
+        result = server.dispatch("initialize", {})
+        # `initialize` already ran in before; dispatching again is
+        # an invalid-request, so re-construct.
+        s = described_class.new
+        result = s.dispatch("initialize", {})
+        expect(result[:capabilities]).not_to include(:hoverProvider)
+      end
+
+      it "returns MethodNotFound for textDocument/hover" do
+        result = server.dispatch("textDocument/hover", {
+                                   textDocument: { uri: uri },
+                                   position: { line: 0, character: 0 }
+                                 })
+
+        expect(result.dig(:error, :code)).to eq(Rigor::LanguageServer::Server::ERROR_METHOD_NOT_FOUND)
+      end
+    end
+
+    context "when a hover provider is wired" do
+      let(:provider) do
+        Class.new do
+          def provide(uri:, line:, character:)
+            { contents: { kind: "markdown", value: "<<#{uri}:#{line}:#{character}>>" } }
+          end
+        end.new
+      end
+      let(:server) { described_class.new(hover_provider: provider) }
+
+      before { server.dispatch("initialize", {}) }
+
+      it "advertises hoverProvider in capabilities" do
+        s = described_class.new(hover_provider: provider)
+        result = s.dispatch("initialize", {})
+        expect(result[:capabilities][:hoverProvider]).to be(true)
+      end
+
+      it "routes textDocument/hover through the provider" do
+        result = server.dispatch("textDocument/hover", {
+                                   textDocument: { uri: uri },
+                                   position: { line: 3, character: 7 }
+                                 })
+
+        expect(result[:contents][:value]).to eq("<<#{uri}:3:7>>")
+      end
+    end
+  end
 end

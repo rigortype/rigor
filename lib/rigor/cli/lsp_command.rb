@@ -53,7 +53,12 @@ module Rigor
         publisher = LanguageServer::DiagnosticPublisher.new(
           writer: writer, configuration: configuration, buffer_table: buffer_table
         )
-        server = LanguageServer::Server.new(buffer_table: buffer_table, publisher: publisher)
+        hover_provider = LanguageServer::HoverProvider.new(
+          buffer_table: buffer_table, configuration: configuration
+        )
+        server = LanguageServer::Server.new(
+          buffer_table: buffer_table, publisher: publisher, hover_provider: hover_provider
+        )
         loop_runner = LanguageServer::Loop.new(
           reader: ::LanguageServer::Protocol::Transport::Io::Reader.new($stdin),
           writer: writer,

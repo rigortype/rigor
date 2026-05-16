@@ -349,12 +349,14 @@ module Rigor
       end
 
       # ADR-17 slice 2 — project-side patched-method tier.
-      # Returns `Dynamic[top]` (slice-2 floor) when the user's
-      # `pre_eval:` pass populated the registry with a matching
-      # `(class_name, method_name, kind)`. Return-type inference
-      # for patched methods stays deferred to a separate slice
-      # (most `core_ext` patches return shapes the heuristic in
-      # ADR-10's walker could extract via the same machinery).
+      # Slice 3a uses the registry's heuristic-extracted
+      # `return_type` (populated via the same
+      # `Analysis::DependencySourceInference::ReturnTypeHeuristic`
+      # the ADR-10 walker uses): a `def to_url; "hello"; end`
+      # patched onto `String` now resolves `s.to_url` to
+      # `Dynamic[Nominal[String]]` instead of the pre-3a
+      # `Dynamic[Top]`. Falls back to `Dynamic[Top]` when the
+      # heuristic declined (non-literal tail expression).
       def try_project_patched_method(receiver_type, method_name, environment)
         registry = environment&.project_patched_methods
         return nil if registry.nil? || registry.empty?
@@ -363,9 +365,11 @@ module Rigor
         return nil if class_name.nil?
 
         kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-        return nil unless registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
+        entry = registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
+        return nil if entry.nil?
+        return Type::Combinator.untyped if entry.return_type.nil?
 
-        Type::Combinator.untyped
+        Type::Combinator.dynamic(entry.return_type)
       end
 
       def try_dependency_source(receiver_type, method_name, environment)

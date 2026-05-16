@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "project_patched_methods"
+require_relative "../analysis/dependency_source_inference/return_type_heuristic"
 
 module Rigor
   module Inference
@@ -44,11 +45,43 @@ module Rigor
         entries = []
         diagnostics = []
         paths.each { |path| scan_file(path, entries, diagnostics) }
+        diagnostics.concat(duplicate_declaration_diagnostics(entries))
         Result.new(
           registry: ProjectPatchedMethods.new(entries: entries),
           diagnostics: diagnostics
         )
       end
+
+      # ADR-17 § "Failure modes" — when two pre-eval entries
+      # declare the same `(class_name, method_name, kind)` triple,
+      # emit one `:info` `pre-eval.duplicate-declaration`
+      # diagnostic per collision. The registry's first-write-wins
+      # behaviour is unchanged; the diagnostic just makes the
+      # shadowing visible so users notice when a later patch
+      # is silently masked.
+      def duplicate_declaration_diagnostics(entries)
+        seen = {}
+        entries.each_with_object([]) do |entry, acc|
+          key = [entry.class_name, entry.method_name, entry.kind]
+          if (first = seen[key])
+            acc << build_diagnostic(
+              path: entry.source_path,
+              line: entry.source_line,
+              column: 1,
+              severity: :info,
+              rule: "pre-eval.duplicate-declaration",
+              message: "pre-eval duplicate declaration: " \
+                       "#{entry.class_name}##{entry.method_name} " \
+                       "(#{entry.kind}) is already declared at " \
+                       "#{first.source_path}:#{first.source_line}. " \
+                       "The first declaration wins; this entry is shadowed."
+            )
+          else
+            seen[key] = entry
+          end
+        end
+      end
+      private_class_method :duplicate_declaration_diagnostics
 
       def scan_file(path, entries, diagnostics)
         parse_result = Prism.parse_file(path)
@@ -141,9 +174,11 @@ module Rigor
         class_name = qualified_prefix.join("::")
         kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
         line = node.location&.start_line || 1
+        return_type = Analysis::DependencySourceInference::ReturnTypeHeuristic.extract(node)
         entries << ProjectPatchedMethods::Entry.new(
           class_name: class_name, method_name: node.name, kind: kind,
-          source_path: source_path, source_line: line
+          source_path: source_path, source_line: line,
+          return_type: return_type
         )
       end
       private_class_method :record_def_node

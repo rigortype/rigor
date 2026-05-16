@@ -90,6 +90,54 @@ RSpec.describe Rigor::Inference::ProjectPatchedScanner do
       end
     end
 
+    it "extracts a heuristic return_type for literal-tail def bodies (slice 3a)" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "ext.rb")
+        File.write(path, <<~RUBY)
+          class String
+            def kind_label
+              "string"
+            end
+            def magic
+              42
+            end
+          end
+        RUBY
+        outcome = described_class.scan([path])
+        label = outcome.registry.lookup(class_name: "String", method_name: :kind_label, kind: :instance)
+        magic = outcome.registry.lookup(class_name: "String", method_name: :magic, kind: :instance)
+        expect(label.return_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+        expect(magic.return_type).to eq(Rigor::Type::Combinator.constant_of(42))
+      end
+    end
+
+    it "leaves return_type nil for non-literal tail expressions" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "ext.rb")
+        File.write(path, "class String; def derived; some_method; end; end\n")
+        outcome = described_class.scan([path])
+        entry = outcome.registry.lookup(class_name: "String", method_name: :derived, kind: :instance)
+        expect(entry.return_type).to be_nil
+      end
+    end
+
+    it "emits `pre-eval.duplicate-declaration` :info when two pre-eval files declare the same (class, method, kind)" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "class String; def to_url; 'a'; end; end\n")
+        File.write(b, "class String; def to_url; 'b'; end; end\n")
+        outcome = described_class.scan([a, b])
+        dup = outcome.diagnostics.select { |d| d[:rule] == "pre-eval.duplicate-declaration" }
+        expect(dup.size).to eq(1)
+        expect(dup.first[:severity]).to eq(:info)
+        expect(dup.first[:path]).to eq(b)
+        # First-write-wins is preserved by the registry.
+        entry = outcome.registry.lookup(class_name: "String", method_name: :to_url, kind: :instance)
+        expect(entry.source_path).to eq(a)
+      end
+    end
+
     it "preserves entries across multiple files (no inter-file interference)" do
       Dir.mktmpdir do |dir|
         a = File.join(dir, "a.rb")

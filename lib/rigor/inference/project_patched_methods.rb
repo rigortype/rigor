@@ -26,8 +26,17 @@ module Rigor
       # (`"String"`, `"Foo::Bar"`); `method_name` is the
       # declared name; `kind` is `:instance` or `:singleton`;
       # `source_path` / `source_line` carry attribution for
-      # diagnostics.
-      Entry = Data.define(:class_name, :method_name, :kind, :source_path, :source_line)
+      # diagnostics; `return_type` is the
+      # {Analysis::DependencySourceInference::ReturnTypeHeuristic}-
+      # extracted static facet (a `Rigor::Type::*`) or `nil`
+      # when the heuristic declined. The dispatcher wraps a
+      # non-nil `return_type` in `Dynamic[T]`; a `nil`
+      # `return_type` falls back to `Dynamic[top]`.
+      Entry = Data.define(:class_name, :method_name, :kind, :source_path, :source_line, :return_type) do
+        def initialize(class_name:, method_name:, kind:, source_path:, source_line:, return_type: nil)
+          super
+        end
+      end
 
       attr_reader :by_key
 

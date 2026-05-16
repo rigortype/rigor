@@ -418,6 +418,65 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
     end
 
+    describe "project-side patched-method tier (ADR-17 slice 3a)" do
+      def env_with_patched(entries)
+        registry = Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
+        Rigor::Environment.new(project_patched_methods: registry)
+      end
+
+      let(:entry_klass) { Rigor::Inference::ProjectPatchedMethods::Entry }
+
+      it "resolves a patched instance method to Dynamic[top] when no return_type heuristic ran" do
+        env = env_with_patched([
+                                 entry_klass.new(
+                                   class_name: "String", method_name: :to_url, kind: :instance,
+                                   source_path: "lib/ext.rb", source_line: 1
+                                 )
+                               ])
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("String"),
+          method_name: :to_url, arg_types: [], environment: env
+        )
+        expect(result).to eq(Rigor::Type::Combinator.untyped)
+      end
+
+      it "wraps the registry's heuristic return_type in Dynamic[T] (slice 3a uplift)" do
+        env = env_with_patched([
+                                 entry_klass.new(
+                                   class_name: "String", method_name: :kind_label, kind: :instance,
+                                   source_path: "lib/ext.rb", source_line: 1,
+                                   return_type: Rigor::Type::Combinator.nominal_of("String")
+                                 )
+                               ])
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("String"),
+          method_name: :kind_label, arg_types: [], environment: env
+        )
+        expect(result).to eq(
+          Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of("String"))
+        )
+      end
+
+      it "respects kind (:instance vs :singleton)" do
+        env = env_with_patched([
+                                 entry_klass.new(
+                                   class_name: "Foo", method_name: :ping, kind: :singleton,
+                                   source_path: "ext.rb", source_line: 1
+                                 )
+                               ])
+        instance_result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Foo"),
+          method_name: :ping, arg_types: [], environment: env
+        )
+        singleton_result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.singleton_of("Foo"),
+          method_name: :ping, arg_types: [], environment: env
+        )
+        expect(instance_result).to be_nil
+        expect(singleton_result).to eq(Rigor::Type::Combinator.untyped)
+      end
+    end
+
     describe "boundary-cross recording on RBS dispatch (ADR-10 slice 5c)" do
       let(:reporter) { Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new }
 

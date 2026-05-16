@@ -18,18 +18,27 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
   end
 
   describe "default body (unspecialised nodes)" do
-    it "mirrors the LSP v1 slice-5 output for a literal integer" do
-      root, index = parse_and_index("42\n")
-      int_node = root.statements.body.first
-      scope = index[int_node]
+    it "renders the slice-A1 type / erased / node body for an unspecialised node" do
+      # `BreakNode` has no specialisation in slices A1-A4; it
+      # exercises the default rendering path. The `break` keyword
+      # has no inferable type so the renderer surfaces `untyped`.
+      root = Prism.parse("loop { break 1 }").value
+      break_node = nil
+      walk = lambda do |n|
+        break_node = n if n.is_a?(Prism::BreakNode)
+        n.compact_child_nodes.each(&walk) if n.respond_to?(:compact_child_nodes) && break_node.nil?
+      end
+      walk.call(root)
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: base_scope)
 
-      result = renderer.render(node: int_node, type: scope.type_of(int_node), node_scope_lookup: index)
+      result = renderer.render(node: break_node, type: index[break_node].type_of(break_node),
+                               node_scope_lookup: index)
       body = result[:contents][:value]
 
       expect(result[:contents][:kind]).to eq("markdown")
       expect(body).to include("type:")
       expect(body).to include("erased:")
-      expect(body).to include("node:   Prism::IntegerNode")
+      expect(body).to include("node:   Prism::BreakNode")
     end
   end
 
@@ -137,6 +146,65 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
       else
         expect(body).to include("node:")
       end
+    end
+  end
+
+  describe "Literal polish (slice A4)" do
+    it "renders an integer literal with Type + Erased (no debug node row)" do
+      root, index = parse_and_index("42\n")
+      int_node = root.statements.body.first
+      scope = index[int_node]
+
+      result = renderer.render(node: int_node, type: scope.type_of(int_node), node_scope_lookup: index)
+      body = result[:contents][:value]
+
+      expect(body).to include("# Type\n42")
+      expect(body).to include("# Erased")
+      expect(body).not_to include("node:") # the slice-A1 default row is gone
+    end
+
+    it "renders a string literal" do
+      root, index = parse_and_index("\"hi\"\n")
+      str_node = root.statements.body.first
+      scope = index[str_node]
+
+      result = renderer.render(node: str_node, type: scope.type_of(str_node), node_scope_lookup: index)
+      body = result[:contents][:value]
+
+      expect(body).to include("# Type")
+      expect(body).to include("# Erased")
+      # The string literal infers to `Constant<"hi">`; its
+      # erase_to_rbs is the inspected literal, not `::String`.
+      expect(body).to include("\"hi\"")
+    end
+
+    it "renders a tuple-shape literal showing element types" do
+      root, index = parse_and_index("[1, 2, 3]\n")
+      arr_node = root.statements.body.first
+      scope = index[arr_node]
+
+      result = renderer.render(node: arr_node, type: scope.type_of(arr_node), node_scope_lookup: index)
+      body = result[:contents][:value]
+
+      # Tuple<1, 2, 3> or similar carrier description; the exact
+      # shape comes from Type::Tuple#describe.
+      expect(body).to include("# Type")
+      expect(body).to include("# Erased")
+    end
+
+    it "surfaces the refinement name for refined carriers" do
+      # We construct a refined type directly because triggering
+      # narrowing through source requires more setup than the test
+      # needs; the renderer's surface contract is "if the type
+      # responds to canonical_name with a non-nil value, surface it."
+      refined = Rigor::Type::Combinator.non_empty_string
+      stub_node = Prism.parse("nil\n").value.statements.body.first
+      stub_index = { stub_node => Rigor::Scope.empty }
+
+      result = renderer.render(node: stub_node, type: refined, node_scope_lookup: stub_index)
+      body = result[:contents][:value]
+
+      expect(body).to include("# Refinement\nnon-empty-string")
     end
   end
 

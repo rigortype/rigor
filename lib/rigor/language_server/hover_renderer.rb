@@ -4,6 +4,8 @@ require_relative "../reflection"
 require_relative "../type/nominal"
 require_relative "../type/singleton"
 require_relative "../type/constant"
+require_relative "../type/refined"
+require_relative "../type/difference"
 
 module Rigor
   module LanguageServer
@@ -47,6 +49,11 @@ module Rigor
         when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode,
              Prism::InstanceVariableTargetNode
           render_ivar(node, type, node_scope_lookup)
+        when Prism::IntegerNode, Prism::FloatNode, Prism::RationalNode,
+             Prism::ImaginaryNode, Prism::StringNode, Prism::SymbolNode,
+             Prism::RegularExpressionNode, Prism::TrueNode, Prism::FalseNode,
+             Prism::NilNode, Prism::ArrayNode, Prism::HashNode
+          render_literal(node, type)
         else
           render_default(node, type)
         end
@@ -221,6 +228,41 @@ module Rigor
         when Type::Nominal then self_type.class_name
         when Type::Singleton then self_type.class_name
         end
+      end
+
+      # Specialises literal-bearing nodes (Integer / Float / String /
+      # Symbol / Regex / true / false / nil / Array / Hash). Drops
+      # the slice-A1 `node:` debug row in favour of a cleaner
+      # `# Type` + `# Erased` framing, and surfaces the refinement
+      # / difference name when one is present. For Array / Hash
+      # the shape carriers (`Tuple<...>` / `HashShape<...>`) already
+      # describe element types, so the framing is identical to
+      # primitive literals.
+      def render_literal(_node, type)
+        body = +"```ruby\n"
+        body << "# Type\n#{type.describe}\n"
+        body << "\n# Erased\n#{type.erase_to_rbs}\n"
+        if (name = refinement_name_for(type))
+          body << "\n# Refinement\n#{name}\n"
+        end
+        body << "```"
+        body
+      end
+
+      # Surfaces the canonical kebab-case refinement name when the
+      # type is a `Refined` or `Difference` carrier with a
+      # registered canonical_name (e.g. `non-empty-string` /
+      # `positive-int`). `canonical_name` is private on both
+      # carriers; the LSP layer is a trusted internal consumer
+      # and `send` is the documented escape hatch for surfacing
+      # display-level metadata. Returns nil for unrefined carriers
+      # and for refinements that don't have a canonical name (those
+      # are presented through the predicate-id operator form by
+      # `describe`).
+      def refinement_name_for(type)
+        return nil unless type.is_a?(Type::Refined) || type.is_a?(Type::Difference)
+
+        type.send(:canonical_name)
       end
 
       def render_default(node, type)

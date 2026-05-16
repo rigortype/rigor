@@ -33,17 +33,21 @@ RSpec.describe Rigor::LanguageServer::HoverProvider do
 
       expect(hover).not_to be_nil
       expect(hover[:contents][:kind]).to eq("markdown")
-      expect(hover[:contents][:value]).to include("type:")
+      # Slice A4 replaces the slice-A1 `type: / erased: / node:`
+      # body with `# Type / # Erased` framing for literal nodes.
+      expect(hover[:contents][:value]).to include("# Type")
       expect(hover[:contents][:value]).to include("42")
     end
 
     it "uses 0-based LSP line/character (no off-by-one against rigor's 1-based input)" do
       # `42` sits at LSP (0, 0). rigor's NodeLocator expects (1, 1).
-      # HoverProvider must translate at the boundary.
+      # HoverProvider must translate at the boundary; the literal
+      # at that position should resolve and produce a non-nil hover.
       buffer_table.open(uri: uri, bytes: "42\n", version: 1)
       hover = provider.provide(uri: uri, line: 0, character: 0)
 
-      expect(hover[:contents][:value]).to include("IntegerNode")
+      expect(hover).not_to be_nil
+      expect(hover[:contents][:value]).to include("42")
     end
 
     it "returns nil when the LSP position is out of range" do

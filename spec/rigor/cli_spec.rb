@@ -1037,4 +1037,59 @@ RSpec.describe Rigor::CLI do
       end
     end
   end
+
+  describe "check --tmp-file / --instead-of (editor mode)" do
+    let(:tmpdir) { Dir.mktmpdir("rigor-cli-editor-mode-") }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    it "rejects --tmp-file alone" do
+      status, _out, err = run_cli("check", "--tmp-file=/nonexistent", "lib")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("--tmp-file and --instead-of must appear together")
+    end
+
+    it "rejects --instead-of alone" do
+      status, _out, err = run_cli("check", "--instead-of=lib/foo.rb", "lib")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("--tmp-file and --instead-of must appear together")
+    end
+
+    it "rejects a --tmp-file path that doesn't exist" do
+      status, _out, err = run_cli(
+        "check", "--tmp-file=#{File.join(tmpdir, 'ghost.rb')}",
+        "--instead-of=lib/foo.rb", "lib"
+      )
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("no such file or not readable")
+    end
+
+    it "analyzes the buffer's bytes under the logical path, emits diagnostics under the logical path" do
+      Dir.chdir(tmpdir) do
+        FileUtils.mkdir_p("lib")
+        # On disk: clean.
+        File.write(File.join("lib", "foo.rb"), "x = 1\n")
+        # Buffer: parse error.
+        physical = File.join(tmpdir, "buffer.rb")
+        File.write(physical, "def broken\n")
+
+        status, out, _err = run_cli(
+          "check", "--format=json",
+          "--tmp-file=#{physical}",
+          "--instead-of=lib/foo.rb",
+          "--no-stats",
+          "lib"
+        )
+
+        expect(status).to eq(1)
+        diagnostics = JSON.parse(out).fetch("diagnostics")
+        paths = diagnostics.map { |d| d.fetch("path") }
+        expect(paths).to include("lib/foo.rb")
+        expect(paths).not_to include(physical)
+      end
+    end
+  end
 end

@@ -69,9 +69,12 @@ module Rigor
 
     def run_check
       require_relative "analysis/runner"
+      require_relative "analysis/buffer_binding"
       require_relative "cache/store"
 
       options = parse_check_options
+      buffer = resolve_buffer_binding(options)
+      return EXIT_USAGE if buffer == :usage_error
 
       configuration = Configuration.load(options.fetch(:config))
       cache_root = configuration.cache_path
@@ -84,7 +87,8 @@ module Rigor
         explain: options.fetch(:explain),
         cache_store: cache_store,
         collect_stats: options.fetch(:stats),
-        workers: resolve_workers(options, configuration)
+        workers: resolve_workers(options, configuration),
+        buffer: buffer
       )
       result = runner.run(paths)
 
@@ -92,6 +96,37 @@ module Rigor
       write_run_stats(result.stats) if result.stats
       write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
       result.success? ? 0 : 1
+    end
+
+    # Editor-mode CLI envelope. The `--tmp-file=PATH` /
+    # `--instead-of=PATH` pair binds an in-flight buffer file to
+    # the logical project path it represents (see
+    # `docs/design/20260516-editor-mode.md`). Both flags must
+    # appear together; either alone is a usage error. The
+    # physical file must be readable; missing-file is a usage
+    # error too so editors get one consistent failure shape.
+    #
+    # Returns:
+    # - `nil` when neither flag was supplied (legacy path).
+    # - `Rigor::Analysis::BufferBinding` when the pair is valid.
+    # - `:usage_error` after writing one diagnostic to stderr;
+    #   the caller MUST translate this to `EXIT_USAGE`.
+    def resolve_buffer_binding(options)
+      tmp = options[:tmp_file]
+      instead = options[:instead_of]
+      return nil if tmp.nil? && instead.nil?
+
+      if tmp.nil? || instead.nil?
+        @err.puts("--tmp-file and --instead-of must appear together")
+        return :usage_error
+      end
+
+      unless File.file?(tmp)
+        @err.puts("--tmp-file #{tmp.inspect}: no such file or not readable")
+        return :usage_error
+      end
+
+      Analysis::BufferBinding.new(logical_path: instead, physical_path: tmp)
     end
 
     # ADR-15 Phase 4c — resolves the worker count by
@@ -133,7 +168,12 @@ module Rigor
         # `RIGOR_RACTOR_WORKERS` then `.rigor.yml`
         # `parallel.workers:` then 0 (sequential). See
         # `resolve_workers` for the precedence chain.
-        workers: nil
+        workers: nil,
+        # Editor mode (`docs/design/20260516-editor-mode.md`).
+        # Both must appear together; the runner uses the pair
+        # to bind an in-flight buffer file to its logical path.
+        tmp_file: nil,
+        instead_of: nil
       }
       parser = OptionParser.new do |opts|
         opts.banner = "Usage: rigor check [options] [paths]"
@@ -150,6 +190,14 @@ module Rigor
         opts.on("--workers=N", Integer,
                 "Dispatch per-file analysis across N Ractor workers (default: 0; sequential)") do |value|
           options[:workers] = value
+        end
+        opts.on("--tmp-file=PATH",
+                "Editor mode: read source bytes from PATH instead of --instead-of (paired)") do |value|
+          options[:tmp_file] = value
+        end
+        opts.on("--instead-of=PATH",
+                "Editor mode: the logical project path the buffer represents (paired with --tmp-file)") do |value|
+          options[:instead_of] = value
         end
       end
       parser.parse!(@argv)

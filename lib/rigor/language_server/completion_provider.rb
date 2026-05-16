@@ -11,6 +11,12 @@ require_relative "../inference/scope_indexer"
 require_relative "../type/nominal"
 require_relative "../type/singleton"
 require_relative "../type/constant"
+require_relative "../type/union"
+require_relative "../type/intersection"
+require_relative "../type/refined"
+require_relative "../type/difference"
+require_relative "../type/tuple"
+require_relative "../type/hash_shape"
 
 module Rigor
   module LanguageServer
@@ -180,35 +186,78 @@ module Rigor
       end
 
       # Returns an Array<Hash> of LSP `CompletionItem`s for every
-      # public method declared on the receiver's nominal class
-      # (or singleton class, for `Type::Singleton` receivers).
-      # Returns nil when the receiver carrier isn't slice-5-supported
-      # (Union / Refined / Shape land in slice 7).
+      # public method callable on the receiver. Slice B3 extends
+      # the slice-B1 floor with:
+      # - `Type::Refined` / `Type::Difference` — enumerate the
+      #   underlying nominal (refinement narrows the value set,
+      #   not the method set).
+      # - `Type::Tuple` / `Type::HashShape` — enumerate the
+      #   nominal ancestor (`Array` / `Hash`); element-type-aware
+      #   completion is queued.
+      # - `Type::Union` — intersection of methods on each member
+      #   (only methods guaranteed to dispatch on every union case).
+      #   Conservative default per design doc § "Union receiver
+      #   completion".
+      # - `Type::Intersection` — union of methods on each member
+      #   (anything callable on at least one member).
       def method_completions(receiver_type, scope)
-        definition, kind = receiver_class_definition(receiver_type, scope)
-        return nil if definition.nil?
+        method_set, kind = enumerate_method_set(receiver_type, scope)
+        return nil if method_set.nil? || method_set.empty?
 
-        definition.methods.filter_map do |name, method|
+        method_set.filter_map do |name, method|
           next nil unless method.public?
 
           completion_item(name: name, method: method, kind: kind)
         end
       end
 
-      # Returns `[RBS::Definition, :instance | :singleton]` for the
-      # receiver. The "kind" carries through to the CompletionItem
-      # `detail` rendering so users see `String#upcase` vs
-      # `String.new`.
-      def receiver_class_definition(receiver_type, scope)
+      # Returns `[{Symbol => RBS::Definition::Method}, :instance | :singleton]`
+      # for the receiver. Composite carriers (Union / Intersection /
+      # Refined / shape carriers) reduce to instance-method
+      # enumeration; the receiver-class label that lands in each
+      # CompletionItem's `detail` still comes from each method's
+      # own `defs.first.implemented_in`, so the rendered prefix
+      # stays accurate per-method.
+      def enumerate_method_set(receiver_type, scope)
         case receiver_type
         when Type::Singleton
-          [Reflection.singleton_definition(receiver_type.class_name, scope: scope), :singleton]
+          [Reflection.singleton_definition(receiver_type.class_name, scope: scope)&.methods, :singleton]
+        when Type::Union
+          [intersect_member_methods(receiver_type.members, scope), :instance]
+        when Type::Intersection
+          [union_member_methods(receiver_type.members, scope), :instance]
+        when Type::Refined, Type::Difference
+          enumerate_method_set(receiver_type.base, scope)
+        when Type::Tuple
+          [Reflection.instance_definition("Array", scope: scope)&.methods, :instance]
+        when Type::HashShape
+          [Reflection.instance_definition("Hash", scope: scope)&.methods, :instance]
         else
           class_name = nominal_class_name(receiver_type)
           return [nil, nil] if class_name.nil?
 
-          [Reflection.instance_definition(class_name, scope: scope), :instance]
+          [Reflection.instance_definition(class_name, scope: scope)&.methods, :instance]
         end
+      end
+
+      # Union receiver — keep only methods present in EVERY
+      # member's set. Conservative semantically (every method
+      # returned is callable on every member) and prevents
+      # `obj.upcase` from appearing on a `String | Integer`
+      # union where only one side answers `upcase`.
+      def intersect_member_methods(members, scope)
+        member_sets = members.filter_map { |m| enumerate_method_set(m, scope).first }
+        return nil if member_sets.empty?
+
+        common_names = member_sets.map(&:keys).reduce(:&)
+        member_sets.first.select { |name, _| common_names.include?(name) }
+      end
+
+      # Intersection receiver — accumulate every method declared on
+      # ANY member. A value of type `A & B` is callable through both
+      # interfaces; the completion popup MAY show either's methods.
+      def union_member_methods(members, scope)
+        members.filter_map { |m| enumerate_method_set(m, scope).first }.reduce({}, :merge)
       end
 
       def nominal_class_name(type)

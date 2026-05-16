@@ -73,6 +73,28 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
       expect(provider.provide(uri: uri, line: 0, character: 2)).to be_nil
     end
 
+    describe "composite-receiver handling (slice B3)" do
+      it "enumerates Array's methods for a tuple-shape receiver" do
+        # `[1, 2, 3]` infers to a Tuple carrier; method completion
+        # should fall through to Array's instance methods.
+        buffer_table.open(uri: uri, bytes: "[1, 2, 3].length\n", version: 1)
+        items = provider.provide(uri: uri, line: 0, character: 11)
+
+        expect(items).not_to be_nil
+        labels = items.map { |i| i[:label] }
+        expect(labels).to include("length", "size", "first")
+      end
+
+      it "enumerates Hash's methods for a hash-shape receiver" do
+        buffer_table.open(uri: uri, bytes: "{a: 1, b: 2}.keys\n", version: 1)
+        items = provider.provide(uri: uri, line: 0, character: 14)
+
+        expect(items).not_to be_nil
+        labels = items.map { |i| i[:label] }
+        expect(labels).to include("keys", "values", "each_pair")
+      end
+    end
+
     describe "constant-path completion (slice B2)" do
       it "returns child constants for `Foo::Bar` when cursor is on `Bar`" do
         # `Process::Status` — Status is a known child of Process

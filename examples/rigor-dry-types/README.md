@@ -55,6 +55,19 @@ Nested modules work too — `module App; module Types; include
 Dry.Types(); end; end` publishes `"App::Types::String"` /
 `"App::Types::Integer"` / etc.
 
+Slice 2 (2026-05-16) extends the table with **nested
+category aliases** — every canonical-shortcut name above is
+also registered under `Coercible::` / `Strict::` / `Params::` /
+`JSON::` namespaces, mirroring dry-types's coercion-category
+layout. So `Types::Coercible::Integer` /
+`Types::Strict::Symbol` / `Types::Params::Bool` /
+`Types::JSON::Date` all resolve to their underlying Ruby
+classes. The four categories share an underlying class per
+name (the difference is coercion semantics, a runtime
+concern); a single `module Types; include Dry.Types(); end`
+declaration therefore publishes **75 entries** (15 canonical
++ 15 × 4 nested-category copies).
+
 ## Floor / ceiling
 
 The slice-1 deliverable is the **floor**:
@@ -67,10 +80,6 @@ The slice-1 deliverable is the **floor**:
 
 The **ceiling** (future slices):
 
-- **Nested categories** — `Types::Coercible::Integer`,
-  `Types::Strict::Symbol`, `Types::Params::Bool`,
-  `Types::JSON::Date`. Each is a separate dry-types coercion
-  family with its own underlying behaviour.
 - **User-authored compositions** — `Email = Types::String.constrained(format: …)`
   registers `Email` as an aliased subtype of `Types::String`.
 - **Diagnostics** — `dry-types.unknown-alias` for references
@@ -86,8 +95,6 @@ The **ceiling** (future slices):
 
 ## What the plugin does NOT do (yet)
 
-- Recognise `Coercible::` / `Strict::` / `Params::` / `JSON::`
-  nested namespaces (deferred to slice 2).
 - Recognise user-authored compositions or `.constrained(...)` /
   `.optional` / `.default(...)` chaining (deferred to slice 2+).
 - Emit `dry-types.*` diagnostics (deferred to demand).

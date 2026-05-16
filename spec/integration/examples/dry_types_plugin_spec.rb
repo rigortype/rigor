@@ -54,6 +54,15 @@ RSpec.describe "rigor-dry-types integration" do
     expect(aliases.fetch("Types::Nil")).to eq("NilClass")
   end
 
+  it "publishes the four nested-category aliases (Coercible / Strict / Params / JSON) per canonical name" do
+    aliases = run_and_read_fact(demo: demo_source)
+    %w[Coercible Strict Params JSON].each do |category|
+      expect(aliases.fetch("Types::#{category}::String")).to eq("String")
+      expect(aliases.fetch("Types::#{category}::Integer")).to eq("Integer")
+      expect(aliases.fetch("Types::#{category}::Bool")).to eq("TrueClass")
+    end
+  end
+
   it "publishes nested-namespace aliases too (module App; module Types; include Dry.Types(); end; end)" do
     nested = <<~RUBY
       module App

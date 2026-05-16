@@ -13,9 +13,7 @@ module Rigor
       module AliasScanner
         # The canonical-shortcut names dry-types exposes through
         # `include Dry.Types()`. Mirrors `Dry::Types.type_keys`
-        # from the upstream gem; nested categories
-        # (`Coercible::*` / `Strict::*` / `Params::*` / `JSON::*`)
-        # are a separate slice and stay deferred.
+        # from the upstream gem.
         CANONICAL_ALIASES = {
           "String" => "String",
           "Integer" => "Integer",
@@ -34,6 +32,23 @@ module Rigor
           "Any" => "Object"
         }.freeze
 
+        # Slice 2 — nested-category aliases. dry-types installs
+        # four parallel coercion categories: `Coercible::*`
+        # (everything-to-target coercion), `Strict::*` (no
+        # coercion; raise if mismatch), `Params::*` (HTTP /
+        # query-string-style coercion, used by Hanami / Roda /
+        # dry-web in request handling), `JSON::*` (JSON-shape
+        # coercion). Each category exposes the same set of names
+        # as the canonical shortcuts above, plus a few additions
+        # that are category-specific (`Params::Nil`,
+        # `JSON::Symbol`). For Rigor's purposes the underlying
+        # class is the same regardless of category — coercion
+        # semantics are a runtime concern. We register every
+        # `<module>::<Category>::<Name>` mapping the upstream gem
+        # publishes so call-site references work uniformly.
+        NESTED_CATEGORIES = %w[Coercible Strict Params JSON].freeze
+        private_constant :NESTED_CATEGORIES
+
         module_function
 
         # @param paths [Array<String>] absolute paths to `.rb`
@@ -48,6 +63,9 @@ module Rigor
           modules.each_with_object({}) do |module_name, acc|
             CANONICAL_ALIASES.each do |alias_name, underlying|
               acc["#{module_name}::#{alias_name}"] = underlying
+              NESTED_CATEGORIES.each do |category|
+                acc["#{module_name}::#{category}::#{alias_name}"] = underlying
+              end
             end
           end.freeze
         end

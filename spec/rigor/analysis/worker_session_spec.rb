@@ -257,6 +257,34 @@ RSpec.describe Rigor::Analysis::WorkerSession do
     end
   end
 
+  describe "editor mode (buffer: BufferBinding)" do
+    it "parses bytes from the buffer's physical path when analyzing the logical path" do
+      Dir.mktmpdir("rigor-worker-session-buffer-") do |tmpdir|
+        Dir.chdir(tmpdir) do
+          logical = File.join("lib", "foo.rb")
+          FileUtils.mkdir_p("lib")
+          File.write(logical, "x = 1\n")
+          physical = File.join(tmpdir, "buffer.rb")
+          File.write(physical, "def broken\n")
+
+          binding = Rigor::Analysis::BufferBinding.new(
+            logical_path: logical, physical_path: physical
+          )
+          session = described_class.new(
+            configuration: Rigor::Configuration.new("paths" => ["lib"]),
+            cache_store: nil, buffer: binding
+          )
+
+          diagnostics = session.analyze(logical)
+
+          # Parse-error from the BUFFER, attributed to the LOGICAL path.
+          expect(diagnostics).not_to be_empty
+          expect(diagnostics.map(&:path).uniq).to eq([logical])
+        end
+      end
+    end
+  end
+
   # Per-file diagnostic comparison key. Severity is intentionally
   # excluded from the key because the Runner re-stamps severity
   # via `apply_severity_profile` AFTER the per-file pass, whereas

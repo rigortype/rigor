@@ -2107,4 +2107,66 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(result.diagnostics.find { |d| d.rule == "dynamic.shape.lossy-projection" }).to be_nil
     end
   end
+
+  describe "editor mode (BufferBinding)" do
+    # Slice 2: when the runner is wired with `buffer:`, the
+    # logical path in `paths:` is parsed from the physical
+    # buffer's bytes but every diagnostic reports the LOGICAL
+    # path. The on-disk version of the logical file is silently
+    # replaced by the buffer for parse purposes.
+    it "parses bytes from the buffer's physical path but emits diagnostics under the logical path" do
+      Dir.mktmpdir("rigor-buffer-binding-") do |tmpdir|
+        Dir.chdir(tmpdir) do
+          logical = File.join("lib", "foo.rb")
+          FileUtils.mkdir_p("lib")
+          # On disk: a clean file with no diagnostics.
+          File.write(logical, "x = 1\n")
+          # Buffer: the same file with a parse error.
+          physical = File.join(tmpdir, "buffer.rb")
+          File.write(physical, "def broken\n")
+
+          configuration = Rigor::Configuration.new("paths" => ["lib"])
+          binding = Rigor::Analysis::BufferBinding.new(
+            logical_path: logical, physical_path: physical
+          )
+          result = described_class.new(
+            configuration: configuration, cache_store: nil, buffer: binding
+          ).run
+
+          # The parse error from the buffer surfaces under the
+          # LOGICAL path — that's what the editor highlights.
+          paths = result.diagnostics.map(&:path)
+          expect(paths).to include(logical)
+          expect(paths).not_to include(physical)
+        end
+      end
+    end
+
+    it "passes through non-logical paths unchanged so other files still parse from disk" do
+      Dir.mktmpdir("rigor-buffer-binding-pass-through-") do |tmpdir|
+        Dir.chdir(tmpdir) do
+          logical = File.join("lib", "foo.rb")
+          other = File.join("lib", "bar.rb")
+          FileUtils.mkdir_p("lib")
+          File.write(logical, "x = 1\n")
+          # `other` has a parse error on disk — should surface unchanged.
+          File.write(other, "def also_broken\n")
+          physical = File.join(tmpdir, "buffer.rb")
+          File.write(physical, "x = 1\n")
+
+          configuration = Rigor::Configuration.new("paths" => ["lib"])
+          binding = Rigor::Analysis::BufferBinding.new(
+            logical_path: logical, physical_path: physical
+          )
+          result = described_class.new(
+            configuration: configuration, cache_store: nil, buffer: binding
+          ).run
+
+          paths = result.diagnostics.map(&:path)
+          expect(paths).to include(other)
+          expect(paths).not_to include(physical)
+        end
+      end
+    end
+  end
 end

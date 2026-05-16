@@ -1024,8 +1024,21 @@ module Rigor
         )
       end
 
+      # Reads + parses the source at `path`. Under editor mode
+      # (`@buffer` set) reads bytes from `@buffer.physical_path`
+      # when `path` matches the logical binding, then parses with
+      # `filepath: path` so Prism's location data carries the
+      # LOGICAL path. Non-binding paths go through the cheaper
+      # `Prism.parse_file` codepath unchanged.
+      def parse_source(path)
+        physical = @buffer ? @buffer.resolve(path) : path
+        return Prism.parse_file(physical, version: @configuration.target_ruby) if physical == path
+
+        Prism.parse(File.read(physical), filepath: path, version: @configuration.target_ruby)
+      end
+
       def analyze_file(path, environment) # rubocop:disable Metrics/MethodLength
-        parse_result = Prism.parse_file(path, version: @configuration.target_ruby)
+        parse_result = parse_source(path)
         return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
 
         scope = Scope.empty(environment: environment, source_path: path)

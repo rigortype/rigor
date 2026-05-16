@@ -88,10 +88,11 @@ module Rigor
       #   directly-unrecognised node, mirroring
       #   {Rigor::Analysis::Runner#explain_diagnostics}.
       def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength
-                     plugin_blueprints: [], explain: false)
+                     plugin_blueprints: [], explain: false, buffer: nil)
         @configuration = configuration
         @cache_store = cache_store
         @explain = explain
+        @buffer = buffer
 
         # NOTE: `Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths`
         # is process-global state. Writing it from a non-main
@@ -137,7 +138,7 @@ module Rigor
       # profile re-stamping is intentionally NOT applied — that
       # is a per-run aggregate concern handled by the caller.
       def analyze(path)
-        parse_result = Prism.parse_file(path, version: @configuration.target_ruby)
+        parse_result = parse_source(path)
         return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
 
         scope = Scope.empty(environment: @environment, source_path: path)
@@ -173,6 +174,17 @@ module Rigor
       end
 
       private
+
+      # See {Runner#parse_source}. Same contract: if `@buffer`
+      # binds `path` to a physical file, read the physical bytes
+      # but stamp the parse buffer's `filepath:` as the LOGICAL
+      # path so downstream diagnostics carry the logical path.
+      def parse_source(path)
+        physical = @buffer ? @buffer.resolve(path) : path
+        return Prism.parse_file(physical, version: @configuration.target_ruby) if physical == path
+
+        Prism.parse(File.read(physical), filepath: path, version: @configuration.target_ruby)
+      end
 
       # Mirrors {Runner#build_trust_policy}. Workers under Phase
       # 4b will need the same trust derivation, and the

@@ -26,6 +26,31 @@ that shaped each cut are preserved in git history (see
 | v0.1.4 | 2026-05-14 | ADR-10 / ADR-11 / ADR-13 deferred queues, ADR-14 `rigor sig-gen` end-to-end, `Type::BoundMethod` carrier, eighteen worked plugin examples. (The v0.1.3 commitment envelope absorbed extra tracks before cut and shipped as v0.1.4.) See `CHANGELOG.md` § `[0.1.4]`. |
 | v0.1.5 | 2026-05-16 | ADR-15 Ractor migration end-to-end (Phases 1–4c + 4b.x), real-world Rails survey (14 projects, 31,840 files) driving production improvements (vendored gem RBS, ActiveSupport core_ext opt-in bundle, Bundler-aware sig discovery), ADR-16 macro / DSL expansion substrate (closes O2 at the WD13 floor), O4 Layer 3 slices 1+2+3 (`Gemfile.lock` parse + `rbs_collection.lock.yaml` awareness + missing-gem `:info` diagnostic), DEFAULT_LIBRARIES stdlib coverage expansion (1,273 → 1,427 RBS classes), `is_a?(C)` lexical-nesting constant resolution, twenty-four worked plugin examples. See `CHANGELOG.md` § `[0.1.5]`. |
 
+## v0.1.6 — accumulating on `master` (release pending)
+
+Theme: **three accepted-and-implemented ADRs unlock per-call-site precision uplift through cross-plugin facts, project-side monkey-patch recognition, and a foundation dry-rb plugin.** Commits `3c99eed` → `31f1ba6`.
+
+- **[ADR-12](adr/12-dry-rb-packaging.md) (accepted) + `rigor-dry-types` slices 1+2+3.** Per-gem + planned `rigor-dry-rb` meta umbrella (matching Rails plugin pattern). `rigor-dry-types` recognises `module Types; include Dry.Types(); end` and publishes the `:dry_type_aliases` ADR-9 cross-plugin fact (15 canonical + 60 nested-category + user-authored composition entries). Twenty-fifth worked plugin under `examples/`.
+- **[ADR-17](adr/17-monkey-patch-pre-evaluation.md) (accepted) + slices 1+2+3a+4.** `pre_eval:` config axis + `Inference::ProjectPatchedMethods` registry + new dispatcher tier between plugins and dependency-source inference. Slice 3a adds `Phase B`-style heuristic return-type extraction (reuses ADR-10's `ReturnTypeHeuristic`) + `pre-eval.duplicate-declaration` `:info`. Slice 4 adds glob support (`lib/core_ext/**/*.rb`). Slice 3b (per-file cache descriptor), slice 5 (full-project 2-pass), slice 6 (plugin-API hook) stay demand-driven.
+- **[ADR-18](adr/18-substrate-per-call-site-return-type.md) (proposed + slices 1+2+3+5).** Substrate amendment to ADR-16: `Plugin::Macro::HeredocTemplate::Emit#returns_from_arg` (declarative `position:` + `lookup_via: {plugin_id:, fact:}` cross-plugin fact channel). `SyntheticMethodScanner` extracts the call-site argument's qualified-constant source representation and looks it up in the named fact. Three-tier fallback (`returns_from_arg:` → static `returns:` → `Dynamic[Top]`). Runner reorders plugin `prepare(services)` to run BEFORE the synthetic-method scanner so facts are available. **End-to-end uplift**: `rigor-dry-struct` v0.2.0 manifest consumes `:dry_type_aliases` so `attribute :city, Types::String` synthesises `Address#city` returning `Nominal[String]` (was `Dynamic[Top]` at the slice-2c floor).
+- **ADR-10 walker — Phase B heuristic return-type extraction.** Literal-tail method bodies in opt-in gem source contribute `Dynamic[T]`-wrapped specific types (`Constant<value>`, `Nominal[String]`, …) instead of `Dynamic[Top]`. Heuristic shared with ADR-17 slice 3a's pre-pass.
+- **`is_a?(C)` lexical-nesting constant resolution.** `Inference::Narrowing#analyse_class_predicate` mirrors Ruby's `Module.nesting`-driven lookup so nested `Rigor::Type::Singleton` wins over top-level stdlib `Singleton`. Unblocks `singleton` in `DEFAULT_LIBRARIES`.
+- **DEFAULT_LIBRARIES expansion +31 stdlib libraries** (1,273 → 1,427 RBS classes out of the box).
+- **O4 Layer 3 slice 3 — graceful-degradation `:info` diagnostic** for gems in `Gemfile.lock` that lack any RBS source (`rbs collection install` suggestion).
+
+Every committed v0.1.6 track is purely additive (no behaviour change for existing CLI consumers); the substrate amendment (ADR-18) preserves the pre-v0.1.6 `returns:` semantics under the new three-tier fallback.
+
+### Out of scope for v0.1.6 (queued, demand-driven)
+
+- **ADR-17 slice 3b** (per-file cache descriptor), slices 5 / 6 (full-project 2-pass / plugin-API hook).
+- **ADR-18 slice 4** (TraitRegistry parity for `returns_from_arg:`) + chained-call argument extension (`Types::String.constrained(...)` chain-head resolution).
+- **ADR-12** continuations: `rigor-dry-validation`, `rigor-dry-monads` (needs ADR-3 amendment for `Result[T, E]` / `Maybe[T]` carrier). **rigor-dry-types slice 4** (transitive composition references).
+- **ADR-10 option C** (lazy / on-demand per-call gem-source inference).
+- **ADR-13 resolver-chain wiring** for synthetic-method tier `returns:` strings (utility-type returns).
+- **ADR-16 slice 5b** (Tier D engine integration).
+- **`rigor-graphql`** (concrete user demand pending).
+- **O4 Layer 3 per-gem-version cache** (slice 3 architecture; future Ruby::Box-style Bundler extension would raise priority).
+
 ## Future cycles (not committed to a specific release)
 
 Items that have surfaced across v0.1.x work and that the next implementer benefits from seeing without re-reading the full thread.
@@ -35,12 +60,12 @@ Items that have surfaced across v0.1.x work and that the next implementer benefi
 - **Lightweight HKT (higher-kinded types) in DSL signatures.** Replace `untyped` boundaries with type-level `eval` per the `docs/type-specification/rigor-extensions.md` conditional / indexed-access rows. First reference site is the rigor-lisp-eval demo. Exploratory, no committed milestone.
 - **`rigor:v1:conforms-to` directive.** Originally queued for v0.1.1's "Out of scope"; still open. Lets a method param accept any value satisfying a named structural interface.
 - **LRU eviction for `Cache::Store`.** Per [ADR-6](adr/6-cache-persistence-backend.md), the persistent cache is sharded "no eviction" by design. Long-lived clones with config / dependency churn accumulate stale slots that only `make cache-clean` releases. LRU is queued, not committed.
-- **Project-side monkey-patch pre-evaluation.** [ADR-17](adr/17-monkey-patch-pre-evaluation.md) accepted (2026-05-16). `pre_eval:` config axis (explicit file list MVP — pattern-based / full-project 2-pass / plugin-API hook stay demand-driven), populates `Inference::ProjectPatchedMethods` registry consulted at a new dispatcher tier between plugins and dependency-source inference. Implementation queued (no committed milestone); slice 1 (configuration plumbing) is the natural first commit.
-- **ADR-13 resolver-chain wiring for the synthetic-method tier (ADR-16 follow-up).** ADR-13's `Plugin::TypeNodeResolver` chain is wired for `%a{rigor:v1:…}` payloads but NOT for substrate manifest `returns:` strings. Routing the synthetic-method tier through the chain unlocks utility-type-shaped Tier C returns (`Array[String]`, `Hash[K, V]`, `Pick<T, K>`). Deferred to demand from utility-type-shaped substrate consumers.
+- **Project-side monkey-patch pre-evaluation.** [ADR-17](adr/17-monkey-patch-pre-evaluation.md) accepted (2026-05-16). Slices 1+2+3a+4 LANDED in v0.1.6 (`pre_eval:` plumbing + registry + dispatcher tier + heuristic return-type + duplicate-declaration `:info` + glob support). Remaining demand-driven follow-ups: slice 3b (per-file cache descriptor), slice 5 (full-project 2-pass discovery), slice 6 (plugin-API hook).
+- **ADR-13 resolver-chain wiring for the synthetic-method tier (ADR-16 follow-up).** ADR-13's `Plugin::TypeNodeResolver` chain is wired for `%a{rigor:v1:…}` payloads but NOT for substrate manifest `returns:` strings. Routing the synthetic-method tier through the chain unlocks utility-type-shaped Tier C returns (`Array[String]`, `Hash[K, V]`, `Pick<T, K>`). Deferred to demand from utility-type-shaped substrate consumers. (Note: per-call-site return-type lookup via cross-plugin facts shipped in v0.1.6 via [ADR-18](adr/18-substrate-per-call-site-return-type.md); the ADR-13 wiring above is the orthogonal "parameterised-form parser" extension.)
 
 ### Plugins / ecosystem
 - **`rigor-graphql`** — last remaining Tier 3 plugin. GraphQL schema DSL parsing is non-trivial; author when there is concrete user demand.
-- **dry-rb adapter plugins** — [ADR-12](adr/12-dry-rb-packaging.md) accepted (2026-05-16): per-gem plugins + planned `rigor-dry-rb` meta umbrella, matching the Rails plugin family pattern. `rigor-dry-struct` (LANDED v0.1.5) is the first concrete; next slice is `rigor-dry-types` as the Tier A foundation. Survey under [`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md).
+- **dry-rb adapter plugins** — [ADR-12](adr/12-dry-rb-packaging.md) accepted (2026-05-16): per-gem plugins + planned `rigor-dry-rb` meta umbrella, matching the Rails plugin family pattern. **Landed**: `rigor-dry-struct` (v0.1.5; v0.2.0 in v0.1.6 with ADR-18 precision uplift) + `rigor-dry-types` (v0.1.6, slices 1+2+3: canonical + nested categories + user-authored compositions). **Next concrete**: `rigor-dry-validation` (Tier A; needs slicing decision: Contract vs schema vs params DSL surfaces) + `rigor-dry-monads` (Tier B; needs ADR-3 amendment for `Result[T, E]` / `Maybe[T]` carrier). **Smaller follow-ups**: `rigor-dry-types` slice 4 (transitive composition references via two-pass walk). Survey under [`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md).
 - **ADR-10 — per-call return-type precision from gem source.** Walker currently catalogs only `(class_name, method_name) → kind` triples. Inferring per-method return types from gem source (so `mode: :full` could contribute richer than `Dynamic[Top]`) is a larger walker enhancement deferred until concrete user demand surfaces.
 - **`rigor-sorbet` follow-ups beyond per-call-site sigil gating** — landed in v0.1.4. No outstanding queue items.
 
@@ -60,21 +85,24 @@ Items that have surfaced across v0.1.x work and that the next implementer benefi
 
 The full roadmap is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/20260508-rails-plugins-roadmap.md). Summary of the running track:
 
-**Already landed (released through v0.1.4 / accumulating on `master` for v0.1.5):**
+**Already landed (released through v0.1.4 / v0.1.5; v0.1.6 accumulating on `master`):**
 
 - **Tier 1**: [`rigor-rails-routes`](../examples/rigor-rails-routes/) (publishes `:helper_table`), [`rigor-rails-i18n`](../examples/rigor-rails-i18n/), [`rigor-actionmailer`](../examples/rigor-actionmailer/), [`rigor-activejob`](../examples/rigor-activejob/).
 - **Tier 2**: [`rigor-activerecord`](../examples/rigor-activerecord/) (publishes `:model_index`; associations / enums / scopes / validations / callbacks all landed in v0.1.5); [`rigor-actionpack`](../examples/rigor-actionpack/) (4 phases: routes / filters / renders / strong-params); [`rigor-factorybot`](../examples/rigor-factorybot/) (Phase 1 (a) + (c)).
 - **Tier 3**: [`rigor-pundit`](../examples/rigor-pundit/), [`rigor-sidekiq`](../examples/rigor-sidekiq/), [`rigor-rspec`](../examples/rigor-rspec/), [`rigor-actioncable`](../examples/rigor-actioncable/), [`rigor-activestorage`](../examples/rigor-activestorage/) (landed v0.1.5).
 - **Opt-in non-plugin bundles**: [`rigor-activesupport-core-ext`](../examples/rigor-activesupport-core-ext/) (v0.1.5; opt-in RBS bundle for top ~50 AS core_ext selectors). [`rigor-typescript-utility-types`](../examples/rigor-typescript-utility-types/) (ADR-13 slice 6).
 - **ADR-16 substrate consumer plugins (v0.1.5)**: [`rigor-sinatra`](../examples/rigor-sinatra/) (Tier A — block-as-method), [`rigor-dry-struct`](../examples/rigor-dry-struct/) (Tier C — heredoc template), [`rigor-devise`](../examples/rigor-devise/) (Tier B — trait-inlining registry). Three purely declarative plugins exercising the macro expansion substrate end-to-end.
+- **dry-rb foundation (v0.1.6)**: [`rigor-dry-types`](../examples/rigor-dry-types/) — recognises `module Types; include Dry.Types(); end`, publishes the `:dry_type_aliases` cross-plugin fact (15 canonical + 60 nested-category + user-authored composition entries). `rigor-dry-struct` v0.2.0 consumes the fact through ADR-18's `returns_from_arg:` for per-call-site precision uplift. Twenty-fifth worked plugin.
 
 **Pending Tier 3 (specialised, author when there is concrete user demand):**
 
 - `rigor-graphql`.
-- `rigor-dry-types` companion (Tier-C-as-`const_set` constant emit). Discussed in [ADR-16](adr/16-macro-expansion.md) survey as the natural follow-up to `rigor-dry-struct`. The current Tier C substrate emits methods, not constants — adding a constant-emit primitive is a separate slice. Gated on demand.
+- `rigor-dry-validation` / `rigor-dry-monads` — ADR-12 next slices. Validation needs Contract vs Schema vs Params slicing decision; monads needs ADR-3 amendment for `Result[T, E]` / `Maybe[T]` carrier.
 
 Each plugin is staged in `examples/rigor-<id>/` per the [`rigor-plugin-author`](../.codex/skills/rigor-plugin-author/SKILL.md) SKILL discipline and extracted via `git subtree split` once its contract is stable. The eventual `rigor-rails` meta-gem will declare the Tier 1+2 plugins as gem dependencies so a single Gemfile line opts the user into the whole stack.
 
 [ADR-9](adr/9-cross-plugin-api.md) (cross-plugin API) landed in v0.1.4 via the `:helper_table` (rails-routes → actionpack) and `:model_index` (activerecord → actionpack + factorybot) publish-and-consume cycles. Slicing per ADR-9 § "Implementation slicing" allows partial landings.
 
-[ADR-16](adr/16-macro-expansion.md) (macro / DSL expansion substrate) landed in v0.1.5 (`master`, release pending). Three worked consumers exercise the substrate end-to-end — `rigor-sinatra` (Tier A), `rigor-dry-struct` (Tier C), `rigor-devise` (Tier B). The substrate ships at the WD13 floor + precision promotion for the common cases (Tier B origin-module RBS dispatch, Tier C plain class-name `nominal_for_name`); Tier D engine integration + ADR-13 resolver-chain wiring for utility-type returns stay demand-driven.
+[ADR-16](adr/16-macro-expansion.md) (macro / DSL expansion substrate) released in v0.1.5. Three worked consumers exercise the substrate end-to-end — `rigor-sinatra` (Tier A), `rigor-dry-struct` (Tier C), `rigor-devise` (Tier B). The substrate ships at the WD13 floor + precision promotion for the common cases (Tier B origin-module RBS dispatch, Tier C plain class-name `nominal_for_name`); Tier D engine integration + ADR-13 resolver-chain wiring for utility-type returns stay demand-driven.
+
+[ADR-18](adr/18-substrate-per-call-site-return-type.md) (substrate per-call-site return-type DSL) accumulating on `master` for v0.1.6. Adds `Plugin::Macro::HeredocTemplate::Emit#returns_from_arg` (+ `lookup_via:` cross-plugin fact channel); `rigor-dry-struct` v0.2.0 is the first worked consumer (resolves `attribute :city, Types::String` to `Nominal[String]` via `:dry_type_aliases` published by `rigor-dry-types`). Slice 4 (TraitRegistry parity) + chained-call argument extraction stay demand-driven.

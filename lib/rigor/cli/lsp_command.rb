@@ -36,44 +36,50 @@ module Rigor
         require "language_server-protocol"
 
         # STDIN is read frame-by-frame via the gem's `Io::Reader`;
-        # STDOUT is written via `Io::Writer` which auto-merges
-        # `jsonrpc: "2.0"` into every response. The Loop runs until
-        # either STDIN hits EOF (client closed the pipe) or the
-        # server reaches `:exited`. The process then exits with the
-        # server's recorded exit code (0 after a clean
-        # `shutdown`+`exit`, 1 otherwise — per the LSP `exit`
-        # contract).
-        # `SynchronizedWriter` serialises STDOUT writes across the
-        # main dispatch thread + the Debouncer's async threads.
-        # Both share one Io::Writer (with one buffered stream); the
-        # Mutex prevents interleaved frames on the wire.
-        raw_writer = ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout)
-        writer = LanguageServer::SynchronizedWriter.new(raw_writer)
-        configuration = Configuration.load(options.fetch(:config))
+        # STDOUT is wrapped in `SynchronizedWriter` so concurrent
+        # writes from the main dispatch thread + the Debouncer's
+        # async threads don't interleave frames. The Loop runs
+        # until either STDIN hits EOF or `server.exited?`; the
+        # process then exits with the server's recorded code
+        # (0 after a clean shutdown+exit, 1 otherwise).
+        writer = LanguageServer::SynchronizedWriter.new(
+          ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout)
+        )
+        server, loop_runner = build_server(writer: writer, config_path: options.fetch(:config))
+        loop_runner.run
+        server.exit_code || 0
+      end
+
+      private
+
+      # Builds the full collaborator graph from a fresh
+      # `Configuration` + `ProjectContext`. Returns `[server,
+      # loop]` so the caller drives the loop and reads
+      # `server.exit_code` for the process exit status.
+      def build_server(writer:, config_path:)
+        configuration = Configuration.load(config_path)
         # ProjectContext caches Environment + Cache::Store across
         # requests so hover / publish hit the warm path. Invalidated
         # by `workspace/didChangeWatchedFiles` and
         # `workspace/didChangeConfiguration`.
         project_context = LanguageServer::ProjectContext.new(configuration: configuration)
-        # The same BufferTable is threaded to Server + all three
-        # providers — single source of truth for buffer state.
+        # Single source of truth for buffer state — threaded to
+        # Server + all three providers.
         buffer_table = LanguageServer::BufferTable.new
         debouncer = LanguageServer::Debouncer.new
         publisher = LanguageServer::DiagnosticPublisher.new(
           writer: writer, buffer_table: buffer_table, project_context: project_context,
           debouncer: debouncer, debounce_seconds: 0.2
         )
-        hover_provider = LanguageServer::HoverProvider.new(
-          buffer_table: buffer_table, project_context: project_context
-        )
-        document_symbol_provider = LanguageServer::DocumentSymbolProvider.new(
-          buffer_table: buffer_table, project_context: project_context
-        )
         server = LanguageServer::Server.new(
           buffer_table: buffer_table,
           publisher: publisher,
-          hover_provider: hover_provider,
-          document_symbol_provider: document_symbol_provider,
+          hover_provider: LanguageServer::HoverProvider.new(
+            buffer_table: buffer_table, project_context: project_context
+          ),
+          document_symbol_provider: LanguageServer::DocumentSymbolProvider.new(
+            buffer_table: buffer_table, project_context: project_context
+          ),
           project_context: project_context
         )
         loop_runner = LanguageServer::Loop.new(
@@ -81,11 +87,8 @@ module Rigor
           writer: writer,
           server: server
         )
-        loop_runner.run
-        server.exit_code || 0
+        [server, loop_runner]
       end
-
-      private
 
       def parse_options
         options = { transport: "stdio", log: nil, config: nil }

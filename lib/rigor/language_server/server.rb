@@ -32,6 +32,10 @@ module Rigor
       ERROR_SERVER_NOT_INITIALIZED = -32_002
       ERROR_INVALID_REQUEST_AFTER_SHUTDOWN = -32_600
 
+      # `TextDocumentSyncKind::Full = 1`. Slice 10 (deferred)
+      # promotes to `Incremental = 2`.
+      TEXT_DOCUMENT_SYNC_FULL = 1
+
       # Methods callable BEFORE `initialize`. Per LSP spec § 3 only
       # `initialize` and `exit` are allowed pre-initialization; every
       # other request returns `ServerNotInitialized`. We also accept
@@ -78,7 +82,7 @@ module Rigor
       #   - the response result Hash for request methods,
       #   - nil for notification methods,
       #   - { error: { code:, message: } } for state / shape errors.
-      def dispatch(method, params = nil)
+      def dispatch(method, params = nil) # rubocop:disable Metrics/CyclomaticComplexity
         return state_violation_response(method) unless method_allowed_in_state?(method)
 
         case method
@@ -145,10 +149,6 @@ module Rigor
           }
         }
       end
-
-      # `TextDocumentSyncKind::Full = 1`. Slice 10 (deferred)
-      # promotes to `Incremental = 2`.
-      TEXT_DOCUMENT_SYNC_FULL = 1
 
       def advertised_capabilities
         caps = {

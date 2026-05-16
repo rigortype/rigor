@@ -20,7 +20,7 @@ module Rigor
     # safer than `Thread#kill` for in-flight Ruby code and good
     # enough for the "drop stale debounce" use case.
     class Debouncer
-      Task = Struct.new(:thread, :cancelled) # rubocop:disable Lint/StructNewOverride
+      Task = Struct.new(:thread, :cancelled)
 
       def initialize
         @tasks = {}

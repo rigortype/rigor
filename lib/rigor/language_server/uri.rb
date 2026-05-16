@@ -28,7 +28,7 @@ module Rigor
         # we re-interpret as UTF-8.
         encoded = uri.byteslice(FILE_SCHEME.bytesize, uri.bytesize)
         encoded.b.gsub(/%([0-9A-Fa-f]{2})/) { ::Regexp.last_match(1).hex.chr }
-               .force_encoding(Encoding::UTF_8)
+                 .force_encoding(Encoding::UTF_8)
       end
 
       def from_path(path)

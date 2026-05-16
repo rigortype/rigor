@@ -71,10 +71,10 @@ RSpec.describe Rigor::LanguageServer::DocumentSymbolProvider do
 
       symbols = provider.provide(uri)
       expect(symbols.size).to eq(1)
-      expect(symbols.first[:kind]).to eq(2)   # Module
+      expect(symbols.first[:kind]).to eq(2) # Module
       expect(symbols.first[:name]).to eq("Outer")
       inner = symbols.first[:children].first
-      expect(inner[:kind]).to eq(5)            # Class
+      expect(inner[:kind]).to eq(5) # Class
       expect(inner[:name]).to eq("Inner")
       expect(inner[:children].first[:name]).to eq("m")
     end

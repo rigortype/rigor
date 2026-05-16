@@ -1087,11 +1087,14 @@ RSpec.describe Rigor::CLI do
       expect(out).to include("Language Server")
     end
 
-    it "returns 0 when invoked with the default --transport=stdio" do
-      status, _out, err = run_cli("lsp")
+    it "returns 0 when stdin closes cleanly with no LSP messages" do
+      # `rigor lsp` blocks reading LSP frames from $stdin via the
+      # gem's Io::Reader. Under RSpec stdin is non-TTY and hits EOF
+      # immediately, so the loop exits with exit_code=0 (no
+      # shutdown → server.exit_code stays nil → CLI returns 0).
+      status, _out, _err = run_cli("lsp")
 
       expect(status).to eq(0)
-      expect(err).to include("stdio JSON-RPC transport queued for slice 2")
     end
 
     it "returns EXIT_USAGE for an unsupported transport" do

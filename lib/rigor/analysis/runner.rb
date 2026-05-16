@@ -1031,21 +1031,24 @@ module Rigor
         Array(paths).each do |path|
           if File.directory?(path)
             files.concat(reject_excluded(Dir.glob(File.join(path, RUBY_GLOB))))
-          elsif File.file?(path) && path.end_with?(".rb")
+          # Editor-mode bypass: the buffer's logical path is treated
+          # as a real `.rb` file regardless of on-disk presence —
+          # `parse_source` reads bytes from the buffer's physical
+          # path. Common case: LSP client editing a brand-new file.
+          elsif accept_as_ruby_file?(path)
             files << path
           elsif File.exist?(path)
             errors << path_error(path, "not a Ruby file (expected `.rb` or a directory)")
-          elsif @buffer && path == @buffer.logical_path
-            # Editor mode: the buffer's logical path is the "file"
-            # regardless of on-disk presence. `parse_source` will
-            # read bytes from the buffer's physical path. Common
-            # case: an LSP client editing a brand-new file.
-            files << path
           else
             errors << path_error(path, "no such file or directory")
           end
         end
         { files: files, errors: errors }
+      end
+
+      def accept_as_ruby_file?(path)
+        (File.file?(path) && path.end_with?(".rb")) ||
+          (@buffer && path == @buffer.logical_path)
       end
 
       # `Configuration#exclude_patterns` is a list of glob patterns

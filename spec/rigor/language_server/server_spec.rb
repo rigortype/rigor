@@ -202,7 +202,7 @@ RSpec.describe Rigor::LanguageServer::Server do
       before { server.dispatch("initialize", {}) }
 
       it "advertises no hoverProvider capability" do
-        result = server.dispatch("initialize", {})
+        server.dispatch("initialize", {})
         # `initialize` already ran in before; dispatching again is
         # an invalid-request, so re-construct.
         s = described_class.new

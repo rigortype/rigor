@@ -40,7 +40,7 @@ module Rigor
         return nil if entry.nil?
 
         parse_result = Prism.parse(entry.bytes, filepath: path,
-                                   version: @project_context.configuration.target_ruby)
+                                                version: @project_context.configuration.target_ruby)
         # Tolerate partial parse errors: walk what Prism gave us
         # anyway. Editors prefer a stale outline over no outline.
         walk_top_level(parse_result.value)
@@ -54,21 +54,17 @@ module Rigor
         symbols
       end
 
-      def each_decl(node, in_namespace:, &block) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength,Metrics/CyclomaticComplexity
+      def each_decl(node, in_namespace:, &block)
         return unless node.is_a?(Prism::Node)
 
         case node
         when Prism::ClassNode
           children = []
-          if node.body
-            each_decl(node.body, in_namespace: true) { |child| children << child }
-          end
+          each_decl(node.body, in_namespace: true) { |child| children << child } if node.body
           block.call(class_symbol(node, children))
         when Prism::ModuleNode
           children = []
-          if node.body
-            each_decl(node.body, in_namespace: true) { |child| children << child }
-          end
+          each_decl(node.body, in_namespace: true) { |child| children << child } if node.body
           block.call(module_symbol(node, children))
         when Prism::DefNode
           block.call(def_symbol(node, in_namespace: in_namespace))
@@ -138,7 +134,7 @@ module Rigor
       def range_from(location)
         {
           start: { line: location.start_line - 1, character: location.start_column },
-          end:   { line: location.end_line - 1,   character: location.end_column }
+          end: { line: location.end_line - 1, character: location.end_column }
         }
       end
     end

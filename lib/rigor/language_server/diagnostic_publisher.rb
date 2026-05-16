@@ -139,7 +139,7 @@ module Rigor
         {
           range: {
             start: { line: line, character: character },
-            end:   { line: line, character: character }
+            end: { line: line, character: character }
           },
           severity: SEVERITY_MAP.fetch(diagnostic.severity, 3),
           code: diagnostic.rule,

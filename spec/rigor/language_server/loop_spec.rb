@@ -18,8 +18,8 @@ RSpec.describe Rigor::LanguageServer::Loop do
 
     server = Rigor::LanguageServer::Server.new
     described_class.new(
-      reader: ::LanguageServer::Protocol::Transport::Io::Reader.new(server_in_r),
-      writer: ::LanguageServer::Protocol::Transport::Io::Writer.new(server_out_w),
+      reader: LanguageServer::Protocol::Transport::Io::Reader.new(server_in_r),
+      writer: LanguageServer::Protocol::Transport::Io::Writer.new(server_out_w),
       server: server
     ).run
     server_out_w.close
@@ -77,7 +77,7 @@ RSpec.describe Rigor::LanguageServer::Loop do
     end
 
     it "exits cleanly with exit_code = 0 after the round-trip" do
-      server, _ = result
+      server, = result
 
       expect(server).to be_exited
       expect(server.exit_code).to eq(0)

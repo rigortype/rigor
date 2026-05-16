@@ -94,7 +94,7 @@ module Rigor
         Rigor::Analysis::BufferBinding.new(logical_path: instead, physical_path: tmp)
       end
 
-      def execute(target:, options:, buffer: nil) # rubocop:disable Metrics/MethodLength
+      def execute(target:, options:, buffer: nil)
         file, line, column = target
         # Under editor mode the logical `file` may not exist on disk
         # (user editing a new file); the runtime check is only that

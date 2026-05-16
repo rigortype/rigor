@@ -79,10 +79,22 @@ module Rigor
       configuration = Configuration.load(options.fetch(:config))
       cache_root = configuration.cache_path
       handle_clear_cache(cache_root) if options.fetch(:clear_cache)
-      cache_store = options.fetch(:no_cache) ? nil : Cache::Store.new(root: cache_root)
 
-      paths = @argv.empty? ? configuration.paths : @argv
-      runner = Analysis::Runner.new(
+      runner = build_check_runner(
+        configuration: configuration, options: options,
+        buffer: buffer, cache_root: cache_root
+      )
+      result = runner.run(@argv.empty? ? configuration.paths : @argv)
+
+      write_result(result, options.fetch(:format))
+      write_run_stats(result.stats) if result.stats
+      write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
+      result.success? ? 0 : 1
+    end
+
+    def build_check_runner(configuration:, options:, buffer:, cache_root:)
+      cache_store = options.fetch(:no_cache) ? nil : Cache::Store.new(root: cache_root)
+      Analysis::Runner.new(
         configuration: configuration,
         explain: options.fetch(:explain),
         cache_store: cache_store,
@@ -90,12 +102,6 @@ module Rigor
         workers: resolve_workers(options, configuration),
         buffer: buffer
       )
-      result = runner.run(paths)
-
-      write_result(result, options.fetch(:format))
-      write_run_stats(result.stats) if result.stats
-      write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
-      result.success? ? 0 : 1
     end
 
     # Editor-mode CLI envelope. The `--tmp-file=PATH` /
@@ -147,7 +153,7 @@ module Rigor
       configuration.parallel_workers
     end
 
-    def parse_check_options
+    def parse_check_options # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
       options = {
         # `nil` triggers `Configuration.discover` (`.rigor.yml` then
         # `.rigor.dist.yml`); an explicit `--config=PATH` overrides.

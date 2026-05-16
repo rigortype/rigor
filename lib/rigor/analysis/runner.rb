@@ -85,7 +85,7 @@ module Rigor
       # diagnostic plus any Prism parse errors. The Environment
       # is built once at run start through `Environment.for_project`
       # so all files share the same RBS load.
-      def run(paths = @configuration.paths) # rubocop:disable Metrics/AbcSize
+      def run(paths = @configuration.paths) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
 

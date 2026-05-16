@@ -56,8 +56,14 @@ module Rigor
         hover_provider = LanguageServer::HoverProvider.new(
           buffer_table: buffer_table, configuration: configuration
         )
+        document_symbol_provider = LanguageServer::DocumentSymbolProvider.new(
+          buffer_table: buffer_table, configuration: configuration
+        )
         server = LanguageServer::Server.new(
-          buffer_table: buffer_table, publisher: publisher, hover_provider: hover_provider
+          buffer_table: buffer_table,
+          publisher: publisher,
+          hover_provider: hover_provider,
+          document_symbol_provider: document_symbol_provider
         )
         loop_runner = LanguageServer::Loop.new(
           reader: ::LanguageServer::Protocol::Transport::Io::Reader.new($stdin),

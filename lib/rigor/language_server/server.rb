@@ -40,29 +40,26 @@ module Rigor
       # skips real work.
       PRE_INITIALIZE_METHODS = %w[initialize shutdown exit].freeze
 
-      attr_reader :state, :exit_code, :buffer_table, :publisher, :hover_provider
+      attr_reader :state, :exit_code, :buffer_table, :publisher,
+                  :hover_provider, :document_symbol_provider
 
       # @param buffer_table [Rigor::LanguageServer::BufferTable]
-      #   per-session virtual file table. The default builds a
-      #   fresh empty table; the CLI passes the same instance
-      #   threaded to the publisher so both read from one source
-      #   of truth.
+      #   per-session virtual file table.
       # @param publisher [Rigor::LanguageServer::DiagnosticPublisher, nil]
-      #   when present, the `didOpen` / `didChange` handlers call
-      #   `publisher.publish_for(uri)` after updating the buffer
-      #   table so a `textDocument/publishDiagnostics` notification
-      #   is pushed to the client. Nil is the slice 1-3 behaviour:
-      #   the table is maintained but no diagnostics fire.
+      #   when present, `didOpen` / `didChange` / `didClose`
+      #   trigger `publishDiagnostics`.
       # @param hover_provider [Rigor::LanguageServer::HoverProvider, nil]
-      #   when present, `textDocument/hover` requests resolve
-      #   through it. Nil keeps hover unadvertised and returns
-      #   `MethodNotFound`.
-      def initialize(buffer_table: BufferTable.new, publisher: nil, hover_provider: nil)
+      #   resolves `textDocument/hover`. Nil → `MethodNotFound`.
+      # @param document_symbol_provider [Rigor::LanguageServer::DocumentSymbolProvider, nil]
+      #   resolves `textDocument/documentSymbol`. Nil → `MethodNotFound`.
+      def initialize(buffer_table: BufferTable.new, publisher: nil,
+                     hover_provider: nil, document_symbol_provider: nil)
         @state = :uninitialized
         @exit_code = nil
         @buffer_table = buffer_table
         @publisher = publisher
         @hover_provider = hover_provider
+        @document_symbol_provider = document_symbol_provider
       end
 
       # @return [Boolean] true once the client has called `exit` and
@@ -92,7 +89,8 @@ module Rigor
         when "textDocument/didOpen"   then handle_did_open(params)
         when "textDocument/didChange" then handle_did_change(params)
         when "textDocument/didClose"  then handle_did_close(params)
-        when "textDocument/hover"     then handle_hover(params)
+        when "textDocument/hover"          then handle_hover(params)
+        when "textDocument/documentSymbol" then handle_document_symbol(params)
         else
           method_not_found(method)
         end
@@ -158,6 +156,7 @@ module Rigor
           }
         }
         caps[:hoverProvider] = true if @hover_provider
+        caps[:documentSymbolProvider] = true if @document_symbol_provider
         caps
       end
 
@@ -233,6 +232,16 @@ module Rigor
           line: pos.fetch(:line),
           character: pos.fetch(:character)
         )
+      end
+
+      # textDocument/documentSymbol REQUEST. Returns the
+      # `DocumentSymbol[]` outline for the buffer at the requested
+      # URI. Returns `MethodNotFound` when no provider is wired.
+      def handle_document_symbol(params)
+        return method_not_found("textDocument/documentSymbol") unless @document_symbol_provider
+
+        doc = params.fetch(:textDocument)
+        @document_symbol_provider.provide(doc.fetch(:uri))
       end
 
       # textDocument/didClose. Drops the buffer table entry AND

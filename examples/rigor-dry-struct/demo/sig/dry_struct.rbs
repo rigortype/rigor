@@ -24,3 +24,7 @@ module Types
   Bool: untyped
   Integer: untyped
 end
+
+module Dry
+  def self.Types: () -> Module
+end

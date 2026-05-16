@@ -1,8 +1,10 @@
 paths:
   - demo.rb
   - consumer.rb
+  - types.rb
 
 plugins:
+  - rigor-dry-types
   - rigor-dry-struct
 
 signature_paths:

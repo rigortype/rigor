@@ -15,7 +15,17 @@ v0.1.5 themes (frozen on tag, full detail in CHANGELOG):
 
 ## Where the Work Resumes
 
-The next cycle (`v0.1.6`) is open — no committed milestone yet. Natural entries:
+The next cycle (`v0.1.6`) is accumulating on `master` (release pending). Slices landed so far (commits `3c99eed` → `30bc221`):
+
+- **O4 Layer 3 slice 3** (graceful-degradation coverage diagnostic). ✓
+- **`is_a?(C)` lexical-nesting constant resolution**. ✓
+- **DEFAULT_LIBRARIES expansion** (+31 stdlib libraries; 1,273 → 1,427 RBS classes). ✓
+- **[ADR-10] walker heuristic return-type extraction** (Phase B floor). ✓
+- **[ADR-12] dry-rb packaging** accepted + `rigor-dry-types` slices 1+2+3 (Tier A foundation; canonical + nested categories + user-authored compositions; 25th worked plugin). ✓
+- **[ADR-17] monkey-patch pre-evaluation** accepted + slices 1+2+3a+4 (`pre_eval:` plumbing + `ProjectPatchedMethods` registry + dispatcher tier + heuristic return-type + duplicate-declaration `:info` + glob support). ✓
+- **[ADR-18] substrate per-call-site return-type DSL** proposed + slices 1+2+3+5 (`HeredocTemplate::Emit#returns_from_arg` + scanner extraction + fact-store lookup + `rigor-dry-struct` consumer manifest update — first worked end-to-end precision uplift through cross-plugin facts). ✓
+
+Natural entries for the remaining work:
 
 1. **O4 Layer 3 slice 3 (per-gem-version cache descriptor) — DEFERRED until measured pain.** The user-facing surface of slice 3 (graceful-degradation `:info` diagnostic for uncovered gems) has landed; the remaining piece is per-gem-version cache invalidation: tracking `(gem_name, gem_version)` in `Cache::Descriptor::RbsCollectionEntry` so a `bundle update` of one gem invalidates only that gem's slice, not the whole project's RBS env cache. Decision (2026-05-16): **defer**. Current behaviour is correct, just suboptimal on partial `bundle update`s; no real-world report of cache invalidation pain has surfaced. A future Ruby::Box-style Bundler extension allowing npm-style non-flat (multi-version) packages would raise the priority of this slice — when one project would legitimately depend on two versions of the same gem, the per-(name, version) cache key becomes load-bearing. Until that lands (or someone measures pain on the current Bundler), this stays queued.
 2. **Per-call return-type precision from gem source** (ADR-10 walker enhancement). Carried over from v0.1.3 / v0.1.4. Walker currently catalogs only `(class_name, method_name) → kind`; richer per-method return types would let `mode: :full` contribute precise types rather than `Dynamic[top]`.

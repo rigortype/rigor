@@ -374,6 +374,58 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
     end
+
+    describe "pre_eval: file-existence validation (ADR-17 slice 1)" do
+      it "surfaces `pre-eval.file-not-found` :error for each missing pre_eval entry" do
+        Dir.mktmpdir("rigor-pre-eval-missing-") do |tmpdir|
+          missing = File.join(tmpdir, "lib", "core_ext", "string_extensions.rb")
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new(
+              "paths" => [], "pre_eval" => [missing]
+            )
+            result = described_class.new(configuration: configuration, cache_store: nil).run
+            diags = result.diagnostics.select { |d| d.rule == "pre-eval.file-not-found" }
+
+            expect(diags.size).to eq(1)
+            expect(diags.first.severity).to eq(:error)
+            expect(diags.first.message).to include(missing)
+          end
+        end
+      end
+
+      it "stays silent when every pre_eval entry resolves to an existing file" do
+        Dir.mktmpdir("rigor-pre-eval-ok-") do |tmpdir|
+          present = File.join(tmpdir, "patches.rb")
+          File.write(present, "class String; def to_url; gsub(/\\W/, '-'); end; end\n")
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new(
+              "paths" => [], "pre_eval" => [present]
+            )
+            result = described_class.new(configuration: configuration, cache_store: nil).run
+            diags = result.diagnostics.select { |d| d.rule == "pre-eval.file-not-found" }
+
+            expect(diags).to be_empty
+          end
+        end
+      end
+
+      it "emits one diagnostic per missing entry (does NOT short-circuit)" do
+        Dir.mktmpdir("rigor-pre-eval-multi-") do |tmpdir|
+          Dir.chdir(tmpdir) do
+            missing_a = File.join(tmpdir, "a.rb")
+            missing_b = File.join(tmpdir, "b.rb")
+            configuration = Rigor::Configuration.new(
+              "paths" => [], "pre_eval" => [missing_a, missing_b]
+            )
+            result = described_class.new(configuration: configuration, cache_store: nil).run
+            diags = result.diagnostics.select { |d| d.rule == "pre-eval.file-not-found" }
+
+            expect(diags.size).to eq(2)
+            expect(diags.map(&:message).join).to include("a.rb").and include("b.rb")
+          end
+        end
+      end
+    end
   end
 
   describe "target_ruby wiring (`.rigor.yml` -> Prism version:)" do

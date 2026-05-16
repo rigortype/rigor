@@ -49,6 +49,16 @@ module Rigor
       "disable" => [],
       "libraries" => [],
       "signature_paths" => nil,
+      # ADR-17 — project-side monkey-patch pre-evaluation.
+      # Empty by default; users opt in by listing explicit files
+      # that the analyzer walks before per-file inference so
+      # patched-method declarations are visible across the
+      # project (e.g. `lib/core_ext/string_extensions.rb`). Slice 1
+      # plumbing only — listed files are validated at config-load
+      # time (`pre-eval.file-not-found` on a missing path), but
+      # the dispatcher tier consuming the registry lands in
+      # slice 2.
+      "pre_eval" => [],
       "fold_platform_specific_paths" => false,
       "cache" => {
         "path" => ".rigor/cache"
@@ -145,7 +155,7 @@ module Rigor
     # MUST be resolved relative to the config file's directory.
     # `exclude:` is intentionally NOT in this list — its entries
     # are glob patterns (`**/vendor/**`), not paths.
-    PATH_KEYS = %w[paths signature_paths].freeze
+    PATH_KEYS = %w[paths signature_paths pre_eval].freeze
     private_constant :PATH_KEYS
 
     attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :disabled_rules,
@@ -155,7 +165,8 @@ module Rigor
                 :severity_profile, :severity_overrides,
                 :dependencies, :parallel_workers,
                 :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile,
-                :rbs_collection_lockfile, :rbs_collection_auto_detect
+                :rbs_collection_lockfile, :rbs_collection_auto_detect,
+                :pre_eval
 
     # Loads a configuration file.
     #
@@ -307,6 +318,7 @@ module Rigor
       @libraries = Array(data.fetch("libraries", DEFAULTS.fetch("libraries"))).map(&:to_s).freeze
       sig_paths = data.fetch("signature_paths", DEFAULTS.fetch("signature_paths"))
       @signature_paths = sig_paths.nil? ? nil : Array(sig_paths).map(&:to_s).freeze
+      @pre_eval = Array(data.fetch("pre_eval", DEFAULTS.fetch("pre_eval"))).map(&:to_s).freeze
       @fold_platform_specific_paths = data.fetch(
         "fold_platform_specific_paths", DEFAULTS.fetch("fold_platform_specific_paths")
       ) == true
@@ -357,6 +369,7 @@ module Rigor
         "disable" => disabled_rules,
         "libraries" => libraries,
         "signature_paths" => signature_paths,
+        "pre_eval" => pre_eval,
         "fold_platform_specific_paths" => fold_platform_specific_paths,
         "cache" => {
           "path" => cache_path

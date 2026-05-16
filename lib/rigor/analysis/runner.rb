@@ -165,11 +165,33 @@ module Rigor
         prepare = pool_mode? ? [] : plugin_prepare_diagnostics
         plugin_load_diagnostics +
           prepare +
+          pre_eval_diagnostics +
           dependency_source_diagnostics +
           dependency_source_budget_diagnostics +
           dependency_source_config_conflict_diagnostics +
           rbs_coverage_diagnostics +
           expansion.fetch(:errors)
+      end
+
+      # ADR-17 slice 1 — surface a `:error` diagnostic for each
+      # `pre_eval:` entry whose resolved path doesn't exist on
+      # disk. Loud failure mode (`:error`, not `:warning`):
+      # a missing pre_eval path is a configuration mistake the
+      # user must fix before analysis is meaningful.
+      def pre_eval_diagnostics
+        @configuration.pre_eval.filter_map do |path|
+          next if File.file?(path)
+
+          Diagnostic.new(
+            path: ".rigor.yml", line: 1, column: 1,
+            message: "pre_eval entry not found: #{path.inspect}. " \
+                     "Pre-evaluation requires the file to exist on disk; remove the entry " \
+                     "or create the file before re-running analysis.",
+            severity: :error,
+            rule: "pre-eval.file-not-found",
+            source_family: :builtin
+          )
+        end
       end
 
       # `target_ruby` flows through to Prism's `version:` option.

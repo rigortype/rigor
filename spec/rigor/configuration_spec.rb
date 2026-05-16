@@ -354,6 +354,51 @@ RSpec.describe Rigor::Configuration do
     end
   end
 
+  describe "pre_eval glob expansion (ADR-17 slice 4)" do
+    it "expands a `**/*.rb` glob to the matching files" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "core_ext"))
+        File.write(File.join(dir, "lib", "core_ext", "string_ext.rb"), "class String; end\n")
+        File.write(File.join(dir, "lib", "core_ext", "hash_ext.rb"), "class Hash; end\n")
+        config_path = File.join(dir, ".rigor.yml")
+        File.write(config_path, "pre_eval:\n  - lib/core_ext/**/*.rb\n")
+        configuration = described_class.load(config_path)
+        expect(configuration.pre_eval.map { |p| File.basename(p) }).to contain_exactly(
+          "string_ext.rb", "hash_ext.rb"
+        )
+      end
+    end
+
+    it "preserves literal entries that contain no glob meta characters" do
+      Dir.mktmpdir do |dir|
+        literal = File.join(dir, "ext.rb")
+        File.write(literal, "# noop\n")
+        configuration = described_class.new("pre_eval" => [literal])
+        expect(configuration.pre_eval).to eq([literal])
+      end
+    end
+
+    it "degrades a match-less glob to an empty entry (no diagnostic, no error)" do
+      Dir.mktmpdir do |dir|
+        config_path = File.join(dir, ".rigor.yml")
+        File.write(config_path, "pre_eval:\n  - lib/none/**/*.rb\n")
+        configuration = described_class.load(config_path)
+        expect(configuration.pre_eval).to be_empty
+      end
+    end
+
+    it "de-duplicates when multiple globs match the same file" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "x.rb"), "# noop\n")
+        config_path = File.join(dir, ".rigor.yml")
+        File.write(config_path, "pre_eval:\n  - lib/*.rb\n  - lib/**/*.rb\n")
+        configuration = described_class.load(config_path)
+        expect(configuration.pre_eval.size).to eq(1)
+      end
+    end
+  end
+
   describe ".discover" do
     it "prefers `.rigor.yml` over `.rigor.dist.yml` when both are present" do
       Dir.mktmpdir do |dir|

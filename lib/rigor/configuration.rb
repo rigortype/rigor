@@ -318,7 +318,9 @@ module Rigor
       @libraries = Array(data.fetch("libraries", DEFAULTS.fetch("libraries"))).map(&:to_s).freeze
       sig_paths = data.fetch("signature_paths", DEFAULTS.fetch("signature_paths"))
       @signature_paths = sig_paths.nil? ? nil : Array(sig_paths).map(&:to_s).freeze
-      @pre_eval = Array(data.fetch("pre_eval", DEFAULTS.fetch("pre_eval"))).map(&:to_s).freeze
+      @pre_eval = expand_pre_eval_entries(
+        Array(data.fetch("pre_eval", DEFAULTS.fetch("pre_eval"))).map(&:to_s)
+      )
       @fold_platform_specific_paths = data.fetch(
         "fold_platform_specific_paths", DEFAULTS.fetch("fold_platform_specific_paths")
       ) == true
@@ -398,6 +400,27 @@ module Rigor
     end
 
     private
+
+    # ADR-17 slice 4 — `pre_eval:` glob expansion. Each entry is
+    # accepted as either a literal path (slice 1 contract) OR a
+    # `File.fnmatch?`-shaped glob pattern (`lib/core_ext/**/*.rb`).
+    # Glob meta characters (`*`, `?`, `[`) trigger `Dir.glob`
+    # expansion; the resulting file list is folded into the
+    # `pre_eval:` set with `uniq`. Literal entries that don't
+    # exist on disk continue to surface as `pre-eval.file-not-found`
+    # `:error` (slice 1 behaviour); glob entries that match
+    # nothing degrade silently to "no contribution from this
+    # entry" so a templated `**` pattern in a fresh project
+    # doesn't generate an error per match-less pattern.
+    def expand_pre_eval_entries(entries)
+      entries.flat_map do |entry|
+        glob_pattern?(entry) ? Dir.glob(entry, sort: true) : [entry]
+      end.uniq.freeze
+    end
+
+    def glob_pattern?(path)
+      path.include?("*") || path.include?("?") || path.include?("[")
+    end
 
     # Accepts either `"rigor-foo"` (gem-name shorthand) or
     # `{ "gem" => "rigor-foo", "id" => "foo", "config" => {...} }`

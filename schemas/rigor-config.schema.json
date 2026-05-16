@@ -49,7 +49,7 @@
       ]
     },
     "pre_eval": {
-      "description": "ADR-17 — project-side monkey-patch pre-evaluation. Files listed here are walked BEFORE per-file inference so patched-method declarations are visible across the project (e.g. `lib/core_ext/string_extensions.rb`). Each path is resolved relative to the config file's directory; missing paths surface as `pre-eval.file-not-found` (`:error`) at config-load time. Slice 1 plumbing only — the dispatcher tier consuming the registry lands in slice 2.",
+      "description": "ADR-17 — project-side monkey-patch pre-evaluation. Files listed here are walked BEFORE per-file inference so patched-method declarations are visible across the project (e.g. `lib/core_ext/string_extensions.rb`). Each entry resolves relative to the config file's directory; literal entries that don't exist surface as `pre-eval.file-not-found` (`:error`). Slice 4 (2026-05-16) accepts `File.fnmatch?`-shaped glob patterns (`lib/core_ext/**/*.rb`); a glob that matches nothing degrades silently to an empty entry (no diagnostic). Slices 1+2+3a have shipped registry + dispatcher tier + duplicate-declaration diagnostic; per-file cache descriptor (slice 3b) stays deferred until measured pain.",
       "type": "array",
       "items": { "type": "string" },
       "default": []

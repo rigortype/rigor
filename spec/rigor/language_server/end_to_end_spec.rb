@@ -25,11 +25,12 @@ require "timeout"
 # exercise the same code path real LSP clients see — framed
 # JSON-RPC over stdio, the gem's `Io::Reader/Writer`, the Loop's
 # dispatch, every collaborator wired in `CLI::LspCommand#run`.
-RSpec.describe "rigor lsp end-to-end session", type: :integration do
-  TIMEOUT_SECONDS = 30
+LSP_E2E_TIMEOUT_SECONDS = 30
 
+RSpec.describe "rigor lsp end-to-end session", type: :integration do
   let(:binary) { File.expand_path("../../../exe/rigor", __dir__) }
 
+  # rubocop:disable RSpec/ExampleLength
   it "round-trips a full initialize → didOpen → hover → completion → shutdown → exit session" do
     session_inputs = [
       request(1, "initialize", { capabilities: {} }),
@@ -81,6 +82,7 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
     shutdown_response = request_responses.find { |f| f[:id] == 4 }
     expect(shutdown_response[:result]).to be_nil
   end
+  # rubocop:enable RSpec/ExampleLength
 
   private
 
@@ -107,7 +109,7 @@ RSpec.describe "rigor lsp end-to-end session", type: :integration do
       stdin.write(framed)
       stdin.close
 
-      Timeout.timeout(TIMEOUT_SECONDS) do
+      Timeout.timeout(LSP_E2E_TIMEOUT_SECONDS) do
         stdout_bytes << stdout.read
         exit_status = wait_thread.value.exitstatus
       end

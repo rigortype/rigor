@@ -51,7 +51,7 @@ module Rigor
 
         bytes, locate_at = parse_attempt_bytes(entry.bytes, line, character)
         parse_result = Prism.parse(bytes, filepath: path,
-                                   version: @project_context.configuration.target_ruby)
+                                          version: @project_context.configuration.target_ruby)
         return nil unless parse_result.errors.empty?
 
         cursor_offset = byte_offset_for(bytes, locate_at[0], locate_at[1])
@@ -109,7 +109,7 @@ module Rigor
       end
 
       def offset_in?(location, offset)
-        location.start_offset <= offset && offset <= location.end_offset
+        offset.between?(location.start_offset, location.end_offset)
       end
 
       def build_signature(call_node, root, path, bytes, line, character)

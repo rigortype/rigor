@@ -56,7 +56,7 @@ module Rigor
       # `Configuration` + `ProjectContext`. Returns `[server,
       # loop]` so the caller drives the loop and reads
       # `server.exit_code` for the process exit status.
-      def build_server(writer:, config_path:)
+      def build_server(writer:, config_path:) # rubocop:disable Metrics/MethodLength
         configuration = Configuration.load(config_path)
         # ProjectContext caches Environment + Cache::Store across
         # requests so hover / publish hit the warm path. Invalidated

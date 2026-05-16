@@ -21,7 +21,7 @@ module Rigor
     # writer so the CLI subcommand can serve real LSP clients.
     # Slice 3+ adds document sync; slice 4+ adds publishDiagnostics;
     # slice 5-8 add the rest of the v1 capability surface.
-    class Server
+    class Server # rubocop:disable Metrics/ClassLength
       # JSON-RPC error codes per LSP spec § "Response Message".
       ERROR_PARSE_ERROR      = -32_700
       ERROR_INVALID_REQUEST  = -32_600

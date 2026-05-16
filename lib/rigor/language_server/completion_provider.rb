@@ -34,7 +34,7 @@ module Rigor
     # - 2 = Method
     #
     # Slice 6 will add 7 (Class), 9 (Module), 21 (Constant).
-    class CompletionProvider
+    class CompletionProvider # rubocop:disable Metrics/ClassLength
       KIND_METHOD   = 2
       KIND_FIELD    = 5
       KIND_CLASS    = 7

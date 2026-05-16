@@ -83,6 +83,9 @@ module Rigor
           completion_provider: LanguageServer::CompletionProvider.new(
             buffer_table: buffer_table, project_context: project_context
           ),
+          signature_help_provider: LanguageServer::SignatureHelpProvider.new(
+            buffer_table: buffer_table, project_context: project_context
+          ),
           project_context: project_context
         )
         loop_runner = LanguageServer::Loop.new(

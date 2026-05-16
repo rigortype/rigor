@@ -46,10 +46,12 @@ module Rigor
 
       attr_reader :state, :exit_code, :buffer_table, :publisher,
                   :hover_provider, :document_symbol_provider, :completion_provider,
-                  :project_context
+                  :signature_help_provider, :project_context
 
       # @param completion_provider [Rigor::LanguageServer::CompletionProvider, nil]
       #   resolves `textDocument/completion`. Nil → `MethodNotFound`.
+      # @param signature_help_provider [Rigor::LanguageServer::SignatureHelpProvider, nil]
+      #   resolves `textDocument/signatureHelp`. Nil → `MethodNotFound`.
       # @param project_context [Rigor::LanguageServer::ProjectContext, nil]
       #   the per-session cache of `Environment` + `Cache::Store`
       #   the providers read on every request. When present,
@@ -59,7 +61,8 @@ module Rigor
       #   behaviour (each request rebuilds env from scratch).
       def initialize(buffer_table: BufferTable.new, publisher: nil,
                      hover_provider: nil, document_symbol_provider: nil,
-                     completion_provider: nil, project_context: nil)
+                     completion_provider: nil, signature_help_provider: nil,
+                     project_context: nil)
         @state = :uninitialized
         @exit_code = nil
         @buffer_table = buffer_table
@@ -67,6 +70,7 @@ module Rigor
         @hover_provider = hover_provider
         @document_symbol_provider = document_symbol_provider
         @completion_provider = completion_provider
+        @signature_help_provider = signature_help_provider
         @project_context = project_context
       end
 
@@ -100,6 +104,7 @@ module Rigor
         when "textDocument/hover"               then handle_hover(params)
         when "textDocument/documentSymbol"      then handle_document_symbol(params)
         when "textDocument/completion"          then handle_completion(params)
+        when "textDocument/signatureHelp"       then handle_signature_help(params)
         when "workspace/didChangeWatchedFiles"  then handle_did_change_watched_files(params)
         when "workspace/didChangeConfiguration" then handle_did_change_configuration(params)
         else
@@ -174,6 +179,13 @@ module Rigor
             # Resolve becomes relevant if large enumerations
             # (Object descendants) become noticeable.
             resolveProvider: false
+          }
+        end
+        if @signature_help_provider
+          caps[:signatureHelpProvider] = {
+            # `(` opens the argument list; `,` advances to the
+            # next argument. Editors retrigger on both.
+            triggerCharacters: ["(", ","]
           }
         end
         caps
@@ -274,6 +286,23 @@ module Rigor
       def handle_did_change_configuration(_params)
         @project_context&.invalidate!
         nil
+      end
+
+      # textDocument/signatureHelp REQUEST. Routes to the
+      # signature-help provider when wired; `MethodNotFound`
+      # otherwise.
+      def handle_signature_help(params)
+        return method_not_found("textDocument/signatureHelp") unless @signature_help_provider
+
+        doc = params.fetch(:textDocument)
+        pos = params.fetch(:position)
+        context = params[:context]
+        @signature_help_provider.provide(
+          uri: doc.fetch(:uri),
+          line: pos.fetch(:line),
+          character: pos.fetch(:character),
+          context: context
+        )
       end
 
       # textDocument/completion REQUEST. Routes to the completion

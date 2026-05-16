@@ -139,4 +139,48 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
       end
     end
   end
+
+  describe "Local / Ivar specialisation (slice A3)" do
+    it "renders a local variable's name + type" do
+      root, index = parse_and_index("x = 42\nx\n")
+      read_node = root.statements.body.last
+      scope = index[read_node]
+
+      result = renderer.render(node: read_node, type: scope.type_of(read_node), node_scope_lookup: index)
+      body = result[:contents][:value]
+
+      expect(body).to include("# Local\nx")
+      expect(body).to include("# Type")
+      # `x` was assigned `42`; the inferred type for the read should
+      # be a Constant<42> or Nominal[Integer] form.
+      expect(body).to match(/# Type\n\d+|# Type\nInteger/)
+    end
+
+    it "renders an instance variable's name + type + enclosing class" do
+      source = <<~RUBY
+        class Foo
+          def m
+            @ivar = 42
+            @ivar
+          end
+        end
+      RUBY
+      root, index = parse_and_index(source)
+      # Find the second @ivar read node (the bare one on its own line).
+      ivar_read = nil
+      walk = lambda do |n|
+        ivar_read = n if n.is_a?(Prism::InstanceVariableReadNode)
+        n.compact_child_nodes.each(&walk) if n.respond_to?(:compact_child_nodes)
+      end
+      walk.call(root)
+      scope = index[ivar_read]
+
+      result = renderer.render(node: ivar_read, type: scope.type_of(ivar_read), node_scope_lookup: index)
+      body = result[:contents][:value]
+
+      expect(body).to include("# Ivar\n@ivar")
+      expect(body).to include("# Type")
+      expect(body).to include("# In class\nFoo")
+    end
+  end
 end

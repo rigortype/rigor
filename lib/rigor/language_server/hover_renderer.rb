@@ -41,6 +41,12 @@ module Rigor
           render_call(node, type, node_scope_lookup) || render_default(node, type)
         when Prism::ConstantReadNode, Prism::ConstantPathNode
           render_constant(node, type, node_scope_lookup) || render_default(node, type)
+        when Prism::LocalVariableReadNode, Prism::LocalVariableWriteNode,
+             Prism::LocalVariableTargetNode
+          render_local(node, type)
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode,
+             Prism::InstanceVariableTargetNode
+          render_ivar(node, type, node_scope_lookup)
         else
           render_default(node, type)
         end
@@ -176,6 +182,45 @@ module Rigor
         return nil if path.nil? || path.empty?
 
         path
+      end
+
+      # Specialises local-variable reads / writes / target nodes.
+      # Surfaces the variable name + narrowed type. "Bound at"
+      # source-line attribution is queued (Scope#locals tracks
+      # {name => Type} but not the binding location); when the
+      # ScopeIndexer grows a side-table for it, slice A3 follow-up
+      # can fill the row in.
+      def render_local(node, type)
+        body = +"```ruby\n"
+        body << "# Local\n#{node.name}\n\n"
+        body << "# Type\n#{type.describe}\n"
+        body << "```"
+        body
+      end
+
+      # Specialises instance-variable reads / writes / targets.
+      # Surfaces the ivar name + narrowed type + the enclosing
+      # class context derived from the scope's `self_type`. When
+      # the self_type isn't a Nominal (e.g., top-level main) the
+      # enclosing-class row is omitted.
+      def render_ivar(node, type, node_scope_lookup)
+        scope = node_scope_lookup[node]
+        body = +"```ruby\n"
+        body << "# Ivar\n#{node.name}\n\n"
+        body << "# Type\n#{type.describe}\n"
+        if scope && (enclosing = enclosing_class_for(scope))
+          body << "\n# In class\n#{enclosing}\n"
+        end
+        body << "```"
+        body
+      end
+
+      def enclosing_class_for(scope)
+        self_type = scope.self_type
+        case self_type
+        when Type::Nominal then self_type.class_name
+        when Type::Singleton then self_type.class_name
+        end
       end
 
       def render_default(node, type)

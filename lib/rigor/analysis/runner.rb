@@ -317,8 +317,19 @@ module Rigor
         Cache::Store.new(root: cache_store.root, read_only: true)
       end
 
+      # ADR-15 Phase 4b — pool mode is enabled when `@workers > 0`.
+      # Editor mode (`buffer:` non-nil) silently overrides pool
+      # mode to sequential: per design § "Ractor pool mode", the
+      # pool's warm-up cost dominates one-file wall time, so the
+      # pool gains nothing on a per-buffer invocation. The override
+      # is part of the contract — not a degradation diagnostic —
+      # because `--workers=N` is a project-scale knob and editor
+      # mode is per-buffer; the conflict resolves toward the more
+      # specific axis.
       def pool_mode?
-        @workers.is_a?(Integer) && @workers.positive?
+        return false unless @workers.is_a?(Integer) && @workers.positive?
+
+        @buffer.nil?
       end
 
       # Coordinator-side Environment used by the sequential code

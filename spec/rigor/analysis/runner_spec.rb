@@ -2108,6 +2108,41 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "editor mode degrades Ractor pool to sequential (slice 7)" do
+    it "runs sequentially even when workers > 0 is requested" do
+      Dir.mktmpdir("rigor-editor-pool-degrade-") do |tmpdir|
+        Dir.chdir(tmpdir) do
+          logical = File.join("lib", "foo.rb")
+          FileUtils.mkdir_p("lib")
+          File.write(logical, "x = 1\n")
+          physical = File.join(tmpdir, "buffer.rb")
+          File.write(physical, "x = 1\n")
+
+          binding = Rigor::Analysis::BufferBinding.new(
+            logical_path: logical, physical_path: physical
+          )
+          runner = described_class.new(
+            configuration: Rigor::Configuration.new("paths" => ["lib"]),
+            cache_store: nil, workers: 4, buffer: binding
+          )
+
+          # `pool_mode?` is private; assert via `send` since the
+          # contract change IS about that predicate.
+          expect(runner.send(:pool_mode?)).to be(false)
+        end
+      end
+    end
+
+    it "still enables pool mode in the absence of a BufferBinding" do
+      runner = described_class.new(
+        configuration: Rigor::Configuration.new("paths" => []),
+        cache_store: nil, workers: 4
+      )
+
+      expect(runner.send(:pool_mode?)).to be(true)
+    end
+  end
+
   describe "editor mode auto-enables read-only cache (slice 3)" do
     it "wraps the supplied cache_store in a read-only Store when a BufferBinding is present" do
       Dir.mktmpdir("rigor-editor-readonly-") do |tmpdir|

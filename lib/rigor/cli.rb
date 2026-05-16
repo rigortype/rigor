@@ -25,7 +25,8 @@ module Rigor
       "type-scan" => :run_type_scan,
       "explain" => :run_explain,
       "diff" => :run_diff,
-      "sig-gen" => :run_sig_gen
+      "sig-gen" => :run_sig_gen,
+      "lsp" => :run_lsp
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -390,6 +391,12 @@ module Rigor
       SigGenCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_lsp
+      require_relative "cli/lsp_command"
+
+      LspCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def write_result(result, format)
       case format
       when "json"
@@ -430,6 +437,7 @@ module Rigor
           explain    Print the description of one or all CheckRules
           diff       Compare current diagnostics to a saved baseline JSON
           sig-gen    Emit RBS skeletons inferred from .rb sources (ADR-14)
+          lsp        Run the Rigor Language Server (LSP) over stdio
           version    Print the Rigor version
           help       Print this help
       HELP

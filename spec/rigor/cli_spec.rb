@@ -1079,6 +1079,29 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  describe "lsp subcommand (slice 1 stub)" do
+    it "is listed in `rigor help`" do
+      _status, out, _err = run_cli("help")
+
+      expect(out).to include("lsp")
+      expect(out).to include("Language Server")
+    end
+
+    it "returns 0 when invoked with the default --transport=stdio" do
+      status, _out, err = run_cli("lsp")
+
+      expect(status).to eq(0)
+      expect(err).to include("stdio JSON-RPC transport queued for slice 2")
+    end
+
+    it "returns EXIT_USAGE for an unsupported transport" do
+      status, _out, err = run_cli("lsp", "--transport=tcp")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("unsupported transport")
+    end
+  end
+
   describe "check --tmp-file / --instead-of (editor mode)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-cli-editor-mode-") }
 

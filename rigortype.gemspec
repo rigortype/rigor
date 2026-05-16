@@ -36,6 +36,7 @@ Gem::Specification.new do |spec|
   spec.executables = ["rigor"]
   spec.require_paths = ["lib"]
 
+  spec.add_dependency "language_server-protocol", ">= 3.17", "< 4.0"
   spec.add_dependency "prism", ">= 1.0", "< 2.0"
   spec.add_dependency "rbs", ">= 3.0", "< 5.0"
 

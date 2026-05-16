@@ -319,4 +319,67 @@ RSpec.describe Rigor::Cache::Store do
       expect(result).to eq(:second)
     end
   end
+
+  describe "read_only: true (editor mode — slice 3)" do
+    let(:ro_store) { described_class.new(root: cache_root, read_only: true) }
+
+    it "exposes the flag via #read_only?" do
+      expect(ro_store.read_only?).to be(true)
+      expect(store.read_only?).to be(false)
+    end
+
+    it "runs the producer block on miss and returns its value without writing to disk" do
+      called = 0
+      result = ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+        called += 1
+        :produced
+      end
+
+      expect(called).to eq(1)
+      expect(result).to eq(:produced)
+      key = descriptor.cache_key_for(producer_id: "p", params: {})
+      expect(File.exist?(File.join(cache_root, "p", key[0, 2], "#{key[2..]}.entry"))).to be(false)
+    end
+
+    it "does not write the schema_version.txt marker even on a fresh root" do
+      ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
+
+      expect(File.exist?(File.join(cache_root, "schema_version.txt"))).to be(false)
+    end
+
+    it "still serves hits from disk when an existing entry is present" do
+      # Warm the cache with a write-enabled store.
+      store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :warm }
+
+      called = 0
+      result = ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+        called += 1
+        :should_not_run
+      end
+
+      expect(called).to eq(0)
+      expect(result).to eq(:warm)
+    end
+
+    it "leaves the writes counter at zero (misses still recorded so callers can detect cold runs)" do
+      ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) { :v }
+      ro_store.fetch_or_compute(producer_id: "p", params: { other: 1 }, descriptor: descriptor) { :w }
+
+      stats = ro_store.stats
+      expect(stats[:writes]).to eq(0)
+      expect(stats[:misses]).to be > 0
+    end
+
+    it "memoises within the same instance so repeated lookups skip the producer" do
+      called = 0
+      2.times do
+        ro_store.fetch_or_compute(producer_id: "p", params: {}, descriptor: descriptor) do
+          called += 1
+          :v
+        end
+      end
+
+      expect(called).to eq(1)
+    end
+  end
 end

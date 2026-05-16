@@ -60,7 +60,7 @@ module Rigor
                      buffer: nil)
         @configuration = configuration
         @explain = explain
-        @cache_store = cache_store
+        @cache_store = enforce_read_only_cache(cache_store, buffer)
         @plugin_requirer = plugin_requirer
         @workers = workers
         @collect_stats = collect_stats
@@ -280,6 +280,20 @@ module Rigor
       end
 
       private
+
+      # Editor mode (`buffer:` non-nil) auto-flips the cache store
+      # to `read_only: true` so multiple debounced editor invocations
+      # against the same project don't churn the on-disk cache or
+      # race on schema-version writes. Cache reads continue
+      # unchanged; misses still run the producer block but the
+      # result is not persisted. Per design doc § "Cache behaviour".
+      def enforce_read_only_cache(cache_store, buffer)
+        return cache_store if buffer.nil?
+        return cache_store if cache_store.nil?
+        return cache_store if cache_store.read_only?
+
+        Cache::Store.new(root: cache_store.root, read_only: true)
+      end
 
       def pool_mode?
         @workers.is_a?(Integer) && @workers.positive?

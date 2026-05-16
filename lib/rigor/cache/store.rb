@@ -31,8 +31,22 @@ module Rigor
 
       VALID_PRODUCER_ID = /\A[a-z][a-z0-9._-]*\z/
 
-      def initialize(root:)
+      # @param root [String] cache root directory.
+      # @param read_only [Boolean] when true, every disk-side
+      #   side-effect is suppressed: `fetch_or_compute` still
+      #   reads existing entries (hits) and still runs the
+      #   producer block on miss, but it does NOT write the
+      #   produced value to disk, does NOT update the
+      #   `schema_version.txt` marker, and does NOT touch the
+      #   on-disk root directory. The in-process memo is still
+      #   populated so repeated lookups within the same run stay
+      #   cheap. Used by editor mode so multiple buffer-mode
+      #   invocations can read from the same cache concurrently
+      #   without churning it. See
+      #   `docs/design/20260516-editor-mode.md` § "Cache behaviour".
+      def initialize(root:, read_only: false)
         @root = root.to_s.dup.freeze
+        @read_only = read_only
         @hits = 0
         @misses = 0
         @writes = 0
@@ -58,6 +72,13 @@ module Rigor
       end
 
       attr_reader :root
+
+      # @return [Boolean] whether this Store suppresses disk writes
+      #   (`schema_version.txt`, entry creation). Reads are
+      #   unaffected.
+      def read_only?
+        @read_only
+      end
 
       # Returns a frozen snapshot of this Store's per-run hit / miss /
       # write counters. The bookkeeping is in-memory only — every new
@@ -167,10 +188,10 @@ module Rigor
         end
 
         value = block.call
-        write_entry(path, descriptor, value, serialize: serialize)
+        write_entry(path, descriptor, value, serialize: serialize) unless @read_only
         @monitor.synchronize do
           record(:misses, producer_id)
-          record(:writes, producer_id)
+          record(:writes, producer_id) unless @read_only
           @memo[memo_key] = value
         end
         value
@@ -302,6 +323,15 @@ module Rigor
       end
 
       def ensure_schema_version!
+        # Read-only stores never touch the cache root — no mkdir,
+        # no marker write, no destructive clear on schema
+        # mismatch. A stale or wrong-schema marker simply yields
+        # nothing back (entries read through the version check
+        # are content-keyed, so a write under the new schema
+        # never collides with a read under the old). The next
+        # writable run will repair the cache.
+        return if @read_only
+
         FileUtils.mkdir_p(@root)
         marker = File.join(@root, "schema_version.txt")
         current = Descriptor::SCHEMA_VERSION.to_s

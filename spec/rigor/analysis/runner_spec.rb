@@ -2108,6 +2108,64 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "editor mode auto-enables read-only cache (slice 3)" do
+    it "wraps the supplied cache_store in a read-only Store when a BufferBinding is present" do
+      Dir.mktmpdir("rigor-editor-readonly-") do |tmpdir|
+        logical = File.join(tmpdir, "lib", "foo.rb")
+        FileUtils.mkdir_p(File.dirname(logical))
+        File.write(logical, "x = 1\n")
+        physical = File.join(tmpdir, "buffer.rb")
+        File.write(physical, "x = 1\n")
+
+        original = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
+        binding = Rigor::Analysis::BufferBinding.new(
+          logical_path: logical, physical_path: physical
+        )
+        runner = described_class.new(
+          configuration: Rigor::Configuration.new("paths" => [File.dirname(logical)]),
+          cache_store: original, buffer: binding
+        )
+
+        expect(runner.cache_store.read_only?).to be(true)
+        expect(runner.cache_store).not_to equal(original)
+        expect(runner.cache_store.root).to eq(original.root)
+      end
+    end
+
+    it "leaves nil cache_store as nil (--no-cache still wins)" do
+      Dir.mktmpdir("rigor-editor-readonly-nil-") do |tmpdir|
+        logical = File.join(tmpdir, "lib", "foo.rb")
+        FileUtils.mkdir_p(File.dirname(logical))
+        File.write(logical, "x = 1\n")
+        physical = File.join(tmpdir, "buffer.rb")
+        File.write(physical, "x = 1\n")
+
+        binding = Rigor::Analysis::BufferBinding.new(
+          logical_path: logical, physical_path: physical
+        )
+        runner = described_class.new(
+          configuration: Rigor::Configuration.new("paths" => [File.dirname(logical)]),
+          cache_store: nil, buffer: binding
+        )
+
+        expect(runner.cache_store).to be_nil
+      end
+    end
+
+    it "does NOT wrap when no BufferBinding is present (legacy path unchanged)" do
+      Dir.mktmpdir("rigor-non-editor-cache-") do |tmpdir|
+        original = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
+        runner = described_class.new(
+          configuration: Rigor::Configuration.new("paths" => []),
+          cache_store: original
+        )
+
+        expect(runner.cache_store).to equal(original)
+        expect(runner.cache_store.read_only?).to be(false)
+      end
+    end
+  end
+
   describe "editor mode (BufferBinding)" do
     # Slice 2: when the runner is wired with `buffer:`, the
     # logical path in `paths:` is parsed from the physical

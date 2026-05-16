@@ -57,9 +57,24 @@ module Rigor
         #   `{aliased_name => underlying_class_name}` map. Empty
         #   when no `include Dry.Types()` declaration is found.
         def scan(paths:)
-          modules = paths.flat_map { |path| scan_file(path) }.uniq
+          results = paths.flat_map { |path| scan_file(path) }
+          modules = results.map { |r| r[:module_name] }.uniq
           return {}.freeze if modules.empty?
 
+          base = canonical_table(modules)
+          results.each do |result|
+            result[:compositions].each do |const_name, underlying|
+              # Each result's compositions are scoped under that
+              # result's enclosing module (`Types::Email`, etc.).
+              base["#{result[:module_name]}::#{const_name}"] ||= underlying
+            end
+          end
+          base.freeze
+        end
+
+        # Populates the canonical-shortcut + nested-category
+        # table (15 + 15 × 4 = 75 entries per alias module).
+        def canonical_table(modules)
           modules.each_with_object({}) do |module_name, acc|
             CANONICAL_ALIASES.each do |alias_name, underlying|
               acc["#{module_name}::#{alias_name}"] = underlying
@@ -67,15 +82,19 @@ module Rigor
                 acc["#{module_name}::#{category}::#{alias_name}"] = underlying
               end
             end
-          end.freeze
+          end
         end
+        private_class_method :canonical_table
 
         def scan_file(path)
           source = File.read(path)
           parse_result = Prism.parse(source, filepath: path)
           return [] unless parse_result.errors.empty?
 
-          collect_alias_modules(parse_result.value, [])
+          collect_alias_modules(parse_result.value, []).map do |module_info|
+            compositions = collect_compositions(module_info[:body])
+            { module_name: module_info[:module_name], compositions: compositions }
+          end
         rescue StandardError
           # Missing-file / parse failures degrade to "no
           # contribution from this file"; the plugin's
@@ -85,11 +104,14 @@ module Rigor
         end
         private_class_method :scan_file
 
-        # Walks a Prism AST collecting module names that contain a
-        # tail-statement `include Dry.Types()` call. Tracks the
-        # enclosing module chain so a nested
-        # `module App; module Types; include Dry.Types(); end; end`
-        # publishes `"App::Types"` as the alias scope.
+        # Walks a Prism AST collecting alias-module info:
+        # `{module_name:, body:}` for every `module X; include
+        # Dry.Types(); …end` shape. Tracks the enclosing module
+        # chain so a nested `module App; module Types; include
+        # Dry.Types(); end; end` publishes `"App::Types"` as the
+        # alias scope. The `body:` field is the
+        # `Prism::StatementsNode` (or nil) we re-walk later for
+        # user-authored compositions (slice 3).
         def collect_alias_modules(node, qualified_prefix)
           return [] unless node.is_a?(Prism::Node)
 
@@ -98,8 +120,12 @@ module Rigor
             name = qualified_name_for(node.constant_path)
             new_prefix = name ? qualified_prefix + [name] : qualified_prefix
             children = node.body ? collect_alias_modules(node.body, new_prefix) : []
-            current_module = name && contains_dry_types_include?(node.body) ? [new_prefix.join("::")] : []
-            current_module + children
+            current = if name && contains_dry_types_include?(node.body)
+                        [{ module_name: new_prefix.join("::"), body: node.body }]
+                      else
+                        []
+                      end
+            current + children
           when Prism::ClassNode
             # Module-level declarations win; we don't recurse into
             # class bodies for `include Dry.Types()` because the
@@ -110,6 +136,70 @@ module Rigor
           end
         end
         private_class_method :collect_alias_modules
+
+        # Slice 3 — user-authored composition recognition.
+        # Walks the alias-module body for `Email =
+        # String.constrained(...)` shapes. Each
+        # `ConstantWriteNode` whose RHS is a method chain
+        # rooted on a canonical-shortcut name (`String`,
+        # `Integer`, …) — or on a nested-category form
+        # (`Strict::String` etc.) — registers the LHS under
+        # the canonical head's underlying class. Unions
+        # (`String | Integer`) and intersections are skipped
+        # (no single underlying class); transitive references
+        # to other compositions (`ManagerEmail = Email`) are
+        # also skipped at the floor (no two-pass resolution
+        # yet).
+        def collect_compositions(body)
+          return {} if body.nil?
+
+          compositions = {}
+          tree_walk(body).each do |child|
+            next unless child.is_a?(Prism::ConstantWriteNode)
+
+            head = composition_head_canonical(child.value)
+            next if head.nil?
+
+            compositions[child.name.to_s] = CANONICAL_ALIASES.fetch(head)
+          end
+          compositions
+        end
+        private_class_method :collect_compositions
+
+        # Walks an RHS expression looking for the canonical
+        # shortcut name at the root of a method chain. Returns
+        # the canonical name (`"String"` etc.) or nil.
+        #
+        # Recognised shapes (recursively on `node.receiver`):
+        #
+        # - Bare `String` / `Integer` — `Prism::ConstantReadNode`
+        #   whose name is in `CANONICAL_ALIASES`.
+        # - `Strict::String` / `Coercible::Integer` / etc. —
+        #   `Prism::ConstantPathNode` whose tail is in
+        #   `CANONICAL_ALIASES`.
+        # - `String.constrained(...)` / `.optional` /
+        #   `.default(...)` / arbitrary single-arg method —
+        #   recurse on the receiver.
+        #
+        # Declines on `String | Integer` (union, `:|`) and
+        # `String & Foo` (intersection, `:&`) so the alias
+        # table doesn't claim a single underlying class for
+        # a multi-class composition.
+        def composition_head_canonical(node)
+          case node
+          when Prism::ConstantReadNode
+            CANONICAL_ALIASES.key?(node.name.to_s) ? node.name.to_s : nil
+          when Prism::ConstantPathNode
+            tail = node.name.to_s
+            CANONICAL_ALIASES.key?(tail) ? tail : nil
+          when Prism::CallNode
+            return nil if %i[| &].include?(node.name)
+            return nil if node.receiver.nil?
+
+            composition_head_canonical(node.receiver)
+          end
+        end
+        private_class_method :composition_head_canonical
 
         # `include Dry.Types()` at the top of the module body is the
         # canonical alias declaration. We accept the call anywhere

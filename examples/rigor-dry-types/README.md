@@ -78,10 +78,23 @@ The slice-1 deliverable is the **floor**:
   the published fact — at slice 1 alone, no behavioural change
   is observable in `bundle exec rigor check` runs.
 
+Slice 3 (2026-05-16) extends the published table with
+**user-authored compositions**: any `Email =
+String.constrained(format: …)` / `Status = Strict::Symbol`
+/ `PositiveInt = Integer.constrained(gt: 0).optional`
+declaration inside the alias-module body publishes the new
+LHS constant under the canonical head's underlying class.
+Unions (`String | Integer`) and intersections (`String &
+Foo`) are skipped because there's no single underlying class
+for those compositions. Transitive references to other
+compositions (`ManagerEmail = Email`) are also skipped at
+the slice-3 floor (no two-pass resolution yet).
+
 The **ceiling** (future slices):
 
-- **User-authored compositions** — `Email = Types::String.constrained(format: …)`
-  registers `Email` as an aliased subtype of `Types::String`.
+- **Transitive composition references** — `ManagerEmail =
+  Email` (where Email was a slice-3 composition) needs a
+  two-pass walk to resolve. Demand-driven follow-up.
 - **Diagnostics** — `dry-types.unknown-alias` for references
   to a `Types::*` name that wasn't published;
   `dry-types.alias-shadow` when two modules conflict.

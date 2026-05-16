@@ -76,6 +76,35 @@ RSpec.describe "rigor-dry-types integration" do
     expect(aliases.fetch("App::Types::Decimal")).to eq("BigDecimal")
   end
 
+  it "publishes user-authored compositions under their head canonical class (slice 3)" do
+    composed = <<~RUBY
+      module Types
+        include Dry.Types()
+
+        Email = String.constrained(format: /@/)
+        ManagerEmail = Strict::String
+        PositiveInt = Integer.constrained(gt: 0).optional
+        ActiveFlag = Bool
+      end
+    RUBY
+    aliases = run_and_read_fact(demo: composed)
+    expect(aliases.fetch("Types::Email")).to eq("String")
+    expect(aliases.fetch("Types::ManagerEmail")).to eq("String")
+    expect(aliases.fetch("Types::PositiveInt")).to eq("Integer")
+    expect(aliases.fetch("Types::ActiveFlag")).to eq("TrueClass")
+  end
+
+  it "skips compositions whose RHS is a union (no single underlying class)" do
+    union = <<~RUBY
+      module Types
+        include Dry.Types()
+        StringOrInt = String | Integer
+      end
+    RUBY
+    aliases = run_and_read_fact(demo: union)
+    expect(aliases).not_to have_key("Types::StringOrInt")
+  end
+
   it "does NOT publish the fact when no `include Dry.Types()` shape is found" do
     plain = <<~RUBY
       module Types

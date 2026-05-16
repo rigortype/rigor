@@ -90,6 +90,18 @@ module Rigor
         expansion = expand_paths(paths)
         @class_decl_paths_snapshot = {}.freeze
         @signature_paths_snapshot = []
+        # ADR-18 slice 3 — plugin prepare MUST run before the
+        # synthetic-method scanner so cross-plugin facts
+        # (`:dry_type_aliases` etc.) are already published when
+        # the scanner resolves Tier C `returns_from_arg:`
+        # lookups. The diagnostics produced by prepare are
+        # captured here so `pre_file_diagnostics` can re-emit
+        # them in the existing order without invoking prepare
+        # twice. Pool mode still re-runs prepare per worker
+        # (workers don't see this early invocation), preserving
+        # the existing Phase 4b contract.
+        @cached_plugin_prepare_diagnostics =
+          pool_mode? ? [] : plugin_prepare_diagnostics
         # ADR-16 slice 2b — Tier C pre-pass. Built once per run
         # against the resolved file set + the loaded plugin
         # registry's `heredoc_templates` so synthetic methods are
@@ -97,7 +109,8 @@ module Rigor
         @synthetic_method_index = Inference::SyntheticMethodScanner.scan(
           plugin_registry: @plugin_registry,
           paths: expansion.fetch(:files),
-          environment: nil
+          environment: nil,
+          fact_store: shared_fact_store
         )
         # ADR-17 slice 2 — pre-eval pre-pass. Built once per run
         # from the `pre_eval:` entries that exist on disk
@@ -175,7 +188,12 @@ module Rigor
       # against the coordinator-side plugin instances (which
       # the pool path never consults for per-file analysis).
       def pre_file_diagnostics(expansion)
-        prepare = pool_mode? ? [] : plugin_prepare_diagnostics
+        # ADR-18 slice 3 — prepare diagnostics are captured
+        # earlier in #run (before the synthetic-method scanner)
+        # so cross-plugin facts are available to the scanner.
+        # We re-surface the captured diagnostics here so the
+        # existing pre_file_diagnostics ordering is preserved.
+        prepare = pool_mode? ? [] : (@cached_plugin_prepare_diagnostics || [])
         plugin_load_diagnostics +
           prepare +
           pre_eval_diagnostics +
@@ -184,6 +202,17 @@ module Rigor
           dependency_source_config_conflict_diagnostics +
           rbs_coverage_diagnostics +
           expansion.fetch(:errors)
+      end
+
+      # Returns the per-run shared `Plugin::FactStore` instance.
+      # All loaded plugins share this store through their
+      # respective `Plugin::Services` (the same instance is
+      # threaded by `Plugin::Loader.load`). Returns `nil` when
+      # no plugins are loaded.
+      def shared_fact_store
+        return nil if @plugin_registry.nil? || @plugin_registry.empty?
+
+        @plugin_registry.plugins.first&.services&.fact_store
       end
 
       # ADR-17 slice 1 — surface a `:error` diagnostic for each

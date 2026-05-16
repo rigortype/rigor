@@ -115,37 +115,147 @@ module Rigor
         # One row of an emit table: the synthetic method's
         # name-template (the analyzer interpolates `\#{name}` with
         # the call-site literal symbol) and its declared return
-        # type (recorded as a string in slice 2a, resolved by the
-        # ceiling slice via ADR-13).
+        # type. The return type can be a static String (resolved
+        # via `Environment#nominal_for_name` per ADR-16 slice 6b)
+        # or a per-call-site lookup ({ReturnsFromArg}) — see
+        # [ADR-18](../../../../../docs/adr/18-substrate-per-call-site-return-type.md).
+        # When both are nil, the synthesised method's return type
+        # falls back to `Dynamic[Top]`.
         class Emit
-          attr_reader :name, :returns
+          attr_reader :name, :returns, :returns_from_arg
 
-          def initialize(name:, returns:)
+          def initialize(name:, returns: nil, returns_from_arg: nil)
             unless name.is_a?(String) && !name.empty?
               raise ArgumentError,
                     "Macro::HeredocTemplate::Emit#name must be a non-empty String, got #{name.inspect}"
             end
-            unless returns.is_a?(String) && !returns.empty?
+            unless returns.nil? || (returns.is_a?(String) && !returns.empty?)
               raise ArgumentError,
-                    "Macro::HeredocTemplate::Emit#returns must be a non-empty String, got #{returns.inspect}"
+                    "Macro::HeredocTemplate::Emit#returns must be a non-empty String or nil, got #{returns.inspect}"
             end
 
             @name = name.dup.freeze
-            @returns = returns.dup.freeze
+            @returns = returns.nil? ? nil : returns.dup.freeze
+            @returns_from_arg = ReturnsFromArg.coerce(returns_from_arg)
             freeze
           end
 
           def to_h
-            { "name" => name, "returns" => returns }
+            {
+              "name" => name,
+              "returns" => returns,
+              "returns_from_arg" => returns_from_arg&.to_h
+            }.compact
           end
 
           def ==(other)
-            other.is_a?(Emit) && name == other.name && returns == other.returns
+            other.is_a?(Emit) && to_h == other.to_h
           end
           alias eql? ==
 
           def hash
-            [name, returns].hash
+            to_h.hash
+          end
+        end
+
+        # ADR-18 — per-call-site return-type DSL. Declares which
+        # call-site argument's source representation to look up
+        # in a cross-plugin fact channel for the synthesised
+        # method's return type.
+        #
+        # Authoring shape:
+        #
+        #     returns_from_arg: {
+        #       position: 1,
+        #       lookup_via: { plugin_id: "dry-types", fact: :dry_type_aliases }
+        #     }
+        #
+        # Slice 1 (this file) ships the value class + validation
+        # only. The scanner-side arg-position extraction +
+        # fact-store lookup land in slice 2 / 3.
+        class ReturnsFromArg
+          attr_reader :position, :plugin_id, :fact
+
+          # @return [ReturnsFromArg, nil] coerced value class
+          #   for a Hash / nil / ReturnsFromArg input. Raises on
+          #   any other shape so manifest authoring failures
+          #   surface at construction time.
+          def self.coerce(value)
+            return nil if value.nil?
+            return value if value.is_a?(ReturnsFromArg)
+            return new_from_hash(value) if value.is_a?(Hash)
+
+            raise ArgumentError,
+                  "Macro::HeredocTemplate::Emit#returns_from_arg must be a Hash or ReturnsFromArg, " \
+                  "got #{value.inspect}"
+          end
+
+          def self.new_from_hash(hash)
+            position = hash[:position] || hash["position"]
+            lookup_via = hash[:lookup_via] || hash["lookup_via"]
+            unless lookup_via.is_a?(Hash)
+              raise ArgumentError,
+                    "Macro::HeredocTemplate::Emit#returns_from_arg requires a `lookup_via:` Hash, " \
+                    "got #{hash.inspect}"
+            end
+            new(
+              position: position,
+              plugin_id: lookup_via[:plugin_id] || lookup_via["plugin_id"],
+              fact: lookup_via[:fact] || lookup_via["fact"]
+            )
+          end
+
+          def initialize(position:, plugin_id:, fact:)
+            validate_position!(position)
+            validate_plugin_id!(plugin_id)
+            validate_fact!(fact)
+
+            @position = position
+            @plugin_id = plugin_id.dup.freeze
+            @fact = fact.to_sym
+            freeze
+          end
+
+          def to_h
+            {
+              "position" => position,
+              "lookup_via" => {
+                "plugin_id" => plugin_id,
+                "fact" => fact.to_s
+              }
+            }
+          end
+
+          def ==(other)
+            other.is_a?(ReturnsFromArg) && to_h == other.to_h
+          end
+          alias eql? ==
+
+          def hash
+            to_h.hash
+          end
+
+          private
+
+          def validate_position!(value)
+            return if value.is_a?(Integer) && value >= 0
+
+            raise ArgumentError,
+                  "ReturnsFromArg#position must be a non-negative Integer, got #{value.inspect}"
+          end
+
+          def validate_plugin_id!(value)
+            return if value.is_a?(String) && !value.empty?
+
+            raise ArgumentError,
+                  "ReturnsFromArg#plugin_id must be a non-empty String, got #{value.inspect}"
+          end
+
+          def validate_fact!(value)
+            return if value.is_a?(Symbol) || (value.is_a?(String) && !value.empty?)
+
+            raise ArgumentError,
+                  "ReturnsFromArg#fact must be a Symbol or non-empty String, got #{value.inspect}"
           end
         end
 
@@ -188,7 +298,11 @@ module Rigor
           case entry
           when Emit then entry
           when Hash
-            Emit.new(name: entry[:name] || entry["name"], returns: entry[:returns] || entry["returns"])
+            Emit.new(
+              name: entry[:name] || entry["name"],
+              returns: entry[:returns] || entry["returns"],
+              returns_from_arg: entry[:returns_from_arg] || entry["returns_from_arg"]
+            )
           else
             raise ArgumentError,
                   "Plugin::Macro::HeredocTemplate##{label} entry must be an Emit or Hash, " \

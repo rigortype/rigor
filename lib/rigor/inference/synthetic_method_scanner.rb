@@ -53,8 +53,15 @@ module Rigor
       #   inheritance resolution against RBS-known classes
       #   (ActiveRecord::Base, Dry::Struct, etc.) that aren't
       #   declared in project source.
+      # @param fact_store      [Rigor::Plugin::FactStore, nil]
+      #   the per-run cross-plugin fact store. ADR-18 lookups
+      #   (`Plugin::Macro::HeredocTemplate::Emit#returns_from_arg`)
+      #   consult this at scan time to resolve per-call-site
+      #   return types from published facts; without it, those
+      #   emit rows fall back to their static `returns:` (or
+      #   `"untyped"` → `Dynamic[Top]`).
       # @return [Rigor::Inference::SyntheticMethodIndex]
-      def scan(plugin_registry:, paths:, environment: nil)
+      def scan(plugin_registry:, paths:, environment: nil, fact_store: nil)
         templates = collect_templates(plugin_registry)
         registries = collect_trait_registries(plugin_registry)
         return SyntheticMethodIndex::EMPTY if templates.empty? && registries.empty?
@@ -66,11 +73,11 @@ module Rigor
         entries = []
         asts.each do |path, ast|
           walk_class_bodies(ast) do |class_name, call_node|
-            collect_entries(entries, templates, class_name, call_node, hierarchy, environment, path)
+            collect_entries(entries, templates, class_name, call_node, hierarchy, environment, path, fact_store)
             collect_trait_entries(entries, registries, class_name, call_node, hierarchy, environment, path)
             collect_concern_re_targeted_entries(
               entries, call_node, class_name, concern_index,
-              templates, registries, hierarchy, environment, path
+              templates, registries, hierarchy, environment, path, fact_store
             )
           end
         end
@@ -209,7 +216,7 @@ module Rigor
       # `collect_trait_entries` fire just as if the calls had been
       # written directly in X's body.
       def collect_concern_re_targeted_entries(entries, call_node, class_name, concern_index, # rubocop:disable Metrics/ParameterLists
-                                              templates, registries, hierarchy, environment, path)
+                                              templates, registries, hierarchy, environment, path, fact_store = nil)
         return unless call_node.name == :include && call_node.receiver.nil?
         return if concern_index.empty?
 
@@ -220,7 +227,7 @@ module Rigor
           next unless deferred
 
           deferred.each do |inner_call|
-            collect_entries(entries, templates, class_name, inner_call, hierarchy, environment, path)
+            collect_entries(entries, templates, class_name, inner_call, hierarchy, environment, path, fact_store)
             collect_trait_entries(entries, registries, class_name, inner_call, hierarchy, environment, path)
           end
         end
@@ -318,7 +325,7 @@ module Rigor
         parent_str ? "#{parent_str}::#{name}" : name
       end
 
-      def collect_entries(entries, templates, class_name, call_node, hierarchy, environment, path)
+      def collect_entries(entries, templates, class_name, call_node, hierarchy, environment, path, fact_store = nil) # rubocop:disable Metrics/ParameterLists
         templates.each do |(plugin_id, template)|
           next unless call_node.name == template.method_name
           next unless class_inherits_from?(class_name, template.receiver_constraint, hierarchy, environment)
@@ -326,7 +333,7 @@ module Rigor
           symbol_arg = literal_symbol_arg(call_node, template.symbol_arg_position)
           next if symbol_arg.nil?
 
-          emit_entries_for(entries, class_name, symbol_arg, template, plugin_id, path, call_node)
+          emit_entries_for(entries, class_name, symbol_arg, template, plugin_id, path, call_node, fact_store)
         end
       end
 
@@ -439,28 +446,31 @@ module Rigor
         )
       end
 
-      def emit_entries_for(entries, class_name, symbol_arg, template, plugin_id, path, call_node)
+      def emit_entries_for(entries, class_name, symbol_arg, template, plugin_id, path, call_node, fact_store = nil) # rubocop:disable Metrics/ParameterLists
         template.emit.each do |row|
           entries << build_synthetic_method(
             class_name: class_name, name_arg: symbol_arg, row: row,
             template: template, plugin_id: plugin_id, path: path, call_node: call_node,
-            kind: SyntheticMethod::INSTANCE
+            kind: SyntheticMethod::INSTANCE, fact_store: fact_store
           )
         end
         template.class_level_emit.each do |row|
           entries << build_synthetic_method(
             class_name: class_name, name_arg: symbol_arg, row: row,
             template: template, plugin_id: plugin_id, path: path, call_node: call_node,
-            kind: SyntheticMethod::SINGLETON
+            kind: SyntheticMethod::SINGLETON, fact_store: fact_store
           )
         end
       end
 
-      def build_synthetic_method(class_name:, name_arg:, row:, template:, plugin_id:, path:, call_node:, kind:) # rubocop:disable Metrics/ParameterLists
+      # rubocop:disable Metrics/ParameterLists
+      def build_synthetic_method(class_name:, name_arg:, row:, template:, plugin_id:, path:, call_node:, kind:,
+                                 fact_store: nil)
+        # rubocop:enable Metrics/ParameterLists
         SyntheticMethod.new(
           class_name: class_name,
           method_name: interpolate(row.name, name_arg).to_sym,
-          return_type: row.returns,
+          return_type: resolve_emit_return_type(row, call_node, fact_store),
           kind: kind,
           provenance: {
             plugin_id: plugin_id,
@@ -470,6 +480,68 @@ module Rigor
             source_line: call_node.location.start_line
           }
         )
+      end
+
+      # ADR-18 three-tier fallback for the synthetic method's
+      # `return_type` string:
+      #
+      # 1. When `row.returns_from_arg` is present AND the
+      #    call-site argument at the declared position is a
+      #    resolvable constant reference AND the fact_store
+      #    has a matching value, use that as the return type.
+      # 2. Else if `row.returns` is a non-empty String, use it
+      #    (the slice-6b static path).
+      # 3. Else use `"untyped"` so the dispatcher's
+      #    `promote_via_return_type` sentinel chain yields
+      #    `Dynamic[Top]`.
+      def resolve_emit_return_type(row, call_node, fact_store)
+        resolved = resolve_returns_from_arg(row.returns_from_arg, call_node, fact_store)
+        return resolved if resolved
+        return row.returns if row.returns
+
+        "untyped"
+      end
+
+      def resolve_returns_from_arg(returns_from_arg, call_node, fact_store)
+        return nil if returns_from_arg.nil?
+
+        source_rep = argument_source_representation(call_node, returns_from_arg.position)
+        return nil if source_rep.nil?
+        return nil if fact_store.nil?
+
+        fact = fact_store.read(plugin_id: returns_from_arg.plugin_id, name: returns_from_arg.fact)
+        return nil unless fact.is_a?(Hash)
+
+        fact[source_rep]
+      end
+
+      # Extracts the source-text qualified-constant representation
+      # of the call's positional argument (e.g.,
+      # `"Types::String"`). Returns nil for non-constant shapes
+      # (literals, method chains, blocks, …). The floor
+      # intentionally accepts only ConstantReadNode /
+      # ConstantPathNode per ADR-18; chained-call argument
+      # resolution stays deferred.
+      def argument_source_representation(call_node, position)
+        args = call_node.arguments&.arguments
+        return nil if args.nil? || position >= args.size
+
+        node = args[position]
+        case node
+        when Prism::ConstantReadNode then node.name.to_s
+        when Prism::ConstantPathNode then qualified_constant_name(node)
+        end
+      end
+
+      def qualified_constant_name(node)
+        case node
+        when Prism::ConstantReadNode then node.name.to_s
+        when Prism::ConstantPathNode
+          parent_name = node.parent.nil? ? nil : qualified_constant_name(node.parent)
+          return nil if !node.parent.nil? && parent_name.nil?
+
+          parent_name.nil? ? node.name.to_s : "#{parent_name}::#{node.name}"
+        end
       end
 
       def interpolate(template_name, name_arg)

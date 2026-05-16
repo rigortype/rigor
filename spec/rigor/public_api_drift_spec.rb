@@ -223,6 +223,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     hash()
     name()
     returns()
+    returns_from_arg()
     to_h()
   ].freeze
 

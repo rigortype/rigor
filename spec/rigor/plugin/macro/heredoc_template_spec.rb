@@ -115,13 +115,13 @@ RSpec.describe Rigor::Plugin::Macro::HeredocTemplate do
       end.to raise_error(ArgumentError, /name must be a non-empty String/)
     end
 
-    it "rejects an Emit Hash entry missing :returns" do
-      expect do
-        described_class.new(
-          receiver_constraint: "Foo", method_name: :bar,
-          emit: [{ name: "y" }]
-        )
-      end.to raise_error(ArgumentError, /returns must be a non-empty String/)
+    it "accepts an Emit Hash entry without :returns (ADR-18 — fallback to Dynamic[Top])" do
+      template = described_class.new(
+        receiver_constraint: "Foo", method_name: :bar,
+        emit: [{ name: "y" }]
+      )
+      expect(template.emit.first.returns).to be_nil
+      expect(template.emit.first.returns_from_arg).to be_nil
     end
   end
 
@@ -191,6 +191,98 @@ RSpec.describe Rigor::Plugin::Macro::HeredocTemplate do
 
     it "rejects an empty returns" do
       expect { described_class.new(name: "foo", returns: "") }.to raise_error(ArgumentError, /returns/)
+    end
+
+    it "accepts a nil returns (ADR-18 — falls back to Dynamic[Top] downstream)" do
+      e = described_class.new(name: "foo")
+      expect(e.returns).to be_nil
+      expect(e.returns_from_arg).to be_nil
+    end
+  end
+
+  describe described_class::ReturnsFromArg do
+    it "coerces a Hash into a frozen value object" do
+      r = described_class.coerce(
+        position: 1,
+        lookup_via: { plugin_id: "dry-types", fact: :dry_type_aliases }
+      )
+      expect(r).to be_a(described_class)
+      expect(r).to be_frozen
+      expect(r.position).to eq(1)
+      expect(r.plugin_id).to eq("dry-types")
+      expect(r.fact).to eq(:dry_type_aliases)
+    end
+
+    it "accepts string-keyed Hash form for cache-roundtrip parity" do
+      r = described_class.coerce(
+        "position" => 0,
+        "lookup_via" => { "plugin_id" => "rails-routes", "fact" => "helper_table" }
+      )
+      expect(r.position).to eq(0)
+      expect(r.plugin_id).to eq("rails-routes")
+      expect(r.fact).to eq(:helper_table)
+    end
+
+    it "returns nil unchanged" do
+      expect(described_class.coerce(nil)).to be_nil
+    end
+
+    it "raises on non-Hash, non-nil values" do
+      expect { described_class.coerce("nope") }.to raise_error(ArgumentError, /must be a Hash/)
+    end
+
+    it "raises when lookup_via is missing" do
+      expect { described_class.coerce(position: 1) }.to raise_error(ArgumentError, /lookup_via/)
+    end
+
+    it "raises on a negative position" do
+      expect do
+        described_class.coerce(position: -1, lookup_via: { plugin_id: "x", fact: :y })
+      end.to raise_error(ArgumentError, /position/)
+    end
+
+    it "raises on an empty plugin_id" do
+      expect do
+        described_class.coerce(position: 0, lookup_via: { plugin_id: "", fact: :y })
+      end.to raise_error(ArgumentError, /plugin_id/)
+    end
+
+    it "round-trips through to_h" do
+      r = described_class.coerce(
+        position: 2, lookup_via: { plugin_id: "p", fact: :f }
+      )
+      expect(r.to_h).to eq(
+        "position" => 2,
+        "lookup_via" => { "plugin_id" => "p", "fact" => "f" }
+      )
+    end
+  end
+
+  describe "#{described_class}::Emit with returns_from_arg" do
+    it "stores the ReturnsFromArg value class on the Emit" do
+      template = described_class::Emit.new(
+        name: "x",
+        returns_from_arg: {
+          position: 1,
+          lookup_via: { plugin_id: "dry-types", fact: :dry_type_aliases }
+        }
+      )
+      expect(template.returns_from_arg).to be_a(described_class::ReturnsFromArg)
+      expect(template.returns_from_arg.position).to eq(1)
+    end
+
+    it "round-trips through to_h with the returns_from_arg key" do
+      template = described_class::Emit.new(
+        name: "x",
+        returns_from_arg: {
+          position: 1,
+          lookup_via: { plugin_id: "dry-types", fact: :dry_type_aliases }
+        }
+      )
+      expect(template.to_h).to include(
+        "name" => "x",
+        "returns_from_arg" => a_kind_of(Hash)
+      )
     end
   end
 end

@@ -1,0 +1,15 @@
+paths:
+  - demo.rb
+
+plugins:
+  - rigor-dry-types
+
+signature_paths:
+  # Minimal Dry::Types RBS stub local to the demo. Covers the
+  # surface the demo touches (`Dry.Types()` factory). A real
+  # project depending on `dry-types` would expose its own RBS
+  # through bundler auto-discovery (rigor's O4 Layer 1/2 path).
+  - sig
+
+cache:
+  path: tmp/.rigor/cache

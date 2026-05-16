@@ -1,0 +1,16 @@
+# Minimal Dry::Types RBS stub for the rigor-dry-types demo.
+#
+# `Dry.Types()` returns a Module the project mixes into its own
+# `Types` namespace. The plugin's scanner doesn't need to follow
+# the constant resolution — it only needs to find the
+# `include Dry.Types()` call. The RBS stub here is enough for
+# Rigor's parser / dispatcher to accept the source without
+# emitting `call.undefined-method` diagnostics on `Dry.Types`.
+#
+# A real project depending on `dry-types` would replace this
+# with the upstream gem's own RBS (or a vendored sig discovered
+# by rigor's Bundler-awareness path).
+
+module Dry
+  def self.Types: () -> Module
+end

@@ -52,23 +52,24 @@ module Rigor
       #   "no completions available," distinct from `[]` which
       #   means "we tried and got nothing".
       def provide(uri:, line:, character:, trigger_character: nil)
-        _ = trigger_character # Slice 6+ will route on trigger.
+        _ = trigger_character # Trigger info logged-not-routed in v1.
         path = Uri.to_path(uri)
         return nil if path.nil?
 
         entry = @buffer_table[uri]
         return nil if entry.nil?
 
-        parse_result = Prism.parse(entry.bytes, filepath: path,
+        # Slice B4 — parse recovery. The common mid-edit buffer
+        # (`obj.` / `Foo::`) doesn't parse cleanly; try inserting
+        # a sentinel name at the cursor before falling through.
+        bytes_to_parse, locate_at = parse_attempt_bytes(entry.bytes, line, character)
+        parse_result = Prism.parse(bytes_to_parse, filepath: path,
                                    version: @project_context.configuration.target_ruby)
-        # Slice 5 requires the buffer to parse cleanly. Slice 8
-        # adds the lexical-fallback path for mid-edit buffers
-        # Prism can't recover.
         return nil unless parse_result.errors.empty?
 
         # Rigor's NodeLocator uses 1-based line / column; LSP uses 0-based.
-        node = locate_node(source: entry.bytes, root: parse_result.value,
-                           line: line + 1, character: character + 1)
+        node = locate_node(source: bytes_to_parse, root: parse_result.value,
+                           line: locate_at[0] + 1, character: locate_at[1] + 1)
         return nil if node.nil?
 
         case node
@@ -80,6 +81,71 @@ module Rigor
       end
 
       private
+
+      # Slice B4 — parse recovery. Returns `[bytes, [line, character]]`:
+      # the source to feed Prism plus the cursor position the
+      # caller should locate against. When the original buffer
+      # parses cleanly we return it verbatim; when it doesn't AND
+      # the cursor sits at a mid-edit `.` / `::` trigger, we
+      # splice a sentinel identifier into the source so Prism's
+      # AST captures the receiver / parent constant cleanly.
+      #
+      # The sentinel is a syntactically-unique identifier the
+      # NodeLocator can find without ambiguity. We choose lower /
+      # upper case based on whether the trigger was `.` (method
+      # name — lowercase identifier) or `::` (constant path —
+      # uppercase identifier).
+      # Sentinels need to be parseable as their target shape:
+      # method sentinel is a lower-snake identifier; constant
+      # sentinel MUST start with an uppercase letter (Ruby
+      # constants reject `_`-leading names — `Process::__Foo`
+      # parses as a method call, not a constant path).
+      SENTINEL_METHOD   = "__rigor_lsp_sentinel__"
+      SENTINEL_CONSTANT = "RigorLspSentinelXyz"
+      private_constant :SENTINEL_METHOD, :SENTINEL_CONSTANT
+
+      def parse_attempt_bytes(original_bytes, line, character)
+        # Cheap probe: try original first. Most editor sessions
+        # call completion in mid-keystroke where parse fails, but
+        # some land on a clean buffer (e.g. the trigger fires
+        # right after the user picked an item).
+        if Prism.parse(original_bytes).errors.empty?
+          [original_bytes, [line, character]]
+        else
+          patch_with_sentinel(original_bytes, line, character)
+        end
+      end
+
+      def patch_with_sentinel(original_bytes, line, character)
+        lines = original_bytes.lines
+        return [original_bytes, [line, character]] if line >= lines.size
+
+        target = lines[line]
+        prefix = target.byteslice(0, character) || ""
+        suffix_offset = [character, target.bytesize].min
+        suffix = target.byteslice(suffix_offset, target.bytesize - suffix_offset) || ""
+
+        sentinel = sentinel_for_prefix(prefix)
+        return [original_bytes, [line, character]] if sentinel.nil?
+
+        lines[line] = "#{prefix}#{sentinel}#{suffix}"
+        # The cursor stays at the same column — Prism's AST now
+        # has a node whose name occupies [character, character +
+        # sentinel.size). NodeLocator at that column returns the
+        # enclosing call / path.
+        [lines.join, [line, character]]
+      end
+
+      def sentinel_for_prefix(prefix)
+        # Strip trailing whitespace before checking for the
+        # trigger character; users often type the dot then a
+        # space mid-edit.
+        stripped = prefix.rstrip
+        return SENTINEL_METHOD if stripped.end_with?(".")
+        return SENTINEL_CONSTANT if stripped.end_with?("::")
+
+        nil
+      end
 
       def method_completion_for(call_node, root, path)
         receiver_node = call_node.receiver

@@ -22,7 +22,7 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
       expect(provider.provide(uri: "file:///nope.rb", line: 0, character: 0)).to be_nil
     end
 
-    it "returns nil when the buffer has parse errors (slice 8 handles recovery)" do
+    it "returns nil when the buffer has parse errors AND no sentinel patch applies" do
       buffer_table.open(uri: uri, bytes: "def broken\n", version: 1)
       expect(provider.provide(uri: uri, line: 0, character: 0)).to be_nil
     end
@@ -130,6 +130,28 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
 
         status = items.find { |i| i[:label] == "Status" }
         expect(status[:detail]).to eq("Process::Status")
+      end
+    end
+
+    describe "parse-recovery sentinel (slice B4)" do
+      it "completes after a trailing `.` even though the buffer doesn't parse" do
+        # `"hi".` is malformed Ruby; provider should patch with
+        # the method sentinel and return String's methods.
+        buffer_table.open(uri: uri, bytes: "\"hi\".\n", version: 1)
+        items = provider.provide(uri: uri, line: 0, character: 5)
+
+        expect(items).not_to be_nil
+        labels = items.map { |i| i[:label] }
+        expect(labels).to include("upcase", "downcase")
+      end
+
+      it "completes after a trailing `::` even though the buffer doesn't parse" do
+        buffer_table.open(uri: uri, bytes: "Process::\n", version: 1)
+        items = provider.provide(uri: uri, line: 0, character: 9)
+
+        expect(items).not_to be_nil
+        labels = items.map { |i| i[:label] }
+        expect(labels).to include("Status")
       end
     end
   end

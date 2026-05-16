@@ -1035,6 +1035,12 @@ module Rigor
             files << path
           elsif File.exist?(path)
             errors << path_error(path, "not a Ruby file (expected `.rb` or a directory)")
+          elsif @buffer && path == @buffer.logical_path
+            # Editor mode: the buffer's logical path is the "file"
+            # regardless of on-disk presence. `parse_source` will
+            # read bytes from the buffer's physical path. Common
+            # case: an LSP client editing a brand-new file.
+            files << path
           else
             errors << path_error(path, "no such file or directory")
           end

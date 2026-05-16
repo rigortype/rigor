@@ -138,4 +138,58 @@ RSpec.describe Rigor::LanguageServer::Server do
       expect([open_result, change_result, close_result]).to all(be_nil)
     end
   end
+
+  describe "publisher integration (slice 4)" do
+    let(:uri) { "file:///abs/path/lib/foo.rb" }
+    let(:publisher) do
+      Class.new do
+        attr_reader :publish_calls, :empty_calls
+
+        def initialize
+          @publish_calls = []
+          @empty_calls = []
+        end
+
+        def publish_for(uri)
+          @publish_calls << uri
+        end
+
+        def publish_empty(uri)
+          @empty_calls << uri
+        end
+      end.new
+    end
+    let(:server) { described_class.new(publisher: publisher) }
+
+    before { server.dispatch("initialize", {}) }
+
+    it "calls publish_for after didOpen" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x" }
+                      })
+
+      expect(publisher.publish_calls).to eq([uri])
+    end
+
+    it "calls publish_for after didChange" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x" }
+                      })
+      server.dispatch("textDocument/didChange", {
+                        textDocument: { uri: uri, version: 2 },
+                        contentChanges: [{ text: "y" }]
+                      })
+
+      expect(publisher.publish_calls).to eq([uri, uri])
+    end
+
+    it "calls publish_empty after didClose to clear inline markers" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x" }
+                      })
+      server.dispatch("textDocument/didClose", { textDocument: { uri: uri } })
+
+      expect(publisher.empty_calls).to eq([uri])
+    end
+  end
 end

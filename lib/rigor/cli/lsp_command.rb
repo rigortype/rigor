@@ -32,20 +32,31 @@ module Rigor
         end
 
         require_relative "../language_server"
+        require_relative "../configuration"
         require "language_server-protocol"
 
-        # Slice 2 wires stdio JSON-RPC. STDIN is read frame-by-frame
-        # via the gem's `Io::Reader`; STDOUT is written via
-        # `Io::Writer` which auto-merges `jsonrpc: "2.0"` into every
-        # response. The Loop runs until either STDIN hits EOF (client
-        # closed the pipe) or the server reaches `:exited`. The
-        # process then exits with the server's recorded exit code
-        # (0 after a clean `shutdown`+`exit`, 1 otherwise — per the
-        # LSP `exit` contract).
-        server = LanguageServer::Server.new
+        # STDIN is read frame-by-frame via the gem's `Io::Reader`;
+        # STDOUT is written via `Io::Writer` which auto-merges
+        # `jsonrpc: "2.0"` into every response. The Loop runs until
+        # either STDIN hits EOF (client closed the pipe) or the
+        # server reaches `:exited`. The process then exits with the
+        # server's recorded exit code (0 after a clean
+        # `shutdown`+`exit`, 1 otherwise — per the LSP `exit`
+        # contract).
+        writer = ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout)
+        configuration = Configuration.load(options.fetch(:config))
+        # The same BufferTable instance is threaded to both Server
+        # (for didOpen / didChange / didClose writes) and Publisher
+        # (for read-by-URI when emitting diagnostics) so they share
+        # one source of truth.
+        buffer_table = LanguageServer::BufferTable.new
+        publisher = LanguageServer::DiagnosticPublisher.new(
+          writer: writer, configuration: configuration, buffer_table: buffer_table
+        )
+        server = LanguageServer::Server.new(buffer_table: buffer_table, publisher: publisher)
         loop_runner = LanguageServer::Loop.new(
           reader: ::LanguageServer::Protocol::Transport::Io::Reader.new($stdin),
-          writer: ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout),
+          writer: writer,
           server: server
         )
         loop_runner.run

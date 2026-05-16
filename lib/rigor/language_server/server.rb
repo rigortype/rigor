@@ -40,12 +40,24 @@ module Rigor
       # skips real work.
       PRE_INITIALIZE_METHODS = %w[initialize shutdown exit].freeze
 
-      attr_reader :state, :exit_code, :buffer_table
+      attr_reader :state, :exit_code, :buffer_table, :publisher
 
-      def initialize
+      # @param buffer_table [Rigor::LanguageServer::BufferTable]
+      #   per-session virtual file table. The default builds a
+      #   fresh empty table; the CLI passes the same instance
+      #   threaded to the publisher so both read from one source
+      #   of truth.
+      # @param publisher [Rigor::LanguageServer::DiagnosticPublisher, nil]
+      #   when present, the `didOpen` / `didChange` handlers call
+      #   `publisher.publish_for(uri)` after updating the buffer
+      #   table so a `textDocument/publishDiagnostics` notification
+      #   is pushed to the client. Nil is the slice 1-3 behaviour:
+      #   the table is maintained but no diagnostics fire.
+      def initialize(buffer_table: BufferTable.new, publisher: nil)
         @state = :uninitialized
         @exit_code = nil
-        @buffer_table = BufferTable.new
+        @buffer_table = buffer_table
+        @publisher = publisher
       end
 
       # @return [Boolean] true once the client has called `exit` and
@@ -161,14 +173,17 @@ module Rigor
 
       # textDocument/didOpen notification. Per LSP spec § the
       # `textDocument` payload carries `uri`, `languageId`,
-      # `version`, and the full initial `text`.
+      # `version`, and the full initial `text`. Triggers a
+      # `publishDiagnostics` push when a publisher is wired.
       def handle_did_open(params)
         doc = params.fetch(:textDocument)
+        uri = doc.fetch(:uri)
         @buffer_table.open(
-          uri: doc.fetch(:uri),
+          uri: uri,
           bytes: doc.fetch(:text),
           version: doc.fetch(:version)
         )
+        @publisher&.publish_for(uri)
         nil
       end
 
@@ -176,23 +191,32 @@ module Rigor
       # entry carries only `{ text: }`; the LAST entry is the new
       # full document text. Per LSP spec § "FULL sync" the array
       # MUST be exactly one entry in practice — we still take
-      # `.last` defensively for clients that pad.
+      # `.last` defensively for clients that pad. Triggers
+      # `publishDiagnostics` afterwards.
       def handle_did_change(params)
         doc = params.fetch(:textDocument)
         changes = params.fetch(:contentChanges)
         return nil if changes.empty?
 
+        uri = doc.fetch(:uri)
         @buffer_table.change(
-          uri: doc.fetch(:uri),
+          uri: uri,
           bytes: changes.last.fetch(:text),
           version: doc.fetch(:version)
         )
+        @publisher&.publish_for(uri)
         nil
       end
 
+      # textDocument/didClose. Drops the buffer table entry AND
+      # publishes an empty diagnostic set so clients clear inline
+      # markers — per LSP spec § "publishDiagnostics" the standard
+      # way to indicate "no diagnostics remain for this URI".
       def handle_did_close(params)
         doc = params.fetch(:textDocument)
-        @buffer_table.close(uri: doc.fetch(:uri))
+        uri = doc.fetch(:uri)
+        @buffer_table.close(uri: uri)
+        @publisher&.publish_empty(uri)
         nil
       end
 

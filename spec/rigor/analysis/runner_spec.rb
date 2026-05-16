@@ -2265,6 +2265,32 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    it "analyzes the buffer when its logical path doesn't exist on disk (LSP new-file case)" do
+      Dir.mktmpdir("rigor-buffer-binding-phantom-") do |tmpdir|
+        Dir.chdir(tmpdir) do
+          # Logical path doesn't exist on disk — user is editing a
+          # brand-new file via LSP.
+          logical = File.join(tmpdir, "lib", "fresh.rb")
+          physical = File.join(tmpdir, "buffer.rb")
+          File.write(physical, "def broken\n")
+
+          configuration = Rigor::Configuration.new("paths" => [])
+          binding = Rigor::Analysis::BufferBinding.new(
+            logical_path: logical, physical_path: physical
+          )
+          result = described_class.new(
+            configuration: configuration, cache_store: nil, buffer: binding
+          ).run([logical])
+
+          paths = result.diagnostics.map(&:path).uniq
+          # The buffer's parse error surfaces under the logical
+          # path — NOT as a "no such file" diagnostic.
+          expect(paths).to include(logical)
+          expect(result.diagnostics.map(&:message)).not_to include(/no such file/)
+        end
+      end
+    end
+
     it "analyzes the buffer even when --instead-of is not under any paths: directory" do
       Dir.mktmpdir("rigor-buffer-binding-outside-paths-") do |tmpdir|
         Dir.chdir(tmpdir) do

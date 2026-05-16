@@ -2,23 +2,26 @@
 
 require "prism"
 
+require_relative "return_type_heuristic"
+
 module Rigor
   module Analysis
     module DependencySourceInference
       # Walks a resolved gem's `roots:` and collects the
-      # `(class_name, method_name) → :instance | :singleton`
-      # method catalog. The walker is the source of facts the
-      # dispatcher tier (slice 2b-ii) consults to recognise a
+      # `(class_name, method_name) → CatalogEntry(kind,
+      # return_type)` method catalog. The walker is the source
+      # of facts the dispatcher tier consults to recognise a
       # method as defined by an opt-in gem and contribute a
-      # `Type::Dynamic` return at the call site.
+      # `Type::Dynamic`-wrapped return at the call site.
       #
-      # Slice 2b-i intentionally collects only the catalog, not
-      # the inferred return type. The dispatcher tier returns
-      # `Dynamic[top]` on a hit until slice 2b-ii wires return-
-      # type inference; the visible payoff today is removing the
-      # `call.undefined-method` diagnostic for opt-in gem methods
-      # at receivers Rigor knows by `Nominal[T]` (typically
-      # because the user authored an RBS skeleton).
+      # The dispatcher tier wraps every walker-contributed return
+      # in `Dynamic[T]` per ADR-10's gem-boundary contract. When
+      # the heuristic ({ReturnTypeHeuristic}) recognises the
+      # method body's tail expression, the dispatcher uses the
+      # heuristic's static facet; otherwise it falls back to
+      # `Dynamic[top]` (the pre-heuristic behaviour). The
+      # heuristic is intentionally narrow — only literal-tail
+      # method bodies fold; everything else degrades silently.
       #
       # Hard exclusions are NOT user-configurable, per ADR-10
       # § "Hard exclusions": top-level `spec/`, `test/`, `bin/`,
@@ -43,6 +46,19 @@ module Rigor
         # naming the affected gem(s).
         class Outcome < Data.define(:catalog, :truncated)
           def truncated? = truncated
+        end
+
+        # Per-method catalog entry. `kind` is `:instance` or
+        # `:singleton`; `return_type` is the
+        # {ReturnTypeHeuristic}-extracted static facet (a
+        # `Rigor::Type::*`) or `nil` when the heuristic declined.
+        # The dispatcher wraps a non-nil `return_type` in
+        # `Dynamic[T]`; a `nil` `return_type` falls back to
+        # `Dynamic[top]`.
+        class CatalogEntry < Data.define(:kind, :return_type)
+          def initialize(kind:, return_type: nil)
+            super
+          end
         end
 
         # Sentinel for "no cap" — used by callers that don't
@@ -175,7 +191,11 @@ module Rigor
 
           class_name = qualified_prefix.join("::")
           kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
-          accumulator[[class_name, node.name]] ||= kind
+          key = [class_name, node.name]
+          return if accumulator.key?(key) # first walk wins
+
+          return_type = ReturnTypeHeuristic.extract(node)
+          accumulator[key] = CatalogEntry.new(kind: kind, return_type: return_type)
         end
 
         # Resolves a `Prism::ConstantPathNode` /

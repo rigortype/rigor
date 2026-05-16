@@ -350,8 +350,8 @@ module Rigor
         # inference must not contribute behind their backs.
         return nil if plugin_owns_receiver?(class_name, environment)
 
-        contribution_kind = index.contribution_for(class_name: class_name, method_name: method_name)
-        return Type::Combinator.untyped if contribution_kind
+        contribution = index.contribution_for(class_name: class_name, method_name: method_name)
+        return dependency_source_return_type(contribution) if contribution
 
         # ADR-10 5b — β budget semantics. On a catalog miss,
         # if the receiver class belongs to a budget-exceeded
@@ -401,6 +401,17 @@ module Rigor
           gem_name: index.gem_for(class_name),
           rbs_display: rbs_display_for(rbs_result)
         )
+      end
+
+      # Maps a {DependencySourceInference::Walker::CatalogEntry}
+      # to the Type the dispatcher returns at the call site.
+      # When the heuristic recovered a static facet, wrap it in
+      # `Dynamic[T]` per ADR-10's gem-boundary contract;
+      # otherwise fall back to the pre-heuristic `Dynamic[top]`.
+      def dependency_source_return_type(contribution)
+        return Type::Combinator.untyped if contribution.return_type.nil?
+
+        Type::Combinator.dynamic(contribution.return_type)
       end
 
       # Composite preflight for {#record_boundary_cross_if_applicable}.

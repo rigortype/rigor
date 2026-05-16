@@ -36,8 +36,12 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
         catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
         expect(catalog).to eq(
-          ["Fake", :shout] => :instance,
-          ["Fake", :greet] => :singleton
+          ["Fake", :shout] => Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry.new(
+            kind: :instance, return_type: Rigor::Type::Combinator.nominal_of("String")
+          ),
+          ["Fake", :greet] => Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry.new(
+            kind: :singleton, return_type: Rigor::Type::Combinator.nominal_of("String")
+          )
         )
       end
     end
@@ -54,7 +58,8 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
 
         catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
-        expect(catalog).to eq(["Fake::Inner", :deep] => :instance)
+        entry = Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry.new(kind: :instance)
+        expect(catalog).to eq(["Fake::Inner", :deep] => entry)
       end
     end
 
@@ -70,7 +75,9 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
 
         catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
-        expect(catalog).to eq(["Fake", :from_meta] => :singleton)
+        expect(catalog).to eq(
+          ["Fake", :from_meta] => Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry.new(kind: :singleton)
+        )
       end
     end
 
@@ -91,7 +98,9 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
 
         catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
-        expect(catalog).to include(["Fake::Sub", :call] => :instance)
+        expect(catalog).to include(
+          ["Fake::Sub", :call] => Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry.new(kind: :instance)
+        )
       end
     end
 
@@ -102,7 +111,9 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Walker do
 
         catalog = walker.walk(gem_dir: gem_dir, roots: %w[lib]).catalog
 
-        expect(catalog).to include(["Good", :ok] => :instance)
+        expect(catalog).to include(
+          ["Good", :ok] => Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry.new(kind: :instance)
+        )
         # The broken file produces no entries — its contents are silently dropped.
         expect(catalog.keys.flat_map(&:first)).not_to include("broken")
       end

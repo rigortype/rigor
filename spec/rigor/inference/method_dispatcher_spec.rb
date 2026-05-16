@@ -357,6 +357,65 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
 
         expect(result).to be_nil
       end
+
+      describe "ADR-10 return-type heuristic (post-floor enhancement)" do
+        # The Walker's ReturnTypeHeuristic populates the
+        # CatalogEntry's `return_type:` with a static facet for
+        # literal-tail method bodies; the dispatcher wraps that
+        # facet in `Dynamic[T]` per the gem-boundary contract
+        # instead of falling back to the pre-heuristic
+        # `Dynamic[top]`.
+        let(:catalog_entry_klass) { Rigor::Analysis::DependencySourceInference::Walker::CatalogEntry }
+
+        it "wraps a heuristic-supplied Constant<Integer> return into Dynamic[Constant<value>]" do
+          env = env_with_index(
+            ["FakeLib::Widget", :version] => catalog_entry_klass.new(
+              kind: :instance,
+              return_type: Rigor::Type::Combinator.constant_of(42)
+            )
+          )
+
+          result = described_class.dispatch(
+            receiver_type: Rigor::Type::Combinator.nominal_of("FakeLib::Widget"),
+            method_name: :version, arg_types: [], environment: env
+          )
+
+          expect(result).to eq(
+            Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.constant_of(42))
+          )
+        end
+
+        it "wraps a heuristic-supplied Nominal[String] return into Dynamic[Nominal[String]]" do
+          env = env_with_index(
+            ["FakeLib::Widget", :name] => catalog_entry_klass.new(
+              kind: :instance,
+              return_type: Rigor::Type::Combinator.nominal_of("String")
+            )
+          )
+
+          result = described_class.dispatch(
+            receiver_type: Rigor::Type::Combinator.nominal_of("FakeLib::Widget"),
+            method_name: :name, arg_types: [], environment: env
+          )
+
+          expect(result).to eq(
+            Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.nominal_of("String"))
+          )
+        end
+
+        it "falls back to Dynamic[top] when the catalog entry's return_type is nil" do
+          env = env_with_index(
+            ["FakeLib::Widget", :unknown] => catalog_entry_klass.new(kind: :instance)
+          )
+
+          result = described_class.dispatch(
+            receiver_type: Rigor::Type::Combinator.nominal_of("FakeLib::Widget"),
+            method_name: :unknown, arg_types: [], environment: env
+          )
+
+          expect(result).to eq(Rigor::Type::Combinator.untyped)
+        end
+      end
     end
 
     describe "boundary-cross recording on RBS dispatch (ADR-10 slice 5c)" do

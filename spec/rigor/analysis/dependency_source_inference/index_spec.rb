@@ -92,8 +92,11 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Index do
       catalog = { ["Foo", :bar] => :instance, ["Foo", :baz] => :singleton }
       index = described_class.new(method_catalog: catalog)
 
-      expect(index.contribution_for(class_name: "Foo", method_name: :bar)).to eq(:instance)
-      expect(index.contribution_for(class_name: "Foo", method_name: :baz)).to eq(:singleton)
+      # Walker::CatalogEntry is the post-normalization shape;
+      # bare-Symbol catalog values are accepted at construction
+      # and normalized into the same shape internally.
+      expect(index.contribution_for(class_name: "Foo", method_name: :bar).kind).to eq(:instance)
+      expect(index.contribution_for(class_name: "Foo", method_name: :baz).kind).to eq(:singleton)
       expect(index.contribution_for(class_name: "Foo", method_name: :missing)).to be_nil
     end
   end

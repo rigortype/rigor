@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **ADR-10 walker — heuristic return-type extraction (Phase B floor).** Opt-in gem-source inference's walker (`Rigor::Analysis::DependencySourceInference::Walker`) now extracts a heuristic return type from each method body's tail expression and records it on the per-method `CatalogEntry`. The dispatcher consumes the heuristic via `Type::Combinator.dynamic(static_facet)`: a `def foo; "hello"; end` in an opt-in gem now resolves `obj.foo` to `Dynamic[Nominal[String]]` instead of the pre-enhancement `Dynamic[Top]`, letting downstream chains (`obj.foo.bytesize`) make progress. The heuristic is **strict-floor**: literal scalar tails (`Integer` / `Float` / `Symbol` / `true` / `false` / `nil`) fold to `Constant<value>`; literal `String` tails fold to `Nominal[String]` (NOT `Constant<"x">` — string literals are mutable under `# frozen_string_literal: false`); literal `Array` / `Hash` tails fold to `Nominal[Array]` / `Nominal[Hash]` (element-type inference deferred); anything else (method calls, explicit `return`, `self`, ivar reads, …) returns `nil` and the dispatcher falls back to `Dynamic[Top]`. Walker `Outcome.catalog` value shape moved from bare `Symbol` (`:instance` / `:singleton`) to `Walker::CatalogEntry(kind:, return_type:)`; `DependencySourceInference::Index` normalizes legacy bare-Symbol callers at construction so existing in-tree specs continue to work unchanged. ADR-10 § "Open questions — `mode: :full` should be allowed at all" stays answered (`:full` still supported), and the per-gem budget contract is unchanged. Lazy / on-demand return-type inference (option C from the design discussion) stays demand-driven for a later slice. Spec coverage: 13 `ReturnTypeHeuristic` unit cases (literal scalars / String → Nominal / Array→Nominal / Hash→Nominal / multi-statement tail / non-literal tails / empty body / explicit return / self / ivar); 3 `MethodDispatcher` integration cases (Constant<Integer> wrap / Nominal[String] wrap / nil-heuristic fallback).
+
 ## [0.1.5] - 2026-05-16
 
 ### Added

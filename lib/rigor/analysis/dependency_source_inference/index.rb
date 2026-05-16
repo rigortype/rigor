@@ -54,13 +54,26 @@ module Rigor
         )
           @resolved_gems = resolved_gems.freeze
           @unresolvable = unresolvable.freeze
-          @method_catalog = method_catalog.freeze
+          @method_catalog = normalize_catalog(method_catalog).freeze
           @budget_exceeded = budget_exceeded.freeze
           @class_to_gem = class_to_gem.freeze
           @budget_overrun_strategy = budget_overrun_strategy
           @gem_modes = gem_modes.freeze
           freeze
         end
+
+        # Accepts both the post-heuristic `CatalogEntry` shape
+        # (the Walker's current output) and the legacy bare-Symbol
+        # `:instance` / `:singleton` shape (older tests + earlier
+        # in-tree callers). Symbol values are wrapped into
+        # `CatalogEntry(kind: value, return_type: nil)` so the
+        # downstream dispatcher always sees a single shape.
+        def normalize_catalog(catalog)
+          catalog.transform_values do |value|
+            value.is_a?(Symbol) ? Walker::CatalogEntry.new(kind: value) : value
+          end
+        end
+        private :normalize_catalog
 
         # @return [String, nil] the gem that owns `class_name`
         #   (first-write-wins); `nil` when the class isn't in

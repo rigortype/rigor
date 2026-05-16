@@ -287,7 +287,10 @@ RSpec.describe Rigor::Analysis::Runner do
       runner = described_class.new(configuration: configuration, cache_store: nil)
       walker = Rigor::Analysis::DependencySourceInference::Walker
       allow(walker).to receive(:walk).and_return(
-        walker::Outcome.new(catalog: { ["Prism::FakeNode", :foo] => :instance }.freeze, truncated: true)
+        walker::Outcome.new(
+          catalog: { ["Prism::FakeNode", :foo] => walker::CatalogEntry.new(kind: :instance) }.freeze,
+          truncated: true
+        )
       )
 
       result = runner.run

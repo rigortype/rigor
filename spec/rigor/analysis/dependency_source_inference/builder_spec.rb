@@ -49,8 +49,8 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
 
       index = described_class.build(dependencies({ "gem" => "alpha" }, { "gem" => "beta" }))
 
-      expect(index.contribution_for(class_name: "Alpha", method_name: :one)).to eq(:instance)
-      expect(index.contribution_for(class_name: "Beta", method_name: :two)).to eq(:singleton)
+      expect(index.contribution_for(class_name: "Alpha", method_name: :one).kind).to eq(:instance)
+      expect(index.contribution_for(class_name: "Beta", method_name: :two).kind).to eq(:singleton)
     end
 
     it "records the class-to-gem reverse index (slice 5b β budget)" do
@@ -113,6 +113,10 @@ RSpec.describe Rigor::Analysis::DependencySourceInference::Builder do
           gem_dir: gem_dir, mode: :when_missing, roots: %w[lib]
         )
       )
+      # The Index normalizes legacy bare-Symbol catalog values
+      # (`=> :instance`) into `CatalogEntry(kind:)` at
+      # construction, so spec stubs may pass either shape. We
+      # keep the helper's API on bare Symbols for legibility.
       outcome = walker::Outcome.new(catalog: method_catalog, truncated: truncated)
       allow(walker).to receive(:walk).with(
         gem_dir: gem_dir, roots: %w[lib], budget: anything

@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "uri"
+require_relative "hover_renderer"
 require_relative "../environment"
 require_relative "../scope"
 require_relative "../source/node_locator"
@@ -21,9 +22,10 @@ module Rigor
     #   for ASCII source (UTF-16 conversion is queued, see design
     #   doc § "Open questions").
     class HoverProvider
-      def initialize(buffer_table:, project_context:)
+      def initialize(buffer_table:, project_context:, renderer: HoverRenderer.new)
         @buffer_table = buffer_table
         @project_context = project_context
+        @renderer = renderer
       end
 
       # @return [Hash, nil] an LSP `Hover` payload or nil when no
@@ -50,7 +52,7 @@ module Rigor
         node_scope = index[node]
         type = node_scope.type_of(node)
 
-        build_hover(type: type, node: node)
+        @renderer.render(node: node, type: type, node_scope_lookup: index)
       end
 
       private
@@ -66,21 +68,6 @@ module Rigor
         # ProjectContext so hovers don't pay the RBS-load tax on
         # every cursor stop.
         Scope.empty(environment: @project_context.environment)
-      end
-
-      # Builds the LSP `Hover` payload. `contents` is `MarkupContent`
-      # with `kind: "markdown"` containing the inferred type and its
-      # RBS-erased form, formatted as a fenced code block so editors
-      # syntax-highlight it. Mirrors the human-readable shape of
-      # `rigor type-of`'s text output.
-      def build_hover(type:, node:)
-        body = +"```ruby\n"
-        body << "type:   #{type.describe}\n"
-        body << "erased: #{type.erase_to_rbs}\n"
-        body << "node:   #{node.class}\n"
-        body << "```"
-
-        { contents: { kind: "markdown", value: body } }
       end
     end
   end

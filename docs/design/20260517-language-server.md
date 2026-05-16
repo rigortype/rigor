@@ -31,7 +31,11 @@ this doc. This file binds the decisions.
 - **CLI surface: `rigor lsp` subcommand.** Same gem, same binary,
   same configuration discovery as `rigor check` / `rigor type-of`.
   No separate gem to publish today; the v1 LSP is part of the
-  rigor gem itself.
+  rigor gem itself. The packaging shape (bundled vs.
+  standalone `rigor-lsp` gem vs. `ruby-lsp-rigor` addon) is
+  decided in [`ADR-19`](../adr/19-language-server-packaging.md)
+  along with the trigger conditions that would re-open the
+  question.
 - **Transport: stdio JSON-RPC.** No TCP / IPC / Unix socket in v1.
 
 ## Why architecture B beats A and C for Rigor

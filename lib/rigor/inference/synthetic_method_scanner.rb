@@ -60,13 +60,18 @@ module Rigor
       #   return types from published facts; without it, those
       #   emit rows fall back to their static `returns:` (or
       #   `"untyped"` → `Dynamic[Top]`).
+      # @param buffer          [Rigor::Analysis::BufferBinding, nil]
+      #   editor-mode buffer binding. When set, reads for the
+      #   logical path resolve to the buffer's physical path so
+      #   the pre-pass sees the in-flight bytes instead of the
+      #   on-disk copy.
       # @return [Rigor::Inference::SyntheticMethodIndex]
-      def scan(plugin_registry:, paths:, environment: nil, fact_store: nil)
+      def scan(plugin_registry:, paths:, environment: nil, fact_store: nil, buffer: nil)
         templates = collect_templates(plugin_registry)
         registries = collect_trait_registries(plugin_registry)
         return SyntheticMethodIndex::EMPTY if templates.empty? && registries.empty?
 
-        asts = parse_paths(paths)
+        asts = parse_paths(paths, buffer: buffer)
         hierarchy = build_hierarchy(asts)
         concern_index = build_concern_index(asts)
 
@@ -114,10 +119,11 @@ module Rigor
         end
       end
 
-      def parse_paths(paths)
+      def parse_paths(paths, buffer: nil)
         paths.to_h do |path|
-          source = File.read(path)
-          [path, Prism.parse(source).value]
+          physical = buffer ? buffer.resolve(path) : path
+          source = File.read(physical)
+          [path, Prism.parse(source, filepath: path).value]
         rescue StandardError
           [path, nil]
         end

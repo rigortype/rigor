@@ -2200,14 +2200,15 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
-    it "passes through non-logical paths unchanged so other files still parse from disk" do
-      Dir.mktmpdir("rigor-buffer-binding-pass-through-") do |tmpdir|
+    it "restricts per-file diagnostics to the buffer's logical path (single-file scope, slice 5)" do
+      Dir.mktmpdir("rigor-buffer-binding-scope-") do |tmpdir|
         Dir.chdir(tmpdir) do
           logical = File.join("lib", "foo.rb")
           other = File.join("lib", "bar.rb")
           FileUtils.mkdir_p("lib")
           File.write(logical, "x = 1\n")
-          # `other` has a parse error on disk — should surface unchanged.
+          # `other` would normally surface a parse error — but under
+          # editor mode it MUST NOT be analyzed.
           File.write(other, "def also_broken\n")
           physical = File.join(tmpdir, "buffer.rb")
           File.write(physical, "x = 1\n")
@@ -2220,9 +2221,40 @@ RSpec.describe Rigor::Analysis::Runner do
             configuration: configuration, cache_store: nil, buffer: binding
           ).run
 
-          paths = result.diagnostics.map(&:path)
-          expect(paths).to include(other)
+          paths = result.diagnostics.map(&:path).uniq
+          # `other` is NOT analyzed — its parse error stays silent.
+          expect(paths).not_to include(other)
+          # The buffer (clean) produces no diagnostics either.
           expect(paths).not_to include(physical)
+        end
+      end
+    end
+
+    it "analyzes the buffer even when --instead-of is not under any paths: directory" do
+      Dir.mktmpdir("rigor-buffer-binding-outside-paths-") do |tmpdir|
+        Dir.chdir(tmpdir) do
+          FileUtils.mkdir_p("app")
+          File.write(File.join("app", "real.rb"), "x = 1\n")
+          # Logical path is in lib/ — NOT under `paths: [app]`.
+          logical = File.join("lib", "foo.rb")
+          FileUtils.mkdir_p("lib")
+          File.write(logical, "x = 1\n")
+          physical = File.join(tmpdir, "buffer.rb")
+          File.write(physical, "def broken\n")
+
+          configuration = Rigor::Configuration.new("paths" => ["app"])
+          binding = Rigor::Analysis::BufferBinding.new(
+            logical_path: logical, physical_path: physical
+          )
+          result = described_class.new(
+            configuration: configuration, cache_store: nil, buffer: binding
+          ).run
+
+          paths = result.diagnostics.map(&:path).uniq
+          expect(paths).to include(logical)
+          # `app/real.rb` is not analyzed under editor mode even though
+          # it's in `paths:` — single-file scope wins.
+          expect(paths).not_to include(File.join("app", "real.rb"))
         end
       end
     end

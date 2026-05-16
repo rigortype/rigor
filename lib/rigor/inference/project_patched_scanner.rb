@@ -39,12 +39,17 @@ module Rigor
       #   each path exists (slice-1 `pre-eval.file-not-found`
       #   `:error` covers missing entries); the scanner does NOT
       #   re-check existence.
+      # @param buffer [Rigor::Analysis::BufferBinding, nil]
+      #   editor-mode buffer binding. When set, the scanner reads
+      #   the buffer's physical bytes if a pre-eval entry matches
+      #   the logical path, so users editing a monkey-patch file
+      #   see the in-flight version in their analysis.
       # @return [Result] the populated registry plus any
       #   per-file warnings.
-      def scan(paths)
+      def scan(paths, buffer: nil)
         entries = []
         diagnostics = []
-        paths.each { |path| scan_file(path, entries, diagnostics) }
+        paths.each { |path| scan_file(path, entries, diagnostics, buffer) }
         diagnostics.concat(duplicate_declaration_diagnostics(entries))
         Result.new(
           registry: ProjectPatchedMethods.new(entries: entries),
@@ -83,8 +88,14 @@ module Rigor
       end
       private_class_method :duplicate_declaration_diagnostics
 
-      def scan_file(path, entries, diagnostics)
-        parse_result = Prism.parse_file(path)
+      def scan_file(path, entries, diagnostics, buffer = nil)
+        physical = buffer ? buffer.resolve(path) : path
+        parse_result =
+          if physical == path
+            Prism.parse_file(path)
+          else
+            Prism.parse(File.read(physical), filepath: path)
+          end
         unless parse_result.errors.empty?
           diagnostics << parse_error_diagnostic(path, parse_result.errors)
           return

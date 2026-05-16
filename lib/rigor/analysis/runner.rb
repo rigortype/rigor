@@ -119,7 +119,8 @@ module Rigor
           plugin_registry: @plugin_registry,
           paths: expansion.fetch(:files),
           environment: nil,
-          fact_store: shared_fact_store
+          fact_store: shared_fact_store,
+          buffer: @buffer
         )
         # ADR-17 slice 2 — pre-eval pre-pass. Built once per run
         # from the `pre_eval:` entries that exist on disk
@@ -130,12 +131,12 @@ module Rigor
         # and dependency-source inference so project-side
         # patches resolve cross-file.
         existing_pre_eval = @configuration.pre_eval.select { |path| File.file?(path) }
-        pre_eval_outcome = Inference::ProjectPatchedScanner.scan(existing_pre_eval)
+        pre_eval_outcome = Inference::ProjectPatchedScanner.scan(existing_pre_eval, buffer: @buffer)
         @project_patched_methods = pre_eval_outcome.registry
         @pre_eval_diagnostics_from_scanner = pre_eval_outcome.diagnostics
 
         diagnostics = pre_file_diagnostics(expansion)
-        diagnostics += analyze_files(expansion.fetch(:files))
+        diagnostics += analyze_files(target_files(expansion))
         diagnostics += rbs_extended_reporter_diagnostics
         diagnostics += boundary_cross_diagnostics
 
@@ -280,6 +281,27 @@ module Rigor
       end
 
       private
+
+      # Editor mode § "Scope choice — option A". Under
+      # `buffer:` non-nil the per-file analysis emits diagnostics
+      # ONLY for the buffer's logical path; the rest of `paths:`
+      # is consumed by the project-wide pre-passes (synthetic
+      # methods, project-patched methods, plugin facts) but
+      # contributes no per-file diagnostics. This is the v1 cut
+      # before a per-file diagnostic cache exists; option B (full
+      # project + incremental cache) is queued.
+      #
+      # The buffer's logical path is added to the file list even
+      # if it's not under `paths:` — per design § "Failure
+      # envelope": "--instead-of=Y with Y not under any paths:
+      # directory → treated as a valid logical identity for the
+      # buffer".
+      def target_files(expansion)
+        files = expansion.fetch(:files)
+        return files if @buffer.nil?
+
+        [@buffer.logical_path]
+      end
 
       # Editor mode (`buffer:` non-nil) auto-flips the cache store
       # to `read_only: true` so multiple debounced editor invocations

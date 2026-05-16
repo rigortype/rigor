@@ -15,7 +15,7 @@ v0.1.5 themes (frozen on tag, full detail in CHANGELOG):
 
 ## Where the Work Resumes
 
-The next cycle (`v0.1.6`) is accumulating on `master` (release pending). Slices landed so far (commits `3c99eed` → `30bc221`):
+The next cycle (`v0.1.6`) is accumulating on `master` (release pending). Slices landed so far (commits `3c99eed` → `9dd28a3`):
 
 - **O4 Layer 3 slice 3** (graceful-degradation coverage diagnostic). ✓
 - **`is_a?(C)` lexical-nesting constant resolution**. ✓
@@ -24,6 +24,7 @@ The next cycle (`v0.1.6`) is accumulating on `master` (release pending). Slices 
 - **[ADR-12] dry-rb packaging** accepted + `rigor-dry-types` slices 1+2+3 (Tier A foundation; canonical + nested categories + user-authored compositions; 25th worked plugin). ✓
 - **[ADR-17] monkey-patch pre-evaluation** accepted + slices 1+2+3a+4 (`pre_eval:` plumbing + `ProjectPatchedMethods` registry + dispatcher tier + heuristic return-type + duplicate-declaration `:info` + glob support). ✓
 - **[ADR-18] substrate per-call-site return-type DSL** proposed + slices 1+2+3+5 (`HeredocTemplate::Emit#returns_from_arg` + scanner extraction + fact-store lookup + `rigor-dry-struct` consumer manifest update — first worked end-to-end precision uplift through cross-plugin facts). ✓
+- **Editor mode v1** — `rigor check` / `rigor type-of` gain paired `--tmp-file` / `--instead-of` flags + `BufferBinding` value object threaded through Runner / WorkerSession / pre-passes + `Cache::Store(read_only: true)` for concurrent-safe editor invocations + single-file scope (only the buffer produces per-file diagnostics) + Ractor pool auto-degrade to sequential. Seven-slice cut, design at [`docs/design/20260516-editor-mode.md`](design/20260516-editor-mode.md). Out-of-scope follow-ups (per-file diagnostic cache for "option B", project-context snapshot cache, multi-buffer, `--also`, LSP daemon) queued in ROADMAP § "Editor / IDE integration". ✓
 
 Natural entries for the remaining work (post v0.1.6 in-flight slices):
 
@@ -36,6 +37,7 @@ Natural entries for the remaining work (post v0.1.6 in-flight slices):
 7. **`rigor-graphql`** (last Tier 3 ecosystem plugin). GraphQL schema DSL parsing is non-trivial; author when there is concrete user demand.
 8. **O4 Layer 3 per-gem-version cache (slice 3 architecture)** — DEFERRED until measured pain. See "Open Engineering Items" below for the Ruby::Box future-direction context.
 9. **ADR-16 demand-driven follow-ups** — (a) **slice 5b** Tier D engine integration (matched external files run with `self_type` narrowed + `bound_ivars` pre-bound); (b) full ADR-13 `Plugin::TypeNodeResolver` chain wiring for `returns:` strings (unlocks utility-type-shaped substrate returns like `Array[String]` / `Pick<T, K>`). Both pinned in ADR-16 § Implementation slicing footnotes; awaiting concrete plugin-author cases.
+10. **Editor mode follow-ups** — see [`docs/design/20260516-editor-mode.md`](design/20260516-editor-mode.md) § "Out of scope for v1". The fast next step is the **project-context snapshot cache** so pre-passes (synthetic-method scanner, project-patched scanner, dependency-source walker) skip their walks when only the buffered file changed; the larger lever is the **per-file diagnostic cache** that upgrades editor mode from option A (single-file scope) to option B (PHPStan-shape: project scope with one substituted file + incremental diagnostic cache). Both demand-driven; first concrete editor-extension consumer of the v1 CLI surface naturally surfaces the priority.
 
 ## Open Engineering Items
 

@@ -80,6 +80,9 @@ module Rigor
           document_symbol_provider: LanguageServer::DocumentSymbolProvider.new(
             buffer_table: buffer_table, project_context: project_context
           ),
+          completion_provider: LanguageServer::CompletionProvider.new(
+            buffer_table: buffer_table, project_context: project_context
+          ),
           project_context: project_context
         )
         loop_runner = LanguageServer::Loop.new(

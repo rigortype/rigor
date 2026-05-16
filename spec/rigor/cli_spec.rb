@@ -123,6 +123,47 @@ RSpec.describe Rigor::CLI do
       expect(err).to include("file not found")
     end
 
+    describe "editor mode (--tmp-file / --instead-of)" do
+      it "rejects --tmp-file alone" do
+        status, _out, err = run_cli("type-of", "--tmp-file=/nonexistent", "lib/foo.rb:1:1")
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(err).to include("--tmp-file and --instead-of must appear together")
+      end
+
+      it "rejects a missing --tmp-file" do
+        status, _out, err = run_cli(
+          "type-of",
+          "--tmp-file=#{File.join(tmpdir, 'ghost.rb')}",
+          "--instead-of=lib/foo.rb",
+          "lib/foo.rb:1:1"
+        )
+
+        expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+        expect(err).to include("no such file or not readable")
+      end
+
+      it "reads bytes from --tmp-file when probing the logical path" do
+        # Logical path has a different value at (1,1) than the buffer.
+        # On disk: ":on_disk_sym"; in buffer: "42".
+        logical = write_fixture("a.rb", ":on_disk_sym\n")
+        buffer = write_fixture("buf.rb", "42\n")
+
+        status, out, _err = run_cli(
+          "type-of",
+          "--tmp-file=#{buffer}",
+          "--instead-of=#{logical}",
+          "#{logical}:1:1"
+        )
+
+        expect(status).to eq(0)
+        # The probe must reflect the BUFFER's bytes (42), not the
+        # on-disk symbol literal.
+        expect(out).to include("Prism::IntegerNode")
+        expect(out).to include("type:    42")
+      end
+    end
+
     it "reports parse errors and exits 1" do
       path = write_fixture("a.rb", "def\n")
 

@@ -3,6 +3,7 @@
 require "optionparser"
 require "prism"
 
+require_relative "../analysis/buffer_binding"
 require_relative "../configuration"
 require_relative "../environment"
 require_relative "../scope"
@@ -38,35 +39,73 @@ module Rigor
       # @return [Integer] CLI exit status.
       def run
         options = parse_options
+        buffer = resolve_buffer_binding(options)
+        return CLI::EXIT_USAGE if buffer == :usage_error
 
         target = parse_position_argument(@argv)
         return CLI::EXIT_USAGE if target.nil?
 
-        execute(target: target, options: options)
+        execute(target: target, options: options, buffer: buffer)
       end
 
       private
 
       def parse_options
-        options = { format: "text", trace: false, config: nil }
+        options = { format: "text", trace: false, config: nil, tmp_file: nil, instead_of: nil }
 
         parser = OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
           opts.on("--trace", "Record fail-soft fallbacks via FallbackTracer") { options[:trace] = true }
           opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+          opts.on("--tmp-file=PATH",
+                  "Editor mode: read source bytes from PATH instead of --instead-of (paired)") do |value|
+            options[:tmp_file] = value
+          end
+          opts.on("--instead-of=PATH",
+                  "Editor mode: the logical project path the buffer represents (paired with --tmp-file)") do |value|
+            options[:instead_of] = value
+          end
         end
         parser.parse!(@argv)
 
         options
       end
 
-      def execute(target:, options:)
+      # Mirrors `Rigor::CLI#resolve_buffer_binding` (the `check`
+      # path). Returns nil / BufferBinding / :usage_error. The
+      # symbol return path lets the caller translate to
+      # `CLI::EXIT_USAGE` without raising.
+      def resolve_buffer_binding(options)
+        tmp = options[:tmp_file]
+        instead = options[:instead_of]
+        return nil if tmp.nil? && instead.nil?
+
+        if tmp.nil? || instead.nil?
+          @err.puts("--tmp-file and --instead-of must appear together")
+          return :usage_error
+        end
+
+        unless File.file?(tmp)
+          @err.puts("--tmp-file #{tmp.inspect}: no such file or not readable")
+          return :usage_error
+        end
+
+        Rigor::Analysis::BufferBinding.new(logical_path: instead, physical_path: tmp)
+      end
+
+      def execute(target:, options:, buffer: nil) # rubocop:disable Metrics/MethodLength
         file, line, column = target
-        return 1 unless file_exists?(file)
+        # Under editor mode the logical `file` may not exist on disk
+        # (user editing a new file); the runtime check is only that
+        # the BUFFER is readable, which `resolve_buffer_binding`
+        # has already enforced. For non-editor mode `file` must
+        # exist.
+        physical = buffer ? buffer.resolve(file) : file
+        return 1 unless file_exists?(buffer ? physical : file)
 
         configuration = Configuration.load(options.fetch(:config))
-        source = File.read(file)
+        source = File.read(physical)
         parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
         return 1 if parse_errors?(parse_result, file)
 

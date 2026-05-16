@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../version"
+require_relative "buffer_table"
 
 module Rigor
   module LanguageServer
@@ -39,11 +40,12 @@ module Rigor
       # skips real work.
       PRE_INITIALIZE_METHODS = %w[initialize shutdown exit].freeze
 
-      attr_reader :state, :exit_code
+      attr_reader :state, :exit_code, :buffer_table
 
       def initialize
         @state = :uninitialized
         @exit_code = nil
+        @buffer_table = BufferTable.new
       end
 
       # @return [Boolean] true once the client has called `exit` and
@@ -66,10 +68,13 @@ module Rigor
         return state_violation_response(method) unless method_allowed_in_state?(method)
 
         case method
-        when "initialize"       then handle_initialize(params)
-        when "initialized"      then handle_initialized
-        when "shutdown"         then handle_shutdown
-        when "exit"             then handle_exit
+        when "initialize"             then handle_initialize(params)
+        when "initialized"            then handle_initialized
+        when "shutdown"               then handle_shutdown
+        when "exit"                   then handle_exit
+        when "textDocument/didOpen"   then handle_did_open(params)
+        when "textDocument/didChange" then handle_did_change(params)
+        when "textDocument/didClose"  then handle_did_close(params)
         else
           method_not_found(method)
         end
@@ -109,17 +114,29 @@ module Rigor
       end
 
       # Per LSP spec § "Server lifecycle / initialize": the server
-      # responds with its capabilities. Slice 1 advertises NOTHING
-      # — every cap is added in the slice that wires the handler.
-      # Clients that ask for unadvertised methods get
-      # `MethodNotFound`.
+      # responds with its capabilities. Each later slice extends
+      # `advertised_capabilities` with the handler it wires;
+      # clients asking for unadvertised methods get `MethodNotFound`.
       def handle_initialize(_params)
         @state = :initialized
         {
-          capabilities: {},
+          capabilities: advertised_capabilities,
           serverInfo: {
             name: "rigor-lsp",
             version: Rigor::VERSION
+          }
+        }
+      end
+
+      # `TextDocumentSyncKind::Full = 1`. Slice 10 (deferred)
+      # promotes to `Incremental = 2`.
+      TEXT_DOCUMENT_SYNC_FULL = 1
+
+      def advertised_capabilities
+        {
+          textDocumentSync: {
+            openClose: true,
+            change: TEXT_DOCUMENT_SYNC_FULL
           }
         }
       end
@@ -139,6 +156,43 @@ module Rigor
       def handle_exit
         @exit_code = @state == :shutdown ? 0 : 1
         @state = :exited
+        nil
+      end
+
+      # textDocument/didOpen notification. Per LSP spec § the
+      # `textDocument` payload carries `uri`, `languageId`,
+      # `version`, and the full initial `text`.
+      def handle_did_open(params)
+        doc = params.fetch(:textDocument)
+        @buffer_table.open(
+          uri: doc.fetch(:uri),
+          bytes: doc.fetch(:text),
+          version: doc.fetch(:version)
+        )
+        nil
+      end
+
+      # textDocument/didChange under FULL sync. Each `contentChanges`
+      # entry carries only `{ text: }`; the LAST entry is the new
+      # full document text. Per LSP spec § "FULL sync" the array
+      # MUST be exactly one entry in practice — we still take
+      # `.last` defensively for clients that pad.
+      def handle_did_change(params)
+        doc = params.fetch(:textDocument)
+        changes = params.fetch(:contentChanges)
+        return nil if changes.empty?
+
+        @buffer_table.change(
+          uri: doc.fetch(:uri),
+          bytes: changes.last.fetch(:text),
+          version: doc.fetch(:version)
+        )
+        nil
+      end
+
+      def handle_did_close(params)
+        doc = params.fetch(:textDocument)
+        @buffer_table.close(uri: doc.fetch(:uri))
         nil
       end
 

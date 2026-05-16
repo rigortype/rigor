@@ -12,5 +12,6 @@ module Rigor
   end
 end
 
+require_relative "language_server/buffer_table"
 require_relative "language_server/server"
 require_relative "language_server/loop"

@@ -12,10 +12,9 @@ RSpec.describe Rigor::LanguageServer::Server do
       result = server.dispatch("initialize", { processId: 0, rootUri: nil, capabilities: {} })
 
       expect(server.state).to eq(:initialized)
-      expect(result).to include(
-        capabilities: {},
-        serverInfo: { name: "rigor-lsp", version: Rigor::VERSION }
-      )
+      expect(result[:serverInfo]).to eq(name: "rigor-lsp", version: Rigor::VERSION)
+      # Slice 3 advertises textDocumentSync (FULL).
+      expect(result[:capabilities][:textDocumentSync]).to eq(openClose: true, change: 1)
     end
 
     it "accepts `shutdown` after `initialize` and transitions to :shutdown" do
@@ -87,6 +86,56 @@ RSpec.describe Rigor::LanguageServer::Server do
 
       expect(server.dispatch("initialized", {})).to be_nil
       expect(server.state).to eq(:initialized)
+    end
+  end
+
+  describe "textDocument sync (slice 3)" do
+    let(:uri) { "file:///abs/path/lib/foo.rb" }
+
+    before { server.dispatch("initialize", {}) }
+
+    it "didOpen populates the BufferTable" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x = 1\n" }
+                      })
+
+      expect(server.buffer_table[uri].bytes).to eq("x = 1\n")
+      expect(server.buffer_table[uri].version).to eq(1)
+    end
+
+    it "didChange replaces bytes under FULL sync" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: "old\n" }
+                      })
+      server.dispatch("textDocument/didChange", {
+                        textDocument: { uri: uri, version: 2 },
+                        contentChanges: [{ text: "new\n" }]
+                      })
+
+      expect(server.buffer_table[uri].bytes).to eq("new\n")
+      expect(server.buffer_table[uri].version).to eq(2)
+    end
+
+    it "didClose drops the entry from the BufferTable" do
+      server.dispatch("textDocument/didOpen", {
+                        textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x" }
+                      })
+      server.dispatch("textDocument/didClose", { textDocument: { uri: uri } })
+
+      expect(server.buffer_table[uri]).to be_nil
+    end
+
+    it "all three are notifications — dispatch returns nil" do
+      open_result = server.dispatch("textDocument/didOpen", {
+                                      textDocument: { uri: uri, languageId: "ruby", version: 1, text: "x" }
+                                    })
+      change_result = server.dispatch("textDocument/didChange", {
+                                        textDocument: { uri: uri, version: 2 },
+                                        contentChanges: [{ text: "y" }]
+                                      })
+      close_result = server.dispatch("textDocument/didClose", { textDocument: { uri: uri } })
+
+      expect([open_result, change_result, close_result]).to all(be_nil)
     end
   end
 end

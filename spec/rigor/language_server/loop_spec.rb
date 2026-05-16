@@ -58,10 +58,9 @@ RSpec.describe Rigor::LanguageServer::Loop do
       _server, frames = result
 
       expect(frames[0]).to include(jsonrpc: "2.0", id: 1)
-      expect(frames[0][:result]).to include(
-        capabilities: {},
-        serverInfo: hash_including(name: "rigor-lsp")
-      )
+      expect(frames[0][:result][:serverInfo]).to include(name: "rigor-lsp")
+      # Slice 3 onwards: textDocumentSync is advertised.
+      expect(frames[0][:result][:capabilities]).to include(:textDocumentSync)
     end
 
     it "returns null result for the shutdown request" do

@@ -43,7 +43,12 @@ module Rigor
         # server's recorded exit code (0 after a clean
         # `shutdown`+`exit`, 1 otherwise — per the LSP `exit`
         # contract).
-        writer = ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout)
+        # `SynchronizedWriter` serialises STDOUT writes across the
+        # main dispatch thread + the Debouncer's async threads.
+        # Both share one Io::Writer (with one buffered stream); the
+        # Mutex prevents interleaved frames on the wire.
+        raw_writer = ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout)
+        writer = LanguageServer::SynchronizedWriter.new(raw_writer)
         configuration = Configuration.load(options.fetch(:config))
         # ProjectContext caches Environment + Cache::Store across
         # requests so hover / publish hit the warm path. Invalidated
@@ -53,8 +58,10 @@ module Rigor
         # The same BufferTable is threaded to Server + all three
         # providers — single source of truth for buffer state.
         buffer_table = LanguageServer::BufferTable.new
+        debouncer = LanguageServer::Debouncer.new
         publisher = LanguageServer::DiagnosticPublisher.new(
-          writer: writer, buffer_table: buffer_table, project_context: project_context
+          writer: writer, buffer_table: buffer_table, project_context: project_context,
+          debouncer: debouncer, debounce_seconds: 0.2
         )
         hover_provider = LanguageServer::HoverProvider.new(
           buffer_table: buffer_table, project_context: project_context

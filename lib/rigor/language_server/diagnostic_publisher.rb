@@ -30,25 +30,40 @@ module Rigor
         hint: 4
       }.freeze
 
-      def initialize(writer:, buffer_table:, project_context:)
+      # @param debouncer [Rigor::LanguageServer::Debouncer, nil]
+      #   when present, `publish_for` schedules its work through
+      #   the debouncer (cancels prior pending task for the same
+      #   URI, fires after `debounce_seconds` quiet-time). Nil
+      #   keeps the slice 4-7 synchronous behaviour — primarily
+      #   useful for specs.
+      # @param debounce_seconds [Numeric] quiet-time before the
+      #   debounced publish fires. 0 with a debouncer means
+      #   "schedule on next-tick" (still async); without a
+      #   debouncer the value is unused.
+      def initialize(writer:, buffer_table:, project_context:,
+                     debouncer: nil, debounce_seconds: 0.2)
         @writer = writer
         @buffer_table = buffer_table
         @project_context = project_context
+        @debouncer = debouncer
+        @debounce_seconds = debounce_seconds
       end
 
       # Run analysis for the buffer at `uri` (looked up in the
       # BufferTable) and push a `textDocument/publishDiagnostics`
       # notification. No-op when the URI isn't a `file://` form or
-      # the buffer isn't currently open.
+      # the buffer isn't currently open. When a Debouncer is wired,
+      # the analysis is scheduled async per the configured
+      # `debounce_seconds`; otherwise it runs inline.
       def publish_for(uri)
         path = Uri.to_path(uri)
         return if path.nil?
 
-        entry = @buffer_table[uri]
-        return if entry.nil?
-
-        diagnostics = run_analysis(path: path, bytes: entry.bytes)
-        notify(uri, diagnostics)
+        if @debouncer
+          @debouncer.schedule(uri, delay: @debounce_seconds) { run_and_notify(uri, path) }
+        else
+          run_and_notify(uri, path)
+        end
       end
 
       # Publishes an EMPTY diagnostic array for `uri`. The LSP-spec
@@ -59,7 +74,25 @@ module Rigor
         notify(uri, [])
       end
 
+      # Cancels every in-flight debounced task. Called from
+      # `Server#handle_shutdown` so pending publishes don't fire
+      # against a closed STDOUT.
+      def cancel_pending
+        @debouncer&.cancel_all
+      end
+
       private
+
+      def run_and_notify(uri, path)
+        entry = @buffer_table[uri]
+        # The buffer may have been closed during the debounce
+        # window — drop the publish; the empty notification from
+        # didClose already cleared the markers.
+        return if entry.nil?
+
+        diagnostics = run_analysis(path: path, bytes: entry.bytes)
+        notify(uri, diagnostics)
+      end
 
       # Runs `Analysis::Runner` with a `BufferBinding` so the buffer
       # bytes (instead of the on-disk file) drive the parse. Returns

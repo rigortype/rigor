@@ -79,6 +79,73 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
     end
   end
 
+  describe "debouncer integration (slice 8)" do
+    let(:debouncer) { Rigor::LanguageServer::Debouncer.new }
+    let(:debounced_publisher) do
+      described_class.new(
+        writer: writer, buffer_table: buffer_table, project_context: project_context,
+        debouncer: debouncer, debounce_seconds: 0
+      )
+    end
+
+    it "delivers exactly ONE notification for a burst of publish_for calls (last write wins)" do
+      Dir.mktmpdir("rigor-lsp-debounce-") do |tmpdir|
+        path = File.join(tmpdir, "foo.rb")
+        uri = "file://#{path}"
+        buffer_table.open(uri: uri, bytes: "x = 1\n", version: 1)
+
+        Dir.chdir(tmpdir) do
+          # Five rapid publish_for calls — only one should fire.
+          5.times { debounced_publisher.publish_for(uri) }
+          debouncer.flush!
+        end
+
+        expect(writer.payloads.size).to eq(1)
+      end
+    end
+
+    it "drops the publish when the buffer is closed during the debounce window" do
+      Dir.mktmpdir("rigor-lsp-debounce-close-") do |tmpdir|
+        path = File.join(tmpdir, "foo.rb")
+        uri = "file://#{path}"
+        buffer_table.open(uri: uri, bytes: "def broken\n", version: 1)
+
+        # Schedule with a small delay so we can close before fire.
+        publisher_with_delay = described_class.new(
+          writer: writer, buffer_table: buffer_table, project_context: project_context,
+          debouncer: debouncer, debounce_seconds: 0.05
+        )
+        Dir.chdir(tmpdir) do
+          publisher_with_delay.publish_for(uri)
+          buffer_table.close(uri: uri) # close before debounce fires
+          debouncer.flush!
+        end
+
+        expect(writer.payloads).to be_empty
+      end
+    end
+  end
+
+  describe "#cancel_pending" do
+    let(:debouncer) { Rigor::LanguageServer::Debouncer.new }
+    let(:debounced_publisher) do
+      described_class.new(
+        writer: writer, buffer_table: buffer_table, project_context: project_context,
+        debouncer: debouncer, debounce_seconds: 0.5
+      )
+    end
+
+    it "cancels in-flight debounced tasks" do
+      buffer_table.open(uri: "file:///tmp/x.rb", bytes: "x = 1", version: 1)
+      debounced_publisher.publish_for("file:///tmp/x.rb")
+      debounced_publisher.cancel_pending
+
+      # Wait past the original delay window; no notification fires.
+      sleep 0.05
+      expect(writer.payloads).to be_empty
+    end
+  end
+
   describe "#publish_empty" do
     it "pushes an empty diagnostics array for the URI" do
       publisher.publish_empty("file:///x.rb")

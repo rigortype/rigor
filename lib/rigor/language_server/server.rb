@@ -171,6 +171,9 @@ module Rigor
 
       def handle_shutdown
         @state = :shutdown
+        # Drop any in-flight debounced publishes so they don't
+        # fire after the client has stopped listening.
+        @publisher&.cancel_pending
         nil
       end
 

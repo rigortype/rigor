@@ -26,18 +26,30 @@ module Rigor
         return CLI::EXIT_USAGE if options == :usage_error
 
         transport = options.fetch(:transport)
-        # Slice 1 doesn't wire the wire. We validate the transport
-        # selection (stdio only in v1) so the CLI surface is locked
-        # in, and slice 2 swaps this branch for the real stdio
-        # JSON-RPC loop driving Rigor::LanguageServer::Server.
         unless transport == "stdio"
           @err.puts("rigor lsp: unsupported transport: #{transport.inspect} (only `stdio` is supported in v1)")
           return CLI::EXIT_USAGE
         end
 
         require_relative "../language_server"
-        @err.puts("rigor lsp: stdio JSON-RPC transport queued for slice 2 (server lifecycle ready, wire pending)")
-        0
+        require "language_server-protocol"
+
+        # Slice 2 wires stdio JSON-RPC. STDIN is read frame-by-frame
+        # via the gem's `Io::Reader`; STDOUT is written via
+        # `Io::Writer` which auto-merges `jsonrpc: "2.0"` into every
+        # response. The Loop runs until either STDIN hits EOF (client
+        # closed the pipe) or the server reaches `:exited`. The
+        # process then exits with the server's recorded exit code
+        # (0 after a clean `shutdown`+`exit`, 1 otherwise — per the
+        # LSP `exit` contract).
+        server = LanguageServer::Server.new
+        loop_runner = LanguageServer::Loop.new(
+          reader: ::LanguageServer::Protocol::Transport::Io::Reader.new($stdin),
+          writer: ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout),
+          server: server
+        )
+        loop_runner.run
+        server.exit_code || 0
       end
 
       private

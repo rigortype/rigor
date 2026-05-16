@@ -36,6 +36,7 @@ module Rigor
     # Slice 6 will add 7 (Class), 9 (Module), 21 (Constant).
     class CompletionProvider
       KIND_METHOD   = 2
+      KIND_FIELD    = 5
       KIND_CLASS    = 7
       KIND_MODULE   = 9
       KIND_CONSTANT = 21
@@ -74,7 +75,18 @@ module Rigor
 
         case node
         when Prism::CallNode
-          method_completion_for(node, parse_result.value, path)
+          # `hash[:|` patches to `hash[:KEY_SENTINEL]`, an index
+          # access call whose argument is the sentinel symbol;
+          # NodeLocator at the sentinel returns the inner CallNode
+          # for `[]`. Hash-key completion wins when the call is an
+          # index access on a HashShape carrier; otherwise fall
+          # through to method completion.
+          hash_key_completion_for(node, parse_result.value, path) ||
+            method_completion_for(node, parse_result.value, path)
+        when Prism::SymbolNode
+          # The sentinel symbol's NodeLocator hit; walk up via the
+          # AST to find the enclosing `[]` call.
+          hash_key_completion_for_symbol(node, parse_result.value, path)
         when Prism::ConstantPathNode
           constant_path_completion_for(node, path)
         end
@@ -102,7 +114,8 @@ module Rigor
       # parses as a method call, not a constant path).
       SENTINEL_METHOD   = "__rigor_lsp_sentinel__"
       SENTINEL_CONSTANT = "RigorLspSentinelXyz"
-      private_constant :SENTINEL_METHOD, :SENTINEL_CONSTANT
+      SENTINEL_HASH_KEY = "__rigor_lsp_key__"
+      private_constant :SENTINEL_METHOD, :SENTINEL_CONSTANT, :SENTINEL_HASH_KEY
 
       def parse_attempt_bytes(original_bytes, line, character)
         # Cheap probe: try original first. Most editor sessions
@@ -141,6 +154,12 @@ module Rigor
         # trigger character; users often type the dot then a
         # space mid-edit.
         stripped = prefix.rstrip
+        # `[:` covers `hash[:|` symbol-key access — splice both
+        # the key name AND the closing `]` so Prism gets a
+        # complete index expression. The closing bracket is part
+        # of the sentinel string for this case (vs the bare
+        # identifier sentinels for `.` / `::`).
+        return "#{SENTINEL_HASH_KEY}]" if stripped.end_with?("[:")
         return SENTINEL_METHOD if stripped.end_with?(".")
         return SENTINEL_CONSTANT if stripped.end_with?("::")
 
@@ -155,6 +174,66 @@ module Rigor
         receiver_scope = index[receiver_node]
         receiver_type = receiver_scope.type_of(receiver_node)
         method_completions(receiver_type, receiver_scope)
+      end
+
+      # Slice D1 — `hash[:|` hash-key completion. Triggers when
+      # the cursor is on the synthetic key inside a `[]` call AND
+      # the receiver's inferred type is a `Type::HashShape`. Returns
+      # nil for any other receiver carrier so the dispatcher falls
+      # through to method completion (which still surfaces Hash's
+      # methods for genuine method calls on a hash receiver).
+      def hash_key_completion_for(call_node, root, path)
+        return nil unless call_node.name == :[]
+
+        receiver_node = call_node.receiver
+        return nil if receiver_node.nil?
+
+        index = build_scope_index(root, path)
+        receiver_type = index[receiver_node].type_of(receiver_node)
+        return nil unless receiver_type.is_a?(Type::HashShape)
+
+        hash_key_items(receiver_type)
+      end
+
+      # When NodeLocator returns the sentinel SymbolNode directly
+      # (rather than the enclosing CallNode), walk up the AST for
+      # the smallest `[]` call containing the symbol's location.
+      # Re-walks the root once; cheap for LSP-sized buffers.
+      def hash_key_completion_for_symbol(symbol_node, root, path)
+        call_node = enclosing_index_call(root, symbol_node)
+        return nil if call_node.nil?
+
+        hash_key_completion_for(call_node, root, path)
+      end
+
+      def enclosing_index_call(root, symbol_node)
+        symbol_offset = symbol_node.location.start_offset
+        result = nil
+        walk = lambda do |n|
+          next unless n.is_a?(Prism::Node)
+
+          if n.is_a?(Prism::CallNode) && n.name == :[] && n.location &&
+             n.location.start_offset <= symbol_offset && symbol_offset <= n.location.end_offset
+            result = n
+          end
+          n.compact_child_nodes.each(&walk)
+        end
+        walk.call(root)
+        result
+      end
+
+      def hash_key_items(hash_shape)
+        hash_shape.pairs.keys.map do |key|
+          label = key.inspect # `:foo` for symbols, `"bar"` for strings
+          {
+            label: label,
+            kind: KIND_FIELD,
+            detail: "key of HashShape",
+            insertText: label,
+            filterText: label,
+            sortText: "0_#{label}"
+          }
+        end
       end
 
       # Slice B2 — `Foo::|` constant-path completion. The cursor

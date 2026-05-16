@@ -133,6 +133,45 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
       end
     end
 
+    describe "hash-key completion (slice D1)" do
+      it "returns the HashShape's keys for `hash[:|` mid-edit" do
+        # Buffer: `h = {a: 1, b: 2, ccc: 3}; h[:` (incomplete).
+        # The provider should patch `__rigor_lsp_key__]` and surface
+        # the three keys from the HashShape carrier.
+        source = "h = {a: 1, b: 2, ccc: 3}\nh[:\n"
+        buffer_table.open(uri: uri, bytes: source, version: 1)
+        items = provider.provide(uri: uri, line: 1, character: 3)
+
+        expect(items).not_to be_nil
+        labels = items.map { |i| i[:label] }
+        expect(labels).to contain_exactly(":a", ":b", ":ccc")
+      end
+
+      it "marks hash-key items with kind 5 (Field)" do
+        source = "h = {x: 1}\nh[:\n"
+        buffer_table.open(uri: uri, bytes: source, version: 1)
+        items = provider.provide(uri: uri, line: 1, character: 3)
+
+        expect(items.first[:kind]).to eq(Rigor::LanguageServer::CompletionProvider::KIND_FIELD)
+      end
+
+      it "falls back to method completion when the receiver isn't a HashShape" do
+        # `[1, 2].[:foo` — receiver is Tuple, not HashShape. The
+        # provider should NOT return hash-key items; falls through
+        # to method completion (Array methods).
+        source = "[1, 2][:\n"
+        buffer_table.open(uri: uri, bytes: source, version: 1)
+        items = provider.provide(uri: uri, line: 0, character: 8)
+
+        # Either nil or Array method completions — but NOT hash
+        # keys. Hash-key items would have labels starting with `:`.
+        if items
+          labels = items.map { |i| i[:label] }
+          expect(labels.none? { |l| l.start_with?(":") }).to be(true)
+        end
+      end
+    end
+
     describe "parse-recovery sentinel (slice B4)" do
       it "completes after a trailing `.` even though the buffer doesn't parse" do
         # `"hi".` is malformed Ruby; provider should patch with

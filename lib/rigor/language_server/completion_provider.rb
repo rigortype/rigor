@@ -64,7 +64,7 @@ module Rigor
         # a sentinel name at the cursor before falling through.
         bytes_to_parse, locate_at = parse_attempt_bytes(entry.bytes, line, character)
         parse_result = Prism.parse(bytes_to_parse, filepath: path,
-                                   version: @project_context.configuration.target_ruby)
+                                                   version: @project_context.configuration.target_ruby)
         return nil unless parse_result.errors.empty?
 
         # Rigor's NodeLocator uses 1-based line / column; LSP uses 0-based.
@@ -316,7 +316,7 @@ module Rigor
         return nil if member_sets.empty?
 
         common_names = member_sets.map(&:keys).reduce(:&)
-        member_sets.first.select { |name, _| common_names.include?(name) }
+        member_sets.first.slice(*common_names)
       end
 
       # Intersection receiver — accumulate every method declared on
@@ -338,7 +338,7 @@ module Rigor
         method_type = method.method_types.first
         signature = method_type ? method_type.to_s : "(unknown)"
         sep = kind == :singleton ? "." : "#"
-        receiver_name = method.defs.first&.implemented_in&.to_s || ""
+        receiver_name = method.defs.first&.implemented_in.to_s
         detail = receiver_name.empty? ? signature : "#{receiver_name}#{sep}#{label}: #{signature}"
 
         {

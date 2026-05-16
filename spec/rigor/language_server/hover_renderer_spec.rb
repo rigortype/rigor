@@ -44,7 +44,7 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
 
   describe "Prism::CallNode specialisation" do
     it "shows the receiver type + method signature for `String#upcase`" do
-      root, index = parse_and_index('"hello".upcase' "\n")
+      root, index = parse_and_index("\"hello\".upcase\n")
       call_node = root.statements.body.first
       scope = index[call_node]
 

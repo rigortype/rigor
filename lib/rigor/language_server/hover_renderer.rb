@@ -170,9 +170,7 @@ module Rigor
         body = +"```ruby\n"
         body << "# Constant\n#{fqn}\n\n"
         body << "# Type\nsingleton(#{fqn})\n"
-        if location
-          body << "\n# Defined in\n#{location}\n"
-        end
+        body << "\n# Defined in\n#{location}\n" if location
         body << "```"
         body
       end
@@ -224,10 +222,10 @@ module Rigor
 
       def enclosing_class_for(scope)
         self_type = scope.self_type
-        case self_type
-        when Type::Nominal then self_type.class_name
-        when Type::Singleton then self_type.class_name
-        end
+        # Both `Nominal[C]` and `Singleton[C]` carry `class_name`;
+        # we want the class label either way. Combined branch
+        # keeps the slice-A3 contract simple.
+        self_type.class_name if self_type.is_a?(Type::Nominal) || self_type.is_a?(Type::Singleton)
       end
 
       # Specialises literal-bearing nodes (Integer / Float / String /

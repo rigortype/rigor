@@ -14,6 +14,7 @@ require_relative "../inference/scope_indexer"
 require_relative "../inference/synthetic_method_scanner"
 require_relative "../inference/project_patched_scanner"
 require_relative "../inference/method_dispatcher/file_folding"
+require_relative "buffer_binding"
 require_relative "check_rules"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
@@ -55,18 +56,26 @@ module Rigor
       #   trivial-fixture runs from warming `.rigor/cache`.
       def initialize(configuration:, explain: false,
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
-                     plugin_requirer: nil, workers: 0, collect_stats: true)
+                     plugin_requirer: nil, workers: 0, collect_stats: true,
+                     buffer: nil)
         @configuration = configuration
         @explain = explain
         @cache_store = cache_store
         @plugin_requirer = plugin_requirer
         @workers = workers
         @collect_stats = collect_stats
+        @buffer = buffer
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
         @rbs_extended_reporter = RbsExtended::Reporter.new
         @boundary_cross_reporter = DependencySourceInference::BoundaryCrossReporter.new
       end
+
+      # ADR-pending editor mode — present when the runner is wired
+      # for the `--tmp-file` / `--instead-of` buffer-binding shape
+      # (`docs/design/20260516-editor-mode.md`). Nil for normal
+      # project runs.
+      attr_reader :buffer
 
       # Walks every Ruby file under `paths`, parses it, builds a
       # per-node scope index through

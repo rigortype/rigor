@@ -138,6 +138,14 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
       contribution = Rigor::FlowContribution.new(return_type: Rigor::Type::Combinator.untyped)
       expect(shareable?(contribution)).to be(true)
     end
+
+    it "Rigor::Analysis::BufferBinding" do
+      require "rigor/analysis/buffer_binding"
+      binding = Rigor::Analysis::BufferBinding.new(
+        logical_path: "lib/foo.rb", physical_path: "/tmp/buffer.rb"
+      )
+      expect(shareable?(binding)).to be(true)
+    end
   end
 
   describe "Phase 2 — Configuration / Scope / Environment" do

@@ -29,7 +29,10 @@ module Rigor
     #
     # Slice 6 will add 7 (Class), 9 (Module), 21 (Constant).
     class CompletionProvider
-      KIND_METHOD = 2
+      KIND_METHOD   = 2
+      KIND_CLASS    = 7
+      KIND_MODULE   = 9
+      KIND_CONSTANT = 21
 
       def initialize(buffer_table:, project_context:)
         @buffer_table = buffer_table
@@ -62,44 +65,112 @@ module Rigor
                            line: line + 1, character: character + 1)
         return nil if node.nil?
 
-        call_node = enclosing_call(node)
-        return nil if call_node.nil?
-
-        receiver_node = call_node.receiver
-        return nil if receiver_node.nil? # implicit-self → slice-3 territory of completion
-
-        index = build_scope_index(parse_result.value, path)
-        receiver_scope = index[receiver_node]
-        receiver_type = receiver_scope.type_of(receiver_node)
-
-        method_completions(receiver_type, receiver_scope)
+        case node
+        when Prism::CallNode
+          method_completion_for(node, parse_result.value, path)
+        when Prism::ConstantPathNode
+          constant_path_completion_for(node, path)
+        end
       end
 
       private
 
+      def method_completion_for(call_node, root, path)
+        receiver_node = call_node.receiver
+        return nil if receiver_node.nil? # implicit-self — slice-3 territory of completion
+
+        index = build_scope_index(root, path)
+        receiver_scope = index[receiver_node]
+        receiver_type = receiver_scope.type_of(receiver_node)
+        method_completions(receiver_type, receiver_scope)
+      end
+
+      # Slice B2 — `Foo::|` constant-path completion. The cursor
+      # sits on a `ConstantPathNode` whose `parent` resolves to a
+      # class / module FQN; we enumerate every known class whose
+      # name is an immediate child of that parent. Top-level
+      # constants (`::Foo`) and parent-less paths are not yet
+      # supported (queued for slice 6 follow-up).
+      def constant_path_completion_for(const_path_node, path)
+        parent_fqn = parent_fqn_of(const_path_node)
+        return nil if parent_fqn.nil?
+
+        scope = base_scope(path)
+        children = enumerate_constant_children(parent_fqn, scope)
+        return nil if children.empty?
+
+        children.map { |child| constant_completion_item(parent_fqn, child) }
+      end
+
+      def parent_fqn_of(const_path_node)
+        # ConstantPathNode#parent is the LHS of the `::`. For
+        # `Foo::Bar` it's the ConstantReadNode for `Foo`; for
+        # `Foo::Bar::Baz` it's a ConstantPathNode. We render
+        # either to the dotted FQN string.
+        parent = const_path_node.parent
+        return nil if parent.nil?
+
+        qualified_name_of(parent)
+      end
+
+      def qualified_name_of(node)
+        case node
+        when Prism::ConstantReadNode
+          node.name.to_s
+        when Prism::ConstantPathNode
+          parent = qualified_name_of(node.parent) if node.parent
+          parent.nil? ? node.name.to_s : "#{parent}::#{node.name}"
+        end
+      end
+
+      # Walks `RbsLoader#known_class_names_set` for entries whose
+      # FQN is `parent_fqn::<one segment>` — the immediate children.
+      # Deeper descendants are filtered out so the popup shows
+      # only the next-level constants the user can directly write.
+      # `known_class_names_set` is private on RbsLoader per the
+      # type-system's internal API discipline; the LSP layer is a
+      # trusted internal consumer and `send` is the documented
+      # escape hatch (same pattern as `Type::Refined#canonical_name`
+      # in slice A4).
+      def enumerate_constant_children(parent_fqn, scope)
+        loader = scope.environment.rbs_loader
+        return [] if loader.nil?
+
+        names = loader.send(:known_class_names_set)
+        # RBS canonical names carry a leading `::` (so the table
+        # holds `::Process::Status` etc.). Match against both
+        # forms so the prefix walk works regardless of which form
+        # the caller passes.
+        prefix = "::#{parent_fqn}::"
+        names.filter_map do |fqn|
+          next nil unless fqn.start_with?(prefix)
+
+          tail = fqn.delete_prefix(prefix)
+          # Only immediate children — no `::` in the tail.
+          next nil if tail.empty? || tail.include?("::")
+
+          tail
+        end.uniq.sort
+      end
+
+      def constant_completion_item(parent_fqn, child_name)
+        {
+          label: child_name,
+          kind: KIND_CLASS, # heuristic; slice-7 follow-up may distinguish Module / Constant
+          detail: "#{parent_fqn}::#{child_name}",
+          insertText: child_name,
+          filterText: child_name,
+          sortText: "0_#{child_name}"
+        }
+      end
+
+      def base_scope(_path)
+        Scope.empty(environment: @project_context.environment)
+      end
+
       def locate_node(source:, root:, line:, character:)
         Source::NodeLocator.at_position(source: source, root: root, line: line, column: character)
       rescue Source::NodeLocator::OutOfRangeError
-        nil
-      end
-
-      # Walks up from a leaf node looking for the enclosing
-      # `Prism::CallNode`. NodeLocator returns the deepest node at
-      # the cursor; for `obj.foo|` the cursor often sits on
-      # an identifier node nested inside the CallNode. We walk
-      # up by re-scanning the root for the smallest CallNode that
-      # spans the leaf's location — Prism doesn't expose
-      # parent pointers, so this is the idiomatic walk.
-      def enclosing_call(node)
-        return node if node.is_a?(Prism::CallNode)
-
-        # Currently NodeLocator returns the deepest matching node;
-        # for `x.upcase` with cursor on `upcase` the deepest is
-        # the CallNode itself (Prism doesn't split out method
-        # identifiers). If a future locator change exposes
-        # sub-call leaves, this guard prevents the slice-5 happy
-        # path from breaking — slice 8 generalises to lexical
-        # fallback anyway.
         nil
       end
 

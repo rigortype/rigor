@@ -72,5 +72,43 @@ RSpec.describe Rigor::LanguageServer::CompletionProvider do
       buffer_table.open(uri: uri, bytes: "foo\n", version: 1)
       expect(provider.provide(uri: uri, line: 0, character: 2)).to be_nil
     end
+
+    describe "constant-path completion (slice B2)" do
+      it "returns child constants for `Foo::Bar` when cursor is on `Bar`" do
+        # `Process::Status` — Status is a known child of Process
+        # in the bundled stdlib RBS. Cursor on `Status` should
+        # surface every immediate child of `Process`.
+        buffer_table.open(uri: uri, bytes: "Process::Status\n", version: 1)
+        items = provider.provide(uri: uri, line: 0, character: 12)
+
+        expect(items).not_to be_nil
+        labels = items.map { |i| i[:label] }
+        expect(labels).to include("Status")
+      end
+
+      it "marks constant-path items with kind 7 (Class)" do
+        buffer_table.open(uri: uri, bytes: "Process::Status\n", version: 1)
+        items = provider.provide(uri: uri, line: 0, character: 12)
+
+        expect(items.map { |i| i[:kind] }.uniq).to eq([7])
+      end
+
+      it "filters out non-immediate descendants (no `::` in tail)" do
+        buffer_table.open(uri: uri, bytes: "Process::Status\n", version: 1)
+        items = provider.provide(uri: uri, line: 0, character: 12)
+
+        labels = items.map { |i| i[:label] }
+        # No label should contain `::` — only immediate children.
+        expect(labels.none? { |l| l.include?("::") }).to be(true)
+      end
+
+      it "renders the full FQN in the detail field" do
+        buffer_table.open(uri: uri, bytes: "Process::Status\n", version: 1)
+        items = provider.provide(uri: uri, line: 0, character: 12)
+
+        status = items.find { |i| i[:label] == "Status" }
+        expect(status[:detail]).to eq("Process::Status")
+      end
+    end
   end
 end

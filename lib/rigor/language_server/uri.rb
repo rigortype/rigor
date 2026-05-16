@@ -25,10 +25,11 @@ module Rigor
         # Percent-decode at the BYTE level so multi-byte UTF-8
         # escapes (`%E6%97%A5` → `日`) reassemble correctly. Each
         # `%xx` decodes to one raw byte; the result is a byte string
-        # we re-interpret as UTF-8.
-        encoded = uri.byteslice(FILE_SCHEME.bytesize, uri.bytesize)
-        encoded.b.gsub(/%([0-9A-Fa-f]{2})/) { ::Regexp.last_match(1).hex.chr }
-                 .force_encoding(Encoding::UTF_8)
+        # we re-interpret as UTF-8. `delete_prefix` always returns
+        # a String (vs `byteslice` whose RBS return is `String?`).
+        uri.delete_prefix(FILE_SCHEME).b
+           .gsub(/%([0-9A-Fa-f]{2})/) { ::Regexp.last_match(1).hex.chr }
+           .force_encoding(Encoding::UTF_8)
       end
 
       def from_path(path)

@@ -39,6 +39,8 @@ module Rigor
         case node
         when Prism::CallNode
           render_call(node, type, node_scope_lookup) || render_default(node, type)
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          render_constant(node, type, node_scope_lookup) || render_default(node, type)
         else
           render_default(node, type)
         end
@@ -138,6 +140,42 @@ module Rigor
         return "(unknown)" if method_type.nil?
 
         method_type.to_s
+      end
+
+      # Specialises `ConstantReadNode` (`Foo`) and `ConstantPathNode`
+      # (`Foo::Bar`) when the inferred type is a `Type::Singleton`
+      # — i.e., the constant refers to a class / module. Returns nil
+      # for constants pointing at values (`FOO = 42`); those fall
+      # through to the literal-polish slice (A4).
+      def render_constant(node, type, node_scope_lookup)
+        return nil unless type.is_a?(Type::Singleton)
+
+        fqn = type.class_name
+        scope = node_scope_lookup[node]
+        location = defined_in(fqn, scope)
+
+        body = +"```ruby\n"
+        body << "# Constant\n#{fqn}\n\n"
+        body << "# Type\nsingleton(#{fqn})\n"
+        if location
+          body << "\n# Defined in\n#{location}\n"
+        end
+        body << "```"
+        body
+      end
+
+      # Resolves the source-file location for a class FQN by reading
+      # the RBS loader's `class_decl_paths` table. Returns nil when
+      # the table doesn't carry attribution (cache-hit paths replace
+      # it with a sentinel, see `RunStats.attribution_available?`).
+      def defined_in(fqn, scope)
+        loader = scope&.environment&.rbs_loader
+        return nil if loader.nil?
+
+        path = loader.class_decl_paths[fqn]
+        return nil if path.nil? || path.empty?
+
+        path
       end
 
       def render_default(node, type)

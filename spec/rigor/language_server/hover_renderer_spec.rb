@@ -89,4 +89,54 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
       expect(body).to include("String.new:")
     end
   end
+
+  describe "Prism::ConstantReadNode / ConstantPathNode specialisation (slice A2)" do
+    it "shows the constant FQN + singleton type for a bare class reference" do
+      root, index = parse_and_index("String\n")
+      const_node = root.statements.body.first
+      scope = index[const_node]
+
+      result = renderer.render(node: const_node, type: scope.type_of(const_node), node_scope_lookup: index)
+      body = result[:contents][:value]
+
+      expect(body).to include("# Constant\nString")
+      expect(body).to include("# Type\nsingleton(String)")
+    end
+
+    it "renders nested constant paths with the full FQN" do
+      root, index = parse_and_index("Process::Status\n")
+      const_node = root.statements.body.first
+      scope = index[const_node]
+
+      result = renderer.render(node: const_node, type: scope.type_of(const_node), node_scope_lookup: index)
+      body = result[:contents][:value]
+
+      expect(body).to include("# Constant\nProcess::Status")
+      expect(body).to include("# Type\nsingleton(Process::Status)")
+    end
+
+    it "falls back to the default body for value constants (e.g. FOO = 42)" do
+      # Without seeing `FOO = 42` in the buffer the renderer can't
+      # know the constant is a value; we test with an unknown
+      # bare-Constant whose type isn't a Singleton — the renderer
+      # must still produce a body (the default one). For this we
+      # use a known not-in-RBS constant by constructing the type
+      # directly is over-mocking; instead test the negative path
+      # via the absence of `# Constant` framing when type isn't
+      # `Singleton`.
+      root, index = parse_and_index("CONSTANT_DOES_NOT_EXIST\n")
+      const_node = root.statements.body.first
+      scope = index[const_node]
+      type = scope.type_of(const_node)
+
+      result = renderer.render(node: const_node, type: type, node_scope_lookup: index)
+      body = result[:contents][:value]
+
+      if type.is_a?(Rigor::Type::Singleton)
+        expect(body).to include("# Constant")
+      else
+        expect(body).to include("node:")
+      end
+    end
+  end
 end

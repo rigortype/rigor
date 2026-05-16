@@ -63,20 +63,34 @@ then dispatch through the substrate's tier (between RBS and
 dependency-source) and return `Dynamic[T]` rather than falling
 through to `call.undefined-method`.
 
-## Floor / ceiling per ADR-16 WD13
+## Precision uplift via `rigor-dry-types` (ADR-18, v0.1.6)
 
-The v0.1.x deliverable is the **floor**: synthetic reader
-**names** emit and are visible to cross-file dispatch. Return
-types degrade to `Dynamic[T]` — the manifest's `returns: "Object"`
-is recorded but not resolved at the dispatcher tier.
+The manifest's `emit:` row uses [ADR-18](../../docs/adr/18-substrate-per-call-site-return-type.md)'s
+`returns_from_arg:` DSL to look up the call-site type argument
+through the `:dry_type_aliases` cross-plugin fact published
+by [`rigor-dry-types`](../rigor-dry-types/):
 
-The **ceiling** is precise return-type promotion: when the
-caller writes `attribute :city, Types::String`, the substrate
-would in a future slice route the type argument through ADR-13's
-`Plugin::TypeNodeResolver` chain so `address.city` returns
-`String`. That precision promotion is the slice-6 work
-described in [ADR-16's Implementation slicing section](../../docs/adr/16-macro-expansion.md#implementation-slicing);
-it's NOT a commitment of slice 2c.
+```ruby
+emit: [{
+  name: "\#{name}",
+  returns_from_arg: {
+    position: 1,
+    lookup_via: { plugin_id: "dry-types", fact: :dry_type_aliases }
+  }
+}]
+```
+
+When both plugins are loaded and the project declares
+`module Types; include Dry.Types(); end`, the substrate
+resolves `attribute :city, Types::String` into a synthetic
+`Address#city` returning `Nominal[String]` (via the slice-6b
+`environment.nominal_for_name` promotion path).
+
+When `rigor-dry-types` isn't loaded OR the call uses an
+unresolvable shape (`attribute :tag, Types::String.constrained(...)`,
+inline method-chain whose chain-head isn't currently
+extracted), the row falls back to `Dynamic[Top]` (the
+pre-ADR-18 floor). The fallback is silent — no diagnostic.
 
 ## What the plugin does NOT do (yet)
 

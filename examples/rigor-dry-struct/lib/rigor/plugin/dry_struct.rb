@@ -63,20 +63,49 @@ module Rigor
     class DryStruct < Rigor::Plugin::Base
       manifest(
         id: "dry-struct",
-        version: "0.1.0",
-        description: "Recognises dry-struct `attribute :name, T` DSL via ADR-16 Tier C.",
+        version: "0.2.0",
+        description: "Recognises dry-struct `attribute :name, T` DSL via ADR-16 Tier C; " \
+                     "promotes the reader's return type through ADR-18's `returns_from_arg:` " \
+                     "by consuming `rigor-dry-types`'s `:dry_type_aliases` fact.",
+        # ADR-9 consumption — the precision-promotion path
+        # below uses `:dry_type_aliases` published by
+        # `rigor-dry-types`. The fact is optional: when the
+        # `rigor-dry-types` plugin isn't loaded, the
+        # `returns_from_arg:` lookup misses and the synthetic
+        # readers fall back to `Dynamic[Top]` (the pre-ADR-18
+        # floor).
+        consumes: [{ plugin_id: "dry-types", name: :dry_type_aliases, optional: true }],
         heredoc_templates: [
           Rigor::Plugin::Macro::HeredocTemplate.new(
             receiver_constraint: "Dry::Struct",
             method_name: :attribute,
             symbol_arg_position: 0,
-            emit: [{ name: "\#{name}", returns: "Object" }]
+            # ADR-18 — the synthetic reader's return type comes
+            # from the call site's second argument
+            # (`Types::String` etc.), resolved through the
+            # `:dry_type_aliases` fact. When the lookup misses
+            # (e.g. inline `attribute :tag, Types::String.constrained(...)`,
+            # whose receiver chain head isn't currently
+            # extracted), the row falls back to Dynamic[Top].
+            emit: [{
+              name: "\#{name}",
+              returns_from_arg: {
+                position: 1,
+                lookup_via: { plugin_id: "dry-types", fact: :dry_type_aliases }
+              }
+            }]
           ),
           Rigor::Plugin::Macro::HeredocTemplate.new(
             receiver_constraint: "Dry::Struct",
             method_name: :attribute?,
             symbol_arg_position: 0,
-            emit: [{ name: "\#{name}", returns: "Object" }]
+            emit: [{
+              name: "\#{name}",
+              returns_from_arg: {
+                position: 1,
+                lookup_via: { plugin_id: "dry-types", fact: :dry_type_aliases }
+              }
+            }]
           )
         ]
       )

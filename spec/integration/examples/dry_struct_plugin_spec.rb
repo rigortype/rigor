@@ -96,6 +96,76 @@ RSpec.describe "rigor-dry-struct integration" do
     )
   end
 
+  describe "ADR-18 precision uplift via rigor-dry-types fact (slice 5)" do
+    before(:all) do # rubocop:disable RSpec/BeforeAfterAll
+      dry_types_plugin_lib = File.expand_path("../../../examples/rigor-dry-types/lib", __dir__)
+      $LOAD_PATH.unshift(dry_types_plugin_lib) unless $LOAD_PATH.include?(dry_types_plugin_lib)
+      require "rigor-dry-types"
+    end
+
+    let(:dry_types_plugin) { Rigor::Plugin::DryTypes }
+
+    let(:types_module) do
+      <<~RUBY
+        module Types
+          include Dry.Types()
+        end
+      RUBY
+    end
+
+    it "promotes the synthesised reader's return type via :dry_type_aliases" do # rubocop:disable RSpec/ExampleLength
+      Rigor::Plugin.unregister!
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "types.rb"), types_module)
+        File.write(File.join(dir, "demo.rb"), demo_source)
+        FileUtils.mkdir_p(File.join(dir, "sig"))
+        File.write(File.join(dir, "sig", "dry_struct.rbs"), dry_struct_rbs)
+        File.write(File.join(dir, "sig", "dry_types.rbs"), <<~RBS)
+          module Dry
+            def self.Types: () -> Module
+          end
+        RBS
+
+        # Capture the synthesised methods directly so we can
+        # assert on their `return_type` instead of relying on
+        # downstream call-site narrowing (which would need
+        # `Types::String` to resolve at the constant-typing
+        # tier — separate work).
+        captured_index = nil
+        allow(Rigor::Inference::SyntheticMethodIndex).to receive(:new).and_wrap_original do |original, **kwargs|
+          captured_index = original.call(**kwargs)
+          captured_index
+        end
+
+        configuration = Rigor::Configuration.new(
+          Rigor::Configuration::DEFAULTS.merge(
+            "paths" => [File.join(dir, "demo.rb"), File.join(dir, "types.rb")],
+            "plugins" => %w[rigor-dry-types rigor-dry-struct]
+          )
+        )
+
+        Dir.chdir(dir) do
+          Rigor::Analysis::Runner.new(
+            configuration: configuration,
+            cache_store: nil,
+            plugin_requirer: lambda do |name|
+              case name
+              when "rigor-dry-types" then Rigor::Plugin.register(dry_types_plugin)
+              when "rigor-dry-struct" then Rigor::Plugin.register(plugin_class)
+              end
+              true
+            end
+          ).run
+        end
+
+        expect(captured_index).not_to be_nil
+        city = captured_index.lookup_instance("Address", :city)
+        expect(city).not_to be_empty
+        expect(city.first.return_type).to eq("String")
+      end
+    end
+  end
+
   def run_under_plugin(demo:, consumer:)
     Rigor::Plugin.unregister!
     Dir.mktmpdir do |dir|

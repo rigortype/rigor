@@ -24,8 +24,9 @@ RSpec.describe Rigor::LanguageServer::DiagnosticPublisher do
 
   let(:buffer_table) { Rigor::LanguageServer::BufferTable.new }
   let(:configuration) { Rigor::Configuration.new("paths" => []) }
+  let(:project_context) { Rigor::LanguageServer::ProjectContext.new(configuration: configuration) }
   let(:publisher) do
-    described_class.new(writer: writer, configuration: configuration, buffer_table: buffer_table)
+    described_class.new(writer: writer, buffer_table: buffer_table, project_context: project_context)
   end
 
   describe "#publish_for" do

@@ -30,10 +30,10 @@ module Rigor
         hint: 4
       }.freeze
 
-      def initialize(writer:, configuration:, buffer_table:)
+      def initialize(writer:, buffer_table:, project_context:)
         @writer = writer
-        @configuration = configuration
         @buffer_table = buffer_table
+        @project_context = project_context
       end
 
       # Run analysis for the buffer at `uri` (looked up in the
@@ -69,8 +69,8 @@ module Rigor
         with_tempfile(bytes) do |tmp|
           binding = Analysis::BufferBinding.new(logical_path: path, physical_path: tmp.path)
           runner = Analysis::Runner.new(
-            configuration: @configuration,
-            cache_store: nil,           # Slice 7 wires the read-only Cache::Store.
+            configuration: @project_context.configuration,
+            cache_store: @project_context.cache_store,
             collect_stats: false,
             buffer: binding
           )

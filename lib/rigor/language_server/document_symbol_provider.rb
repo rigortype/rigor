@@ -23,9 +23,9 @@ module Rigor
       KIND_METHOD   = 6
       KIND_FUNCTION = 12
 
-      def initialize(buffer_table:, configuration:)
+      def initialize(buffer_table:, project_context:)
         @buffer_table = buffer_table
-        @configuration = configuration
+        @project_context = project_context
       end
 
       # @return [Array<Hash>, nil] LSP `DocumentSymbol[]` for the
@@ -39,7 +39,8 @@ module Rigor
         entry = @buffer_table[uri]
         return nil if entry.nil?
 
-        parse_result = Prism.parse(entry.bytes, filepath: path, version: @configuration.target_ruby)
+        parse_result = Prism.parse(entry.bytes, filepath: path,
+                                   version: @project_context.configuration.target_ruby)
         # Tolerate partial parse errors: walk what Prism gave us
         # anyway. Editors prefer a stale outline over no outline.
         walk_top_level(parse_result.value)

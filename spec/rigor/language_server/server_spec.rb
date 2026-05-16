@@ -248,4 +248,32 @@ RSpec.describe Rigor::LanguageServer::Server do
       end
     end
   end
+
+  describe "workspace/* invalidation (slice 7)" do
+    let(:context) do
+      Rigor::LanguageServer::ProjectContext.new(
+        configuration: Rigor::Configuration.new("paths" => [])
+      )
+    end
+    let(:server) { described_class.new(project_context: context) }
+
+    before { server.dispatch("initialize", {}) }
+
+    it "didChangeWatchedFiles bumps the project context generation" do
+      expect do
+        server.dispatch("workspace/didChangeWatchedFiles", { changes: [] })
+      end.to change(context, :generation).by(1)
+    end
+
+    it "didChangeConfiguration bumps the project context generation" do
+      expect do
+        server.dispatch("workspace/didChangeConfiguration", { settings: {} })
+      end.to change(context, :generation).by(1)
+    end
+
+    it "both are notifications — dispatch returns nil" do
+      expect(server.dispatch("workspace/didChangeWatchedFiles", { changes: [] })).to be_nil
+      expect(server.dispatch("workspace/didChangeConfiguration", { settings: {} })).to be_nil
+    end
+  end
 end

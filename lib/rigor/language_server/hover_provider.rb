@@ -21,9 +21,9 @@ module Rigor
     #   for ASCII source (UTF-16 conversion is queued, see design
     #   doc § "Open questions").
     class HoverProvider
-      def initialize(buffer_table:, configuration:)
+      def initialize(buffer_table:, project_context:)
         @buffer_table = buffer_table
-        @configuration = configuration
+        @project_context = project_context
       end
 
       # @return [Hash, nil] an LSP `Hover` payload or nil when no
@@ -37,7 +37,7 @@ module Rigor
         entry = @buffer_table[uri]
         return nil if entry.nil?
 
-        parse_result = Prism.parse(entry.bytes, filepath: path, version: @configuration.target_ruby)
+        parse_result = Prism.parse(entry.bytes, filepath: path, version: @project_context.configuration.target_ruby)
         return nil unless parse_result.errors.empty?
 
         # Rigor's NodeLocator uses 1-based line / column; LSP uses
@@ -62,13 +62,10 @@ module Rigor
       end
 
       def base_scope(_path)
-        # Slice 5 builds a fresh Environment per request. Slice 7
-        # (ProjectContext) caches the Environment across requests
-        # so hovers don't pay the RBS-load tax every time.
-        Scope.empty(environment: Environment.for_project(
-          libraries: @configuration.libraries,
-          signature_paths: @configuration.signature_paths
-        ))
+        # Slice 7: pull the Environment from the cached
+        # ProjectContext so hovers don't pay the RBS-load tax on
+        # every cursor stop.
+        Scope.empty(environment: @project_context.environment)
       end
 
       # Builds the LSP `Hover` payload. `contents` is `MarkupContent`

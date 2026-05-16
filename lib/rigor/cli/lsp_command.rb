@@ -45,25 +45,29 @@ module Rigor
         # contract).
         writer = ::LanguageServer::Protocol::Transport::Io::Writer.new($stdout)
         configuration = Configuration.load(options.fetch(:config))
-        # The same BufferTable instance is threaded to both Server
-        # (for didOpen / didChange / didClose writes) and Publisher
-        # (for read-by-URI when emitting diagnostics) so they share
-        # one source of truth.
+        # ProjectContext caches Environment + Cache::Store across
+        # requests so hover / publish hit the warm path. Invalidated
+        # by `workspace/didChangeWatchedFiles` and
+        # `workspace/didChangeConfiguration`.
+        project_context = LanguageServer::ProjectContext.new(configuration: configuration)
+        # The same BufferTable is threaded to Server + all three
+        # providers — single source of truth for buffer state.
         buffer_table = LanguageServer::BufferTable.new
         publisher = LanguageServer::DiagnosticPublisher.new(
-          writer: writer, configuration: configuration, buffer_table: buffer_table
+          writer: writer, buffer_table: buffer_table, project_context: project_context
         )
         hover_provider = LanguageServer::HoverProvider.new(
-          buffer_table: buffer_table, configuration: configuration
+          buffer_table: buffer_table, project_context: project_context
         )
         document_symbol_provider = LanguageServer::DocumentSymbolProvider.new(
-          buffer_table: buffer_table, configuration: configuration
+          buffer_table: buffer_table, project_context: project_context
         )
         server = LanguageServer::Server.new(
           buffer_table: buffer_table,
           publisher: publisher,
           hover_provider: hover_provider,
-          document_symbol_provider: document_symbol_provider
+          document_symbol_provider: document_symbol_provider,
+          project_context: project_context
         )
         loop_runner = LanguageServer::Loop.new(
           reader: ::LanguageServer::Protocol::Transport::Io::Reader.new($stdin),

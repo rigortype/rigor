@@ -41,25 +41,25 @@ module Rigor
       PRE_INITIALIZE_METHODS = %w[initialize shutdown exit].freeze
 
       attr_reader :state, :exit_code, :buffer_table, :publisher,
-                  :hover_provider, :document_symbol_provider
+                  :hover_provider, :document_symbol_provider, :project_context
 
-      # @param buffer_table [Rigor::LanguageServer::BufferTable]
-      #   per-session virtual file table.
-      # @param publisher [Rigor::LanguageServer::DiagnosticPublisher, nil]
-      #   when present, `didOpen` / `didChange` / `didClose`
-      #   trigger `publishDiagnostics`.
-      # @param hover_provider [Rigor::LanguageServer::HoverProvider, nil]
-      #   resolves `textDocument/hover`. Nil → `MethodNotFound`.
-      # @param document_symbol_provider [Rigor::LanguageServer::DocumentSymbolProvider, nil]
-      #   resolves `textDocument/documentSymbol`. Nil → `MethodNotFound`.
+      # @param project_context [Rigor::LanguageServer::ProjectContext, nil]
+      #   the per-session cache of `Environment` + `Cache::Store`
+      #   the providers read on every request. When present,
+      #   `workspace/didChangeWatchedFiles` and
+      #   `workspace/didChangeConfiguration` invalidate the cache;
+      #   nil means "no project context", which is the slice 1-6
+      #   behaviour (each request rebuilds env from scratch).
       def initialize(buffer_table: BufferTable.new, publisher: nil,
-                     hover_provider: nil, document_symbol_provider: nil)
+                     hover_provider: nil, document_symbol_provider: nil,
+                     project_context: nil)
         @state = :uninitialized
         @exit_code = nil
         @buffer_table = buffer_table
         @publisher = publisher
         @hover_provider = hover_provider
         @document_symbol_provider = document_symbol_provider
+        @project_context = project_context
       end
 
       # @return [Boolean] true once the client has called `exit` and
@@ -89,8 +89,10 @@ module Rigor
         when "textDocument/didOpen"   then handle_did_open(params)
         when "textDocument/didChange" then handle_did_change(params)
         when "textDocument/didClose"  then handle_did_close(params)
-        when "textDocument/hover"          then handle_hover(params)
-        when "textDocument/documentSymbol" then handle_document_symbol(params)
+        when "textDocument/hover"               then handle_hover(params)
+        when "textDocument/documentSymbol"      then handle_document_symbol(params)
+        when "workspace/didChangeWatchedFiles"  then handle_did_change_watched_files(params)
+        when "workspace/didChangeConfiguration" then handle_did_change_configuration(params)
         else
           method_not_found(method)
         end
@@ -232,6 +234,26 @@ module Rigor
           line: pos.fetch(:line),
           character: pos.fetch(:character)
         )
+      end
+
+      # workspace/didChangeWatchedFiles NOTIFICATION. Invalidates
+      # the ProjectContext so cached pre-pass / Environment is
+      # rebuilt on the next request. Slice 7's floor: any watched
+      # file change triggers a full context rebuild. Per-file
+      # surgical invalidation (per design doc § "Project context
+      # refresh") is a follow-up; this is the LSP-correct floor.
+      def handle_did_change_watched_files(_params)
+        @project_context&.invalidate!
+        nil
+      end
+
+      # workspace/didChangeConfiguration NOTIFICATION. The payload
+      # shape is client-specific; v1 ignores the payload and
+      # invalidates the context so the next read picks up any
+      # external config changes (.rigor.yml / Gemfile.lock / etc).
+      def handle_did_change_configuration(_params)
+        @project_context&.invalidate!
+        nil
       end
 
       # textDocument/documentSymbol REQUEST. Returns the

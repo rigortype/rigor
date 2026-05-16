@@ -6,8 +6,9 @@ require "rigor/configuration"
 RSpec.describe Rigor::LanguageServer::HoverProvider do
   let(:buffer_table)  { Rigor::LanguageServer::BufferTable.new }
   let(:configuration) { Rigor::Configuration.new("paths" => []) }
+  let(:project_context) { Rigor::LanguageServer::ProjectContext.new(configuration: configuration) }
   let(:provider) do
-    described_class.new(buffer_table: buffer_table, configuration: configuration)
+    described_class.new(buffer_table: buffer_table, project_context: project_context)
   end
 
   let(:uri) { "file:///tmp/lsp-hover.rb" }

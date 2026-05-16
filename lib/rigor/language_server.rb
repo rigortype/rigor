@@ -14,6 +14,7 @@ end
 
 require_relative "language_server/buffer_table"
 require_relative "language_server/uri"
+require_relative "language_server/project_context"
 require_relative "language_server/diagnostic_publisher"
 require_relative "language_server/hover_provider"
 require_relative "language_server/document_symbol_provider"

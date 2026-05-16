@@ -12,6 +12,7 @@ require_relative "../type/combinator"
 require_relative "../inference/coverage_scanner"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/synthetic_method_scanner"
+require_relative "../inference/project_patched_scanner"
 require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
 require_relative "dependency_source_inference"
@@ -75,7 +76,7 @@ module Rigor
       # diagnostic plus any Prism parse errors. The Environment
       # is built once at run start through `Environment.for_project`
       # so all files share the same RBS load.
-      def run(paths = @configuration.paths)
+      def run(paths = @configuration.paths) # rubocop:disable Metrics/AbcSize
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
 
@@ -98,6 +99,18 @@ module Rigor
           paths: expansion.fetch(:files),
           environment: nil
         )
+        # ADR-17 slice 2 — pre-eval pre-pass. Built once per run
+        # from the `pre_eval:` entries that exist on disk
+        # (slice-1's `pre-eval.file-not-found` `:error` already
+        # surfaced any missing entries; the scanner skips them
+        # here). The resulting {ProjectPatchedMethods} registry
+        # is consulted by the dispatcher tier between plugins
+        # and dependency-source inference so project-side
+        # patches resolve cross-file.
+        existing_pre_eval = @configuration.pre_eval.select { |path| File.file?(path) }
+        pre_eval_outcome = Inference::ProjectPatchedScanner.scan(existing_pre_eval)
+        @project_patched_methods = pre_eval_outcome.registry
+        @pre_eval_diagnostics_from_scanner = pre_eval_outcome.diagnostics
 
         diagnostics = pre_file_diagnostics(expansion)
         diagnostics += analyze_files(expansion.fetch(:files))
@@ -178,8 +191,14 @@ module Rigor
       # disk. Loud failure mode (`:error`, not `:warning`):
       # a missing pre_eval path is a configuration mistake the
       # user must fix before analysis is meaningful.
+      #
+      # Slice 2 adds the `:warning` `pre-eval.parse-error`
+      # stream from the pre-pass scanner — accumulated as
+      # `@pre_eval_diagnostics_from_scanner` during {#run} and
+      # merged here so both diagnostics flow through the same
+      # severity / ordering pipeline.
       def pre_eval_diagnostics
-        @configuration.pre_eval.filter_map do |path|
+        not_found = @configuration.pre_eval.filter_map do |path|
           next if File.file?(path)
 
           Diagnostic.new(
@@ -192,6 +211,15 @@ module Rigor
             source_family: :builtin
           )
         end
+        not_found + Array(@pre_eval_diagnostics_from_scanner).map { |hash| diagnostic_from_hash(hash) }
+      end
+
+      def diagnostic_from_hash(hash)
+        Diagnostic.new(
+          path: hash.fetch(:path), line: hash.fetch(:line), column: hash.fetch(:column),
+          message: hash.fetch(:message), severity: hash.fetch(:severity),
+          rule: hash.fetch(:rule), source_family: :builtin
+        )
       end
 
       # `target_ruby` flows through to Prism's `version:` option.
@@ -236,7 +264,8 @@ module Rigor
           bundler_lockfile: @configuration.bundler_lockfile,
           rbs_collection_lockfile: @configuration.rbs_collection_lockfile,
           rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect,
-          synthetic_method_index: @synthetic_method_index
+          synthetic_method_index: @synthetic_method_index,
+          project_patched_methods: @project_patched_methods
         )
       end
 

@@ -12,11 +12,12 @@ module Rigor
     attr_reader boundary_cross_reporter: untyped?
     attr_reader name_scope: untyped?
     attr_reader synthetic_method_index: untyped?
+    attr_reader project_patched_methods: untyped?
 
     def self.default: () -> Environment
-    def self.for_project: (?root: String, ?libraries: Array[String], ?signature_paths: Array[String | _ToPath]?, ?cache_store: untyped?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?, ?rbs_extended_reporter: untyped?, ?boundary_cross_reporter: untyped?, ?bundler_bundle_path: String?, ?bundler_auto_detect: bool, ?synthetic_method_index: untyped?) -> Environment
+    def self.for_project: (?root: String, ?libraries: Array[String], ?signature_paths: Array[String | _ToPath]?, ?cache_store: untyped?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?, ?rbs_extended_reporter: untyped?, ?boundary_cross_reporter: untyped?, ?bundler_bundle_path: String?, ?bundler_auto_detect: bool, ?synthetic_method_index: untyped?, ?project_patched_methods: untyped?) -> Environment
 
-    def initialize: (?class_registry: ClassRegistry, ?rbs_loader: RbsLoader?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?, ?rbs_extended_reporter: untyped?, ?boundary_cross_reporter: untyped?, ?synthetic_method_index: untyped?) -> void
+    def initialize: (?class_registry: ClassRegistry, ?rbs_loader: RbsLoader?, ?plugin_registry: untyped?, ?dependency_source_index: untyped?, ?rbs_extended_reporter: untyped?, ?boundary_cross_reporter: untyped?, ?synthetic_method_index: untyped?, ?project_patched_methods: untyped?) -> void
     def nominal_for_name: (String | Symbol name) -> Type::Nominal?
     def singleton_for_name: (String | Symbol name) -> Type::Singleton?
     def constant_for_name: (String | Symbol name) -> Type::t?

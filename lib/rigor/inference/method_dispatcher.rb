@@ -111,6 +111,20 @@ module Rigor
         )
         return synthetic_result if synthetic_result
 
+        # ADR-17 slice 2 — project-side patched-method tier.
+        # Sits BELOW the substrate / plugin tiers and ABOVE
+        # dependency-source inference per ADR-17 § "Inference
+        # contract". When the user's `pre_eval:` list named a
+        # file that re-opens a class (e.g.,
+        # `lib/core_ext/string_extensions.rb` declaring
+        # `class String; def to_url; end; end`), the pre-pass
+        # populated `ProjectPatchedMethods` with the `(class,
+        # method, kind)` triple; this tier surfaces it as
+        # `Dynamic[top]` so the patched call resolves
+        # cross-file without `call.undefined-method`.
+        patched_result = try_project_patched_method(receiver_type, method_name, environment)
+        return patched_result if patched_result
+
         # ADR-10 slice 2b-ii — dependency-source inference tier.
         # Sits BELOW RBS dispatch (RBS / RBS::Inline / generated
         # stubs / plugin contracts always win) and ABOVE the
@@ -332,6 +346,26 @@ module Rigor
         case receiver_type
         when Type::Nominal, Type::Singleton then receiver_type.class_name
         end
+      end
+
+      # ADR-17 slice 2 — project-side patched-method tier.
+      # Returns `Dynamic[top]` (slice-2 floor) when the user's
+      # `pre_eval:` pass populated the registry with a matching
+      # `(class_name, method_name, kind)`. Return-type inference
+      # for patched methods stays deferred to a separate slice
+      # (most `core_ext` patches return shapes the heuristic in
+      # ADR-10's walker could extract via the same machinery).
+      def try_project_patched_method(receiver_type, method_name, environment)
+        registry = environment&.project_patched_methods
+        return nil if registry.nil? || registry.empty?
+
+        class_name = synthetic_method_class_name(receiver_type)
+        return nil if class_name.nil?
+
+        kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
+        return nil unless registry.lookup(class_name: class_name, method_name: method_name, kind: kind)
+
+        Type::Combinator.untyped
       end
 
       def try_dependency_source(receiver_type, method_name, environment)

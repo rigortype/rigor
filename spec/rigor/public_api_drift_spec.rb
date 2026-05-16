@@ -87,6 +87,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     name_scope()
     nominal_for_name(req:name)
     plugin_registry()
+    project_patched_methods()
     rbs_extended_reporter()
     rbs_loader()
     reflection()
@@ -100,7 +101,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     "key:plugin_registry,key:dependency_source_index,key:rbs_extended_reporter," \
     "key:boundary_cross_reporter,key:bundler_bundle_path,key:bundler_auto_detect," \
     "key:bundler_lockfile,key:rbs_collection_lockfile,key:rbs_collection_auto_detect," \
-    "key:synthetic_method_index)"
+    "key:synthetic_method_index,key:project_patched_methods)"
   ].freeze
 
   REFLECTION_SINGLETON = %w[

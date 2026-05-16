@@ -8,6 +8,7 @@ require_relative "environment/lockfile_resolver"
 require_relative "environment/rbs_collection_discovery"
 require_relative "environment/rbs_coverage_report"
 require_relative "inference/synthetic_method_index"
+require_relative "inference/project_patched_methods"
 require_relative "type_node/name_scope"
 require_relative "type_node/resolver_chain"
 
@@ -58,7 +59,7 @@ module Rigor
 
     attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index,
                 :rbs_extended_reporter, :boundary_cross_reporter, :name_scope,
-                :synthetic_method_index
+                :synthetic_method_index, :project_patched_methods
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
     # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the
@@ -79,10 +80,10 @@ module Rigor
     #   sources the dispatcher consults BELOW RBS dispatch.
     #   When nil (the default), no dep-source contribution
     #   participates and the dispatcher tier is a no-op.
-    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil,
+    def initialize(class_registry: ClassRegistry.default, rbs_loader: nil, # rubocop:disable Metrics/ParameterLists
                    plugin_registry: nil, dependency_source_index: nil,
                    rbs_extended_reporter: nil, boundary_cross_reporter: nil,
-                   synthetic_method_index: nil)
+                   synthetic_method_index: nil, project_patched_methods: nil)
       @class_registry = class_registry
       @rbs_loader = rbs_loader
       @plugin_registry = plugin_registry
@@ -90,6 +91,7 @@ module Rigor
       @rbs_extended_reporter = rbs_extended_reporter
       @boundary_cross_reporter = boundary_cross_reporter
       @synthetic_method_index = synthetic_method_index || Inference::SyntheticMethodIndex::EMPTY
+      @project_patched_methods = project_patched_methods || Inference::ProjectPatchedMethods::EMPTY
       @name_scope = build_name_scope
       freeze
     end
@@ -127,7 +129,7 @@ module Rigor
                       bundler_bundle_path: nil, bundler_auto_detect: false,
                       bundler_lockfile: nil,
                       rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
-                      synthetic_method_index: nil)
+                      synthetic_method_index: nil, project_patched_methods: nil)
         resolved_paths = signature_paths || default_signature_paths(root)
         # O4 MVP — append per-gem `sig/` directories discovered
         # under the target project's bundler install root. Empty
@@ -179,7 +181,8 @@ module Rigor
           dependency_source_index: dependency_source_index,
           rbs_extended_reporter: rbs_extended_reporter,
           boundary_cross_reporter: boundary_cross_reporter,
-          synthetic_method_index: synthetic_method_index
+          synthetic_method_index: synthetic_method_index,
+          project_patched_methods: project_patched_methods
         )
       end
       # rubocop:enable Metrics/MethodLength, Metrics/ParameterLists

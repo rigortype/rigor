@@ -426,6 +426,61 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
     end
+
+    describe "pre_eval: dispatcher integration (ADR-17 slice 2)" do
+      it "resolves cross-file calls to a patched method without `call.undefined-method`" do # rubocop:disable RSpec/ExampleLength
+        Dir.mktmpdir("rigor-pre-eval-dispatch-") do |tmpdir|
+          ext_path = File.join(tmpdir, "string_ext.rb")
+          consumer_path = File.join(tmpdir, "consumer.rb")
+          File.write(ext_path, <<~RUBY)
+            class String
+              def to_url
+                gsub(/\\W/, "-")
+              end
+            end
+          RUBY
+          File.write(consumer_path, <<~RUBY)
+            class Consumer
+              def call(s)
+                s.to_url
+              end
+            end
+          RUBY
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new(
+              "paths" => [consumer_path],
+              "pre_eval" => [ext_path]
+            )
+            result = described_class.new(configuration: configuration, cache_store: nil).run
+            undefined = result.diagnostics.select do |d|
+              d.rule.to_s.include?("undefined-method") && d.message.include?("to_url")
+            end
+            expect(undefined).to(
+              be_empty,
+              "expected `s.to_url` to resolve through ProjectPatchedMethods; got: " \
+              "#{undefined.map(&:message).inspect}"
+            )
+          end
+        end
+      end
+
+      it "surfaces `pre-eval.parse-error` :warning when a pre_eval file has a parse error" do
+        Dir.mktmpdir("rigor-pre-eval-parse-") do |tmpdir|
+          broken_path = File.join(tmpdir, "broken.rb")
+          File.write(broken_path, "def broken\n")
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new(
+              "paths" => [], "pre_eval" => [broken_path]
+            )
+            result = described_class.new(configuration: configuration, cache_store: nil).run
+            warns = result.diagnostics.select { |d| d.rule == "pre-eval.parse-error" }
+
+            expect(warns.size).to eq(1)
+            expect(warns.first.severity).to eq(:warning)
+          end
+        end
+      end
+    end
   end
 
   describe "target_ruby wiring (`.rigor.yml` -> Prism version:)" do

@@ -135,7 +135,9 @@ module Rigor
             field = parse_field_call(node)
             next if field.nil?
 
-            fields[field[:name]] = { type: field[:type], nullable: field[:nullable] }
+            fields[field[:name]] = {
+              type: field[:type], nullable: field[:nullable], list: field[:list]
+            }
           end
           fields
         end
@@ -148,9 +150,10 @@ module Rigor
 
         # `field :name, Type, null: false` shape. The first
         # positional is a Symbol (field name); the second is a
-        # constant reference (GraphQL type); `null:` is the
-        # nullability keyword (defaults to TRUE per graphql-ruby's
-        # field defaults so we mirror that).
+        # constant reference (GraphQL type) OR a single-element
+        # ArrayNode (`[Type]`) for GraphQL list types; `null:` is
+        # the nullability keyword (defaults to TRUE per
+        # graphql-ruby's field defaults so we mirror that).
         def parse_field_call(node)
           args = node.arguments&.arguments
           return nil if args.nil? || args.size < 2
@@ -159,21 +162,51 @@ module Rigor
           type_node = args[1]
           return nil unless name_node.is_a?(Prism::SymbolNode)
 
-          underlying = resolve_field_type(type_node)
-          return nil if underlying.nil?
+          type_info = resolve_field_type(type_node)
+          return nil if type_info.nil?
 
-          { name: name_node.unescaped, type: underlying, nullable: extract_nullability(args) }
+          {
+            name: name_node.unescaped,
+            type: type_info[:type],
+            list: type_info[:list],
+            nullable: extract_nullability(args)
+          }
         end
         private_class_method :parse_field_call
 
+        # Resolves the `Type` positional argument to a
+        # `{type: "ClassName", list: bool}` tuple. ArrayNode
+        # forms (`[String]` / `[Types::User]`) unwrap the single
+        # element and mark `list: true`. Bare constant refs are
+        # not lists. Returns nil for unrecognised shapes (string
+        # types `"User"`, Proc lazy types, etc.) so callers drop
+        # the field.
         def resolve_field_type(node)
+          if node.is_a?(Prism::ArrayNode)
+            element = node.elements.first
+            return nil if node.elements.size != 1 || element.nil?
+
+            inner = resolve_constant_type(element)
+            return nil if inner.nil?
+
+            { type: inner, list: true }
+          else
+            name = resolve_constant_type(node)
+            return nil if name.nil?
+
+            { type: name, list: false }
+          end
+        end
+        private_class_method :resolve_field_type
+
+        def resolve_constant_type(node)
           name = constant_name_for(node)
           return nil if name.nil?
 
           tail = name.split("::").last
           CANONICAL_TYPES[tail] || name
         end
-        private_class_method :resolve_field_type
+        private_class_method :resolve_constant_type
 
         # Defaults to `true` (matches graphql-ruby's `field`
         # default nullability). Looks for an explicit `null:`

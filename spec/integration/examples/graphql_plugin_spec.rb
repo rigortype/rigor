@@ -53,12 +53,12 @@ RSpec.describe "rigor-graphql integration" do
     table = run_and_read_fact(demo: demo)
     expect(table).not_to be_nil
     expect(table.fetch("User")).to eq(
-      "name" => { type: "String", nullable: false },
-      "email" => { type: "String", nullable: true },
-      "age" => { type: "Integer", nullable: false },
-      "is_active" => { type: "TrueClass", nullable: false },
-      "rating" => { type: "Float", nullable: false },
-      "uid" => { type: "String", nullable: false }
+      "name" => { type: "String", nullable: false, list: false },
+      "email" => { type: "String", nullable: true, list: false },
+      "age" => { type: "Integer", nullable: false, list: false },
+      "is_active" => { type: "TrueClass", nullable: false, list: false },
+      "rating" => { type: "Float", nullable: false, list: false },
+      "uid" => { type: "String", nullable: false, list: false }
     )
   end
 
@@ -73,7 +73,7 @@ RSpec.describe "rigor-graphql integration" do
     table = run_and_read_fact(demo: demo)
     expect(table).to have_key("Types::User")
     expect(table.fetch("Types::User")).to eq(
-      "name" => { type: "String", nullable: false }
+      "name" => { type: "String", nullable: false, list: false }
     )
   end
 
@@ -86,8 +86,8 @@ RSpec.describe "rigor-graphql integration" do
     RUBY
     fields = run_and_read_fact(demo: demo).fetch("Post")
     expect(fields).to eq(
-      "author" => { type: "Types::User", nullable: false },
-      "status" => { type: "Types::Status", nullable: true }
+      "author" => { type: "Types::User", nullable: false, list: false },
+      "status" => { type: "Types::Status", nullable: true, list: false }
     )
   end
 
@@ -98,7 +98,47 @@ RSpec.describe "rigor-graphql integration" do
       end
     RUBY
     fields = run_and_read_fact(demo: demo).fetch("User")
-    expect(fields.fetch("nickname")).to eq(type: "String", nullable: true)
+    expect(fields.fetch("nickname")).to eq(type: "String", nullable: true, list: false)
+  end
+
+  it "recognises list-wrapped scalar types (`[String]`) as list-of-element" do
+    demo = <<~RUBY
+      class Post < GraphQL::Schema::Object
+        field :tags, [String], null: false
+        field :scores, [Integer], null: true
+      end
+    RUBY
+    fields = run_and_read_fact(demo: demo).fetch("Post")
+    expect(fields).to eq(
+      "tags" => { type: "String", nullable: false, list: true },
+      "scores" => { type: "Integer", nullable: true, list: true }
+    )
+  end
+
+  it "recognises list-wrapped user-defined types (`[Types::Author]`)" do
+    demo = <<~RUBY
+      class Post < GraphQL::Schema::Object
+        field :authors, [Types::Author], null: false
+        field :revisions, [Types::Revision], null: true
+      end
+    RUBY
+    fields = run_and_read_fact(demo: demo).fetch("Post")
+    expect(fields).to eq(
+      "authors" => { type: "Types::Author", nullable: false, list: true },
+      "revisions" => { type: "Types::Revision", nullable: true, list: true }
+    )
+  end
+
+  it "ignores multi-element / empty list literals (not GraphQL list shape)" do
+    demo = <<~RUBY
+      class Bad < GraphQL::Schema::Object
+        field :empty, [], null: false
+        field :multi, [String, Integer], null: false
+        field :real, String, null: false
+      end
+    RUBY
+    fields = run_and_read_fact(demo: demo).fetch("Bad")
+    expect(fields.keys).to contain_exactly("real")
   end
 
   it "ignores `field` calls whose first arg isn't a literal Symbol (defensive)" do

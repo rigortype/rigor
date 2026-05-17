@@ -26,15 +26,40 @@ the plugin's `prepare(services)` hook scans every `paths:` entry for
 ```ruby
 {
   "User" => {
-    "name"      => { type: "String", nullable: false },
-    "email"     => { type: "String", nullable: true },
-    "age"       => { type: "Integer", nullable: false },
-    "is_active" => { type: "TrueClass", nullable: false }
+    "name"      => { type: "String", nullable: false, list: false },
+    "email"     => { type: "String", nullable: true,  list: false },
+    "age"       => { type: "Integer", nullable: false, list: false },
+    "is_active" => { type: "TrueClass", nullable: false, list: false }
   }
 }
 ```
 
 table, and publishes it as `:graphql_type_table`.
+
+## List wrappers (slice 2a)
+
+`field :tags, [String]` is GraphQL's list-of-element shape. The
+plugin recognises the single-element `Prism::ArrayNode` form and
+sets `list: true` on the row:
+
+```ruby
+class Post < GraphQL::Schema::Object
+  field :tags, [String], null: false
+  field :authors, [Types::Author], null: false
+end
+
+# →
+{
+  "Post" => {
+    "tags"    => { type: "String", nullable: false, list: true },
+    "authors" => { type: "Types::Author", nullable: false, list: true }
+  }
+}
+```
+
+Multi-element list literals (`[String, Integer]`) and empty lists
+(`[]`) silently drop — they are not valid GraphQL list type
+expressions.
 
 ## Why this is a metadata-recorder plugin (not ADR-16 substrate)
 
@@ -92,7 +117,9 @@ The **ceiling** (future slices, demand-driven):
   matches `Type`'s underlying class.
 - **`GraphQL::Schema::Enum`** — `value "ACTIVE"` declarations.
 - **`GraphQL::Schema::Mutation`** + **`GraphQL::Schema::InputObject`**.
-- **List / Non-Null wrappers** (`[String]`, `String.array`).
+- **Non-Null wrappers** (`String.array`). The bracket form
+  (`[String]`) is recognised in slice 2a; the `<Type>.array` /
+  `<Type>!` chain forms graphql-ruby also accepts stay deferred.
 - **`resolver:` / `mutation:`** reroute recognition.
 - **String type-expression diagnostic** — graphql-ruby accepts
   `field :foo, "User"` and `BuildType.parse_type` constantizes at

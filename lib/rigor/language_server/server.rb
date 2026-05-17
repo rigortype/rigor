@@ -46,7 +46,7 @@ module Rigor
 
       attr_reader :state, :exit_code, :buffer_table, :publisher,
                   :hover_provider, :document_symbol_provider, :completion_provider,
-                  :signature_help_provider, :project_context
+                  :signature_help_provider, :folding_range_provider, :project_context
 
       # @param completion_provider [Rigor::LanguageServer::CompletionProvider, nil]
       #   resolves `textDocument/completion`. Nil → `MethodNotFound`.
@@ -62,7 +62,7 @@ module Rigor
       def initialize(buffer_table: BufferTable.new, publisher: nil,
                      hover_provider: nil, document_symbol_provider: nil,
                      completion_provider: nil, signature_help_provider: nil,
-                     project_context: nil)
+                     folding_range_provider: nil, project_context: nil)
         @state = :uninitialized
         @exit_code = nil
         @buffer_table = buffer_table
@@ -71,6 +71,7 @@ module Rigor
         @document_symbol_provider = document_symbol_provider
         @completion_provider = completion_provider
         @signature_help_provider = signature_help_provider
+        @folding_range_provider = folding_range_provider
         @project_context = project_context
       end
 
@@ -105,6 +106,7 @@ module Rigor
         when "textDocument/documentSymbol"      then handle_document_symbol(params)
         when "textDocument/completion"          then handle_completion(params)
         when "textDocument/signatureHelp"       then handle_signature_help(params)
+        when "textDocument/foldingRange"        then handle_folding_range(params)
         when "workspace/didChangeWatchedFiles"  then handle_did_change_watched_files(params)
         when "workspace/didChangeConfiguration" then handle_did_change_configuration(params)
         else
@@ -188,6 +190,7 @@ module Rigor
             triggerCharacters: ["(", ","]
           }
         end
+        caps[:foldingRangeProvider] = true if @folding_range_provider
         caps
       end
 
@@ -286,6 +289,16 @@ module Rigor
       def handle_did_change_configuration(_params)
         @project_context&.invalidate!
         nil
+      end
+
+      # textDocument/foldingRange REQUEST. Routes to the
+      # folding-range provider when wired; `MethodNotFound`
+      # otherwise.
+      def handle_folding_range(params)
+        return method_not_found("textDocument/foldingRange") unless @folding_range_provider
+
+        doc = params.fetch(:textDocument)
+        @folding_range_provider.provide(doc.fetch(:uri))
       end
 
       # textDocument/signatureHelp REQUEST. Routes to the

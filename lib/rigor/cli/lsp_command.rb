@@ -86,6 +86,9 @@ module Rigor
           signature_help_provider: LanguageServer::SignatureHelpProvider.new(
             buffer_table: buffer_table, project_context: project_context
           ),
+          folding_range_provider: LanguageServer::FoldingRangeProvider.new(
+            buffer_table: buffer_table, project_context: project_context
+          ),
           project_context: project_context
         )
         loop_runner = LanguageServer::Loop.new(

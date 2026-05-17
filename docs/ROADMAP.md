@@ -52,7 +52,7 @@ Every committed v0.1.6 track is purely additive (no behaviour change for existin
 
 - **ADR-17 slice 3b** (per-file cache descriptor), slices 5 / 6 (full-project 2-pass / plugin-API hook).
 - **ADR-18 slice 4** (TraitRegistry parity for `returns_from_arg:`) + chained-call argument extension (`Types::String.constrained(...)` chain-head resolution).
-- **ADR-12** continuations: `rigor-dry-schema` (slicing in [`docs/design/20260517-dry-validation-slicing.md`](design/20260517-dry-validation-slicing.md) — must land before `rigor-dry-validation`), `rigor-dry-validation` (proposed 3-slice plan blocked on dry-schema; no ADR-3 amendment needed), `rigor-dry-monads` (still needs `Result[T, E]` / `Maybe[T]` carrier decision). **rigor-dry-types slice 4** LANDED (transitive composition references with cycle detection — CHANGELOG `[Unreleased]` § Added).
+- **ADR-12** continuations: `rigor-dry-schema` slice 1 LANDED (recognition + fact publication — CHANGELOG `[Unreleased]` § Added); `rigor-dry-schema` slice 2+ (typed `result.to_h` synthesis via ADR-16 Tier C / per-row diagnostics) demand-driven; `rigor-dry-validation` (3-slice plan blocked on dry-schema slice 2; no ADR-3 amendment needed); `rigor-dry-monads` (still needs `Result[T, E]` / `Maybe[T]` carrier decision). **rigor-dry-types slice 4** LANDED (transitive composition references with cycle detection — CHANGELOG `[Unreleased]` § Added).
 - **ADR-10 option C** (lazy / on-demand per-call gem-source inference).
 - **ADR-13 resolver-chain wiring** for synthetic-method tier `returns:` strings (utility-type returns).
 - **ADR-16 slice 5b** (Tier D engine integration).

@@ -1,0 +1,16 @@
+paths:
+  - demo.rb
+
+plugins:
+  - rigor-dry-types
+  - rigor-dry-schema
+
+signature_paths:
+  # Minimal Dry::Schema RBS stub local to the demo. Covers the
+  # surface the demo touches (`Dry::Schema.Params` factory). A real
+  # project depending on `dry-schema` would expose its own RBS
+  # through bundler auto-discovery (rigor's O4 Layer 1/2 path).
+  - sig
+
+cache:
+  path: tmp/.rigor/cache

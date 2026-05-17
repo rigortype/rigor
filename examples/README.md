@@ -1,13 +1,17 @@
 # Rigor plugin examples
 
-Twenty-four entries — twenty-three worked plugins of the **v0.1.0
+Twenty-six entries — twenty-five worked plugins of the **v0.1.0
 plugin authoring surface** plus one RBS-only bundle
 (`rigor-activesupport-core-ext`). `rigor-sinatra`,
 `rigor-dry-struct`, and `rigor-devise` are the first worked
 consumers of the **ADR-16 macro expansion substrate** — their
 bodies are purely declarative `Plugin::Macro::*` manifest
 entries (Tier A, Tier C, and Tier B respectively), with no
-walker code.
+walker code. `rigor-dry-types` + `rigor-dry-schema` form the
+**dry-rb foundation pair** per [ADR-12](../docs/adr/12-dry-rb-packaging.md):
+dry-types publishes the alias table; dry-schema reads it for
+constant-reference resolution and publishes its own schema
+table.
 
 (The earlier "eighteen worked examples" paragraph reflected the
 state on 2026-05-11; subsequent additions are listed in the tables
@@ -47,7 +51,8 @@ ADR-9's cross-plugin fact store.
 | [`rigor-sinatra`](rigor-sinatra/) | **Macro expansion substrate, Tier A** (ADR-16) — declarative `Plugin::Macro::BlockAsMethod` manifest entry narrows the block body's `self_type` for `get` / `post` / `put` / `delete` / `head` / `options` / `patch` / `link` / `unlink` against `Sinatra::Base` subclasses. First worked consumer of the macro expansion substrate; the plugin body is purely declarative — no walker, no `diagnostics_for_file`. | ~60 | — | — | — | 2 |
 | [`rigor-dry-struct`](rigor-dry-struct/) | **Macro expansion substrate, Tier C** (ADR-16) — declarative `Plugin::Macro::HeredocTemplate` manifest entry synthesises an instance reader on every `Dry::Struct` subclass for each `attribute :name, T` / `attribute? :name, T` call. First worked consumer of `HeredocTemplate`; per WD13 the floor ships `Dynamic[T]` returns + cross-file dispatch resolution. | ~70 | — | — | — | 2 |
 | [`rigor-devise`](rigor-devise/) | **Macro expansion substrate, Tier B** (ADR-16) — declarative `Plugin::Macro::TraitRegistry` manifest entry mirroring Devise's `lib/devise/modules.rb` symbol → module table. The substrate's pre-pass explodes each `devise :strategy_a, :strategy_b` call's included modules' RBS instance methods onto the calling AR model. First worked consumer of `TraitRegistry`; floor ships `Dynamic[T]` returns + cross-file dispatch resolution. | ~110 | — | — | — | 2 |
-| [`rigor-dry-types`](rigor-dry-types/) | **dry-rb foundation plugin (ADR-12 Tier A)** — recognises `module X; include Dry.Types(); end` and publishes the `{X::String => "String", X::Integer => "Integer", …}` table as the `:dry_type_aliases` cross-plugin fact (ADR-9). Foundation gem for the `rigor-dry-*` family; consumed by `rigor-dry-struct` / `rigor-dry-validation` / `rigor-dry-schema` once their precision-promotion slices wire through the fact. Slice 1 ships fact-publication only; user-facing diagnostics deferred. | ~150 | Project source (`paths:` `.rb` files) | — | — | 4 |
+| [`rigor-dry-types`](rigor-dry-types/) | **dry-rb foundation plugin (ADR-12 Tier A)** — recognises `module X; include Dry.Types(); end` and publishes the `{X::String => "String", X::Integer => "Integer", …}` table as the `:dry_type_aliases` cross-plugin fact (ADR-9). Foundation gem for the `rigor-dry-*` family; consumed by `rigor-dry-struct` / `rigor-dry-validation` / `rigor-dry-schema`. Slices 1-4 ship the full alias coverage: canonical + four nested coercion categories + user-authored compositions + transitive composition references with cycle detection. | ~250 | Project source (`paths:` `.rb` files) | — | — | 10 |
+| [`rigor-dry-schema`](rigor-dry-schema/) | **dry-rb schema plugin (ADR-12 Tier A)** — recognises `Foo = Dry::Schema.{Params,JSON,define} { ... }` assignments and publishes the per-schema `{required: {key => underlying_class}, optional: {…}}` table as the `:dry_schema_table` cross-plugin fact (ADR-9). Maps `required(:k).filled(:string)` / `required(:k).value(:integer)` / `optional(:k).maybe(:string)` predicate rows to underlying classes; resolves `value(Types::Email)` user-authored references through `:dry_type_aliases` published by `rigor-dry-types`. Floor for the future `rigor-dry-validation` plugin per [the slicing plan](../docs/design/20260517-dry-validation-slicing.md). | ~250 | Project source (`paths:` `.rb` files) | — | — | 9 |
 
 ### Rails ecosystem family
 

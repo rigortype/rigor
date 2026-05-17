@@ -1,0 +1,9 @@
+module Dry
+  def self.Types: () -> Module
+
+  module Schema
+    def self.Params: () { (untyped) -> void } -> untyped
+    def self.JSON: () { (untyped) -> void } -> untyped
+    def self.define: () { (untyped) -> void } -> untyped
+  end
+end

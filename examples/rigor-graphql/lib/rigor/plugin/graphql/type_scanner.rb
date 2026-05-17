@@ -32,98 +32,112 @@ module Rigor
         # `BaseObject = GraphQL::Schema::Object` shape work when
         # the alias's RHS is the canonical path.
         SCHEMA_OBJECT_TAIL = "Object"
-        SCHEMA_OBJECT_PARENTS = %w[Schema GraphQL].freeze
-        private_constant :SCHEMA_OBJECT_TAIL, :SCHEMA_OBJECT_PARENTS
+        SCHEMA_ENUM_TAIL = "Enum"
+        # Common path-segment for both `Schema::Object` and
+        # `Schema::Enum`; the second-to-last segment must be
+        # `Schema` (either fully-qualified `GraphQL::Schema::X`
+        # or lexically nested `Schema::X` inside `module GraphQL`).
+        SCHEMA_PARENT_SEGMENTS = %w[Schema GraphQL].freeze
+        private_constant :SCHEMA_OBJECT_TAIL, :SCHEMA_ENUM_TAIL, :SCHEMA_PARENT_SEGMENTS
 
         module_function
 
         # @param paths [Array<String>] absolute paths to `.rb` files
         #   the project's `paths:` resolves to.
-        # @return [Hash{String => Hash{String => Hash{Symbol => Object}}}]
-        #   frozen per-type field table. Empty when no recognisable
-        #   `Schema::Object` subclass is found.
+        # @return [Hash{Symbol => Hash}] frozen 2-key result with
+        #   `:types` (per-`Schema::Object` field table) and
+        #   `:enums` (per-`Schema::Enum` value list). Either may
+        #   be empty when no recognisable declaration is found.
         def scan(paths:)
-          table = {}
+          types = {}
+          enums = {}
           paths.each do |path|
-            scan_file(path).each do |type_class, fields|
-              table[type_class] ||= fields
-            end
+            file_types, file_enums = scan_file(path)
+            file_types.each { |k, v| types[k] ||= v }
+            file_enums.each { |k, v| enums[k] ||= v }
           end
-          table.freeze
+          { types: types.freeze, enums: enums.freeze }.freeze
         end
 
         def scan_file(path)
           source = File.read(path)
           parse_result = Prism.parse(source, filepath: path)
-          return {} unless parse_result.errors.empty?
+          return [{}, {}] unless parse_result.errors.empty?
 
-          collect_types(parse_result.value, [])
+          collect_definitions(parse_result.value, [])
         rescue StandardError
-          {}
+          [{}, {}]
         end
         private_class_method :scan_file
 
         # Walks the AST collecting `class X < GraphQL::Schema::Object`
-        # decls at any nesting level. Tracks the enclosing module
-        # chain so a `module Types; class User < ...; end; end` shape
-        # registers as `"Types::User"`.
-        def collect_types(node, qualified_prefix)
-          return {} if node.nil?
+        # and `class X < GraphQL::Schema::Enum` decls at any nesting
+        # level. Tracks the enclosing module chain so
+        # `module Types; class User < Schema::Object; end; end`
+        # registers as `"Types::User"`. Returns the 2-tuple
+        # `[types_hash, enums_hash]` so the caller can publish two
+        # cross-plugin facts from one walk.
+        def collect_definitions(node, qualified_prefix)
+          return [{}, {}] if node.nil?
 
           case node
           when Prism::ClassNode then collect_class_node(node, qualified_prefix)
           when Prism::ModuleNode then collect_module_node(node, qualified_prefix)
           else
-            node.compact_child_nodes.each_with_object({}) do |child, acc|
-              collect_types(child, qualified_prefix).each { |k, v| acc[k] ||= v }
+            node.compact_child_nodes.each_with_object([{}, {}]) do |child, acc|
+              child_types, child_enums = collect_definitions(child, qualified_prefix)
+              child_types.each { |k, v| acc[0][k] ||= v }
+              child_enums.each { |k, v| acc[1][k] ||= v }
             end
           end
         end
-        private_class_method :collect_types
+        private_class_method :collect_definitions
 
         def collect_class_node(node, qualified_prefix)
           inner_name = constant_name_for(node.constant_path)
-          return {} if inner_name.nil?
+          return [{}, {}] if inner_name.nil?
 
           new_prefix = qualified_prefix + [inner_name]
-          inner = collect_types(node.body, new_prefix)
-          if schema_object_subclass?(node)
-            type_class = new_prefix.join("::")
-            fields = collect_fields(node.body)
-            inner[type_class] ||= fields unless fields.empty?
-          end
-          inner
+          inner_types, inner_enums = collect_definitions(node.body, new_prefix)
+          register_object_or_enum!(node, new_prefix, inner_types, inner_enums)
+          [inner_types, inner_enums]
         end
         private_class_method :collect_class_node
 
+        def register_object_or_enum!(class_node, prefix, types, enums)
+          if schema_subclass?(class_node, SCHEMA_OBJECT_TAIL)
+            fields = collect_fields(class_node.body)
+            types[prefix.join("::")] ||= fields unless fields.empty?
+          elsif schema_subclass?(class_node, SCHEMA_ENUM_TAIL)
+            values = collect_values(class_node.body)
+            enums[prefix.join("::")] ||= values unless values.empty?
+          end
+        end
+        private_class_method :register_object_or_enum!
+
         def collect_module_node(node, qualified_prefix)
           inner_name = constant_name_for(node.constant_path)
-          return {} if inner_name.nil?
+          return [{}, {}] if inner_name.nil?
 
-          collect_types(node.body, qualified_prefix + [inner_name])
+          collect_definitions(node.body, qualified_prefix + [inner_name])
         end
         private_class_method :collect_module_node
 
-        # `class X < GraphQL::Schema::Object` matches when the
-        # superclass's last two path segments are
-        # `Schema::Object` (or a single-segment `Object` whose
-        # parent is `Schema`, etc.). Matches both
-        # `< GraphQL::Schema::Object` (fully qualified) and
-        # `< Schema::Object` (lexically inside `module GraphQL`).
-        def schema_object_subclass?(class_node)
+        # `class X < GraphQL::Schema::<Tail>` matches when the
+        # superclass's last two path segments are `Schema::<Tail>`.
+        # Matches both `< GraphQL::Schema::<Tail>` (fully qualified)
+        # and `< Schema::<Tail>` (lexically inside `module GraphQL`).
+        def schema_subclass?(class_node, tail)
           superclass = class_node.superclass
           return false if superclass.nil?
 
           path = constant_path_segments(superclass)
           return false if path.empty?
-          return false unless path.last == SCHEMA_OBJECT_TAIL
+          return false unless path.last == tail
 
-          # Accept any chain whose tail two are
-          # `<...>::Schema::Object` (caters to `GraphQL::Schema::Object`
-          # explicit and `Schema::Object` lexical-nested).
-          SCHEMA_OBJECT_PARENTS.include?(path[-2])
+          SCHEMA_PARENT_SEGMENTS.include?(path[-2])
         end
-        private_class_method :schema_object_subclass?
+        private_class_method :schema_subclass?
 
         def collect_fields(body)
           return {} if body.nil?
@@ -147,6 +161,34 @@ module Rigor
           body.is_a?(Prism::StatementsNode) ? body.body : [body]
         end
         private_class_method :statement_nodes
+
+        # Walks every top-level `value "..."` call inside an
+        # enum subclass body and returns the value names as an
+        # Array<String>. Both shapes graphql-ruby accepts work:
+        #
+        #     value "ACTIVE"
+        #     value "DISABLED", value: :off, description: "..."
+        #
+        # The first positional must be a String literal — the
+        # graphql-ruby `value` API also accepts a Symbol form
+        # (`value :ACTIVE`) but the documented idiom is String.
+        # Slice 2b only stores the GraphQL-side value name; the
+        # optional `value:` kwarg (Ruby-side override) and
+        # `description:` stay out of the published table for
+        # the floor.
+        def collect_values(body)
+          return [] if body.nil?
+
+          values = []
+          statement_nodes(body).each do |node|
+            next unless node.is_a?(Prism::CallNode) && node.name == :value
+
+            arg = node.arguments&.arguments&.first
+            values << arg.unescaped if arg.is_a?(Prism::StringNode)
+          end
+          values
+        end
+        private_class_method :collect_values
 
         # `field :name, Type, null: false` shape. The first
         # positional is a Symbol (field name); the second is a

@@ -61,6 +61,36 @@ Multi-element list literals (`[String, Integer]`) and empty lists
 (`[]`) silently drop — they are not valid GraphQL list type
 expressions.
 
+## Schema::Enum recognition (slice 2b)
+
+Enum subclasses (`class T < GraphQL::Schema::Enum`) are walked in
+the same AST pass; every `value "STRING"` declaration inside the
+class body is collected into a per-enum value list, published as
+the **separate** `:graphql_enum_table` cross-plugin fact:
+
+```ruby
+class Status < GraphQL::Schema::Enum
+  value "ACTIVE"
+  value "PENDING"
+  value "DISABLED", value: :off       # value: kwarg ignored at slice 2b
+end
+
+# :graphql_enum_table fact →
+{
+  "Status" => ["ACTIVE", "PENDING", "DISABLED"]
+}
+```
+
+Only literal-String first arguments register. The optional
+`value:` Ruby-side override and `description:` kwarg ride along
+but stay out of the published table at this slice. Symbol-form
+(`value :ACTIVE`) and constant-form (`value SOME_CONSTANT`)
+declarations drop silently.
+
+The plugin publishes BOTH facts from one project walk; consumers
+that only need one fact (or neither) are unaffected by the
+other's presence / absence.
+
 ## Why this is a metadata-recorder plugin (not ADR-16 substrate)
 
 graphql-ruby's `field` DSL is a **pure metadata recorder** — it just
@@ -115,7 +145,6 @@ The **ceiling** (future slices, demand-driven):
 - **Resolver-method check** — for each `field :name, Type`, if
   `name` is also defined as a Ruby method, verify the return type
   matches `Type`'s underlying class.
-- **`GraphQL::Schema::Enum`** — `value "ACTIVE"` declarations.
 - **`GraphQL::Schema::Mutation`** + **`GraphQL::Schema::InputObject`**.
 - **Non-Null wrappers** (`String.array`). The bracket form
   (`[String]`) is recognised in slice 2a; the `<Type>.array` /

@@ -33,10 +33,87 @@ RSpec.describe "rigor-graphql integration" do
     RBS
   end
 
-  it "registers a manifest publishing :graphql_type_table" do
+  it "registers a manifest publishing :graphql_type_table + :graphql_enum_table" do
     manifest = plugin_class.manifest
     expect(manifest.id).to eq("graphql")
-    expect(manifest.produces).to include(:graphql_type_table)
+    expect(manifest.produces).to include(:graphql_type_table, :graphql_enum_table)
+  end
+
+  describe "slice 2b — Schema::Enum recognition" do
+    it "publishes the per-enum value list for a `Schema::Enum` subclass" do
+      demo = <<~RUBY
+        class Status < GraphQL::Schema::Enum
+          value "ACTIVE"
+          value "PENDING"
+          value "DISABLED"
+        end
+      RUBY
+      table = run_and_read_fact(demo: demo, fact_name: :graphql_enum_table)
+      expect(table).not_to be_nil
+      expect(table.fetch("Status")).to eq(%w[ACTIVE PENDING DISABLED])
+    end
+
+    it "registers nested enums under the enclosing constant chain" do
+      demo = <<~RUBY
+        module Types
+          class Status < GraphQL::Schema::Enum
+            value "OK"
+            value "ERROR"
+          end
+        end
+      RUBY
+      table = run_and_read_fact(demo: demo, fact_name: :graphql_enum_table)
+      expect(table).to have_key("Types::Status")
+      expect(table.fetch("Types::Status")).to eq(%w[OK ERROR])
+    end
+
+    it "ignores `value` calls whose first arg isn't a literal String (slice 2b floor)" do
+      demo = <<~RUBY
+        class Status < GraphQL::Schema::Enum
+          value "ACTIVE"
+          value :SYMBOL_FORM
+          value SOME_CONSTANT
+        end
+      RUBY
+      values = run_and_read_fact(demo: demo, fact_name: :graphql_enum_table).fetch("Status")
+      expect(values).to eq(%w[ACTIVE])
+    end
+
+    it "preserves additional kwargs (`value:`, `description:`) without dropping the row" do
+      demo = <<~RUBY
+        class Status < GraphQL::Schema::Enum
+          value "ACTIVE", description: "currently in use"
+          value "DISABLED", value: :off
+        end
+      RUBY
+      values = run_and_read_fact(demo: demo, fact_name: :graphql_enum_table).fetch("Status")
+      expect(values).to eq(%w[ACTIVE DISABLED])
+    end
+
+    it "publishes both facts when a project mixes Schema::Object and Schema::Enum" do
+      demo = <<~RUBY
+        class User < GraphQL::Schema::Object
+          field :name, String, null: false
+        end
+
+        class Status < GraphQL::Schema::Enum
+          value "ACTIVE"
+        end
+      RUBY
+      types = run_and_read_fact(demo: demo, fact_name: :graphql_type_table)
+      enums = run_and_read_fact(demo: demo, fact_name: :graphql_enum_table)
+      expect(types).to have_key("User")
+      expect(enums).to have_key("Status")
+    end
+
+    it "does NOT publish :graphql_enum_table when no Schema::Enum subclass is present" do
+      demo = <<~RUBY
+        class User < GraphQL::Schema::Object
+          field :name, String, null: false
+        end
+      RUBY
+      expect(run_and_read_fact(demo: demo, fact_name: :graphql_enum_table)).to be_nil
+    end
   end
 
   it "publishes the per-type field map for a `Schema::Object` subclass" do
@@ -194,7 +271,7 @@ RSpec.describe "rigor-graphql integration" do
     expect(run_and_read_fact(demo: demo)).to be_nil
   end
 
-  def run_and_read_fact(demo:)
+  def run_and_read_fact(demo:, fact_name: :graphql_type_table)
     Rigor::Plugin.unregister!
     captured_store = nil
     allow(Rigor::Plugin::Services).to receive(:new).and_wrap_original do |original, **kwargs|
@@ -225,6 +302,6 @@ RSpec.describe "rigor-graphql integration" do
         ).run
       end
     end
-    captured_store&.read(plugin_id: "graphql", name: :graphql_type_table)
+    captured_store&.read(plugin_id: "graphql", name: fact_name)
   end
 end

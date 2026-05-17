@@ -69,20 +69,16 @@ module Rigor
       manifest(
         id: "graphql",
         version: "0.1.0",
-        description: "Recognises `class T < GraphQL::Schema::Object` subclasses and " \
-                     "publishes the per-type field-type table.",
-        produces: [:graphql_type_table]
+        description: "Recognises `class T < GraphQL::Schema::Object` and " \
+                     "`class T < GraphQL::Schema::Enum` subclasses; publishes the " \
+                     "per-type field-type table and the per-enum value list.",
+        produces: %i[graphql_type_table graphql_enum_table]
       )
 
       def prepare(services)
-        table = TypeScanner.scan(paths: scannable_paths(services))
-        return if table.empty?
-
-        services.fact_store.publish(
-          plugin_id: manifest.id,
-          name: :graphql_type_table,
-          value: table
-        )
+        scanned = TypeScanner.scan(paths: scannable_paths(services))
+        publish_if_present(services, :graphql_type_table, scanned.fetch(:types))
+        publish_if_present(services, :graphql_enum_table, scanned.fetch(:enums))
       end
 
       def init(_services)
@@ -90,6 +86,12 @@ module Rigor
       end
 
       private
+
+      def publish_if_present(services, name, value)
+        return if value.nil? || value.empty?
+
+        services.fact_store.publish(plugin_id: manifest.id, name: name, value: value)
+      end
 
       def scannable_paths(services)
         @scannable_paths ||= services.configuration.paths.flat_map do |entry|

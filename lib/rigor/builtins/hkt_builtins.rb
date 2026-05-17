@@ -107,20 +107,32 @@ module Rigor
       # (`Union[nil, true, false, ..., Array[App[json::value,
       # String]], Hash[String, App[json::value, String]]]`)
       # rather than the opaque carrier.
+      JSON_VALUE_SPEC = {
+        uri: :"json::value",
+        args: ["String"],
+        discriminator: :json_symbolize_names
+      }.freeze
+      private_constant :JSON_VALUE_SPEC
+
       METHOD_RETURN_OVERRIDES = {
-        ["JSON", :parse,  :singleton] => { uri: :"json::value", args: ["String"] },
-        ["JSON", :parse!, :singleton] => { uri: :"json::value", args: ["String"] },
-        ["JSON", :load,   :singleton] => { uri: :"json::value", args: ["String"] }
+        ["JSON", :parse,  :singleton] => JSON_VALUE_SPEC,
+        ["JSON", :parse!, :singleton] => JSON_VALUE_SPEC,
+        ["JSON", :load,   :singleton] => JSON_VALUE_SPEC
       }.freeze
 
       # @return [Rigor::Type, nil] the reduced HKT type for
       #   the given (class_name, method_name, kind) triple,
       #   or `nil` when no built-in override is registered.
-      def method_return_override(class_name:, method_name:, kind:, hkt_registry: nil)
+      #   When `arg_types` is supplied AND the entry carries a
+      #   `:discriminator` symbol, the discriminator may swap
+      #   the spec's default args for an alternate (e.g.
+      #   `JSON.parse(str, symbolize_names: true)` discriminates
+      #   `K = Symbol` instead of the default `K = String`).
+      def method_return_override(class_name:, method_name:, kind:, arg_types: nil, hkt_registry: nil)
         spec = METHOD_RETURN_OVERRIDES[[class_name, method_name.to_sym, kind]]
         return nil unless spec
 
-        args = spec[:args].map { |n| Rigor::Type::Nominal.new(n) }
+        args = discriminated_args(spec, arg_types)
         registration = hkt_registry&.registration(spec[:uri])
         bound = registration&.bound || Rigor::Type::Combinator.untyped
         app = Rigor::Type::App.new(spec[:uri], args, bound: bound)
@@ -128,6 +140,37 @@ module Rigor
         return app if hkt_registry.nil? || !hkt_registry.defined?(spec[:uri])
 
         hkt_registry.reduce(app) || app
+      end
+
+      # Per-spec discriminator dispatch. Slice 3 ships one
+      # built-in discriminator (`json_symbolize_names`) that
+      # observes the optional 2nd argument's `HashShape` for a
+      # literal `symbolize_names: true` entry. Plugin / Rigor-
+      # bundled callers wanting their own discriminators add a
+      # branch here.
+      def discriminated_args(spec, arg_types)
+        default_args = spec[:args].map { |n| Rigor::Type::Nominal.new(n) }
+        return default_args if arg_types.nil?
+        return default_args unless spec[:discriminator] == :json_symbolize_names
+        return default_args unless json_symbolize_names?(arg_types)
+
+        [Rigor::Type::Nominal.new("Symbol")]
+      end
+
+      # Returns true iff the call-site's 2nd argument is a
+      # `Type::HashShape` carrying a literal
+      # `symbolize_names: true` entry. Anything else
+      # (no second arg, non-HashShape, missing key, non-literal
+      # `true`) returns false so the default `K = String`
+      # branch wins.
+      def json_symbolize_names?(arg_types)
+        return false unless arg_types.is_a?(Array) && arg_types.size >= 2
+
+        opts = arg_types[1]
+        return false unless opts.is_a?(Rigor::Type::HashShape)
+
+        value = opts.pairs[:symbolize_names] || opts.pairs["symbolize_names"]
+        value.is_a?(Rigor::Type::Constant) && value.value == true
       end
     end
   end

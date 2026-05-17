@@ -101,7 +101,7 @@ module Rigor
         # plugin-supplied per-method overrides are out of
         # scope for slice 3 and continue to flow through the
         # `try_plugin_contribution` tier above.
-        hkt_builtin_result = try_hkt_builtin_return(receiver_type, method_name, environment)
+        hkt_builtin_result = try_hkt_builtin_return(receiver_type, method_name, arg_types, environment)
         return hkt_builtin_result if hkt_builtin_result
 
         rbs_result = RbsDispatch.try_dispatch(
@@ -254,7 +254,7 @@ module Rigor
       # `JSON.parse` shape) and the registry-backed reduction
       # succeeds; returns `nil` otherwise so the dispatcher
       # falls through to RBS.
-      def try_hkt_builtin_return(receiver_type, method_name, environment)
+      def try_hkt_builtin_return(receiver_type, method_name, arg_types, environment)
         return nil if environment.nil?
         return nil unless receiver_type.is_a?(Type::Singleton)
 
@@ -262,6 +262,7 @@ module Rigor
           class_name: receiver_type.class_name,
           method_name: method_name,
           kind: :singleton,
+          arg_types: arg_types,
           hkt_registry: environment.hkt_registry
         )
       end

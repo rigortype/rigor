@@ -67,6 +67,40 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
       expect(type).to be_a(Rigor::Type::Union)
     end
 
+    context "with the `symbolize_names: true` discriminator" do
+      def dispatch_with_opts(method_name, opts_pairs)
+        opts_shape = Rigor::Type::HashShape.new(opts_pairs)
+        described_class.dispatch(
+          receiver_type: json_singleton,
+          method_name: method_name,
+          arg_types: [Rigor::Type::Combinator.nominal_of(String), opts_shape],
+          environment: environment
+        )
+      end
+
+      it "switches K = Symbol when arg_types[1] carries `symbolize_names: true`" do
+        type = dispatch_with_opts(:parse, { symbolize_names: Rigor::Type::Constant.new(true) })
+        hash_arm = type.members.find { |t| t.is_a?(Rigor::Type::Nominal) && t.class_name == "Hash" }
+        expect(hash_arm).not_to be_nil
+        expect(hash_arm.type_args[0]).to eq(Rigor::Type::Combinator.nominal_of(Symbol))
+        nested = hash_arm.type_args[1]
+        expect(nested).to be_a(Rigor::Type::App)
+        expect(nested.args).to eq([Rigor::Type::Combinator.nominal_of(Symbol)])
+      end
+
+      it "stays at K = String when `symbolize_names: false`" do
+        type = dispatch_with_opts(:parse, { symbolize_names: Rigor::Type::Constant.new(false) })
+        hash_arm = type.members.find { |t| t.is_a?(Rigor::Type::Nominal) && t.class_name == "Hash" }
+        expect(hash_arm.type_args[0]).to eq(Rigor::Type::Combinator.nominal_of(String))
+      end
+
+      it "stays at K = String when `symbolize_names` is absent" do
+        type = dispatch_with_opts(:parse, { max_nesting: Rigor::Type::Constant.new(10) })
+        hash_arm = type.members.find { |t| t.is_a?(Rigor::Type::Nominal) && t.class_name == "Hash" }
+        expect(hash_arm.type_args[0]).to eq(Rigor::Type::Combinator.nominal_of(String))
+      end
+    end
+
     it "does not fire for a JSON instance-method (only Singleton receivers)" do
       type = described_class.dispatch(
         receiver_type: Rigor::Type::Combinator.nominal_of(JSON),

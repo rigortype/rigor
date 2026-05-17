@@ -30,7 +30,7 @@ module Rigor
         return nil if entry.nil?
 
         parse_result = Prism.parse(entry.bytes, filepath: path,
-                                   version: @project_context.configuration.target_ruby)
+                                                version: @project_context.configuration.target_ruby)
         root = parse_result.value
 
         positions.map do |pos|
@@ -75,7 +75,7 @@ module Rigor
         loc = node.location
         {
           start: { line: loc.start_line - 1, character: loc.start_column },
-          end:   { line: loc.end_line - 1,   character: loc.end_column }
+          end: { line: loc.end_line - 1,   character: loc.end_column }
         }
       end
 

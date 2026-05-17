@@ -60,7 +60,7 @@ module Rigor
       #   `workspace/didChangeConfiguration` invalidate the cache;
       #   nil means "no project context", which is the slice 1-6
       #   behaviour (each request rebuilds env from scratch).
-      def initialize(buffer_table: BufferTable.new, publisher: nil,
+      def initialize(buffer_table: BufferTable.new, publisher: nil, # rubocop:disable Metrics/ParameterLists
                      hover_provider: nil, document_symbol_provider: nil,
                      completion_provider: nil, signature_help_provider: nil,
                      folding_range_provider: nil, selection_range_provider: nil,

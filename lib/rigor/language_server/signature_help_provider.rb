@@ -154,12 +154,11 @@ module Rigor
       # index expectation: required positionals, then optionals,
       # then rest, then trailing, then required keywords, then
       # optional keywords, then rest keywords.
-      def parameter_information(method_type)
+      def parameter_information(method_type) # rubocop:disable Metrics/AbcSize
         func = method_type.type
         return [] unless func.respond_to?(:required_positionals)
 
-        params = []
-        func.required_positionals.each { |p| params << { label: format_param(p) } }
+        params = func.required_positionals.map { |p| { label: format_param(p) } }
         func.optional_positionals.each { |p| params << { label: "?#{format_param(p)}" } }
         params << { label: "*#{format_param(func.rest_positionals)}" } if func.rest_positionals
         func.trailing_positionals.each { |p| params << { label: format_param(p) } }

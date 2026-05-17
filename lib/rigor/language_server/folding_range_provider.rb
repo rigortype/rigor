@@ -33,7 +33,7 @@ module Rigor
         return nil if entry.nil?
 
         parse_result = Prism.parse(entry.bytes, filepath: path,
-                                   version: @project_context.configuration.target_ruby)
+                                                version: @project_context.configuration.target_ruby)
         # Tolerate partial parse errors — fold whatever AST Prism
         # produced. Editors prefer a stale outline / fold map
         # over none.

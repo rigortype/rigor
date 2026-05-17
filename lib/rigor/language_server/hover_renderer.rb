@@ -48,7 +48,7 @@ module Rigor
         loc = node.location
         {
           start: { line: loc.start_line - 1, character: loc.start_column },
-          end:   { line: loc.end_line - 1,   character: loc.end_column }
+          end: { line: loc.end_line - 1, character: loc.end_column }
         }
       end
 

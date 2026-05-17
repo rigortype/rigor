@@ -11,6 +11,10 @@ require_relative "../inference/scope_indexer"
 require_relative "../type/nominal"
 require_relative "../type/singleton"
 require_relative "../type/constant"
+require_relative "../type/refined"
+require_relative "../type/difference"
+require_relative "../type/tuple"
+require_relative "../type/hash_shape"
 
 module Rigor
   module LanguageServer
@@ -119,19 +123,20 @@ module Rigor
 
         receiver_type = scope_index[receiver_node].type_of(receiver_node)
         definition = lookup_method(receiver_type, call_node.name, scope_index[receiver_node])
-        return nil if definition.nil?
+        return nil if definition.nil? || definition.method_types.empty?
 
-        method_type = definition.method_types.first
-        return nil if method_type.nil?
-
-        signature_label = "#{call_node.name}#{method_type}"
+        active_param = active_parameter_index(call_node, bytes, line, character)
+        signatures = definition.method_types.map do |method_type|
+          { label: "#{call_node.name}#{method_type}", parameters: [] }
+        end
         {
-          signatures: [{
-            label: signature_label,
-            parameters: []
-          }],
+          signatures: signatures,
+          # `activeSignature` is the index editors highlight by
+          # default. Slice C2 picks the first overload uniformly;
+          # a future slice could choose the overload that best
+          # matches the current argument shape.
           activeSignature: 0,
-          activeParameter: active_parameter_index(call_node, bytes, line, character)
+          activeParameter: active_param
         }
       end
 
@@ -139,6 +144,8 @@ module Rigor
         case receiver_type
         when Type::Singleton
           Reflection.singleton_method_definition(receiver_type.class_name, method_name, scope: scope)
+        when Type::Refined, Type::Difference
+          lookup_method(receiver_type.base, method_name, scope)
         else
           class_name = nominal_class_name(receiver_type)
           return nil if class_name.nil?
@@ -147,10 +154,15 @@ module Rigor
         end
       end
 
+      # Mirrors CompletionProvider's receiver-type mapping. Tuple →
+      # Array, HashShape → Hash, Refined / Difference unwrap to
+      # their base (handled in `lookup_method` above for clarity).
       def nominal_class_name(type)
         case type
         when Type::Nominal then type.class_name
         when Type::Constant then type.value.class.name
+        when Type::Tuple then "Array"
+        when Type::HashShape then "Hash"
         end
       end
 

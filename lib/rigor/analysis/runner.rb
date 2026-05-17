@@ -67,10 +67,22 @@ module Rigor
       #   once per request. Watched-file invalidation is the
       #   owner's responsibility; the runner trusts the snapshot
       #   it was given.
+      # @param environment [Rigor::Environment, nil] opt-in
+      #   Environment override. When supplied, sequential mode uses
+      #   the provided env instance in `#analyze_files` instead of
+      #   building a fresh one via `Environment.for_project`, and
+      #   attaches the runner's per-run reporter pair onto the
+      #   env's mutable `Reporters` slot via
+      #   `Environment#attach_reporters!`. Long-lived consumers
+      #   (LSP `ProjectContext`) pass a shared env so per-publish
+      #   work doesn't repeat the `Environment.for_project` build
+      #   (bundler / lockfile / collection discovery, RbsLoader
+      #   construction). Pool mode ignores the override — each
+      #   worker continues to build its own Environment.
       def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
-                     buffer: nil, prebuilt: nil)
+                     buffer: nil, prebuilt: nil, environment: nil)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -79,6 +91,7 @@ module Rigor
         @collect_stats = collect_stats
         @buffer = buffer
         @prebuilt = prebuilt
+        @environment_override = environment
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
         @rbs_extended_reporter = RbsExtended::Reporter.new
@@ -246,7 +259,7 @@ module Rigor
         if pool_mode?
           analyze_files_in_pool(files)
         else
-          environment = build_runner_environment
+          environment = resolve_sequential_environment
           result = files.flat_map { |path| analyze_file(path, environment) }
           if @collect_stats
             loader = environment.rbs_loader
@@ -256,6 +269,23 @@ module Rigor
           result
         end
       end
+
+      # Sequential-mode environment resolver. Returns the supplied
+      # `environment:` override (with the runner's fresh per-run
+      # reporter pair attached so dispatcher events route to THIS
+      # runner's diagnostics) when present; otherwise builds a
+      # fresh Environment per-call via {#build_runner_environment}
+      # — preserving the pre-override behaviour bit-for-bit.
+      def resolve_sequential_environment
+        return build_runner_environment unless @environment_override
+
+        @environment_override.attach_reporters!(
+          rbs_extended_reporter: @rbs_extended_reporter,
+          boundary_cross_reporter: @boundary_cross_reporter
+        )
+        @environment_override
+      end
+      private :resolve_sequential_environment
 
       # Pre-file diagnostic streams that fire once per run rather
       # than per analyzed file: plugin load / prepare envelopes,

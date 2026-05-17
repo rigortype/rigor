@@ -198,4 +198,62 @@ RSpec.describe Rigor::Environment do
       end
     end
   end
+
+  describe "#attach_reporters!" do
+    let(:env) do
+      described_class.new(
+        rbs_extended_reporter: Rigor::RbsExtended::Reporter.new,
+        boundary_cross_reporter:
+          Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new
+      )
+    end
+
+    it "replaces the reporter slots without rebuilding the environment" do
+      fresh_rbs = Rigor::RbsExtended::Reporter.new
+      fresh_boundary = Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new
+
+      env.attach_reporters!(rbs_extended_reporter: fresh_rbs, boundary_cross_reporter: fresh_boundary)
+
+      expect(env.rbs_extended_reporter).to equal(fresh_rbs)
+      expect(env.boundary_cross_reporter).to equal(fresh_boundary)
+    end
+
+    it "is callable on a frozen environment (reporters live in a mutable container)" do
+      expect(env).to be_frozen
+      expect do
+        env.attach_reporters!(
+          rbs_extended_reporter: Rigor::RbsExtended::Reporter.new,
+          boundary_cross_reporter:
+            Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new
+        )
+      end.not_to raise_error
+    end
+
+    it "preserves every other env attr (only reporters mutate)" do
+      loader_before = env.rbs_loader
+      class_registry_before = env.class_registry
+
+      env.attach_reporters!(
+        rbs_extended_reporter: Rigor::RbsExtended::Reporter.new,
+        boundary_cross_reporter:
+          Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new
+      )
+
+      expect(env.rbs_loader).to equal(loader_before)
+      expect(env.class_registry).to equal(class_registry_before)
+    end
+
+    it "scopes events recorded after the swap to the NEW reporter" do
+      fresh = Rigor::RbsExtended::Reporter.new
+      env.attach_reporters!(
+        rbs_extended_reporter: fresh,
+        boundary_cross_reporter:
+          Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new
+      )
+
+      env.rbs_extended_reporter.record_unresolved(payload: "foo", source_location: nil)
+
+      expect(fresh.unresolved_payloads.size).to eq(1)
+    end
+  end
 end

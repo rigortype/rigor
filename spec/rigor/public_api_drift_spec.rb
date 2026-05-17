@@ -78,6 +78,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   SCOPE_SINGLETON = %w[empty(key:environment,key:source_path)].freeze
 
   ENVIRONMENT_INSTANCE = %w[
+    attach_reporters!(keyreq:rbs_extended_reporter,keyreq:boundary_cross_reporter)
     boundary_cross_reporter()
     class_known?(req:name)
     class_ordering(req:lhs,req:rhs)
@@ -91,6 +92,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     rbs_extended_reporter()
     rbs_loader()
     reflection()
+    reporters()
     singleton_for_name(req:name)
     synthetic_method_index()
   ].freeze

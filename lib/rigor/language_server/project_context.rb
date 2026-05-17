@@ -61,13 +61,40 @@ module Rigor
       end
 
       # Returns the cached `Rigor::Environment` for this session,
-      # building it on first access. Subsequent calls return the
-      # same instance until `#invalidate!` drops the cache.
+      # building it on first access. The build includes the
+      # project's full scan state (plugin registry, dependency-source
+      # index, synthetic-method / project-patched indexes — drawn
+      # from {#project_scan}) AND every Bundler / RBS-collection
+      # axis the runner consults at build time, so the resulting
+      # env is bit-for-bit equivalent to what `Runner.run` would
+      # have built on its own.
+      #
+      # `DiagnosticPublisher` passes this env through
+      # `Runner.new(environment: …)` so per-buffer publishes share
+      # one instance instead of repeating the
+      # `Environment.for_project` build per call (bundler
+      # discovery, RbsLoader construction, signature_paths
+      # composition). Subsequent calls return the same instance
+      # until `#invalidate!` drops the cache.
+      #
+      # The runner attaches its own per-call reporter pair onto
+      # the shared env's `Reporters` slot at the start of each
+      # `#analyze_files` — so diagnostic events stay scoped to a
+      # single publish and do NOT accumulate across publishes.
       def environment
         @environment ||= Environment.for_project(
           libraries: @configuration.libraries,
           signature_paths: @configuration.signature_paths,
-          cache_store: cache_store
+          cache_store: cache_store,
+          plugin_registry: project_scan.plugin_registry,
+          dependency_source_index: project_scan.dependency_source_index,
+          synthetic_method_index: project_scan.synthetic_method_index,
+          project_patched_methods: project_scan.project_patched_methods,
+          bundler_bundle_path: @configuration.bundler_bundle_path,
+          bundler_auto_detect: @configuration.bundler_auto_detect,
+          bundler_lockfile: @configuration.bundler_lockfile,
+          rbs_collection_lockfile: @configuration.rbs_collection_lockfile,
+          rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect
         )
       end
 

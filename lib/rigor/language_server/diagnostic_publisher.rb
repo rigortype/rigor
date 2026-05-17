@@ -112,7 +112,8 @@ module Rigor
             cache_store: @project_context.cache_store,
             collect_stats: false,
             buffer: binding,
-            prebuilt: @project_context.project_scan
+            prebuilt: @project_context.project_scan,
+            environment: @project_context.environment
           )
           result = runner.run([path])
           result.diagnostics.filter_map { |diagnostic| to_lsp_diagnostic(diagnostic, path) }

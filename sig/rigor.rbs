@@ -105,7 +105,7 @@ module Rigor
       attr_reader cache_store: untyped
       attr_reader plugin_registry: untyped
       attr_reader buffer: untyped
-      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped, ?workers: Integer, ?collect_stats: bool, ?buffer: untyped, ?prebuilt: untyped) -> void
+      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped, ?workers: Integer, ?collect_stats: bool, ?buffer: untyped, ?prebuilt: untyped, ?environment: untyped) -> void
       def run: (?Array[String] paths) -> Result
       def prepare_project_scan: (?paths: Array[String]) -> untyped
     end

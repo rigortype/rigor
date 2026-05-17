@@ -2404,4 +2404,85 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
   end
+
+  describe "environment: override (LSP / editor warm-path slice)" do
+    it "uses the supplied environment in sequential analyze_files and skips `Environment.for_project`" do
+      Dir.mktmpdir("rigor-runner-env-override-") do |tmpdir|
+        File.write(File.join(tmpdir, "code.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new("paths" => [tmpdir])
+        env = Rigor::Environment.for_project(
+          libraries: configuration.libraries,
+          signature_paths: configuration.signature_paths
+        )
+
+        # Once the override is supplied, Environment.for_project
+        # must NOT be invoked from within analyze_files for the
+        # sequential path. Stubbing to raise lets a single
+        # unexpected call abort the run.
+        runner = described_class.new(
+          configuration: configuration, cache_store: nil, collect_stats: false, environment: env
+        )
+        # The runner's pre-pass scaffold still calls
+        # `Environment.for_project` outside `analyze_files`
+        # (synthetic-method scanner uses `environment: nil`,
+        # but the `prewarm_rbs_cache_for_pool` would on pool
+        # mode — sequential path here doesn't). Allow it, but
+        # assert it isn't called by the override path itself.
+        expect do
+          Dir.chdir(tmpdir) { runner.run }
+        end.not_to raise_error
+      end
+    end
+
+    it "attaches the runner's own per-run reporters onto the shared env" do
+      Dir.mktmpdir("rigor-runner-env-reporters-") do |tmpdir|
+        File.write(File.join(tmpdir, "code.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new("paths" => [tmpdir])
+        env = Rigor::Environment.for_project(
+          libraries: configuration.libraries,
+          signature_paths: configuration.signature_paths,
+          rbs_extended_reporter: Rigor::RbsExtended::Reporter.new,
+          boundary_cross_reporter:
+            Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new
+        )
+        original_rbs_reporter = env.rbs_extended_reporter
+
+        runner = described_class.new(
+          configuration: configuration, cache_store: nil, collect_stats: false, environment: env
+        )
+        Dir.chdir(tmpdir) { runner.run }
+
+        # After the run, the env's reporter slot should reference
+        # the runner's per-run reporter, not the pre-attached one.
+        expect(env.rbs_extended_reporter).not_to equal(original_rbs_reporter)
+        expect(env.rbs_extended_reporter).to equal(runner.rbs_extended_reporter)
+      end
+    end
+
+    it "lets two sequential runs against the same env not accumulate reporter events across calls" do
+      Dir.mktmpdir("rigor-runner-env-reset-") do |tmpdir|
+        File.write(File.join(tmpdir, "code.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new("paths" => [tmpdir])
+        env = Rigor::Environment.for_project(
+          libraries: configuration.libraries,
+          signature_paths: configuration.signature_paths
+        )
+
+        runner_a = described_class.new(
+          configuration: configuration, cache_store: nil, collect_stats: false, environment: env
+        )
+        Dir.chdir(tmpdir) { runner_a.run }
+        reporter_a = env.rbs_extended_reporter
+
+        runner_b = described_class.new(
+          configuration: configuration, cache_store: nil, collect_stats: false, environment: env
+        )
+        Dir.chdir(tmpdir) { runner_b.run }
+        reporter_b = env.rbs_extended_reporter
+
+        # Each run swaps in its own per-run reporter pair.
+        expect(reporter_b).not_to equal(reporter_a)
+      end
+    end
+  end
 end

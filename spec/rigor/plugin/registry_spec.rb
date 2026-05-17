@@ -2,6 +2,17 @@
 
 require "spec_helper"
 
+# Top-level constant the `.materialize` tests use as a
+# `Blueprint#klass_name`. Defined locally so this spec file is
+# self-contained — under `parallel_test` two workers may split
+# `blueprint_spec.rb` and `registry_spec.rb` across processes,
+# and `registry_spec` previously borrowed
+# `RigorPluginBlueprintSpecPlugin` from the blueprint spec
+# which left it `NameError`-prone in isolation.
+class RigorPluginRegistrySpecPlugin < Rigor::Plugin::Base
+  manifest(id: "registry-spec-plugin", version: "0.0.1")
+end
+
 RSpec.describe Rigor::Plugin::Registry do
   let(:plugin_class) do
     Class.new(Rigor::Plugin::Base) do
@@ -50,24 +61,24 @@ RSpec.describe Rigor::Plugin::Registry do
 
   describe "ADR-15 Phase 3 — blueprints + materialize" do
     it "exposes the supplied blueprints (frozen, Ractor-shareable)" do
-      blueprint = Rigor::Plugin::Blueprint.new(klass_name: "RigorPluginBlueprintSpecPlugin")
+      blueprint = Rigor::Plugin::Blueprint.new(klass_name: "RigorPluginRegistrySpecPlugin")
       registry = described_class.new(blueprints: [blueprint])
       expect(registry.blueprints).to eq([blueprint])
       expect(registry.blueprints).to be_frozen
     end
 
     it ".materialize replays blueprints into a fresh registry" do
-      blueprint = Rigor::Plugin::Blueprint.new(klass_name: "RigorPluginBlueprintSpecPlugin")
+      blueprint = Rigor::Plugin::Blueprint.new(klass_name: "RigorPluginRegistrySpecPlugin")
       materialised = described_class.materialize(blueprints: [blueprint], services: services)
 
       expect(materialised.plugins.size).to eq(1)
-      expect(materialised.plugins.first).to be_a(RigorPluginBlueprintSpecPlugin)
+      expect(materialised.plugins.first).to be_a(RigorPluginRegistrySpecPlugin)
       expect(materialised.blueprints).to eq([blueprint])
       expect(materialised.load_errors).to eq([])
     end
 
     it ".materialize produces NEW plugin instances on every call" do
-      blueprint = Rigor::Plugin::Blueprint.new(klass_name: "RigorPluginBlueprintSpecPlugin")
+      blueprint = Rigor::Plugin::Blueprint.new(klass_name: "RigorPluginRegistrySpecPlugin")
       first = described_class.materialize(blueprints: [blueprint], services: services)
       second = described_class.materialize(blueprints: [blueprint], services: services)
       expect(first.plugins.first).not_to equal(second.plugins.first)

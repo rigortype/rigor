@@ -3,6 +3,7 @@
 require_relative "environment/class_registry"
 require_relative "environment/rbs_loader"
 require_relative "environment/reflection"
+require_relative "environment/reporters"
 require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
 require_relative "environment/rbs_collection_discovery"
@@ -58,7 +59,7 @@ module Rigor
     ].freeze
 
     attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index,
-                :rbs_extended_reporter, :boundary_cross_reporter, :name_scope,
+                :reporters, :name_scope,
                 :synthetic_method_index, :project_patched_methods
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
@@ -88,12 +89,49 @@ module Rigor
       @rbs_loader = rbs_loader
       @plugin_registry = plugin_registry
       @dependency_source_index = dependency_source_index
-      @rbs_extended_reporter = rbs_extended_reporter
-      @boundary_cross_reporter = boundary_cross_reporter
+      # ADR-pending — reporters live in a mutable container so
+      # long-lived integrations (LSP `ProjectContext`) can swap
+      # them per `Runner.run` without rebuilding the env. The
+      # existing `#rbs_extended_reporter` / `#boundary_cross_reporter`
+      # accessors below preserve the public lookup shape.
+      @reporters = Reporters.new(
+        rbs_extended: rbs_extended_reporter,
+        boundary_cross: boundary_cross_reporter
+      )
       @synthetic_method_index = synthetic_method_index || Inference::SyntheticMethodIndex::EMPTY
       @project_patched_methods = project_patched_methods || Inference::ProjectPatchedMethods::EMPTY
       @name_scope = build_name_scope
       freeze
+    end
+
+    # Backwards-compatible reporter accessors — every existing
+    # consumer (rbs_extended, method_dispatcher) calls these. The
+    # frozen `@reporters` container is mutable for slot reassignment
+    # via {#attach_reporters!} below.
+    def rbs_extended_reporter
+      @reporters.rbs_extended
+    end
+
+    def boundary_cross_reporter
+      @reporters.boundary_cross
+    end
+
+    # Replaces the env's per-run reporter slots. Intended for
+    # long-lived integrations (LSP `ProjectContext`) that share one
+    # Environment instance across many `Runner.run` calls: each call
+    # attaches its own fresh reporter pair so per-call diagnostic
+    # events stay scoped to that call rather than accumulating
+    # across publishes.
+    #
+    # Single-threaded use only. Concurrent publishes against one
+    # Environment must serialise — the LSP `Server` debouncer +
+    # synchronized writer already enforces this for the editor
+    # path. The Ractor pool path builds a per-worker Environment
+    # and does not reach this surface.
+    def attach_reporters!(rbs_extended_reporter:, boundary_cross_reporter:)
+      @reporters.rbs_extended = rbs_extended_reporter
+      @reporters.boundary_cross = boundary_cross_reporter
+      nil
     end
 
     class << self

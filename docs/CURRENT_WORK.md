@@ -15,7 +15,7 @@ v0.1.5 themes (frozen on tag, full detail in CHANGELOG):
 
 ## Where the Work Resumes
 
-The next cycle (`v0.1.6`) is accumulating on `master` (release pending). Slices landed so far (commits `3c99eed` → `728e916`):
+The next cycle (`v0.1.6`) is accumulating on `master` (release pending). Slices landed so far (commits `3c99eed` → `086e507`):
 
 - **O4 Layer 3 slice 3** (graceful-degradation coverage diagnostic). ✓
 - **`is_a?(C)` lexical-nesting constant resolution**. ✓
@@ -29,6 +29,7 @@ The next cycle (`v0.1.6`) is accumulating on `master` (release pending). Slices 
 - **Language Server v2** — type-aware hover + completion. Eight-slice cut, design at [`docs/design/20260517-lsp-hover-completion.md`](design/20260517-lsp-hover-completion.md). Hover gets per-Prism-node-class dispatch (CallNode → receiver + signature + return; Constant → FQN + singleton + defined-in; Local/Ivar → name + type + enclosing class; literals → clean Type/Erased + refinement-name surfacing). Completion ships `textDocument/completion` with `[".", ":"]` trigger characters: method completion for `obj.|`, constant-path completion for `Foo::|`, composite-receiver handling (Refined/Tuple/HashShape → underlying nominal; Union → intersection-of-methods; Intersection → union-of-methods), parse-recovery via sentinel-name patching for mid-edit `.` / `::` buffers. ✓
 - **LSP follow-up cluster** — `textDocument/signatureHelp` (new `SignatureHelpProvider`; sentinel-patched `obj.foo(` recovery; activeParameter via comma count; advertises `signatureHelpProvider.triggerCharacters: ["(", ","]`) + hash-key completion for `HashShape` carriers (slice D1; `[:` sentinel patch returns `:foo` / `"bar"` keys as KIND_FIELD items) + user-facing [editor-integration guide](lsp-integration.md) (Neovim / VSCode / Helix / Emacs setup, troubleshooting, performance) + end-to-end spec spawning real `exe/rigor lsp` binary via `Open3.popen3`. ✓
 - **LSP polish + new capabilities** — six small slices: signatureHelp multi-overload presentation (C2) + RBS comments in hover + signatureHelp (C3) + populated `SignatureInformation.parameters` (C4) + hover `range` field (E1) + new `textDocument/foldingRange` (F1) + new `textDocument/selectionRange` (G1). The LSP now advertises 9 capabilities (textDocumentSync / hoverProvider / completionProvider / signatureHelpProvider / documentSymbolProvider / foldingRangeProvider / selectionRangeProvider + workspace/didChangeWatchedFiles + workspace/didChangeConfiguration). ✓
+- **`make verify` parallel-by-default** — commit `086e507` switched the spec phase from sequential `bundle exec rspec` to `rake spec_parallel` (parallel_rspec across `PARALLEL_TEST_PROCESSORS` workers). Wall time 217s → 60s on 12-core (3.6×). Rakefile gains a native `--exclude-pattern` for `runner_pool_spec.rb` (the RSpec config-side exclusion in spec_helper.rb didn't apply to parallel_rspec because it splits files before workers load spec_helper). `make verify-sequential` kept as the slow flake-resistant fallback; `make verify-parallel` retained as a backward-compatible alias. AGENTS.md verification-protocol entry updated. ✓
 
 Natural entries for the remaining work (post v0.1.6 in-flight slices):
 
@@ -75,6 +76,16 @@ Driven by the v0.1.5 work to expand `Environment::DEFAULT_LIBRARIES` (commits `0
    - **(c) Upstream the fix to `ruby/rbs`** and bump the gem. Highest-quality long-term path; needs cross-project coordination.
 
    The same pattern will recur for other stdlib RBS gaps as the library set expands. The decision tree is: when an upstream RBS gap is surfaced by a single internal call site, prefer (a') (disable directive); when it surfaces across multiple call sites or in user-facing code, escalate to (b) or (c).
+
+### Session-end carryover (2026-05-17)
+
+Notes for the next implementer beyond the slice-by-slice landed list:
+
+1. **`make verify` is now parallel by default.** AGENTS.md verification protocol updated. If you see a parallel-only flake, fall back to `make verify-sequential` to confirm whether it's worker isolation or a real bug, then file. `runner_pool_spec.rb` is excluded from BOTH paths (sequential via `RSpec.config.exclude_pattern`, parallel via `parallel_rspec --exclude-pattern`); `RIGOR_INCLUDE_RACTOR_POOL=1` opts it back in (mirrored on both sides). Run `make test-ractor-pool` for repeatable pool-spec coverage in isolation.
+2. **Spec-suite hot spots identified, NOT yet optimised.** Per-file isolated wall times in sequential mode: `runner_spec.rb` 42.6s, `cli_spec.rb` 19.7s, `sorbet_plugin_spec.rb` 14.8s, LSP specs combined ~11s, everything else <5s individually. The slowest worker (which carries `runner_spec.rb`) bottlenecks the parallel run at ~45s wall time; this is the headroom remaining after the parallel switch. Two queued levers in ROADMAP § "Performance / scalability → Spec-suite runtime breakdown": (a) `before(:context)`-style Environment sharing in `runner_spec.rb` (big win, large refactor); (b) `Analysis::Runner.run_source` in-memory entry point (small win, low risk). LSP-spec splitting (`make verify-lsp` or `make verify-no-lsp`) was investigated and REJECTED — LSP is only ~5% of sequential / ~1% of parallel time, splitting buys nothing meaningful.
+3. **LSP v1 + v2 + follow-ups now ship 9 advertised capabilities.** The lsp subsystem is feature-complete for the "keystroke-fast linting + hover + completion + signatureHelp + folding + selection" loop. Remaining LSP work (codeAction / rename / semanticTokens / inlayHint / definition / incremental sync / Ractor pool dispatch) is in ROADMAP § "Editor / IDE integration" — each needs its own design pass; priorities surface from concrete editor-integration demand.
+4. **v0.1.6 is ship-ready as-is.** The accumulated work (ADR-12 / ADR-17 / ADR-18 floors + worked-consumer state + editor mode v1 + LSP v1/v2 + LSP polish + spec-suite parallel default) is purely additive — no behaviour change for existing CLI consumers. `bundle exec rake release` per the `rigor-release-prep` SKILL is the natural next decision; awaits explicit user authorisation.
+5. **Plugin packaging ADRs to keep in mind when adding `rigor-*` work.** [ADR-12 (dry-rb)](adr/12-dry-rb-packaging.md) sets the per-gem + meta umbrella pattern; [ADR-19 (LSP)](adr/19-language-server-packaging.md) decides the LSP stays bundled in `rigortype` (not a separate `rigor-lsp` gem) with explicit trigger conditions for re-evaluation. Both ADRs document the "no premature gem split" stance the project takes.
 
 ### Pre-survey persistent items
 

@@ -128,7 +128,10 @@ module Rigor
         active_param = active_parameter_index(call_node, bytes, line, character)
         doc = rbs_documentation(definition)
         signatures = definition.method_types.map do |method_type|
-          info = { label: "#{call_node.name}#{method_type}", parameters: [] }
+          info = {
+            label: "#{call_node.name}#{method_type}",
+            parameters: parameter_information(method_type)
+          }
           info[:documentation] = { kind: "markdown", value: doc } if doc
           info
         end
@@ -141,6 +144,33 @@ module Rigor
           activeSignature: 0,
           activeParameter: active_param
         }
+      end
+
+      # Builds the LSP `ParameterInformation[]` for a method type's
+      # parameter list. Each entry's `label` is a STRING form
+      # (e.g. `"::int width"`, `"?::string pad_string"`); LSP's
+      # offset-tuple form (`[start, end]`) for in-signature
+      # highlighting is queued. Order matches `activeParameter`'s
+      # index expectation: required positionals, then optionals,
+      # then rest, then trailing, then required keywords, then
+      # optional keywords, then rest keywords.
+      def parameter_information(method_type)
+        func = method_type.type
+        return [] unless func.respond_to?(:required_positionals)
+
+        params = []
+        func.required_positionals.each { |p| params << { label: format_param(p) } }
+        func.optional_positionals.each { |p| params << { label: "?#{format_param(p)}" } }
+        params << { label: "*#{format_param(func.rest_positionals)}" } if func.rest_positionals
+        func.trailing_positionals.each { |p| params << { label: format_param(p) } }
+        func.required_keywords.each { |name, p| params << { label: "#{name}: #{format_param(p)}" } }
+        func.optional_keywords.each { |name, p| params << { label: "?#{name}: #{format_param(p)}" } }
+        params << { label: "**#{format_param(func.rest_keywords)}" } if func.rest_keywords
+        params
+      end
+
+      def format_param(param)
+        param.name ? "#{param.type} #{param.name}" : param.type.to_s
       end
 
       # Identical contract to HoverRenderer#rbs_documentation —

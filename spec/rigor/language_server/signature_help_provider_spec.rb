@@ -104,6 +104,22 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
       end
     end
 
+    describe "per-parameter info (slice C4)" do
+      it "populates `parameters` with one entry per parameter in the signature" do
+        # `String#center(int, ?string) -> String` — two params:
+        # required `width` (int) + optional `pad_string` (string).
+        buffer_table.open(uri: uri, bytes: "\"hi\".center(\n", version: 1)
+        result = provider.provide(uri: uri, line: 0, character: 12)
+
+        params = result[:signatures].first[:parameters]
+        expect(params.size).to eq(2)
+        labels = params.map { |p| p[:label] }
+        expect(labels[0]).to include("width")
+        # Optional positional gets a `?` prefix.
+        expect(labels[1]).to start_with("?").and include("pad_string")
+      end
+    end
+
     describe "multi-overload presentation (slice C2)" do
       it "surfaces every overload of a multi-signature method" do
         # `Array#fetch` has multiple overloads in core RBS:

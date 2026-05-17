@@ -142,7 +142,28 @@ module Rigor
         body << "# Return\n"
         body << "#{return_type.describe}\n"
         body << "```"
+        if (doc = rbs_documentation(definition))
+          # Close the code fence first so the comment text renders
+          # as prose, then a fresh fenced block isn't necessary —
+          # plain markdown below the code reads better in clients.
+          body << "\n\n---\n\n#{doc}"
+        end
         body
+      end
+
+      # Returns the concatenated text of every RBS comment attached
+      # to the method definition, or nil when no comments exist.
+      # `RBS::Definition::Method#comments` is an Array<AST::Comment>
+      # with each entry's `.string` carrying the raw text (newline-
+      # terminated `# foo` lines). Multiple comments are joined
+      # with a blank line so each upstream `# Foo bar` paragraph
+      # is preserved.
+      def rbs_documentation(definition)
+        comments = definition.respond_to?(:comments) ? definition.comments : nil
+        return nil if comments.nil? || comments.empty?
+
+        text = comments.map(&:string).join("\n\n").strip
+        text.empty? ? nil : text
       end
 
       # v1 surfaces the FIRST overload only. Multi-overload

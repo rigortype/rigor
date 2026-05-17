@@ -126,8 +126,11 @@ module Rigor
         return nil if definition.nil? || definition.method_types.empty?
 
         active_param = active_parameter_index(call_node, bytes, line, character)
+        doc = rbs_documentation(definition)
         signatures = definition.method_types.map do |method_type|
-          { label: "#{call_node.name}#{method_type}", parameters: [] }
+          info = { label: "#{call_node.name}#{method_type}", parameters: [] }
+          info[:documentation] = { kind: "markdown", value: doc } if doc
+          info
         end
         {
           signatures: signatures,
@@ -138,6 +141,20 @@ module Rigor
           activeSignature: 0,
           activeParameter: active_param
         }
+      end
+
+      # Identical contract to HoverRenderer#rbs_documentation —
+      # surfaces the method's RBS comment text or nil. Kept inline
+      # rather than extracted to a shared mixin because the two
+      # call sites are small and the shape may diverge (signatureHelp
+      # might want per-parameter docs split out; hover wants the
+      # full paragraph).
+      def rbs_documentation(definition)
+        comments = definition.respond_to?(:comments) ? definition.comments : nil
+        return nil if comments.nil? || comments.empty?
+
+        text = comments.map(&:string).join("\n\n").strip
+        text.empty? ? nil : text
       end
 
       def lookup_method(receiver_type, method_name, scope)

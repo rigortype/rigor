@@ -84,6 +84,22 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
       expect(result[:contents][:value]).to include("node:   Prism::CallNode")
     end
 
+    it "appends RBS documentation when the method has comments (slice C3)" do
+      # `String#upcase`'s RBS in core ships with rdoc comments;
+      # hover should surface them below the code block.
+      root, index = parse_and_index("\"hello\".upcase\n")
+      call_node = root.statements.body.first
+      scope = index[call_node]
+
+      result = renderer.render(node: call_node, type: scope.type_of(call_node), node_scope_lookup: index)
+      body = result[:contents][:value]
+
+      # The doc text contains rdoc-flavoured markup; just check
+      # the separator + at least one comment line is present.
+      expect(body).to include("---")
+      expect(body).to match(/Returns|String/)
+    end
+
     it "handles a singleton-method call (`String.new`) via singleton_method_definition" do
       root, index = parse_and_index("String.new\n")
       call_node = root.statements.body.first

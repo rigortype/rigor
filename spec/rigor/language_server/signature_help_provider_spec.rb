@@ -67,6 +67,43 @@ RSpec.describe Rigor::LanguageServer::SignatureHelpProvider do
       expect(provider.provide(uri: uri, line: 0, character: 4)).to be_nil
     end
 
+    describe "RBS documentation field (slice C3)" do
+      it "attaches the method's RBS comments to each SignatureInformation" do
+        # `String#center` ships with rdoc comments in core RBS;
+        # the documentation field should carry them.
+        buffer_table.open(uri: uri, bytes: "\"hi\".center(\n", version: 1)
+        result = provider.provide(uri: uri, line: 0, character: 12)
+
+        first = result[:signatures].first
+        expect(first[:documentation]).to include(kind: "markdown")
+        expect(first[:documentation][:value]).not_to be_empty
+      end
+
+      it "omits the documentation field when the method has no RBS comments" do
+        # Most analyzer-internal classes ship without rdoc; use a
+        # definition known to be comment-less by stubbing a
+        # minimal `RBS::Definition::Method`-shaped double.
+        require "rbs"
+        empty_comments_def = Class.new do
+          def method_types
+            [RBS::Parser.parse_method_type("() -> String")]
+          end
+
+          def comments
+            []
+          end
+        end.new
+
+        allow(Rigor::Reflection).to receive(:instance_method_definition)
+          .and_return(empty_comments_def)
+
+        buffer_table.open(uri: uri, bytes: "\"hi\".upcase(\n", version: 1)
+        result = provider.provide(uri: uri, line: 0, character: 12)
+
+        expect(result[:signatures].first).not_to include(:documentation)
+      end
+    end
+
     describe "multi-overload presentation (slice C2)" do
       it "surfaces every overload of a multi-signature method" do
         # `Array#fetch` has multiple overloads in core RBS:

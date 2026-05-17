@@ -89,6 +89,9 @@ module Rigor
           folding_range_provider: LanguageServer::FoldingRangeProvider.new(
             buffer_table: buffer_table, project_context: project_context
           ),
+          selection_range_provider: LanguageServer::SelectionRangeProvider.new(
+            buffer_table: buffer_table, project_context: project_context
+          ),
           project_context: project_context
         )
         loop_runner = LanguageServer::Loop.new(

@@ -1,0 +1,25 @@
+# RBS overlay for dry-validation core. Users add this directory
+# to their `.rigor.yml`'s `signature_paths:` so
+# `contract.call(input).to_h` chains type cleanly.
+#
+# This is the slice-1 floor — `Contract#call` returns the generic
+# `Result`. Slice 2 (deferred) will refine `Result#to_h` per-contract
+# by consuming the `:dry_schema_table` fact published by
+# rigor-dry-schema.
+
+module Dry
+  module Validation
+    class Contract
+      def call: (Hash[Symbol, untyped]) -> Result
+              | (untyped) -> Result
+    end
+
+    class Result
+      def success?: () -> bool
+      def failure?: () -> bool
+      def to_h: () -> Hash[Symbol, untyped]
+      def errors: () -> untyped
+      def []: (Symbol) -> untyped
+    end
+  end
+end

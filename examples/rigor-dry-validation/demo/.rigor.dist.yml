@@ -1,0 +1,11 @@
+paths:
+  - demo.rb
+
+plugins:
+  - rigor-dry-validation
+
+signature_paths:
+  - ../sig
+
+cache:
+  path: tmp/.rigor/cache

@@ -146,25 +146,90 @@ module Rigor
         # (`Strict::String` etc.) — registers the LHS under
         # the canonical head's underlying class. Unions
         # (`String | Integer`) and intersections are skipped
-        # (no single underlying class); transitive references
-        # to other compositions (`ManagerEmail = Email`) are
-        # also skipped at the floor (no two-pass resolution
-        # yet).
+        # (no single underlying class).
+        #
+        # Slice 4 — transitive composition resolution. After
+        # the direct (slice-3) pass collects compositions
+        # whose RHS root is canonical, a second pass walks the
+        # remaining `ConstantWriteNode`s for RHS shapes that
+        # resolve THROUGH an already-published composition —
+        # e.g. `ManagerEmail = Email` (bare reference) or
+        # `ManagerEmail = Email.constrained(min_size: 3)`
+        # (method chain rooted on a composition LHS). Cycle
+        # detection: `A = B; B = A` resolves neither (each
+        # LHS's resolution walk sees itself in the visited
+        # set and bails). Unknown references (`ManagerEmail =
+        # NotAComposition`) silently drop — the user is free
+        # to assign any constant to any other; the plugin only
+        # publishes facts when the underlying class is known.
         def collect_compositions(body)
           return {} if body.nil?
 
-          compositions = {}
+          direct = {}
+          ref_edges = {}
           tree_walk(body).each do |child|
             next unless child.is_a?(Prism::ConstantWriteNode)
 
             head = composition_head_canonical(child.value)
-            next if head.nil?
-
-            compositions[child.name.to_s] = CANONICAL_ALIASES.fetch(head)
+            if head
+              direct[child.name.to_s] = CANONICAL_ALIASES.fetch(head)
+            else
+              ref = transitive_reference_name(child.value)
+              ref_edges[child.name.to_s] = ref if ref
+            end
           end
-          compositions
+
+          resolved = direct.dup
+          ref_edges.each_key do |lhs|
+            underlying = resolve_transitive_ref(lhs, direct, ref_edges, visited: ::Set.new)
+            resolved[lhs] = underlying if underlying
+          end
+          resolved
         end
         private_class_method :collect_compositions
+
+        # Slice-4 helper. Returns the un-resolved RHS root
+        # constant name (not necessarily a CANONICAL_ALIASES
+        # entry) for transitive resolution. Mirrors
+        # {composition_head_canonical} but accepts any
+        # `ConstantReadNode` / `ConstantPathNode` tail rather
+        # than canonical-only. Declines on union / intersection
+        # operators for the same single-underlying-class
+        # reason.
+        def transitive_reference_name(node)
+          case node
+          when Prism::ConstantReadNode
+            node.name.to_s
+          when Prism::ConstantPathNode
+            node.name.to_s
+          when Prism::CallNode
+            return nil if %i[| &].include?(node.name)
+            return nil if node.receiver.nil?
+
+            transitive_reference_name(node.receiver)
+          end
+        end
+        private_class_method :transitive_reference_name
+
+        # Slice-4 helper. Resolves `lhs`'s RHS through the
+        # `direct` (slice-3) compositions table, chaining
+        # through `ref_edges` for transitive references.
+        # Returns the canonical underlying-class name (e.g.
+        # `"String"`) or nil when no chain ends at a direct
+        # composition. Cycles silently return nil — every step
+        # adds the current lhs to `visited` and bails on
+        # re-entry.
+        def resolve_transitive_ref(lhs, direct, ref_edges, visited:)
+          return nil if visited.include?(lhs)
+
+          visited << lhs
+          target = ref_edges[lhs]
+          return nil if target.nil?
+          return direct[target] if direct.key?(target)
+
+          resolve_transitive_ref(target, direct, ref_edges, visited: visited)
+        end
+        private_class_method :resolve_transitive_ref
 
         # Walks an RHS expression looking for the canonical
         # shortcut name at the root of a method chain. Returns

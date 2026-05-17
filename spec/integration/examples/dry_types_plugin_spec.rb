@@ -94,6 +94,50 @@ RSpec.describe "rigor-dry-types integration" do
     expect(aliases.fetch("Types::ActiveFlag")).to eq("TrueClass")
   end
 
+  it "resolves transitive composition references to the head canonical (slice 4)" do
+    transitive = <<~RUBY
+      module Types
+        include Dry.Types()
+
+        Email = String.constrained(format: /@/)
+        ManagerEmail = Email
+        SeniorManagerEmail = ManagerEmail
+        ConstrainedManagerEmail = Email.constrained(min_size: 3)
+      end
+    RUBY
+    aliases = run_and_read_fact(demo: transitive)
+    expect(aliases.fetch("Types::Email")).to eq("String")
+    expect(aliases.fetch("Types::ManagerEmail")).to eq("String")
+    expect(aliases.fetch("Types::SeniorManagerEmail")).to eq("String")
+    expect(aliases.fetch("Types::ConstrainedManagerEmail")).to eq("String")
+  end
+
+  it "silently drops transitive references that target an unknown constant (slice 4)" do
+    dangling = <<~RUBY
+      module Types
+        include Dry.Types()
+
+        DanglingAlias = NotAComposition
+      end
+    RUBY
+    aliases = run_and_read_fact(demo: dangling)
+    expect(aliases).not_to have_key("Types::DanglingAlias")
+  end
+
+  it "breaks composition reference cycles silently (slice 4)" do
+    cycle = <<~RUBY
+      module Types
+        include Dry.Types()
+
+        Loopy = LoopyToo
+        LoopyToo = Loopy
+      end
+    RUBY
+    aliases = run_and_read_fact(demo: cycle)
+    expect(aliases).not_to have_key("Types::Loopy")
+    expect(aliases).not_to have_key("Types::LoopyToo")
+  end
+
   it "skips compositions whose RHS is a union (no single underlying class)" do
     union = <<~RUBY
       module Types

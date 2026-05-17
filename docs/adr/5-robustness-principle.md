@@ -154,3 +154,7 @@ These are deferred for v0.1.0+ and tracked alongside the related slices.
 - [ADR-1: Type Model and RBS Superset Strategy](1-types.md) — establishes the RBS round-trip rules ADR-5 refines.
 - [ADR-3: Internal Type Representation](3-type-representation.md) — defines the carriers (`Constant`, `Nominal`, `Union`, `Tuple`, `HashShape`, `IntegerRange`) that ADR-5 picks between.
 - [ADR-4: Type Inference Engine](4-type-inference-engine.md) — the engine that observes the principle when inferring user-method types.
+
+## Background Research Notes
+
+- [`docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md`](../notes/20260518-matsumoto-2010-cfa-rigor-review.md) — Matsumoto & Minamide 2010 prove soundness for SemiRuby. Rigor *deliberately* does not aim at the same level of formal soundness; this note records the upstream design lineage that justifies Rigor's robustness-first stance as a continuation rather than a deviation.

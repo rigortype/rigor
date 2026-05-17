@@ -246,3 +246,7 @@ Reference docs included in the Rigor checkout via the `references/phpstan` submo
 
 - [`references/phpstan/website/src/developing-extensions/type-system.md`](../../references/phpstan/website/src/developing-extensions/type-system.md).
 - [`references/phpstan/website/src/developing-extensions/trinary-logic.md`](../../references/phpstan/website/src/developing-extensions/trinary-logic.md).
+
+Background research notes (Rigor-observation reviews of external papers):
+
+- [`docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md`](../notes/20260518-matsumoto-2010-cfa-rigor-review.md) — review of Matsumoto & Minamide 2010 (semi-flow-sensitive Ruby CFA on SemiRuby). Contrasts Rigor's per-walker static dispatcher tier with the paper's per-program-point method configuration.

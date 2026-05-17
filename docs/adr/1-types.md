@@ -837,3 +837,10 @@ Negative:
 ## Resulting Specification
 
 The current draft specification is maintained in `docs/types.md`.
+
+## Background Research Notes
+
+External-paper reviews that informed (or retroactively justify) the
+nominal-first / RBS-superset stance decided in this ADR:
+
+- [`docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md`](../notes/20260518-matsumoto-2010-cfa-rigor-review.md) — Matsumoto & Minamide 2010's semi-flow-sensitive CFA on SemiRuby. Shows that *method-definition* flow-sensitivity (without value flow-sensitivity) is a coherent design choice in its own right — Rigor's static dispatcher tier approximates this in exchange for cache-amenability and Ractor isolation.

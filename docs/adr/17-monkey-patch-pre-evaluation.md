@@ -391,6 +391,24 @@ should write RBS for their patches.
   `(class_name, method_name, source_path:line)` table for
   debugging. Decision deferred to demand.
 
+## Background Research Notes
+
+- [`docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md`](../notes/20260518-matsumoto-2010-cfa-rigor-review.md)
+  — Matsumoto & Minamide 2010's semi-flow-sensitive CFA
+  on SemiRuby is the *theoretical* solution to the same
+  monkey-patch problem ADR-17 attacks engineering-side.
+  The paper tracks per-program-point "method
+  configurations" (which `def`s are visible at this
+  exact location) and proves soundness. ADR-17 instead
+  pays an explicit-pre-eval cost up-front, freezes the
+  resulting (class, method, kind) registry into a
+  dispatcher tier, and lets the rest of the analyzer
+  stay flow-insensitive on method definitions. The paper
+  reads as the alternative road we did not take, and
+  records why semi-flow-sensitive method configuration
+  remains a credible future precision-uplift path if the
+  explicit-list MVP ever proves insufficient.
+
 ## Revision history
 
 - 2026-05-16 — initial proposal. Triggered by the v0.1.6 cycle

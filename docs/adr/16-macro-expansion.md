@@ -1093,6 +1093,19 @@ gracefully," not "fabricate precision."
   deferred to slice 7 (heuristic ships); the substrate's primary
   purpose does not need this rule defined.
 
+## Background Research Notes
+
+- [`docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md`](../notes/20260518-matsumoto-2010-cfa-rigor-review.md)
+  — Matsumoto & Minamide 2010's SemiRuby formalises
+  blocks as lambdas and `return`/`break` as `throw`/`catch`
+  with statically-scoped tags. Same translation shape ADR-16
+  Tier A (block-as-method) and the dispatcher's non-local
+  exit handling already converge on independently. Useful
+  as an external formal-semantics reference if Tier A's
+  "what is the correct synthesised method for a Sinatra
+  `get '/foo' do … end`?" question ever needs a
+  mechanically-checkable specification.
+
 ## Revision history
 
 - 2026-05-15 — initial proposal. Triggered by user request to advance

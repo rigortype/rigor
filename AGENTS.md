@@ -64,7 +64,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make li
 nix --extra-experimental-features 'nix-command flakes' develop --command make check
 ```
 
-- `make verify` runs `test`, `lint`, and `check` in sequence.
+- `make verify` runs `test-parallel` (the spec suite across `PARALLEL_TEST_PROCESSORS` workers — defaults to CPU count via `parallel_tests`), `lint`, and `check`. Total wall time on a 12-core laptop ≈ 60s vs ≈ 220s for the sequential variant. Use `make verify-sequential` when chasing parallel-only flakes; `make verify-parallel` is a backward-compatible alias for the default.
 - `make check-json` runs `rigor check --format=json lib` (machine-readable diagnostics).
 - Submodule maintenance: `make init-submodules`, `make pull-submodules`.
 - Cross-checker pass: `make steep-install` once, then `make steep-check`. Steep runs under an isolated `tool/steep/Gemfile` so its dependency tree (rbs, prism, …) cannot bleed into Rigor's own `Gemfile.lock`. `make steep ARGS="check --severity-level=error"` is the pass-through escape hatch.

@@ -97,11 +97,27 @@ check:
 check-json:
 	bundle exec exe/rigor check --format=json lib
 
-verify: test lint check
+# `verify` chains the spec suite, rubocop, and `rigor check lib`.
+# The spec phase runs in parallel by default (3-4× faster on
+# multi-core hosts than the sequential rspec invocation). `lint`
+# is already process-parallel via rubocop's built-in worker pool;
+# `check` is a single short rigor invocation.
+#
+# Total wall time on a 12-core laptop: ~60s (vs ~200s for the
+# sequential variant below). Use `verify-sequential` when chasing
+# parallel-only flakes — the worker isolation hides certain
+# ordering bugs that surface only in a single-process run.
+verify: test-parallel lint check
 
-# Parallel variant of `verify`. Swaps `test` for
-# `test-parallel`; `lint` / `check` are already fast.
-verify-parallel: test-parallel lint check
+# Sequential variant. Identical phases as `verify` but `test`
+# runs single-process. Slower but bit-for-bit reproducible
+# without inter-worker scheduling effects.
+verify-sequential: test lint check
+
+# Backward-compatible alias for the previous `verify-parallel`
+# target name. Identical to `verify` now that parallel is the
+# default.
+verify-parallel: verify
 
 extract-builtin-catalogs:
 	bundle exec ruby tool/extract_builtin_catalog.rb

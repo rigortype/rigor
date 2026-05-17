@@ -23,6 +23,14 @@ task :spec_parallel do
   count = ENV.fetch("PARALLEL_TEST_PROCESSORS", "")
   args = ["bundle", "exec", "parallel_rspec", "--group-by", "filesize"]
   args.push("-n", count) unless count.empty?
+  # ADR-15 Phase 4b — `runner_pool_spec.rb` is excluded by the
+  # sequential `make test` path via `RSpec.config.exclude_pattern`
+  # (spec_helper.rb). parallel_rspec splits files BEFORE workers
+  # load spec_helper, so the exclude_pattern there doesn't apply
+  # — we have to pass `--exclude-pattern` natively here.
+  # `RIGOR_INCLUDE_RACTOR_POOL=1` opts the pool spec back in,
+  # mirroring the sequential exclusion's opt-out shape.
+  args.push("--exclude-pattern", "spec/rigor/analysis/runner_pool_spec.rb") unless ENV["RIGOR_INCLUDE_RACTOR_POOL"]
   args.push("spec")
   exec(*args)
 end

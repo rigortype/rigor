@@ -100,6 +100,25 @@ different choices.
   and the coexistence pattern for projects that want to run
   both.
 
+### Appendix — Connections to type theory
+
+A short bridge between Rigor's vocabulary and the formal
+type-theoretic concepts you may have seen in a programming-
+languages textbook or in another type checker's documentation.
+Read this if you came in from a "where does Rigor sit in the
+type-theory landscape" question; the handbook proper stays
+deliberately short on theory.
+
+- [**Connections to type theory**](appendix-type-theory.md) —
+  the type lattice, subtyping vs gradual consistency, nominal
+  vs structural, the polymorphism family (parametric / subtype
+  / ad-hoc), variance, refinement / predicate subtyping,
+  occurrence typing, gradual typing, effect systems, the
+  soundness vs completeness trade-off, and a short list of
+  features Rigor deliberately does not model (HKT,
+  higher-rank, full dependent types, …) — each with the
+  matching Rigor surface and a pointer into the spec corpus.
+
 ## How to read this handbook
 
 Each chapter is short on theory and long on examples. Every

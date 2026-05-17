@@ -95,9 +95,15 @@ module Rigor
       end
 
       # Runs `Analysis::Runner` with a `BufferBinding` so the buffer
-      # bytes (instead of the on-disk file) drive the parse. Returns
-      # the LSP-shaped Diagnostic Array, ready to serialize into the
-      # notification's `params.diagnostics` field.
+      # bytes (instead of the on-disk file) drive the parse. The
+      # `Rigor::Analysis::ProjectScan` cached on the ProjectContext
+      # is passed through `prebuilt:` so plugin `#prepare`, the
+      # dependency-source walker, and the synthetic-method /
+      # project-patched scanners do not re-run per publish. The
+      # snapshot rebuilds only when `ProjectContext#invalidate!`
+      # fires (watched-file or configuration change). Returns
+      # the LSP-shaped Diagnostic Array, ready to serialize into
+      # the notification's `params.diagnostics` field.
       def run_analysis(path:, bytes:)
         with_tempfile(bytes) do |tmp|
           binding = Analysis::BufferBinding.new(logical_path: path, physical_path: tmp.path)
@@ -105,7 +111,8 @@ module Rigor
             configuration: @project_context.configuration,
             cache_store: @project_context.cache_store,
             collect_stats: false,
-            buffer: binding
+            buffer: binding,
+            prebuilt: @project_context.project_scan
           )
           result = runner.run([path])
           result.diagnostics.filter_map { |diagnostic| to_lsp_diagnostic(diagnostic, path) }

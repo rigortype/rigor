@@ -18,6 +18,7 @@ require_relative "buffer_binding"
 require_relative "check_rules"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
+require_relative "project_scan"
 require_relative "result"
 require_relative "run_stats"
 require_relative "worker_session"
@@ -54,10 +55,22 @@ module Rigor
       #   Set to false to skip the stats summary entirely; the
       #   CLI's `--no-stats` threads `false` through to keep
       #   trivial-fixture runs from warming `.rigor/cache`.
-      def initialize(configuration:, explain: false,
+      # @param prebuilt [Rigor::Analysis::ProjectScan, nil] when
+      #   supplied, the runner adopts the pre-built plugin
+      #   registry / dependency-source index / scanner outputs
+      #   from the snapshot and skips the per-call pre-passes
+      #   that produce them. Used by long-lived integrations
+      #   (`Rigor::LanguageServer::ProjectContext`) to keep
+      #   per-buffer requests fast — scanners walk the project
+      #   once per generation rather than once per request, and
+      #   plugin `#prepare` runs once per generation rather than
+      #   once per request. Watched-file invalidation is the
+      #   owner's responsibility; the runner trusts the snapshot
+      #   it was given.
+      def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
-                     buffer: nil)
+                     buffer: nil, prebuilt: nil)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -65,6 +78,7 @@ module Rigor
         @workers = workers
         @collect_stats = collect_stats
         @buffer = buffer
+        @prebuilt = prebuilt
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
         @rbs_extended_reporter = RbsExtended::Reporter.new
@@ -85,7 +99,7 @@ module Rigor
       # diagnostic plus any Prism parse errors. The Environment
       # is built once at run start through `Environment.for_project`
       # so all files share the same RBS load.
-      def run(paths = @configuration.paths) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+      def run(paths = @configuration.paths)
         Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths =
           @configuration.fold_platform_specific_paths
 
@@ -94,11 +108,70 @@ module Rigor
         target_ruby_error = validate_target_ruby
         return Result.new(diagnostics: [target_ruby_error]) if target_ruby_error
 
-        @plugin_registry = load_plugins
-        @dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
         expansion = expand_paths(paths)
         @class_decl_paths_snapshot = {}.freeze
         @signature_paths_snapshot = []
+
+        if @prebuilt
+          adopt_prebuilt_project_scan(@prebuilt)
+        else
+          run_project_pre_passes(expansion: expansion)
+        end
+
+        diagnostics = pre_file_diagnostics(expansion)
+        diagnostics += analyze_files(target_files(expansion))
+        diagnostics += rbs_extended_reporter_diagnostics
+        diagnostics += boundary_cross_diagnostics
+
+        Result.new(
+          diagnostics: apply_severity_profile(diagnostics),
+          stats: @collect_stats ? build_run_stats(wall_started_at: wall_started_at, expansion: expansion) : nil
+        )
+      end
+
+      # Runs every project-wide pre-pass (`load_plugins` +
+      # `plugin#prepare` + dependency-source builder +
+      # synthetic-method scanner + project-patched scanner)
+      # exactly once, then returns a frozen
+      # {Rigor::Analysis::ProjectScan} snapshot.
+      #
+      # Long-lived integrations (`Rigor::LanguageServer::ProjectContext`)
+      # call this once per project-state generation and feed the
+      # snapshot back into `Runner.new(prebuilt: scan)` for every
+      # subsequent per-buffer publish. The cold pre-pass cost is
+      # paid once per generation rather than once per keystroke.
+      #
+      # Notes for callers:
+      # - The runner this method is called on may be a "build only"
+      #   instance — `@buffer` is typically nil so the scanners
+      #   observe on-disk bytes for the full project. Callers that
+      #   want pre-passes to see a particular buffer's edits should
+      #   build the runner WITH `buffer:` set.
+      # - The returned ProjectScan is frozen and shareable; the
+      #   underlying `plugin_registry` is the same object that ran
+      #   `#prepare`, so the per-plugin `services.fact_store` is
+      #   already populated for subsequent dispatch use.
+      def prepare_project_scan(paths: @configuration.paths)
+        expansion = expand_paths(paths)
+        run_project_pre_passes(expansion: expansion)
+        ProjectScan.new(
+          plugin_registry: @plugin_registry,
+          dependency_source_index: @dependency_source_index,
+          synthetic_method_index: @synthetic_method_index,
+          project_patched_methods: @project_patched_methods,
+          plugin_prepare_diagnostics: @cached_plugin_prepare_diagnostics.dup.freeze,
+          pre_eval_diagnostics: @pre_eval_diagnostics_from_scanner.dup.freeze
+        )
+      end
+
+      # Internal: drives every project-wide pre-pass and stores
+      # the results on instance variables in the order the
+      # downstream `#run` body expects. Extracted so
+      # `#prepare_project_scan` and the prebuilt-less `#run` path
+      # share one implementation.
+      def run_project_pre_passes(expansion:)
+        @plugin_registry = load_plugins
+        @dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
         # ADR-18 slice 3 — plugin prepare MUST run before the
         # synthetic-method scanner so cross-plugin facts
         # (`:dry_type_aliases` etc.) are already published when
@@ -134,17 +207,21 @@ module Rigor
         pre_eval_outcome = Inference::ProjectPatchedScanner.scan(existing_pre_eval, buffer: @buffer)
         @project_patched_methods = pre_eval_outcome.registry
         @pre_eval_diagnostics_from_scanner = pre_eval_outcome.diagnostics
-
-        diagnostics = pre_file_diagnostics(expansion)
-        diagnostics += analyze_files(target_files(expansion))
-        diagnostics += rbs_extended_reporter_diagnostics
-        diagnostics += boundary_cross_diagnostics
-
-        Result.new(
-          diagnostics: apply_severity_profile(diagnostics),
-          stats: @collect_stats ? build_run_stats(wall_started_at: wall_started_at, expansion: expansion) : nil
-        )
       end
+
+      # Internal: adopts a frozen {ProjectScan} snapshot supplied
+      # to `Runner.new(prebuilt: ...)` by storing each slot on
+      # the runner's ivar surface, mirroring what
+      # `run_project_pre_passes` would have produced.
+      def adopt_prebuilt_project_scan(scan)
+        @plugin_registry = scan.plugin_registry
+        @dependency_source_index = scan.dependency_source_index
+        @synthetic_method_index = scan.synthetic_method_index
+        @project_patched_methods = scan.project_patched_methods
+        @cached_plugin_prepare_diagnostics = scan.plugin_prepare_diagnostics
+        @pre_eval_diagnostics_from_scanner = scan.pre_eval_diagnostics
+      end
+      private :run_project_pre_passes, :adopt_prebuilt_project_scan
 
       # ADR-15 Phase 4b — routes per-file analysis to either the
       # sequential coordinator-side Environment (legacy path,

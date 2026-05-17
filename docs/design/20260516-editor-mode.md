@@ -238,8 +238,16 @@ consumers see the field directly.
 - LSP daemon, persistent process, file-watch.
 - Per-file diagnostic cache (ADR-17 slice 3b territory). Unblocks
   scope shape (B).
-- Project-context snapshot cache for pre-pass reuse. Unblocks
-  pre-pass-free editor-mode startup.
+- Project-context snapshot cache for pre-pass reuse. **LANDED for
+  the LSP path** as `Rigor::Analysis::ProjectScan` +
+  `Runner#prepare_project_scan` + `Runner.new(prebuilt:)`
+  (v0.1.6); the LSP's `ProjectContext` lazy-builds the snapshot
+  and `DiagnosticPublisher` threads it through every per-publish
+  `Runner.new`. CLI `rigor check --tmp-file` does not yet
+  consume the snapshot — each invocation is a fresh process; a
+  disk-backed snapshot cache keyed on `(plugin-manifest digest,
+  project file mtime + size list)` would let one-shot CLI
+  invocations skip pre-passes too. Demand-driven.
 - Caller-declared dependent files (`--also=...`). Trivial CLI
   extension once (A) ships; defer until an editor extension actually
   needs it.

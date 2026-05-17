@@ -2320,4 +2320,88 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
   end
+
+  describe "ProjectScan pre-pass caching (LSP / editor warm-path slice)" do
+    it "exposes a frozen ProjectScan snapshot from `#prepare_project_scan`" do
+      Dir.mktmpdir("rigor-project-scan-prepare-") do |tmpdir|
+        File.write(File.join(tmpdir, "code.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new("paths" => [tmpdir])
+        scan = Dir.chdir(tmpdir) do
+          described_class.new(configuration: configuration, cache_store: nil, collect_stats: false)
+                         .prepare_project_scan
+        end
+
+        expect(scan).to be_a(Rigor::Analysis::ProjectScan)
+        expect(scan).to be_frozen
+        expect(scan.plugin_registry).not_to be_nil
+        expect(scan.dependency_source_index).not_to be_nil
+        expect(scan.synthetic_method_index).not_to be_nil
+        expect(scan.project_patched_methods).not_to be_nil
+        expect(scan.plugin_prepare_diagnostics).to eq([])
+        expect(scan.pre_eval_diagnostics).to eq([])
+      end
+    end
+
+    it "adopts the supplied prebuilt snapshot and surfaces its ivars on the runner" do
+      Dir.mktmpdir("rigor-project-scan-adopt-") do |tmpdir|
+        File.write(File.join(tmpdir, "code.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new("paths" => [tmpdir])
+        scan = Dir.chdir(tmpdir) do
+          described_class.new(configuration: configuration, cache_store: nil, collect_stats: false)
+                         .prepare_project_scan
+        end
+
+        runner = described_class.new(
+          configuration: configuration,
+          cache_store: nil,
+          collect_stats: false,
+          prebuilt: scan
+        )
+        Dir.chdir(tmpdir) { runner.run }
+
+        expect(runner.plugin_registry).to equal(scan.plugin_registry)
+        expect(runner.dependency_source_index).to equal(scan.dependency_source_index)
+      end
+    end
+
+    it "skips `Plugin::Loader.load` when prebuilt is supplied (idempotency check)" do
+      Dir.mktmpdir("rigor-project-scan-skip-load-") do |tmpdir|
+        File.write(File.join(tmpdir, "code.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new("paths" => [tmpdir])
+        scan = Dir.chdir(tmpdir) do
+          described_class.new(configuration: configuration, cache_store: nil, collect_stats: false)
+                         .prepare_project_scan
+        end
+
+        # When prebuilt: is supplied, Plugin::Loader.load MUST NOT
+        # run — the cached registry is the one the runner uses. We
+        # verify by stubbing `Plugin::Loader.load` to raise and
+        # confirming the run still succeeds.
+        allow(Rigor::Plugin::Loader).to receive(:load).and_raise("loader.load called unexpectedly")
+
+        runner = described_class.new(
+          configuration: configuration,
+          cache_store: nil,
+          collect_stats: false,
+          prebuilt: scan
+        )
+        expect { Dir.chdir(tmpdir) { runner.run } }.not_to raise_error
+      end
+    end
+
+    it "re-runs pre-passes when prebuilt: is nil (legacy behaviour preserved)" do
+      Dir.mktmpdir("rigor-project-scan-no-prebuilt-") do |tmpdir|
+        File.write(File.join(tmpdir, "code.rb"), "x = 1\n")
+        configuration = Rigor::Configuration.new("paths" => [tmpdir])
+
+        runner = described_class.new(configuration: configuration, cache_store: nil, collect_stats: false)
+        Dir.chdir(tmpdir) { runner.run }
+
+        # Pre-passes ran inline — registry / dep_index built fresh
+        # this call, not adopted from a prior snapshot.
+        expect(runner.plugin_registry).not_to be_nil
+        expect(runner.dependency_source_index).not_to be_nil
+      end
+    end
+  end
 end

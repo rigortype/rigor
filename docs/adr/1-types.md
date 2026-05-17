@@ -843,4 +843,5 @@ The current draft specification is maintained in `docs/types.md`.
 External-paper reviews that informed (or retroactively justify) the
 nominal-first / RBS-superset stance decided in this ADR:
 
+- [`docs/notes/20260518-matsumoto-2008-poly-records-rigor-review.md`](../notes/20260518-matsumoto-2008-poly-records-rigor-review.md) — Matsumoto & Minamide 2008's Garrigue-kinded polymorphic-record type inference for Ruby. The paper exhibits the failure modes (polymorphic recursion collapse on `Array`/`String`/`Integer`, no varargs, `map` becomes non-regular, inferred types balloon to ~57k bound type variables) that RBS sidesteps by demanding nominal up-front declarations. Reads as the *negative experiment* for the structural-records-first path Rigor rejected.
 - [`docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md`](../notes/20260518-matsumoto-2010-cfa-rigor-review.md) — Matsumoto & Minamide 2010's semi-flow-sensitive CFA on SemiRuby. Shows that *method-definition* flow-sensitivity (without value flow-sensitivity) is a coherent design choice in its own right — Rigor's static dispatcher tier approximates this in exchange for cache-amenability and Ractor isolation.

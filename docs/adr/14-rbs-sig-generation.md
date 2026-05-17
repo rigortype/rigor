@@ -557,6 +557,20 @@ independent of the packaging discussion.
   — plugin-supplied type vocabulary that future slices
   may emit when the resolver chain proves a round-trip.
 
+## Background Research Notes
+
+- [`docs/notes/20260518-matsumoto-2008-poly-records-rigor-review.md`](../notes/20260518-matsumoto-2008-poly-records-rigor-review.md)
+  — Matsumoto & Minamide 2008 had to manually expand
+  multi-class recursion (`Array#0` / `Array#1` for `map`
+  call-chains) inside the type inference engine because
+  ML inference can't handle polymorphic recursion. ADR-14
+  takes the inverse stance: humans declare the
+  generics up-front in RBS, and the generator trusts
+  those declarations. Useful background for the
+  `--params` policy (`untyped` / `observed` /
+  `observed-strict`) discussion — the paper is the
+  *automated-expansion* alternative Rigor declined.
+
 ## Revision history
 
 - 2026-05-12 — initial draft.

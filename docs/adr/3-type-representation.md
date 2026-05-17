@@ -249,4 +249,5 @@ Reference docs included in the Rigor checkout via the `references/phpstan` submo
 
 Background research notes (Rigor-observation reviews of external papers):
 
+- [`docs/notes/20260518-matsumoto-2008-poly-records-rigor-review.md`](../notes/20260518-matsumoto-2008-poly-records-rigor-review.md) — review of Matsumoto & Minamide 2008 (Garrigue-kinded polymorphic records for Ruby). Documents the type-variable explosion (~57k bound type variables for an 80-line program) and the structural-record limitations that ADR-3's nominal-first carrier choice avoids.
 - [`docs/notes/20260518-matsumoto-2010-cfa-rigor-review.md`](../notes/20260518-matsumoto-2010-cfa-rigor-review.md) — review of Matsumoto & Minamide 2010 (semi-flow-sensitive Ruby CFA on SemiRuby). Contrasts Rigor's per-walker static dispatcher tier with the paper's per-program-point method configuration.

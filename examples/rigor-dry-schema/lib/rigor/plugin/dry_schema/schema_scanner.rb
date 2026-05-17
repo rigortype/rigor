@@ -135,13 +135,10 @@ module Rigor
         def collect_schema_shape(block_node, type_aliases)
           required = {}
           optional = {}
-          walk_block_body(block_node) do |kind, key, underlying|
-            (kind == :required ? required : optional)[key] = underlying if underlying
+          walk_block_body(block_node) do |kind, key, type_info|
+            (kind == :required ? required : optional)[key] = type_info if type_info
           end
 
-          # Re-walk to apply type-alias resolution on the
-          # second pass so we don't double-walk the AST in the
-          # common branch.
           remap_aliases!(required, type_aliases)
           remap_aliases!(optional, type_aliases)
 
@@ -165,15 +162,19 @@ module Rigor
         # `required(:key).filled(:string)` parses as a CallNode
         # whose receiver is the `required(:key)` call. Walk the
         # chain inward looking for the type-bearing predicate at
-        # the head; the key sits on the chain's tail.
+        # the head; the key sits on the chain's tail. The
+        # `each(<Type>)` predicate yields a list-of-element
+        # type info (`{type: <T>, list: true}`); other type-bearing
+        # predicates (`filled`/`value`/`maybe`) yield scalar info
+        # (`{type: <T>, list: false}`).
         def visit_chain(node, &block)
           return unless node.is_a?(Prism::CallNode)
 
           key, kind = extract_key_and_kind(node)
           return if key.nil?
 
-          underlying = walk_predicate_chain(node)
-          block.call(kind, key, underlying)
+          type_info = walk_predicate_chain(node)
+          block.call(kind, key, type_info)
         end
         private_class_method :visit_chain
 
@@ -199,15 +200,15 @@ module Rigor
 
         # Walks the call chain finding the first type-bearing
         # predicate (`filled` / `value` / `maybe` / `each`) and
-        # extracts its argument type. Returns the underlying
-        # class name (`"String"` etc.) or nil when no recognisable
-        # type sits on the chain.
+        # extracts its argument type. Returns a `{type:, list:}`
+        # tuple (`each` is the only verb that produces a list)
+        # or nil when no recognisable type sits on the chain.
         def walk_predicate_chain(node)
           current = node
           while current.is_a?(Prism::CallNode)
             if TYPE_BEARING_PREDICATES.include?(current.name)
               underlying = extract_type_from_predicate(current)
-              return underlying if underlying
+              return { type: underlying, list: current.name == :each } if underlying
             end
             current = current.receiver
           end
@@ -234,19 +235,21 @@ module Rigor
         end
         private_class_method :extract_type_from_predicate
 
-        # In-place: any value in `bucket` that doesn't already
-        # match a canonical class (e.g. `"Types::Email"`) gets
-        # resolved through the type_aliases fact. Unresolvable
-        # values drop from the bucket (no fact contribution
-        # rather than misleading data).
+        # In-place: any value's `type:` slot in `bucket` that
+        # doesn't already match a canonical class (e.g.
+        # `"Types::Email"`) gets resolved through the
+        # type_aliases fact. Unresolvable values drop from the
+        # bucket (no fact contribution rather than misleading
+        # data). The `list:` slot rides along unchanged.
         def remap_aliases!(bucket, type_aliases)
           canonical_set = CANONICAL_TYPES.values.to_set
-          bucket.each_pair.to_a.each do |key, value|
-            next if canonical_set.include?(value)
+          bucket.each_pair.to_a.each do |key, info|
+            type_name = info.fetch(:type)
+            next if canonical_set.include?(type_name)
 
-            resolved = type_aliases[value]
+            resolved = type_aliases[type_name]
             if resolved
-              bucket[key] = resolved
+              bucket[key] = info.merge(type: resolved)
             else
               bucket.delete(key)
             end

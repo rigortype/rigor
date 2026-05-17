@@ -38,13 +38,50 @@ frozen
 ```ruby
 {
   "NewUserSchema" => {
-    required: { email: "String", age: "Integer" },
-    optional: { nickname: "String" }
+    required: {
+      email: { type: "String", list: false },
+      age:   { type: "Integer", list: false }
+    },
+    optional: {
+      nickname: { type: "String", list: false }
+    }
   }
 }
 ```
 
 table, and publishes it as `:dry_schema_table`.
+
+## `each(<Type>)` list recognition (slice 2)
+
+The `each` predicate on dry-schema rows marks the key as a list:
+
+```ruby
+ContactSchema = Dry::Schema.Params do
+  required(:tags).each(:string)
+  required(:scores).value(:array)
+  optional(:authors).each(:string)
+end
+
+# → :dry_schema_table fact
+{
+  "ContactSchema" => {
+    required: {
+      tags:   { type: "String", list: true },   # each-list
+      scores: { type: "Array",  list: false }   # value(:array) — single Array, not list-of-element
+    },
+    optional: {
+      authors: { type: "String", list: true }
+    }
+  }
+}
+```
+
+`each` is the only verb that produces `list: true`; the other
+three type-bearing predicates (`filled` / `value` / `maybe`)
+yield `list: false`. The `list:` slot is symmetric with
+`rigor-graphql`'s field-table shape so downstream cross-plugin
+consumers (a future `rigor-dry-validation` plugin) can reason
+about list-vs-scalar fields uniformly.
 
 ## Predicate type recognition
 

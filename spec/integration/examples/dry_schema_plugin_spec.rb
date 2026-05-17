@@ -55,8 +55,11 @@ RSpec.describe "rigor-dry-schema integration" do
     table = run_and_read_fact(demo: demo)
     expect(table).not_to be_nil
     shape = table.fetch("NewUserSchema")
-    expect(shape.fetch(:required)).to eq(email: "String", age: "Integer")
-    expect(shape.fetch(:optional)).to eq(nickname: "String")
+    expect(shape.fetch(:required)).to eq(
+      email: { type: "String", list: false },
+      age: { type: "Integer", list: false }
+    )
+    expect(shape.fetch(:optional)).to eq(nickname: { type: "String", list: false })
   end
 
   it "recognises `Dry::Schema.JSON` and `Dry::Schema.define` entry points" do
@@ -70,8 +73,8 @@ RSpec.describe "rigor-dry-schema integration" do
       end
     RUBY
     table = run_and_read_fact(demo: demo)
-    expect(table.fetch("JsonSchema").fetch(:required)).to eq(sku: "String")
-    expect(table.fetch("RawSchema").fetch(:required)).to eq(foo: "Integer")
+    expect(table.fetch("JsonSchema").fetch(:required)).to eq(sku: { type: "String", list: false })
+    expect(table.fetch("RawSchema").fetch(:required)).to eq(foo: { type: "Integer", list: false })
   end
 
   it "registers class-level schema constants under the enclosing constant chain" do
@@ -86,7 +89,8 @@ RSpec.describe "rigor-dry-schema integration" do
     RUBY
     table = run_and_read_fact(demo: demo)
     expect(table).to have_key("App::Schemas::UserCreate")
-    expect(table.fetch("App::Schemas::UserCreate").fetch(:required)).to eq(email: "String")
+    expect(table.fetch("App::Schemas::UserCreate").fetch(:required))
+      .to eq(email: { type: "String", list: false })
   end
 
   it "maps every dry-schema canonical-type symbol the slice-1 vocabulary supports" do
@@ -108,12 +112,13 @@ RSpec.describe "rigor-dry-schema integration" do
     RUBY
     table = run_and_read_fact(demo: demo)
     req = table.fetch("EverythingSchema").fetch(:required)
-    expect(req).to eq(
+    expect(req.transform_values { |v| v[:type] }).to eq(
       a: "String", b: "Integer", c: "Float", d: "BigDecimal",
       e: "Symbol", f: "TrueClass", g: "NilClass",
       h: "Date", i: "DateTime", j: "Time",
       k: "Hash", l: "Array"
     )
+    expect(req.values.map { |v| v[:list] }.uniq).to eq([false])
   end
 
   it "drops keys whose type symbol isn't in the canonical vocabulary" do
@@ -124,7 +129,7 @@ RSpec.describe "rigor-dry-schema integration" do
       end
     RUBY
     shape = run_and_read_fact(demo: demo).fetch("Schema")
-    expect(shape.fetch(:required)).to eq(known: "String")
+    expect(shape.fetch(:required)).to eq(known: { type: "String", list: false })
   end
 
   it "resolves user-authored constant references through the :dry_type_aliases fact" do
@@ -142,7 +147,10 @@ RSpec.describe "rigor-dry-schema integration" do
     RUBY
     table = run_and_read_fact(demo: demo, with_dry_types: true)
     shape = table.fetch("ContactSchema")
-    expect(shape.fetch(:required)).to eq(email: "String", name: "String")
+    expect(shape.fetch(:required)).to eq(
+      email: { type: "String", list: false },
+      name: { type: "String", list: false }
+    )
   end
 
   it "drops constant-type references when :dry_type_aliases isn't published" do
@@ -155,7 +163,23 @@ RSpec.describe "rigor-dry-schema integration" do
     # No `Types` module + no rigor-dry-types loaded → the constant
     # reference doesn't resolve, key drops.
     shape = run_and_read_fact(demo: demo).fetch("UnresolvedSchema")
-    expect(shape.fetch(:required)).to eq(name: "String")
+    expect(shape.fetch(:required)).to eq(name: { type: "String", list: false })
+  end
+
+  it "marks `each(<Type>)` predicates as list-typed (slice 2)" do
+    demo = <<~RUBY
+      Schema = Dry::Schema.Params do
+        required(:tags).each(:string)
+        required(:scores).value(:array)
+        optional(:authors).each(:string)
+      end
+    RUBY
+    shape = run_and_read_fact(demo: demo).fetch("Schema")
+    expect(shape.fetch(:required)).to eq(
+      tags: { type: "String", list: true },
+      scores: { type: "Array", list: false }
+    )
+    expect(shape.fetch(:optional)).to eq(authors: { type: "String", list: true })
   end
 
   it "does NOT publish the fact when no `Dry::Schema.X` declaration is present" do

@@ -1,8 +1,10 @@
 # Rigor plugin examples
 
-Twenty-seven entries — twenty-six worked plugins of the **v0.1.0
-plugin authoring surface** plus one RBS-only bundle
-(`rigor-activesupport-core-ext`). `rigor-sinatra`,
+Twenty-eight entries — twenty-six worked plugins of the **v0.1.0
+plugin authoring surface** + one RBS-only bundle
+(`rigor-activesupport-core-ext`) + one Gemfile-convenience
+meta-gem (`rigor-rails` — Tier 1+2 Rails ecosystem umbrella per
+[ADR-12](../docs/adr/12-dry-rb-packaging.md) WD1). `rigor-sinatra`,
 `rigor-dry-struct`, and `rigor-devise` are the first worked
 consumers of the **ADR-16 macro expansion substrate** — their
 bodies are purely declarative `Plugin::Macro::*` manifest
@@ -74,6 +76,12 @@ ADR-9's cross-plugin fact store.
 | [`rigor-actionpack`](rigor-actionpack/) | 2 | **Phase 4** — route-helper consumption (first concrete ADR-9 consumer); **Phase 2** — filter chain validation (`before_action :name` against the controller's effective method set, including one level of inheritance); **Phase 3** — render-target validation (`render :show` → `app/views/<controller_path>/show.html.erb`) | Ruby (`app/controllers/`) + view templates | ✅ | 21 |
 | [`rigor-factorybot`](rigor-factorybot/) | 2 | **Phase 1 (a)** — self-contained validation of `FactoryBot.create(:name, key: ...)` / `.build` / `.attributes_for` / `*_list` against a per-run factory index built from `spec/factories/`. Phase 1 (c) AR column cross-check is queued | Ruby (`spec/factories/`) | ✅ | 10 |
 | [`rigor-activestorage`](rigor-activestorage/) | 3E | `has_one_attached :avatar` / `has_many_attached :photos` macro discovery on AR models + return-type narrowing to `Nominal[ActiveStorage::Attached::One]` / `::Many` via `flow_contribution_for` (instance navigation tier) | Ruby (`app/models/`) | ✅ | 11 |
+
+### Meta-gems (Gemfile-convenience umbrellas, ADR-12 WD1)
+
+| Example | Bundles | Notes |
+| --- | --- | --- |
+| [`rigor-rails`](rigor-rails/) | Tier 1+2 Rails plugins (7 gems: rails-routes / rails-i18n / actionmailer / activejob / activerecord / actionpack / factorybot) | Gemfile convenience only — users still enumerate the individual plugins they want active in `.rigor.yml`'s `plugins:` list. Per [ADR-12](../docs/adr/12-dry-rb-packaging.md) WD1. |
 
 ### RBS-only community bundles
 

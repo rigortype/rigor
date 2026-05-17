@@ -4,6 +4,7 @@ require_relative "../reflection"
 require_relative "../type"
 require_relative "../flow_contribution"
 require_relative "../flow_contribution/merger"
+require_relative "../builtins/hkt_builtins"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/literal_string_folding"
 require_relative "method_dispatcher/shape_dispatch"
@@ -62,7 +63,7 @@ module Rigor
       # @param environment [Rigor::Environment, nil] required for
       #   RBS-backed dispatch; when nil only constant folding can fire.
       # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
-      def dispatch(receiver_type:, method_name:, arg_types:,
+      def dispatch(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/MethodLength
                    block_type: nil, environment: nil,
                    call_node: nil, scope: nil)
         return nil if receiver_type.nil?
@@ -87,6 +88,21 @@ module Rigor
         # (per-element block fold, etc.) skip this tier.
         plugin_result = try_plugin_contribution(call_node, scope)
         return plugin_result if plugin_result
+
+        # ADR-20 slice 3 — Rigor-bundled HKT-builtin return-
+        # type tier. Sits ABOVE `RbsDispatch.try_dispatch` so
+        # the handful of stdlib methods whose upstream RBS
+        # signature is `untyped` but whose runtime shape Rigor
+        # models via a Lightweight HKT (`json::value`,
+        # eventually `dry_monads::result`, …) get the reduced
+        # type instead of `Dynamic[Top]`. The table that
+        # populates this tier lives in
+        # `Rigor::Builtins::HktBuiltins::METHOD_RETURN_OVERRIDES`;
+        # plugin-supplied per-method overrides are out of
+        # scope for slice 3 and continue to flow through the
+        # `try_plugin_contribution` tier above.
+        hkt_builtin_result = try_hkt_builtin_return(receiver_type, method_name, environment)
+        return hkt_builtin_result if hkt_builtin_result
 
         rbs_result = RbsDispatch.try_dispatch(
           receiver: receiver_type, method_name: method_name, args: arg_types,
@@ -231,6 +247,25 @@ module Rigor
       # keeps moving — the run-level diagnostic envelope (per
       # ADR-2 § "Plugin Trust and I/O Policy") is owned by
       # `Analysis::Runner#plugin_emitted_diagnostics`.
+      # ADR-20 slice 3 — looks up the receiver / method pair
+      # in {Rigor::Builtins::HktBuiltins::METHOD_RETURN_OVERRIDES}
+      # and returns the reduced HKT type. Only fires when the
+      # receiver is a {Rigor::Type::Singleton} (the
+      # `JSON.parse` shape) and the registry-backed reduction
+      # succeeds; returns `nil` otherwise so the dispatcher
+      # falls through to RBS.
+      def try_hkt_builtin_return(receiver_type, method_name, environment)
+        return nil if environment.nil?
+        return nil unless receiver_type.is_a?(Type::Singleton)
+
+        Rigor::Builtins::HktBuiltins.method_return_override(
+          class_name: receiver_type.class_name,
+          method_name: method_name,
+          kind: :singleton,
+          hkt_registry: environment.hkt_registry
+        )
+      end
+
       def try_plugin_contribution(call_node, scope)
         return nil if call_node.nil? || scope.nil?
 

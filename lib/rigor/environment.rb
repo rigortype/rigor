@@ -10,6 +10,8 @@ require_relative "environment/rbs_collection_discovery"
 require_relative "environment/rbs_coverage_report"
 require_relative "inference/synthetic_method_index"
 require_relative "inference/project_patched_methods"
+require_relative "inference/hkt_registry"
+require_relative "builtins/hkt_builtins"
 require_relative "type_node/name_scope"
 require_relative "type_node/resolver_chain"
 
@@ -60,7 +62,8 @@ module Rigor
 
     attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index,
                 :reporters, :name_scope,
-                :synthetic_method_index, :project_patched_methods
+                :synthetic_method_index, :project_patched_methods,
+                :hkt_registry
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
     # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the
@@ -84,7 +87,8 @@ module Rigor
     def initialize(class_registry: ClassRegistry.default, rbs_loader: nil, # rubocop:disable Metrics/ParameterLists
                    plugin_registry: nil, dependency_source_index: nil,
                    rbs_extended_reporter: nil, boundary_cross_reporter: nil,
-                   synthetic_method_index: nil, project_patched_methods: nil)
+                   synthetic_method_index: nil, project_patched_methods: nil,
+                   hkt_registry: nil)
       @class_registry = class_registry
       @rbs_loader = rbs_loader
       @plugin_registry = plugin_registry
@@ -100,6 +104,12 @@ module Rigor
       )
       @synthetic_method_index = synthetic_method_index || Inference::SyntheticMethodIndex::EMPTY
       @project_patched_methods = project_patched_methods || Inference::ProjectPatchedMethods::EMPTY
+      # ADR-20 slice 2c — the per-env HKT registry consulted by
+      # the reducer when resolving `Type::App` carriers. Defaults
+      # to {Inference::HktRegistry::EMPTY}; the {.default} /
+      # {.for_project} class methods seed it with the bundled
+      # builtins (`json::value`, …) below.
+      @hkt_registry = hkt_registry || Inference::HktRegistry::EMPTY
       @name_scope = build_name_scope
       freeze
     end
@@ -136,7 +146,10 @@ module Rigor
 
     class << self
       def default
-        @default ||= new(rbs_loader: RbsLoader.default).freeze
+        @default ||= new(
+          rbs_loader: RbsLoader.default,
+          hkt_registry: Builtins::HktBuiltins.registry
+        ).freeze
       end
 
       # Builds an Environment that consults the project's local
@@ -220,7 +233,8 @@ module Rigor
           rbs_extended_reporter: rbs_extended_reporter,
           boundary_cross_reporter: boundary_cross_reporter,
           synthetic_method_index: synthetic_method_index,
-          project_patched_methods: project_patched_methods
+          project_patched_methods: project_patched_methods,
+          hkt_registry: Builtins::HktBuiltins.registry
         )
       end
       # rubocop:enable Metrics/MethodLength, Metrics/ParameterLists

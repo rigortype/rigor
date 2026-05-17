@@ -386,13 +386,15 @@ module Rigor
 
       name_scope = environment&.name_scope
       reporter = environment&.rbs_extended_reporter
+      hkt_registry = environment&.hkt_registry
 
       annotations.each do |annotation|
         type = parse_return_type_override(
           annotation.string,
           name_scope: name_scope,
           reporter: reporter,
-          source_location: annotation.location
+          source_location: annotation.location,
+          hkt_registry: hkt_registry
         )
         return type if type
       end
@@ -418,9 +420,39 @@ module Rigor
     /x
     private_constant :RETURN_DIRECTIVE_PATTERN
 
-    def parse_return_type_override(string, name_scope: nil, reporter: nil, source_location: nil)
+    # ADR-20 slice 2d — recognises `App[<uri>, <ClassName>, ...]`
+    # syntax in a `rigor:v1:return:` payload before falling
+    # through to the refinement-name parser. The match captures
+    # the namespaced URI (`json::value`) plus a comma-separated
+    # list of bare class names (`String`, `Symbol`, `Integer`).
+    # Slice 2d keeps the arg vocabulary intentionally narrow;
+    # parameterised forms (`Array[T]`, `Hash[K, V]`), unions,
+    # and refinements inside `App[...]` wait for a follow-up
+    # slice's expression parser.
+    APP_PAYLOAD_PATTERN = /
+      \A
+      App\[
+      \s*
+      (?<uri>[a-z_][a-z0-9_]*(?:::[a-z_][a-z0-9_]*)+)
+      \s*,\s*
+      (?<args>[^\[\]]+?)
+      \s*\]
+      \z
+    /x
+    private_constant :APP_PAYLOAD_PATTERN
+
+    def parse_return_type_override(string, name_scope: nil, reporter: nil, source_location: nil, hkt_registry: nil)
       match = RETURN_DIRECTIVE_PATTERN.match(string)
       return nil if match.nil?
+
+      app_type = parse_app_payload(
+        match[:payload],
+        name_scope: name_scope,
+        reporter: reporter,
+        source_location: source_location,
+        hkt_registry: hkt_registry
+      )
+      return app_type if app_type
 
       type = Builtins::ImportedRefinements.parse(
         match[:payload],
@@ -430,6 +462,53 @@ module Rigor
       )
       record_unresolved(reporter, string, source_location) if type.nil?
       type
+    end
+
+    # ADR-20 slice 2d. Parses `App[<uri>, <ClassName>, ...]`
+    # syntax into a `Rigor::Type::App`. When `hkt_registry` is
+    # supplied and the URI is registered with a body_tree, the
+    # `App` is reduced eagerly via {Inference::HktRegistry#reduce}
+    # so call sites observe the unfolded form (e.g.
+    # `Union[nil, true, false, ..., Array[App[json::value,
+    # String]], Hash[String, App[json::value, String]]]`)
+    # rather than the opaque carrier. When the registry is
+    # absent or the URI is unregistered, the carrier with its
+    # registry-supplied bound (or `untyped` as a last-resort
+    # fallback) is returned as-is.
+    def parse_app_payload(payload, name_scope: nil, reporter: nil, source_location: nil, hkt_registry: nil)
+      match = APP_PAYLOAD_PATTERN.match(payload)
+      return nil if match.nil?
+
+      uri = match[:uri].to_sym
+      arg_classes = match[:args].split(",").map(&:strip)
+      args = arg_classes.map { |name| resolve_app_arg(name, name_scope: name_scope) }
+
+      if args.any?(&:nil?)
+        record_unresolved(reporter, "App payload `#{payload}`: unresolved arg class name", source_location)
+        return nil
+      end
+
+      registration = hkt_registry&.registration(uri)
+      bound = registration&.bound || Type::Combinator.untyped
+      app = Type::App.new(uri, args, bound: bound)
+
+      return app if hkt_registry.nil? || !hkt_registry.defined?(uri)
+
+      reduced = hkt_registry.reduce(app)
+      reduced || app
+    end
+
+    def resolve_app_arg(class_name, name_scope: nil)
+      return nil unless /\A(?:::)?(?:[A-Z]\w*)(?:::[A-Z]\w*)*\z/.match?(class_name)
+
+      normalized = class_name.sub(/\A::/, "")
+      return Type::Nominal.new(normalized) if name_scope.nil?
+
+      if name_scope.respond_to?(:nominal_for_name)
+        resolved = name_scope.nominal_for_name(normalized)
+        return resolved if resolved
+      end
+      Type::Nominal.new(normalized)
     end
 
     # Returned for `rigor:v1:param: <name> <refinement>`. The

@@ -2,20 +2,75 @@
 
 ## Status
 
-Proposed (2026-05-18). **No implementation commitment.** This ADR
-captures the design space for a Rigor-side defunctionalised
-higher-kinded type encoding (Yallop & White 2014; fp-ts) so that
-slot signatures currently typed `untyped` can be tightened without
-forcing real System F⊤ machinery into RBS. The concrete first
-adopter is `JSON.parse`; longer-term adopters are the
-`rigor-lisp-eval` demo, `rigor-dry-validation` schema results, and
-the `rigor-dry-monads` `Result[T, E]` / `Maybe[T]` carriers.
+**Accepted (partial implementation, 2026-05-18).** Originally
+proposed 2026-05-18; promoted to accepted the same day after slices
+1, 2a, 2c, 2d, and 3 landed end-to-end with `JSON.parse` returning
+the recursive `json::value` union instead of `untyped` (verified
+via `rigor type-of`). The remaining open slices (§ Implementation
+slicing slices 2b, 4, 5, 6) carry no scheduling commitment and
+ship demand-driven.
 
-The ADR exits "proposed" when (a) the type-level evaluation rules in
-[`rigor-extensions.md`](../type-specification/rigor-extensions.md)
-rows 22 + 23 are normatively specified, (b) at least one slice in
-§ Implementation slicing is scheduled, and (c) `JSON.parse`'s RBS
-slot is committed to using the new mechanism rather than `untyped`.
+### What landed (v0.1.6)
+
+- **Slice 1** — `Rigor::Type::App` opaque carrier (`uri`, `args`,
+  `bound`); `Rigor::Inference::HktRegistry` (`Registration` +
+  `Definition` value objects + `merge` with last-write-wins);
+  `Rigor::RbsExtended::HktDirectives.parse_register` /
+  `parse_define` (JSON-flow payload parser for the
+  `%a{rigor:v1:hkt_register}` / `%a{rigor:v1:hkt_define}`
+  directives). No reduction, no call-site wiring at this slice.
+- **Slice 2a** — `Rigor::Inference::HktBody` (five `Data.define`
+  body-tree node types: `TypeLeaf`, `Param`, `AppRef`, `Union`,
+  `NominalApp`); `Rigor::Inference::HktReducer` implementing the
+  D4 evaluation rules with per-call in-progress stack for lazy
+  self-recursion handling (the "tying-the-knot" trick that lets
+  recursive sums terminate) and fuel budget (default 64 per WD3).
+  `Definition#body_tree` slot added; the body String stays
+  alongside for future Slice 2b consumption. `Type::App#reduce`
+  + `HktRegistry#reduce` convenience wrappers.
+- **Slice 2c** — `Environment#hkt_registry` attr_reader threading
+  the frozen registry through every analyzer call.
+  `Environment.default` / `.for_project` seed it via the new
+  `Rigor::Builtins::HktBuiltins.registry` module.
+- **Slice 2d** — `App[<uri>, <ClassName>, ...]` payload syntax
+  in `%a{rigor:v1:return:}` payloads parsed by
+  `RbsExtended.parse_return_type_override` and eagerly reduced
+  through the env's registry.
+- **Slice 3** — `Rigor::Builtins::HktBuiltins::METHOD_RETURN_OVERRIDES`
+  table covering `JSON.parse` / `JSON.parse!` / `JSON.load`;
+  new `Inference::MethodDispatcher.try_hkt_builtin_return` tier
+  sitting ABOVE `RbsDispatch.try_dispatch` so the table wins over
+  the upstream rbs gem's `untyped` slot. Discriminator surface
+  (`:json_symbolize_names`) swaps `K = String` for `K = Symbol`
+  when the call carries a literal `symbolize_names: true` option.
+  Annotation-based authoring (the original D8 plan via
+  `%a{rigor:v1:return: App[...]}` on a re-declared method) was
+  investigated and rejected for this slice because RBS does not
+  propagate `%a{...}` annotations from extension-form `def m:
+  ...` declarations onto the resolved `RBS::Definition::Method`;
+  the hardcoded table is the pragmatic shortcut while the
+  annotation-based path stays the general extension surface for
+  user-authored sigs that DECLARE new methods (not re-declare
+  upstream ones).
+
+### What remains open
+
+- **Slice 2b** — body-string-grammar parser that reads
+  `Definition#body` (currently an opaque String) into a
+  `HktBody::*` tree. Until it ships, plugin / Rigor-bundled
+  overlay authors MUST build body trees programmatically via the
+  Slice 2a node-constructor API (see
+  `Rigor::Builtins::HktBuiltins.json_value_body_tree` as the
+  worked example). The Slice 2b parser unblocks
+  `%a{rigor:v1:hkt_define}`-authored bodies in real `.rbs` files.
+- **Slice 4** — multi-arg HKT validation via `rigor-dry-monads`
+  `Result[T, E]` / `Maybe[T]` carriers. Queued behind ADR-3
+  amendment for the underlying value-object representation.
+- **Slice 5** — sugar via recursive `type` aliases. Gated on
+  user feedback that the explicit `%a{...}` form is too verbose.
+- **Slice 6** — plugin-side resolver hookup
+  (`Plugin::TypeNodeResolver` extension with `hkt_definitions:`
+  manifest entry). Demand-driven; ships when a plugin needs it.
 
 ## Context
 
@@ -646,3 +701,18 @@ first v0.2.x release.
   goal of replacing `JSON.parse`'s `untyped` slot. Scope set by
   the user's chosen references: the Yallop & White 2014 paper and
   fp-ts's `HKT.ts`.
+- 2026-05-18 — **slice 1 LANDED.** Carrier + registry + parser.
+  56 spec examples. No reduction yet.
+- 2026-05-18 — **slice 2a LANDED.** HktBody node types +
+  HktReducer with lazy self-recursion + fuel budget. 33 new spec
+  examples (total HKT spec count: 89).
+- 2026-05-18 — **slices 2c + 2d + 3 LANDED + status promoted to
+  accepted.** Environment#hkt_registry; App[uri, args] syntax in
+  %a{rigor:v1:return:}; METHOD_RETURN_OVERRIDES table + dispatcher
+  tier. End-to-end JSON.parse goal achieved (verified via
+  `rigor type-of`). 9 new integration spec cases (total HKT
+  spec count: 98).
+- 2026-05-18 — **slice 3 follow-up LANDED.** `:json_symbolize_names`
+  discriminator swaps K = String for K = Symbol when call carries
+  literal symbolize_names: true. 3 new spec cases (total HKT
+  spec count: 101).

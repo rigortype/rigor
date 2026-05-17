@@ -4,6 +4,7 @@ require_relative "type"
 require_relative "builtins/imported_refinements"
 require_relative "flow_contribution"
 require_relative "rbs_extended/reporter"
+require_relative "rbs_extended/hkt_directives"
 
 module Rigor
   # Slice 7 phase 15 — first-preview reader for the

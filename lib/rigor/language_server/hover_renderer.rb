@@ -32,10 +32,25 @@ module Rigor
       #   the renderer trusts the lookup result.
       def render(node:, type:, node_scope_lookup:)
         body = render_body(node, type, node_scope_lookup)
-        { contents: { kind: "markdown", value: body } }
+        result = { contents: { kind: "markdown", value: body } }
+        result[:range] = lsp_range_for(node) if node.respond_to?(:location) && node.location
+        result
       end
 
       private
+
+      # Converts a Prism `Location` to an LSP `Range` (0-based
+      # line, 0-based UTF-16-character column). UTF-16 conversion
+      # is queued — slice E1 emits byte columns which match for
+      # ASCII source; non-ASCII falls back gracefully because
+      # clients clamp out-of-range columns to the end of line.
+      def lsp_range_for(node)
+        loc = node.location
+        {
+          start: { line: loc.start_line - 1, character: loc.start_column },
+          end:   { line: loc.end_line - 1,   character: loc.end_column }
+        }
+      end
 
       def render_body(node, type, node_scope_lookup)
         case node

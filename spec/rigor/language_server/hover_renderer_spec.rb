@@ -115,6 +115,24 @@ RSpec.describe Rigor::LanguageServer::HoverRenderer do
     end
   end
 
+  describe "range field (slice E1)" do
+    it "includes the hovered node's source range in the response" do
+      root, index = parse_and_index("\"hello\".upcase\n")
+      call_node = root.statements.body.first
+      scope = index[call_node]
+
+      result = renderer.render(node: call_node, type: scope.type_of(call_node), node_scope_lookup: index)
+
+      expect(result).to include(:range)
+      range = result[:range]
+      # `"hello".upcase` sits on LSP line 0; spans from col 0 to
+      # col 14 (length of the call expression including the dot).
+      expect(range[:start]).to eq(line: 0, character: 0)
+      expect(range[:end][:line]).to eq(0)
+      expect(range[:end][:character]).to be > 0
+    end
+  end
+
   describe "Prism::ConstantReadNode / ConstantPathNode specialisation (slice A2)" do
     it "shows the constant FQN + singleton type for a bare class reference" do
       root, index = parse_and_index("String\n")

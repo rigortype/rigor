@@ -94,6 +94,14 @@ module Rigor
       def inspect
         "#<Rigor::Type::App #{describe(:short)} (bound=#{bound.describe(:short)})>"
       end
+
+      # ADR-20 Slice 2a — reduce this application against a
+      # registry. Returns the reducer's output (`bound` when
+      # reduction is blocked or fuel exhausts).
+      def reduce(registry, fuel: nil)
+        fuel ||= Inference::HktReducer::DEFAULT_FUEL
+        registry.reduce(self, fuel: fuel)
+      end
     end
   end
 end

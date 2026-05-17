@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "hkt_body"
+
 module Rigor
   module Inference
     # ADR-20 § "Decision D1 / D2" — registry of Lightweight HKT
@@ -59,13 +61,24 @@ module Rigor
         end
       end
 
-      # Frozen value object recording the un-evaluated body of
-      # one type-function definition. Slice 1 stores `body` as a
-      # raw String — the literal payload text from the `%a{...}`
-      # annotation; Slice 2's evaluator parses it into a
-      # conditional / indexed-access expression tree.
-      Definition = Data.define(:uri, :params, :body, :source_path, :source_line) do
-        def initialize(uri:, params:, body:, source_path: nil, source_line: nil)
+      # Frozen value object recording one type-function
+      # definition.
+      #
+      # `body` is the raw String payload from the `%a{...}`
+      # annotation (Slice 1's parser populates it). It stays
+      # opaque until Slice 2b's body-string parser lands.
+      #
+      # `body_tree` is the optional evaluable form: a
+      # `Rigor::Inference::HktBody::*` node tree the Slice 2a
+      # reducer walks against the application's concrete
+      # arguments. Plugin and Rigor-bundled overlay authors
+      # construct it programmatically through
+      # {with_body_tree}; the Slice 2b string parser will set
+      # it from `body` once it ships. The reducer treats a
+      # `nil` `body_tree` as "definition not yet evaluable"
+      # and returns the registered bound.
+      Definition = Data.define(:uri, :params, :body, :body_tree, :source_path, :source_line) do
+        def initialize(uri:, params:, body:, body_tree: nil, source_path: nil, source_line: nil)
           raise ArgumentError, "uri must be a Symbol, got #{uri.class}" unless uri.is_a?(Symbol)
           raise ArgumentError, "params must be an Array, got #{params.class}" unless params.is_a?(Array)
 
@@ -74,8 +87,31 @@ module Rigor
           end
           raise ArgumentError, "body must be a String, got #{body.class}" unless body.is_a?(String)
 
-          super(uri: uri, params: params.dup.freeze, body: body, source_path: source_path, source_line: source_line)
+          super(
+            uri: uri,
+            params: params.dup.freeze,
+            body: body,
+            body_tree: body_tree,
+            source_path: source_path,
+            source_line: source_line
+          )
         end
+      end
+
+      # Convenience constructor for callers that have a body
+      # tree but no raw String — typically Rigor-bundled HKT
+      # overlays that build the body programmatically. The
+      # raw `body` slot is filled with an empty placeholder
+      # so existing consumers keep their type contract.
+      def self.definition_with_body_tree(uri:, params:, body_tree:, source_path: nil, source_line: nil)
+        Definition.new(
+          uri: uri,
+          params: params,
+          body: "",
+          body_tree: body_tree,
+          source_path: source_path,
+          source_line: source_line
+        )
       end
 
       attr_reader :registrations, :definitions
@@ -121,7 +157,17 @@ module Rigor
         @registrations.empty? && @definitions.empty?
       end
 
+      # ADR-20 Slice 2a — reduce an `App` against this
+      # registry. Convenience wrapper around `HktReducer.new(self).reduce`.
+      # Each call allocates a fresh reducer; concurrent
+      # reductions are safe.
+      def reduce(app, fuel: HktReducer::DEFAULT_FUEL)
+        HktReducer.new(self).reduce(app, fuel: fuel)
+      end
+
       EMPTY = new.freeze
     end
   end
 end
+
+require_relative "hkt_reducer"

@@ -88,13 +88,16 @@ module Rigor
       # the `default_run_plugin_cache_store` let override) because
       # it is only a net win for spec files with many `run_plugin`
       # calls: cache I/O overhead exceeds the per-call env build
-      # savings for spec files with 1–7 examples, but pays back
-      # large for the heavy ones (sorbet's 48 examples shrink from
-      # 13.1 s to 3.9 s when the cache is shared, a ≈7× speedup).
-      # Spec files whose plugin's `cache_for(...)` descriptor is
-      # incomplete (does not include the project files the producer
-      # reads from) MUST avoid the shared cache because stale
-      # producer output leaks between examples.
+      # savings up to and including ≈17 examples per spec file
+      # (measured: a 17-example file got ~12 % slower under
+      # shared cache). The crossover sits closer to the high end
+      # of plugin-spec example counts, so only the heaviest files
+      # opt in today — sorbet's 48 examples shrink from 13.1 s to
+      # 4.7 s with the shared cache (≈3× faster). Spec files
+      # whose plugin's `cache_for(...)` descriptor is incomplete
+      # (does not include the project files the producer reads
+      # from) MUST avoid the shared cache because stale producer
+      # output leaks between examples.
       DEFAULT_CACHE_STORE = :default
 
       def default_run_plugin_cache_store

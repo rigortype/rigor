@@ -28,6 +28,17 @@ RSpec.describe "examples/rigor-sorbet" do
 
   let(:plugin_class) { Rigor::Plugin::Sorbet }
 
+  # Opt into the shared per-process `Cache::Store`. This file
+  # has 48 `run_plugin` examples and the warm-cache savings
+  # dominate the cache I/O overhead: spec wall time drops
+  # 13.1 s → 3.9 s isolated (≈3× faster). Other plugin specs
+  # with fewer examples (typically 4–11) see net-neutral or
+  # net-negative parallel-mode behaviour from the shared cache
+  # because the cache I/O overhead exceeds the per-call env
+  # build savings; the shared-cache default in `plugin_helpers`
+  # stays opt-in for that reason.
+  let(:default_run_plugin_cache_store) { :shared }
+
   describe "method signature contributions (slice 1)" do
     it "narrows a chained call's receiver to the sig'd return type" do
       source = <<~RUBY

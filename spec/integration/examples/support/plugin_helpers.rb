@@ -53,8 +53,56 @@ module Rigor
     # `after { Rigor::Plugin.unregister! }` for visibility — the
     # belt-and-braces is harmless and surfaces the lifecycle
     # for readers.
+    #
+    # ## Why `cache_store: :shared` is the default
+    #
+    # The persistent `Cache::Store` caches the per-run RBS
+    # environment, constant table, instance/singleton
+    # definitions, and known-class set. With `cache_store: nil`
+    # every call paid the full ~250ms cold env build; using one
+    # process-wide store warms the cache after the first call so
+    # subsequent calls are ~30ms each (≈7× faster). The
+    # descriptor's `gems` / `files` / `configs` / `plugins`
+    # slots key the entries so different plugins, sigs, and
+    # libraries automatically land in separate slots —
+    # cross-test contamination is impossible. Tests that need to
+    # assert cache behaviour explicitly (e.g.
+    # `routes_plugin_spec`'s invalidation surface) pass an
+    # explicit `cache_store:` to opt out.
     module PluginHelpers
-      def run_plugin(source:, plugin_entry: nil, cache_store: nil, files: {}, paths: nil, signature_paths: nil)
+      class << self
+        def shared_cache_store
+          @shared_cache_store ||= Rigor::Cache::Store.new(root: shared_cache_root)
+        end
+
+        def shared_cache_root
+          @shared_cache_root ||= Dir.mktmpdir("rigor-plugin-spec-cache-")
+        end
+      end
+
+      # Sentinel default. Callers can pass `:shared` for the
+      # process-wide store, an explicit `Cache::Store`, or `nil`
+      # for no caching (the historical default — every call pays
+      # the cold ~250ms env build). The process-wide store is
+      # opt-in per spec file via `cache_store: :shared` (or via
+      # the `default_run_plugin_cache_store` let override) because
+      # it is only a net win for spec files with many `run_plugin`
+      # calls: cache I/O overhead exceeds the per-call env build
+      # savings for spec files with 1–7 examples, but pays back
+      # large for the heavy ones (sorbet's 48 examples shrink from
+      # 13.1 s to 3.9 s when the cache is shared, a ≈7× speedup).
+      # Spec files whose plugin's `cache_for(...)` descriptor is
+      # incomplete (does not include the project files the producer
+      # reads from) MUST avoid the shared cache because stale
+      # producer output leaks between examples.
+      DEFAULT_CACHE_STORE = :default
+
+      def default_run_plugin_cache_store
+        nil
+      end
+
+      def run_plugin(source:, plugin_entry: nil, cache_store: DEFAULT_CACHE_STORE,
+                     files: {}, paths: nil, signature_paths: nil)
         Rigor::Plugin.unregister!
         Dir.mktmpdir do |dir|
           run_plugin_in_dir(
@@ -69,9 +117,8 @@ module Rigor
         end
       end
 
-      # rubocop:disable Layout/LineLength
-      def run_plugin_in_dir(dir:, source:, plugin_entry: nil, cache_store: nil, files: {}, paths: nil, signature_paths: nil)
-        # rubocop:enable Layout/LineLength
+      def run_plugin_in_dir(dir:, source:, plugin_entry: nil, cache_store: DEFAULT_CACHE_STORE,
+                            files: {}, paths: nil, signature_paths: nil)
         materialize_files(dir, files)
         File.write(File.join(dir, "demo.rb"), source)
         configuration = build_plugin_configuration(
@@ -80,13 +127,19 @@ module Rigor
           paths: paths,
           signature_paths: signature_paths
         )
+        effective_cache = resolve_cache_store(cache_store)
         Dir.chdir(dir) do
           Rigor::Analysis::Runner.new(
             configuration: configuration,
-            cache_store: cache_store,
+            cache_store: effective_cache,
             plugin_requirer: build_plugin_requirer
           ).run
         end
+      end
+
+      def resolve_cache_store(cache_store)
+        cache_store = default_run_plugin_cache_store if cache_store == DEFAULT_CACHE_STORE
+        cache_store == :shared ? PluginHelpers.shared_cache_store : cache_store
       end
 
       def plugin_diagnostics(result)

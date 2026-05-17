@@ -33,10 +33,193 @@ RSpec.describe "rigor-graphql integration" do
     RBS
   end
 
-  it "registers a manifest publishing :graphql_type_table + :graphql_enum_table" do
+  it "registers a manifest publishing all four facts" do
     manifest = plugin_class.manifest
     expect(manifest.id).to eq("graphql")
-    expect(manifest.produces).to include(:graphql_type_table, :graphql_enum_table)
+    expect(manifest.produces).to include(
+      :graphql_type_table, :graphql_enum_table,
+      :graphql_input_object_table, :graphql_mutation_table
+    )
+  end
+
+  describe "slice 2d — Schema::Mutation recognition" do
+    it "publishes per-mutation arguments + fields tables" do
+      demo = <<~RUBY
+        class UpdateUser < GraphQL::Schema::Mutation
+          argument :user_id, ID, required: true
+          argument :name, String, required: false
+
+          field :user, Types::User, null: true
+          field :errors, [String], null: false
+        end
+      RUBY
+      table = run_and_read_fact(demo: demo, fact_name: :graphql_mutation_table)
+      expect(table).not_to be_nil
+      shape = table.fetch("UpdateUser")
+      expect(shape.fetch(:arguments)).to eq(
+        "user_id" => { type: "String", required: true, list: false },
+        "name" => { type: "String", required: false, list: false }
+      )
+      expect(shape.fetch(:fields)).to eq(
+        "user" => { type: "Types::User", nullable: true, list: false },
+        "errors" => { type: "String", nullable: false, list: true }
+      )
+    end
+
+    it "registers a mutation with only arguments (no fields)" do
+      demo = <<~RUBY
+        class DeleteUser < GraphQL::Schema::Mutation
+          argument :user_id, ID, required: true
+        end
+      RUBY
+      shape = run_and_read_fact(demo: demo, fact_name: :graphql_mutation_table).fetch("DeleteUser")
+      expect(shape.fetch(:arguments)).to have_key("user_id")
+      expect(shape.fetch(:fields)).to be_empty
+    end
+
+    it "registers nested mutations under the enclosing constant chain" do
+      demo = <<~RUBY
+        module Mutations
+          class CreatePost < GraphQL::Schema::Mutation
+            argument :title, String, required: true
+            field :post, Types::Post, null: true
+          end
+        end
+      RUBY
+      table = run_and_read_fact(demo: demo, fact_name: :graphql_mutation_table)
+      expect(table).to have_key("Mutations::CreatePost")
+    end
+
+    it "publishes all four facts when a project mixes every schema kind" do
+      demo = <<~RUBY
+        class User < GraphQL::Schema::Object
+          field :name, String, null: false
+        end
+        class Status < GraphQL::Schema::Enum
+          value "ACTIVE"
+        end
+        class UserInput < GraphQL::Schema::InputObject
+          argument :name, String, required: true
+        end
+        class CreateUser < GraphQL::Schema::Mutation
+          argument :input, UserInput, required: true
+          field :user, User, null: true
+        end
+      RUBY
+      expect(run_and_read_fact(demo: demo, fact_name: :graphql_type_table)).to have_key("User")
+      expect(run_and_read_fact(demo: demo, fact_name: :graphql_enum_table)).to have_key("Status")
+      expect(run_and_read_fact(demo: demo, fact_name: :graphql_input_object_table)).to have_key("UserInput")
+      expect(run_and_read_fact(demo: demo, fact_name: :graphql_mutation_table)).to have_key("CreateUser")
+    end
+
+    it "does NOT publish :graphql_mutation_table when no Mutation subclass is present" do
+      demo = <<~RUBY
+        class User < GraphQL::Schema::Object
+          field :name, String, null: false
+        end
+      RUBY
+      expect(run_and_read_fact(demo: demo, fact_name: :graphql_mutation_table)).to be_nil
+    end
+  end
+
+  describe "slice 2c — Schema::InputObject recognition" do
+    it "publishes the per-input-object argument table" do
+      demo = <<~RUBY
+        class UserInput < GraphQL::Schema::InputObject
+          argument :name, String, required: true
+          argument :email, String, required: true
+          argument :nickname, String, required: false
+        end
+      RUBY
+      table = run_and_read_fact(demo: demo, fact_name: :graphql_input_object_table)
+      expect(table).not_to be_nil
+      expect(table.fetch("UserInput")).to eq(
+        "name" => { type: "String", required: true, list: false },
+        "email" => { type: "String", required: true, list: false },
+        "nickname" => { type: "String", required: false, list: false }
+      )
+    end
+
+    it "recognises list-wrapped argument types" do
+      demo = <<~RUBY
+        class FilterInput < GraphQL::Schema::InputObject
+          argument :tags, [String], required: true
+          argument :ids, [ID], required: false
+        end
+      RUBY
+      args = run_and_read_fact(demo: demo, fact_name: :graphql_input_object_table).fetch("FilterInput")
+      expect(args).to eq(
+        "tags" => { type: "String", required: true, list: true },
+        "ids" => { type: "String", required: false, list: true }
+      )
+    end
+
+    it "preserves user-defined types as their qualified name" do
+      demo = <<~RUBY
+        class PostInput < GraphQL::Schema::InputObject
+          argument :author, Types::UserRef, required: true
+          argument :status, Types::Status, required: false
+        end
+      RUBY
+      args = run_and_read_fact(demo: demo, fact_name: :graphql_input_object_table).fetch("PostInput")
+      expect(args).to eq(
+        "author" => { type: "Types::UserRef", required: true, list: false },
+        "status" => { type: "Types::Status", required: false, list: false }
+      )
+    end
+
+    it "defaults `required:` to false when omitted (graphql-ruby default)" do
+      demo = <<~RUBY
+        class UserInput < GraphQL::Schema::InputObject
+          argument :nickname, String
+        end
+      RUBY
+      args = run_and_read_fact(demo: demo, fact_name: :graphql_input_object_table).fetch("UserInput")
+      expect(args.fetch("nickname")).to eq(type: "String", required: false, list: false)
+    end
+
+    it "registers nested input objects under the enclosing constant chain" do
+      demo = <<~RUBY
+        module Types
+          class UserInput < GraphQL::Schema::InputObject
+            argument :name, String, required: true
+          end
+        end
+      RUBY
+      table = run_and_read_fact(demo: demo, fact_name: :graphql_input_object_table)
+      expect(table).to have_key("Types::UserInput")
+    end
+
+    it "publishes all three facts when a project mixes Object + Enum + InputObject" do
+      demo = <<~RUBY
+        class User < GraphQL::Schema::Object
+          field :name, String, null: false
+        end
+
+        class Status < GraphQL::Schema::Enum
+          value "ACTIVE"
+        end
+
+        class UserInput < GraphQL::Schema::InputObject
+          argument :name, String, required: true
+        end
+      RUBY
+      types = run_and_read_fact(demo: demo, fact_name: :graphql_type_table)
+      enums = run_and_read_fact(demo: demo, fact_name: :graphql_enum_table)
+      inputs = run_and_read_fact(demo: demo, fact_name: :graphql_input_object_table)
+      expect(types).to have_key("User")
+      expect(enums).to have_key("Status")
+      expect(inputs).to have_key("UserInput")
+    end
+
+    it "does NOT publish :graphql_input_object_table when no InputObject subclass is present" do
+      demo = <<~RUBY
+        class User < GraphQL::Schema::Object
+          field :name, String, null: false
+        end
+      RUBY
+      expect(run_and_read_fact(demo: demo, fact_name: :graphql_input_object_table)).to be_nil
+    end
   end
 
   describe "slice 2b — Schema::Enum recognition" do

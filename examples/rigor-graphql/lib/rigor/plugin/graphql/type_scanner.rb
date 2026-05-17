@@ -33,61 +33,82 @@ module Rigor
         # the alias's RHS is the canonical path.
         SCHEMA_OBJECT_TAIL = "Object"
         SCHEMA_ENUM_TAIL = "Enum"
-        # Common path-segment for both `Schema::Object` and
-        # `Schema::Enum`; the second-to-last segment must be
-        # `Schema` (either fully-qualified `GraphQL::Schema::X`
-        # or lexically nested `Schema::X` inside `module GraphQL`).
+        SCHEMA_INPUT_OBJECT_TAIL = "InputObject"
+        SCHEMA_MUTATION_TAIL = "Mutation"
+        # Common path-segment for `Schema::Object` / `Schema::Enum`
+        # / `Schema::InputObject` / `Schema::Mutation`; the
+        # second-to-last segment must be `Schema` (either
+        # fully-qualified `GraphQL::Schema::X` or lexically nested
+        # `Schema::X` inside `module GraphQL`).
         SCHEMA_PARENT_SEGMENTS = %w[Schema GraphQL].freeze
-        private_constant :SCHEMA_OBJECT_TAIL, :SCHEMA_ENUM_TAIL, :SCHEMA_PARENT_SEGMENTS
+        private_constant :SCHEMA_OBJECT_TAIL, :SCHEMA_ENUM_TAIL,
+                         :SCHEMA_INPUT_OBJECT_TAIL, :SCHEMA_MUTATION_TAIL,
+                         :SCHEMA_PARENT_SEGMENTS
 
         module_function
 
         # @param paths [Array<String>] absolute paths to `.rb` files
         #   the project's `paths:` resolves to.
-        # @return [Hash{Symbol => Hash}] frozen 2-key result with
-        #   `:types` (per-`Schema::Object` field table) and
-        #   `:enums` (per-`Schema::Enum` value list). Either may
-        #   be empty when no recognisable declaration is found.
+        # @return [Hash{Symbol => Hash}] frozen 3-key result with
+        #   `:types` (per-`Schema::Object` field table),
+        #   `:enums` (per-`Schema::Enum` value list), and
+        #   `:input_objects` (per-`Schema::InputObject` argument
+        #   table). Any subset may be empty when no recognisable
+        #   declaration of that kind is found.
         def scan(paths:)
-          types = {}
-          enums = {}
+          acc = empty_accumulator
           paths.each do |path|
-            file_types, file_enums = scan_file(path)
-            file_types.each { |k, v| types[k] ||= v }
-            file_enums.each { |k, v| enums[k] ||= v }
+            merge_accumulator(acc, scan_file(path))
           end
-          { types: types.freeze, enums: enums.freeze }.freeze
+          freeze_accumulator(acc)
         end
+
+        def empty_accumulator
+          { types: {}, enums: {}, input_objects: {}, mutations: {} }
+        end
+        private_class_method :empty_accumulator
+
+        def merge_accumulator(target, source)
+          source.each do |kind, table|
+            table.each { |k, v| target[kind][k] ||= v }
+          end
+          target
+        end
+        private_class_method :merge_accumulator
+
+        def freeze_accumulator(acc)
+          { types: acc[:types].freeze,
+            enums: acc[:enums].freeze,
+            input_objects: acc[:input_objects].freeze,
+            mutations: acc[:mutations].freeze }.freeze
+        end
+        private_class_method :freeze_accumulator
 
         def scan_file(path)
           source = File.read(path)
           parse_result = Prism.parse(source, filepath: path)
-          return [{}, {}] unless parse_result.errors.empty?
+          return empty_accumulator unless parse_result.errors.empty?
 
           collect_definitions(parse_result.value, [])
         rescue StandardError
-          [{}, {}]
+          empty_accumulator
         end
         private_class_method :scan_file
 
-        # Walks the AST collecting `class X < GraphQL::Schema::Object`
-        # and `class X < GraphQL::Schema::Enum` decls at any nesting
-        # level. Tracks the enclosing module chain so
-        # `module Types; class User < Schema::Object; end; end`
-        # registers as `"Types::User"`. Returns the 2-tuple
-        # `[types_hash, enums_hash]` so the caller can publish two
-        # cross-plugin facts from one walk.
+        # Walks the AST collecting `class X < GraphQL::Schema::Object`,
+        # `class X < GraphQL::Schema::Enum`, and
+        # `class X < GraphQL::Schema::InputObject` decls at any
+        # nesting level. Returns a 3-key hash so the caller can
+        # publish multiple cross-plugin facts from one walk.
         def collect_definitions(node, qualified_prefix)
-          return [{}, {}] if node.nil?
+          return empty_accumulator if node.nil?
 
           case node
           when Prism::ClassNode then collect_class_node(node, qualified_prefix)
           when Prism::ModuleNode then collect_module_node(node, qualified_prefix)
           else
-            node.compact_child_nodes.each_with_object([{}, {}]) do |child, acc|
-              child_types, child_enums = collect_definitions(child, qualified_prefix)
-              child_types.each { |k, v| acc[0][k] ||= v }
-              child_enums.each { |k, v| acc[1][k] ||= v }
+            node.compact_child_nodes.each_with_object(empty_accumulator) do |child, acc|
+              merge_accumulator(acc, collect_definitions(child, qualified_prefix))
             end
           end
         end
@@ -95,29 +116,38 @@ module Rigor
 
         def collect_class_node(node, qualified_prefix)
           inner_name = constant_name_for(node.constant_path)
-          return [{}, {}] if inner_name.nil?
+          return empty_accumulator if inner_name.nil?
 
           new_prefix = qualified_prefix + [inner_name]
-          inner_types, inner_enums = collect_definitions(node.body, new_prefix)
-          register_object_or_enum!(node, new_prefix, inner_types, inner_enums)
-          [inner_types, inner_enums]
+          inner = collect_definitions(node.body, new_prefix)
+          register_subclass!(node, new_prefix, inner)
+          inner
         end
         private_class_method :collect_class_node
 
-        def register_object_or_enum!(class_node, prefix, types, enums)
+        def register_subclass!(class_node, prefix, acc)
+          fqn = prefix.join("::")
           if schema_subclass?(class_node, SCHEMA_OBJECT_TAIL)
             fields = collect_fields(class_node.body)
-            types[prefix.join("::")] ||= fields unless fields.empty?
+            acc[:types][fqn] ||= fields unless fields.empty?
           elsif schema_subclass?(class_node, SCHEMA_ENUM_TAIL)
             values = collect_values(class_node.body)
-            enums[prefix.join("::")] ||= values unless values.empty?
+            acc[:enums][fqn] ||= values unless values.empty?
+          elsif schema_subclass?(class_node, SCHEMA_INPUT_OBJECT_TAIL)
+            arguments = collect_arguments(class_node.body)
+            acc[:input_objects][fqn] ||= arguments unless arguments.empty?
+          elsif schema_subclass?(class_node, SCHEMA_MUTATION_TAIL)
+            arguments = collect_arguments(class_node.body)
+            fields = collect_fields(class_node.body)
+            shape = { arguments: arguments, fields: fields }
+            acc[:mutations][fqn] ||= shape unless arguments.empty? && fields.empty?
           end
         end
-        private_class_method :register_object_or_enum!
+        private_class_method :register_subclass!
 
         def collect_module_node(node, qualified_prefix)
           inner_name = constant_name_for(node.constant_path)
-          return [{}, {}] if inner_name.nil?
+          return empty_accumulator if inner_name.nil?
 
           collect_definitions(node.body, qualified_prefix + [inner_name])
         end
@@ -189,6 +219,78 @@ module Rigor
           values
         end
         private_class_method :collect_values
+
+        # Walks every top-level `argument :name, Type, required: ...`
+        # call inside an InputObject (or Mutation) subclass body and
+        # returns the per-argument shape table. Argument syntax
+        # mirrors `field` except the nullability axis is named
+        # `required:` (default `false` — per graphql-ruby's
+        # `argument` default; the OPPOSITE polarity of `field`'s
+        # `null:`).
+        #
+        #     argument :name, String, required: true
+        #     argument :tags, [String], required: false
+        #     argument :status, Types::Status, required: true
+        def collect_arguments(body)
+          return {} if body.nil?
+
+          arguments = {}
+          statement_nodes(body).each do |node|
+            next unless node.is_a?(Prism::CallNode) && node.name == :argument
+
+            argument = parse_argument_call(node)
+            next if argument.nil?
+
+            arguments[argument[:name]] = {
+              type: argument[:type], required: argument[:required], list: argument[:list]
+            }
+          end
+          arguments
+        end
+        private_class_method :collect_arguments
+
+        def parse_argument_call(node)
+          args = node.arguments&.arguments
+          return nil if args.nil? || args.size < 2
+
+          name_node = args[0]
+          type_node = args[1]
+          return nil unless name_node.is_a?(Prism::SymbolNode)
+
+          type_info = resolve_field_type(type_node)
+          return nil if type_info.nil?
+
+          {
+            name: name_node.unescaped,
+            type: type_info[:type],
+            list: type_info[:list],
+            required: extract_required_flag(args)
+          }
+        end
+        private_class_method :parse_argument_call
+
+        # Mirror of `extract_nullability` but reads the `required:`
+        # kwarg, defaulting to `false` (graphql-ruby's argument
+        # default — the OPPOSITE polarity of `field`'s `null:` /
+        # nullability default).
+        # rubocop:disable Naming/PredicateMethod  -- extractor returns the literal required value
+        def extract_required_flag(args)
+          kwargs = args.last
+          return false unless kwargs.is_a?(Prism::KeywordHashNode)
+
+          pair = kwargs.elements.find do |el|
+            el.is_a?(Prism::AssocNode) && el.key.is_a?(Prism::SymbolNode) && el.key.unescaped == "required"
+          end
+          return false if pair.nil?
+
+          case pair.value
+          when Prism::TrueNode then true
+          when Prism::FalseNode then false
+          else false
+          end
+        end
+        # rubocop:enable Naming/PredicateMethod
+        private_class_method :extract_required_flag
 
         # `field :name, Type, null: false` shape. The first
         # positional is a Symbol (field name); the second is a

@@ -61,6 +61,59 @@ Multi-element list literals (`[String, Integer]`) and empty lists
 (`[]`) silently drop — they are not valid GraphQL list type
 expressions.
 
+## Schema::InputObject + Schema::Mutation (slice 2c + 2d)
+
+`class T < GraphQL::Schema::InputObject` subclasses contribute a
+per-argument table via the `argument :name, Type, required: ...`
+DSL — same shape as `field` but with `required:` (default `false`)
+instead of `null:` (default `true`):
+
+```ruby
+class UserInput < GraphQL::Schema::InputObject
+  argument :name, String, required: true
+  argument :tags, [String], required: false
+end
+
+# :graphql_input_object_table fact →
+{
+  "UserInput" => {
+    "name" => { type: "String", required: true, list: false },
+    "tags" => { type: "String", required: false, list: true }
+  }
+}
+```
+
+`class T < GraphQL::Schema::Mutation` subclasses contribute BOTH
+`argument`s (input) and `field`s (output) under one row:
+
+```ruby
+class UpdateUser < GraphQL::Schema::Mutation
+  argument :user_id, ID, required: true
+  argument :name, String, required: false
+
+  field :user, Types::User, null: true
+  field :errors, [String], null: false
+end
+
+# :graphql_mutation_table fact →
+{
+  "UpdateUser" => {
+    arguments: {
+      "user_id" => { type: "String", required: true, list: false },
+      "name"    => { type: "String", required: false, list: false }
+    },
+    fields: {
+      "user"   => { type: "Types::User", nullable: true, list: false },
+      "errors" => { type: "String", nullable: false, list: true }
+    }
+  }
+}
+```
+
+Per-mutation argument and field tables share the same value shape
+as their standalone Input + Object equivalents, so consumers can
+treat them uniformly.
+
 ## Schema::Enum recognition (slice 2b)
 
 Enum subclasses (`class T < GraphQL::Schema::Enum`) are walked in
@@ -145,7 +198,6 @@ The **ceiling** (future slices, demand-driven):
 - **Resolver-method check** — for each `field :name, Type`, if
   `name` is also defined as a Ruby method, verify the return type
   matches `Type`'s underlying class.
-- **`GraphQL::Schema::Mutation`** + **`GraphQL::Schema::InputObject`**.
 - **Non-Null wrappers** (`String.array`). The bracket form
   (`[String]`) is recognised in slice 2a; the `<Type>.array` /
   `<Type>!` chain forms graphql-ruby also accepts stay deferred.

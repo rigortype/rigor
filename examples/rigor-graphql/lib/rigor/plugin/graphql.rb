@@ -69,16 +69,19 @@ module Rigor
       manifest(
         id: "graphql",
         version: "0.1.0",
-        description: "Recognises `class T < GraphQL::Schema::Object` and " \
-                     "`class T < GraphQL::Schema::Enum` subclasses; publishes the " \
-                     "per-type field-type table and the per-enum value list.",
-        produces: %i[graphql_type_table graphql_enum_table]
+        description: "Recognises `class T < GraphQL::Schema::{Object,Enum,InputObject,Mutation}` " \
+                     "subclasses; publishes the per-type field-type table, the per-enum value " \
+                     "list, the per-input-object argument table, and the per-mutation arguments+fields " \
+                     "table.",
+        produces: %i[graphql_type_table graphql_enum_table graphql_input_object_table graphql_mutation_table]
       )
 
       def prepare(services)
         scanned = TypeScanner.scan(paths: scannable_paths(services))
         publish_if_present(services, :graphql_type_table, scanned.fetch(:types))
         publish_if_present(services, :graphql_enum_table, scanned.fetch(:enums))
+        publish_if_present(services, :graphql_input_object_table, scanned.fetch(:input_objects))
+        publish_if_present(services, :graphql_mutation_table, scanned.fetch(:mutations))
       end
 
       def init(_services)

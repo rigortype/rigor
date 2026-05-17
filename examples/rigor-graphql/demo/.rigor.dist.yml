@@ -1,0 +1,14 @@
+paths:
+  - demo.rb
+
+plugins:
+  - rigor-graphql
+
+signature_paths:
+  # Minimal GraphQL RBS stub local to the demo. A real project
+  # depending on `graphql-ruby` would expose its own RBS through
+  # bundler auto-discovery (rigor's O4 Layer 1/2 path).
+  - sig
+
+cache:
+  path: tmp/.rigor/cache

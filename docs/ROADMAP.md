@@ -57,7 +57,7 @@ Every committed v0.1.6 track is purely additive (no behaviour change for existin
 - **ADR-13 resolver-chain wiring** for synthetic-method tier `returns:` strings (utility-type returns).
 - **ADR-16 slice 5b** (Tier D engine integration).
 - **Editor mode follow-ups** ([`docs/design/20260516-editor-mode.md`](design/20260516-editor-mode.md) § "Out of scope for v1"): per-file diagnostic cache (the lever to upgrade single-file scope (option A) → project-scope with substitution (option B)), project-context snapshot cache for pre-pass reuse, multi-buffer (`--buffer A=B --buffer C=D`), `--also=dep1,dep2` caller-declared dependents, LSP daemon / file-watch.
-- **`rigor-graphql`** (concrete user demand pending).
+- **`rigor-graphql` slice 1 LANDED** (Tier 3D — Schema::Object recognition + `:graphql_type_table` fact publication; CHANGELOG `[Unreleased]` § Added). Future slices (resolver-method type-check, enums / mutations / input objects, list wrappers, schema-execute result typing) demand-driven.
 - **O4 Layer 3 per-gem-version cache** (slice 3 architecture; future Ruby::Box-style Bundler extension would raise priority).
 
 ## Future cycles (not committed to a specific release)
@@ -73,7 +73,7 @@ Items that have surfaced across v0.1.x work and that the next implementer benefi
 - **ADR-13 resolver-chain wiring for the synthetic-method tier (ADR-16 follow-up).** ADR-13's `Plugin::TypeNodeResolver` chain is wired for `%a{rigor:v1:…}` payloads but NOT for substrate manifest `returns:` strings. Routing the synthetic-method tier through the chain unlocks utility-type-shaped Tier C returns (`Array[String]`, `Hash[K, V]`, `Pick<T, K>`). Deferred to demand from utility-type-shaped substrate consumers. (Note: per-call-site return-type lookup via cross-plugin facts shipped in v0.1.6 via [ADR-18](adr/18-substrate-per-call-site-return-type.md); the ADR-13 wiring above is the orthogonal "parameterised-form parser" extension.)
 
 ### Plugins / ecosystem
-- **`rigor-graphql`** — last remaining Tier 3 plugin. GraphQL schema DSL parsing is non-trivial; author when there is concrete user demand.
+- **`rigor-graphql`** — Tier 3 plugin LANDED at slice 1 (CHANGELOG `[Unreleased]` § Added). Schema::Object recognition + per-type field map published as `:graphql_type_table`. Future slices: resolver-method type-check, `Schema::Enum` / `Schema::Mutation` / `Schema::InputObject` recognition, list / Non-Null wrappers, string-form `field :foo, "User"` diagnostic, `Schema.execute(...)` result typing — all demand-driven.
 - **dry-rb adapter plugins** — [ADR-12](adr/12-dry-rb-packaging.md) accepted (2026-05-16): per-gem plugins + planned `rigor-dry-rb` meta umbrella, matching the Rails plugin family pattern. **Landed**: `rigor-dry-struct` (v0.1.5; v0.2.0 in v0.1.6 with ADR-18 precision uplift) + `rigor-dry-types` (v0.1.6, slices 1+2+3: canonical + nested categories + user-authored compositions). **Next concrete**: `rigor-dry-validation` (Tier A; needs slicing decision: Contract vs schema vs params DSL surfaces) + `rigor-dry-monads` (Tier B; needs ADR-3 amendment for `Result[T, E]` / `Maybe[T]` carrier). **Smaller follow-ups**: `rigor-dry-types` slice 4 (transitive composition references via two-pass walk). Survey under [`docs/design/20260509-dry-plugins-roadmap.md`](design/20260509-dry-plugins-roadmap.md).
 - **ADR-10 — per-call return-type precision from gem source.** Walker currently catalogs only `(class_name, method_name) → kind` triples. Inferring per-method return types from gem source (so `mode: :full` could contribute richer than `Dynamic[Top]`) is a larger walker enhancement deferred until concrete user demand surfaces.
 - **`rigor-sorbet` follow-ups beyond per-call-site sigil gating** — landed in v0.1.4. No outstanding queue items.
@@ -118,8 +118,8 @@ The full roadmap is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/
 
 **Pending Tier 3 (specialised, author when there is concrete user demand):**
 
-- `rigor-graphql`.
-- `rigor-dry-validation` / `rigor-dry-monads` — ADR-12 next slices. Validation needs Contract vs Schema vs Params slicing decision; monads needs ADR-3 amendment for `Result[T, E]` / `Maybe[T]` carrier.
+- `rigor-graphql` slice 2+ (resolver-method type-check; `Schema::Enum` / `Schema::Mutation` / `Schema::InputObject`; list / Non-Null wrappers).
+- `rigor-dry-validation` / `rigor-dry-monads` — `rigor-dry-schema` slice 1 LANDED (slicing plan in [`docs/design/20260517-dry-validation-slicing.md`](design/20260517-dry-validation-slicing.md)). Validation depends on dry-schema slice 2 (typed `result.to_h` synthesis); monads needs ADR-3 amendment for `Result[T, E]` / `Maybe[T]` carrier.
 
 Each plugin is staged in `examples/rigor-<id>/` per the [`rigor-plugin-author`](../.codex/skills/rigor-plugin-author/SKILL.md) SKILL discipline and extracted via `git subtree split` once its contract is stable. The eventual `rigor-rails` meta-gem will declare the Tier 1+2 plugins as gem dependencies so a single Gemfile line opts the user into the whole stack.
 

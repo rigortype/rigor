@@ -1,0 +1,8 @@
+module GraphQL
+  module Schema
+    class Object
+      def self.field: (*untyped) { (?) -> void } -> void
+                    | (*untyped) -> void
+    end
+  end
+end

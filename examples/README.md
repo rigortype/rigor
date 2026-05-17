@@ -1,6 +1,6 @@
 # Rigor plugin examples
 
-Twenty-six entries — twenty-five worked plugins of the **v0.1.0
+Twenty-seven entries — twenty-six worked plugins of the **v0.1.0
 plugin authoring surface** plus one RBS-only bundle
 (`rigor-activesupport-core-ext`). `rigor-sinatra`,
 `rigor-dry-struct`, and `rigor-devise` are the first worked
@@ -11,7 +11,11 @@ walker code. `rigor-dry-types` + `rigor-dry-schema` form the
 **dry-rb foundation pair** per [ADR-12](../docs/adr/12-dry-rb-packaging.md):
 dry-types publishes the alias table; dry-schema reads it for
 constant-reference resolution and publishes its own schema
-table.
+table. `rigor-graphql` rounds out Tier 3D — a metadata-recorder
+plugin (the macro-expansion library survey at
+[`docs/notes/20260515-macro-expansion-library-survey.md`](../docs/notes/20260515-macro-expansion-library-survey.md)
+§ "GraphQL-Ruby" documents why graphql-ruby is NOT an ADR-16
+substrate consumer).
 
 (The earlier "eighteen worked examples" paragraph reflected the
 state on 2026-05-11; subsequent additions are listed in the tables
@@ -53,6 +57,7 @@ ADR-9's cross-plugin fact store.
 | [`rigor-devise`](rigor-devise/) | **Macro expansion substrate, Tier B** (ADR-16) — declarative `Plugin::Macro::TraitRegistry` manifest entry mirroring Devise's `lib/devise/modules.rb` symbol → module table. The substrate's pre-pass explodes each `devise :strategy_a, :strategy_b` call's included modules' RBS instance methods onto the calling AR model. First worked consumer of `TraitRegistry`; floor ships `Dynamic[T]` returns + cross-file dispatch resolution. | ~110 | — | — | — | 2 |
 | [`rigor-dry-types`](rigor-dry-types/) | **dry-rb foundation plugin (ADR-12 Tier A)** — recognises `module X; include Dry.Types(); end` and publishes the `{X::String => "String", X::Integer => "Integer", …}` table as the `:dry_type_aliases` cross-plugin fact (ADR-9). Foundation gem for the `rigor-dry-*` family; consumed by `rigor-dry-struct` / `rigor-dry-validation` / `rigor-dry-schema`. Slices 1-4 ship the full alias coverage: canonical + four nested coercion categories + user-authored compositions + transitive composition references with cycle detection. | ~250 | Project source (`paths:` `.rb` files) | — | — | 10 |
 | [`rigor-dry-schema`](rigor-dry-schema/) | **dry-rb schema plugin (ADR-12 Tier A)** — recognises `Foo = Dry::Schema.{Params,JSON,define} { ... }` assignments and publishes the per-schema `{required: {key => underlying_class}, optional: {…}}` table as the `:dry_schema_table` cross-plugin fact (ADR-9). Maps `required(:k).filled(:string)` / `required(:k).value(:integer)` / `optional(:k).maybe(:string)` predicate rows to underlying classes; resolves `value(Types::Email)` user-authored references through `:dry_type_aliases` published by `rigor-dry-types`. Floor for the future `rigor-dry-validation` plugin per [the slicing plan](../docs/design/20260517-dry-validation-slicing.md). | ~250 | Project source (`paths:` `.rb` files) | — | — | 9 |
+| [`rigor-graphql`](rigor-graphql/) | **GraphQL Schema::Object recognition (Tier 3D)** — recognises `class T < GraphQL::Schema::Object` subclasses and walks every `field :name, Type, null: ...` declaration, publishing the `{type_class_fqn => {field_name => {type:, nullable:}}}` table as the `:graphql_type_table` cross-plugin fact (ADR-9). Maps the canonical GraphQL scalar names (`String` / `Integer` / `Boolean` / `Float` / `ID`) to underlying Ruby classes; user-defined types preserved as qualified names. Metadata-recorder shape rather than ADR-16 substrate consumer (graphql-ruby's `field` DSL emits no Ruby methods; see [survey](../docs/notes/20260515-macro-expansion-library-survey.md) § "GraphQL-Ruby"). Floor for future resolver-method type-checking. | ~250 | Project source (`paths:` `.rb` files) | — | — | 10 |
 
 ### Rails ecosystem family
 

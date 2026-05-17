@@ -96,7 +96,20 @@ module Rigor
       def mailer_index_or_nil
         return @mailer_index if @mailer_index
 
-        @mailer_index = cache_for(:mailer_index, params: {}).call
+        # Two-glob descriptor: every mailer class under
+        # `mailer_search_paths` AND every view template under
+        # `views_root`. Without explicit enumeration the cache
+        # invalidates only on files the `IoBoundary` has already
+        # read in the current process — empty on the first call
+        # of a fresh process, so warm hits would serve stale
+        # `MailerIndex` data after mailers are added / removed or
+        # view templates are added (`view_exists?` failures aren't
+        # recorded, so the auto-built descriptor cannot detect a
+        # newly-added view).
+        mailer_d = glob_descriptor(@mailer_search_paths, "**/*.rb")
+        view_d = glob_descriptor([@views_root], "**/*")
+        descriptor = Rigor::Cache::Descriptor.compose(mailer_d, view_d)
+        @mailer_index = cache_for(:mailer_index, params: {}, descriptor: descriptor).call
       rescue StandardError => e
         @load_error = "rigor-actionmailer: failed to discover mailers: #{e.class}: #{e.message}"
         nil

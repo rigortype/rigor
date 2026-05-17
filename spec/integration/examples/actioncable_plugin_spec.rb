@@ -58,6 +58,16 @@ RSpec.describe "examples/rigor-actioncable" do
 
   let(:plugin_class) { Rigor::Plugin::Actioncable }
 
+  # Opt into the shared per-process `Cache::Store`. The plugin's
+  # `:channel_index` producer now passes an explicit
+  # `glob_descriptor` covering `app/channels/**/*.rb`, so cache
+  # entries invalidate correctly when channel files differ between
+  # examples. Without that descriptor fix the shared cache served
+  # stale `ChannelIndex` data across examples (see
+  # `docs/CURRENT_WORK.md` § Open Engineering Items for the
+  # session that surfaced the bug).
+  let(:default_run_plugin_cache_store) { :shared }
+
   describe "broadcast_to recognition" do
     it "emits a `broadcast-target` info diagnostic for `<Channel>.broadcast_to(...)`" do
       result = run_plugin(

@@ -109,7 +109,17 @@ module Rigor
       def locale_index_or_nil
         return @locale_index if @locale_index
 
-        @locale_index = cache_for(:locale_index, params: {}).call
+        # Pass an explicit descriptor covering every `.yml` / `.yaml`
+        # file under the configured locale search paths so the cache
+        # invalidates when locale files are added, removed, or edited.
+        # Without it the auto-built descriptor depends on the
+        # `IoBoundary`'s in-process read history — empty on the
+        # first call of a fresh process — so warm cache hits would
+        # serve stale `LocaleIndex` data and hide per-call load
+        # errors (a malformed YAML in one run would not surface
+        # when a healthy cache entry from an earlier run exists).
+        descriptor = glob_descriptor(@locale_search_paths, "**/*.yml", "**/*.yaml")
+        @locale_index = cache_for(:locale_index, params: {}, descriptor: descriptor).call
       rescue StandardError => e
         @runtime_error = "rigor-rails-i18n: failed to load locales: #{e.class}: #{e.message}"
         nil

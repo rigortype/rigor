@@ -105,7 +105,16 @@ module Rigor
       def channel_index_or_nil
         return @channel_index if @channel_index
 
-        @channel_index = cache_for(:channel_index, params: {}).call
+        # Pass an explicit descriptor covering every `.rb` file
+        # under the configured channel search paths so the cache
+        # invalidates when channels are added, removed, or edited.
+        # Without it the auto-built descriptor depends on the
+        # `IoBoundary`'s in-process read history — empty on the
+        # first call of a fresh process, so warm cache hits would
+        # serve stale `ChannelIndex` data when project files have
+        # changed between sessions.
+        descriptor = glob_descriptor(@channel_search_paths, "**/*.rb")
+        @channel_index = cache_for(:channel_index, params: {}, descriptor: descriptor).call
       rescue StandardError => e
         @load_error = "rigor-actioncable: failed to discover channels: #{e.class}: #{e.message}"
         nil

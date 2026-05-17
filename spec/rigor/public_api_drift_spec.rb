@@ -132,6 +132,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     config()
     diagnostics_for_file(keyreq:path,keyreq:scope,keyreq:root)
     flow_contribution_for(keyreq:call_node,keyreq:scope)
+    glob_descriptor(req:roots,rest:patterns)
     init(req:services)
     io_boundary()
     manifest()

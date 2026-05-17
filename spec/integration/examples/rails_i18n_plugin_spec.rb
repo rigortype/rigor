@@ -42,6 +42,15 @@ RSpec.describe "examples/rigor-rails-i18n" do
 
   let(:plugin_class) { Rigor::Plugin::RailsI18n }
 
+  # Opt into the shared per-process `Cache::Store`. The plugin's
+  # `:locale_index` producer now passes an explicit
+  # `glob_descriptor` covering `config/locales/**/*.{yml,yaml}`,
+  # so cache entries invalidate when locale YAML files differ
+  # between examples — letting the malformed-YAML test surface a
+  # fresh load error rather than reading a healthy cache entry
+  # left over from a prior valid-YAML example.
+  let(:default_run_plugin_cache_store) { :shared }
+
   describe "recognised translation calls" do
     it "emits an info diagnostic for `t('users.welcome')` listing the resolving locales" do
       result = run_plugin(

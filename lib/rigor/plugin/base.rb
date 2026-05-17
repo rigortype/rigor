@@ -243,7 +243,70 @@ module Rigor
         end
       end
 
+      # Builds a `Cache::Descriptor` covering every file matched by
+      # `pattern` (a glob, e.g. `"**/*.rb"`) under any of `roots`.
+      # Each matching file contributes a `:digest`-comparator
+      # `FileEntry` so the cache invalidates on any content change,
+      # any addition (a newly-glob-matched file appears in the
+      # descriptor), or any removal (the previously-matched file
+      # drops out).
+      #
+      # Pass the returned descriptor as `cache_for(..., descriptor: …)`
+      # so the cache key reflects the project files the producer
+      # reads from. Without it, `Plugin::Base#cache_for`'s
+      # auto-built descriptor only includes files the
+      # {Plugin::IoBoundary} has already read in the current
+      # process — empty on the first call of a fresh process — so
+      # the cache key is identical regardless of project state and
+      # warm runs return stale producer output when files have
+      # changed between sessions.
+      #
+      # Discovery-style producers (`actioncable`'s `:channel_index`,
+      # `actionmailer`'s `:mailer_index`, `rails-i18n`'s
+      # `:locale_index`) all follow the same pattern: walk a glob
+      # under one or more search roots, parse / read every match,
+      # build a typed index. They MUST call this helper at the
+      # `cache_for(descriptor: …)` site to be cache-correct under
+      # the persistent `Cache::Store` `rigor check` uses by
+      # default.
+      #
+      # The helper pays one SHA-256 read per matched file at
+      # call time; the producer block typically re-reads through
+      # `io_boundary.read_file` so the cost is doubled. For
+      # discovery globs in the 10-100 file range this is
+      # negligible (~ms) relative to the parse + walk the
+      # producer does on cache miss.
+      #
+      # @param roots    [Array<String>] search roots (relative to
+      #   the project root, or absolute paths)
+      # @param patterns [Array<String>] glob suffixes joined under
+      #   each root via `File.join(root, pattern)`. Multiple
+      #   patterns union into one descriptor (`"**/*.erb",
+      #   "**/*.html"` etc.).
+      # @return [Rigor::Cache::Descriptor]
+      def glob_descriptor(roots, *patterns)
+        files = collect_glob_files(Array(roots), patterns)
+        entries = files.map do |path|
+          Cache::Descriptor::FileEntry.new(
+            path: path,
+            comparator: :digest,
+            value: Digest::SHA256.file(path).hexdigest
+          )
+        end
+        Cache::Descriptor.new(files: entries)
+      end
+
       private
+
+      def collect_glob_files(roots, patterns)
+        matched = roots.flat_map do |root|
+          absolute = File.expand_path(root.to_s)
+          next [] unless File.directory?(absolute)
+
+          patterns.flat_map { |pattern| Dir.glob(File.join(absolute, pattern.to_s)) }
+        end
+        matched.uniq.sort.select { |path| File.file?(path) }
+      end
 
       # ADR-7 § "Slice 6-B" — composes the per-call cache
       # descriptor from (1) the plugin's PluginEntry template

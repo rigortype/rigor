@@ -42,6 +42,15 @@ RSpec.describe "examples/rigor-actionmailer" do
 
   let(:plugin_class) { Rigor::Plugin::Actionmailer }
 
+  # Opt into the shared per-process `Cache::Store`. The plugin's
+  # `:mailer_index` producer now passes an explicit composed
+  # `glob_descriptor` covering both `app/mailers/**/*.rb` and
+  # every file under `app/views/`, so cache entries invalidate on
+  # mailer or view changes between examples. Without that fix the
+  # shared cache served stale `MailerIndex` data (missing-view
+  # discovery hid views added in later examples).
+  let(:default_run_plugin_cache_store) { :shared }
+
   describe "recognised mailer calls" do
     it "emits an info diagnostic for `UserMailer.welcome(user)` matching the action's arity" do
       result = run_plugin(

@@ -242,10 +242,8 @@ RSpec.describe Rigor::Inference::HktBodyParser do
 
   describe "directive integration" do
     it "HktDirectives.parse_define populates Definition#body_tree via the parser" do
-      payload = "rigor:v1:hkt_define: " \
-                "{\"uri\": \"json::value\", \"params\": [\"K\"], " \
-                "\"body\": \"nil | true | false | Integer | Float | String | " \
-                "Array[App[json::value, K]] | Hash[K, App[json::value, K]]\"}"
+      payload = "rigor:v1:hkt_define: uri=json::value params=K body=nil | true | false | Integer | " \
+                "Float | String | Array[App[json::value, K]] | Hash[K, App[json::value, K]]"
       defn = Rigor::RbsExtended::HktDirectives.parse_define(payload)
       expect(defn).not_to be_nil
       expect(defn.body_tree).not_to be_nil
@@ -258,8 +256,7 @@ RSpec.describe Rigor::Inference::HktBodyParser do
         define_method(:initialize) { @entries = collected }
         define_method(:record) { |**e| @entries << e }
       end.new
-      payload = "rigor:v1:hkt_define: " \
-                '{"uri": "json::value", "params": ["K"], "body": "Array[K"}'
+      payload = "rigor:v1:hkt_define: uri=json::value params=K body=Array[K"
       defn = Rigor::RbsExtended::HktDirectives.parse_define(payload, reporter: reporter)
       expect(defn).not_to be_nil
       expect(defn.body_tree).to be_nil

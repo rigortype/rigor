@@ -154,6 +154,87 @@ RSpec.describe Rigor::Inference::HktBodyParser do
     end
   end
 
+  describe "conditional parsing (ADR-20 § D3)" do
+    it "parses `(K <: String ? Integer : Float)`" do
+      result = parse("(K <: String ? Integer : Float)", params: [:K])
+      expect(result).to be_a(body::Conditional)
+      expect(result.test).to be_a(body::TestSubtype)
+      expect(result.test.left).to eq(body::Param.new(name: :K))
+      expect(result.test.right).to eq(body::TypeLeaf.new(type: Rigor::Type::Nominal.new("String")))
+      expect(result.then_branch).to eq(body::TypeLeaf.new(type: Rigor::Type::Nominal.new("Integer")))
+      expect(result.else_branch).to eq(body::TypeLeaf.new(type: Rigor::Type::Nominal.new("Float")))
+    end
+
+    it "parses `(K == nil ? untyped : K)`" do
+      result = parse("(K == nil ? untyped : K)", params: [:K])
+      expect(result).to be_a(body::Conditional)
+      expect(result.test).to be_a(body::TestEquality)
+    end
+
+    it "supports nested conditionals" do
+      result = parse("(K <: String ? Integer : (K <: Float ? String : nil))", params: [:K])
+      expect(result).to be_a(body::Conditional)
+      expect(result.else_branch).to be_a(body::Conditional)
+    end
+
+    it "supports unions in branches: `(K <: A ? B | C : D | E)`" do
+      result = parse("(K <: A ? B | C : D | E)", params: [:K])
+      expect(result.then_branch).to be_a(body::Union)
+      expect(result.then_branch.arms.size).to eq(2)
+      expect(result.else_branch).to be_a(body::Union)
+      expect(result.else_branch.arms.size).to eq(2)
+    end
+
+    it "supports Array[K] on a test side" do
+      result = parse("(K <: Array[Integer] ? Integer : String)", params: [:K])
+      expect(result.test.right).to be_a(body::NominalApp)
+    end
+
+    it "supports App[uri, K] in branches" do
+      result = parse("(K <: nil ? untyped : App[json::value, K])", params: [:K])
+      expect(result.else_branch).to be_a(body::AppRef)
+    end
+
+    it "raises on missing test operator" do
+      expect { parse("(K ? Integer : Float)", params: [:K]) }
+        .to raise_error(described_class::ParseError, /expected `<:` or `==`/)
+    end
+
+    it "raises on missing `?`" do
+      expect { parse("(K <: String Integer : Float)", params: [:K]) }
+        .to raise_error(described_class::ParseError, /expected question/)
+    end
+
+    it "raises on missing `:` else marker" do
+      expect { parse("(K <: String ? Integer Float)", params: [:K]) }
+        .to raise_error(described_class::ParseError, /expected colon/)
+    end
+
+    it "raises on unclosed paren" do
+      expect { parse("(K <: String ? Integer : Float", params: [:K]) }
+        .to raise_error(described_class::ParseError, /expected rparen/)
+    end
+
+    it "the parsed conditional reduces end-to-end" do
+      registry_class = Rigor::Inference::HktRegistry
+      registry = registry_class.new(
+        registrations: [
+          registry_class::Registration.new(uri: :"cond::it", arity: 1, variance: [:out],
+                                           bound: Rigor::Type::Combinator.untyped)
+        ],
+        definitions: [
+          registry_class.definition_with_body_tree(
+            uri: :"cond::it", params: [:K],
+            body_tree: parse("(K <: String ? Integer : Float)", params: [:K])
+          )
+        ]
+      )
+      str_app = Rigor::Type::App.new(:"cond::it", [Rigor::Type::Combinator.nominal_of(String)],
+                                     bound: Rigor::Type::Combinator.untyped)
+      expect(registry.reduce(str_app)).to eq(Rigor::Type::Combinator.nominal_of(Integer))
+    end
+  end
+
   describe "JSON_VALUE end-to-end equivalence" do
     let(:registry_class) { Rigor::Inference::HktRegistry }
     let(:str) { Rigor::Type::Combinator.nominal_of(String) }

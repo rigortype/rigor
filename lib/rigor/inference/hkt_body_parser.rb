@@ -81,9 +81,15 @@ module Rigor
             (?<ws>\s+)
           | (?<lb>\[)
           | (?<rb>\])
+          | (?<lparen>\()
+          | (?<rparen>\))
           | (?<comma>,)
           | (?<pipe>\|)
+          | (?<sub><:)
+          | (?<eq>==)
           | (?<sep>::)
+          | (?<colon>:(?!:))
+          | (?<question>\?)
           | (?<ident>[a-z_][a-zA-Z0-9_]*)
           | (?<ucname>[A-Z][a-zA-Z0-9_]*)
           )
@@ -141,11 +147,52 @@ module Rigor
           raise ParseError, "unexpected end of input; expected type expression" if tok.nil?
 
           case tok.kind
+          when :lparen  then parse_conditional
           when :ident   then parse_lowercase_atom
           when :ucname  then parse_ucname_form
           when :sep     then parse_classname_with_leading_sep
           else
             raise ParseError, "unexpected token #{tok.kind} (#{tok.value.inspect}) at position #{tok.pos}"
+          end
+        end
+
+        # ADR-20 § D3 conditional parser. Grammar:
+        #
+        #     conditional := "(" test "?" union ":" union ")"
+        #     test        := type_expr ("<:" | "==") type_expr
+        #
+        # Parens delimit a conditional unambiguously — bare
+        # `(type_expr)` grouping is not supported at this slice
+        # (no use case yet). Branches can be unions; test sides
+        # are single arms (wrap in `App[my_union, ...]` if you
+        # need a union there). `in [opt1, opt2]` membership
+        # tests are programmatically supported via
+        # `HktBody::TestMembership` but the parser does not yet
+        # recognise the `in` keyword (no concrete demand yet).
+        def parse_conditional
+          expect!(:lparen)
+          test = parse_test
+          expect!(:question)
+          then_branch = parse_union
+          expect!(:colon)
+          else_branch = parse_union
+          expect!(:rparen)
+          HktBody::Conditional.new(test: test, then_branch: then_branch, else_branch: else_branch)
+        end
+
+        def parse_test
+          left = parse_type_expr
+          op = peek
+          case op&.kind
+          when :sub
+            consume
+            HktBody::TestSubtype.new(left: left, right: parse_type_expr)
+          when :eq
+            consume
+            HktBody::TestEquality.new(left: left, right: parse_type_expr)
+          else
+            actual = op.nil? ? "end of input" : "#{op.kind} (#{op.value.inspect})"
+            raise ParseError, "expected `<:` or `==` in conditional test, got #{actual}"
           end
         end
 

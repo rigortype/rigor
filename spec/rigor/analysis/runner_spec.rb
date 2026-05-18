@@ -1571,6 +1571,52 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(ivar_diags(result)).to be_empty
       end
 
+      it "does not flag the bool flag idiom (false in initialize, true elsewhere)" do
+        # Common idiom: a memoization flag starts at `false` and
+        # transitions to `true` once the underlying value has been
+        # computed. Both writes are conceptually `bool` — the rule
+        # MUST NOT fire on this shape.
+        result = analyze(<<~RUBY)
+          class Holder
+            def initialize
+              @loaded = false
+              @value = nil
+            end
+
+            def fetch
+              return @value if @loaded
+
+              @value = compute
+              @loaded = true
+              @value
+            end
+
+            def compute
+              42
+            end
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "still flags a genuine bool → String drift" do
+        result = analyze(<<~RUBY)
+          class Foo
+            def initialize
+              @flag = true
+            end
+
+            def reset
+              @flag = "ready"
+            end
+          end
+        RUBY
+        diag = ivar_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("bool")
+        expect(diag.message).to include("String")
+      end
+
       it "is suppressible via `# rigor:disable ivar-write-mismatch`" do
         result = analyze(<<~RUBY)
           class Foo

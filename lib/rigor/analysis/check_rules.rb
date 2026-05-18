@@ -944,8 +944,18 @@ module Rigor
         # / Constant / Tuple / HashShape; the wrapper exists so
         # the ivar rule can extend the envelope (or apply
         # different filters) without disturbing the call rules.
+        #
+        # `TrueClass` / `FalseClass` are both normalised to
+        # `"bool"` here so the common boolean-flag idiom
+        # (`@loaded = false` in `initialize` then `@loaded = true`
+        # on first work) doesn't fire the mismatch rule. A real
+        # `bool → String` drift still trips because the second
+        # write's `ivar_class_for` returns `"String"`.
         def ivar_class_for(type)
-          concrete_class_name(type)
+          name = concrete_class_name(type)
+          return "bool" if %w[TrueClass FalseClass].include?(name)
+
+          name
         end
 
         def build_always_truthy_condition_diagnostic(path, predicate_node, polarity)

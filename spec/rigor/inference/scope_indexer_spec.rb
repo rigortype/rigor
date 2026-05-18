@@ -331,6 +331,47 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       foreign = parse("2").statements.body.first
       expect(idx[foreign]).to eq(default_scope)
     end
+
+    # Regression: kwarg default value expressions execute when the
+    # method is INVOKED, so their `self` is the instance — not the
+    # surrounding class body's `self`. Previously the scope-index
+    # filled parameter-subtree nodes with the outer class-body
+    # scope (`self_type = singleton(C)`) via `propagate`, causing
+    # `def copy(x: self.foo)`-style idioms to be analysed as
+    # singleton-side calls. Observed surfacing 915 false positives
+    # in `prism-1.9.0`'s auto-generated `copy` methods.
+    it "scopes parameter default values under the method's body scope (instance self)" do
+      program = parse(<<~RUBY)
+        class Foo
+          def copy(x: self)
+            x
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      class_node  = program.statements.body.first
+      def_node    = class_node.body.body.first
+      kwarg_param = def_node.parameters.keywords.first
+      self_node   = kwarg_param.value
+      expect(self_node).to be_a(Prism::SelfNode)
+      expect(idx[self_node].self_type).to eq(Rigor::Type::Combinator.nominal_of("Foo"))
+    end
+
+    it "scopes kwarg defaults inside a singleton method under singleton(C)" do
+      program = parse(<<~RUBY)
+        class Foo
+          def self.factory(seed: self)
+            seed
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      class_node  = program.statements.body.first
+      def_node    = class_node.body.body.first
+      kwarg_param = def_node.parameters.keywords.first
+      self_node   = kwarg_param.value
+      expect(idx[self_node].self_type).to eq(Rigor::Type::Combinator.singleton_of("Foo"))
+    end
   end
 
   describe "declaration overrides (Slice A-declarations)" do

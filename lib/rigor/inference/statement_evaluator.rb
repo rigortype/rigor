@@ -760,6 +760,19 @@ module Rigor
       # name as a Symbol, so the produced type is `Constant[:name]`.
       def eval_def(node)
         body_scope = build_method_entry_scope(node)
+        # Parameter default value expressions (e.g. `self.x` in
+        # `def copy(x: self.x)`) execute when the method is
+        # *invoked*, not when the `def` is read; their `self` is
+        # the instance receiver, not the surrounding class body.
+        # Walk the parameters subtree under `body_scope` so the
+        # scope-index records the instance `self_type` for every
+        # node inside parameter defaults. `propagate` would
+        # otherwise drop them to the outer class-body scope (where
+        # `self_type` is `singleton(C)`), making `self.foo` look
+        # like a singleton-side call. Observed surfacing 915 false
+        # positives in `prism-1.9.0`'s auto-generated `copy`
+        # methods alone.
+        sub_eval(node.parameters, body_scope, class_context: @class_context) if node.parameters
         sub_eval(node.body, body_scope, class_context: @class_context) if node.body
         [Type::Combinator.constant_of(node.name), scope]
       end

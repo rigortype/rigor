@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Changed
+
+- **Engine — `eval_and_or` narrows the post-OR / post-AND scope when the RHS unconditionally exits.** Driven by the `references/ruby/lib` survey (`net/http/header.rb` 8+ sites; `optparse.rb` `private def parse_arg` body; vendored rubygems copies of both files) and the Steep 2.0.0 self-analysis (~7 occurrences) recorded under [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md) § "Queued engine items (a)". The `a or raise` / `a or return` / `a or throw` / `a or exit` / `a or abort` / `a or fail` / `a or next` / `a or break` idiom is widely used to assert non-nil; pre-fix `m = expr or raise` left `m` typed as the unnarrowed rvalue (e.g. `MatchData | nil`) so subsequent uses like `m[1]` fired `possible-nil-receiver`. `StatementEvaluator#eval_and_or` now consults the existing `branch_unconditionally_exits?` helper (same surface `eval_if` / `eval_unless` already use for early-return narrowing) and, when the RHS terminates, returns the LHS-surviving edge alone instead of joining with the (non-returning) RHS scope. Symmetric for `a and raise` (post-scope is the falsey edge — LHS truthy is the exiting branch). Survey delta: **references/ruby/lib 1746 → 1724 errors / 254 → 252 files (−22 / −2)**, all 22 removed errors traced to the documented `or raise` sites. `make verify` clean (3790 examples / 0 failures); rigor self-check unchanged (3 known loop-mutation `flow.always-truthy-condition` warnings; queued separately).
+
 ## [0.1.6] - 2026-05-19
 
 ### Added

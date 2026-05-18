@@ -310,6 +310,86 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type).to be_a(Rigor::Type::Union)
       expect(type.members.map(&:value)).to contain_exactly(1, "hi")
     end
+
+    # Early-return narrowing through the OR / AND seam, mirroring
+    # the `eval_if` / `eval_unless` `branch_unconditionally_exits?`
+    # path. When the RHS terminates (raise / return / throw / exit /
+    # abort / fail / next / break), the surviving control flow is
+    # the LHS-skipped edge alone, so the post-scope narrows the
+    # write target accordingly.
+    context "when the RHS unconditionally exits (early-return narrowing across or / and)" do
+      let(:union_local) do
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.nominal_of("String"),
+          Rigor::Type::Combinator.constant_of(nil)
+        )
+      end
+      let(:bound_scope) { scope.with_local(:v, union_local) }
+
+      def parse(source, locals: %i[v m])
+        Prism.parse(source, scopes: [locals]).value
+      end
+
+      it "narrows the assignment target after `lhs = expr or raise`" do
+        _, post = bound_scope.evaluate(parse(<<~RUBY))
+          (m = v) or raise "bad"
+        RUBY
+        # The OR survives only when the LHS write is truthy; the
+        # nil fragment is removed from `m`.
+        expect(post.local(:m)).to be_a(Rigor::Type::Nominal)
+        expect(post.local(:m).class_name).to eq("String")
+      end
+
+      it "narrows after `lhs = expr or return`" do
+        _, post = bound_scope.evaluate(parse(<<~RUBY))
+          (m = v) or return nil
+        RUBY
+        expect(post.local(:m).class_name).to eq("String")
+      end
+
+      it "narrows after `lhs = expr or throw`" do
+        _, post = bound_scope.evaluate(parse(<<~RUBY))
+          (m = v) or throw :done
+        RUBY
+        expect(post.local(:m).class_name).to eq("String")
+      end
+
+      it "narrows after the high-precedence `||` form" do
+        _, post = bound_scope.evaluate(parse(<<~RUBY))
+          m = (v || raise("bad"))
+        RUBY
+        expect(post.local(:m).class_name).to eq("String")
+      end
+
+      it "narrows symmetrically for `lhs = expr and raise`" do
+        _, post = bound_scope.evaluate(parse(<<~RUBY))
+          (m = v) and raise "got something"
+        RUBY
+        # AND survives only when LHS is falsey, so `m` is the nil
+        # fragment.
+        expect(post.local(:m)).to eq(Rigor::Type::Combinator.constant_of(nil))
+      end
+
+      it "produces the narrowed surviving type as the OR expression's value" do
+        type, _post = bound_scope.evaluate(parse(<<~RUBY))
+          (m = v) or raise "bad"
+        RUBY
+        # Value of the OR expression is the truthy fragment of the
+        # LHS write — String only, no nil.
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("String")
+      end
+
+      it "is unchanged when RHS does not unconditionally exit" do
+        # `a || b` where neither side exits — the existing
+        # join-with-nil-injection path still runs and post-scope
+        # binds `m` to the union (no narrowing).
+        _, post = bound_scope.with_local(:w, union_local).evaluate(parse(<<~RUBY, locals: %i[v w m]))
+          (m = v) || (m = w)
+        RUBY
+        expect(post.local(:m)).to be_a(Rigor::Type::Union)
+      end
+    end
   end
 
   describe "parentheses thread scope through their body" do

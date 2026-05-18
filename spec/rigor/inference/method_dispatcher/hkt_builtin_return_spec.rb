@@ -224,6 +224,42 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
       end
     end
 
+    context "with CSV.parse / CSV.read overrides (no-headers shape)" do
+      # CSV is stdlib loaded by Rigor's bundled RBS but not
+      # `require`d in the test process; construct the
+      # Singleton from the class name string directly so the
+      # spec works regardless of `require "csv"` availability.
+      let(:csv_singleton) { Rigor::Type::Singleton.new("CSV") }
+
+      it "CSV.parse(str) returns Array[Array[String | nil]]" do
+        type = described_class.dispatch(
+          receiver_type: csv_singleton,
+          method_name: :parse,
+          arg_types: [Rigor::Type::Combinator.nominal_of(String)],
+          environment: environment
+        )
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+        inner = type.type_args.first
+        expect(inner).to be_a(Rigor::Type::Nominal)
+        expect(inner.class_name).to eq("Array")
+        cell = inner.type_args.first
+        expect(cell).to be_a(Rigor::Type::Union)
+        expect(cell.members.map(&:describe)).to contain_exactly("String", "nil")
+      end
+
+      it "CSV.read(path) returns the same shape" do
+        type = described_class.dispatch(
+          receiver_type: csv_singleton,
+          method_name: :read,
+          arg_types: [Rigor::Type::Combinator.nominal_of(String)],
+          environment: environment
+        )
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+      end
+    end
+
     it "does not fire for YAML.load (deliberately uncovered — can return any Ruby object)" do
       type = described_class.dispatch(
         receiver_type: Rigor::Type::Combinator.singleton_of(YAML),

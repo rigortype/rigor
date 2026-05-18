@@ -309,11 +309,18 @@ module Rigor
           parts.join("::").to_sym
         end
 
+        # Arg list for `Foo[A, B, C]` and `App[uri, A, B]`
+        # forms. Each arg is parsed as a union so per-arg
+        # `A | B` forms work (`Array[K | nil]`); the COMMA
+        # at the top level still separates args, so
+        # `Hash[K, V]` reads as two args (each a single-arm
+        # union that collapses to the arm) rather than one
+        # union of two.
         def parse_arg_list
-          args = [parse_type_expr]
+          args = [parse_union]
           while peek_kind == :comma
             consume
-            args << parse_type_expr
+            args << parse_union
           end
           args
         end

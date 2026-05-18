@@ -130,5 +130,31 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(mt.type.required_positionals.size).to eq(2)
       end
     end
+
+    describe "alias-resolved pass 1.5 (canonical core aliases)" do
+      # `Array#*` ships two overloads —
+      #   (string str) -> String
+      #   (int int) -> Array[Elem]
+      # Both `string` and `int` are aliases that translate to
+      # `Dynamic[Top]`. Without pass 1.5, gradual matching picks
+      # the first arity-compatible overload (string) regardless
+      # of the arg's actual type. Pass 1.5 consults each alias's
+      # strict arm and prefers `int` when the arg is Integer.
+      it "prefers `(int) -> Array[Elem]` over `(string) -> String` for Array#*(Integer)" do
+        mt = select("Array", :*, [Rigor::Type::Combinator.nominal_of("Integer")])
+        expect(mt.type.required_positionals.size).to eq(1)
+        param_type = mt.type.required_positionals.first.type
+        # The chosen overload's param is the `int` alias.
+        expect(param_type).to be_a(RBS::Types::Alias)
+        expect(param_type.name.to_s).to eq("::int")
+      end
+
+      it "still prefers `(string) -> String` for Array#*(String)" do
+        mt = select("Array", :*, [Rigor::Type::Combinator.nominal_of("String")])
+        param_type = mt.type.required_positionals.first.type
+        expect(param_type).to be_a(RBS::Types::Alias)
+        expect(param_type.name.to_s).to eq("::string")
+      end
+    end
   end
 end

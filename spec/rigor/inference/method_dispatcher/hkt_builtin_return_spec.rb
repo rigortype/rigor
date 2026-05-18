@@ -67,6 +67,30 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
       expect(type).to be_a(Rigor::Type::Union)
     end
 
+    it "also fires for JSON.load_file (Ruby 3.1+ stdlib)" do
+      type = dispatch(:load_file)
+      expect(type).to be_a(Rigor::Type::Union)
+      # Same shape as JSON.parse — recursive json::value envelope.
+      expect(type.members.map(&:describe)).to include("nil", "true", "Integer", "String")
+    end
+
+    it "also fires for JSON.load_file! (Ruby 3.1+ stdlib)" do
+      type = dispatch(:load_file!)
+      expect(type).to be_a(Rigor::Type::Union)
+    end
+
+    it "JSON.load_file honours the symbolize_names discriminator" do
+      opts_shape = Rigor::Type::HashShape.new(symbolize_names: Rigor::Type::Constant.new(true))
+      type = described_class.dispatch(
+        receiver_type: json_singleton,
+        method_name: :load_file,
+        arg_types: [Rigor::Type::Combinator.nominal_of(String), opts_shape],
+        environment: environment
+      )
+      hash_arm = type.members.find { |t| t.is_a?(Rigor::Type::Nominal) && t.class_name == "Hash" }
+      expect(hash_arm.type_args[0]).to eq(Rigor::Type::Combinator.nominal_of(Symbol))
+    end
+
     context "with the `symbolize_names: true` discriminator" do
       def dispatch_with_opts(method_name, opts_pairs)
         opts_shape = Rigor::Type::HashShape.new(opts_pairs)

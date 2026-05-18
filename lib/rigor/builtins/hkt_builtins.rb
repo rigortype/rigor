@@ -171,9 +171,14 @@ module Rigor
         # JSON — stdlib's `json` library. Upstream rbs declares
         # `(string, ?options) -> untyped`; the HKT-builtin tier
         # tightens to the recursive `json::value[K]` union.
-        ["JSON", :parse,  :singleton] => JSON_VALUE_SPEC,
-        ["JSON", :parse!, :singleton] => JSON_VALUE_SPEC,
-        ["JSON", :load,   :singleton] => JSON_VALUE_SPEC,
+        # `load_file` / `load_file!` share the `?options` slot
+        # so the `symbolize_names: true` discriminator applies
+        # to them too (just like `parse` / `load`).
+        ["JSON", :parse,      :singleton] => JSON_VALUE_SPEC,
+        ["JSON", :parse!,     :singleton] => JSON_VALUE_SPEC,
+        ["JSON", :load,       :singleton] => JSON_VALUE_SPEC,
+        ["JSON", :load_file,  :singleton] => JSON_VALUE_SPEC,
+        ["JSON", :load_file!, :singleton] => JSON_VALUE_SPEC,
         # YAML.safe_load / Psych.safe_load — default
         # `permitted_classes: []` admits exactly the JSON
         # vocabulary (nil / true / false / Integer / Float /

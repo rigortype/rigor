@@ -15,13 +15,32 @@ for any class it can find, and reports a small but trustworthy
 catalogue of bugs (undefined methods on typed receivers, wrong
 positional arity, provable `Integer / 0`, …).
 
-The differentiator is a richer type vocabulary than ordinary
-RBS expresses. Rigor reasons about *what values an expression
-actually produces* — literal values, integer ranges,
-refinement-type carriers, per-position tuple / hash shapes —
-not just *which class an object belongs to*. See **[Beyond
-`Integer` and `String`](#beyond-integer-and-string-rigors-richer-type-vocabulary)**
-for the full type-model story; the short pitch is below.
+**Two design commitments drive Rigor.**
+
+1. **Types are facts, not wishes.** Hand-written type
+   annotations drift from the implementation the moment they
+   are written. Rigor infers from the code itself — every
+   carrier in its type vocabulary is derived from what your
+   source actually produces, not from a signature you authored
+   and might forget to update. When you do want RBS in
+   `sig/`, [`rigor sig-gen`](docs/adr/14-rbs-sig-generation.md)
+   emits it from inference results so the written form starts
+   in sync with reality, and `tighter-return` candidates flag
+   the cases where an existing `.rbs` is already weaker than
+   what the implementation provably returns.
+2. **Programmable inference beyond unions.** A plain union
+   (`Integer | nil`) is not the type story Ruby needs. Rigor
+   reasons about *what values an expression actually
+   produces* — literal values, integer ranges, refinement
+   carriers, per-position tuple / hash shapes, bound-method
+   bindings — and exposes a plugin extension API plus an
+   [ADR-16](docs/adr/16-macro-expansion.md) macro / DSL
+   expansion substrate so Rails-shape DSLs are first-class
+   type sources rather than analysis blind spots.
+
+See **[Beyond `Integer` and `String`](#beyond-integer-and-string-rigors-richer-type-vocabulary)**
+for the full type-model story; the carrier-zoo table is the
+short pitch.
 
 When you want tighter types than RBS expresses, refine them
 through the

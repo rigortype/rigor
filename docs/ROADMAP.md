@@ -68,6 +68,69 @@ Every committed v0.1.6 track is purely additive (no behaviour change for existin
 - **`rigor-graphql` slices 1+2a+2b+2c+2d ALL LANDED** (Tier 3D — `Schema::Object` + list wrappers + `Schema::Enum` + `Schema::InputObject` + `Schema::Mutation` recognition, publishing four cross-plugin facts; CHANGELOG `[Unreleased]` § Added). Remaining future slices (resolver-method type-check, `<Type>.array` / `<Type>!` chain forms, string-form `field :foo, "User"` diagnostic, `Schema.execute(...)` result typing) demand-driven.
 - **O4 Layer 3 per-gem-version cache** (slice 3 architecture; future Ruby::Box-style Bundler extension would raise priority).
 
+## v0.1.7 / v0.1.8 — user-facing positioning track (committed)
+
+A three-pillar messaging framework drives README / handbook
+front matter and shapes the v0.1.7 / v0.1.8 release narrative.
+**Pillars 1 and 3 already ship-back from v0.1.5 / v0.1.6
+inference + plugin / substrate work and are reflected in the
+README lead from v0.1.6 onward; Pillar 2 needs the
+implementation slices below before being promoted into the
+README.**
+
+| Pillar | Tag line | Status |
+| --- | --- | --- |
+| 1. Types as facts, not wishes | "Are the types in your code asserting facts, or are they lagging behind the implementation?" | Shipped (inference-first + `rigor sig-gen` + `tighter-return`). README lead reflects this from v0.1.6. |
+| 2. Your specs are types | "Do you really need to write types? `spec/` is already type information." | Implementation track below. Promote into README when slices 1–3 land. |
+| 3. Programmable inference beyond unions | "Union types aren't enough for type safety. Programmable inference makes metaprogramming and safety friendly." | Shipped (carrier zoo + plugin contract + ADR-16 substrate + ADR-18 per-call-site precision). README lead reflects this from v0.1.6. |
+
+### Pillar 2 implementation track (target: v0.1.8)
+
+Backing the "specs are types" narrative without overpromising
+requires three concrete capabilities, additive on top of the
+existing [`rigor-rspec`](../examples/rigor-rspec/) and
+[`rigor-factorybot`](../examples/rigor-factorybot/) plugins:
+
+- **Slice 1 — spec-derived flow facts from RSpec assertions.**
+  `expect(x).to be_a(T)` / `eq(literal)` / `be_kind_of(T)` /
+  `be_instance_of(T)` / `be_nil` / `be_truthy|falsey` inside
+  `it` blocks contribute Rigor narrowing facts about `x` from
+  the assertion onward. Closes today's gap where `rigor check`
+  reads specs as opaque Ruby and misses both spec-internal
+  bugs (assertions against the wrong variable) and spec-derived
+  contracts (downstream calls in the same `it` body that would
+  benefit from the narrowed receiver). Slice extends
+  `rigor-rspec`; no core engine change. Six-matcher table the
+  natural floor.
+- **Slice 2 — `subject` / `let` cross-binding to the SUT.**
+  When a `describe User do … end` body declares
+  `subject { described_class.new(...) }` or
+  `let(:user) { User.new(name: "a") }`, treat the block as
+  evidence of constructor arity and per-attribute presence;
+  feed back into `rigor-activerecord` / `rigor-factorybot`'s
+  existing `:model_index` channel so `let`-introduced locals
+  surface at the right carrier in downstream `it` bodies.
+- **Slice 3 — factory definitions as struct-shape facts.**
+  `rigor-factorybot` today validates factory CALLS; it does
+  not publish the per-factory attribute set as an ADR-9 fact.
+  Slice promotes `spec/factories/` into a `:factory_index` /
+  `:factory_attributes` channel so `let(:user) {
+  create(:user) }` yields a `User` carrier with the factory's
+  attribute shape bound to the local. Composes with slice 2
+  for the `let` ↔ factory chain.
+
+Each slice is opt-in (manifest entry or `.rigor.yml` toggle);
+no behaviour change for users not running `rigor-rspec` /
+`rigor-factorybot`. Once the slices land the README's
+"two design commitments" lead expands to three.
+
+The v0.1.7 cut absorbs whichever slice lands first during the
+v0.1.6 finalisation window; v0.1.8 is the binding ceiling for
+all three. If concrete user demand surfaces sooner — say, a
+spec-heavy codebase reporting that `let`-bindings read as
+`Dynamic[Top]` is the dominant friction — the ceiling pulls
+forward.
+
 ## Future cycles (not committed to a specific release)
 
 Items that have surfaced across v0.1.x work and that the next implementer benefits from seeing without re-reading the full thread.

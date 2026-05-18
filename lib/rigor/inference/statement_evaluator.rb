@@ -1412,7 +1412,37 @@ module Rigor
       end
 
       def singleton_def?(def_node)
-        def_node.receiver.is_a?(Prism::SelfNode) || current_frame_singleton?
+        return true if def_node.receiver.is_a?(Prism::SelfNode) || current_frame_singleton?
+
+        def_receiver_targets_lexical_self?(def_node.receiver)
+      end
+
+      # `def Foo.bar` inside `module Foo` (or `def Meta.init` inside
+      # `module Meta`) — explicit-receiver def that semantically
+      # equals `def self.bar` because the receiver constant
+      # resolves to `self` at the def-site. Matched against the
+      # current class context's tail to cover both the
+      # `def OpenURI.x` form (single segment) and the
+      # `def OpenURI::Meta.x` form (qualified path). Cross-class
+      # receivers (`def Bar.baz` inside `module Foo` where the
+      # receiver names a different constant) are not promoted to
+      # singleton at this slice.
+      def def_receiver_targets_lexical_self?(receiver)
+        return false if @class_context.empty?
+
+        prefix = @class_context.map(&:name)
+        case receiver
+        when Prism::ConstantReadNode
+          receiver.name.to_s == prefix.last
+        when Prism::ConstantPathNode
+          rendered = render_constant_path(receiver)
+          return false unless rendered
+
+          path = rendered.split("::")
+          prefix.last(path.length) == path
+        else
+          false
+        end
       end
 
       # Slice A-engine. Inside a class body `class Foo; ...; end`,

@@ -177,8 +177,10 @@ module Rigor
         return if def_node.body.nil? || qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
+        singleton = def_node.receiver.is_a?(Prism::SelfNode) ||
+                    def_receiver_targets_lexical_self?(def_node.receiver, qualified_prefix)
         self_type =
-          if def_node.receiver.is_a?(Prism::SelfNode)
+          if singleton
             Type::Combinator.singleton_of(class_name)
           else
             Type::Combinator.nominal_of(class_name)
@@ -418,9 +420,48 @@ module Rigor
         return if qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
-        kind = def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
+        singleton = def_singleton?(def_node, qualified_prefix, in_singleton_class)
+        kind = singleton ? :singleton : :instance
         accumulator[class_name] ||= {}
         accumulator[class_name][def_node.name] = kind
+      end
+
+      # `def Foo.bar` inside `module Foo` (or `def Meta.init` inside
+      # `module Meta`) is semantically equivalent to `def self.bar`:
+      # at the def-site, the runtime value of the constant `Foo` is
+      # the module itself (== `self`). Recognise the form so the
+      # method registers as singleton on the enclosing class.
+      #
+      # The cross-class form `def Bar.baz` inside `module Foo` —
+      # where the receiver names a constant other than the
+      # enclosing class — is not supported at this slice; falls
+      # through to `:instance` (current behaviour) rather than
+      # silently re-routing the registration.
+      def def_singleton?(def_node, qualified_prefix, in_singleton_class)
+        return true if def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
+
+        def_receiver_targets_lexical_self?(def_node.receiver, qualified_prefix)
+      end
+
+      # Only `Prism::ConstantReadNode` is observed in real Ruby —
+      # Prism mis-parses `def C::P.method` as `def C.P` (Ruby itself
+      # rejects the form as a SyntaxError). The ConstantPathNode
+      # branch stays defensive in case Prism's grammar widens.
+      def def_receiver_targets_lexical_self?(receiver, qualified_prefix)
+        return false if qualified_prefix.empty?
+
+        case receiver
+        when Prism::ConstantReadNode
+          receiver.name.to_s == qualified_prefix.last
+        when Prism::ConstantPathNode
+          rendered = render_constant_path(receiver)
+          return false unless rendered
+
+          path = rendered.split("::")
+          qualified_prefix.last(path.length) == path
+        else
+          false
+        end
       end
 
       # v0.0.2 #5 — instance-side def-node recording. Walks
@@ -481,7 +522,7 @@ module Rigor
       TOP_LEVEL_DEF_KEY = "<toplevel>"
 
       def record_def_node(def_node, qualified_prefix, in_singleton_class, accumulator)
-        return if def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
+        return if def_singleton?(def_node, qualified_prefix, in_singleton_class)
 
         class_name = qualified_prefix.empty? ? TOP_LEVEL_DEF_KEY : qualified_prefix.join("::")
         accumulator[class_name] ||= {}

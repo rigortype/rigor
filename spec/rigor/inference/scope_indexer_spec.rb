@@ -517,6 +517,47 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
+  describe "explicit-receiver def discovery (def Foo.bar)" do
+    it "registers `def Foo.bar` inside `module Foo` as a singleton method" do
+      program = parse(<<~RUBY)
+        module Foo
+          def Foo.bar = 1
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      expect(outer_scope.discovered_method?("Foo", :bar, :singleton)).to be(true)
+    end
+
+    it "registers `def Meta.init` inside `module Outer; module Meta` as a singleton on Outer::Meta" do
+      program = parse(<<~RUBY)
+        module Outer
+          module Meta
+            def Meta.init = 1
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      expect(outer_scope.discovered_method?("Outer::Meta", :init, :singleton)).to be(true)
+    end
+
+    it "leaves cross-class explicit-receiver defs unpromoted (instance, current behaviour)" do
+      program = parse(<<~RUBY)
+        module Foo
+          module Bar
+            def Baz.unrelated = 1
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      outer_scope = idx[program]
+      # Not a singleton method of Foo::Bar; the receiver names a different
+      # constant so the slice does not promote.
+      expect(outer_scope.discovered_method?("Foo::Bar", :unrelated, :singleton)).to be(false)
+    end
+  end
+
   describe "alias discovery" do
     it "registers the aliased name in discovered_methods" do
       program = parse(<<~RUBY)

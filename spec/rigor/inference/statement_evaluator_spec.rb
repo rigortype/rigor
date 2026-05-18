@@ -190,6 +190,72 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(type).to be_a(Rigor::Type::Union)
       expect(type.members.map(&:value)).to contain_exactly(2, 3)
     end
+
+    # When a rescue arm unconditionally exits (`return`, `next`,
+    # `break`, `raise`, `throw`, `exit`, `abort`, `fail`),
+    # control cannot reach the post-begin scope via that arm, so
+    # it contributes neither a value-fragment nor a scope-binding
+    # to the join. The primary body's bindings survive without
+    # nil-injection from the (unreachable) rescue path.
+    it "drops a rescue arm whose body returns from the post-begin scope" do
+      type, post = evaluate(<<~RUBY)
+        x = begin
+          list = [1, 2, 3]
+          list
+        rescue NotImplementedError
+          return true
+        end
+        x.size
+      RUBY
+      # `list` survives without being widened by the
+      # (unreachable) rescue arm; `x` is the primary body's value
+      # type (Array<Integer>-shaped), so `.size` resolves cleanly.
+      expect(post.local(:list)).to be_a(Rigor::Type::Tuple)
+      expect(type).to be_a(Rigor::Type::Constant)
+    end
+
+    it "drops a rescue arm whose body raises" do
+      _, post = evaluate(<<~RUBY)
+        begin
+          list = [1, 2, 3]
+        rescue StandardError
+          raise "bail"
+        end
+        list
+      RUBY
+      # `list` remains the primary-body Tuple — the rescue arm
+      # would have raised, never bound `list`, but its scope is
+      # excluded so no nil-injection occurs.
+      expect(post.local(:list)).to be_a(Rigor::Type::Tuple)
+    end
+
+    it "still joins rescue arms whose bodies do not exit" do
+      _, post = evaluate(<<~RUBY)
+        begin
+          x = 1
+        rescue StandardError
+          x = 2
+        end
+      RUBY
+      expect(post.local(:x).members.map(&:value)).to contain_exactly(1, 2)
+    end
+
+    it "joins surviving rescue arms when only some exit (mixed chain)" do
+      _, post = evaluate(<<~RUBY)
+        begin
+          x = 1
+        rescue TypeError
+          x = 2
+        rescue StandardError
+          return
+        end
+      RUBY
+      # The StandardError arm exits, so it contributes nothing;
+      # the TypeError arm survives and joins with the primary
+      # body. The post-scope's `x` is exactly { 1, 2 } — NOT
+      # widened by the exiting arm.
+      expect(post.local(:x).members.map(&:value)).to contain_exactly(1, 2)
+    end
   end
 
   describe "loops" do

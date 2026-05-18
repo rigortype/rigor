@@ -497,13 +497,25 @@ module Rigor
       def eval_begin(node)
         primary_type, primary_scope = eval_begin_primary(node)
         rescue_chain = collect_rescue_chain_results(node.rescue_clause, scope)
+        # Rescue arms whose body unconditionally exits (`return`,
+        # `next`, `break`, `raise`, `throw`, `exit`, `abort`,
+        # `fail`) contribute neither a type fragment NOR a scope
+        # to the post-begin flow — control left the `begin` via
+        # that arm. Mirrors the `eval_if` / `eval_unless` /
+        # `eval_and_or` early-return narrowing. Without this
+        # filter, a `rescue ... return` on a local bound only in
+        # the primary body nil-injects that local across the
+        # join, defeating the rescue arm's whole point of guaranteeing
+        # the primary local is in scope for downstream statements.
+        live_rescues = rescue_chain.reject { |_pair, arm_node| branch_unconditionally_exits?(arm_node.statements) }
+                                   .map(&:first)
 
-        if rescue_chain.empty?
+        if live_rescues.empty?
           exit_type = primary_type
           exit_scope = primary_scope
         else
-          exit_type = Type::Combinator.union(primary_type, *rescue_chain.map(&:first))
-          exit_scope = reduce_scopes_with_nil_injection([primary_scope, *rescue_chain.map(&:last)])
+          exit_type = Type::Combinator.union(primary_type, *live_rescues.map(&:first))
+          exit_scope = reduce_scopes_with_nil_injection([primary_scope, *live_rescues.map(&:last)])
         end
 
         if node.ensure_clause
@@ -540,7 +552,7 @@ module Rigor
         current = rescue_node
         while current
           rescue_scope = bind_rescue_reference(current, entry_scope)
-          results << eval_branch_or_nil(current.statements, rescue_scope)
+          results << [eval_branch_or_nil(current.statements, rescue_scope), current]
           current = current.subsequent
         end
         results

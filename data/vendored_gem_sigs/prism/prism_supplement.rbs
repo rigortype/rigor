@@ -1,0 +1,44 @@
+#
+# Rigor-side supplement to the `prism` gem's bundled RBS.
+#
+# The `prism` gem ships its own `sig/` directory (loaded via
+# `Rigor::Environment::DEFAULT_LIBRARIES`), but a handful of
+# surfaces visible to Ruby callers are not declared there because
+# they are bound by the C extension or because the RBS template
+# (`prism/templates/sig/prism.rbs.erb`) omits them.
+#
+# This file re-opens the affected modules / classes to ADD the
+# missing declarations only — never re-declaring anything that
+# the gem's RBS already covers, so the loader does not raise
+# `RBS::DuplicatedDeclarationError`.
+#
+# Surfaces covered:
+#   1. `Prism::ParseResult#attach_comments!`,
+#      `Prism::ParseResult#mark_newlines!`
+#      — defined in Ruby source (`lib/prism/parse_result.rb`)
+#      but not declared in the gem's RBS.
+#   2. `Prism::StringQuery.{local?, constant?, method_name?}`
+#      — bound as singleton methods by the C extension; the
+#      gem's RBS only declares the matching instance methods.
+#
+module Prism
+  class ParseResult < Result
+    # Walk the parse result's tree, attaching every comment to
+    # its nearest node. Mutates the tree in place; returns the
+    # mutated comments array.
+    def attach_comments!: () -> Array[comment]
+
+    # Walk the tree and mark nodes that begin on a new line,
+    # loosely emulating CRuby's `:line` tracepoint event.
+    def mark_newlines!: () -> ProgramNode
+  end
+
+  class StringQuery
+    # C-extension-bound class-method counterparts to the Ruby
+    # instance methods. `Prism::StringQuery.local?("foo")` is
+    # a shorthand for `Prism::StringQuery.new("foo").local?`.
+    def self.local?: (String string) -> bool
+    def self.constant?: (String string) -> bool
+    def self.method_name?: (String string) -> bool
+  end
+end

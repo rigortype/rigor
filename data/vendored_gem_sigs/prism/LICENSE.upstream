@@ -1,0 +1,15 @@
+Source: this file is NOT vendored; the declarations under
+`prism_supplement.rbs` are Rigor-authored supplements to the
+`prism` gem's own bundled RBS (under the gem's `sig/` tree).
+The gem's `sig/` is loaded automatically via
+`Rigor::Environment::DEFAULT_LIBRARIES` (entry `"prism"`); this
+overlay adds only declarations the gem's RBS omits (today: the
+`ParseResult#attach_comments!` / `#mark_newlines!` Ruby methods
+and the C-extension-bound `StringQuery.{local?, constant?,
+method_name?}` singleton methods).
+
+The supplement is written from scratch; no upstream RBS is
+vendored here. The prism gem itself is licensed MIT (see
+https://github.com/ruby/prism/blob/main/LICENSE.md) and the
+Ruby-source method signatures are facts of the gem's public
+API, not copyrightable expression.

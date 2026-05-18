@@ -77,9 +77,30 @@ RSpec.describe Rigor::Inference::Acceptance do
       expect(accepts(int_nominal, int_singleton)).to be_no
     end
 
-    it "is maybe when the class name does not resolve to a Ruby class" do
+    it "is no when target is unresolvable but actual's ancestor chain excludes it" do
+      # When the target's Ruby class is not loaded (e.g. a stdlib
+      # gem like `bigdecimal` that rigor's own process never
+      # `require`s) but the actual side IS loaded, the actual's
+      # ancestor chain is authoritative. `Integer.ancestors`
+      # does not contain "Definitely::Not::A::Real::Class", so
+      # the subtype relation is definitively `:no` — not the
+      # conservative `:maybe` it used to be. Required to keep
+      # the `OverloadSelector` from picking
+      # `Integer#+(BigDecimal) -> BigDecimal` over
+      # `Integer#+(Integer) -> Integer` when the bigdecimal RBS
+      # reopen puts the BigDecimal arm first in the overload
+      # list.
       unresolved = Rigor::Type::Combinator.nominal_of("Definitely::Not::A::Real::Class")
-      expect(accepts(unresolved, int_nominal)).to be_maybe
+      expect(accepts(unresolved, int_nominal)).to be_no
+    end
+
+    it "is maybe when neither side resolves to a Ruby class" do
+      # Two user-defined classes neither side can load. Without
+      # an ancestor chain to fall back on we keep the
+      # conservative `:maybe` answer.
+      left = Rigor::Type::Combinator.nominal_of("Definitely::Not::A::Real::Class")
+      right = Rigor::Type::Combinator.nominal_of("Also::Not::Real")
+      expect(accepts(left, right)).to be_maybe
     end
   end
 
@@ -103,6 +124,31 @@ RSpec.describe Rigor::Inference::Acceptance do
 
     it "rejects a Constant" do
       expect(accepts(int_singleton, int_constant)).to be_no
+    end
+  end
+
+  describe "Nominal acceptance of Constant with an unloadable target" do
+    # Regression: when `Nominal[BigDecimal]` (target unloadable
+    # because rigor's process never requires `bigdecimal`)
+    # checks acceptance of `Constant<1>` (value class Integer),
+    # the answer MUST be `:no` so the `OverloadSelector` cannot
+    # pick `Integer#+(BigDecimal) -> BigDecimal` over
+    # `Integer#+(Integer) -> Integer`. Previously this answered
+    # `:maybe` (resolve_class fallback) and the BigDecimal arm
+    # — which the bigdecimal stdlib RBS reopens at the FRONT
+    # of `Integer#+` — won by overload-list position, polluting
+    # the inferred type of plain Integer arithmetic.
+    it "answers :no when the target is unloadable but the constant's value class excludes it" do
+      bd_nominal = Rigor::Type::Combinator.nominal_of("BigDecimal")
+      expect(accepts(bd_nominal, int_constant)).to be_no
+    end
+
+    it "answers :yes when the target is unloadable but the constant's value class ancestors include it" do
+      # `Numeric` IS loadable so this routes through `is_a?` —
+      # asserted here to make the assignment of behavior clear:
+      # the ancestor fallback only kicks in when the target
+      # Ruby class can't be resolved.
+      expect(accepts(numeric_nominal, int_constant)).to be_yes
     end
   end
 
@@ -136,9 +182,17 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
 
     it "is maybe when no member proves yes but some member is maybe" do
-      unresolved = Rigor::Type::Combinator.nominal_of("Definitely::Not::A::Real::Class")
-      union = Rigor::Type::Combinator.union(unresolved, str_nominal)
-      expect(accepts(union, int_nominal)).to be_maybe
+      # Both sides unresolvable so the Nominal acceptance can
+      # only answer `:maybe` — the ancestor-chain fallback that
+      # collapsed the single-unresolved case to `:no` (see the
+      # Nominal spec immediately above) needs an authoritative
+      # actual side, and a Nominal-vs-Nominal pair where the
+      # actual is also user-defined leaves us with no chain to
+      # consult. The Union-merge then surfaces that `:maybe`.
+      left = Rigor::Type::Combinator.nominal_of("Definitely::Not::A::Real::Class")
+      right = Rigor::Type::Combinator.nominal_of("Also::Not::Real")
+      union = Rigor::Type::Combinator.union(left, str_nominal)
+      expect(accepts(union, right)).to be_maybe
     end
 
     it "self.accepts(Union[A,B]) requires every member to be accepted" do

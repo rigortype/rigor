@@ -156,5 +156,69 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(param_type.name.to_s).to eq("::string")
       end
     end
+
+    describe "receiver-affinity pre-sort (BigDecimal-coerce regression)" do
+      # When the `bigdecimal` stdlib RBS is loaded, its reopen
+      # of `Integer#+` adds `(BigDecimal) -> BigDecimal` at the
+      # FRONT of the overload list. Without the pre-sort the
+      # selector picks that arm for unknown / Integer args and
+      # produces a spurious BigDecimal return — surfacing as
+      # `undefined method 'upto' for BigDecimal` on plain
+      # `(i + 1).upto(n)` code. The pre-sort demotes the
+      # disjoint-sibling arm so the receiver-preserving
+      # `(Integer) -> Integer` wins for both Integer and
+      # untyped args.
+      let(:env) { Rigor::Environment.for_project(root: Dir.pwd) }
+
+      def select_with_env(class_name, method_name, arg_types)
+        definition = env.rbs_loader.instance_definition(class_name)
+        raise "missing definition" unless definition
+
+        method = definition.methods[method_name]
+        raise "missing method #{class_name}##{method_name}" unless method
+
+        instance_type = Rigor::Type::Combinator.nominal_of(class_name)
+        described_class.select(
+          method,
+          arg_types: arg_types,
+          self_type: instance_type,
+          instance_type: instance_type,
+          environment: env
+        )
+      end
+
+      it "prefers Integer#+(Integer) -> Integer over (BigDecimal) -> BigDecimal for an Integer arg" do
+        mt = select_with_env("Integer", :+, [Rigor::Type::Combinator.nominal_of("Integer")])
+        param_class = mt.type.required_positionals.first.type
+        expect(param_class).to be_a(RBS::Types::ClassInstance)
+        expect(param_class.name.relative!.to_s).to eq("Integer")
+      end
+
+      it "prefers Integer#+(Integer) -> Integer over (BigDecimal) -> BigDecimal for an untyped arg" do
+        mt = select_with_env("Integer", :+, [Rigor::Type::Combinator.untyped])
+        param_class = mt.type.required_positionals.first.type
+        expect(param_class).to be_a(RBS::Types::ClassInstance)
+        expect(param_class.name.relative!.to_s).to eq("Integer")
+      end
+
+      it "prefers Integer#-(Integer) -> Integer over (BigDecimal) -> BigDecimal for an untyped arg" do
+        mt = select_with_env("Integer", :-, [Rigor::Type::Combinator.untyped])
+        param_class = mt.type.required_positionals.first.type
+        expect(param_class).to be_a(RBS::Types::ClassInstance)
+        expect(param_class.name.relative!.to_s).to eq("Integer")
+      end
+
+      it "still routes Integer#*(Float) -> Float when the arg actually is a Float" do
+        # The pre-sort is stable: when a non-affinity arm
+        # accepts the actual arg and the affinity arm does not,
+        # the non-affinity arm still wins via Pass 1. Asserted
+        # so the pre-sort isn't misread as "always prefer the
+        # receiver class."
+        mt = select_with_env("Integer", :*, [Rigor::Type::Combinator.nominal_of("Float")])
+        param_class = mt.type.required_positionals.first.type
+        expect(param_class).to be_a(RBS::Types::ClassInstance)
+        expect(param_class.name.relative!.to_s).to eq("Float")
+      end
+    end
   end
 end

@@ -3,6 +3,7 @@
 require_relative "../../type"
 require_relative "../acceptance"
 require_relative "../rbs_type_translator"
+require_relative "receiver_affinity"
 
 module Rigor
   module Inference
@@ -104,40 +105,19 @@ module Rigor
           # compatibility.
           param_overrides = RbsExtended.param_type_override_map(method_definition, environment: environment)
 
-          # Pass 1: prefer overloads whose param types stay strict —
-          # no translator-induced `Dynamic[Top]` from Alias /
-          # Interface / Intersection. The pass is skipped
-          # entirely when any arg is `Dynamic[Top]` (literally
-          # `untyped`), because gradual acceptance against an
-          # untyped arg accepts every param indiscriminately and
-          # would let pass 1 lock in an arbitrary strict overload
-          # (e.g. `Regexp#=~(nil) -> nil` over the
-          # `(::interned?) -> Integer?` overload). Pass 2 falls
-          # back to the original gradual matcher so overloads
-          # that legitimately rely on duck-typed params still
-          # resolve when nothing stricter applies.
-          match = find_matching_overload(
-            overloads,
-            arg_types: arg_types,
-            self_type: self_type,
-            instance_type: instance_type,
-            type_vars: type_vars,
-            block_required: block_required,
-            param_overrides: param_overrides,
-            strict: true
-          ) || find_matching_overload_via_aliases(
-            overloads,
-            arg_types: arg_types,
-            block_required: block_required
-          ) || find_matching_overload(
-            overloads,
-            arg_types: arg_types,
-            self_type: self_type,
-            instance_type: instance_type,
-            type_vars: type_vars,
-            block_required: block_required,
-            param_overrides: param_overrides,
-            strict: false
+          # Pre-sort: demote overloads whose param class is a
+          # disjoint sibling of the receiver class (e.g.
+          # `Integer#+(BigDecimal) -> BigDecimal` from the
+          # `bigdecimal` RBS reopen). Honors the coerce
+          # convention so `5 + ?` for unknown `?` resolves to
+          # the receiver-class-preserving arm rather than an
+          # arbitrary sibling-class arm that only wins by
+          # overload-list position.
+          overloads = ReceiverAffinity.reorder(overloads, self_type: self_type, environment: environment)
+
+          match = run_selection_passes(
+            overloads, arg_types: arg_types, self_type: self_type, instance_type: instance_type,
+                       type_vars: type_vars, block_required: block_required, param_overrides: param_overrides
           )
           return match if match
           return overloads.find { |mt| overload_has_block?(mt) } if block_required
@@ -151,6 +131,30 @@ module Rigor
 
         class << self
           private
+
+          # Three-pass overload search:
+          # - Pass 1 (strict): skipped when any arg is
+          #   `Dynamic[Top]`, because gradual acceptance against
+          #   an untyped arg accepts every param indiscriminately
+          #   and would let pass 1 lock in an arbitrary strict
+          #   overload (e.g. `Regexp#=~(nil) -> nil` over the
+          #   `(::interned?) -> Integer?` overload).
+          # - Pass 1.5 (alias-resolved): consults each `RBS::Types::Alias`'s
+          #   strict arm so e.g. `Array#*(int)` wins over the
+          #   `Array#*(string) -> String` overload for Integer args.
+          # - Pass 2 (gradual): the original gradual matcher so
+          #   overloads that legitimately rely on duck-typed
+          #   params still resolve when nothing stricter applies.
+          def run_selection_passes(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:,
+                                   param_overrides:)
+            shared = {
+              arg_types: arg_types, self_type: self_type, instance_type: instance_type,
+              type_vars: type_vars, block_required: block_required, param_overrides: param_overrides
+            }
+            find_matching_overload(overloads, **shared, strict: true) ||
+              find_matching_overload_via_aliases(overloads, arg_types: arg_types, block_required: block_required) ||
+              find_matching_overload(overloads, **shared, strict: false)
+          end
 
           # rubocop:disable Metrics/ParameterLists
           def find_matching_overload(overloads, arg_types:, self_type:, instance_type:, type_vars:, block_required:,

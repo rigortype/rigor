@@ -446,13 +446,45 @@ module Rigor
 
         def accepts_nominal_from_constant(self_type, constant, mode)
           ruby_class = resolve_class(self_type.class_name)
-          if ruby_class.nil?
-            return Type::AcceptsResult.maybe(
+          return constant_is_a_result(ruby_class, constant, self_type, mode) if ruby_class
+
+          # The host process may not have required the constant's
+          # declared self_type (e.g. `BigDecimal` since Ruby 3.4
+          # is no longer a default gem). Fall back to inspecting
+          # the value's own class ancestor chain — always loadable
+          # because the value already exists. Required for
+          # OverloadSelector to reject `Integer#+(BigDecimal) ->
+          # BigDecimal` overloads contributed by `bigdecimal`'s
+          # RBS reopening when the actual arg is a Constant<Integer>.
+          ancestor_names = constant.value.class.ancestors.map(&:name)
+          if ancestor_names.include?(self_type.class_name)
+            Type::AcceptsResult.yes(
               mode: mode,
-              reasons: "class #{self_type.class_name} not loadable; cannot prove from Constant"
+              reasons: "Constant value class ancestors include #{self_type.class_name}"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "Constant value class ancestors exclude #{self_type.class_name}"
             )
           end
+        end
 
+        def subtype_result_via_ancestors(actual_class, target_name, mode)
+          if actual_class.ancestors.map(&:name).include?(target_name)
+            Type::AcceptsResult.yes(
+              mode: mode,
+              reasons: "#{actual_class.name} ancestors include #{target_name}"
+            )
+          else
+            Type::AcceptsResult.no(
+              mode: mode,
+              reasons: "#{actual_class.name} ancestors exclude #{target_name} (target unloadable)"
+            )
+          end
+        end
+
+        def constant_is_a_result(ruby_class, constant, self_type, mode)
           if constant.value.is_a?(ruby_class)
             Type::AcceptsResult.yes(mode: mode, reasons: "Constant value is_a?(#{self_type.class_name})")
           else
@@ -794,6 +826,19 @@ module Rigor
 
           target_class = resolve_class(target_name)
           actual_class = resolve_class(actual_name)
+          # When only `actual` resolves, we can still rule out
+          # `actual <:= target` by inspecting `actual`'s ancestor
+          # chain. The canonical case: `target=BigDecimal` is not
+          # loadable in the host process (no `require` in rigor's
+          # own runtime), but `actual=Integer` IS, and Integer's
+          # ancestors do not include `BigDecimal`, so the subtype
+          # relation MUST be `:no` rather than the conservative
+          # `:maybe`. The reverse asymmetry (target resolves,
+          # actual doesn't) does not let us conclude anything —
+          # the unloaded `actual` could be an unrelated class or
+          # a subclass of `target` we can't see, so we still
+          # answer `:maybe` there.
+          return subtype_result_via_ancestors(actual_class, target_name, mode) if target_class.nil? && actual_class
           if target_class.nil? || actual_class.nil?
             return Type::AcceptsResult.maybe(
               mode: mode,

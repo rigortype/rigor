@@ -96,6 +96,13 @@ module Rigor
         @dependency_source_index = DependencySourceInference::Index::EMPTY
         @rbs_extended_reporter = RbsExtended::Reporter.new
         @boundary_cross_reporter = DependencySourceInference::BoundaryCrossReporter.new
+        # `#run` resets these for each invocation; pre-seed them to
+        # empty containers so `build_run_stats` / `pre_file_diagnostics`
+        # (private, called only from `#run`) can read them without
+        # nil-guards.
+        @class_decl_paths_snapshot = {}.freeze
+        @signature_paths_snapshot = [].freeze
+        @cached_plugin_prepare_diagnostics = [].freeze
       end
 
       # ADR-pending editor mode — present when the runner is wired
@@ -310,7 +317,7 @@ module Rigor
         # so cross-plugin facts are available to the scanner.
         # We re-surface the captured diagnostics here so the
         # existing pre_file_diagnostics ordering is preserved.
-        prepare = pool_mode? ? [] : (@cached_plugin_prepare_diagnostics || [])
+        prepare = pool_mode? ? [] : @cached_plugin_prepare_diagnostics
         plugin_load_diagnostics +
           prepare +
           pre_eval_diagnostics +
@@ -588,7 +595,7 @@ module Rigor
       # Wall + RSS are single syscalls; total cost is bounded
       # by the snapshot size (~1000-2000 entries).
       def build_run_stats(wall_started_at:, expansion:)
-        snapshot = @class_decl_paths_snapshot || {}.freeze
+        snapshot = @class_decl_paths_snapshot
         project_sig, bundled = RunStats.partition_classes(
           class_decl_paths: snapshot,
           signature_paths: @signature_paths_snapshot

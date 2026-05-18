@@ -103,6 +103,7 @@ module Rigor
         @class_decl_paths_snapshot = {}.freeze
         @signature_paths_snapshot = [].freeze
         @cached_plugin_prepare_diagnostics = [].freeze
+        @project_discovered_classes = {}.freeze
       end
 
       # ADR-pending editor mode — present when the runner is wired
@@ -227,6 +228,19 @@ module Rigor
         pre_eval_outcome = Inference::ProjectPatchedScanner.scan(existing_pre_eval, buffer: @buffer)
         @project_patched_methods = pre_eval_outcome.registry
         @pre_eval_diagnostics_from_scanner = pre_eval_outcome.diagnostics
+        # Cross-file class discovery — walks every project file
+        # for `class Foo` / `module Bar` declarations so a
+        # `Foo.method_call` receiver in one file resolves a
+        # `class Foo` declared in a sibling file. Without this
+        # pre-pass each file's `discovered_classes` was per-file
+        # only, and lexical lookup fell back to stdlib `::Foo`
+        # for any user class shadowing a stdlib name (e.g.
+        # `Google::Cloud::Storage::File`). Cost is one extra
+        # parse pass over the project; small projects pay
+        # tens of ms, larger projects ~1s. Future optimisation
+        # can share parses with the existing scanner passes.
+        @project_discovered_classes =
+          Inference::ScopeIndexer.discovered_classes_for_paths(expansion.fetch(:files), buffer: @buffer)
       end
 
       # Internal: adopts a frozen {ProjectScan} snapshot supplied
@@ -1212,6 +1226,7 @@ module Rigor
         return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
 
         scope = Scope.empty(environment: environment, source_path: path)
+        scope = scope.with_discovered_classes(@project_discovered_classes) unless @project_discovered_classes.empty?
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
         diagnostics = CheckRules.diagnose(
           path: path,

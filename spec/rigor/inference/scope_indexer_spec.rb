@@ -2,6 +2,8 @@
 
 require "spec_helper"
 require "prism"
+require "fileutils"
+require "tmpdir"
 
 RSpec.describe Rigor::Inference::ScopeIndexer do
   let(:default_scope) { Rigor::Scope.empty }
@@ -371,6 +373,75 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       kwarg_param = def_node.parameters.keywords.first
       self_node   = kwarg_param.value
       expect(idx[self_node].self_type).to eq(Rigor::Type::Combinator.singleton_of("Foo"))
+    end
+  end
+
+  describe ".discovered_classes_for_paths" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write(name, body)
+      path = File.join(tmpdir, name)
+      File.write(path, body)
+      path
+    end
+
+    it "unions class declarations across multiple files" do
+      a = write("a.rb", <<~RUBY)
+        module App
+          class Foo
+          end
+        end
+      RUBY
+      b = write("b.rb", <<~RUBY)
+        module App
+          class Bar
+          end
+        end
+      RUBY
+      discovered = described_class.discovered_classes_for_paths([a, b])
+      expect(discovered["App::Foo"]).to eq(Rigor::Type::Combinator.singleton_of("App::Foo"))
+      expect(discovered["App::Bar"]).to eq(Rigor::Type::Combinator.singleton_of("App::Bar"))
+    end
+
+    it "does NOT register modules (only classes) to avoid module_function fall-through" do
+      a = write("a.rb", <<~RUBY)
+        module App
+          module Helpers
+            module_function
+            def util; end
+          end
+        end
+      RUBY
+      discovered = described_class.discovered_classes_for_paths([a])
+      expect(discovered).not_to have_key("App::Helpers")
+      expect(discovered).not_to have_key("App")
+    end
+
+    it "registers classes nested inside modules" do
+      a = write("a.rb", <<~RUBY)
+        module Outer
+          module Inner
+            class Leaf
+            end
+          end
+        end
+      RUBY
+      discovered = described_class.discovered_classes_for_paths([a])
+      expect(discovered["Outer::Inner::Leaf"]).to eq(Rigor::Type::Combinator.singleton_of("Outer::Inner::Leaf"))
+    end
+
+    it "fails-soft on unreadable / unparseable files" do
+      a = write("ok.rb", "class A; end")
+      bogus = "/nonexistent/path/never/exists.rb"
+      discovered = described_class.discovered_classes_for_paths([bogus, a])
+      expect(discovered["A"]).to eq(Rigor::Type::Combinator.singleton_of("A"))
+    end
+
+    it "returns a frozen Hash" do
+      a = write("a.rb", "class A; end")
+      expect(described_class.discovered_classes_for_paths([a])).to be_frozen
     end
   end
 

@@ -703,6 +703,76 @@ module Rigor
         node.unescaped&.to_sym
       end
 
+      # Walks every file in `paths` (each path is parsed once with
+      # `Prism.parse_file`) and returns the unioned project-wide
+      # `discovered_classes` Hash: `{qualified_name => Singleton[…]}`.
+      # Used by `Analysis::Runner` to seed each file's
+      # `default_scope.discovered_classes` so that lexical
+      # constant lookup in one file resolves a `class Foo`
+      # declared in a sibling file. Per-file collisions are
+      # last-write-wins (matches the existing in-file merge
+      # semantics). Parse failures fail-soft to an empty
+      # contribution. The `buffer` argument, when present,
+      # redirects reads for the bound logical path to the
+      # buffer's physical path so editor-mode pre-passes see
+      # the in-flight bytes.
+      #
+      # **Modules are intentionally excluded** from the
+      # project-wide seed: a `module M; module_function; def x; end; end`
+      # body, when surfaced as `singleton(M)` to the dispatcher,
+      # falls through to `Kernel#x` (or any Module ancestor
+      # method) when the project's per-file
+      # `discovered_methods` doesn't know `M.x` — leading to
+      # surprising types like `Kernel.select → Array[String]`.
+      # Until cross-file `discovered_methods` follows the same
+      # project-wide seed, registering modules here would
+      # introduce regressions in modules-with-module_function
+      # idioms that previously resolved to `Dynamic[Top]`.
+      # Class declarations are safe because per-file
+      # `discovered_methods` already tracks `def self.x` /
+      # `def x` instance and singleton methods consistently.
+      #
+      # @param paths  [Array<String>] project file paths.
+      # @param buffer [Rigor::Analysis::BufferBinding, nil]
+      # @return [Hash{String => Rigor::Type::Singleton}]
+      def discovered_classes_for_paths(paths, buffer: nil)
+        accumulator = {}
+        paths.each do |path|
+          physical = buffer ? buffer.resolve(path) : path
+          source = File.read(physical)
+          root = Prism.parse(source, filepath: path).value
+          collect_class_decls(root, [], accumulator)
+        rescue StandardError
+          # Skip files that fail to parse or read; the per-file
+          # analyzer surfaces the parse error separately.
+          next
+        end
+        accumulator.freeze
+      end
+
+      # Class-only variant of `record_declarations` — descends
+      # into nested module bodies (so `module Foo; class Bar`
+      # registers `Foo::Bar`) but never registers the module
+      # itself in `accumulator`.
+      def collect_class_decls(node, qualified_prefix, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            full = (qualified_prefix + [name]).join("::")
+            accumulator[full] = Type::Combinator.singleton_of(full)
+            return collect_class_decls(node.body, qualified_prefix + [name], accumulator) if node.body
+          end
+        when Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          return collect_class_decls(node.body, qualified_prefix + [name], accumulator) if name && node.body
+        end
+
+        node.compact_child_nodes.each { |child| collect_class_decls(child, qualified_prefix, accumulator) }
+      end
+
       # Walks the program once for `Prism::ModuleNode` and
       # `Prism::ClassNode`, recording the `Singleton[<qualified>]`
       # type for the outermost `constant_path` node of each

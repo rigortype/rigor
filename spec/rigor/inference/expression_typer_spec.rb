@@ -41,12 +41,16 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(scope.type_of(parse_expression("nil")).describe).to eq("nil")
     end
 
-    it "types __FILE__ as Nominal[String]" do
-      expect(scope.type_of(parse_expression("__FILE__")).erase_to_rbs).to eq("String")
+    it "types __FILE__ as `non-empty-string` (erases to String)" do
+      type = scope.type_of(parse_expression("__FILE__"))
+      expect(type.describe).to eq("non-empty-string")
+      expect(type.erase_to_rbs).to eq("String")
     end
 
-    it "types __LINE__ as Nominal[Integer]" do
-      expect(scope.type_of(parse_expression("__LINE__")).erase_to_rbs).to eq("Integer")
+    it "types __LINE__ as `positive-int` (erases to Integer)" do
+      type = scope.type_of(parse_expression("__LINE__"))
+      expect(type.describe).to eq("positive-int")
+      expect(type.erase_to_rbs).to eq("Integer")
     end
 
     it "types backtick xstrings as Nominal[String]" do

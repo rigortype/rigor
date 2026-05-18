@@ -904,18 +904,23 @@ module Rigor
         Type::Combinator.nominal_of(String)
       end
 
-      # __FILE__ is a String (the source file path). The value is
-      # known at parse time as `node.filepath`, but typing it as a
-      # Constant carrier would tie inference results to absolute paths;
-      # we widen to Nominal[String].
+      # __FILE__ is the source file path. Always non-empty when
+      # parsing a real file (the path resolver gives the buffer
+      # name, which is at minimum `"(stdin)"` / `"-e"` / a real
+      # path — never the empty String). Widened to
+      # `non-empty-string` instead of `Nominal[String]` so
+      # downstream String-emptiness checks know the value cannot
+      # be `""`.
       def type_of_source_file(_node)
-        Type::Combinator.nominal_of(String)
+        Type::Combinator.non_empty_string
       end
 
-      # __LINE__ is an Integer (the line of the literal). Widened to
-      # Nominal[Integer] for the same reason as __FILE__.
+      # __LINE__ is the line of the source literal. Ruby line
+      # numbers are 1-indexed, so `__LINE__` is always at least
+      # 1 — `positive-int` (Integer in `[1, +Inf)`) is the
+      # canonical refinement.
       def type_of_source_line(_node)
-        Type::Combinator.nominal_of(Integer)
+        Type::Combinator.positive_int
       end
 
       # `# shareable_constant_value:` magic comment wraps the next

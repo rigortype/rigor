@@ -2,6 +2,7 @@
 
 require "json"
 require_relative "../inference/hkt_registry"
+require_relative "../inference/hkt_body_parser"
 
 module Rigor
   module RbsExtended
@@ -122,10 +123,13 @@ module Rigor
           return nil
         end
 
+        body_tree = parse_body_tree(body, params, reporter: reporter, source_location: source_location)
+
         Inference::HktRegistry::Definition.new(
           uri: uri,
           params: params,
           body: body,
+          body_tree: body_tree,
           source_path: source_path_of(source_location),
           source_line: source_line_of(source_location)
         )
@@ -258,6 +262,27 @@ module Rigor
           source_location
         )
         Type::Combinator.untyped
+      end
+
+      # ADR-20 slice 2b — parse the body String into an
+      # `HktBody::*` tree via {Inference::HktBodyParser.parse}.
+      # On parse failure: emit a fail-soft `:info` reporter
+      # entry and return `nil` so the resulting Definition
+      # keeps its `body` String slot but `body_tree` stays
+      # absent (the reducer falls back to `app.bound` at call
+      # time per ADR-20 D5). The body String can still be
+      # consumed by future slices' richer grammars without
+      # the registration being lost.
+      def parse_body_tree(body, params, reporter:, source_location:)
+        return nil if body.nil? || body.empty?
+
+        Inference::HktBodyParser.parse(body, params: params)
+      rescue Inference::HktBodyParser::ParseError => e
+        record_hkt_error(reporter, "hkt_define body parse error: #{e.message}", source_location)
+        nil
+      rescue ArgumentError => e
+        record_hkt_error(reporter, "hkt_define body construction error: #{e.message}", source_location)
+        nil
       end
 
       def source_path_of(source_location)

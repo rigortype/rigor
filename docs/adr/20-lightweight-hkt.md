@@ -26,8 +26,18 @@ ship demand-driven.
   self-recursion handling (the "tying-the-knot" trick that lets
   recursive sums terminate) and fuel budget (default 64 per WD3).
   `Definition#body_tree` slot added; the body String stays
-  alongside for future Slice 2b consumption. `Type::App#reduce`
+  alongside for the Slice 2b parser. `Type::App#reduce`
   + `HktRegistry#reduce` convenience wrappers.
+- **Slice 2b** — `Rigor::Inference::HktBodyParser` (minimal
+  grammar: union + atoms + nominal_app + app_ref + param,
+  sufficient for `JSON.parse`'s recursive sum and similar
+  recursive-data-shape signatures; conditional / indexed-access
+  forms remain follow-up). `HktDirectives.parse_define` now
+  calls the parser automatically and populates `body_tree`
+  from the body String; parse failures fail-soft to
+  `body_tree: nil` plus an `:info` reporter entry. End-to-end
+  reducer-equivalence verified vs. the programmatic JSON_VALUE
+  body.
 - **Slice 2c** — `Environment#hkt_registry` attr_reader threading
   the frozen registry through every analyzer call.
   `Environment.default` / `.for_project` seed it via the new
@@ -55,14 +65,6 @@ ship demand-driven.
 
 ### What remains open
 
-- **Slice 2b** — body-string-grammar parser that reads
-  `Definition#body` (currently an opaque String) into a
-  `HktBody::*` tree. Until it ships, plugin / Rigor-bundled
-  overlay authors MUST build body trees programmatically via the
-  Slice 2a node-constructor API (see
-  `Rigor::Builtins::HktBuiltins.json_value_body_tree` as the
-  worked example). The Slice 2b parser unblocks
-  `%a{rigor:v1:hkt_define}`-authored bodies in real `.rbs` files.
 - **Slice 4** — multi-arg HKT validation via `rigor-dry-monads`
   `Result[T, E]` / `Maybe[T]` carriers. Queued behind ADR-3
   amendment for the underlying value-object representation.
@@ -716,3 +718,8 @@ first v0.2.x release.
   discriminator swaps K = String for K = Symbol when call carries
   literal symbolize_names: true. 3 new spec cases (total HKT
   spec count: 101).
+- 2026-05-18 — **slice 2b LANDED.** Body-string-grammar parser
+  with minimum-viable grammar (union + atoms + nominal_app +
+  app_ref + param). HktDirectives.parse_define now populates
+  body_tree from the body String automatically. 33 new spec
+  cases (total HKT spec count: 134).

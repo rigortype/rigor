@@ -226,6 +226,20 @@ module Rigor
           signature_paths: loader_signature_paths,
           cache_store: cache_store
         )
+        # ADR-20 slice 2e — scan the loaded RBS env for
+        # `%a{rigor:v1:hkt_register / hkt_define}` annotations
+        # and merge them on top of the bundled builtins. The
+        # scan triggers an eager RBS env build (otherwise lazy)
+        # so user-authored overlays take effect at the same
+        # call sites the dispatcher consults. URI collisions
+        # let the user-authored overlay win over the bundled
+        # builtin (last-write-wins per ADR-20 OQ3 tentative).
+        merged_hkt_registry = Inference::HktRegistry.scan_rbs_loader(
+          loader,
+          base: Builtins::HktBuiltins.registry,
+          reporter: rbs_extended_reporter
+        )
+
         new(
           rbs_loader: loader,
           plugin_registry: plugin_registry,
@@ -234,7 +248,7 @@ module Rigor
           boundary_cross_reporter: boundary_cross_reporter,
           synthetic_method_index: synthetic_method_index,
           project_patched_methods: project_patched_methods,
-          hkt_registry: Builtins::HktBuiltins.registry
+          hkt_registry: merged_hkt_registry
         )
       end
       # rubocop:enable Metrics/MethodLength, Metrics/ParameterLists

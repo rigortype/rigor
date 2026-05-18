@@ -38,6 +38,18 @@ ship demand-driven.
   `body_tree: nil` plus an `:info` reporter entry. End-to-end
   reducer-equivalence verified vs. the programmatic JSON_VALUE
   body.
+- **Slice 2e** — `RbsLoader#each_class_decl_annotation` +
+  `HktRegistry.scan_rbs_loader` + `Environment.for_project`
+  wiring. User-authored `.rbs` overlays carrying
+  `%a{rigor:v1:hkt_register / hkt_define}` annotations now
+  surface in `env.hkt_registry`, merged on top of the bundled
+  builtins. Last-write-wins on URI collisions so user
+  overlays can override the bundled JSON_VALUE if desired.
+- **HktDirectives kv-form refactor** — payload format moved
+  from JSON-flow (`{"uri": "x", ...}`) to kv-form
+  (`uri=x arity=1 ... body=...`) because RBS's `%a{...}`
+  annotation grammar rejects `"` quotes. Verified via raw
+  RBS::EnvironmentLoader.
 - **Slice 2c** — `Environment#hkt_registry` attr_reader threading
   the frozen registry through every analyzer call.
   `Environment.default` / `.for_project` seed it via the new
@@ -65,6 +77,9 @@ ship demand-driven.
 
 ### What remains open
 
+- (Originally listed: Slice 2e — `Environment.for_project` HKT
+  annotation scan. **LANDED 2026-05-18** — see "What landed"
+  below.)
 - **Slice 4** — multi-arg HKT validation via `rigor-dry-monads`
   `Result[T, E]` / `Maybe[T]` carriers. Queued behind ADR-3
   amendment for the underlying value-object representation.
@@ -723,3 +738,17 @@ first v0.2.x release.
   app_ref + param). HktDirectives.parse_define now populates
   body_tree from the body String automatically. 33 new spec
   cases (total HKT spec count: 134).
+- 2026-05-18 — **METHOD_RETURN_OVERRIDES expansion** to
+  YAML.safe_load / YAML.safe_load_file / Psych.safe_load /
+  Psych.safe_load_file (reuse JSON_VALUE_SPEC). 4 new dispatch
+  cases (total HKT spec count: 138).
+- 2026-05-18 — **HktDirectives kv-form refactor** (bug fix).
+  JSON-flow payload incompatible with RBS annotation grammar;
+  refactored to space-separated `key=value` form with body=
+  gobbling to end. 22 directive specs + 2 directive-integration
+  specs rewritten (total HKT spec count unchanged at 138).
+- 2026-05-18 — **slice 2e LANDED.** RbsLoader#each_class_decl_annotation
+  + HktRegistry.scan_rbs_loader + Environment.for_project
+  wiring closes the user-authoring loop. User .rbs overlays
+  now surface in env.hkt_registry. 4 new integration cases
+  (total HKT spec count: 142).

@@ -165,6 +165,56 @@ module Rigor
         HktReducer.new(self).reduce(app, fuel: fuel)
       end
 
+      # ADR-20 slice 2e — scan a Rigor RbsLoader for
+      # `rigor:v1:hkt_register` / `rigor:v1:hkt_define`
+      # annotations attached to class- or module-level
+      # declarations in the loaded RBS env, parse them via
+      # {Rigor::RbsExtended::HktDirectives}, and return a new
+      # registry that is the union of `base` and every parsed
+      # entry. Last-write-wins on URI collisions per
+      # {#merge}'s contract. Fail-soft on per-annotation parse
+      # errors (the reporter records an `:info` entry; the
+      # other annotations still apply).
+      #
+      # @param rbs_loader [Rigor::Environment::RbsLoader]
+      # @param base [HktRegistry] starting registry (typically
+      #   the bundled `Rigor::Builtins::HktBuiltins.registry`).
+      # @param name_scope [Rigor::Environment::NameScope, nil]
+      #   threaded through to the bound resolver for class-name
+      #   lookups; safe to omit during scanning since hkt
+      #   bounds are typically `untyped` or stdlib classes.
+      # @param reporter [#record, nil] same fail-soft reporter
+      #   contract the other RBS-extended parsers use.
+      def self.scan_rbs_loader(rbs_loader, base: EMPTY, name_scope: nil, reporter: nil)
+        return base if rbs_loader.nil?
+
+        # Required lazily here to avoid a hard circular
+        # require between hkt_registry / hkt_directives;
+        # HktDirectives requires HktRegistry to construct its
+        # value objects.
+        require_relative "../rbs_extended/hkt_directives"
+
+        registrations = []
+        definitions = []
+
+        rbs_loader.each_class_decl_annotation do |annotation_string, source_location|
+          reg = Rigor::RbsExtended::HktDirectives.parse_register(
+            annotation_string, name_scope: name_scope, reporter: reporter, source_location: source_location
+          )
+          registrations << reg if reg
+
+          defn = Rigor::RbsExtended::HktDirectives.parse_define(
+            annotation_string, reporter: reporter, source_location: source_location
+          )
+          definitions << defn if defn
+        end
+
+        return base if registrations.empty? && definitions.empty?
+
+        overlay = new(registrations: registrations, definitions: definitions)
+        base.merge(overlay)
+      end
+
       EMPTY = new.freeze
     end
   end

@@ -165,6 +165,31 @@ module Rigor
         # v0.0.9 cache `Cache::Descriptor` regression did.
       end
 
+      # ADR-20 slice 2e — iterates over every `%a{...}`
+      # annotation attached to a class- or module-level
+      # declaration in the loaded RBS environment, yielding
+      # `(annotation_string, source_location)` pairs. Used by
+      # {Rigor::Inference::HktRegistry.scan_rbs_loader} to
+      # find `rigor:v1:hkt_register` / `rigor:v1:hkt_define`
+      # directives in user-authored overlays and merge them
+      # into the per-`Environment` HKT registry. Yields nothing
+      # when the env failed to build (fail-soft, same shape as
+      # {#each_known_class_name}).
+      def each_class_decl_annotation
+        return enum_for(:each_class_decl_annotation) unless block_given?
+        return if env.nil?
+
+        env.class_decls.each_value do |entry|
+          entry.each_decl do |decl|
+            next unless decl.respond_to?(:annotations)
+
+            decl.annotations.each { |a| yield a.string, a.location }
+          end
+        end
+      rescue ::RBS::BaseError
+        # fail-soft: matches each_known_class_name's policy.
+      end
+
       # Returns a frozen `Hash<String, String>` mapping each loaded
       # class / module name (top-level prefixed) to the file path of
       # its FIRST declaration's RBS source. Used by

@@ -157,6 +157,65 @@ RSpec.describe Rigor::Environment do
       expect(env.nominal_for_name("JSON")&.class_name).to eq("JSON")
     end
 
+    describe "ADR-20 HKT registry scan" do
+      it "seeds env.hkt_registry with bundled builtins (json::value)" do
+        env = described_class.for_project(signature_paths: [])
+        expect(env.hkt_registry).to be_registered(:"json::value")
+        expect(env.hkt_registry).to be_defined(:"json::value")
+      end
+
+      it "merges user-authored `%a{rigor:v1:hkt_register / hkt_define}` overlays from signature_paths" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, "user_overlay.rbs"), <<~RBS)
+            %a{rigor:v1:hkt_register: uri=user::box arity=1 variance=out bound=untyped}
+            %a{rigor:v1:hkt_define: uri=user::box params=K body=K | nil}
+            class UserHktOverlay
+            end
+          RBS
+
+          env = described_class.for_project(signature_paths: [dir])
+          expect(env.hkt_registry).to be_registered(:"user::box")
+          expect(env.hkt_registry).to be_defined(:"user::box")
+          expect(env.hkt_registry.registration(:"user::box").arity).to eq(1)
+          expect(env.hkt_registry.definition(:"user::box").params).to eq([:K])
+        end
+      end
+
+      it "the user-authored URI reduces end-to-end via env.hkt_registry" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, "box.rbs"), <<~RBS)
+            %a{rigor:v1:hkt_register: uri=user::box arity=1 variance=out bound=untyped}
+            %a{rigor:v1:hkt_define: uri=user::box params=K body=K | nil}
+            class UserHktBox
+            end
+          RBS
+
+          env = described_class.for_project(signature_paths: [dir])
+          str = Rigor::Type::Combinator.nominal_of(String)
+          app = Rigor::Type::App.new(:"user::box", [str], bound: Rigor::Type::Combinator.untyped)
+          result = env.hkt_registry.reduce(app)
+          # K | nil reduces to Union[String, Constant<nil>] when K = String
+          expect(result).to be_a(Rigor::Type::Union)
+          expect(result.members.map(&:describe)).to include("String", "nil")
+        end
+      end
+
+      it "keeps bundled JSON_VALUE alongside user URIs (no collision drops the builtin)" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, "side.rbs"), <<~RBS)
+            %a{rigor:v1:hkt_register: uri=my::side arity=1 variance=out bound=untyped}
+            %a{rigor:v1:hkt_define: uri=my::side params=K body=K}
+            class Side
+            end
+          RBS
+
+          env = described_class.for_project(signature_paths: [dir])
+          expect(env.hkt_registry).to be_registered(:"my::side")
+          expect(env.hkt_registry).to be_registered(:"json::value")
+        end
+      end
+    end
+
     describe "DEFAULT_LIBRARIES (Slice A stdlib expansion)" do
       it "loads the common stdlib by default without requiring the caller to pass libraries:" do
         env = described_class.for_project(signature_paths: [])

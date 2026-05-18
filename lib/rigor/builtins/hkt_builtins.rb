@@ -115,9 +115,27 @@ module Rigor
       private_constant :JSON_VALUE_SPEC
 
       METHOD_RETURN_OVERRIDES = {
+        # JSON — stdlib's `json` library. Upstream rbs declares
+        # `(string, ?options) -> untyped`; the HKT-builtin tier
+        # tightens to the recursive `json::value[K]` union.
         ["JSON", :parse,  :singleton] => JSON_VALUE_SPEC,
         ["JSON", :parse!, :singleton] => JSON_VALUE_SPEC,
-        ["JSON", :load,   :singleton] => JSON_VALUE_SPEC
+        ["JSON", :load,   :singleton] => JSON_VALUE_SPEC,
+        # YAML.safe_load / Psych.safe_load — default
+        # `permitted_classes: []` admits exactly the JSON
+        # vocabulary (nil / true / false / Integer / Float /
+        # String / Array / Hash), so the json::value tree
+        # also describes them. Non-default `permitted_classes`
+        # broadens the runtime answer; the analyzer reports
+        # the json::value envelope and users opt into RBS
+        # overrides when they configure custom permits.
+        # YAML.load / YAML.unsafe_load deliberately stay out
+        # of the override table — they can return ANY Ruby
+        # object and have no useful HKT envelope.
+        ["YAML",  :safe_load,      :singleton] => JSON_VALUE_SPEC,
+        ["YAML",  :safe_load_file, :singleton] => JSON_VALUE_SPEC,
+        ["Psych", :safe_load,      :singleton] => JSON_VALUE_SPEC,
+        ["Psych", :safe_load_file, :singleton] => JSON_VALUE_SPEC
       }.freeze
 
       # @return [Rigor::Type, nil] the reduced HKT type for

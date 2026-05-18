@@ -114,6 +114,54 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
       expect(type).not_to be_a(Rigor::Type::Union)
     end
 
+    it "also fires for YAML.safe_load" do
+      type = described_class.dispatch(
+        receiver_type: Rigor::Type::Combinator.singleton_of(YAML),
+        method_name: :safe_load,
+        arg_types: [Rigor::Type::Combinator.nominal_of(String)],
+        environment: environment
+      )
+      expect(type).to be_a(Rigor::Type::Union)
+      expect(type.members.map(&:describe)).to include("nil", "true", "Integer", "String")
+    end
+
+    it "also fires for YAML.safe_load_file" do
+      type = described_class.dispatch(
+        receiver_type: Rigor::Type::Combinator.singleton_of(YAML),
+        method_name: :safe_load_file,
+        arg_types: [Rigor::Type::Combinator.nominal_of(String)],
+        environment: environment
+      )
+      expect(type).to be_a(Rigor::Type::Union)
+    end
+
+    it "also fires for Psych.safe_load" do
+      type = described_class.dispatch(
+        receiver_type: Rigor::Type::Combinator.singleton_of(Psych),
+        method_name: :safe_load,
+        arg_types: [Rigor::Type::Combinator.nominal_of(String)],
+        environment: environment
+      )
+      expect(type).to be_a(Rigor::Type::Union)
+    end
+
+    it "does not fire for YAML.load (deliberately uncovered — can return any Ruby object)" do
+      type = described_class.dispatch(
+        receiver_type: Rigor::Type::Combinator.singleton_of(YAML),
+        method_name: :load,
+        arg_types: [Rigor::Type::Combinator.nominal_of(String)],
+        environment: environment
+      )
+      next if type.nil?
+
+      next unless type.is_a?(Rigor::Type::Union)
+
+      nominal_class_names = type.members.grep(Rigor::Type::Nominal).map(&:class_name)
+      # Should NOT be the json::value Union shape (which contains BOTH Array AND Hash arms).
+      json_value_shape = nominal_class_names.include?("Array") && nominal_class_names.include?("Hash")
+      expect(json_value_shape).to be(false)
+    end
+
     it "does not fire for an unrelated singleton (e.g. YAML.parse)" do
       type = described_class.dispatch(
         receiver_type: Rigor::Type::Combinator.singleton_of(YAML),

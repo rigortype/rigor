@@ -123,17 +123,25 @@ module Rigor
       freeze
     end
 
-    # ADR-20 slice 2e — lazy HKT registry getter. Merges the
-    # base registry (Builtins seed) with the RBS env scan on
-    # first call, then memoises. Single-threaded use only:
-    # under the Ractor pool path each worker has its own
-    # Environment so cross-worker mutation is impossible; the
-    # LSP single-publish-at-a-time invariant serialises here.
+    # ADR-20 slices 2e + 6 — lazy HKT registry getter.
+    # Merge order on first call: builtins (base) ← plugin
+    # manifest aggregation ← RBS env scan. Last-write-wins on
+    # URI collisions so user-authored `.rbs` overlays beat
+    # plugin entries, which beat the bundled JSON_VALUE.
+    # Memoised; single-threaded use only (under the Ractor
+    # pool path each worker has its own Environment so
+    # cross-worker mutation is impossible; the LSP
+    # single-publish-at-a-time invariant serialises here).
     def hkt_registry
       @hkt_registry_holder.fetch do
+        with_plugin_overlay = if @plugin_registry.respond_to?(:hkt_overlay_registry)
+                                @hkt_registry_base.merge(@plugin_registry.hkt_overlay_registry)
+                              else
+                                @hkt_registry_base
+                              end
         Inference::HktRegistry.scan_rbs_loader(
           @rbs_loader,
-          base: @hkt_registry_base,
+          base: with_plugin_overlay,
           reporter: rbs_extended_reporter
         )
       end

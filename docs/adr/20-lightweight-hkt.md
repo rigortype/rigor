@@ -45,6 +45,12 @@ ship demand-driven.
   surface in `env.hkt_registry`, merged on top of the bundled
   builtins. Last-write-wins on URI collisions so user
   overlays can override the bundled JSON_VALUE if desired.
+- **Slice 6** — plugin-manifest-declared HKT registrations.
+  `Plugin::Manifest` gains `hkt_registrations:` /
+  `hkt_definitions:` fields; `Plugin::Registry#hkt_overlay_registry`
+  aggregates every loaded plugin's entries; `Environment#hkt_registry`
+  merges in the order **builtins → plugin overlay → RBS env
+  scan**, with last-write-wins on URI collisions.
 - **HktDirectives kv-form refactor** — payload format moved
   from JSON-flow (`{"uri": "x", ...}`) to kv-form
   (`uri=x arity=1 ... body=...`) because RBS's `%a{...}`
@@ -85,9 +91,8 @@ ship demand-driven.
   amendment for the underlying value-object representation.
 - **Slice 5** — sugar via recursive `type` aliases. Gated on
   user feedback that the explicit `%a{...}` form is too verbose.
-- **Slice 6** — plugin-side resolver hookup
-  (`Plugin::TypeNodeResolver` extension with `hkt_definitions:`
-  manifest entry). Demand-driven; ships when a plugin needs it.
+- (Originally listed: Slice 6 — plugin-side resolver hookup.
+  **LANDED 2026-05-18** — see "What landed" below.)
 
 ## Context
 

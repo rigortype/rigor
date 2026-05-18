@@ -200,6 +200,47 @@ RSpec.describe Rigor::Environment do
         end
       end
 
+      it "merges plugin-manifest-declared hkt_registrations + hkt_definitions on top of the bundled builtins" do # rubocop:disable RSpec/ExampleLength
+        # ADR-20 slice 6 — plugin-shipped HKT registrations.
+        fake_plugin_class = Class.new(Rigor::Plugin::Base) do
+          manifest(
+            id: "fake-hkt-plugin",
+            version: "0.0.1",
+            hkt_registrations: [
+              Rigor::Inference::HktRegistry::Registration.new(
+                uri: :"plugin::box", arity: 1, variance: [:out],
+                bound: Rigor::Type::Combinator.untyped
+              )
+            ],
+            hkt_definitions: [
+              Rigor::Inference::HktRegistry.definition_with_body_tree(
+                uri: :"plugin::box",
+                params: [:K],
+                body_tree: Rigor::Inference::HktBody::Param.new(name: :K)
+              )
+            ]
+          )
+        end
+
+        services = Rigor::Plugin::Services.new(
+          reflection: Rigor::Reflection,
+          type: Rigor::Type::Combinator,
+          configuration: Rigor::Configuration.new
+        )
+        registry = Rigor::Plugin::Registry.new(plugins: [fake_plugin_class.new(services: services, config: {})])
+        env = described_class.for_project(signature_paths: [], plugin_registry: registry)
+
+        expect(env.hkt_registry).to be_registered(:"plugin::box")
+        expect(env.hkt_registry).to be_defined(:"plugin::box")
+        # Bundled JSON_VALUE survives alongside the plugin entry.
+        expect(env.hkt_registry).to be_registered(:"json::value")
+
+        # End-to-end reduction succeeds.
+        str = Rigor::Type::Combinator.nominal_of(String)
+        app = Rigor::Type::App.new(:"plugin::box", [str], bound: Rigor::Type::Combinator.untyped)
+        expect(env.hkt_registry.reduce(app)).to eq(str)
+      end
+
       it "keeps bundled JSON_VALUE alongside user URIs (no collision drops the builtin)" do
         Dir.mktmpdir do |dir|
           File.write(File.join(dir, "side.rbs"), <<~RBS)

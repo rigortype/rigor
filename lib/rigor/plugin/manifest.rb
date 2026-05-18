@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "../inference/hkt_registry"
+
 module Rigor
   module Plugin
     # Value object describing one plugin's identity and metadata.
@@ -11,7 +13,7 @@ module Rigor
     # The fields are pinned by ADR-2 § "Registration, Configuration,
     # and Caching"; the v0.1.0 plugin contract surface treats this
     # struct as the public manifest shape.
-    class Manifest
+    class Manifest # rubocop:disable Metrics/ClassLength
       # Same regex {Rigor::Cache::Store::VALID_PRODUCER_ID} uses,
       # so plugin ids round-trip through cache producer ids and
       # `plugin.<id>.<rule>` diagnostic identifiers without escape.
@@ -39,13 +41,14 @@ module Rigor
 
       attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
                   :owns_receivers, :type_node_resolvers, :block_as_methods, :heredoc_templates,
-                  :trait_registries, :external_files
+                  :trait_registries, :external_files, :hkt_registrations, :hkt_definitions
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
         produces: [], consumes: [], owns_receivers: [], type_node_resolvers: [],
-        block_as_methods: [], heredoc_templates: [], trait_registries: [], external_files: []
+        block_as_methods: [], heredoc_templates: [], trait_registries: [], external_files: [],
+        hkt_registrations: [], hkt_definitions: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -58,9 +61,12 @@ module Rigor
         validate_heredoc_templates!(heredoc_templates)
         validate_trait_registries!(trait_registries)
         validate_external_files!(external_files)
+        validate_hkt_registrations!(hkt_registrations)
+        validate_hkt_definitions!(hkt_definitions)
 
         assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
-                      type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files)
+                      type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files,
+                      hkt_registrations, hkt_definitions)
         freeze
       end
 
@@ -68,7 +74,8 @@ module Rigor
 
       # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
       def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
-                        type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files)
+                        type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files,
+                        hkt_registrations, hkt_definitions)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
@@ -82,6 +89,8 @@ module Rigor
         @heredoc_templates = heredoc_templates.dup.freeze
         @trait_registries = trait_registries.dup.freeze
         @external_files = external_files.dup.freeze
+        @hkt_registrations = hkt_registrations.dup.freeze
+        @hkt_definitions = hkt_definitions.dup.freeze
       end
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
@@ -110,7 +119,7 @@ module Rigor
         errors
       end
 
-      def to_h
+      def to_h # rubocop:disable Metrics/AbcSize
         {
           "id" => id,
           "version" => version,
@@ -124,7 +133,9 @@ module Rigor
           "block_as_methods" => block_as_methods.map(&:to_h),
           "heredoc_templates" => heredoc_templates.map(&:to_h),
           "trait_registries" => trait_registries.map(&:to_h),
-          "external_files" => external_files.map(&:to_h)
+          "external_files" => external_files.map(&:to_h),
+          "hkt_registrations" => hkt_registrations.map(&:to_h),
+          "hkt_definitions" => hkt_definitions.map { |d| { "uri" => d.uri, "params" => d.params } }
         }
       end
 
@@ -277,6 +288,42 @@ module Rigor
         raise ArgumentError,
               "plugin manifest external_files must be an Array of " \
               "Rigor::Plugin::Macro::ExternalFile instances, got #{entries.inspect}"
+      end
+
+      # ADR-20 slice 6 — `hkt_registrations:` declares the
+      # Lightweight HKT URI registrations this plugin ships
+      # (analogous to `%a{rigor:v1:hkt_register: ...}` directives
+      # but published via the manifest contract instead of a
+      # shipped `.rbs` file). Each entry MUST be an
+      # `Rigor::Inference::HktRegistry::Registration`. The
+      # registry aggregator on `Plugin::Registry` flattens
+      # entries from every loaded plugin and merges them into
+      # `env.hkt_registry` on top of `Builtins::HktBuiltins.registry`;
+      # user `.rbs` overlays merge on top of plugin entries
+      # last-write-wins.
+      def validate_hkt_registrations!(entries)
+        return if entries.is_a?(Array) && entries.all?(Inference::HktRegistry::Registration)
+
+        raise ArgumentError,
+              "plugin manifest hkt_registrations must be an Array of " \
+              "Rigor::Inference::HktRegistry::Registration instances, got #{entries.inspect}"
+      end
+
+      # ADR-20 slice 6 — `hkt_definitions:` declares the
+      # plugin's HKT type-function bodies (analogous to
+      # `%a{rigor:v1:hkt_define: ...}` directives). Each entry
+      # MUST be an `Rigor::Inference::HktRegistry::Definition`
+      # — typically built via
+      # `Rigor::Inference::HktRegistry.definition_with_body_tree(...)`
+      # so plugin authors can build the body programmatically
+      # via {Rigor::Inference::HktBody}'s node-constructor API
+      # without parsing a string.
+      def validate_hkt_definitions!(entries)
+        return if entries.is_a?(Array) && entries.all?(Inference::HktRegistry::Definition)
+
+        raise ArgumentError,
+              "plugin manifest hkt_definitions must be an Array of " \
+              "Rigor::Inference::HktRegistry::Definition instances, got #{entries.inspect}"
       end
 
       def coerce_consumes(consumes)

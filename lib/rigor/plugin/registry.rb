@@ -85,6 +85,25 @@ module Rigor
         plugins.flat_map { |plugin| plugin.manifest.type_node_resolvers }
       end
 
+      # ADR-20 slice 6 — aggregate every loaded plugin's
+      # manifest-declared HKT registrations + definitions
+      # into a single `Inference::HktRegistry` overlay that
+      # `Environment#hkt_registry` merges on top of the
+      # bundled `Builtins::HktBuiltins.registry`. Last
+      # plugin to register a URI wins (registration order
+      # determined by the user's `plugins:` list); user
+      # `.rbs` overlays merge on top of this overlay last.
+      # Returns `Inference::HktRegistry::EMPTY` when no
+      # plugin contributes HKT entries so callers can skip
+      # the merge.
+      def hkt_overlay_registry
+        registrations = plugins.flat_map { |plugin| plugin.manifest.hkt_registrations }
+        definitions = plugins.flat_map { |plugin| plugin.manifest.hkt_definitions }
+        return Inference::HktRegistry::EMPTY if registrations.empty? && definitions.empty?
+
+        Inference::HktRegistry.new(registrations: registrations, definitions: definitions)
+      end
+
       EMPTY = new.freeze
     end
   end

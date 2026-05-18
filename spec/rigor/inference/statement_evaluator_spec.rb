@@ -529,6 +529,33 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect { described_class.new(scope: scope).evaluate(ast) }.not_to raise_error
     end
 
+    it "walks DefNode arguments wrapped in a CallNode (ruby2_keywords / private def)" do
+      observed = []
+      on_enter = ->(node, s) { observed << s.self_type if node.is_a?(Prism::SelfNode) }
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        class Foo
+          ruby2_keywords def bar(*args)
+            self
+          end
+        end
+      RUBY
+      # The body of `bar` -- inside the ruby2_keywords(<DefNode>) call --
+      # sees self as Nominal[Foo] (instance method), NOT Singleton[Foo].
+      expect(observed).to include(Rigor::Type::Combinator.nominal_of("Foo"))
+      expect(observed).not_to include(Rigor::Type::Combinator.singleton_of("Foo"))
+    end
+
+    it "walks private/public def argument-position bodies under their instance self_type" do
+      observed = []
+      on_enter = ->(node, s) { observed << s.self_type if node.is_a?(Prism::SelfNode) }
+      described_class.new(scope: scope, on_enter: on_enter).evaluate(parse_program(<<~RUBY))
+        class Foo
+          private def bar; self; end
+        end
+      RUBY
+      expect(observed).to include(Rigor::Type::Combinator.nominal_of("Foo"))
+    end
+
     it "renders the qualified name correctly for class A::B" do
       ast = parse_program("class A::B; def foo(x); x; end; end")
       expect { described_class.new(scope: scope).evaluate(ast) }.not_to raise_error

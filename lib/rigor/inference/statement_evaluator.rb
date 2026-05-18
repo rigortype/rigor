@@ -796,11 +796,35 @@ module Rigor
       def eval_call(node)
         call_type = scope.type_of(node, tracer: tracer)
         evaluate_block_if_present(node)
+        # `ruby2_keywords def foo(...)` (and similar wrappers like
+        # `private def`, `public def`, `module_function def`) parse
+        # the def as the call's positional argument; the
+        # ExpressionTyper#type_of_def handler types it as
+        # `Constant[:foo]` without walking the body. Without
+        # explicitly evaluating the argument-position def, the body's
+        # scope-index entries inherit the outer class-body
+        # `self_type = singleton(C)` from `ScopeIndexer.propagate`,
+        # so `self.helper` inside reports `undefined method 'helper'
+        # for singleton(C)`. Walking each argument-position def under
+        # the current evaluator (not a sub_eval — the def's effects
+        # do not bind into the surrounding scope) populates the
+        # scope index with the correct instance / singleton
+        # `self_type` for the def's body.
+        evaluate_def_arguments(node)
         post_scope = record_closure_escape_if_any(node)
         post_scope = apply_rbs_extended_assertions(node, post_scope)
         post_scope = apply_plugin_assertions(node, post_scope)
         post_scope = apply_rspec_matcher_narrowing(node, post_scope)
         [call_type, post_scope]
+      end
+
+      def evaluate_def_arguments(call_node)
+        args = call_node.arguments
+        return unless args.respond_to?(:arguments)
+
+        args.arguments.each do |arg|
+          eval_def(arg) if arg.is_a?(Prism::DefNode)
+        end
       end
 
       # v0.0.3 — recognises a small catalogue of RSpec

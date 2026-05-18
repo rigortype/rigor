@@ -68,6 +68,17 @@ this handbook disagrees.
     classification model, the `--print` / `--diff` /
     `--write` modes, the `--params` policy and ADR-5
     trade-off, RSpec-aware observations.
+12. [**Lightweight HKT (`JSON.parse` and friends)**](12-lightweight-hkt.md)
+    — Rigor's defunctionalised higher-kinded type encoding
+    ([ADR-20](../adr/20-lightweight-hkt.md), Yallop & White
+    2014 / fp-ts shape). Covers the bundled `json::value`
+    registration backing `JSON.parse` / `YAML.safe_load`,
+    the `symbolize_names: true` + `permitted_classes: [...]`
+    call-site discriminators, how to author your own URI
+    overlay in `.rbs`, the body grammar, the reducer's
+    lazy "tying-the-knot" handling for recursive sums, and
+    the conscious non-goals (no conditional bodies, no
+    multi-arg containers yet, no plugin manifest hookup).
 
 ### Appendix — Coming from another type checker
 

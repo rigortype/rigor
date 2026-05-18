@@ -5,6 +5,7 @@ require_relative "../type"
 require_relative "../flow_contribution"
 require_relative "../flow_contribution/merger"
 require_relative "../builtins/hkt_builtins"
+require_relative "../builtins/static_return_refinements"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/literal_string_folding"
 require_relative "method_dispatcher/shape_dispatch"
@@ -103,6 +104,17 @@ module Rigor
         # `try_plugin_contribution` tier above.
         hkt_builtin_result = try_hkt_builtin_return(receiver_type, method_name, arg_types, environment)
         return hkt_builtin_result if hkt_builtin_result
+
+        # Rigor-bundled static refinement tier. Sits between HKT
+        # and RBS so stdlib methods whose upstream RBS is broader
+        # than the documented behaviour (e.g. `Kernel#__dir__`
+        # declared `() -> String?` when the documented return is
+        # `non-empty-string | nil`) get the tightened type
+        # without modifying the vendored `ruby/rbs` submodule.
+        # The override table lives in
+        # `Rigor::Builtins::StaticReturnRefinements::OVERRIDES`.
+        static_refinement = try_static_refinement(receiver_type, method_name, arg_types)
+        return static_refinement if static_refinement
 
         rbs_result = RbsDispatch.try_dispatch(
           receiver: receiver_type, method_name: method_name, args: arg_types,
@@ -265,6 +277,60 @@ module Rigor
           arg_types: arg_types,
           hkt_registry: environment.hkt_registry
         )
+      end
+
+      # Consults the Rigor-bundled static refinement table for a
+      # (owner-class, method-name, kind) entry. Kernel methods
+      # are mixed into every non-BasicObject class, so an
+      # implicit-self `__dir__` call (receiver_type =
+      # Nominal[ClassName]) is matched by looking up Kernel as
+      # the owner. Explicit `Kernel.__dir__` (receiver_type =
+      # Singleton[Kernel]) and instance-side calls
+      # (receiver_type = Nominal[Klass]) share the `:both` row.
+      #
+      # The receiver-side ancestor check is intentionally cheap:
+      # any non-BasicObject Nominal / Singleton matches every
+      # Kernel-owned override. BasicObject explicitly excludes
+      # Kernel and is therefore rejected. The narrow risk of a
+      # user-defined `def __dir__` shadowing Kernel's method
+      # would also alter the runtime answer; users with that
+      # configuration opt out via a `signature_paths` overlay
+      # declaring their own return type.
+      def try_static_refinement(receiver_type, method_name, arg_types)
+        candidates = Rigor::Builtins::StaticReturnRefinements.owners_for(method_name)
+        return nil if candidates.empty?
+
+        owner = static_refinement_owner_for(receiver_type, candidates)
+        return nil unless owner
+
+        kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
+        Rigor::Builtins::StaticReturnRefinements.lookup(
+          owner_class_name: owner,
+          method_name: method_name,
+          kind: kind,
+          arg_types: arg_types
+        )
+      end
+
+      # Picks the most specific override owner the receiver
+      # honours. For Kernel-owned overrides the receiver simply
+      # needs to be a real-class Nominal / Singleton (i.e. not
+      # BasicObject and not a Dynamic / Constant / shape carrier
+      # — those carriers go through their own narrower tiers).
+      def static_refinement_owner_for(receiver_type, candidates)
+        receiver_class = static_refinement_class_for(receiver_type)
+        return nil unless receiver_class
+
+        return "Kernel" if candidates.include?("Kernel") && receiver_class != "BasicObject"
+
+        candidates.find { |owner| owner == receiver_class }
+      end
+
+      def static_refinement_class_for(receiver_type)
+        case receiver_type
+        when Type::Singleton, Type::Nominal
+          receiver_type.class_name
+        end
       end
 
       def try_plugin_contribution(call_node, scope)

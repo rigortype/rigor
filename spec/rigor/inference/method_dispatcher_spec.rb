@@ -553,5 +553,49 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(reporter).to be_empty
       end
     end
+
+    describe "static return refinements tier (Kernel#__dir__)" do
+      let(:env) { Rigor::Environment.default }
+      let(:expected_dir_type) do
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.non_empty_string,
+          Rigor::Type::Combinator.constant_of(nil)
+        )
+      end
+
+      it "tightens Kernel.__dir__ (singleton receiver) to non-empty-string | nil" do
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.singleton_of("Kernel"),
+          method_name: :__dir__, arg_types: [], environment: env
+        )
+        expect(result).to eq(expected_dir_type)
+      end
+
+      it "tightens an implicit-self __dir__ (Nominal receiver) to non-empty-string | nil" do
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Object"),
+          method_name: :__dir__, arg_types: [], environment: env
+        )
+        expect(result).to eq(expected_dir_type)
+      end
+
+      it "fires for any Kernel-mixed-in receiver class (e.g. user-defined class)" do
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("MyApp::Service"),
+          method_name: :__dir__, arg_types: [], environment: env
+        )
+        expect(result).to eq(expected_dir_type)
+      end
+
+      it "does NOT fire for a BasicObject receiver (Kernel not mixed in)" do
+        # BasicObject is the one class that explicitly excludes
+        # Kernel, so the tightened return would be wrong.
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("BasicObject"),
+          method_name: :__dir__, arg_types: [], environment: env
+        )
+        expect(result).not_to eq(expected_dir_type)
+      end
+    end
   end
 end

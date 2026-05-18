@@ -597,5 +597,30 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).not_to eq(expected_dir_type)
       end
     end
+
+    describe "static return refinements tier (File class-side)" do
+      let(:env) { Rigor::Environment.default }
+      let(:non_empty_string) { Rigor::Type::Combinator.non_empty_string }
+
+      it "tightens File.expand_path to non-empty-string" do
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.singleton_of("File"),
+          method_name: :expand_path,
+          arg_types: [Rigor::Type::Combinator.nominal_of("String")],
+          environment: env
+        )
+        expect(result).to eq(non_empty_string)
+      end
+
+      it "tightens File.dirname to non-empty-string" do
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.singleton_of("File"),
+          method_name: :dirname,
+          arg_types: [Rigor::Type::Combinator.nominal_of("String")],
+          environment: env
+        )
+        expect(result).to eq(non_empty_string)
+      end
+    end
   end
 end

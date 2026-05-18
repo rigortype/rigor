@@ -53,6 +53,9 @@ module Rigor
       ).freeze
       private_constant :NON_EMPTY_STRING_OR_NIL
 
+      NON_EMPTY_STRING = Type::Combinator.non_empty_string.freeze
+      private_constant :NON_EMPTY_STRING
+
       # `Kernel#__dir__` returns the canonical directory of the
       # source file the call appears in, or `nil` when the file
       # is invalid / not available (typically `-e` and similar
@@ -62,12 +65,31 @@ module Rigor
       KERNEL_DIR = ->(_arg_types) { NON_EMPTY_STRING_OR_NIL }
       private_constant :KERNEL_DIR
 
+      # `File.expand_path(path, ?dir_string)` always returns an
+      # absolute path string. Even `File.expand_path("")` expands
+      # to the current working directory's absolute path. The
+      # upstream RBS row is `(path file_name, ?path dir_string) ->
+      # String`; the refinement tightens to `non-empty-string`.
+      #
+      # `File.dirname(path, ?level)` always returns at least `"."`
+      # (or `"/"` for absolute roots), so the return is never the
+      # empty string. Upstream RBS returns `String`; the refinement
+      # tightens to `non-empty-string`.
+      #
+      # `File.basename` is intentionally NOT refined: it returns
+      # `""` for `File.basename("")`, so `non-empty-string` would
+      # be unsound.
+      FILE_NON_EMPTY = ->(_arg_types) { NON_EMPTY_STRING }
+      private_constant :FILE_NON_EMPTY
+
       # Frozen ((owner_class_name, method_name, kind) => handler)
       # table. The kind tag is `:both`, `:singleton`, or
       # `:instance`. New entries SHOULD prefer `:both` unless the
       # singleton- and instance-side shapes genuinely differ.
       OVERRIDES = {
-        ["Kernel", :__dir__, :both] => KERNEL_DIR
+        ["Kernel", :__dir__, :both] => KERNEL_DIR,
+        ["File", :expand_path, :singleton] => FILE_NON_EMPTY,
+        ["File", :dirname, :singleton] => FILE_NON_EMPTY
       }.freeze
       private_constant :OVERRIDES
 

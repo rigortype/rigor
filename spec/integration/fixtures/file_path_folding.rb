@@ -24,9 +24,12 @@ include Rigor::Testing
 #
 # (See `spec/integration/fixtures/file_path_folding_optin/`.)
 
-# In the default mode each fold lands at the RBS-declared shape:
+# In the default mode each fold lands at the RBS-declared shape,
+# except for methods covered by `StaticReturnRefinements` — those
+# tighten to `non-empty-string` (the platform-agnostic "never the
+# empty string" refinement) without leaking platform specifics:
 assert_type("String", File.basename("/foo/bar.rb"))
-assert_type("String", File.dirname("/foo/bar.rb"))
+assert_type("non-empty-string", File.dirname("/foo/bar.rb"))
 assert_type("String", File.extname("hello.rb"))
 assert_type("String", File.join("a", "b", "c.rb"))
 assert_type("[String, String]", File.split("/foo/bar.rb"))

@@ -61,6 +61,10 @@ module Rigor
         Prism::RationalNode => :type_of_literal_value,
         Prism::SymbolNode => :symbol_type_for,
         Prism::StringNode => :string_type_for,
+        Prism::XStringNode => :type_of_xstring,
+        Prism::InterpolatedXStringNode => :type_of_xstring,
+        Prism::SourceFileNode => :type_of_source_file,
+        Prism::SourceLineNode => :type_of_source_line,
         Prism::TrueNode => :type_of_true,
         Prism::FalseNode => :type_of_false,
         Prism::NilNode => :type_of_nil,
@@ -144,6 +148,9 @@ module Rigor
         Prism::AliasMethodNode => :type_of_nil_value,
         Prism::AliasGlobalVariableNode => :type_of_nil_value,
         Prism::UndefNode => :type_of_nil_value,
+        Prism::PostExecutionNode => :type_of_nil_value,
+        Prism::ShareableConstantNode => :type_of_shareable_constant,
+        Prism::ImplicitNode => :type_of_implicit,
         Prism::ForwardingSuperNode => :type_of_dynamic_top,
         Prism::BlockArgumentNode => :type_of_non_value,
         # Parameters and blocks (non-value positions)
@@ -159,6 +166,7 @@ module Rigor
         Prism::ForwardingParameterNode => :type_of_non_value,
         Prism::NoKeywordsParameterNode => :type_of_non_value,
         Prism::ImplicitRestNode => :type_of_non_value,
+        Prism::ItParametersNode => :type_of_non_value,
         Prism::BlockNode => :type_of_dynamic_top,
         Prism::SplatNode => :type_of_non_value,
         # Control flow (Slice 3 phase 1): branch types are unioned, jumps
@@ -886,6 +894,40 @@ module Rigor
         return Type::Combinator.nominal_of(String) if unescaped.nil?
 
         Type::Combinator.constant_of(unescaped)
+      end
+
+      # Backtick (`cmd`) and `%x{cmd}` invoke Kernel#` and always return a
+      # String. Even when the content is statically known, we widen to
+      # Nominal[String] because the runtime value depends on the
+      # subprocess output, not the source text.
+      def type_of_xstring(_node)
+        Type::Combinator.nominal_of(String)
+      end
+
+      # __FILE__ is a String (the source file path). The value is
+      # known at parse time as `node.filepath`, but typing it as a
+      # Constant carrier would tie inference results to absolute paths;
+      # we widen to Nominal[String].
+      def type_of_source_file(_node)
+        Type::Combinator.nominal_of(String)
+      end
+
+      # __LINE__ is an Integer (the line of the literal). Widened to
+      # Nominal[Integer] for the same reason as __FILE__.
+      def type_of_source_line(_node)
+        Type::Combinator.nominal_of(Integer)
+      end
+
+      # `# shareable_constant_value:` magic comment wraps the next
+      # constant write. Type is the wrapped write's value.
+      def type_of_shareable_constant(node)
+        type_of(node.write)
+      end
+
+      # `{ x: }` shorthand hash. The implicit value is the call to
+      # `x` (or a local read of `x`). Delegate.
+      def type_of_implicit(node)
+        type_of(node.value)
       end
 
       def local_read(node)

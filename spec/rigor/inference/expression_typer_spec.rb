@@ -40,6 +40,38 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(scope.type_of(parse_expression("false")).describe).to eq("false")
       expect(scope.type_of(parse_expression("nil")).describe).to eq("nil")
     end
+
+    it "types __FILE__ as Nominal[String]" do
+      expect(scope.type_of(parse_expression("__FILE__")).erase_to_rbs).to eq("String")
+    end
+
+    it "types __LINE__ as Nominal[Integer]" do
+      expect(scope.type_of(parse_expression("__LINE__")).erase_to_rbs).to eq("Integer")
+    end
+
+    it "types backtick xstrings as Nominal[String]" do
+      expect(scope.type_of(parse_expression("`echo hi`")).erase_to_rbs).to eq("String")
+    end
+
+    it "types %x{...} xstrings as Nominal[String]" do
+      expect(scope.type_of(parse_expression("%x{echo hi}")).erase_to_rbs).to eq("String")
+    end
+
+    it "types interpolated %x{} xstrings as Nominal[String]" do
+      source = "%x{echo \#{1}}"
+      expect(scope.type_of(parse_expression(source)).erase_to_rbs).to eq("String")
+    end
+
+    it "types END { } (PostExecutionNode) as nil" do
+      expect(scope.type_of(parse_expression("END { 1 }")).describe).to eq("nil")
+    end
+
+    it "passes through ImplicitNode (shorthand hash value)" do
+      hash_node = parse_expression("{ y: }", scopes: [[:y]])
+      implicit = hash_node.elements.first.value
+      bound = scope.with_local(:y, Rigor::Type::Combinator.constant_of(7))
+      expect(bound.type_of(implicit).describe).to eq("7")
+    end
   end
 
   describe "local variables" do

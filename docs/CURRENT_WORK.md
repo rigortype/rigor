@@ -17,6 +17,7 @@ v0.1.5 themes (frozen on tag, full detail in CHANGELOG):
 
 The next cycle (`v0.1.6`) is accumulating on `master` (release pending). Slices landed so far (commits `3c99eed` → `8530856`):
 
+- **Engine — built-in Prism leaf-node fallback handlers.** Driven by `rigor check --explain references/ruby/lib` survey; eight new `PRISM_DISPATCH` entries cover `__FILE__` / `__LINE__` / backtick / `%x{...}` / `END { … }` / shareable-constant comment / `{ x: }` shorthand / `it` parameter. ~60 `:info` fail-soft fallback events removed across the Ruby core/stdlib reference tree. ✓
 - **O4 Layer 3 slice 3** (graceful-degradation coverage diagnostic). ✓
 - **`is_a?(C)` lexical-nesting constant resolution**. ✓
 - **DEFAULT_LIBRARIES expansion** (+31 stdlib libraries; 1,273 → 1,427 RBS classes). ✓

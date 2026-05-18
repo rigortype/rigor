@@ -4,6 +4,7 @@ require_relative "environment/class_registry"
 require_relative "environment/rbs_loader"
 require_relative "environment/reflection"
 require_relative "environment/reporters"
+require_relative "environment/hkt_registry_holder"
 require_relative "environment/bundle_sig_discovery"
 require_relative "environment/lockfile_resolver"
 require_relative "environment/rbs_collection_discovery"
@@ -62,8 +63,7 @@ module Rigor
 
     attr_reader :class_registry, :rbs_loader, :plugin_registry, :dependency_source_index,
                 :reporters, :name_scope,
-                :synthetic_method_index, :project_patched_methods,
-                :hkt_registry
+                :synthetic_method_index, :project_patched_methods
 
     # @param class_registry [Rigor::Environment::ClassRegistry]
     # @param rbs_loader [Rigor::Environment::RbsLoader, nil] when nil the
@@ -104,14 +104,39 @@ module Rigor
       )
       @synthetic_method_index = synthetic_method_index || Inference::SyntheticMethodIndex::EMPTY
       @project_patched_methods = project_patched_methods || Inference::ProjectPatchedMethods::EMPTY
-      # ADR-20 slice 2c — the per-env HKT registry consulted by
-      # the reducer when resolving `Type::App` carriers. Defaults
-      # to {Inference::HktRegistry::EMPTY}; the {.default} /
-      # {.for_project} class methods seed it with the bundled
-      # builtins (`json::value`, …) below.
-      @hkt_registry = hkt_registry || Inference::HktRegistry::EMPTY
+      # ADR-20 slice 2c + 2e — the per-env HKT registry
+      # consulted by the reducer when resolving `Type::App`
+      # carriers. Defaults to {Inference::HktRegistry::EMPTY};
+      # the {.default} / {.for_project} class methods seed it
+      # with the bundled builtins (`json::value`, …) plus any
+      # `%a{rigor:v1:hkt_register / hkt_define}` annotations
+      # the RBS loader exposes. The hkt_registry getter
+      # (defined below) MEMOIZES the result of merging the
+      # base with the RBS scan so the scan is paid at most
+      # once per Environment lifetime — and only when first
+      # consulted, leaving fast paths like `rigor check
+      # --cache-stats --no-stats` from doing the RBS env
+      # build at all.
+      @hkt_registry_base = hkt_registry || Inference::HktRegistry::EMPTY
+      @hkt_registry_holder = HktRegistryHolder.new
       @name_scope = build_name_scope
       freeze
+    end
+
+    # ADR-20 slice 2e — lazy HKT registry getter. Merges the
+    # base registry (Builtins seed) with the RBS env scan on
+    # first call, then memoises. Single-threaded use only:
+    # under the Ractor pool path each worker has its own
+    # Environment so cross-worker mutation is impossible; the
+    # LSP single-publish-at-a-time invariant serialises here.
+    def hkt_registry
+      @hkt_registry_holder.fetch do
+        Inference::HktRegistry.scan_rbs_loader(
+          @rbs_loader,
+          base: @hkt_registry_base,
+          reporter: rbs_extended_reporter
+        )
+      end
     end
 
     # Backwards-compatible reporter accessors — every existing
@@ -226,20 +251,15 @@ module Rigor
           signature_paths: loader_signature_paths,
           cache_store: cache_store
         )
-        # ADR-20 slice 2e — scan the loaded RBS env for
-        # `%a{rigor:v1:hkt_register / hkt_define}` annotations
-        # and merge them on top of the bundled builtins. The
-        # scan triggers an eager RBS env build (otherwise lazy)
-        # so user-authored overlays take effect at the same
-        # call sites the dispatcher consults. URI collisions
-        # let the user-authored overlay win over the bundled
-        # builtin (last-write-wins per ADR-20 OQ3 tentative).
-        merged_hkt_registry = Inference::HktRegistry.scan_rbs_loader(
-          loader,
-          base: Builtins::HktBuiltins.registry,
-          reporter: rbs_extended_reporter
-        )
-
+        # ADR-20 slice 2c + 2e — seed hkt_registry with the
+        # bundled builtins. The Environment's `#hkt_registry`
+        # getter then LAZILY merges in the RBS env scan on
+        # first call so fast paths that don't consult HKT
+        # (e.g. `rigor check --cache-stats --no-stats`) don't
+        # pay the eager env-build cost up front. URI
+        # collisions let the user-authored overlay win over
+        # the bundled builtin (last-write-wins per ADR-20
+        # OQ3 tentative).
         new(
           rbs_loader: loader,
           plugin_registry: plugin_registry,
@@ -248,7 +268,7 @@ module Rigor
           boundary_cross_reporter: boundary_cross_reporter,
           synthetic_method_index: synthetic_method_index,
           project_patched_methods: project_patched_methods,
-          hkt_registry: merged_hkt_registry
+          hkt_registry: Builtins::HktBuiltins.registry
         )
       end
       # rubocop:enable Metrics/MethodLength, Metrics/ParameterLists

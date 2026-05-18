@@ -83,7 +83,7 @@ module Rigor
         VENDORED_GEM_SIGS_ROOT = File.expand_path(
           "../../../data/vendored_gem_sigs",
           __dir__
-        )
+        ).freeze
         private_constant :VENDORED_GEM_SIGS_ROOT
 
         def vendored_gem_sig_paths
@@ -186,8 +186,13 @@ module Rigor
             decl.annotations.each { |a| yield a.string, a.location }
           end
         end
-      rescue ::RBS::BaseError
+      rescue ::RBS::BaseError, ::Ractor::IsolationError
         # fail-soft: matches each_known_class_name's policy.
+        # Ractor::IsolationError surfaces when the scan is
+        # invoked from a non-main Ractor pool worker before
+        # ADR-15's full deep-freeze migration completes — the
+        # worker falls back to the base (builtins-only)
+        # registry rather than crashing.
       end
 
       # Returns a frozen `Hash<String, String>` mapping each loaded

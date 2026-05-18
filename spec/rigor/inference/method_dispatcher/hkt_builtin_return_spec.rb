@@ -145,6 +145,85 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
       expect(type).to be_a(Rigor::Type::Union)
     end
 
+    context "with the YAML `permitted_classes:` post-reduce hook" do
+      def dispatch_with_opts(method_name, opts_pairs, receiver: Rigor::Type::Combinator.singleton_of(YAML))
+        opts_shape = Rigor::Type::HashShape.new(opts_pairs)
+        described_class.dispatch(
+          receiver_type: receiver,
+          method_name: method_name,
+          arg_types: [Rigor::Type::Combinator.nominal_of(String), opts_shape],
+          environment: environment
+        )
+      end
+
+      def singleton_of_class(name)
+        Rigor::Type::Combinator.singleton_of(Object.const_get(name))
+      end
+
+      it "unions a single `permitted_classes: [Date]` literal into the YAML.safe_load result" do
+        require "date"
+        type = dispatch_with_opts(:safe_load, {
+                                    permitted_classes: Rigor::Type::Tuple.new([singleton_of_class("Date")])
+                                  })
+        expect(type).to be_a(Rigor::Type::Union)
+        described = type.members.map(&:describe)
+        expect(described).to include("Date")
+        # The json::value envelope members survive alongside Date.
+        expect(described).to include("nil", "true", "Integer", "String")
+      end
+
+      it "unions multiple permitted_classes (Date + Symbol) into the result" do
+        require "date"
+        type = dispatch_with_opts(:safe_load, {
+                                    permitted_classes: Rigor::Type::Tuple.new(
+                                      [singleton_of_class("Date"), singleton_of_class("Symbol")]
+                                    )
+                                  })
+        described = type.members.map(&:describe)
+        expect(described).to include("Date", "Symbol")
+      end
+
+      it "stays at the base json::value envelope when permitted_classes is empty" do
+        type = dispatch_with_opts(:safe_load, { permitted_classes: Rigor::Type::Tuple.new([]) })
+        described = type.members.map(&:describe)
+        expect(described).not_to include("Date")
+        expect(described).to include("nil", "true", "Integer", "String")
+      end
+
+      it "silently no-ops when permitted_classes is a non-literal value (e.g. Dynamic[Top])" do
+        type = dispatch_with_opts(:safe_load, { permitted_classes: Rigor::Type::Combinator.untyped })
+        # Should still be the base json::value Union — no extra class arms.
+        described = type.members.map(&:describe)
+        expect(described).to include("nil", "true", "Integer", "String")
+      end
+
+      it "also works for Psych.safe_load" do
+        require "date"
+        type = dispatch_with_opts(
+          :safe_load,
+          { permitted_classes: Rigor::Type::Tuple.new([singleton_of_class("Date")]) },
+          receiver: Rigor::Type::Combinator.singleton_of(Psych)
+        )
+        expect(type.members.map(&:describe)).to include("Date")
+      end
+
+      it "does NOT augment JSON.parse (no post_reduce on JSON_VALUE_SPEC)" do
+        # JSON.parse with a similarly-shaped opts hash should NOT pick up Date —
+        # only YAML/Psych entries have the post_reduce hook.
+        require "date"
+        opts_shape = Rigor::Type::HashShape.new(
+          permitted_classes: Rigor::Type::Tuple.new([singleton_of_class("Date")])
+        )
+        type = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.singleton_of(JSON),
+          method_name: :parse,
+          arg_types: [Rigor::Type::Combinator.nominal_of(String), opts_shape],
+          environment: environment
+        )
+        expect(type.members.map(&:describe)).not_to include("Date")
+      end
+    end
+
     it "does not fire for YAML.load (deliberately uncovered — can return any Ruby object)" do
       type = described_class.dispatch(
         receiver_type: Rigor::Type::Combinator.singleton_of(YAML),

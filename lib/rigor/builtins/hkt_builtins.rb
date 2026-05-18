@@ -110,9 +110,23 @@ module Rigor
       JSON_VALUE_SPEC = {
         uri: :"json::value",
         args: ["String"],
-        discriminator: :json_symbolize_names
+        discriminator: :json_symbolize_names,
+        post_reduce: nil
       }.freeze
       private_constant :JSON_VALUE_SPEC
+
+      # YAML / Psych.safe_load reuse the json::value reducer
+      # for the JSON-equivalent leaf set BUT additionally
+      # honour `permitted_classes: [<Class>, ...]` literal
+      # Array arguments, unioning each permitted class as an
+      # extra arm of the result. Slice 2c-bis behaviour.
+      YAML_SAFE_VALUE_SPEC = {
+        uri: :"json::value",
+        args: ["String"],
+        discriminator: :json_symbolize_names,
+        post_reduce: :yaml_permitted_classes
+      }.freeze
+      private_constant :YAML_SAFE_VALUE_SPEC
 
       METHOD_RETURN_OVERRIDES = {
         # JSON — stdlib's `json` library. Upstream rbs declares
@@ -125,17 +139,20 @@ module Rigor
         # `permitted_classes: []` admits exactly the JSON
         # vocabulary (nil / true / false / Integer / Float /
         # String / Array / Hash), so the json::value tree
-        # also describes them. Non-default `permitted_classes`
-        # broadens the runtime answer; the analyzer reports
-        # the json::value envelope and users opt into RBS
-        # overrides when they configure custom permits.
-        # YAML.load / YAML.unsafe_load deliberately stay out
-        # of the override table — they can return ANY Ruby
-        # object and have no useful HKT envelope.
-        ["YAML",  :safe_load,      :singleton] => JSON_VALUE_SPEC,
-        ["YAML",  :safe_load_file, :singleton] => JSON_VALUE_SPEC,
-        ["Psych", :safe_load,      :singleton] => JSON_VALUE_SPEC,
-        ["Psych", :safe_load_file, :singleton] => JSON_VALUE_SPEC
+        # also describes them. When the call passes a literal
+        # `permitted_classes: [Date, Symbol, ...]` Array, the
+        # `:yaml_permitted_classes` post_reduce unions each
+        # named class into the result. Non-literal options
+        # (a variable, a constant reference, a `+ classes`
+        # concat) silently no-op and the caller observes the
+        # base json::value envelope only. YAML.load /
+        # YAML.unsafe_load deliberately stay out of the
+        # override table — they can return ANY Ruby object
+        # and have no useful HKT envelope.
+        ["YAML",  :safe_load,      :singleton] => YAML_SAFE_VALUE_SPEC,
+        ["YAML",  :safe_load_file, :singleton] => YAML_SAFE_VALUE_SPEC,
+        ["Psych", :safe_load,      :singleton] => YAML_SAFE_VALUE_SPEC,
+        ["Psych", :safe_load_file, :singleton] => YAML_SAFE_VALUE_SPEC
       }.freeze
 
       # @return [Rigor::Type, nil] the reduced HKT type for
@@ -155,9 +172,14 @@ module Rigor
         bound = registration&.bound || Rigor::Type::Combinator.untyped
         app = Rigor::Type::App.new(spec[:uri], args, bound: bound)
 
-        return app if hkt_registry.nil? || !hkt_registry.defined?(spec[:uri])
+        reduced =
+          if hkt_registry.nil? || !hkt_registry.defined?(spec[:uri])
+            app
+          else
+            hkt_registry.reduce(app) || app
+          end
 
-        hkt_registry.reduce(app) || app
+        apply_post_reduce(spec[:post_reduce], reduced, arg_types)
       end
 
       # Per-spec discriminator dispatch. Slice 3 ships one
@@ -189,6 +211,76 @@ module Rigor
 
         value = opts.pairs[:symbolize_names] || opts.pairs["symbolize_names"]
         value.is_a?(Rigor::Type::Constant) && value.value == true
+      end
+
+      # Slice 2c-bis — post-reduce hook. Receives the already-
+      # reduced `Type` and the call-site's `arg_types`; returns
+      # a (possibly augmented) `Type`. `kind = nil` is the
+      # identity (passes the reduced type through unchanged).
+      # Only `:yaml_permitted_classes` is implemented today;
+      # plugin / Rigor-bundled callers wanting their own
+      # post-reduce hooks add a branch here.
+      def apply_post_reduce(kind, reduced, arg_types)
+        case kind
+        when :yaml_permitted_classes
+          augment_with_yaml_permitted_classes(reduced, arg_types)
+        else
+          # `nil` (no post-reduce declared) and any future
+          # unrecognised kind both pass the reduced type
+          # through unchanged. Unknown kinds are silently
+          # tolerated rather than raised because adding a
+          # new kind on a Rigor upgrade should not crash a
+          # stale METHOD_RETURN_OVERRIDES entry on the
+          # caller side.
+          reduced
+        end
+      end
+
+      # Inspects arg_types for a `permitted_classes: [<Class>,
+      # ...]` literal Array in the options Hash and unions
+      # each named class into the reduced result. Non-literal
+      # `permitted_classes:` values (a variable, a constant
+      # reference, a concat) silently no-op and the caller
+      # observes the base json::value envelope only. Defensive
+      # against the various ways Ruby literal arrays surface
+      # as Rigor types: `Tuple[Singleton<Date>]` for a single
+      # element, `Tuple[Singleton<Date>, Singleton<Symbol>]`
+      # for multiple, `Nominal[Array, [Singleton<...>]]` if
+      # the analyzer widened (rare for literal arrays).
+      def augment_with_yaml_permitted_classes(reduced, arg_types)
+        return reduced unless arg_types.is_a?(Array) && arg_types.size >= 2
+
+        opts = arg_types[1]
+        return reduced unless opts.is_a?(Rigor::Type::HashShape)
+
+        value = opts.pairs[:permitted_classes] || opts.pairs["permitted_classes"]
+        return reduced if value.nil?
+
+        extras = permitted_class_nominals(value)
+        return reduced if extras.empty?
+
+        Rigor::Type::Combinator.union(reduced, *extras)
+      end
+
+      # Extract Singleton-class elements from a Tuple or
+      # Array-shape carrier, mapping each to its Nominal
+      # counterpart. Returns an empty array when no static
+      # Singletons are reachable (e.g. value is `Dynamic[T]`,
+      # element types are non-Singleton, etc.).
+      def permitted_class_nominals(value)
+        candidates =
+          if value.is_a?(Rigor::Type::Tuple)
+            value.elements
+          elsif value.is_a?(Rigor::Type::Nominal) && value.class_name == "Array" && value.type_args.size == 1
+            element = value.type_args.first
+            element.is_a?(Rigor::Type::Union) ? element.members : [element]
+          else
+            []
+          end
+
+        candidates.filter_map do |c|
+          c.is_a?(Rigor::Type::Singleton) ? Rigor::Type::Nominal.new(c.class_name) : nil
+        end
       end
     end
   end

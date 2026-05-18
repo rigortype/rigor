@@ -76,6 +76,64 @@ RSpec.describe Rigor::Inference::HktBody do
     end
   end
 
+  describe Rigor::Inference::HktBody::Conditional do
+    let(:k_param) { Rigor::Inference::HktBody::Param.new(name: :K) }
+    let(:str_leaf) { Rigor::Inference::HktBody::TypeLeaf.new(type: str_nominal) }
+    let(:test) { Rigor::Inference::HktBody::TestSubtype.new(left: k_param, right: str_leaf) }
+
+    it "stores test, then_branch, and else_branch" do
+      cond = described_class.new(test: test, then_branch: str_leaf, else_branch: str_leaf)
+      expect(cond.test).to eq(test)
+      expect(cond.then_branch).to eq(str_leaf)
+      expect(cond.else_branch).to eq(str_leaf)
+    end
+
+    it "rejects nil test/then/else" do
+      expect { described_class.new(test: nil, then_branch: str_leaf, else_branch: str_leaf) }
+        .to raise_error(ArgumentError, /test must not be nil/)
+      expect { described_class.new(test: test, then_branch: nil, else_branch: str_leaf) }
+        .to raise_error(ArgumentError, /then_branch must not be nil/)
+      expect { described_class.new(test: test, then_branch: str_leaf, else_branch: nil) }
+        .to raise_error(ArgumentError, /else_branch must not be nil/)
+    end
+  end
+
+  describe Rigor::Inference::HktBody::TestSubtype do
+    let(:left) { Rigor::Inference::HktBody::Param.new(name: :K) }
+    let(:right) { Rigor::Inference::HktBody::TypeLeaf.new(type: str_nominal) }
+
+    it "stores left and right" do
+      test = described_class.new(left: left, right: right)
+      expect(test.left).to eq(left)
+      expect(test.right).to eq(right)
+    end
+
+    it "rejects nil sides" do
+      expect { described_class.new(left: nil, right: right) }
+        .to raise_error(ArgumentError, %r{left/right must not be nil})
+    end
+  end
+
+  describe Rigor::Inference::HktBody::TestMembership do
+    let(:left) { Rigor::Inference::HktBody::Param.new(name: :K) }
+    let(:option) { Rigor::Inference::HktBody::TypeLeaf.new(type: Rigor::Type::Constant.new(:foo)) }
+
+    it "stores left and options" do
+      test = described_class.new(left: left, options: [option, option])
+      expect(test.options.size).to eq(2)
+    end
+
+    it "rejects empty options" do
+      expect { described_class.new(left: left, options: []) }
+        .to raise_error(ArgumentError, /options must be non-empty/)
+    end
+
+    it "freezes options" do
+      test = described_class.new(left: left, options: [option])
+      expect(test.options).to be_frozen
+    end
+  end
+
   describe Rigor::Inference::HktBody::NominalApp do
     let(:param_k) { Rigor::Inference::HktBody::Param.new(name: :K) }
 

@@ -111,6 +111,61 @@ module Rigor
           super(class_name: class_name, args: args.dup.freeze)
         end
       end
+
+      # ADR-20 § D3 — conditional type form. `test` is a
+      # {TestSubtype} / {TestEquality} / {TestMembership}
+      # value object the reducer evaluates against the
+      # current bindings; `then_branch` / `else_branch` are
+      # body nodes. The reducer's trinary handling:
+      #
+      # - test = `yes` → return the reduced `then_branch`.
+      # - test = `no` → return the reduced `else_branch`.
+      # - test = `maybe` → widen to the union of both
+      #   reduced branches (per ADR-20 WD7 / robustness
+      #   principle).
+      Conditional = Data.define(:test, :then_branch, :else_branch) do
+        def initialize(test:, then_branch:, else_branch:)
+          raise ArgumentError, "test must not be nil" if test.nil?
+          raise ArgumentError, "then_branch must not be nil" if then_branch.nil?
+          raise ArgumentError, "else_branch must not be nil" if else_branch.nil?
+
+          super
+        end
+      end
+
+      # `left <: right` — subtype check. `left` is typically
+      # a {Param} reference; `right` is any body expression.
+      TestSubtype = Data.define(:left, :right) do
+        def initialize(left:, right:)
+          raise ArgumentError, "left/right must not be nil" if left.nil? || right.nil?
+
+          super
+        end
+      end
+
+      # `left == right` — structural equality. Useful for
+      # discriminating against literal constants
+      # (`E == :symbol`).
+      TestEquality = Data.define(:left, :right) do
+        def initialize(left:, right:)
+          raise ArgumentError, "left/right must not be nil" if left.nil? || right.nil?
+
+          super
+        end
+      end
+
+      # `left in [opt1, opt2, ...]` — set membership. Each
+      # `option` is a body node; the test passes iff `left`
+      # is structurally equal to any of the options.
+      TestMembership = Data.define(:left, :options) do
+        def initialize(left:, options:)
+          raise ArgumentError, "left must not be nil" if left.nil?
+          raise ArgumentError, "options must be an Array, got #{options.class}" unless options.is_a?(Array)
+          raise ArgumentError, "options must be non-empty" if options.empty?
+
+          super(left: left, options: options.dup.freeze)
+        end
+      end
     end
   end
 end

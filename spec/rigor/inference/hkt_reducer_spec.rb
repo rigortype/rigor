@@ -259,6 +259,99 @@ RSpec.describe Rigor::Inference::HktReducer do
       end
     end
 
+    context "with conditional body nodes (ADR-20 § D3)" do
+      let(:str_leaf) { body::TypeLeaf.new(type: str_nominal) }
+      let(:int_leaf) { body::TypeLeaf.new(type: int_nominal) }
+
+      def conditional_registry(test_node)
+        registry_class.new(
+          registrations: [registry_class::Registration.new(uri: :"cond::it", arity: 1, variance: [:out],
+                                                           bound: untyped)],
+          definitions: [
+            registry_class.definition_with_body_tree(
+              uri: :"cond::it",
+              params: [:K],
+              body_tree: body::Conditional.new(
+                test: test_node,
+                then_branch: str_leaf,
+                else_branch: int_leaf
+              )
+            )
+          ]
+        )
+      end
+
+      it "TestSubtype: left == right yields the then_branch" do
+        # K <: String when K = String → :yes → then_branch (String)
+        test = body::TestSubtype.new(left: body::Param.new(name: :K), right: str_leaf)
+        registry = conditional_registry(test)
+        result = registry.reduce(make_app(:"cond::it", [str_nominal]))
+        expect(result).to eq(str_nominal)
+      end
+
+      it "TestSubtype: disjoint nominals → else_branch" do
+        # K <: String when K = Integer → :no (disjoint nominals) → else_branch (Integer)
+        test = body::TestSubtype.new(left: body::Param.new(name: :K), right: str_leaf)
+        registry = conditional_registry(test)
+        result = registry.reduce(make_app(:"cond::it", [int_nominal]))
+        expect(result).to eq(int_nominal)
+      end
+
+      it "TestEquality on constants: equal → then_branch" do
+        # K == :foo when K = Constant<:foo> → :yes → then_branch (String)
+        sym_const = Rigor::Type::Constant.new(:foo)
+        test = body::TestEquality.new(
+          left: body::Param.new(name: :K),
+          right: body::TypeLeaf.new(type: sym_const)
+        )
+        registry = conditional_registry(test)
+        result = registry.reduce(make_app(:"cond::it", [sym_const]))
+        expect(result).to eq(str_nominal)
+      end
+
+      it "TestEquality on constants: not equal → else_branch" do
+        test = body::TestEquality.new(
+          left: body::Param.new(name: :K),
+          right: body::TypeLeaf.new(type: Rigor::Type::Constant.new(:foo))
+        )
+        registry = conditional_registry(test)
+        result = registry.reduce(make_app(:"cond::it", [Rigor::Type::Constant.new(:bar)]))
+        expect(result).to eq(int_nominal)
+      end
+
+      it "TestMembership: any option matches → then_branch" do
+        test = body::TestMembership.new(
+          left: body::Param.new(name: :K),
+          options: [
+            body::TypeLeaf.new(type: Rigor::Type::Constant.new(:foo)),
+            body::TypeLeaf.new(type: Rigor::Type::Constant.new(:bar))
+          ]
+        )
+        registry = conditional_registry(test)
+        result = registry.reduce(make_app(:"cond::it", [Rigor::Type::Constant.new(:bar)]))
+        expect(result).to eq(str_nominal)
+      end
+
+      it "TestMembership: no option matches → else_branch" do
+        test = body::TestMembership.new(
+          left: body::Param.new(name: :K),
+          options: [body::TypeLeaf.new(type: Rigor::Type::Constant.new(:foo))]
+        )
+        registry = conditional_registry(test)
+        result = registry.reduce(make_app(:"cond::it", [Rigor::Type::Constant.new(:bar)]))
+        expect(result).to eq(int_nominal)
+      end
+
+      it "undecided subtype (Dynamic[Top] vs String) widens to union of both branches" do
+        # K <: String when K = Dynamic[Top] → :maybe → union(String, Integer)
+        test = body::TestSubtype.new(left: body::Param.new(name: :K), right: str_leaf)
+        registry = conditional_registry(test)
+        result = registry.reduce(make_app(:"cond::it", [untyped]))
+        expect(result).to be_a(Rigor::Type::Union)
+        expect(result.members).to contain_exactly(str_nominal, int_nominal)
+      end
+    end
+
     context "with cross-URI references" do
       # outer::it[K] = Array[App[inner::it, K]]
       # inner::it[K] = K

@@ -100,9 +100,99 @@ module Rigor
         when HktBody::AppRef
           reduced_args = node.args.map { |arg| walk(arg, bindings: bindings, state: state) }
           reduce_app_ref(node.uri, reduced_args, state: state)
+        when HktBody::Conditional
+          walk_conditional(node, bindings: bindings, state: state)
         else
           raise ArgumentError, "unknown body node: #{node.class}"
         end
+      end
+
+      # ADR-20 § D3 conditional reduction. Resolves the test
+      # against the current bindings and picks a branch:
+      #
+      # - test = `yes` → return the reduced `then_branch`.
+      # - test = `no`  → return the reduced `else_branch`.
+      # - test = `maybe` → widen to the union of both
+      #   reduced branches (per ADR-20 WD7).
+      def walk_conditional(node, bindings:, state:)
+        verdict = evaluate_test(node.test, bindings: bindings, state: state)
+        case verdict
+        when :yes
+          walk(node.then_branch, bindings: bindings, state: state)
+        when :no
+          walk(node.else_branch, bindings: bindings, state: state)
+        else
+          # `:maybe` — widen to the union of both branches.
+          then_t = walk(node.then_branch, bindings: bindings, state: state)
+          else_t = walk(node.else_branch, bindings: bindings, state: state)
+          Type::Combinator.union(then_t, else_t)
+        end
+      end
+
+      def evaluate_test(test, bindings:, state:)
+        case test
+        when HktBody::TestSubtype
+          left = walk(test.left, bindings: bindings, state: state)
+          right = walk(test.right, bindings: bindings, state: state)
+          subtype_verdict(left, right)
+        when HktBody::TestEquality
+          left = walk(test.left, bindings: bindings, state: state)
+          right = walk(test.right, bindings: bindings, state: state)
+          equality_verdict(left, right)
+        when HktBody::TestMembership
+          left = walk(test.left, bindings: bindings, state: state)
+          options = test.options.map { |o| walk(o, bindings: bindings, state: state) }
+          membership_verdict(left, options)
+        else
+          raise ArgumentError, "unknown test node: #{test.class}"
+        end
+      end
+
+      # `left <: right`. Slice 7a verdict policy: structural
+      # equality is `:yes`; clearly-disjoint nominal /
+      # constant pairs are `:no`; everything else is `:maybe`
+      # (widens to the union per ADR-20 WD7 — robustness
+      # principle keeps us conservative on undecided tests).
+      def subtype_verdict(left, right)
+        return :yes if left == right
+
+        # Both Nominals with different class names AND
+        # neither carries Dynamic — `:no` (statically
+        # disjoint). For any other shape pair, `:maybe`.
+        return :no if disjoint_nominals?(left, right)
+        return :no if disjoint_constants?(left, right)
+
+        :maybe
+      end
+
+      # Structural equality verdict — same shape as
+      # subtype_verdict but symmetric.
+      def equality_verdict(left, right)
+        return :yes if left == right
+        return :no if disjoint_nominals?(left, right)
+        return :no if disjoint_constants?(left, right)
+
+        :maybe
+      end
+
+      def membership_verdict(left, options)
+        verdicts = options.map { |o| equality_verdict(left, o) }
+        return :yes if verdicts.include?(:yes)
+        return :no if verdicts.all? { |v| v == :no }
+
+        :maybe
+      end
+
+      def disjoint_nominals?(left, right)
+        return false unless left.is_a?(Type::Nominal) && right.is_a?(Type::Nominal)
+
+        left.class_name != right.class_name
+      end
+
+      def disjoint_constants?(left, right)
+        return false unless left.is_a?(Type::Constant) && right.is_a?(Type::Constant)
+
+        left.value != right.value
       end
 
       def reduce_app_ref(uri, reduced_args, state:)

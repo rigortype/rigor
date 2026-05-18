@@ -118,7 +118,20 @@ module Rigor
         @libraries = libraries.map(&:to_s).freeze
         @signature_paths = signature_paths.map { |p| Pathname(p) }.freeze
         @cache_store = cache_store
-        @state = { env: nil, builder: nil }
+        # Per-loader memoization bucket. Held as a single
+        # mutable Hash so the loader instance itself can be
+        # `.freeze`d (per ADR-15 reflection-facade contract)
+        # without losing the lazy-memo behaviour. Slot names
+        # currently consulted: `:env`, `:env_loaded`,
+        # `:env_build_warned`, `:builder`, `:reflection`,
+        # `:instance_definitions_table`,
+        # `:singleton_definitions_table`. Constructed via
+        # `Hash.new` (NOT a `{ ... }` literal) so Rigor's
+        # `HashShape` narrowing doesn't infer a fixed key set
+        # from the initial state and fold post-initial slot
+        # reads (e.g. `@state[:env_loaded]`) to a constant
+        # `nil`.
+        @state = Hash.new # rubocop:disable Style/EmptyLiteral
         @instance_definition_cache = {}
         @singleton_definition_cache = {}
         @class_known_cache = {}

@@ -197,7 +197,7 @@ RSpec.describe Rigor::Inference::HktBodyParser do
 
     it "raises on missing test operator" do
       expect { parse("(K ? Integer : Float)", params: [:K]) }
-        .to raise_error(described_class::ParseError, /expected `<:` or `==`/)
+        .to raise_error(described_class::ParseError, /expected `<:`, `==`, or `in`/)
     end
 
     it "raises on missing `?`" do
@@ -213,6 +213,25 @@ RSpec.describe Rigor::Inference::HktBodyParser do
     it "raises on unclosed paren" do
       expect { parse("(K <: String ? Integer : Float", params: [:K]) }
         .to raise_error(described_class::ParseError, /expected rparen/)
+    end
+
+    it "parses `(K in [String, Symbol] ? Integer : Float)` as TestMembership" do
+      result = parse("(K in [String, Symbol] ? Integer : Float)", params: [:K])
+      expect(result.test).to be_a(body::TestMembership)
+      expect(result.test.options.size).to eq(2)
+      expect(result.test.options[0]).to eq(body::TypeLeaf.new(type: Rigor::Type::Nominal.new("String")))
+      expect(result.test.options[1]).to eq(body::TypeLeaf.new(type: Rigor::Type::Nominal.new("Symbol")))
+    end
+
+    it "parses single-option membership `(K in [String] ? Integer : Float)`" do
+      result = parse("(K in [String] ? Integer : Float)", params: [:K])
+      expect(result.test).to be_a(body::TestMembership)
+      expect(result.test.options.size).to eq(1)
+    end
+
+    it "rejects bare lowercase identifier other than `in` as test operator" do
+      expect { parse("(K foo String ? Integer : Float)", params: [:K]) }
+        .to raise_error(described_class::ParseError, /expected `<:`, `==`, or `in`/)
     end
 
     it "the parsed conditional reduces end-to-end" do

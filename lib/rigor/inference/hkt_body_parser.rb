@@ -190,10 +190,34 @@ module Rigor
           when :eq
             consume
             HktBody::TestEquality.new(left: left, right: parse_type_expr)
+          when :ident
+            parse_in_membership(left, op_token: op)
           else
             actual = op.nil? ? "end of input" : "#{op.kind} (#{op.value.inspect})"
-            raise ParseError, "expected `<:` or `==` in conditional test, got #{actual}"
+            raise ParseError, "expected `<:`, `==`, or `in` in conditional test, got #{actual}"
           end
+        end
+
+        # `left in [opt1, opt2, ...]` membership test.
+        # Distinguished from a lowercase atom by the
+        # subsequent `[` — the only place an identifier
+        # `in` is permitted at this position is membership
+        # syntax.
+        def parse_in_membership(left, op_token:)
+          unless op_token.value == "in"
+            raise ParseError,
+                  "expected `<:`, `==`, or `in` in conditional test, got ident (#{op_token.value.inspect})"
+          end
+
+          consume # in
+          expect!(:lb)
+          options = [parse_type_expr]
+          while peek_kind == :comma
+            consume
+            options << parse_type_expr
+          end
+          expect!(:rb)
+          HktBody::TestMembership.new(left: left, options: options)
         end
 
         def parse_lowercase_atom

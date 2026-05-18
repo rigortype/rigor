@@ -153,8 +153,7 @@ if you want to.
 ## The body grammar
 
 `body=` is parsed by `HktBodyParser` into a tree the reducer
-walks. The minimum-viable grammar (sufficient for `JSON.parse`'s
-recursive sum and similar recursive-data-shape signatures):
+walks. The grammar covers ADR-20 § D3 in full:
 
 | Form | Example | Meaning |
 | --- | --- | --- |
@@ -164,12 +163,60 @@ recursive sum and similar recursive-data-shape signatures):
 | Parameterised nominal | `Array[K]`, `Hash[K, V]` | `Nominal[..., type_args: [...]]` |
 | Lightweight HKT application | `App[json::value, K]` | Another `Type::App` carrier, reduced lazily |
 | Union | `A \| B \| C` | `Type::Union` (normalised) |
+| **Conditional** | `(K <: String ? Integer : Float)` | Branches on a test verdict |
 
 Disambiguation: a UCName matching one of `params` becomes a
 `Param` node, **unless** it's followed by `::` (qualified class
 continuation) or `[` (parameterised app), in which case it's
 treated as a nominal. So `K` is a param ref, `K[X]` is the
 class `K` applied to `X`.
+
+### Conditional types (§ D3)
+
+Conditional types let the body branch on the bound type — useful
+for shape-driven discriminators inside a single registration:
+
+```rbs
+%a{rigor:v1:hkt_define: uri=my_app::result params=K body=
+  (K <: String ? Integer : Float)
+}
+```
+
+Three test operators:
+
+| Test | Example | Meaning |
+| --- | --- | --- |
+| `<:` (subtype) | `K <: String` | True when `K`'s reduced type is a subtype of `String` |
+| `==` (structural equality) | `K == :symbol` | True when `K`'s reduced type structurally equals the right side |
+| `in [...]` (membership) | `K in [String, Symbol]` | True when `K`'s reduced type structurally equals any option |
+
+The reducer's verdict policy is **trinary**:
+
+- `:yes` → reduce the `then_branch`.
+- `:no` → reduce the `else_branch`.
+- `:maybe` (undecided — e.g. `Dynamic[T]` on either side) → widen
+  to the union of both reduced branches (per ADR-20 WD7 /
+  robustness principle — Rigor stays conservative when it can't
+  prove which arm fires).
+
+Verdict policy at the current slice: structural equality → `:yes`;
+disjoint nominals (different `class_name`) or disjoint constants
+(different `value`) → `:no`; everything else → `:maybe`.
+
+Branches accept unions and nested conditionals:
+
+```rbs
+%a{rigor:v1:hkt_define: uri=my_app::numeric params=E body=
+  (E <: Integer ? Integer
+    : (E <: Float ? Float
+      : (E <: String ? Integer | Float | nil
+        : untyped)))
+}
+```
+
+Test sides themselves are single arms (no union directly on a
+test side — wrap in `App[my_union, ...]` if you need a union
+there).
 
 ## Reduction semantics — lazy "tying-the-knot"
 
@@ -207,12 +254,13 @@ evaluation) bounds runaway expansion. Exhaustion unwinds to
 
 Lightweight HKT is, well, lightweight. Conscious non-goals:
 
-- **Conditional / indexed-access bodies** (`E <: T ? A : B`,
-  `E in [k1, k2]`) — drafted in ADR-20 § D3 but not yet
-  implemented. The `rigor-lisp-eval` demo's
-  `lisp_type[E]` body needs this; it stays on the
-  diagnostic-emitter path until the conditional grammar
-  ships.
+- **Pattern-matching with binder extraction**
+  (`E <: [:if, _, A, B] ? lisp_type[A] | lisp_type[B] : ...`).
+  The conditional grammar described above tests yes/no/maybe
+  but does not bind new type variables out of the pattern.
+  `rigor-lisp-eval` needs binder extraction for full
+  AST-shape discrimination; it stays on the diagnostic-emitter
+  path until pattern bindings land.
 - **Multi-arg HKTs for non-recursive containers**
   (`Result[T, E]` / `Maybe[T]`) — the registry supports
   multi-arg URIs, but Rigor's existing carriers don't have

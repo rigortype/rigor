@@ -373,9 +373,12 @@ module Rigor
             return
           end
         when Prism::SingletonClassNode
-          if node.expression.is_a?(Prism::SelfNode) && node.body
-            walk_methods(node.body, qualified_prefix, true, accumulator)
-            return
+          if node.body
+            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
+            if singleton_prefix
+              walk_methods(node.body, singleton_prefix, true, accumulator)
+              return
+            end
           end
         when Prism::ConstantWriteNode
           if meta_new_block_body(node)
@@ -395,6 +398,30 @@ module Rigor
 
         node.compact_child_nodes.each do |child|
           walk_methods(child, qualified_prefix, in_singleton_class, accumulator)
+        end
+      end
+
+      # Resolves a `class << X` body's qualified prefix.
+      #   - `class << self` keeps `qualified_prefix` (the enclosing class).
+      #   - `class << Foo` inside `class Foo` collapses to the same prefix
+      #     (semantically `class << self`).
+      #   - `class << Foo` not nested in `class Foo` returns `[Foo]`
+      #     so methods defined inside register on Foo's singleton.
+      #   - Any other expression (variable, method call) returns nil
+      #     so the walker falls through and skips the body.
+      def singleton_class_prefix(node, qualified_prefix)
+        case node.expression
+        when Prism::SelfNode
+          qualified_prefix
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          rendered = qualified_name_for(node.expression)
+          return nil unless rendered
+
+          if !qualified_prefix.empty? && qualified_prefix.last == rendered
+            qualified_prefix
+          else
+            rendered.split("::")
+          end
         end
       end
       # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength
@@ -493,9 +520,12 @@ module Rigor
             return
           end
         when Prism::SingletonClassNode
-          if node.expression.is_a?(Prism::SelfNode) && node.body
-            walk_def_nodes(node.body, qualified_prefix, true, accumulator)
-            return
+          if node.body
+            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
+            if singleton_prefix
+              walk_def_nodes(node.body, singleton_prefix, true, accumulator)
+              return
+            end
           end
         when Prism::ConstantWriteNode
           if meta_new_block_body(node)
@@ -571,9 +601,12 @@ module Rigor
             return current_visibility
           end
         when Prism::SingletonClassNode
-          if node.expression.is_a?(Prism::SelfNode) && node.body
-            walk_method_visibilities(node.body, qualified_prefix, true, :public, accumulator)
-            return current_visibility
+          if node.body
+            singleton_prefix = singleton_class_prefix(node, qualified_prefix)
+            if singleton_prefix
+              walk_method_visibilities(node.body, singleton_prefix, true, :public, accumulator)
+              return current_visibility
+            end
           end
         when Prism::ConstantWriteNode
           if meta_new_block_body(node)

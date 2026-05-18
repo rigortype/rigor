@@ -17,6 +17,7 @@ v0.1.5 themes (frozen on tag, full detail in CHANGELOG):
 
 The next cycle (`v0.1.6`) is accumulating on `master` (release pending). Slices landed so far (commits `3c99eed` → `8530856`):
 
+- **Engine — `class << Foo` (explicit-constant singleton-class) opens Foo's singleton scope.** Driven by the references survey (`time.rb`'s `class Time; class << Time; ...`). New `singleton_class_prefix` helper resolves the receiver and collapses to the enclosing class when it matches, or replaces the prefix when unrelated. Mirrored on the StatementEvaluator side. time.rb: 13 → 1 error. ✓
 - **Engine — `def Foo.method` explicit-receiver form recognised as singleton on the enclosing class.** Driven by the references/ruby/lib survey (open-uri.rb's `def OpenURI.check_options` etc.). `ScopeIndexer` + `StatementEvaluator` get a `def_receiver_targets_lexical_self?` helper that promotes `def C.method` to singleton when the receiver constant resolves to the lexical enclosing class. Cross-class form (`def Bar.x` inside `module Foo`) stays unpromoted. open-uri.rb: 24 → 15 errors. ✓
 - **Engine — built-in Prism leaf-node fallback handlers.** Driven by `rigor check --explain references/ruby/lib` survey; eight new `PRISM_DISPATCH` entries cover `__FILE__` / `__LINE__` / backtick / `%x{...}` / `END { … }` / shareable-constant comment / `{ x: }` shorthand / `it` parameter. ~60 `:info` fail-soft fallback events removed across the Ruby core/stdlib reference tree. ✓
 - **O4 Layer 3 slice 3** (graceful-degradation coverage diagnostic). ✓

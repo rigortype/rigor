@@ -1495,12 +1495,45 @@ module Rigor
       end
 
       def singleton_context_for(node)
-        return @class_context unless node.expression.is_a?(Prism::SelfNode)
-        return @class_context if @class_context.empty?
+        case node.expression
+        when Prism::SelfNode
+          return @class_context if @class_context.empty?
 
-        outer = @class_context[0..-2]
-        last = @class_context.last
-        outer + [ClassFrame.new(name: last.name, singleton: true)]
+          outer = @class_context[0..-2]
+          last = @class_context.last
+          outer + [ClassFrame.new(name: last.name, singleton: true)]
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          target = singleton_constant_target(node.expression)
+          return @class_context unless target
+
+          # `class << Foo` inside `class Foo` (the canonical
+          # pattern in Ruby's own time.rb) is semantically
+          # `class << self` — replace the enclosing frame with a
+          # singleton frame for the same name so method
+          # registration and `self_type` lookup land on Foo.
+          # When the target names a different constant (rare
+          # cross-class form), append a fresh singleton frame
+          # tagged with the target FQN; the bodies are scoped to
+          # that target rather than to the lexical enclosing
+          # class.
+          if !@class_context.empty? && @class_context.last.name == target
+            outer = @class_context[0..-2]
+            outer + [ClassFrame.new(name: target, singleton: true)]
+          else
+            [ClassFrame.new(name: target, singleton: true)]
+          end
+        else
+          @class_context
+        end
+      end
+
+      def singleton_constant_target(expression)
+        case expression
+        when Prism::ConstantReadNode
+          expression.name.to_s
+        when Prism::ConstantPathNode
+          render_constant_path(expression)
+        end
       end
 
       # The qualified name of the immediately-enclosing class (joining

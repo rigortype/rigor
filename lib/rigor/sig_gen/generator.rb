@@ -52,6 +52,15 @@ module Rigor
         @paths = paths
         @observations = normalize_observations(observations)
         @include_private = include_private
+        # Per-file scratch state. `analyse_file` resets each
+        # one to a fresh container for every file walked so
+        # candidates from one file don't leak into another;
+        # initialising empty here gives downstream consumers
+        # (`build_candidate`, `method_def_prefix`) a never-nil
+        # invariant without per-call-site defensive guards.
+        @namespace_kinds = {}
+        @module_function_methods = Set.new
+        @class_shells = Set.new
       end
 
       # Lifts legacy plain-`Array[Type]` observation entries
@@ -270,8 +279,8 @@ module Rigor
       # `Const = Data.define(...)` declarations.
       def build_candidate(**)
         MethodCandidate.new(
-          namespace_kinds: @namespace_kinds || {},
-          class_shells: (@class_shells || Set.new).to_a,
+          namespace_kinds: @namespace_kinds,
+          class_shells: @class_shells.to_a,
           **
         )
       end
@@ -282,7 +291,7 @@ module Rigor
       # dispatch at runtime), or "def " (plain instance).
       def method_def_prefix(class_name, method_name, kind)
         return "def self." if kind == :singleton
-        return "def self?." if @module_function_methods&.include?([class_name, method_name])
+        return "def self?." if @module_function_methods.include?([class_name, method_name])
 
         "def "
       end

@@ -1,0 +1,15 @@
+No upstream source: this DidYouMean RBS extras stub is hand-written
+by Rigor maintainers under MPL-2.0 (matching the rest of Rigor).
+The rbs gem ships `stdlib/did_you_mean/0/did_you_mean.rbs` already
+(loaded via `did_you_mean` in `Environment::DEFAULT_LIBRARIES`),
+but four top-level singleton methods (`DidYouMean.formatter`,
+`DidYouMean.formatter=`, `DidYouMean.spell_checkers`,
+`DidYouMean.correct_error`) are missing.
+
+This file is a SUPPLEMENT — it re-opens the upstream module to
+ADD the missing declarations only, never redeclaring anything
+the upstream RBS already covers, so the loader does not raise
+`RBS::DuplicatedDeclarationError`.
+
+Modelled on `references/ruby/lib/did_you_mean.rb`'s `class << self`
+block.

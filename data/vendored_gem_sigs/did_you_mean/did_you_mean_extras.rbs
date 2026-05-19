@@ -1,0 +1,34 @@
+#
+# Rigor-side supplement to the rbs gem's
+# `stdlib/did_you_mean/0/did_you_mean.rbs` declarations.
+#
+# Re-opens `module DidYouMean` to add the top-level singleton
+# methods the upstream RBS omits — every method below is defined
+# in `lib/did_you_mean.rb` and called by rubygems / bundler /
+# optparse / thor without an RBS declaration to back it.
+#
+# Adds new declarations only; never redeclares anything the
+# upstream RBS already covers, so the loader does not raise
+# `RBS::DuplicatedDeclarationError`.
+#
+module DidYouMean
+  # Sharable hash of error-class names to spell-checker objects.
+  # Defaults to `Hash.new(NullChecker)` — the value's runtime
+  # default makes any missing-key lookup return `NullChecker`.
+  def self.spell_checkers: () -> Hash[String, untyped]
+
+  # `correct_error(error_class, spell_checker)` registers a
+  # spell-checker for the named error class, prepending
+  # `Correctable` to it when the class doesn't already include
+  # it. Returns the registered spell_checker (the assignment's
+  # value).
+  def self.correct_error: (untyped error_class, untyped spell_checker) -> untyped
+
+  # The active formatter. Returns the per-Ractor override when
+  # one is set; otherwise `DidYouMean::Formatter` (the module).
+  def self.formatter: () -> untyped
+
+  # Per-Ractor formatter override. Returns the assigned
+  # formatter under Ractor; nil otherwise.
+  def self.formatter=: (untyped) -> untyped
+end

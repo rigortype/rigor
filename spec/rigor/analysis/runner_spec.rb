@@ -1599,6 +1599,59 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(ivar_diags(result)).to be_empty
       end
 
+      it "does not flag a nil-placeholder followed by concrete writes (nullable-slot idiom)" do
+        # The `@parse_method = nil` placeholder followed by
+        # per-state `@parse_method = :foo` / `:bar` assignments
+        # is the common nullable-slot idiom. Pre-fix the
+        # `NilClass` placeholder anchored as `first_class` and
+        # every concrete write tripped the rule; the canonical
+        # type is now the first non-nil write so neither
+        # `Symbol → Symbol` (same class) nor `nil → Symbol`
+        # widening fires.
+        result = analyze(<<~RUBY)
+          class Foo
+            def initialize
+              @parse_method = nil
+            end
+
+            def step(line)
+              if line == "a"
+                @parse_method = :parse_a
+              elsif line == "b"
+                @parse_method = :parse_b
+              elsif line == "c"
+                @parse_method = nil
+              end
+            end
+          end
+        RUBY
+        expect(ivar_diags(result)).to be_empty
+      end
+
+      it "still flags Symbol → String drift even with a leading nil placeholder" do
+        # The leading `nil` shouldn't mask a genuine drift between
+        # two distinct concrete classes.
+        result = analyze(<<~RUBY)
+          class Foo
+            def initialize
+              @value = nil
+            end
+
+            def first_write
+              @value = :sym
+            end
+
+            def second_write
+              @value = "string"
+            end
+          end
+        RUBY
+        diag = ivar_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("Symbol")
+        expect(diag.message).to include("String")
+      end
+
       it "still flags a genuine bool → String drift" do
         result = analyze(<<~RUBY)
           class Foo

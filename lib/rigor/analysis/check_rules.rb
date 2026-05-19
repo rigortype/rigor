@@ -228,10 +228,26 @@ module Rigor
       def ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
         return [] if writes.size < 2
 
-        first_class = ivar_class_for(writes.first[:type])
+        # Skip past leading `NilClass` writes when establishing
+        # the canonical type. The common nullable-slot idiom
+        # (`@x = nil` placeholder in `initialize` / a default
+        # state slot, then `@x = :foo` on first concrete state)
+        # would otherwise fire a false positive on every
+        # concrete write because `first_class` was `NilClass`
+        # and every subsequent `Symbol` / `String` / `Hash`
+        # write triggered the divergence rule. The first
+        # concrete (non-nil) write is the canonical type;
+        # additional `NilClass` writes are still tolerated
+        # downstream by the existing `other_class == "NilClass"`
+        # check (the nullable-slot resets to nil between work).
+        canonical = writes.find { |w| ivar_class_for(w[:type]) != "NilClass" }
+        return [] if canonical.nil?
+
+        first_class = ivar_class_for(canonical[:type])
         return [] if first_class.nil?
 
-        writes[1..].filter_map do |write|
+        canonical_index = writes.index(canonical)
+        writes[(canonical_index + 1)..].filter_map do |write|
           other_class = ivar_class_for(write[:type])
           next nil if other_class.nil? || other_class == "NilClass" || other_class == first_class
 

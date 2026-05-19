@@ -1,0 +1,14 @@
+No upstream source: this Bundler RBS stub is hand-written by
+Rigor maintainers under MPL-2.0 (matching the rest of Rigor)
+because the `bundler` gem ships no `sig/` and is not covered by
+`ruby/gem_rbs_collection`.
+
+The minimal `references/rbs/sig/shims/bundler.rbs` shim in the
+upstream `rbs` gem (MIT) declares a smaller subset
+(`LockfileParser` / `LazySpecification` / `Dependency` /
+`Definition` / `default_lockfile` / `definition` /
+`Source::Gemspec`); the vendored stub here is a strict superset
+modelled on `references/ruby/lib/bundler.rb`'s `class << self`
+block and the most-touched Bundler classes per the
+`references/ruby/lib` survey
+(`docs/CURRENT_WORK.md` § "Queued engine items").

@@ -42,7 +42,7 @@ module Rigor
       # enough that hard-coding is acceptable; a directory walk
       # at every call would add stat-cost to no benefit.)
       VENDORED_GEM_NAMES = Set[
-        "bcrypt", "idn-ruby", "mysql2", "nokogiri", "pg", "prism", "redis"
+        "bcrypt", "bundler", "idn-ruby", "mysql2", "nokogiri", "pg", "prism", "redis", "rubygems"
       ].freeze
 
       # @param locked_gems [Hash{String => LockfileResolver::LockedGem}]

@@ -1,0 +1,216 @@
+#
+# Rigor-side vendored RBS stub for the `bundler` gem.
+#
+# The `bundler` gem does not ship its own `sig/` and is not
+# covered by `ruby/gem_rbs_collection`. The shim in
+# `references/rbs/sig/shims/bundler.rbs` (rbs gem upstream)
+# carries a tiny subset (`LockfileParser`, `LazySpecification`,
+# `Dependency`, `Definition`, `default_lockfile`, `definition`,
+# `Source::Gemspec`) but is only loaded when the user opts in via
+# `library "bundler"` — that's rare in Rigor `.rigor.yml` setups,
+# so most projects analyse bundler-using code with NO `Bundler`
+# RBS in scope.
+#
+# This stub covers the Bundler module's top-25 singleton methods
+# surfaced by the `references/ruby/lib` survey
+# (`docs/CURRENT_WORK.md`), plus the handful of class-level
+# entries (`Definition`, `LockfileParser`, `LazySpecification`,
+# `Dependency`, `ConfigFile`, `Settings`, `UI`) that downstream
+# Rigor users routinely touch. Most return types are `untyped`
+# because Bundler's surface is dynamic / opaque; the goal is to
+# silence `call.undefined-method` rather than infer precise
+# returns.
+#
+# Declarations are intentionally a SUPERSET of the
+# `references/rbs/sig/shims/bundler.rbs` shim. When the user
+# opts into `library "bundler"`, the shim's typed declarations
+# (`LockfileParser#specs -> Array[LazySpecification]`, etc.)
+# would conflict; users who want both should drop the
+# `library "bundler"` entry from their config so this vendored
+# stub wins.
+#
+module Bundler
+  # `Bundler.<name>` — accessors / module-level entry points.
+  # Return types: `untyped` unless the surface is documented and
+  # widely-used (`bundle_path` -> Pathname).
+  def self.configure: () -> untyped
+  def self.ui: () -> untyped
+  def self.ui=: (untyped) -> untyped
+  def self.bundle_path: () -> Pathname
+  def self.create_bundle_path: () -> Pathname
+  def self.configured_bundle_path: () -> untyped
+  def self.bin_path: () -> Pathname
+  def self.setup: (*untyped groups) -> untyped
+  def self.auto_switch: () -> untyped
+  def self.auto_install: () -> untyped
+  def self.require: (*untyped groups) -> untyped
+  def self.load: () -> untyped
+  def self.environment: () -> untyped
+  def self.definition: (?untyped unlock, ?untyped lockfile) -> Definition
+  def self.frozen_bundle?: () -> bool
+  def self.locked_gems: () -> untyped
+  def self.ruby_scope: () -> String
+  def self.user_home: () -> Pathname
+  def self.user_bundle_path: (?untyped dir) -> Pathname
+  def self.user_cache: () -> Pathname
+  def self.home: () -> Pathname
+  def self.install_path: () -> Pathname
+  def self.specs_path: () -> Pathname
+  def self.root: () -> Pathname
+  def self.app_config_path: () -> Pathname
+  def self.app_cache: (?untyped custom_path) -> Pathname
+  def self.tmp: (?untyped name) -> Pathname
+  def self.rm_rf: (untyped path) -> untyped
+  def self.settings: () -> untyped
+  def self.original_env: () -> Hash[String, String]
+  def self.clean_env: () -> Hash[String, String]
+  def self.unbundled_env: () -> Hash[String, String]
+  def self.unbundle_env!: () -> untyped
+  def self.with_original_env: () { () -> untyped } -> untyped
+  def self.with_clean_env: () { () -> untyped } -> untyped
+  def self.with_unbundled_env: () { () -> untyped } -> untyped
+  def self.original_system: (*untyped) -> untyped
+  def self.clean_system: (*untyped) -> untyped
+  def self.unbundled_system: (*untyped) -> untyped
+  def self.original_exec: (*untyped) -> untyped
+  def self.clean_exec: (*untyped) -> untyped
+  def self.unbundled_exec: (*untyped) -> untyped
+  def self.local_platform: () -> untyped
+  def self.generic_local_platform: () -> untyped
+  def self.default_gemfile: () -> Pathname
+  def self.default_lockfile: () -> Pathname
+  def self.default_bundle_dir: () -> Pathname?
+  def self.system_bindir: () -> String?
+  def self.preferred_gemfile_name: () -> String
+  def self.use_system_gems?: () -> bool
+  def self.rubygems: () -> untyped
+  def self.which: (untyped) -> String?
+  def self.load_gemspec: (untyped path, ?bool validate) -> untyped
+  def self.read_file: (untyped path) -> String
+  def self.safe_load_marshal: (untyped data) -> untyped
+  def self.git_present?: () -> bool
+  def self.gem_version: () -> Gem::Version
+  def self.verbose_version: () -> String
+  def self.self_manager: () -> untyped
+  def self.reset!: () -> void
+
+  # Top-level classes touched in real-world bundler / rubygems
+  # code paths the survey analysed. Each class declares only the
+  # most-used members; the rest fall through to `untyped`-typed
+  # singleton-class dispatch via the surrounding module's
+  # untyped return contracts.
+  class Definition
+    def self.build: (untyped gemfile, untyped lockfile, untyped unlock) -> Definition
+
+    def initialize: (*untyped) -> void
+    def gemfiles: () -> Array[Pathname]
+    def lockfile: () -> Pathname
+    def lockfile=: (untyped) -> untyped
+    def locked_gems: () -> LockfileParser
+    def dependencies: () -> Array[Dependency]
+    def current_dependencies: () -> Array[Dependency]
+    def requested_dependencies: () -> Array[Dependency]
+    def dependencies_for: (untyped groups) -> Array[Dependency]
+    def specs: () -> untyped
+    def specs_for: (untyped groups) -> untyped
+    def missing_specs: () -> untyped
+    def validate_runtime!: () -> untyped
+    def check!: () -> untyped
+    def lock: (?untyped) -> untyped
+    def write_lock: () -> untyped
+    def to_lock: () -> String
+    def resolve: () -> untyped
+    def resolve_with_cache!: () -> untyped
+    def resolve_remotely!: () -> untyped
+    def remotely!: () -> untyped
+    def ensure_equivalent_gemfile_and_lockfile: (?bool) -> untyped
+    def normalize_platforms: () -> untyped
+    def platforms: () -> Array[untyped]
+    def add_platform: (untyped) -> untyped
+    def remove_platform: (untyped) -> untyped
+    def add_checksums: () -> untyped
+    def groups: () -> Array[Symbol]
+    def ruby_version: () -> untyped
+  end
+
+  class LockfileParser
+    def initialize: (String body) -> void
+    def specs: () -> Array[LazySpecification]
+    def platforms: () -> Array[untyped]
+    def sources: () -> Array[untyped]
+    def dependencies: () -> Array[Dependency]
+    def ruby_version: () -> untyped
+    def bundler_version: () -> untyped
+  end
+
+  class LazySpecification
+    def name: () -> String
+    def version: () -> Gem::Version
+    def platform: () -> untyped
+    def dependencies: () -> Array[Gem::Dependency]
+    def source: () -> untyped
+  end
+
+  class Dependency < Gem::Dependency
+    attr_reader autorequire: Array[String]?
+    attr_reader source: untyped
+    attr_reader groups: Array[Symbol]
+    attr_reader platforms: Array[Symbol]
+  end
+
+  class ConfigFile
+    def []: (*untyped) -> untyped
+    def []=: (*untyped) -> untyped
+    def set_global: (untyped, untyped) -> untyped
+    def set_local: (untyped, untyped) -> untyped
+    def all: () -> Hash[String, untyped]
+  end
+
+  module Source
+    class Gemspec
+    end
+    class Path
+    end
+    class Git
+    end
+    class Rubygems
+    end
+  end
+
+  module UI
+    class Shell
+      def initialize: (?untyped) -> void
+      def info: (untyped, ?bool newline) -> void
+      def confirm: (untyped, ?bool newline) -> void
+      def warn: (untyped, ?bool newline) -> void
+      def debug: (untyped, ?bool newline) -> void
+      def debug?: () -> bool
+      def error: (untyped, ?bool newline) -> void
+      def trace: (untyped, ?untyped newline, ?bool force) -> void
+      def silence: () { () -> untyped } -> untyped
+      def ask: (untyped) -> String?
+      def yes?: (untyped) -> bool
+      def no?: () -> bool
+      def level: (?String name) -> String
+      def level=: (untyped) -> untyped
+      def quiet?: () -> bool
+      def quiet=: (bool) -> bool
+    end
+
+    class RGProxy
+      def initialize: (?untyped) -> void
+    end
+  end
+
+  class GemfileError < StandardError
+  end
+
+  class GemfileNotFound < StandardError
+  end
+
+  class LockfileError < StandardError
+  end
+
+  class GemNotFound < StandardError
+  end
+end

@@ -1,0 +1,17 @@
+No upstream source: this rubygems RBS extras stub is hand-written
+by Rigor maintainers under MPL-2.0 (matching the rest of Rigor).
+The rbs gem ships partial `core/rubygems/*.rbs` coverage already
+(loaded via Ruby core RBS, no opt-in needed), but the surface
+omitted there — `Gem.target_rbconfig` / `Gem.verbose` /
+`Gem.load_safe_marshal` / `Gem::Platform#initialize` /
+`Gem::Dependency#initialize` / `Gem::Specification.find_all_by_name`
+etc. — surfaces hundreds of false positives when rigor analyses
+rubygems' or bundler's own source code.
+
+This file is a SUPPLEMENT — it re-opens the upstream classes /
+the Gem module to ADD the missing declarations only, never
+redeclaring anything the upstream RBS already covers, so the
+loader does not raise `RBS::DuplicatedDeclarationError`.
+
+Modelled on `lib/rubygems/defaults.rb` and the survey at
+`docs/CURRENT_WORK.md` § "Queued engine items".

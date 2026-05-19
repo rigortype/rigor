@@ -1,0 +1,169 @@
+#
+# Rigor-side supplement to the rbs gem's
+# `core/rubygems/*.rbs` declarations.
+#
+# Re-opens the rubygems classes / Gem module to ADD the
+# declarations the upstream RBS omits. Every block below adds
+# new method signatures only — it does NOT redeclare anything
+# the upstream RBS already covers, so the loader does not raise
+# `RBS::DuplicatedDeclarationError`.
+#
+# Driven by the `references/ruby/lib` survey
+# (`docs/CURRENT_WORK.md` § "Queued engine items") which
+# clusters `undefined-method` on Gem-side selectors most-touched
+# by rubygems' own source tree and by bundler. Returns are
+# `untyped` where Rigor cannot infer a precise shape — the goal
+# is to silence false positives, not to author precise sigs.
+#
+module Gem
+  # Singleton additions surfacing in the survey but absent from
+  # the upstream `core/rubygems/rubygems.rbs`. All are real
+  # methods defined in `lib/rubygems/defaults.rb`,
+  # `lib/rubygems.rb`, or the platform-specific override files.
+  def self.target_rbconfig: () -> untyped
+  def self.set_target_rbconfig: (untyped) -> untyped
+  def self.load_safe_marshal: () -> untyped
+  def self.safe_load_marshal: (untyped) -> untyped
+  def self.verbose: () -> bool
+  def self.really_verbose: () -> bool
+  def self.discover_gems_on_require: () -> bool
+  def self.discover_gems_on_require=: (bool) -> bool
+  def self.default_user_install: () -> bool
+  def self.dynamic_library_suffixes: () -> Array[String]
+  def self.extension_api_version: () -> String
+  def self.find_default_spec: (untyped) -> untyped?
+  def self.install_extension_in_lib: () -> bool
+  def self.load_bundler_extensions: () -> untyped
+  def self.load_plugin_files: (?untyped plugins) -> untyped
+  def self.open_file: (String path, String mode) { (IO) -> untyped } -> untyped
+  def self.open_file_with_lock: (String path) { (IO) -> untyped } -> untyped
+  def self.state_file: () -> String
+  def self.vendor_dir: () -> String
+  def self.activate_bin_path: (String name, ?String exec_name, ?untyped requirements) -> String
+end
+
+class Gem::Platform
+  # `Gem::Platform.new(arg)` is the canonical constructor; the
+  # upstream `core/rubygems/platform.rbs` declares the class
+  # but no `initialize`, which forces RBS to default to
+  # `(): void` and the wrong-arity rule fires for every call
+  # site. The accessor / predicate set covers the most-used
+  # surface bundler and rubygems internals touch.
+  def initialize: (*untyped) -> void
+  attr_accessor cpu: String?
+  attr_accessor os: String?
+  attr_accessor version: String?
+  def to_s: () -> String
+  def ==: (untyped) -> bool
+  def ===: (untyped) -> bool
+  def =~: (untyped) -> bool?
+  def eql?: (untyped) -> bool
+  def hash: () -> Integer
+  def match_spec?: (untyped) -> bool
+  def match_gem?: (untyped, untyped) -> bool
+
+  def self.local: () -> Platform
+  def self.match_spec?: (untyped) -> bool
+  def self.match_gem?: (untyped, untyped) -> bool
+  def self.installable?: (untyped) -> bool
+  def self.sort_priority: (untyped) -> Integer
+end
+
+class Gem::Dependency
+  # `Gem::Dependency.new(name, *requirements, type: :runtime)`.
+  # Upstream RBS declares the class shell but no constructor; a
+  # permissive splat keeps the canonical and the
+  # `(name, requirements, type)` invocation forms both silent.
+  def initialize: (*untyped) -> void
+  attr_accessor name: String
+  attr_accessor requirement: Gem::Requirement
+  attr_accessor type: Symbol
+  attr_accessor prerelease: bool
+  def matches_spec?: (untyped) -> bool
+  def match?: (*untyped) -> bool
+  def to_s: () -> String
+  def ==: (untyped) -> bool
+  def eql?: (untyped) -> bool
+  def hash: () -> Integer
+end
+
+class Gem::Specification
+  def self.find_all_by_name: (String name, *untyped requirements) -> Array[Gem::Specification]
+  def self.stubs: () -> Array[untyped]
+  def self.default_stubs: (?String pattern) -> Array[untyped]
+  def self.reset: () -> void
+  def self.from_yaml: (untyped) -> Gem::Specification
+  def self.load: (String path) -> Gem::Specification?
+  def self._all: () -> Array[Gem::Specification]
+  def self.each: () { (Gem::Specification) -> untyped } -> void
+end
+
+class Gem::BasicSpecification
+  def version: () -> Gem::Version
+  def executables: () -> Array[String]
+  def name: () -> String
+  def full_name: () -> String
+  def gem_dir: () -> String
+end
+
+class Gem::Version
+  def segments: () -> Array[untyped]
+end
+
+class Gem::Requirement
+  def requirements: () -> Array[untyped]
+  def self.create: (*untyped) -> Gem::Requirement
+end
+
+class Gem::ConfigFile
+  def []: (untyped) -> untyped
+  def []=: (untyped, untyped) -> untyped
+  def write: () -> void
+  def verbose: () -> bool
+  def verbose=: (bool) -> bool
+  def really_verbose: () -> bool
+  def ssl_ca_cert: () -> String?
+  def credentials_path: () -> String
+  def api_keys: () -> Hash[String, String]
+end
+
+class Gem::LoadError < LoadError
+  attr_accessor name: String
+  attr_accessor requirement: Gem::Requirement
+end
+
+class Gem::SourceList
+  include Enumerable[untyped]
+  def initialize: () -> void
+  def include?: (untyped) -> bool
+  def each: () { (untyped) -> untyped } -> void
+  def to_a: () -> Array[untyped]
+  def from: (untyped) -> SourceList
+end
+
+class Gem::RequestSet
+  def initialize: (*untyped) -> void
+  def import: (untyped) -> untyped
+  def source_set: () -> untyped
+end
+
+class Gem::Uninstaller
+  def initialize: (*untyped) -> void
+  def uninstall: () -> void
+end
+
+class Gem::PathSupport
+  def initialize: (*untyped) -> void
+end
+
+class Gem::Installer
+  def initialize: (*untyped) -> void
+end
+
+class Gem::DependencyInstaller
+  def initialize: (*untyped) -> void
+end
+
+class Gem::MissingSpecError < StandardError
+  def initialize: (*untyped) -> void
+end

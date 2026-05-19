@@ -185,18 +185,50 @@ The baseline records *rule identifiers* (`call.undefined-method`
    <rule>` surface**. Same identifier vocabulary; no second
    classification scheme to learn.
 
-### WD4 — Excess-over-baseline diagnostics surface unchanged
+### WD4 — Threshold semantics: ALL-or-NOTHING per (file, rule) bucket
 
-When `actual > baseline.count` for a (file, rule) pair, the
-**excess** diagnostics are emitted at their full normal
-severity. Implementation simplification: emit the first `count`
-diagnostics silently, then emit the remaining `actual - count`
-as normal. The user sees "1 new error" when their commit adds
-one site of an already-baselined rule.
+The baseline `count` acts as a **threshold**, not as a
+"silence-the-first-N" mask. Two states per (file, rule) pair:
 
-Edge case: when `actual < baseline.count`, do *not* emit; the
-gap is recorded by `rigor baseline drift` as a reduction
-opportunity. (See WD5.)
+| Actual | Behaviour |
+| --- | --- |
+| `actual ≤ baseline.count` | **All** diagnostics in the bucket are silenced — the project is within the recorded envelope. |
+| `actual > baseline.count` | **All** diagnostics in the bucket surface at their full normal severity — including the ones that would have been silenced when the count was still under threshold. |
+
+Rationale: when a (file, rule) bucket crosses its threshold,
+the team's review focus is "what's going on with this rule in
+this file" — not "which of the N diagnostics is new". Line
+numbers within a bucket shift across refactors; a "first 3
+silenced, surface only #4 and #5" rule would point at
+positions that may have moved between the baseline-generation
+moment and the current run. Surfacing the whole bucket lets
+the reviewer audit the rule holistically.
+
+Worked example: baseline records `count: 3` for `(foo.rb,
+call.undefined-method)`.
+
+- Current run reports 3 sites → 0 surfaced (within threshold;
+  silenced).
+- Current run reports 5 sites → **all 5** surfaced (over
+  threshold; the bucket is now an active concern).
+- Current run reports 2 sites → 0 surfaced (under threshold;
+  drift opportunity, see WD5).
+
+Implementation: the baseline filter is a per-bucket gate
+keyed on `(file, rule)`. When `actual ≤ baseline`, every
+diagnostic in the bucket drops; when `actual > baseline`,
+every diagnostic in the bucket passes through. There is no
+mid-bucket partial state.
+
+Side benefit: the rule is symmetric and easy to explain to
+both human reviewers and the CI gate. "Your commit pushed
+`foo.rb`'s `call.undefined-method` count from 3 to 4 — over
+threshold; here are all 4 sites" reads cleanly. The
+alternative "your commit added a 4th site; here's site #4"
+would force the CI message to declare which specific site is
+the new one, which the (file, rule, count) granularity
+deliberately cannot do (because line positions aren't
+tracked).
 
 ### WD5 — Drift detection is opt-in, not enforced
 

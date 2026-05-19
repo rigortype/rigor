@@ -62,6 +62,24 @@ module Rigor
           @by_key.key?(dotted_key.to_s)
         end
 
+        # CLDR plural form keys recognised by Ruby I18n. When a
+        # locale defines `accounts.posts.one`, `accounts.posts.other`,
+        # the call `t('accounts.posts', count: n)` resolves into
+        # the matching plural sub-key — the parent `accounts.posts`
+        # is a **pluralization namespace**, not a missing key.
+        # Mastodon hits this on `accounts.posts` /
+        # `accounts.following` / `accounts.followers` for the post,
+        # follow, and follower counts shown on the profile page.
+        PLURAL_SUBKEYS = %w[zero one two few many other].freeze
+
+        # Returns true when the dotted key itself isn't a leaf in
+        # any locale, but at least one of its CLDR plural form
+        # children exists.
+        def pluralization_namespace?(dotted_key)
+          base = dotted_key.to_s
+          PLURAL_SUBKEYS.any? { |sub| @by_key.key?("#{base}.#{sub}") }
+        end
+
         def empty?
           @entries.empty?
         end

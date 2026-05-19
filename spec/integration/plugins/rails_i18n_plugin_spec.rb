@@ -96,6 +96,27 @@ RSpec.describe "plugins/rigor-rails-i18n" do
       expect(err.message).to include("users.welcom")
       expect(err.message).to include("users.welcome")
     end
+
+    it "accepts a pluralization namespace whose CLDR subkeys exist" do
+      # Mastodon-derived regression: `t('accounts.posts', count: n)`
+      # resolves through `accounts.posts.{one,other}`. The parent
+      # `accounts.posts` itself has no leaf value, but it IS a
+      # valid pluralization namespace.
+      result = run_plugin(
+        source: "t('accounts.posts', count: 3)\n",
+        files: {
+          "config/locales/en.yml" => <<~YAML
+            en:
+              accounts:
+                posts:
+                  one: "%{count} post"
+                  other: "%{count} posts"
+          YAML
+        }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-key" }).to be_empty
+    end
   end
 
   describe "missing-locale diagnostics" do

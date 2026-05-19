@@ -255,13 +255,27 @@ module Rigor
           interpret_block_body(node, context)
         end
 
-        def handle_root(_node, context)
+        def handle_root(node, context)
           # `root to: "..."` / `root "..."` — single helper
-          # `root_path`, arity 0, GET.
+          # `root_path`, arity 0, GET. Real-world Rails apps also
+          # use `root :to => 'welcome#index', :as => 'home'` (the
+          # canonical Redmine idiom across 230+ call sites), which
+          # registers an additional `home_path` / `home_url` alias
+          # for the same path. Mastodon and Solidus also use the
+          # `as:` form occasionally for analytics-friendly URL
+          # naming.
+          path = context.path_prefix.empty? ? "/" : context.path_prefix
           context.entries << HelperTable::Entry.new(
             name: "#{context.helper_prefix}root_path",
-            arity: 0, path: context.path_prefix.empty? ? "/" : context.path_prefix,
-            http_method: :get, action: :root
+            arity: 0, path: path, http_method: :get, action: :root
+          )
+
+          alias_name = keyword_symbol(node, :as)
+          return if alias_name.nil?
+
+          context.entries << HelperTable::Entry.new(
+            name: "#{context.helper_prefix}#{alias_name}_path",
+            arity: 0, path: path, http_method: :get, action: :root
           )
         end
 

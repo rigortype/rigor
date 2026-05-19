@@ -61,6 +61,15 @@ module Rigor
             options = options_hash(call_node)
             entry = locale_index.find(literal_key)
             if entry.nil?
+              # CLDR pluralization namespace: the parent key isn't
+              # a leaf, but at least one `.one` / `.other` / etc.
+              # child exists. `t('accounts.posts', count: n)`
+              # resolves through that branch — not a missing key.
+              # Accept silently; downstream interpolation checks
+              # don't apply (no single entry to read placeholders
+              # from).
+              next if locale_index.pluralization_namespace?(literal_key)
+
               diagnostics << unknown_key_diagnostic(path, call_node, literal_key, locale_index)
               next
             end

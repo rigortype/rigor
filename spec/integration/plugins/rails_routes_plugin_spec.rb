@@ -151,6 +151,27 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(load_errors.size).to eq(1)
     end
 
+    it "registers the `as:` alias on root, both new and hash-rocket forms" do
+      # Redmine uses `root :to => 'welcome#index', :as => 'home'`
+      # at line 26 of config/routes.rb — the hash-rocket form is
+      # the legacy Ruby 1.8 idiom that still works in modern
+      # Rails. Pre-fix the parser registered only `root_path`,
+      # so all 230 call sites to `home_path` / `home_url` across
+      # Redmine surfaced as `unknown-helper`.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          root :to => 'welcome#index', :as => 'home'
+        end
+      RUBY
+      result = run_plugin(
+        source: "home_path\nhome_url\nroot_path\nroot_url\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result)
+      unknown = diags.select { |d| d.rule == "unknown-helper" }
+      expect(unknown).to be_empty
+    end
+
     it "accepts `only:` / `except:` as a single Symbol (not just Array)" do
       # Mastodon, Solidus and many other Rails apps use the shorthand
       # `resources :foo, only: :show` (Symbol) interchangeably with

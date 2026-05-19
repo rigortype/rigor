@@ -71,9 +71,11 @@ module Rigor
           parse_result = Prism.parse(contents)
           return unless parse_result.errors.empty?
 
-          walk_for_factories(parse_result.value) do |factory_name, attribute_names|
+          walk_for_factories(parse_result.value) do |factory_name, attribute_names, model_class|
             entries[factory_name] = FactoryIndex::Entry.new(
-              name: factory_name, attribute_names: attribute_names.uniq.freeze
+              name: factory_name,
+              attribute_names: attribute_names.uniq.freeze,
+              model_class: model_class
             )
           end
         rescue Plugin::AccessDeniedError, Errno::ENOENT
@@ -105,7 +107,8 @@ module Rigor
           return if factory_name.nil?
 
           attribute_names = collect_attribute_names(call_node.block)
-          yield factory_name, attribute_names
+          model_class = factory_model_class(call_node, factory_name)
+          yield factory_name, attribute_names, model_class
         end
 
         def literal_name_arg(call_node)
@@ -114,6 +117,78 @@ module Rigor
           when Prism::SymbolNode then first_arg.value
           when Prism::StringNode then first_arg.unescaped
           end
+        end
+
+        # Pillar 2 Slice 3 — resolve the model class name for
+        # the factory. Three sources, in priority order:
+        #
+        # 1. Explicit `class: <Const>` keyword arg —
+        #    ConstantReadNode / ConstantPathNode value.
+        # 2. Explicit `class: "<name>"` keyword arg — String
+        #    value (supports `"Admin::User"`).
+        # 3. Inflected from the factory name — `:user` →
+        #    `"User"`, `:admin_user` → `"AdminUser"`. The
+        #    factory name is already singular by FactoryBot
+        #    convention, so we only need camelization.
+        #
+        # Returns a String (the canonical class name).
+        def factory_model_class(call_node, factory_name)
+          explicit = explicit_class_option(call_node)
+          return explicit if explicit
+
+          camelize(factory_name)
+        end
+
+        def explicit_class_option(call_node)
+          kwargs = factory_keyword_args(call_node)
+          return nil if kwargs.nil?
+
+          class_pair = kwargs.elements.find do |elem|
+            elem.is_a?(Prism::AssocNode) &&
+              elem.key.is_a?(Prism::SymbolNode) &&
+              elem.key.value == "class"
+          end
+          return nil if class_pair.nil?
+
+          render_class_value(class_pair.value)
+        end
+
+        def factory_keyword_args(call_node)
+          args = call_node.arguments&.arguments || []
+          last = args.last
+          last.is_a?(Prism::KeywordHashNode) || last.is_a?(Prism::HashNode) ? last : nil
+        end
+
+        def render_class_value(node)
+          case node
+          when Prism::ConstantReadNode then node.name.to_s
+          when Prism::ConstantPathNode then render_constant_path(node)
+          when Prism::StringNode then node.unescaped
+          end
+        end
+
+        def render_constant_path(node)
+          parts = []
+          current = node
+          while current.is_a?(Prism::ConstantPathNode)
+            parts.unshift(current.name.to_s)
+            current = current.parent
+          end
+          case current
+          when nil then "::#{parts.join('::')}"
+          when Prism::ConstantReadNode then "#{current.name}::#{parts.join('::')}"
+          end
+        end
+
+        # Pure-Ruby camelize for the factory-name fallback.
+        # `user` → `User`, `blog_post` → `BlogPost`, `admin_user`
+        # → `AdminUser`. Factory names with `/` separators
+        # (`admin/user`) camelize per-segment and join with `::`
+        # (`Admin::User`), mirroring Rails inflection.
+        def camelize(snake)
+          snake.to_s.split("/").map do |segment|
+            segment.split("_").map { |part| part.empty? ? part : part[0].upcase + part[1..] }.join
+          end.join("::")
         end
 
         def collect_attribute_names(block_node)

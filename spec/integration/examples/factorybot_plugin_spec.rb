@@ -254,4 +254,101 @@ RSpec.describe "examples/rigor-factorybot" do
       end
     end
   end
+
+  # Pillar 2 Slice 3 — factory definitions as struct-shape
+  # facts. The `:factory_index` ADR-9 publication now carries
+  # per-factory `model_class` so downstream consumers (Slice
+  # 2's `let(:user) { create(:user) }` SUT binding, future
+  # `rigor-shoulda-matchers`-style cross-checks) can map a
+  # factory name to a Ruby class.
+  describe "Pillar 2 Slice 3 — factory entry model_class" do
+    # Drives the FactoryDiscoverer directly via a temp dir.
+    # The full integration through `producer :factory_index`
+    # is exercised by every downstream consumer spec (e.g.
+    # rspec_plugin_spec / shoulda_matchers_plugin_spec
+    # patterns) — these focused tests pin the Entry shape
+    # change.
+    def factory_index_for(files)
+      Dir.mktmpdir do |dir|
+        files.each do |relative, contents|
+          full = File.join(dir, relative)
+          FileUtils.mkdir_p(File.dirname(full))
+          File.write(full, contents)
+        end
+        io = Class.new do
+          def read_file(path) = File.read(path)
+        end.new
+        Rigor::Plugin::Factorybot::FactoryDiscoverer.new(
+          io_boundary: io,
+          search_paths: files.keys.map { |relative| File.join(dir, relative) }
+        ).discover
+      end
+    end
+
+    it "inflects model_class from a simple factory name (:user → User)" do
+      index = factory_index_for(
+        "spec/factories/users.rb" => "FactoryBot.define do\n  factory :user do\n  end\nend\n"
+      )
+      expect(index.find("user").model_class).to eq("User")
+    end
+
+    it "camelizes snake_case factory names (:blog_post → BlogPost)" do
+      index = factory_index_for(
+        "spec/factories/blog_posts.rb" => "FactoryBot.define do\n  factory :blog_post do\n  end\nend\n"
+      )
+      expect(index.find("blog_post").model_class).to eq("BlogPost")
+    end
+
+    it "honours an explicit `class: <Const>` keyword option" do
+      index = factory_index_for(
+        "spec/factories/admin.rb" => <<~RUBY
+          FactoryBot.define do
+            factory :admin, class: AdminUser do
+            end
+          end
+        RUBY
+      )
+      expect(index.find("admin").model_class).to eq("AdminUser")
+    end
+
+    it "honours an explicit `class: <ConstantPath>` keyword option" do
+      index = factory_index_for(
+        "spec/factories/admin.rb" => <<~RUBY
+          FactoryBot.define do
+            factory :admin, class: Accounts::AdminUser do
+            end
+          end
+        RUBY
+      )
+      expect(index.find("admin").model_class).to eq("Accounts::AdminUser")
+    end
+
+    it "honours an explicit `class: \"<String>\"` keyword option" do
+      index = factory_index_for(
+        "spec/factories/admin.rb" => <<~RUBY
+          FactoryBot.define do
+            factory :admin, class: "Admin::Manager" do
+            end
+          end
+        RUBY
+      )
+      expect(index.find("admin").model_class).to eq("Admin::Manager")
+    end
+
+    it "preserves attribute_names alongside the new model_class field" do
+      index = factory_index_for(
+        "spec/factories/users.rb" => <<~RUBY
+          FactoryBot.define do
+            factory :user do
+              name  { "Alice" }
+              email { "a@b" }
+            end
+          end
+        RUBY
+      )
+      entry = index.find("user")
+      expect(entry.attribute_names).to contain_exactly("name", "email")
+      expect(entry.model_class).to eq("User")
+    end
+  end
 end

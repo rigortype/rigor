@@ -75,8 +75,10 @@ module Rigor
     class Factorybot < Rigor::Plugin::Base
       manifest(
         id: "factorybot",
-        version: "0.1.0",
-        description: "Validates FactoryBot.create / build / attributes_for call shapes.",
+        version: "0.2.0",
+        description: "Validates FactoryBot.create / build / attributes_for call shapes; " \
+                     "publishes per-factory attribute set + inferred model class as the " \
+                     ":factory_index ADR-9 fact (Pillar 2 Slice 3).",
         config_schema: {
           "factory_search_paths" => :array
         },

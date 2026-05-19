@@ -13,9 +13,13 @@ Decide placement first (Phase 0 below), then load the four reference files in or
 
 ## Phase 0 — Decide where the plugin lands
 
-Trigger this skill when the user requests a new plugin: "Create a Rigor plugin that catches Y", "Extend Rigor to understand our DSL Z", "Write a plugin similar to rigor-units but for currency", or Japanese equivalents.
+Trigger this skill when the user requests a **new** plugin: "Create a Rigor plugin that catches Y", "Extend Rigor to understand our DSL Z", "Write a plugin similar to rigor-units but for currency", or Japanese equivalents.
 
-Do NOT trigger for edits to existing plugins (ordinary edit tasks) or for analyser-engine work in `lib/rigor/inference/` / `lib/rigor/analysis/` / `lib/rigor/plugin/` (core development).
+Do NOT trigger for:
+
+- **Edits / bug-fixes / new diagnostics on an existing plugin** under `plugins/<id>/` or `examples/<id>/` — these are ordinary edit tasks; modify the plugin in place and bump only the `[Unreleased]` CHANGELOG.
+- **Analyser-engine work** in `lib/rigor/inference/` / `lib/rigor/analysis/` / `lib/rigor/plugin/` — that's core development.
+- **Post-landing maintenance** (refactor / rename / dependency bump on an already-shipped plugin) — these don't need the 10-phase pipeline; they're scoped per task.
 
 | Signal | Lands under |
 | --- | --- |
@@ -30,16 +34,16 @@ Default to `plugins/`. The five walkthroughs under [`examples/`](https://github.
 
 Mechanical differences: production specs live at `spec/integration/plugins/<id>_plugin_spec.rb`; walkthrough specs at `spec/integration/examples/<id>_plugin_spec.rb`. Both auto-include [`spec/integration/support/plugin_helpers.rb`](https://github.com/rigortype/rigor/blob/master/spec/integration/support/plugin_helpers.rb). RuboCop excludes `plugins/**/*` and `examples/**/*` but lints the specs.
 
-## Reading order
+## Reading order — modules and their outputs
 
-Load each reference when you reach its phase. Don't skim ahead — the phases compound.
+Load each reference when you reach its phase. The phases assume prior context, so backwards skipping is fine but forward skipping leaves gaps.
 
-| Module | Read | Covers |
-| --- | --- | --- |
-| 1 | [`references/01-requirements-and-templates.md`](references/01-requirements-and-templates.md) | **Phases 1–2.** Five-question scope check (trigger surface / look at / prove / diagnostic / config). Picks ADR-16 macro-substrate tier (A/B/C/D, declarative) or a hand-rolled walker template from six worked examples. |
-| 2 | [`references/02-scaffold-walker-demo.md`](references/02-scaffold-walker-demo.md) | **Phases 3–5.** Directory tree, gemspec, plugin class skeleton, per-template walker patterns, IoBoundary + cache producer rule (read BEFORE `cache_for`), demo project with `tmp/`-anchored cache + per-demo `.gitignore`. |
-| 3 | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) | **Phases 6–10.** RSpec integration helpers, README sections, CHANGELOG `[Unreleased]` entry, `make verify` expectations, commit subject convention. |
-| 4 | [`references/04-appendix.md`](references/04-appendix.md) | **Side material.** Common pitfalls (top 10), real-Rails alignment for `rigor-rails-*` plugins, post-ADR-9 `services.fact_store` cross-plugin pattern, reading list, closing checklist. |
+| Module | Read | Covers | Output of this module |
+| --- | --- | --- | --- |
+| 1 | [`references/01-requirements-and-templates.md`](references/01-requirements-and-templates.md) | **Phases 1–2.** Five-question scope check (trigger surface / look at / prove / diagnostic / config). Picks ADR-16 macro-substrate tier (A/B/C/D, declarative) or a hand-rolled walker template from six worked examples. | Five Q&A answers + one template name from the table. |
+| 2 | [`references/02-scaffold-walker-demo.md`](references/02-scaffold-walker-demo.md) | **Phases 3–5.** Directory tree, gemspec, plugin class skeleton, per-template walker patterns, IoBoundary + cache producer rule (read BEFORE `cache_for`), demo project with `tmp/`-anchored cache + per-demo `.gitignore`. | Working plugin directory + runnable `demo/` whose `rigor check` diagnostic stream matches expectations. |
+| 3 | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) | **Phases 6–10.** RSpec integration helpers, README sections, CHANGELOG `[Unreleased]` entry, `make verify` expectations, commit subject convention. | Passing integration spec + README + CHANGELOG entry + one green `make verify` + one commit. |
+| 4 | [`references/04-appendix.md`](references/04-appendix.md) | **Side material.** Common pitfalls (top 10), real-Rails alignment for `rigor-rails-*` plugins, post-ADR-9 `services.fact_store` cross-plugin pattern, reading list, closing checklist. | Reference-only — no fixed output. Consult per the surface the plugin touches. |
 
 ## Worked examples to copy from
 
@@ -62,3 +66,16 @@ Hand-rolled walker templates:
 ```
 
 If the requirement fits neither substrate nor template, **stop and ask the user** — the v0.1.x plugin contract may not yet expose what they need. Check the [per-library survey](https://github.com/rigortype/rigor/blob/master/docs/notes/20260515-macro-expansion-library-survey.md) before inventing a workaround.
+
+## What "done" looks like
+
+The plugin is shippable when **all** of these hold:
+
+- `bundle exec exe/rigor check` against the plugin's `demo/` prints the diagnostic stream documented in the plugin's `README.md` § "What the plugin recognises" — verbatim, no drift.
+- `spec/integration/plugins/<id>_plugin_spec.rb` (or `examples/`) covers every diagnostic shape the plugin emits, passing under `make verify`.
+- `make verify` is green: parallel-rspec 0 failures, rubocop 0 offenses on the spec file (the plugin source itself is excluded from rubocop), `rigor check lib` baseline unchanged.
+- `git status` is clean (`tmp/`-anchored cache + per-demo `.gitignore` keep build artefacts out of the index).
+- `CHANGELOG.md` `[Unreleased]` carries one new bullet naming the plugin; `Rigor::VERSION` is **not** bumped (the project user drives release cuts per `AGENTS.md` § "Release Cadence").
+- One commit, subject following `AGENTS.md` style (`Add rigor-<id> plugin (<facet>)` or `Add rigor-<id> walkthrough (<facet>)`).
+
+Publishing to RubyGems is **out of scope** for this skill — the plugin lives in this repo until a maintainer runs the `git subtree split` + `bundle exec rake release` flow ([`.claude/skills/rigor-release-prep/SKILL.md`](../../.claude/skills/rigor-release-prep/SKILL.md)).

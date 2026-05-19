@@ -19,9 +19,9 @@ The catalog tier is the additive superset; the hand-rolled tier remains the safe
 
 The principled background lives in:
 
-- [`docs/adr/3-type-representation.md`](https://github.com/rigortype/rigor/blob/master/docs/adr/3-type-representation.md) — type-object layout and the OQ3 working decision (Difference + Refined).
-- [`docs/adr/5-robustness-principle.md`](https://github.com/rigortype/rigor/blob/master/docs/adr/5-robustness-principle.md) — strict-on-returns, lenient-on-parameters.
-- [`docs/type-specification/imported-built-in-types.md`](https://github.com/rigortype/rigor/blob/master/docs/type-specification/imported-built-in-types.md) — the canonical kebab-case refinement names.
+- [`docs/adr/3-type-representation.md`](../../../docs/adr/3-type-representation.md) — type-object layout and the OQ3 working decision (Difference + Refined).
+- [`docs/adr/5-robustness-principle.md`](../../../docs/adr/5-robustness-principle.md) — strict-on-returns, lenient-on-parameters.
+- [`docs/type-specification/imported-built-in-types.md`](../../../docs/type-specification/imported-built-in-types.md) — the canonical kebab-case refinement names.
 
 Read those before extending the catalogue if you have not already; the decision points below assume the principle's framing.
 

@@ -1,0 +1,9 @@
+paths:
+  - spec/user_spec.rb
+
+plugins:
+  - rigor-activerecord
+  - rigor-shoulda-matchers
+
+cache:
+  path: tmp/.rigor/cache

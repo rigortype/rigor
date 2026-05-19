@@ -527,7 +527,15 @@ module Rigor
           return nil if entry.nil?
 
           actual_arity = positional_arg_count(call_node)
-          return nil if actual_arity != entry[:arity]
+          # The `:helper_table` fact entry carries both
+          # `:arity` (the first registered entry's arity) and
+          # `:acceptable_arities` (the full Array — populated
+          # for uncountable-noun resources like `resources :news`
+          # which share a helper name across index/show). Honour
+          # the full set; fall back to the single arity for
+          # consumers compiled against an older fact shape.
+          acceptable = entry[:acceptable_arities] || [entry[:arity]]
+          return nil unless acceptable.include?(actual_arity)
 
           helper_call_diagnostic(path, call_node, entry)
         end

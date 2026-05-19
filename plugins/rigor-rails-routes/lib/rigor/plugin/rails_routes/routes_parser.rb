@@ -155,7 +155,23 @@ module Rigor
           # generates by default; users with custom
           # inflections need to author RBS by hand for the
           # affected helpers (out of scope for v0.1.0).
+          #
+          # The canonical English uncountable noun set from
+          # ActiveSupport::Inflector::Inflections (Rails 8.x).
+          # `singularize("news")` returns `"news"` rather than
+          # `"new"`. Pre-fix the parser stripped the trailing
+          # 's' from `news`, so `resources :news` registered
+          # `new_path` / `news_path` / `new_news_path` (broken
+          # — Rails actually generates `news_path` for both
+          # index and show, with the show form taking `:id`).
+          # Redmine hit this 81× across `news_path(id)` calls.
+          UNCOUNTABLE = %w[
+            equipment information rice money species series fish
+            sheep jeans police news media settings
+          ].to_set.freeze
+
           def singularize(word)
+            return word if UNCOUNTABLE.include?(word)
             return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
             return word.chomp("es") if word.end_with?("ses") || word.end_with?("xes")
             return word.chomp("s") if word.end_with?("s")
@@ -164,6 +180,7 @@ module Rigor
           end
 
           def pluralize(word)
+            return word if UNCOUNTABLE.include?(word)
             return word if word.end_with?("s")
             return "#{word.chomp('y')}ies" if word.end_with?("y") && word.length > 1
 
@@ -450,7 +467,16 @@ module Rigor
           path.scan(/:[a-z_][a-z0-9_]*/).size
         end
 
+        # Shared with `Context::Inflector#singularize` — kept in
+        # sync until one of the two call sites can adopt the
+        # other.
+        UNCOUNTABLE = %w[
+          equipment information rice money species series fish
+          sheep jeans police news media settings
+        ].to_set.freeze
+
         def singularize_word(word)
+          return word if UNCOUNTABLE.include?(word)
           return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
           return word.chomp("es") if word.end_with?("ses") || word.end_with?("xes")
           return word.chomp("s") if word.end_with?("s")

@@ -151,6 +151,44 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(load_errors.size).to eq(1)
     end
 
+    it "handles uncountable-noun resources (`resources :news`, index + show share `news_path`)" do
+      # Redmine's `config/routes.rb` declares `resources :news`
+      # with the full action set. ActiveSupport's inflector
+      # knows `news` is uncountable, so both the index helper
+      # AND the show helper are named `news_path` — index takes
+      # 0 args, show takes 1. Pre-fix the parser stripped the
+      # 's', registering `news_path` (index, arity 0) +
+      # `new_path` (show, arity 1) + `new_news_path` (new) —
+      # so legitimate `news_path(@news)` calls (81× across
+      # Redmine) surfaced as wrong-arity.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :news, only: [:index, :show, :new, :edit]
+        end
+      RUBY
+      result = run_plugin(
+        source: "news_path\nnews_path(1)\nnew_news_path\nedit_news_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "wrong-arity" }).to be_empty
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+
+    it "still fires wrong-arity for an uncountable resource with the wrong number of args" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :news, only: [:index, :show]
+        end
+      RUBY
+      result = run_plugin(
+        source: "news_path(1, 2)\n",  # neither 0 nor 1 — should fail
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.find { |d| d.rule == "wrong-arity" }).not_to be_nil
+    end
+
     it "registers the `as:` alias on root, both new and hash-rocket forms" do
       # Redmine uses `root :to => 'welcome#index', :as => 'home'`
       # at line 26 of config/routes.rb — the hash-rocket form is

@@ -36,18 +36,39 @@ module Rigor
         #   factory below is the canonical construction path.
         def initialize(entries)
           @entries = entries.freeze
-          @by_name = entries.to_h { |entry| [entry.name, entry] }.freeze
+          # Multimap: a single helper name can map to multiple
+          # entries when an uncountable-noun resource registers
+          # both an arity-0 index helper and an arity-1 show
+          # helper under the same `news_path` name. `find`
+          # returns the first entry (preserving the previous
+          # API); `accepts_arity?` checks against every entry.
+          @by_name = entries.group_by(&:name).transform_values(&:freeze).freeze
           freeze
         end
 
-        # @return [Entry, nil]
+        # @return [Entry, nil] First matching entry; for the
+        #   uncountable-noun case this is the index helper
+        #   (the show helper is also registered but starts
+        #   second).
         def find(helper_name)
-          @by_name[helper_name.to_s]
+          @by_name[helper_name.to_s]&.first
         end
 
         # @return [Boolean]
         def known?(helper_name)
           @by_name.key?(helper_name.to_s)
+        end
+
+        # @return [Boolean] true when any entry under this
+        #   helper name accepts the given positional arity.
+        def accepts_arity?(helper_name, arity)
+          (@by_name[helper_name.to_s] || []).any? { |entry| entry.arity == arity }
+        end
+
+        # @return [Array<Integer>] all accepted positional
+        #   arities for a helper name. Empty when unknown.
+        def acceptable_arities(helper_name)
+          (@by_name[helper_name.to_s] || []).map(&:arity).uniq
         end
 
         # All helper names — used by the "did you mean" suggester.
@@ -65,11 +86,15 @@ module Rigor
 
         def to_h
           # Plain dump for fact-store publishing (ADR-9). Each
-          # entry serialises as a small Hash so consumers don't
-          # need to require this file's classes.
-          @by_name.transform_values do |entry|
+          # name serialises as a small Hash for the FIRST entry
+          # under that name, with `acceptable_arities` carrying
+          # the full arity set so cross-plugin consumers can
+          # honour the uncountable-noun multi-arity case.
+          @by_name.transform_values do |group|
+            entry = group.first
             { name: entry.name, arity: entry.arity, path: entry.path,
-              http_method: entry.http_method, action: entry.action }
+              http_method: entry.http_method, action: entry.action,
+              acceptable_arities: group.map(&:arity).uniq }
           end
         end
       end

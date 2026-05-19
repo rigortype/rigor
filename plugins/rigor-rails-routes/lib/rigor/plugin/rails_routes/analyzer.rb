@@ -41,7 +41,7 @@ module Rigor
             entry = helper_table.find(name)
             if entry
               diagnostics << info_diagnostic(path, call_node, entry)
-              arity_diagnostic = arity_check(path, call_node, entry)
+              arity_diagnostic = arity_check(path, call_node, entry, helper_table)
               diagnostics << arity_diagnostic if arity_diagnostic
             else
               diagnostics << unknown_helper_diagnostic(path, call_node, name, helper_table)
@@ -79,10 +79,17 @@ module Rigor
           )
         end
 
-        def arity_check(path, call_node, entry)
+        def arity_check(path, call_node, entry, helper_table)
           actual = (call_node.arguments&.arguments || []).size
-          return nil if actual == entry.arity
+          # Uncountable nouns (`news` / `series` / `media`) cause
+          # Rails to register two entries under the same helper
+          # name — `news_path` accepts both arity 0 (index) and
+          # arity 1 (show). The HelperTable multimap stores both;
+          # accepts_arity? checks the full set.
+          return nil if helper_table.accepts_arity?(entry.name, actual)
 
+          arities = helper_table.acceptable_arities(entry.name).sort
+          expected = arities.length == 1 ? arities.first.to_s : "#{arities.first}..#{arities.last}"
           location = call_node.location
           Diagnostic.new(
             path: path,
@@ -90,7 +97,7 @@ module Rigor
             column: location.start_column + 1,
             severity: :error,
             rule: "wrong-arity",
-            message: "`#{entry.name}` expects #{entry.arity} argument(s), got #{actual}"
+            message: "`#{entry.name}` expects #{expected} argument(s), got #{actual}"
           )
         end
 

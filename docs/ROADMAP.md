@@ -160,9 +160,11 @@ Items that have surfaced across v0.1.x work and that the next implementer benefi
 - **ADR-15 § OQ1** — per-Ractor `Cache::Store`-shared facade. Today each worker builds its own RBS env from cache; OQ1 explores sharing the in-memory env across workers via a shareable facade. Would lower the pool wall-clock crossover with sequential (currently around 1.3–1.8 K files).
 - **ADR-13 § "Open questions"** — extending the shape-projection surface beyond the five core functions (`pick_of` / `omit_of` / `partial_of` / `required_of` / `readonly_of`). Authoritative when adding new mapped-type vocabulary.
 
-### Agent workflows / SKILLs (committed: v0.2.0)
+### Agent workflows / SKILLs (committed: v0.1.9)
 
 Three SKILLs target **end-users newly adopting Rigor on their own projects** (gem authors, application developers, project-private plugin maintainers running `gem install rigortype`). All three live under the **top-level `skills/` tree** — the slot vacated when `rigor-plugin-author` was re-homed to `.claude/skills/` in commit `1a3c342` — and follow the [agentskills.io](https://agentskills.io/) portable-skill conventions (self-contained `SKILL.md` + `references/`, absolute GitHub URLs for cross-repo refs, kebab-case names, public CLI surface only).
+
+Lead-up cycle (v0.1.7 / v0.1.8) is reserved for **collecting and addressing real-project error data** — running rigor against widening project surveys, tightening defaults from observed signal, and curating the SKILL trio's plugin / severity / baseline-rule recommendations against empirical evidence rather than first-principles guesses.
 
 - **`skills/rigor-project-init/`** ([ADR-22 § "WD8"](adr/22-baseline-and-project-onboarding.md), [§ "SKILL: rigor-project-init"](adr/22-baseline-and-project-onboarding.md)). First-time onboarding workflow: Gemfile / Gemfile.lock walk → propose plugin set matching the detected stack (Rails / dry-rb / Sinatra / plain Ruby) → severity profile choice (lenient if >100 errors on first run, balanced otherwise) → write `.rigor.dist.yml` → run `rigor check` → write `.rigor-baseline.yml` AND the matching `baseline: .rigor-baseline.yml` line into the config → surface concentrated rules as likely real bugs. Audience: a user typing `gem install rigortype` for the first time in their project.
 
@@ -172,9 +174,9 @@ Three SKILLs target **end-users newly adopting Rigor on their own projects** (ge
 
 The trio forms a coherent **onboarding → ongoing-quality → extension** progression for the v0.2.0 external-user track. Out of scope today (v0.1.x): no external `rigor-*` gems exist outside this monorepo; ADR-2 plugin contract surface still pre-1.0; the subtree-split / RubyGems publishing flow stays internal — these are the gating conditions v0.2.0 absorbs.
 
-Companion non-SKILL deliverable on the same `v0.2.0` cycle:
+Companion non-SKILL deliverable, ahead of the SKILL trio:
 
-- **Baseline mechanism core** ([ADR-22](adr/22-baseline-and-project-onboarding.md)): PHPStan-shaped `.rigor-baseline.yml` recording `(file, rule, count)` snapshots (rule-ID default + opt-in message-pattern mode per WD1); `rigor check` filters baselined diagnostics with ALL-or-NOTHING per-bucket threshold semantics (WD4); explicit-loading-only (WD2 (b)) via `baseline: <path>` in `.rigor.yml`. New CLI subcommand family: `rigor baseline {generate, dump, drift, prune, regenerate}` + `--baseline=PATH` / `--no-baseline` on `rigor check`. Driven by the five-project survey ([`docs/notes/20260519-oss-library-survey.md`](notes/20260519-oss-library-survey.md)) where mature codebases carry hundreds-thousands of diagnostics on first contact. Slices 1 + 2 (file I/O + drift inspection) ship through the regular v0.1.x cycle and the v0.2.0 SKILLs consume them post-release; slices 3 + 4 (the two SKILLs) ship under the v0.2.0 cycle.
+- **Baseline mechanism core** ([ADR-22](adr/22-baseline-and-project-onboarding.md)): PHPStan-shaped `.rigor-baseline.yml` recording `(file, rule, count)` snapshots (rule-ID default + opt-in message-pattern mode per WD1); `rigor check` filters baselined diagnostics with ALL-or-NOTHING per-bucket threshold semantics (WD4); explicit-loading-only (WD2 (b)) via `baseline: <path>` in `.rigor.yml`. New CLI subcommand family: `rigor baseline {generate, dump, drift, prune, regenerate}` + `--baseline=PATH` / `--no-baseline` on `rigor check`. Driven by the five-project survey ([`docs/notes/20260519-oss-library-survey.md`](notes/20260519-oss-library-survey.md)) where mature codebases carry hundreds-thousands of diagnostics on first contact. Slices 1 + 2 (file I/O + drift inspection) ship through the regular v0.1.x cycle starting v0.1.7 — so the v0.1.7 / v0.1.8 survey work can collect empirical baseline data before the SKILLs land; slices 3 + 4 (the two SKILLs) ship under the v0.1.9 cycle.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 

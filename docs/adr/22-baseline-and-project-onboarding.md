@@ -440,15 +440,20 @@ workflows for the rigor monorepo. Audience consequence:
   module-count advisory.
 
 Implication for scheduling: WD8 commits the two SKILLs to the
-**v0.2.0 cycle**, in lockstep with the external
-`rigor-plugin-author` reformulation. The ADR's slicing
+**v0.1.9 cycle** — the lead-up versions (v0.1.7 / v0.1.8)
+are reserved for collecting and addressing real-project
+error data from the field, so the SKILLs ship with concrete
+empirical signal behind their default plugin / severity /
+baseline-rule choices. The external `rigor-plugin-author`
+reformulation rides the same v0.1.9 train. The ADR's slicing
 section places them in slices 3 + 4 as the externally-shippable
 work, not as contributor experiments.
 
 Carry-over: the baseline file-format and the `rigor baseline
 {...}` CLI subcommand family (slices 1 + 2) are NOT gated on
-v0.2.0 — those ship through the regular v0.1.x cycle and the
-external SKILLs consume them post-release.
+v0.1.9 — those ship through the regular v0.1.x cycle
+(starting v0.1.7) so contributors and field-survey runs can
+collect empirical baseline data before the SKILLs land.
 
 The two SKILLs are sketched in §§ "rigor-project-init" and
 "rigor-baseline-reduce" below.
@@ -704,7 +709,7 @@ on its own. Demand-driven; no slice scheduled by this ADR.
   (Bundler-installed), not `bundle exec exe/rigor` from a
   monorepo checkout. References only public CLI flags and
   config keys.
-- Committed to v0.2.0 per WD8.
+- Committed to v0.1.9 per WD8.
 
 ### Slice 4 — `rigor-baseline-reduce` SKILL
 
@@ -719,7 +724,7 @@ on its own. Demand-driven; no slice scheduled by this ADR.
   have a `spec/` to extend rigor with).
 - Audience consequence: same as slice 3 — external-user
   surface only.
-- Committed to v0.2.0 per WD8.
+- Committed to v0.1.9 per WD8.
 
 ### Slice 5 — `regenerate` + drift-as-warning mode
 

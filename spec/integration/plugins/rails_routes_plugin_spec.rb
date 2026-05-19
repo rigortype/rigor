@@ -137,6 +137,32 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(load_error.severity).to eq(:warning)
       expect(diags.find { |d| d.rule == "unknown-helper" }).to be_nil
     end
+
+    it "accepts `only:` / `except:` as a single Symbol (not just Array)" do
+      # Mastodon, Solidus and many other Rails apps use the shorthand
+      # `resources :foo, only: :show` (Symbol) interchangeably with
+      # `only: [:show]` (Array). The parser must accept both — pre-fix,
+      # `Symbol#&` raised `NoMethodError` and the entire routes file
+      # failed to parse, bubbling up as a load-error against every
+      # analyzed file in the project.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :custom_css, only: :show
+          resources :statuses,  except: :destroy
+        end
+      RUBY
+      result = run_plugin(
+        source: "custom_css_path\nstatuses_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.find { |d| d.rule == "load-error" }).to be_nil
+      # Both helpers should be recognised (info-level), proving the
+      # restrict_actions table built cleanly.
+      helper_names = diags.map(&:message).join("\n")
+      expect(helper_names).to include("custom_css_path")
+      expect(helper_names).to include("statuses_path")
+    end
   end
 
   describe "ADR-9 cross-plugin fact publication" do

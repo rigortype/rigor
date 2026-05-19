@@ -375,10 +375,13 @@ module Rigor
 
         def restrict_actions(node, default)
           options = options_hash(node)
+          # `resources :foo, only: :show` is the same as
+          # `only: [:show]` in Rails; `options_hash` preserves the
+          # Symbol shape from the source, so coerce here.
           if (only = options[:only])
-            only & default
+            Array(only) & default
           elsif (except = options[:except])
-            default - except
+            default - Array(except)
           else
             default
           end

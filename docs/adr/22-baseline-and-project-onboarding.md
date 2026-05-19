@@ -487,8 +487,28 @@ Two candidate shapes, then:
 | Generator footprint | Reuses Configuration writer. | ~270 lines of Baseline class (already written). |
 | Drift / prune semantics | Generic — operate on a config-shaped file. | Specific to the baseline tool's frame. |
 
-**Decision**: WD9 = (B) — dedicated baseline schema. Documented
-rationale, ranked by load-bearing weight:
+**Decision**: WD9 = (B) — dedicated baseline schema. ACCEPTED
+(2026-05-19, after Slice 1 landed) — the alternative was
+considered explicitly and the choice is recorded here so future
+"why not the PHPStan way?" questions resolve against a written
+premise.
+
+The core framing — short form:
+
+> Unifying the schemas WOULD let one ignore-rule form double
+> as a project-wide config (`paths:` plus `ignored:` in the
+> same file). That's a genuine benefit for direct authoring.
+> But the baseline is **not authored by hand** — it's generated
+> by `rigor baseline generate` and reduced by the
+> `rigor-baseline-reduce` SKILL. The schema-unification value
+> (UX learnability, one config grammar) doesn't accrue if
+> humans don't read or write the file directly. The
+> separation costs (extra Baseline class, custom load
+> path) are bounded and one-time; the unification benefit
+> would be paid every release cycle in the form of mixed
+> stable / churning content in one schema.
+
+Documented rationale, ranked by load-bearing weight:
 
 1. **Separation of concerns matches operational reality.**
    The config file (`paths:` / `plugins:` / `severity_profile:`

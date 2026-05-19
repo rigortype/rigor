@@ -32,7 +32,7 @@ RIGOR_RAILS_META_GEMSPEC = File.expand_path(
   rigor-actionpack
   rigor-factorybot
 ].each do |gem_name|
-  lib = File.expand_path("../../../examples/#{gem_name}/lib", __dir__)
+  lib = File.expand_path("../../../plugins/#{gem_name}/lib", __dir__)
   $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 end
 $LOAD_PATH.unshift(RIGOR_RAILS_META_LIB) unless $LOAD_PATH.include?(RIGOR_RAILS_META_LIB)

@@ -206,6 +206,72 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(scope.discovered_method?("Row", :to_pair, :instance)).to be(true)
     end
 
+    # Survey item (e) — `Const = Module.new do ... end` and
+    # `Const = Class.new(?super) do ... end` are block-as-method
+    # idioms that mirror the Data.define / Struct.new shape: the
+    # block body holds method overrides whose canonical class is
+    # the named constant. Driven by `references/ruby/lib/resolv.rb`
+    # (~8 sites) where `ClassHash = Module.new do; def []=; ...; end; end`
+    # registers an instance method that `ClassHash[k] = v` then
+    # calls.
+    it "registers Module.new block-body methods under the constant's name" do
+      program = parse(<<~RUBY)
+        ClassHash = Module.new do
+          def []=(key, value)
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.user_def_for("ClassHash", :[]=)).to be_a(Prism::DefNode)
+      expect(scope.discovered_method?("ClassHash", :[]=, :instance)).to be(true)
+    end
+
+    it "registers Class.new block-body methods under the constant's name" do
+      program = parse(<<~RUBY)
+        AnonBase = Class.new do
+          def foo
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.discovered_method?("AnonBase", :foo, :instance)).to be(true)
+    end
+
+    it "qualifies Module.new / Class.new block-body methods under the surrounding module path" do
+      program = parse(<<~RUBY)
+        module Resolv
+          module DNS
+            ClassHash = Module.new do
+              def []=(k, v)
+              end
+            end
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.discovered_method?("Resolv::DNS::ClassHash", :[]=, :instance)).to be(true)
+    end
+
+    it "types the named constant as Singleton[Const] so dispatch routes through the discovered table" do
+      program = parse(<<~RUBY)
+        ClassHash = Module.new do
+          def []=(k, v)
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      const_type = scope.in_source_constants["ClassHash"]
+      expect(const_type).to eq(Rigor::Type::Combinator.singleton_of("ClassHash"))
+    end
+
     it "qualifies block-body methods under the surrounding module path" do
       program = parse(<<~RUBY)
         module Geom

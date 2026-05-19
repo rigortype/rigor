@@ -343,9 +343,24 @@ module Rigor
         unless qualified_prefix.empty?
           body_scope = body_scope.with_self_type(Type::Combinator.singleton_of(qualified_prefix.join("::")))
         end
-        rvalue_type = body_scope.type_of(node.value)
+        rvalue_type = meta_new_constant_type(node, full) || body_scope.type_of(node.value)
         existing = accumulator[full]
         accumulator[full] = existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+      end
+
+      # Survey item (e): when the rvalue is a recognised
+      # `Module.new do ... end` / `Class.new do ... end` /
+      # `Struct.new(*sym) do ... end` / `Data.define(*sym) do
+      # ... end` form, type the named constant as
+      # `Singleton[<full>]` so the discovered-method table
+      # registered under `full` becomes reachable through
+      # singleton-side dispatch (`Const.[]=` etc.). Returns nil
+      # for non-meta-new rvalues so the caller falls back to the
+      # default `body_scope.type_of(node.value)` shape.
+      def meta_new_constant_type(node, full)
+        return nil unless meta_new_block_body(node)
+
+        Type::Combinator.singleton_of(full)
       end
 
       # Slice 7 phase 12 — in-source method discovery pre-pass.
@@ -429,16 +444,22 @@ module Rigor
       # v0.1.2 — when a `Const = Data.define(*sym) do ... end`
       # / `Const = Struct.new(*sym) do ... end` constant write
       # carries a block, the block body holds method overrides
-      # whose canonical class is `Const`. Returns the block body
-      # node (a `Prism::StatementsNode`) when the rvalue
-      # matches; nil otherwise. Used by `walk_methods` /
-      # `walk_def_nodes` to push `Const` onto the qualified
-      # prefix before recursing.
+      # whose canonical class is `Const`. Survey item (e) extended
+      # the recognition to `Const = Module.new do ... end` and
+      # `Const = Class.new(?super) do ... end` — the
+      # ADR-16 Tier A "block-as-method" idiom at constant-write
+      # position. Returns the block body node (a
+      # `Prism::StatementsNode`) when the rvalue matches; nil
+      # otherwise. Used by `walk_methods` / `walk_def_nodes` to
+      # push `Const` onto the qualified prefix before recursing.
       def meta_new_block_body(node)
         return nil unless node.is_a?(Prism::ConstantWriteNode)
 
         rvalue = node.value
-        return nil unless data_define_call?(rvalue) || struct_new_call?(rvalue)
+        return nil unless data_define_call?(rvalue) ||
+                          struct_new_call?(rvalue) ||
+                          module_new_call?(rvalue) ||
+                          class_new_call?(rvalue)
 
         rvalue.block&.body
       end
@@ -944,6 +965,31 @@ module Rigor
         return false if positional.nil? || positional.empty?
 
         positional.all?(Prism::SymbolNode)
+      end
+
+      # Recognises `Module.new` and `Module.new(&block)` /
+      # `Module.new do ... end` at constant-write rvalue
+      # position. The block body is the anonymous module's
+      # `module_eval` body; defs inside it bind methods on the
+      # named constant (`Const = Module.new do ...; def foo; ...; end; end`).
+      # Arguments are NOT inspected because `Module.new` accepts
+      # no positionals — Ruby raises ArgumentError if any are
+      # passed — so a malformed call falls through the walker
+      # without affecting analysis.
+      def module_new_call?(node)
+        meta_call_with_name?(node, :Module, :new)
+      end
+
+      # Recognises `Class.new`, `Class.new(super_class)`, and the
+      # block form `Class.new { ... }`. Like `module_new_call?`,
+      # the block body is walked as the anonymous class's body.
+      # The optional `super_class` positional is accepted but does
+      # NOT route through `ancestor` discovery in this slice — the
+      # synthesised class still answers method lookups via its
+      # own body's defs, mirroring how `Struct.new` / `Data.define`
+      # are handled.
+      def class_new_call?(node)
+        meta_call_with_name?(node, :Class, :new)
       end
 
       def meta_call_with_name?(node, receiver_name, method_name)

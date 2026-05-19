@@ -14,6 +14,8 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-20
+
 ### Changed
 
 - **SKILL re-home — `rigor-plugin-author` reverted from `skills/` to `.claude/skills/`** as a contributor-only SKILL. Earlier in the same `[Unreleased]` cycle the SKILL was promoted to `skills/rigor-plugin-author/` under the framing "distributable to external plugin authors". On review the content is **rigor-monorepo-internal** end-to-end — it assumes the repo's `Makefile` (`make verify`), `spec/integration/{plugins,examples}/` layout, `spec/integration/support/plugin_helpers.rb`, `.rubocop.yml`'s `plugins/**/*` + `examples/**/*` excludes, the Flake (`nix develop --command ...`), and the `plugins/<id>/demo/` / `examples/<id>/demo/` placement convention. The mismatch surfaced when a Troubleshooting bullet referenced `make verify` (rigor-internal Makefile target) — usable for contributors but not for an external `rigor-foo` gem author. Cleaner to call this what it is. Path adjustments: all outbound docs/spec links reverted from absolute `https://github.com/rigortype/rigor/{blob,tree}/master/...` URLs back to relative `../../../X` (SKILL.md, 3 ups from `.claude/skills/rigor-plugin-author/`) or `../../../../X` (references/*.md, 4 ups). The top-level `skills/` directory is removed entirely; the slot is reserved for the **external-author SKILL committed to v0.2.0** per `docs/ROADMAP.md` § "Agent workflows / SKILLs". `CLAUDE.md` skills table re-collapsed to a single-tree shape (four contributor SKILLs under `.claude/skills/`) with a forward-pointer to the v0.2.0 commitment.
@@ -752,7 +754,8 @@ Each example ships `lib/`, runnable `demo/`, README, and an end-to-end integrati
 - **Cache load order for CLI flow.** `lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`. In CLI flow, the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). Fixed; `--cache-stats` now reports real activity.
 - **Fail-soft `rescue StandardError` was masking analyzer-internal bugs.** Tightened to `rescue ::RBS::BaseError` across the RBS-touching code paths — `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`. Analyzer-internal `NameError` / `NoMethodError` / `LoadError` now propagate so similar bugs surface immediately rather than silently degrading user-visible behaviour.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/rigortype/rigor/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/rigortype/rigor/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/rigortype/rigor/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/rigortype/rigor/compare/v0.1.3...v0.1.4

@@ -657,12 +657,21 @@ module Rigor
         fallback_receiver = user_class_fallback_receiver(receiver_type, environment)
         return nil if fallback_receiver.nil?
 
+        # Preserve the ORIGINAL receiver type as the `self`
+        # substitution so `Kernel#dup: () -> self` and other
+        # `self`-returning methods route through Object's RBS
+        # while still returning the caller's type rather than
+        # `Object`. Without this, `base = self.dup` inside a
+        # `Bundler::URI::Generic` instance method types `base`
+        # as `Object` because `Bundler::URI::Generic` is not in
+        # RBS and the fallback's `self` resolves to Object.
         RbsDispatch.try_dispatch(
           receiver: fallback_receiver,
           method_name: method_name,
           args: arg_types,
           environment: environment,
-          block_type: block_type
+          block_type: block_type,
+          self_type_override: receiver_type
         )
       end
 

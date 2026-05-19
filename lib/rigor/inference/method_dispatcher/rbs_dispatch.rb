@@ -74,10 +74,21 @@ module Rigor
         #   and binds the method-level type parameter that the
         #   block's return type references to `block_type` (Slice 6
         #   phase C sub-phase 2).
+        # @param self_type_override [Rigor::Type, nil] when set,
+        #   the substitution for `Bases::Self` in the method's
+        #   return type. Used by `MethodDispatcher#try_user_class_fallback`
+        #   to preserve the ORIGINAL receiver as the substitute
+        #   for `self` even though the dispatch is routed through
+        #   `Nominal[Object]` — so that `Bundler::URI::Generic.dup`
+        #   (which resolves through the `Object` fallback because
+        #   `Bundler::URI::Generic` lacks RBS) returns
+        #   `Bundler::URI::Generic` per `Kernel#dup: () -> self`
+        #   rather than `Object`. Defaults to nil (compute self
+        #   from the resolved class_name as before).
         # @return [Rigor::Type, nil] inferred return type, or `nil`
         #   when no rule resolves (no class name, no method, dispatch
         #   on a Top/Dynamic[Top] receiver, etc.).
-        def try_dispatch(receiver:, method_name:, args:, environment:, block_type: nil)
+        def try_dispatch(receiver:, method_name:, args:, environment:, block_type: nil, self_type_override: nil)
           return nil if environment.nil?
           return nil unless environment.rbs_loader
 
@@ -86,7 +97,8 @@ module Rigor
             method_name: method_name,
             args: args,
             environment: environment,
-            block_type: block_type
+            block_type: block_type,
+            self_type_override: self_type_override
           )
         end
 
@@ -128,26 +140,26 @@ module Rigor
         class << self
           private
 
-          def dispatch_for(receiver:, method_name:, args:, environment:, block_type:)
+          def dispatch_for(receiver:, method_name:, args:, environment:, block_type:, self_type_override: nil)
             args ||= []
             case receiver
             when Type::Union
-              dispatch_union(receiver, method_name, args, environment, block_type)
+              dispatch_union(receiver, method_name, args, environment, block_type, self_type_override)
             else
-              dispatch_one(receiver, method_name, args, environment, block_type)
+              dispatch_one(receiver, method_name, args, environment, block_type, self_type_override)
             end
           end
 
-          def dispatch_union(receiver, method_name, args, environment, block_type)
+          def dispatch_union(receiver, method_name, args, environment, block_type, self_type_override = nil)
             results = receiver.members.map do |member|
-              dispatch_one(member, method_name, args, environment, block_type)
+              dispatch_one(member, method_name, args, environment, block_type, self_type_override)
             end
             return nil if results.any?(&:nil?)
 
             Type::Combinator.union(*results)
           end
 
-          def dispatch_one(receiver, method_name, args, environment, block_type)
+          def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil)
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
@@ -163,7 +175,8 @@ module Rigor
               args: args,
               type_vars: type_vars,
               block_type: block_type,
-              environment: environment
+              environment: environment,
+              self_type_override: self_type_override
             )
           rescue StandardError
             # Defensive: if RBS' definition builder raises on a broken
@@ -254,8 +267,10 @@ module Rigor
             param_names.zip(receiver_args).to_h
           end
 
+          # rubocop:disable Metrics/ParameterLists
           def translate_return_type(method_definition, class_name:, kind:, args:, type_vars:, block_type:,
-                                    environment: nil)
+                                    environment: nil, self_type_override: nil)
+            # rubocop:enable Metrics/ParameterLists
             # Slice 4b-3 (ADR-7 § "Slice 4-A/4-B") — read the
             # return-type override through the merger so future
             # plugin / `:rbs_extended` bundles that also assert a
@@ -266,11 +281,17 @@ module Rigor
             return override if override
 
             instance_type = Type::Combinator.nominal_of(class_name)
-            self_type =
+            resolved_self_type =
               case kind
               when :singleton then Type::Combinator.singleton_of(class_name)
               else                 instance_type
               end
+            # `self_type_override` lets the user-class fallback
+            # path preserve the ORIGINAL receiver as the substitute
+            # for `Bases::Self` — so `Kernel#dup: () -> self`
+            # resolved through the Object fallback returns the
+            # caller's type, not Object.
+            self_type = self_type_override || resolved_self_type
 
             method_type = OverloadSelector.select(
               method_definition,

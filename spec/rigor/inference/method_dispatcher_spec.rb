@@ -634,6 +634,32 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         # directly, not a fallback against Object's parent.
         expect(env.rbs_module?("Object")).to be(false)
       end
+
+      it "preserves the original receiver type as `self` when falling back through Object" do
+        # `Kernel#dup: () -> self` resolved through the Object
+        # fallback (because `MyApp::UriThing` is not in RBS)
+        # MUST return `Nominal[MyApp::UriThing]`, not
+        # `Nominal[Object]`. Without `self_type_override`,
+        # `base = self.dup` inside a `Bundler::URI::Generic`
+        # method body types `base` as `Object` and every
+        # subsequent `base.fragment=` / `base.set_path(...)`
+        # call fires `undefined-method for Object`.
+        unknown_receiver = Rigor::Type::Combinator.nominal_of("MyApp::UriThing")
+        result = described_class.dispatch(
+          receiver_type: unknown_receiver,
+          method_name: :dup, arg_types: [], environment: env
+        )
+        expect(result).to eq(unknown_receiver)
+      end
+
+      it "preserves the original receiver type for `clone` (the symmetric Kernel method)" do
+        unknown_receiver = Rigor::Type::Combinator.nominal_of("MyApp::Thing")
+        result = described_class.dispatch(
+          receiver_type: unknown_receiver,
+          method_name: :clone, arg_types: [], environment: env
+        )
+        expect(result).to eq(unknown_receiver)
+      end
     end
 
     describe "static return refinements tier (File class-side)" do

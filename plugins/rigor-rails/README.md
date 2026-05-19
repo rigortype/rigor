@@ -95,7 +95,7 @@ becomes after the Tier 1+2 sub-plugins are extracted via
 gemspec's `add_dependency` declarations name gems that don't
 yet exist on RubyGems — installation requires `path:` overrides
 in the `Gemfile`. The extraction workflow is documented in the
-[`rigor-plugin-author`](../../.codex/skills/rigor-plugin-author/SKILL.md)
+[`rigor-plugin-author`](../../skills/rigor-plugin-author/SKILL.md)
 SKILL.
 
 ## Related

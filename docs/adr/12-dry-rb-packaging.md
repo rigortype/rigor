@@ -41,7 +41,7 @@ family pattern.**
   `rigor-dry-struct`, `rigor-dry-validation`, `rigor-dry-monads`,
   `rigor-dry-schema`, … one-to-one with the upstream gem boundary.
 - Plugins are staged under `plugins/rigor-dry-<id>/` per the
-  [`rigor-plugin-author`](../../.codex/skills/rigor-plugin-author/SKILL.md)
+  [`rigor-plugin-author`](../../skills/rigor-plugin-author/SKILL.md)
   SKILL discipline.
 - When a plugin's contract stabilises it is extracted via
   `git subtree split` into its own published gem, on the same

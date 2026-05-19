@@ -1,27 +1,45 @@
 ---
 name: rigor-plugin-author
-description: End-to-end workflow for an AI agent to translate a user requirement into a working Rigor plugin under `examples/`. Use when the user asks to "create a Rigor plugin for X", "write a plugin that does Y", "extend Rigor for our DSL", or similar. Covers requirements gathering, template selection, scaffolding, integration spec, and verification.
+description: End-to-end workflow for an AI agent to translate a user requirement into a working Rigor plugin. Production plugins (real gems / frameworks) land under `plugins/`; tutorial walkthroughs over deliberately simplified virtual use cases land under `examples/`. Use when the user asks to "create a Rigor plugin for X", "write a plugin that does Y", "extend Rigor for our DSL", or similar. Covers requirements gathering, plugins-vs-examples placement, template selection, scaffolding, integration spec, and verification.
 ---
 
 # Rigor Plugin Author Workflow
 
 This SKILL is for AI agents. It compresses the experience of having
-authored the sixteen examples under [`examples/`](../../../examples/README.md)
-(eight plugin-contract walkthroughs plus the Rails ecosystem
-family — `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionmailer`,
-`rigor-activejob`, `rigor-pundit`, `rigor-sidekiq`, `rigor-actioncable`,
-`rigor-rspec`) into a procedural pipeline so the next plugin can be
-built end-to-end without re-discovering the gotchas.
+authored the twenty-seven production plugins under
+[`plugins/`](../../plugins/README.md) (Rails ecosystem, RSpec /
+Minitest / shoulda-matchers, dry-rb foundation, Sorbet, Devise,
+Sidekiq, Pundit, GraphQL, Statesman, TypeScript utility types, …)
+plus the five plugin-contract walkthroughs under
+[`examples/`](../../examples/README.md) (`rigor-deprecations` /
+`rigor-lisp-eval` / `rigor-pattern` / `rigor-routes` / `rigor-units`)
+into a procedural pipeline so the next plugin can be built end-to-end
+without re-discovering the gotchas.
 
-The user-facing handbook for plugin **authoring** is the
-[`examples/README.md`](../../../examples/README.md) landing page.
-This document is the agent-facing **how-to-build** companion.
+The repository keeps two conceptually distinct trees:
+
+- **[`plugins/`](../../plugins/README.md)** — production plugins
+  targeting real gems / frameworks. Twenty-seven gems intended to be
+  installed alongside the analyzer in a user's `Gemfile` and activated
+  through `.rigor.yml`. The catalogue / installation guide lives in
+  [`plugins/README.md`](../../plugins/README.md).
+- **[`examples/`](../../examples/README.md)** — five tutorial
+  walkthroughs over deliberately simplified, virtual use cases. Each
+  spotlights a single architectural surface so plugin authors can
+  read the smallest possible code that demonstrates one slice of the
+  contract at a time. The handbook lives in
+  [`examples/README.md`](../../examples/README.md).
+
+This document is the agent-facing **how-to-build** companion to those
+two landing pages. Pick `plugins/` or `examples/` per Phase 0 below.
 
 All commands MUST run through the Flake per `AGENTS.md`.
 
 ---
 
-## Phase 0 — When this SKILL fires
+## Phase 0 — When this SKILL fires, and where the plugin lands
+
+### Trigger conditions
 
 Trigger the SKILL when the user requests a plugin in the broad
 sense:
@@ -33,12 +51,46 @@ sense:
 
 Do NOT trigger for:
 
-- Modifications to existing plugins under `examples/` (those are
-  ordinary edit tasks).
+- Modifications to existing plugins under `plugins/` or `examples/`
+  (those are ordinary edit tasks).
 - Requests for the analyser engine itself (`lib/rigor/inference/`,
   `lib/rigor/analysis/`, `lib/rigor/plugin/`). Those are core
   development; this SKILL only covers writing third-party-style
-  plugins under `examples/`.
+  plugins.
+
+### `plugins/` vs `examples/` — where does the new plugin go?
+
+This is the **first** decision after the trigger fires. Confirm with
+the user if any signal points both ways.
+
+| Signal | Lands under |
+| --- | --- |
+| Targets a real gem / framework (Rails, RSpec, dry-rb, Sorbet, Devise, Sidekiq, GraphQL, Statesman, …) | **`plugins/<id>/`** |
+| Targets a user's in-house DSL or domain language they want analysed on a real project | **`plugins/<id>/`** |
+| Intended to be installed via `Gemfile` + activated in `.rigor.yml` against real source code | **`plugins/<id>/`** |
+| Deliberately fictional / virtual domain (a tiny Lisp evaluator, units-of-measure, fake route YAML) | **`examples/<id>/`** |
+| Authored primarily to **demonstrate one architectural surface** of the plugin contract | **`examples/<id>/`** |
+| Will be referenced by the handbook / ADRs as a teaching reference | **`examples/<id>/`** |
+
+The mechanical differences:
+
+- **Production plugins (`plugins/`)** are excluded from RuboCop by
+  `.rubocop.yml`'s `plugins/**/*` list. Their integration spec lives
+  at [`spec/integration/plugins/<id>_plugin_spec.rb`](../../spec/integration/plugins/);
+  the spec IS linted.
+- **Walkthroughs (`examples/`)** are excluded from RuboCop by
+  `.rubocop.yml`'s `examples/**/*` list. Their integration spec lives
+  at [`spec/integration/examples/<id>_plugin_spec.rb`](../../spec/integration/examples/);
+  the spec IS linted.
+
+Both trees share the same `PluginHelpers` module
+([`spec/integration/support/plugin_helpers.rb`](../../spec/integration/support/plugin_helpers.rb))
+which is auto-included for `*_plugin_spec.rb` under either directory.
+
+When in doubt, default to `plugins/`. The five walkthroughs in
+`examples/` are a curated set covering the architectural surfaces;
+new entries there require a positive reason ("this teaches a contract
+slice that isn't already covered").
 
 ---
 
@@ -125,9 +177,9 @@ If the target DSL fits one of these shapes, ship a
 
 | If the DSL is… | Substrate tier | Manifest entry | Reference plugin |
 | --- | --- | --- | --- |
-| `<Class>.<verb>(path) do … end` where the block runs as an instance method on `<Class>` (Sinatra-shape) | **Tier A** | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](../../../plugins/rigor-sinatra/) |
-| `<Class>.<dsl_method>(:sym_a, :sym_b)` where each symbol maps via a bundled registry to a module that gets `include`d (Devise-shape) | **Tier B** | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](../../../plugins/rigor-devise/) |
-| `<Class>.<dsl_method>(:name, T)` where the framework `class_eval`s a heredoc interpolating `name` (dry-struct-shape, ActiveStorage-shape) | **Tier C** | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](../../../plugins/rigor-dry-struct/) |
+| `<Class>.<verb>(path) do … end` where the block runs as an instance method on `<Class>` (Sinatra-shape) | **Tier A** | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](../../plugins/rigor-sinatra/) |
+| `<Class>.<dsl_method>(:sym_a, :sym_b)` where each symbol maps via a bundled registry to a module that gets `include`d (Devise-shape) | **Tier B** | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](../../plugins/rigor-devise/) |
+| `<Class>.<dsl_method>(:name, T)` where the framework `class_eval`s a heredoc interpolating `name` (dry-struct-shape, ActiveStorage-shape) | **Tier C** | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](../../plugins/rigor-dry-struct/) |
 | External Ruby files `instance_eval`'d under a declared receiver (Redmine webhook payloads / tDiary plugins) | **Tier D** (contract only as of v0.1.x; engine integration demand-driven) | `external_files: [Macro::ExternalFile.new(glob:, receiver_type:, bound_ivars:)]` | — |
 
 `ActiveSupport::Concern.included do ... end` re-targeting is
@@ -154,18 +206,18 @@ the directory layout and adapt the analyser body.
 
 | If the answers look like… | Use template | Why |
 | --- | --- | --- |
-| Q1=A/B, Q2=A, Q3=A, Q5=C | [`rigor-deprecations`](../../../examples/rigor-deprecations/) | Smallest possible plugin; pure config-driven rules; ~80 lines. |
-| Q1=A, Q2=A, Q3=E, Q5=A/B | [`rigor-lisp-eval`](../../../examples/rigor-lisp-eval/) | Recursive interpretation of the literal AST argument. |
-| Q1=D, Q2=B, Q3=C, Q5=A | [`rigor-units`](../../../examples/rigor-units/) | Local-variable flow tracking through arithmetic and chained calls. |
-| Q1=C/E, Q2=C, Q3=A, Q5=A/B | [`rigor-statesman`](../../../plugins/rigor-statesman/) | Two-pass DSL analysis — collect declarations, then validate uses. |
-| Q1=B, Q2=A/B, Q3=B, Q5=C | [`rigor-pattern`](../../../examples/rigor-pattern/) | Plugin asks the analyser via `Scope#type_of` + `literal_string_compatible?`; matches against a literal value. |
-| Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D | [`rigor-routes`](../../../examples/rigor-routes/) | Reads a project file via `IoBoundary` under `TrustPolicy`; caches the parse via `Plugin::Base.producer`. |
+| Q1=A/B, Q2=A, Q3=A, Q5=C | [`rigor-deprecations`](../../examples/rigor-deprecations/) | Smallest possible plugin; pure config-driven rules; ~80 lines. |
+| Q1=A, Q2=A, Q3=E, Q5=A/B | [`rigor-lisp-eval`](../../examples/rigor-lisp-eval/) | Recursive interpretation of the literal AST argument. |
+| Q1=D, Q2=B, Q3=C, Q5=A | [`rigor-units`](../../examples/rigor-units/) | Local-variable flow tracking through arithmetic and chained calls. |
+| Q1=C/E, Q2=C, Q3=A, Q5=A/B | [`rigor-statesman`](../../plugins/rigor-statesman/) | Two-pass DSL analysis — collect declarations, then validate uses. |
+| Q1=B, Q2=A/B, Q3=B, Q5=C | [`rigor-pattern`](../../examples/rigor-pattern/) | Plugin asks the analyser via `Scope#type_of` + `literal_string_compatible?`; matches against a literal value. |
+| Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D | [`rigor-routes`](../../examples/rigor-routes/) | Reads a project file via `IoBoundary` under `TrustPolicy`; caches the parse via `Plugin::Base.producer`. |
 
 If the requirement fits neither the substrate tiers nor the
 six hand-rolled templates, **stop and ask the user**. The
 v0.1.x plugin contract may not yet expose what they need;
 don't invent a workaround. The
-[per-library survey](../../../docs/notes/20260515-macro-expansion-library-survey.md)
+[per-library survey](../../docs/notes/20260515-macro-expansion-library-survey.md)
 records which Ruby libraries the substrate covers and which
 fall outside (GraphQL-Ruby is the canonical "schema-graph
 recorder" case that the substrate does NOT fit).
@@ -183,10 +235,11 @@ Pick a plugin id and gem name following the convention:
   `require "rigor-<id>"` from each `.rigor.yml` `plugins:` entry.
 
 Create the directory tree (replacing `<id>` and `ClassName` with the
-chosen id and matching CamelCase Ruby class name):
+chosen id and matching CamelCase Ruby class name, and replacing the
+`plugins/` root with `examples/` if Phase 0 placed the plugin there):
 
 ```text
-plugins/rigor-<id>/
+plugins/rigor-<id>/   # or examples/rigor-<id>/ for a walkthrough
 ├── README.md
 ├── rigor-<id>.gemspec
 ├── lib/
@@ -367,8 +420,9 @@ plugin reads from outside the project root + signature paths.
 
 ## Phase 5 — Demo
 
-The demo project under `plugins/rigor-<id>/demo/` makes the plugin
-runnable. Two-file convention when Q4 is B or C:
+The demo project under `plugins/rigor-<id>/demo/` (or
+`examples/rigor-<id>/demo/`, matching Phase 0's placement) makes the
+plugin runnable. Two-file convention when Q4 is B or C:
 
 - `demo.rb` — only the recognised / valid call sites. Runs cleanly
   under MRI.
@@ -396,16 +450,17 @@ cache:
 Pair it with a per-demo `.gitignore` so the cache stays out of git:
 
 ```
-# plugins/rigor-<id>/demo/.gitignore
+# plugins/rigor-<id>/demo/.gitignore   (or examples/rigor-<id>/demo/.gitignore)
 /tmp/
 ```
 
-Verify the demo runs:
+Verify the demo runs (substitute `examples/` for `plugins/` if Phase 0
+placed the plugin there):
 
 ```sh
 cd plugins/rigor-<id>/demo
 nix --extra-experimental-features 'nix-command flakes' develop --command \
-  env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../../Gemfile \
+  env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../Gemfile \
   rigor check
 ```
 
@@ -418,20 +473,27 @@ The diagnostic stream should match what the README claims. The
 ## Phase 6 — Integration spec
 
 Mirror one of the existing specs under
-`spec/integration/examples/`. The shared boilerplate
-(`run_plugin`, `plugin_diagnostics`, requirer construction,
-tmpdir lifecycle) lives in
-[`spec/integration/examples/support/plugin_helpers.rb`](../../../spec/integration/examples/support/plugin_helpers.rb)
-and is auto-included for every `*_plugin_spec.rb` file under
-that directory. The spec only needs the per-plugin parts.
+[`spec/integration/plugins/`](../../spec/integration/plugins/)
+(for production plugins) or
+[`spec/integration/examples/`](../../spec/integration/examples/)
+(for walkthroughs). The shared boilerplate (`run_plugin`,
+`plugin_diagnostics`, requirer construction, tmpdir lifecycle) lives
+in
+[`spec/integration/support/plugin_helpers.rb`](../../spec/integration/support/plugin_helpers.rb)
+and is auto-included for every `*_plugin_spec.rb` file under either
+directory (the `define_derived_metadata` regex in `plugin_helpers.rb`
+matches `/spec/integration/(plugins|examples)/.+_plugin_spec\.rb`).
+The spec only needs the per-plugin parts.
 
 ```ruby
-# spec/integration/examples/<id>_plugin_spec.rb
+# spec/integration/plugins/<id>_plugin_spec.rb
+# (use spec/integration/examples/<id>_plugin_spec.rb for a walkthrough)
 # frozen_string_literal: true
 
 require "spec_helper"
 
-PLUGIN_LIB = File.expand_path("../../../plugins/rigor-<id>/lib", __dir__)
+# Adjust the lib path to match Phase 0's placement: plugins/ vs examples/.
+PLUGIN_LIB = File.expand_path("../../plugins/rigor-<id>/lib", __dir__)
 $LOAD_PATH.unshift(PLUGIN_LIB) unless $LOAD_PATH.include?(PLUGIN_LIB)
 require "rigor-<id>"
 
@@ -548,14 +610,14 @@ Per `AGENTS.md` § "Release Cadence", add the entry under
 drives the cut-over.
 
 ```markdown
-### Added — example plugin: `rigor-<id>`
+### Added — plugin: `rigor-<id>`
 
 - **One-line description.** Two-to-three-sentence body describing the
   user-facing diagnostics, the architecture facet, and how to run
   the demo.
 - **Configuration.** What the user puts in `.rigor.yml`.
-- **Demo project** under `plugins/rigor-<id>/demo/`.
-- **Integration spec** at `spec/integration/examples/<id>_plugin_spec.rb` — N examples covering …
+- **Demo project** under `plugins/rigor-<id>/demo/` (or `examples/rigor-<id>/demo/` for a walkthrough).
+- **Integration spec** at `spec/integration/plugins/<id>_plugin_spec.rb` (or `spec/integration/examples/<id>_plugin_spec.rb` for a walkthrough) — N examples covering …
 ```
 
 ---
@@ -573,9 +635,10 @@ nix --extra-experimental-features 'nix-command flakes' develop --command git dif
 
 - RSpec passing (the new integration spec adds N examples to the
   total).
-- RuboCop 0 offenses (the example's own source is excluded by
-  `.rubocop.yml`'s `examples/**/*` rule, but the integration spec
-  IS linted — keep it under the per-example length / multiple-
+- RuboCop 0 offenses (the plugin's own source is excluded by
+  `.rubocop.yml`'s `plugins/**/*` and `examples/**/*` rules, but the
+  integration spec under `spec/integration/{plugins,examples}/` IS
+  linted — keep it under the per-example length / multiple-
   expectations limits, or add inline `# rubocop:disable` with a
   reason).
 - `bundle exec exe/rigor check lib` reporting only the three
@@ -589,7 +652,8 @@ nix --extra-experimental-features 'nix-command flakes' develop --command git dif
 One commit per plugin is preferred. Subject:
 
 ```text
-Add rigor-<id> example plugin (<facet>)
+Add rigor-<id> plugin (<facet>)             # for plugins/rigor-<id>/
+Add rigor-<id> walkthrough (<facet>)        # for examples/rigor-<id>/
 ```
 
 Body: explain WHY this plugin was needed (the user's requirement),
@@ -636,10 +700,11 @@ non-anchored `.rigor/cache/` pattern as a fallback.)
    "this might be a literal string" gate; `carrier?` is internal.
    Use `Type::Combinator.literal_string_compatible?(type)` from
    plugin code.
-9. **Examples are excluded from RuboCop globally** (`.rubocop.yml`'s
-   `Exclude:` list). The integration spec under
-   `spec/integration/examples/` is NOT excluded — keep it within
-   the project's RuboCop limits.
+9. **Plugin source trees are excluded from RuboCop globally**
+   (`.rubocop.yml`'s `Exclude:` list covers both `plugins/**/*` and
+   `examples/**/*`). The integration specs under
+   `spec/integration/plugins/` and `spec/integration/examples/` are
+   NOT excluded — keep them within the project's RuboCop limits.
 10. **The plugin's lib/ is NOT on the load path in tests.** The
     spec must `$LOAD_PATH.unshift(...)` before `require "rigor-<id>"`,
     or use a `requirer:` lambda that registers the plugin class
@@ -672,9 +737,9 @@ the same input. Concretely:
   Rails sample app is a TEST-time tool, not a demo-time
   fixture.
 - **The roadmap lives in
-  [`docs/design/20260508-rails-plugins-roadmap.md`](../../../docs/design/20260508-rails-plugins-roadmap.md).**
+  [`docs/design/20260508-rails-plugins-roadmap.md`](../../docs/design/20260508-rails-plugins-roadmap.md).**
   Tier 1 plugins are unblocked on the current API. Tier 2
-  needs the cross-plugin API ([ADR-9](../../../docs/adr/9-cross-plugin-api.md))
+  needs the cross-plugin API ([ADR-9](../../docs/adr/9-cross-plugin-api.md))
   and lands after that ships.
 
 ## Cross-plugin facts (post-ADR-9)
@@ -724,28 +789,34 @@ Until then, plugins that need cross-plugin data either:
 
 When in doubt, read these in order:
 
-1. **[`examples/README.md`](../../../examples/README.md)** — the
-   landing page. Comparison table and recommended reading order
-   across the sixteen worked examples (eight plugin-contract
-   walkthroughs + eight Rails ecosystem plugins covering Tier 1
-   + Tier 3A + Tier 3B + Tier 3C + Tier 3F).
-2. **[`docs/handbook/09-plugins.md`](../../../docs/handbook/09-plugins.md)**
+1. **[`plugins/README.md`](../../plugins/README.md)** — the
+   production-plugin catalogue. Twenty-seven plugins targeting real
+   gems / frameworks, with the cross-plugin fact-channel table
+   (ADR-9) and the ADR-16 substrate-consumer table. Read this when
+   placing a new production plugin alongside its peers (Rails
+   ecosystem tier, dry-rb family, testing-and-matchers, …).
+2. **[`examples/README.md`](../../examples/README.md)** — the
+   walkthrough catalogue. Five tutorial plugins over deliberately
+   simplified virtual use cases (deprecations / lisp-eval / pattern
+   / units / routes), one architectural surface per walkthrough.
+   Read this to pick a structural template in Phase 2.
+3. **[`docs/handbook/09-plugins.md`](../../docs/handbook/09-plugins.md)**
    — the user-facing one-pager. Names what plugins can and cannot
    do today.
-3. **[`docs/internal-spec/plugin.md`](../../../docs/internal-spec/plugin.md)**
+4. **[`docs/internal-spec/plugin.md`](../../docs/internal-spec/plugin.md)**
    — slice-1 normative surface (registration, manifest, services).
-4. **[`docs/internal-spec/plugin-trust.md`](../../../docs/internal-spec/plugin-trust.md)**
+5. **[`docs/internal-spec/plugin-trust.md`](../../docs/internal-spec/plugin-trust.md)**
    — slice-2 normative surface (`TrustPolicy`, `IoBoundary`).
-5. **[`docs/internal-spec/plugin-cache-producers.md`](../../../docs/internal-spec/plugin-cache-producers.md)**
+6. **[`docs/internal-spec/plugin-cache-producers.md`](../../docs/internal-spec/plugin-cache-producers.md)**
    — slice-6 normative surface (`producer` DSL, `cache_for`).
-6. **[`docs/adr/2-extension-api.md`](../../../docs/adr/2-extension-api.md)**
+7. **[`docs/adr/2-extension-api.md`](../../docs/adr/2-extension-api.md)**
    — binding design document. Read end-to-end before authoring a
    plugin that pushes the surface in a non-obvious direction.
-7. **`spec/rigor/public_api_drift_spec.rb`** — pins every public
+8. **`spec/rigor/public_api_drift_spec.rb`** — pins every public
    namespace plugins touch. If the plugin needs a method not in
    the drift snapshots, the method is internal — do not depend on
    it.
-8. **`spec/rigor/plugin/cache_producer_spec.rb`** — the
+9. **`spec/rigor/plugin/cache_producer_spec.rb`** — the
    "invalidates when files read via io_boundary BEFORE cache_for
    change between calls" example is the canonical reference for
    the slice-6 read-then-cache pattern.
@@ -756,15 +827,18 @@ When in doubt, read these in order:
 
 Before declaring "the plugin is done":
 
+- [ ] Phase 0 placement decided (`plugins/` for production, `examples/`
+      for walkthrough) and confirmed with the user if ambiguous.
 - [ ] Phase 1 questions answered explicitly by the user (not
       assumed).
 - [ ] Template selected from Phase 2's table; no inventing.
-- [ ] `plugins/rigor-<id>/` directory tree complete (gemspec,
-      lib, demo).
+- [ ] `plugins/rigor-<id>/` (or `examples/rigor-<id>/`) directory tree
+      complete (gemspec, lib, demo).
 - [ ] Demo runs cleanly under `rigor check`; diagnostics match the
       README's "What the plugin recognises" section verbatim.
-- [ ] Integration spec at `spec/integration/examples/<id>_plugin_spec.rb`
-      passes; covers every diagnostic shape the plugin emits.
+- [ ] Integration spec at `spec/integration/plugins/<id>_plugin_spec.rb`
+      (or `spec/integration/examples/<id>_plugin_spec.rb` for a
+      walkthrough) passes; covers every diagnostic shape the plugin emits.
 - [ ] README follows the structure in Phase 7.
 - [ ] CHANGELOG entry under `## [Unreleased]` only.
 - [ ] `make verify` clean.

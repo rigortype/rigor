@@ -405,7 +405,7 @@ non-trivial.
 | Add rubydex as a hard runtime dependency of `rigortype` | Rejected | Pulls a native dependency on every Rigor install for features only a subset of users want; expands the supported-platform matrix Rigor commits to. |
 | Propose upstream changes to rubydex to expose RBS method types | Queued (informational) | Worth proposing if Track 2's triggers cluster around (1). Rigor's contribution would be a Rust-side patch to `ruby-rbs` integration, not a small Ruby PR — substantial scope. |
 | Fork rubydex and add typed RBS extraction | Rejected | Forking a Rust workspace owned by Shopify creates a maintenance burden Rigor cannot reasonably carry. |
-| Adopt rubydex's MCP server pattern for Rigor's own AI integration | Out of scope | Rigor has no current AI-agent integration mandate. If one emerges, see the [`rigor-plugin-author`](../../.codex/skills/rigor-plugin-author/SKILL.md) discipline. |
+| Adopt rubydex's MCP server pattern for Rigor's own AI integration | Out of scope | Rigor has no current AI-agent integration mandate. If one emerges, see the [`rigor-plugin-author`](../../skills/rigor-plugin-author/SKILL.md) discipline. |
 
 ## Working decisions
 
@@ -578,7 +578,7 @@ Track 2 is v0.3.x or beyond.
   reserved for Track 3, even though no diagnostics emit today.
 - Adds `plugins/rigor-lsp-rubydex/` to the reserved-but-empty
   directory list. When Track 3 actions, the
-  [`rigor-plugin-author`](../../.codex/skills/rigor-plugin-author/SKILL.md)
+  [`rigor-plugin-author`](../../skills/rigor-plugin-author/SKILL.md)
   SKILL covers the scaffold; this ADR doesn't pre-author the code.
 
 ## Revision history

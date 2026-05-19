@@ -660,7 +660,7 @@ the ceiling incrementally.
    chapter `docs/handbook/09-plugins.md` § "Macro / DSL
    expansion substrate (ADR-16)" introduces the four tiers
    + Concern re-targeting + floor/ceiling framing + decision
-   matrix; `.codex/skills/rigor-plugin-author/SKILL.md` Phase 2
+   matrix; `skills/rigor-plugin-author/SKILL.md` Phase 2
    splits into "Step 2A — Try the macro substrate first" /
    "Step 2B — Hand-rolled walker"; ROADMAP / CURRENT_WORK O2
    reframed from "queued" to "substrate floor LANDED";

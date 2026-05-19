@@ -170,7 +170,7 @@ precision per ADR-5 robustness.
 The substrate and the hand-rolled walker contract coexist —
 a plugin can mix `manifest`-declared substrate entries with a
 `diagnostics_for_file` walker. The
-[`.codex/skills/rigor-plugin-author/SKILL.md`](../../.codex/skills/rigor-plugin-author/SKILL.md)
+[`skills/rigor-plugin-author/SKILL.md`](../../skills/rigor-plugin-author/SKILL.md)
 SKILL captures the decision flow in detail; the survey at
 [`docs/notes/20260515-macro-expansion-library-survey.md`](../notes/20260515-macro-expansion-library-survey.md)
 records which Ruby libraries the substrate covers and which

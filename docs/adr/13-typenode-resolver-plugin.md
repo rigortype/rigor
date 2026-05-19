@@ -363,7 +363,7 @@ Recommended order; each slice independently shippable:
     carriers; lossy-projection diagnostic for non-shape
     inputs.
 6.  **`plugins/rigor-typescript-utility-types/`.** Plugin
-    scaffold via `.codex/skills/rigor-plugin-author/SKILL.md`.
+    scaffold via `skills/rigor-plugin-author/SKILL.md`.
     Five resolvers (Pick, Omit, Partial, Required, Readonly)
     in the v1 cut; the seven "degraded" rows ship as
     `plugin.typescript-utility-types.unsupported` returns.

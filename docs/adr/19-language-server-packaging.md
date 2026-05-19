@@ -128,7 +128,7 @@ If trigger conditions fire and the split happens:
 - **`rigor-lsp`** — matches the existing Rigor plugin family
   prefix (`rigor-rails-routes`, `rigor-dry-types`,
   `rigor-activerecord`, etc.). Stage under `plugins/rigor-lsp/`
-  per the [`rigor-plugin-author`](../../.codex/skills/rigor-plugin-author/SKILL.md)
+  per the [`rigor-plugin-author`](../../skills/rigor-plugin-author/SKILL.md)
   SKILL discipline if the move is gradual; extract via
   `git subtree split` once stable.
 - **`ruby-lsp-rigor`** — if the split is toward C (Ruby LSP

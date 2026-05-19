@@ -7,7 +7,7 @@ the binding sources for individual plugin contracts remain the
 
 The first plugin in this family — [`rigor-activerecord`](../../plugins/rigor-activerecord/) —
 landed on `master` (commit `e8fda84`) and is staged in the
-monorepo per [`.codex/skills/rigor-plugin-author/SKILL.md`](../../.codex/skills/rigor-plugin-author/SKILL.md)'s
+monorepo per [`skills/rigor-plugin-author/SKILL.md`](../../skills/rigor-plugin-author/SKILL.md)'s
 "start in monorepo, extract via `git subtree split` once stable"
 discipline.
 

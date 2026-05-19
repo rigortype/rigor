@@ -175,7 +175,7 @@ Treat any tightening that **loses union members** compared to the declared RBS a
 - Use a plain imperative subject in sentence case (e.g. `Add GitHub Actions CI running make verify on Ruby 4.0`, `Bump up version to 0.0.1`).
 - Do **not** use Conventional-Commits-style `type:` or `area:` prefixes. The subject starts with a capitalised verb, no leading tag.
 - Keep the subject self-contained and reasonably short; detail belongs in the body. Wrap the body at ~72 columns and write it for humans — explain the why and any context a future reader will need, not the diff itself.
-- Release version bumps follow the fixed form `Bump up version to x.y.z`. See [`.codex/skills/rigor-release-prep/SKILL.md`](.codex/skills/rigor-release-prep/SKILL.md) for the full release-prep flow.
+- Release version bumps follow the fixed form `Bump up version to x.y.z`. See [`.claude/skills/rigor-release-prep/SKILL.md`](.claude/skills/rigor-release-prep/SKILL.md) for the full release-prep flow.
 
 ## Release Cadence
 

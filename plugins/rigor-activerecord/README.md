@@ -178,7 +178,7 @@ shape stabilises against this real consumer — see
 [`docs/ROADMAP.md`](../../docs/ROADMAP.md) and the
 relevant CHANGELOG `[Unreleased]` entry. The extraction process
 is recorded in
-[`.codex/skills/rigor-plugin-author/SKILL.md`](../../.codex/skills/rigor-plugin-author/SKILL.md).
+[`skills/rigor-plugin-author/SKILL.md`](../../skills/rigor-plugin-author/SKILL.md).
 
 As of v0.1.2 the plugin emits `FlowContribution` bundles
 through `#flow_contribution_for`: `User.find(1)` now narrows

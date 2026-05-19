@@ -1,0 +1,8 @@
+paths:
+  - spec/http_status_spec.rb
+
+plugins:
+  - rigor-rspec-rails
+
+cache:
+  path: tmp/.rigor/cache

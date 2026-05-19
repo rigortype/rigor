@@ -63,36 +63,46 @@ module Rigor
           parse_result = Prism.parse(contents)
           return unless parse_result.errors.empty?
 
-          first_class = locate_first_class(parse_result.value)
-          return if first_class.nil?
-
-          entry = build_entry(first_class)
-          entries[entry.class_name] = entry
+          locate_classes_and_modules(parse_result.value).each do |declaration_node|
+            entry = build_entry(declaration_node)
+            entries[entry.class_name] = entry if entry.class_name
+          end
         rescue Plugin::AccessDeniedError, Errno::ENOENT
           nil
         end
 
-        # Recursive top-level descent — accepts files that wrap
-        # the class in a `module` block (`module Admin; class
-        # WidgetsController < ApplicationController; end; end`).
-        def locate_first_class(node)
-          return nil unless node.is_a?(Prism::Node)
-          return node if node.is_a?(Prism::ClassNode)
+        # Recursive top-level descent. Returns every `ClassNode`
+        # and `ModuleNode` reachable through nested `module` /
+        # `class` blocks. Pre-fix only the **first** ClassNode
+        # was harvested, which meant controller files that
+        # define multiple classes lost coverage AND concern
+        # modules under `app/controllers/concerns/` were ignored
+        # entirely. The latter was the dominant Mastodon /
+        # Redmine FP: `before_action :require_account_signature!`
+        # references a method defined in a concern module that
+        # the harvester never visited.
+        def locate_classes_and_modules(node, into = [])
+          return into unless node.is_a?(Prism::Node)
 
+          into << node if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
           node.compact_child_nodes.each do |child|
-            found = locate_first_class(child)
-            return found if found
+            locate_classes_and_modules(child, into)
           end
-          nil
+          into
         end
 
-        def build_entry(class_node)
-          class_name = qualified_name_for(class_node.constant_path)
-          parent_name = class_node.superclass.nil? ? nil : qualified_name_for(class_node.superclass)
-          methods = collect_def_names(class_node.body)
+        def build_entry(declaration_node)
+          name = qualified_name_for(declaration_node.constant_path)
+          parent_name = if declaration_node.is_a?(Prism::ClassNode) && declaration_node.superclass
+                          qualified_name_for(declaration_node.superclass)
+                        end
+          methods = collect_def_names(declaration_node.body)
+          includes = collect_include_targets(declaration_node.body)
           ControllerIndex::Entry.new(
-            class_name: class_name, defined_methods: methods.freeze,
-            parent_class_name: parent_name
+            class_name: name,
+            defined_methods: methods.freeze,
+            parent_class_name: parent_name,
+            included_module_names: includes.freeze
           )
         end
 
@@ -101,6 +111,26 @@ module Rigor
 
           accumulator << node.name if node.is_a?(Prism::DefNode) && node.receiver.nil?
           node.compact_child_nodes.each { |child| collect_def_names(child, accumulator) }
+          accumulator
+        end
+
+        # Collects the qualified-constant targets passed to
+        # `include` calls inside the body. Stops at nested
+        # `ClassNode` / `ModuleNode` boundaries so a class
+        # declared inside a concern doesn't pull the concern's
+        # includes into itself.
+        def collect_include_targets(node, accumulator = [])
+          return accumulator unless node.is_a?(Prism::Node)
+          return accumulator if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+
+          if node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :include
+            (node.arguments&.arguments || []).each do |arg|
+              name = qualified_name_for(arg)
+              accumulator << name if name
+            end
+          end
+
+          node.compact_child_nodes.each { |child| collect_include_targets(child, accumulator) }
           accumulator
         end
 

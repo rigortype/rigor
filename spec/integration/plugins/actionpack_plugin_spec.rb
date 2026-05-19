@@ -341,6 +341,58 @@ RSpec.describe "plugins/rigor-actionpack" do
         expect(infos.length).to eq(3)
       end
     end
+
+    it "resolves filter methods transitively through `include` chains (Mastodon shape)" do
+      # AccountsController includes SignatureAuthentication,
+      # SignatureAuthentication includes SignatureVerification,
+      # SignatureVerification defines `require_account_signature!`.
+      # Pre-fix all 177 such Mastodon call sites surfaced as
+      # `unknown-filter-method`.
+      with_controllers(controllers: {
+                         "concerns/signature_verification.rb" => <<~RUBY,
+                           module SignatureVerification
+                             def require_account_signature!; end
+                           end
+                         RUBY
+                         "concerns/signature_authentication.rb" => <<~RUBY,
+                           module SignatureAuthentication
+                             include SignatureVerification
+                           end
+                         RUBY
+                         "accounts_controller.rb" => <<~RUBY
+                           class AccountsController
+                             include SignatureAuthentication
+
+                             before_action :require_account_signature!
+                           end
+                         RUBY
+                       }) do |result|
+        diags = actionpack_diagnostics(result)
+        expect(diags.select { |d| d.rule == "unknown-filter-method" }).to be_empty
+        expect(diags.select { |d| d.rule == "filter-call" }).not_to be_empty
+      end
+    end
+
+    it "suppresses unknown-filter-method when the controller includes a gem-shipped (unresolved) concern" do
+      # Devise / Pundit-style: the controller `include`s a module
+      # whose source isn't in `app/controllers/`. We can't see
+      # what methods that module provides, so an unrecognized
+      # `before_action :authenticate_user!` MUST stay silent —
+      # the method could legitimately come from the unresolved
+      # include.
+      with_controllers(controllers: {
+                         "application_controller.rb" => <<~RUBY
+                           class ApplicationController
+                             include Devise::Controllers::Helpers
+
+                             before_action :authenticate_user!
+                           end
+                         RUBY
+                       }) do |result|
+        diags = actionpack_diagnostics(result)
+        expect(diags.select { |d| d.rule == "unknown-filter-method" }).to be_empty
+      end
+    end
   end
 
   describe "render targets (Phase 3)" do

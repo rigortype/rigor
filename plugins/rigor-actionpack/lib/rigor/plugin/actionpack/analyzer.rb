@@ -112,26 +112,43 @@ module Rigor
 
           methods = controller_index.effective_methods_for(class_name)
           spell_checker = DidYouMean::SpellChecker.new(dictionary: methods.map(&:to_s))
+          # When the controller (or its parent) `include`s a
+          # module the discoverer couldn't resolve — typically a
+          # gem-shipped concern such as `Devise::Controllers::
+          # Helpers` or `Pundit::Authorization` — any
+          # `before_action :name` MIGHT be defined in that
+          # unresolved module. Suppress `unknown-filter-method`
+          # in that case rather than FPing on legitimate
+          # gem-provided callback names.
+          ambiguous_filters = controller_index.has_unresolved_include?(class_name)
 
-          collect_filter_diagnostics(path, class_node.body, methods, spell_checker)
+          collect_filter_diagnostics(path, class_node.body, methods, spell_checker, ambiguous_filters: ambiguous_filters)
         end
 
-        def collect_filter_diagnostics(path, body, methods, spell_checker)
+        def collect_filter_diagnostics(path, body, methods, spell_checker, ambiguous_filters:)
           diagnostics = []
           walk_filter_calls(body) do |call_node|
             filter_name_args(call_node).each do |arg_node|
               filter_name = literal_symbol_or_string(arg_node)
               next if filter_name.nil?
 
-              diag = filter_lookup_diagnostic(path, call_node, arg_node, filter_name, methods, spell_checker)
+              diag = filter_lookup_diagnostic(
+                path, call_node, arg_node, filter_name, methods, spell_checker,
+                ambiguous_filters: ambiguous_filters
+              )
               diagnostics << diag if diag
             end
           end
           diagnostics
         end
 
-        def filter_lookup_diagnostic(path, call_node, arg_node, filter_name, methods, spell_checker)
+        def filter_lookup_diagnostic(path, call_node, arg_node, filter_name, methods, spell_checker, ambiguous_filters:)
           if methods.include?(filter_name.to_sym)
+            filter_call_diagnostic(path, call_node, filter_name)
+          elsif ambiguous_filters
+            # An unresolved include shadows our judgment — emit
+            # the recognized-filter info anyway so the call site
+            # is still indexed, but skip the error.
             filter_call_diagnostic(path, call_node, filter_name)
           else
             unknown_filter_diagnostic(path, arg_node, call_node, filter_name, spell_checker)

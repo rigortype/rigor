@@ -137,7 +137,18 @@ module Rigor
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = model_index
-        return load_error_diagnostics(path) if index.nil?
+        if index.nil?
+          # Project-global error (missing `db/schema.rb`, parse
+          # failure, etc.) — emit once per run rather than once
+          # per analyzed file. On a Redmine-shape project that
+          # uses migrations only (no `schema.rb`), the old path
+          # produced 346 identical load-errors; on a Solidus
+          # monorepo (no top-level `schema.rb`), 999.
+          return [] if @load_errors_emitted
+
+          @load_errors_emitted = true
+          return load_error_diagnostics(path)
+        end
         return [] if index.empty?
 
         Analyzer.new(path: path, model_index: index).analyze(root).diagnostics

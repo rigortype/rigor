@@ -240,6 +240,19 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(warning.message).to include("db/schema.rb")
       expect(warning.message).to include("not found")
     end
+
+    it "emits the load-error warning at most once across many analyzed files" do
+      # Solidus monorepo / Redmine (migrations-only) scale: hundreds
+      # of files, but `db/schema.rb` absence is a single
+      # project-global root cause. Pre-fix the plugin emitted
+      # `load-error` per file (346× on Redmine).
+      result = run_plugin(
+        source: "User.find(1)\n",
+        files: { "extra1.rb" => "stuff\n", "extra2.rb" => "more\n", "extra3.rb" => "again\n" }
+      )
+      load_errors = result.diagnostics.select { |d| d.rule == "load-error" }
+      expect(load_errors.size).to eq(1)
+    end
   end
 
   describe "#flow_contribution_for return-type contribution (v0.1.2)" do

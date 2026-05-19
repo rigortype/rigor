@@ -94,7 +94,12 @@ module Rigor
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         table = helper_table_or_nil
-        return [load_error_diagnostic(path)] if table.nil? && @load_error
+        if table.nil? && @load_error
+          return [] if @load_error_emitted
+
+          @load_error_emitted = true
+          return [load_error_diagnostic(path)]
+        end
         return [] if table.nil? || table.empty?
 
         Analyzer.diagnose(path: path, root: root, helper_table: table)
@@ -102,6 +107,14 @@ module Rigor
       end
 
       private
+
+      # The load-error path used to emit the same warning on
+      # every analyzed file in the project. On large monorepos
+      # (Mastodon: 1,302 files; Solidus: ~1,000 files) and on
+      # legacy projects without a top-level `config/routes.rb`,
+      # this multiplied a single root cause into 1,000+
+      # identical diagnostics. The error is project-global —
+      # report it once per run.
 
       def helper_table_or_nil
         return @helper_table if @helper_table

@@ -138,6 +138,19 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(diags.find { |d| d.rule == "unknown-helper" }).to be_nil
     end
 
+    it "emits the load-error warning at most once across many analyzed files" do
+      # Solidus / Mastodon scale: hundreds of files, but `routes.rb`
+      # absence is a single project-global root cause. Pre-fix, the
+      # plugin emitted `load-error` per file (999× on Solidus).
+      result = run_plugin(
+        source: "users_path\n",
+        files: { "extra1.rb" => "stuff\n", "extra2.rb" => "more\n", "extra3.rb" => "again\n" }
+      )
+      diags = plugin_diagnostics(result)
+      load_errors = diags.select { |d| d.rule == "load-error" }
+      expect(load_errors.size).to eq(1)
+    end
+
     it "accepts `only:` / `except:` as a single Symbol (not just Array)" do
       # Mastodon, Solidus and many other Rails apps use the shorthand
       # `resources :foo, only: :show` (Symbol) interchangeably with

@@ -59,6 +59,14 @@ module Rigor
       # the dispatcher tier consuming the registry lands in
       # slice 2.
       "pre_eval" => [],
+      # ADR-22 — baseline file path. nil (default) means no
+      # baseline is loaded; the `false` literal is treated as
+      # the explicit-disable form for `.rigor.yml`-side override
+      # of an upstream `.rigor.dist.yml` `baseline:` declaration.
+      # The presence of `.rigor-baseline.yml` on disk alone does
+      # NOT activate filtering — the path must be named here
+      # (WD2 (b) of ADR-22).
+      "baseline" => nil,
       "fold_platform_specific_paths" => false,
       "cache" => {
         "path" => ".rigor/cache"
@@ -166,7 +174,7 @@ module Rigor
                 :dependencies, :parallel_workers,
                 :bundler_bundle_path, :bundler_auto_detect, :bundler_lockfile,
                 :rbs_collection_lockfile, :rbs_collection_auto_detect,
-                :pre_eval
+                :pre_eval, :baseline_path
 
     # Loads a configuration file.
     #
@@ -321,6 +329,7 @@ module Rigor
       @pre_eval = expand_pre_eval_entries(
         Array(data.fetch("pre_eval", DEFAULTS.fetch("pre_eval"))).map(&:to_s)
       )
+      @baseline_path = coerce_baseline_path(data.fetch("baseline", DEFAULTS.fetch("baseline")))
       @fold_platform_specific_paths = data.fetch(
         "fold_platform_specific_paths", DEFAULTS.fetch("fold_platform_specific_paths")
       ) == true
@@ -486,6 +495,17 @@ module Rigor
       integer
     rescue TypeError, ArgumentError => e
       raise ArgumentError, "parallel.workers must be a non-negative Integer, got #{value.inspect} (#{e.message})"
+    end
+
+    # ADR-22 WD2 (b) — `baseline: <path>` activates the file;
+    # `baseline: false` is the explicit-disable form (useful in
+    # `.rigor.yml` to override an upstream `.rigor.dist.yml`
+    # that names a baseline). `nil` (default / absent key) is
+    # also "no baseline".
+    def coerce_baseline_path(value)
+      return nil if value.nil? || value == false
+
+      value.to_s
     end
 
     def coerce_network_policy(value)

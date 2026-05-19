@@ -1,0 +1,149 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+require "stringio"
+require "tmpdir"
+require "fileutils"
+require "yaml"
+
+require "rigor/cli"
+require "rigor/cli/baseline_command"
+
+RSpec.describe Rigor::CLI::BaselineCommand do
+  let(:tmpdir) { Dir.mktmpdir }
+
+  after { FileUtils.remove_entry(tmpdir) }
+
+  def run_cli(*argv, cwd: nil)
+    out = StringIO.new
+    err = StringIO.new
+    status = if cwd
+               Dir.chdir(cwd) { Rigor::CLI.start(argv, out: out, err: err) }
+             else
+               Rigor::CLI.start(argv, out: out, err: err)
+             end
+    [status, out.string, err.string]
+  end
+
+  def write_demo_project(diagnostic_source: "x = 1\nputs x\n")
+    FileUtils.mkdir_p(File.join(tmpdir, "lib"))
+    File.write(File.join(tmpdir, "lib", "demo.rb"), diagnostic_source)
+    File.write(File.join(tmpdir, ".rigor.yml"), <<~YAML)
+      paths:
+        - lib
+      libraries:
+        - prism
+    YAML
+  end
+
+  describe "help / usage" do
+    it "lists `generate` under the baseline help" do
+      status, out, _err = run_cli("baseline", "help")
+      expect(status).to eq(0)
+      expect(out).to include("generate")
+    end
+
+    it "exits with the usage code on an unknown subcommand" do
+      status, _out, err = run_cli("baseline", "unknown")
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to include("Unknown baseline subcommand")
+    end
+  end
+
+  describe "generate" do
+    before { write_demo_project }
+
+    it "writes the baseline file at the default path with `version: 1`" do
+      status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(status).to eq(0)
+      baseline_path = File.join(tmpdir, ".rigor-baseline.yml")
+      expect(File.exist?(baseline_path)).to be(true)
+      data = YAML.safe_load_file(baseline_path)
+      expect(data["version"]).to eq(1)
+      expect(data["ignored"]).to be_an(Array)
+      expect(err).to include("wrote baseline")
+    end
+
+    it "warns when the config does not declare `baseline:`" do
+      _status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(err).to include("note — `.rigor.yml` does not declare `baseline:`")
+    end
+
+    it "refuses to overwrite an existing baseline without --force" do
+      File.write(File.join(tmpdir, ".rigor-baseline.yml"), "version: 1\nignored: []\n")
+      status, _out, err = run_cli("baseline", "generate", cwd: tmpdir)
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to include("already exists")
+    end
+
+    it "overwrites with --force" do
+      File.write(File.join(tmpdir, ".rigor-baseline.yml"), "stale: content\n")
+      status, _out, _err = run_cli("baseline", "generate", "--force", cwd: tmpdir)
+      expect(status).to eq(0)
+      data = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))
+      expect(data["version"]).to eq(1)
+    end
+
+    it "honours --output=PATH" do
+      status, _out, _err = run_cli(
+        "baseline", "generate", "--output=custom-baseline.yml", cwd: tmpdir
+      )
+      expect(status).to eq(0)
+      expect(File.exist?(File.join(tmpdir, "custom-baseline.yml"))).to be(true)
+    end
+  end
+
+  describe "rigor check --baseline" do
+    let(:diagnostic_source) do
+      # Deliberate undefined-method on a well-typed receiver
+      # (Integer) so rigor fires `call.undefined-method`
+      # reliably. Two sites so the baseline gets a non-empty
+      # bucket.
+      <<~RUBY
+        1.this_method_does_not_exist
+        2.also_not_a_method
+      RUBY
+    end
+
+    before { write_demo_project(diagnostic_source: diagnostic_source) }
+
+    it "silences baselined diagnostics when --baseline=PATH is supplied" do
+      _status, _out, _err = run_cli("baseline", "generate", cwd: tmpdir)
+      baseline_path = File.join(tmpdir, ".rigor-baseline.yml")
+
+      _status, out, err = run_cli("check", "--baseline=#{baseline_path}", cwd: tmpdir)
+      expect(err).to include("silenced by baseline")
+      expect(out).not_to include("this_method_does_not_exist")
+      expect(out).not_to include("also_not_a_method")
+    end
+
+    it "ignores any configured baseline when --no-baseline is passed" do
+      _status, _out, _err = run_cli("baseline", "generate", cwd: tmpdir)
+      File.write(File.join(tmpdir, ".rigor.yml"), <<~YAML)
+        paths:
+          - lib
+        libraries:
+          - prism
+        baseline: .rigor-baseline.yml
+      YAML
+
+      _status, out, _err = run_cli("check", "--no-baseline", cwd: tmpdir)
+      expect(out).to include("this_method_does_not_exist")
+    end
+
+    it "honours the `baseline: PATH` config key when no CLI flag is supplied" do
+      _status, _out, _err = run_cli("baseline", "generate", cwd: tmpdir)
+      File.write(File.join(tmpdir, ".rigor.yml"), <<~YAML)
+        paths:
+          - lib
+        libraries:
+          - prism
+        baseline: .rigor-baseline.yml
+      YAML
+
+      _status, out, err = run_cli("check", cwd: tmpdir)
+      expect(err).to include("silenced by baseline")
+      expect(out).not_to include("this_method_does_not_exist")
+    end
+  end
+end

@@ -54,6 +54,14 @@
       "items": { "type": "string" },
       "default": []
     },
+    "baseline": {
+      "description": "ADR-22 — path to the per-project baseline file (PHPStan-shaped). When set, `rigor check` loads the named file and filters known diagnostics per the WD4 ALL-or-NOTHING threshold semantics. `false` is the explicit-disable form (useful in `.rigor.yml` to override an upstream `.rigor.dist.yml`'s `baseline:` declaration). The convention path is `.rigor-baseline.yml` at the project root, but the path is loaded only when this key names it (WD2 (b) — file presence alone never activates the filter). Generate with `rigor baseline generate`.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "boolean", "const": false },
+        { "type": "null" }
+      ]
+    },
     "fold_platform_specific_paths": {
       "description": "When `true`, `File` path-manipulation methods fold to platform-aware constants (`File::SEPARATOR` etc.). Default `false` — most projects want platform-agnostic results.",
       "type": "boolean"

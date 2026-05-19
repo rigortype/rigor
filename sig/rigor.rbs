@@ -9,6 +9,7 @@ module Rigor
     attr_reader paths: Array[String]
     attr_reader plugins: Array[String]
     attr_reader cache_path: String
+    attr_reader baseline_path: String?
 
     def self.load: (?String path) -> Configuration
     def initialize: (?Hash[String, untyped] data) -> void

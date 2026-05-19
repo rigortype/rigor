@@ -26,7 +26,8 @@ module Rigor
       "explain" => :run_explain,
       "diff" => :run_diff,
       "sig-gen" => :run_sig_gen,
-      "lsp" => :run_lsp
+      "lsp" => :run_lsp,
+      "baseline" => :run_baseline
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -71,6 +72,7 @@ module Rigor
     def run_check
       require_relative "analysis/runner"
       require_relative "analysis/buffer_binding"
+      require_relative "analysis/baseline"
       require_relative "cache/store"
 
       options = parse_check_options
@@ -86,11 +88,57 @@ module Rigor
         buffer: buffer, cache_root: cache_root
       )
       result = runner.run(@argv.empty? ? configuration.paths : @argv)
+      result = apply_baseline_filter(result, configuration, options)
 
       write_result(result, options.fetch(:format))
       write_run_stats(result.stats) if result.stats
       write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
       result.success? ? 0 : 1
+    end
+
+    # ADR-22 — apply the baseline filter as the LAST step of
+    # the diagnostic pipeline (after `# rigor:disable`,
+    # `severity_profile`, etc. — WD6). Resolution order
+    # follows WD2 (b):
+    #
+    #   1. --no-baseline on the CLI → no baseline.
+    #   2. --baseline=PATH on the CLI → load that path.
+    #   3. .rigor.yml's `baseline: <path>` → load that path.
+    #   4. otherwise → no baseline.
+    #
+    # When the path resolves and loads successfully, the filter
+    # replaces `result.diagnostics` with the surfaced set and
+    # writes a one-line summary to stderr (WD7) when any
+    # diagnostics were silenced. Load failures emit a warning
+    # to stderr and fall through to "no baseline" (graceful
+    # degradation).
+    def apply_baseline_filter(result, configuration, options)
+      path = resolve_baseline_path(configuration, options)
+      return result if path.nil?
+
+      baseline = Analysis::Baseline.load(path)
+      return result if baseline.nil?
+
+      surfaced, silenced_count = baseline.filter(result.diagnostics)
+      report_baseline_summary(silenced_count, path) if silenced_count.positive?
+      Analysis::Result.new(diagnostics: surfaced, stats: result.stats)
+    rescue Analysis::Baseline::LoadError => e
+      @err.puts("rigor: baseline load failed: #{e.message} (continuing without baseline)")
+      result
+    end
+
+    # WD2 (b) — resolve effective baseline path.
+    def resolve_baseline_path(configuration, options)
+      cli_value = options.fetch(:baseline)
+      case cli_value
+      when false then nil # --no-baseline
+      when :unset then configuration.baseline_path # fall through to config
+      else cli_value # --baseline=PATH
+      end
+    end
+
+    def report_baseline_summary(silenced_count, baseline_path)
+      @err.puts("rigor: #{silenced_count} diagnostic(s) silenced by baseline #{baseline_path}")
     end
 
     def build_check_runner(configuration:, options:, buffer:, cache_root:)
@@ -180,9 +228,14 @@ module Rigor
         # Both must appear together; the runner uses the pair
         # to bind an in-flight buffer file to its logical path.
         tmp_file: nil,
-        instead_of: nil
+        instead_of: nil,
+        # ADR-22 — baseline filter. `:unset` means "fall through
+        # to `.rigor.yml`'s `baseline:` key"; a String overrides
+        # the config; `false` (from `--no-baseline`) suppresses
+        # any baseline that the config might name.
+        baseline: :unset
       }
-      parser = OptionParser.new do |opts|
+      parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
         opts.banner = "Usage: rigor check [options] [paths]"
         opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
         opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
@@ -205,6 +258,14 @@ module Rigor
         opts.on("--instead-of=PATH",
                 "Editor mode: the logical project path the buffer represents (paired with --tmp-file)") do |value|
           options[:instead_of] = value
+        end
+        opts.on("--baseline=PATH",
+                "ADR-22: load baseline from PATH (overrides .rigor.yml `baseline:`)") do |value|
+          options[:baseline] = value
+        end
+        opts.on("--no-baseline",
+                "ADR-22: ignore any configured baseline for this run") do
+          options[:baseline] = false
         end
       end
       parser.parse!(@argv)
@@ -395,6 +456,12 @@ module Rigor
       require_relative "cli/lsp_command"
 
       LspCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
+    def run_baseline
+      require_relative "cli/baseline_command"
+
+      BaselineCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
     def write_result(result, format)

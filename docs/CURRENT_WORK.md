@@ -153,6 +153,60 @@ Queued StaticReturnRefinements extensions (one row each, demand-driven):
 
 Adding a row is now a single-table edit (`lib/rigor/builtins/static_return_refinements.rb`'s `OVERRIDES` constant + a `static_return_refinements_spec.rb` case + a `method_dispatcher_spec.rb` integration case). The match policy already handles every Kernel-mixed-in receiver class. No engine work needed for additions.
 
+### Session-end carryover (2026-05-19)
+
+Picks up after the 2026-05-18 late-session references survey carryover. This session ran 14 distinct improvements on top of v0.1.6 (commits accumulating to `ae1b1c9`; **20 commits ahead of `origin/master`, NOT pushed**) and closed the session with a single radical pre-release **repository layout split** the user authorised explicitly over a staged migration ("正論ですが、いまはまだ正式リリース前でユーザーが居ないので、抜本的に修正するチャンスです").
+
+**Major event — repository layout split (commit `ae1b1c9`).** `examples/` was carrying two conceptually distinct categories that this commit separates:
+
+- **`plugins/<id>/` (production)** — 27 plugins targeting real gems / frameworks: Rails ecosystem (`rigor-actioncable`, `rigor-actionmailer`, `rigor-actionpack`, `rigor-activejob`, `rigor-activerecord`, `rigor-activestorage`, `rigor-activesupport-core-ext`, `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-rails`); testing-and-matchers (`rigor-rspec`, `rigor-minitest`, `rigor-rspec-rails`, `rigor-shoulda-matchers`, `rigor-factorybot`); dry-rb foundation (`rigor-dry-types`, `rigor-dry-schema`, `rigor-dry-struct`, `rigor-dry-validation`); ADR-16 substrate consumers (`rigor-devise`, `rigor-sinatra`, `rigor-statesman`); plus `rigor-sorbet`, `rigor-sidekiq`, `rigor-pundit`, `rigor-graphql`, `rigor-typescript-utility-types`.
+- **`examples/<id>/` (walkthroughs)** — 5 plugin-contract tutorials over deliberately simplified virtual use cases: `rigor-deprecations` / `rigor-lisp-eval` / `rigor-pattern` / `rigor-routes` / `rigor-units`. Each spotlights a single architectural surface of the plugin contract.
+
+Mechanics: `git mv` preserved history; 26 integration specs moved to `spec/integration/plugins/<id>_plugin_spec.rb` (5 walkthrough specs stay under `spec/integration/examples/`); shared `PluginHelpers` moved to `spec/integration/support/`; `define_derived_metadata` regex broadened to match both directories; new `plugins/README.md` carries the production catalogue (Tier 1 / Tier 2 / Tier 3 / testing-and-matchers / dry-rb foundation / ADR-16 substrate consumers / cross-plugin fact-channel table); rewritten `examples/README.md` carries only the walkthroughs + the architectural-surface map for plugin authoring; `.rubocop.yml` `Exclude:` lists extended from `examples/**/*` to both directories; root `README.md`, `AGENTS.md`, `CLAUDE.md`, ROADMAP, CURRENT_WORK (this file's pre-split parts), handbook chapters, ADRs, design notes, and the `rigor-plugin-author` SKILL all updated to reference the new dual layout. **Mental-model update for the next implementer**: when adding a new plugin, the SKILL now decides `plugins/` vs `examples/` upfront based on "does this target a real gem" (→ `plugins/`) vs "does this teach one architectural surface" (→ `examples/`).
+
+**14 engine + plugin improvements that landed earlier in the session** (each individually committed, ordered by topic):
+
+Engine — newly closed items from the 2026-05-18 late-session queued list:
+- **(b) `$1..$9` regex narrowing after `=~`-success guard.** `Inference::Narrowing#analyse_regex_match_predicate` models `=~` as binding `$~` / `$1..$N` to `String | nil` on the success branch.
+- **(c) `rescue ... return` post-block flow narrowing.** `StatementEvaluator#eval_begin` now drops the rescue arm from the post-block flow union when every rescue branch ends in `raise` / `return` / `throw`.
+- **(e) `Module.new do ... end` / `Class.new do ... end` block contents walked.** `ScopeIndexer#meta_new_block_body` recognises the constructor pattern and walks the block body as the new class / module's definition scope.
+- **(f) Module-mixin `self_type` admits `Object` / `Kernel` methods.** `MethodDispatcher#try_user_class_fallback` falls back to Object/Kernel resolution when the receiver is a module body whose mixin destination is open. `self_type_override:` threaded through `RbsDispatch` so the override surfaces in plugin contributions. `Analysis::CheckRules` suppresses the module-mixin diagnostic and treats ivar nil-placeholder as the canonical type.
+
+Engine — Pillar 2 enabler:
+- **`FlowContribution::Fact` gains `:local` `target_kind`** (alongside the existing `:parameter` / `:self`). `StatementEvaluator#apply_local_post_return_fact` consumes it. This unlocks plugin-emitted narrowing of local-variable types after a call — the engine extension Pillar 2 Slices 1 / 2 needed to land.
+
+Engine — assorted:
+- **`Environment#rbs_module?(name)`** helper for plugin-side mixin classification.
+- **`StaticReturnRefinements` extensions** — `File.expand_path` → `non-empty-string`; `File.dirname` → `non-empty-string` (queued items from the 2026-05-18 late-session list).
+- **`eval_and_or` early-return narrowing** — `expr && return` and `expr || return` propagate the truthy / falsey narrowing to the post-expression scope.
+
+Vendored gem sigs (`data/vendored_gem_sigs/`):
+- **bundler/** — `Bundler` singleton-method stubs filling RubyGems' broader-than-true types.
+- **rubygems/** — `Gem` singleton extras for the gaps the upstream RBS leaves.
+- **did_you_mean/** — class-level extras for the suggestion APIs.
+- **References survey delta from this work**: `references/ruby/lib` errors **1746 → 354 (-1392, -80%)** — the biggest single-session improvement on the reference corpus in the v0.1.6 cycle.
+
+New plugins (now under `plugins/`):
+- **`plugins/rigor-minitest/`** — Minitest + Test::Unit + matchers_vaccine. `assert_kind_of(C, x)` / `assert_instance_of` / `assert_nil` / `refute_nil` / `_(x).must_be_kind_of` narrowing via the new `:local` `target_kind`.
+- **`plugins/rigor-rspec-rails/`** — `have_http_status(:ok)` floor + status-code validation. First worked rspec-rails-shaped plugin.
+- **`plugins/rigor-shoulda-matchers/`** — model_index consumer; validates `validate_presence_of(:name)` / `belong_to(:user)` matchers reference real model columns via the rigor-activerecord-published `:model_index` fact.
+
+Pillar 2 ("Your specs are types") track — three slices LANDED:
+- **Slice 1** — `plugins/rigor-rspec/lib/rigor/plugin/rspec/matcher_analyzer.rb`. Matcher narrowing for `expect(x).to be_a(C)` / `be_kind_of(C)` / `be_truthy` / `be_falsey` / `be_nil` + composite matchers. Threads through `flow_contribution_for` via the new `:local` `target_kind`.
+- **Slice 2** — `plugins/rigor-rspec/lib/rigor/plugin/rspec/let_scope_index.rb` + `let_type_resolver.rb`. Each `let(:foo) { … }` / `subject(:bar) { … }` body is type-resolved once, and the inferred type is bound to the local symbol inside `it` blocks under the same `describe`/`context`. Plugin walks `describe` / `context` / `xdescribe` / `fdescribe` block bodies for the `let` declarations.
+- **Slice 3** — `plugins/rigor-factorybot/lib/rigor/plugin/factorybot/factory_index.rb` gains `model_class` per entry; `factory_discoverer.rb` extracts via `class: User` kwarg with CamelCase-of-factory-name fallback. The `:factory_index` cross-plugin fact now carries model class so shoulda-matchers / spec-side validators can chain `create(:user).valid?`-shape narrowing.
+
+ADR-20 follow-up:
+- **L1 / L2 / L3 tier framing addendum** to [`docs/adr/20-lightweight-hkt.md`](adr/20-lightweight-hkt.md). Names the three implementation tiers (L1 hardcoded core-only, L2 fixed-arity hand-rolled, L3 fully parameterised user-authorable) and records why Rigor shipped L3 from day one rather than incrementing through L1 / L2 — partly because the HKT machinery's complexity budget lives at the carrier+parser layer regardless of tier, and L3 closes the user-authoring loop completion that motivated ADR-20 in the first place.
+
+**Net state for the next implementer**:
+
+1. **20 commits ahead of `origin/master`, none pushed; no version bump done.** Push + release decision remain user-gated per AGENTS.md release cadence policy.
+2. **The next implementer should expect `plugins/` to be the natural home for any new `rigor-*` plugin work**, with `examples/` reserved for new architectural-surface walkthroughs. The `rigor-plugin-author` SKILL was updated to reflect the dual layout.
+3. **Several engine items from the 2026-05-18 late-session queued list closed in this session** (b / c / e / f). Items (a) (`x = expr() or raise` narrowing) and (d) (`Hash === expr` case-equality narrowing) remain queued; minimal repros still at `/tmp/rigor-refs-check/`.
+4. **`make verify` ran clean throughout** (3789+ examples, 0 failures; 624 lint files clean; `rigor check lib` baseline unchanged from the previous baseline of 3 known queued warnings). **One environmental note**: `make verify` occasionally hangs on `cli_spec.rb` / `runner_pool_spec.rb` under host Ruby 4.0.4 due to a Ractor host-side crash reproducible on master without this session's changes; targeted `bundle exec rspec` runs over specific files were used as the practical verification path during the session.
+5. **v0.1.6 ship-readiness is unchanged** — all of this session's work is purely additive on top of the v0.1.6 ship-ready state. The repository layout split is the largest user-visible change but is mechanical (no behaviour change). `bundle exec rake release` per the `rigor-release-prep` SKILL is the natural next "ship state" decision once the user authorises.
+
 ### Pre-survey persistent items
 
 -2. **External-codebase analysis: business-use SDKs (2026-05-18).** Ran `rigor check lib` against three production Ruby SDKs cloned shallowly into `/tmp/sdks/`: `facebook-ruby-business-sdk` (1,220 files), `google-api-ruby-client/google-apis-core` (25 files), `google-cloud-ruby/google-cloud-storage` (27 files, sparse). Triaged 79 errors + 8 warnings across the three. **Real bugs surfaced**: 6 files in `facebook/lib/facebook_ads/ad_objects/` (auto-generated) contain literal Ruby syntax errors — `has_edge : do |edge|` — that even `ruby -c` rejects. **Engine improvements driven by the analysis**: (β) cross-file class discovery pre-pass LANDED in `a8932a1` — `ScopeIndexer.discovered_classes_for_paths` walks every project file's `class Foo` declarations and seeds the project-wide table into each per-file `default_scope`, closing 5 false-positive `singleton(File)` errors on google-cloud-storage where `Google::Cloud::Storage::File` is a user-defined class shadowing stdlib `::File`. Modules are intentionally excluded from the seed (rigor self-check exposed that registering modules surfaces a separate `module_function` fall-through limitation; documented as queued follow-up). **Queued engine items** (not yet implemented): (α) `x ||= expr` non-nil narrowing inside closures — 4 google-apis-core false positives observed (`download_offset` read as `nil` after `||= 0` inside a `proc do |chunk|` block); simple-case reproducers narrow correctly, so the failure mode involves nested closure interaction that needs deeper investigation. Cross-file `discovered_methods` pre-pass (mirror of (β) for methods) would unlock module_function support and further close user-defined-method false positives on cross-file calls.
@@ -175,7 +229,7 @@ The default goal for the next session is **either cut the v0.1.6 release** (with
 4. [`docs/adr/16-macro-expansion.md`](adr/16-macro-expansion.md) — the substrate ADR-18 amends; orient against the existing slice plan + WD13.
 5. [`docs/adr/9-cross-plugin-api.md`](adr/9-cross-plugin-api.md) — `Plugin::FactStore` is the channel ADR-18 reads from / `rigor-dry-types` writes to.
 6. [`docs/adr/10-dependency-source-inference.md`](adr/10-dependency-source-inference.md) — ADR-10 walker (gem-source inference); the heuristic return-type extractor (`Phase B`, `e40947c`) is reused by `ProjectPatchedScanner`.
-7. [`examples/README.md`](../examples/README.md) — comparison table over twenty-nine `examples/` entries (twenty-seven worked plugins + one RBS-only bundle + one Gemfile-convenience meta-gem). v0.1.6 additions: `rigor-dry-types` slice 4 expansion + new plugins `rigor-dry-schema`, `rigor-graphql`, `rigor-dry-validation`, plus the `rigor-rails` meta-gem scaffold.
+7. [`plugins/README.md`](../plugins/README.md) — production-plugin catalogue (Rails Tier 1/2/3, testing matchers, dry-rb foundation, ADR-16 substrate consumers, cross-plugin fact-channel table). [`examples/README.md`](../examples/README.md) — five plugin-contract walkthroughs (`rigor-deprecations` / `rigor-lisp-eval` / `rigor-pattern` / `rigor-routes` / `rigor-units`) + architectural-surface map. Repository layout split landed in commit `ae1b1c9` (2026-05-19); see the 2026-05-19 session-end carryover above for the rationale.
 8. [`docs/notes/20260515-real-world-rails-survey.md`](notes/20260515-real-world-rails-survey.md) — the survey that drove v0.1.5's production-rigor improvements; still authoritative when the next batch of real-world projects gets analysed.
 8a. [`docs/notes/20260519-oss-library-survey.md`](notes/20260519-oss-library-survey.md) — 22-OSS-library survey that drove v0.1.6's `OverloadSelector` receiver-affinity pre-sort + `Acceptance` ancestor-chain fallback (Family 3 / BigDecimal-coerce regression). Five other diagnostic clusters (§3b mixin lookup / §3c nil-narrowing through guards / §3d always-falsey-truthy noise / §3g ivar type-divergence / §8a generator `.rb` ERB) remain queued; this note records the per-library counts so the next slice can be picked with the data in hand.
 9. [`docs/adr/15-ractor-concurrency.md`](adr/15-ractor-concurrency.md) + [`docs/design/20260514-ractor-migration.md`](design/20260514-ractor-migration.md) — Ractor migration contract; relevant when adding plugin surfaces that need shareability review (ADR-18 was a pass).

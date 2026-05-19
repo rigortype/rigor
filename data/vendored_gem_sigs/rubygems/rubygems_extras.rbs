@@ -96,6 +96,25 @@ class Gem::Specification
   def self.load: (String path) -> Gem::Specification?
   def self._all: () -> Array[Gem::Specification]
   def self.each: () { (Gem::Specification) -> untyped } -> void
+
+  # Instance-side surface widely used by bundler / rubygems
+  # internals. `attr_accessor` mirrors the writer + reader pair
+  # so the survey's `.name=` / `.version=` / `.full_gem_path=` /
+  # `.loaded_from=` / `.post_install_message=` writes resolve too.
+  def activate: () -> untyped
+  def specification_version: () -> Integer
+  def files: () -> Array[String]
+  def default_gem?: () -> bool
+  def spec_file: () -> String
+  def runtime_dependencies: () -> Array[Gem::Dependency]
+  def required_rubygems_version: () -> Gem::Requirement
+  def required_ruby_version: () -> Gem::Requirement
+  def require_paths: () -> Array[String]
+  attr_accessor name: String
+  attr_accessor version: Gem::Version
+  attr_accessor full_gem_path: String
+  attr_accessor loaded_from: String?
+  attr_accessor post_install_message: String?
 end
 
 class Gem::BasicSpecification
@@ -123,8 +142,23 @@ class Gem::ConfigFile
   def verbose=: (bool) -> bool
   def really_verbose: () -> bool
   def ssl_ca_cert: () -> String?
+  def ssl_client_cert: () -> String?
+  def ssl_verify_mode: () -> Integer?
   def credentials_path: () -> String
   def api_keys: () -> Hash[String, String]
+  def cert_expiration_length_days: () -> Integer
+  def sources: () -> Array[String]
+  def update_sources=: (bool) -> bool
+  def unset_api_key!: () -> bool
+  def state_file_writable?: () -> bool
+  def set_api_key: (untyped host, untyped key) -> untyped
+  def rubygems_api_key: () -> String?
+  def rubygems_api_key=: (String?) -> String?
+  def last_update_check: () -> Integer
+  def last_update_check=: (Integer) -> Integer
+  def ipv4_fallback_enabled: () -> bool
+  def install_extension_in_lib: () -> bool
+  def each: () { ([String, untyped]) -> untyped } -> void
 end
 
 class Gem::LoadError < LoadError
@@ -145,6 +179,29 @@ class Gem::RequestSet
   def initialize: (*untyped) -> void
   def import: (untyped) -> untyped
   def source_set: () -> untyped
+  def installed_gems: () -> Hash[String, untyped]
+  def install: (?untyped options) { (?untyped) -> untyped } -> untyped
+  def install_from_gemdeps: (untyped options) { (?untyped) -> untyped } -> untyped
+  def resolve: (?untyped) -> untyped
+  def resolve_current: () -> untyped
+  def resolve_dependencies: () -> untyped
+  def errors: () -> Array[untyped]
+  attr_accessor remote: bool
+  attr_accessor development: bool
+  attr_accessor development_shallow: bool
+  attr_accessor ignore_dependencies: bool
+  attr_accessor prerelease: bool
+  attr_accessor soft_missing: bool
+  attr_accessor without_groups: Array[Symbol]
+  attr_accessor always_install: untyped
+  attr_accessor installing: bool
+end
+
+class Gem::DependencyInstaller
+  def initialize: (*untyped) -> void
+  def install: (untyped, ?untyped) -> Array[untyped]
+  def installed_gems: () -> Array[untyped]
+  def errors: () -> Array[untyped]
 end
 
 class Gem::Uninstaller

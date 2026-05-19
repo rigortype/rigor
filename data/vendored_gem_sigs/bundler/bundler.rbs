@@ -168,12 +168,34 @@ module Bundler
 
   module Source
     class Gemspec
+      def initialize: (*untyped) -> void
+      attr_accessor name: String?
+      attr_accessor version: String?
     end
+
     class Path
+      def initialize: (*untyped) -> void
+      attr_accessor name: String?
+      attr_accessor version: String?
+      attr_accessor path: String?
     end
+
     class Git
+      def initialize: (*untyped) -> void
+      attr_accessor uri: String?
+      attr_accessor branch: String?
+      attr_accessor ref: String?
+      attr_accessor submodules: bool
+      attr_accessor glob: String?
+      attr_accessor name: String?
+      attr_accessor version: String?
     end
+
     class Rubygems
+      def initialize: (*untyped) -> void
+      attr_accessor remotes: Array[String]
+      attr_accessor name: String?
+      attr_accessor version: String?
     end
   end
 

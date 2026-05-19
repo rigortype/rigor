@@ -81,17 +81,14 @@ When a change touches type-language behaviour or analyzer-internal contracts, th
 
 ## Skills available in this repository
 
-Skills follow the [Anthropic Agent Skills](https://agentskills.io/) shape — a directory carrying a `SKILL.md` with YAML `name:` + `description:` frontmatter. The repository keeps **two trees** with different audiences:
+Skills follow the [Anthropic Agent Skills](https://agentskills.io/) shape — a directory carrying a `SKILL.md` with YAML `name:` + `description:` frontmatter. All four SKILLs live under [`.claude/skills/`](.claude/skills/) and are auto-discovered by Claude Code when working inside this repository. They are **contributor workflows** — they assume the rigor monorepo's `Makefile`, `spec/integration/`, `.rubocop.yml`, and `plugins/` / `examples/` layout. A separate SKILL aimed at **external library / project-specific plugin developers** (writing a parallel `rigor-foo` gem in their own repo, depending on `gem "rigortype"`) is queued for v0.2.0 — see [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-- **`.claude/skills/`** — repo-contributor workflows. Auto-discovered by Claude Code when working inside this repository. Maintain-the-rigor-repo tasks (releases, built-in imports, reference submodules) live here.
-- **`skills/`** — distributable user-facing skills. Self-contained, portable, intended for installation by third parties writing plugins on top of `rigortype`. Currently houses `rigor-plugin-author/`.
-
-| Skill | Audience | Use when |
-| --- | --- | --- |
-| [`.claude/skills/rigor-release-prep/SKILL.md`](.claude/skills/rigor-release-prep/SKILL.md) | Maintainers | Preparing a RubyGems release: bumping `Rigor::VERSION`, updating `CHANGELOG.md` (Keep a Changelog 1.1.0), regenerating `Gemfile.lock`, building the gem, and running `bundle exec rake release`. |
-| [`.claude/skills/rigor-builtin-import/SKILL.md`](.claude/skills/rigor-builtin-import/SKILL.md) | Maintainers | Importing a Ruby core / stdlib class into Rigor's catalog-driven inference pipeline. Records the nine-stage flow (locate sources → extend `TOPICS` → regenerate YAML → wire loader → curate `:leaf` blocklist → decide RBS::Extended overrides → fixture → verify → changelog) and the decision points where the procedure is NOT mechanical. |
-| [`.claude/skills/rigor-add-reference/SKILL.md`](.claude/skills/rigor-add-reference/SKILL.md) | Maintainers | Adding a new upstream repo as a reference submodule under `references/`. Covers the three-file atomic change (`.gitmodules` + Makefile `REFERENCE_SUBMODULES` + `init-submodules`) and the decision between full and sparse checkout strategies. |
-| [`skills/rigor-plugin-author/SKILL.md`](skills/rigor-plugin-author/SKILL.md) | **Plugin authors (distributable)** | Authoring a new Rigor plugin. End-to-end pipeline: 5-question requirements gathering → template selection from the existing walkthroughs (`examples/`) and production plugins (`plugins/`) → directory scaffold → AST walker pattern → integration spec → CHANGELOG `[Unreleased]` entry. Use whenever the user asks to "create a Rigor plugin for X" or similar. New production plugins go under `plugins/`; new contract walkthroughs / tutorials go under `examples/`. |
+| Skill | Use when |
+| --- | --- |
+| [`.claude/skills/rigor-release-prep/SKILL.md`](.claude/skills/rigor-release-prep/SKILL.md) | Preparing a RubyGems release: bumping `Rigor::VERSION`, updating `CHANGELOG.md` (Keep a Changelog 1.1.0), regenerating `Gemfile.lock`, building the gem, and running `bundle exec rake release`. |
+| [`.claude/skills/rigor-builtin-import/SKILL.md`](.claude/skills/rigor-builtin-import/SKILL.md) | Importing a Ruby core / stdlib class into Rigor's catalog-driven inference pipeline. Records the nine-stage flow (locate sources → extend `TOPICS` → regenerate YAML → wire loader → curate `:leaf` blocklist → decide RBS::Extended overrides → fixture → verify → changelog) and the decision points where the procedure is NOT mechanical. |
+| [`.claude/skills/rigor-add-reference/SKILL.md`](.claude/skills/rigor-add-reference/SKILL.md) | Adding a new upstream repo as a reference submodule under `references/`. Covers the three-file atomic change (`.gitmodules` + Makefile `REFERENCE_SUBMODULES` + `init-submodules`) and the decision between full and sparse checkout strategies. |
+| [`.claude/skills/rigor-plugin-author/SKILL.md`](.claude/skills/rigor-plugin-author/SKILL.md) | Authoring a new official / bundled Rigor plugin under this repo's `plugins/` or `examples/` tree. End-to-end pipeline: 5-question requirements gathering → template selection from the existing walkthroughs (`examples/`) and production plugins (`plugins/`) → directory scaffold → AST walker pattern → integration spec → CHANGELOG `[Unreleased]` entry. Use whenever the user asks to "create a Rigor plugin for X" inside this repository. |
 
 ## Commit message style (mirrors AGENTS.md)
 

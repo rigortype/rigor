@@ -31,9 +31,9 @@ Do NOT trigger for:
 | Authored to **demonstrate one architectural surface** of the contract | **`examples/<id>/`** |
 | Referenced by the handbook / ADRs as a teaching reference | **`examples/<id>/`** |
 
-Default to `plugins/`. The five walkthroughs under [`examples/`](https://github.com/rigortype/rigor/tree/master/examples/) (`rigor-deprecations` / `rigor-lisp-eval` / `rigor-pattern` / `rigor-routes` / `rigor-units`) are a curated set; adding to that tree requires a positive teaching reason.
+Default to `plugins/`. The five walkthroughs under [`examples/`](../../../examples/) (`rigor-deprecations` / `rigor-lisp-eval` / `rigor-pattern` / `rigor-routes` / `rigor-units`) are a curated set; adding to that tree requires a positive teaching reason.
 
-Mechanical differences: production specs live at `spec/integration/plugins/<id>_plugin_spec.rb`; walkthrough specs at `spec/integration/examples/<id>_plugin_spec.rb`. Both auto-include [`spec/integration/support/plugin_helpers.rb`](https://github.com/rigortype/rigor/blob/master/spec/integration/support/plugin_helpers.rb). RuboCop excludes `plugins/**/*` and `examples/**/*` but lints the specs.
+Mechanical differences: production specs live at `spec/integration/plugins/<id>_plugin_spec.rb`; walkthrough specs at `spec/integration/examples/<id>_plugin_spec.rb`. Both auto-include [`spec/integration/support/plugin_helpers.rb`](../../../spec/integration/support/plugin_helpers.rb). RuboCop excludes `plugins/**/*` and `examples/**/*` but lints the specs.
 
 ## Reading order — modules and their outputs
 
@@ -66,7 +66,7 @@ Hand-rolled walker templates:
   Q1=A/B/C Q2=E Q3=A/D Q5=C/D  → examples/rigor-routes/        (IoBoundary + cache)
 ```
 
-If the requirement fits neither substrate nor template, **stop and ask the user** — the v0.1.x plugin contract may not yet expose what they need. Check the [per-library survey](https://github.com/rigortype/rigor/blob/master/docs/notes/20260515-macro-expansion-library-survey.md) before inventing a workaround.
+If the requirement fits neither substrate nor template, **stop and ask the user** — the v0.1.x plugin contract may not yet expose what they need. Check the [per-library survey](../../../docs/notes/20260515-macro-expansion-library-survey.md) before inventing a workaround.
 
 ## What "done" looks like
 
@@ -79,7 +79,7 @@ The plugin is shippable when **all** of these hold:
 - `CHANGELOG.md` `[Unreleased]` carries one new bullet naming the plugin; `Rigor::VERSION` is **not** bumped (the project user drives release cuts per `AGENTS.md` § "Release Cadence").
 - One commit, subject following `AGENTS.md` style (`Add rigor-<id> plugin (<facet>)` or `Add rigor-<id> walkthrough (<facet>)`).
 
-Publishing to RubyGems is **out of scope** for this skill — the plugin lives in this repo until a maintainer runs the `git subtree split` + `bundle exec rake release` flow ([`.claude/skills/rigor-release-prep/SKILL.md`](../../.claude/skills/rigor-release-prep/SKILL.md)).
+Publishing to RubyGems is **out of scope** for this skill — the plugin lives in this repo until a maintainer runs the `git subtree split` + `bundle exec rake release` flow ([`.claude/skills/rigor-release-prep/SKILL.md`](../rigor-release-prep/SKILL.md)).
 
 ## Example walkthrough
 

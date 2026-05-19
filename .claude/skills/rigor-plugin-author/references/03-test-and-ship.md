@@ -1,6 +1,6 @@
 # Phases 6–10 — Integration spec, README, CHANGELOG, verify, commit
 
-Mirror one of the existing specs under [`spec/integration/plugins/`](https://github.com/rigortype/rigor/tree/master/spec/integration/plugins/) (for production plugins) or [`spec/integration/examples/`](https://github.com/rigortype/rigor/tree/master/spec/integration/examples/) (for walkthroughs). The shared boilerplate (`run_plugin`, `plugin_diagnostics`, requirer construction, tmpdir lifecycle) lives in [`spec/integration/support/plugin_helpers.rb`](https://github.com/rigortype/rigor/blob/master/spec/integration/support/plugin_helpers.rb) and is auto-included for every `*_plugin_spec.rb` file under either directory (the `define_derived_metadata` regex matches `/spec/integration/(plugins|examples)/.+_plugin_spec\.rb`). The spec only needs the per-plugin parts.
+Mirror one of the existing specs under [`spec/integration/plugins/`](../../../../spec/integration/plugins/) (for production plugins) or [`spec/integration/examples/`](../../../../spec/integration/examples/) (for walkthroughs). The shared boilerplate (`run_plugin`, `plugin_diagnostics`, requirer construction, tmpdir lifecycle) lives in [`spec/integration/support/plugin_helpers.rb`](../../../../spec/integration/support/plugin_helpers.rb) and is auto-included for every `*_plugin_spec.rb` file under either directory (the `define_derived_metadata` regex matches `/spec/integration/(plugins|examples)/.+_plugin_spec\.rb`). The spec only needs the per-plugin parts.
 
 ```ruby
 # spec/integration/plugins/<id>_plugin_spec.rb

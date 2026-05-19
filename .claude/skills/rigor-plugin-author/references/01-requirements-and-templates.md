@@ -54,9 +54,9 @@ If the target DSL fits one of these shapes, ship a **declarative manifest only**
 
 | If the DSL is… | Substrate tier | Manifest entry | Reference plugin |
 | --- | --- | --- | --- |
-| `<Class>.<verb>(path) do … end` where the block runs as an instance method on `<Class>` (Sinatra-shape) | **Tier A** | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-sinatra/) |
-| `<Class>.<dsl_method>(:sym_a, :sym_b)` where each symbol maps via a bundled registry to a module that gets `include`d (Devise-shape) | **Tier B** | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-devise/) |
-| `<Class>.<dsl_method>(:name, T)` where the framework `class_eval`s a heredoc interpolating `name` (dry-struct-shape, ActiveStorage-shape) | **Tier C** | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-dry-struct/) |
+| `<Class>.<verb>(path) do … end` where the block runs as an instance method on `<Class>` (Sinatra-shape) | **Tier A** | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](../../../../plugins/rigor-sinatra/) |
+| `<Class>.<dsl_method>(:sym_a, :sym_b)` where each symbol maps via a bundled registry to a module that gets `include`d (Devise-shape) | **Tier B** | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](../../../../plugins/rigor-devise/) |
+| `<Class>.<dsl_method>(:name, T)` where the framework `class_eval`s a heredoc interpolating `name` (dry-struct-shape, ActiveStorage-shape) | **Tier C** | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](../../../../plugins/rigor-dry-struct/) |
 | External Ruby files `instance_eval`'d under a declared receiver (Redmine webhook payloads / tDiary plugins) | **Tier D** (contract only as of v0.1.x; engine integration demand-driven) | `external_files: [Macro::ExternalFile.new(glob:, receiver_type:, bound_ivars:)]` | — |
 
 `ActiveSupport::Concern.included do ... end` re-targeting is handled automatically by the substrate — a Tier B/C call inside an `included do` block fires on whoever later `include`s the concern, not on the concern module itself.
@@ -71,11 +71,11 @@ Map the [Phase 1](01-requirements.md) answers to one of the six existing hand-ro
 
 | If the answers look like… | Use template | Why |
 | --- | --- | --- |
-| Q1=A/B, Q2=A, Q3=A, Q5=C | [`rigor-deprecations`](https://github.com/rigortype/rigor/tree/master/examples/rigor-deprecations/) | Smallest possible plugin; pure config-driven rules; ~80 lines. |
-| Q1=A, Q2=A, Q3=E, Q5=A/B | [`rigor-lisp-eval`](https://github.com/rigortype/rigor/tree/master/examples/rigor-lisp-eval/) | Recursive interpretation of the literal AST argument. |
-| Q1=D, Q2=B, Q3=C, Q5=A | [`rigor-units`](https://github.com/rigortype/rigor/tree/master/examples/rigor-units/) | Local-variable flow tracking through arithmetic and chained calls. |
-| Q1=C/E, Q2=C, Q3=A, Q5=A/B | [`rigor-statesman`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-statesman/) | Two-pass DSL analysis — collect declarations, then validate uses. |
-| Q1=B, Q2=A/B, Q3=B, Q5=C | [`rigor-pattern`](https://github.com/rigortype/rigor/tree/master/examples/rigor-pattern/) | Plugin asks the analyser via `Scope#type_of` + `literal_string_compatible?`; matches against a literal value. |
-| Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D | [`rigor-routes`](https://github.com/rigortype/rigor/tree/master/examples/rigor-routes/) | Reads a project file via `IoBoundary` under `TrustPolicy`; caches the parse via `Plugin::Base.producer`. |
+| Q1=A/B, Q2=A, Q3=A, Q5=C | [`rigor-deprecations`](../../../../examples/rigor-deprecations/) | Smallest possible plugin; pure config-driven rules; ~80 lines. |
+| Q1=A, Q2=A, Q3=E, Q5=A/B | [`rigor-lisp-eval`](../../../../examples/rigor-lisp-eval/) | Recursive interpretation of the literal AST argument. |
+| Q1=D, Q2=B, Q3=C, Q5=A | [`rigor-units`](../../../../examples/rigor-units/) | Local-variable flow tracking through arithmetic and chained calls. |
+| Q1=C/E, Q2=C, Q3=A, Q5=A/B | [`rigor-statesman`](../../../../plugins/rigor-statesman/) | Two-pass DSL analysis — collect declarations, then validate uses. |
+| Q1=B, Q2=A/B, Q3=B, Q5=C | [`rigor-pattern`](../../../../examples/rigor-pattern/) | Plugin asks the analyser via `Scope#type_of` + `literal_string_compatible?`; matches against a literal value. |
+| Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D | [`rigor-routes`](../../../../examples/rigor-routes/) | Reads a project file via `IoBoundary` under `TrustPolicy`; caches the parse via `Plugin::Base.producer`. |
 
-If the requirement fits neither the substrate tiers nor the six hand-rolled templates, **stop and ask the user**. The v0.1.x plugin contract may not yet expose what they need; don't invent a workaround. The [per-library survey](https://github.com/rigortype/rigor/blob/master/docs/notes/20260515-macro-expansion-library-survey.md) records which Ruby libraries the substrate covers and which fall outside (GraphQL-Ruby is the canonical "schema-graph recorder" case that the substrate does NOT fit).
+If the requirement fits neither the substrate tiers nor the six hand-rolled templates, **stop and ask the user**. The v0.1.x plugin contract may not yet expose what they need; don't invent a workaround. The [per-library survey](../../../../docs/notes/20260515-macro-expansion-library-survey.md) records which Ruby libraries the substrate covers and which fall outside (GraphQL-Ruby is the canonical "schema-graph recorder" case that the substrate does NOT fit).

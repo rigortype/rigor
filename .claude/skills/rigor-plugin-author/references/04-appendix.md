@@ -20,7 +20,7 @@ When authoring a Rails-side plugin (`rigor-rails-routes`, `rigor-actionpack`, `r
 - **Plugin source code never `require`s `rails` / `active_record` / `action_pack`.** It analyses Ruby source files, the same way the other examples do. Rigor stays decoupled from Rails.
 - **Per-plugin `demo/` directories are self-contained.** No shared Rails-app skeleton across plugins — after `git subtree split` each `demo/` travels with its plugin. Some duplication of Rails-shaped tree (e.g. `app/models/application_record.rb`) is accepted in exchange for clean extraction.
 - **Integration specs may exec real Rails to verify alignment.** Compare the plugin's parsed output against `rails routes -E` / `db:schema:dump` / similar real-Rails commands run against a small sample app in a tmpdir. The Rails sample app is a TEST-time tool, not a demo-time fixture.
-- **The roadmap lives in [`docs/design/20260508-rails-plugins-roadmap.md`](https://github.com/rigortype/rigor/blob/master/docs/design/20260508-rails-plugins-roadmap.md).** Tier 1 plugins are unblocked on the current API. Tier 2 needs the cross-plugin API ([ADR-9](https://github.com/rigortype/rigor/blob/master/docs/adr/9-cross-plugin-api.md)) and lands after that ships.
+- **The roadmap lives in [`docs/design/20260508-rails-plugins-roadmap.md`](../../../../docs/design/20260508-rails-plugins-roadmap.md).** Tier 1 plugins are unblocked on the current API. Tier 2 needs the cross-plugin API ([ADR-9](../../../../docs/adr/9-cross-plugin-api.md)) and lands after that ships.
 
 ## Cross-plugin facts (post-ADR-9)
 
@@ -63,13 +63,13 @@ Until ADR-9 ships, plugins that need cross-plugin data either:
 
 When in doubt, read these in order:
 
-1. **[`plugins/README.md`](https://github.com/rigortype/rigor/blob/master/plugins/README.md)** — the production-plugin catalogue. Twenty-seven plugins targeting real gems / frameworks, with the cross-plugin fact-channel table (ADR-9) and the ADR-16 substrate-consumer table. Read this when placing a new production plugin alongside its peers (Rails ecosystem tier, dry-rb family, testing-and-matchers, …).
-2. **[`examples/README.md`](https://github.com/rigortype/rigor/blob/master/examples/README.md)** — the walkthrough catalogue. Five tutorial plugins over deliberately simplified virtual use cases (deprecations / lisp-eval / pattern / units / routes), one architectural surface per walkthrough. Read this to pick a structural template in Phase 2.
-3. **[`docs/handbook/09-plugins.md`](https://github.com/rigortype/rigor/blob/master/docs/handbook/09-plugins.md)** — the user-facing one-pager. Names what plugins can and cannot do today.
-4. **[`docs/internal-spec/plugin.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin.md)** — slice-1 normative surface (registration, manifest, services).
-5. **[`docs/internal-spec/plugin-trust.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin-trust.md)** — slice-2 normative surface (`TrustPolicy`, `IoBoundary`).
-6. **[`docs/internal-spec/plugin-cache-producers.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/plugin-cache-producers.md)** — slice-6 normative surface (`producer` DSL, `cache_for`).
-7. **[`docs/adr/2-extension-api.md`](https://github.com/rigortype/rigor/blob/master/docs/adr/2-extension-api.md)** — binding design document. Read end-to-end before authoring a plugin that pushes the surface in a non-obvious direction.
+1. **[`plugins/README.md`](../../../../plugins/README.md)** — the production-plugin catalogue. Twenty-seven plugins targeting real gems / frameworks, with the cross-plugin fact-channel table (ADR-9) and the ADR-16 substrate-consumer table. Read this when placing a new production plugin alongside its peers (Rails ecosystem tier, dry-rb family, testing-and-matchers, …).
+2. **[`examples/README.md`](../../../../examples/README.md)** — the walkthrough catalogue. Five tutorial plugins over deliberately simplified virtual use cases (deprecations / lisp-eval / pattern / units / routes), one architectural surface per walkthrough. Read this to pick a structural template in Phase 2.
+3. **[`docs/handbook/09-plugins.md`](../../../../docs/handbook/09-plugins.md)** — the user-facing one-pager. Names what plugins can and cannot do today.
+4. **[`docs/internal-spec/plugin.md`](../../../../docs/internal-spec/plugin.md)** — slice-1 normative surface (registration, manifest, services).
+5. **[`docs/internal-spec/plugin-trust.md`](../../../../docs/internal-spec/plugin-trust.md)** — slice-2 normative surface (`TrustPolicy`, `IoBoundary`).
+6. **[`docs/internal-spec/plugin-cache-producers.md`](../../../../docs/internal-spec/plugin-cache-producers.md)** — slice-6 normative surface (`producer` DSL, `cache_for`).
+7. **[`docs/adr/2-extension-api.md`](../../../../docs/adr/2-extension-api.md)** — binding design document. Read end-to-end before authoring a plugin that pushes the surface in a non-obvious direction.
 8. **`spec/rigor/public_api_drift_spec.rb`** — pins every public namespace plugins touch. If the plugin needs a method not in the drift snapshots, the method is internal — do not depend on it.
 9. **`spec/rigor/plugin/cache_producer_spec.rb`** — the "invalidates when files read via io_boundary BEFORE cache_for change between calls" example is the canonical reference for the slice-6 read-then-cache pattern.
 

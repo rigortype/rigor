@@ -403,17 +403,52 @@ existing `--stats` flag gets a baseline section. The summary
 line is plain stderr, not a diagnostic, so it doesn't pollute
 machine-readable output.
 
-### WD8 — Two new SKILLs, both contributor-facing (`.claude/skills/`)
+### WD8 — Two new SKILLs, **external-author-facing** under `skills/`
 
-Per the discipline established when
-[`skills/rigor-plugin-author/`](../../.claude/skills/rigor-plugin-author/)
-was re-homed to `.claude/skills/` (commit `1a3c342`), the new
-SKILLs are contributor-facing today. They consume rigor's
-internal layout (`make verify`, the Flake, `bundle exec exe/rigor`)
-and run inside the rigor monorepo's checkout. Both SKILLs are
-candidates for an `external-author` reformulation when the
-v0.2.0 external-SKILL track lands (see
-[`docs/ROADMAP.md`](../ROADMAP.md) § "Agent workflows / SKILLs").
+Both SKILLs target **users newly adopting Rigor in their own
+projects** — gem authors, application developers, project-private
+plugin maintainers running `gem install rigortype` and pointing
+`rigor check` at their own codebase. They are NOT contributor
+workflows for the rigor monorepo. Audience consequence:
+
+- They consume the **published `rigortype` gem surface** — the
+  `rigor` executable installed via Bundler, not
+  `bundle exec exe/rigor` from a checkout. No `make verify`, no
+  Nix Flake, no `spec/integration/...` assumptions.
+- They reference **public CLI flags and config keys** only —
+  the same surface end-users see in `rigor --help`. Internal
+  helpers (`Rigor::Analysis::Runner.new(...)`, Phoenix-style
+  internal-only modules) are off-limits.
+- They live under the **`skills/` top-level tree** that the
+  ROADMAP reserved for the v0.2.0 external-SKILL track (see
+  [`docs/ROADMAP.md`](../ROADMAP.md) § "Agent workflows /
+  SKILLs"). The `skills/rigor-project-init/` and
+  `skills/rigor-baseline-reduce/` directories become the
+  first concrete occupants of that tree alongside the
+  forthcoming `skills/rigor-plugin-author/` external
+  variant. The three SKILLs form a coherent onboarding +
+  ongoing-quality + plugin-extension trio for the v0.2.0
+  external-user track.
+- They follow the **portable / agentskills.io-compatible**
+  conventions established when `rigor-plugin-author` was
+  briefly under `skills/` (commits `25e98cc` /
+  `f2dcc5a`): self-contained, absolute GitHub URLs for
+  cross-repo references (not relative `../../` paths),
+  `name:` + `description:` + optional
+  `metadata: {version:, homepage:}` frontmatter,
+  consolidated `references/` modules at ≤ 4 to clear waza's
+  module-count advisory.
+
+Implication for scheduling: WD8 commits the two SKILLs to the
+**v0.2.0 cycle**, in lockstep with the external
+`rigor-plugin-author` reformulation. The ADR's slicing
+section places them in slices 3 + 4 as the externally-shippable
+work, not as contributor experiments.
+
+Carry-over: the baseline file-format and the `rigor baseline
+{...}` CLI subcommand family (slices 1 + 2) are NOT gated on
+v0.2.0 — those ship through the regular v0.1.x cycle and the
+external SKILLs consume them post-release.
 
 The two SKILLs are sketched in §§ "rigor-project-init" and
 "rigor-baseline-reduce" below.
@@ -656,23 +691,35 @@ on its own. Demand-driven; no slice scheduled by this ADR.
 ### Slice 3 — `rigor-project-init` SKILL
 
 - `.claude/skills/rigor-project-init/SKILL.md` (router).
-- `.claude/skills/rigor-project-init/references/01-detect.md`
+- `skills/rigor-project-init/SKILL.md` (router; agentskills.io-shape frontmatter; absolute GitHub URLs for cross-repo references).
+- `skills/rigor-project-init/references/01-detect.md`
   (Gemfile / Gemfile.lock walk; plugin matching).
-- `.claude/skills/rigor-project-init/references/02-configure.md`
+- `skills/rigor-project-init/references/02-configure.md`
   (severity profile choice; `.rigor.yml` / `.rigor.dist.yml`
-  template).
-- `.claude/skills/rigor-project-init/references/03-baseline.md`
-  (run `rigor check`; generate baseline; surface concentrated
-  rules as likely real bugs).
+  template; baseline path declaration).
+- `skills/rigor-project-init/references/03-baseline.md`
+  (run `rigor check` against the user's project; generate
+  baseline; surface concentrated rules as likely real bugs).
+- Audience consequence: invokes the published `rigor` binary
+  (Bundler-installed), not `bundle exec exe/rigor` from a
+  monorepo checkout. References only public CLI flags and
+  config keys.
+- Committed to v0.2.0 per WD8.
 
 ### Slice 4 — `rigor-baseline-reduce` SKILL
 
-- `.claude/skills/rigor-baseline-reduce/SKILL.md` (router).
-- `.claude/skills/rigor-baseline-reduce/references/01-classify.md`
-  (per-rule walkthrough; sample-and-classify protocol).
-- `.claude/skills/rigor-baseline-reduce/references/02-fix-or-suppress.md`
-  (real-bug fixes, `# rigor:disable` placement, FP escalation
-  to a Rigor-side regression spec).
+- `skills/rigor-baseline-reduce/SKILL.md` (router; agentskills.io-shape).
+- `skills/rigor-baseline-reduce/references/01-classify.md`
+  (per-rule walkthrough; sample-and-classify protocol;
+  real-bug / stylistic / FP triage).
+- `skills/rigor-baseline-reduce/references/02-fix-or-suppress.md`
+  (real-bug fix patterns; `# rigor:disable` placement
+  decisions; FP escalation as a GitHub issue against rigor
+  rather than as a regression spec — external users don't
+  have a `spec/` to extend rigor with).
+- Audience consequence: same as slice 3 — external-user
+  surface only.
+- Committed to v0.2.0 per WD8.
 
 ### Slice 5 — `regenerate` + drift-as-warning mode
 

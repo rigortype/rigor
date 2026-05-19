@@ -77,7 +77,7 @@ When the rule fires:
 1. Create `docs/CHANGELOG-<old-prefix>.md` with a header explaining what's
    in the file and a back-link to `CHANGELOG.md`. Use the archive built at
    `0.1.1` as the template — the explanatory header on
-   [`docs/CHANGELOG-0.0.x.md`](../../../docs/CHANGELOG-0.0.x.md) is the
+   [`docs/CHANGELOG-0.0.x.md`](https://github.com/rigortype/rigor/blob/master/docs/CHANGELOG-0.0.x.md) is the
    reference shape.
 2. Move the entire `## [a.b.c] - YYYY-MM-DD` block for every version in the
    range, plus the matching `[a.b.c]: https://...` reference links from

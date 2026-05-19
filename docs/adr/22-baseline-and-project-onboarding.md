@@ -156,21 +156,79 @@ ignored:
     count: 2
 ```
 
-### WD2 — Baseline file location
+### WD2 — Baseline file location AND opt-in loading
 
-Three candidate locations:
+Two questions, both answered together:
 
-| Location | Pros | Cons |
-| --- | --- | --- |
-| `.rigor-baseline.yml` (project root) | Sibling of `.rigor.yml`. Visible to the author. PHPStan convention. | One more file at the root. |
-| `.rigor/baseline.yml` | Nested under existing cache dir. | The cache dir is gitignored by convention; baseline would have to escape that. |
-| Inside `.rigor.yml` `baseline:` key | Single config file. | Baseline rows can be thousands; muddy with config. |
+**(a) Default file name + location.** `.rigor-baseline.yml` at
+the project root, sibling of `.rigor.yml` / `.rigor.dist.yml`.
+This is the path `rigor baseline generate` writes to by default,
+and the path the project-init SKILL writes when first
+scaffolding a project. The file is intentionally
+version-controlled (it documents project state).
 
-**Decision**: WD2 = `.rigor-baseline.yml` at project root. The
-file is intentionally version-controlled (it documents project
-state). Embedded mode (inline `baseline:` key in `.rigor.yml`)
-is rejected — baseline content scale (rows × projects with
-hundreds of files) is wrong for the config file.
+Rejected alternatives:
+
+| Location | Why rejected |
+| --- | --- |
+| `.rigor/baseline.yml` | The cache dir is gitignored by convention; baseline would have to escape that, and the project state would be hidden one level deeper than the config. |
+| Inside `.rigor.yml` `baseline:` key | Baseline content scale (rows × hundreds of files) is wrong for the config file — would muddy diffs and lock-step `.rigor.yml` edits with baseline edits. |
+
+**(b) Loading semantics: explicit only, never implicit.** The
+**presence** of `.rigor-baseline.yml` on disk does NOT change
+`rigor check` behaviour. The baseline is loaded only when
+`.rigor.yml` (or `.rigor.dist.yml`) **explicitly** names it:
+
+```yaml
+# .rigor.yml — opt-in baseline reference
+baseline: .rigor-baseline.yml
+# (or any other path the project chose)
+```
+
+When the key is omitted, `rigor check` runs as if no baseline
+existed — same behaviour Rigor has today. This is the "no
+magic" stance: a file sitting in the project root must never
+silently change diagnostic semantics.
+
+The reasoning behind making it explicit:
+
+1. **Auditability**: the config file is the single document
+   that records what changes diagnostic output. A reviewer
+   reading `.rigor.yml` sees `baseline: .rigor-baseline.yml`
+   and knows the baseline is active; without that line the
+   baseline file is dormant (or absent). No surprise from a
+   file checked-in by another contributor that the reviewer
+   missed.
+2. **CI flexibility**: a project can keep
+   `.rigor-baseline.yml` committed for the
+   `rigor-baseline-reduce` SKILL's drift inspection without
+   activating the suppression in CI. Two configs side by
+   side:
+   ```yaml
+   # .rigor.dist.yml — production CI uses the baseline
+   baseline: .rigor-baseline.yml
+   ```
+   ```yaml
+   # .rigor.yml — a contributor's local override that doesn't
+   baseline: false   # or just omit the key
+   ```
+3. **Migration ergonomics**: removing the baseline mid-cycle
+   is a one-line edit, not a file deletion. The history of
+   "we used to suppress N diagnostics" stays in the YAML.
+4. **Test stability**: rigor's own integration specs and
+   third-party plugin specs run `rigor check` against
+   synthetic projects. If baseline loading were implicit on
+   presence, spec authors would have to track stray
+   `.rigor-baseline.yml` files in tmpdirs; explicit loading
+   removes that footgun.
+
+**Decision**: WD2 = `.rigor-baseline.yml` at project root
+**as the convention path**, loaded **only when
+`.rigor.yml` / `.rigor.dist.yml` declares `baseline: <path>`**.
+The CLI flag `--baseline=PATH` exists as a per-run override
+(see § "CLI surface") and is the only way to use a baseline
+without putting `baseline:` in the config — primarily a CI
+escape hatch, not the intended workflow.
 
 ### WD3 — Scope is per-rule, not per-severity
 
@@ -327,10 +385,29 @@ $ rigor baseline regenerate
     common end-of-quality-improvement-session refresh.
 ```
 
-`rigor check` itself grows a `--baseline=PATH` flag (default
-`.rigor-baseline.yml`) and a `--no-baseline` opt-out. Both can
-be set via `.rigor.yml`'s `baseline_path:` and `baseline:` keys
-respectively for the in-config form.
+`rigor check` itself grows a `--baseline=PATH` flag and a
+`--no-baseline` opt-out. Resolution order for the active
+baseline path (per WD2 (b) — explicit loading only):
+
+1. `--no-baseline` on the CLI → no baseline loaded, regardless
+   of `.rigor.yml` / `.rigor.dist.yml` content.
+2. `--baseline=PATH` on the CLI → load that specific path.
+3. `.rigor.yml` (or `.rigor.dist.yml`) carries
+   `baseline: PATH` → load that path. `baseline: false` is
+   the explicit-disable form.
+4. Neither flag nor config key set → no baseline loaded
+   (current default behaviour preserved).
+
+The **presence of `.rigor-baseline.yml` on disk is never a
+trigger**. A project can scaffold the file with
+`rigor baseline generate`, version-control it, and still
+deliberately leave the suppression dormant by omitting the
+`baseline:` key from its config. The intended workflow is
+that `rigor baseline generate` writes both the file and a
+matching `baseline: .rigor-baseline.yml` line into
+`.rigor.dist.yml` (or warns the user when that line is
+missing); the `rigor-project-init` SKILL takes care of this
+wiring as a single step.
 
 ## SKILL: rigor-project-init
 
@@ -364,8 +441,14 @@ a Gemfile-bearing directory that has no `.rigor.yml`.
    detected configuration.
 5. **Run `rigor check`** to get the diagnostic baseline.
 6. **Write `.rigor-baseline.yml`** via `rigor baseline
-   generate`. Print the suppression summary: "N diagnostics
-   recorded as baseline; M will surface on subsequent runs".
+   generate`. AND add `baseline: .rigor-baseline.yml` to
+   the `.rigor.dist.yml` written in step 4 — per WD2 (b)
+   the file's presence alone is dormant; the config has to
+   name it. The SKILL does both edits in one step so the
+   user doesn't end up with a generated baseline that
+   silently does nothing.
+   Print the suppression summary: "N diagnostics recorded
+   as baseline; M will surface on subsequent runs".
 7. **Surface real bugs**: in the baseline, count diagnostics
    per rule. Suggest 2-3 rules where the count is small enough
    to fix interactively (these are likely the genuine bugs

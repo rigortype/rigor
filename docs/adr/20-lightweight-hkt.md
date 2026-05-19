@@ -209,6 +209,61 @@ URIS` and recover the underlying type via `Kind<URI, A>`. This is
 in TypeScript — but for the purposes of writing
 `Functor<F>`-shaped libraries, it is sufficient.
 
+### Tiered design space: L1 / L2 / L3
+
+The mechanism in this ADR is the **upper tier of a three-tier design
+space**. Naming the tiers explicitly makes it easier to judge, at each
+downstream consumer, what level of machinery is actually needed.
+
+| Tier | Surface | Mechanism cost |
+| --- | --- | --- |
+| **L1** | Parametric recursive `type` aliases — `type json::value[K] = nil \| bool \| ... \| Array[json::value[K]] \| Hash[K, json::value[K]]`. Equivalent in spirit to Python PEP 695's `type Json[K] = ...` and to TypeScript's forward-reference recursive aliases. | Zero. RBS already accepts recursive `type` aliases (see § "The JSON.parse problem"). |
+| **L2** | L1 + per-call-site `return_override` directive — discriminates `JSON.parse(s, symbolize_names: true) -> Json[Symbol]` vs. `Json[String]` at the call site. | One directive. `return_override` is independent of the `App[F, A]` carrier and could ship without the HKT registry. Same shape as the ADR-18 substrate amendment, lifted to user RBS (WD6). |
+| **L3** | L1 + L2 + URI registry + `App[F, A]` carrier + conditional type bodies. | Full ADR-20 machinery (HktRegistry, HktReducer, HktBody, fuel budget, three-layer merge). Unlocks (a) cross-plugin type-constructor extensibility, (b) type-level conditional computation (rigor-lisp-eval's `eval`), (c) multi-argument HKT for `Result[T, E]` / `Maybe[T]`. |
+
+Python's typing system stops at **L1 by design**: `json.loads` is typed
+`-> Any`, and user-authored `Json[K]` aliases are conveniences that the
+caller re-`cast`s into. TypeScript / fp-ts climb to **L3** via
+declaration-merging on `URItoKind<A>` plus built-in conditional types.
+
+ADR-20's significance — and its justification for shipping L3 from day
+one rather than landing L1+L2 first and gating L3 on demand — rests on
+**two specific second-level precision targets that L1+L2 cannot
+reach**:
+
+1. **Conditional type evaluation.** The rigor-lisp-eval demo's `eval`
+   needs `App[lisp_type, E]` to encode "the literal AST shape `E`
+   determines the result type." No L1 form expresses this; conditional
+   bodies (D3) are necessary, and an open registry is the natural home
+   for them.
+2. **Open type-constructor registry.** Once `rigor-dry-monads` ships
+   `Result[T, E]` and `Maybe[T]` as named constructors, downstream code
+   wants to abstract over *any* such carrier (a single `traverse`
+   signature, a generic `Functor<F>`-shaped library). L1's recursive
+   aliases are closed; the defunctionalised tag + URI registry is what
+   permits "any future plugin can register a new constructor and have
+   generic combinators apply to it" without recompiling the analyzer.
+
+For consumers whose only need is the JSON.parse-shaped recursive sum
+**without** per-option discrimination, L1 alone is sufficient — and
+already works today via `type json::value[K] = …`. The implication for
+authoring guidance is: **start at L1, climb to L2 when a single option
+needs discrimination, and only reach for the full L3 registry when
+type-level computation or cross-plugin extensibility is actually in
+play.** Slice 5 (sugar via recursive `type` aliases per WD5) is the
+path that makes L1 ergonomic alongside L3; it is intentionally a
+follow-up rather than the entrypoint, because the second-level
+precision targets above need L3 anyway and the JSON.parse showcase
+needed L2's `return_override` from day one.
+
+ADR-20 therefore **contains L1 as an inner layer** (Slice 5 exposes it
+directly) rather than replacing it: the inclusion is monotonic in
+precision, not an alternative path. A library author who never reaches
+for `App[...]` or `%a{rigor:v1:hkt_*}` directives still benefits from
+recursive `type` aliases, and Rigor's bundled JSON_VALUE definition
+remains expressible as a single recursive alias once the Slice 5 sugar
+parser is in place.
+
 ### What Rigor already has that is close
 
 The Rigor extension catalog already lists, as "MAY support for
@@ -646,6 +701,7 @@ first v0.2.x release.
 | **Full HKT in RBS** | Would require either kind-system extension to RBS (out of Rigor's authority) or a Rigor-only RBS dialect that breaks ADR-1's superset stance. |
 | **Inline cast at call site (`JSON.parse(s) as MySchema`)** | Pushes the work onto every user, defeats the point of inferring a recursive sum. Closest current equivalent is `rigor-sorbet`'s `T.cast`, which remains available for users who prefer it. |
 | **Enumerated overloads in vanilla RBS** | Works for `JSON.parse` with one bool option, scales linearly in the number of options × discriminated values. Lisp-eval demo's 7-arm conditional with recursion is not expressible. |
+| **Python PEP 695-style recursive `type` aliases only (L1 cap)** | RBS already accepts recursive `type` aliases, so the JSON.parse recursive-sum floor (`type json::value[K] = nil \| ... \| Hash[K, json::value[K]]`) ships today with zero new mechanism — directly equivalent to Python's `type Json[K] = ...` (PEP 695) and TypeScript's forward-reference recursive aliases. Insufficient for: (a) per-call-site option discrimination (`symbolize_names: true` ↔ `K = Symbol` — Python answers this with `-> Any`); (b) type-level conditional evaluation (rigor-lisp-eval's `eval` over literal-AST `E`); (c) open plugin-registered type constructors (the fp-ts `URItoKind` use case, needed by `rigor-dry-monads` for `Result` / `Maybe` and by any future `Functor<F>`-shaped library). ADR-20 *contains* this tier as L1 inside its design space (Slice 5 / WD5 ships sugar for it) and extends upward to L2's `return_override` and L3's `App[F, A]` registry; capping at L1-only would lock downstream precision at the Python ceiling and forfeit (a)–(c). See § "Tiered design space: L1 / L2 / L3". |
 | **Plugin-only `FlowContribution`** | The current rigor-lisp-eval approach. Works per plugin but does not generalise to library-authored signatures; every library would need a plugin. ADR-20's authoring surface fixes this. |
 | **Implement Liquid Types / SMT-driven refinement** | Out of scope per § Non-Goals; SMT dependency, undecidable in general, doesn't compose with the existing certainty model. |
 | **Adopt fp-ts's `URItoKind` shape verbatim** | TypeScript declaration merging has no RBS analogue. The `%a{rigor:v1:hkt_register}` annotation is the moral equivalent — explicit, no language extension required. |
@@ -757,3 +813,16 @@ first v0.2.x release.
   wiring closes the user-authoring loop. User .rbs overlays
   now surface in env.hkt_registry. 4 new integration cases
   (total HKT spec count: 142).
+- 2026-05-19 — **Context expanded with L1 / L2 / L3 tier framing.**
+  New § "Tiered design space" subsection names the three tiers
+  explicitly (L1 = parametric recursive `type` aliases à la Python
+  PEP 695 / RBS-native; L2 = + `return_override` directive; L3 =
+  full HKT machinery) and justifies ADR-20's L3-from-day-one choice
+  against the two second-level precision targets (conditional type
+  evaluation, open type-constructor registry) that L1+L2 cannot
+  reach. Authoring guidance: start at L1, climb to L2 for single-
+  option discrimination, reach for L3 only when type-level
+  computation or cross-plugin extensibility is in play. New
+  Alternatives row pinning "Python PEP 695-style recursive `type`
+  aliases only (L1 cap)" as a rejected variant — ADR-20 contains
+  this tier as its inner layer rather than replacing it.

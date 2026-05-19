@@ -1,6 +1,7 @@
 ---
 name: rigor-plugin-author
-description: Author a new Rigor plugin end-to-end. Production plugins targeting real gems / frameworks land under `plugins/`; tutorial walkthroughs under `examples/`. Use when the user asks to create a Rigor plugin for X, write a plugin for a DSL, or extend Rigor for a framework. Covers requirements, placement, template selection, scaffolding, demo, integration spec, verification.
+description: |
+  Author a new Rigor plugin end-to-end: decide `plugins/` (production) vs `examples/` (tutorial), then run requirements → template → scaffold → demo → spec → verify. Triggers: "Create a Rigor plugin for X", "Extend Rigor for our DSL", "Plugin similar to rigor-units for currency". NOT for edits to existing plugins or analyser-engine work in `lib/rigor/`.
 license: MPL-2.0
 metadata:
   version: 0.1.0
@@ -79,3 +80,24 @@ The plugin is shippable when **all** of these hold:
 - One commit, subject following `AGENTS.md` style (`Add rigor-<id> plugin (<facet>)` or `Add rigor-<id> walkthrough (<facet>)`).
 
 Publishing to RubyGems is **out of scope** for this skill — the plugin lives in this repo until a maintainer runs the `git subtree split` + `bundle exec rake release` flow ([`.claude/skills/rigor-release-prep/SKILL.md`](../../.claude/skills/rigor-release-prep/SKILL.md)).
+
+## Example walkthrough
+
+Concrete trace through a fictional request — "Create a Rigor plugin for the `dotenv` gem" — to anchor expectations:
+
+1. **Phase 0** — `dotenv` is a real gem → `plugins/rigor-dotenv/`. (Not a fictional teaching domain.)
+2. **Phase 1** (Module 1) — user answers narrow the surface: Q1=A (`Dotenv.load(path)` call), Q2=E (reads `.env` file), Q3=A (known finite set of variable names), Q4=B (error on missing var), Q5=D (external file path config).
+3. **Phase 2** — answers match the `rigor-routes` template row (Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D). Copy the `rigor-routes` directory layout.
+4. **Phases 3–5** (Module 2) — scaffold `plugins/rigor-dotenv/{lib,demo}/`, add the cache-producer + IoBoundary pattern verbatim from Module 2, demo with `tmp/`-anchored cache.
+5. **Phases 6–10** (Module 3) — write `spec/integration/plugins/dotenv_plugin_spec.rb`, README, CHANGELOG entry, run `make verify`, single commit.
+
+If the request shifts mid-flow (e.g. user later says "and also error when the value is empty"), restart from Phase 1 Q3 — the requirements gathering is the gate that prevents accidental scope creep.
+
+## Troubleshooting (most common at landing time)
+
+- **`make verify` fails on the new spec** — the spec doesn't `Rigor::Plugin.unregister!` in `before` + `after`. See [`references/04-appendix.md`](references/04-appendix.md) § Common pitfalls #2.
+- **Cache key never invalidates** — `io_boundary.read_file` was called AFTER `cache_for` instead of before. See [`references/02-scaffold-walker-demo.md`](references/02-scaffold-walker-demo.md) Phase 4.5.
+- **Diagnostics don't appear in the demo output** — `source_family:` was passed to the `Diagnostic` constructor. Don't — the runner overwrites it. See pitfall #7.
+- **`Prism::CallNode#name == "foo"` always false** — `node.name` returns a `Symbol`. Use `== :foo`. See pitfall #4.
+- **Plugin's `lib/` not on load path in tests** — spec needs `$LOAD_PATH.unshift(...)` before `require "rigor-<id>"`. See pitfall #10.
+- **`git status` shows leaked `.rigor/cache/`** — demo `.rigor.yml` didn't set `cache.path: tmp/.rigor/cache` or missing per-demo `/tmp/`-only `.gitignore`. See pitfall #1.

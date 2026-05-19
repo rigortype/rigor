@@ -950,7 +950,7 @@ module Rigor
         end
 
         def simple_dispatch_name?(name)
-          %i[nil? ! is_a? kind_of? instance_of? == != ===].include?(name)
+          %i[nil? ! is_a? kind_of? instance_of? == != === =~].include?(name)
         end
 
         def dispatch_call_simple(node, scope, name)
@@ -960,7 +960,109 @@ module Rigor
           when :instance_of? then analyse_class_predicate(node, scope, exact: true)
           when :==, :!= then analyse_equality_predicate(node, scope, equality: name)
           when :=== then analyse_case_equality_predicate(node, scope)
+          when :=~ then analyse_regex_match_predicate(node, scope)
           end
+        end
+
+        # Survey item (b): `/regex/ =~ str` and `str =~ /regex/`
+        # bind the regex match-data globals on each edge.
+        #
+        # - Truthy edge (`=~` returned an Integer position — the
+        #   match succeeded): `$~` to `Nominal[MatchData]`; `$&`
+        #   and `$1..$N` (where N is the number of capture groups
+        #   in the regex source) to `Nominal[String]`. This is the
+        #   same optimistic-narrowing shape the existing
+        #   `analyse_match_write` uses for named captures inside
+        #   `if /(?<x>...)/ =~ str` — optional groups in the
+        #   regex source (`(\d+)?`) would bind `$N` to `nil` at
+        #   runtime, but the floor here matches the common idiom
+        #   (required captures) and lets `unless /(\d+)/ =~ s;
+        #   raise; end; $1.to_i` resolve cleanly.
+        # - Falsey edge (`=~` returned nil — no match): `$~` and
+        #   every numbered / back-reference global bound to
+        #   `Constant<nil>`.
+        #
+        # Returns nil (no narrowing) when the receiver / argument
+        # pair does not include a `RegularExpressionNode` literal
+        # we can count.
+        def analyse_regex_match_predicate(node, scope)
+          return nil if node.arguments.nil?
+          return nil unless node.arguments.arguments.size == 1
+
+          regex_node = regex_match_literal(node.receiver, node.arguments.arguments.first)
+          return nil if regex_node.nil?
+
+          group_count = count_regex_capture_groups(regex_node.unescaped)
+          regex_match_predicate_scopes(scope, group_count)
+        end
+
+        def regex_match_literal(left, right)
+          return left if left.is_a?(Prism::RegularExpressionNode)
+          return right if right.is_a?(Prism::RegularExpressionNode)
+
+          nil
+        end
+
+        # Curated set of back-reference globals bound by every
+        # `=~`. Numbered references (`$1..$N`) are handled
+        # separately because N depends on the regex source.
+        REGEX_MATCH_GLOBALS = %i[$~ $& $` $' $+].freeze
+        private_constant :REGEX_MATCH_GLOBALS
+
+        def regex_match_predicate_scopes(scope, group_count)
+          string_t = Type::Combinator.nominal_of("String")
+          match_data_t = Type::Combinator.nominal_of("MatchData")
+          nil_t = Type::Combinator.constant_of(nil)
+
+          truthy = scope
+          falsey = scope
+          truthy = truthy.with_global(:$~, match_data_t)
+          falsey = falsey.with_global(:$~, nil_t)
+          REGEX_MATCH_GLOBALS.each do |name|
+            next if name == :$~
+
+            truthy = truthy.with_global(name, string_t)
+            falsey = falsey.with_global(name, nil_t)
+          end
+          group_count.times do |i|
+            name = :"$#{i + 1}"
+            truthy = truthy.with_global(name, string_t)
+            falsey = falsey.with_global(name, nil_t)
+          end
+          [truthy, falsey]
+        end
+
+        # Counts capture groups (numbered + named — both
+        # contribute to `$1..$N`) in a regex source. Backslash
+        # escapes are skipped; non-capturing `(?:...)`, lookahead
+        # `(?=...)` / `(?!...)`, and lookbehind `(?<=...)` /
+        # `(?<!...)` do NOT count. Named groups `(?<name>...)`
+        # DO count. The walker is intentionally light — it does
+        # not parse the regex AST, just scans char-by-char — so
+        # exotic constructs that overlap the lookaround syntax
+        # may miscount; the unsoundness is bounded (over- or
+        # under-binding a few `$N` globals) and we already accept
+        # the same shape of unsoundness for `analyse_match_write`.
+        def count_regex_capture_groups(source)
+          i = 0
+          total = 0
+          length = source.length
+          while i < length
+            c = source[i]
+            if c == "\\"
+              i += 2
+              next
+            end
+            if c == "("
+              if source[i + 1] == "?"
+                total += 1 if source[i + 2] == "<" && source[i + 3] != "=" && source[i + 3] != "!"
+              else
+                total += 1
+              end
+            end
+            i += 1
+          end
+          total
         end
 
         def dispatch_call_numeric(node, scope, name)

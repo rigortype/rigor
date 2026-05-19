@@ -196,8 +196,8 @@ module Rigor
         Prism::UntilNode => :type_of_loop,
         Prism::ForNode => :type_of_dynamic_top,
         Prism::DefinedNode => :type_of_defined,
-        Prism::NumberedReferenceReadNode => :type_of_string_or_nil,
-        Prism::BackReferenceReadNode => :type_of_string_or_nil,
+        Prism::NumberedReferenceReadNode => :type_of_numbered_reference,
+        Prism::BackReferenceReadNode => :type_of_back_reference,
         Prism::MatchPredicateNode => :type_of_match_predicate,
         Prism::MatchRequiredNode => :type_of_match_required,
         Prism::MatchWriteNode => :type_of_dynamic_top,
@@ -345,6 +345,21 @@ module Rigor
           Type::Combinator.nominal_of("String"),
           Type::Combinator.constant_of(nil)
         )
+      end
+
+      # `$1` / `$2` / ... — numbered match-data globals. When the
+      # narrowing tier has bound a tighter type for this number
+      # (typically `String` after a `=~`-success guard like `unless
+      # /(\d+)/ =~ s; raise; end`), prefer the scope-bound type.
+      # Falls back to the default `String | nil`.
+      def type_of_numbered_reference(node)
+        scope.global(:"$#{node.number}") || type_of_string_or_nil(node)
+      end
+
+      # `$&` / `$'` / `$\`` / `$+` — symbolic back-references. Same
+      # narrowing model as numbered references.
+      def type_of_back_reference(node)
+        scope.global(node.name) || type_of_string_or_nil(node)
       end
 
       # `expr in pattern` — pattern-match predicate. Returns `true`

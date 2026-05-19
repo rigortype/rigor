@@ -2126,4 +2126,86 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       end
     end
   end
+
+  # Survey item (b) — `=~` with a regex literal binds the
+  # match-data globals (`$~`, `$&`, `$\``, `$'`, `$+`, `$1..$N`)
+  # on each predicate edge so subsequent reads inside an
+  # `unless ... raise` guard see the tightened type.
+  describe "regex `=~` predicate narrowing (numbered globals)" do
+    let(:string_t) { Rigor::Type::Combinator.nominal_of("String") }
+    let(:nil_t) { Rigor::Type::Combinator.constant_of(nil) }
+    let(:default_env_scope) { Rigor::Scope.empty(environment: Rigor::Environment.default) }
+
+    it "binds $1..$N to String on the truthy edge of `regex =~ str`" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        unless /(\\d+)-(\\w+)/ =~ value
+          raise "bad"
+        end
+      RUBY
+      # After `unless ... raise`, only the predicate-truthy edge
+      # survives — $1 and $2 are narrowed to String.
+      expect(post.global(:$1)).to eq(string_t)
+      expect(post.global(:$2)).to eq(string_t)
+    end
+
+    it "binds $~ to MatchData on the truthy edge" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        unless /(\\d+)/ =~ value
+          raise
+        end
+      RUBY
+      expect(post.global(:$~)).to be_a(Rigor::Type::Nominal)
+      expect(post.global(:$~).class_name).to eq("MatchData")
+    end
+
+    it "binds back-reference globals ($&, $`, $', $+) to String on the truthy edge" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        unless /(\\d+)/ =~ value
+          raise
+        end
+      RUBY
+      %i[$& $` $' $+].each do |name|
+        expect(post.global(name)).to eq(string_t), "#{name}: #{post.global(name).inspect}"
+      end
+    end
+
+    it "binds $~ / $1 to nil on the falsey edge" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        if /(\\d+)/ =~ value
+          raise "matched"
+        end
+      RUBY
+      expect(post.global(:$~)).to eq(nil_t)
+      expect(post.global(:$1)).to eq(nil_t)
+    end
+
+    it "recognises the reverse argument order (`str =~ regex`)" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        unless value =~ /(\\d+)/
+          raise
+        end
+      RUBY
+      expect(post.global(:$1)).to eq(string_t)
+    end
+
+    it "does not count non-capturing groups (`(?:...)`)" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        unless /(?:foo)(\\d+)/ =~ value
+          raise
+        end
+      RUBY
+      expect(post.global(:$1)).to eq(string_t)
+      # No $2 — the (?:foo) is non-capturing.
+      expect(post.global(:$2)).to be_nil
+    end
+
+    it "does not narrow when neither side is a regex literal" do
+      _, post = default_env_scope.evaluate(parse_program(<<~RUBY))
+        unless lhs =~ rhs
+          raise
+        end
+      RUBY
+      expect(post.global(:$1)).to be_nil
+    end
+  end
 end

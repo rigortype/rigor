@@ -33,6 +33,21 @@ class Object
   # @return [self?]
   def presence: () -> self?
 
+  # `active_support/core_ext/object/json` monkey-patches
+  # `as_json` onto Object (default returns the object's
+  # `instance_values` hash) plus per-class overrides on
+  # NilClass / TrueClass / FalseClass / Numeric / String /
+  # Symbol / Time / Date / Array / Hash / Range / Regexp /
+  # Struct / Enumerable. Most call-site code uses the
+  # universal `obj.as_json` shape so a single Object row
+  # restores type coverage at the Mastodon-derived
+  # `as_json` call sites (`fan_out_on_write_service.rb`,
+  # `push_update_worker.rb`, `media_component_helper.rb`).
+  # `options` is the standard `only:` / `except:` / `methods:`
+  # / `include:` hash — left as untyped because the surface
+  # is large and per-call-site precision is rarely useful.
+  def as_json: (?untyped options) -> untyped
+
   # `try` swallows NoMethodError; declared return is `untyped`
   # because the called method's signature is not known to RBS
   # at this call site.

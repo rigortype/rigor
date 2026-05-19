@@ -149,19 +149,87 @@ module Rigor
         end
 
         # Returns the instance-side `def` nodes that look like
-        # mailer actions. Filters obvious non-actions:
-        # `initialize`, methods starting with `_`, and any
-        # `def self.<name>` (singleton-side).
+        # mailer actions. Filters non-actions:
+        # - `initialize`
+        # - methods starting with `_` (Ruby convention for
+        #   private/internal)
+        # - `def self.<name>` (singleton-side)
+        # - methods after a bare `private` (or
+        #   `public` → `private` transition) — these are
+        #   internal helpers, not actions
+        # - methods named as a `private :foo` argument
+        # - methods named as a callback target
+        #   (`before_action :name`, `after_action`,
+        #   `around_action`)
+        #
+        # Pre-fix, Mastodon's `AdminMailer#process_params` /
+        # `set_instance` / `set_locale` / `set_important_headers!`
+        # all surfaced as missing-view because the bare `private`
+        # keyword wasn't honoured. ~19 false positives across
+        # Mastodon's mailers.
+        CALLBACK_DECLARATIONS = %i[before_action after_action around_action].freeze
+        private_constant :CALLBACK_DECLARATIONS
+
         def collect_action_defs(body)
           return [] if body.nil?
 
+          private_names, callback_names = collect_visibility_and_callbacks(body)
+          visibility = :public
+
           body.compact_child_nodes.flat_map do |node|
+            visibility = next_visibility(node, visibility)
             next [] unless node.is_a?(Prism::DefNode)
             next [] if node.receiver.is_a?(Prism::SelfNode)
             next [] if node.name == :initialize
             next [] if node.name.to_s.start_with?("_")
+            next [] if visibility == :private
+            next [] if private_names.include?(node.name)
+            next [] if callback_names.include?(node.name)
 
             [node]
+          end
+        end
+
+        # First pass over the class body: collect (a) names
+        # passed to `private :foo` / `protected :foo` (explicit
+        # visibility-on-existing-method form), and (b) Symbol
+        # arguments to callback declarations
+        # (`before_action :setup`, etc.).
+        def collect_visibility_and_callbacks(body)
+          private_names = []
+          callback_names = []
+
+          body.compact_child_nodes.each do |node|
+            next unless node.is_a?(Prism::CallNode) && node.receiver.nil?
+
+            args = (node.arguments&.arguments || []).filter_map do |arg|
+              arg.is_a?(Prism::SymbolNode) ? arg.unescaped.to_sym : nil
+            end
+            next if args.empty?
+
+            case node.name
+            when :private, :protected then private_names.concat(args)
+            when *CALLBACK_DECLARATIONS then callback_names.concat(args)
+            end
+          end
+
+          [private_names.to_set, callback_names.to_set]
+        end
+
+        # Returns the new visibility scope state after observing
+        # `node`. Bare `private` / `protected` / `public` switch
+        # state; the `private :foo` arg-bearing form does NOT
+        # (already handled by `collect_visibility_and_callbacks`).
+        def next_visibility(node, current)
+          return current unless node.is_a?(Prism::CallNode)
+          return current unless node.receiver.nil?
+          return current unless (args = node.arguments&.arguments).nil? || args.empty?
+
+          case node.name
+          when :private then :private
+          when :protected then :protected
+          when :public then :public
+          else current
           end
         end
 

@@ -143,6 +143,70 @@ RSpec.describe "plugins/rigor-actionmailer" do
       missing = plugin_diagnostics(result).select { |d| d.rule == "missing-view" }
       expect(missing.map(&:message).grep(/UserMailer#welcome/)).to be_empty
     end
+
+    it "skips methods that follow a bare `private` (Mastodon AdminMailer shape)" do
+      # Mastodon's AdminMailer has `before_action :set_instance`
+      # plus `private` followed by `set_instance` /
+      # `process_params` / `set_locale` / `set_important_headers!`.
+      # None of those are mailer actions; pre-fix they surfaced
+      # as missing-view because the discoverer treated every
+      # instance `def` as an action.
+      files = {
+        "app/mailers/admin_mailer.rb" => <<~RUBY,
+          class AdminMailer < ApplicationMailer
+            before_action :set_instance
+
+            def daily_report
+              mail subject: "report"
+            end
+
+            private
+
+            def set_instance
+              @instance = "x"
+            end
+
+            def helper_method
+              "helper"
+            end
+          end
+        RUBY
+        "app/views/admin_mailer/daily_report.html.erb" => "Hello\n"
+      }
+      result = run_plugin(
+        source: "# noop\n",
+        files: files,
+        paths: ["app/mailers/admin_mailer.rb"]
+      )
+      missing = plugin_diagnostics(result).select { |d| d.rule == "missing-view" }
+      expect(missing.map(&:message).grep(/set_instance|helper_method/)).to be_empty
+    end
+
+    it "skips methods named explicitly as before_action callback targets" do
+      files = {
+        "app/mailers/admin_mailer.rb" => <<~RUBY,
+          class AdminMailer < ApplicationMailer
+            before_action :setup_for_render
+
+            def public_action
+              mail
+            end
+
+            def setup_for_render
+              @x = 1
+            end
+          end
+        RUBY
+        "app/views/admin_mailer/public_action.html.erb" => "Hi\n"
+      }
+      result = run_plugin(
+        source: "# noop\n",
+        files: files,
+        paths: ["app/mailers/admin_mailer.rb"]
+      )
+      missing = plugin_diagnostics(result).select { |d| d.rule == "missing-view" }
+      expect(missing.map(&:message).grep(/setup_for_render/)).to be_empty
+    end
   end
 
   describe "edge cases" do

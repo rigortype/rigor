@@ -73,8 +73,8 @@ module Rigor
       # This file ships the value class only. Slice 2b wires the
       # pre-pass that scans Tier C call sites + the
       # `SyntheticMethodIndex` the dispatcher consults; slice 2c
-      # authors `examples/rigor-dry-struct/` and
-      # `examples/rigor-dry-types/` as the worked consumers.
+      # authors `plugins/rigor-dry-struct/` and
+      # `plugins/rigor-dry-types/` as the worked consumers.
       class HeredocTemplate
         NAME_PLACEHOLDER = "\#{name}"
 

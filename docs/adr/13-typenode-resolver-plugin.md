@@ -362,7 +362,7 @@ Recommended order; each slice independently shippable:
     Extends phase-A coverage to Tuple and object-shape
     carriers; lossy-projection diagnostic for non-shape
     inputs.
-6.  **`examples/rigor-typescript-utility-types/`.** Plugin
+6.  **`plugins/rigor-typescript-utility-types/`.** Plugin
     scaffold via `.codex/skills/rigor-plugin-author/SKILL.md`.
     Five resolvers (Pick, Omit, Partial, Required, Readonly)
     in the v1 cut; the seven "degraded" rows ship as

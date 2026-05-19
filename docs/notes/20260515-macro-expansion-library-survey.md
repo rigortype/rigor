@@ -193,7 +193,7 @@ clones' file paths so a future reader can re-clone to verify.
      does NOT depend on adapter checks.
 
 5. **Closest analogue** — **PHPStan trait inlining / Lisp-macro-style**
-   expansion. Identical in spirit to how `examples/rigor-statesman/` already
+   expansion. Identical in spirit to how `plugins/rigor-statesman/` already
    walks `state_machine_class.state :foo`. AASM is in reach of the same
    plugin approach as statesman.
 
@@ -426,7 +426,7 @@ clones' file paths so a future reader can re-clone to verify.
    generate methods on `User`, so there is nothing to inline at user-class
    call sites. The model is: one registry walk at boot + one return-type
    rule per strategy method, keyed on the first symbol argument.
-   rigor already has the right hook in `examples/rigor-factorybot/`;
+   rigor already has the right hook in `plugins/rigor-factorybot/`;
    reachable extensions without macro machinery include `*_list` / `*_pair`
    wrapping, `parent:` chain resolution, `aliases:` registration, trait-name
    validation.

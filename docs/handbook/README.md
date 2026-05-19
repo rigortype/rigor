@@ -58,7 +58,7 @@ this handbook disagrees.
    landing page.
 10. [**Coexisting with Sorbet**](10-sorbet.md) — for users
     arriving from a Sorbet-using project: the
-    [`rigor-sorbet`](../../examples/rigor-sorbet/) adapter
+    [`rigor-sorbet`](../../plugins/rigor-sorbet/) adapter
     reads `sig { ... }` blocks, RBI files, and
     `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions
     as type sources without rewriting in RBS.

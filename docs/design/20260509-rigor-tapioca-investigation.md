@@ -301,7 +301,7 @@ while `Post.new.foo` resolves through `include`d modules.)
 ### Step 4 — integration spec
 
 Add a Tapioca-shaped RBI fixture to
-`spec/integration/examples/sorbet_plugin_spec.rb`:
+`spec/integration/plugins/sorbet_plugin_spec.rb`:
 
 ```ruby
 let(:tapioca_dsl_rbi) do
@@ -330,7 +330,7 @@ end
 ### Step 5 — README + CHANGELOG
 
 Add a "Tapioca DSL RBI compatibility" subsection to
-`examples/rigor-sorbet/README.md` listing which Tapioca
+`plugins/rigor-sorbet/README.md` listing which Tapioca
 compilers the plugin now supports, and which (if any)
 still need work.
 
@@ -350,7 +350,7 @@ If a future user request makes a separate plugin
 worthwhile, the **right minimum scope** would be:
 
 ```text
-examples/rigor-tapioca/
+plugins/rigor-tapioca/
 ├── README.md
 ├── rigor-tapioca.gemspec
 ├── lib/

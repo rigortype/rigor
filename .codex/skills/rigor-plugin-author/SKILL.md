@@ -125,9 +125,9 @@ If the target DSL fits one of these shapes, ship a
 
 | If the DSL is… | Substrate tier | Manifest entry | Reference plugin |
 | --- | --- | --- | --- |
-| `<Class>.<verb>(path) do … end` where the block runs as an instance method on `<Class>` (Sinatra-shape) | **Tier A** | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](../../../examples/rigor-sinatra/) |
-| `<Class>.<dsl_method>(:sym_a, :sym_b)` where each symbol maps via a bundled registry to a module that gets `include`d (Devise-shape) | **Tier B** | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](../../../examples/rigor-devise/) |
-| `<Class>.<dsl_method>(:name, T)` where the framework `class_eval`s a heredoc interpolating `name` (dry-struct-shape, ActiveStorage-shape) | **Tier C** | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](../../../examples/rigor-dry-struct/) |
+| `<Class>.<verb>(path) do … end` where the block runs as an instance method on `<Class>` (Sinatra-shape) | **Tier A** | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](../../../plugins/rigor-sinatra/) |
+| `<Class>.<dsl_method>(:sym_a, :sym_b)` where each symbol maps via a bundled registry to a module that gets `include`d (Devise-shape) | **Tier B** | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](../../../plugins/rigor-devise/) |
+| `<Class>.<dsl_method>(:name, T)` where the framework `class_eval`s a heredoc interpolating `name` (dry-struct-shape, ActiveStorage-shape) | **Tier C** | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](../../../plugins/rigor-dry-struct/) |
 | External Ruby files `instance_eval`'d under a declared receiver (Redmine webhook payloads / tDiary plugins) | **Tier D** (contract only as of v0.1.x; engine integration demand-driven) | `external_files: [Macro::ExternalFile.new(glob:, receiver_type:, bound_ivars:)]` | — |
 
 `ActiveSupport::Concern.included do ... end` re-targeting is
@@ -157,7 +157,7 @@ the directory layout and adapt the analyser body.
 | Q1=A/B, Q2=A, Q3=A, Q5=C | [`rigor-deprecations`](../../../examples/rigor-deprecations/) | Smallest possible plugin; pure config-driven rules; ~80 lines. |
 | Q1=A, Q2=A, Q3=E, Q5=A/B | [`rigor-lisp-eval`](../../../examples/rigor-lisp-eval/) | Recursive interpretation of the literal AST argument. |
 | Q1=D, Q2=B, Q3=C, Q5=A | [`rigor-units`](../../../examples/rigor-units/) | Local-variable flow tracking through arithmetic and chained calls. |
-| Q1=C/E, Q2=C, Q3=A, Q5=A/B | [`rigor-statesman`](../../../examples/rigor-statesman/) | Two-pass DSL analysis — collect declarations, then validate uses. |
+| Q1=C/E, Q2=C, Q3=A, Q5=A/B | [`rigor-statesman`](../../../plugins/rigor-statesman/) | Two-pass DSL analysis — collect declarations, then validate uses. |
 | Q1=B, Q2=A/B, Q3=B, Q5=C | [`rigor-pattern`](../../../examples/rigor-pattern/) | Plugin asks the analyser via `Scope#type_of` + `literal_string_compatible?`; matches against a literal value. |
 | Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D | [`rigor-routes`](../../../examples/rigor-routes/) | Reads a project file via `IoBoundary` under `TrustPolicy`; caches the parse via `Plugin::Base.producer`. |
 
@@ -186,7 +186,7 @@ Create the directory tree (replacing `<id>` and `ClassName` with the
 chosen id and matching CamelCase Ruby class name):
 
 ```text
-examples/rigor-<id>/
+plugins/rigor-<id>/
 ├── README.md
 ├── rigor-<id>.gemspec
 ├── lib/
@@ -367,7 +367,7 @@ plugin reads from outside the project root + signature paths.
 
 ## Phase 5 — Demo
 
-The demo project under `examples/rigor-<id>/demo/` makes the plugin
+The demo project under `plugins/rigor-<id>/demo/` makes the plugin
 runnable. Two-file convention when Q4 is B or C:
 
 - `demo.rb` — only the recognised / valid call sites. Runs cleanly
@@ -396,14 +396,14 @@ cache:
 Pair it with a per-demo `.gitignore` so the cache stays out of git:
 
 ```
-# examples/rigor-<id>/demo/.gitignore
+# plugins/rigor-<id>/demo/.gitignore
 /tmp/
 ```
 
 Verify the demo runs:
 
 ```sh
-cd examples/rigor-<id>/demo
+cd plugins/rigor-<id>/demo
 nix --extra-experimental-features 'nix-command flakes' develop --command \
   env RUBYLIB="$PWD/../lib" bundle exec --gemfile=$PWD/../../../Gemfile \
   rigor check
@@ -431,11 +431,11 @@ that directory. The spec only needs the per-plugin parts.
 
 require "spec_helper"
 
-PLUGIN_LIB = File.expand_path("../../../examples/rigor-<id>/lib", __dir__)
+PLUGIN_LIB = File.expand_path("../../../plugins/rigor-<id>/lib", __dir__)
 $LOAD_PATH.unshift(PLUGIN_LIB) unless $LOAD_PATH.include?(PLUGIN_LIB)
 require "rigor-<id>"
 
-RSpec.describe "examples/rigor-<id>" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "plugins/rigor-<id>" do # rubocop:disable RSpec/DescribeClass
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
 
@@ -530,7 +530,7 @@ the template. Required sections:
    diagnostics (info + error rows). Match `rigor check`'s actual
    output verbatim.
 3. **Layout** — directory tree.
-4. **Running the demo** — `cd examples/rigor-<id>/demo` + `RUBYLIB=...`.
+4. **Running the demo** — `cd plugins/rigor-<id>/demo` + `RUBYLIB=...`.
 5. **Plugin authoring surface this exercises** — table of which
    surfaces (manifest / config_schema / IoBoundary / cache producer
    / Scope#type_of / etc.) the plugin touches.
@@ -554,7 +554,7 @@ drives the cut-over.
   user-facing diagnostics, the architecture facet, and how to run
   the demo.
 - **Configuration.** What the user puts in `.rigor.yml`.
-- **Demo project** under `examples/rigor-<id>/demo/`.
+- **Demo project** under `plugins/rigor-<id>/demo/`.
 - **Integration spec** at `spec/integration/examples/<id>_plugin_spec.rb` — N examples covering …
 ```
 
@@ -759,7 +759,7 @@ Before declaring "the plugin is done":
 - [ ] Phase 1 questions answered explicitly by the user (not
       assumed).
 - [ ] Template selected from Phase 2's table; no inventing.
-- [ ] `examples/rigor-<id>/` directory tree complete (gemspec,
+- [ ] `plugins/rigor-<id>/` directory tree complete (gemspec,
       lib, demo).
 - [ ] Demo runs cleanly under `rigor check`; diagnostics match the
       README's "What the plugin recognises" section verbatim.

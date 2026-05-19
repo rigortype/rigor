@@ -279,7 +279,7 @@ Option 2 is more principled; option 1 is faster to ship.
 
 `hamlit` + `haml`: 6 occurrences of `undefined method 'html_safe' for String`.
 This is the ActiveSupport core_ext method. Users have the
-[`rigor-activesupport-core-ext`](examples/rigor-activesupport-core-ext)
+[`rigor-activesupport-core-ext`](plugins/rigor-activesupport-core-ext)
 plugin available but it isn't applied by default. Three options:
 
 1. Document the plugin more loudly in the diagnostic ("hint: enable plugin X")

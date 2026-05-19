@@ -362,7 +362,7 @@ spec change is required.
 
 ## Implementation slicing
 
-The plugin lives under `examples/rigor-sorbet/` while the
+The plugin lives under `plugins/rigor-sorbet/` while the
 contract stabilises, then extracts via `git subtree split`
 per the existing pattern (see
 [Rails plugins roadmap][rails-roadmap]). Recommended order:
@@ -397,7 +397,7 @@ per the existing pattern (see
     `flow.unreachable-branch`. Diagnostic identifier:
     `plugin.sorbet.absurd-reachable`.
 7.  **Documentation update.** New
-    `examples/rigor-sorbet/README.md` and a chapter in
+    `plugins/rigor-sorbet/README.md` and a chapter in
     `docs/handbook/` covering the adapter for users who
     arrive from a Sorbet-using project. Cross-link from
     [`docs/handbook/01-getting-started.md`](../handbook/01-getting-started.md)'s

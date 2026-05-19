@@ -310,6 +310,6 @@ deprecations, …). Most projects will never write one; the
 chapter exists so you know the option is there.
 [Chapter 10 — Coexisting with Sorbet](10-sorbet.md) is for
 projects arriving from a Sorbet codebase: the
-[`rigor-sorbet`](../../examples/rigor-sorbet/) adapter reads
+[`rigor-sorbet`](../../plugins/rigor-sorbet/) adapter reads
 `sig { ... }` blocks, RBI files, and `T.let` / `T.cast` /
 `T.must` / `T.unsafe` assertions as type sources.

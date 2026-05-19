@@ -5,7 +5,7 @@ planned `rigor-*` plugin family for Rails apps. It is informational;
 the binding sources for individual plugin contracts remain the
 `README.md` and integration spec under each plugin's directory.
 
-The first plugin in this family — [`rigor-activerecord`](../../examples/rigor-activerecord/) —
+The first plugin in this family — [`rigor-activerecord`](../../plugins/rigor-activerecord/) —
 landed on `master` (commit `e8fda84`) and is staged in the
 monorepo per [`.codex/skills/rigor-plugin-author/SKILL.md`](../../.codex/skills/rigor-plugin-author/SKILL.md)'s
 "start in monorepo, extract via `git subtree split` once stable"
@@ -364,7 +364,7 @@ them in via gem dependencies. Users who want the whole stack:
 
 ## Demo / test app strategy
 
-**Per-plugin self-contained demos.** Each `examples/rigor-<id>/demo/`
+**Per-plugin self-contained demos.** Each `plugins/rigor-<id>/demo/`
 ships a small Rails-shaped directory tree appropriate to the
 plugin's scope. After `git subtree split`, the demo travels
 with the plugin without manual fix-up.
@@ -385,9 +385,9 @@ that is a TEST-time tool, not a demo-time fixture.
 
 Per plugin, verify before splitting:
 
-- [ ] `examples/rigor-<id>/` directory is self-contained
+- [ ] `plugins/rigor-<id>/` directory is self-contained
       (no `require_relative`s pointing outside).
-- [ ] `examples/rigor-<id>/demo/` runs cleanly via
+- [ ] `plugins/rigor-<id>/demo/` runs cleanly via
       `RUBYLIB=$PWD/../lib bundle exec rigor check`.
 - [ ] Integration spec at `spec/integration/examples/<id>_plugin_spec.rb`
       passes with the plugin loaded as a real
@@ -403,12 +403,12 @@ Per plugin, verify before splitting:
 When all check, run:
 
 ```sh
-git subtree split --prefix=examples/rigor-<id> -b rigor-<id>-extracted
+git subtree split --prefix=plugins/rigor-<id> -b rigor-<id>-extracted
 git remote add rigor-<id> git@github.com:rigortype/rigor-<id>.git
 git push rigor-<id> rigor-<id>-extracted:master
 ```
 
-Then in the monorepo: remove `examples/rigor-<id>/`, drop the
+Then in the monorepo: remove `plugins/rigor-<id>/`, drop the
 matching `spec/integration/examples/<id>_plugin_spec.rb`,
 update `examples/README.md`'s comparison table to remove the
 row, and update `README.md`'s plugin list.

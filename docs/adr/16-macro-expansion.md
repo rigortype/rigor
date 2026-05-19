@@ -226,7 +226,7 @@ substrate" path stays a first-class option.
   substrate fires. Tracked as a separate ROADMAP item that consumes this
   ADR's substrate downstream.
 - **Forcing all current plugins to migrate.** The substrate is opt-in.
-  Existing walkers in `examples/rigor-activestorage/` etc. continue to
+  Existing walkers in `plugins/rigor-activestorage/` etc. continue to
   work; migration is a follow-up exercise demonstrating the substrate's
   reach.
 
@@ -591,14 +591,14 @@ the ceiling incrementally.
    value class + `Plugin::Manifest#block_as_methods` field;
    engine hook (`Rigor::Inference::MacroBlockSelfType`) wired
    into `ExpressionTyper`'s block-return path; worked plugin
-   `examples/rigor-sinatra/`.
+   `plugins/rigor-sinatra/`.
 2. **Tier C — heredoc-template expansion.** ✅ **LANDED** (slices
    2a `b77c101`, 2b `9251916`, 2c `e65ff9b`). `Plugin::Macro::HeredocTemplate`
    value class + `Plugin::Manifest#heredoc_templates` field;
    new `Rigor::Inference::SyntheticMethod` / `SyntheticMethodIndex`
    / `SyntheticMethodScanner` substrate + new
    `try_synthetic_method` dispatcher tier between RBS and
-   dep-source; worked plugin `examples/rigor-dry-struct/`. Per
+   dep-source; worked plugin `plugins/rigor-dry-struct/`. Per
    WD13 floor: synthetic methods return `Dynamic[T]`; precise
    return-type promotion is slice-6 work (deferred). `rigor-dry-types`
    noted as a future companion (a separate Tier-C-as-`const_set`
@@ -610,7 +610,7 @@ the ceiling incrementally.
    module's RBS instance methods into the existing
    `SyntheticMethodIndex` (with `origin_module:` provenance for
    future precision promotion); worked plugin
-   `examples/rigor-devise/` (bundled registry mirrors Devise's
+   `plugins/rigor-devise/` (bundled registry mirrors Devise's
    `lib/devise/modules.rb` strategy table — 11 entries plus
    the always-included `Devise::Models::Authenticatable`).
 4. **Concern re-targeting walker.** ✅ **LANDED** (`bdbccdd`).

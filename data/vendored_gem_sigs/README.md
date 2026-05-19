@@ -96,7 +96,7 @@ up. PRs welcome.
 
 ## Why opt-in is NOT the design
 
-Earlier we landed `examples/rigor-activesupport-core-ext/` as an
+Earlier we landed `plugins/rigor-activesupport-core-ext/` as an
 **opt-in** RBS bundle wired in via `signature_paths:`. That was the
 right design for ActiveSupport-shaped extensions because they're
 in-place modifications of stdlib classes (`Object#blank?`,

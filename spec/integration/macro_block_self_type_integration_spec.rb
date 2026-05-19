@@ -9,7 +9,7 @@
 #
 # The Sinatra-flavoured fixture is the canonical real-world target
 # for Tier A — but this spec ships in advance of the worked
-# `examples/rigor-sinatra/` plugin gem (slice 1c). It uses an
+# `plugins/rigor-sinatra/` plugin gem (slice 1c). It uses an
 # in-spec plugin class with a minimal RBS stub for `Sinatra::Base`
 # so the Tier A contract is observable without authoring the
 # external example.

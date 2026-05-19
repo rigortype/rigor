@@ -271,7 +271,7 @@ the underlying RBS sig advertises.
 
 If you prefer the TS spellings (`Pick<T, K>` etc.) in
 directives, opt into the
-[`rigor-typescript-utility-types`](../../examples/rigor-typescript-utility-types/)
+[`rigor-typescript-utility-types`](../../plugins/rigor-typescript-utility-types/)
 plugin. The plugin registers a `Plugin::TypeNodeResolver` that
 translates each TS name onto the canonical projection:
 

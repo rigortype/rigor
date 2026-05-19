@@ -16,7 +16,7 @@ survey is the binding inventory of which gems matter for static
 analysis, their inter-gem dependencies, and the type-shaping
 surface each one publishes.
 
-[`rigor-dry-struct`](../../examples/rigor-dry-struct/) shipped in
+[`rigor-dry-struct`](../../plugins/rigor-dry-struct/) shipped in
 v0.1.5 as the first dry-* plugin, exercising the
 [ADR-16](16-macro-expansion.md) Tier C (heredoc-template) substrate.
 The shape of `rigor-dry-types`, `rigor-dry-validation`,
@@ -27,7 +27,7 @@ ships.
 
 The same question was answered for the Rails plugin family in
 [`docs/design/20260508-rails-plugins-roadmap.md`](../design/20260508-rails-plugins-roadmap.md):
-per-gem plugins staged under `examples/rigor-<id>/` and extracted
+per-gem plugins staged under `plugins/rigor-<id>/` and extracted
 via `git subtree split` once each plugin's contract stabilises,
 with a future `rigor-rails` meta-gem listing the Tier 1+2 plugins
 as gem dependencies. The same pattern works for dry-rb.
@@ -40,7 +40,7 @@ family pattern.**
 - Each dry-* gem gets its own Rigor plugin: `rigor-dry-types`,
   `rigor-dry-struct`, `rigor-dry-validation`, `rigor-dry-monads`,
   `rigor-dry-schema`, … one-to-one with the upstream gem boundary.
-- Plugins are staged under `examples/rigor-dry-<id>/` per the
+- Plugins are staged under `plugins/rigor-dry-<id>/` per the
   [`rigor-plugin-author`](../../.codex/skills/rigor-plugin-author/SKILL.md)
   SKILL discipline.
 - When a plugin's contract stabilises it is extracted via
@@ -199,7 +199,7 @@ Before then, users can list individual gems in their `Gemfile`.
 
 ### WD5 — `rigor-dry-types` is the next concrete slice
 
-The next implementation step is `examples/rigor-dry-types/`. It's
+The next implementation step is `plugins/rigor-dry-types/`. It's
 the foundation every higher-tier dry-* plugin reads. The plugin's
 work is concentrated in a hand-rolled walker that recognises the
 `Types::String` / `Types::Coercible::Integer` / `Types::Strict::Bool`

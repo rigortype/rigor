@@ -284,7 +284,7 @@ Rigor maps onto this as:
 | Dynamic type `?` | **`Dynamic[T]`** — a carrier that *wraps* a "best-guess" type `T` while marking the value as not-statically-verified. `Dynamic[Top]` is the maximally-dynamic form. |
 | Consistency `~` | The `maybe` arm of the trinary certainty — `Dynamic[T] ~ U` holds whenever `T ~ U` does. |
 | Static/dynamic boundary | Per-method, per-file, per-plugin contribution — Rigor records *why* a value became `Dynamic[T]` in its dynamic-origin algebra. |
-| Casts | No in-source cast operator. The opt-in [`rigor-sorbet`](../../examples/rigor-sorbet/) plugin reads `T.let` / `T.cast` / `T.must` as cast forms; `RBS::Extended` `assert_type` directives serve the same role from `.rbs`. |
+| Casts | No in-source cast operator. The opt-in [`rigor-sorbet`](../../plugins/rigor-sorbet/) plugin reads `T.let` / `T.cast` / `T.must` as cast forms; `RBS::Extended` `assert_type` directives serve the same role from `.rbs`. |
 
 Two Rigor-specific extensions matter:
 

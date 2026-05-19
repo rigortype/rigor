@@ -445,19 +445,20 @@ plugin-supplied type-vocabulary resolvers, and
 [ADR-16](docs/adr/16-macro-expansion.md) macro / DSL expansion
 substrate (declarative Tier A block-as-method / Tier B
 trait-inlining-registry / Tier C heredoc-template / Tier D
-external-file inclusion). **Twenty-four worked examples** ship
-under [`examples/`](examples/) — each is a fully-shaped plugin
-gem with a runnable demo and an end-to-end integration spec.
+external-file inclusion). Production plugins ship under
+[`plugins/`](plugins/) — each is a fully-shaped plugin gem
+with a runnable demo and an end-to-end integration spec.
+Plugin-contract walkthroughs (deliberately simplified
+virtual use cases that spotlight one architectural surface
+per example) live under [`examples/`](examples/).
 
-**Plugin-contract teaching examples** (focus on a single
-extension-point):
+**Plugin-contract walkthroughs** (`examples/`, focus on a
+single extension-point):
 
 - [`rigor-deprecations`](examples/rigor-deprecations/) —
   smallest possible plugin (~80 lines); config-driven rules.
 - [`rigor-lisp-eval`](examples/rigor-lisp-eval/) — typing literal
   AST arguments at a method call.
-- [`rigor-statesman`](examples/rigor-statesman/) — two-pass DSL
-  analysis (collect declarations, then validate references).
 - [`rigor-pattern`](examples/rigor-pattern/) — plugin →
   analyzer collaboration via `Scope#type_of` and the
   literal-string carrier.
@@ -465,7 +466,13 @@ extension-point):
   tracking through arithmetic.
 - [`rigor-routes`](examples/rigor-routes/) — `Plugin::IoBoundary`
   reads under `TrustPolicy` plus cache producers.
-- [`rigor-typescript-utility-types`](examples/rigor-typescript-utility-types/)
+
+**Other production plugins for type-language extension** (`plugins/`):
+
+- [`rigor-statesman`](plugins/rigor-statesman/) — two-pass DSL
+  analysis (collect declarations, then validate references)
+  for the Statesman state-machine gem.
+- [`rigor-typescript-utility-types`](plugins/rigor-typescript-utility-types/)
   — `Plugin::TypeNodeResolver` chain wiring TS-canonical names
   (`Pick` / `Omit` / `Partial` / `Required` / `Readonly`) onto
   Rigor's shape-projection type functions.
@@ -473,16 +480,16 @@ extension-point):
 **Macro expansion substrate consumers** (ADR-16 — declarative
 manifest entries, no walker code):
 
-- [`rigor-sinatra`](examples/rigor-sinatra/) — **Tier A**
+- [`rigor-sinatra`](plugins/rigor-sinatra/) — **Tier A**
   block-as-method. Recognises Sinatra's nine class-level HTTP
   verb methods and narrows the route block's `self_type` so
   bare `params` / `redirect` / `halt` resolve through
   `Sinatra::Base`'s RBS.
-- [`rigor-dry-struct`](examples/rigor-dry-struct/) — **Tier C**
+- [`rigor-dry-struct`](plugins/rigor-dry-struct/) — **Tier C**
   heredoc-template. Synthesises a reader on every `Dry::Struct`
   subclass for each `attribute :name, T` / `attribute? :name, T`
   call.
-- [`rigor-devise`](examples/rigor-devise/) — **Tier B**
+- [`rigor-devise`](plugins/rigor-devise/) — **Tier B**
   trait-inlining registry mirroring `lib/devise/modules.rb`.
   Each `devise :strategy_a, :strategy_b` call explodes the
   included module's RBS instance methods onto the calling model
@@ -491,28 +498,30 @@ manifest entries, no walker code):
 
 **Rails ecosystem plugins** (Tier 1 + Tier 2 + Tier 3 + Sorbet):
 
-- Tier 1: [`rigor-rails-routes`](examples/rigor-rails-routes/),
-  [`rigor-rails-i18n`](examples/rigor-rails-i18n/),
-  [`rigor-actionmailer`](examples/rigor-actionmailer/),
-  [`rigor-activejob`](examples/rigor-activejob/).
-- Tier 2: [`rigor-actionpack`](examples/rigor-actionpack/)
+- Tier 1: [`rigor-rails-routes`](plugins/rigor-rails-routes/),
+  [`rigor-rails-i18n`](plugins/rigor-rails-i18n/),
+  [`rigor-actionmailer`](plugins/rigor-actionmailer/),
+  [`rigor-activejob`](plugins/rigor-activejob/).
+- Tier 2: [`rigor-actionpack`](plugins/rigor-actionpack/)
   (4 phases — routes / filters / renders / strong-params),
-  [`rigor-factorybot`](examples/rigor-factorybot/),
-  [`rigor-activerecord`](examples/rigor-activerecord/) —
+  [`rigor-factorybot`](plugins/rigor-factorybot/),
+  [`rigor-activerecord`](plugins/rigor-activerecord/) —
   publishes `:model_index` via ADR-9 for the other two
   to consume.
-- Tier 3: [`rigor-pundit`](examples/rigor-pundit/),
-  [`rigor-sidekiq`](examples/rigor-sidekiq/),
-  [`rigor-rspec`](examples/rigor-rspec/),
-  [`rigor-actioncable`](examples/rigor-actioncable/).
-- Parallel: [`rigor-sorbet`](examples/rigor-sorbet/) — ingests
+- Tier 3: [`rigor-pundit`](plugins/rigor-pundit/),
+  [`rigor-sidekiq`](plugins/rigor-sidekiq/),
+  [`rigor-rspec`](plugins/rigor-rspec/),
+  [`rigor-actioncable`](plugins/rigor-actioncable/).
+- Parallel: [`rigor-sorbet`](plugins/rigor-sorbet/) — ingests
   Sorbet `sig` / `T.let` / `T.cast` / `T.must` / `T.bind` /
   `T.assert_type!` / `T.reveal_type` / `T.absurd` and RBI
   files as type sources.
 
-[`examples/README.md`](examples/README.md) is the plugin
-authoring landing page — comparison table, recommended reading
-order, and the architectural map of which surface each example
+[`plugins/README.md`](plugins/README.md) is the production
+plugin catalogue (Rails / RSpec / dry-rb / Sorbet / etc.) and
+[`examples/README.md`](examples/README.md) is the walkthrough
+catalogue — comparison table, recommended reading order, and
+the architectural map of which surface each walkthrough
 exercises. The binding contract for the plugin API lives in
 [`docs/adr/2-extension-api.md`](docs/adr/2-extension-api.md);
 the slice-by-slice normative specs are under
@@ -568,10 +577,12 @@ while the inference surface stabilises. Forward-looking commitments
 - **DEFAULT_LIBRARIES stdlib coverage expansion** — out-of-the-box RBS classes available 1,273 → 1,427 (+154); 31 additional stdlib libraries auto-load.
 - **`is_a?(C)` lexical-nesting constant resolution** — predicate-narrowing now mirrors Ruby's `Module.nesting`-driven lookup.
 
-Twenty-four worked plugin examples now ship under
+Production plugins ship under [`plugins/`](plugins/) (Rails /
+RSpec / dry-rb / Sorbet / etc.) — see
+[`plugins/README.md`](plugins/README.md) for the catalogue.
+Plugin-contract walkthroughs ship under
 [`examples/`](examples/) — see
-[`examples/README.md`](examples/README.md) for the comparison
-table.
+[`examples/README.md`](examples/README.md).
 
 ## Contributing
 

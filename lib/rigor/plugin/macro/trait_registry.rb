@@ -83,7 +83,7 @@ module Rigor
       # This file ships the value class only. Slice 3b wires the
       # scanner that walks Tier B call sites + the per-method
       # explosion via `SyntheticMethodIndex`; slice 3c authors
-      # `examples/rigor-devise/` model side as the worked consumer.
+      # `plugins/rigor-devise/` model side as the worked consumer.
       class TraitRegistry
         REST_POSITION = :rest
 

@@ -106,9 +106,9 @@ outside the substrate's scope.
 
 | Tier | Shape | Manifest declaration | Worked example |
 | --- | --- | --- | --- |
-| **A — block-as-method** | DSL call's block runs as an instance method on the receiver class (`Sinatra::Base#generate_method`) | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](../../examples/rigor-sinatra/) |
-| **B — trait-inlining registry** | Class-level call enumerates symbols → bundled registry maps each to a module → substrate explodes the module's RBS methods onto the calling class | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](../../examples/rigor-devise/) |
-| **C — heredoc template** | Class-level call interpolates a literal symbol into a method-name template; substrate emits synthetic readers | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](../../examples/rigor-dry-struct/) |
+| **A — block-as-method** | DSL call's block runs as an instance method on the receiver class (`Sinatra::Base#generate_method`) | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](../../plugins/rigor-sinatra/) |
+| **B — trait-inlining registry** | Class-level call enumerates symbols → bundled registry maps each to a module → substrate explodes the module's RBS methods onto the calling class | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](../../plugins/rigor-devise/) |
+| **C — heredoc template** | Class-level call interpolates a literal symbol into a method-name template; substrate emits synthetic readers | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](../../plugins/rigor-dry-struct/) |
 | **D — external-file inclusion** | Files matching a glob run with `self` typed as a declared class | `external_files: [Macro::ExternalFile.new(glob:, receiver_type:, bound_ivars:)]` | (contract only as of v0.1.x — engine integration demand-driven) |
 
 The three Tier-A/B/C plugins above are each ~60–110 LoC of
@@ -163,7 +163,7 @@ precision per ADR-5 robustness.
 | `class-level call with do…end block running as an instance method` | ✓ Tier A | — |
 | `external Ruby files instance_eval'd under a declared self` | ✓ Tier D (contract only as of v0.1.x) | — |
 | `domain DSL whose return type depends on argument shape` | — | `flow_contribution_for` ([`rigor-lisp-eval`](../../examples/rigor-lisp-eval/)) |
-| `cross-file validation (collect declarations, then validate uses)` | — | Two-pass walker ([`rigor-statesman`](../../examples/rigor-statesman/)) |
+| `cross-file validation (collect declarations, then validate uses)` | — | Two-pass walker ([`rigor-statesman`](../../plugins/rigor-statesman/)) |
 | `parsing an external project file (routes, schema, locale)` | — | `IoBoundary` + cache producer ([`rigor-routes`](../../examples/rigor-routes/)) |
 | `schema-graph recorder (GraphQL-Ruby-style)` | — | Schema-resolution pass (no plugin authored yet) |
 

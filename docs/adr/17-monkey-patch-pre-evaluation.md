@@ -33,7 +33,7 @@ today cannot satisfy that expectation without help:
   *other* files consult when their inference engine asks "does
   `s.to_url` resolve?".
 - **RBS bundles cannot cover project-private patches.** The
-  v0.1.5 `examples/rigor-activesupport-core-ext/` bundle covers
+  v0.1.5 `plugins/rigor-activesupport-core-ext/` bundle covers
   the *common* ActiveSupport `core_ext` selectors. Project-private
   patches are by definition outside any bundleable RBS.
 - **Plugin authoring is too heavy.** A user could author a

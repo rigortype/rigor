@@ -749,7 +749,7 @@ would close the project-private remainder.
 
 | ID | Status | Item |
 | --- | --- | --- |
-| O1 | landed (MVP, v2) | `examples/rigor-activesupport-core-ext/` — community RBS bundle covering the top ~50 ActiveSupport core-ext selectors. Opt-in via `signature_paths`. |
+| O1 | landed (MVP, v2) | `plugins/rigor-activesupport-core-ext/` — community RBS bundle covering the top ~50 ActiveSupport core-ext selectors. Opt-in via `signature_paths`. |
 | O2 | queued | Macro-template / heredoc-Ruby expansion. **tDiary's `instance_eval` plugin pattern (round 3) is a concrete motivating case** alongside Rails-generator `.rb`-as-ERB templates. |
 | O3 | not-an-issue | `next if x.nil?` / `return if x.nil?` already narrowed — survey-residual nil-receivers are mostly `Object#blank?` / `#present?` / `#try` ActiveSupport extensions, which O1's RBS bundle covers. |
 | O4 | Layer 1+2 landed | Target-project Bundler awareness. `bundler.bundle_path:` (explicit) and `bundler.auto_detect:` (`.bundle/config` → `vendor/bundle/`) now auto-feed gem-shipped `sig/` into `signature_paths:`. Auto-skip list prevents prism/stdlib conflicts. Layer 3 (`Gemfile.lock` parse + `gem_rbs_collection` matching) still queued. |

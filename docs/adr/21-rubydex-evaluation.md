@@ -99,7 +99,7 @@ The three questions decide differently:
 |---|---|---|---|
 | 1 | Foundation (replace Rigor's core) | **Reject.** Rubydex's scope ends below Rigor's primary mission. | Only if rubydex ships a type-inference engine usable as a substrate without re-implementing carrier / narrowing / dispatcher (see triggers). |
 | 2 | Backend (swappable index source) | **Defer, with explicit triggers.** Not actioned in v0.1.x or v0.2.x. | When the trigger conditions below fire — chiefly: rubydex reaches 1.0 with stable API; rubydex exposes RBS *method types* not just parameter shape; Ractor shareability is documented. |
-| 3 | Tool (LSP cross-file features) | **Conditional accept, queued.** Adopt under `examples/rigor-lsp-rubydex/` as an *opt-in* LSP capability provider for `textDocument/definition` / `textDocument/references` / `workspace/symbol`. Does not modify the analyzer's primary path. | When LSP roadmap commits to one of these capabilities. |
+| 3 | Tool (LSP cross-file features) | **Conditional accept, queued.** Adopt under `plugins/rigor-lsp-rubydex/` as an *opt-in* LSP capability provider for `textDocument/definition` / `textDocument/references` / `workspace/symbol`. Does not modify the analyzer's primary path. | When LSP roadmap commits to one of these capabilities. |
 
 The strategic frame, recorded once so the rest of the document
 doesn't have to keep restating it: **Rubydex is the universal
@@ -576,7 +576,7 @@ Track 2 is v0.3.x or beyond.
 
 - Adds a new diagnostic family prefix `language_server.rubydex.*`
   reserved for Track 3, even though no diagnostics emit today.
-- Adds `examples/rigor-lsp-rubydex/` to the reserved-but-empty
+- Adds `plugins/rigor-lsp-rubydex/` to the reserved-but-empty
   directory list. When Track 3 actions, the
   [`rigor-plugin-author`](../../.codex/skills/rigor-plugin-author/SKILL.md)
   SKILL covers the scaffold; this ADR doesn't pre-author the code.

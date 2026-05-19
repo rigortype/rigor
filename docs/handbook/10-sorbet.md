@@ -1,7 +1,7 @@
 # Coexisting with Sorbet
 
 If your project already uses [Sorbet](https://sorbet.org/),
-the [`rigor-sorbet`](../../examples/rigor-sorbet/) plugin
+the [`rigor-sorbet`](../../plugins/rigor-sorbet/) plugin
 lets Rigor read your existing `sig` blocks, RBI files, and
 `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions as type
 sources. You do not have to rewrite anything in RBS to start
@@ -337,7 +337,7 @@ unit tests).
 ## Where to go next
 
 - The full feature matrix and architectural surface live in
-  [`examples/rigor-sorbet/README.md`](../../examples/rigor-sorbet/README.md).
+  [`plugins/rigor-sorbet/README.md`](../../plugins/rigor-sorbet/README.md).
 - The design rationale + slice plan is at
   [`docs/adr/11-sorbet-input-adapter.md`](../adr/11-sorbet-input-adapter.md).
 - The cross-checker triage report at

@@ -253,6 +253,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
         "module Prism\n  VERSION: String\nend\n"
       )
       loader = described_class.new(libraries: ["prism"], signature_paths: [tmpdir])
+      allow(loader).to receive(:warn) # silence the once-per-loader env-build-failure warning
       allow(described_class).to receive(:build_env_for).and_call_original
       # Touch env many times; the broken state should be memoised
       # so build_env_for runs at most once.

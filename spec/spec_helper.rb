@@ -2,6 +2,13 @@
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 
+# Silence MRI's once-per-process "Ractor API is experimental" warning
+# during test runs. Rigor uses Ractors as a committed production
+# feature (ADR-15 Phase 4 — `Analysis::Runner` worker pool), so the
+# warning is informational noise on every `make verify`. Suppressed
+# only here — downstream `rigortype` users keep the warning.
+Warning[:experimental] = false if Warning.respond_to?(:[]=)
+
 require "rigor"
 
 Dir[File.expand_path("support/**/*.rb", __dir__)].each { |f| require f }

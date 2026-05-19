@@ -71,7 +71,8 @@ module Rigor
 
           walk(root) do |call_node|
             entry, suggestion = lookup(call_node, helper_table, spell_checker)
-            diagnostics << diagnostic_for(path, call_node, entry, suggestion)
+            diagnostic = diagnostic_for(path, call_node, entry, suggestion)
+            diagnostics << diagnostic if diagnostic
           end
 
           diagnostics
@@ -476,15 +477,23 @@ module Rigor
           [nil, spell_checker.correct(name).first]
         end
 
-        # Builds the diagnostic. `entry == nil` → unknown helper.
-        # `entry != nil` and arity matches → info. Otherwise
-        # arity mismatch.
-        def diagnostic_for(path, call_node, entry, suggestion)
-          return unknown_helper_diagnostic(path, call_node, suggestion) if entry.nil?
+        # Builds the diagnostic. Only the **info-level** route
+        # resolution (`helper-call`) is the value this plugin
+        # adds — it surfaces the resolved HTTP method + path +
+        # action alongside the call site, which `rigor-rails-routes`
+        # does not. Unknown-helper and wrong-arity diagnostics are
+        # produced canonically by `rigor-rails-routes`'s own analyzer
+        # (same `:helper_table` source of truth), so emitting them
+        # here would double every call-site error. Real-world
+        # impact pre-fix: ~301 duplicates on Mastodon and ~119 on
+        # Redmine, exactly stacked with the rails-routes diagnostics.
+        # Return `nil` for unknown / arity-mismatch shapes so the
+        # caller filters them out.
+        def diagnostic_for(path, call_node, entry, _suggestion)
+          return nil if entry.nil?
 
           actual_arity = positional_arg_count(call_node)
-          expected = entry[:arity]
-          return wrong_arity_diagnostic(path, call_node, entry, actual_arity) if actual_arity != expected
+          return nil if actual_arity != entry[:arity]
 
           helper_call_diagnostic(path, call_node, entry)
         end

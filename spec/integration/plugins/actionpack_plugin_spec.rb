@@ -135,36 +135,52 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
   end
 
-  describe "error diagnostics" do
-    it "fires `unknown-helper` with a did-you-mean suggestion on a typo" do
+  describe "helper-call error diagnostics (canonically delegated to rigor-rails-routes)" do
+    # rigor-actionpack and rigor-rails-routes both consume the same
+    # `:helper_table` fact. To avoid every typo'd / wrong-arity
+    # helper call surfacing twice (once per plugin) on every
+    # Rails project, the actionpack plugin emits only the
+    # info-level route-resolution (`helper-call`) and defers
+    # `unknown-helper` / `wrong-helper-arity` to rigor-rails-routes.
+    # Mastodon pre-fix saw +301 duplicate errors from this overlap.
+    # These specs assert the new contract: rails-routes still fires.
+    it "rigor-rails-routes fires `unknown-helper` with a did-you-mean suggestion on a typo" do
       source = "class C\n  def show\n    usres_path\n  end\nend\n"
       with_demo(source) do |result|
-        err = actionpack_diagnostics(result).find { |d| d.rule == "unknown-helper" }
+        err = result.diagnostics.find do |d|
+          d.source_family == "plugin.rails-routes" && d.rule == "unknown-helper"
+        end
         expect(err).not_to be_nil
         expect(err.severity).to eq(:error)
         expect(err.message).to include("usres_path")
-        expect(err.message).to include("Did you mean `users_path`?")
+        expect(err.message).to include("users_path")
       end
     end
 
-    it "fires `wrong-helper-arity` when a positional arg is missing" do
+    it "actionpack stays silent on the unknown helper (no duplicate)" do
+      source = "class C\n  def show\n    usres_path\n  end\nend\n"
+      with_demo(source) do |result|
+        ap_unknown = actionpack_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+        expect(ap_unknown).to be_empty
+      end
+    end
+
+    it "rigor-rails-routes fires the arity-mismatch diagnostic when an arg is missing" do
       source = "class C\n  def show\n    user_path\n  end\nend\n"
       with_demo(source) do |result|
-        err = actionpack_diagnostics(result).find { |d| d.rule == "wrong-helper-arity" }
+        err = result.diagnostics.find do |d|
+          d.source_family == "plugin.rails-routes" && d.rule == "wrong-arity"
+        end
         expect(err).not_to be_nil
         expect(err.severity).to eq(:error)
-        expect(err.message).to include("expects 1 positional argument")
-        expect(err.message).to include("but the call passes 0")
       end
     end
 
-    it "fires `wrong-helper-arity` when a nested helper is under-supplied" do
-      source = "class C\n  def show\n    user_post_path(@user)\n  end\nend\n"
+    it "actionpack stays silent on the arity mismatch (no duplicate)" do
+      source = "class C\n  def show\n    user_path\n  end\nend\n"
       with_demo(source) do |result|
-        err = actionpack_diagnostics(result).find { |d| d.rule == "wrong-helper-arity" }
-        expect(err).not_to be_nil
-        expect(err.message).to include("expects 2")
-        expect(err.message).to include("passes 1")
+        ap_arity = actionpack_diagnostics(result).select { |d| d.rule == "wrong-helper-arity" }
+        expect(ap_arity).to be_empty
       end
     end
   end

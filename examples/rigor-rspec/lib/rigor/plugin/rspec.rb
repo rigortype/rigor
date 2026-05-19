@@ -4,6 +4,7 @@ require "rigor/plugin"
 
 require_relative "rspec/scope_walker"
 require_relative "rspec/analyzer"
+require_relative "rspec/matcher_analyzer"
 
 module Rigor
   module Plugin
@@ -61,12 +62,27 @@ module Rigor
     class Rspec < Rigor::Plugin::Base
       manifest(
         id: "rspec",
-        version: "0.1.0",
-        description: "Validates RSpec `let` / `subject` declarations within each scope."
+        version: "0.2.0",
+        description: "Validates RSpec `let` / `subject` declarations within each scope; " \
+                     "narrows expect(x).to <matcher> assertions downstream in `it` bodies."
       )
 
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         Analyzer.diagnose(path: path, root: root).map { |diag| build_diagnostic(diag) }
+      end
+
+      # Pillar 2 Slice 1 — spec-derived flow facts from RSpec
+      # assertions. Recognises `expect(x).to MATCHER` at every
+      # call site the dispatcher visits and, for the six
+      # supported matchers (`be_a` / `be_kind_of` /
+      # `be_instance_of` / `be_nil` / `eq(literal)` / `eql(literal)`),
+      # emits a `post_return_fact` that narrows `x` from the
+      # assertion onward. The engine consumes the contribution
+      # through `StatementEvaluator#apply_plugin_assertions` and
+      # routes it to the new `:local` target_kind branch added
+      # in v0.1.8.
+      def flow_contribution_for(call_node:, scope:)
+        MatcherAnalyzer.contribution_for(call_node, environment: scope&.environment)
       end
 
       private

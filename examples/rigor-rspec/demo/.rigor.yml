@@ -1,6 +1,7 @@
 paths:
   - spec/user_spec.rb
   - spec/errors_spec.rb
+  - spec/matcher_narrowing_spec.rb
 
 plugins:
   - rigor-rspec

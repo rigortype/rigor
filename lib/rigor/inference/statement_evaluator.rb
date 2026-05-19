@@ -1143,12 +1143,36 @@ module Rigor
       # narrowing logic via `Narrowing.narrow_for_fact` so the
       # predicate / assert / plugin paths all converge on the
       # same hierarchy-aware narrowing rules.
+      #
+      # v0.1.8 Pillar 2 Slice 1 added the `:local` target_kind
+      # branch so plugins recognising bespoke call shapes
+      # (`expect(x).to be_a(T)`) can directly narrow a named
+      # local in the surrounding scope, bypassing the
+      # parameter-name lookup that requires an authoritative RBS
+      # sig on the called method (which RSpec matchers lack).
       def apply_post_return_fact(fact, call_node, current_scope, method_def)
+        return apply_local_post_return_fact(fact, current_scope) if fact.target_kind == :local
+
         target_node = fact_target_node(fact, call_node, method_def)
         return apply_self_post_return_fact(fact, target_node, current_scope) if fact.target_kind == :self
         return current_scope unless target_node.is_a?(Prism::LocalVariableReadNode)
 
         local_name = target_node.name
+        current_type = current_scope.local(local_name)
+        return current_scope if current_type.nil?
+
+        narrowed = Narrowing.narrow_for_fact(current_type, fact, current_scope.environment)
+        current_scope.with_local(local_name, narrowed)
+      end
+
+      # v0.1.8 Pillar 2 Slice 1 — narrows the named local directly
+      # without consulting the call node's argument list. The fact's
+      # `target_name` is the local-variable name as written in
+      # source. Silently no-ops when the local is unbound in the
+      # current scope (the plugin's named local may have already
+      # gone out of scope when the contribution fires).
+      def apply_local_post_return_fact(fact, current_scope)
+        local_name = fact.target_name
         current_type = current_scope.local(local_name)
         return current_scope if current_type.nil?
 

@@ -31,14 +31,20 @@ module Rigor
     #
     # ## Field set
     #
-    # - `target_kind`: `:parameter` (call-site argument) or
-    #   `:self` (receiver). Future slices may extend the set
-    #   (`:local`, `:ivar`, `:result`); the merger is agnostic
-    #   to the concrete kinds and only requires equality.
+    # - `target_kind`: `:parameter` (call-site argument), `:self`
+    #   (receiver), or `:local` (a named local in the surrounding
+    #   scope). v0.1.8 Pillar 2 Slice 1 added `:local` so plugins
+    #   recognising bespoke call shapes (`expect(x).to be_a(T)`)
+    #   can narrow a specific scope-bound local without routing
+    #   through the parameter-name lookup that requires an
+    #   authoritative RBS sig on the called method. Future slices
+    #   may extend further (`:ivar`, `:result`). The merger is
+    #   agnostic to the concrete kinds and only requires equality.
     # - `target_name`: a `Symbol`. For `:parameter` it's the
     #   declared parameter name. For `:self` it is the literal
     #   `:self` symbol so the field stays non-nil and the merge
-    #   key is well-defined.
+    #   key is well-defined. For `:local` it's the local-variable
+    #   name (e.g. `:x` for `expect(x).to be_a(T)`).
     # - `type`: a `Rigor::Type::*` (Nominal, Refined,
     #   IntegerRange, Difference, …) the fact narrows the
     #   target toward (when `negative` is false) or away from
@@ -53,7 +59,7 @@ module Rigor
     # value {Element#target} keys on, so two facts that narrow
     # the same parameter from different contribution sources
     # land in the same merge bucket.
-    FACT_VALID_TARGET_KINDS = %i[parameter self].freeze
+    FACT_VALID_TARGET_KINDS = %i[parameter self local].freeze
 
     class Fact < Data.define(:target_kind, :target_name, :type, :negative)
       def initialize(target_kind:, target_name:, type:, negative: false)
@@ -72,10 +78,14 @@ module Rigor
       end
 
       # Composite target identifier the merger keys on. `:self`
-      # for self-targeted facts; otherwise `[:parameter, name]`
-      # so two contributions that narrow the same parameter
-      # (regardless of source family) land in the same merge
-      # bucket.
+      # for self-targeted facts; otherwise `[kind, name]` so two
+      # contributions that narrow the same `(kind, name)` pair —
+      # regardless of source family — land in the same merge
+      # bucket. `:local` and `:parameter` facts that name the
+      # same symbol stay in separate buckets, which is the
+      # correct semantics: a `:local` fact narrows the surrounding
+      # scope's named local, a `:parameter` fact narrows the
+      # call-site argument matching the parameter declaration.
       def target
         target_kind == :self ? :self : [target_kind, target_name]
       end

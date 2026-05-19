@@ -120,7 +120,7 @@ module Rigor
           # unresolved module. Suppress `unknown-filter-method`
           # in that case rather than FPing on legitimate
           # gem-provided callback names.
-          ambiguous_filters = controller_index.has_unresolved_include?(class_name)
+          ambiguous_filters = controller_index.unresolved_include?(class_name)
 
           collect_filter_diagnostics(path, class_node.body, methods, spell_checker, ambiguous_filters: ambiguous_filters)
         end

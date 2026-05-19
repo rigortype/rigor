@@ -169,6 +169,7 @@ module Rigor
             equipment information rice money species series fish
             sheep jeans police news media settings
           ].to_set.freeze
+          private_constant :UNCOUNTABLE
 
           def singularize(word)
             return word if UNCOUNTABLE.include?(word)

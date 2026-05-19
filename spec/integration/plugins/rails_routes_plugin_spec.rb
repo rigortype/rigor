@@ -182,7 +182,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
         end
       RUBY
       result = run_plugin(
-        source: "news_path(1, 2)\n",  # neither 0 nor 1 — should fail
+        source: "news_path(1, 2)\n", # neither 0 nor 1 — should fail
         files: { "config/routes.rb" => routes_rb }
       )
       diags = plugin_diagnostics(result)

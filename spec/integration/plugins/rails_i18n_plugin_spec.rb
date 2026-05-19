@@ -105,6 +105,7 @@ RSpec.describe "plugins/rigor-rails-i18n" do
       result = run_plugin(
         source: "t('accounts.posts', count: 3)\n",
         files: {
+          # rubocop:disable Style/FormatStringToken -- I18n YAML uses %{count}, not annotated form
           "config/locales/en.yml" => <<~YAML
             en:
               accounts:
@@ -112,6 +113,7 @@ RSpec.describe "plugins/rigor-rails-i18n" do
                   one: "%{count} post"
                   other: "%{count} posts"
           YAML
+          # rubocop:enable Style/FormatStringToken
         }
       )
       diags = plugin_diagnostics(result)

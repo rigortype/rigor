@@ -65,7 +65,7 @@ module Rigor
         #   the unresolved module may legitimately contribute
         #   the filter, and there's no way for the static
         #   analyzer to verify.
-        def has_unresolved_include?(class_name)
+        def unresolved_include?(class_name)
           entry = @entries[class_name]
           return false if entry.nil?
 
@@ -105,7 +105,7 @@ module Rigor
         # Yields each transitively-included module name (whether
         # we have an entry for it or not). Returns nil; callers
         # use it for visit-and-classify, not to collect.
-        def walk_includes(name, seen, &block)
+        def walk_includes(name, seen, &)
           return if seen[name]
 
           seen[name] = true
@@ -114,7 +114,7 @@ module Rigor
 
           entry.included_module_names.each do |included|
             yield included
-            walk_includes(included, seen, &block)
+            walk_includes(included, seen, &)
           end
         end
       end

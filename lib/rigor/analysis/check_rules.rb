@@ -1076,8 +1076,29 @@ module Rigor
         #   (no splat / kw / block-pass / forwarded).
         # - Per-argument: skip when EITHER side is `Dynamic`
         #   (the call cannot be statically refuted).
+        # Ruby's universal-equality methods accept any object
+        # per the `Object#==(other) → bool` /
+        # `Object#eql?(other) → bool` contract. Even when a
+        # subclass overrides `==` to compare specific shapes
+        # (URI::Generic#==(URI::Generic), Time#==(Time), …),
+        # the runtime convention is to RETURN false for
+        # type-mismatched arguments rather than raise. RBS sigs
+        # that declare a tight parameter type therefore over-
+        # specify; checking arguments against them produces
+        # spurious mismatches such as
+        #   `URI::Generic#==(URI::Generic)`
+        #   called with `URI::HTTP | nil`
+        # tdiary-core's `config_uri == referer_uri` (where
+        # `referer_uri` is `URI.parse(...) if condition`, hence
+        # union-with-nil) is the canonical case. Skip arg
+        # checking on these methods entirely; the call is
+        # well-formed by Ruby's contract.
+        UNIVERSAL_EQUALITY_METHODS = %i[== != eql? equal? <=>].to_set.freeze
+        private_constant :UNIVERSAL_EQUALITY_METHODS
+
         def argument_type_diagnostic(path, call_node, scope_index)
           return nil if call_node.receiver.nil?
+          return nil if UNIVERSAL_EQUALITY_METHODS.include?(call_node.name)
           return nil unless plain_positional_call?(call_node)
 
           scope = scope_index[call_node]

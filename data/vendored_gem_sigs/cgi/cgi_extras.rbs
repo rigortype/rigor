@@ -1,0 +1,34 @@
+#
+# Rigor-side supplement to the rbs gem's
+# `stdlib/cgi/0/core.rbs` declarations.
+#
+# Re-opens `class CGI` to bring in the instance methods that
+# real-world Ruby code calls on a CGI instance: `params`,
+# `params=`, `cookies`, `cookies=`, `multipart?`, `query_string`,
+# the parsed-request bits.
+#
+# Why this isn't already in the upstream RBS: at runtime
+# `CGI#initialize` does `extend CGI::QueryExtension`, which
+# attaches the methods to each instance via singleton-class
+# inheritance. The static-RBS surface can't represent
+# per-instance `extend` calls. Declaring `class CGI; include
+# CGI::QueryExtension; end` here is a deliberate
+# over-approximation that matches the real surface every CGI
+# instance you actually use (you got it from `CGI.new`) has.
+#
+# Driven by the tdiary-core survey
+# (`docs/notes/20260519-oss-library-survey.md`) where
+# `lib/tdiary/core_ext.rb:62`'s `cgi.params['key']` /
+# `self.params[param]` surfaced as `undefined method 'params'
+# for CGI` (3 errors per call site, 6 total).
+#
+# Adds new declarations only — never redeclares anything the
+# upstream RBS already covers, so the loader does not raise
+# `RBS::DuplicatedDeclarationError`. `include` is permitted
+# because the upstream `class CGI` declaration already does
+# `include CGI::Util` + `extend CGI::Util`; adding a sibling
+# `include CGI::QueryExtension` is purely additive.
+#
+class CGI
+  include CGI::QueryExtension
+end

@@ -464,6 +464,38 @@ RSpec.describe "plugins/rigor-activerecord" do
 
       expect(contribution).to be_nil
     end
+
+    it "accepts a singular association name as a `find_by` / `where` key alias" do
+      # Mastodon-derived regression: `AccountPin.find_by(account: x)`
+      # passes the belongs_to association name `:account` instead of
+      # the FK column `:account_id`. ActiveRecord accepts both; the
+      # plugin should match. Pre-fix this was 100+ FPs on Mastodon's
+      # API controllers.
+      result = run_plugin(
+        source: "Post.find_by(user: x); Post.where(user: y)\n",
+        files: {
+          "db/schema.rb" => POST_USER_PROFILE_SCHEMA,
+          **POST_USER_MODELS
+        }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+
+    it "still flags an unknown key that is neither column nor singular association" do
+      result = run_plugin(
+        source: "Post.find_by(posts: x)\n",
+        files: {
+          "db/schema.rb" => POST_USER_PROFILE_SCHEMA,
+          **POST_USER_MODELS
+        }
+      )
+      diags = plugin_diagnostics(result)
+      # `posts` would be a has_many (collection) association on a
+      # hypothetical reverse relationship; it's not declared here at
+      # all, so the plugin should still error.
+      expect(diags.find { |d| d.rule == "unknown-column" && d.message.include?("`posts`") }).not_to be_nil
+    end
   end
 
   describe "enums — v0.1.5" do

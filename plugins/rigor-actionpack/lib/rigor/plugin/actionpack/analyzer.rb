@@ -37,13 +37,30 @@ module Rigor
           prepend_before_action prepend_after_action prepend_around_action
         ].freeze
 
-        # Phase 3 — render-target template extensions checked
-        # in priority order. Limited to the two most common
-        # default extensions per the v0.1.x roadmap; users with
-        # `.haml` / `.slim` / `.jbuilder` setups need the
-        # widening slice that ships configurable template
-        # families.
-        RENDER_TEMPLATE_EXTENSIONS = %w[.html.erb .text.erb].freeze
+        # Phase 3 — render-target template extensions checked in
+        # priority order. The first six cover the templating
+        # engines used by the projects this plugin is regularly
+        # exercised against: ERB (Rails default — `.html.erb`,
+        # `.text.erb`), HAML (Mastodon, Solidus admin —
+        # `.html.haml`), Slim, and JSON (`.json.jbuilder` plus a
+        # raw `.json.erb` for hand-rolled API responses). When a
+        # template exists under any of these extensions, the
+        # missing-template diagnostic stays silent.
+        # Configurable extension list is queued — see the
+        # `external-author plugin SKILL` track (v0.2.0). For now
+        # this set is wide enough to cover the surveyed real-world
+        # projects without leaking FPs.
+        RENDER_TEMPLATE_EXTENSIONS = %w[
+          .html.erb
+          .text.erb
+          .html.haml
+          .text.haml
+          .html.slim
+          .json.jbuilder
+          .json.erb
+          .xml.builder
+          .xml.erb
+        ].freeze
 
         # Phase 1 — strong-parameter call shapes that begin a
         # validatable chain. The walker matches the

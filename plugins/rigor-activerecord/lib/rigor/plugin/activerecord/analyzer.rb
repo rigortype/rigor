@@ -80,7 +80,7 @@ module Rigor
           keyword_pairs = keyword_argument_pairs(node)
           return push_recognised(node, entry) if keyword_pairs.empty?
 
-          unknown = keyword_pairs.reject { |pair| entry.column?(pair[:key]) }
+          unknown = keyword_pairs.reject { |pair| valid_query_key?(entry, pair[:key]) }
           if unknown.empty?
             keyword_pairs.each { |pair| validate_enum_value(node, entry, pair) }
             push_recognised(node, entry, keyword_pairs.map { |p| p[:key] })
@@ -94,6 +94,25 @@ module Rigor
                          "unknown column `#{key}` on table `#{entry.table_name}`#{hint}")
             end
           end
+        end
+
+        # ActiveRecord's `where` / `find_by` / `find_or_initialize_by`
+        # accept either a column name *or* a singular association
+        # name (belongs_to / has_one). The latter resolves to the
+        # association's FK column behind the scenes:
+        #
+        #   AccountPin.find_by(account: x)
+        #   # → SELECT … WHERE account_id = x.id
+        #
+        # Without this allowance, every `find_by(<assoc>:)` call
+        # surfaces as an `unknown-column` false positive — Mastodon
+        # saw ~100 such hits across the API controllers, all of
+        # which were the canonical Rails idiom rather than typos.
+        def valid_query_key?(entry, key)
+          return true if entry.column?(key)
+
+          assoc = entry.association(key)
+          assoc && assoc[:kind] == :singular
         end
 
         # When the column is an enum-bearing column AND the

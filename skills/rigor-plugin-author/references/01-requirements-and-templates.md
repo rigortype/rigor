@@ -1,0 +1,81 @@
+# Phases 1–2 — Requirements gathering & template selection
+
+Before any code, get the user to commit to answers for **all five** questions below. Ask them in a single message; do NOT scaffold anything yet. The answers narrow the architecture choice in [Phase 2](02-template-selection.md).
+
+## Q1. Trigger surface — what call shape activates the plugin?
+
+- **A.** A specific module / class method (`Module.method(...)`, `Class#method(...)`).
+- **B.** A specific implicit-receiver method (top-level `helper(...)`).
+- **C.** A method whose name matches a pattern (`*_path`, `*_url`, `transition_to_*`).
+- **D.** A constructor chain on a built-in type (`100.kilometers`, `"x".validates_as(:email)`).
+- **E.** A DSL block (`state_machine do ... end`, `validates_with do ... end`).
+
+## Q2. What does the plugin need to LOOK at?
+
+- **A.** Just the call site (literal arguments, immediate receiver).
+- **B.** The local-variable bindings flowing INTO the call site (variable came from earlier in the file).
+- **C.** Declarations from EARLIER in the same file (a `state` block before the `transition_to` call).
+- **D.** Declarations from ANOTHER file in the project (cross-file).
+- **E.** An external resource — `config/routes.yml`, `db/schema.rb`, `config/locales/*.yml`.
+
+## Q3. What does the plugin need to PROVE?
+
+- **A.** The argument is one of a known finite set (route name, state name, deprecated method name).
+- **B.** The argument's literal value matches a pattern (regex, format string).
+- **C.** The arguments compose dimensionally (Distance + Distance = Distance; Distance + Time = error).
+- **D.** The arity / shape matches a declared signature.
+- **E.** The literal expression evaluates to a known type (Lisp eval pattern).
+
+## Q4. What diagnostic output does the user want?
+
+- **A. Info-only** — surface the inferred type / matched name as a trace, no errors.
+- **B. Error on mismatch** — flag wrong inputs, otherwise stay silent.
+- **C. Both** — info on success, error on mismatch.
+- **D. Warning** — deprecation / soft contract violation.
+
+## Q5. What is the plugin's CONFIGURATION shape?
+
+- **A. None** — behaviour is hard-coded.
+- **B. A few string knobs** (`module_name`, `severity`).
+- **C. A list / hash of rules** (deprecation entries, regex patterns).
+- **D. An external file path** (`routes_file: "config/routes.yml"`).
+- **E. All of the above** (rich configuration).
+
+---
+
+Two authoring paths exist as of v0.1.x:
+
+1. **Macro expansion substrate** (ADR-16) — declarative `manifest` entries; substrate handles AST walking, name-interpolation, and synthesis. Use this when the plugin's job fits one of the four ADR-16 tiers below.
+2. **Hand-rolled walker** — `diagnostics_for_file` + `flow_contribution_for`. Use this when the requirement falls outside the substrate's tier shapes (domain DSLs with argument-shape-dependent return types, cross-file collect-then-validate analyses, external-file parsing, etc.).
+
+## Step 2A — Try the macro substrate first
+
+If the target DSL fits one of these shapes, ship a **declarative manifest only** — no walker code is needed.
+
+| If the DSL is… | Substrate tier | Manifest entry | Reference plugin |
+| --- | --- | --- | --- |
+| `<Class>.<verb>(path) do … end` where the block runs as an instance method on `<Class>` (Sinatra-shape) | **Tier A** | `block_as_methods: [Macro::BlockAsMethod.new(receiver_constraint:, verbs:)]` | [`rigor-sinatra`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-sinatra/) |
+| `<Class>.<dsl_method>(:sym_a, :sym_b)` where each symbol maps via a bundled registry to a module that gets `include`d (Devise-shape) | **Tier B** | `trait_registries: [Macro::TraitRegistry.new(receiver_constraint:, method_name:, modules_by_symbol:, always_included:)]` | [`rigor-devise`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-devise/) |
+| `<Class>.<dsl_method>(:name, T)` where the framework `class_eval`s a heredoc interpolating `name` (dry-struct-shape, ActiveStorage-shape) | **Tier C** | `heredoc_templates: [Macro::HeredocTemplate.new(receiver_constraint:, method_name:, symbol_arg_position:, emit:)]` | [`rigor-dry-struct`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-dry-struct/) |
+| External Ruby files `instance_eval`'d under a declared receiver (Redmine webhook payloads / tDiary plugins) | **Tier D** (contract only as of v0.1.x; engine integration demand-driven) | `external_files: [Macro::ExternalFile.new(glob:, receiver_type:, bound_ivars:)]` | — |
+
+`ActiveSupport::Concern.included do ... end` re-targeting is handled automatically by the substrate — a Tier B/C call inside an `included do` block fires on whoever later `include`s the concern, not on the concern module itself.
+
+The substrate floor (per ADR-16 § WD13) is "synthetic methods emit by name, return types degrade to `Dynamic[T]`." Precise return-type promotion via ADR-13's resolver chain is the **ceiling**, deferred to a future slice — declare `returns:` strings in the manifest today, unlock precision later without changes to the plugin gem.
+
+If the DSL fits a substrate tier, skip the rest of this phase and jump to [Phase 5](05-demo.md). The plugin's `lib/rigor/plugin/<id>.rb` is a 20-line manifest declaration — no walker.
+
+## Step 2B — Hand-rolled walker (when the substrate does not fit)
+
+Map the [Phase 1](01-requirements.md) answers to one of the six existing hand-rolled examples. Use the chosen example as the **structural template** — copy the directory layout and adapt the analyser body.
+
+| If the answers look like… | Use template | Why |
+| --- | --- | --- |
+| Q1=A/B, Q2=A, Q3=A, Q5=C | [`rigor-deprecations`](https://github.com/rigortype/rigor/tree/master/examples/rigor-deprecations/) | Smallest possible plugin; pure config-driven rules; ~80 lines. |
+| Q1=A, Q2=A, Q3=E, Q5=A/B | [`rigor-lisp-eval`](https://github.com/rigortype/rigor/tree/master/examples/rigor-lisp-eval/) | Recursive interpretation of the literal AST argument. |
+| Q1=D, Q2=B, Q3=C, Q5=A | [`rigor-units`](https://github.com/rigortype/rigor/tree/master/examples/rigor-units/) | Local-variable flow tracking through arithmetic and chained calls. |
+| Q1=C/E, Q2=C, Q3=A, Q5=A/B | [`rigor-statesman`](https://github.com/rigortype/rigor/tree/master/plugins/rigor-statesman/) | Two-pass DSL analysis — collect declarations, then validate uses. |
+| Q1=B, Q2=A/B, Q3=B, Q5=C | [`rigor-pattern`](https://github.com/rigortype/rigor/tree/master/examples/rigor-pattern/) | Plugin asks the analyser via `Scope#type_of` + `literal_string_compatible?`; matches against a literal value. |
+| Q1=A/B/C, Q2=E, Q3=A/D, Q5=C/D | [`rigor-routes`](https://github.com/rigortype/rigor/tree/master/examples/rigor-routes/) | Reads a project file via `IoBoundary` under `TrustPolicy`; caches the parse via `Plugin::Base.producer`. |
+
+If the requirement fits neither the substrate tiers nor the six hand-rolled templates, **stop and ask the user**. The v0.1.x plugin contract may not yet expose what they need; don't invent a workaround. The [per-library survey](https://github.com/rigortype/rigor/blob/master/docs/notes/20260515-macro-expansion-library-survey.md) records which Ruby libraries the substrate covers and which fall outside (GraphQL-Ruby is the canonical "schema-graph recorder" case that the substrate does NOT fit).

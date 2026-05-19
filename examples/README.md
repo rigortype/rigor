@@ -1,6 +1,6 @@
 # Rigor plugin examples
 
-Twenty-nine entries — twenty-seven worked plugins of the **v0.1.0
+Thirty entries — twenty-eight worked plugins of the **v0.1.0
 plugin authoring surface** + one RBS-only bundle
 (`rigor-activesupport-core-ext`) + one Gemfile-convenience
 meta-gem (`rigor-rails` — Tier 1+2 Rails ecosystem umbrella per
@@ -73,7 +73,8 @@ ADR-9's cross-plugin fact store.
 | [`rigor-pundit`](rigor-pundit/) | 3B | Policy class + predicate method validation for `authorize(record, :action)`; receiver-type lookup via `Scope#type_of` | Ruby (`app/policies/`) | ✅ | 12 |
 | [`rigor-sidekiq`](rigor-sidekiq/) | 3C | Sidekiq worker `perform_async` / `perform_in` / `perform_at` argument shape; schedule-aware arity model | Ruby (`app/workers/`, `app/sidekiq/`) | ✅ | 11 |
 | [`rigor-actioncable`](rigor-actioncable/) | 3F | ActionCable channel discovery + `<Channel>.broadcast_to` / `ActionCable.server.broadcast(stream)` validation, with dynamic-stream suppression | Ruby (`app/channels/`) | ✅ | 9 |
-| [`rigor-rspec`](rigor-rspec/) | 3A | Duplicate `let` / `subject` + self-referencing let detection (deliberately minimal — mock-target validation + let-typo deferred) | — | — | 11 |
+| [`rigor-rspec`](rigor-rspec/) | 3A | Duplicate `let` / `subject` + self-referencing let detection (deliberately minimal — mock-target validation + let-typo deferred); v0.2.0 adds **Pillar 2 Slice 1** — `expect(x).to <matcher>` narrows `x` downstream through `:local`-kind `post_return_facts` (six-matcher floor: `be_a` / `be_kind_of` / `be_instance_of` / `be_nil` / `eq(literal)` / `eql(literal)`) | — | — | 11 |
+| [`rigor-minitest`](rigor-minitest/) | — | **Minitest + Test::Unit assertion narrowing** — `assert_kind_of(T, x)` / `assert_instance_of(T, x)` / `assert_nil(x)` / `assert_equal(literal, x)` / `assert_match(regex, x)` + `refute_*` / `assert_not_*` mirrors + Minitest/spec `_(x).must_*` / `.wont_*` matchers (matchers_vaccine covered transitively). Each recognised assertion emits a `:local`-kind `post_return_fact` so downstream calls in the same `def test_*` / `it` body resolve at the narrowed type. Single plugin covers both frameworks (their `assert_*` API is compatible). Sibling to rigor-rspec's matcher narrowing (Pillar 2 Slice 1, ROADMAP § v0.1.8). | — | — | 9 |
 | [`rigor-actionpack`](rigor-actionpack/) | 2 | **Phase 4** — route-helper consumption (first concrete ADR-9 consumer); **Phase 2** — filter chain validation (`before_action :name` against the controller's effective method set, including one level of inheritance); **Phase 3** — render-target validation (`render :show` → `app/views/<controller_path>/show.html.erb`) | Ruby (`app/controllers/`) + view templates | ✅ | 21 |
 | [`rigor-factorybot`](rigor-factorybot/) | 2 | **Phase 1 (a)** — self-contained validation of `FactoryBot.create(:name, key: ...)` / `.build` / `.attributes_for` / `*_list` against a per-run factory index built from `spec/factories/`. Phase 1 (c) AR column cross-check is queued | Ruby (`spec/factories/`) | ✅ | 10 |
 | [`rigor-activestorage`](rigor-activestorage/) | 3E | `has_one_attached :avatar` / `has_many_attached :photos` macro discovery on AR models + return-type narrowing to `Nominal[ActiveStorage::Attached::One]` / `::Many` via `flow_contribution_for` (instance navigation tier) | Ruby (`app/models/`) | ✅ | 11 |

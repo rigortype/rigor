@@ -36,15 +36,19 @@ module Rigor
       #
       # The analyzer fires ONLY when:
       #
-      # 1. The call node is `<recv>.to(matcher)` (RSpec's primary
-      #    assertion verb; `not_to` / `to_not` produce a negated
-      #    fact path that is also queued for follow-up).
-      # 2. The receiver of `.to` is `expect(<local_var>)` —
-      #    exactly one positional argument that's a
-      #    LocalVariableReadNode. Composite receivers
-      #    (`expect(foo.bar)`, `expect { ... }.to raise_error`)
-      #    fall through.
-      # 3. The matcher is one of the recognised forms above.
+      # 1. The call node is one of `<recv>.to(matcher)` /
+      #    `<recv>.not_to(matcher)` / `<recv>.to_not(matcher)`.
+      #    `not_to` / `to_not` flip the fact's `negative` flag
+      #    so the engine narrows AWAY from the matcher's type
+      #    (e.g. `not_to be_nil` removes nil from the receiver).
+      # 2. The receiver is `expect(<local_var>)` — exactly one
+      #    positional argument that's a LocalVariableReadNode.
+      #    Composite receivers (`expect(foo.bar)`,
+      #    `expect { ... }.to raise_error`) fall through.
+      # 3. The matcher is one of the recognised forms above
+      #    (`be_a` / `be_kind_of` / `be_instance_of` /
+      #    `be_an_instance_of` / `be_nil` / `eq(literal)` /
+      #    `eql(literal)` / `match(/regex/)`).
       module MatcherAnalyzer
         module_function
 
@@ -59,7 +63,8 @@ module Rigor
         #   constant may be a user class not in RBS).
         # @return [Rigor::FlowContribution, nil]
         def contribution_for(call_node, environment:)
-          return nil unless to_call?(call_node)
+          verb = assertion_verb(call_node)
+          return nil if verb.nil?
           return nil unless call_node.receiver.is_a?(Prism::CallNode)
 
           expect_call = call_node.receiver
@@ -77,14 +82,25 @@ module Rigor
           fact = Rigor::FlowContribution::Fact.new(
             target_kind: :local,
             target_name: target_local,
-            type: narrowed_type
+            type: narrowed_type,
+            negative: verb == :negative
           )
           Rigor::FlowContribution.new(post_return_facts: [fact])
         end
 
-        def to_call?(node)
-          node.is_a?(Prism::CallNode) && node.name == :to &&
-            node.arguments&.arguments&.size == 1
+        # Recognises the assertion verb chained after `expect(...)`:
+        # - `.to(<matcher>)`     → :positive
+        # - `.not_to(<matcher>)` → :negative
+        # - `.to_not(<matcher>)` → :negative (older spelling)
+        # Returns nil for any other call.
+        def assertion_verb(node)
+          return nil unless node.is_a?(Prism::CallNode)
+          return nil unless node.arguments&.arguments&.size == 1
+
+          case node.name
+          when :to then :positive
+          when :not_to, :to_not then :negative
+          end
         end
 
         def expect_call?(node)
@@ -111,7 +127,7 @@ module Rigor
           return nil unless matcher.is_a?(Prism::CallNode) && matcher.receiver.nil?
 
           case matcher.name
-          when :be_a, :be_kind_of, :be_instance_of
+          when :be_a, :be_kind_of, :be_instance_of, :be_an_instance_of
             nominal_type_for_class_arg(matcher, environment: environment)
           when :be_nil
             return nil unless empty_args?(matcher)
@@ -119,6 +135,13 @@ module Rigor
             Rigor::Type::Combinator.constant_of(nil)
           when :eq, :eql
             constant_type_for_literal_arg(matcher)
+          when :match
+            # `match(/regex/)` narrows x to String. `match("...")`
+            # or `match(arbitrary_object)` falls through — the
+            # broader matcher dispatch needs the receiver to be a
+            # String, but we can only assert that for a literal
+            # regex.
+            string_type_for_regex_arg(matcher)
           end
         end
 
@@ -145,6 +168,17 @@ module Rigor
           return nil if literal_value.equal?(NO_LITERAL)
 
           Rigor::Type::Combinator.constant_of(literal_value)
+        end
+
+        def string_type_for_regex_arg(matcher)
+          args = matcher.arguments&.arguments || []
+          return nil unless args.size == 1
+
+          arg = args.first
+          return nil unless arg.is_a?(Prism::RegularExpressionNode) ||
+                            arg.is_a?(Prism::InterpolatedRegularExpressionNode)
+
+          Rigor::Type::Combinator.nominal_of("String")
         end
 
         NO_LITERAL = Object.new.freeze

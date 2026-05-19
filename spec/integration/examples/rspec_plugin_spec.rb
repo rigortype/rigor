@@ -236,6 +236,48 @@ RSpec.describe "examples/rigor-rspec" do
       end
     end
 
+    context "when matcher is match(/regex/)" do
+      it "narrows x to String for a regex literal arg" do
+        call_node = parse_call_node("expect(x).to match(/\\Afoo\\z/)")
+        fact = plugin.flow_contribution_for(call_node: call_node, scope: nil).post_return_facts.first
+
+        expect(fact.type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+      end
+
+      it "is silent for a non-regex argument" do
+        call_node = parse_call_node('expect(x).to match("foo")')
+        expect(plugin.flow_contribution_for(call_node: call_node, scope: nil)).to be_nil
+      end
+    end
+
+    context "when assertion verb is not_to" do
+      it "emits a negative fact for not_to be_nil" do
+        call_node = parse_call_node("expect(x).not_to be_nil")
+        fact = plugin.flow_contribution_for(call_node: call_node, scope: nil).post_return_facts.first
+
+        expect(fact.target_name).to eq(:x)
+        expect(fact.type).to eq(Rigor::Type::Combinator.constant_of(nil))
+        expect(fact.negative).to be(true)
+      end
+
+      it "emits a negative fact for not_to be_a(T)" do
+        call_node = parse_call_node("expect(x).not_to be_a(String)")
+        fact = plugin.flow_contribution_for(call_node: call_node, scope: nil).post_return_facts.first
+
+        expect(fact.type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+        expect(fact.negative).to be(true)
+      end
+    end
+
+    context "when assertion verb is to_not (older spelling)" do
+      it "behaves like not_to" do
+        call_node = parse_call_node("expect(x).to_not be_nil")
+        fact = plugin.flow_contribution_for(call_node: call_node, scope: nil).post_return_facts.first
+
+        expect(fact.negative).to be(true)
+      end
+    end
+
     context "with non-matching call shapes" do
       it "is silent for expect(non_local).to MATCHER" do
         # expect(foo.bar) — the arg isn't a LocalVariableReadNode,

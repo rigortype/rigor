@@ -1,0 +1,8 @@
+paths:
+  - test/narrowing_test.rb
+
+plugins:
+  - rigor-minitest
+
+cache:
+  path: tmp/.rigor/cache

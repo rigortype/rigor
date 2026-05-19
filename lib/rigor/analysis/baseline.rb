@@ -217,6 +217,56 @@ module Rigor
         [surfaced + unkeyable, silenced_count]
       end
 
+      # A single bucket's drift state for slice 2 inspection.
+      # `status` is one of:
+      #
+      # - `:within`    — `actual <= count` (silenced by the filter).
+      # - `:over`      — `actual > count` (over threshold; surfaced
+      #                  in the regular `rigor check` output).
+      # - `:cleared`   — `actual == 0` (the bucket can be pruned).
+      # - `:reducible` — `0 < actual < count` (the bucket's count
+      #                  can be tightened; future `regenerate`
+      #                  slice 5 handles this).
+      DriftRow = Struct.new(:bucket, :actual_count, :status, keyword_init: true) do
+        def delta
+          actual_count - bucket.count
+        end
+      end
+
+      # Walk the current diagnostic stream and report
+      # bucket-level drift. Each baseline bucket becomes one
+      # DriftRow regardless of whether the current run still
+      # matches it.
+      #
+      # @param diagnostics [Array<Diagnostic>] current run's
+      #   diagnostic stream (PRE-filter — pass the raw
+      #   `result.diagnostics` from `Runner#run`, not the
+      #   post-baseline surface).
+      # @return [Array<DriftRow>] one entry per baseline bucket,
+      #   in baseline-file order.
+      def audit(diagnostics)
+        counts = Hash.new(0)
+        diagnostics.each do |diag|
+          next if diag.qualified_rule.nil? || diag.path.nil?
+
+          bucket = claim_bucket_for(diag)
+          counts[bucket_key(bucket)] += 1 if bucket
+        end
+
+        buckets.map do |bucket|
+          actual = counts[bucket_key(bucket)]
+          DriftRow.new(bucket: bucket, actual_count: actual, status: status_for(actual, bucket.count))
+        end
+      end
+
+      # Returns a new Baseline with the given buckets dropped.
+      # Used by `rigor baseline prune` (slice 2) to remove
+      # cleared buckets (`actual == 0`) from the on-disk file.
+      def without(buckets_to_drop)
+        dropset = buckets_to_drop.to_set
+        self.class.new(buckets.reject { |b| dropset.include?(b) })
+      end
+
       # Serialise to a YAML string. The generator path writes
       # this through `File.write`; the dump format is stable
       # across versions of this class as long as the bucket
@@ -244,6 +294,18 @@ module Rigor
       end
 
       private
+
+      def status_for(actual, count)
+        return :cleared if actual.zero?
+        return :over if actual > count
+        return :within if actual == count
+
+        :reducible
+      end
+
+      def bucket_key(bucket)
+        [bucket.file, bucket.rule, bucket.message_regex&.source]
+      end
 
       def group_diagnostics_for_filtering(diagnostics)
         # First pass: bin each diagnostic into the bucket that

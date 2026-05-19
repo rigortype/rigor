@@ -146,4 +146,135 @@ RSpec.describe Rigor::CLI::BaselineCommand do
       expect(out).not_to include("this_method_does_not_exist")
     end
   end
+
+  describe "dump" do
+    let(:baseline_path) { File.join(tmpdir, ".rigor-baseline.yml") }
+
+    before do
+      File.write(baseline_path, <<~YAML)
+        version: 1
+        ignored:
+          - file: app/models/user.rb
+            rule: call.undefined-method
+            count: 3
+          - file: app/models/post.rb
+            rule: call.undefined-method
+            count: 1
+          - file: app/services/foo.rb
+            rule: nullable-receiver
+            count: 2
+      YAML
+    end
+
+    it "prints the baseline grouped by rule" do
+      status, out, _err = run_cli("baseline", "dump", "--baseline=#{baseline_path}", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(out).to include("call.undefined-method")
+      expect(out).to include("nullable-receiver")
+      expect(out).to include("app/models/user.rb: 3")
+      expect(out).to include("Total: 3 bucket(s)")
+    end
+
+    it "filters by --rule" do
+      status, out, _err = run_cli("baseline", "dump", "--baseline=#{baseline_path}",
+                                  "--rule=nullable-receiver", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(out).to include("nullable-receiver")
+      expect(out).not_to include("call.undefined-method")
+    end
+
+    it "filters by --file glob" do
+      status, out, _err = run_cli("baseline", "dump", "--baseline=#{baseline_path}",
+                                  "--file=app/models/*", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(out).to include("app/models/user.rb")
+      expect(out).to include("app/models/post.rb")
+      expect(out).not_to include("app/services/foo.rb")
+    end
+
+    it "emits JSON when --format=json" do
+      status, out, _err = run_cli("baseline", "dump", "--baseline=#{baseline_path}",
+                                  "--format=json", cwd: tmpdir)
+      expect(status).to eq(0)
+      data = JSON.parse(out)
+      expect(data["version"]).to eq(1)
+      expect(data["ignored"].size).to eq(3)
+    end
+
+    it "exits with usage code when the baseline file is missing" do
+      status, _out, err = run_cli("baseline", "dump", "--baseline=/nonexistent.yml", cwd: tmpdir)
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to include("baseline file not found")
+    end
+  end
+
+  describe "drift / prune" do
+    let(:diagnostic_source) do
+      <<~RUBY
+        1.this_method_does_not_exist
+        2.also_not_a_method
+      RUBY
+    end
+
+    before { write_demo_project(diagnostic_source: diagnostic_source) }
+
+    it "drift reports no drift when the current run matches baseline exactly" do
+      run_cli("baseline", "generate", cwd: tmpdir)
+      status, out, _err = run_cli("baseline", "drift", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(out).to include("No drift detected")
+    end
+
+    it "drift reports :cleared when the baseline points at a now-clean file" do
+      run_cli("baseline", "generate", cwd: tmpdir)
+      # Remove the diagnostic source so actual count drops to zero.
+      File.write(File.join(tmpdir, "lib", "demo.rb"), "x = 1\n")
+      status, out, _err = run_cli("baseline", "drift", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(out).to include("Cleared")
+    end
+
+    it "drift reports :over when the codebase introduced new diagnostics" do
+      run_cli("baseline", "generate", cwd: tmpdir)
+      # Add a third site so actual count crosses threshold.
+      File.write(File.join(tmpdir, "lib", "demo.rb"), <<~RUBY)
+        1.this_method_does_not_exist
+        2.also_not_a_method
+        3.third_missing_method
+      RUBY
+      status, out, _err = run_cli("baseline", "drift", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(out).to include("Over threshold")
+    end
+
+    it "prune drops cleared buckets and reports the count" do
+      run_cli("baseline", "generate", cwd: tmpdir)
+      File.write(File.join(tmpdir, "lib", "demo.rb"), "x = 1\n")
+      before_size = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].size
+
+      status, _out, err = run_cli("baseline", "prune", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(err).to include("pruned")
+      after_size = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))["ignored"].size
+      expect(after_size).to be < before_size
+    end
+
+    it "prune --dry-run shows the candidates without writing the file" do
+      run_cli("baseline", "generate", cwd: tmpdir)
+      File.write(File.join(tmpdir, "lib", "demo.rb"), "x = 1\n")
+      original = File.read(File.join(tmpdir, ".rigor-baseline.yml"))
+
+      status, out, _err = run_cli("baseline", "prune", "--dry-run", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(out).to include("to prune")
+      expect(File.read(File.join(tmpdir, ".rigor-baseline.yml"))).to eq(original)
+    end
+
+    it "prune exits cleanly with no candidates when the baseline still matches" do
+      run_cli("baseline", "generate", cwd: tmpdir)
+      status, out, _err = run_cli("baseline", "prune", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(out).to include("No cleared buckets")
+    end
+  end
 end

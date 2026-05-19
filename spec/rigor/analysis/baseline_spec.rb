@@ -251,6 +251,79 @@ RSpec.describe Rigor::Analysis::Baseline do
     end
   end
 
+  describe "#audit (slice 2 — drift inspection)" do
+    it "classifies a bucket whose actual count equals the recorded count as :within" do
+      baseline = described_class.from_diagnostics([
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method")
+                                                  ])
+      rows = baseline.audit(Array.new(3) { diagnostic(path: "a.rb", rule: "call.undefined-method") })
+      expect(rows.first.status).to eq(:within)
+      expect(rows.first.delta).to eq(0)
+    end
+
+    it "classifies a bucket whose actual count is zero as :cleared (prune candidate)" do
+      baseline = described_class.from_diagnostics([
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method")
+                                                  ])
+      rows = baseline.audit([])
+      expect(rows.first.status).to eq(:cleared)
+      expect(rows.first.delta).to eq(-2)
+    end
+
+    it "classifies a bucket whose actual count is below recorded as :reducible (regenerate candidate)" do
+      baseline = described_class.from_diagnostics([
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method")
+                                                  ])
+      rows = baseline.audit(Array.new(2) { diagnostic(path: "a.rb", rule: "call.undefined-method") })
+      expect(rows.first.status).to eq(:reducible)
+      expect(rows.first.delta).to eq(-3)
+    end
+
+    it "classifies a bucket whose actual count exceeds recorded as :over (CI regression)" do
+      baseline = described_class.from_diagnostics([
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method")
+                                                  ])
+      rows = baseline.audit(Array.new(5) { diagnostic(path: "a.rb", rule: "call.undefined-method") })
+      expect(rows.first.status).to eq(:over)
+      expect(rows.first.delta).to eq(3)
+    end
+
+    it "ignores diagnostics that don't match any bucket (new findings are out of audit scope)" do
+      baseline = described_class.from_diagnostics([
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method")
+                                                  ])
+      rows = baseline.audit([
+                              diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                              diagnostic(path: "b.rb", rule: "nullable-receiver"),
+                              diagnostic(path: "c.rb", rule: "wrong-arity")
+                            ])
+      expect(rows.size).to eq(1)
+      expect(rows.first.bucket.file).to eq("a.rb")
+      expect(rows.first.status).to eq(:within)
+    end
+  end
+
+  describe "#without (slice 2 — prune helper)" do
+    it "returns a new Baseline omitting the given buckets" do
+      baseline = described_class.from_diagnostics([
+                                                    diagnostic(path: "a.rb", rule: "call.undefined-method"),
+                                                    diagnostic(path: "b.rb", rule: "wrong-arity")
+                                                  ])
+      first = baseline.buckets.first
+      pruned = baseline.without([first])
+      expect(pruned.size).to eq(1)
+      expect(pruned.buckets).not_to include(first)
+    end
+  end
+
   describe "#to_yaml" do
     it "round-trips through load → diagnostics → from_diagnostics → to_yaml → load" do
       diagnostics = [

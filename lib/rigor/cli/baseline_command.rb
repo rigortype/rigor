@@ -20,11 +20,11 @@ module Rigor
     #   rigor baseline generate --match-mode message
     #   rigor baseline generate --force      # overwrite existing
     #   rigor baseline generate --output=PATH
-    class BaselineCommand
+    class BaselineCommand # rubocop:disable Metrics/ClassLength
       EXIT_USAGE = 64
       DEFAULT_BASELINE_PATH = ".rigor-baseline.yml"
 
-      SUBCOMMANDS = %w[generate].freeze
+      SUBCOMMANDS = %w[generate dump drift prune].freeze
 
       def initialize(argv:, out: $stdout, err: $stderr)
         @argv = argv
@@ -38,8 +38,10 @@ module Rigor
         when nil, "help", "-h", "--help"
           @out.puts(help)
           0
-        when "generate"
-          run_generate
+        when "generate" then run_generate
+        when "dump" then run_dump
+        when "drift" then run_drift
+        when "prune" then run_prune
         else
           @err.puts("Unknown baseline subcommand: #{subcommand.inspect}")
           @err.puts(help)
@@ -141,12 +143,231 @@ module Rigor
         Configuration.new(defaults)
       end
 
+      # ---- dump --------------------------------------------------
+
+      def run_dump
+        options = parse_dump_options
+        baseline = load_baseline_or_exit(options.fetch(:baseline))
+        return EXIT_USAGE if baseline == :error
+
+        rows = filter_dump_rows(baseline.buckets, options)
+        case options.fetch(:format)
+        when :json then @out.puts(JSON.pretty_generate(dump_to_json(rows)))
+        else dump_text(rows, options)
+        end
+        0
+      end
+
+      def parse_dump_options
+        options = { baseline: DEFAULT_BASELINE_PATH, format: :text, rule: nil, file: nil }
+        parser = OptionParser.new do |opts|
+          opts.banner = "Usage: rigor baseline dump [options]"
+          opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
+            options[:baseline] = v
+          end
+          opts.on("--format=FORMAT", %i[text json], "Output format: text (default) or json") do |v|
+            options[:format] = v
+          end
+          opts.on("--rule=RULE", "Filter rows by exact rule id") { |v| options[:rule] = v }
+          opts.on("--file=GLOB", "Filter rows by File.fnmatch? glob") { |v| options[:file] = v }
+        end
+        parser.parse!(@argv)
+        options
+      end
+
+      def filter_dump_rows(buckets, options)
+        buckets.select do |b|
+          next false if options[:rule] && b.rule != options[:rule]
+          next false if options[:file] && !File.fnmatch?(options[:file], b.file)
+
+          true
+        end
+      end
+
+      def dump_text(rows, options)
+        if rows.empty?
+          @out.puts("(no baseline rows matching the supplied filters)")
+          return
+        end
+
+        # Group by rule for readability; rules with the most
+        # entries first.
+        by_rule = rows.group_by(&:rule).sort_by { |_rule, group| -group.size }
+        by_rule.each do |rule, group|
+          total = group.sum(&:count)
+          @out.puts("#{rule}  (#{group.size} bucket(s), #{total} occurrence(s))")
+          group.sort_by { |b| [-b.count, b.file] }.each do |bucket|
+            label = if bucket.message_regex
+                      "  #{bucket.file}: #{bucket.count}  ~/#{bucket.message_regex.source}/"
+                    else
+                      "  #{bucket.file}: #{bucket.count}"
+                    end
+            @out.puts(label)
+          end
+          @out.puts("")
+        end
+        @out.puts("Total: #{rows.size} bucket(s), #{rows.sum(&:count)} occurrence(s)")
+        _ = options # reserved for future flags
+      end
+
+      def dump_to_json(rows)
+        {
+          "version" => Analysis::Baseline::CURRENT_VERSION,
+          "ignored" => rows.map do |b|
+            row = { "file" => b.file, "rule" => b.rule, "count" => b.count }
+            row["message"] = b.message_regex.source if b.message_regex
+            row
+          end
+        }
+      end
+
+      # ---- drift --------------------------------------------------
+
+      def run_drift
+        options = parse_drift_options
+        baseline = load_baseline_or_exit(options.fetch(:baseline))
+        return EXIT_USAGE if baseline == :error
+
+        configuration = Configuration.load(options.fetch(:config))
+        diagnostics = collect_diagnostics(configuration, options)
+        drift_rows = baseline.audit(diagnostics)
+
+        shown = if options.fetch(:only).nil?
+                  drift_rows.reject { |r| r.delta.zero? }
+                else
+                  drift_rows.select { |r| r.status == options.fetch(:only) }
+                end
+
+        if shown.empty?
+          @out.puts("No drift detected.")
+          return 0
+        end
+
+        report_drift_rows(shown, baseline_path: options.fetch(:baseline))
+        0
+      end
+
+      def parse_drift_options
+        options = {
+          config: nil,
+          baseline: DEFAULT_BASELINE_PATH,
+          only: nil
+        }
+        parser = OptionParser.new do |opts|
+          opts.banner = "Usage: rigor baseline drift [options]"
+          opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
+          opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
+            options[:baseline] = v
+          end
+          opts.on("--only=STATUS", %i[within over cleared reducible],
+                  "Show only buckets with the given status (within|over|cleared|reducible)") do |v|
+            options[:only] = v
+          end
+        end
+        parser.parse!(@argv)
+        options
+      end
+
+      def report_drift_rows(rows, baseline_path:) # rubocop:disable Metrics/AbcSize
+        @out.puts("Drift report against #{baseline_path}:")
+        @out.puts("")
+        groups = rows.group_by(&:status)
+        %i[over cleared reducible within].each do |status|
+          group = groups[status] || []
+          next if group.empty?
+
+          @out.puts(drift_section_header(status, group.size))
+          group.sort_by { |r| [r.bucket.file, r.bucket.rule] }.each do |row|
+            delta_str = row.delta.positive? ? "+#{row.delta}" : row.delta.to_s
+            @out.puts("  #{row.bucket.file}  [#{row.bucket.rule}]  " \
+                      "#{row.bucket.count} → #{row.actual_count}  (Δ#{delta_str})")
+          end
+          @out.puts("")
+        end
+      end
+
+      def drift_section_header(status, count)
+        case status
+        when :over then "## Over threshold (#{count}) — bucket exceeded; check the regular diagnostic output."
+        when :cleared then "## Cleared (#{count}) — `rigor baseline prune` can drop these."
+        when :reducible then "## Reducible (#{count}) — tightening opportunity; consider `regenerate` (slice 5)."
+        when :within then "## Within threshold (#{count})"
+        end
+      end
+
+      # ---- prune --------------------------------------------------
+
+      def run_prune
+        options = parse_prune_options
+        baseline = load_baseline_or_exit(options.fetch(:baseline))
+        return EXIT_USAGE if baseline == :error
+
+        configuration = Configuration.load(options.fetch(:config))
+        diagnostics = collect_diagnostics(configuration, options)
+        drift_rows = baseline.audit(diagnostics)
+        cleared = drift_rows.select { |r| r.status == :cleared }
+
+        if cleared.empty?
+          @out.puts("No cleared buckets to prune.")
+          return 0
+        end
+
+        announce_prune(cleared, options.fetch(:baseline))
+        return 0 if options.fetch(:dry_run)
+
+        pruned = baseline.without(cleared.map(&:bucket))
+        File.write(options.fetch(:baseline), pruned.to_yaml)
+        @err.puts("rigor: pruned #{cleared.size} bucket(s); baseline now has #{pruned.size} entries.")
+        0
+      end
+
+      def parse_prune_options
+        options = {
+          config: nil,
+          baseline: DEFAULT_BASELINE_PATH,
+          dry_run: false
+        }
+        parser = OptionParser.new do |opts|
+          opts.banner = "Usage: rigor baseline prune [options]"
+          opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
+          opts.on("--baseline=PATH", "Path to the baseline file (default: #{DEFAULT_BASELINE_PATH})") do |v|
+            options[:baseline] = v
+          end
+          opts.on("--dry-run", "Show what would be dropped without writing the file") { options[:dry_run] = true }
+        end
+        parser.parse!(@argv)
+        options
+      end
+
+      def announce_prune(cleared, baseline_path)
+        @out.puts("#{cleared.size} bucket(s) to prune from #{baseline_path}:")
+        cleared.sort_by { |r| [r.bucket.file, r.bucket.rule] }.each do |row|
+          @out.puts("  - #{row.bucket.file}  [#{row.bucket.rule}]  (was: #{row.bucket.count})")
+        end
+      end
+
+      # ---- shared helpers ----------------------------------------
+
+      def load_baseline_or_exit(path)
+        unless File.exist?(path)
+          @err.puts("rigor: baseline file not found: #{path}")
+          return :error
+        end
+        Analysis::Baseline.load(path)
+      rescue Analysis::Baseline::LoadError => e
+        @err.puts("rigor: baseline load failed: #{e.message}")
+        :error
+      end
+
       def help
         <<~HELP
           Usage: rigor baseline <subcommand> [options]
 
           Subcommands:
             generate    Write a fresh baseline file from a `rigor check` run.
+            dump        Print the contents of an existing baseline.
+            drift       Compare baseline vs current diagnostics (reduction / regression hints).
+            prune       Drop cleared buckets (`actual == 0`) from the baseline.
 
           Run `rigor baseline <subcommand> --help` for subcommand options.
         HELP

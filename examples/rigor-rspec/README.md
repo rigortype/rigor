@@ -176,6 +176,59 @@ need significantly more analyzer surface:
   emit a hint to switch to the explicit form when the
   scope has more than one example.
 
+## rspec-rails / shoulda-matchers boundary
+
+The `MatcherAnalyzer` (Pillar 2 Slice 1 — `expect(x).to
+MATCHER` narrows `x`) covers the **type-narrowing** floor
+of RSpec's matcher DSL. The two ecosystem gems most
+projects also pull in (`rspec-rails` for Rails-specific
+matchers; `shoulda-matchers` for ActiveRecord / ActiveModel
+matchers) are **mostly** behavioral — they assert
+runtime behavior rather than narrowing a static type:
+
+- `expect(response).to have_http_status(200)` /
+  `render_template(:show)` / `route_to(...)` /
+  `redirect_to(...)` — assertions about the
+  `ActionDispatch::TestResponse` object's state, not its
+  type. The receiver stays at `Nominal[ActionDispatch::TestResponse]`
+  regardless of the matcher; nothing for Rigor to narrow.
+- `should validate_presence_of(:email)` /
+  `should belong_to(:user)` /
+  `should have_many(:posts)` — schema-shape matchers on a
+  model class. The receiver is `Singleton[<Model>]` and
+  the matcher asserts the model's DSL configuration, not
+  a type narrowing on an instance.
+
+A small number of matchers in these gems DO fit the
+narrowing model — for example, `expect(model).to be_a(User)`
+or `expect(response_body).to match(/foo/)` work cleanly via
+the existing matcher table because they reduce to the
+RSpec-core forms `be_a` / `match`. No new wiring is needed
+for those; they fall through the existing recogniser.
+
+The behavioral matchers (have_http_status, render_template,
+validate_presence_of, …) would each need a domain-specific
+diagnostic (e.g. "render_template :show but no
+app/views/<controller>/show.html.erb"), which is a different
+plugin shape from type narrowing. Those queued for follow-up
+plugins:
+
+- `rigor-rspec-rails` — would absorb the response-state /
+  route-shape / template-existence matchers and emit
+  domain-specific diagnostics. Currently `rigor-actionpack`'s
+  render-target validation (`render :show` against the
+  view tree) overlaps; the slice would coordinate to avoid
+  double-firing.
+- `rigor-shoulda-matchers` — would consume the
+  `:model_index` cross-plugin fact (published by
+  `rigor-activerecord`) and validate `should validate_presence_of(:email)`
+  against the model's actual columns / associations /
+  validations.
+
+Both are queued under [the Rails plugins
+roadmap](../../docs/design/20260508-rails-plugins-roadmap.md);
+neither has an active slice today.
+
 ## License
 
 MPL-2.0, matching the parent Rigor project.

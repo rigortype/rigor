@@ -339,6 +339,195 @@ RSpec.describe "examples/rigor-rspec" do
     end
   end
 
+  # Pillar 2 Slice 2 — let / subject locals in `it` bodies
+  # are bound to their inferred return type. Tests exercise
+  # the LetScopeIndex + LetTypeResolver directly with a stub
+  # factory_index where applicable; the end-to-end run goes
+  # through `flow_contribution_for` to prove the engine
+  # actually narrows the local.
+  describe "let / subject binding (Pillar 2 Slice 2)" do
+    describe "LetScopeIndex" do
+      def build_index(source)
+        Rigor::Plugin::Rspec::LetScopeIndex.build(Prism.parse(source).value)
+      end
+
+      it "records the describe-const anchor for `RSpec.describe SomeModel do`" do
+        index = build_index(<<~RUBY)
+          RSpec.describe User do
+            let(:user) { 1 }
+          end
+        RUBY
+        expect(index.records.size).to eq(1)
+        expect(index.records.first.describe_const).to eq("User")
+        expect(index.records.first.lets.keys).to contain_exactly(:user)
+      end
+
+      it "records nested describe scopes with inherited const" do
+        index = build_index(<<~RUBY)
+          RSpec.describe User do
+            let(:user) { 1 }
+            describe ".active" do
+              let(:filter) { 2 }
+            end
+          end
+        RUBY
+        # Two records: outer (User, lets [:user]) and inner
+        # (anchor inherits User, lets [:filter]).
+        expect(index.records.size).to eq(2)
+        const_anchors = index.records.map(&:describe_const)
+        expect(const_anchors).to eq(%w[User User])
+      end
+
+      it "resolves let_block_at by walking innermost to outermost" do
+        source = <<~RUBY
+          RSpec.describe User do
+            let(:name) { "outer" }
+            describe "inner" do
+              let(:name) { "inner" }
+              it "x" do
+                name
+              end
+            end
+          end
+        RUBY
+        index = build_index(source)
+        # The `name` read inside the inner `it` block is line
+        # 6; the inner-record's `:name` let wins.
+        block = index.let_block_at(6, :name)
+        expect(block).not_to be_nil
+        expect(block.body.body.first.unescaped).to eq("inner")
+      end
+
+      it "captures the implicit `subject { ... }` under :subject" do
+        index = build_index(<<~RUBY)
+          RSpec.describe User do
+            subject { User.new }
+          end
+        RUBY
+        expect(index.records.first.lets.keys).to contain_exactly(:subject)
+      end
+
+      it "captures the named `subject(:user) { ... }` under :user" do
+        index = build_index(<<~RUBY)
+          RSpec.describe User do
+            subject(:user) { User.new }
+          end
+        RUBY
+        expect(index.records.first.lets.keys).to contain_exactly(:user)
+      end
+    end
+
+    describe "LetTypeResolver" do
+      def block_node(source)
+        ast = Prism.parse(source).value
+        ast.statements.body.first.block
+      end
+
+      it "resolves `let(:user) { User.new }` to Nominal[User]" do
+        type = Rigor::Plugin::Rspec::LetTypeResolver.resolve(
+          block_node("let(:user) { User.new }"),
+          describe_const: nil, factory_index: nil, environment: nil
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("User"))
+      end
+
+      it "resolves `let(:doc) { Foo::Bar.new }` to Nominal[Foo::Bar]" do
+        type = Rigor::Plugin::Rspec::LetTypeResolver.resolve(
+          block_node("let(:doc) { Foo::Bar.new }"),
+          describe_const: nil, factory_index: nil, environment: nil
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Foo::Bar"))
+      end
+
+      it "resolves `subject { described_class.new }` via the enclosing describe_const" do
+        type = Rigor::Plugin::Rspec::LetTypeResolver.resolve(
+          block_node("subject { described_class.new }"),
+          describe_const: "User", factory_index: nil, environment: nil
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("User"))
+      end
+
+      it "returns nil for `described_class.new` without an anchor" do
+        type = Rigor::Plugin::Rspec::LetTypeResolver.resolve(
+          block_node("subject { described_class.new }"),
+          describe_const: nil, factory_index: nil, environment: nil
+        )
+        expect(type).to be_nil
+      end
+
+      it "resolves `let(:user) { create(:user) }` via factory_index.model_class" do
+        factory_index = Class.new do
+          def find(name)
+            return nil unless name == "user"
+
+            Struct.new(:model_class).new("User")
+          end
+        end.new
+        type = Rigor::Plugin::Rspec::LetTypeResolver.resolve(
+          block_node("let(:user) { create(:user) }"),
+          describe_const: nil, factory_index: factory_index, environment: nil
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("User"))
+      end
+
+      it "resolves `let(:user) { FactoryBot.build_stubbed(:user) }`" do
+        factory_index = Class.new do
+          def find(name) = name == "user" ? Struct.new(:model_class).new("Admin::User") : nil
+        end.new
+        type = Rigor::Plugin::Rspec::LetTypeResolver.resolve(
+          block_node("let(:user) { FactoryBot.build_stubbed(:user) }"),
+          describe_const: nil, factory_index: factory_index, environment: nil
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("Admin::User"))
+      end
+
+      it "returns nil for unrecognised body shapes" do
+        type = Rigor::Plugin::Rspec::LetTypeResolver.resolve(
+          block_node("let(:user) { some_helper_method }"),
+          describe_const: nil, factory_index: nil, environment: nil
+        )
+        expect(type).to be_nil
+      end
+
+      it "returns nil for factorybot calls when factory_index is missing" do
+        type = Rigor::Plugin::Rspec::LetTypeResolver.resolve(
+          block_node("let(:user) { create(:user) }"),
+          describe_const: nil, factory_index: nil, environment: nil
+        )
+        expect(type).to be_nil
+      end
+
+      it "uses the LAST statement of a multi-stmt block body" do
+        type = Rigor::Plugin::Rspec::LetTypeResolver.resolve(
+          block_node("let(:user) { x = 1\nUser.new }"),
+          describe_const: nil, factory_index: nil, environment: nil
+        )
+        expect(type).to eq(Rigor::Type::Combinator.nominal_of("User"))
+      end
+    end
+
+    describe "end-to-end through the engine" do
+      it "binds `user` inside an `it` body to Nominal[User] via let(:user) { User.new }" do
+        result = run_plugin(
+          source: <<~RUBY
+            RSpec.describe User do
+              let(:user) { User.new }
+              it "test" do
+                expect(user).to be_a(User)
+              end
+            end
+          RUBY
+        )
+        # No undefined-method diagnostics — `user` resolved
+        # through the let binding rather than as an unknown
+        # method call. The engine's matcher narrowing (Slice
+        # 1) plus the let binding (Slice 2) compose cleanly.
+        undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+        expect(undefined).to be_empty
+      end
+    end
+  end
+
   describe "edge cases" do
     it "ignores files with no `RSpec.describe` block" do
       result = run_plugin(source: "x = 1\nputs x\n")

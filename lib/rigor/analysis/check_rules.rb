@@ -358,7 +358,25 @@ module Rigor
           method_def = lookup_method(receiver_type, class_name, call_node.name, scope)
           return nil if method_def
 
+          # Module-mixin fallback (mirror of
+          # `MethodDispatcher#user_class_fallback_receiver`'s module
+          # path): an instance method on a module-mixin like
+          # `PP::ObjectMixin` observes Kernel / Object methods
+          # through every concrete includer's ancestor chain, so an
+          # unresolved `self.inspect` / `self.respond_to?` /
+          # `self.class` MUST NOT fire `undefined-method`. Retry
+          # against Object before the rule fires.
+          return nil if module_mixin_receiver?(receiver_type, scope) &&
+                        lookup_method(receiver_type, "Object", call_node.name, scope)
+
           build_undefined_method_diagnostic(path, call_node, receiver_type)
+        end
+
+        def module_mixin_receiver?(receiver_type, scope)
+          return false unless receiver_type.is_a?(Type::Nominal)
+          return false if scope.environment.nil?
+
+          scope.environment.rbs_module?(receiver_type.class_name)
         end
 
         # Returns a qualified class name for the in-scope check.

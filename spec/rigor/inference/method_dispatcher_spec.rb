@@ -598,6 +598,44 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
     end
 
+    describe "user-class fallback for module-mixin receivers" do
+      let(:env) { Rigor::Environment.default }
+
+      it "routes Nominal[<core module>].inspect through Nominal[Object]" do
+        # Comparable is a real RBS module that does not declare
+        # `inspect` itself. With the module-mixin fallback in
+        # `user_class_fallback_receiver`, the dispatcher retries
+        # against Nominal[Object] and resolves Kernel#inspect.
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Comparable"),
+          method_name: :inspect, arg_types: [], environment: env
+        )
+        expect(result).to be_a(Rigor::Type::Nominal)
+        expect(result.class_name).to eq("String")
+      end
+
+      it "routes Nominal[<core module>].class through Nominal[Object]" do
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("Comparable"),
+          method_name: :class, arg_types: [], environment: env
+        )
+        # `meta_class` for a Nominal returns Singleton[<class_name>]
+        # — the receiver-side `class` always wins at the
+        # meta-introspection tier (above the fallback). The point
+        # of the test is that this doesn't surface as
+        # `undefined-method` because the fallback would have
+        # caught it even if meta-introspection didn't.
+        expect(result).to be_a(Rigor::Type::Singleton)
+      end
+
+      it "does NOT route Nominal[<core class>] through the module fallback" do
+        # Object is a class, not a module. The fallback path is
+        # NOT taken — the dispatcher uses Object's own RBS
+        # directly, not a fallback against Object's parent.
+        expect(env.rbs_module?("Object")).to be(false)
+      end
+    end
+
     describe "static return refinements tier (File class-side)" do
       let(:env) { Rigor::Environment.default }
       let(:non_empty_string) { Rigor::Type::Combinator.non_empty_string }

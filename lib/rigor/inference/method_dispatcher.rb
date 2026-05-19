@@ -669,9 +669,17 @@ module Rigor
       def user_class_fallback_receiver(receiver_type, environment)
         case receiver_type
         when Type::Nominal
-          return nil if Rigor::Reflection.rbs_class_known?(receiver_type.class_name, environment: environment)
+          # Modules: even when RBS knows the module, an instance
+          # method on a mixin-only module (e.g. `PP::ObjectMixin`)
+          # observes Kernel / Object methods through every concrete
+          # includer's ancestor chain. Route through the
+          # `Nominal[Object]` fallback so `self.inspect` /
+          # `self.respond_to?` / `self.class` resolve cleanly when
+          # the module itself does not declare them.
+          known = Rigor::Reflection.rbs_class_known?(receiver_type.class_name, environment: environment)
+          return environment.nominal_for_name("Object") if !known || environment.rbs_module?(receiver_type.class_name)
 
-          environment.nominal_for_name("Object")
+          nil
         when Type::Singleton
           return nil if Rigor::Reflection.rbs_class_known?(receiver_type.class_name, environment: environment)
 

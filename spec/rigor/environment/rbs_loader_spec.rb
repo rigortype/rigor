@@ -85,6 +85,34 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "#rbs_module?" do
+    it "is true for core modules (Comparable, Enumerable, Kernel)" do
+      expect(loader.rbs_module?("Comparable")).to be(true)
+      expect(loader.rbs_module?("Enumerable")).to be(true)
+      expect(loader.rbs_module?("Kernel")).to be(true)
+    end
+
+    it "is false for core classes (Object, Integer, String)" do
+      expect(loader.rbs_module?("Object")).to be(false)
+      expect(loader.rbs_module?("Integer")).to be(false)
+      expect(loader.rbs_module?("String")).to be(false)
+    end
+
+    it "is false for unknown names" do
+      expect(loader.rbs_module?("ThisModuleDoesNotExist123")).to be(false)
+    end
+
+    it "accepts both unprefixed and absolute names" do
+      expect(loader.rbs_module?("Kernel")).to be(true)
+      expect(loader.rbs_module?("::Kernel")).to be(true)
+    end
+
+    it "tolerates malformed names without raising" do
+      expect(loader.rbs_module?("not a name")).to be(false)
+      expect(loader.rbs_module?("")).to be(false)
+    end
+  end
+
   describe "#instance_method" do
     it "returns the method definition for a known instance method" do
       method = loader.instance_method(class_name: "Integer", method_name: :succ)

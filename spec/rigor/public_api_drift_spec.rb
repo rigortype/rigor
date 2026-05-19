@@ -92,6 +92,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     project_patched_methods()
     rbs_extended_reporter()
     rbs_loader()
+    rbs_module?(req:name)
     reflection()
     reporters()
     singleton_for_name(req:name)

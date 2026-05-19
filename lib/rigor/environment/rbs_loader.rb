@@ -160,6 +160,28 @@ module Rigor
                                   end
       end
 
+      # Returns true when the named RBS declaration is a Module
+      # (`RBS::AST::Declarations::Module`) rather than a Class. The
+      # `user_class_fallback_receiver` tier consults this to route
+      # `Nominal[M].some_kernel_method` (where M is a module mixin
+      # like `PP::ObjectMixin`) through the `Nominal[Object]`
+      # fallback, because every concrete includer of M sees Kernel
+      # / Object instance methods as part of its own ancestor chain.
+      #
+      # Returns false for classes, for unknown names, and when the
+      # RBS environment failed to build (fail-soft).
+      def rbs_module?(name)
+        return false if env.nil?
+
+        rbs_name = parse_type_name(name)
+        return false if rbs_name.nil?
+
+        entry = env.class_decls[rbs_name]
+        entry.is_a?(::RBS::Environment::ModuleEntry)
+      rescue ::RBS::BaseError
+        false
+      end
+
       # Yields every known class / module / alias name (top-level
       # prefixed) currently loaded into the environment. The cache
       # producer that materialises the known-name set uses this so

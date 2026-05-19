@@ -82,6 +82,25 @@ RSpec.describe Rigor::Environment do
     end
   end
 
+  describe "#rbs_module?" do
+    let(:env) { described_class.default }
+
+    it "delegates to the rbs_loader for core modules" do
+      expect(env.rbs_module?("Kernel")).to be(true)
+      expect(env.rbs_module?("Comparable")).to be(true)
+    end
+
+    it "is false for core classes" do
+      expect(env.rbs_module?("Object")).to be(false)
+      expect(env.rbs_module?("Integer")).to be(false)
+    end
+
+    it "is false on an RBS-blind Environment (no loader)" do
+      blind = described_class.new
+      expect(blind.rbs_module?("Kernel")).to be(false)
+    end
+  end
+
   describe "#class_ordering" do
     it "answers built-in hierarchy questions through the registry/RBS chain" do
       env = described_class.default

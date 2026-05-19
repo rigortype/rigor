@@ -25,6 +25,7 @@ module Rigor
     def singleton_for_name: (String | Symbol name) -> Type::Singleton?
     def constant_for_name: (String | Symbol name) -> Type::t?
     def class_known?: (String | Symbol name) -> bool
+    def rbs_module?: (String | Symbol name) -> bool
     def class_ordering: (String | Symbol lhs, String | Symbol rhs) -> ordering
     def reflection: () -> untyped?
 
@@ -52,6 +53,7 @@ module Rigor
 
       def initialize: (?libraries: Array[String], ?signature_paths: Array[String | _ToPath], ?cache_store: untyped?) -> void
       def class_known?: (String | Symbol name) -> bool
+      def rbs_module?: (String | Symbol name) -> bool
       def instance_definition: (String | Symbol class_name) -> untyped?
       def instance_method: (class_name: String | Symbol, method_name: String | Symbol) -> untyped?
       def uncached_instance_definition: (String | Symbol class_name) -> untyped?

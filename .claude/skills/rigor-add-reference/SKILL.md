@@ -1,6 +1,7 @@
 ---
 name: rigor-add-reference
-description: Add a new reference submodule under references/ in this repository. Use whenever the user wants to vendor an upstream repo as a reference (e.g. "add sorbet as a reference", "vendor the dry-rb source", "add a submodule for X under references/"), or when a new ADR or feature needs a reference checkout that doesn't exist yet. Covers the full three-file change: .gitmodules + Makefile (two locations) + the submodule pointer, committed together.
+description: |
+  Add a new reference submodule under references/ in this repository. Use whenever the user wants to vendor an upstream repo as a reference (e.g. "add sorbet as a reference", "vendor the dry-rb source", "add a submodule for X under references/"), or when a new ADR or feature needs a reference checkout that doesn't exist yet. Covers the full three-file change — .gitmodules + Makefile (two locations) + the submodule pointer, committed together.
 ---
 
 # Add a Reference Submodule

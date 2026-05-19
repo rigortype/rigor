@@ -1,9 +1,10 @@
 ---
 name: rigor-plugin-author
 description: End-to-end workflow for an AI agent to translate a user requirement into a working Rigor plugin. Production plugins (real gems / frameworks) land under `plugins/`; tutorial walkthroughs over deliberately simplified virtual use cases land under `examples/`. Use when the user asks to "create a Rigor plugin for X", "write a plugin that does Y", "extend Rigor for our DSL", or similar. Covers requirements gathering, plugins-vs-examples placement, template selection, scaffolding, integration spec, and verification.
-version: 0.1.0
 license: MPL-2.0
-homepage: https://github.com/rigortype/rigor
+metadata:
+  version: 0.1.0
+  homepage: https://github.com/rigortype/rigor
 ---
 
 # Rigor Plugin Author Workflow

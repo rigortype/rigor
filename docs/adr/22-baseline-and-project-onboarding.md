@@ -458,6 +458,126 @@ collect empirical baseline data before the SKILLs land.
 The two SKILLs are sketched in §§ "rigor-project-init" and
 "rigor-baseline-reduce" below.
 
+### WD9 — Dedicated baseline file schema (vs config-include reuse)
+
+PHPStan's actual approach is structurally different from what
+this ADR records as Slice 1. PHPStan's `phpstan-baseline.neon`
+is a **regular PHPStan config file** containing only
+`parameters.ignoreErrors` entries; the main `phpstan.neon`
+absorbs it via `includes:` array. The file is "a baseline" by
+convention, not by schema — every key is the same as the main
+config's.
+
+Rigor's existing surface ALREADY provides the same primitive:
+`.rigor.yml` accepts an `includes:` list (per the existing
+configuration loader). So the PHPStan-style approach IS
+available: we could define a single `ignored:` key valid at
+any config level and merge from an include.
+
+Two candidate shapes, then:
+
+| Aspect | (A) Config-include reuse (PHPStan-style) | (B) Dedicated baseline schema (Slice 1) |
+| --- | --- | --- |
+| Schema | Same as `.rigor.yml`; baseline rows under `ignored:` (or similar) key. Merged via existing `includes:` plumbing. | Distinct top-level: `version: 1` + `ignored:` only. Loaded via dedicated `baseline:` key. |
+| Generator output | Writes a config file with only the ignore section populated. | Writes a self-contained baseline file. |
+| Schema evolution | Baseline format coupled to config schema bumps. | Baseline format versioned independently (`version: 1`). |
+| Inline option | Yes — small projects can put `ignored:` directly in `.rigor.yml`. | No — must reference an external file. |
+| Tool ergonomics | Generic config tools handle the file. | Custom Baseline class owns load / filter / drift; cleaner per-tool API. |
+| Newcomer mental model | "Config files everywhere; you stack them." | "Config is one thing, baseline is another thing." |
+| Generator footprint | Reuses Configuration writer. | ~270 lines of Baseline class (already written). |
+| Drift / prune semantics | Generic — operate on a config-shaped file. | Specific to the baseline tool's frame. |
+
+**Decision**: WD9 = (B) — dedicated baseline schema. Documented
+rationale, ranked by load-bearing weight:
+
+1. **Separation of concerns matches operational reality.**
+   The config file (`paths:` / `plugins:` / `severity_profile:`
+   / …) is *stable* — it describes how the project wants to
+   be analysed. The baseline (`ignored:` rows × hundreds of
+   files) is *churning* — every fix, every refactor, every
+   rigor patch release can shift the bucket counts. Co-locating
+   them in one schema means the same file format carries two
+   different cadences, which leaks into the reader's mental
+   model ("which slots are stable vs churn?").
+
+2. **`version: 1` lets the baseline format evolve without
+   moving the rest of the config.** Slice 5's `regenerate`
+   plus future format migrations (e.g., adding optional
+   `last_seen:` timestamps to rows, switching the message
+   field's escape grammar) are baseline-internal concerns;
+   they shouldn't force a config-schema version bump that
+   external `.rigor.yml`-aware tools have to track.
+
+3. **Generator semantics are cleaner.** `rigor baseline
+   generate` writes a file whose every row is meaningful —
+   no "this is technically valid config but most slots are
+   defaults" confusion. A reviewer opening the generated
+   file sees ignore rules and nothing else.
+
+4. **Drift / prune tools own the schema.** `rigor baseline
+   drift` (slice 2) doesn't have to walk a config tree
+   looking for ignore-shaped entries — it reads a
+   `version: 1` file and reasons about its single concern.
+
+5. **No key-name conflict.** With (B), `baseline: <path>` in
+   `.rigor.yml` cleanly references the dedicated file. With
+   (A), the same `baseline:` key would collide with a
+   per-file `ignored:` array, forcing a renaming (e.g.,
+   `baseline_path:` / `include_baseline_at:`) that's less
+   discoverable.
+
+6. **Existing surface is already separated.** `.rigor.yml`'s
+   stable shape predates this ADR; folding a high-churn
+   `ignored:` key into it would expand the config's
+   responsibility scope at exactly the moment the project
+   is otherwise narrowing toward concrete per-task files
+   (`.rigor.dist.yml` / `.rigor-baseline.yml` / future per-
+   topic configs).
+
+The (A) advantages are real but lower-weight in the current
+mix:
+
+- "Schema simplicity" is true for the format authors, but
+  users almost never hand-edit the baseline — the regenerate
+  /  prune subcommands own it. So the "one schema to learn"
+  benefit lands disproportionately on rigor's own
+  contributors rather than on external users (the v0.1.9
+  SKILL trio's target audience).
+- The "inline `ignored:`" option matters for projects with
+  ~3 ignore rules, which is rare enough that the cost of
+  asking those projects to keep a tiny `.rigor-baseline.yml`
+  file is negligible.
+- "Generic config tools work" — true but speculative; rigor
+  doesn't have an external-config-tool ecosystem the way
+  PHPStan does (where `phpstan/extension-installer` etc.
+  rely on neon parsing). When such an ecosystem matures, the
+  trade-off can be revisited.
+
+### When to revisit WD9
+
+This decision becomes worth re-litigating if any of the
+following becomes true:
+
+1. **Multiple "topic" config files appear** (`.rigor-i18n.yml`
+   for i18n-specific rule overrides, `.rigor-plugins.yml` for
+   plugin-only config, etc.). At that point the `includes:`
+   machinery is the load-bearing primitive and folding
+   baseline into it gets cheaper.
+2. **Per-rule ignoreErrors-style inline config** lands as
+   a feature (e.g., a `.rigor.yml`-side `ignored:` key
+   alongside `disabled:`). At that point the schemas
+   converge anyway and merging them simplifies.
+3. **A future SKILL or eval tool needs to read both
+   simultaneously** (`.rigor.yml` + baseline) and the
+   two-schema cost outweighs the separation benefit.
+
+Implementation note: the Baseline class today could be
+**extended** to accept the config-include form as an
+alternative load path (heuristic: `version:` field present
+→ dedicated; absent + `paths:` / `plugins:` present →
+config-shape). Worth queuing as slice 5+ if WD9 gets
+revisited; out of scope for the current slice.
+
 ## CLI surface
 
 Three new subcommands, all backed by the same baseline I/O

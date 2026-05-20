@@ -109,25 +109,11 @@ module Rigor
         discovered_methods = build_discovered_methods(root)
         seeded_scope = seeded_scope.with_discovered_methods(discovered_methods)
 
-        # v0.0.2 #5 — also record the def node itself for
-        # instance methods so the engine can re-type the body
-        # when a call site dispatches against a user-defined
-        # method without an RBS sig. ADR-24 slice 2 — merge the
-        # cross-file `discovered_def_index_for_paths` seed (on
-        # `default_scope`) under the per-file table so a
-        # subclass resolves a superclass `def` from a sibling
-        # file; same-file declarations win per method on a
-        # collision.
-        discovered_def_nodes = default_scope.discovered_def_nodes.merge(
-          build_discovered_def_nodes(root)
-        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
-        seeded_scope = seeded_scope.with_discovered_def_nodes(discovered_def_nodes)
-
-        # ADR-24 slice 2 — class -> superclass map (per-file
-        # merged under the cross-file seed) drives superclass-
-        # chain resolution of implicit-self calls.
-        discovered_superclasses = default_scope.discovered_superclasses.merge(build_discovered_superclasses(root))
-        seeded_scope = seeded_scope.with_discovered_superclasses(discovered_superclasses)
+        # v0.0.2 #5 + ADR-24 slice 2 — record per-instance-method
+        # def nodes, the class -> superclass map, and the
+        # class/module -> included-modules map, each merged under
+        # the cross-file pre-pass seed (see below).
+        seeded_scope = merge_project_method_indexes(seeded_scope, default_scope, root)
 
         # v0.1.2 — per-class table of method visibilities
         # (`:public` / `:private` / `:protected`). The
@@ -145,6 +131,31 @@ module Rigor
 
         propagate(root, table, seeded_scope)
         table
+      end
+
+      # v0.0.2 #5 + ADR-24 slice 2 — seeds the three
+      # project-method indexes onto `seeded_scope`: the
+      # per-instance-method def-node table, the class ->
+      # superclass map, and the class/module -> included-modules
+      # map. Each per-file table is merged UNDER the cross-file
+      # `discovered_def_index_for_paths` seed carried on
+      # `default_scope` — same-file declarations win per entry,
+      # the cross-file seed supplies sibling-file ancestors.
+      def merge_project_method_indexes(seeded_scope, default_scope, root)
+        def_nodes = default_scope.discovered_def_nodes.merge(
+          build_discovered_def_nodes(root)
+        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+        superclasses = default_scope.discovered_superclasses.merge(
+          build_discovered_superclasses(root)
+        )
+        includes = default_scope.discovered_includes.merge(
+          build_discovered_includes(root)
+        ) { |_class, cross_file, per_file| (cross_file + per_file).uniq }
+
+        seeded_scope
+          .with_discovered_def_nodes(def_nodes)
+          .with_discovered_superclasses(superclasses)
+          .with_discovered_includes(includes)
       end
 
       # Slice 7 phase 2. Builds the class-level ivar accumulator
@@ -633,6 +644,54 @@ module Rigor
         end
       end
 
+      MIXIN_CALL_NAMES = %i[include prepend].freeze
+
+      # ADR-24 slice 2 — per-class/module table mapping a fully
+      # qualified user class or module to the list of module
+      # names it `include`s / `prepend`s, AS WRITTEN at the
+      # mixin call (`include Foo` / `include Foo::Bar`). Only
+      # constant arguments are recorded; dynamic mixins
+      # (`include some_method`) produce no entry. `prepend` is
+      # bucketed with `include` — both contribute instance
+      # methods to the ancestor chain. `extend` is NOT tracked
+      # (it adds singleton methods; ADR-24 slice 2 resolves the
+      # instance-side chain).
+      def build_discovered_includes(root)
+        accumulator = {}
+        walk_class_includes(root, [], nil, accumulator)
+        accumulator.transform_values { |mods| mods.uniq.freeze }.freeze
+      end
+
+      def walk_class_includes(node, qualified_prefix, current_class, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            full = (qualified_prefix + [name]).join("::")
+            walk_class_includes(node.body, qualified_prefix + [name], full, accumulator) if node.body
+            return
+          end
+        when Prism::CallNode
+          record_mixin_call(node, current_class, accumulator)
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_class_includes(child, qualified_prefix, current_class, accumulator)
+        end
+      end
+
+      def record_mixin_call(node, current_class, accumulator)
+        return unless current_class && node.receiver.nil?
+        return unless MIXIN_CALL_NAMES.include?(node.name)
+
+        node.arguments&.arguments&.each do |arg|
+          mod = qualified_name_for(arg)
+          (accumulator[current_class] ||= []) << mod if mod
+        end
+      end
+
       VISIBILITY_MODIFIERS = %i[public private protected].freeze
 
       # v0.1.2 — per-class method-visibility table for the
@@ -915,6 +974,7 @@ module Rigor
       def discovered_def_index_for_paths(paths, buffer: nil)
         def_nodes = {}
         superclasses = {}
+        includes = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
@@ -922,13 +982,17 @@ module Rigor
             (def_nodes[class_name] ||= {}).merge!(methods)
           end
           superclasses.merge!(build_discovered_superclasses(root))
+          build_discovered_includes(root).each do |class_name, mods|
+            includes[class_name] = ((includes[class_name] || []) + mods).uniq
+          end
         rescue StandardError
           # Skip files that fail to parse or read; the per-file
           # analyzer surfaces the parse error separately.
           next
         end
         def_nodes.each_value(&:freeze)
-        { def_nodes: def_nodes.freeze, superclasses: superclasses.freeze }
+        includes.each_value(&:freeze)
+        { def_nodes: def_nodes.freeze, superclasses: superclasses.freeze, includes: includes.freeze }
       end
 
       # Class-only variant of `record_declarations` — descends

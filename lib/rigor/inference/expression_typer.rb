@@ -1162,34 +1162,55 @@ module Rigor
 
       # ADR-24 slice 2 — resolves `method_name` against
       # `class_name`'s own `def`s, then walks the user-class
-      # superclass chain. RBS-known ancestors are NOT walked
-      # here — the `MethodDispatcher` RBS tier runs before
-      # `try_user_method_inference` and already covers them; a
-      # superclass name that resolves to no project-discovered
-      # class ends the walk. Cross-file: the chain is followed
-      # through `Scope#discovered_superclasses` /
-      # `#discovered_def_nodes`, which the runner seeds from the
-      # project-wide pre-pass. The walk is depth-capped and
-      # cycle-guarded.
-      ANCESTOR_WALK_LIMIT = 20
+      # ancestor chain: included / prepended modules (transitive)
+      # and the superclass chain. RBS-known ancestors are NOT
+      # walked here — the `MethodDispatcher` RBS tier runs before
+      # `try_user_method_inference` and already covers them; an
+      # ancestor name that resolves to no project-discovered
+      # class/module ends that branch. Cross-file: the chain is
+      # followed through `Scope#discovered_superclasses` /
+      # `#discovered_includes` / `#discovered_def_nodes`, which
+      # the runner seeds from the project-wide pre-pass. The walk
+      # is breadth-first, cycle-guarded, and node-count-capped.
+      ANCESTOR_WALK_LIMIT = 100
       private_constant :ANCESTOR_WALK_LIMIT
 
       def resolve_user_def_through_ancestors(class_name, method_name)
-        current = class_name.to_s
+        queue = [class_name.to_s]
         seen = {}
-        ANCESTOR_WALK_LIMIT.times do
-          return nil if current.nil? || seen[current]
+        visited = 0
+        until queue.empty?
+          current = queue.shift
+          next if current.nil? || seen[current]
 
           seen[current] = true
+          visited += 1
+          return nil if visited > ANCESTOR_WALK_LIMIT
+
           found = scope.user_def_for(current, method_name)
           return found if found
 
-          raw = scope.superclass_of(current)
-          return nil if raw.nil?
-
-          current = resolve_ancestor_class_name(current, raw)
+          enqueue_ancestors(current, queue)
         end
         nil
+      end
+
+      # Pushes `current`'s direct ancestors onto the BFS queue:
+      # included / prepended modules first (Ruby places mixins
+      # nearer than the superclass), then the superclass. Each
+      # as-written name is resolved against `current`'s lexical
+      # nesting; names that resolve to no project class/module
+      # are dropped (RBS-known / third-party ancestors).
+      def enqueue_ancestors(current, queue)
+        scope.includes_of(current).each do |raw|
+          resolved = resolve_ancestor_class_name(current, raw)
+          queue.push(resolved) if resolved
+        end
+        raw_super = scope.superclass_of(current)
+        return if raw_super.nil?
+
+        resolved_super = resolve_ancestor_class_name(current, raw_super)
+        queue.push(resolved_super) if resolved_super
       end
 
       # Resolves a superclass name AS WRITTEN (`"Base"`, or a
@@ -1210,7 +1231,8 @@ module Rigor
 
       def known_user_class?(name)
         scope.discovered_superclasses.key?(name) ||
-          scope.discovered_def_nodes.key?(name)
+          scope.discovered_def_nodes.key?(name) ||
+          scope.discovered_includes.key?(name)
       end
 
       INFERENCE_GUARD_KEY = :__rigor_user_method_inference_stack__
@@ -1274,6 +1296,7 @@ module Rigor
                      .with_discovered_methods(scope.discovered_methods)
                      .with_discovered_def_nodes(scope.discovered_def_nodes)
                      .with_discovered_superclasses(scope.discovered_superclasses)
+                     .with_discovered_includes(scope.discovered_includes)
                      .with_self_type(receiver)
 
         required.each_with_index do |param, index|

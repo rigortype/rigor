@@ -21,7 +21,7 @@ module Rigor
                 :class_ivars, :class_cvars, :program_globals,
                 :discovered_classes, :in_source_constants, :discovered_methods,
                 :discovered_def_nodes, :discovered_method_visibilities,
-                :discovered_superclasses,
+                :discovered_superclasses, :discovered_includes,
                 :source_path
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
@@ -53,6 +53,7 @@ module Rigor
       discovered_def_nodes: EMPTY_CLASS_BINDINGS,
       discovered_method_visibilities: EMPTY_CLASS_BINDINGS,
       discovered_superclasses: EMPTY_CLASS_BINDINGS,
+      discovered_includes: EMPTY_CLASS_BINDINGS,
       source_path: nil
     )
       @environment = environment
@@ -72,6 +73,7 @@ module Rigor
       @discovered_def_nodes = discovered_def_nodes
       @discovered_method_visibilities = discovered_method_visibilities
       @discovered_superclasses = discovered_superclasses
+      @discovered_includes = discovered_includes
       @source_path = source_path
       freeze
     end
@@ -305,6 +307,23 @@ module Rigor
       rebuild(discovered_superclasses: table)
     end
 
+    # ADR-24 slice 2 — per-class/module table mapping a fully
+    # qualified user class or module to the list of module
+    # names it `include`s / `prepend`s, AS WRITTEN at the
+    # mixin call. Populated by `ScopeIndexer` (per-file plus
+    # the cross-file pre-pass) and consumed by
+    # `ExpressionTyper#resolve_user_def_through_ancestors` so an
+    # implicit-self call resolves against an included module's
+    # `def`s, not just the superclass chain. As-written names
+    # are resolved to qualified classes at walk time.
+    def includes_of(class_name)
+      @discovered_includes[class_name.to_s] || []
+    end
+
+    def with_discovered_includes(table)
+      rebuild(discovered_includes: table)
+    end
+
     # v0.1.2 — per-class table mapping `method_name (Symbol) →
     # :public | :private | :protected`. Populated by
     # `ScopeIndexer` for every `def` it sees inside a class
@@ -394,6 +413,7 @@ module Rigor
       discovered_methods: @discovered_methods, discovered_def_nodes: @discovered_def_nodes,
       discovered_method_visibilities: @discovered_method_visibilities,
       discovered_superclasses: @discovered_superclasses,
+      discovered_includes: @discovered_includes,
       source_path: @source_path
     )
       self.class.new(
@@ -409,6 +429,7 @@ module Rigor
         discovered_def_nodes: discovered_def_nodes,
         discovered_method_visibilities: discovered_method_visibilities,
         discovered_superclasses: discovered_superclasses,
+        discovered_includes: discovered_includes,
         source_path: source_path
       )
     end
@@ -437,6 +458,7 @@ module Rigor
         discovered_def_nodes: discovered_def_nodes,
         discovered_method_visibilities: discovered_method_visibilities,
         discovered_superclasses: discovered_superclasses,
+        discovered_includes: discovered_includes,
         source_path: source_path
       )
     end

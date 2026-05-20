@@ -17,6 +17,7 @@ module Rigor
     attr_reader discovered_def_nodes: Hash[String, Hash[Symbol, untyped]]
     attr_reader discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]]
     attr_reader discovered_superclasses: Hash[String, String]
+    attr_reader discovered_includes: Hash[String, Array[String]]
     attr_reader source_path: String?
 
     def self.empty: (?environment: Environment, ?source_path: String?) -> Scope
@@ -47,6 +48,8 @@ module Rigor
     def discovered_method_visibility: (String | Symbol class_name, String | Symbol method_name) -> Symbol?
     def superclass_of: (String | Symbol class_name) -> String?
     def with_discovered_superclasses: (Hash[String, String] table) -> Scope
+    def includes_of: (String | Symbol class_name) -> Array[String]
+    def with_discovered_includes: (Hash[String, Array[String]] table) -> Scope
     def with_fact: (Analysis::FactStore::Fact fact) -> Scope
     def with_self_type: (Type::t? type) -> Scope
     def with_declared_types: (Hash[untyped, Type::t] table) -> Scope

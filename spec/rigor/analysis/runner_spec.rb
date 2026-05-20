@@ -517,6 +517,42 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
     end
+
+    it "resolves an implicit-self call against an included module's `def` declared in a sibling file" do # rubocop:disable RSpec/ExampleLength
+      Dir.mktmpdir("rigor-adr24-include-") do |tmpdir|
+        File.write(File.join(tmpdir, "helpers.rb"), <<~RUBY)
+          module Helpers
+            def boom(msg)
+              raise msg
+            end
+          end
+        RUBY
+        File.write(File.join(tmpdir, "worker.rb"), <<~RUBY)
+          require "rigor/testing"
+          include Rigor::Testing
+
+          class Worker
+            include Helpers
+
+            def run
+              v = boom("x")
+              assert_type("bot", v)
+            end
+          end
+        RUBY
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [tmpdir])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          mismatches = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }
+
+          expect(mismatches).to(
+            be_empty,
+            "expected `boom` to resolve cross-file to `Helpers#boom` (`bot`); got: " \
+            "#{mismatches.map(&:message).inspect}"
+          )
+        end
+      end
+    end
   end
 
   describe "target_ruby wiring (`.rigor.yml` -> Prism version:)" do

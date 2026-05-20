@@ -280,29 +280,37 @@ file scope exactly as it already seeds cross-file
 `discovered_classes`. The walk is depth-capped (20) and
 cycle-guarded.
 
+**Included / prepended modules** were added in a follow-up the same
+day (2026-05-21). `ScopeIndexer.build_discovered_includes` records,
+per class / module, the modules it `include`s / `prepend`s
+(constant arguments only). The cross-file
+`discovered_def_index_for_paths` returns the include map alongside
+the def-node and superclass maps; `Runner` seeds it via
+`Scope#discovered_includes` / `#includes_of`.
+`resolve_user_def_through_ancestors` is a breadth-first walk over
+the full user-class ancestor set — included / prepended modules
+(transitive) first, then the superclass — cycle-guarded and
+node-count-capped (100). `extend` is NOT tracked: it adds singleton
+methods, out of scope for the instance-side chain.
+
 Scope deviations from the slice sketch:
 
 - **RBS-known ancestors are NOT walked here.** The
   `MethodDispatcher` RBS tier runs *before*
   `try_user_method_inference` and already resolves methods on
-  RBS-known ancestors; the user-class walk simply stops when a
-  superclass name resolves to no project-discovered class. So "and
-  RBS-known ancestors" is satisfied by the existing dispatch
-  ordering, not by new code in the walk.
-- **Included modules (`include`) are deferred.** The engine has no
-  `include` / `prepend` / `extend` tracking for user code, and the
-  Mastodon cluster that drove this ADR is a *superclass* chain. A
-  separate follow-up adds module-mixin tracking + resolution; until
-  then an implicit-self call to an included-module method keeps
-  today's `Dynamic[top]` (WD3).
+  RBS-known ancestors; the user-class walk simply stops when an
+  ancestor name resolves to no project-discovered class / module.
+  So "and RBS-known ancestors" is satisfied by the existing
+  dispatch ordering, not by new code in the walk.
 
 Adoption stays gated by slice 1's `adoptable_self_call_result?`
 (inside a class body only a `Bot` return is adopted), so the FP
 profile is unchanged from slice 1: an ancestor guard helper
 resolves to `bot` and narrows (with slice 3); non-`Bot` ancestor
 returns stay `Dynamic[top]`. Fixtures:
-`spec/integration/fixtures/inherited_guard.rb` (same-file) + a
-cross-file `Runner` spec.
+`spec/integration/fixtures/inherited_guard.rb` (superclass,
+same-file) + `included_module_guard.rb` (mixin, same-file) + two
+cross-file `Runner` specs.
 
 ### Slice 3 — `bot`-branch flow narrowing (WD6) — IMPLEMENTED 2026-05-20
 

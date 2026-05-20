@@ -107,6 +107,7 @@ module Rigor
         @project_discovered_classes = {}.freeze
         @project_discovered_def_nodes = {}.freeze
         @project_discovered_superclasses = {}.freeze
+        @project_discovered_includes = {}.freeze
       end
 
       # ADR-pending editor mode — present when the runner is wired
@@ -253,6 +254,7 @@ module Rigor
           Inference::ScopeIndexer.discovered_def_index_for_paths(expansion.fetch(:files), buffer: @buffer)
         @project_discovered_def_nodes = def_index.fetch(:def_nodes)
         @project_discovered_superclasses = def_index.fetch(:superclasses)
+        @project_discovered_includes = def_index.fetch(:includes)
       end
 
       # Internal: adopts a frozen {ProjectScan} snapshot supplied
@@ -1377,11 +1379,13 @@ module Rigor
         Prism.parse(File.read(physical), filepath: path, version: @configuration.target_ruby)
       end
 
-      def analyze_file(path, environment) # rubocop:disable Metrics/MethodLength
-        parse_result = parse_source(path)
-        return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
-
-        scope = Scope.empty(environment: environment, source_path: path)
+      # Seeds the cross-file project pre-pass indexes onto a
+      # fresh per-file scope: discovered classes, and the ADR-24
+      # def-node / superclass / included-module maps. Each is
+      # applied only when non-empty so a runner constructed
+      # without the project pre-pass (e.g. a single-file probe)
+      # keeps an empty seed.
+      def seed_project_scope(scope)
         scope = scope.with_discovered_classes(@project_discovered_classes) unless @project_discovered_classes.empty?
         unless @project_discovered_def_nodes.empty?
           scope = scope.with_discovered_def_nodes(@project_discovered_def_nodes)
@@ -1389,6 +1393,15 @@ module Rigor
         unless @project_discovered_superclasses.empty?
           scope = scope.with_discovered_superclasses(@project_discovered_superclasses)
         end
+        scope = scope.with_discovered_includes(@project_discovered_includes) unless @project_discovered_includes.empty?
+        scope
+      end
+
+      def analyze_file(path, environment) # rubocop:disable Metrics/MethodLength
+        parse_result = parse_source(path)
+        return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
+
+        scope = seed_project_scope(Scope.empty(environment: environment, source_path: path))
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
         diagnostics = CheckRules.diagnose(
           path: path,

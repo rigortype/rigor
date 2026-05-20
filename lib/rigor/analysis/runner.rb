@@ -550,6 +550,8 @@ module Rigor
         blueprints = @plugin_registry.blueprints
         explain = @explain
 
+        prewarm_callinfo_table_for_pool(configuration, blueprints, explain, files)
+
         pool = Array.new(@workers) do
           Ractor.new(configuration, cache_root, blueprints, explain) do |configuration, cache_root, blueprints, explain|
             cache_store = cache_root ? Rigor::Cache::Store.new(root: cache_root) : nil
@@ -648,6 +650,41 @@ module Rigor
           rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect
         )
         warm_env.rbs_loader&.prewarm
+      end
+
+      # ADR-15 Phase 4 — pre-warm the process-global VM
+      # call-info table on the MAIN Ractor before the pool
+      # spawns. Building a full WorkerSession here (and running
+      # the first file through it) interns every runtime
+      # callinfo the worker init + analyse path needs into
+      # `vm->ci_table` while single-threaded.
+      #
+      # `vm->ci_table` is a process-global structure CRuby does
+      # NOT guard against concurrent Ractor mutation. Without
+      # this pre-warm the worker Ractors run byte-identical
+      # initialisation in lockstep and race to insert the same
+      # callinfos — notably the `super` calls in the HKT
+      # `Data.define` value objects ({Inference::HktBody}) — and
+      # a racing insert rehashes the table under a concurrent
+      # reader, which then dereferences freed bucket memory and
+      # segfaults (observed in CI: `hkt_body.rb`
+      # `NominalApp#initialize` `super` inside a pool worker).
+      #
+      # `prewarm_rbs_cache_for_pool` only builds an
+      # `Environment`, so it interns the HKT path but NOT the
+      # rest of `WorkerSession#initialize` (plugin materialise /
+      # prepare) nor the `#analyze` path — hence the full
+      # session build here. The throwaway session's diagnostics
+      # are discarded; any cache entries it writes are reused by
+      # the workers.
+      def prewarm_callinfo_table_for_pool(configuration, blueprints, explain, files)
+        warm_session = WorkerSession.new(
+          configuration: configuration,
+          cache_store: @cache_store,
+          plugin_blueprints: blueprints,
+          explain: explain
+        )
+        warm_session.analyze(files.first) unless files.empty?
       end
 
       # ADR-15 Phase 4b.x — pool-mode safety net. When pool

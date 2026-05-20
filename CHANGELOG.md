@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Fixed
+
+- **ADR-15 Phase 4 — Ractor worker pool segfault from a concurrent `vm->ci_table` race.** Under `make verify` in CI the pool-mode run intermittently crashed with `[BUG] Segmentation fault` inside a pool worker — the C backtrace pinned it to `vm_search_super_method` → `vm_ci_new_runtime_` → `rb_vm_ci_lookup` → `vm_ci_hash`, triggered by the `super` call in an HKT `Data.define` value object (`Inference::HktBody::NominalApp#initialize`). Root cause: `vm->ci_table` (CRuby's process-global runtime call-info cache) is not guarded against concurrent Ractor mutation. The four worker Ractors run byte-identical `WorkerSession` initialisation in lockstep and race to intern the same callinfos; a racing insert rehashes the table under a concurrent reader, which then dereferences freed bucket memory. `prewarm_rbs_cache_for_pool` already interned the HKT path (it builds an `Environment` on the main Ractor) but NOT the rest of `WorkerSession#initialize` (plugin materialise / prepare) nor the `#analyze` path. New `Runner#prewarm_callinfo_table_for_pool` builds one full throwaway `WorkerSession` — and runs the first file through it — on the main Ractor before the pool spawns, interning every runtime callinfo the worker init + analyse path needs while single-threaded; workers then only perform `ci_table` reads. The throwaway session's diagnostics are discarded; cache entries it writes are reused by the workers.
+
 ## [0.1.7] - 2026-05-20
 
 ### Changed

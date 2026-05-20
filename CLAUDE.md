@@ -94,6 +94,14 @@ Skills follow the [Anthropic Agent Skills](https://agentskills.io/) shape — a 
 | [`.claude/skills/rigor-ruby-version-bump/SKILL.md`](.claude/skills/rigor-ruby-version-bump/SKILL.md) | Bumping the development Ruby version across every project marker — `flake.nix` (with the Nix fake-hash derivation trick), `.ruby-version`, the `Gemfile` `ruby` directive, `Gemfile.lock`'s `RUBY VERSION`, and the `AGENTS.md` target-Ruby line. Covers patch vs minor vs major scope and the files that deliberately stay untouched (`flake.lock`, the gemspec range, the `ci.yml` minor series). |
 | [`.claude/skills/rigor-plugin-author/SKILL.md`](.claude/skills/rigor-plugin-author/SKILL.md) | Authoring a new official / bundled Rigor plugin under this repo's `plugins/` or `examples/` tree. End-to-end pipeline: 5-question requirements gathering → template selection from the existing walkthroughs (`examples/`) and production plugins (`plugins/`) → directory scaffold → AST walker pattern → integration spec → CHANGELOG `[Unreleased]` entry. Use whenever the user asks to "create a Rigor plugin for X" inside this repository. |
 
+### Evaluating skills with `waza`
+
+`waza` is an Agent-Skill evaluation CLI bundled in the Flake (`waza --help`; subcommands include `check`, `quality`, `dev`). Run `waza check <skill-path>` **once after authoring a new SKILL.md** as a minimal sanity check — it validates agentskills.io spec compliance (frontmatter structure, required fields, name / directory match).
+
+Treat everything else `waza` reports as **informational, not binding**. These SKILLs are internal contributor workflows, not marketplace submissions, so `waza`'s token-budget soft limit (500 tokens), module-count advisory, "comprehensive"-complexity penalty, and `USE FOR:` / `DO NOT USE FOR:` / `**UTILITY SKILL**` routing markers — all calibrated for agentskills.io publication — do not apply. Comprehensive single-file procedural skills are the intended shape here.
+
+Do **not** run `waza dev --auto` on these skills. It raises the compliance score by injecting `USE FOR:` / `**UTILITY SKILL** INVOKES:` boilerplate that is frequently false (e.g. listing H2 headings as trigger phrases, or claiming a procedural skill "invokes built-in analysis tools") — the score rises while the frontmatter degrades. The YAML `name:` + `description:` pair is the binding surface; keep it accurate and hand-written.
+
 ## Commit message style (mirrors AGENTS.md)
 
 - Plain imperative subject in sentence case. No Conventional-Commits-style `type:` or `area:` prefixes.

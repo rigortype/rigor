@@ -27,7 +27,8 @@ module Rigor
       "diff" => :run_diff,
       "sig-gen" => :run_sig_gen,
       "lsp" => :run_lsp,
-      "baseline" => :run_baseline
+      "baseline" => :run_baseline,
+      "triage" => :run_triage
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -464,6 +465,12 @@ module Rigor
       BaselineCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_triage
+      require_relative "cli/triage_command"
+
+      CLI::TriageCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def write_result(result, format)
       case format
       when "json"
@@ -505,6 +512,7 @@ module Rigor
           diff       Compare current diagnostics to a saved baseline JSON
           sig-gen    Emit RBS skeletons inferred from .rb sources (ADR-14)
           lsp        Run the Rigor Language Server (LSP) over stdio
+          triage     Summarise diagnostics: distribution, hotspots, hints (ADR-23)
           version    Print the Rigor version
           help       Print this help
       HELP

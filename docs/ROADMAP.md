@@ -25,8 +25,74 @@ that shaped each cut are preserved in git history (see
 | v0.1.2 | 2026-05-09 | Example plugin return-type migration, engine depth follow-up. See `CHANGELOG.md` § `[0.1.2]`. |
 | v0.1.4 | 2026-05-14 | ADR-10 / ADR-11 / ADR-13 deferred queues, ADR-14 `rigor sig-gen` end-to-end, `Type::BoundMethod` carrier, eighteen worked plugin examples. (The v0.1.3 commitment envelope absorbed extra tracks before cut and shipped as v0.1.4.) See `CHANGELOG.md` § `[0.1.4]`. |
 | v0.1.5 | 2026-05-16 | ADR-15 Ractor migration end-to-end (Phases 1–4c + 4b.x), real-world Rails survey (14 projects, 31,840 files) driving production improvements (vendored gem RBS, ActiveSupport core_ext opt-in bundle, Bundler-aware sig discovery), ADR-16 macro / DSL expansion substrate (closes O2 at the WD13 floor), O4 Layer 3 slices 1+2+3 (`Gemfile.lock` parse + `rbs_collection.lock.yaml` awareness + missing-gem `:info` diagnostic), DEFAULT_LIBRARIES stdlib coverage expansion (1,273 → 1,427 RBS classes), `is_a?(C)` lexical-nesting constant resolution, twenty-four worked plugin examples. See `CHANGELOG.md` § `[0.1.5]`. |
+| v0.1.6 | 2026-05-19 | ADR-12 / ADR-17 / ADR-18 floors + worked consumers; editor mode v1 + Language Server v1/v2; ADR-20 Lightweight HKT; ecosystem plugins + the `rigor-rails` meta-gem scaffold. See `CHANGELOG.md` § `[0.1.6]`. |
+| v0.1.7 | 2026-05-20 | ADR-22 baseline mechanism (slices 1+2) + project-onboarding groundwork; survey-driven plugin / engine false-positive fixes; Pillar 2 "your specs are types" slices 1+2+3. See `CHANGELOG.md` § `[0.1.7]`. |
+| v0.1.8 | 2026-05-21 | Mastodon-survey false-positive reduction: ADR-15 fork-based worker pool (the active `workers > 0` backend), ADR-23 `rigor triage` diagnostic-triage subcommand, ADR-24 implicit-self method-call resolution. See `CHANGELOG.md` § `[0.1.8]`. |
 
-## v0.1.6 — accumulating on `master` (release pending)
+## Release strategy — the road to v0.2.0
+
+The `0.1.x` line is the **preview** line. The `0.2.x` line opens
+the **evaluation** line — still not a formal / GA release, but the
+first publicly announced version meant for trial deployment in
+real products.
+
+| Line | Role |
+| --- | --- |
+| `0.1.x` | Preview. **v0.1.9 is the last preview cut — a near-complete (準完成版) release** that closes the outstanding preview-track commitments. |
+| `v0.2.0` | **First evaluation release.** Publicly announced as the first version intended for real-product trial deployment; opens the evaluation period and invites outside feedback. |
+| `0.2.x` | Evaluation line. Not yet a formal version, but the goal is to bring **every planned feature except the Ractor concurrency track** to high completion / production quality. |
+
+### v0.1.9 — last preview (near-complete)
+
+The final `0.1.x` cut. It closes the preview-track commitments so
+v0.2.0 starts the evaluation line from a near-complete base:
+
+- The **external-user SKILL trio** — `rigor-project-init`,
+  `rigor-baseline-reduce`, and the external-author
+  `rigor-plugin-author` variant (see § "Agent workflows / SKILLs"
+  below; [ADR-22 WD8](adr/22-baseline-and-project-onboarding.md)).
+- **ADR-22 baseline slice 5** — `rigor baseline regenerate` plus
+  the `--baseline-strict` CI gate.
+- Tightening defaults (plugin / severity / baseline-rule
+  recommendations) against the empirical project-survey data
+  collected across the v0.1.7 / v0.1.8 cycles.
+
+Treated as a release candidate for the v0.2.0 evaluation line:
+the bar is "no known release-blocking defect", not "every
+demand-driven backlog item closed".
+
+### v0.2.0 — first evaluation release
+
+The first publicly announced version, intended for trial
+deployment in real products. v0.2.0 is an **evaluation** release,
+not a GA / formal version — it opens the evaluation period and
+solicits outside feedback. Gating conditions (the v0.1.x
+"out of scope today" list this release absorbs):
+
+- The ADR-2 plugin-contract surface stabilised enough to support
+  external `rigor-*` gems outside this monorepo.
+- The subtree-split / RubyGems publishing flow exercised for at
+  least the `rigor-rails` family.
+- The SKILL trio shipped (v0.1.9) so newcomers have an onboarding
+  path.
+
+### v0.2.x — high-completion evaluation line
+
+Across the `0.2.x` series the goal is to bring the planned
+feature set to high completion / production quality. The
+demand-driven backlog under § "Future cycles" below is, under
+this plan, the **v0.2.x completion target** rather than an
+open-ended queue — every item there is in scope for `0.2.x`
+**except the Ractor concurrency track**.
+
+**Ractor is deliberately excluded.** ADR-15's Ractor worker pool
+was found unusable on Ruby 4.0.x (Ruby Bug #22075 plus a
+deterministic `Ractor::IsolationError`); v0.1.8's fork-based pool
+is the active backend. The Ractor pool stays parked behind
+`RIGOR_POOL_BACKEND=ractor` and ADR-15 § OQ1; completing it is
+NOT a `0.2.x` goal and waits on upstream CRuby fixes.
+
+## v0.1.6 — shipped 2026-05-19 (planning envelope retained below)
 
 Theme: **three accepted-and-implemented ADRs unlock per-call-site precision uplift through cross-plugin facts, project-side monkey-patch recognition, and a foundation dry-rb plugin — plus the first two cuts of editor / IDE integration (editor mode v1 + Language Server v1), substantial LSP / spec-suite performance wins, and four new ecosystem plugins (rigor-dry-schema, rigor-graphql, rigor-dry-validation) plus the `rigor-rails` meta-gem scaffold.** Commits `3c99eed` → `8530856`.
 
@@ -53,7 +119,7 @@ Every committed v0.1.6 track is purely additive (no behaviour change for existin
 - **`rigor-graphql` slices 1+2a+2b+2c+2d ALL LANDED** (Tier 3D — `Schema::Object` + list wrappers + `Schema::Enum` + `Schema::InputObject` + `Schema::Mutation` recognition, publishing four cross-plugin facts; CHANGELOG `[Unreleased]` § Added). Remaining future slices (resolver-method type-check, `<Type>.array` / `<Type>!` chain forms, string-form `field :foo, "User"` diagnostic, `Schema.execute(...)` result typing) demand-driven.
 - **O4 Layer 3 per-gem-version cache** (slice 3 architecture; future Ruby::Box-style Bundler extension would raise priority).
 
-## v0.1.7 / v0.1.8 — user-facing positioning track (committed)
+## v0.1.7 / v0.1.8 — user-facing positioning track (shipped)
 
 A three-pillar messaging framework drives README / handbook
 front matter and shapes the v0.1.7 / v0.1.8 release narrative.
@@ -69,7 +135,7 @@ README.**
 | 2. Your specs are types | "Do you really need to write types? `spec/` is already type information." | Implementation track below. Promote into README when slices 1–3 land. |
 | 3. Programmable inference beyond unions | "Union types aren't enough for type safety. Programmable inference makes metaprogramming and safety friendly." | Shipped (carrier zoo + plugin contract + ADR-16 substrate + ADR-18 per-call-site precision). README lead reflects this from v0.1.6. |
 
-### Pillar 2 implementation track (target: v0.1.8)
+### Pillar 2 implementation track (shipped — slices 1+2+3 landed in v0.1.7)
 
 Backing the "specs are types" narrative without overpromising
 requires three concrete capabilities, additive on top of the
@@ -109,12 +175,9 @@ no behaviour change for users not running `rigor-rspec` /
 `rigor-factorybot`. Once the slices land the README's
 "two design commitments" lead expands to three.
 
-The v0.1.7 cut absorbs whichever slice lands first during the
-v0.1.6 finalisation window; v0.1.8 is the binding ceiling for
-all three. If concrete user demand surfaces sooner — say, a
-spec-heavy codebase reporting that `let`-bindings read as
-`Dynamic[Top]` is the dominant friction — the ceiling pulls
-forward.
+All three slices landed in the v0.1.7 cut (CHANGELOG § `[0.1.7]`),
+ahead of the v0.1.8 ceiling; the README's "two design commitments"
+lead has expanded to three.
 
 ## Future cycles (not committed to a specific release)
 
@@ -164,7 +227,7 @@ Items that have surfaced across v0.1.x work and that the next implementer benefi
 
 Three SKILLs target **end-users newly adopting Rigor on their own projects** (gem authors, application developers, project-private plugin maintainers running `gem install rigortype`). All three live under the **top-level `skills/` tree** — the slot vacated when `rigor-plugin-author` was re-homed to `.claude/skills/` in commit `1a3c342` — and follow the [agentskills.io](https://agentskills.io/) portable-skill conventions (self-contained `SKILL.md` + `references/`, absolute GitHub URLs for cross-repo refs, kebab-case names, public CLI surface only).
 
-Lead-up cycle (v0.1.7 / v0.1.8) is reserved for **collecting and addressing real-project error data** — running rigor against widening project surveys, tightening defaults from observed signal, and curating the SKILL trio's plugin / severity / baseline-rule recommendations against empirical evidence rather than first-principles guesses.
+The v0.1.7 / v0.1.8 cycles were the lead-up — **collecting and addressing real-project error data** by running rigor against widening project surveys (the Mastodon survey drove the v0.1.8 false-positive-reduction work), tightening defaults from observed signal, and curating the SKILL trio's plugin / severity / baseline-rule recommendations against empirical evidence rather than first-principles guesses. v0.1.9 ships the trio itself as the last preview cut (see § "Release strategy — the road to v0.2.0").
 
 - **`skills/rigor-project-init/`** ([ADR-22 § "WD8"](adr/22-baseline-and-project-onboarding.md), [§ "SKILL: rigor-project-init"](adr/22-baseline-and-project-onboarding.md)). First-time onboarding workflow: Gemfile / Gemfile.lock walk → propose plugin set matching the detected stack (Rails / dry-rb / Sinatra / plain Ruby) → severity profile choice (lenient if >100 errors on first run, balanced otherwise) → write `.rigor.dist.yml` → run `rigor check` → write `.rigor-baseline.yml` AND the matching `baseline: .rigor-baseline.yml` line into the config → surface concentrated rules as likely real bugs. Audience: a user typing `gem install rigortype` for the first time in their project.
 
@@ -176,7 +239,7 @@ The trio forms a coherent **onboarding → ongoing-quality → extension** progr
 
 Companion non-SKILL deliverable, ahead of the SKILL trio:
 
-- **Baseline mechanism core** ([ADR-22](adr/22-baseline-and-project-onboarding.md)): PHPStan-shaped `.rigor-baseline.yml` recording `(file, rule, count)` snapshots (rule-ID default + opt-in message-pattern mode per WD1); `rigor check` filters baselined diagnostics with ALL-or-NOTHING per-bucket threshold semantics (WD4); explicit-loading-only (WD2 (b)) via `baseline: <path>` in `.rigor.yml`. New CLI subcommand family: `rigor baseline {generate, dump, drift, prune, regenerate}` + `--baseline=PATH` / `--no-baseline` on `rigor check`. Driven by the five-project survey ([`docs/notes/20260519-oss-library-survey.md`](notes/20260519-oss-library-survey.md)) where mature codebases carry hundreds-thousands of diagnostics on first contact. Slices 1 + 2 (file I/O + drift inspection) ship through the regular v0.1.x cycle starting v0.1.7 — so the v0.1.7 / v0.1.8 survey work can collect empirical baseline data before the SKILLs land; slices 3 + 4 (the two SKILLs) ship under the v0.1.9 cycle.
+- **Baseline mechanism core** ([ADR-22](adr/22-baseline-and-project-onboarding.md)): PHPStan-shaped `.rigor-baseline.yml` recording `(file, rule, count)` snapshots (rule-ID default + opt-in message-pattern mode per WD1); `rigor check` filters baselined diagnostics with ALL-or-NOTHING per-bucket threshold semantics (WD4); explicit-loading-only (WD2 (b)) via `baseline: <path>` in `.rigor.yml`. New CLI subcommand family: `rigor baseline {generate, dump, drift, prune, regenerate}` + `--baseline=PATH` / `--no-baseline` on `rigor check`. Driven by the five-project survey ([`docs/notes/20260519-oss-library-survey.md`](notes/20260519-oss-library-survey.md)) where mature codebases carry hundreds-thousands of diagnostics on first contact. Slices 1 + 2 (file I/O + drift inspection) shipped in v0.1.7 — so the v0.1.7 / v0.1.8 survey work could collect empirical baseline data before the SKILLs land. Slice 5 (`regenerate` + `--baseline-strict` CI gate) and the SKILL trio ship under v0.1.9, the last preview cut.
 
 ## Rails ecosystem plugins (running track, parallel to v0.1.x core work)
 

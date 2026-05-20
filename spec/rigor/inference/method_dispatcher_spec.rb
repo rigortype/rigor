@@ -662,6 +662,55 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
     end
 
+    describe "private-method suppression on the explicit-receiver fallback" do
+      let(:env) { Rigor::Environment.default }
+
+      def call_node_for(source)
+        Prism.parse(source).value.statements.body.first
+      end
+
+      it "does NOT resolve a private Kernel method on an explicit non-self receiver" do
+        # `Favourite.select(:col)` (ActiveRecord) must not adopt the
+        # private `Kernel#select` signature (`-> Array[String]`).
+        # Ruby raises NoMethodError for a private method called with
+        # an explicit receiver, so the fallback returns nil and the
+        # call types `Dynamic[top]` rather than a wrong `Array[String]`.
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.singleton_of("Favourite"),
+          method_name: :select, arg_types: [Rigor::Type::Combinator.constant_of(:status_id)],
+          environment: env,
+          call_node: call_node_for("Favourite.select(:status_id)")
+        )
+        expect(result).to be_nil
+      end
+
+      it "still resolves a private Kernel method on an IMPLICIT-self call" do
+        # `puts "x"` inside a method body is an implicit-self call:
+        # `call_node.receiver` is nil, so the fallback keeps resolving
+        # `Kernel#puts` (the fallback's intended target).
+        result = described_class.dispatch(
+          receiver_type: Rigor::Type::Combinator.nominal_of("MyApp::Greeter"),
+          method_name: :puts, arg_types: [Rigor::Type::Combinator.nominal_of("String")],
+          environment: env,
+          call_node: call_node_for("puts \"x\"")
+        )
+        expect(result).not_to be_nil
+      end
+
+      it "still resolves a public Kernel method on an explicit non-self receiver" do
+        # `.dup` is public — the explicit-receiver suppression must
+        # not touch it.
+        unknown_receiver = Rigor::Type::Combinator.nominal_of("MyApp::Thing")
+        result = described_class.dispatch(
+          receiver_type: unknown_receiver,
+          method_name: :dup, arg_types: [],
+          environment: env,
+          call_node: call_node_for("thing.dup")
+        )
+        expect(result).to eq(unknown_receiver)
+      end
+    end
+
     describe "static return refinements tier (File class-side)" do
       let(:env) { Rigor::Environment.default }
       let(:non_empty_string) { Rigor::Type::Combinator.non_empty_string }

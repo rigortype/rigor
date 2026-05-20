@@ -85,10 +85,17 @@ module Rigor
         #   `Bundler::URI::Generic` per `Kernel#dup: () -> self`
         #   rather than `Object`. Defaults to nil (compute self
         #   from the resolved class_name as before).
+        # @param public_only [Boolean] when true, a method whose RBS
+        #   accessibility is `:private` does not resolve (the call
+        #   yields `nil`, i.e. "no rule"). Set by the explicit-
+        #   non-`self`-receiver user-class fallback so a call like
+        #   `Favourite.select(...)` does not adopt the private
+        #   `Kernel#select` signature.
         # @return [Rigor::Type, nil] inferred return type, or `nil`
         #   when no rule resolves (no class name, no method, dispatch
         #   on a Top/Dynamic[Top] receiver, etc.).
-        def try_dispatch(receiver:, method_name:, args:, environment:, block_type: nil, self_type_override: nil)
+        def try_dispatch(receiver:, method_name:, args:, environment:, block_type: nil, self_type_override: nil,
+                         public_only: false)
           return nil if environment.nil?
           return nil unless environment.rbs_loader
 
@@ -98,7 +105,8 @@ module Rigor
             args: args,
             environment: environment,
             block_type: block_type,
-            self_type_override: self_type_override
+            self_type_override: self_type_override,
+            public_only: public_only
           )
         end
 
@@ -140,32 +148,39 @@ module Rigor
         class << self
           private
 
-          def dispatch_for(receiver:, method_name:, args:, environment:, block_type:, self_type_override: nil)
+          def dispatch_for(receiver:, method_name:, args:, environment:, block_type:, self_type_override: nil,
+                           public_only: false)
             args ||= []
             case receiver
             when Type::Union
-              dispatch_union(receiver, method_name, args, environment, block_type, self_type_override)
+              dispatch_union(receiver, method_name, args, environment, block_type, self_type_override,
+                             public_only: public_only)
             else
-              dispatch_one(receiver, method_name, args, environment, block_type, self_type_override)
+              dispatch_one(receiver, method_name, args, environment, block_type, self_type_override,
+                           public_only: public_only)
             end
           end
 
-          def dispatch_union(receiver, method_name, args, environment, block_type, self_type_override = nil)
+          def dispatch_union(receiver, method_name, args, environment, block_type, self_type_override = nil,
+                             public_only: false)
             results = receiver.members.map do |member|
-              dispatch_one(member, method_name, args, environment, block_type, self_type_override)
+              dispatch_one(member, method_name, args, environment, block_type, self_type_override,
+                           public_only: public_only)
             end
             return nil if results.any?(&:nil?)
 
             Type::Combinator.union(*results)
           end
 
-          def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil)
+          def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil,
+                           public_only: false)
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
             class_name, kind, receiver_args = descriptor
             method_definition = lookup_method(environment, class_name, kind, method_name)
             return nil unless method_definition
+            return nil if public_only && method_private?(method_definition)
 
             type_vars = build_type_vars(environment, class_name, receiver_args)
             translate_return_type(
@@ -240,6 +255,16 @@ module Rigor
               Type::Combinator.union(*key_types),
               Type::Combinator.union(*value_types)
             ]
+          end
+
+          # True when the RBS method definition is `private`. A call
+          # with an explicit, non-`self` receiver cannot reach a
+          # private method (Ruby raises `NoMethodError`), so the
+          # explicit-receiver user-class fallback uses this to reject
+          # private signatures rather than return a wrong type.
+          def method_private?(method_definition)
+            method_definition.respond_to?(:accessibility) &&
+              method_definition.accessibility == :private
           end
 
           def lookup_method(environment, class_name, kind, method_name)

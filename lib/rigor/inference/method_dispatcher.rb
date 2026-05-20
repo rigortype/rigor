@@ -191,7 +191,7 @@ module Rigor
         # introspection (`attr_reader`, `private`, ...) on
         # user classes without requiring the user to author
         # their own RBS.
-        try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type)
+        try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type, call_node)
       end
 
       # v0.1.3 — discovered-method dispatch tier. `scope` carries
@@ -651,7 +651,7 @@ module Rigor
           )
       end
 
-      def try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type)
+      def try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type, call_node = nil)
         return nil if environment.nil?
 
         fallback_receiver = user_class_fallback_receiver(receiver_type, environment)
@@ -665,14 +665,42 @@ module Rigor
         # `Bundler::URI::Generic` instance method types `base`
         # as `Object` because `Bundler::URI::Generic` is not in
         # RBS and the fallback's `self` resolves to Object.
+        #
+        # `public_only:` — when the call has an EXPLICIT, non-`self`
+        # receiver (`Favourite.select(...)`), suppress the private
+        # `Object`/`Kernel`/`Class` methods the fallback would
+        # otherwise resolve. Ruby raises `NoMethodError` for a
+        # private method called with an explicit receiver, so
+        # resolving `Favourite.select` to the private `Kernel#select`
+        # (`-> Array[String]`) is a confidently-wrong type. Implicit-
+        # self / `self.`-receiver calls (`puts`, `raise`, `require`)
+        # keep resolving — those are the fallback's intended targets.
         RbsDispatch.try_dispatch(
           receiver: fallback_receiver,
           method_name: method_name,
           args: arg_types,
           environment: environment,
           block_type: block_type,
-          self_type_override: receiver_type
+          self_type_override: receiver_type,
+          public_only: explicit_non_self_receiver?(call_node)
         )
+      end
+
+      # True when the call node carries an explicit receiver that is
+      # not the literal `self`. Such a call cannot legally dispatch to
+      # a private method, so the user-class fallback must skip private
+      # signatures rather than return a confidently-wrong type. Returns
+      # false for implicit-self calls and `self.`-receiver calls (both
+      # may legally reach a private method in modern Ruby), and false
+      # when no `call_node` is supplied (internal dispatcher callers).
+      def explicit_non_self_receiver?(call_node)
+        return false if call_node.nil?
+        return false unless call_node.respond_to?(:receiver)
+
+        receiver = call_node.receiver
+        return false if receiver.nil?
+
+        !receiver.is_a?(Prism::SelfNode)
       end
 
       def user_class_fallback_receiver(receiver_type, environment)

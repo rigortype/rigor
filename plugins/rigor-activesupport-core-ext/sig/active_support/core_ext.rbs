@@ -387,6 +387,9 @@ class Hash[unchecked out K, unchecked out V]
   def deep_stringify_keys!: () -> self
   def assert_valid_keys: (*K | Array[K]) -> self
   def deep_transform_keys: () { (K) -> K } -> Hash[K, untyped]
+  def deep_transform_keys!: () { (K) -> K } -> self
+  def deep_transform_values: () { (V) -> untyped } -> Hash[K, untyped]
+  def deep_transform_values!: () { (V) -> untyped } -> self
 
   # `core_ext/hash/deep_dup`
   def deep_dup: () -> Hash[K, V]

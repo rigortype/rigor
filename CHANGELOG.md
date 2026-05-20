@@ -20,6 +20,10 @@ cycles live in dedicated archives:
 
 - **ADR-23 Slices 1+2 — `rigor triage` diagnostic-triage subcommand.** A `check`-derived subcommand that summarises a project's diagnostic stream instead of dumping the raw per-line list. Three sections: (1) **rule-ID distribution** — histogram by `qualified_rule`, split by severity; (2) **per-file hotspots** with their per-rule breakdown; (3) a **six-recogniser heuristic-hint catalogue** — H1 likely ActiveSupport `core_ext`, H2 likely a project monkey-patch / refinement, H3 a gem shipping no RBS, H4 a possible ActiveRecord relation misinference on `Array[...]`, H5 a systemic single-file cluster, H6 low-count scattered rules = likely genuine bugs — each naming a likely cause and a suggested action. `--format json` for tooling / the ADR-22 onboarding SKILLs; `--hints-only` / `--no-hints` / `--top N`. Read-only and advisory: never edits config, never writes a baseline, always exits 0 (`rigor check` remains the gate). New `Rigor::Triage` (pure over the diagnostic stream) + `Triage::Catalogue` + `CLI::TriageCommand` + `TriageRenderer`. On Mastodon (1303 files, default config) the report condenses 489 diagnostics into five hints headed by "365 likely ActiveSupport core_ext — wire the RBS bundle". Spec coverage: 19 examples (`spec/rigor/triage_spec.rb` unit + `spec/rigor/cli/triage_command_spec.rb` end-to-end). ADR-23 slices 3 (SKILL integration) + 4 (structured `Diagnostic` fields + plugin-contributed recognisers) remain. See [ADR-23](docs/adr/23-diagnostic-triage-command.md).
 
+### Fixed
+
+- **`rigor-activesupport-core-ext` — `Hash#deep_transform_keys!` / `deep_transform_values` family.** The bundle declared `deep_transform_keys` but not its `!` sibling, nor `deep_transform_values` / `deep_transform_values!`, so those ActiveSupport `core_ext` selectors surfaced as `call.undefined-method` false positives (observed on the Mastodon survey). Added the four signatures to the bundle's `Hash` section.
+
 ## [0.1.7] - 2026-05-20
 
 ### Changed

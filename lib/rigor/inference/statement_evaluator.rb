@@ -709,24 +709,25 @@ module Rigor
       # `a` when the RHS is skipped, while `a || b` can only produce
       # the truthy fragment of `a` when the RHS is skipped.
       #
-      # When the RHS unconditionally exits (`raise` / `return` /
-      # `throw` / `exit` / `abort` / `fail` / `next` / `break`), the
-      # post-OR / post-AND scope is the LHS-skipped edge alone:
-      # `a or raise` only survives when `a` was truthy, so subsequent
-      # statements observe `a` narrowed to its truthy fragment; the
-      # symmetric `a and raise` survives only when `a` was falsey.
-      # Same shape as the `eval_if` / `eval_unless` early-return
-      # narrowing.
+      # When the RHS is a terminating branch — it `raise`s /
+      # `return`s / `throw`s / `exit`s / `break`s / `next`s, OR its
+      # inferred type is `Bot` (ADR-24 WD6: a divergent helper such
+      # as `a or fail_with_message(...)`, recognised via
+      # `branch_terminates?`) — the post-OR / post-AND scope is the
+      # LHS-skipped edge alone: `a or raise` only survives when `a`
+      # was truthy, so subsequent statements observe `a` narrowed to
+      # its truthy fragment; the symmetric `a and raise` survives
+      # only when `a` was falsey. Same shape as the `eval_if` /
+      # `eval_unless` early-return narrowing.
       def eval_and_or(node)
         left_type, left_scope = sub_eval(node.left, scope)
         truthy_left, falsey_left = Narrowing.predicate_scopes(node.left, left_scope)
         rhs_entry = node.is_a?(Prism::AndNode) ? truthy_left : falsey_left
-        if branch_unconditionally_exits?(node.right)
-          # Walk the RHS for side-effects (on_enter callbacks,
-          # diagnostic dispatch on the raise / return expression
-          # itself) but discard its scope: control never reaches
-          # any statement after `a or raise` via that edge.
-          sub_eval(node.right, rhs_entry)
+        right_type, right_scope = sub_eval(node.right, rhs_entry)
+
+        if branch_terminates?(node.right, right_type)
+          # Control never reaches any statement after `a or raise`
+          # via the RHS edge — the RHS scope is discarded.
           surviving_type =
             if node.is_a?(Prism::AndNode)
               Narrowing.narrow_falsey(left_type)
@@ -737,7 +738,6 @@ module Rigor
           return [surviving_type, surviving_scope]
         end
 
-        right_type, right_scope = sub_eval(node.right, rhs_entry)
         skipped_type =
           if node.is_a?(Prism::AndNode)
             Narrowing.narrow_falsey(left_type)

@@ -331,6 +331,14 @@ top-level guard helper resolve to `bot`, and slice 3 makes that
 Mastodon `fail_with_message` cluster) still awaits slice 2.
 Integration fixture: `spec/integration/fixtures/bot_branch_guard.rb`.
 
+A follow-up (2026-05-21) extended the same generalisation to
+`eval_and_or`: `&&` / `||` carried an independent syntactic
+`branch_unconditionally_exits?` check, so `x = src or fail_now`
+(divergent helper rather than a bare `raise`) did not narrow.
+`eval_and_or` now evaluates the RHS first and uses
+`branch_terminates?`, so a `Bot`-typed RHS narrows the LHS to its
+surviving edge. Fixture: `spec/integration/fixtures/or_guard_narrowing.rb`.
+
 ### Slice 4 (gated — separate decision) — diagnostics on closed-class self-calls
 
 `call.undefined-method` / `call.wrong-arity` / argument-type on a

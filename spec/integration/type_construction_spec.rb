@@ -326,6 +326,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/or_guard_narrowing.rb — ADR-24 WD6 `or`-guard narrowing in eval_and_or" do
+    let(:harness) { harness_for("or_guard_narrowing") }
+
+    it "narrows the LHS of `or` when the RHS is a `Bot`-typed guard helper" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assert_extended/ — RBS::Extended `assert` / `assert-if-*` (v0.0.2)" do
     let(:harness) { harness_for("assert_extended") }
 

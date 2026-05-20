@@ -201,6 +201,58 @@ is the contract between phases. Adding a new value-object
 class without writing the matching `Ractor.shareable?`
 assertion is a regression.
 
+## Amendment (2026-05-20) — fork becomes the active parallel backend
+
+Phase 4 (the Ractor worker pool) **landed but does not work**. Two
+independent defects, both confirmed against Ruby 4.0.4 and 4.0.5, make
+the pool unusable. The full investigation is
+[`docs/notes/20260520-ractor-pool-cruby-uaf.md`](../notes/20260520-ractor-pool-cruby-uaf.md).
+
+1. **CRuby heap-use-after-free (upstream, flaky).** Under a parallel
+   Ractor pool, a GC sweep on one Ractor frees a `T_DATA` object whose
+   memory `rb_vm_ci_lookup` (the runtime call-info path, reached from
+   every `super` call) concurrently reads on another Ractor.
+   AddressSanitizer pins it; filed upstream as **Ruby Bug #22075**.
+   ~70 % of `runner_pool_spec.rb` runs crash, with a varying crash site.
+2. **`Ractor::IsolationError` (rigor-side, deterministic).** Worker
+   Ractors read non-shareable process-global constants
+   (`RBS::EnvironmentLoader::DEFAULT_CORE_ROOT`, rigor's own
+   `Builtins::StaticReturnRefinements::OWNERS_BY_METHOD` and
+   `Builtins::HktBuiltins::METHOD_RETURN_OVERRIDES`). The access raises,
+   the analyzer catches it per file, and the pool emits 100 %
+   `internal analyzer error` diagnostics — zero real analysis. A
+   Mastodon benchmark (1303 files) yielded 1296 isolation-error
+   diagnostics against the sequential path's 488 real ones.
+
+### Decision
+
+**Fork-based parallelism becomes the active backend for `workers > 0`.**
+The Ractor pool implementation is preserved — it is the correct
+long-term direction once #22075 is fixed and the shareability gaps are
+closed — but is no longer on the default path; it is reachable only via
+an explicit opt-in (`RIGOR_POOL_BACKEND=ractor`) so it stays testable.
+
+- `Runner#analyze_files_in_fork_pool` builds one `WorkerSession` in the
+  parent, `fork`s N children that copy-on-write inherit it, each child
+  analyses its file slice and returns Marshal'd diagnostics + reporter
+  drains, and the parent merges. Separate processes mean separate GC
+  heaps and `vm->ci_table` (immune to defect 1) and COW-inherited
+  constants (no shareability constraint — immune to defect 2).
+- POSIX-only. Where `fork` is unavailable (Windows) `workers > 0`
+  degrades to sequential with a `pool-degraded` diagnostic.
+- This **supersedes WD1** below: fork is no longer merely "a viable
+  fallback", it is the shipping backend. WD1's reasoning held for the
+  Ractor *design*; it did not anticipate that CRuby's parallel-Ractor
+  memory safety would not be production-ready in 4.0.x.
+
+### Status of the four phases
+
+Phases 1–3 (shareability scaffolding) are unaffected and remain
+valuable — the `WorkerSession` substrate (Phase 4a) is backend-neutral
+and the fork pool reuses it directly. Phase 4b/4c (the Ractor pool
+itself) is **blocked on Ruby Bug #22075** plus the constant-shareability
+gaps; revisit when both are resolved.
+
 ## Reference: the share boundary
 
 Ractors require every object that crosses a Ractor boundary
@@ -252,6 +304,15 @@ than expected, the fork path becomes a viable fallback —
 fork doesn't require plugins to be shareable. We are not
 committing AGAINST fork; we are committing to Ractor as the
 primary direction.
+
+> **Revisited 2026-05-20 — superseded by the Amendment above.**
+> Phase 4 measured the Ractor pool as unusable on Ruby 4.0.x (Ruby Bug
+> #22075 + isolation-error gaps), so fork is now the active backend,
+> not a fallback. This table's "MRI maturity in 4.x — Stable, with
+> caveats" line proved too optimistic for parallel-Ractor memory
+> safety. The "fork forces per-process Environment rebuild" cost is
+> also avoided: the fork pool builds the `WorkerSession` once in the
+> parent and children copy-on-write inherit it.
 
 ### WD2 — Why split `RbsLoader` rather than make it shareable?
 

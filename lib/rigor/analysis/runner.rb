@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "tmpdir"
 
 require_relative "../environment"
 require_relative "../scope"
@@ -278,7 +279,7 @@ module Rigor
         return [] if files.empty?
 
         if pool_mode?
-          analyze_files_in_pool(files)
+          dispatch_pool(files)
         else
           environment = resolve_sequential_environment
           result = files.flat_map { |path| analyze_file(path, environment) }
@@ -460,6 +461,34 @@ module Rigor
         @buffer.nil?
       end
 
+      # ADR-15 Amendment (2026-05-20) — worker-pool backend selector.
+      # `fork` is the active backend: separate processes sidestep both
+      # the Ruby Bug #22075 use-after-free and the worker-side
+      # `Ractor::IsolationError` that make the Ractor pool unusable
+      # (see the ADR-15 Amendment +
+      # docs/notes/20260520-ractor-pool-cruby-uaf.md). The Ractor pool
+      # is preserved but off the default path — `RIGOR_POOL_BACKEND=ractor`
+      # opts back in so it stays testable. Platforms without `fork`
+      # (Windows) fall back to sequential.
+      def pool_backend
+        return :ractor if ENV["RIGOR_POOL_BACKEND"] == "ractor"
+        return :fork if Process.respond_to?(:fork)
+
+        :sequential
+      end
+
+      # Routes pool-mode analysis to the selected backend.
+      def dispatch_pool(files)
+        case pool_backend
+        when :ractor then analyze_files_in_pool(files)
+        when :fork   then analyze_files_in_fork_pool(files)
+        else
+          analyze_files_sequentially_fallback(
+            files, reason: "fork-based parallelism is unavailable on this platform"
+          )
+        end
+      end
+
       # Coordinator-side Environment used by the sequential code
       # path. Pool mode builds one Environment per worker inside
       # the worker Ractor's body instead.
@@ -596,6 +625,122 @@ module Rigor
         pool.each(&:join)
 
         Array(prepare_diagnostics) + files.flat_map { |path| results_by_path.fetch(path, []) }
+      end
+
+      # ADR-15 Amendment (2026-05-20) — fork-based worker pool, the
+      # active backend for `workers > 0`. Builds ONE {WorkerSession}
+      # on the parent, then `fork`s N children that copy-on-write
+      # inherit it. Each child analyses a contiguous slice of `files`
+      # and writes a Marshal'd `{results:, reporters:}` payload to a
+      # temp file; the parent `Process.wait`s every child, merges the
+      # payloads, and re-orders diagnostics by original path order.
+      #
+      # Separate processes have separate GC heaps and `vm->ci_table`
+      # (immune to Ruby Bug #22075) and copy-on-write-inherit every
+      # constant (no `Ractor.shareable?` constraint). See the ADR-15
+      # Amendment + docs/notes/20260520-ractor-pool-cruby-uaf.md.
+      #
+      # A child that exits non-zero (crash / unmarshalable payload) is
+      # degraded: the parent re-analyses that slice in-process and
+      # prepends a `pool-degraded` warning.
+      def analyze_files_in_fork_pool(files) # rubocop:disable Metrics/AbcSize
+        Environment::ClassRegistry.default
+
+        session = WorkerSession.new(
+          configuration: @configuration,
+          cache_store: @cache_store,
+          plugin_blueprints: @plugin_registry.blueprints,
+          explain: @explain,
+          synthetic_method_index: @synthetic_method_index,
+          project_patched_methods: @project_patched_methods
+        )
+        # Force the full RBS load on the parent so children
+        # copy-on-write inherit a warm Environment rather than each
+        # rebuilding it after the fork.
+        session.environment.rbs_loader&.prewarm
+        snapshot_fork_pool_stats(session) if @collect_stats
+
+        worker_count = [@workers, files.size].min
+        slices = files.each_slice((files.size.to_f / worker_count).ceil).to_a
+        results_by_path = {}
+
+        degraded = Dir.mktmpdir("rigor-fork-pool") do |tmpdir|
+          children = slices.each_with_index.map do |slice, index|
+            out_path = File.join(tmpdir, "worker-#{index}")
+            { pid: fork { run_fork_worker(session, slice, out_path) },
+              slice: slice, out_path: out_path }
+          end
+          collect_fork_results(children, results_by_path)
+        end
+
+        unless degraded.empty?
+          degraded.each { |path| results_by_path[path] = session.analyze(path) }
+          merge_worker_reporters(session.drain_reporters)
+        end
+
+        diagnostics = Array(session.prepare_diagnostics) +
+                      files.flat_map { |path| results_by_path.fetch(path, []) }
+        degraded.empty? ? diagnostics : diagnostics.unshift(fork_degraded_diagnostic(degraded.size))
+      end
+
+      # Child-process body for {#analyze_files_in_fork_pool}. Analyses
+      # the slice with the copy-on-write-inherited session and writes
+      # the Marshal'd payload to `out_path`. `exit!` skips `at_exit` /
+      # stdio flush — the payload is already durable on disk by then.
+      def run_fork_worker(session, slice, out_path)
+        results = slice.to_h { |path| [path, session.analyze(path)] }
+        payload = { results: results, reporters: session.drain_reporters }
+        File.binwrite(out_path, Marshal.dump(payload))
+        exit!(0)
+      rescue StandardError
+        exit!(1)
+      end
+
+      # Snapshots `class_decl_paths` from the parent session's loader
+      # so end-of-run {RunStats} can attribute the RBS class universe.
+      def snapshot_fork_pool_stats(session)
+        loader = session.environment.rbs_loader
+        @class_decl_paths_snapshot = loader&.class_decl_paths || {}.freeze
+        @signature_paths_snapshot = loader&.signature_paths || [].freeze
+      end
+
+      # Waits for every forked child, merges each successful payload
+      # into `results_by_path`, and returns the file paths whose
+      # worker exited abnormally (for in-process degrade).
+      def collect_fork_results(children, results_by_path)
+        degraded = []
+        children.each do |child|
+          _, status = Process.waitpid2(child[:pid])
+          payload = fork_worker_payload(status, child[:out_path])
+          if payload
+            results_by_path.merge!(payload.fetch(:results))
+            merge_worker_reporters(payload.fetch(:reporters))
+          else
+            degraded.concat(child[:slice])
+          end
+        end
+        degraded
+      end
+
+      # @return [Hash, nil] the child's `{results:, reporters:}`
+      #   payload, or nil when the child exited abnormally or wrote no
+      #   readable payload. `Marshal.load` is safe here: the blob was
+      #   written by our own forked child to a temp file we created.
+      def fork_worker_payload(status, out_path)
+        return nil unless status.success? && File.exist?(out_path)
+
+        Marshal.load(File.binread(out_path)) # rubocop:disable Security/MarshalLoad
+      rescue StandardError
+        nil
+      end
+
+      def fork_degraded_diagnostic(count)
+        Diagnostic.new(
+          path: ".rigor.yml", line: 1, column: 1,
+          message: "fork pool degraded: #{count} file(s) re-analysed in-process " \
+                   "after a worker exited abnormally",
+          severity: :warning, rule: "pool-degraded", source_family: :builtin
+        )
       end
 
       # End-of-run telemetry. Walks the cached

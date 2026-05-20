@@ -38,6 +38,12 @@ module Rigor
     # - `plugin_blueprints` — Phase 3a
     #   (`Array<Plugin::Blueprint>` is `Ractor.shareable?`).
     # - `explain` — Boolean.
+    # - `synthetic_method_index` / `project_patched_methods` —
+    #   optional (default `nil`). NOT `Ractor.shareable?`, so the
+    #   Ractor pool path leaves them unset; the fork backend
+    #   (ADR-15 Amendment), which builds the session pre-fork on the
+    #   parent, threads the runner's project-scan results through so
+    #   per-file inference matches the sequential path exactly.
     #
     # Internally the session OWNS (and never shares):
     #
@@ -70,7 +76,7 @@ module Rigor
     # output (modulo severity-profile re-stamping, which the
     # session leaves to the caller because it is a per-run
     # aggregate concern).
-    class WorkerSession
+    class WorkerSession # rubocop:disable Metrics/ClassLength
       attr_reader :configuration, :cache_store, :services, :plugin_registry,
                   :dependency_source_index, :environment,
                   :rbs_extended_reporter, :boundary_cross_reporter,
@@ -88,11 +94,14 @@ module Rigor
       #   directly-unrecognised node, mirroring
       #   {Rigor::Analysis::Runner#explain_diagnostics}.
       def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength
-                     plugin_blueprints: [], explain: false, buffer: nil)
+                     plugin_blueprints: [], explain: false, buffer: nil,
+                     synthetic_method_index: nil, project_patched_methods: nil)
         @configuration = configuration
         @cache_store = cache_store
         @explain = explain
         @buffer = buffer
+        @synthetic_method_index = synthetic_method_index
+        @project_patched_methods = project_patched_methods
 
         # NOTE: `Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths`
         # is process-global state. Writing it from a non-main
@@ -127,7 +136,9 @@ module Rigor
           bundler_auto_detect: configuration.bundler_auto_detect,
           bundler_lockfile: configuration.bundler_lockfile,
           rbs_collection_lockfile: configuration.rbs_collection_lockfile,
-          rbs_collection_auto_detect: configuration.rbs_collection_auto_detect
+          rbs_collection_auto_detect: configuration.rbs_collection_auto_detect,
+          synthetic_method_index: @synthetic_method_index,
+          project_patched_methods: @project_patched_methods
         )
         @prepare_diagnostics = run_plugin_prepare.freeze
       end

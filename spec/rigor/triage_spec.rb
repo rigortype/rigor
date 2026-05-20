@@ -7,9 +7,11 @@ require "rigor/analysis/diagnostic"
 # the aggregation and the six-recogniser catalogue are covered here
 # with synthetic `Diagnostic` arrays (no Runner / no analysis pass).
 RSpec.describe Rigor::Triage do
-  def diag(path: "a.rb", rule: "call.undefined-method", message: "boom", severity: :error)
+  def diag(path: "a.rb", rule: "call.undefined-method", message: "boom", severity: :error,
+           receiver_type: nil, method_name: nil)
     Rigor::Analysis::Diagnostic.new(
-      path: path, line: 1, column: 1, message: message, severity: severity, rule: rule
+      path: path, line: 1, column: 1, message: message, severity: severity, rule: rule,
+      receiver_type: receiver_type, method_name: method_name
     )
   end
 
@@ -107,6 +109,32 @@ RSpec.describe Rigor::Triage do
       report = described_class.analyze([udm("days", "5")] * 3)
       expect(hint(report, "activesupport-core-ext")).not_to be_nil
       expect(hint(report, "genuine-bugs")).to be_nil
+    end
+  end
+
+  describe "WD3 — structured receiver_type / method_name fields (slice 4)" do
+    # Carries the structured pair but a message the `undefined
+    # method ...` parser cannot match — proves the recogniser reads
+    # the fields rather than the message.
+    def structured(method, receiver, **)
+      diag(message: "(wording the message parser cannot match)",
+           receiver_type: receiver, method_name: method, **)
+    end
+
+    it "H1 recognises a cluster from the structured fields alone" do
+      report = described_class.analyze([structured("days", "Integer")] * 3)
+      h = hint(report, "activesupport-core-ext")
+      expect([h&.confidence, h&.diagnostic_count]).to eq([:likely, 3])
+    end
+
+    it "H4 reads the Array[...] receiver from the structured field" do
+      report = described_class.analyze([structured("where", "Array[String]")])
+      expect(hint(report, "activerecord-relation-misinference")).not_to be_nil
+    end
+
+    it "falls back to message parsing when the structured fields are absent" do
+      report = described_class.analyze([udm("days", "5")] * 3)
+      expect(hint(report, "activesupport-core-ext")).not_to be_nil
     end
   end
 

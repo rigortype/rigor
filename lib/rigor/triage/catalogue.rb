@@ -11,11 +11,14 @@ module Rigor
     # an earlier one, so a `5.minutes` diagnostic counted by H1
     # (ActiveSupport) is not re-counted by H2 (monkey-patch).
     #
-    # WD3: recognisers key on the structured `qualified_rule`
-    # first; where they additionally need the receiver type or
-    # method name they parse the diagnostic message. A parse
-    # failure degrades to "skip this diagnostic" — never a crash.
-    module Catalogue
+    # WD3 / slice 4: recognisers key on the structured
+    # `qualified_rule` first; where they additionally need the
+    # receiver type or method name they read the structured
+    # `Diagnostic#receiver_type` / `#method_name` fields, falling
+    # back to parsing the diagnostic message only when those are
+    # absent. A parse failure degrades to "skip this diagnostic" —
+    # never a crash.
+    module Catalogue # rubocop:disable Metrics/ModuleLength
       module_function
 
       UNDEFINED_METHOD_RULE = "call.undefined-method"
@@ -212,16 +215,33 @@ module Rigor
 
       # --- shared helpers ----------------------------------------
 
+      # WD3 / slice 4: prefer the structured `receiver_type` /
+      # `method_name` fields the `call.undefined-method` rule now
+      # populates; fall back to parsing the message only when they
+      # are absent (older diagnostics, plugin-emitted rules). Either
+      # way the receiver token is normalised through `receiver_class`.
       def parse_undefined_method(diag)
         return nil unless rule_of(diag) == UNDEFINED_METHOD_RULE
 
-        m = UNDEF_METHOD.match(diag.message)
-        return nil unless m
+        method, receiver_token = structured_undefined_method(diag) ||
+                                 message_undefined_method(diag)
+        return nil unless method
 
-        receiver = receiver_class(m[2])
+        receiver = receiver_class(receiver_token)
         return nil unless receiver
 
-        { method: m[1], receiver: receiver }
+        { method: method, receiver: receiver }
+      end
+
+      def structured_undefined_method(diag)
+        return nil unless diag.method_name && diag.receiver_type
+
+        [diag.method_name, diag.receiver_type]
+      end
+
+      def message_undefined_method(diag)
+        m = UNDEF_METHOD.match(diag.message)
+        m && [m[1], m[2]]
       end
 
       # Normalises a message receiver token to a class name.

@@ -608,6 +608,15 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.line).to eq(1)
     end
 
+    it "carries structured receiver_type / method_name on the undefined-method diagnostic (ADR-23 slice 4)" do
+      result = analyze("\"hello\".no_such_method\n")
+
+      # `receiver_type` stores the rendered receiver type — the same
+      # token the message uses; the triage catalogue normalises it.
+      diag = result.diagnostics.find { |d| d.rule == "call.undefined-method" }
+      expect([diag&.receiver_type, diag&.method_name]).to eq(['"hello"', "no_such_method"])
+    end
+
     it "does not flag a method that exists on the receiver class" do
       expect(analyze("[1, 2, 3].push(4)\n\"x\".upcase\n")).to be_success
     end

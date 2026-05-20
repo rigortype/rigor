@@ -89,4 +89,19 @@ RSpec.describe Rigor::Analysis::Diagnostic do
       expect(diagnostic.to_s).to eq("f.rb:1:2: error: internal")
     end
   end
+
+  describe "structured receiver_type / method_name fields (ADR-23 slice 4)" do
+    it "defaults both to nil" do
+      diagnostic = described_class.new(path: "f.rb", line: 1, column: 1, message: "x")
+      expect([diagnostic.receiver_type, diagnostic.method_name]).to eq([nil, nil])
+    end
+
+    it "carries the rendered receiver type and called method name" do
+      diagnostic = described_class.new(
+        path: "f.rb", line: 1, column: 1, message: "undefined method `days' for Integer",
+        rule: "call.undefined-method", receiver_type: "Integer", method_name: "days"
+      )
+      expect([diagnostic.receiver_type, diagnostic.method_name]).to eq(%w[Integer days])
+    end
+  end
 end

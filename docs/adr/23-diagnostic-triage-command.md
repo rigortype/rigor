@@ -119,8 +119,12 @@ baseline. Mitigations:
 
 The robust fix — giving `Analysis::Diagnostic` optional structured
 fields (`receiver_type`, `method_name`) populated by the rules
-that have them — is recorded as **slice 4**, deferred because it
-touches every call-site of `call.undefined-method` emission.
+that have them — was recorded as **slice 4** and is now
+**implemented**: the single `call.undefined-method` emission site
+(`CheckRules#build_undefined_method_diagnostic`) populates the
+pair, and the catalogue reads the fields, falling back to message
+parsing only where they are absent. The message-wording coupling
+is gone for the engine-emitted path.
 
 ### WD4 — Triage is advisory; it does not act
 
@@ -298,12 +302,15 @@ Demand-driven; no slice scheduled by this ADR.
 - `rigor-project-init` phase 7 and `rigor-baseline-reduce`
   phase 1 rewritten to call `rigor triage --format json`.
 
-### Slice 4 (deferred) — structured `Diagnostic` fields + plugin recognisers
+### Slice 4 — structured `Diagnostic` fields (DONE) + plugin recognisers (deferred)
 
-- Optional `receiver_type` / `method_name` on
-  `Analysis::Diagnostic`, populated by the rules that have them —
-  removes the WD3 message-parsing coupling.
-- A `Plugin` hook letting plugins contribute recognisers.
+- **DONE** — optional `receiver_type` / `method_name` on
+  `Analysis::Diagnostic`, populated by the `call.undefined-method`
+  rule. The catalogue reads the structured pair (falling back to
+  message parsing only where absent), removing the WD3
+  message-parsing coupling for the engine-emitted path.
+- **Deferred** — a `Plugin` hook letting plugins contribute
+  recognisers.
 
 ## Re-evaluation triggers
 

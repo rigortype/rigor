@@ -1215,7 +1215,9 @@ module Rigor
             line: location.start_line,
             column: location.start_column + 1,
             message: "undefined method `#{call_node.name}' for #{rendered_receiver}",
-            severity: :error
+            severity: :error,
+            receiver_type: rendered_receiver,
+            method_name: call_node.name.to_s
           )
         end
 

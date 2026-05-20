@@ -8,7 +8,8 @@ module Rigor
       # baseline against which non-default families are recognised.
       DEFAULT_SOURCE_FAMILY = :builtin
 
-      attr_reader :path, :line, :column, :message, :severity, :rule, :source_family
+      attr_reader :path, :line, :column, :message, :severity, :rule, :source_family,
+                  :receiver_type, :method_name
 
       # `rule:` is the stable identifier (a kebab-case string)
       # of the diagnostic's source rule. It is used by the
@@ -24,8 +25,19 @@ module Rigor
       # ADR-2 § "Plugin Diagnostic Provenance") let consumers
       # distinguish where a diagnostic originated without committing
       # to the plugin API itself.
-      def initialize(path:, line:, column:, message:, severity: :error, rule: nil,
-                     source_family: DEFAULT_SOURCE_FAMILY)
+      #
+      # `receiver_type:` / `method_name:` are optional structured
+      # fields populated by the call-related rules (`call.undefined-
+      # method`) — the rendered receiver type and the called method
+      # name as plain strings. ADR-23 WD3 / slice 4: `rigor triage`'s
+      # heuristic recognisers read these directly instead of parsing
+      # the diagnostic message, so the catalogue no longer couples to
+      # message wording. Both stay nil for rules that have no such
+      # pair; a consumer that finds them nil falls back to message
+      # parsing.
+      def initialize(path:, line:, column:, message:, severity: :error, rule: nil, # rubocop:disable Metrics/ParameterLists
+                     source_family: DEFAULT_SOURCE_FAMILY,
+                     receiver_type: nil, method_name: nil)
         @path = path
         @line = line
         @column = column
@@ -33,6 +45,8 @@ module Rigor
         @severity = severity
         @rule = rule
         @source_family = source_family
+        @receiver_type = receiver_type
+        @method_name = method_name
       end
 
       def error?

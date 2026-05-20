@@ -14,7 +14,14 @@ sweep on one Ractor frees an object whose heap memory `rb_vm_ci_lookup`
 (the runtime call-info interning path) is concurrently reading on
 another Ractor — a heap-use-after-free. AddressSanitizer reproduces it
 deterministically. A fix attempted in rigor (`7952ff2`) was proven
-ineffective and reverted (`c3b02d3`).
+ineffective and reverted (`c3b02d3`). The crash is filed upstream as
+**Ruby Bug #22075**.
+
+A later benchmark against the Mastodon codebase (§6) surfaced a
+**second, independent pool defect** — a deterministic
+`Ractor::IsolationError` that makes the pool produce 100% garbage
+output even on runs that do not crash. The two defects are unrelated;
+either one alone makes the pool unusable.
 
 **Companion artifacts.** A reproduction Docker image (sanitizer-built
 Ruby 4.0.5 + the rigor bundle) and its `Dockerfile` are kept outside
@@ -156,9 +163,10 @@ same spec.
 
 - **`7952ff2` reverted** (`c3b02d3`); the CHANGELOG "Fixed" entry that
   claimed a segfault fix is removed with it.
-- **File a CRuby bug** with the §3 ASAN evidence (the three-stack
-  use-after-free report is far stronger than the original `[BUG]`
-  dump). Reference GitHub Actions run `26123249293` and tag `v0.1.7`.
+- **Filed upstream as Ruby Bug #22075**
+  (https://bugs.ruby-lang.org/issues/22075) — *heap-use-after-free in
+  `rb_vm_ci_lookup` under parallel Ractors* — with the §3 ASAN
+  evidence, GitHub Actions run `26123249293`, and tag `v0.1.7`.
 - **Gate the Ractor pool off** until CRuby is fixed. `runner_pool_spec.rb`
   is already excluded from the default `make verify`, but the pool is
   still reachable from `cli.rb`'s `--workers` / `parallel.workers:`
@@ -171,13 +179,69 @@ same spec.
   path removed from CI surface entirely) so a regression like this
   cannot reach `master` silently again.
 
-## 6. Relation to existing Ruby tracker issues
+## 6. Second pool defect — deterministic `Ractor::IsolationError`
 
-A scan of the last ~12 months of `ractor`-tagged issues on
-bugs.ruby-lang.org found **no duplicate** — no open or closed issue
-names `rb_vm_ci_lookup`, the runtime call-info table, or a
-GC-sweep-vs-Ractor use-after-free on the default GC. A new report is
-therefore warranted. Three issues were checked in full:
+A benchmark against the Mastodon codebase
+(`github.com/mastodon/mastodon`, `app/` + `lib/` = 1303 Ruby files;
+12-core arm64-darwin, Ruby 4.0.5) intended to compare sequential vs
+pool throughput instead exposed a second, distinct pool defect.
+
+| mode                  | wall  | mem     | diagnostics |
+| --------------------- | ----- | ------- | ----------- |
+| sequential            | ~3.5s | ~374 MB | 488 real (480 error + 8 warning) |
+| pool (`--workers=4`)  | ~1.1s | ~393 MB | 1296 — **all `internal analyzer error`** |
+
+Every one of the pool's 1296 diagnostics is an `internal analyzer
+error: Ractor::IsolationError: can not access non-shareable objects in
+constant ... by non-main ractor`. The constants named:
+
+- `RBS::EnvironmentLoader::DEFAULT_CORE_ROOT`
+- `Rigor::Builtins::StaticReturnRefinements::OWNERS_BY_METHOD`
+- `Rigor::Builtins::HktBuiltins::METHOD_RETURN_OVERRIDES`
+
+A worker Ractor reads these process-global constants; they are not
+`Ractor.make_shareable`d, so the access raises `Ractor::IsolationError`,
+which the analyzer catches and emits as a per-file diagnostic. **Every
+file fails; the pool performs no real analysis.** The output is
+byte-identical across `--workers=4/8/12` and across runs — fully
+deterministic.
+
+Consequences:
+
+- The naive "pool is ~3× faster" reading of the raw wall times is
+  **false**. The pool is fast only because it does no work — each file
+  fails immediately. The only valid figure is the sequential one
+  (~3.5s / ~374 MB for 1303 files).
+- This defect is **rigor-side and deterministic**, unlike the §3
+  use-after-free (upstream, flaky). Either one alone makes the pool
+  unusable.
+- Single-shot `rigor check --workers=N` did **not** hard-crash in 27
+  runs (workers 4 / 8 / 12) — *because* the isolation error fails every
+  file fast, so the workers never do the RBS-parse + `super` work that
+  opens the §3 crash window. `runner_pool_spec.rb` still crashes ~70%
+  because it repeatedly spawns pools and the crash window is worker
+  *initialisation* (HKT registry build), not per-file analysis.
+- It most likely regressed when recent features (HKT builtins,
+  static-return refinements) added non-shareable constants on the
+  worker path. `prewarm_rbs_cache_for_pool` only dodged
+  `RBS::EnvironmentLoader.new`, not the `DEFAULT_CORE_ROOT` constant
+  read nor rigor's own new constants.
+
+A fork-based worker pool (ADR-15 names fork as a sanctioned
+alternative) sidesteps **both** defects: forked children COW-inherit
+every constant — no shareability constraint — and run in separate
+processes with separate GC heaps and `vm->ci_table`, immune to the §3
+use-after-free.
+
+## 7. Relation to existing Ruby tracker issues
+
+The §3 use-after-free is filed upstream as **Ruby Bug #22075**
+(*heap-use-after-free in `rb_vm_ci_lookup` under parallel Ractors*;
+Open; Bug). A scan of the last ~12 months of `ractor`-tagged issues
+found **no pre-existing duplicate** — no other issue names
+`rb_vm_ci_lookup`, the runtime call-info table, or a
+GC-sweep-vs-Ractor use-after-free on the default GC. Three nearby
+issues were checked in full:
 
 - **#21200** — *Ractor spuriously hangs, segfaults or errors on
   `TestEtc#test_ractor_parallel`* (Assigned). Same **class** of bug:
@@ -205,12 +269,12 @@ Ractors crashes*, #21315 *Finalizers violate
 path is a plain `gc_sweep_plane` → `rb_data_free`, with no finalizer
 involved.
 
-The new report links #21200 and #21204 as "Related issues" and frames
-its unique contribution as the precise manifestation point — a
+#22075 links #21200 and #21204 as "Related issues" and frames its
+unique contribution as the precise manifestation point — a
 `heap-use-after-free` at `rb_vm_ci_lookup` on the **default GC**, with
 a full three-stack ASAN trace.
 
-## 7. Notes for a returning implementer
+## 8. Notes for a returning implementer
 
 - TSAN is not a usable tool here — Ruby's M:N scheduler defeats its
   thread tracking. Use ASAN; disable use-after-scope instrumentation

@@ -24,6 +24,8 @@ cycles live in dedicated archives:
 
 - **`rigor-activesupport-core-ext` — `Hash#deep_transform_keys!` / `deep_transform_values` family.** The bundle declared `deep_transform_keys` but not its `!` sibling, nor `deep_transform_values` / `deep_transform_values!`, so those ActiveSupport `core_ext` selectors surfaced as `call.undefined-method` false positives (observed on the Mastodon survey). Added the four signatures to the bundle's `Hash` section.
 
+- **`rigor-activerecord` v0.2.0 — `belongs_to` associations are non-nullable by default.** The plugin contributed `Nominal[Target] | nil` for every `:singular` association accessor. Since Rails 5 `belongs_to` is *required* (non-`nil`) by default (`belongs_to_required_by_default`), so `post.user` is `Nominal[User]`, not `User?`; modelling it nullable produced `call.possible-nil-receiver` false positives on `belongs_to` chains. The model discoverer now computes a per-association `nullable` flag — `has_one` stays nullable (it genuinely returns `nil` when there is no associated record), `belongs_to` is non-nullable unless the declaration passes `optional: true` / `required: false` — and `flow_contribution_for` honours it. Plugin version 0.1.0 → 0.2.0.
+
 ## [0.1.7] - 2026-05-20
 
 ### Changed

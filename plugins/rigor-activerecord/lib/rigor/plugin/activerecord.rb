@@ -211,8 +211,13 @@ module Rigor
       # Instance-side navigation: when the call's receiver
       # resolves to `Nominal[Model]` and the method name
       # matches a discovered `belongs_to` / `has_one`
-      # association, the return type narrows to
-      # `Nominal[Target] | nil`. `has_many` associations are
+      # association, the return type is the target model.
+      # `belongs_to` is required (non-`nil`) by default since
+      # Rails 5, so it narrows to `Nominal[Target]`; `has_one`
+      # (and an `optional: true` / `required: false` `belongs_to`)
+      # is nullable, narrowing to `Nominal[Target] | nil` — the
+      # `nullable` flag computed at discovery time carries this.
+      # `has_many` associations are
       # intentionally NOT contributed — relation types are a
       # future track and the RBS-erased return is the
       # honest fall-back. Calls with arguments are skipped
@@ -233,10 +238,10 @@ module Rigor
         return nil if association.nil?
         return nil unless association[:kind] == :singular
 
-        Rigor::Type::Combinator.union(
-          Rigor::Type::Combinator.nominal_of(association[:target]),
-          Rigor::Type::Combinator.constant_of(nil)
-        )
+        target = Rigor::Type::Combinator.nominal_of(association[:target])
+        return target unless association[:nullable]
+
+        Rigor::Type::Combinator.union(target, Rigor::Type::Combinator.constant_of(nil))
       end
 
       def constant_receiver_name(node)

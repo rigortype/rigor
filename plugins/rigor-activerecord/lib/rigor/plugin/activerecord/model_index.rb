@@ -21,7 +21,7 @@ module Rigor
       # derives from {Inflector.tableize}.
       class ModelIndex
         # `associations` is a frozen `Array<Hash>` where each
-        # row carries `{ name:, kind:, target: }`:
+        # row carries `{ name:, kind:, target:, nullable: }`:
         #
         # - `name`   — String, the association method name as
         #              the user invokes it (`"posts"`).
@@ -30,6 +30,12 @@ module Rigor
         # - `target` — String, the target class name resolved
         #              either from an explicit `class_name:`
         #              option or via {Inflector.classify}.
+        # - `nullable` — Boolean; whether a `:singular` accessor
+        #              can return `nil`. `has_one` → `true`;
+        #              `belongs_to` → `false` (required by default
+        #              since Rails 5) unless `optional: true` /
+        #              `required: false`. Meaningless for
+        #              `:collection` rows.
         Entry = Struct.new(:class_name, :table_name, :columns, :associations,
                            :enums, :scopes, :validations, :callbacks,
                            keyword_init: true) do

@@ -388,7 +388,7 @@ RSpec.describe "plugins/rigor-activerecord" do
       post_entry = index.find("Post")
 
       expect(post_entry.associations).to contain_exactly(
-        a_hash_including(name: "user", kind: :singular, target: "User")
+        a_hash_including(name: "user", kind: :singular, target: "User", nullable: false)
       )
     end
 
@@ -397,7 +397,8 @@ RSpec.describe "plugins/rigor-activerecord" do
       user_entry = index.find("User")
       profile_association = user_entry.associations.find { |a| a[:name] == "profile" }
 
-      expect(profile_association).to include(name: "profile", kind: :singular, target: "Profile")
+      expect(profile_association).to include(name: "profile", kind: :singular, target: "Profile",
+                                             nullable: true)
     end
 
     it "records `has_many :posts` on User as a collection association" do
@@ -425,11 +426,12 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(author_association).to include(name: "author", kind: :singular, target: "User")
     end
 
-    it "publishes the singular flow contribution `Nominal[Target] | nil` for belongs_to" do
-      # Spec the contribution shape directly on the plugin
+    it "publishes a non-nullable `Nominal[Target]` for a required belongs_to" do
+      # `belongs_to` is required (non-`nil`) by default since
+      # Rails 5, so `post.user` narrows to `Nominal[User]` with no
+      # nil arm. Spec the contribution shape directly on the plugin
       # instance — Rigor's diagnostic rule contract for chained
-      # calls on union types is independent of the plugin's
-      # return-type publication, so we assert what we control.
+      # calls is independent of the plugin's return-type publication.
       index = model_index_after_run(models: POST_USER_MODELS)
       runner_plugin = Rigor::Plugin::Activerecord.allocate
       runner_plugin.instance_variable_set(:@model_index, index)
@@ -442,6 +444,52 @@ RSpec.describe "plugins/rigor-activerecord" do
       contribution = runner_plugin.flow_contribution_for(call_node: call_node, scope: double_scope)
 
       expect(contribution).to be_a(Rigor::FlowContribution)
+      expect(contribution.return_type).to eq(Rigor::Type::Combinator.nominal_of("User"))
+    end
+
+    it "publishes a nullable `Nominal[Target] | nil` for has_one" do
+      # `has_one` genuinely returns `nil` when no associated
+      # record exists, so `user.profile` keeps the nil arm.
+      index = model_index_after_run(models: POST_USER_MODELS)
+      runner_plugin = Rigor::Plugin::Activerecord.allocate
+      runner_plugin.instance_variable_set(:@model_index, index)
+
+      call_node = Prism.parse("user.profile").value.statements.body.first
+      double_scope = Object.new
+      double_scope.define_singleton_method(:type_of) do |_node|
+        Rigor::Type::Combinator.nominal_of("User")
+      end
+      contribution = runner_plugin.flow_contribution_for(call_node: call_node, scope: double_scope)
+
+      expect(contribution.return_type).to eq(
+        Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.nominal_of("Profile"),
+          Rigor::Type::Combinator.constant_of(nil)
+        )
+      )
+    end
+
+    it "publishes a nullable type for `belongs_to ..., optional: true`" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/post.rb" => <<~RUBY,
+          class Post < ApplicationRecord
+            belongs_to :user, optional: true
+          end
+        RUBY
+        "app/models/user.rb" => "class User < ApplicationRecord\nend\n"
+      }
+      index = model_index_after_run(models: models)
+      runner_plugin = Rigor::Plugin::Activerecord.allocate
+      runner_plugin.instance_variable_set(:@model_index, index)
+
+      call_node = Prism.parse("post.user").value.statements.body.first
+      double_scope = Object.new
+      double_scope.define_singleton_method(:type_of) do |_node|
+        Rigor::Type::Combinator.nominal_of("Post")
+      end
+      contribution = runner_plugin.flow_contribution_for(call_node: call_node, scope: double_scope)
+
       expect(contribution.return_type).to eq(
         Rigor::Type::Combinator.union(
           Rigor::Type::Combinator.nominal_of("User"),

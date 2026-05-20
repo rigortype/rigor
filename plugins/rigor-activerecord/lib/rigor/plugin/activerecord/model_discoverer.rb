@@ -217,7 +217,41 @@ module Rigor
           target = override || Inflector.classify(name)
           return nil if target.nil? || target.empty?
 
-          { name: name, kind: kind, target: target }
+          { name: name, kind: kind, target: target,
+            nullable: association_nullable?(node.name, args) }
+        end
+
+        # Whether a `:singular` association's accessor can return
+        # `nil`. `has_one` genuinely can (no associated record →
+        # `nil`). `belongs_to` is **required (non-`nil`) by default
+        # since Rails 5** (`belongs_to_required_by_default`); it
+        # becomes nullable only when the call passes `optional: true`
+        # or `required: false`. A non-literal option value declines
+        # to the default rather than guessing.
+        def association_nullable?(method_name, args)
+          return true if method_name == :has_one
+          return false unless method_name == :belongs_to
+
+          association_option(args, "optional") == true ||
+            association_option(args, "required") == false
+        end
+
+        # Reads a literal boolean association option (`optional:` /
+        # `required:`). Returns `true` / `false` for a literal, or
+        # `nil` when the key is absent or its value is non-literal.
+        def association_option(args, key)
+          args.each do |arg|
+            next unless arg.is_a?(Prism::KeywordHashNode)
+
+            arg.elements.each do |pair|
+              next unless pair.is_a?(Prism::AssocNode) && pair.key.is_a?(Prism::SymbolNode)
+              next unless pair.key.unescaped == key
+
+              return true if pair.value.is_a?(Prism::TrueNode)
+              return false if pair.value.is_a?(Prism::FalseNode)
+            end
+          end
+          nil
         end
 
         def explicit_class_name(args)

@@ -1,6 +1,6 @@
 # ADR-24 — Implicit-self method-call resolution
 
-Status: **proposed, 2026-05-20; slice 1 implemented 2026-05-20.**
+Status: **proposed, 2026-05-20; slices 1 + 3 implemented 2026-05-20.**
 Records the project's decision to resolve implicit-self method calls
 (a call written with no explicit receiver, inside a method body)
 against the enclosing class/module's method set — its own
@@ -263,11 +263,24 @@ Extend resolution to the superclass chain and included modules,
 across project files (the class-discovery registry) and RBS-known
 ancestors.
 
-### Slice 3 — `bot`-branch flow narrowing (WD6)
+### Slice 3 — `bot`-branch flow narrowing (WD6) — IMPLEMENTED 2026-05-20
 
 Generalise `eval_if` / `eval_unless` terminating-branch detection
 from the syntactic `EXIT_CALL_NAMES` list to "branch inferred type
 is `Bot`". Guard clauses through a diverging helper now narrow.
+
+**As shipped.** `StatementEvaluator#branch_terminates?(branch_node,
+branch_type)` ORs the existing syntactic `branch_unconditionally_exits?`
+with `branch_type.is_a?(Type::Bot)`. The branch type is already
+computed by `eval_if` / `eval_unless` (`then_type` / `else_type`), so
+both early-return-narrowing tests in each just swap
+`branch_unconditionally_exits?` for `branch_terminates?` — no extra
+evaluation. Implemented out of slice order, alongside slice 1,
+because the two compose directly: slice 1 makes a same-class /
+top-level guard helper resolve to `bot`, and slice 3 makes that
+`bot` narrow the fall-through. The ancestor-helper case (the
+Mastodon `fail_with_message` cluster) still awaits slice 2.
+Integration fixture: `spec/integration/fixtures/bot_branch_guard.rb`.
 
 ### Slice 4 (gated — separate decision) — diagnostics on closed-class self-calls
 

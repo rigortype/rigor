@@ -358,9 +358,9 @@ module Rigor
         # is the falsey edge of the predicate (subsequent
         # statements observe the predicate-was-false world).
         return [Type::Combinator.union(then_type, else_type), falsey_scope] \
-          if branch_unconditionally_exits?(node.statements) && node.subsequent.nil?
+          if branch_terminates?(node.statements, then_type) && node.subsequent.nil?
         return [Type::Combinator.union(then_type, else_type), truthy_scope] \
-          if branch_unconditionally_exits?(node.subsequent) && node.statements
+          if branch_terminates?(node.subsequent, else_type) && node.statements
 
         [
           Type::Combinator.union(then_type, else_type),
@@ -385,9 +385,9 @@ module Rigor
         # `if`: when the body unconditionally exits and there
         # is no else, the post-scope is the truthy edge.
         return [Type::Combinator.union(then_type, else_type), truthy_scope] \
-          if branch_unconditionally_exits?(node.statements) && node.else_clause.nil?
+          if branch_terminates?(node.statements, then_type) && node.else_clause.nil?
         return [Type::Combinator.union(then_type, else_type), falsey_scope] \
-          if branch_unconditionally_exits?(node.else_clause) && node.statements
+          if branch_terminates?(node.else_clause, else_type) && node.statements
 
         [
           Type::Combinator.union(then_type, else_type),
@@ -1691,6 +1691,23 @@ module Rigor
         when Prism::IfNode then node.subsequent
         when Prism::UnlessNode then node.else_clause
         end
+      end
+
+      # ADR-24 WD6 / slice 3 — generalised terminating-branch
+      # detection. `branch_unconditionally_exits?` recognises a
+      # branch SYNTACTICALLY (return / next / break / a call
+      # named raise / throw / exit / abort / fail). A branch
+      # whose *inferred type is `Bot`* also terminates — it
+      # cannot produce a value, so control never falls through
+      # it — regardless of how it is spelled. The canonical
+      # case is a resolved guard helper (`fail_with_message(...)`)
+      # whose body always raises: ADR-24 slice 1 types the call
+      # `bot`, and this OR-test makes `helper(...) if x.nil?`
+      # narrow exactly like `raise ... if x.nil?`. The branch
+      # type is already computed by `eval_if` / `eval_unless`.
+      def branch_terminates?(branch_node, branch_type)
+        branch_unconditionally_exits?(branch_node) ||
+          branch_type.is_a?(Type::Bot)
       end
 
       def eval_branch_or_nil(branch_node, branch_scope)

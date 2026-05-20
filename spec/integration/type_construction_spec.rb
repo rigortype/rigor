@@ -299,6 +299,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/bot_branch_guard.rb — ADR-24 slice 3 Bot-branch flow narrowing" do
+    let(:harness) { harness_for("bot_branch_guard") }
+
+    it "treats a `bot`-typed guard helper as a terminating branch and narrows the fall-through" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assert_extended/ — RBS::Extended `assert` / `assert-if-*` (v0.0.2)" do
     let(:harness) { harness_for("assert_extended") }
 

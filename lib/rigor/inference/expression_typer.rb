@@ -1152,12 +1152,65 @@ module Rigor
       def try_user_method_inference(receiver, call_node, arg_types)
         return nil unless receiver.is_a?(Type::Nominal)
 
-        def_node = scope.user_def_for(receiver.class_name, call_node.name)
+        def_node = resolve_user_def_through_ancestors(receiver.class_name, call_node.name)
         return nil if def_node.nil?
 
         infer_user_method_return(def_node, receiver, arg_types)
       rescue StandardError
         nil
+      end
+
+      # ADR-24 slice 2 — resolves `method_name` against
+      # `class_name`'s own `def`s, then walks the user-class
+      # superclass chain. RBS-known ancestors are NOT walked
+      # here — the `MethodDispatcher` RBS tier runs before
+      # `try_user_method_inference` and already covers them; a
+      # superclass name that resolves to no project-discovered
+      # class ends the walk. Cross-file: the chain is followed
+      # through `Scope#discovered_superclasses` /
+      # `#discovered_def_nodes`, which the runner seeds from the
+      # project-wide pre-pass. The walk is depth-capped and
+      # cycle-guarded.
+      ANCESTOR_WALK_LIMIT = 20
+      private_constant :ANCESTOR_WALK_LIMIT
+
+      def resolve_user_def_through_ancestors(class_name, method_name)
+        current = class_name.to_s
+        seen = {}
+        ANCESTOR_WALK_LIMIT.times do
+          return nil if current.nil? || seen[current]
+
+          seen[current] = true
+          found = scope.user_def_for(current, method_name)
+          return found if found
+
+          raw = scope.superclass_of(current)
+          return nil if raw.nil?
+
+          current = resolve_ancestor_class_name(current, raw)
+        end
+        nil
+      end
+
+      # Resolves a superclass name AS WRITTEN (`"Base"`, or a
+      # qualified `"A::B"`) to a project-discovered class,
+      # following Ruby's `Module.nesting` constant lookup: try
+      # the raw name under each enclosing namespace of the
+      # subclass, innermost first, then bare. Returns nil when
+      # no candidate names a discovered user class (e.g. the
+      # superclass is an RBS-known or third-party class).
+      def resolve_ancestor_class_name(subclass_qualified, raw_superclass)
+        segments = subclass_qualified.split("::")
+        (segments.length - 1).downto(0) do |i|
+          candidate = (segments[0, i] + [raw_superclass]).join("::")
+          return candidate if known_user_class?(candidate)
+        end
+        nil
+      end
+
+      def known_user_class?(name)
+        scope.discovered_superclasses.key?(name) ||
+          scope.discovered_def_nodes.key?(name)
       end
 
       INFERENCE_GUARD_KEY = :__rigor_user_method_inference_stack__
@@ -1220,6 +1273,7 @@ module Rigor
                      .with_program_globals(scope.program_globals)
                      .with_discovered_methods(scope.discovered_methods)
                      .with_discovered_def_nodes(scope.discovered_def_nodes)
+                     .with_discovered_superclasses(scope.discovered_superclasses)
                      .with_self_type(receiver)
 
         required.each_with_index do |param, index|

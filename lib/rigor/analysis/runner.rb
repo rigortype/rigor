@@ -105,6 +105,8 @@ module Rigor
         @signature_paths_snapshot = [].freeze
         @cached_plugin_prepare_diagnostics = [].freeze
         @project_discovered_classes = {}.freeze
+        @project_discovered_def_nodes = {}.freeze
+        @project_discovered_superclasses = {}.freeze
       end
 
       # ADR-pending editor mode — present when the runner is wired
@@ -242,6 +244,15 @@ module Rigor
         # can share parses with the existing scanner passes.
         @project_discovered_classes =
           Inference::ScopeIndexer.discovered_classes_for_paths(expansion.fetch(:files), buffer: @buffer)
+        # ADR-24 slice 2 — cross-file def-node + class->superclass
+        # index so an implicit-self call inside a subclass
+        # resolves a superclass `def` declared in a sibling
+        # file. One extra parse pass over the project; shares
+        # the cost profile of the class-discovery pass above.
+        def_index =
+          Inference::ScopeIndexer.discovered_def_index_for_paths(expansion.fetch(:files), buffer: @buffer)
+        @project_discovered_def_nodes = def_index.fetch(:def_nodes)
+        @project_discovered_superclasses = def_index.fetch(:superclasses)
       end
 
       # Internal: adopts a frozen {ProjectScan} snapshot supplied
@@ -1372,6 +1383,12 @@ module Rigor
 
         scope = Scope.empty(environment: environment, source_path: path)
         scope = scope.with_discovered_classes(@project_discovered_classes) unless @project_discovered_classes.empty?
+        unless @project_discovered_def_nodes.empty?
+          scope = scope.with_discovered_def_nodes(@project_discovered_def_nodes)
+        end
+        unless @project_discovered_superclasses.empty?
+          scope = scope.with_discovered_superclasses(@project_discovered_superclasses)
+        end
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
         diagnostics = CheckRules.diagnose(
           path: path,

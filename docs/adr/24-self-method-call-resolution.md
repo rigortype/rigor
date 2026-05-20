@@ -1,6 +1,7 @@
 # ADR-24 — Implicit-self method-call resolution
 
-Status: **proposed, 2026-05-20; slices 1 + 3 implemented 2026-05-20.**
+Status: **proposed, 2026-05-20; slices 1 + 3 implemented 2026-05-20,
+slice 2 implemented 2026-05-21.**
 Records the project's decision to resolve implicit-self method calls
 (a call written with no explicit receiver, inside a method body)
 against the enclosing class/module's method set — its own
@@ -257,11 +258,51 @@ Two deviations from the slice sketch, both forced by measurement:
   the slice-1 mechanism; a memoised summary index stays a WD7
   performance follow-up.
 
-### Slice 2 — ancestors + cross-file
+### Slice 2 — ancestors + cross-file — IMPLEMENTED 2026-05-21
 
 Extend resolution to the superclass chain and included modules,
 across project files (the class-discovery registry) and RBS-known
 ancestors.
+
+**As shipped.** `ExpressionTyper#try_user_method_inference`, on a
+same-class `user_def_for` miss, walks the user-class superclass
+chain (`resolve_user_def_through_ancestors`). The chain is followed
+through a new `Scope#discovered_superclasses` map — `class →
+superclass-name AS WRITTEN`. The as-written name is resolved to a
+qualified class at the call site by `resolve_ancestor_class_name`,
+which follows `Module.nesting` constant lookup (raw name under each
+enclosing namespace of the subclass, innermost first). Cross-file
+resolution rides a new project pre-pass,
+`ScopeIndexer.discovered_def_index_for_paths`, which walks every
+project file once and returns the merged `discovered_def_nodes`
+table plus the merged superclass map; `Runner` seeds both onto each
+file scope exactly as it already seeds cross-file
+`discovered_classes`. The walk is depth-capped (20) and
+cycle-guarded.
+
+Scope deviations from the slice sketch:
+
+- **RBS-known ancestors are NOT walked here.** The
+  `MethodDispatcher` RBS tier runs *before*
+  `try_user_method_inference` and already resolves methods on
+  RBS-known ancestors; the user-class walk simply stops when a
+  superclass name resolves to no project-discovered class. So "and
+  RBS-known ancestors" is satisfied by the existing dispatch
+  ordering, not by new code in the walk.
+- **Included modules (`include`) are deferred.** The engine has no
+  `include` / `prepend` / `extend` tracking for user code, and the
+  Mastodon cluster that drove this ADR is a *superclass* chain. A
+  separate follow-up adds module-mixin tracking + resolution; until
+  then an implicit-self call to an included-module method keeps
+  today's `Dynamic[top]` (WD3).
+
+Adoption stays gated by slice 1's `adoptable_self_call_result?`
+(inside a class body only a `Bot` return is adopted), so the FP
+profile is unchanged from slice 1: an ancestor guard helper
+resolves to `bot` and narrows (with slice 3); non-`Bot` ancestor
+returns stay `Dynamic[top]`. Fixtures:
+`spec/integration/fixtures/inherited_guard.rb` (same-file) + a
+cross-file `Runner` spec.
 
 ### Slice 3 — `bot`-branch flow narrowing (WD6) — IMPLEMENTED 2026-05-20
 

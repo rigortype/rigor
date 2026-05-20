@@ -112,9 +112,22 @@ module Rigor
         # v0.0.2 #5 — also record the def node itself for
         # instance methods so the engine can re-type the body
         # when a call site dispatches against a user-defined
-        # method without an RBS sig.
-        discovered_def_nodes = build_discovered_def_nodes(root)
+        # method without an RBS sig. ADR-24 slice 2 — merge the
+        # cross-file `discovered_def_index_for_paths` seed (on
+        # `default_scope`) under the per-file table so a
+        # subclass resolves a superclass `def` from a sibling
+        # file; same-file declarations win per method on a
+        # collision.
+        discovered_def_nodes = default_scope.discovered_def_nodes.merge(
+          build_discovered_def_nodes(root)
+        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
         seeded_scope = seeded_scope.with_discovered_def_nodes(discovered_def_nodes)
+
+        # ADR-24 slice 2 — class -> superclass map (per-file
+        # merged under the cross-file seed) drives superclass-
+        # chain resolution of implicit-self calls.
+        discovered_superclasses = default_scope.discovered_superclasses.merge(build_discovered_superclasses(root))
+        seeded_scope = seeded_scope.with_discovered_superclasses(discovered_superclasses)
 
         # v0.1.2 — per-class table of method visibilities
         # (`:public` / `:private` / `:protected`). The
@@ -580,6 +593,46 @@ module Rigor
         accumulator[class_name][def_node.name] = def_node
       end
 
+      # ADR-24 slice 2 — per-class table mapping a fully
+      # qualified user class to its superclass name AS WRITTEN
+      # at the `class Foo < Bar` declaration. Only constant
+      # superclasses are recorded (`class Foo < Struct.new(...)`
+      # and other non-constant superclasses produce no entry).
+      # The as-written name is resolved to a qualified class at
+      # the call site against the subclass's lexical nesting —
+      # see `ExpressionTyper#resolve_ancestor_class_name`.
+      def build_discovered_superclasses(root)
+        accumulator = {}
+        walk_class_superclasses(root, [], accumulator)
+        accumulator.freeze
+      end
+
+      def walk_class_superclasses(node, qualified_prefix, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            full = (qualified_prefix + [name]).join("::")
+            superclass = node.superclass && qualified_name_for(node.superclass)
+            accumulator[full] = superclass if superclass
+            walk_class_superclasses(node.body, qualified_prefix + [name], accumulator) if node.body
+            return
+          end
+        when Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            walk_class_superclasses(node.body, qualified_prefix + [name], accumulator) if node.body
+            return
+          end
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_class_superclasses(child, qualified_prefix, accumulator)
+        end
+      end
+
       VISIBILITY_MODIFIERS = %i[public private protected].freeze
 
       # v0.1.2 — per-class method-visibility table for the
@@ -843,6 +896,39 @@ module Rigor
           next
         end
         accumulator.freeze
+      end
+
+      # ADR-24 slice 2 — cross-file companion to
+      # `discovered_classes_for_paths`. Walks every project
+      # file once and returns both the merged
+      # `discovered_def_nodes` table (a class reopened across
+      # files has its method tables merged) and the merged
+      # class -> superclass-name map. The engine consults these
+      # so an implicit-self call inside a subclass resolves
+      # against a superclass `def` declared in a sibling file
+      # (`Mastodon::CLI::Accounts` calling a helper defined in
+      # `Mastodon::CLI::Base`).
+      #
+      # @param paths  [Array<String>] project file paths.
+      # @param buffer [Rigor::Analysis::BufferBinding, nil]
+      # @return [Hash{Symbol => Hash}] `{ def_nodes:, superclasses: }`
+      def discovered_def_index_for_paths(paths, buffer: nil)
+        def_nodes = {}
+        superclasses = {}
+        paths.each do |path|
+          physical = buffer ? buffer.resolve(path) : path
+          root = Prism.parse(File.read(physical), filepath: path).value
+          build_discovered_def_nodes(root).each do |class_name, methods|
+            (def_nodes[class_name] ||= {}).merge!(methods)
+          end
+          superclasses.merge!(build_discovered_superclasses(root))
+        rescue StandardError
+          # Skip files that fail to parse or read; the per-file
+          # analyzer surfaces the parse error separately.
+          next
+        end
+        def_nodes.each_value(&:freeze)
+        { def_nodes: def_nodes.freeze, superclasses: superclasses.freeze }
       end
 
       # Class-only variant of `record_declarations` — descends

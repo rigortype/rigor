@@ -1484,7 +1484,7 @@ module Rigor
       # ScopeIndexer-populated declaration overrides
       # (`Prism::ConstantReadNode` for `module Foo` headers, etc.)
       # remain reachable from inside nested bodies.
-      def build_fresh_body_scope
+      def build_fresh_body_scope # rubocop:disable Metrics/AbcSize
         Scope.empty(environment: scope.environment)
              .with_declared_types(scope.declared_types)
              .with_discovered_classes(scope.discovered_classes)
@@ -1494,6 +1494,7 @@ module Rigor
              .with_program_globals(scope.program_globals)
              .with_discovered_methods(scope.discovered_methods)
              .with_discovered_def_nodes(scope.discovered_def_nodes)
+             .with_discovered_superclasses(scope.discovered_superclasses)
              .with_discovered_method_visibilities(scope.discovered_method_visibilities)
       end
 

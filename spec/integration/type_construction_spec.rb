@@ -308,6 +308,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/inherited_guard.rb — ADR-24 slice 2 superclass-chain resolution" do
+    let(:harness) { harness_for("inherited_guard") }
+
+    it "resolves an implicit-self call against a superclass `def` and narrows through the guard" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assert_extended/ — RBS::Extended `assert` / `assert-if-*` (v0.0.2)" do
     let(:harness) { harness_for("assert_extended") }
 

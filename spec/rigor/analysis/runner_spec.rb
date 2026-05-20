@@ -483,6 +483,42 @@ RSpec.describe Rigor::Analysis::Runner do
     end
   end
 
+  describe "ADR-24 slice 2 — cross-file superclass-chain resolution" do
+    it "resolves an implicit-self call against a superclass `def` declared in a sibling file" do # rubocop:disable RSpec/ExampleLength
+      Dir.mktmpdir("rigor-adr24-slice2-") do |tmpdir|
+        File.write(File.join(tmpdir, "base.rb"), <<~RUBY)
+          class Base
+            def boom(msg)
+              raise msg
+            end
+          end
+        RUBY
+        File.write(File.join(tmpdir, "sub.rb"), <<~RUBY)
+          require "rigor/testing"
+          include Rigor::Testing
+
+          class Sub < Base
+            def run
+              v = boom("x")
+              assert_type("bot", v)
+            end
+          end
+        RUBY
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [tmpdir])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          mismatches = result.diagnostics.select { |d| d.message.start_with?("assert_type ") }
+
+          expect(mismatches).to(
+            be_empty,
+            "expected `boom` to resolve cross-file to `Base#boom` (`bot`); got: " \
+            "#{mismatches.map(&:message).inspect}"
+          )
+        end
+      end
+    end
+  end
+
   describe "target_ruby wiring (`.rigor.yml` -> Prism version:)" do
     it "passes target_ruby through to Prism so the configured version drives the parse" do
       # Prism's `version: "3.4"` accepts current Ruby syntax.

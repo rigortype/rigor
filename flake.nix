@@ -21,8 +21,8 @@
         let
           pkgs = import nixpkgs { inherit system; };
           ruby = (pkgs.mkRuby {
-            version = pkgs.mkRubyVersion "4" "0" "4" "";
-            hash = "sha256-819u36Pauz9yP50M8ZBsZRKud/TkEqseaMxukdIw+oA=";
+            version = pkgs.mkRubyVersion "4" "0" "5" "";
+            hash = "sha256-fWFJB5pj+K4dMmyfplxgGbotwxVerns5FZgXkRyIlY4=";
             cargoHash = "sha256-z7NwWc4TaR042hNx0xgRkh/BQEpEJtE53cfrN0qNiE0=";
           }).override {
             docSupport = false;

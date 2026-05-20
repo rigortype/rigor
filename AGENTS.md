@@ -14,7 +14,7 @@ The implementation sits on top of the v0.1.0 plugin contract. It parses Ruby wit
 
 ## Development Environment
 
-- Target Ruby is `4.0.3`. The gemspec requires Ruby `>= 4.0.0`, `< 4.1`.
+- Target Ruby is `4.0.5`. The gemspec requires Ruby `>= 4.0.0`, `< 4.1`.
 - All development-time commands MUST run through the Flake. Do not run `bundle`, `rake`, `rspec`, `rubocop`, or `exe/rigor` directly from the host shell.
 - The Flake shell includes Git 2.54.0 and GNU Make.
 - `flake.nix` points Bundler at `vendor/bundle`; keep local gem installs isolated from global machine state.

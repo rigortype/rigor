@@ -1025,11 +1025,15 @@ module Rigor
         local_def = node.receiver.nil? ? scope.top_level_def_for(node.name) : nil
         if local_def
           local_inference = infer_top_level_user_method(local_def, receiver, arg_types)
-          return local_inference if local_inference
+          return local_inference if local_inference && adoptable_self_call_result?(local_inference)
 
-          # The local def matches by name but the
-          # parameter shape is too complex for the first-
-          # iteration binder (kwargs / optionals / rest).
+          # The local def matches by name but the inference
+          # was disqualified — either the parameter shape is
+          # too complex for the first-iteration binder
+          # (kwargs / optionals / rest), or ADR-24 slice 1's
+          # conservative gate declined the resolved return
+          # type inside a class body (see
+          # `adoptable_self_call_result?`).
           # Returning `Dynamic[Top]` is the safest answer:
           # we know RBS dispatch would be wrong (the
           # method is user-defined and shadows whatever
@@ -1069,7 +1073,11 @@ module Rigor
         # the body with the call's argument types bound and
         # return the body's last-expression type.
         user_inference = try_user_method_inference(receiver, node, arg_types)
-        return user_inference if user_inference
+        if user_inference
+          return user_inference if adoptable_self_call_result?(user_inference)
+
+          return dynamic_top
+        end
 
         # Dynamic-origin propagation: when the receiver is Dynamic[T] and
         # no positive rule resolves the call, the result inherits the
@@ -1112,6 +1120,35 @@ module Rigor
         nil
       end
 
+      # ADR-24 slice 1 — implicit-self method-call resolution.
+      # `discovered_def_nodes` is now carried into method /
+      # class body scopes (see `StatementEvaluator#build_fresh_body_scope`),
+      # so a call written with no explicit receiver inside a
+      # method body resolves against the enclosing class's own
+      # definitions and the file's top-level defs. Before
+      # slice 1 every such call typed `Dynamic[top]`.
+      #
+      # The adoption of the resolved return type is gated:
+      #
+      # - At top-level / inside a DSL block (`scope.self_type`
+      #   is nil) the result is adopted unchanged — this is
+      #   the pre-slice-1 surface (the v0.0.3 A local-`def`
+      #   shortcut) and MUST keep working.
+      # - Inside a class body / method body (`self_type` set)
+      #   the result is adopted ONLY when it is `Bot`. A `Bot`
+      #   return is an always-diverging guard helper; adopting
+      #   it can only ever enable correct terminating-branch
+      #   narrowing, never a new `undefined-method` /
+      #   argument-type false positive. A non-`Bot` resolved
+      #   return is kept as `Dynamic[top]` (WD3) — adopting
+      #   precise non-`Bot` returns project-wide awaits the
+      #   callee-return-inference precision a later slice
+      #   brings (measured: unconditional adoption regressed
+      #   `rigor check lib` by 16 diagnostics).
+      def adoptable_self_call_result?(type)
+        scope.self_type.nil? || type.is_a?(Type::Bot)
+      end
+
       def try_user_method_inference(receiver, call_node, arg_types)
         return nil unless receiver.is_a?(Type::Nominal)
 
@@ -1132,11 +1169,20 @@ module Rigor
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types)
         return nil if body_scope.nil?
 
-        # Recursion-guard signature. Uses `describe(:short)`
-        # so non-Nominal receivers (e.g. the implicit
-        # `Object` carrier used for top-level / DSL-block
-        # defs in v0.0.3 A) can participate without raising.
-        signature = [receiver.describe(:short), def_node.name, arg_types.map { |t| t.describe(:short) }]
+        # Recursion-guard signature. Keyed on `(receiver,
+        # method)` only — NOT the argument types. ADR-24 WD5:
+        # a method whose summary is still being computed
+        # resolves to `Dynamic[top]` for that cycle. Keying on
+        # arg types would let mutual recursion through a
+        # `module_function` module (`Acceptance#accepts` →
+        # `accepts_one` → `accepts_dynamic` → `accepts`)
+        # recurse unboundedly whenever the carried argument
+        # types differ at each level — observed as a
+        # `SystemStackError` once implicit-self calls began
+        # resolving during the main walk. `describe(:short)`
+        # keeps non-Nominal receivers (the implicit `Object`
+        # carrier for top-level / DSL-block defs) printable.
+        signature = [receiver.describe(:short), def_node.name]
         stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
         return Type::Combinator.untyped if stack.include?(signature)
 

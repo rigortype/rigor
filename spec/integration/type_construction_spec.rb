@@ -290,6 +290,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/self_method_call.rb — ADR-24 slice 1 implicit-self call resolution" do
+    let(:harness) { harness_for("self_method_call") }
+
+    it "resolves same-class and top-level implicit-self calls to the callee's return type" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assert_extended/ — RBS::Extended `assert` / `assert-if-*` (v0.0.2)" do
     let(:harness) { harness_for("assert_extended") }
 

@@ -1,12 +1,13 @@
 # ADR-24 — Implicit-self method-call resolution
 
-Status: **proposed, 2026-05-20.** Records the project's decision to
-resolve implicit-self method calls (a call written with no explicit
-receiver, inside a method body) against the enclosing class/module's
-method set — its own definitions, its ancestors, and cross-file
-project classes — so the resolved method's inferred return type and
-parameter contract become visible at the call site. Today such calls
-type as `Dynamic[top]`, which is a foundational precision gap.
+Status: **proposed, 2026-05-20; slice 1 implemented 2026-05-20.**
+Records the project's decision to resolve implicit-self method calls
+(a call written with no explicit receiver, inside a method body)
+against the enclosing class/module's method set — its own
+definitions, its ancestors, and cross-file project classes — so the
+resolved method's inferred return type and parameter contract become
+visible at the call site. Today such calls type as `Dynamic[top]`,
+which is a foundational precision gap.
 
 ## Context
 
@@ -209,12 +210,52 @@ unbounded walk.
 
 Demand-driven; no slice scheduled by this ADR.
 
-### Slice 1 — same-class self-call resolution
+### Slice 1 — same-class self-call resolution — IMPLEMENTED 2026-05-20
 
 Resolve an implicit-self call against the enclosing class's *own*
-instance/singleton method definitions; adopt the resolved method's
-inferred return type. Per-method summaries (WD5) for the same file.
-No ancestors yet, no new diagnostics.
+instance method definitions and the file's top-level defs; adopt the
+resolved method's inferred return type. No ancestors yet, no new
+diagnostics.
+
+**As shipped.** The wiring gap was small: `discovered_def_nodes` —
+the per-class / top-level `method → DefNode` table built by
+`ScopeIndexer` and consulted by the engine's existing
+inter-procedural resolution (`Scope#user_def_for` /
+`#top_level_def_for`) — was carried into top-level call-site scopes
+but NOT into the fresh scope built for every class / method body
+(`StatementEvaluator#build_fresh_body_scope`). Carrying it activates
+resolution inside method bodies.
+
+Two deviations from the slice sketch, both forced by measurement:
+
+- **Conservative adoption gate.** Adopting *every* resolved return
+  type unconditionally regressed `rigor check lib` from clean by 16
+  diagnostics — a resolved precise type (`Nominal[Manifest]`, an
+  imprecise `Hash` shape, `nil`) makes downstream strict checks
+  (`undefined-method`, argument-type, flow-folding) fire on
+  *pre-existing* callee-return-inference imprecisions that were
+  masked while the self-call stayed `Dynamic[top]`. So
+  `ExpressionTyper#adoptable_self_call_result?` gates adoption:
+  inside a class body (`scope.self_type` set) the resolved type is
+  adopted only when it is `Bot`; at top-level / DSL-block scope
+  (`self_type` nil — the pre-slice-1 surface) it is adopted
+  unchanged. The `Bot` case is the ADR's motivating bug and is
+  provably FP-free (a `Bot` result can only enable correct
+  terminating-branch narrowing). General non-`Bot` adoption inside
+  class bodies is deferred until callee-return inference is precise
+  enough — its own follow-up, gated by re-evaluation trigger 1.
+- **Recursion guard re-keyed (WD5).** The `infer_user_method_return`
+  guard keyed on `(receiver, method, arg_types)`; once self-calls
+  resolved, mutual recursion through a `module_function` module
+  (`Acceptance#accepts` → `accepts_one` → `accepts_dynamic` →
+  `accepts`) recursed unboundedly whenever the carried argument
+  types differed level-to-level — a `SystemStackError`. The guard is
+  now keyed on `(receiver, method)`: a method whose summary is still
+  being computed resolves to `Dynamic[top]` for that cycle, exactly
+  as WD5 prescribes. No separate per-method summary index was added
+  — the existing per-call re-walk under the (now correct) guard is
+  the slice-1 mechanism; a memoised summary index stays a WD7
+  performance follow-up.
 
 ### Slice 2 — ancestors + cross-file
 

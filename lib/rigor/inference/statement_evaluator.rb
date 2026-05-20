@@ -1493,6 +1493,7 @@ module Rigor
              .with_class_cvars(scope.class_cvars)
              .with_program_globals(scope.program_globals)
              .with_discovered_methods(scope.discovered_methods)
+             .with_discovered_def_nodes(scope.discovered_def_nodes)
              .with_discovered_method_visibilities(scope.discovered_method_visibilities)
       end
 

@@ -122,8 +122,8 @@ module Rigor
           diagnostic_count: matched.size,
           summary: "undefined-method on core classes (#{top_methods(matched)}) — " \
                    "ActiveSupport monkey-patches these",
-          action: "Wire the rigor-activesupport-core-ext RBS bundle via " \
-                  "`signature_paths:` in .rigor.yml."
+          action: "Add rigor-activesupport-core-ext to `plugins:` in .rigor.yml " \
+                  "(it is an RBS-bundle plugin — ADR-25)."
         ), matched]
       end
 

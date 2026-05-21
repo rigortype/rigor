@@ -23,8 +23,18 @@ module Rigor
       # stay silent.
       class Analyzer
         # Methods that take a column → value Hash and need each key
-        # validated against the receiver's column set.
-        COLUMN_HASH_METHODS = %i[where find_by find_or_create_by find_or_initialize_by].freeze
+        # validated against the receiver's column set. The bang
+        # variants (`find_by!` raises instead of returning nil;
+        # `find_or_create_by!` raises on a validation failure) and
+        # `create_or_find_by` / `create_or_find_by!` take the
+        # identical column-hash argument shape.
+        COLUMN_HASH_METHODS = %i[
+          where
+          find_by find_by!
+          find_or_create_by find_or_create_by!
+          find_or_initialize_by
+          create_or_find_by create_or_find_by!
+        ].freeze
 
         DID_YOU_MEAN_DISTANCE = 3
 

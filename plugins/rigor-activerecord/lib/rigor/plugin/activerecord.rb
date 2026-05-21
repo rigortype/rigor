@@ -200,6 +200,10 @@ module Rigor
           return nil if call_argument_count(call_node).zero?
 
           Rigor::Type::Combinator.nominal_of(entry.class_name)
+        when :find_by!
+          # The bang variant raises `RecordNotFound` instead of
+          # returning `nil`, so the result is non-nullable.
+          Rigor::Type::Combinator.nominal_of(entry.class_name)
         when :find_by
           Rigor::Type::Combinator.union(
             Rigor::Type::Combinator.nominal_of(entry.class_name),

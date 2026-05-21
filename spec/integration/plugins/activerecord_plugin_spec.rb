@@ -1096,4 +1096,37 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(undefined.message).to include("Admin")
     end
   end
+
+  describe "bang / create-or-find finder variants" do
+    it "validates column keys on `find_by!`" do
+      diags = plugin_diagnostics(run_ar("User.find_by!(emial: 'a')\n"))
+      expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+    end
+
+    it "validates column keys on `create_or_find_by`" do
+      diags = plugin_diagnostics(run_ar("User.create_or_find_by(emial: 'a')\n"))
+      expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+    end
+
+    it "stays silent on a valid key for `find_or_create_by!`" do
+      diags = plugin_diagnostics(run_ar("User.find_or_create_by!(email: 'a')\n"))
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+
+    it "narrows `find_by!` to a non-nullable model type" do
+      result = run_plugin(
+        source: "u = User.find_by!(email: 'a')\nu.bit_length\n",
+        files: {
+          "db/schema.rb" => DEFAULT_SCHEMA,
+          "sig/user.rbs" => USER_RBS_FOR_NARROWING,
+          **DEFAULT_MODELS
+        },
+        signature_paths: ["sig"]
+      )
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("bit_length")
+      end
+      expect(undefined).not_to be_nil
+    end
+  end
 end

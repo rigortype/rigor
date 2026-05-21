@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Fixed
+
+- **Instance-variable narrowing through a truthy guard.** Rigor narrowed a local variable to non-`nil` inside `if x` / `x && x.foo` / `unless x.nil?`, but an *instance* variable kept its declared / inferred `T | nil` type inside the guarded branch — every method call on a guarded ivar (`@journal.user` inside `if @journal`) reported a false-positive `... for nil`. `Inference::Narrowing#analyse` did not dispatch `Prism::InstanceVariableReadNode` at all, and `analyse_nil_predicate` recognised only a local-variable receiver. The dispatcher now routes both the bare read and the assignment-in-condition write (`if @ivar = expr`) through a shared `analyse_ivar`, and `analyse_nil_predicate` narrows an ivar receiver — mirroring the existing local-variable paths. The narrowing is scoped to the guarded branch and is purely additive (the truthy edge subtracts `nil` / `false`, the falsey edge the complement); it never widens or re-narrows the ivar binding seen elsewhere. Surfaced by the Redmine 6.x regression sweep ([`docs/notes/20260521-redmine-6.x-regression-sweep.md`](docs/notes/20260521-redmine-6.x-regression-sweep.md), the "+6 at 6.1.2" breach — 6 false positives in `app/models/issue.rb`, all `@current_journal.METHOD` inside `if @current_journal` guards) and the Mastodon cluster-4 G2 note. New `spec/integration/fixtures/ivar_guard_narrowing.rb` fixture covering all three guard shapes.
+
 ## [0.1.9] - 2026-05-21
 
 ### Added

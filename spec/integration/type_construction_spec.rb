@@ -335,6 +335,14 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/ivar_guard_narrowing.rb — `if @ivar` / `@ivar && …` / `unless @ivar.nil?` narrowing" do
+    let(:harness) { harness_for("ivar_guard_narrowing") }
+
+    it "narrows an instance variable to non-nil inside a truthy guard" do
+      expect(harness.errors).to be_empty
+    end
+  end
+
   describe "fixtures/assert_extended/ — RBS::Extended `assert` / `assert-if-*` (v0.0.2)" do
     let(:harness) { harness_for("assert_extended") }
 

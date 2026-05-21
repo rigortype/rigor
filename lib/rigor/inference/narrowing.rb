@@ -386,8 +386,8 @@ module Rigor
           analyse_local_read(node, scope)
         when Prism::LocalVariableWriteNode
           analyse_local_write(node, scope)
-        when Prism::InstanceVariableWriteNode
-          analyse_ivar_write(node, scope)
+        when Prism::InstanceVariableReadNode, Prism::InstanceVariableWriteNode
+          analyse_ivar(node, scope)
         when Prism::ClassVariableWriteNode
           analyse_cvar_write(node, scope)
         when Prism::GlobalVariableWriteNode
@@ -767,7 +767,17 @@ module Rigor
           ]
         end
 
-        def analyse_ivar_write(node, scope)
+        # Truthy guard on an instance variable. Covers both the bare
+        # read — `if @ivar`, the left arm of `@ivar && @ivar.foo`,
+        # the receiver of `unless @ivar.nil?` once `!` reverses it —
+        # and the assignment-in-condition write `if @ivar = expr`.
+        # Mirrors `analyse_local_read` / `analyse_local_write`: the
+        # truthy edge narrows the ivar by `narrow_truthy` (dropping
+        # `nil` / `false`), the falsey edge by `narrow_falsey`. The
+        # narrowing is scoped to the guarded branch only, so it is
+        # purely additive — it never widens or re-narrows the ivar
+        # binding seen elsewhere.
+        def analyse_ivar(node, scope)
           current = scope.ivar(node.name)
           return nil if current.nil?
 
@@ -2024,15 +2034,24 @@ module Rigor
         end
 
         def analyse_nil_predicate(receiver, scope)
-          return nil unless receiver.is_a?(Prism::LocalVariableReadNode)
+          case receiver
+          when Prism::LocalVariableReadNode
+            current = scope.local(receiver.name)
+            return nil if current.nil?
 
-          current = scope.local(receiver.name)
-          return nil if current.nil?
+            [
+              scope.with_local(receiver.name, narrow_nil(current)),
+              scope.with_local(receiver.name, narrow_non_nil(current))
+            ]
+          when Prism::InstanceVariableReadNode
+            current = scope.ivar(receiver.name)
+            return nil if current.nil?
 
-          [
-            scope.with_local(receiver.name, narrow_nil(current)),
-            scope.with_local(receiver.name, narrow_non_nil(current))
-          ]
+            [
+              scope.with_ivar(receiver.name, narrow_nil(current)),
+              scope.with_ivar(receiver.name, narrow_non_nil(current))
+            ]
+          end
         end
 
         # `a && b` short-circuits: the truthy edge is the truthy edge

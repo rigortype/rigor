@@ -31,6 +31,19 @@ This specification is organized around the ideal type model, not the first imple
 5. Support Ruby duck typing through structural interfaces and object shapes without making all class compatibility structural.
 6. Let plugins and `RBS::Extended` contribute facts, effects, and dynamic reflection while the analyzer keeps ownership of scope application and normalization.
 7. Apply the [robustness principle](robustness-principle.md) (Postel's law) to every Rigor-authored type — strict on returns, lenient on parameters — so precision propagates downstream and call sites avoid coercion noise.
+8. Minimise false positives on working code. A program that runs is primary evidence of its own correctness; a diagnostic MUST NOT alarm the author over a worst case the runtime does not reach, nor induce defensive code beyond what the logic genuinely needs. See [False-positive discipline](#false-positive-discipline).
+
+## False-positive discipline
+
+Design priority 8 is a first-class value — on the same footing as RBS preservation and the robustness principle, not a tuning knob.
+
+- **The working program is the most important fact.** When static analysis derives a worst-case-sound reading — a `T | nil`, a possibly-missing method — that the running, test-covered program never actually reaches, the runtime evidence outranks the static worst case. Rigor reports such a site cautiously, and a release-quality codebase is expected to surface few or no diagnostics from it.
+
+- **Reasonable defensive programming is welcome, and Rigor stays quiet about it.** Guarding a genuine external-input boundary, handling a value that is honestly nilable, validating at a trust boundary — these are good Ruby. Rigor MUST NOT flag them as redundant or push back on them.
+
+- **What Rigor MUST NOT induce is *excessive* defensiveness.** A diagnostic that pushes the author toward a guard the type information already proves unnecessary — a `nil` check on a value narrowing has established as non-nil, an `is_a?` on a value whose class is already known — or toward belt-and-suspenders coding beyond what the logic needs, is a design failure. The author must not be made more conservative or more verbose than the program's own logic warrants. The line is *necessity*: the guard the logic genuinely needs is welcome; the guard the types render moot is noise.
+
+- **Consequence for engine and rule work.** A precision change or a new rule that increases diagnostics on working code is suspect even when it also catches more — the false-positive cost is weighed heavily, never treated as free. Declining (narrowing to `Dynamic`, emitting nothing) is preferred over a speculative diagnostic. This is the diagnostic-emission expression of the same intent the [robustness principle](robustness-principle.md) carries on the type-authorship side (clause 2's workaround-multiplication anti-pattern) and the baseline mechanism ([ADR-22](../adr/22-baseline-and-project-onboarding.md)) carries on the adoption side.
 
 ## Release scope
 

@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **ADR-22 Slice 3 — the `rigor-project-init` onboarding SKILL.** First member of the v0.1.9 external-user SKILL trio (ADR-22 WD8), under the top-level `skills/` tree: `skills/rigor-project-init/SKILL.md` (router) + three `references/` modules (`01-detect.md`, `02-configure.md`, `03-baseline-and-bugs.md`). End-to-end onboarding for a project that has never run Rigor — detect the stack from `Gemfile` / `Gemfile.lock`, select a plugin set, write `.rigor.dist.yml`, and either snapshot a baseline or commit to a zero-diagnostic gate. The SKILL frames the onboarding around an explicit **adoption-mode choice** the user makes up front (a realised shape of ADR-22 phase 3 + 6, recorded in ADR-22 § "SKILL: rigor-project-init"): **acknowledge mode** (`severity_profile: lenient`, generate a baseline, parenthesise today's diagnostics and lean on the test / spec suite for runtime correctness of those sites) vs. **strict mode** (`severity_profile: strict`, no baseline, fix or consciously `# rigor:disable` every site). Both modes preserve the regression guarantee — a *new* diagnostic surfaces either way. It also surfaces two escalation paths for clusters that are neither a quick fix nor honest baseline material: application-specific metaprogramming → write a project-private plugin (hand off to `rigor-plugin-author`); an unsupported external gem → `rbs collection install` / `dependencies.source_inference:` / open a Rigor issue. The SKILL is external-user-facing — published `rigor` binary, public CLI / config surface only, agentskills.io-portable conventions (validated `Meets agentskills.io specification` via `waza check`). **ADR-23 Slice 3 (the project-init half)** rides along: the SKILL's Phase 5 consumes `rigor triage --format json` as the deterministic diagnosis layer rather than counting the raw `rigor check` stream. See [ADR-22](docs/adr/22-baseline-and-project-onboarding.md), [ADR-23](docs/adr/23-diagnostic-triage-command.md). Remaining trio members: `skills/rigor-baseline-reduce/` + the external-author `skills/rigor-plugin-author/` variant.
+
 ## [0.1.8] - 2026-05-21
 
 ### Added

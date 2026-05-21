@@ -17,12 +17,12 @@ The release-line plan is recorded in [`docs/ROADMAP.md`](ROADMAP.md) § "Release
 v0.1.9 closes the preview-track commitments so v0.2.0 starts the evaluation line from a near-complete base. Two committed deliverables:
 
 1. **External-user SKILL trio** ([ADR-22 § WD8](adr/22-baseline-and-project-onboarding.md)) — three SKILLs aimed at Rigor newcomers running `gem install rigortype` against their own projects, under the top-level `skills/` tree (agentskills.io portable conventions, public CLI surface only):
-   - `skills/rigor-project-init/` — first-time onboarding: Gemfile / Gemfile.lock walk → propose a plugin set matching the detected stack → severity-profile choice → write `.rigor.dist.yml` → run `rigor check` → write `.rigor-baseline.yml` + the `baseline:` config line → surface concentrated rules as likely real bugs.
+   - `skills/rigor-project-init/` — **LANDED.** First-time onboarding: Gemfile / Gemfile.lock walk → propose a plugin set matching the detected stack → **adoption-mode choice** (acknowledge / baseline vs. strict) → write `.rigor.dist.yml` → run `rigor triage --format json` → (acknowledge mode) write `.rigor-baseline.yml` + the `baseline:` config line → surface concentrated rules as likely real bugs → offer the two escalation paths (project plugin / Rigor issue). SKILL.md + three `references/` modules.
    - `skills/rigor-baseline-reduce/` — ongoing-quality: walk `.rigor-baseline.yml` rule-by-rule in priority order → sample sites → classify each (real bug / stylistic-safe / FP) → apply fix / `# rigor:disable` / open a Rigor issue → refresh the baseline.
    - `skills/rigor-plugin-author/` — the external-author variant of the plugin-authoring workflow (distinct from the `.claude/skills/rigor-plugin-author/` contributor SKILL): authoring a standalone `rigor-foo` gem against the published `rigortype` API surface.
 2. **ADR-22 baseline slice 5** — `rigor baseline regenerate` plus the `--baseline-strict` CI gate.
 
-`rigor triage` slice 3 (SKILL integration — `rigor-project-init` phase 7 and `rigor-baseline-reduce` phase 1 call `rigor triage --format json` instead of ad-hoc LLM counting; [ADR-23 WD5](adr/23-diagnostic-triage-command.md)) lands as part of the SKILL-trio work, since it depends on those SKILLs existing.
+`rigor triage` slice 3 (SKILL integration — `rigor-project-init` phase 7 and `rigor-baseline-reduce` phase 1 call `rigor triage --format json` instead of ad-hoc LLM counting; [ADR-23 WD5](adr/23-diagnostic-triage-command.md)) lands as part of the SKILL-trio work, since it depends on those SKILLs existing. The `rigor-project-init` half is done; the `rigor-baseline-reduce` half lands with that SKILL.
 
 The v0.1.7 / v0.1.8 cycles were the lead-up — collecting real-project error data so the SKILL trio's plugin / severity / baseline-rule defaults rest on empirical evidence.
 

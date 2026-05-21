@@ -679,7 +679,11 @@ a Gemfile-bearing directory that has no `.rigor.yml`.
 4. **Write `.rigor.dist.yml`** (the convention is dist-file
    committed, optional `.rigor.yml` local override) with the
    detected configuration.
-5. **Run `rigor check`** to get the diagnostic baseline.
+5. **Run `rigor triage --format json`** to diagnose the
+   diagnostic stream (rule distribution, hotspots, heuristic
+   hints) — per [ADR-23 WD5](23-diagnostic-triage-command.md)
+   the SKILL consumes the triage JSON rather than counting the
+   raw `rigor check` stream itself.
 6. **Write `.rigor-baseline.yml`** via `rigor baseline
    generate`. AND add `baseline: .rigor-baseline.yml` to
    the `.rigor.dist.yml` written in step 4 — per WD2 (b)
@@ -695,8 +699,40 @@ a Gemfile-bearing directory that has no `.rigor.yml`.
    Rigor caught — concentrated rules with low counts often
    indicate localised issues vs. systemic patterns).
 
+### Adoption mode — the realised phase shape
+
+As built (v0.1.9), the SKILL frames phases 3 + 6 as a single
+**adoption-mode** choice the user makes up front, rather than
+two independent knobs:
+
+- **Acknowledge mode** (baseline adoption) — `severity_profile:
+  lenient` (or `balanced` for a small project), phase 6 runs:
+  today's diagnostics are snapshotted into the baseline and the
+  project leans on its **test / spec suite** to cover runtime
+  correctness for the parenthesised sites. The static `T | nil`
+  reading is worst-case-sound; the suite is the evidence the
+  worst case is not hit (the context § observation 1).
+- **Strict mode** (no compromise) — `severity_profile: strict`,
+  phase 6 is **skipped**: no baseline, every diagnostic stays
+  live, each is fixed or annotated `# rigor:disable` with an
+  author-intent reason.
+
+Both modes keep the regression guarantee — a *new* diagnostic
+surfaces in either. They differ only in the treatment of the
+diagnostics that exist on day one. The >100-errors heuristic of
+phase 3 becomes the recommendation for which mode to default to.
+
+The SKILL also surfaces two **escalation paths** for clusters
+that are neither a quick fix nor honest baseline material:
+application-specific metaprogramming → write a project-private
+plugin (hand off to `rigor-plugin-author`); an unsupported
+external gem → `rbs collection install` /
+`dependencies.source_inference:` / open a Rigor issue.
+
 ### Decision points the SKILL escalates to the user
 
+- "Acknowledge mode or strict mode?" — the central choice, made
+  before any config is written (see above).
 - "This project uses HAML in places and ERB in others — should
   I enable `rigor-actionpack`'s extended template extension
   set, or restrict it?" (P3-style trade-off.)

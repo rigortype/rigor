@@ -1,0 +1,182 @@
+# ActiveRecord::Relation — generic signature bundled by
+# rigor-activerecord (ADR-25 plugin-contributed RBS).
+#
+# Purpose: give `has_many` / `has_and_belongs_to_many` accessors,
+# `Model.where(...)` / `Model.all` / `Model.order(...)` and
+# user-declared `scope`s a precise *element* type. The plugin
+# contributes `ActiveRecord::Relation[Model]` for those call
+# sites; this file is what makes the chained relation methods
+# (`.where`, `.order`, `.first`, `.each { |m| ... }`, …) resolve.
+#
+# This is NOT a faithful transcription of Rails' Relation API —
+# it is the surface Rigor needs to type-check idiomatic relation
+# usage WITHOUT false positives. Two design rules:
+#
+# - Chain methods return `self`, so `Relation[Model]` survives an
+#   arbitrarily long query chain.
+# - The method list is deliberately generous. A method that is
+#   genuinely on `ActiveRecord::Relation` but missing here would
+#   surface as a false `call.undefined-method` once the plugin
+#   has typed the receiver — so the list errs toward inclusion.
+#   `include Enumerable[Elem]` carries the whole iteration
+#   surface; the class body only adds relation-specific methods
+#   and the ones whose argument shape differs from Enumerable's.
+#
+# If the project supplies its own ActiveRecord RBS (e.g. via
+# `rbs collection`), that definition conflicts with this one and
+# the conflict degrades through Rigor's plugin-RBS failure memo
+# (ADR-25 WD4) — the richer upstream definition simply wins.
+
+module ActiveRecord
+  class Relation[Elem]
+    include Enumerable[Elem]
+
+    # `Enumerable` only *requires* `each` (the includer supplies
+    # it); it is declared here so `relation.each { |m| ... }`
+    # resolves and the block parameter carries the element type.
+    def each: () { (Elem) -> void } -> self
+            | () -> Enumerator[Elem, self]
+
+    # --- query builders (return another relation) ---
+    def where: (*untyped) ?{ () -> untyped } -> self
+    def rewhere: (*untyped) -> self
+    def not: (*untyped) -> self
+    def or: (untyped) -> self
+    def and: (untyped) -> self
+    def order: (*untyped) -> self
+    def reorder: (*untyped) -> self
+    def in_order_of: (*untyped) -> self
+    def limit: (untyped) -> self
+    def offset: (untyped) -> self
+    def distinct: (?untyped) -> self
+    def group: (*untyped) -> self
+    def regroup: (*untyped) -> self
+    def having: (*untyped) -> self
+    def includes: (*untyped) -> self
+    def preload: (*untyped) -> self
+    def eager_load: (*untyped) -> self
+    def joins: (*untyped) -> self
+    def left_joins: (*untyped) -> self
+    def left_outer_joins: (*untyped) -> self
+    def references: (*untyped) -> self
+    def select: (*untyped) -> self
+    def reselect: (*untyped) -> self
+    def unscope: (*untyped) -> self
+    def merge: (untyped) -> self
+    def except: (*untyped) -> self
+    def only: (*untyped) -> self
+    def extending: (*untyped) -> self
+    def from: (untyped, ?untyped) -> self
+    def lock: (?untyped) -> self
+    def readonly: (?untyped) -> self
+    def strict_loading: (?untyped) -> self
+    def create_with: (untyped) -> self
+    def none: () -> self
+    def all: () -> self
+    def unscoped: () -> self
+    def default_scoped: () -> self
+    def annotate: (*untyped) -> self
+    def optimizer_hints: (*untyped) -> self
+    def excluding: (*untyped) -> self
+    def without: (*untyped) -> self
+    def with: (*untyped) -> self
+    def scoping: () { () -> untyped } -> untyped
+
+    # --- finders (return an element) ---
+    def find: (*untyped) -> Elem
+    def find_by: (*untyped) -> Elem?
+    def find_by!: (*untyped) -> Elem
+    def find_sole_by: (*untyped) -> Elem
+    def sole: () -> Elem
+    def first: () -> Elem?
+            | (Integer limit) -> Array[Elem]
+    def first!: () -> Elem
+    def last: () -> Elem?
+           | (Integer limit) -> Array[Elem]
+    def last!: () -> Elem
+    def take: () -> Elem?
+           | (Integer limit) -> Array[Elem]
+    def take!: () -> Elem
+    def second: () -> Elem?
+    def third: () -> Elem?
+    def fourth: () -> Elem?
+    def fifth: () -> Elem?
+    def forty_two: () -> Elem?
+    def second_to_last: () -> Elem?
+    def third_to_last: () -> Elem?
+
+    # --- batched enumeration ---
+    def find_each: (**untyped) ?{ (Elem) -> void } -> untyped
+    def find_in_batches: (**untyped) ?{ (Array[Elem]) -> void } -> untyped
+    def in_batches: (**untyped) ?{ (ActiveRecord::Relation[Elem]) -> void } -> untyped
+
+    # --- scalars / aggregates ---
+    def count: (*untyped) ?{ (Elem) -> untyped } -> untyped
+    def sum: (*untyped) ?{ (Elem) -> untyped } -> untyped
+    def average: (untyped) -> untyped
+    def minimum: (untyped) -> untyped
+    def maximum: (untyped) -> untyped
+    def calculate: (*untyped) -> untyped
+    def pluck: (*untyped) -> Array[untyped]
+    def pick: (*untyped) -> untyped
+    def ids: () -> Array[untyped]
+    def size: () -> Integer
+    def length: () -> Integer
+    def empty?: () -> bool
+    def any?: (*untyped) ?{ (Elem) -> boolish } -> bool
+    def none?: (*untyped) ?{ (Elem) -> boolish } -> bool
+    def one?: (*untyped) ?{ (Elem) -> boolish } -> bool
+    def many?: () ?{ (Elem) -> boolish } -> bool
+    def exists?: (*untyped) -> bool
+    def include?: (untyped) -> bool
+    def member?: (untyped) -> bool
+
+    # --- conversion / state ---
+    def to_a: () -> Array[Elem]
+    def to_ary: () -> Array[Elem]
+    def entries: () -> Array[Elem]
+    def load: (?untyped) -> self
+    def reload: () -> self
+    def reset: () -> self
+    def loaded?: () -> bool
+    def to_sql: () -> String
+    def explain: (*untyped) -> String
+    def cache_key: (?untyped) -> String
+    def cache_version: (?untyped) -> untyped
+    def to_json: (*untyped) -> String
+    def as_json: (?untyped) -> untyped
+    def blank?: () -> bool
+    def present?: () -> bool
+    def klass: () -> untyped
+    def model: () -> untyped
+    def table: () -> untyped
+    def arel: () -> untyped
+
+    # --- whole-relation persistence ---
+    def update_all: (untyped) -> Integer
+    def delete_all: () -> Integer
+    def destroy_all: () -> Array[Elem]
+    def update: (*untyped) -> untyped
+    def update!: (*untyped) -> untyped
+    def delete_by: (*untyped) -> Integer
+    def destroy_by: (*untyped) -> Array[Elem]
+    def touch_all: (*untyped) -> Integer
+    def insert_all: (untyped, **untyped) -> untyped
+    def insert_all!: (untyped, **untyped) -> untyped
+    def upsert_all: (untyped, **untyped) -> untyped
+
+    # --- instantiating builders (return an element) ---
+    def new: (*untyped) ?{ (Elem) -> void } -> Elem
+    def build: (*untyped) ?{ (Elem) -> void } -> Elem
+    def create: (*untyped) ?{ (Elem) -> void } -> Elem
+    def create!: (*untyped) ?{ (Elem) -> void } -> Elem
+    def find_or_create_by: (untyped) ?{ (Elem) -> void } -> Elem
+    def find_or_create_by!: (untyped) ?{ (Elem) -> void } -> Elem
+    def find_or_initialize_by: (untyped) ?{ (Elem) -> void } -> Elem
+    def create_or_find_by: (untyped) ?{ (Elem) -> void } -> Elem
+    def create_or_find_by!: (untyped) ?{ (Elem) -> void } -> Elem
+    def first_or_create: (?untyped) ?{ (Elem) -> void } -> Elem
+    def first_or_create!: (?untyped) ?{ (Elem) -> void } -> Elem
+    def first_or_initialize: (?untyped) ?{ (Elem) -> void } -> Elem
+  end
+end

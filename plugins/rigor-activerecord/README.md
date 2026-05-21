@@ -152,9 +152,8 @@ digest and the cache would never invalidate.
   family (`name_changed?`, `name_was`, …). `rbs_rails` generates
   ~20 methods per column; Rigor contributes only the accessor
   return type the call-site analysis actually consumes.
-- **No associations / scopes / strong parameters.** Those belong
-  in a future `rigor-rails` meta-gem that depends on this one
-  plus future siblings (`rigor-actionpack`, etc.).
+- **No strong-parameter typing.** Controller-side `params`
+  shaping belongs in `rigor-actionpack`, not here.
 - **Inflector handles regular plurals only.** `Person → people`,
   `Mouse → mice` etc. require `self.table_name = "..."`.
 
@@ -181,15 +180,27 @@ relevant CHANGELOG `[Unreleased]` entry. The extraction process
 is recorded in
 [`skills/rigor-plugin-author/SKILL.md`](../../skills/rigor-plugin-author/SKILL.md).
 
-As of v0.1.2 the plugin emits `FlowContribution` bundles
-through `#flow_contribution_for`: `User.find(1)` now narrows
-to `Nominal[User]` at the call site, and `User.find_by(...)` to
-`Nominal[User] | nil`. Chained calls (`User.find(1).name`)
-resolve through Rigor's normal dispatch instead of the
-RBS-level `untyped` envelope. `where` / `find_or_*` are
-intentionally deferred — they return relations, and Rigor does
-not yet carry an Enumerable-backed relation shape that would
-be more precise than the existing RBS envelope.
+The plugin emits `FlowContribution` bundles through
+`#flow_contribution_for`. Class-side: `User.find(1)` narrows to
+`Nominal[User]`, `User.find_by(...)` to `Nominal[User] | nil`,
+`User.find_by!(...)` back to non-nullable `Nominal[User]`.
+Instance-side: a column read (`user.name`) narrows to the
+column's value type and `user.admin?` to `bool`; a singular
+association (`post.user`) to the target model.
+
+Relation-returning call sites — `User.where(...)`, `User.all`,
+`User.order(...)`, a `has_many` / `has_and_belongs_to_many`
+accessor (`user.posts`), and user-declared `scope`s
+(`Post.published`) — narrow to `ActiveRecord::Relation[Model]`.
+That type is described by the RBS the plugin bundles under
+`sig/` and contributes through its manifest's `signature_paths:`
+(ADR-25), so chained query methods (`.where`, `.order`,
+`.limit`, …) keep the element type and iteration
+(`user.posts.each { |p| ... }`) yields the model. The bundled
+RBS is deliberately generous — `include Enumerable[Elem]` plus
+the relation-specific surface — because a missing method would
+surface as a false `call.undefined-method` once the receiver is
+typed.
 
 ## License
 

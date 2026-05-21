@@ -50,30 +50,22 @@ from stdlib RBS.** The top selectors across the four projects:
 
 This bundle covers those selectors plus the close-neighbour family.
 
-## Why a `sig/` bundle and not a `Rigor::Plugin::Base` subclass
+## How it works
 
-The plugin authoring surface today exposes hooks for diagnostic
-emission and per-call return-type contributions (`#diagnostics_for_file`,
-`#flow_contribution_for`). It does NOT yet expose a hook for
-"extend the RBS environment my analyzer queries against", which is
-what an ActiveSupport-style core-extension plugin needs. Until
-Rigor grows a plugin manifest entry for "extend `signature_paths`
-when loaded", the simplest packaging is a `sig/` directory the
-user wires in by hand. The gem still installs cleanly via Bundler;
-only the wiring step is manual.
+`rigor-activesupport-core-ext` is a **pure RBS-bundle plugin**
+(see [ADR-25](https://github.com/rigortype/rigor/blob/master/docs/adr/25-plugin-contributed-rbs.md)):
+it ships a `sig/` directory and a trivial `Rigor::Plugin::Base`
+subclass whose manifest declares `signature_paths: ["sig"]`. It
+contributes **no diagnostics and no analyzer code** — its whole job
+is to hand Rigor the bundled RBS. When the gem is listed under
+`.rigor.yml`'s `plugins:`, Rigor's plugin loader resolves the
+`sig/` directory against the gem root and merges it into the RBS
+environment.
 
 ## Usage
 
-`signature_paths:` entries are plain directory paths. `.rigor.yml` is
-parsed with `YAML.safe_load_file` (see `Rigor::Configuration.load` /
-`load_with_includes` in `lib/rigor/configuration.rb`) — there is **no
-ERB rendering**, so a path cannot contain `<%= … %>` or any other
-embedded Ruby. Relative entries are resolved against the directory of
-the `.rigor.yml` file itself. Wire the bundle in one of two ways.
-
-### Option A — point at the installed gem's `sig/`
-
-Add to your `Gemfile` (typically the `:development` group):
+Add the gem to your `Gemfile`, typically in the `:development`
+group:
 
 ```ruby
 group :development do
@@ -82,42 +74,16 @@ group :development do
 end
 ```
 
-Find the gem's installed location:
-
-```sh
-bundle show rigor-activesupport-core-ext
-```
-
-Then put that absolute path (with `/sig` appended) in `.rigor.yml`:
+Then list it under `plugins:` in `.rigor.yml` — no path, no
+vendoring, no `signature_paths:` wiring:
 
 ```yaml
-signature_paths:
-  - sig
-  - /absolute/path/from/bundle-show/rigor-activesupport-core-ext-x.y.z/sig
+plugins:
+  - rigor-activesupport-core-ext
 ```
 
-The gem path embeds the version, so this entry must be refreshed when
-the gem is upgraded. Option B avoids that.
-
-### Option B — vendor the `sig/` directory (portable, recommended)
-
-Copy this bundle's `sig/` directory into your project repository and
-reference the vendored copy with a relative path:
-
-```sh
-cp -R "$(bundle show rigor-activesupport-core-ext)/sig" vendor/rigor-activesupport-core-ext-sig
-```
-
-```yaml
-# .rigor.yml at your project root
-signature_paths:
-  - sig
-  - vendor/rigor-activesupport-core-ext-sig
-```
-
-This keeps the wiring stable across gem upgrades and across machines
-(no absolute paths), at the cost of having to re-copy when you want
-newer coverage.
+That is the whole setup: Rigor resolves the bundled `sig/`
+automatically from the installed gem.
 
 ## Scope and limits
 
@@ -146,5 +112,6 @@ keep ActiveSupport coverage off-the-shelf-but-opt-in mirrors how
 `rigor-rails-routes` / `rigor-actionpack` / `rigor-factorybot` /
 `rigor-activerecord` / `rigor-activestorage` and the other Tier 2-3
 Rails plugins are packaged: Rigor stays Rails-agnostic at its core
-and the Rails-specific surface lives in opt-in plugins (or, in this
-case, an opt-in RBS bundle).
+and the Rails-specific surface lives in opt-in plugins — this one
+being an RBS-bundle plugin that contributes signatures rather than
+diagnostics.

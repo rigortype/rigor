@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 # Demo: every method in this file is an ActiveSupport core_ext
-# extension. Without the bundle's `sig/` directory wired into
-# `.rigor.yml`'s `signature_paths:`, every line emits a
-# `call.undefined-method` diagnostic. With the bundle in scope,
+# extension. Without `rigor-activesupport-core-ext` activated
+# under `.rigor.yml`'s `plugins:`, every line emits a
+# `call.undefined-method` diagnostic. With the plugin in scope,
 # they all type-check cleanly.
 
 # Duration multipliers (Integer / Float)

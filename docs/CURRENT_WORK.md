@@ -14,15 +14,15 @@ The release-line plan is recorded in [`docs/ROADMAP.md`](ROADMAP.md) § "Release
 
 ## Next entry — v0.1.9 (last preview cut)
 
-v0.1.9 closes the preview-track commitments so v0.2.0 starts the evaluation line from a near-complete base. Two committed deliverables:
+v0.1.9 closes the preview-track commitments so v0.2.0 starts the evaluation line from a near-complete base. Both committed deliverables have **LANDED** on `master` (`[Unreleased]` in `CHANGELOG.md`); v0.1.9 is ready to cut once the version bump is authorised.
 
-1. **External-user SKILL trio** ([ADR-22 § WD8](adr/22-baseline-and-project-onboarding.md)) — three SKILLs aimed at Rigor newcomers running `gem install rigortype` against their own projects, under the top-level `skills/` tree (agentskills.io portable conventions, public CLI surface only):
-   - `skills/rigor-project-init/` — **LANDED.** First-time onboarding: Gemfile / Gemfile.lock walk → propose a plugin set matching the detected stack → **adoption-mode choice** (acknowledge / baseline vs. strict) → write `.rigor.dist.yml` → run `rigor triage --format json` → (acknowledge mode) write `.rigor-baseline.yml` + the `baseline:` config line → surface concentrated rules as likely real bugs → offer the two escalation paths (project plugin / Rigor issue). SKILL.md + three `references/` modules.
-   - `skills/rigor-baseline-reduce/` — ongoing-quality: walk `.rigor-baseline.yml` rule-by-rule in priority order → sample sites → classify each (real bug / stylistic-safe / FP) → apply fix / `# rigor:disable` / open a Rigor issue → refresh the baseline.
-   - `skills/rigor-plugin-author/` — the external-author variant of the plugin-authoring workflow (distinct from the `.claude/skills/rigor-plugin-author/` contributor SKILL): authoring a standalone `rigor-foo` gem against the published `rigortype` API surface.
-2. **ADR-22 baseline slice 5** — `rigor baseline regenerate` plus the `--baseline-strict` CI gate.
+1. **External-user SKILL trio** ([ADR-22 § WD8](adr/22-baseline-and-project-onboarding.md)) — **complete.** Three SKILLs aimed at Rigor newcomers running `gem install rigortype` against their own projects, under the top-level `skills/` tree (agentskills.io portable conventions, `waza check` spec-compliant, public CLI surface only):
+   - `skills/rigor-project-init/` — first-time onboarding: Gemfile / Gemfile.lock walk → propose a plugin set → **adoption-mode choice** (acknowledge / baseline vs. strict) → write `.rigor.dist.yml` → run `rigor triage --format json` → (acknowledge mode) write `.rigor-baseline.yml` + the `baseline:` config line → surface likely real bugs → offer the two escalation paths (project plugin / Rigor issue). SKILL.md + three `references/` modules.
+   - `skills/rigor-baseline-reduce/` — ongoing-quality: prioritise with the `rigor triage` hints + `rigor baseline dump` → walk `.rigor-baseline.yml` rule-by-rule → sample sites → classify (real bug / stylistic-safe / FP) → fix / `# rigor:disable` / open a Rigor issue → `rigor baseline drift` + `regenerate`. SKILL.md + two `references/` modules.
+   - `skills/rigor-plugin-author/` — external-author variant of the plugin-authoring workflow (distinct from the `.claude/skills/rigor-plugin-author/` contributor SKILL): authoring a `rigor-`-prefixed gem or project-private plugin against the published `rigortype` API; threads the pre-1.0-contract caveat. SKILL.md + three `references/` modules.
+2. **ADR-22 baseline slice 5** — **complete.** `rigor baseline regenerate` (unconditional rewrite) + the `rigor check --baseline-strict` CI gate (fails on any drift, including deficit drift). The `rigor baseline {generate, regenerate, dump, drift, prune}` family is now whole.
 
-`rigor triage` slice 3 (SKILL integration — `rigor-project-init` phase 7 and `rigor-baseline-reduce` phase 1 call `rigor triage --format json` instead of ad-hoc LLM counting; [ADR-23 WD5](adr/23-diagnostic-triage-command.md)) lands as part of the SKILL-trio work, since it depends on those SKILLs existing. The `rigor-project-init` half is done; the `rigor-baseline-reduce` half lands with that SKILL.
+`rigor triage` slice 3 (SKILL integration — [ADR-23 WD5](adr/23-diagnostic-triage-command.md)) landed with the trio: `rigor-project-init` Phase 5 and `rigor-baseline-reduce` Phase 1 both consume `rigor triage --format json` instead of ad-hoc LLM counting. ADR-23's only remaining carry-over is the deferred plugin-contributed-recogniser hook (slice 4 second half).
 
 The v0.1.7 / v0.1.8 cycles were the lead-up — collecting real-project error data so the SKILL trio's plugin / severity / baseline-rule defaults rest on empirical evidence.
 
@@ -57,12 +57,12 @@ When an upstream `ruby/rbs` RBS gap is surfaced by a single internal Rigor call 
 
 ## Reading order for a returning implementer
 
-The next session's default goal is the v0.1.9 SKILL trio + ADR-22 baseline slice 5. Read in this order:
+The v0.1.9 SKILL trio + ADR-22 baseline slice 5 have all landed on `master`; the next session's default goal is the v0.1.9 version bump (when authorised) and then the v0.2.x evaluation-line work. Read in this order:
 
 1. [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0" — the v0.1.9 / v0.2.0 / v0.2.x plan and what gates each.
-2. [`docs/adr/22-baseline-and-project-onboarding.md`](adr/22-baseline-and-project-onboarding.md) — WD8 + the two onboarding-SKILL sketches; the baseline mechanism (slice 5 is the remaining CLI work).
+2. [`docs/adr/22-baseline-and-project-onboarding.md`](adr/22-baseline-and-project-onboarding.md) — WD8 + the two onboarding-SKILL sketches; the baseline mechanism.
 3. [`docs/adr/23-diagnostic-triage-command.md`](adr/23-diagnostic-triage-command.md) — `rigor triage`; WD5 / slice 3 is the triage ↔ SKILL data-layer contract.
-4. `CHANGELOG.md` § `[0.1.8]` — what just shipped.
+4. `CHANGELOG.md` § `[Unreleased]` — the v0.1.9-cycle work awaiting a version bump.
 5. [`.claude/skills/rigor-plugin-author/SKILL.md`](../.claude/skills/rigor-plugin-author/SKILL.md) — the contributor SKILL; the template for the external-author `skills/rigor-plugin-author/` variant.
 6. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — the public-vs-internal stability boundary. v0.2.0 stabilises the plugin-contract surface for external `rigor-*` gems, so cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
 7. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — the plugin contract v0.2.0 must stabilise.

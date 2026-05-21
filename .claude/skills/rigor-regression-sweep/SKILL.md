@@ -212,6 +212,16 @@ survey note (mirror the Mastodon one). Cover:
 - **Cold-cache spot check.** Re-run the last tag with `--no-cache
   --no-baseline` and confirm `raw` matches the swept value — proves
   the shared cache masked nothing.
+- **The parse-error floor.** A constant, non-zero `surfaced` at
+  *every* tag — including the baseline tag itself — is the
+  signature of **rule-less diagnostics**: parse errors and
+  internal-analyzer errors carry no `rule`, so `Baseline` never
+  buckets them and they surface forever. The usual source is a
+  Rails generator `.rb` template (an ERB file with a `.rb`
+  extension — `<%= … %>` fails to parse). Confirm by reading the
+  rule-less rows; the fix is config-side — `exclude:` the
+  generator-template directory — not a baseline concern. (Seen in
+  the Redmine sweep: 22 parse errors from one `lib/generators/.../templates/migration.rb`.)
 - **Feed findings back.** Validated behaviour → cite in the relevant
   ADR. New false positives or a surprising curve → a queued
   engine/plugin item, or a regression spec under `spec/`.

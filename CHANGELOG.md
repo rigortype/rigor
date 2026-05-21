@@ -14,6 +14,8 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-05-21
+
 ### Added
 
 - **ADR-25 Slice 1 — plugin-contributed RBS signatures.** A plugin gem can now contribute RBS signature directories to Rigor's analysis environment through its manifest, closing the gap that forced an RBS-only bundle gem to be hand-wired via a non-portable `signature_paths:` path (`.rigor.yml` has no ERB, so a gem reference cannot resolve). `Plugin::Manifest` gains an optional `signature_paths:` field — an array of directory paths relative to the plugin gem root. `Plugin::Base#signature_paths` resolves them to absolute dirs against that root (derived from the plugin class's defining file: the directory above `lib/`, falling back to the file's own directory; `[]` for an anonymous class). `Plugin::Loader` validates each resolved directory exists at load time — a missing one is a `LoadError` that drops the plugin, loud rather than silent because a missing `sig/` means the bundle gem is broken. `Plugin::Registry#signature_paths` aggregates the resolved set across loaded plugins in registration order, and `Environment.for_project` merges it into the signature-path set fed to `RbsLoader` — ranked below the user's explicit `signature_paths:` and above the opportunistic `bundler:` / `rbs_collection:` discovery; duplicate-declaration conflicts degrade through the existing O7 failure-memo. The change is additive to the pre-1.0 plugin contract (a new optional manifest field; no existing plugin breaks). Spec coverage: +11 examples across `manifest_spec` (field accept / default / validation / `to_h` round-trip), `base_spec` (gem-root resolution + anonymous-class / no-declaration `[]`), `loader_spec` (existing-dir load + missing-dir `LoadError` drop), `registry_spec` (aggregation); `public_api_drift_spec` updated for the three new public methods. See [ADR-25](docs/adr/25-plugin-contributed-rbs.md).
@@ -798,7 +800,8 @@ Each example ships `lib/`, runnable `demo/`, README, and an end-to-end integrati
 - **Cache load order for CLI flow.** `lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`. In CLI flow, the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). Fixed; `--cache-stats` now reports real activity.
 - **Fail-soft `rescue StandardError` was masking analyzer-internal bugs.** Tightened to `rescue ::RBS::BaseError` across the RBS-touching code paths — `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`. Analyzer-internal `NameError` / `NoMethodError` / `LoadError` now propagate so similar bugs surface immediately rather than silently degrading user-visible behaviour.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/rigortype/rigor/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/rigortype/rigor/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/rigortype/rigor/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/rigortype/rigor/compare/v0.1.5...v0.1.6

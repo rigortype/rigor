@@ -64,7 +64,14 @@ only the wiring step is manual.
 
 ## Usage
 
-### From a Bundler context
+`signature_paths:` entries are plain directory paths. `.rigor.yml` is
+parsed with `YAML.safe_load_file` (see `Rigor::Configuration.load` /
+`load_with_includes` in `lib/rigor/configuration.rb`) — there is **no
+ERB rendering**, so a path cannot contain `<%= … %>` or any other
+embedded Ruby. Relative entries are resolved against the directory of
+the `.rigor.yml` file itself. Wire the bundle in one of two ways.
+
+### Option A — point at the installed gem's `sig/`
 
 Add to your `Gemfile` (typically the `:development` group):
 
@@ -75,25 +82,42 @@ group :development do
 end
 ```
 
-Then in `.rigor.yml`:
+Find the gem's installed location:
+
+```sh
+bundle show rigor-activesupport-core-ext
+```
+
+Then put that absolute path (with `/sig` appended) in `.rigor.yml`:
 
 ```yaml
 signature_paths:
   - sig
-  - <%= Gem.loaded_specs["rigor-activesupport-core-ext"].full_gem_path %>/sig
+  - /absolute/path/from/bundle-show/rigor-activesupport-core-ext-x.y.z/sig
 ```
 
-`.rigor.yml` is ERB-rendered before parse (see `lib/rigor/configuration.rb`
-for the loading path), so the `<%= … %>` resolves at load time.
+The gem path embeds the version, so this entry must be refreshed when
+the gem is upgraded. Option B avoids that.
 
-### From a checked-out path (for trying this bundle without a release)
+### Option B — vendor the `sig/` directory (portable, recommended)
+
+Copy this bundle's `sig/` directory into your project repository and
+reference the vendored copy with a relative path:
+
+```sh
+cp -R "$(bundle show rigor-activesupport-core-ext)/sig" vendor/rigor-activesupport-core-ext-sig
+```
 
 ```yaml
 # .rigor.yml at your project root
 signature_paths:
   - sig
-  - /absolute/path/to/rigor/plugins/rigor-activesupport-core-ext/sig
+  - vendor/rigor-activesupport-core-ext-sig
 ```
+
+This keeps the wiring stable across gem upgrades and across machines
+(no absolute paths), at the cost of having to re-copy when you want
+newer coverage.
 
 ## Scope and limits
 
@@ -116,7 +140,7 @@ signature_paths:
 
 ## Not part of the core gem
 
-This bundle sits under `examples/` in the Rigor repository. It is
+This bundle sits under `plugins/` in the Rigor repository. It is
 NOT shipped as part of the `rigortype` gem itself. The decision to
 keep ActiveSupport coverage off-the-shelf-but-opt-in mirrors how
 `rigor-rails-routes` / `rigor-actionpack` / `rigor-factorybot` /

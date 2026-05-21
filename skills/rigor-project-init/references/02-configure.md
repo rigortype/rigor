@@ -98,7 +98,7 @@ plugins:
 # the path is portable across machines and CI.
 signature_paths:
   - sig
-  - vendor/rbs/activesupport-core-ext   # vendored copy of the bundle's sig/
+  - vendor/rigor-activesupport-core-ext-sig   # vendored copy of the bundle's sig/
 
 severity_profile: lenient
 

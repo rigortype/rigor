@@ -1020,4 +1020,80 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(assoc).to include(name: "entryable", kind: :singular, target: nil, polymorphic: true)
     end
   end
+
+  describe "single-table inheritance (STI)" do
+    let(:sti_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/user.rb" => <<~RUBY,
+          class User < ApplicationRecord
+            belongs_to :company
+            alias_attribute :email_address, :email
+          end
+        RUBY
+        "app/models/admin.rb" => "class Admin < User\nend\n",
+        "app/models/super_admin.rb" => "class SuperAdmin < Admin\nend\n",
+        "app/models/plain_object.rb" => "class PlainObject\nend\n",
+        "app/models/post.rb" => "class Post < ApplicationRecord\nend\n"
+      }
+    end
+
+    it "discovers an STI subclass and resolves its table to the root model's" do
+      _result, index = run_ar_with_index("x = 1\n", models: sti_models, schema: DEFAULT_SCHEMA)
+
+      expect(index.model?("Admin")).to be(true)
+      expect(index.find("Admin").table_name).to eq("users")
+    end
+
+    it "discovers a multi-level STI subclass" do
+      _result, index = run_ar_with_index("x = 1\n", models: sti_models, schema: DEFAULT_SCHEMA)
+
+      expect(index.find("SuperAdmin").table_name).to eq("users")
+    end
+
+    it "does not treat a plain non-AR class as a model" do
+      _result, index = run_ar_with_index("x = 1\n", models: sti_models, schema: DEFAULT_SCHEMA)
+
+      expect(index.model?("PlainObject")).to be(false)
+    end
+
+    it "validates a column query on the STI subclass against the inherited table" do
+      diags = plugin_diagnostics(run_ar("Admin.where(email: 'a')\n", models: sti_models))
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+
+    it "still flags a genuine typo on the STI subclass" do
+      diags = plugin_diagnostics(run_ar("Admin.where(emial: 'a')\n", models: sti_models))
+      expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+    end
+
+    it "inherits the parent model's associations on the STI subclass" do
+      # `belongs_to :company` is declared on User; the child must
+      # accept `:company` as a query key or it is a false positive.
+      diags = plugin_diagnostics(run_ar("Admin.find_by(company: x)\n", models: sti_models))
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+
+    it "inherits the parent model's alias_attribute mappings" do
+      diags = plugin_diagnostics(run_ar("Admin.where(email_address: 'a')\n", models: sti_models))
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+
+    it "narrows `STISubclass.find(id)` to the subclass type" do
+      result = run_plugin(
+        source: "admin = Admin.find(1)\nadmin.bit_length\n",
+        files: {
+          "db/schema.rb" => DEFAULT_SCHEMA,
+          "sig/user.rbs" => "class Admin\n  attr_accessor email: String\nend\n",
+          **sti_models
+        },
+        signature_paths: ["sig"]
+      )
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("bit_length")
+      end
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("Admin")
+    end
+  end
 end

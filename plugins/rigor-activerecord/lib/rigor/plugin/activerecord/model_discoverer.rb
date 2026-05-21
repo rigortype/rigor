@@ -7,27 +7,35 @@ module Rigor
     class Activerecord < Rigor::Plugin::Base
       # Walks the configured model search paths via the plugin's
       # `IoBoundary`, parses each `.rb` file with Prism, and
-      # collects class declarations whose immediate superclass is
-      # one of the configured base classes.
+      # collects class declarations that resolve to ActiveRecord
+      # models.
+      #
+      # Discovery is a two-step pass. First every class declaration
+      # is captured as a *candidate* (its name, its superclass
+      # name, and its DSL metadata). Then a fixpoint marks a
+      # candidate as a model when its superclass is a configured
+      # base class OR (transitively) the class name of another
+      # model — this is what makes single-table-inheritance
+      # subclasses (`class Admin < User`) discoverable. Each STI
+      # child carries an `sti_parent:` pointer the {ModelIndex}
+      # uses to inherit the root model's table and DSL surface.
       #
       # Returns rows the {ModelIndex} consumes:
       #
-      #   { class_name: "User", table_name_override: nil }
-      #   { class_name: "ApplicationRecord", table_name_override: "people" }
+      #   { class_name: "User", table_name_override: nil, sti_parent: nil, ... }
+      #   { class_name: "Admin", table_name_override: nil, sti_parent: "User", ... }
       #
       # Limitations (intentional for v0.1.0 of the plugin):
       #
-      # - Only direct-superclass matches. `class Admin < User`
-      #   where `User < ApplicationRecord` is NOT discovered.
-      #   Add `Admin` to the index by listing every concrete model
-      #   you want recognised, or add `User` to
-      #   `model_base_classes` config.
       # - `self.table_name = "..."` recognised only when the RHS
       #   is a String literal. Computed names
       #   (`self.table_name = "#{tenant}_users"`) are skipped.
       # - Modules (`class Admin::User < ApplicationRecord`) are
       #   recognised; the resulting class name is the lexical
       #   path (`Admin::User`).
+      # - The STI fixpoint matches a superclass name against model
+      #   class names tolerating a leading `::`; richer constant
+      #   resolution (relative namespacing) is not modelled.
       class ModelDiscoverer
         # @param io_boundary [Rigor::Plugin::IoBoundary]
         # @param search_paths [Array<String>] absolute or
@@ -40,20 +48,74 @@ module Rigor
           @base_classes = base_classes.to_set
         end
 
-        # @return [Array<Hash>] rows of { class_name:, table_name_override:, ... }
+        # @return [Array<Hash>] rows of { class_name:, table_name_override:, sti_parent:, ... }
         def discover
-          rows = []
+          candidates = []
           ruby_files_under(@search_paths).each do |path|
             contents = read_safely(path)
             next if contents.nil?
 
             tree = Prism.parse(contents).value
-            walk_for_classes(tree, []) { |row| rows << row }
+            walk_for_classes(tree, []) { |candidate| candidates << candidate }
           end
-          rows
+          resolve_models(candidates)
         end
 
         private
+
+        # Fixpoint over the captured class candidates: a candidate
+        # is a model when its superclass is a configured base
+        # class, or — transitively — the class name of an
+        # already-known model. The second arm is what discovers
+        # STI subclasses; the matched parent name is stamped onto
+        # the row as `sti_parent:` so the {ModelIndex} can inherit
+        # the root model's table and association surface.
+        #
+        # Non-model classes (POROs, service objects that happen to
+        # live under `app/models/`) never enter `model_names` and
+        # are dropped.
+        def resolve_models(candidates)
+          model_names = {}
+          sti_parent = {}
+
+          loop do
+            added = false
+            candidates.each do |candidate|
+              name = candidate[:class_name]
+              next if model_names.key?(name)
+
+              superclass = candidate[:superclass_name]
+              next if superclass.nil?
+
+              if @base_classes.include?(superclass)
+                model_names[name] = true
+                added = true
+              elsif (parent = model_match(superclass, model_names))
+                model_names[name] = true
+                sti_parent[name] = parent
+                added = true
+              end
+            end
+            break unless added
+          end
+
+          candidates.filter_map do |candidate|
+            name = candidate[:class_name]
+            next unless model_names.key?(name)
+
+            candidate.merge(sti_parent: sti_parent[name])
+          end
+        end
+
+        # Resolves a superclass NAME against the set of known
+        # model class names, tolerating a leading `::`. Returns
+        # the matched model class name, or nil.
+        def model_match(superclass_name, model_names)
+          return superclass_name if model_names.key?(superclass_name)
+
+          stripped = superclass_name.sub(/\A::/, "")
+          model_names.key?(stripped) ? stripped : nil
+        end
 
         def read_safely(path)
           @io_boundary.read_file(path)
@@ -83,6 +145,11 @@ module Rigor
           end
         end
 
+        # Captures EVERY class declaration as a candidate — the
+        # `resolve_models` fixpoint decides afterwards which ones
+        # are models. The DSL metadata is extracted eagerly; for a
+        # non-model class it is simply discarded when the candidate
+        # is dropped.
         def visit_class(node, lexical_path, &)
           class_local_name = constant_path_name(node.constant_path)
           return if class_local_name.nil?
@@ -90,18 +157,17 @@ module Rigor
           full_name = (lexical_path + [class_local_name]).join("::")
           superclass = constant_path_name(node.superclass) if node.superclass
 
-          if superclass && @base_classes.include?(superclass)
-            yield({
-              class_name: full_name,
-              table_name_override: lookup_table_name_override(node.body),
-              associations: lookup_associations(node.body),
-              enums: lookup_enums(node.body),
-              scopes: lookup_scopes(node.body),
-              validations: lookup_validations(node.body),
-              callbacks: lookup_callbacks(node.body),
-              aliases: lookup_aliases(node.body)
-            })
-          end
+          yield({
+            class_name: full_name,
+            superclass_name: superclass,
+            table_name_override: lookup_table_name_override(node.body),
+            associations: lookup_associations(node.body),
+            enums: lookup_enums(node.body),
+            scopes: lookup_scopes(node.body),
+            validations: lookup_validations(node.body),
+            callbacks: lookup_callbacks(node.body),
+            aliases: lookup_aliases(node.body)
+          })
 
           # Recurse into the body in case nested classes exist.
           inner_path = lexical_path + [class_local_name]

@@ -1219,4 +1219,56 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(undefined).to be_empty
     end
   end
+
+  describe "declarations inside a `with_options` block" do
+    let(:with_options_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/report.rb" => <<~RUBY,
+          class Report < ApplicationRecord
+            with_options class_name: "Account" do
+              belongs_to :target_account
+              belongs_to :assigned_account, optional: true
+            end
+          end
+        RUBY
+        "app/models/account.rb" => "class Account < ApplicationRecord\nend\n"
+      }
+    end
+
+    let(:reports_schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "reports", force: :cascade do |t|
+            t.bigint "target_account_id"
+            t.bigint "assigned_account_id"
+          end
+
+          create_table "accounts", force: :cascade do |t|
+            t.string "username"
+          end
+        end
+      SCHEMA
+    end
+
+    it "discovers a `belongs_to` nested inside `with_options`" do
+      _result, index = run_ar_with_index("x = 1\n", models: with_options_models, schema: reports_schema)
+      report = index.find("Report")
+
+      expect(report.association?("target_account")).to be(true)
+      expect(report.association?("assigned_account")).to be(true)
+    end
+
+    it "accepts the nested association name as a query key" do
+      # Mastodon-derived regression: `Report` declares its
+      # account belongs_to associations inside a
+      # `with_options class_name: 'Account'` block. Before the
+      # `with_options` descent every `Report.where(target_account:
+      # ...)` surfaced as a false `unknown-column`.
+      diags = plugin_diagnostics(
+        run_ar("Report.where(target_account: a)\n", models: with_options_models, schema: reports_schema)
+      )
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+  end
 end

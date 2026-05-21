@@ -253,6 +253,35 @@ module Rigor
         POLYMORPHIC_BY_DEFAULT = %i[delegated_type].freeze
         private_constant :POLYMORPHIC_BY_DEFAULT
 
+        # Class-body declaration calls — the top-level `CallNode`s
+        # PLUS those nested inside a `with_options(...) do … end`
+        # block. `with_options` is Rails' idiom for sharing
+        # options across a group of `belongs_to` / `validates` /
+        # etc. declarations; without descending into it every
+        # association / enum / validation declared inside is
+        # invisible to the discoverer, turning `where(<assoc>:
+        # ...)` into a false `unknown-column`. Nested
+        # `with_options` blocks recurse.
+        #
+        # The options the `with_options` call itself carries (e.g.
+        # `with_options class_name: 'Account'`) are NOT merged into
+        # the nested calls — discovering the declaration name is
+        # what clears the false positive; the merged-option target
+        # precision is a separate refinement.
+        def declaration_calls(body)
+          return [] if body.nil?
+
+          body.compact_child_nodes.flat_map do |node|
+            next [] unless node.is_a?(Prism::CallNode)
+
+            if node.name == :with_options && node.block.is_a?(Prism::BlockNode)
+              declaration_calls(node.block.body)
+            else
+              [node]
+            end
+          end
+        end
+
         # Walks the class body for association DSL calls and
         # returns a list of rows shaped:
         #
@@ -268,9 +297,7 @@ module Rigor
           return [] if body.nil?
 
           rows = []
-          body.compact_child_nodes.each do |node|
-            next unless node.is_a?(Prism::CallNode)
-
+          declaration_calls(body).each do |node|
             kind = ASSOCIATION_METHODS[node.name]
             next if kind.nil?
             next if node.receiver # skip `self.has_many` and similar
@@ -371,8 +398,8 @@ module Rigor
           return {} if body.nil?
 
           enums = {}
-          body.compact_child_nodes.each do |node|
-            next unless node.is_a?(Prism::CallNode) && node.name == :enum
+          declaration_calls(body).each do |node|
+            next unless node.name == :enum
             next if node.receiver
 
             row = parse_enum_call(node)
@@ -428,8 +455,8 @@ module Rigor
           return [] if body.nil?
 
           scopes = []
-          body.compact_child_nodes.each do |node|
-            next unless node.is_a?(Prism::CallNode) && node.name == :scope
+          declaration_calls(body).each do |node|
+            next unless node.name == :scope
             next if node.receiver
 
             args = node.arguments&.arguments
@@ -452,9 +479,8 @@ module Rigor
           return [] if body.nil?
 
           attrs = []
-          body.compact_child_nodes.each do |node|
-            next unless node.is_a?(Prism::CallNode) &&
-                        %i[validates validates_presence_of validates_length_of
+          declaration_calls(body).each do |node|
+            next unless %i[validates validates_presence_of validates_length_of
                            validates_format_of validates_uniqueness_of].include?(node.name)
             next if node.receiver
 
@@ -482,8 +508,7 @@ module Rigor
           return [] if body.nil?
 
           targets = []
-          body.compact_child_nodes.each do |node|
-            next unless node.is_a?(Prism::CallNode)
+          declaration_calls(body).each do |node|
             next unless CALLBACK_METHODS.include?(node.name)
             next if node.receiver
 
@@ -504,8 +529,8 @@ module Rigor
           return {} if body.nil?
 
           aliases = {}
-          body.compact_child_nodes.each do |node|
-            next unless node.is_a?(Prism::CallNode) && node.name == :alias_attribute
+          declaration_calls(body).each do |node|
+            next unless node.name == :alias_attribute
             next if node.receiver
 
             args = node.arguments&.arguments

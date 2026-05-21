@@ -238,6 +238,11 @@ module Rigor
         return nil if association.nil?
         return nil unless association[:kind] == :singular
 
+        # A polymorphic association (`belongs_to ..., polymorphic:
+        # true`, `delegated_type`) has no single static target —
+        # decline rather than invent a wrong `Nominal[...]`.
+        return nil if association[:target].nil?
+
         target = Rigor::Type::Combinator.nominal_of(association[:target])
         return target unless association[:nullable]
 

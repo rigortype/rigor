@@ -157,18 +157,35 @@ module Rigor
           nil
         end
 
-        # Recognised single-instance ("`belongs_to` / `has_one`")
-        # and collection ("`has_many`") association DSL methods.
-        # The kind drives the eventual return-type contribution:
-        # singular associations narrow to `Nominal[Target] | nil`,
-        # plural ones currently degrade to the RBS envelope
-        # (relation types are a future track).
+        # Recognised single-instance and collection association
+        # DSL methods. The kind drives the eventual return-type
+        # contribution: singular associations narrow to
+        # `Nominal[Target] | nil`, plural ones currently degrade
+        # to the RBS envelope (relation types are a future track).
+        #
+        # `composed_of` value-object aggregations and
+        # `delegated_type` roles are folded in here too — both
+        # accept the association name as a `where` / `find_by`
+        # query key, so omitting them turns every such query into
+        # a false `unknown-column`. `composed_of` resolves to its
+        # value class (a real target); `delegated_type` is
+        # polymorphic (no single target).
         ASSOCIATION_METHODS = {
           belongs_to: :singular,
           has_one: :singular,
-          has_many: :collection
+          has_many: :collection,
+          has_and_belongs_to_many: :collection,
+          composed_of: :singular,
+          delegated_type: :singular
         }.freeze
         private_constant :ASSOCIATION_METHODS
+
+        # Association DSL methods that are ALWAYS polymorphic —
+        # the accessor has no single static target class.
+        # `belongs_to` / `has_one` become polymorphic only with
+        # an explicit `polymorphic: true` option.
+        POLYMORPHIC_BY_DEFAULT = %i[delegated_type].freeze
+        private_constant :POLYMORPHIC_BY_DEFAULT
 
         # Walks the class body for association DSL calls and
         # returns a list of rows shaped:
@@ -206,11 +223,21 @@ module Rigor
           return nil unless name_node.is_a?(Prism::SymbolNode)
 
           name = name_node.unescaped
-          override = explicit_class_name(args)
-          target = override || Inflector.classify(name)
-          return nil if target.nil? || target.empty?
+          polymorphic = POLYMORPHIC_BY_DEFAULT.include?(node.name) ||
+                        association_option(args, "polymorphic") == true
 
-          { name: name, kind: kind, target: target,
+          # A polymorphic association has no single static target
+          # class — `target` is nil and the flow contribution
+          # declines to narrow rather than inventing a wrong
+          # `Nominal[<classified-name>]`.
+          if polymorphic
+            target = nil
+          else
+            target = explicit_class_name(args) || Inflector.classify(name)
+            return nil if target.nil? || target.empty?
+          end
+
+          { name: name, kind: kind, target: target, polymorphic: polymorphic,
             nullable: association_nullable?(node.name, args) }
         end
 
@@ -219,14 +246,22 @@ module Rigor
         # `nil`). `belongs_to` is **required (non-`nil`) by default
         # since Rails 5** (`belongs_to_required_by_default`); it
         # becomes nullable only when the call passes `optional: true`
-        # or `required: false`. A non-literal option value declines
-        # to the default rather than guessing.
+        # or `required: false`. `composed_of` is non-nullable
+        # unless `allow_nil: true`. `delegated_type` roles are
+        # required. A non-literal option value declines to the
+        # default rather than guessing.
         def association_nullable?(method_name, args)
-          return true if method_name == :has_one
-          return false unless method_name == :belongs_to
-
-          association_option(args, "optional") == true ||
-            association_option(args, "required") == false
+          case method_name
+          when :has_one
+            true
+          when :belongs_to
+            association_option(args, "optional") == true ||
+              association_option(args, "required") == false
+          when :composed_of
+            association_option(args, "allow_nil") == true
+          else
+            false
+          end
         end
 
         # Reads a literal boolean association option (`optional:` /

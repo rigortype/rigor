@@ -878,4 +878,146 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
     end
   end
+
+  describe "association coverage — HABTM / polymorphic / composed_of / delegated_type" do
+    def flow_contribution_for_call(index:, source:, receiver_class:)
+      plugin = Rigor::Plugin::Activerecord.allocate
+      plugin.instance_variable_set(:@model_index, index)
+      call_node = Prism.parse(source).value.statements.body.first
+      scope = Object.new
+      scope.define_singleton_method(:type_of) do |_node|
+        Rigor::Type::Combinator.nominal_of(receiver_class)
+      end
+      plugin.flow_contribution_for(call_node: call_node, scope: scope)
+    end
+
+    it "records `has_and_belongs_to_many` as a collection association" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/post.rb" => <<~RUBY
+          class Post < ApplicationRecord
+            has_and_belongs_to_many :tags
+          end
+        RUBY
+      }
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: DEFAULT_SCHEMA)
+      tags = index.find("Post").associations.find { |a| a[:name] == "tags" }
+
+      expect(tags).to include(name: "tags", kind: :collection, target: "Tag")
+    end
+
+    context "with a polymorphic `belongs_to`" do
+      let(:poly_models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/comment.rb" => <<~RUBY
+            class Comment < ApplicationRecord
+              belongs_to :commentable, polymorphic: true
+            end
+          RUBY
+        }
+      end
+
+      let(:poly_schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "comments", force: :cascade do |t|
+              t.text "body"
+              t.references "commentable", polymorphic: true
+            end
+          end
+        SCHEMA
+      end
+
+      it "records it as a singular association with a nil target" do
+        _result, index = run_ar_with_index("x = 1\n", models: poly_models, schema: poly_schema)
+        assoc = index.find("Comment").associations.find { |a| a[:name] == "commentable" }
+
+        expect(assoc).to include(name: "commentable", kind: :singular, target: nil, polymorphic: true)
+      end
+
+      it "accepts the polymorphic association name as a query key" do
+        diags = plugin_diagnostics(
+          run_ar("Comment.where(commentable: x)\n", schema: poly_schema, models: poly_models)
+        )
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      it "declines to contribute a (wrong) Nominal type for the polymorphic accessor" do
+        _result, index = run_ar_with_index("x = 1\n", models: poly_models, schema: poly_schema)
+        contribution = flow_contribution_for_call(
+          index: index, source: "comment.commentable", receiver_class: "Comment"
+        )
+        expect(contribution).to be_nil
+      end
+    end
+
+    context "with a `composed_of` aggregation" do
+      let(:composed_models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/account.rb" => <<~RUBY
+            class Account < ApplicationRecord
+              composed_of :balance, class_name: "Money"
+            end
+          RUBY
+        }
+      end
+
+      let(:composed_schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "accounts", force: :cascade do |t|
+              t.integer "balance_amount"
+              t.string  "balance_currency"
+            end
+          end
+        SCHEMA
+      end
+
+      it "records it as a singular association targeting its value class" do
+        _result, index = run_ar_with_index("x = 1\n", models: composed_models, schema: composed_schema)
+        assoc = index.find("Account").associations.find { |a| a[:name] == "balance" }
+
+        expect(assoc).to include(name: "balance", kind: :singular, target: "Money", nullable: false)
+      end
+
+      it "accepts the aggregation name as a query key" do
+        diags = plugin_diagnostics(
+          run_ar("Account.where(balance: m)\n", schema: composed_schema, models: composed_models)
+        )
+        expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+      end
+
+      it "contributes `Nominal[ValueClass]` for the aggregation accessor" do
+        _result, index = run_ar_with_index("x = 1\n", models: composed_models, schema: composed_schema)
+        contribution = flow_contribution_for_call(
+          index: index, source: "account.balance", receiver_class: "Account"
+        )
+        expect(contribution.return_type).to eq(Rigor::Type::Combinator.nominal_of("Money"))
+      end
+    end
+
+    it "records `delegated_type` as a polymorphic singular association" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/entry.rb" => <<~RUBY
+          class Entry < ApplicationRecord
+            delegated_type :entryable, types: %w[Message Comment]
+          end
+        RUBY
+      }
+      schema = <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "entries", force: :cascade do |t|
+            t.references "entryable", polymorphic: true
+          end
+        end
+      SCHEMA
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+      assoc = index.find("Entry").associations.find { |a| a[:name] == "entryable" }
+
+      expect(assoc).to include(name: "entryable", kind: :singular, target: nil, polymorphic: true)
+    end
+  end
 end

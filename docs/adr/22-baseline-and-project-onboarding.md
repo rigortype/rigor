@@ -948,6 +948,11 @@ This ADR's design is re-litigated if any of these become true:
   profiles (the prior layer this ADR builds on).
 - [`docs/notes/20260519-oss-library-survey.md`](../notes/20260519-oss-library-survey.md)
   — the five-project survey that drove the design need.
+- [`docs/notes/20260521-mastodon-v4.5-regression-sweep.md`](../notes/20260521-mastodon-v4.5-regression-sweep.md)
+  — a 16-tag baseline-drift sweep over Mastodon's v4.5.x line:
+  surfaced diagnostics stayed at 0 across the whole release line,
+  empirically validating the acknowledge-mode "adopt once, surface
+  only regressions" contract.
 - [`docs/ROADMAP.md`](../ROADMAP.md) § "Agent workflows /
   SKILLs (committed: v0.2.0)" — companion external-author
   SKILL track this ADR's SKILLs feed into.

@@ -37,7 +37,7 @@ module Rigor
         #              `required: false`. Meaningless for
         #              `:collection` rows.
         Entry = Struct.new(:class_name, :table_name, :columns, :associations,
-                           :enums, :scopes, :validations, :callbacks,
+                           :enums, :scopes, :validations, :callbacks, :aliases,
                            keyword_init: true) do
           def column(name)
             columns.find { |c| c.name == name.to_s }
@@ -74,6 +74,11 @@ module Rigor
 
           # `callbacks` is `Array<{ name:, callback: }>`.
           def callback_targets = callbacks.map { |c| c[:name] }
+
+          # `aliases` is `Hash<alias_name => target_attribute>`
+          # populated from `alias_attribute` declarations.
+          def alias?(name) = aliases.key?(name.to_s)
+          def resolve_alias(name) = aliases[name.to_s]
         end
 
         attr_reader :entries
@@ -102,6 +107,7 @@ module Rigor
             scopes = Array(row[:scopes]).freeze
             validations = Array(row[:validations]).freeze
             callbacks = Array(row[:callbacks]).map(&:freeze).freeze
+            aliases = (row[:aliases] || {}).transform_keys(&:to_s).transform_values(&:to_s).freeze
             acc[class_name] = Entry.new(
               class_name: class_name,
               table_name: table_name,
@@ -110,7 +116,8 @@ module Rigor
               enums: enums,
               scopes: scopes,
               validations: validations,
-              callbacks: callbacks
+              callbacks: callbacks,
+              aliases: aliases
             ).freeze
           end
           new(entries.freeze)

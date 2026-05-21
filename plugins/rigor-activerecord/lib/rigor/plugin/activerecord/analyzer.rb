@@ -108,7 +108,14 @@ module Rigor
         # surfaces as an `unknown-column` false positive — Mastodon
         # saw ~100 such hits across the API controllers, all of
         # which were the canonical Rails idiom rather than typos.
+        #
+        # `alias_attribute` names resolve to their target before
+        # the column / association check — querying by an aliased
+        # attribute is a valid Rails idiom and must not surface as
+        # an `unknown-column`.
         def valid_query_key?(entry, key)
+          key = entry.resolve_alias(key) if entry.alias?(key)
+
           return true if entry.column?(key)
 
           assoc = entry.association(key)

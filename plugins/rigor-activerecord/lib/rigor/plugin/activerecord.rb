@@ -285,7 +285,8 @@ module Rigor
             enums: entry.enums,
             scopes: entry.scopes,
             validations: entry.validated_attributes,
-            callbacks: entry.callbacks
+            callbacks: entry.callbacks,
+            aliases: entry.aliases
           }.freeze
         end.freeze
       end

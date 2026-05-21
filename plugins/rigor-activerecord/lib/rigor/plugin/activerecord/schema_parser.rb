@@ -21,18 +21,34 @@ module Rigor
       #     end
       #   end
       #
-      # `t.references "x"` becomes a single `x_id` integer column
+      # `t.references "x"` becomes an `x_id` integer column
       # (foreign-key indices and constraints are ignored — only the
-      # column shape matters for type inference). `t.timestamps`
-      # adds `created_at` and `updated_at` datetime columns. Any
-      # other `t.<method>` call is treated as an unknown column
-      # type and falls back to `Object` per
-      # `SchemaTable.ruby_type_for`.
+      # column shape matters for type inference); add a `polymorphic:
+      # true` option and an `x_type` string column is emitted too.
+      # `t.timestamps` adds `created_at` and `updated_at` datetime
+      # columns. `t.column "x", :type` is the generic column form.
+      # Any other `t.<method> "name"` call is treated as a column
+      # whose type symbol is the method name — unknown types degrade
+      # to `Object` per `SchemaTable.ruby_type_for` rather than being
+      # dropped. Only the structural calls in {NON_COLUMN_METHODS}
+      # (indexes, constraints, foreign keys) are skipped.
       #
       # Designed for the Prism interpretation pattern from
       # rigor-lisp-eval — recursive descent on the AST, no eval.
       class SchemaParser
         TIMESTAMPS_COLUMNS = %w[created_at updated_at].freeze
+
+        # Structural `t.<method>` calls inside a `create_table`
+        # block that declare indexes / constraints rather than
+        # columns. Everything NOT in this set that carries a
+        # literal column name is treated as a column declaration
+        # so a real column is never silently dropped — a dropped
+        # column turns every query against it into a false
+        # `unknown-column` diagnostic.
+        NON_COLUMN_METHODS = %i[
+          index check_constraint exclusion_constraint
+          unique_constraint foreign_key primary_keys
+        ].freeze
 
         # @param source [String] contents of `db/schema.rb`
         # @return [SchemaTable]
@@ -116,16 +132,21 @@ module Rigor
         def parse_column(call_node)
           method = call_node.name
           case method
-          when :string, :text, :integer, :bigint, :float, :decimal, :boolean,
-               :datetime, :timestamp, :date, :time, :binary, :json, :jsonb
-            parse_typed_column(method, call_node)
           when :references, :belongs_to
             parse_references_column(call_node)
           when :timestamps
             parse_timestamps
+          when :column
+            parse_generic_column(call_node)
           else
-            # Unknown column DSL method — parser stays silent.
-            nil
+            # Structural DSL call (index / constraint / FK) —
+            # not a column.
+            return nil if NON_COLUMN_METHODS.include?(method)
+
+            # Any other `t.<method> "name"` is a column. The
+            # method name is the type symbol; unknown types
+            # degrade to `Object` rather than dropping the column.
+            parse_typed_column(method, call_node)
           end
         end
 
@@ -140,15 +161,53 @@ module Rigor
           )
         end
 
+        # `t.references "x"` adds an `x_id` integer column.
+        # `t.references "x", polymorphic: true` additionally adds
+        # an `x_type` string column — without it every
+        # `where(x_type: ...)` on the polymorphic owner surfaces
+        # as a false `unknown-column`.
         def parse_references_column(call_node)
           name = string_argument(call_node, 0)
           return nil if name.nil?
 
-          column_name = "#{name}_id"
+          columns = [
+            SchemaTable::Column.new(name: "#{name}_id", type: :integer, ruby_type: "Integer")
+          ]
+          if references_polymorphic?(call_node)
+            columns << SchemaTable::Column.new(name: "#{name}_type", type: :string, ruby_type: "String")
+          end
+          columns
+        end
+
+        def references_polymorphic?(call_node)
+          return false if call_node.arguments.nil?
+
+          call_node.arguments.arguments.each do |arg|
+            next unless arg.is_a?(Prism::KeywordHashNode)
+
+            arg.elements.each do |pair|
+              next unless pair.is_a?(Prism::AssocNode)
+              next unless symbol_key(pair.key) == :polymorphic
+
+              return pair.value.is_a?(Prism::TrueNode)
+            end
+          end
+          false
+        end
+
+        # `t.column "name", "type"` / `t.column "name", :type` —
+        # the explicit generic column form. The type lives in the
+        # second argument; an absent type degrades to `:string`.
+        def parse_generic_column(call_node)
+          name = string_argument(call_node, 0)
+          return nil if name.nil?
+
+          type = string_argument(call_node, 1)
+          type_sym = type ? type.to_sym : :string
           SchemaTable::Column.new(
-            name: column_name,
-            type: :integer,
-            ruby_type: "Integer"
+            name: name,
+            type: type_sym,
+            ruby_type: SchemaTable.ruby_type_for(type_sym)
           )
         end
 

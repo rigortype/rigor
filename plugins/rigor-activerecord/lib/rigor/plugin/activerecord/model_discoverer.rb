@@ -40,7 +40,7 @@ module Rigor
           @base_classes = base_classes.to_set
         end
 
-        # @return [Array<Hash>] rows of { class_name:, table_name_override: }
+        # @return [Array<Hash>] rows of { class_name:, table_name_override:, ... }
         def discover
           rows = []
           ruby_files_under(@search_paths).each do |path|
@@ -48,17 +48,7 @@ module Rigor
             next if contents.nil?
 
             tree = Prism.parse(contents).value
-            walk_for_classes(tree, []) do |class_name, table_override, associations, enums, scopes, validations, callbacks|
-              rows << {
-                class_name: class_name,
-                table_name_override: table_override,
-                associations: associations,
-                enums: enums,
-                scopes: scopes,
-                validations: validations,
-                callbacks: callbacks
-              }
-            end
+            walk_for_classes(tree, []) { |row| rows << row }
           end
           rows
         end
@@ -101,13 +91,16 @@ module Rigor
           superclass = constant_path_name(node.superclass) if node.superclass
 
           if superclass && @base_classes.include?(superclass)
-            table_override = lookup_table_name_override(node.body)
-            associations = lookup_associations(node.body)
-            enums = lookup_enums(node.body)
-            scopes = lookup_scopes(node.body)
-            validations = lookup_validations(node.body)
-            callbacks = lookup_callbacks(node.body)
-            yield full_name, table_override, associations, enums, scopes, validations, callbacks
+            yield({
+              class_name: full_name,
+              table_name_override: lookup_table_name_override(node.body),
+              associations: lookup_associations(node.body),
+              enums: lookup_enums(node.body),
+              scopes: lookup_scopes(node.body),
+              validations: lookup_validations(node.body),
+              callbacks: lookup_callbacks(node.body),
+              aliases: lookup_aliases(node.body)
+            })
           end
 
           # Recurse into the body in case nested classes exist.
@@ -398,6 +391,32 @@ module Rigor
             end
           end
           targets.freeze
+        end
+
+        # `alias_attribute :new_name, :old_name`. Records the
+        # mapping so the analyzer accepts the alias as a query
+        # key — without it every `where(<alias>: ...)` /
+        # `find_by(<alias>: ...)` call surfaces as a false
+        # `unknown-column`. Returns `Hash<alias => target>`;
+        # non-Symbol-literal forms decline rather than guess.
+        def lookup_aliases(body)
+          return {} if body.nil?
+
+          aliases = {}
+          body.compact_child_nodes.each do |node|
+            next unless node.is_a?(Prism::CallNode) && node.name == :alias_attribute
+            next if node.receiver
+
+            args = node.arguments&.arguments
+            next if args.nil? || args.size < 2
+
+            new_name = args[0]
+            old_name = args[1]
+            next unless new_name.is_a?(Prism::SymbolNode) && old_name.is_a?(Prism::SymbolNode)
+
+            aliases[new_name.unescaped] = old_name.unescaped
+          end
+          aliases.freeze
         end
 
         # Collects every Symbol-literal positional argument

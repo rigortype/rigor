@@ -35,7 +35,15 @@ module Rigor
           time: "Time",
           binary: "String",
           json: "Object",
-          jsonb: "Object"
+          jsonb: "Object",
+          # PostgreSQL-flavoured string-ish column types Rails
+          # schemas commonly carry. `uuid` / `citext` / `inet`
+          # all behave as `String` for query purposes; mapping
+          # them here keeps the column out of the "unknown type
+          # → dropped column → false unknown-column" path.
+          uuid: "String",
+          citext: "String",
+          inet: "String"
         }.freeze
 
         # Implicit columns that every Rails table has unless the

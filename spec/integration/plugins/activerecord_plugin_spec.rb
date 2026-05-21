@@ -771,4 +771,111 @@ RSpec.describe "plugins/rigor-activerecord" do
       end
     end
   end
+
+  describe "polymorphic `t.references` — `_type` column" do
+    let(:poly_schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "comments", force: :cascade do |t|
+            t.text "body"
+            t.references "commentable", polymorphic: true
+          end
+        end
+      SCHEMA
+    end
+
+    let(:poly_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/comment.rb" => "class Comment < ApplicationRecord\nend\n"
+      }
+    end
+
+    it "adds `<name>_type` alongside `<name>_id` for a polymorphic reference" do
+      diags = plugin_diagnostics(
+        run_ar("Comment.where(commentable_type: 'Post', commentable_id: 1)\n",
+               schema: poly_schema, models: poly_models)
+      )
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+
+    it "adds only `<name>_id` for a non-polymorphic reference" do
+      # DEFAULT_SCHEMA's `posts` table has a plain
+      # `t.references "user"` — no `user_type` column exists.
+      diags = plugin_diagnostics(run_ar("Post.where(user_type: 'x')\n"))
+      expect(diags.find { |d| d.rule == "unknown-column" && d.message.include?("user_type") }).not_to be_nil
+    end
+  end
+
+  describe "exotic / generic column types are not dropped" do
+    let(:exotic_schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "accounts", force: :cascade do |t|
+            t.citext "email"
+            t.uuid   "public_token"
+            t.inet   "last_ip"
+            t.column "preferences", :jsonb
+            t.index  ["email"], unique: true
+          end
+        end
+      SCHEMA
+    end
+
+    let(:exotic_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/account.rb" => "class Account < ApplicationRecord\nend\n"
+      }
+    end
+
+    it "recognises citext / uuid / inet / generic-column declarations as columns" do
+      diags = plugin_diagnostics(
+        run_ar("Account.where(email: 'a', public_token: 't', last_ip: '127.0.0.1', preferences: {})\n",
+               schema: exotic_schema, models: exotic_models)
+      )
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+
+    it "does not treat a structural `t.index` declaration as a column" do
+      diags = plugin_diagnostics(
+        run_ar("Account.where(nonexistent: 1)\n", schema: exotic_schema, models: exotic_models)
+      )
+      expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+    end
+  end
+
+  describe "alias_attribute query keys" do
+    let(:alias_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/user.rb" => <<~RUBY,
+          class User < ApplicationRecord
+            alias_attribute :email_address, :email
+          end
+        RUBY
+        "app/models/post.rb" => "class Post < ApplicationRecord\nend\n"
+      }
+    end
+
+    it "accepts an aliased attribute as a `where` / `find_by` key" do
+      diags = plugin_diagnostics(
+        run_ar("User.where(email_address: 'a'); User.find_by(email_address: 'b')\n", models: alias_models)
+      )
+      expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+
+    it "records the alias on the model entry" do
+      _result, index = run_ar_with_index("x = 1\n", models: alias_models, schema: DEFAULT_SCHEMA)
+      entry = index.find("User")
+
+      expect(entry.alias?("email_address")).to be(true)
+      expect(entry.resolve_alias("email_address")).to eq("email")
+    end
+
+    it "still flags a genuine typo that is not an alias" do
+      diags = plugin_diagnostics(run_ar("User.where(emial: 'a')\n", models: alias_models))
+      expect(diags.find { |d| d.rule == "unknown-column" }).not_to be_nil
+    end
+  end
 end

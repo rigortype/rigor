@@ -88,13 +88,56 @@ module Rigor
         configuration: configuration, options: options,
         buffer: buffer, cache_root: cache_root
       )
-      result = runner.run(@argv.empty? ? configuration.paths : @argv)
-      result = apply_baseline_filter(result, configuration, options)
+      raw_result = runner.run(@argv.empty? ? configuration.paths : @argv)
+      result = apply_baseline_filter(raw_result, configuration, options)
 
       write_result(result, options.fetch(:format))
       write_run_stats(result.stats) if result.stats
       write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
-      result.success? ? 0 : 1
+
+      exit_code = result.success? ? 0 : 1
+      exit_code = 1 if baseline_strict_violation?(raw_result.diagnostics, configuration, options)
+      exit_code
+    end
+
+    # ADR-22 slice 5 — the `--baseline-strict` CI gate. When the
+    # flag is set, ANY baseline drift fails the run — not only
+    # excess drift (a bucket over threshold, which already fails
+    # via the surfaced diagnostics) but also DEFICIT drift
+    # (`actual < count`: the baseline has grown looser than the
+    # code and should be regenerated). A no-op, with a stderr
+    # note, when no baseline is active — the flag never
+    # implicitly loads a baseline the config did not name (WD2).
+    def baseline_strict_violation?(raw_diagnostics, configuration, options)
+      return false unless options.fetch(:baseline_strict)
+
+      path = resolve_baseline_path(configuration, options)
+      if path.nil?
+        @err.puts("rigor: --baseline-strict given but no baseline is active; nothing to gate.")
+        return false
+      end
+
+      baseline = Analysis::Baseline.load(path)
+      return false if baseline.nil? || baseline.empty?
+
+      drifted = baseline.audit(raw_diagnostics).reject { |row| row.status == :within }
+      return false if drifted.empty?
+
+      report_strict_drift(drifted, path)
+      true
+    rescue Analysis::Baseline::LoadError => e
+      @err.puts("rigor: baseline load failed: #{e.message} (--baseline-strict gate skipped)")
+      false
+    end
+
+    def report_strict_drift(rows, path)
+      @err.puts("rigor: --baseline-strict — #{rows.size} bucket(s) drifted from #{path}:")
+      rows.sort_by { |r| [r.bucket.file, r.bucket.rule] }.each do |row|
+        delta = row.delta.positive? ? "+#{row.delta}" : row.delta.to_s
+        @err.puts("  #{row.bucket.file}  [#{row.bucket.rule}]  " \
+                  "#{row.bucket.count} → #{row.actual_count}  (Δ#{delta}, #{row.status})")
+      end
+      @err.puts("rigor: run `rigor baseline regenerate` to refresh the baseline.")
     end
 
     # ADR-22 — apply the baseline filter as the LAST step of
@@ -234,7 +277,10 @@ module Rigor
         # to `.rigor.yml`'s `baseline:` key"; a String overrides
         # the config; `false` (from `--no-baseline`) suppresses
         # any baseline that the config might name.
-        baseline: :unset
+        baseline: :unset,
+        # ADR-22 slice 5 — `--baseline-strict` CI gate: fail the
+        # run on any baseline drift, in either direction.
+        baseline_strict: false
       }
       parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
         opts.banner = "Usage: rigor check [options] [paths]"
@@ -267,6 +313,10 @@ module Rigor
         opts.on("--no-baseline",
                 "ADR-22: ignore any configured baseline for this run") do
           options[:baseline] = false
+        end
+        opts.on("--baseline-strict",
+                "ADR-22: fail the run on any baseline drift (CI gate)") do
+          options[:baseline_strict] = true
         end
       end
       parser.parse!(@argv)

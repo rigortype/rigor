@@ -9,22 +9,22 @@ require_relative "../configuration"
 
 module Rigor
   class CLI
-    # ADR-22 Slice 1 — `rigor baseline {generate}` subcommands.
-    # Backed by `Rigor::Analysis::Baseline`. Future slices
-    # extend the subcommand surface with `dump`, `drift`,
-    # `prune`, `regenerate`.
-    #
-    # Initial subcommand: `generate`.
+    # ADR-22 — `rigor baseline {generate,regenerate,dump,drift,
+    # prune}` subcommands, backed by `Rigor::Analysis::Baseline`.
     #
     #   rigor baseline generate              # default: rule-ID rows
     #   rigor baseline generate --match-mode message
     #   rigor baseline generate --force      # overwrite existing
     #   rigor baseline generate --output=PATH
+    #   rigor baseline regenerate            # slice 5: unconditional rewrite
+    #   rigor baseline dump
+    #   rigor baseline drift
+    #   rigor baseline prune
     class BaselineCommand # rubocop:disable Metrics/ClassLength
       EXIT_USAGE = 64
       DEFAULT_BASELINE_PATH = ".rigor-baseline.yml"
 
-      SUBCOMMANDS = %w[generate dump drift prune].freeze
+      SUBCOMMANDS = %w[generate regenerate dump drift prune].freeze
 
       def initialize(argv:, out: $stdout, err: $stderr)
         @argv = argv
@@ -39,6 +39,7 @@ module Rigor
           @out.puts(help)
           0
         when "generate" then run_generate
+        when "regenerate" then run_regenerate
         when "dump" then run_dump
         when "drift" then run_drift
         when "prune" then run_prune
@@ -59,21 +60,36 @@ module Rigor
         path = options.fetch(:output)
 
         if File.exist?(path) && !options.fetch(:force)
-          @err.puts("rigor: #{path} already exists. Re-run with --force to overwrite.")
+          @err.puts("rigor: #{path} already exists. Re-run with --force to " \
+                    "overwrite, or use `rigor baseline regenerate`.")
           return EXIT_USAGE
         end
 
+        write_baseline(options, verb: "wrote baseline to")
+      end
+
+      # ADR-22 slice 5 — `regenerate` is `generate --force`: the
+      # end-of-quality-improvement-session refresh after landing
+      # baseline-reducing fixes. It rewrites the file
+      # unconditionally (no existence guard, no `--force` flag),
+      # so `rigor baseline regenerate` reads cleanly as "make the
+      # baseline match reality again".
+      def run_regenerate
+        options = parse_generate_options(subcommand: "regenerate")
+        write_baseline(options, verb: "regenerated baseline")
+      end
+
+      def write_baseline(options, verb:)
+        path = options.fetch(:output)
         configuration = Configuration.load(options.fetch(:config))
         diagnostics = collect_diagnostics(configuration, options)
 
         baseline = Analysis::Baseline.from_diagnostics(diagnostics, match_mode: options.fetch(:match_mode))
         File.write(path, baseline.to_yaml)
 
-        bucket_count = baseline.size
-        diagnostic_count = diagnostics.size
         @err.puts(
-          "rigor: wrote baseline to #{path} " \
-          "(#{bucket_count} bucket(s) covering #{diagnostic_count} diagnostic(s); " \
+          "rigor: #{verb} #{path} " \
+          "(#{baseline.size} bucket(s) covering #{diagnostics.size} diagnostic(s); " \
           "match-mode: #{options.fetch(:match_mode)})"
         )
         if configuration.baseline_path.nil?
@@ -85,7 +101,7 @@ module Rigor
         0
       end
 
-      def parse_generate_options
+      def parse_generate_options(subcommand: "generate")
         options = {
           config: nil,
           output: DEFAULT_BASELINE_PATH,
@@ -93,7 +109,7 @@ module Rigor
           force: false
         }
         parser = OptionParser.new do |opts|
-          opts.banner = "Usage: rigor baseline generate [options]"
+          opts.banner = "Usage: rigor baseline #{subcommand} [options]"
           opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
           opts.on("--output=PATH", "Write baseline to PATH (default: #{DEFAULT_BASELINE_PATH})") do |v|
             options[:output] = v
@@ -102,7 +118,10 @@ module Rigor
                   "Row form: rule (default) or message") do |v|
             options[:match_mode] = v
           end
-          opts.on("--force", "Overwrite an existing baseline file") { options[:force] = true }
+          # `regenerate` always overwrites — no `--force` to offer.
+          if subcommand == "generate"
+            opts.on("--force", "Overwrite an existing baseline file") { options[:force] = true }
+          end
         end
         parser.parse!(@argv)
         options
@@ -290,7 +309,7 @@ module Rigor
         case status
         when :over then "## Over threshold (#{count}) — bucket exceeded; check the regular diagnostic output."
         when :cleared then "## Cleared (#{count}) — `rigor baseline prune` can drop these."
-        when :reducible then "## Reducible (#{count}) — tightening opportunity; consider `regenerate` (slice 5)."
+        when :reducible then "## Reducible (#{count}) — tightening opportunity; run `rigor baseline regenerate`."
         when :within then "## Within threshold (#{count})"
         end
       end
@@ -365,6 +384,7 @@ module Rigor
 
           Subcommands:
             generate    Write a fresh baseline file from a `rigor check` run.
+            regenerate  Rewrite the baseline unconditionally (post-fix refresh).
             dump        Print the contents of an existing baseline.
             drift       Compare baseline vs current diagnostics (reduction / regression hints).
             prune       Drop cleared buckets (`actual == 0`) from the baseline.

@@ -147,6 +147,65 @@ RSpec.describe Rigor::CLI::BaselineCommand do
     end
   end
 
+  describe "regenerate" do
+    before { write_demo_project }
+
+    it "rewrites an existing baseline unconditionally (no --force needed)" do
+      File.write(File.join(tmpdir, ".rigor-baseline.yml"), "stale: content\n")
+      status, _out, err = run_cli("baseline", "regenerate", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(err).to include("regenerated baseline")
+      data = YAML.safe_load_file(File.join(tmpdir, ".rigor-baseline.yml"))
+      expect(data["version"]).to eq(1)
+      expect(data["ignored"]).to be_an(Array)
+    end
+
+    it "writes a fresh baseline when none exists yet" do
+      status, _out, _err = run_cli("baseline", "regenerate", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(File.exist?(File.join(tmpdir, ".rigor-baseline.yml"))).to be(true)
+    end
+  end
+
+  describe "rigor check --baseline-strict" do
+    let(:diagnostic_source) do
+      <<~RUBY
+        1.this_method_does_not_exist
+        2.also_not_a_method
+      RUBY
+    end
+
+    before { write_demo_project(diagnostic_source: diagnostic_source) }
+
+    it "passes when the current run matches the baseline exactly" do
+      run_cli("baseline", "generate", cwd: tmpdir)
+      status, _out, err = run_cli(
+        "check", "--baseline=.rigor-baseline.yml", "--baseline-strict", cwd: tmpdir
+      )
+      expect(status).to eq(0)
+      expect(err).not_to include("drifted")
+    end
+
+    it "fails on deficit drift even though the run has no surfaced diagnostics" do
+      run_cli("baseline", "generate", cwd: tmpdir)
+      # Clean the file: actual count drops below the baseline.
+      File.write(File.join(tmpdir, "lib", "demo.rb"), "x = 1\n")
+      status, _out, err = run_cli(
+        "check", "--baseline=.rigor-baseline.yml", "--baseline-strict", cwd: tmpdir
+      )
+      expect(status).to eq(1)
+      expect(err).to include("drifted")
+      expect(err).to include("rigor baseline regenerate")
+    end
+
+    it "is a no-op with a note when no baseline is active" do
+      File.write(File.join(tmpdir, "lib", "demo.rb"), "x = 1\n")
+      status, _out, err = run_cli("check", "--baseline-strict", cwd: tmpdir)
+      expect(status).to eq(0)
+      expect(err).to include("no baseline is active")
+    end
+  end
+
   describe "dump" do
     let(:baseline_path) { File.join(tmpdir, ".rigor-baseline.yml") }
 

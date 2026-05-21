@@ -31,6 +31,38 @@ from the Phase 2 mode:
 
 `balanced` is the built-in default — omit the key to get it.
 
+## Install the gems first
+
+Rigor and every plugin are **Ruby gems** loaded by Bundler. The
+`plugins:` and `signature_paths:` config below is inert until the
+gems are installed — the plugin loader runs `require "rigor-<id>"`
+and a missing gem surfaces as a `plugin-loader` diagnostic. Add the
+selected gems to the project `Gemfile`, conventionally in a
+`:development` group, and `bundle install`:
+
+```ruby
+group :development do
+  gem "rigortype", require: false
+  gem "rigor-actionpack", require: false
+  gem "rigor-activerecord", require: false
+  # …one line per plugin chosen in Phase 3…
+  gem "rigor-activesupport-core-ext", require: false
+end
+```
+
+> **v0.1.x availability — tell the user.** The `rigortype` gem is
+> published on RubyGems. The `rigor-*` **plugin gems are not yet** —
+> in the v0.1.x preview line they live in the rigor monorepo, and an
+> external project consumes them with a `path:` or `git:` reference
+> to a checkout, e.g.
+> `gem "rigor-actionpack", path: "../rigor/plugins/rigor-actionpack"`.
+> RubyGems publication of the plugin family is a **v0.2.0**
+> deliverable. So on v0.1.x a project either vendors the plugins it
+> needs from a checkout or defers the plugin-backed parts of this
+> workflow to v0.2.0. The core (`rigortype` + `rigor check` + the
+> baseline) works today; the plugin set does not install cleanly
+> from RubyGems yet.
+
 ## The template
 
 Write `.rigor.dist.yml` at the project root. A Rails app in
@@ -55,11 +87,18 @@ plugins:
   - rigor-rails-routes
   - rigor-rails-i18n
 
-# RBS bundles loaded as extra signature sources. The
-# activesupport-core-ext bundle closes the largest Rails diagnostic
-# cluster (see 01-detect.md).
+# Extra RBS signature sources. IMPORTANT: signature_paths entries
+# are DIRECTORY PATHS, not gem names — `.rigor.yml` is plain YAML
+# (no ERB), so a gem cannot be named here directly. Point at the
+# project's own `sig/` and at the activesupport-core-ext bundle's
+# `sig/` directory. Find that directory with
+# `bundle show rigor-activesupport-core-ext` (append `/sig`); since
+# the path is machine-specific, projects usually VENDOR the bundle —
+# copy its `sig/` into the repo and reference the vendored copy so
+# the path is portable across machines and CI.
 signature_paths:
-  - rigor-activesupport-core-ext
+  - sig
+  - vendor/rbs/activesupport-core-ext   # vendored copy of the bundle's sig/
 
 severity_profile: lenient
 
@@ -86,7 +125,7 @@ handbook document the full surface.
 | `paths:` | Directories Rigor analyses. Source roots only — not `spec/` / `test/`. |
 | `exclude:` | Paths removed from the `paths:` walk. |
 | `plugins:` | Plugin ids to activate (the Phase 3 set). |
-| `signature_paths:` | Extra RBS sources — bundled RBS plugins (e.g. `rigor-activesupport-core-ext`) and any local `sig/` directory. |
+| `signature_paths:` | Extra RBS source **directories** (paths, not gem names; resolved relative to the config file). The project's own `sig/`, plus a vendored copy of the `rigor-activesupport-core-ext` bundle's `sig/`. |
 | `severity_profile:` | `lenient` / `balanced` / `strict`. See the table above. |
 | `severity_overrides:` | Per-rule severity tweaks. Leave empty at init; the baseline-reduce workflow tunes it later. |
 | `baseline:` | Path to the baseline file. **Only acknowledge mode sets it**, and only in Phase 6 *after* the file exists. Per Rigor's no-magic rule, a `.rigor-baseline.yml` on disk does nothing until this key names it. |
@@ -104,7 +143,9 @@ Strict mode never adds `baseline:` at all.
 
 ## Output of this module
 
-A committed `.rigor.dist.yml` with `paths:`, `exclude:`, `plugins:`,
+The selected gems added to the `Gemfile` and `bundle install`d (or,
+on v0.1.x, wired by `path:` to a rigor checkout), plus a committed
+`.rigor.dist.yml` with `paths:`, `exclude:`, `plugins:`,
 `signature_paths:`, and `severity_profile:` set — and no active
 `baseline:` line.
 

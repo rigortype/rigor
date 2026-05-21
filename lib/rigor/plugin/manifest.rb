@@ -41,14 +41,15 @@ module Rigor
 
       attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
                   :owns_receivers, :type_node_resolvers, :block_as_methods, :heredoc_templates,
-                  :trait_registries, :external_files, :hkt_registrations, :hkt_definitions
+                  :trait_registries, :external_files, :hkt_registrations, :hkt_definitions,
+                  :signature_paths
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
         produces: [], consumes: [], owns_receivers: [], type_node_resolvers: [],
         block_as_methods: [], heredoc_templates: [], trait_registries: [], external_files: [],
-        hkt_registrations: [], hkt_definitions: []
+        hkt_registrations: [], hkt_definitions: [], signature_paths: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -63,10 +64,11 @@ module Rigor
         validate_external_files!(external_files)
         validate_hkt_registrations!(hkt_registrations)
         validate_hkt_definitions!(hkt_definitions)
+        validate_signature_paths!(signature_paths)
 
         assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
                       type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files,
-                      hkt_registrations, hkt_definitions)
+                      hkt_registrations, hkt_definitions, signature_paths)
         freeze
       end
 
@@ -75,7 +77,7 @@ module Rigor
       # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
       def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
                         type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files,
-                        hkt_registrations, hkt_definitions)
+                        hkt_registrations, hkt_definitions, signature_paths)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
@@ -91,6 +93,7 @@ module Rigor
         @external_files = external_files.dup.freeze
         @hkt_registrations = hkt_registrations.dup.freeze
         @hkt_definitions = hkt_definitions.dup.freeze
+        @signature_paths = signature_paths.map { |p| p.to_s.dup.freeze }.freeze
       end
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
@@ -135,7 +138,8 @@ module Rigor
           "trait_registries" => trait_registries.map(&:to_h),
           "external_files" => external_files.map(&:to_h),
           "hkt_registrations" => hkt_registrations.map(&:to_h),
-          "hkt_definitions" => hkt_definitions.map { |d| { "uri" => d.uri, "params" => d.params } }
+          "hkt_definitions" => hkt_definitions.map { |d| { "uri" => d.uri, "params" => d.params } },
+          "signature_paths" => signature_paths
         }
       end
 
@@ -324,6 +328,20 @@ module Rigor
         raise ArgumentError,
               "plugin manifest hkt_definitions must be an Array of " \
               "Rigor::Inference::HktRegistry::Definition instances, got #{entries.inspect}"
+      end
+
+      # ADR-25 — `signature_paths:` declares the RBS signature
+      # directories this plugin gem ships, as paths relative to the
+      # plugin's own gem root (e.g. `["sig"]`). `Plugin::Base#signature_paths`
+      # resolves them to absolute dirs against the gem root; the
+      # loader validates each exists and `Environment.for_project`
+      # merges the resolved set into the RBS environment.
+      def validate_signature_paths!(paths)
+        return if paths.is_a?(Array) && paths.all? { |p| p.is_a?(String) && !p.empty? }
+
+        raise ArgumentError,
+              "plugin manifest signature_paths must be an Array of non-empty String, " \
+              "got #{paths.inspect}"
       end
 
       def coerce_consumes(consumes)

@@ -2,6 +2,14 @@
 
 require "spec_helper"
 
+# Top-level named plugin class for the ADR-25 `#signature_paths`
+# tests — resolution needs `Object.const_source_location`, which
+# only resolves a named constant. Defined here so the file is
+# self-contained under `parallel_test`.
+class RigorPluginBaseSpecSigPlugin < Rigor::Plugin::Base
+  manifest(id: "base-spec-sig", version: "0.0.1", signature_paths: ["sig"])
+end
+
 RSpec.describe Rigor::Plugin::Base do
   let(:services) do
     Rigor::Plugin::Services.new(
@@ -46,6 +54,29 @@ RSpec.describe Rigor::Plugin::Base do
       end
       plugin = klass.new(services: services)
       expect(plugin.manifest).to eq(klass.manifest)
+    end
+  end
+
+  describe "#signature_paths (ADR-25)" do
+    it "returns [] when the manifest declares no signature_paths" do
+      klass = Class.new(described_class) do
+        manifest(id: "demo", version: "0.1.0")
+      end
+      expect(klass.new(services: services).signature_paths).to eq([])
+    end
+
+    it "resolves declared paths against the plugin gem root" do
+      plugin = RigorPluginBaseSpecSigPlugin.new(services: services)
+      # The class is defined in this spec file (no `/lib/` segment),
+      # so the gem root falls back to the file's directory.
+      expect(plugin.signature_paths).to eq([File.expand_path("sig", __dir__)])
+    end
+
+    it "returns [] for an anonymous class even when paths are declared" do
+      klass = Class.new(described_class) do
+        manifest(id: "demo", version: "0.1.0", signature_paths: ["sig"])
+      end
+      expect(klass.new(services: services).signature_paths).to eq([])
     end
   end
 

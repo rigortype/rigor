@@ -13,6 +13,13 @@ class RigorPluginRegistrySpecPlugin < Rigor::Plugin::Base
   manifest(id: "registry-spec-plugin", version: "0.0.1")
 end
 
+# ADR-25 — a named plugin class declaring `signature_paths:`, for
+# the `Registry#signature_paths` aggregation test (resolution
+# needs a named constant).
+class RigorPluginRegistrySpecSigPlugin < Rigor::Plugin::Base
+  manifest(id: "registry-spec-sig-plugin", version: "0.0.1", signature_paths: ["sig"])
+end
+
 RSpec.describe Rigor::Plugin::Registry do
   let(:plugin_class) do
     Class.new(Rigor::Plugin::Base) do
@@ -118,6 +125,21 @@ RSpec.describe Rigor::Plugin::Registry do
       ts = build_plugin("ts-utilities", [pick, omit], services)
       registry = described_class.new(plugins: [ts])
       expect(registry.type_node_resolvers).to eq([pick, omit])
+    end
+  end
+
+  describe "#signature_paths (ADR-25)" do
+    it "is empty when no plugin declares signature_paths" do
+      expect(described_class::EMPTY.signature_paths).to eq([])
+      registry = described_class.new(plugins: [plugin_class.new(services: services)])
+      expect(registry.signature_paths).to eq([])
+    end
+
+    it "aggregates declared signature_paths across loaded plugins" do
+      sig_plugin = RigorPluginRegistrySpecSigPlugin.new(services: services)
+      registry = described_class.new(plugins: [sig_plugin])
+      expect(registry.signature_paths).to eq(sig_plugin.signature_paths)
+      expect(registry.signature_paths).not_to be_empty
     end
   end
 end

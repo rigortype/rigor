@@ -104,6 +104,16 @@ module Rigor
         Inference::HktRegistry.new(registrations: registrations, definitions: definitions)
       end
 
+      # ADR-25 — flat, ordered list of every loaded plugin's
+      # resolved RBS signature directories (absolute paths), in
+      # plugin registration order. `Environment.for_project`
+      # merges these into the signature-path set fed to
+      # `RbsLoader`, alongside the configuration's `signature_paths:`
+      # and the `bundler:` / `rbs_collection:` discovery output.
+      def signature_paths
+        plugins.flat_map(&:signature_paths)
+      end
+
       EMPTY = new.freeze
     end
   end

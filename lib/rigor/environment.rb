@@ -252,7 +252,15 @@ module Rigor
           project_root: root,
           auto_detect: rbs_collection_auto_detect
         ).map(&:to_s)
-        loader_signature_paths = resolved_paths + gem_sig_paths + collection_paths
+        # ADR-25 — RBS signature directories contributed by loaded
+        # plugins via their manifest `signature_paths:`. Resolved
+        # to absolute dirs by `Plugin::Base#signature_paths`;
+        # additive, ranked below the user's explicit
+        # `signature_paths:` and above the opportunistic bundle /
+        # collection discovery. A duplicate-declaration conflict
+        # degrades through the same O7 failure-memo path.
+        plugin_sig_paths = plugin_registry ? plugin_registry.signature_paths.map(&:to_s) : []
+        loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths + collection_paths
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
         loader = RbsLoader.new(
           libraries: merged_libraries,

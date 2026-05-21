@@ -183,6 +183,32 @@ module Rigor
         self.class.manifest
       end
 
+      # ADR-25 — absolute RBS signature directories this plugin
+      # contributes. Resolves each `manifest.signature_paths` entry
+      # (declared relative to the plugin gem root) against that
+      # root. The gem root is the directory above `lib/` in the
+      # file that defined the plugin class (falling back to that
+      # file's directory for a non-conventional layout). Returns
+      # `[]` when the manifest declares no `signature_paths:` or
+      # the class is anonymous (an anonymous class cannot ship a
+      # gem). `Plugin::Loader` validates the resolved dirs exist at
+      # load time; `Environment.for_project` merges them into the
+      # signature-path set fed to `RbsLoader`.
+      def signature_paths
+        relative = manifest.signature_paths
+        return [] if relative.empty?
+
+        class_name = self.class.name
+        return [] if class_name.nil?
+
+        file, = Object.const_source_location(class_name)
+        return [] if file.nil?
+
+        before, separator, = file.rpartition("/lib/")
+        root = separator.empty? ? File.dirname(file) : before
+        relative.map { |rel| File.expand_path(rel, root) }
+      end
+
       # ADR-7 § "Slice 6-A/6-B" — per-plugin {IoBoundary}.
       # Memoised so the boundary's accumulated `FileEntry`
       # rows persist across producer invocations within the

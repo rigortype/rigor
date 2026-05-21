@@ -2,6 +2,19 @@
 
 require "spec_helper"
 
+# ADR-25 — named plugin classes for the signature_paths
+# load-time-validation tests. Defined in this file, so the gem
+# root resolves (no `/lib/` segment) to this file's directory;
+# `"."` therefore points at an existing directory and the
+# bogus entry at a missing one.
+class LoaderSpecSigOkPlugin < Rigor::Plugin::Base
+  manifest(id: "sigok", version: "0.1.0", signature_paths: ["."])
+end
+
+class LoaderSpecSigMissingPlugin < Rigor::Plugin::Base
+  manifest(id: "sigmissing", version: "0.1.0", signature_paths: ["does-not-exist-xyz"])
+end
+
 RSpec.describe Rigor::Plugin::Loader do
   let(:configuration) { Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge("plugins" => plugins)) }
   let(:services) do
@@ -375,6 +388,45 @@ RSpec.describe Rigor::Plugin::Loader do
       expect(err).not_to be_nil
       expect(err.message).to include("cycle-a")
       expect(err.message).to include("cycle-b")
+    end
+  end
+
+  describe "signature_paths validation (ADR-25)" do
+    it "loads a plugin whose declared signature path exists" do
+      requirer = lambda { |name|
+        Rigor::Plugin.register(LoaderSpecSigOkPlugin) if name == "rigor-sigok"
+        true
+      }
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("plugins" => ["rigor-sigok"])
+      )
+      services = Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection, type: Rigor::Type::Combinator, configuration: configuration
+      )
+
+      registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
+
+      expect(registry.ids).to eq(["sigok"])
+      expect(registry.load_errors).to be_empty
+      expect(registry.signature_paths).to eq([File.expand_path(".", __dir__)])
+    end
+
+    it "drops a plugin whose declared signature path is missing, with a LoadError" do
+      requirer = lambda { |name|
+        Rigor::Plugin.register(LoaderSpecSigMissingPlugin) if name == "rigor-sigmissing"
+        true
+      }
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge("plugins" => ["rigor-sigmissing"])
+      )
+      services = Rigor::Plugin::Services.new(
+        reflection: Rigor::Reflection, type: Rigor::Type::Combinator, configuration: configuration
+      )
+
+      registry = described_class.load(configuration: configuration, services: services, requirer: requirer)
+
+      expect(registry.plugins).to be_empty
+      expect(registry.load_errors.map(&:message)).to include(/signature path .* not a directory/)
     end
   end
 end

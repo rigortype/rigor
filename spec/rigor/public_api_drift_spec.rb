@@ -148,6 +148,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     manifest()
     prepare(req:services)
     services()
+    signature_paths()
   ].freeze
 
   PLUGIN_BASE_SINGLETON = %w[
@@ -172,6 +173,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     owns_receivers()
     produces()
     protocols()
+    signature_paths()
     to_h()
     trait_registries()
     type_node_resolvers()
@@ -204,6 +206,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     ids()
     load_errors()
     plugins()
+    signature_paths()
     type_node_resolvers()
   ].freeze
 

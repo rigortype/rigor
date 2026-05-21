@@ -137,6 +137,33 @@ RSpec.describe Rigor::Plugin::Manifest do
       end.to raise_error(ArgumentError, /owns_receivers/)
     end
 
+    it "accepts signature_paths as an Array of relative-path Strings (ADR-25)" do
+      m = described_class.new(
+        id: "as", version: "0.1.0", signature_paths: ["sig", "sig/overlay"]
+      )
+      expect(m.signature_paths).to eq(%w[sig sig/overlay])
+      expect(m.signature_paths).to be_frozen
+    end
+
+    it "defaults signature_paths to an empty array" do
+      m = described_class.new(id: "as", version: "0.1.0")
+      expect(m.signature_paths).to eq([])
+    end
+
+    it "rejects non-String / empty-String signature_paths entries" do
+      expect do
+        described_class.new(id: "as", version: "0.1.0", signature_paths: [:sig])
+      end.to raise_error(ArgumentError, /signature_paths/)
+      expect do
+        described_class.new(id: "as", version: "0.1.0", signature_paths: [""])
+      end.to raise_error(ArgumentError, /signature_paths/)
+    end
+
+    it "round-trips signature_paths through #to_h" do
+      m = described_class.new(id: "as", version: "0.1.0", signature_paths: ["sig"])
+      expect(m.to_h["signature_paths"]).to eq(["sig"])
+    end
+
     it "coerces consumes hashes into Consumption value objects" do
       m = described_class.new(
         id: "ap",

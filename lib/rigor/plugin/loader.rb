@@ -125,7 +125,28 @@ module Rigor
         seen_ids[manifest.id] = entry[:gem]
 
         validate_config!(manifest, entry[:config])
-        instantiate(plugin_class, entry[:config])
+        plugin = instantiate(plugin_class, entry[:config])
+        validate_signature_paths!(plugin)
+        plugin
+      end
+
+      # ADR-25 — a plugin's manifest-declared `signature_paths:`
+      # are resolved (by `Plugin::Base#signature_paths`) against
+      # the plugin gem root. A declared directory that does not
+      # exist is a load-time failure for that plugin — loud, not
+      # silent, because a missing `sig/` means the bundle gem is
+      # broken. The raised LoadError is collected like any other
+      # load failure and the plugin drops from the registry.
+      def validate_signature_paths!(plugin)
+        plugin.signature_paths.each do |dir|
+          next if File.directory?(dir)
+
+          raise LoadError.new(
+            "plugin #{plugin.manifest.id.inspect} declares signature path #{dir.inspect} " \
+            "which is not a directory",
+            plugin_ref: plugin.manifest.id
+          )
+        end
       end
 
       def require_gem!(entry)

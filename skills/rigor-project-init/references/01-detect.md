@@ -70,12 +70,17 @@ treating the table above as exhaustive.
 
 ActiveSupport monkey-patches the core classes (`3.days`,
 `5.minutes`, `"x".squish`, `Time.current`, …). Without the
-`rigor-activesupport-core-ext` RBS bundle, every such call reports
+`rigor-activesupport-core-ext` bundle, every such call reports
 `call.undefined-method` — on a real Rails app this is the single
 largest diagnostic cluster (a measured Mastodon run: ~365 of 489
 diagnostics were exactly this). Phase 5's `rigor triage` flags it as
-hint `activesupport-core-ext`. Wire the bundle into `signature_paths:`
-(Phase 4 shows the key) for any Rails-family project.
+hint `activesupport-core-ext`.
+
+`rigor-activesupport-core-ext` is a **plugin** (an RBS-bundle plugin
+— it contributes signatures, not diagnostics). Activate it like any
+other: list it under `plugins:`. No `signature_paths:` wiring is
+needed — the plugin ships its own `sig/`. Include it for any
+Rails-family project.
 
 ## Output of this module
 

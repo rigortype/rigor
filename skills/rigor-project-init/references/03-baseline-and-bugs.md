@@ -48,7 +48,7 @@ Use the three sections like this:
 
 | Hint `id` | Cause | Where this skill handles it |
 | --- | --- | --- |
-| `activesupport-core-ext` | ActiveSupport core-class monkey-patches not loaded. | Go back to Phase 4: add `rigor-activesupport-core-ext` to `signature_paths:`, re-run triage. This is a config gap, not a bug. |
+| `activesupport-core-ext` | ActiveSupport core-class monkey-patches not loaded. | Go back to Phase 3/4: add `rigor-activesupport-core-ext` to `plugins:` (it is an RBS-bundle plugin), re-run triage. This is a config gap, not a bug. |
 | `gem-without-rbs` | A dependency ships no RBS. | Phase 7 escalation — `rbs collection install`, or `dependencies.source_inference:`, or open a Rigor issue. |
 | `project-monkey-patch` | An in-project monkey-patch / refinement Rigor did not see. | Phase 7 escalation — register the defining file via `pre_eval:`, or (if it is a DSL) write a project plugin. |
 | `activerecord-relation-misinference` | An ActiveRecord relation inferred as `Array`. | Ensure `rigor-activerecord` is enabled (Phase 3). If it persists, it is an engine gap — open a Rigor issue. |

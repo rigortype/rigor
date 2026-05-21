@@ -86,19 +86,9 @@ plugins:
   - rigor-actionmailer
   - rigor-rails-routes
   - rigor-rails-i18n
-
-# Extra RBS signature sources. IMPORTANT: signature_paths entries
-# are DIRECTORY PATHS, not gem names — `.rigor.yml` is plain YAML
-# (no ERB), so a gem cannot be named here directly. Point at the
-# project's own `sig/` and at the activesupport-core-ext bundle's
-# `sig/` directory. Find that directory with
-# `bundle show rigor-activesupport-core-ext` (append `/sig`); since
-# the path is machine-specific, projects usually VENDOR the bundle —
-# copy its `sig/` into the repo and reference the vendored copy so
-# the path is portable across machines and CI.
-signature_paths:
-  - sig
-  - vendor/rigor-activesupport-core-ext-sig   # vendored copy of the bundle's sig/
+  # An RBS-bundle plugin — ships ActiveSupport core_ext signatures,
+  # no signature_paths: wiring needed (see 01-detect.md).
+  - rigor-activesupport-core-ext
 
 severity_profile: lenient
 
@@ -125,7 +115,7 @@ handbook document the full surface.
 | `paths:` | Directories Rigor analyses. Source roots only — not `spec/` / `test/`. |
 | `exclude:` | Paths removed from the `paths:` walk. |
 | `plugins:` | Plugin ids to activate (the Phase 3 set). |
-| `signature_paths:` | Extra RBS source **directories** (paths, not gem names; resolved relative to the config file). The project's own `sig/`, plus a vendored copy of the `rigor-activesupport-core-ext` bundle's `sig/`. |
+| `signature_paths:` | Extra RBS source **directories** (paths, not gem names; resolved relative to the config file). Use it for the project's own local `sig/` if it has one. RBS-bundle *plugins* like `rigor-activesupport-core-ext` ship their own `sig/` and need no entry here — list them under `plugins:`. |
 | `severity_profile:` | `lenient` / `balanced` / `strict`. See the table above. |
 | `severity_overrides:` | Per-rule severity tweaks. Leave empty at init; the baseline-reduce workflow tunes it later. |
 | `baseline:` | Path to the baseline file. **Only acknowledge mode sets it**, and only in Phase 6 *after* the file exists. Per Rigor's no-magic rule, a `.rigor-baseline.yml` on disk does nothing until this key names it. |
@@ -145,8 +135,7 @@ Strict mode never adds `baseline:` at all.
 
 The selected gems added to the `Gemfile` and `bundle install`d (or,
 on v0.1.x, wired by `path:` to a rigor checkout), plus a committed
-`.rigor.dist.yml` with `paths:`, `exclude:`, `plugins:`,
-`signature_paths:`, and `severity_profile:` set — and no active
-`baseline:` line.
+`.rigor.dist.yml` with `paths:`, `exclude:`, `plugins:`, and
+`severity_profile:` set — and no active `baseline:` line.
 
 Proceed to Phase 5 ([`03-baseline-and-bugs.md`](03-baseline-and-bugs.md)).

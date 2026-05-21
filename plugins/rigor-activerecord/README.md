@@ -145,12 +145,13 @@ digest and the cache would never invalidate.
 - **`db/schema.rb` only.** `db/structure.sql` (PostgreSQL-style
   raw SQL dumps) is not supported in this iteration. `schema.rb`
   is the standard for most Rails apps.
-- **No instance-method typing.** `user.name` (column accessor on
-  an instance) does not get typed as `String`. The plugin only
-  validates class-side finders. Instance accessor typing would
-  need analyser integration that the v0.1.0 plugin contract does
-  not yet expose. Queued for once plugin return-type contributions
-  ship.
+- **No instance-method *setter* / dirty-tracking typing.** The
+  plugin types instance-side column *reads* (`user.name` →
+  `String`, `user.admin?` → `bool`) and singular-association
+  reads, but not the `name=` setter or the dirty-tracking method
+  family (`name_changed?`, `name_was`, …). `rbs_rails` generates
+  ~20 methods per column; Rigor contributes only the accessor
+  return type the call-site analysis actually consumes.
 - **No associations / scopes / strong parameters.** Those belong
   in a future `rigor-rails` meta-gem that depends on this one
   plus future siblings (`rigor-actionpack`, etc.).

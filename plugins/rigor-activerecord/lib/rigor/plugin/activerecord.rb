@@ -213,21 +213,12 @@ module Rigor
       end
 
       # Instance-side navigation: when the call's receiver
-      # resolves to `Nominal[Model]` and the method name
-      # matches a discovered `belongs_to` / `has_one`
-      # association, the return type is the target model.
-      # `belongs_to` is required (non-`nil`) by default since
-      # Rails 5, so it narrows to `Nominal[Target]`; `has_one`
-      # (and an `optional: true` / `required: false` `belongs_to`)
-      # is nullable, narrowing to `Nominal[Target] | nil` — the
-      # `nullable` flag computed at discovery time carries this.
-      # `has_many` associations are
-      # intentionally NOT contributed — relation types are a
-      # future track and the RBS-erased return is the
-      # honest fall-back. Calls with arguments are skipped
-      # (the association accessor takes no args; argument
-      # forms like `user.posts(limit: 10)` route through
-      # other Rails APIs that this slice doesn't model).
+      # resolves to `Nominal[Model]` and the method name matches
+      # a discovered association OR a table column, the call site
+      # gets a precise return type. Calls with arguments are
+      # skipped — accessor / association calls take no args, and
+      # argument forms (`user.posts(limit: 10)`, `user.name = x`)
+      # route through Rails APIs this slice does not model.
       def instance_call_return_type(call_node, scope, index)
         return nil unless call_node.arguments.nil?
 
@@ -238,19 +229,78 @@ module Rigor
                 index.find("::#{receiver_type.class_name}")
         return nil if entry.nil?
 
-        association = entry.association(call_node.name)
+        association_return_type(entry, call_node.name) ||
+          column_return_type(entry, call_node.name)
+      end
+
+      # When the method name matches a discovered `belongs_to` /
+      # `has_one` association, the return type is the target
+      # model. `belongs_to` is required (non-`nil`) by default
+      # since Rails 5, so it narrows to `Nominal[Target]`;
+      # `has_one` (and an `optional: true` / `required: false`
+      # `belongs_to`) is nullable, narrowing to `Nominal[Target]
+      # | nil`. `has_many` / `has_and_belongs_to_many` are
+      # intentionally NOT contributed — relation types are a
+      # future track and the RBS-erased return is the honest
+      # fall-back. A polymorphic association has no single static
+      # target and declines rather than inventing a wrong type.
+      def association_return_type(entry, method_name)
+        association = entry.association(method_name)
         return nil if association.nil?
         return nil unless association[:kind] == :singular
-
-        # A polymorphic association (`belongs_to ..., polymorphic:
-        # true`, `delegated_type`) has no single static target —
-        # decline rather than invent a wrong `Nominal[...]`.
         return nil if association[:target].nil?
 
         target = Rigor::Type::Combinator.nominal_of(association[:target])
         return target unless association[:nullable]
 
         Rigor::Type::Combinator.union(target, Rigor::Type::Combinator.constant_of(nil))
+      end
+
+      # Instance-side column access. `user.name` on a
+      # `Nominal[User]` receiver narrows to the column's value
+      # type; `user.name?` (the ActiveRecord-generated predicate)
+      # narrows to `bool`.
+      #
+      # The contributed type is deliberately NON-nullable even
+      # though the DB column may permit `NULL`: Rails code calls
+      # column accessors directly (`user.email.downcase`) as a
+      # matter of course, and contributing `T | nil` would light
+      # up that idiom with `possible-nil-receiver` across an
+      # entire codebase. Under-reporting a nil column is a false
+      # negative; over-reporting it is a false positive — and the
+      # project ranks the latter as the worse failure.
+      def column_return_type(entry, method_name)
+        name = method_name.to_s
+        predicate = name.end_with?("?")
+        column_name = predicate ? name[0..-2] : name
+
+        column = entry.column(column_name)
+        return nil if column.nil?
+        return bool_type if predicate
+
+        ruby_type_to_type(column.ruby_type)
+      end
+
+      # Maps a `SchemaTable::Column#ruby_type` string to a Rigor
+      # type. `"Object"` (json / jsonb / unrecognised column
+      # types) declines — `Nominal[Object]` would be NARROWER
+      # than the RBS-erased envelope and could surface false
+      # `call.undefined-method` on a value whose real shape the
+      # plugin cannot model.
+      def ruby_type_to_type(ruby_type)
+        case ruby_type
+        when "bool" then bool_type
+        when "Object", nil then nil
+        else Rigor::Type::Combinator.nominal_of(ruby_type)
+        end
+      end
+
+      # `true | false`, the structural shape RBS `bool` folds to.
+      def bool_type
+        @bool_type ||= Rigor::Type::Combinator.union(
+          Rigor::Type::Combinator.constant_of(true),
+          Rigor::Type::Combinator.constant_of(false)
+        )
       end
 
       def constant_receiver_name(node)

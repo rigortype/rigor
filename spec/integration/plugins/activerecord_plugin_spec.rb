@@ -1129,4 +1129,94 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(undefined).not_to be_nil
     end
   end
+
+  describe "instance column accessors" do
+    def column_contribution(index:, source:, receiver_class:)
+      plugin = Rigor::Plugin::Activerecord.allocate
+      plugin.instance_variable_set(:@model_index, index)
+      call_node = Prism.parse(source).value.statements.body.first
+      scope = Object.new
+      scope.define_singleton_method(:type_of) do |_node|
+        Rigor::Type::Combinator.nominal_of(receiver_class)
+      end
+      plugin.flow_contribution_for(call_node: call_node, scope: scope)
+    end
+
+    let(:bool_union) do
+      Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(true),
+        Rigor::Type::Combinator.constant_of(false)
+      )
+    end
+
+    it "contributes the column value type for a string accessor" do
+      _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
+      contribution = column_contribution(index: index, source: "user.name", receiver_class: "User")
+
+      expect(contribution.return_type).to eq(Rigor::Type::Combinator.nominal_of("String"))
+    end
+
+    it "contributes Integer for the implicit `id` column" do
+      _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
+      contribution = column_contribution(index: index, source: "user.id", receiver_class: "User")
+
+      expect(contribution.return_type).to eq(Rigor::Type::Combinator.nominal_of("Integer"))
+    end
+
+    it "contributes `bool` for a boolean column accessor" do
+      _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
+      contribution = column_contribution(index: index, source: "user.admin", receiver_class: "User")
+
+      expect(contribution.return_type).to eq(bool_union)
+    end
+
+    it "contributes `bool` for the generated `<column>?` predicate" do
+      _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
+      contribution = column_contribution(index: index, source: "user.name?", receiver_class: "User")
+
+      expect(contribution.return_type).to eq(bool_union)
+    end
+
+    it "declines for a json / jsonb (`Object`-typed) column" do
+      models = {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/account.rb" => "class Account < ApplicationRecord\nend\n"
+      }
+      schema = <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "accounts", force: :cascade do |t|
+            t.jsonb "preferences"
+          end
+        end
+      SCHEMA
+      _result, index = run_ar_with_index("x = 1\n", models: models, schema: schema)
+      contribution = column_contribution(index: index, source: "account.preferences", receiver_class: "Account")
+
+      expect(contribution).to be_nil
+    end
+
+    it "declines for a method that is neither a column nor an association" do
+      _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
+      contribution = column_contribution(index: index, source: "user.totally_unknown", receiver_class: "User")
+
+      expect(contribution).to be_nil
+    end
+
+    it "types an accessor end-to-end so a chained typo on the column surfaces" do
+      result = run_ar("u = User.find(1)\nu.name.bit_length\n")
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("bit_length")
+      end
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("String")
+    end
+
+    it "stays silent on a valid method of the column's value type" do
+      result = run_ar("u = User.find(1)\nu.name.upcase\n")
+      undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("upcase")
+      end
+      expect(undefined).to be_empty
+    end
+  end
 end

@@ -37,22 +37,50 @@ Do NOT use for: a single-version check of one project (just run
 
 Choose a real OSS Ruby project with git tags.
 
-**The range selection is the single most important decision.**
-A range determines what the sweep can prove:
+**The sampling decision is the single most important one** — and it
+governs *what the sweep can prove*.
 
-- A **patch-series** range (`vX.Y.0` → `vX.Y.10`) is mostly
-  stabilisation: small, safe diffs. The sweep then validates
-  baseline **stability** (does ordinary maintenance produce false
-  regressions?) but says little about **bug-catching** —
-  `surfaced = 0` there also just means "no new bug was written."
-- A **feature-development** range (`vX.(Y-1).0` → `vX.Y.0`, or a
-  minor/major span) adds new code and new diagnostic surface — this
-  is where "error increase" becomes a real measurement and where
-  Rigor's regression-catching value is actually tested.
+Released tags are a **post-spec-gate population**. A mature project's
+CI catches obvious errors before merge, and genuine bugs are fixed
+before a tag is cut. So a sweep over *released tags* — whether a
+patch series or a feature-spanning minor/major range — measures:
 
-Prefer a feature-spanning range, or run both and contrast. Record
-the rationale in the survey note. List the tags in **release
-order** (betas / RCs included — they are part of the dev flow).
+- **baseline stability** — does ordinary maintenance churn produce
+  false regressions? (a real, valuable question), and
+- **standing diagnostics** — does newly-added released code carry
+  diagnostics the baseline did not already cover?
+
+It does **not** measure Rigor's **bug-detection** power.
+`surfaced = 0` over released tags is the *expected* result for a
+healthy project, not a Rigor weakness: the bugs Rigor would catch
+are the same class the project's specs already caught and removed
+before the tag existed. (Confirmed by the Mastodon v4.5.x run —
+flat at 0 across 16 tags.)
+
+To actually test bug-detection, sample where **unfixed bugs still
+exist** — finer than release tags:
+
+- **per-commit** on `main` between two releases (or a window of it);
+- **PR-head commits** (pre-merge state);
+- **bug-introducing commits** — for a fixed set of known bug fixes,
+  sweep the commit *before* each fix and check whether Rigor
+  surfaced the defect.
+
+Pick the sampling to match the question:
+
+| Question | Sample |
+| --- | --- |
+| Does maintenance churn cause false regressions? | released tags (this is the easy, default run) |
+| Does new released code add standing diagnostics? | feature-spanning released-tag range |
+| Does Rigor *catch real bugs*? | per-commit / PR-head / bug-introducing commits |
+
+List the chosen revisions in **chronological order** (betas / RCs
+included — they are part of the dev flow). Record the sampling
+choice *and its consequence* in the survey note.
+
+The later phases say "tag" for brevity, but every step works on any
+checkout-able revision — `git checkout` and the scripts' `TAGS`
+list accept commit SHAs just as well as tag names.
 
 ## Phase 2 — Clone the target
 

@@ -1,10 +1,12 @@
 # ADR-25 — Plugin-contributed RBS signatures
 
-Status: **proposed, 2026-05-21.** Records the decision to let a
+Status: **accepted, 2026-05-21.** Records the decision to let a
 plugin gem contribute RBS signature directories to Rigor's analysis
 environment through its manifest — closing the gap that today forces
 an RBS-only "bundle" gem to be wired by a hand-written
-`signature_paths:` path.
+`signature_paths:` path. WD1 (a `Manifest` field, not a
+`signature_gems:` config key) is ratified; the rejected config-key
+alternative is recorded for the written premise.
 
 ## Context
 

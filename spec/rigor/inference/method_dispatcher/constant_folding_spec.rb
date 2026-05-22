@@ -69,6 +69,21 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         type = fold("hi", :to_sym)
         expect(type.value).to eq(:hi)
       end
+
+      it "folds String#to_i to a Constant Integer" do
+        expect(fold("42", :to_i).value).to eq(42)
+        expect(fold("0", :to_i).value).to eq(0)
+      end
+
+      it "folds String#to_f to a Constant Float" do
+        expect(fold("3.14", :to_f).value).to eq(3.14)
+        expect(fold("0", :to_f).value).to eq(0.0)
+      end
+
+      it "folds String#ord to a Constant Integer" do
+        expect(fold("A", :ord).value).to eq(65)
+        expect(fold("a", :ord).value).to eq(97)
+      end
     end
 
     describe "boolean / nil" do
@@ -85,6 +100,13 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         # test below proves the engine still returns the
         # correct precise value through dispatch.
         expect(fold(1, :nil?)).to be_nil
+      end
+
+      it "folds true.=== and false.===" do
+        expect(fold(true, :===, [true]).value).to be(true)
+        expect(fold(true, :===, [false]).value).to be(false)
+        expect(fold(false, :===, [false]).value).to be(true)
+        expect(fold(false, :===, [true]).value).to be(false)
       end
     end
 
@@ -134,6 +156,33 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold(5, :modulo, [2]).value).to eq(1)
       expect(fold(5, :remainder, [2]).value).to eq(1)
       expect(fold(2, :pow, [10]).value).to eq(1024)
+    end
+  end
+
+  describe "STRING_BINARY fold (slice 2 additions)" do
+    it "folds String#start_with?" do
+      expect(fold("hello", :start_with?, ["he"]).value).to be(true)
+      expect(fold("hello", :start_with?, ["x"]).value).to be(false)
+    end
+
+    it "folds String#end_with?" do
+      expect(fold("hello", :end_with?, ["lo"]).value).to be(true)
+      expect(fold("hello", :end_with?, ["x"]).value).to be(false)
+    end
+
+    it "folds String#include?" do
+      expect(fold("hello", :include?, ["ell"]).value).to be(true)
+      expect(fold("hello", :include?, ["x"]).value).to be(false)
+    end
+
+    it "folds String#delete_prefix" do
+      expect(fold("hello", :delete_prefix, ["he"]).value).to eq("llo")
+      expect(fold("hello", :delete_prefix, ["x"]).value).to eq("hello")
+    end
+
+    it "folds String#delete_suffix" do
+      expect(fold("hello", :delete_suffix, ["lo"]).value).to eq("hel")
+      expect(fold("hello", :delete_suffix, ["x"]).value).to eq("hello")
     end
   end
 

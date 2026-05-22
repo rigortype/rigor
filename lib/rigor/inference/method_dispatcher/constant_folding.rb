@@ -48,10 +48,14 @@ module Rigor
       module ConstantFolding # rubocop:disable Metrics/ModuleLength
         module_function
 
-        NUMERIC_BINARY = Set[:+, :-, :*, :/, :%, :<, :<=, :>, :>=, :==, :!=, :<=>].freeze
-        STRING_BINARY  = Set[:+, :*, :==, :!=, :<, :<=, :>, :>=, :<=>].freeze
+        NUMERIC_BINARY = Set[:+, :-, :*, :/, :%, :**, :&, :|, :^, :<<, :>>, :<, :<=, :>, :>=, :==, :!=, :<=>].freeze
+        STRING_BINARY  = Set[
+          :+, :*, :==, :!=, :<, :<=, :>, :>=, :<=>,
+          :start_with?, :end_with?, :include?,
+          :delete_prefix, :delete_suffix
+        ].freeze
         SYMBOL_BINARY  = Set[:==, :!=, :<=>, :<, :<=, :>, :>=].freeze
-        BOOL_BINARY    = Set[:&, :|, :^, :==, :!=].freeze
+        BOOL_BINARY    = Set[:&, :|, :^, :==, :!=, :===].freeze
         NIL_BINARY     = Set[:==, :!=].freeze
 
         # v0.0.3 C — pure unary catalogue. Each method must:
@@ -88,6 +92,7 @@ module Rigor
           :reverse, :length, :size, :bytesize,
           :empty?, :strip, :lstrip, :rstrip, :chomp,
           :to_s, :to_str, :to_sym, :intern,
+          :to_i, :to_f, :ord,
           :inspect, :hash
         ].freeze
         SYMBOL_UNARY = Set[

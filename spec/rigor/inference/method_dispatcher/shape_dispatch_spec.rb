@@ -184,6 +184,102 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       end
     end
 
+    describe "Tuple#values_at (Slice 5 phase 2)" do
+      let(:t) { tuple(constant(1), constant(2), constant(3)) }
+
+      it "returns a Tuple of per-index elements for static integer indices" do
+        result = dispatch(receiver: t, method_name: :values_at, args: [constant(0), constant(2)])
+        expect(result).to be_a(Rigor::Type::Tuple)
+        expect(result.elements.map(&:value)).to eq([1, 3])
+      end
+
+      it "supports negative indices" do
+        result = dispatch(receiver: t, method_name: :values_at, args: [constant(-1)])
+        expect(result.elements.map(&:value)).to eq([3])
+      end
+
+      it "fills out-of-range indices with Constant[nil]" do
+        result = dispatch(receiver: t, method_name: :values_at, args: [constant(0), constant(5)])
+        expect(result.elements.map(&:value)).to eq([1, nil])
+      end
+
+      it "falls through when any argument is non-static" do
+        dyn = Rigor::Type::Combinator.untyped
+        expect(dispatch(receiver: t, method_name: :values_at, args: [constant(0), dyn])).to be_nil
+      end
+
+      it "falls through when called with no arguments" do
+        expect(dispatch(receiver: t, method_name: :values_at, args: [])).to be_nil
+      end
+    end
+
+    describe "Tuple#+ (concatenation) (Slice 5 phase 2)" do
+      let(:a) { tuple(constant(1), constant(2)) }
+      let(:b) { tuple(constant(3), constant(4)) }
+
+      it "concatenates two Tuples" do
+        result = dispatch(receiver: a, method_name: :+, args: [b])
+        expect(result).to be_a(Rigor::Type::Tuple)
+        expect(result.elements.map(&:value)).to eq([1, 2, 3, 4])
+      end
+
+      it "falls through when the argument is not a Tuple" do
+        nominal_arr = Rigor::Type::Combinator.nominal_of("Array", type_args: [constant(0)])
+        expect(dispatch(receiver: a, method_name: :+, args: [nominal_arr])).to be_nil
+      end
+
+      it "falls through when called with no arguments" do
+        expect(dispatch(receiver: a, method_name: :+, args: [])).to be_nil
+      end
+    end
+
+    describe "Tuple#compact (Slice 5 phase 2)" do
+      it "removes Constant[nil] entries from a Tuple" do
+        t = tuple(constant(1), constant(nil), constant(3))
+        result = dispatch(receiver: t, method_name: :compact)
+        expect(result.elements.map(&:value)).to eq([1, 3])
+      end
+
+      it "returns the same Tuple when no nil entries" do
+        t = tuple(constant(1), constant(2))
+        result = dispatch(receiver: t, method_name: :compact)
+        expect(result).to eq(t)
+      end
+
+      it "declines when an element is non-Constant" do
+        mixed = tuple(constant(1), Rigor::Type::Combinator.nominal_of("Integer"))
+        expect(dispatch(receiver: mixed, method_name: :compact)).to be_nil
+      end
+    end
+
+    describe "Tuple#take (Slice 5 phase 2)" do
+      let(:t) { tuple(constant(1), constant(2), constant(3)) }
+
+      it "returns the first n elements" do
+        result = dispatch(receiver: t, method_name: :take, args: [constant(2)])
+        expect(result.elements.map(&:value)).to eq([1, 2])
+      end
+
+      it "returns the empty Tuple for n <= 0" do
+        result = dispatch(receiver: t, method_name: :take, args: [constant(0)])
+        expect(result.elements).to be_empty
+      end
+
+      it "returns the full Tuple when n >= size" do
+        result = dispatch(receiver: t, method_name: :take, args: [constant(10)])
+        expect(result.elements.map(&:value)).to eq([1, 2, 3])
+      end
+
+      it "falls through when the argument is non-static" do
+        dyn = Rigor::Type::Combinator.untyped
+        expect(dispatch(receiver: t, method_name: :take, args: [dyn])).to be_nil
+      end
+
+      it "falls through when called with no arguments" do
+        expect(dispatch(receiver: t, method_name: :take, args: [])).to be_nil
+      end
+    end
+
     describe "Tuple#zip per-position fold (v0.0.7)" do
       it "pairs receiver and other-Tuple per position" do
         a = tuple(constant(1), constant(2), constant(3))

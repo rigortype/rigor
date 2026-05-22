@@ -87,7 +87,11 @@ module Rigor
           zip: :tuple_zip,
           :[] => :tuple_index,
           fetch: :tuple_index,
-          dig: :tuple_dig
+          dig: :tuple_dig,
+          values_at: :tuple_values_at,
+          :+ => :tuple_concat,
+          compact: :tuple_compact,
+          take: :tuple_take
         }.freeze
 
         HASH_SHAPE_HANDLERS = {
@@ -659,6 +663,67 @@ module Rigor
             return nil unless key.is_a?(Type::Constant)
 
             [key.value, value]
+          end
+
+          # `tuple.values_at(i1, i2, ...)` — returns a Tuple of
+          # per-index elements. Each argument must be a
+          # `Constant[Integer]`. Out-of-range indices fill with
+          # `Constant[nil]`, mirroring Ruby's runtime behaviour.
+          # Declines when any argument is non-static.
+          def tuple_values_at(tuple, _method_name, args)
+            return nil if args.empty?
+
+            values = args.map do |arg|
+              return nil unless arg.is_a?(Type::Constant)
+              return nil unless arg.value.is_a?(Integer)
+
+              idx = normalise_index(arg.value, tuple.elements.size)
+              idx ? tuple.elements[idx] : Type::Combinator.constant_of(nil)
+            end
+
+            Type::Combinator.tuple_of(*values)
+          end
+
+          # `tuple + other` — concatenates two Tuples. Both sides
+          # must be `Type::Tuple`. Returns a new Tuple whose
+          # elements are those of the receiver followed by those
+          # of the argument.
+          def tuple_concat(tuple, _method_name, args)
+            return nil unless args.size == 1
+
+            other = args.first
+            return nil unless other.is_a?(Type::Tuple)
+
+            Type::Combinator.tuple_of(*tuple.elements, *other.elements)
+          end
+
+          # `tuple.compact` — removes every element that is
+          # `Constant[nil]`. Folds only when every element is a
+          # `Constant` (so the nil set is decidable). Mixed-shape
+          # elements decline so the RBS tier widens.
+          def tuple_compact(tuple, _method_name, args)
+            return nil unless args.empty?
+            return nil unless tuple.elements.all?(Type::Constant)
+
+            kept = tuple.elements.reject { |e| e.is_a?(Type::Constant) && e.value.nil? }
+            Type::Combinator.tuple_of(*kept)
+          end
+
+          # `tuple.take(n)` — returns the first n elements as a
+          # new Tuple. The argument must be a `Constant[Integer]`.
+          # n <= 0 returns the empty Tuple; n >= size returns the
+          # full receiver.
+          def tuple_take(tuple, _method_name, args)
+            return nil unless args.size == 1
+
+            arg = args.first
+            return nil unless arg.is_a?(Type::Constant)
+            return nil unless arg.value.is_a?(Integer)
+
+            n = arg.value
+            return Type::Combinator.tuple_of if n <= 0
+
+            Type::Combinator.tuple_of(*tuple.elements.take(n))
           end
 
           # Returns `true` / `false` if every element's truthiness

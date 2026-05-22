@@ -1159,4 +1159,132 @@ RSpec.describe Rigor::CLI do
       end
     end
   end
+
+  describe "annotate" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    def write_fixture(name, contents)
+      path = File.join(tmpdir, name)
+      File.write(path, contents)
+      path
+    end
+
+    it "annotates each line with its last-expression type" do
+      path = write_fixture("a.rb", "a = 1\nb = 2\nc = a + b\n")
+
+      status, out, err = run_cli("annotate", "--no-color", path)
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("a = 1").and include("#=> dump_type: 1")
+      expect(out).to include("#=> dump_type: 2")
+      expect(out).to include("#=> dump_type: 3")
+    end
+
+    it "reports the last expression of a multi-statement line" do
+      path = write_fixture("a.rb", "1; 2; 3\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      expect(out).to include("1; 2; 3").and include("#=> dump_type: 3")
+      expect(out).not_to include("dump_type: 1")
+    end
+
+    it "folds an `if` whose condition is statically falsey" do
+      path = write_fixture("a.rb", "if nil\n  :then\nelse\n  :else\nend\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      lines = out.lines
+      expect(lines[0]).to include("#=> dump_type: nil")
+      expect(lines[1]).to include("#=> dump_type: :then")
+      expect(lines[2]).not_to include("dump_type") # the bare `else`
+      expect(lines[4]).to include("end").and include("#=> dump_type: :else")
+    end
+
+    it "is idempotent — re-annotating does not stack comments" do
+      path = write_fixture("a.rb", "a = 1\n")
+
+      _status, first, _err = run_cli("annotate", "--no-color", path)
+      File.write(path, first)
+      _status, second, _err = run_cli("annotate", "--no-color", path)
+
+      expect(second).to eq(first)
+      expect(second.scan("#=> dump_type:").size).to eq(1)
+    end
+
+    it "emits ANSI colour escapes when --color is forced" do
+      path = write_fixture("a.rb", "1\n")
+
+      _status, out, _err = run_cli("annotate", "--color", path)
+
+      expect(out).to include("\e[")
+    end
+
+    it "reports a missing file" do
+      status, _out, err = run_cli("annotate", "--no-color", "no_such_file.rb")
+
+      expect(status).to eq(1)
+      expect(err).to include("file not found")
+    end
+
+    it "reports a syntax error in the input" do
+      path = write_fixture("bad.rb", "def broken(\n")
+
+      status, _out, err = run_cli("annotate", "--no-color", path)
+
+      expect(status).to eq(1)
+      expect(err).to include("bad.rb:")
+    end
+
+    describe "NO_COLOR support (https://no-color.org)" do
+      # Runs `rigor annotate` against an out stream that reports
+      # itself as a tty, with `NO_COLOR` set to `value` (or unset
+      # when `value` is `:unset`).
+      def run_annotate_tty(*argv, no_color: :unset)
+        out = StringIO.new
+        out.define_singleton_method(:tty?) { true }
+        original = ENV.fetch("NO_COLOR", :absent)
+        no_color == :unset ? ENV.delete("NO_COLOR") : ENV["NO_COLOR"] = no_color
+        status = described_class.start(["annotate", *argv], out: out, err: StringIO.new)
+        [status, out.string]
+      ensure
+        original == :absent ? ENV.delete("NO_COLOR") : ENV["NO_COLOR"] = original
+      end
+
+      it "colours a tty when NO_COLOR is unset" do
+        path = write_fixture("a.rb", "1\n")
+
+        _status, out = run_annotate_tty(path, no_color: :unset)
+
+        expect(out).to include("\e[")
+      end
+
+      it "suppresses colour when NO_COLOR is present and non-empty" do
+        path = write_fixture("a.rb", "1\n")
+
+        _status, out = run_annotate_tty(path, no_color: "1")
+
+        expect(out).not_to include("\e[")
+      end
+
+      it "still colours when NO_COLOR is the empty string" do
+        path = write_fixture("a.rb", "1\n")
+
+        _status, out = run_annotate_tty(path, no_color: "")
+
+        expect(out).to include("\e[")
+      end
+
+      it "lets an explicit --color override NO_COLOR" do
+        path = write_fixture("a.rb", "1\n")
+
+        _status, out = run_annotate_tty("--color", path, no_color: "1")
+
+        expect(out).to include("\e[")
+      end
+    end
+  end
 end

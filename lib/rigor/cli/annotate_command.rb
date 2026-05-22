@@ -1,0 +1,224 @@
+# frozen_string_literal: true
+
+require "optionparser"
+require "prism"
+
+require_relative "../configuration"
+require_relative "../environment"
+require_relative "../scope"
+require_relative "../inference/scope_indexer"
+require_relative "prism_colorizer"
+
+module Rigor
+  class CLI
+    # Executes `rigor annotate FILE`.
+    #
+    # For every source line the command finds the expression the
+    # line evaluates to — the last statement that ends on the line
+    # (so `1; 2; 3` reports `3`), or, for a line that no statement
+    # closes, the widest expression ending there (so the `if nil`
+    # header reports its condition). It infers that expression's
+    # type and appends a `#=> dump_type: <type>` comment.
+    #
+    # The annotated source is re-parsed with Prism — a sanity gate,
+    # since the appended text is always a comment — and printed to
+    # stdout with IRB-style syntax highlighting via
+    # {PrismColorizer}.
+    class AnnotateCommand
+      USAGE = "Usage: rigor annotate [options] FILE"
+
+      # Appended ` #=> dump_type: <type>` suffix. Matched and
+      # stripped before re-annotating so re-running is idempotent.
+      ANNOTATION_PATTERN = /\s*#=>\s*dump_type:.*\z/
+
+      def initialize(argv:, out:, err:)
+        @argv = argv
+        @out = out
+        @err = err
+      end
+
+      # @return [Integer] CLI exit status.
+      def run
+        options = parse_options
+        file = @argv.shift
+        if file.nil?
+          @err.puts(USAGE)
+          return CLI::EXIT_USAGE
+        end
+        unless File.file?(file)
+          @err.puts("annotate: file not found: #{file}")
+          return 1
+        end
+
+        execute(file, options)
+      end
+
+      private
+
+      def parse_options
+        # Default: colour a tty, unless `NO_COLOR` opts out. An
+        # explicit `--color` / `--no-color` overrides both.
+        options = { config: nil, color: @out.tty? && !no_color_env? }
+
+        parser = OptionParser.new do |opts|
+          opts.banner = USAGE
+          opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
+          opts.on("--[no-]color",
+                  "Force or disable ANSI colour (default: auto-detect a tty; honours NO_COLOR)") do |value|
+            options[:color] = value
+          end
+        end
+        parser.parse!(@argv)
+
+        options
+      end
+
+      # https://no-color.org — colour output is suppressed by
+      # default when `NO_COLOR` is present and not an empty string,
+      # regardless of its value.
+      def no_color_env?
+        value = ENV.fetch("NO_COLOR", nil)
+        !value.nil? && !value.empty?
+      end
+
+      def execute(file, options)
+        configuration = Configuration.load(options.fetch(:config))
+        source = File.read(file)
+        parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
+        return 1 if parse_errors?(parse_result, file)
+
+        scope_index = Inference::ScopeIndexer.index(
+          parse_result.value, default_scope: base_scope(configuration)
+        )
+        line_types = LineTypeCollector.new(scope_index).collect(parse_result.value)
+
+        @out.puts(render(annotate(source, line_types), color: options.fetch(:color)))
+        0
+      end
+
+      def base_scope(configuration)
+        Scope.empty(
+          environment: Environment.for_project(
+            libraries: configuration.libraries,
+            signature_paths: configuration.signature_paths
+          )
+        )
+      end
+
+      def parse_errors?(parse_result, file)
+        return false if parse_result.success?
+
+        parse_result.errors.each do |error|
+          @err.puts("#{file}:#{error.location.start_line}: #{error.message}")
+        end
+        true
+      end
+
+      # Appends ` #=> dump_type: <type>` to every line a type was
+      # inferred for, aligning the comment column.
+      def annotate(source, line_types)
+        lines = source.lines
+        column = annotation_column(lines, line_types)
+
+        lines.each_with_index.map do |line, index|
+          type = line_types[index + 1]
+          eol = line.end_with?("\n") ? "\n" : ""
+          code = line.chomp.sub(ANNOTATION_PATTERN, "")
+          next "#{code}#{eol}" if type.nil?
+
+          "#{code.ljust(column)}  #=> dump_type: #{type.describe(:short)}#{eol}"
+        end.join
+      end
+
+      def annotation_column(lines, line_types)
+        widths = lines.each_index.filter_map do |index|
+          next unless line_types.key?(index + 1)
+
+          lines[index].chomp.sub(ANNOTATION_PATTERN, "").length
+        end
+        widths.max || 0
+      end
+
+      def render(annotated, color:)
+        return annotated unless color
+        return annotated unless Prism.parse(annotated).success?
+
+        PrismColorizer.colorize(annotated)
+      end
+    end
+
+    # Walks a parsed program and resolves, per source line, the
+    # type of the expression the line evaluates to. Used only by
+    # {AnnotateCommand}.
+    class LineTypeCollector
+      def initialize(scope_index)
+        @scope_index = scope_index
+      end
+
+      # @param program [Prism::ProgramNode]
+      # @return [Hash{Integer => Rigor::Type}] 1-indexed line => type.
+      def collect(program)
+        by_line = {}
+        each_statement(program) do |statement|
+          type = type_of(statement)
+          by_line[statement.location.end_line] = type unless type.nil?
+        end
+        fill_uncovered_lines(program, by_line)
+        by_line
+      end
+
+      private
+
+      # Yields each statement node (a child of any `StatementsNode`
+      # anywhere in the tree) in source order, so a later statement
+      # ending on a line overwrites an earlier one — `1; 2; 3`
+      # resolves to `3`.
+      def each_statement(node, &)
+        return if node.nil?
+
+        node.body.each(&) if node.is_a?(Prism::StatementsNode)
+        node.compact_child_nodes.each { |child| each_statement(child, &) }
+      end
+
+      # For a line no statement closes (the `if` / block header
+      # lines), fall back to the widest expression ending there.
+      def fill_uncovered_lines(program, by_line)
+        widest_per_line(program).each do |line, node|
+          next if by_line.key?(line)
+
+          type = type_of(node)
+          by_line[line] = type unless type.nil?
+        end
+      end
+
+      def widest_per_line(program)
+        widest = {}
+        walk(program) do |node|
+          next if node.is_a?(Prism::ProgramNode) || node.is_a?(Prism::StatementsNode)
+
+          line = node.location.end_line
+          current = widest[line]
+          widest[line] = node if current.nil? || span(node) > span(current)
+        end
+        widest
+      end
+
+      def span(node)
+        node.location.end_offset - node.location.start_offset
+      end
+
+      def walk(node, &block)
+        return if node.nil?
+
+        block.call(node)
+        node.compact_child_nodes.each { |child| walk(child, &block) }
+      end
+
+      def type_of(node)
+        @scope_index[node].type_of(node)
+      rescue StandardError
+        nil
+      end
+    end
+  end
+end

@@ -21,6 +21,7 @@ module Rigor
     HANDLERS = {
       "check" => :run_check,
       "init" => :run_init,
+      "annotate" => :run_annotate,
       "type-of" => :run_type_of,
       "type-scan" => :run_type_scan,
       "explain" => :run_explain,
@@ -473,6 +474,12 @@ module Rigor
       YAML
     end
 
+    def run_annotate
+      require_relative "cli/annotate_command"
+
+      AnnotateCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def run_type_of
       require_relative "cli/type_of_command"
 
@@ -556,6 +563,7 @@ module Rigor
         Commands:
           check      Analyze Ruby source files
           init       Create a starter .rigor.yml
+          annotate   Print FILE with each line's last-expression type
           type-of    Print the inferred type at FILE:LINE:COL
           type-scan  Report Scope#type_of coverage across PATHs
           explain    Print the description of one or all CheckRules

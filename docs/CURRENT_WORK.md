@@ -55,6 +55,14 @@ When an upstream `ruby/rbs` RBS gap is surfaced by a single internal Rigor call 
 - **`Hash === expr` case-equality narrowing** (`open3.rb:226` shape) — still open.
 - **In-memory `Analysis::Runner.run_source(source:, path:, …)` entry point** — bypasses the per-call tmpdir + chdir in `RunnerHelpers#analyze`; ~5 % spec-suite win plus a clean public API for embedders (LSP / editor mode). Demand-driven.
 
+### Type-coverage uplift — line status (2026-05-23)
+
+The post-`c9a535a` type-coverage-uplift line landed Phases 1–4 on `master` (`[Unreleased]` in `CHANGELOG.md`): String / Integer / Float / Comparable mid-priority folds, `MathFolding` (all 28 `Math` functions), eleven HashShape mid/low-priority handlers, `Kernel#Integer` / `Float` folding, and the `Date` / `DateTime` / `Time` `Constant` carrier + constructor folding. Audit docs: `docs/notes/20260522-*-coverage.md`, `docs/notes/20260523-date-time-method-coverage.md`. Remaining items, all **release undetermined**:
+
+- **Struct / Data value folding** — deferred ADR-worthy feature (needs two new carriers). See `docs/ROADMAP.md` § "Future cycles" → "Type-language / engine" and [`docs/notes/20260523-struct-encoding-coverage.md`](notes/20260523-struct-encoding-coverage.md). `Encoding` value folding recorded in the same audit as a *permanent exclusion*.
+- **`MathFolding` result refinements** — the 28-function fold is value-precise; attaching range refinements to the results (`Math.exp` → `positive-float`, `Math.sqrt` / `hypot` → `non-negative-float`) is the demand-driven follow-up ([`docs/notes/20260522-stdlib-deterministic-module-coverage.md`](notes/20260522-stdlib-deterministic-module-coverage.md) § 1).
+- **Hash `rassoc` shape handler** — the one open low-priority Hash handler ([`docs/notes/20260522-hash-method-coverage.md`](notes/20260522-hash-method-coverage.md)); value → `[k, v]` reverse lookup, foldable when every value is a `Constant`. Demand-driven.
+
 ## Reading order for a returning implementer
 
 The v0.1.9 SKILL trio + ADR-22 baseline slice 5 have all landed on `master`; the next session's default goal is the v0.1.9 version bump (when authorised) and then the v0.2.x evaluation-line work. Read in this order:

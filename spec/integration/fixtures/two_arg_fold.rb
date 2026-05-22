@@ -17,10 +17,10 @@ assert_type("true", 5.between?(0, 10))
 assert_type("false", 100.between?(0, 10))
 
 # Comparable#between? — receiver below the lower bound.
-assert_type("false", (-5).between?(0, 10))
+assert_type("false", -5.between?(0, 10))
 
 # Comparable#clamp(min, max) — clamp from below.
-assert_type("0", (-5).clamp(0, 10))
+assert_type("0", -5.clamp(0, 10))
 
 # Comparable#clamp(min, max) — clamp from above.
 assert_type("10", 100.clamp(0, 10))
@@ -30,3 +30,11 @@ assert_type("5", 5.clamp(0, 10))
 
 # Integer#pow(exp, mod) — modular exponentiation.
 assert_type("4", 100.pow(50, 17))
+
+# Comparable#between? / #clamp also fold for a Float receiver —
+# the catalog ternary path reaches Comparable through Float's
+# ancestry the same way it does for Integer.
+assert_type("true", 2.5.between?(0.0, 10.0))
+assert_type("false", 99.9.between?(0.0, 10.0))
+assert_type("10.0", 99.9.clamp(0.0, 10.0))
+assert_type("2.5", 2.5.clamp(0.0, 10.0))

@@ -244,6 +244,25 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/per_element_filter.rb — per-element select/filter/reject fold" do
+    let(:harness) { harness_for("per_element_filter") }
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "narrows `reject(&:nil?)` to the surviving Tuple positions" do
+      non_nil = harness.local(:non_nil_sym)
+      expect(non_nil).to be_a(Rigor::Type::Tuple)
+      expect(non_nil.elements.map(&:value)).to eq([1, 2])
+    end
+
+    it "folds an all-dropped `reject` to the empty tuple" do
+      expect(harness.local(:nothing)).to eq(Rigor::Type::Combinator.tuple_of)
+    end
+  end
+
   describe "fixtures/early_return.rb — return-if-nil narrowing" do
     let(:harness) { harness_for("early_return") }
 
@@ -752,7 +771,8 @@ RSpec.describe "Rigor type construction (integration)" do
   # specific assertions for each fixture live in their own
   # `describe` block.
   describe "self-asserting `assert_type` calls in converted fixtures" do
-    %w[parity case_when compound_writes tuple_access hash_shape block_map block_filter tuple_map].each do |name|
+    %w[parity case_when compound_writes tuple_access hash_shape block_map block_filter tuple_map
+       per_element_filter].each do |name|
       it "produces no assert_type mismatches in fixtures/#{name}.rb" do
         harness = harness_for(name)
         mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }

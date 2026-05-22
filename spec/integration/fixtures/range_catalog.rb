@@ -50,10 +50,11 @@ assert_type("Infinity", (1..).size)
 # yields to a block (the C-body classifier mis-flags it as
 # `:leaf`); the blocklist keeps the analyzer from inventing a
 # `Constant<Range>` answer for an Enumerator-returning call.
-# The conservative fall-through answer comes from the RBS-tier
-# projection of the receiver's nominal — `Range` here.
+# Called WITHOUT a block, `reverse_each` returns an
+# `Enumerator` at runtime, so the overload selector picks the
+# block-less `() -> Enumerator[Elem, self]` overload.
 r = (1..3)
-assert_type("Range", r.reverse_each)
+assert_type("Enumerator[Dynamic[top], Range]", r.reverse_each)
 
 # Tier A additions — `entries` and `minmax` folded through
 # RANGE_FOLD_METHODS + range_constant_unary.

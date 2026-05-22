@@ -122,11 +122,28 @@ module Rigor
           return match if match
           return overloads.find { |mt| overload_has_block?(mt) } if block_required
 
-          overloads.first
+          # No block at the call site: prefer an overload that does
+          # not REQUIRE a block over `overloads.first`. Methods like
+          # `Array#filter` / `Enumerable#map` declare the block-
+          # bearing overload first (`() { ... } -> Array[Elem]`) and
+          # the bare-call overload second (`() -> Enumerator[...]`).
+          # Without this, a no-block `[1, 2].filter` would adopt the
+          # block overload's `Array[Elem]` return when the call
+          # actually yields an `Enumerator`.
+          overloads.find { |mt| !overload_requires_block?(mt) } || overloads.first
         end
 
         def overload_has_block?(method_type)
           method_type.respond_to?(:block) && method_type.block
+        end
+
+        # True when the overload declares a block that the caller
+        # MUST supply (`{ ... }` in RBS). An optional block
+        # (`?{ ... }`) does NOT count — that overload is a valid
+        # match for a block-less call.
+        def overload_requires_block?(method_type)
+          block = overload_has_block?(method_type)
+          !!block && block.required
         end
 
         class << self
@@ -163,6 +180,7 @@ module Rigor
 
             overloads.find do |method_type|
               next false if block_required && !OverloadSelector.overload_has_block?(method_type)
+              next false if !block_required && OverloadSelector.overload_requires_block?(method_type)
               next false if strict && !strictly_typed_params?(method_type, arg_types.size)
 
               matches?(
@@ -199,6 +217,7 @@ module Rigor
           def find_matching_overload_via_aliases(overloads, arg_types:, block_required:)
             overloads.find do |method_type|
               next false if block_required && !OverloadSelector.overload_has_block?(method_type)
+              next false if !block_required && OverloadSelector.overload_requires_block?(method_type)
 
               fun = method_type.type
               next false unless arity_compatible?(fun, arg_types.size)

@@ -5,7 +5,7 @@ require "spec_helper"
 RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
   let(:loader) { Rigor::Environment::RbsLoader.default }
 
-  def select(class_name, method_name, arg_types, kind: :instance)
+  def select(class_name, method_name, arg_types, kind: :instance, block_required: false)
     definition =
       case kind
       when :instance then loader.instance_definition(class_name)
@@ -23,7 +23,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       method,
       arg_types: arg_types,
       self_type: self_type,
-      instance_type: instance_type
+      instance_type: instance_type,
+      block_required: block_required
     )
   end
 
@@ -85,6 +86,33 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
       # via Hash#fetch which has keyword-free overloads in core RBS.
       mt = select("Hash", :fetch, [Rigor::Type::Combinator.constant_of(:k)])
       expect(mt).not_to be_nil
+    end
+
+    describe "block-less call-site overload selection" do
+      # `Array#filter` declares the block-bearing overload first
+      # (`() { (Elem) -> boolish } -> Array[Elem]`) and the
+      # bare-call overload second (`() -> Enumerator[...]`). A
+      # call with no block must pick the second: `[1, 2].filter`
+      # yields an `Enumerator`, not an `Array`.
+      it "skips a required-block overload when the call has no block" do
+        mt = select("Array", :filter, [], block_required: false)
+        expect(described_class.overload_requires_block?(mt)).to be(false)
+        expect(mt.type.return_type.name.relative!.to_s).to eq("Enumerator")
+      end
+
+      it "still prefers the block-bearing overload when a block is present" do
+        mt = select("Array", :filter, [], block_required: true)
+        expect(described_class.overload_requires_block?(mt)).to be(true)
+        expect(mt.type.return_type.name.relative!.to_s).to eq("Array")
+      end
+
+      it "keeps the only overload when every candidate requires a block" do
+        # `Array#each_with_object` has a single required-block
+        # overload; a block-less call still resolves to it via
+        # the `overloads.first` fall-back.
+        mt = select("Array", :each_with_object, [Rigor::Type::Combinator.constant_of(0)], block_required: false)
+        expect(mt).not_to be_nil
+      end
     end
 
     describe "interface-strictness preference (v0.1.2)" do

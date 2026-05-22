@@ -1040,15 +1040,16 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.pairs.keys).to eq([:a])
     end
 
-    it "selects the block-bearing overload of Array#map for &:to_s" do
+    it "per-element folds Array#map for &:to_s into a Tuple" do
       type = project_scope.type_of(parse_expression("[1, 2, 3].map(&:to_s)"))
 
-      # `Tuple[Constant<1..3>]#map(&:to_s)` flows through
-      # the RBS tier (the per-element fold declines on
-      # BlockArgumentNode); the block-bearing overload
-      # produces `Array[String]`.
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("Array")
+      # The per-element block fold now recognises the `&:symbol`
+      # shorthand: the symbol is dispatched as a zero-arg method
+      # on each Tuple element, so `[1, 2, 3].map(&:to_s)` folds
+      # to `Tuple[Constant["1"], Constant["2"], Constant["3"]]` —
+      # strictly tighter than the RBS-projected `Array[String]`.
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements.map(&:value)).to eq(%w[1 2 3])
     end
   end
 

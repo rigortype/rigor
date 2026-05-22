@@ -1458,6 +1458,7 @@ module Rigor
       # the dispatch chain untouched.
       PER_ELEMENT_TUPLE_METHODS = Set[
         :map, :collect, :filter_map, :flat_map,
+        :select, :filter, :reject,
         :find, :detect, :find_index, :index
       ].freeze
       private_constant :PER_ELEMENT_TUPLE_METHODS
@@ -1484,15 +1485,50 @@ module Rigor
         element_types = per_element_elements_of(receiver_type)
         return nil if element_types.nil? || element_types.empty?
 
-        block_node = call_node.block
-        return nil unless block_node.is_a?(Prism::BlockNode)
-
-        per_position = element_types.map do |element_type|
-          type_block_body_with_param(block_node, [element_type])
-        end
-        return nil if per_position.any?(&:nil?)
+        per_position = per_element_block_results(call_node.block, element_types)
+        return nil if per_position.nil? || per_position.any?(&:nil?)
 
         assemble_per_element_result(call_node.name, per_position, element_types)
+      end
+
+      # Evaluates the call's block once per receiver element.
+      # Two block shapes are supported:
+      #
+      # - `Prism::BlockNode` — a full `do … end` / `{ … }` block;
+      #   the body is re-typed per position with the element
+      #   bound to the block parameter.
+      # - `Prism::BlockArgumentNode` wrapping a `SymbolNode` —
+      #   the `&:predicate` shorthand; the symbol is dispatched
+      #   as a zero-arg method on each element type.
+      #
+      # Any other shape (`&proc_local`, `&method(:foo)`, no
+      # block) returns `nil` so the fold declines.
+      def per_element_block_results(block, element_types)
+        case block
+        when Prism::BlockNode
+          element_types.map { |element_type| type_block_body_with_param(block, [element_type]) }
+        when Prism::BlockArgumentNode
+          per_element_symbol_results(block, element_types)
+        end
+      end
+
+      def per_element_symbol_results(block_arg, element_types)
+        expression = block_arg.expression
+        return nil unless expression.is_a?(Prism::SymbolNode)
+
+        method_name = expression.unescaped.to_sym
+        element_types.map do |element_type|
+          MethodDispatcher.dispatch(
+            receiver_type: element_type,
+            method_name: method_name,
+            arg_types: [],
+            block_type: nil,
+            environment: scope.environment,
+            scope: scope
+          )
+        end
+      rescue StandardError
+        nil
       end
 
       # Returns the per-position element types for a finite,
@@ -1541,9 +1577,35 @@ module Rigor
         when :map, :collect then Type::Combinator.tuple_of(*per_position)
         when :filter_map then assemble_filter_map_result(per_position)
         when :flat_map then assemble_flat_map_result(per_position)
+        when :select, :filter
+          assemble_filter_result(per_position, element_types, keep_on_truthy: true)
+        when :reject
+          assemble_filter_result(per_position, element_types, keep_on_truthy: false)
         when :find, :detect then assemble_find_result(per_position, element_types)
         when :find_index, :index then assemble_find_index_result(per_position)
         end
+      end
+
+      # `select` / `filter` / `reject`: keeps each receiver
+      # element whose per-position predicate result folds to a
+      # decisive `Constant` — Ruby-truthy for `select` / `filter`,
+      # Ruby-falsey for `reject`. The surviving elements assemble
+      # into a `Tuple`, strictly tighter than the RBS-projected
+      # `Array[Elem]`.
+      #
+      # Folds tightly only when EVERY position is a `Constant`:
+      # a single non-`Constant` position leaves the result
+      # cardinality unknown (the element might or might not
+      # survive), so the dispatcher declines and the RBS tier
+      # widens to `Array[Elem]`. `[].select` style empty results
+      # are sound — an empty `Tuple` is the empty-array carrier.
+      def assemble_filter_result(per_position, element_types, keep_on_truthy:)
+        return nil unless per_position.all?(Type::Constant)
+
+        kept = element_types.each_index.filter_map do |index|
+          element_types[index] if truthy_constant?(per_position[index]) == keep_on_truthy
+        end
+        Type::Combinator.tuple_of(*kept)
       end
 
       # `filter_map` folds tightly only when every per-position

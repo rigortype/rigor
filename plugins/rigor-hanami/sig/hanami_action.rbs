@@ -34,6 +34,14 @@ module Hanami
       def user_agent: () -> String?
       def subdomain: (?Integer tld_length) -> String?
       def subdomains: (?Integer tld_length) -> Array[String]
+      def cookies: () -> Hash[String, String]
+      def host: () -> String
+      def port: () -> Integer
+      def url: () -> String
+      def base_url: () -> String
+      def query_string: () -> String
+      def multipart?: () -> bool
+      def form_data?: () -> bool
     end
 
     # Represents the outgoing HTTP response inside `#handle`.
@@ -48,6 +56,10 @@ module Hanami
       def format=: (Symbol | String) -> void
       def redirect_to: (String url, ?Integer status) -> void
       def write: (String str) -> void
+      def set_cookie: (String name, ?(String | Hash[Symbol, untyped]) value) -> void
+      def delete_cookie: (String name, ?Hash[Symbol, untyped] options) -> void
+      def content_type: () -> String
+      def content_type=: (String) -> void
     end
 
     # Typed parameter container. Values are coerced by the
@@ -59,6 +71,8 @@ module Hanami
       def valid?: () -> bool
       def errors: () -> Hash[Symbol, Array[String]]
       def to_h: () -> Hash[Symbol, untyped]
+      def fetch: (Symbol key, ?untyped default) -> untyped
+      def slice: (*Symbol keys) -> Hash[Symbol, untyped]
     end
   end
 end

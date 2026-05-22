@@ -175,4 +175,98 @@ RSpec.describe "plugins/rigor-hanami" do
       expect(plugin_diagnostics(result)).to be_empty
     end
   end
+
+  describe "#handle arity check" do
+    it "flags handle-arity-mismatch when #handle has 1 parameter" do
+      result = run_hanami(
+        files: {
+          "app/actions/books/create.rb" => <<~RUBY
+            class BooksCreate
+              def handle(request)
+                request
+              end
+            end
+          RUBY
+        },
+        paths: ["app/actions/books/create.rb"]
+      )
+      diag = plugin_diagnostics(result).find { |d| d.rule == "handle-arity-mismatch" }
+      expect(diag).not_to be_nil
+      expect(diag.severity).to eq(:error)
+      expect(diag.message).to include("BooksCreate", "2", "1")
+    end
+
+    it "flags handle-arity-mismatch when #handle has 0 parameters" do
+      result = run_hanami(
+        files: {
+          "app/actions/books/create.rb" => <<~RUBY
+            class BooksCreate
+              def handle
+              end
+            end
+          RUBY
+        },
+        paths: ["app/actions/books/create.rb"]
+      )
+      diag = plugin_diagnostics(result).find { |d| d.rule == "handle-arity-mismatch" }
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("2", "0")
+    end
+
+    it "accepts #handle with non-standard parameter names (req, res)" do
+      result = run_hanami(
+        files: {
+          "app/actions/books/index.rb" => <<~RUBY
+            class BooksIndex
+              def handle(req, res)
+                res.status = 200
+              end
+            end
+          RUBY
+        },
+        paths: ["app/actions/books/index.rb"]
+      )
+      expect(plugin_diagnostics(result)).to be_empty
+    end
+  end
+
+  describe "RBS stub coverage" do
+    def core_diagnostics_for(result)
+      result.diagnostics.reject { |d| d.source_family.to_s.start_with?("plugin.") }
+    end
+
+    it "resolves request.cookies without a call.undefined-method diagnostic" do
+      result = run_hanami(
+        files: {
+          "app/actions/books/index.rb" => <<~RUBY
+            class BooksIndex
+              def handle(request, response)
+                request.cookies
+              end
+            end
+          RUBY
+        },
+        paths: ["app/actions/books/index.rb"]
+      )
+      offending = core_diagnostics_for(result).select { |d| d.message.include?("cookies") }
+      expect(offending).to be_empty
+    end
+
+    it "resolves response.set_cookie without a call.undefined-method diagnostic" do
+      result = run_hanami(
+        files: {
+          "app/actions/books/index.rb" => <<~RUBY
+            class BooksIndex
+              def handle(request, response)
+                response.set_cookie("user_id", "42")
+              end
+            end
+          RUBY
+        },
+        paths: ["app/actions/books/index.rb"]
+      )
+      offending = core_diagnostics_for(result).select { |d| d.message.include?("set_cookie") }
+      expect(offending).to be_empty
+    end
+  end
 end

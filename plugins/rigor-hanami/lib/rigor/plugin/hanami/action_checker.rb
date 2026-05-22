@@ -27,9 +27,12 @@ module Rigor
             next [] unless path_matches?(contract.path_glob, path)
 
             class_nodes(root).filter_map do |class_node|
-              next nil if defines_handle?(class_node, contract)
-
-              missing_handle_diagnostic(contract, path, class_node)
+              handle_def = find_handle(class_node, contract)
+              if handle_def.nil?
+                missing_handle_diagnostic(contract, path, class_node)
+              else
+                handle_arity_mismatch_diagnostic(contract, path, class_node, handle_def)
+              end
             end
           end
         end
@@ -52,8 +55,8 @@ module Rigor
           found
         end
 
-        def defines_handle?(class_node, contract)
-          direct_defs(class_node).any? do |def_node|
+        def find_handle(class_node, contract)
+          direct_defs(class_node).find do |def_node|
             def_node.name == contract.method_name &&
               !def_node.receiver.is_a?(Prism::SelfNode)
           end
@@ -73,6 +76,22 @@ module Rigor
           when Prism::ClassNode, Prism::ModuleNode then nil # nested scopes own their own defs
           else node.compact_child_nodes.each { |child| collect_direct_defs(child, defs) }
           end
+        end
+
+        def handle_arity_mismatch_diagnostic(contract, path, class_node, def_node)
+          req_count = def_node.parameters ? def_node.parameters.requireds.size : 0
+          return nil if req_count == 2
+
+          location = def_node.location
+          Rigor::Analysis::Diagnostic.new(
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "`#{class_name(class_node)}#handle` must accept exactly 2 parameters " \
+                     "(request, response), got #{req_count}",
+            severity: contract.severity,
+            rule: "handle-arity-mismatch"
+          )
         end
 
         def missing_handle_diagnostic(contract, path, class_node)

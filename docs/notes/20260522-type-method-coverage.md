@@ -133,16 +133,16 @@
 [x] ord            → STRING_UNARY に追加  → Constant[Integer]
 
 中優先度:
-[ ] chr            → STRING_UNARY に追加  → Constant[String]
-[ ] hex            → STRING_UNARY に追加  → Constant[Integer]
-[ ] oct            → STRING_UNARY に追加  → Constant[Integer]
-[ ] next / succ    → STRING_UNARY に追加  → Constant[String]
-[ ] chop           → STRING_UNARY に追加  → Constant[String]
-[ ] match?         → STRING_BINARY に追加 → Constant[bool]
-[ ] index          → STRING_BINARY に追加 → Constant[Integer|nil]
-[ ] rindex         → STRING_BINARY に追加 → Constant[Integer|nil]
-[ ] center         → STRING_BINARY に追加 → Constant[String]
-[ ] ljust / rjust  → STRING_BINARY に追加 → Constant[String]
+[x] chr            → STRING_UNARY に追加  → Constant[String]
+[x] hex            → STRING_UNARY に追加  → Constant[Integer]
+[x] oct            → STRING_UNARY に追加  → Constant[Integer]
+[x] next / succ    → STRING_UNARY に追加  → Constant[String]
+[x] chop           → STRING_UNARY に追加  → Constant[String]
+[x] match?         → STRING_BINARY に追加 → Constant[bool]
+[x] index          → STRING_BINARY に追加 → Constant[Integer|nil]
+[x] rindex         → STRING_BINARY に追加 → Constant[Integer|nil]
+[x] center         → STRING_BINARY に追加 → Constant[String]（幅ブローアップガード付き）
+[x] ljust / rjust  → STRING_BINARY に追加 → Constant[String]（同上）
 
 低優先度:
 [ ] casecmp / casecmp?   → STRING_BINARY

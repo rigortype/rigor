@@ -30,3 +30,19 @@ s = "hi"
 # frozen String literal carrier; the rule keeps the fold inert
 # and the RBS tier answers with `Nominal[String]` instead.
 assert_type("String", s.replace("ho"))
+
+# Mid-priority String folds (coverage uplift): chr / succ / chop
+# unary, hex / oct radix conversions, match? / rindex / center /
+# ljust / rjust binary.
+assert_type('"h"', "hello".chr)
+assert_type('"ba"', "az".succ)
+assert_type('"hell"', "hello".chop)
+assert_type("255", "ff".hex)
+assert_type("493", "755".oct)
+assert_type("true", "hello".match?("ell"))
+assert_type("false", "hello".match?("xyz"))
+assert_type("2", "hello".index("l"))
+assert_type("3", "hello".rindex("l"))
+assert_type('"  hi  "', "hi".center(6))
+assert_type('"hi   "', "hi".ljust(5))
+assert_type('"   hi"', "hi".rjust(5))

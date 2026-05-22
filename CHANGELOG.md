@@ -16,6 +16,8 @@ cycles live in dedicated archives:
 
 ### Added
 
+- **String mid-priority constant folds.** Six unary methods (`chr`, `hex`, `oct`, `succ` / `next`, `chop`) and six binary methods (`match?`, `index`, `rindex`, `center`, `ljust`, `rjust`) now fold to a precise `Constant` type when the receiver — and, for the binary forms, the argument — is a literal: `"ff".hex` → `Constant[255]`, `"hello".match?(/l+o/)` → `Constant[true]`, `"hello".index("z")` → `Constant[nil]`, `"hi".center(6)` → `Constant["  hi  "]`. Added to `STRING_UNARY` / `STRING_BINARY` in `ConstantFolding`. `center` / `ljust` / `rjust` carry a width blow-up guard (`string_pad_blow_up?`) that declines the fold when the requested width exceeds `STRING_FOLD_BYTE_LIMIT`, mirroring the existing `+` / `*` guards.
+
 - **`Regexp.new` constructor folding, `Complex#rect/rectangular/polar` Tuple lifting, `Range.new` constructor folding, and `Set` constant carrier.** Four precision additions to the constant-folding pipeline:
   - `Regexp.new(pattern)` / `Regexp.new(pattern, opts)` — folds to `Constant[Regexp]` when the pattern is a `Constant[String]` and the optional second argument is a `Constant[Integer]` (flag bits) or `Constant[true/false]` (IGNORECASE shorthand). Wired in `RegexpFolding.try_dispatch`.
   - `Complex#rect` / `#rectangular` / `#polar` — lifts the two-element Array result to `Tuple[Constant[re], Constant[im]]` (for `rect`) or `Tuple[Constant[abs], Constant[arg]]` (for `polar`) when the receiver is a `Constant[Complex]`. Follows the same Tuple-lift pattern as `Range#to_a` and `String#chars`. Implemented via `COMPLEX_ARRAY_UNARY_METHODS` + `try_fold_complex_array_unary` in `ConstantFolding`.

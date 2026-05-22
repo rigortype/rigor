@@ -186,6 +186,43 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
+  describe "String mid-priority folds (coverage uplift)" do
+    it "folds String#chr / #succ / #next / #chop" do
+      expect(fold("hello", :chr).value).to eq("h")
+      expect(fold("az", :succ).value).to eq("ba")
+      expect(fold("az", :next).value).to eq("ba")
+      expect(fold("hello", :chop).value).to eq("hell")
+    end
+
+    it "folds String#hex / #oct" do
+      expect(fold("ff", :hex).value).to eq(255)
+      expect(fold("0x1a", :hex).value).to eq(26)
+      expect(fold("755", :oct).value).to eq(493)
+    end
+
+    it "folds String#match? against a String or Regexp argument" do
+      expect(fold("hello", :match?, ["ell"]).value).to be(true)
+      expect(fold("hello", :match?, ["xyz"]).value).to be(false)
+      expect(fold("hello", :match?, [/l+o/]).value).to be(true)
+    end
+
+    it "folds String#index / #rindex to Integer or nil" do
+      expect(fold("hello", :index, ["l"]).value).to eq(2)
+      expect(fold("hello", :rindex, ["l"]).value).to eq(3)
+      expect(fold("hello", :index, ["z"]).value).to be_nil
+    end
+
+    it "folds String#center / #ljust / #rjust" do
+      expect(fold("hi", :center, [6]).value).to eq("  hi  ")
+      expect(fold("hi", :ljust, [5]).value).to eq("hi   ")
+      expect(fold("hi", :rjust, [5]).value).to eq("   hi")
+    end
+
+    it "declines String#center when the requested width would blow up" do
+      expect(fold("hi", :center, [100_000])).to be_nil
+    end
+  end
+
   # Union[Constant…] folding. Each Constant in a union represents a
   # possible runtime value; a binary op over two unions is the
   # cartesian fold, deduplicated. Bounded by the input/output

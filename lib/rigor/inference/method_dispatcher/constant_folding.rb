@@ -52,7 +52,8 @@ module Rigor
         STRING_BINARY  = Set[
           :+, :*, :==, :!=, :<, :<=, :>, :>=, :<=>,
           :start_with?, :end_with?, :include?,
-          :delete_prefix, :delete_suffix
+          :delete_prefix, :delete_suffix,
+          :match?, :index, :rindex, :center, :ljust, :rjust
         ].freeze
         SYMBOL_BINARY  = Set[:==, :!=, :<=>, :<, :<=, :>, :>=].freeze
         BOOL_BINARY    = Set[:&, :|, :^, :==, :!=, :===].freeze
@@ -91,9 +92,9 @@ module Rigor
         STRING_UNARY = Set[
           :upcase, :downcase, :capitalize, :swapcase,
           :reverse, :length, :size, :bytesize,
-          :empty?, :strip, :lstrip, :rstrip, :chomp,
+          :empty?, :strip, :lstrip, :rstrip, :chomp, :chop,
           :to_s, :to_str, :to_sym, :intern,
-          :to_i, :to_f, :ord,
+          :to_i, :to_f, :ord, :chr, :hex, :oct, :succ, :next,
           :inspect, :hash
         ].freeze
         SYMBOL_UNARY = Set[
@@ -1282,8 +1283,17 @@ module Rigor
           case method_name
           when :+ then string_concat_blow_up?(receiver_value, arg_value)
           when :* then string_repeat_blow_up?(receiver_value, arg_value)
+          when :center, :ljust, :rjust then string_pad_blow_up?(arg_value)
           else false
           end
+        end
+
+        # `"x".center(width)` / `#ljust` / `#rjust` produce a string
+        # of `max(width, len)` characters. A literal `width` far
+        # larger than the receiver would materialise a huge Constant;
+        # cap it at the same byte limit the concat / repeat paths use.
+        def string_pad_blow_up?(arg_value)
+          arg_value.is_a?(Integer) && arg_value > STRING_FOLD_BYTE_LIMIT
         end
 
         def string_concat_blow_up?(receiver_value, arg_value)

@@ -1,6 +1,6 @@
 # Rigor production plugins
 
-Twenty-seven plugins targeting real Ruby gems, frameworks,
+Twenty-eight plugins targeting real Ruby gems, frameworks,
 and DSLs. Each ships as a standalone gem (`lib/` +
 `<id>.gemspec` + README + demo + integration spec) and is
 intended to be installed alongside the analyzer in a project's
@@ -98,6 +98,7 @@ subset; they cross-reference through ADR-9 facts.
 | [`rigor-devise`](rigor-devise/) | **ADR-16 macro expansion substrate Tier B consumer** — declarative `Plugin::Macro::TraitRegistry` manifest mirroring Devise's `lib/devise/modules.rb` symbol → module table. The substrate explodes each `devise :strategy_a, :strategy_b` call's included modules' RBS instance methods onto the calling AR model. |
 | [`rigor-sinatra`](rigor-sinatra/) | **ADR-16 macro expansion substrate Tier A consumer** — declarative `Plugin::Macro::BlockAsMethod` manifest narrows the block body's `self_type` for `get` / `post` / `put` / `delete` / `head` / `options` / `patch` / `link` / `unlink` against `Sinatra::Base` subclasses. |
 | [`rigor-sorbet`](rigor-sorbet/) | **External type DSL adapter** — reads inline `sig { params(...).returns(T) }` blocks plus `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions and contributes return types via `flow_contribution_for` (per ADR-11). |
+| [`rigor-hanami`](rigor-hanami/) | **ADR-28 path-scoped protocol contract** — enforces `#handle(Hanami::Action::Request, Hanami::Action::Response) → void` on every class under `app/actions/**/*.rb`. The engine **provides** `Hanami::Action::Request` / `Hanami::Action::Response` into action bodies (replacing `Dynamic[Top]`) so misuse surfaces as core diagnostics. Plugin ships its own Hanami Action RBS stubs. Config override: `action_path:`. |
 | [`rigor-statesman`](rigor-statesman/) | State machine DSL recognition (`state` + `transition` declarations) and `transition_to(:state)` / `can_transition_to?(:state)` validation against the per-class state set. Two-pass collect → validate analysis. |
 | [`rigor-activesupport-core-ext`](rigor-activesupport-core-ext/) | **RBS-only community bundle** (not a plugin in the contract sense — no `Rigor::Plugin::Base` subclass). Top ~50 ActiveSupport `core_ext` selectors that dominated the nine-project Rails survey: `Integer`/`Float` Duration & Bytes multipliers; `Time`/`Date`/`DateTime` calculations; `String` inflections / filters / `#exclude?`; `Array.wrap` + `Array#to_sentence` / `#in_groups_of`; `Hash#deep_dup` / `#deep_merge` / `#symbolize_keys`; `Object#blank?` / `#present?` / `#presence` / `#try`. Measured impact across nine survey projects: total diagnostics 12,502 → 3,071 (−75%). Wire via `signature_paths:` in `.rigor.yml`. |
 | [`rigor-typescript-utility-types`](rigor-typescript-utility-types/) | **Type-language vocabulary extension** via `Plugin::TypeNodeResolver` ([ADR-13](../docs/adr/13-typenode-resolver-plugin.md)) — maps `Pick<T, K>` / `Omit<T, K>` / `Partial<T>` / `Required<T>` / `Readonly<T>` onto Rigor-canonical shape-projection type functions. |

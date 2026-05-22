@@ -1,0 +1,64 @@
+# Minimal Hanami::Action type stubs for rigor-hanami.
+#
+# Hanami::Action::Request and Hanami::Action::Response are
+# defined as standalone types (without declaring Rack::Request /
+# Rack::Response inheritance) so this file is self-contained
+# regardless of whether a Rack RBS bundle is present in the
+# analysed project.
+#
+# The methods listed here cover the surface documented at:
+# https://guides.hanamirb.org/v3.0/actions/request-and-response/
+
+module Hanami
+  module Action
+    # Represents the incoming HTTP request inside `#handle`.
+    class Request
+      def path_info: () -> String
+      def request_method: () -> String
+      def get?: () -> bool
+      def post?: () -> bool
+      def patch?: () -> bool
+      def put?: () -> bool
+      def delete?: () -> bool
+      def head?: () -> bool
+      def xhr?: () -> bool
+      def params: () -> Hanami::Action::Params
+      def session: () -> Hash[Symbol, untyped]
+      def flash: () -> Hash[Symbol, untyped]
+      def content_type: () -> String?
+      def env: () -> Hash[String, untyped]
+      def body: () -> String
+      def get_header: (String name) -> String?
+      def ip: () -> String?
+      def referer: () -> String?
+      def user_agent: () -> String?
+      def subdomain: (?Integer tld_length) -> String?
+      def subdomains: (?Integer tld_length) -> Array[String]
+    end
+
+    # Represents the outgoing HTTP response inside `#handle`.
+    # The response is mutated in-place; the `#handle` return
+    # value is discarded by the framework.
+    class Response
+      def status: () -> Integer
+      def status=: (Integer | Symbol) -> void
+      def body: () -> Array[String]
+      def body=: (String | Array[String]) -> void
+      def headers: () -> Hash[String, String]
+      def format=: (Symbol | String) -> void
+      def redirect_to: (String url, ?Integer status) -> void
+      def write: (String str) -> void
+    end
+
+    # Typed parameter container. Values are coerced by the
+    # action's `params` block schema (if declared); otherwise
+    # all values are `untyped`.
+    class Params
+      def []: (Symbol key) -> untyped
+      def dig: (Symbol, *Symbol) -> untyped
+      def valid?: () -> bool
+      def errors: () -> Hash[Symbol, Array[String]]
+      def to_h: () -> Hash[Symbol, untyped]
+    end
+  end
+end

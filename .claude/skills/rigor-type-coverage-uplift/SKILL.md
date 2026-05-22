@@ -194,16 +194,6 @@ both. Integer-only operations (`&`, `|`, `^`, `<<`, `>>`) can be added to `NUMER
 safely — if a Float receiver calls them, `invoke_binary` rescues the `NoMethodError` and returns
 `nil`, falling through to the RBS tier. No separate Integer-only binary set is needed.
 
-**Watch the 120-character line limit**: adding several Symbols to an existing single-line
-`Set[…].freeze` constant often pushes it past Rubocop's `Layout/LineLength` threshold. Use the
-multi-line form when adding more than two or three Symbols:
-```ruby
-STRING_BINARY = Set[
-  :+, :*, :==, :!=, :<, :<=, :>, :>=, :<=>,
-  :start_with?, :end_with?, :include?,
-  :delete_prefix, :delete_suffix
-].freeze
-```
 
 ### Tier B — ShapeDispatch HANDLERS entries
 

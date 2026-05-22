@@ -40,6 +40,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | [24](24-self-method-call-resolution.md) | Self Method Call Resolution | — |
 | [25](25-plugin-contributed-rbs.md) | Plugin Contributed RBS | — |
 | [26](26-activerecord-relation-typing.md) | ActiveRecord Relation Typing | — |
+| [27](27-tool-distribution-model.md) | Tool Distribution and Installation Model | — |
 
 ## Adding a New ADR
 

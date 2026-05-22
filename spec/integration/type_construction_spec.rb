@@ -831,6 +831,27 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(result).to be_a(Rigor::Type::Constant)
         expect(result.value).to be_a(String)
       end
+
+      it "folds Regexp.new(pattern) to a Constant[Regexp]" do
+        result = harness.local(:_regexp_plain)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq(/hello/)
+      end
+
+      it "folds Regexp.new(pattern, flags) to a Constant[Regexp] with options" do
+        result = harness.local(:_regexp_new_flags)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq(/world/i)
+      end
+    end
+
+    describe "fixtures/set_constant_folding.rb — Set constant carrier" do
+      let(:harness) { harness_for("set_constant_folding") }
+
+      it "self-asserts every Set[] / Set.new / instance-method fold" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
     end
   end
 end

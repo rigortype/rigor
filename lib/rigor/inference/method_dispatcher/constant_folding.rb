@@ -288,6 +288,15 @@ module Rigor
           pathname_lift = try_fold_pathname_unary(receiver_values, method_name)
           return pathname_lift if pathname_lift
 
+          regexp_lift = try_fold_regexp_array_unary(receiver_values, method_name)
+          return regexp_lift if regexp_lift
+
+          set_lift = try_fold_set_array_unary(receiver_values, method_name)
+          return set_lift if set_lift
+
+          complex_lift = try_fold_complex_array_unary(receiver_values, method_name)
+          return complex_lift if complex_lift
+
           # Type-level allow check on every receiver. If one member's
           # type does not have the method in its allow list (e.g.
           # `Union[String, nil].nil?` — `:nil?` is not in
@@ -382,6 +391,21 @@ module Rigor
                          :STRING_ARRAY_BINARY_METHODS,
                          :STRING_ARRAY_LIFT_LIMIT
 
+        # `Constant<Regexp>#names` returns an Array of capture-group name
+        # strings. Lifted to a Tuple so downstream narrowing can project
+        # per-element types. The catalog classifies the C body as `:leaf`
+        # so it is safe to evaluate at fold time; no `$~` side effect.
+        REGEXP_ARRAY_UNARY_METHODS = Set[:names].freeze
+        private_constant :REGEXP_ARRAY_UNARY_METHODS
+
+        # `Constant<Set>#to_a` returns an Array of the set's elements.
+        # Ruby 3.2+ Set is C-implemented with a Hash as its backing store,
+        # so element ordering is deterministic (insertion order).
+        # The catalog marks `to_a` as `:dispatch` (it calls through to the
+        # internal hash), so this dedicated handler bypasses the catalog gate.
+        SET_ARRAY_UNARY_METHODS = Set[:to_a, :entries].freeze
+        private_constant :SET_ARRAY_UNARY_METHODS
+
         # v0.0.7 — `Constant<Pathname>` delegates to a curated set
         # of pure path-manipulation methods. Pathname is immutable
         # in Ruby (per its docstring) and the catalog classifies
@@ -445,6 +469,62 @@ module Rigor
 
           receiver = receiver_values.first
           return nil unless receiver.is_a?(String)
+
+          lift_array_result(receiver.public_send(method_name))
+        rescue StandardError
+          nil
+        end
+
+        # `Constant<Regexp>#names` — lift the Array[String] of named-capture
+        # group names to a Tuple[Constant[String]…]. Safe to evaluate at fold
+        # time: the C body reads only the regexp's internal names table,
+        # writes no global state, and always returns an Array of frozen Strings.
+        def try_fold_regexp_array_unary(receiver_values, method_name)
+          return nil unless REGEXP_ARRAY_UNARY_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1
+
+          receiver = receiver_values.first
+          return nil unless receiver.is_a?(Regexp)
+
+          lift_array_result(receiver.public_send(method_name))
+        rescue StandardError
+          nil
+        end
+
+        # `Constant<Set>#to_a` / `#entries` — lift the Array of set elements
+        # to a Tuple[Constant[…]…] when every element is a foldable scalar.
+        # Ruby 3.2+ Set is C-implemented; element order is deterministic
+        # (insertion order), so the result is stable across invocations.
+        def try_fold_set_array_unary(receiver_values, method_name)
+          return nil unless SET_ARRAY_UNARY_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1
+
+          receiver = receiver_values.first
+          return nil unless receiver.is_a?(::Set)
+
+          lift_array_result(receiver.to_a)
+        rescue StandardError
+          nil
+        end
+
+        # `Constant<Complex>#rect` / `#rectangular` — lifts `[real, imaginary]`
+        # to `Tuple[Constant[re], Constant[im]]`. Both components are always
+        # numeric (Integer or Float for literal complexes), so they satisfy
+        # `foldable_constant_value?`.
+        #
+        # `Constant<Complex>#polar` — lifts `[abs, arg]` to
+        # `Tuple[Constant[Float], Constant[Float]]`. Evaluated at fold time
+        # via `Complex#polar` (which calls `Math.hypot` and `Math.atan2`).
+        # Deterministic: reads only the receiver's real and imaginary parts.
+        COMPLEX_ARRAY_UNARY_METHODS = Set[:rect, :rectangular, :polar].freeze
+        private_constant :COMPLEX_ARRAY_UNARY_METHODS
+
+        def try_fold_complex_array_unary(receiver_values, method_name)
+          return nil unless COMPLEX_ARRAY_UNARY_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1
+
+          receiver = receiver_values.first
+          return nil unless receiver.is_a?(Complex)
 
           lift_array_result(receiver.public_send(method_name))
         rescue StandardError
@@ -1133,7 +1213,7 @@ module Rigor
         # round-trip through `Type::Combinator.constant_of`".
         def foldable_constant_value?(value)
           case value
-          when Integer, Float, Rational, Complex, String, Symbol, Regexp, Pathname, true, false, nil then true
+          when Integer, Float, Rational, Complex, String, Symbol, Regexp, Pathname, ::Set, true, false, nil then true
           else false
           end
         end

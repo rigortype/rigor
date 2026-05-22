@@ -9,10 +9,11 @@ include Rigor::Testing
 
 # `Set#size` / `#length` / `#count` tighten through ShapeDispatch's
 # `SIZE_RETURNING_NOMINALS` projection (a `Nominal[Set]` receiver
-# returns `non-negative-int` rather than the RBS-declared
-# `Integer`). `Set.new([…])` yields a `Nominal[Set]`; the chained
-# `#size` call observes the projection.
-s = Set.new([1, 2, 3])
+# returns `non-negative-int` rather than the RBS-declared `Integer`).
+# Use a non-constant element (`rand.to_i`) so `set_new_lift` declines
+# and the receiver stays `Nominal[Set]` — constant-shaped Set.new
+# calls now fold to `Constant[Set]` (see set_constant_folding.rb).
+s = Set.new([1, 2, rand.to_i])
 assert_type("non-negative-int", s.size)
 assert_type("non-negative-int", s.length)
 

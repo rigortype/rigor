@@ -57,10 +57,10 @@ assert_type("5", flagged.options)
 assert_type("true", flagged.casefold?)
 
 # ---------------------------------------------------------------
-# Regexp.new path: `Nominal[Regexp]` — no constant-constructor
-# lift today, the catalog still recognises the receiver class
-# so subsequent dispatch flows through the right entry.
+# Regexp.new path: folds to `Constant[Regexp]` when the pattern
+# is a literal `Constant[String]`. Subsequent dispatch on the
+# constant receiver flows through the catalog tier.
 # ---------------------------------------------------------------
 
 dyn = Regexp.new("abc")
-assert_type("Regexp", dyn)
+assert_type("/abc/", dyn)

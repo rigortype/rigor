@@ -17,6 +17,7 @@ require_relative "method_dispatcher/shellwords_folding"
 require_relative "method_dispatcher/regexp_folding"
 require_relative "method_dispatcher/cgi_folding"
 require_relative "method_dispatcher/uri_folding"
+require_relative "method_dispatcher/set_folding"
 require_relative "method_dispatcher/kernel_dispatch"
 require_relative "method_dispatcher/method_folding"
 
@@ -647,16 +648,24 @@ module Rigor
         ConstantFolding.try_fold(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           LiteralStringFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           ShapeDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          ShellwordsFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          RegexpFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          CGIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          URIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          dispatch_stdlib_module_tiers(receiver_type, method_name, arg_types) ||
           KernelDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           MethodFolding.try_forward(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           BlockFolding.try_fold(
             receiver: receiver_type, method_name: method_name, args: arg_types, block_type: block_type
           )
+      end
+
+      # Stdlib module singleton-folding tiers: File, Shellwords, Regexp,
+      # CGI, URI, Set. Extracted from `dispatch_precise_tiers` to keep
+      # the parent method within the cyclomatic-complexity limit.
+      def dispatch_stdlib_module_tiers(receiver_type, method_name, arg_types)
+        FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          ShellwordsFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          RegexpFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          CGIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          URIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          SetFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types)
       end
 
       def try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type, call_node = nil)
@@ -779,6 +788,15 @@ module Rigor
         array_lift = array_new_lift(receiver_type.class_name, arg_types)
         return array_lift if array_lift
 
+        range_lift = range_new_lift(receiver_type.class_name, arg_types)
+        return range_lift if range_lift
+
+        set_lift = set_new_lift(receiver_type.class_name, arg_types)
+        return set_lift if set_lift
+
+        regexp_lift = regexp_new_lift(receiver_type.class_name, arg_types)
+        return regexp_lift if regexp_lift
+
         Type::Combinator.nominal_of(receiver_type.class_name)
       end
 
@@ -846,6 +864,93 @@ module Rigor
         return Type::Combinator.constant_of(nil) if type.nil?
 
         type
+      end
+
+      # `Range.new(b, e)` / `Range.new(b, e, excl)` — folds to
+      # `Constant[Range]` when both endpoints are `Constant[Integer]`
+      # or both are `Constant[String]`, and the optional third argument
+      # is a `Constant[true/false]`. Nil endpoints (beginless /
+      # endless ranges) are not folded because the useful instance
+      # methods (`to_a`, `first`, `last`) are not defined for them;
+      # the RBS tier answers `Nominal[Range]` for those forms.
+      def range_new_lift(class_name, arg_types)
+        return nil unless class_name == "Range"
+        return nil if arg_types.size < 2 || arg_types.size > 3
+
+        b_type = arg_types[0]
+        e_type = arg_types[1]
+
+        return nil unless b_type.is_a?(Type::Constant) && e_type.is_a?(Type::Constant)
+
+        b_val = b_type.value
+        e_val = e_type.value
+
+        # Only fold homogeneous Integer or String endpoint pairs.
+        return nil unless b_val.instance_of?(e_val.class)
+        return nil unless b_val.is_a?(Integer) || b_val.is_a?(String)
+
+        excl = range_new_excl(arg_types[2])
+        return nil if excl.nil?
+
+        Type::Combinator.constant_of(Range.new(b_val, e_val, excl))
+      rescue StandardError
+        nil
+      end
+
+      # Resolves the optional `exclude_end` argument for `range_new_lift`.
+      # Returns `false` (no arg), `true`/`false` (Constant[bool] arg),
+      # or `nil` to signal "decline" (wrong type / wrong value class).
+      def range_new_excl(excl_type)
+        case excl_type
+        when nil then false
+        when Type::Constant
+          excl_type.value if [true, false].include?(excl_type.value)
+        end
+      end
+
+      # `Set.new` / `Set.new(tuple_of_constants)` — folds to `Constant[Set]`
+      # when zero arguments are given or the single argument is a `Tuple`
+      # whose every element is a `Constant[T]`. Mirrors `SetFolding#fold_new`
+      # but lives here so the `:new` path in `try_meta_introspection` can
+      # reach it before the RBS tier answers `Nominal[Set]`.
+      def set_new_lift(class_name, arg_types)
+        return nil unless class_name == "Set"
+        return Type::Combinator.constant_of(::Set.new) if arg_types.empty?
+        return nil if arg_types.size > 1
+
+        arg = arg_types.first
+        return nil unless arg.is_a?(Type::Tuple)
+        return nil unless arg.elements.all?(Type::Constant)
+
+        values = arg.elements.map(&:value)
+        Type::Combinator.constant_of(::Set.new(values))
+      rescue StandardError
+        nil
+      end
+
+      # `Regexp.new(pattern)` / `Regexp.new(pattern, opts)` — folds to
+      # `Constant[Regexp]` when the pattern is a `Constant[String]`.
+      # Mirrors `RegexpFolding#fold_new` but lives here so the `:new` path
+      # in `try_meta_introspection` can reach it.
+      def regexp_new_lift(class_name, arg_types)
+        return nil unless class_name == "Regexp"
+        return nil if arg_types.empty? || arg_types.size > 2
+
+        pattern_arg = arg_types.first
+        return nil unless pattern_arg.is_a?(Type::Constant) && pattern_arg.value.is_a?(String)
+
+        opts = if arg_types.size == 2
+                 opt_type = arg_types[1]
+                 return nil unless opt_type.is_a?(Type::Constant)
+
+                 opt_type.value
+               else
+                 0
+               end
+
+        Type::Combinator.constant_of(Regexp.new(pattern_arg.value, opts))
+      rescue StandardError
+        nil
       end
 
       CONSTANT_METACLASSES = {

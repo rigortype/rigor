@@ -996,5 +996,36 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
         expect(fold_types(constant_of(1.0..2.0), :to_a)).to be_nil
       end
     end
+
+    describe "Constant<Complex> array-returning method lift" do
+      def tuple_of(*elems) = Rigor::Type::Combinator.tuple_of(*elems)
+
+      it "lifts (3+4i).rect to Tuple[Constant[3], Constant[4]]" do
+        result = fold_types(constant_of(Complex(3, 4)), :rect)
+        expect(result).to eq(tuple_of(constant_of(3), constant_of(4)))
+      end
+
+      it "treats rectangular as an alias for rect" do
+        result = fold_types(constant_of(Complex(3, 4)), :rectangular)
+        expect(result).to eq(tuple_of(constant_of(3), constant_of(4)))
+      end
+
+      it "lifts (3+4i).polar to Tuple[Constant[5.0], Constant[atan2(4,3)]]" do
+        result = fold_types(constant_of(Complex(3, 4)), :polar)
+        expect(result).to be_a(Rigor::Type::Tuple)
+        expect(result.elements.size).to eq(2)
+        expect(result.elements[0]).to eq(constant_of(5.0))
+        expect(result.elements[1]).to eq(constant_of(Math.atan2(4, 3)))
+      end
+
+      it "lifts a purely imaginary complex rect" do
+        result = fold_types(constant_of(Complex(0, 1)), :rect)
+        expect(result).to eq(tuple_of(constant_of(0), constant_of(1)))
+      end
+
+      it "declines for a non-Complex receiver" do
+        expect(fold_types(constant_of(3), :rect)).to be_nil
+      end
+    end
   end
 end

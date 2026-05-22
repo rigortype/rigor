@@ -24,6 +24,7 @@ module Rigor
         Complex,
         Regexp,
         Pathname,
+        ::Set,
         TrueClass,
         FalseClass,
         NilClass
@@ -42,7 +43,7 @@ module Rigor
           raise ArgumentError, "Rigor::Type::Constant only carries scalar literals; got #{value.class}"
         end
 
-        @value = value.is_a?(String) ? value.dup.freeze : value
+        @value = value.is_a?(String) || value.is_a?(::Set) ? value.dup.freeze : value
         freeze
       end
 

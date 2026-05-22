@@ -13,6 +13,13 @@ assert_type('"hello\\\\.world"', _regexp_escaped)
 _regexp_quoted = Regexp.quote("[a-z]")
 assert_type('"\\\\[a\\\\-z\\\\]"', _regexp_quoted)
 
+# --- Regexp.new ---
+
+_regexp_plain = Regexp.new("hello")
+assert_type("/hello/", _regexp_plain)
+_regexp_new_flags = Regexp.new("world", 1) # 1 == Regexp::IGNORECASE; constant literal required for fold
+assert_type("/world/i", _regexp_new_flags)
+
 # --- CGI.escapeHTML / h / unescapeHTML ---
 
 assert_type('"&lt;b&gt;"', CGI.escapeHTML("<b>"))

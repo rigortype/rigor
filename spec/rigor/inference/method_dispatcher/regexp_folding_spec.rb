@@ -65,4 +65,55 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RegexpFolding do
       expect(fold(:compile, c("hello"))).to be_nil
     end
   end
+
+  describe "new" do
+    it "folds a simple pattern with no options" do
+      result = fold(:new, c("hello"))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(/hello/)
+    end
+
+    it "folds a pattern with integer flags" do
+      result = fold(:new, c("hello"), c(Regexp::IGNORECASE))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(/hello/i)
+    end
+
+    it "folds a pattern with true (IGNORECASE shorthand)" do
+      result = fold(:new, c("hello"), c(true))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value.options).to eq(Regexp.new("hello", true).options)
+    end
+
+    it "folds a pattern with false (no flags)" do
+      result = fold(:new, c("hello"), c(false))
+      expect(result).to be_a(Rigor::Type::Constant)
+      expect(result.value).to eq(/hello/)
+    end
+
+    it "declines when given no arguments" do
+      expect(fold(:new)).to be_nil
+    end
+
+    it "declines when the pattern is not a Constant" do
+      expect(fold(:new, Rigor::Type::Combinator.nominal_of("String"))).to be_nil
+    end
+
+    it "declines when the pattern is a non-String Constant" do
+      expect(fold(:new, c(42))).to be_nil
+    end
+
+    it "declines when more than two arguments are given" do
+      expect(fold(:new, c("hello"), c(0), c("n"))).to be_nil
+    end
+
+    it "declines when the second argument is not a Constant" do
+      expect(fold(:new, c("hello"), Rigor::Type::Combinator.nominal_of("Integer"))).to be_nil
+    end
+
+    it "returns nil gracefully for an invalid pattern rather than raising" do
+      # Regexp.new with an unbalanced group should decline (rescue → nil)
+      expect(fold(:new, c("(unclosed"))).to be_nil
+    end
+  end
 end

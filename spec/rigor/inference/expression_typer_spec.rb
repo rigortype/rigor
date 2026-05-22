@@ -738,6 +738,34 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type.class_name).to eq("Array")
     end
 
+    it "Range.new(1, 5) lifts to Constant[1..5]" do
+      type = scope.type_of(parse_expression("Range.new(1, 5)"))
+
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq(1..5)
+    end
+
+    it "Range.new(1, 5, true) lifts to Constant[1...5] (exclusive)" do
+      type = scope.type_of(parse_expression("Range.new(1, 5, true)"))
+
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq(1...5)
+    end
+
+    it "Range.new(\"a\", \"z\") lifts to Constant[\"a\"..\"z\"]" do
+      type = scope.type_of(parse_expression("Range.new(\"a\", \"z\")"))
+
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq("a".."z")
+    end
+
+    it "Range.new with a dynamic endpoint falls back to Nominal[Range]" do
+      type = scope.type_of(parse_expression("Range.new(rand.to_i, 10)"))
+
+      expect(type).to be_a(Rigor::Type::Nominal)
+      expect(type.class_name).to eq("Range")
+    end
+
     it "Integer.new resolves to Nominal[Integer] via inherited Class#new" do
       type = scope.type_of(parse_expression("Integer.new"))
 

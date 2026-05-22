@@ -5,22 +5,23 @@ require_relative "../../type"
 module Rigor
   module Inference
     module MethodDispatcher
-      # Folds `Regexp` module-function calls on statically known
-      # string constants.
-      #
-      # `Regexp.escape(str)` / `Regexp.quote(str)` escapes regexp
-      # meta-characters. The function is pure and deterministic —
-      # the same input always produces the same output.
+      # Folds `Regexp` class-method calls on statically known arguments.
       #
       # === Supported methods
       #
-      # * `escape(str)` / `quote(str)` — returns `Constant[String]`.
+      # * `escape(str)` / `quote(str)` — escapes regexp meta-characters.
+      #   Returns `Constant[String]`.
+      # * `new(str)` / `new(str, opts)` — constructs a Regexp at fold time
+      #   when the pattern argument is a `Constant[String]`. The optional
+      #   second argument may be a `Constant[Integer]` (flag bits), a
+      #   `Constant[true/false]` (IGNORECASE shorthand), or absent.
+      #   Returns `Constant[Regexp]`.
       #
       # === Non-constant / unsupported cases
       #
       # Returns `nil` (deferring to the next dispatcher tier) when:
       # - the receiver is not `Singleton[Regexp]`,
-      # - the required argument is not a `Constant[String]`,
+      # - the required pattern argument is not a `Constant[String]`,
       # - the method is not in the supported set.
       module RegexpFolding
         REGEXP_ESCAPE_METHODS = Set[:escape, :quote].freeze
@@ -31,9 +32,10 @@ module Rigor
         # @return [Rigor::Type, nil] folded result, or nil to defer.
         def try_dispatch(receiver:, method_name:, args:)
           return nil unless dispatch_target?(receiver)
-          return nil unless REGEXP_ESCAPE_METHODS.include?(method_name)
+          return fold_escape(args) if REGEXP_ESCAPE_METHODS.include?(method_name)
+          return fold_new(args) if method_name == :new
 
-          fold_escape(args)
+          nil
         end
 
         def dispatch_target?(receiver)
@@ -48,6 +50,30 @@ module Rigor
           return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(String)
 
           Type::Combinator.constant_of(Regexp.escape(arg.value))
+        end
+
+        # `Regexp.new(pattern)` / `Regexp.new(pattern, opts)` — constructs
+        # the pattern at inference time. Delegates to Ruby's real
+        # `Regexp.new` so all option forms (Integer flags, `true`/`false`,
+        # option strings) are handled without case-analysis; non-constant or
+        # invalid arguments decline through to the RBS tier.
+        def fold_new(args)
+          return nil if args.empty? || args.size > 2
+
+          pattern_arg = args.first
+          return nil unless pattern_arg.is_a?(Type::Constant) &&
+                            pattern_arg.value.is_a?(String)
+
+          opts = args.size == 2 ? constant_value_or_nil(args[1]) : 0
+          return nil if args.size == 2 && opts.nil?
+
+          Type::Combinator.constant_of(Regexp.new(pattern_arg.value, opts))
+        rescue StandardError
+          nil
+        end
+
+        def constant_value_or_nil(type)
+          type.is_a?(Type::Constant) ? type.value : nil
         end
       end
     end

@@ -31,14 +31,13 @@ assert_type("1", c.denominator)
 # receiver.
 assert_type("false", c.real?)
 
-# Tuple-returning leaves. `rect` / `rectangular` return Array
-# results — `foldable_constant_value?` rejects Array values, so
-# the constant-fold tier declines and the RBS tier answers with
-# the structural `[Numeric, Numeric]` shape. A future slice
-# that lifts Array results to `Tuple[…]` (similar to the v0.0.7
-# `Range#to_a` lift) would tighten these to `[3, 4]`.
-assert_type("[Numeric, Numeric]", c.rect)
-assert_type("[Numeric, Numeric]", c.rectangular)
+# Tuple-returning leaves. `rect` / `rectangular` return `[real, imaginary]`
+# — now lifted to `Tuple[Constant[re], Constant[im]]` by
+# `try_fold_complex_array_unary`, so the result is `[3, 4]` for
+# `Complex(3, 4)`. `polar` returns `[abs, arg]` (both Float).
+assert_type("[3, 4]", c.rect)
+assert_type("[3, 4]", c.rectangular)
+assert_type("[5.0, 0.9272952180016122]", c.polar)
 
 # Singleton constructors. `Complex.rect` and `Complex.polar`
 # are catalog-classified `:leaf` against `nucomp_s_new` /

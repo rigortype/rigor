@@ -1,6 +1,6 @@
 # Rigor plugin walkthroughs
 
-Five **tutorial walkthroughs** that exercise the
+Six **tutorial walkthroughs** that exercise the
 [Rigor plugin contract](../docs/adr/2-extension-api.md) over
 deliberately simplified, virtual use cases. Each walkthrough
 spotlights a single architectural surface so plugin authors
@@ -27,7 +27,7 @@ For "I want to analyse my Rails project" or "I want type
 narrowing through my factory_bot calls," go to
 [`plugins/`](../plugins/) instead.
 
-## The five walkthroughs
+## The six walkthroughs
 
 | Walkthrough | Headline facet | LoC | I/O | Cache | Engine query |
 | --- | --- | --- | --- | --- | --- |
@@ -36,6 +36,7 @@ narrowing through my factory_bot calls," go to
 | [`rigor-pattern`](rigor-pattern/) | **Engine collaboration** via `Scope#type_of` + literal-string carrier | ~180 | — | — | ✅ |
 | [`rigor-units`](rigor-units/) | **Local-variable flow tracking** through arithmetic | ~280 | — | — | — |
 | [`rigor-routes`](rigor-routes/) | **`IoBoundary` + cache producer** (slice 2 + slice 6) | ~250 | YAML | ✅ | — |
+| [`rigor-web`](rigor-web/) | **Path-scoped protocol contract** (ADR-28 provide-and-check) | ~210 | — | — | ✅ |
 
 The walkthroughs intentionally use virtual / fictional
 domains — physical units of measure, a tiny Lisp evaluator,
@@ -51,7 +52,8 @@ domain code crowding the read.
 | **Inspect a method call's literal arguments** | `rigor-lisp-eval` → `rigor-pattern` |
 | **Track types through a series of statements** | `rigor-units` |
 | **Read a project file under `TrustPolicy` + cache the parse** | `rigor-routes` |
-| **Internalise the architecture** | deprecations → lisp-eval → pattern → units → routes |
+| **Enforce a directory-scoped protocol on user classes** | `rigor-web` |
+| **Internalise the architecture** | deprecations → lisp-eval → pattern → units → routes → web |
 
 Then move to [`plugins/`](../plugins/) for the production
 plugins layered on top of this contract.
@@ -60,19 +62,21 @@ plugins layered on top of this contract.
 
 | Surface | Where it lives | Walkthroughs that use it |
 | --- | --- | --- |
-| `Rigor::Plugin::Base.manifest(...)` | manifest declaration | all five |
-| `config_schema` (`:string` / `:array` / `:hash`) | manifest body | deprecations / lisp-eval / pattern |
-| `#init(services)` config plumbing | init hook | lisp-eval / pattern / routes |
-| `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all five |
+| `Rigor::Plugin::Base.manifest(...)` | manifest declaration | all six |
+| `config_schema` (`:string` / `:array` / `:hash`) | manifest body | deprecations / lisp-eval / pattern / web |
+| `#init(services)` config plumbing | init hook | lisp-eval / pattern / routes / web |
+| `#diagnostics_for_file(path:, scope:, root:)` | slice-5 emission hook | all six |
 | `#flow_contribution_for(node, scope)` | return-type contribution | lisp-eval / pattern / units |
 | `Plugin::IoBoundary#read_file` (slice 2) | sandboxed file reads | routes |
 | `Plugin::TrustPolicy.allowed_read_roots` (slice 2) | declarative read-root policy | routes |
 | `Plugin::Base.producer` DSL (slice 6) | cached producer declaration | routes |
 | `Plugin::Base#cache_for` callable (slice 6) | cache round-trip wrapper | routes |
-| `Scope#type_of(node)` | engine query for an inferred type | **pattern** |
+| `Scope#type_of(node)` | engine query for an inferred type | **pattern** / **web** |
 | `Type::Combinator.literal_string_compatible?` | literal-string predicate | **pattern** |
 | `Type::Constant#value` | exact-value extraction | **pattern** |
 | Local-variable binding map across statements | pattern, not API | **units** |
+| `protocol_contracts:` manifest field (ADR-28) | path-scoped protocol declaration | **web** |
+| `signature_paths:` manifest field (ADR-25) | plugin-shipped RBS | **web** |
 
 The production [`plugins/`](../plugins/) entries combine
 these surfaces in larger, more realistic shapes — see

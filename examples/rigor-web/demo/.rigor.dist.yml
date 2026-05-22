@@ -1,0 +1,18 @@
+paths:
+  - lib
+
+plugins:
+  # The rigor-web plugin. With no config it enforces the
+  # convention path `lib/controller/**/*.rb`. To retarget the
+  # contract — e.g. for a Rails-style layout — use the config
+  # form instead:
+  #
+  #   - gem: rigor-web
+  #     config:
+  #       controller_path: "app/controllers/**/*.rb"
+  - rigor-web
+
+cache:
+  # Strict per-demo isolation: cache lives under tmp/, which the
+  # demo's .gitignore excludes.
+  path: tmp/.rigor/cache

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../inference/hkt_registry"
+require_relative "protocol_contract"
 
 module Rigor
   module Plugin
@@ -42,14 +43,14 @@ module Rigor
       attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
                   :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
                   :heredoc_templates, :trait_registries, :external_files, :hkt_registrations,
-                  :hkt_definitions, :signature_paths
+                  :hkt_definitions, :signature_paths, :protocol_contracts
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
         produces: [], consumes: [], owns_receivers: [], open_receivers: [], type_node_resolvers: [],
         block_as_methods: [], heredoc_templates: [], trait_registries: [], external_files: [],
-        hkt_registrations: [], hkt_definitions: [], signature_paths: []
+        hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -66,10 +67,11 @@ module Rigor
         validate_hkt_registrations!(hkt_registrations)
         validate_hkt_definitions!(hkt_definitions)
         validate_signature_paths!(signature_paths)
+        validate_protocol_contracts!(protocol_contracts)
 
         assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
                       open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
-                      external_files, hkt_registrations, hkt_definitions, signature_paths)
+                      external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts)
         freeze
       end
 
@@ -78,7 +80,7 @@ module Rigor
       # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
       def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
                         open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
-                        external_files, hkt_registrations, hkt_definitions, signature_paths)
+                        external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
@@ -96,6 +98,7 @@ module Rigor
         @hkt_registrations = hkt_registrations.dup.freeze
         @hkt_definitions = hkt_definitions.dup.freeze
         @signature_paths = signature_paths.map { |p| p.to_s.dup.freeze }.freeze
+        @protocol_contracts = protocol_contracts.dup.freeze
       end
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
@@ -124,7 +127,7 @@ module Rigor
         errors
       end
 
-      def to_h # rubocop:disable Metrics/AbcSize
+      def to_h # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
         {
           "id" => id,
           "version" => version,
@@ -142,7 +145,8 @@ module Rigor
           "external_files" => external_files.map(&:to_h),
           "hkt_registrations" => hkt_registrations.map(&:to_h),
           "hkt_definitions" => hkt_definitions.map { |d| { "uri" => d.uri, "params" => d.params } },
-          "signature_paths" => signature_paths
+          "signature_paths" => signature_paths,
+          "protocol_contracts" => protocol_contracts.map(&:to_h)
         }
       end
 
@@ -363,6 +367,26 @@ module Rigor
         raise ArgumentError,
               "plugin manifest signature_paths must be an Array of non-empty String, " \
               "got #{paths.inspect}"
+      end
+
+      # ADR-28 — `protocol_contracts:` declares the path-scoped
+      # method-protocol contracts the plugin contributes. Each
+      # entry MUST be a `Rigor::Plugin::ProtocolContract`. The
+      # registry aggregator on `Plugin::Registry` flattens
+      # contracts across loaded plugins; the engine consults them
+      # in two places — `MethodParameterBinder` provides the
+      # declared parameter types into matching method bodies, and
+      # the contributing plugin's `#diagnostics_for_file` checks
+      # method presence + return-type conformance. The manifest
+      # field carries the plugin's *default* contracts; a plugin
+      # MAY override `Plugin::Base#protocol_contracts` to fold in
+      # per-project config (e.g. a custom convention path).
+      def validate_protocol_contracts!(entries)
+        return if entries.is_a?(Array) && entries.all?(ProtocolContract)
+
+        raise ArgumentError,
+              "plugin manifest protocol_contracts must be an Array of " \
+              "Rigor::Plugin::ProtocolContract instances, got #{entries.inspect}"
       end
 
       def coerce_consumes(consumes)

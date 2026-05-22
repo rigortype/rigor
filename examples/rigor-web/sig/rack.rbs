@@ -1,0 +1,41 @@
+# Minimal RBS for the slice of Rack the RigWeb controller
+# protocol depends on. Shipped by the rigor-web plugin via the
+# manifest `signature_paths: ["sig"]` (ADR-25), so an analysed
+# project gets `Rack::Request` / `Rack::Response` resolvable
+# without depending on the rack gem.
+#
+# This is NOT upstream Rack's RBS — it is the deliberately small
+# subset the example needs.
+
+module Rack
+  class Request
+    def initialize: (untyped env) -> void
+
+    # The path component of the request URI.
+    def path_info: () -> String
+
+    # The query / form parameters.
+    def params: () -> Hash[String, untyped]
+
+    # The HTTP method, upcased ("GET", "POST", ...).
+    def request_method: () -> String
+
+    def get?: () -> bool
+
+    def post?: () -> bool
+  end
+
+  class Response
+    def initialize: (?String body, ?Integer status, ?Hash[String, untyped] headers) -> void
+
+    def status: () -> Integer
+
+    def status=: (Integer) -> Integer
+
+    # Append to the response body.
+    def write: (String) -> void
+
+    # The Rack response triple.
+    def finish: () -> [Integer, Hash[String, untyped], Array[String]]
+  end
+end

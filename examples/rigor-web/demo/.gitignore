@@ -1,0 +1,10 @@
+# Demo-local cache and any other build artefacts. The repo-root
+# .gitignore's `/tmp/` is anchored to the root, not to the demo
+# tree, so this anchored copy keeps cache output from leaking
+# into commits and survives the future `git subtree split` per
+# the rigor-plugin-author SKILL.
+/tmp/
+
+# Developer-local Rigor config override (committed default is
+# `.rigor.dist.yml`).
+/.rigor.yml

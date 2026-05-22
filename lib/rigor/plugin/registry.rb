@@ -130,7 +130,47 @@ module Rigor
         open_receivers.include?(class_name.to_s)
       end
 
+      # ADR-28 — flat, ordered list of every loaded plugin's
+      # path-scoped method-protocol contracts, in plugin
+      # registration order. Read from each plugin's
+      # `#protocol_contracts` (which the manifest backs by default
+      # but a plugin MAY override to fold in per-project config).
+      # Consumed by `Inference::MethodParameterBinder` (the
+      # parameter-type provision) and by contributing plugins'
+      # `#diagnostics_for_file` hooks (the presence + return-type
+      # check).
+      def protocol_contracts
+        plugins.flat_map(&:protocol_contracts)
+      end
+
+      # ADR-28 — the subset of `protocol_contracts` whose
+      # `path_glob` matches `path`. Contract globs are authored
+      # project-root-relative (`lib/controller/**/*.rb`); the
+      # analyzer may hand this method either a project-relative
+      # path (`rigor check` run from the project root) or an
+      # absolute one (run from elsewhere, or a spec tmpdir), so the
+      # glob is matched both directly and as a `**/`-prefixed path
+      # suffix. `File::FNM_PATHNAME` keeps `*` from crossing `/`;
+      # `File::FNM_EXTGLOB` enables `{a,b}` groups. Returns `[]` for
+      # a nil path so the binder can call this unconditionally.
+      def contracts_for_path(path)
+        return [] if path.nil?
+
+        path_s = path.to_s
+        protocol_contracts.select { |contract| path_matches_glob?(contract.path_glob, path_s) }
+      end
+
+      FNMATCH_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
+      private_constant :FNMATCH_FLAGS
+
       EMPTY = new.freeze
+
+      private
+
+      def path_matches_glob?(glob, path)
+        File.fnmatch?(glob, path, FNMATCH_FLAGS) ||
+          File.fnmatch?(File.join("**", glob), path, FNMATCH_FLAGS)
+      end
     end
   end
 end

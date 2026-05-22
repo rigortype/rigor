@@ -1421,7 +1421,8 @@ module Rigor
         binder = MethodParameterBinder.new(
           environment: scope.environment,
           class_path: current_class_path,
-          singleton: singleton
+          singleton: singleton,
+          source_path: scope.source_path
         )
         bindings = binder.bind(def_node)
 
@@ -1486,6 +1487,7 @@ module Rigor
       # remain reachable from inside nested bodies.
       def build_fresh_body_scope # rubocop:disable Metrics/AbcSize
         Scope.empty(environment: scope.environment)
+             .with_source_path(scope.source_path)
              .with_declared_types(scope.declared_types)
              .with_discovered_classes(scope.discovered_classes)
              .with_in_source_constants(scope.in_source_constants)

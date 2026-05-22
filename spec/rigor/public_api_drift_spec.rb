@@ -147,6 +147,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     io_boundary()
     manifest()
     prepare(req:services)
+    protocol_contracts()
     services()
     signature_paths()
   ].freeze
@@ -173,6 +174,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     open_receivers()
     owns_receivers()
     produces()
+    protocol_contracts()
     protocols()
     signature_paths()
     to_h()
@@ -201,6 +203,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   PLUGIN_REGISTRY_INSTANCE = %w[
     any_load_errors?()
     blueprints()
+    contracts_for_path(req:path)
     empty?()
     find(req:id)
     hkt_overlay_registry()
@@ -209,6 +212,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     open_receiver?(req:class_name)
     open_receivers()
     plugins()
+    protocol_contracts()
     signature_paths()
     type_node_resolvers()
   ].freeze

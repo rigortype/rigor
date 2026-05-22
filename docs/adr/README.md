@@ -41,6 +41,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-25 | [Plugin Contributed RBS](25-plugin-contributed-rbs.md) | Accepted |
 | ADR-26 | [ActiveRecord Relation Typing](26-activerecord-relation-typing.md) | Accepted |
 | ADR-27 | [Tool Distribution and Installation Model](27-tool-distribution-model.md) | Proposed |
+| ADR-28 | [Path-scoped Method-Protocol Contracts](28-path-scoped-protocol-contracts.md) | Proposed |
 
 ## Adding a New ADR
 

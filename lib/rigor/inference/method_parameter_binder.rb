@@ -43,10 +43,15 @@ module Rigor
       #   method (either `def self.foo` or a `def foo` inside
       #   `class << self`); routes the lookup through
       #   `RbsLoader#singleton_method`.
-      def initialize(environment:, class_path:, singleton:)
+      # @param source_path [String, nil] the project-relative path of
+      #   the file the method is defined in. Used to match ADR-28
+      #   path-scoped protocol contracts; `nil` (the default for
+      #   synthetic / probe scopes) disables the contract tier.
+      def initialize(environment:, class_path:, singleton:, source_path: nil)
         @environment = environment
         @class_path = class_path
         @singleton = singleton
+        @source_path = source_path
       end
 
       # @param def_node [Prism::DefNode]
@@ -58,15 +63,22 @@ module Rigor
         types = default_types_for(slots)
 
         rbs_method = lookup_rbs_method(def_node)
-        return types unless rbs_method
-
-        apply_rbs_overloads(types, slots, rbs_method.method_types) unless rbs_method.method_types.empty?
-        # `rigor:v1:param: <name> <refinement>` annotations
-        # tighten the bound type for matching slots. Applied
-        # after the RBS-overload pass so the override is the
-        # authoritative answer regardless of what the RBS
-        # signature declared.
-        apply_param_overrides(types, slots, rbs_method)
+        if rbs_method
+          apply_rbs_overloads(types, slots, rbs_method.method_types) unless rbs_method.method_types.empty?
+          # `rigor:v1:param: <name> <refinement>` annotations
+          # tighten the bound type for matching slots. Applied
+          # after the RBS-overload pass so the override is the
+          # authoritative answer regardless of what the RBS
+          # signature declared.
+          apply_param_overrides(types, slots, rbs_method)
+        end
+        # ADR-28 — a path-scoped protocol contract supplies the
+        # parameter type for a matching `def`. Applied last (most
+        # authoritative) and regardless of RBS presence: the
+        # methods a contract targets — controller actions and the
+        # like — typically have no RBS signature at all, so this
+        # tier must run even when `rbs_method` is nil.
+        apply_protocol_contract(types, slots, def_node)
         types
       end
 
@@ -74,6 +86,10 @@ module Rigor
 
       ParamSlot = Data.define(:kind, :name, :index)
       private_constant :ParamSlot
+
+      # Slot kinds a contract's positional `index` can address.
+      POSITIONAL_KINDS = %i[required_positional optional_positional].freeze
+      private_constant :POSITIONAL_KINDS
 
       # Walk the Prism `ParametersNode` and emit one slot per named
       # parameter, in declaration order. Anonymous slots (rest /
@@ -185,6 +201,47 @@ module Rigor
 
           types[slot.name] = override
         end
+      end
+
+      # ADR-28 — when a path-scoped protocol contract targets this
+      # `def` (file path matches the contract's `path_glob`, method
+      # name + singleton-ness match), replace each contracted
+      # positional slot's binding with the contract's declared type.
+      # The type name resolves against the environment lazily here;
+      # an unresolvable name (the protocol's RBS not loaded) falls
+      # through to whatever the prior tiers bound, fail-soft.
+      def apply_protocol_contract(types, slots, def_node)
+        return if @source_path.nil?
+
+        registry = @environment.respond_to?(:plugin_registry) ? @environment.plugin_registry : nil
+        return if registry.nil?
+
+        contract = matching_contract(registry, def_node)
+        return if contract.nil?
+
+        contract.param_types.each do |param_type|
+          slot = positional_slot_at(slots, param_type.index)
+          next if slot.nil? || slot.name.nil?
+
+          resolved = @environment.nominal_for_name(param_type.type_name)
+          next if resolved.nil?
+
+          types[slot.name] = resolved
+        end
+      end
+
+      def matching_contract(registry, def_node)
+        contracts = registry.contracts_for_path(@source_path)
+        return nil if contracts.empty?
+
+        singleton = def_node.receiver.is_a?(Prism::SelfNode) || @singleton
+        contracts.find do |contract|
+          contract.method_name == def_node.name && contract.singleton == singleton
+        end
+      end
+
+      def positional_slot_at(slots, index)
+        slots.find { |slot| POSITIONAL_KINDS.include?(slot.kind) && slot.index == index }
       end
 
       def collect_translated_types(method_types, slot)

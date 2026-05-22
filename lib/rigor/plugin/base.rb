@@ -209,6 +209,19 @@ module Rigor
         relative.map { |rel| File.expand_path(rel, root) }
       end
 
+      # ADR-28 — the path-scoped method-protocol contracts this
+      # plugin contributes. Defaults to the manifest-declared
+      # `protocol_contracts:`; the same indirection
+      # `#signature_paths` uses, so a plugin MAY override this to
+      # fold per-project config into the contract set (e.g.
+      # substituting the convention `path_glob` with a user-supplied
+      # one) without the manifest having to be config-aware.
+      # `Plugin::Registry#protocol_contracts` aggregates the result
+      # across loaded plugins.
+      def protocol_contracts
+        manifest.protocol_contracts
+      end
+
       # ADR-7 § "Slice 6-A/6-B" — per-plugin {IoBoundary}.
       # Memoised so the boundary's accumulated `FileEntry`
       # rows persist across producer invocations within the

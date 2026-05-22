@@ -27,6 +27,22 @@ class RigorPluginRegistrySpecOpenPlugin < Rigor::Plugin::Base
            open_receivers: ["ActiveRecord::Relation"])
 end
 
+# ADR-28 — a named plugin class declaring `protocol_contracts:`,
+# for the `Registry#protocol_contracts` / `#contracts_for_path`
+# tests.
+class RigorPluginRegistrySpecContractPlugin < Rigor::Plugin::Base
+  manifest(
+    id: "registry-spec-contract-plugin", version: "0.0.1",
+    protocol_contracts: [
+      Rigor::Plugin::ProtocolContract.new(
+        path_glob: "lib/controller/**/*.rb",
+        method_name: :get,
+        return_type_name: "Object"
+      )
+    ]
+  )
+end
+
 RSpec.describe Rigor::Plugin::Registry do
   let(:plugin_class) do
     Class.new(Rigor::Plugin::Base) do
@@ -166,6 +182,28 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(registry.open_receiver?("ActiveRecord::Relation")).to be(true)
       expect(registry.open_receiver?("String")).to be(false)
       expect(registry.open_receiver?(nil)).to be(false)
+    end
+  end
+
+  describe "#protocol_contracts / #contracts_for_path (ADR-28)" do
+    it "is empty when no plugin declares protocol_contracts" do
+      expect(described_class::EMPTY.protocol_contracts).to eq([])
+      registry = described_class.new(plugins: [plugin_class.new(services: services)])
+      expect(registry.protocol_contracts).to eq([])
+      expect(registry.contracts_for_path("lib/controller/x.rb")).to eq([])
+      expect(registry.contracts_for_path(nil)).to eq([])
+    end
+
+    it "aggregates declared protocol_contracts and matches them by path glob" do
+      contract_plugin = RigorPluginRegistrySpecContractPlugin.new(services: services)
+      registry = described_class.new(plugins: [contract_plugin])
+
+      expect(registry.protocol_contracts.size).to eq(1)
+
+      expect(registry.contracts_for_path("lib/controller/home_controller.rb")).not_to be_empty
+      # absolute paths match via the `**/`-prefixed suffix form
+      expect(registry.contracts_for_path("/tmp/proj/lib/controller/api/v1_controller.rb")).not_to be_empty
+      expect(registry.contracts_for_path("lib/services/widget.rb")).to eq([])
     end
   end
 end

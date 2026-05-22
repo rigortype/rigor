@@ -189,6 +189,33 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(m.to_h["signature_paths"]).to eq(["sig"])
     end
 
+    it "accepts protocol_contracts as an Array of ProtocolContract (ADR-28)" do
+      contract = Rigor::Plugin::ProtocolContract.new(
+        path_glob: "lib/controller/**/*.rb", method_name: :get, return_type_name: "Object"
+      )
+      m = described_class.new(id: "web", version: "0.1.0", protocol_contracts: [contract])
+      expect(m.protocol_contracts).to eq([contract])
+      expect(m.protocol_contracts).to be_frozen
+    end
+
+    it "defaults protocol_contracts to an empty array" do
+      expect(described_class.new(id: "web", version: "0.1.0").protocol_contracts).to eq([])
+    end
+
+    it "rejects protocol_contracts entries that are not ProtocolContract instances" do
+      expect do
+        described_class.new(id: "web", version: "0.1.0", protocol_contracts: [{ method_name: :get }])
+      end.to raise_error(ArgumentError, /protocol_contracts/)
+    end
+
+    it "round-trips protocol_contracts through #to_h" do
+      contract = Rigor::Plugin::ProtocolContract.new(
+        path_glob: "lib/controller/**/*.rb", method_name: :get, return_type_name: "Object"
+      )
+      m = described_class.new(id: "web", version: "0.1.0", protocol_contracts: [contract])
+      expect(m.to_h["protocol_contracts"]).to eq([contract.to_h])
+    end
+
     it "coerces consumes hashes into Consumption value objects" do
       m = described_class.new(
         id: "ap",

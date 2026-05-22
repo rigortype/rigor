@@ -32,14 +32,12 @@ Engine-internal items the next implementer benefits from seeing directly. The fu
 
 ### ADR-24 — implicit-self method-call resolution, remaining
 
-Slices 1+2+3 plus included/prepended-module resolution LANDED in v0.1.8; the ADR-24 ancestor chain (WD1) is complete (same-class + top-level + superclass chain + included modules, cross-file). Remaining:
-
 - **Slice 4** — gated `undefined-method` / arity diagnostics on resolved closed-class self-calls. Its own FP-evaluation gate ([ADR-24 WD4](adr/24-self-method-call-resolution.md)) — a large new false-positive surface on metaprogramming-dense code, so v1 was deliberately precision-additive only.
-- **Non-`Bot` general adoption inside class bodies** — v0.1.8 adopts a resolved self-call return type inside a class body ONLY when it is `Bot` (an always-diverging guard helper). Unconditional adoption of precise non-`Bot` returns regressed `rigor check lib` by 16 diagnostics (pre-existing callee-return-inference imprecisions surfacing downstream); this follow-up needs callee-return inference precise enough that adopting precise types does not surface those imprecisions.
+- **Non-`Bot` general adoption inside class bodies** — resolved self-call return type is adopted ONLY when it is `Bot`. Unconditional adoption of precise non-`Bot` returns regressed `rigor check lib` by 16 diagnostics (pre-existing callee-return-inference imprecisions surfacing downstream); this follow-up needs callee-return inference precise enough that adopting precise types does not surface those imprecisions.
 
 ### ADR-23 — `rigor triage` slice 4 plugin recognisers
 
-The structured-`Diagnostic`-fields half of slice 4 landed in v0.1.8 (`receiver_type` / `method_name` on `Analysis::Diagnostic`, populated by `call.undefined-method`; the catalogue reads them with message parsing as fallback). Remaining: a `Plugin` hook letting plugins contribute their own recognisers (deferred). Slice 3 (SKILL integration) is folded into the v0.1.9 SKILL-trio work above.
+Remaining: a `Plugin` hook letting plugins contribute their own recognisers (deferred). (`receiver_type` / `method_name` structured fields on `Analysis::Diagnostic` shipped in v0.1.8; the SKILL integration shipped with the v0.1.9 trio.)
 
 ### Flow-folding — loop-mutation tracking (gaps G1 / G2)
 
@@ -57,7 +55,7 @@ When an upstream `ruby/rbs` RBS gap is surfaced by a single internal Rigor call 
 
 ### Type-coverage uplift — line status (2026-05-23)
 
-The post-`c9a535a` type-coverage-uplift line landed Phases 1–4 on `master` (`[Unreleased]` in `CHANGELOG.md`): String / Integer / Float / Comparable mid-priority folds, `MathFolding` (all 28 `Math` functions), eleven HashShape mid/low-priority handlers, `Kernel#Integer` / `Float` folding, and the `Date` / `DateTime` / `Time` `Constant` carrier + constructor folding. Audit docs: `docs/notes/20260522-*-coverage.md`, `docs/notes/20260523-date-time-method-coverage.md`. Remaining items, all **release undetermined**:
+Phases 1–4 landed (String / Integer / Float / Comparable / Math / HashShape / Date / DateTime / Time). Remaining items, all **release undetermined**:
 
 - **Struct / Data value folding** — deferred ADR-worthy feature (needs two new carriers). See `docs/ROADMAP.md` § "Future cycles" → "Type-language / engine" and [`docs/notes/20260523-struct-encoding-coverage.md`](notes/20260523-struct-encoding-coverage.md). `Encoding` value folding recorded in the same audit as a *permanent exclusion*.
 - **`MathFolding` result refinements** — the 28-function fold is value-precise; attaching range refinements to the results (`Math.exp` → `positive-float`, `Math.sqrt` / `hypot` → `non-negative-float`) is the demand-driven follow-up ([`docs/notes/20260522-stdlib-deterministic-module-coverage.md`](notes/20260522-stdlib-deterministic-module-coverage.md) § 1).

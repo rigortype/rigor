@@ -1,4 +1,4 @@
-# RBS and `RBS::Extended`
+# RBS and RBS::Extended
 
 When Rigor's inference cannot prove a type, the next escape
 hatch is RBS — Ruby's signature language. When RBS cannot

@@ -45,7 +45,7 @@ this handbook disagrees.
    typing, return-type inference, block parameters, arity.
 6. [**Classes**](06-classes.md) — instance-side vs class-side,
    `self`, `attr_accessor`, `Data.define`.
-7. [**RBS and `RBS::Extended`**](07-rbs-and-extended.md) — when
+7. [**RBS and RBS::Extended**](07-rbs-and-extended.md) — when
    inference cannot prove what the runtime actually returns,
    how to nudge it through `.rbs` files and `%a{rigor:v1:…}`
    directives.
@@ -62,13 +62,13 @@ this handbook disagrees.
     reads `sig { ... }` blocks, RBI files, and
     `T.let` / `T.cast` / `T.must` / `T.unsafe` assertions
     as type sources without rewriting in RBS.
-11. [**Generating RBS with `rigor sig-gen`**](11-sig-gen.md)
+11. [**Generating RBS with rigor sig-gen**](11-sig-gen.md)
     — emitting RBS from Rigor's inference results, the
     `new-file` / `new-method` / `tighter-return`
     classification model, the `--print` / `--diff` /
     `--write` modes, the `--params` policy and ADR-5
     trade-off, RSpec-aware observations.
-12. [**Lightweight HKT (`JSON.parse` and friends)**](12-lightweight-hkt.md)
+12. [**Lightweight HKT (JSON.parse and friends)**](12-lightweight-hkt.md)
     — Rigor's defunctionalised higher-kinded type encoding
     ([ADR-20](../adr/20-lightweight-hkt.md), Yallop & White
     2014 / fp-ts shape). Covers the bundled `json::value`

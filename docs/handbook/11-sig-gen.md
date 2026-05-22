@@ -1,4 +1,4 @@
-# 11. Generating RBS with `rigor sig-gen`
+# Generating RBS with rigor sig-gen
 
 When `rigor check` is happy with your code but `sig/` is still
 mostly empty, the analyzer is doing useful inference that

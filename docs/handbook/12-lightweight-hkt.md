@@ -1,4 +1,4 @@
-# 12. Lightweight HKT (`JSON.parse` and friends)
+# Lightweight HKT (JSON.parse and friends)
 
 `JSON.parse(str)` returns "some JSON value": `nil`, a bool, a
 number, a string, an array of JSON values, or a hash of JSON

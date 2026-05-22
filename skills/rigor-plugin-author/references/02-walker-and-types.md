@@ -151,5 +151,5 @@ ship both.
 A plugin whose `diagnostics_for_file` recognises the DSL and emits
 diagnostics with correct severities and rule ids — optionally a
 `flow_contribution_for` and a `sig/` bundle. Verify by eye with
-`bundle exec rigor check`; lock it down with tests in Phase 3
+`rigor check`; lock it down with tests in Phase 3
 ([`03-test-and-ship.md`](03-test-and-ship.md)).

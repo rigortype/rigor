@@ -101,7 +101,7 @@ your-app/rigor-ext/rigor-myapp.rb     # requires the plugin class
 ```
 
 ```sh
-RUBYLIB=rigor-ext bundle exec rigor check
+RUBYLIB=rigor-ext rigor check
 ```
 
 Workable, but the `RUBYLIB` has to be set on every invocation (CI
@@ -180,7 +180,7 @@ plugins:
 Confirm activation with the public CLI:
 
 ```sh
-bundle exec rigor check
+rigor check
 ```
 
 A misconfigured plugin surfaces as a `plugin-loader` diagnostic

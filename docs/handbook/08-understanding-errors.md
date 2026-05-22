@@ -199,12 +199,12 @@ fail only on *new* diagnostics introduced by a PR:
 
 ```sh
 # Once: capture the current diagnostic surface.
-bundle exec rigor check --format=json > rigor.baseline.json
+rigor check --format=json > rigor.baseline.json
 git add rigor.baseline.json
 git commit
 
 # Per PR: compare against the committed baseline.
-bundle exec rigor diff rigor.baseline.json
+rigor diff rigor.baseline.json
 ```
 
 `rigor diff` prints `+ NEW` rows for each diagnostic that
@@ -249,7 +249,7 @@ The most common reasons:
 When in doubt, run with `--explain`:
 
 ```sh
-bundle exec rigor check --explain lib
+rigor check --explain lib
 ```
 
 This adds an `:info` diagnostic for every fail-soft fallback
@@ -292,7 +292,7 @@ The pragmatic loop on a project that just adopted Rigor:
    c. **Genuine noise.** Add `# rigor:disable <rule>` on the
       line, or `disabled_rules:` to `.rigor.yml`.
 3. Re-run. Repeat until the diagnostic stream is clean.
-4. Add `bundle exec rigor check lib` to CI under the
+4. Add `rigor check lib` to CI under the
    `balanced` profile (or stricter).
 5. As the project's invariants get more proven, demote
    `# rigor:disable` lines into `RBS::Extended` directives

@@ -203,7 +203,7 @@ function length(s: string | null): number {
 | `// @ts-ignore` | `# rigor:disable <rule>` |
 | `// @ts-expect-error` | (no analogue today) |
 | `// @ts-nocheck` | `# rigor:disable-file all` |
-| `tsc --noEmit` | `bundle exec rigor check lib` |
+| `tsc --noEmit` | `rigor check lib` |
 
 ## What TypeScript has and Rigor does not
 

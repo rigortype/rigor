@@ -16,8 +16,7 @@ walks its sites, and lands a mix of fixes, intentional suppressions,
 and issue reports — then refreshes the baseline so the gains stick.
 
 This skill is for **users improving their own project**. It uses the
-published `rigor` executable (Bundler-installed: `bundle exec rigor
-…`, or a plain `rigor …` on `PATH`) and references only public CLI
+published `rigor` executable on `PATH` and references only public CLI
 flags and config keys.
 
 ## Phase 0 — When to use this skill

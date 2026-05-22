@@ -145,7 +145,7 @@ range.
 
 **Project-private plugin** — nothing to publish. Commit it with the
 app (the `rigor-plugin/` path-gem directory, or the `RUBYLIB` file).
-Make sure CI runs `bundle exec rigor check` so the plugin stays
+Make sure CI runs `rigor check` so the plugin stays
 wired and the fixture tests run.
 
 Either way, if the plugin uncovered a gap that *should* be core

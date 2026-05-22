@@ -270,7 +270,7 @@ end
 ```
 
 Both tools read the same `sig/`. CI runs `steep check` and
-`bundle exec rigor check lib` as separate steps. Each tool's
+`rigor check lib` as separate steps. Each tool's
 output goes to its own annotation channel. When they disagree
 on the same line, the standing rule is: **if Steep flags it
 and Rigor does not, investigate**. Steep tends to surface sig
@@ -287,7 +287,7 @@ want to add Rigor without uprooting anything.
 Steps:
 
 1. **Add Rigor as a dev dependency.** No changes to `sig/`.
-2. **Run `bundle exec rigor check lib` once.** You will see a
+2. **Run `rigor check lib` once.** You will see a
    small number of new diagnostics — typically narrowing-aware
    findings Steep does not produce (`flow.always-truthy-condition`,
    `def.return-type-mismatch` against an `RBS::Extended`-tightened

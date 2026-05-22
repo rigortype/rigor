@@ -38,7 +38,7 @@ design + capability matrix lives in
 
 - `bundle install`.
 
-The LSP server runs as `bundle exec rigor lsp`. No separate gem,
+The LSP server runs as `rigor lsp`. No separate gem,
 no addon registration — same binary as `rigor check` / `rigor type-of`.
 
 ## CLI

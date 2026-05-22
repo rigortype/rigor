@@ -37,6 +37,23 @@ So: every value at every program point is described by a
 or narrow (`Constant<3>`, `non-empty-string`). The rest of
 this chapter is the carrier zoo.
 
+## Seeing carriers yourself — `rigor annotate`
+
+Every code example below tags each line with its inferred
+type in a trailing `#=> dump_type:` comment:
+
+```ruby
+two = 1 + 1   #=> dump_type: Constant<2>
+```
+
+That is the comment format `rigor annotate FILE` produces:
+it reprints a source file with every line tagged by the
+carrier of the expression that line evaluates to. Run it on
+your own code to watch the carrier zoo appear in the margin.
+(`annotate` prints carriers in their compact display form,
+so it writes `2` where this handbook spells `Constant<2>`
+out in full.)
+
 ## Nominal types — the familiar starting point
 
 The simplest carrier is the one you already know:
@@ -44,9 +61,8 @@ The simplest carrier is the one you already know:
 class" with no additional information.
 
 ```ruby
-n = ARGV.first         # Nominal[String] | Constant<nil>
-                       # (RBS says `String?`, which is
-                       # String | nil)
+n = ARGV.first  #=> dump_type: Nominal[String] | Constant<nil>
+                # RBS says `String?` — String | nil
 ```
 
 `Nominal[Integer]`, `Nominal[String]`, `Nominal[Symbol]`,
@@ -66,27 +82,20 @@ often produces something narrower than nominal — see below.
 is" carrier. It wraps one Ruby literal:
 
 ```ruby
-n = 42
-assert_type(n, "Constant<42>")
-
-s = "hello"
-assert_type(s, "Constant<\"hello\">")
-
-sym = :foo
-assert_type(sym, "Constant<:foo>")
-
-t = true
-assert_type(t, "Constant<true>")
+n   = 42       #=> dump_type: Constant<42>
+s   = "hello"  #=> dump_type: Constant<"hello">
+sym = :foo     #=> dump_type: Constant<:foo>
+t   = true     #=> dump_type: Constant<true>
 ```
 
 Rigor folds arithmetic and string composition aggressively
 when every operand is a Constant:
 
 ```ruby
-two = 1 + 1               # Constant<2>
-ten = 5 * 2               # Constant<10>
-hi  = "Hello, " + "world" # Constant<"Hello, world">
-sym = "foo".to_sym        # Constant<:foo>
+two = 1 + 1               #=> dump_type: Constant<2>
+ten = 5 * 2               #=> dump_type: Constant<10>
+hi  = "Hello, " + "world" #=> dump_type: Constant<"Hello, world">
+sym = "foo".to_sym        #=> dump_type: Constant<:foo>
 ```
 
 Folding extends to a long list of "pure" methods on Numeric,
@@ -108,13 +117,14 @@ producing a single literal value. Rigor describes those with
 `Type::IntegerRange`, displayed as `int<min, max>`:
 
 ```ruby
-n = ARGV.size               # int<0, max>
-m = n + 1                   # int<1, max>
-double = n * 2              # int<0, max>  — multiplication preserves the floor
+n = ARGV.size               #=> dump_type: int<0, max>
+m = n + 1                   #=> dump_type: int<1, max>
+double = n * 2              #=> dump_type: int<0, max>
 ```
 
 `max` here means "positive infinity" — the upper bound is
-unbounded.
+unbounded. Multiplication preserves the floor, so `n * 2`
+stays `int<0, max>`.
 
 A handful of common ranges have shorter names:
 
@@ -193,21 +203,22 @@ You will see them most often in narrowing:
 ```ruby
 n = some_integer_call
 if n.zero?
-  # n: Constant<0>
+  n   #=> dump_type: Constant<0>
 else
-  assert_type(n, "non-zero-int")  # narrowed by !.zero?
+  n   #=> dump_type: non-zero-int
 end
 ```
 
 ## `Dynamic[Top]` — the gradual carrier
 
 Sometimes Rigor cannot prove anything tighter than "this
-could be any Ruby value." That is `Dynamic[Top]`, often
-shortened to `untyped` for the RBS-erased view.
+could be any Ruby value" — a bare parameter, for instance,
+carries no calling-side information. That is `Dynamic[Top]`,
+often shortened to `untyped` for the RBS-erased view.
 
 ```ruby
 def foo(x)
-  x.bar           # x: Dynamic[Top] — no calling-side info
+  x.bar   #=> dump_type: Dynamic[Top]
 end
 ```
 
@@ -228,21 +239,21 @@ elements." Rigor describes it with `Type::Tuple`:
 
 ```ruby
 arr = [1, "two", :three]
-# Tuple[Constant<1>, Constant<"two">, Constant<:three>]
+#=> dump_type: Tuple[Constant<1>, Constant<"two">, Constant<:three>]
 
 first, second, third = arr
-assert_type(first,  "Constant<1>")
-assert_type(second, "Constant<\"two\">")
-assert_type(third,  "Constant<:three>")
+first   #=> dump_type: Constant<1>
+second  #=> dump_type: Constant<"two">
+third   #=> dump_type: Constant<:three>
 ```
 
 Same for hashes with literal keys:
 
 ```ruby
 h = { name: "Alice", age: 30 }
-# HashShape{name: Constant<"Alice">, age: Constant<30>}
+#=> dump_type: HashShape{name: Constant<"Alice">, age: Constant<30>}
 
-assert_type(h[:name], "Constant<\"Alice\">")
+h[:name]  #=> dump_type: Constant<"Alice">
 ```
 
 Tuples and hash shapes erase to `Array[…]` and `Hash[K, V]`
@@ -263,7 +274,7 @@ label = case n
         when 1..9   then :small
         else             :large
         end
-# Constant<:zero> | Constant<:small> | Constant<:large>
+#=> dump_type: Constant<:zero> | Constant<:small> | Constant<:large>
 ```
 
 A union of constants is the closest Ruby gets to a sum type or
@@ -292,7 +303,7 @@ def classify(n)
 end
 
 result = classify(some_integer_input)
-assert_type(result, "Constant<:zero> | Constant<:positive> | Constant<:negative>")
+#=> dump_type: Constant<:zero> | Constant<:positive> | Constant<:negative>
 ```
 
 A vanilla type-checker would call `result: Symbol`. Rigor

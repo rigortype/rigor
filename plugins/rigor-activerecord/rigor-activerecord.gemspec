@@ -15,7 +15,7 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = [">= 4.0.0", "< 4.1"]
   spec.metadata = { "rubygems_mfa_required" => "true" }
 
-  spec.files = Dir.glob(%w[README.md lib/**/*.rb])
+  spec.files = Dir.glob(%w[README.md lib/**/*.rb sig/**/*.rbs])
   spec.require_paths = ["lib"]
 
   spec.add_dependency "prism", ">= 1.0", "< 2.0"

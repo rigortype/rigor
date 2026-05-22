@@ -40,14 +40,14 @@ module Rigor
       end
 
       attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
-                  :owns_receivers, :type_node_resolvers, :block_as_methods, :heredoc_templates,
-                  :trait_registries, :external_files, :hkt_registrations, :hkt_definitions,
-                  :signature_paths
+                  :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
+                  :heredoc_templates, :trait_registries, :external_files, :hkt_registrations,
+                  :hkt_definitions, :signature_paths
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
-        produces: [], consumes: [], owns_receivers: [], type_node_resolvers: [],
+        produces: [], consumes: [], owns_receivers: [], open_receivers: [], type_node_resolvers: [],
         block_as_methods: [], heredoc_templates: [], trait_registries: [], external_files: [],
         hkt_registrations: [], hkt_definitions: [], signature_paths: []
       )
@@ -57,6 +57,7 @@ module Rigor
         validate_config_schema!(config_schema)
         validate_produces!(produces)
         validate_owns_receivers!(owns_receivers)
+        validate_open_receivers!(open_receivers)
         validate_type_node_resolvers!(type_node_resolvers)
         validate_block_as_methods!(block_as_methods)
         validate_heredoc_templates!(heredoc_templates)
@@ -67,8 +68,8 @@ module Rigor
         validate_signature_paths!(signature_paths)
 
         assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
-                      type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files,
-                      hkt_registrations, hkt_definitions, signature_paths)
+                      open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
+                      external_files, hkt_registrations, hkt_definitions, signature_paths)
         freeze
       end
 
@@ -76,8 +77,8 @@ module Rigor
 
       # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
       def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
-                        type_node_resolvers, block_as_methods, heredoc_templates, trait_registries, external_files,
-                        hkt_registrations, hkt_definitions, signature_paths)
+                        open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
+                        external_files, hkt_registrations, hkt_definitions, signature_paths)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
@@ -86,6 +87,7 @@ module Rigor
         @produces = produces.map(&:to_sym).freeze
         @consumes = coerce_consumes(consumes)
         @owns_receivers = owns_receivers.map { |c| c.to_s.dup.freeze }.freeze
+        @open_receivers = open_receivers.map { |c| c.to_s.dup.freeze }.freeze
         @type_node_resolvers = type_node_resolvers.dup.freeze
         @block_as_methods = block_as_methods.dup.freeze
         @heredoc_templates = heredoc_templates.dup.freeze
@@ -132,6 +134,7 @@ module Rigor
           "produces" => produces.map(&:to_s),
           "consumes" => consumes.map { |c| consumption_hash(c) },
           "owns_receivers" => owns_receivers,
+          "open_receivers" => open_receivers,
           "type_node_resolvers" => type_node_resolvers.map { |r| r.class.name },
           "block_as_methods" => block_as_methods.map(&:to_h),
           "heredoc_templates" => heredoc_templates.map(&:to_h),
@@ -219,6 +222,24 @@ module Rigor
         raise ArgumentError,
               "plugin manifest owns_receivers must be an Array of non-empty String, " \
               "got #{owns_receivers.inspect}"
+      end
+
+      # ADR-26 — `open_receivers:` declares the class names this
+      # plugin marks as "open": statically known to respond beyond
+      # their RBS-declared method surface (e.g. `ActiveRecord::Relation`,
+      # which delegates an unbounded set of user-defined scopes to
+      # its model). `Analysis::CheckRules` skips the
+      # `call.undefined-method` rule for a receiver whose class any
+      # loaded plugin lists here — flagging a method on a class
+      # with an open dynamic surface is unsound. Distinct from
+      # `owns_receivers:` (which routes dispatch); this one only
+      # suppresses the diagnostic.
+      def validate_open_receivers!(open_receivers)
+        return if open_receivers.is_a?(Array) && open_receivers.all? { |c| c.is_a?(String) && !c.empty? }
+
+        raise ArgumentError,
+              "plugin manifest open_receivers must be an Array of non-empty String, " \
+              "got #{open_receivers.inspect}"
       end
 
       # ADR-13 slice 2 — `type_node_resolvers:` declares the

@@ -137,6 +137,31 @@ RSpec.describe Rigor::Plugin::Manifest do
       end.to raise_error(ArgumentError, /owns_receivers/)
     end
 
+    it "accepts open_receivers as an Array of class-name Strings (ADR-26)" do
+      m = described_class.new(
+        id: "ar", version: "0.1.0",
+        open_receivers: ["ActiveRecord::Relation"]
+      )
+      expect(m.open_receivers).to eq(%w[ActiveRecord::Relation])
+      expect(m.open_receivers).to be_frozen
+    end
+
+    it "defaults open_receivers to an empty array" do
+      m = described_class.new(id: "ar", version: "0.1.0")
+      expect(m.open_receivers).to eq([])
+    end
+
+    it "rejects non-String / empty-String open_receivers entries" do
+      expect do
+        described_class.new(id: "ar", version: "0.1.0", open_receivers: [""])
+      end.to raise_error(ArgumentError, /open_receivers/)
+    end
+
+    it "round-trips open_receivers through to_h" do
+      m = described_class.new(id: "ar", version: "0.1.0", open_receivers: ["ActiveRecord::Relation"])
+      expect(m.to_h["open_receivers"]).to eq(%w[ActiveRecord::Relation])
+    end
+
     it "accepts signature_paths as an Array of relative-path Strings (ADR-25)" do
       m = described_class.new(
         id: "as", version: "0.1.0", signature_paths: ["sig", "sig/overlay"]

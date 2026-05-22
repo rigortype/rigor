@@ -20,6 +20,13 @@ class RigorPluginRegistrySpecSigPlugin < Rigor::Plugin::Base
   manifest(id: "registry-spec-sig-plugin", version: "0.0.1", signature_paths: ["sig"])
 end
 
+# ADR-26 — a named plugin class declaring `open_receivers:`, for
+# the `Registry#open_receivers` / `#open_receiver?` tests.
+class RigorPluginRegistrySpecOpenPlugin < Rigor::Plugin::Base
+  manifest(id: "registry-spec-open-plugin", version: "0.0.1",
+           open_receivers: ["ActiveRecord::Relation"])
+end
+
 RSpec.describe Rigor::Plugin::Registry do
   let(:plugin_class) do
     Class.new(Rigor::Plugin::Base) do
@@ -140,6 +147,25 @@ RSpec.describe Rigor::Plugin::Registry do
       registry = described_class.new(plugins: [sig_plugin])
       expect(registry.signature_paths).to eq(sig_plugin.signature_paths)
       expect(registry.signature_paths).not_to be_empty
+    end
+  end
+
+  describe "#open_receivers / #open_receiver? (ADR-26)" do
+    it "is empty when no plugin declares open_receivers" do
+      expect(described_class::EMPTY.open_receivers).to eq([])
+      registry = described_class.new(plugins: [plugin_class.new(services: services)])
+      expect(registry.open_receivers).to eq([])
+      expect(registry.open_receiver?("ActiveRecord::Relation")).to be(false)
+    end
+
+    it "aggregates declared open_receivers and answers the membership predicate" do
+      open_plugin = RigorPluginRegistrySpecOpenPlugin.new(services: services)
+      registry = described_class.new(plugins: [open_plugin])
+
+      expect(registry.open_receivers).to eq(%w[ActiveRecord::Relation])
+      expect(registry.open_receiver?("ActiveRecord::Relation")).to be(true)
+      expect(registry.open_receiver?("String")).to be(false)
+      expect(registry.open_receiver?(nil)).to be(false)
     end
   end
 end

@@ -66,12 +66,29 @@ module Rigor
           "model_search_paths" => :array,
           "model_base_classes" => :array
         },
-        produces: [:model_index]
+        produces: [:model_index],
+        # ADR-25 — the bundled `ActiveRecord::Relation` RBS, the
+        # type `flow_contribution_for`'s relation-typed call sites
+        # (`has_many` accessors, `Model.where`, scopes) dispatch
+        # against.
+        signature_paths: ["sig"],
+        # ADR-26 — `ActiveRecord::Relation` is an "open" receiver:
+        # it delegates an unbounded set of user-defined scopes /
+        # class methods to its model, so `call.undefined-method`
+        # must not fire for it. `CheckRules` reads this manifest
+        # field and skips the rule for the class.
+        open_receivers: ["ActiveRecord::Relation"]
       )
 
       DEFAULT_SCHEMA_FILE = "db/schema.rb"
       DEFAULT_MODEL_SEARCH_PATHS = ["app/models"].freeze
       DEFAULT_MODEL_BASE_CLASSES = %w[ApplicationRecord ActiveRecord::Base].freeze
+
+      # The class the bundled `sig/active_record/relation.rbs`
+      # describes; `flow_contribution_for` contributes
+      # `ActiveRecord::Relation[Model]` for relation-returning
+      # call sites (`has_many` accessors, `Model.where`, scopes).
+      RELATION_CLASS_NAME = "ActiveRecord::Relation"
 
       # Cached: parsed schema table. The producer reads `@schema_file`
       # via `io_boundary.read_file` so the descriptor picks up the
@@ -172,6 +189,7 @@ module Rigor
         return nil if index.nil? || index.empty?
 
         return_type = class_call_return_type(call_node, index) ||
+                      relation_call_return_type(call_node, scope, index) ||
                       instance_call_return_type(call_node, scope, index)
         return nil if return_type.nil?
 
@@ -195,6 +213,17 @@ module Rigor
         entry = index.find(model_name) || index.find("::#{model_name}")
         return nil if entry.nil?
 
+        finder_return_type(call_node, entry) ||
+          class_scope_return_type(call_node, entry)
+      end
+
+      # Class-side finders + the class-side relation entry points.
+      # `find` / `find_by!` return the model; `find_by` adds the
+      # `nil` arm; `where` / `all` / `order` / `limit` / `none`
+      # open a relation. The relation then carries its element
+      # type through any further chained query method via the
+      # bundled `ActiveRecord::Relation` RBS.
+      def finder_return_type(call_node, entry)
         case call_node.name
         when :find
           return nil if call_argument_count(call_node).zero?
@@ -209,7 +238,80 @@ module Rigor
             Rigor::Type::Combinator.nominal_of(entry.class_name),
             Rigor::Type::Combinator.constant_of(nil)
           )
+        when :where, :all, :order, :limit, :none
+          relation_of(entry.class_name)
         end
+      end
+
+      # `Post.published` / `Post.recent(5)` — a user-declared
+      # `scope` returns a relation of the model regardless of the
+      # arguments it takes.
+      def class_scope_return_type(call_node, entry)
+        return nil unless entry.scope?(call_node.name)
+
+        relation_of(entry.class_name)
+      end
+
+      # `ActiveRecord::Relation[Model]` — the type the bundled
+      # `sig/active_record/relation.rbs` describes. The class is
+      # declared `open_receivers` in the manifest, so a chained
+      # scope call the bundled RBS cannot enumerate does not
+      # surface as `call.undefined-method` (ADR-26).
+      def relation_of(model_class_name)
+        Rigor::Type::Combinator.nominal_of(
+          RELATION_CLASS_NAME,
+          type_args: [Rigor::Type::Combinator.nominal_of(model_class_name)]
+        )
+      end
+
+      # A scope invoked on an already-typed relation
+      # (`User.where(active: true).published`) keeps the relation
+      # type through the chain. The bundled `ActiveRecord::Relation`
+      # RBS cannot enumerate user-defined scopes, so without this
+      # the chain would lose its element type after the first
+      # scope call. Non-scope methods decline — the RBS tier
+      # resolves `where` / `order` / `each` / `first` precisely.
+      # Scopes may take arguments (`relation.recent(5)`), so —
+      # unlike `instance_call_return_type` — argument calls are
+      # not skipped.
+      #
+      # The cheap `scope_name?` pre-check is load-bearing: it
+      # gates the `scope.type_of(receiver)` call so the receiver
+      # type is computed ONLY when the method name could be a
+      # scope. `type_of` on a call receiver re-enters dispatch,
+      # and calling it for every call node in a long method chain
+      # is pathologically expensive — the pre-check keeps the
+      # cost off the hot path.
+      def relation_call_return_type(call_node, scope, index)
+        return nil if call_node.receiver.nil?
+        return nil unless scope_name?(call_node.name, index)
+
+        model_name = relation_element_class_name(scope.type_of(call_node.receiver))
+        return nil if model_name.nil?
+
+        entry = index.find(model_name) || index.find("::#{model_name}")
+        return nil if entry.nil?
+        return nil unless entry.scope?(call_node.name)
+
+        relation_of(model_name)
+      end
+
+      # Whether `name` is a declared `scope` on ANY model in the
+      # index. A run-lifetime memoised Set so the per-call check
+      # in `relation_call_return_type` stays O(1).
+      def scope_name?(name, index)
+        @all_scope_names ||= index.entries.each_value.flat_map(&:scopes).to_set
+        @all_scope_names.include?(name.to_s)
+      end
+
+      # When `type` is `ActiveRecord::Relation[Nominal[Model]]`,
+      # returns the model class name; nil for any other type.
+      def relation_element_class_name(type)
+        return nil unless type.is_a?(Rigor::Type::Nominal)
+        return nil unless type.class_name == RELATION_CLASS_NAME
+
+        element = type.type_args&.first
+        element.class_name if element.is_a?(Rigor::Type::Nominal)
       end
 
       # Instance-side navigation: when the call's receiver
@@ -233,27 +335,30 @@ module Rigor
           column_return_type(entry, call_node.name)
       end
 
-      # When the method name matches a discovered `belongs_to` /
-      # `has_one` association, the return type is the target
-      # model. `belongs_to` is required (non-`nil`) by default
-      # since Rails 5, so it narrows to `Nominal[Target]`;
-      # `has_one` (and an `optional: true` / `required: false`
-      # `belongs_to`) is nullable, narrowing to `Nominal[Target]
-      # | nil`. `has_many` / `has_and_belongs_to_many` are
-      # intentionally NOT contributed — relation types are a
-      # future track and the RBS-erased return is the honest
-      # fall-back. A polymorphic association has no single static
-      # target and declines rather than inventing a wrong type.
+      # The return type for an association accessor. A `belongs_to`
+      # / `has_one` singular association narrows to the target
+      # model — `belongs_to` is required (non-`nil`) by default
+      # since Rails 5 so it is `Nominal[Target]`, while `has_one`
+      # (and an `optional: true` / `required: false` `belongs_to`)
+      # adds the `nil` arm. A `has_many` / `has_and_belongs_to_many`
+      # collection narrows to `ActiveRecord::Relation[Target]` so
+      # chained query / iteration calls resolve. A polymorphic
+      # association has no single static target and declines
+      # rather than inventing a wrong type.
       def association_return_type(entry, method_name)
         association = entry.association(method_name)
         return nil if association.nil?
-        return nil unless association[:kind] == :singular
         return nil if association[:target].nil?
 
-        target = Rigor::Type::Combinator.nominal_of(association[:target])
-        return target unless association[:nullable]
+        case association[:kind]
+        when :collection
+          relation_of(association[:target])
+        when :singular
+          target = Rigor::Type::Combinator.nominal_of(association[:target])
+          return target unless association[:nullable]
 
-        Rigor::Type::Combinator.union(target, Rigor::Type::Combinator.constant_of(nil))
+          Rigor::Type::Combinator.union(target, Rigor::Type::Combinator.constant_of(nil))
+        end
       end
 
       # Instance-side column access. `user.name` on a

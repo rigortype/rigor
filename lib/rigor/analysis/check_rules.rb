@@ -355,6 +355,15 @@ module Rigor
           class_name = concrete_class_name(receiver_type)
           return nil if class_name.nil?
 
+          # ADR-26 — a plugin may declare a class "open": one
+          # known to respond beyond its RBS-declared method
+          # surface (e.g. `ActiveRecord::Relation`, which
+          # delegates an unbounded set of user-defined scopes to
+          # its model). Flagging an undefined method on a class
+          # with an open dynamic surface is unsound, so the rule
+          # skips it.
+          return nil if open_receiver?(class_name, scope)
+
           # Slice 7 phase 12 — suppress when the user has
           # declared the method in source (instance `def`,
           # `def self.foo`, or recognised `define_method`).
@@ -422,6 +431,17 @@ module Rigor
         def constant_class_name(value)
           CONSTANT_CLASSES.each { |klass, name| return name if value.is_a?(klass) }
           nil
+        end
+
+        # ADR-26 — whether `class_name` is declared "open" by a
+        # loaded plugin (manifest `open_receivers:`). An open
+        # class responds beyond its RBS surface, so the
+        # `call.undefined-method` rule must not fire for it.
+        def open_receiver?(class_name, scope)
+          registry = scope.environment&.plugin_registry
+          return false if registry.nil?
+
+          registry.open_receiver?(class_name)
         end
 
         def definition_available?(receiver_type, class_name, scope)

@@ -114,6 +114,22 @@ module Rigor
         plugins.flat_map(&:signature_paths)
       end
 
+      # ADR-26 — the aggregate set of "open" receiver class names
+      # declared across loaded plugins (manifest `open_receivers:`).
+      # A class is open when a plugin vouches that it responds
+      # beyond its RBS-declared method surface. `open_receiver?`
+      # is the membership predicate `Analysis::CheckRules` consults
+      # to skip the `call.undefined-method` rule for such a class.
+      def open_receivers
+        plugins.flat_map { |plugin| plugin.manifest.open_receivers }
+      end
+
+      def open_receiver?(class_name)
+        return false if class_name.nil?
+
+        open_receivers.include?(class_name.to_s)
+      end
+
       EMPTY = new.freeze
     end
   end

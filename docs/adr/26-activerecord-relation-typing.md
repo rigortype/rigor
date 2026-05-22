@@ -1,12 +1,15 @@
 # ADR-26 — ActiveRecord relation typing
 
-Status: **proposed, 2026-05-22.** Records the design for typing
-`ActiveRecord::Relation`-returning call sites in `rigor-activerecord`
-(`has_many` accessors, `Model.where`, `scope`s) after a first
-implementation attempt regressed the project's false-positive
-discipline and was reverted. The decision is a four-part design whose
-only engine-side change is a narrow `call.undefined-method` exemption
-for plugin-declared "open" receiver classes.
+Status: **accepted, 2026-05-22 — implemented.** Records the design
+for typing `ActiveRecord::Relation`-returning call sites in
+`rigor-activerecord` (`has_many` accessors, `Model.where`, `scope`s)
+after a first implementation attempt regressed the project's
+false-positive discipline and was reverted. The decision is a
+four-part design whose only engine-side change is a narrow
+`call.undefined-method` exemption for plugin-declared "open" receiver
+classes. All five implementation slices landed; re-verified against
+Mastodon's `app/models` (237 models) with zero scope-on-relation
+false positives.
 
 ## Context
 

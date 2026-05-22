@@ -189,6 +189,22 @@ STRING_UNARY = Set[
 ].freeze
 ```
 
+**`NUMERIC_BINARY` is shared by Integer and Float**: adding a Symbol there makes it available to
+both. Integer-only operations (`&`, `|`, `^`, `<<`, `>>`) can be added to `NUMERIC_BINARY`
+safely — if a Float receiver calls them, `invoke_binary` rescues the `NoMethodError` and returns
+`nil`, falling through to the RBS tier. No separate Integer-only binary set is needed.
+
+**Watch the 120-character line limit**: adding several Symbols to an existing single-line
+`Set[…].freeze` constant often pushes it past Rubocop's `Layout/LineLength` threshold. Use the
+multi-line form when adding more than two or three Symbols:
+```ruby
+STRING_BINARY = Set[
+  :+, :*, :==, :!=, :<, :<=, :>, :>=, :<=>,
+  :start_with?, :end_with?, :include?,
+  :delete_prefix, :delete_suffix
+].freeze
+```
+
 ### Tier B — ShapeDispatch HANDLERS entries
 
 **Use when**: the receiver is a structural type (`Tuple`, `HashShape`, or a `Difference` like
@@ -208,11 +224,17 @@ TUPLE_HANDLERS = {
   :last => :tuple_last,
 }.freeze
 
-def tuple_last(tuple, args)
+def tuple_last(tuple, _method_name, args)
   return nil if args.size > 1
   tuple.elements.last  # Constant[T] element type
 end
 ```
+
+> **Handler signature**: every handler receives `(receiver, method_name, args)` — three positional
+> parameters. The dispatch call is `send(handler, receiver, method_name, args)` (see
+> `dispatch_tuple` / `dispatch_hash_shape`). A handler written as `def h(tuple, args)` silently
+> receives `method_name` in `args` and `args` is bound to `nil`, causing mysterious nil-related
+> bugs. Use `_method_name` if you do not need it.
 
 ### Tier C — ExpressionTyper / BlockFolding
 

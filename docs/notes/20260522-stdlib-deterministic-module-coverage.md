@@ -126,25 +126,22 @@ Refinement 追加（値の範囲が分かる場合）:
 
 | メソッド | エイリアス | シグネチャ | 返却型 | 状態 | 備考 |
 |----------|-----------|-----------|--------|------|------|
-| `escape(str)` | `shellescape` | String → String | `non-empty-string` | 🔲 | `""` 入力でも `"''"` を返すため常に非空。**高優先度。** |
-| `split(line)` | `shellsplit`, `shellwords` | String → Array[String] | `Tuple[Constant[String]…]` | 🔲 | `Constant[String]` 引数なら Tuple に折りたためる。**高優先度。** |
-| `join(array)` | `shelljoin` | Array[String] → String | `Constant[String]` | 🔲 | Tuple 引数なら Constant[String] へ。中優先度。 |
+| `escape(str)` | `shellescape` | String → String | `Constant[String]` | ✅ | `ShellwordsFolding` 実装済み。`""` 入力でも `"''"` を返すため常に非空。 |
+| `split(line)` | `shellsplit`, `shellwords` | String → Array[String] | `Tuple[Constant[String]…]` | ✅ | `ShellwordsFolding` 実装済み。不正クォートは nil を返し RBS に委譲。 |
+| `join(array)` | `shelljoin` | Array[String] → String | `Constant[String]` | ✅ | `ShellwordsFolding` 実装済み。`Tuple[Constant[String]…]` 引数時のみ。 |
 
 ### 2-1. 実装チェックリスト
 
 ```
 高優先度:
-[ ] escape / shellescape → Constant[String] (Constant[String] 引数時)
-                           Refinement: non-empty-string（常に非空）
-[ ] split / shellsplit / shellwords → Tuple[Constant[String]…] (Constant[String] 引数時)
-                                      空文字列入力 → Tuple[] (空 Tuple)
-
-中優先度:
-[ ] join / shelljoin → Constant[String] (Tuple[Constant[String]…] 引数時)
+[x] escape / shellescape → Constant[String] (Constant[String] 引数時)
+[x] split / shellsplit / shellwords → Tuple[Constant[String]…] (Constant[String] 引数時)
+[x] join / shelljoin → Constant[String] (Tuple[Constant[String]…] 引数時)
 ```
 
-実装ファイル: `constant_folding.rb` に `try_fold_shellwords` メソッド。  
-`Shellwords.escape(arg_value)` / `Shellwords.split(arg_value)` を inference 時に直接呼び出す。
+実装ファイル: `lib/rigor/inference/method_dispatcher/shellwords_folding.rb` (`ShellwordsFolding` モジュール)。  
+`dispatch_precise_tiers` の `FileFolding` 直後に接続。  
+`Singleton["Shellwords"]` 受信者を `dispatch_target?` で検出し、`Shellwords.escape` / `.split` / `.join` を inference 時に直接呼び出す。
 
 ---
 
@@ -270,8 +267,7 @@ Refinement 追加（値の範囲が分かる場合）:
 | 優先度 | モジュール・メソッド | 期待する精度向上 |
 |--------|---------------------|-----------------|
 | 🔴 高 | `Regexp.escape` / `quote` | `Constant[String]` |
-| 🔴 高 | `Shellwords.escape` / `shellescape` | `Constant[String]` + `non-empty-string` |
-| 🔴 高 | `Shellwords.split` / `shellsplit` | `Tuple[Constant[String]…]` |
+| ✅ 済 | `Shellwords.escape` / `shellescape` / `split` / `shellsplit` / `join` / `shelljoin` | `Constant[String]` / `Tuple[Constant[String]…]` |
 | 🔴 高 | `CGI.escapeHTML` / `h` | `Constant[String]` |
 | 🔴 高 | `URI.encode_www_form_component` / `decode_www_form_component` | `Constant[String]` |
 | 🟡 中 | `Math.sqrt` / `exp` / `log` / `sin` / `cos` | `Constant[Float]` |

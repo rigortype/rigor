@@ -776,5 +776,29 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(mismatches).to be_empty
       end
     end
+
+    describe "fixtures/shellwords_folding.rb — Shellwords module function folding" do
+      let(:harness) { harness_for("shellwords_folding") }
+
+      it "self-asserts every Shellwords.escape/split/join fold" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "folds Shellwords.escape to the exact escaped Constant[String]" do
+        expect(harness.local(:_escape_space)).to eq(Rigor::Type::Combinator.constant_of("hello\\ world"))
+      end
+
+      it "folds Shellwords.split to a Tuple of Constant[String]" do
+        result = harness.local(:_split_cmd)
+        expect(result).to be_a(Rigor::Type::Tuple)
+        expect(result.elements.map(&:value)).to eq(%w[git commit -m] + ["initial commit"])
+      end
+
+      it "folds Shellwords.join to a Constant[String]" do
+        result = harness.local(:_join_arr)
+        expect(result).to eq(Rigor::Type::Combinator.constant_of("git commit -m initial\\ commit"))
+      end
+    end
   end
 end

@@ -13,6 +13,7 @@ require_relative "method_dispatcher/rbs_dispatch"
 require_relative "method_dispatcher/iterator_dispatch"
 require_relative "method_dispatcher/block_folding"
 require_relative "method_dispatcher/file_folding"
+require_relative "method_dispatcher/shellwords_folding"
 require_relative "method_dispatcher/kernel_dispatch"
 require_relative "method_dispatcher/method_folding"
 
@@ -644,6 +645,7 @@ module Rigor
           LiteralStringFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           ShapeDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          ShellwordsFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           KernelDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           MethodFolding.try_forward(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           BlockFolding.try_fold(

@@ -36,6 +36,13 @@ module Rigor
 
         NUMERIC = [INTEGER, FLOAT].freeze
 
+        # Carries both a type tag and an optional concrete value.
+        # When `value` is non-nil the result is a precise constant
+        # (e.g. `[:+, 1, 2]` → tag `:integer`, value `3`).
+        Result = Struct.new(:tag, :value, keyword_init: true) do
+          def error? = false
+        end
+
         # Produced when the expression is well-formed but its
         # operands violate the operator's domain.
         TypeError = Struct.new(:message, :node, keyword_init: true) do
@@ -51,15 +58,16 @@ module Rigor
         end
 
         # Returns one of:
-        #   - a tag Symbol (`:integer`, `:float`, `:bool`) — success
-        #   - an Array of tag Symbols — successful union (`:if` branches)
+        #   - a {Result} (tag + optional value) — success
+        #   - an Array of {Result}s — successful union (`:if` branches)
         #   - {TypeError} — well-formed but ill-typed
         #   - {UnknownExpression} — outside the supported grammar
         def evaluate(node)
           case node
-          when Prism::IntegerNode then INTEGER
-          when Prism::FloatNode then FLOAT
-          when Prism::TrueNode, Prism::FalseNode then BOOL
+          when Prism::IntegerNode then Result.new(tag: INTEGER, value: node.value)
+          when Prism::FloatNode then Result.new(tag: FLOAT, value: node.value)
+          when Prism::TrueNode then Result.new(tag: BOOL, value: true)
+          when Prism::FalseNode then Result.new(tag: BOOL, value: false)
           when Prism::ArrayNode then evaluate_form(node)
           else
             UnknownExpression.new(
@@ -109,7 +117,8 @@ module Rigor
             )
           end
 
-          numeric_join(left, right)
+          value = compute_arith_value(operator, left.value, right.value)
+          Result.new(tag: numeric_join(left.tag, right.tag), value: value)
         end
 
         def evaluate_compare(operator, args, node)
@@ -127,7 +136,8 @@ module Rigor
             )
           end
 
-          BOOL
+          value = compute_compare_value(operator, left.value, right.value)
+          Result.new(tag: BOOL, value: value)
         end
 
         def evaluate_boolean_binop(operator, args, node)
@@ -145,7 +155,8 @@ module Rigor
             )
           end
 
-          BOOL
+          value = compute_boolean_binop_value(operator, left.value, right.value)
+          Result.new(tag: BOOL, value: value)
         end
 
         def evaluate_not(args, node)
@@ -160,7 +171,8 @@ module Rigor
             )
           end
 
-          BOOL
+          value = inner.value.nil? ? nil : !inner.value
+          Result.new(tag: BOOL, value: value)
         end
 
         def evaluate_if(args, node)
@@ -196,29 +208,67 @@ module Rigor
           result.is_a?(TypeError) || result.is_a?(UnknownExpression)
         end
 
-        def numeric?(tag)
-          NUMERIC.include?(tag) || (tag.is_a?(Array) && tag.all? { |t| NUMERIC.include?(t) })
+        def numeric?(result)
+          NUMERIC.include?(result.tag) || (result.is_a?(Array) && result.all? { |r| NUMERIC.include?(r.tag) })
         end
 
-        def boolean?(tag)
-          tag == BOOL || (tag.is_a?(Array) && tag.all? { |t| t == BOOL })
+        def boolean?(result)
+          result.tag == BOOL || (result.is_a?(Array) && result.all? { |r| r.tag == BOOL })
         end
 
-        def numeric_join(left, right)
-          tags = Array(left) | Array(right)
+        def compute_arith_value(operator, left_val, right_val)
+          return nil if left_val.nil? || right_val.nil?
+          case operator
+          when :+ then left_val + right_val
+          when :- then left_val - right_val
+          when :* then left_val * right_val
+          when :/ then left_val / right_val
+          end
+        end
+
+        def compute_compare_value(operator, left_val, right_val)
+          return nil if left_val.nil? || right_val.nil?
+          case operator
+          when :<  then left_val < right_val
+          when :>  then left_val > right_val
+          when :<= then left_val <= right_val
+          when :>= then left_val >= right_val
+          when :== then left_val == right_val
+          end
+        end
+
+        def compute_boolean_binop_value(operator, left_val, right_val)
+          return nil if left_val.nil? || right_val.nil?
+          case operator
+          when :and then left_val && right_val
+          when :or  then left_val || right_val
+          end
+        end
+
+        def numeric_join(left_tag, right_tag)
+          tags = [left_tag, right_tag].uniq
           tags.include?(FLOAT) ? FLOAT : INTEGER
         end
 
         def tag_union(left, right)
-          members = (Array(left) | Array(right)).uniq
-          members.size == 1 ? members.first : members
+          members = ([left] | [right]).uniq
+          if members.size == 1
+            members.first
+          else
+            members
+          end
         end
 
-        def describe(tag)
-          case tag
-          when Array then tag.map { |t| describe(t) }.join(" | ")
-          when Symbol then tag.to_s.capitalize.then { |s| s == "Bool" ? "bool" : s }
-          else tag.inspect
+        def describe(result)
+          case result
+          when Array then result.map { |r| describe(r) }.join(" | ")
+          when Result
+            tag_str = case result.tag
+                      when Symbol then result.tag.to_s.capitalize.then { |s| s == "Bool" ? "bool" : s }
+                      else result.tag.inspect
+                      end
+            result.value.nil? ? tag_str : "#{tag_str}(#{result.value.inspect})"
+          else result.inspect
           end
         end
 

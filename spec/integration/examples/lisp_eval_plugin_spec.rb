@@ -27,29 +27,29 @@ RSpec.describe "examples/rigor-lisp-eval" do
     result = run_plugin(source: "Lisp.eval([:+, 1, [:*, 2, 3]])\n")
     diags = plugin_diagnostics(result)
     expect(diags.size).to eq(1)
-    expect(diags.first.message).to include("inferred as Integer")
+    expect(diags.first.message).to eq("Lisp.eval return type inferred as Constant<7>")
     expect(diags.first.severity).to eq(:info)
     expect(diags.first.qualified_rule).to eq("plugin.lisp-eval.inferred-return-type")
   end
 
   it "promotes to Float when any operand is a float literal" do
     result = run_plugin(source: "Lisp.eval([:+, 1, [:*, 2.0, 3]])\n")
-    expect(plugin_diagnostics(result).first.message).to include("inferred as Float")
+    expect(plugin_diagnostics(result).first.message).to eq("Lisp.eval return type inferred as Constant<7.0>")
   end
 
   it "infers bool for comparison forms" do
     result = run_plugin(source: "Lisp.eval([:<, 1, 2])\n")
-    expect(plugin_diagnostics(result).first.message).to include("inferred as bool")
+    expect(plugin_diagnostics(result).first.message).to eq("Lisp.eval return type inferred as Constant<true>")
   end
 
   it "unions branch types for `:if` forms with disagreeing branches" do
     result = run_plugin(source: "Lisp.eval([:if, [:<, 1, 2], 1, 2.0])\n")
-    expect(plugin_diagnostics(result).first.message).to include("inferred as Integer | Float")
+    expect(plugin_diagnostics(result).first.message).to eq("Lisp.eval return type inferred as Constant<1> | Constant<2.0>")
   end
 
   it "infers bool for boolean composition" do
     result = run_plugin(source: "Lisp.eval([:and, true, [:not, false]])\n")
-    expect(plugin_diagnostics(result).first.message).to include("inferred as bool")
+    expect(plugin_diagnostics(result).first.message).to eq("Lisp.eval return type inferred as Constant<true>")
   end
 
   it "stays silent when the argument is not a literal Lisp expression" do
@@ -84,7 +84,7 @@ RSpec.describe "examples/rigor-lisp-eval" do
     )
     diags = plugin_diagnostics(result)
     expect(diags.size).to eq(1)
-    expect(diags.first.message).to start_with("Calculator.run return type inferred as Integer")
+    expect(diags.first.message).to eq("Calculator.run return type inferred as Constant<3>")
   end
 
   describe "#flow_contribution_for return-type contribution (v0.1.2)" do
@@ -101,8 +101,7 @@ RSpec.describe "examples/rigor-lisp-eval" do
         d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
       end
       expect(undefined).not_to be_nil
-      expect(undefined.message).to include("upcase")
-      expect(undefined.message).to include("Integer")
+      expect(undefined.message).to eq("undefined method `upcase' for 3")
     end
 
     it "promotes mixed int/float arithmetic so calls resolve against Float" do
@@ -114,8 +113,7 @@ RSpec.describe "examples/rigor-lisp-eval" do
         d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
       end
       expect(undefined).not_to be_nil
-      expect(undefined.message).to include("upcase")
-      expect(undefined.message).to include("Float")
+      expect(undefined.message).to eq("undefined method `upcase' for 3.0")
     end
 
     it "leaves non-literal arguments at the RBS `untyped` return so downstream calls stay silent" do

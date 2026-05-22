@@ -83,7 +83,7 @@ module Rigor
         result = @interpreter.evaluate(argument)
         return nil if result.is_a?(Interpreter::TypeError) || result.is_a?(Interpreter::UnknownExpression)
 
-        return_type = type_for_tag(result)
+        return_type = type_for_result(result)
         return nil if return_type.nil?
 
         Rigor::FlowContribution.new(
@@ -124,13 +124,24 @@ module Rigor
         Walker.receiver_matches?(call_node.receiver, @module_name)
       end
 
-      def type_for_tag(tag)
-        case tag
+      def type_for_result(result)
+        case result
         when Array
-          members = tag.filter_map { |t| type_for_tag(t) }
+          members = result.filter_map { |r| type_for_result(r) }
           return nil if members.empty?
 
           Rigor::Type::Combinator.union(*members)
+        when Interpreter::Result
+          if result.value
+            Rigor::Type::Combinator.constant_of(result.value)
+          else
+            tag_to_nominal(result.tag)
+          end
+        end
+      end
+
+      def tag_to_nominal(tag)
+        case tag
         when Interpreter::INTEGER then Rigor::Type::Combinator.nominal_of("Integer")
         when Interpreter::FLOAT then Rigor::Type::Combinator.nominal_of("Float")
         when Interpreter::BOOL
@@ -148,9 +159,9 @@ module Rigor
         arguments.arguments.first
       end
 
-      def diagnostic_for_inferred_type(path, call_node, type_tag)
+      def diagnostic_for_inferred_type(path, call_node, result)
         location = call_node.location
-        rendered = render_type_tag(type_tag)
+        rendered = render_result(result)
         Rigor::Analysis::Diagnostic.new(
           path: path,
           line: location.start_line,
@@ -173,10 +184,22 @@ module Rigor
         )
       end
 
-      def render_type_tag(tag)
-        case tag
+      def render_result(result)
+        case result
         when Array
-          tag.map { |member| render_type_tag(member) }.join(" | ")
+          result.map { |member| render_result(member) }.join(" | ")
+        when Interpreter::Result
+          if result.value
+            "Constant<#{result.value.inspect}>"
+          else
+            render_tag(result.tag)
+          end
+        else result.inspect
+        end
+      end
+
+      def render_tag(tag)
+        case tag
         when :integer then "Integer"
         when :float then "Float"
         when :bool then "bool"

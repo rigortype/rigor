@@ -57,6 +57,7 @@ module Rigor
         SYMBOL_BINARY  = Set[:==, :!=, :<=>, :<, :<=, :>, :>=].freeze
         BOOL_BINARY    = Set[:&, :|, :^, :==, :!=, :===].freeze
         NIL_BINARY     = Set[:==, :!=].freeze
+        RATIONAL_BINARY = Set[:div, :modulo, :%, :remainder, :fdiv].freeze
 
         # v0.0.3 C — pure unary catalogue. Each method must:
         # - take zero arguments,
@@ -102,6 +103,11 @@ module Rigor
         ].freeze
         BOOL_UNARY = Set[:!, :to_s, :inspect, :hash, :&, :|, :^].freeze
         NIL_UNARY  = Set[:nil?, :!, :to_s, :to_a, :to_h, :inspect, :hash].freeze
+        RATIONAL_UNARY = Set[
+          :zero?, :integer?, :real, :abs2,
+          :conj, :conjugate, :nonzero?
+        ].freeze
+        COMPLEX_UNARY = Set[:zero?, :nonzero?].freeze
 
         STRING_FOLD_BYTE_LIMIT = 4096
 
@@ -294,8 +300,8 @@ module Rigor
           set_lift = try_fold_set_array_unary(receiver_values, method_name)
           return set_lift if set_lift
 
-          complex_lift = try_fold_complex_array_unary(receiver_values, method_name)
-          return complex_lift if complex_lift
+          numeric_lift = try_fold_numeric_array_unary(receiver_values, method_name)
+          return numeric_lift if numeric_lift
 
           # Type-level allow check on every receiver. If one member's
           # type does not have the method in its allow list (e.g.
@@ -323,7 +329,7 @@ module Rigor
         # Only fires on a single-receiver Range with finite integer
         # endpoints; mixed unions fall through so the existing
         # union-of-Constants path keeps the rest of the arms.
-        RANGE_FOLD_METHODS = Set[:to_a, :first, :last, :min, :max, :count, :size, :length].freeze
+        RANGE_FOLD_METHODS = Set[:to_a, :first, :last, :min, :max, :count, :size, :length, :entries, :minmax].freeze
         RANGE_TO_A_LIMIT = 16
         private_constant :RANGE_FOLD_METHODS, :RANGE_TO_A_LIMIT
 
@@ -340,10 +346,11 @@ module Rigor
 
         def range_constant_unary(range, method_name)
           case method_name
-          when :to_a then range_to_a_tuple(range)
+          when :to_a, :entries then range_to_a_tuple(range)
           when :first, :min then range_endpoint_constant(range, :first)
           when :last, :max then range_endpoint_constant(range, :last)
           when :count, :size, :length then Type::Combinator.constant_of(range.to_a.size)
+          when :minmax then range_minmax_tuple(range)
           end
         end
 
@@ -360,6 +367,21 @@ module Rigor
           return Type::Combinator.constant_of(nil) if values.empty?
 
           Type::Combinator.constant_of(edge == :first ? values.first : values.last)
+        end
+
+        def range_minmax_tuple(range)
+          values = range.to_a
+          if values.empty?
+            return Type::Combinator.tuple_of(
+              Type::Combinator.constant_of(nil),
+              Type::Combinator.constant_of(nil)
+            )
+          end
+
+          Type::Combinator.tuple_of(
+            Type::Combinator.constant_of(values.first),
+            Type::Combinator.constant_of(values.last)
+          )
         end
 
         def try_fold_binary_set(receiver_values, method_name, arg_values)
@@ -516,15 +538,18 @@ module Rigor
         # `Tuple[Constant[Float], Constant[Float]]`. Evaluated at fold time
         # via `Complex#polar` (which calls `Math.hypot` and `Math.atan2`).
         # Deterministic: reads only the receiver's real and imaginary parts.
-        COMPLEX_ARRAY_UNARY_METHODS = Set[:rect, :rectangular, :polar].freeze
-        private_constant :COMPLEX_ARRAY_UNARY_METHODS
+        #
+        # Rational receivers also support `rect` / `rectangular` / `polar`:
+        # `Rational(r,1).rect` → `[r, 0]`, `Rational(r,1).polar` → `[abs, arg]`.
+        NUMERIC_ARRAY_UNARY_METHODS = Set[:rect, :rectangular, :polar].freeze
+        private_constant :NUMERIC_ARRAY_UNARY_METHODS
 
-        def try_fold_complex_array_unary(receiver_values, method_name)
-          return nil unless COMPLEX_ARRAY_UNARY_METHODS.include?(method_name)
+        def try_fold_numeric_array_unary(receiver_values, method_name)
+          return nil unless NUMERIC_ARRAY_UNARY_METHODS.include?(method_name)
           return nil unless receiver_values.size == 1
 
           receiver = receiver_values.first
-          return nil unless receiver.is_a?(Complex)
+          return nil unless receiver.is_a?(Complex) || receiver.is_a?(Rational)
 
           lift_array_result(receiver.public_send(method_name))
         rescue StandardError
@@ -1186,6 +1211,8 @@ module Rigor
           when Symbol         then SYMBOL_UNARY
           when true, false    then BOOL_UNARY
           when nil            then NIL_UNARY
+          when Rational       then RATIONAL_UNARY
+          when Complex        then COMPLEX_UNARY
           else                     Set.new
           end
         end
@@ -1235,6 +1262,7 @@ module Rigor
           when Symbol         then SYMBOL_BINARY
           when true, false    then BOOL_BINARY
           when nil            then NIL_BINARY
+          when Rational       then RATIONAL_BINARY
           else                     Set.new
           end
         end

@@ -57,7 +57,8 @@ module Rigor
           return nil unless klass
 
           bucket_key = kind == :singleton ? "singleton_methods" : "instance_methods"
-          klass.dig(bucket_key, selector.to_s)
+          klass.dig(bucket_key, selector.to_s) ||
+            resolve_alias_entry(klass, selector, bucket_key)
         end
 
         def reset!
@@ -65,6 +66,21 @@ module Rigor
         end
 
         private
+
+        def resolve_alias_entry(klass, selector, bucket_key)
+          return nil unless bucket_key == "instance_methods"
+
+          aliases = klass["aliases"]
+          return nil unless aliases
+
+          alias_entry = aliases[selector.to_s]
+          return nil unless alias_entry
+
+          target = alias_entry["old"]
+          return nil unless target
+
+          klass.dig(bucket_key, target)
+        end
 
         def blocked?(class_name, selector)
           # Bang-suffixed selectors are mutating by Ruby convention

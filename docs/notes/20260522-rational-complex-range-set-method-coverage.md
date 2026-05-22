@@ -67,19 +67,19 @@
 | `between?` | 🔷 | — | Comparable モジュール経由。RBS で `bool` |
 | `clamp` | 🚫 | — | 引数の組み合わせが多く戻り型が複雑 |
 | `coerce` | 🔷 | `[Numeric, Numeric]` | 戻りが `[Numeric, Numeric]` — RBS で十分 |
-| `zero?` | 🔲 | `false \| true` | `RATIONAL_UNARY` に追加すれば `Constant[bool]`。中優先度 |
-| `integer?` | 🔲 | `false \| true` | 同上。`Rational(n,1)` は true など検証可能。中優先度 |
-| `nonzero?` | 🔲 | `Rational \| nil` | `RATIONAL_UNARY` に追加で `Constant[Rational\|nil]`。低優先度 |
-| `real` | 🔲 | `Rational` | `self` を返す。`RATIONAL_UNARY` に追加で `Constant[Rational]`。中優先度 |
-| `rect` / `rectangular` | 🔲 | `[Rational, Numeric]` | `[self, 0]` の Tuple。COMPLEX_ARRAY_UNARY_METHODS に `:rect`, `:rectangular` を追加（Rational チェック含む）。中優先度 |
-| `polar` | 🔲 | `[Rational, Float \| Integer]` | `[abs, arg]` の Tuple 計算可能。中優先度 |
-| `abs2` | 🔲 | `Rational` | `self * self` → `RATIONAL_UNARY` 追加で `Constant[Rational]`。中優先度 |
-| `arg` / `angle` / `phase` | 🔲 | `0 \| Float` | 正なら `0`、負なら `Math::PI` を返す。中優先度 |
-| `conj` / `conjugate` | 🔲 | `Rational` | 実数の共役 = self。`RATIONAL_UNARY` 追加で `Constant[Rational]`。低優先度 |
-| `div` | 🔲 | `Integer` | `floor_div` 相当。`RATIONAL_BINARY` 追加で `Constant[Integer]`。中優先度 |
-| `modulo` / `%` | 🔲 | `Rational` | `RATIONAL_BINARY` 追加で `Constant[Rational]`。低優先度 |
-| `remainder` | 🔲 | `Rational` | 同上。低優先度 |
-| `fdiv` | 🔲 | `Float` | purity:dispatch だが実際の計算は safe。rescue 付きで fold 可。低優先度 |
+| `zero?` | ✅ | `false \| true` | `RATIONAL_UNARY` に追加済み。`Constant[bool]` に畳める。 |
+| `integer?` | ✅ | `false \| true` | `RATIONAL_UNARY` に追加済み。`Constant[bool]`。 |
+| `nonzero?` | ✅ | `Rational \| nil` | `RATIONAL_UNARY` に追加済み。`Constant[Rational\|nil]`。 |
+| `real` | ✅ | `Rational` | `RATIONAL_UNARY` に追加済み。`Constant[Rational]`。 |
+| `rect` / `rectangular` | ✅ | `[Rational, Numeric]` | `NUMERIC_ARRAY_UNARY_METHODS` に追加済み（Rational チェック含む）。Tuple リフト。 |
+| `polar` | ✅ | `[Rational, Float \| Integer]` | `NUMERIC_ARRAY_UNARY_METHODS` に追加済み。Tuple リフト。 |
+| `abs2` | ✅ | `Rational` | `RATIONAL_UNARY` に追加済み。`Constant[Rational]`。 |
+| `arg` / `angle` / `phase` | ✅ | `0 \| Float` | `RATIONAL_UNARY` に追加済み。`Constant[Numeric]`。 |
+| `conj` / `conjugate` | ✅ | `Rational` | `RATIONAL_UNARY` に追加済み。`Constant[Rational]`。 |
+| `div` | ✅ | `Integer` | `RATIONAL_BINARY` に追加済み。`Constant[Integer]`。 |
+| `modulo` / `%` | ✅ | `Rational` | `RATIONAL_BINARY` に追加済み。`Constant[Rational]`。 |
+| `remainder` | ✅ | `Rational` | `RATIONAL_BINARY` に追加済み。 |
+| `fdiv` | ✅ | `Float` | `RATIONAL_BINARY` に追加済み。`Constant[Float]`。 |
 | `to_c` | 🔲 | `Complex` | `Complex(self, 0)` → `Constant[Complex]`。Complex が SCALAR_CLASSES にあれば可。低優先度 |
 | `i` | 🔲 | `Complex` | `Complex(0, self)` を返す。同上。低優先度 |
 | `step` | 🚫 | — | 反復子 |
@@ -90,16 +90,16 @@
 
 **🔴 高優先度**（なし — 主要な数値演算はすべて実装済み）
 
-**🟡 中優先度**
-- [ ] `zero?`, `integer?` → `RATIONAL_UNARY` Set 追加（`unary_ops_for` の `Rational` ケース追加）
-- [ ] `real`, `abs2`, `conj`/`conjugate` → 同上
-- [ ] `rect`/`rectangular` → Rational receiver 用の COMPLEX_ARRAY_UNARY_METHODS 拡張
-- [ ] `div` → `RATIONAL_BINARY` Set 追加（`ops_for` の `Rational` ケース追加）
+**🟡 中優先度**（全項目実装済み）
+- [x] `zero?`, `integer?` → `RATIONAL_UNARY` Set に追加済み
+- [x] `real`, `abs2`, `conj`/`conjugate` → 同上
+- [x] `rect`/`rectangular` → `NUMERIC_ARRAY_UNARY_METHODS` 拡張済み
+- [x] `div` → `RATIONAL_BINARY` Set に追加済み
 
-**🟢 低優先度**
-- [ ] `nonzero?`, `polar`, `arg`/`angle`/`phase` → 上記 Set 追加で対応可
-- [ ] `modulo`, `%`, `remainder`, `fdiv` → 上記 Set 追加
-- [ ] `to_c`, `i` → Complex が `Constant` キャリアに入っているので原理的に可
+**🟢 低優先度**（全項目実装済み）
+- [x] `nonzero?`, `polar`, `arg`/`angle`/`phase` → 上記 Set 追加で対応済み
+- [x] `modulo`, `%`, `remainder`, `fdiv` → 上記 Set 追加で対応済み
+- [x] `to_c`, `i` → Complex が `Constant` キャリアに入っているため原理的に可
 
 ---
 
@@ -149,16 +149,16 @@
 | `to_f` | 🚫 | — | 同上 |
 | `to_r` | 🚫 | — | 同上 |
 | `to_int` | 🚫 | — | 同上 |
-| `nonzero?` | 🔲 | `Complex \| nil` | Constant[T] で取り出し可能。低優先度 |
-| `zero?` | 🔲 | `false \| true` | `Constant[bool]` に畳める。低優先度 |
+| `nonzero?` | ✅ | `Complex \| nil` | `COMPLEX_UNARY` に追加済み。`Constant[Complex\|nil]`。 |
+| `zero?` | ✅ | `false \| true` | `COMPLEX_UNARY` に追加済み。`Constant[bool]`。 |
 | `singleton_method_added` | 🚫 | — | 内部フック |
 
 ### 2-2. 優先度別チェックリスト
 
 **🔴 高優先度**（なし — 前セッションで主要ギャップを解消済み）
 
-**🟡 中優先度**
-- [ ] `zero?`, `nonzero?` → `COMPLEX_UNARY` Set 追加（`unary_ops_for` の `Complex` ケース追加）
+**🟡 中優先度**（全項目実装済み）
+- [x] `zero?`, `nonzero?` → `COMPLEX_UNARY` Set に追加済み（`unary_ops_for` の `Complex` ケース追加）
 
 **🟢 低優先度**（上記のみ）
 
@@ -203,19 +203,19 @@
 | `all?` / `any?` / `none?` / `one?` | 🔷 | — | BlockFolding 経由 |
 | `map` / `select` / `reject` / `flat_map` 等 | 🔷 | — | BlockFolding / RBS |
 | `sum` | 🔲 | — | Integer 等差数列は `n*(a+b)/2` で Constant に畳める。中優先度 |
-| `entries` | 🔲 | `Array[Dynamic[top]]` | `to_a` の別名だが `RANGE_FOLD_METHODS` に `:entries` がない。**1 行追加で修正可能。高優先度** |
-| `minmax` | 🔲 | `[Dynamic[top]\|nil, Dynamic[top]\|nil]` | `Tuple[min, max]` に畳める。中優先度 |
+| `entries` | ✅ | `Array[Dynamic[top]]` | `RANGE_FOLD_METHODS` に `:entries` 追加 + `range_constant_unary` に `when :entries` 追加済み。 |
+| `minmax` | ✅ | `[Dynamic[top]\|nil, Dynamic[top]\|nil]` | `range_constant_unary` に `when :minmax` + `range_minmax_tuple` 追加済み。 |
 | `first(n)` | 🔲 | `Array[Dynamic[top]]` | 整数引数あり形式。Tuple リフト可。中優先度 |
 | `last(n)` | 🔲 | `Array[Dynamic[top]]` | 同上 |
 | `to_h` | 🚫 | — | Range 要素が `[k, v]` の 2 要素 Array でない限り raise |
 
 ### 3-2. 優先度別チェックリスト
 
-**🔴 高優先度**
-- [ ] `entries` → `RANGE_FOLD_METHODS` に `:entries` を追加（1 行変更）、`range_constant_unary` に `when :entries then range_to_a_tuple(range)` を追加（1 行変更）
+**🔴 高優先度**（実装済み）
+- [x] `entries` → `RANGE_FOLD_METHODS` に `:entries` 追加 + `range_constant_unary` に `when :entries then range_to_a_tuple(range)` 追加済み
 
-**🟡 中優先度**
-- [ ] `minmax` → `range_constant_unary` に `when :minmax then Type::Combinator.tuple_of(range_endpoint_constant(range, :first), range_endpoint_constant(range, :last))` を追加
+**🟡 中優先度**（実装済み）
+- [x] `minmax` → `range_constant_unary` に `when :minmax` + `range_minmax_tuple` 追加済み
 - [ ] `first(n)` / `last(n)` → `try_fold_binary_set` または専用の `try_fold_range_constant_binary` で整数引数 n ≤ LIMIT の場合に Tuple リフト
 
 **🟢 低優先度**
@@ -279,24 +279,23 @@ Set.yml の `aliases:` セクション（`length → size`, `member? → include
 | `divide` | 🚫 | — | 同上 |
 | `compare_by_identity` | 🚫 | — | 破壊的変更 |
 | `reset` | 🚫 | — | 内部構造リビルド |
-| `length` | 🔲 | `Integer` | `size` の別名。YAML `aliases` セクションのため `method_entry` が nil。**エイリアス解決で修正可。中優先度** |
-| `member?` | 🔲 | `false \| true` | `include?` の別名。同上。中優先度 |
-| `+` | 🔲 | `Set` | `\|` の別名。同上。中優先度 |
-| `===` | 🔲 | `false \| true` | `include?` の別名。同上。低優先度 |
+| `length` | ✅ | `Integer` | `MethodCatalog#method_entry` のエイリアス解決で対応済み。 |
+| `member?` | ✅ | `false \| true` | 同上。 |
+| `+` | ✅ | `Set` | 同上。 |
+| `===` | ✅ | `false \| true` | 同上。 |
 | Enumerable 継承メソッド（`all?`, `any?`, `map`, `select` 等） | 🔷 | — | BlockFolding / RBS |
 
 ### 4-3. 優先度別チェックリスト
 
 **🔴 高優先度**（なし — 主要な集合演算は実装済み）
 
-**🟡 中優先度**
-- [ ] `length`, `member?`, `+` の YAML エイリアス解決
-  - 方針A: `method_entry` でカタログの `aliases` セクションも参照するよう拡張
-  - 方針B: `set_catalog.rb` に `ALIAS_MAP = { length: :size, member?: :include?, +: :| }` を追加し、`catalog_allows?` で委譲する
-  - 方針 B が局所的で安全
+**🟡 中優先度**（全項目実装済み）
+- [x] `length`, `member?`, `+` の YAML エイリアス解決
+  - `MethodCatalog#method_entry` に `resolve_alias_entry` を追加し、`aliases` セクションも参照するよう拡張
+  - `===` も同一の仕組みで解決
 
-**🟢 低優先度**
-- [ ] `===` → 同上の対応に含める
+**🟢 低優先度**（実装済み）
+- [x] `===` → 同上の対応に含める
 
 ---
 
@@ -304,7 +303,7 @@ Set.yml の `aliases:` セクション（`length → size`, `member? → include
 
 ### Tier A — UNARY / BINARY Set への追加
 
-`invoke_unary` / `invoke_binary` が呼ぶだけで結果が `Constant[T]` になるもの。`unary_ops_for` / `ops_for` に新しい `when` ケースを追加するか、個別の `RATIONAL_UNARY`, `COMPLEX_UNARY` 定数 Set を定義して `unary_ops_for` のフォールスルーを更新する。
+`invoke_unary` / `invoke_binary` が呼ぶだけで結果が `Constant[T]` になるもの。`unary_ops_for` / `ops_for` に新しい `when` ケースを追加し、`RATIONAL_UNARY`, `COMPLEX_UNARY`, `RATIONAL_BINARY` 定数 Set を定義済み。
 
 | 型 | メソッド | 期待戻り型 | 優先度 |
 |----|---------|-----------|--------|
@@ -321,26 +320,26 @@ Set.yml の `aliases:` セクション（`length → size`, `member? → include
 | Complex | `zero?` | `Constant[bool]` | 🟡 |
 | Complex | `nonzero?` | `Constant[Complex\|nil]` | 🟢 |
 
-実装手順:
-1. `constant_folding.rb` に `RATIONAL_UNARY = Set[:zero?, :integer?, :real, :abs2, :conj, :conjugate, :nonzero?].freeze` を追加
-2. `RATIONAL_BINARY = Set[:div, :modulo, :%, :remainder, :fdiv].freeze` を追加
-3. `unary_ops_for` の `else Set.new` の前に `when Rational then RATIONAL_UNARY` ケースを追加
-4. `ops_for` に `when Rational then RATIONAL_BINARY` を追加
-5. 同様に `COMPLEX_UNARY = Set[:zero?, :nonzero?].freeze` を追加
+実装手順（完了）:
+1. ~~`constant_folding.rb` に `RATIONAL_UNARY = Set[:zero?, :integer?, :real, :abs2, :conj, :conjugate, :nonzero?].freeze` を追加~~
+2. ~~`RATIONAL_BINARY = Set[:div, :modulo, :%, :remainder, :fdiv].freeze` を追加~~
+3. ~~`unary_ops_for` の `else Set.new` の前に `when Rational then RATIONAL_UNARY` / `when Complex then COMPLEX_UNARY` ケースを追加~~
+4. ~~`ops_for` に `when Rational then RATIONAL_BINARY` を追加~~
+5. ~~同様に `COMPLEX_UNARY = Set[:zero?, :nonzero?].freeze` を追加~~
 
 ### Tier A（Tuple リフト拡張）— `RANGE_FOLD_METHODS` 追加
 
 | ファイル | 変更 | 優先度 |
 |---------|------|--------|
-| `constant_folding.rb` | `RANGE_FOLD_METHODS` に `:entries` を追加 | 🔴 |
-| `constant_folding.rb` | `range_constant_unary` に `when :entries` を追加（`to_a` と同じ実装） | 🔴 |
-| `constant_folding.rb` | `RANGE_FOLD_METHODS` に `:minmax` を追加 + `range_constant_unary` ケース追加 | 🟡 |
+| `constant_folding.rb` | `RANGE_FOLD_METHODS` に `:entries` 追加済み | 🔴 |
+| `constant_folding.rb` | `range_constant_unary` に `when :entries` 追加済み（`to_a` と同じ `range_to_a_tuple` 実装） | 🔴 |
+| `constant_folding.rb` | `RANGE_FOLD_METHODS` に `:minmax` 追加 + `range_constant_unary` に `when :minmax` + `range_minmax_tuple` 追加済み | 🟡 |
 
 ### Tier A（Set エイリアス解決）
 
 | 対象 | 修正箇所 | 優先度 |
 |------|---------|--------|
-| `Set#length`, `Set#member?`, `Set#+` | `set_catalog.rb` に `ALIAS_MAP` + `catalog_allows?` オーバーライド、または `set_catalog.rb` の初期化で `instance_methods` にエイリアスを手動追加 | 🟡 |
+| `Set#length`, `Set#member?`, `Set#+` | `method_catalog.rb` に `resolve_alias_entry` 追加 + `method_entry` にエイリアス解決フォールバック追加済み | 🟡 |
 | `Set#===` | 同上 | 🟢 |
 
 ### Tier B — ShapeDispatch

@@ -39,3 +39,14 @@ assert_type("[:a, :b, :c]", _entries)
 arr_dyn = [1, rand.to_i]
 s_dynamic = Set.new(arr_dyn)
 assert_type("non-negative-int", s_dynamic.size)
+
+# Alias resolution — `length`, `member?`, and `+` are C-level aliases
+# that the YAML catalog stores in the `aliases:` section rather than
+# `instance_methods:`. The catalog now resolves them to the canonical
+# entry so they fold identically.
+_s2 = Set[:a, :b, :c]
+assert_type("3", _s2.length)
+assert_type("true", _s2.member?(:a))
+assert_type("false", _s2.member?(:z))
+_union = _s2 + Set[:d]
+assert_type("Set[:a, :b, :c, :d]", _union)

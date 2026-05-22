@@ -46,4 +46,43 @@ assert_type("1", r <=> Rational(1, 2))
 # `nurat_fdiv` calls back into `rb_Float()`. The fold tier bails
 # and the RBS tier answers with the declared return type.
 assert_type("false | true", r == Rational(3, 4))
-assert_type("Float", r.fdiv(2))
+# `fdiv` is now folded through RATIONAL_BINARY — returns the actual Float.
+assert_type("0.375", r.fdiv(2))
+
+# Tier A unary additions — methods now folded through RATIONAL_UNARY.
+# `zero?` / `integer?` fold to a precise `Constant[bool]`.
+# Note: Rational#integer? returns false for all Rationals (it checks
+# `is_a?(Integer)`, not denominator == 1).
+assert_type("false", r.zero?)
+assert_type("true", Rational(0, 1).zero?)
+assert_type("false", r.integer?)
+assert_type("false", Rational(4, 1).integer?)
+
+# `real` returns self; `abs2` returns self * self.
+assert_type("(3/4)", r.real)
+assert_type("(9/16)", r.abs2)
+
+# `conj` / `conjugate` return self for real numbers.
+assert_type("(3/4)", r.conj)
+assert_type("(3/4)", r.conjugate)
+
+# `nonzero?` returns self or nil.
+assert_type("(3/4)", r.nonzero?)
+assert_type("nil", Rational(0, 1).nonzero?)
+
+# Tier A binary additions — folded through RATIONAL_BINARY.
+# `div` performs integer floor division.
+assert_type("0", r.div(2))
+# `modulo` / `%` / `remainder` return Rational.
+assert_type("(3/4)", r.modulo(2))
+assert_type("(3/4)", r % 2)
+assert_type("(3/4)", r.remainder(2))
+# `fdiv` returns a Float.
+assert_type("0.375", r.fdiv(2))
+
+# Tier A tuple-lift extensions — `rect` / `rectangular` / `polar`
+# lifted through NUMERIC_ARRAY_UNARY_METHODS (shared with Complex).
+# `r.rect` returns `[self, 0]` (real = self, imag = 0).
+assert_type("[(3/4), 0]", r.rect)
+assert_type("[(3/4), 0]", r.rectangular)
+assert_type("[(3/4), 0]", r.polar)

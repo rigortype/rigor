@@ -54,3 +54,12 @@ assert_type("Infinity", (1..).size)
 # projection of the receiver's nominal — `Range` here.
 r = (1..3)
 assert_type("Range", r.reverse_each)
+
+# Tier A additions — `entries` and `minmax` folded through
+# RANGE_FOLD_METHODS + range_constant_unary.
+# `entries` is an alias of `to_a` — lifts to Tuple[Constant…].
+assert_type("[1, 2, 3, 4, 5]", (1..5).entries)
+# `minmax` returns Tuple[min, max].
+assert_type("[1, 10]", (1..10).minmax)
+# Empty range `minmax` returns Tuple[nil, nil].
+assert_type("[nil, nil]", (1..0).minmax)

@@ -56,3 +56,11 @@ assert_type("[Complex, Complex]", Complex.polar(1, 0).coerce(Complex(1, 0)))
 assert_type("Integer | nil", c <=> Complex(1, 1))
 assert_type("String", c.to_s)
 assert_type("String", c.inspect)
+
+# Tier A unary additions — folded through COMPLEX_UNARY.
+# `zero?` folds to a precise `Constant[bool]`.
+assert_type("false", c.zero?)
+assert_type("true", Complex(0, 0).zero?)
+# `nonzero?` returns self or nil.
+assert_type("(3+4i)", c.nonzero?)
+assert_type("nil", Complex(0, 0).nonzero?)

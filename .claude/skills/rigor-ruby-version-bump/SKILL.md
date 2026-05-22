@@ -1,7 +1,7 @@
 ---
 name: rigor-ruby-version-bump
 description: |
-  Bump the development Ruby version across the markers that record it — flake.nix (including the Nix fake-hash derivation trick), .ruby-version, and the AGENTS.md target-Ruby line. Use when the user asks to "update Ruby to x.y.z", "bump the Ruby version", or after a new Ruby release lands. Explains the development-Ruby vs supported-range split: a patch bump touches only the three development markers and deliberately leaves the Gemfile `ruby` directive, Gemfile.lock's RUBY VERSION, the gemspec range, and the ci.yml matrix alone.
+  Bump the development Ruby version across the markers that record it — flake.nix (including the Nix fake-hash derivation trick), .ruby-version, .tool-versions, and the AGENTS.md target-Ruby line. Use when the user asks to "update Ruby to x.y.z", "bump the Ruby version", or after a new Ruby release lands. Explains the development-Ruby vs supported-range split: a patch bump touches only the four development markers and deliberately leaves the Gemfile `ruby` directive, Gemfile.lock's RUBY VERSION, the gemspec range, and the ci.yml matrix alone.
 ---
 
 # Bump the Ruby Version
@@ -18,6 +18,7 @@ An earlier version of this skill bumped *every* marker to the exact patch. That 
 
 - `flake.nix` — the `mkRuby` version + re-derived `hash`.
 - `.ruby-version` — read by rbenv / chruby / asdf and by `ruby/setup-ruby` in CI.
+- `.tool-versions` — read by asdf / mise; a peer of `.ruby-version`.
 - `AGENTS.md` — the target-Ruby line.
 
 **Supported-range markers** — express what Ruby the *gem* supports, not the dev patch. A **patch** bump MUST NOT touch these.
@@ -75,12 +76,20 @@ nix --extra-experimental-features 'nix-command flakes' develop --command ruby -v
 # => ruby 4.0.5 (...) +PRISM [...]
 ```
 
-## Step 2 — `.ruby-version`
+## Step 2 — `.ruby-version` and `.tool-versions`
 
-A single-line file. Set it to the full `x.y.z` version. Read by rbenv / chruby / asdf and by `ruby/setup-ruby` in CI.
+Two single-line version files. Set each to the full `x.y.z` version.
+
+`.ruby-version` is read by rbenv / chruby / asdf and by `ruby/setup-ruby` in CI:
 
 ```
 4.0.5
+```
+
+`.tool-versions` is the asdf / mise version file — a peer of `.ruby-version` recording the same development-Ruby patch, prefixed with the tool name:
+
+```
+ruby 4.0.5
 ```
 
 ## Step 3 — `AGENTS.md` — the target-Ruby line
@@ -115,7 +124,7 @@ Body — note what changed and why the supported-range markers were left alone, 
 
 ```
 Only the development markers move on a patch bump: flake.nix,
-.ruby-version, and the AGENTS.md target line. The Gemfile `ruby`
+.ruby-version, .tool-versions, and the AGENTS.md target line. The Gemfile `ruby`
 directive (a >= 4.0.0, < 4.1 range), Gemfile.lock's RUBY VERSION
 (held at the 4.0.0 floor), the gemspec range, and the ci.yml
 "4.0" minor series are supported-range markers and deliberately
@@ -149,6 +158,7 @@ Bundler writes the `RUBY VERSION` block from the *running* Ruby whenever `bundle
 - `flake.nix` — `mkRubyVersion` digits + re-derived `hash`; `cargoHash` verified (not assumed).
 - `nix develop --command ruby -v` reports the new version.
 - `.ruby-version` — full `x.y.z`.
+- `.tool-versions` — `ruby x.y.z`.
 - `AGENTS.md` target-Ruby line (development digit only); live `docs/` updated, dated records left alone.
 - `Gemfile`, `Gemfile.lock`, `rigortype.gemspec`, `ci.yml` — NOT modified.
 - `flake.lock` — NOT modified.

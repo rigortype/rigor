@@ -101,13 +101,17 @@ module Rigor
           empty?: :hash_empty?,
           any?: :hash_any?,
           none?: :hash_none?,
+          one?: :hash_one?,
           keys: :hash_keys,
           values: :hash_values,
           first: :hash_first,
           flatten: :hash_flatten,
           compact: :hash_compact,
           to_a: :hash_to_a,
+          entries: :hash_to_a,
           to_h: :hash_to_h,
+          to_hash: :hash_to_h,
+          deconstruct_keys: :hash_deconstruct_keys,
           invert: :hash_invert,
           merge: :hash_merge,
           slice: :hash_slice,
@@ -116,10 +120,21 @@ module Rigor
           fetch: :hash_lookup,
           dig: :hash_dig,
           values_at: :hash_values_at,
+          fetch_values: :hash_fetch_values,
+          assoc: :hash_assoc,
+          key: :hash_key,
           has_key?: :hash_has_key?,
           key?: :hash_has_key?,
           member?: :hash_has_key?,
-          include?: :hash_has_key?
+          include?: :hash_has_key?,
+          has_value?: :hash_has_value?,
+          value?: :hash_has_value?,
+          default: :hash_default,
+          default_proc: :hash_default,
+          :< => :hash_compare,
+          :<= => :hash_compare,
+          :> => :hash_compare,
+          :>= => :hash_compare
         }.freeze
 
         # @return [Rigor::Type, nil] the precise element/value type, or
@@ -899,6 +914,156 @@ module Rigor
             return nil unless shape.optional_keys.empty?
 
             Type::Combinator.constant_of(shape.pairs.empty?)
+          end
+
+          # `shape.one?` (no block, no arg) — folds to
+          # `Constant[shape.pairs.size == 1]` for a closed shape
+          # with no optional keys.
+          def hash_one?(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            Type::Combinator.constant_of(shape.pairs.size == 1)
+          end
+
+          # `shape.deconstruct_keys(keys)` — Ruby's `Hash#deconstruct_keys`
+          # returns the receiver itself regardless of the `keys`
+          # argument, so the precise answer is the shape unchanged.
+          def hash_deconstruct_keys(shape, _method_name, args)
+            return nil unless args.size == 1
+
+            shape
+          end
+
+          # `shape.fetch_values(:a, :b, ...)` — like `values_at` but
+          # raises `KeyError` on a missing key. Folds to `Tuple[V…]`
+          # only when every requested key is present; a missing key
+          # declines so the RBS tier reflects the raise.
+          def hash_fetch_values(shape, _method_name, args)
+            return nil if args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            values = []
+            args.each do |arg|
+              return nil unless arg.is_a?(Type::Constant)
+
+              key = arg.value
+              return nil unless key.is_a?(Symbol) || key.is_a?(String)
+              return nil unless shape.pairs.key?(key)
+
+              values << shape.pairs[key]
+            end
+            Type::Combinator.tuple_of(*values)
+          end
+
+          # `shape.assoc(key)` — returns `Tuple[Constant[k], V]` for a
+          # known key, `Constant[nil]` for a missing key.
+          def hash_assoc(shape, _method_name, args)
+            return nil unless args.size == 1
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            arg = args.first
+            return nil unless arg.is_a?(Type::Constant)
+
+            key = arg.value
+            return nil unless key.is_a?(Symbol) || key.is_a?(String)
+            return Type::Combinator.constant_of(nil) unless shape.pairs.key?(key)
+
+            Type::Combinator.tuple_of(Type::Combinator.constant_of(key), shape.pairs[key])
+          end
+
+          # `shape.key(value)` — reverse lookup. Folds when every
+          # value is a `Constant` so equality is decidable: returns
+          # `Constant[k]` for the first matching key, `Constant[nil]`
+          # when no value matches.
+          def hash_key(shape, _method_name, args)
+            return nil unless args.size == 1
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+            return nil unless shape.pairs.values.all?(Type::Constant)
+
+            arg = args.first
+            return nil unless arg.is_a?(Type::Constant)
+
+            pair = shape.pairs.find { |_k, v| v.value == arg.value }
+            Type::Combinator.constant_of(pair&.first)
+          end
+
+          # `shape.has_value?(v)` / `value?(v)` — folds to
+          # `Constant[true/false]` when every value is a `Constant`
+          # (so equality is decidable) and the argument is a
+          # `Constant`.
+          def hash_has_value?(shape, _method_name, args)
+            return nil unless args.size == 1
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+            return nil unless shape.pairs.values.all?(Type::Constant)
+
+            arg = args.first
+            return nil unless arg.is_a?(Type::Constant)
+
+            found = shape.pairs.values.any? { |v| v.value == arg.value }
+            Type::Combinator.constant_of(found)
+          end
+
+          # `shape.default` / `default_proc` — a literal `HashShape`
+          # carries no default value or proc, so both fold to
+          # `Constant[nil]`. `default` accepts an optional key
+          # argument (still returns the default), `default_proc`
+          # takes none — the `args.size <= 1` guard covers both.
+          def hash_default(shape, _method_name, args)
+            return nil unless args.size <= 1
+            return nil unless shape.closed?
+
+            Type::Combinator.constant_of(nil)
+          end
+
+          # `shape < other` / `<=` / `>` / `>=` — Hash containment
+          # comparison. Both sides must be closed `HashShape`s whose
+          # values are all `Constant` (so pair equality is
+          # decidable). `<` / `>` are proper-subset / -superset.
+          def hash_compare(shape, method_name, args)
+            return nil unless args.size == 1
+            return nil unless shape.closed? && shape.optional_keys.empty?
+
+            other = args.first
+            return nil unless other.is_a?(Type::HashShape)
+            return nil unless other.closed? && other.optional_keys.empty?
+
+            left = constant_pairs(shape)
+            right = constant_pairs(other)
+            return nil if left.nil? || right.nil?
+
+            Type::Combinator.constant_of(hash_containment(method_name, left, right))
+          end
+
+          # Unwraps a closed shape's pairs to a plain Ruby Hash of
+          # `key => value` for value-equality comparison. Returns nil
+          # when any value is not a `Constant`.
+          def constant_pairs(shape)
+            return nil unless shape.pairs.values.all?(Type::Constant)
+
+            shape.pairs.transform_values(&:value)
+          end
+
+          def hash_containment(method_name, left, right)
+            case method_name
+            when :<  then hash_proper_subset?(left, right)
+            when :<= then hash_subset?(left, right)
+            when :>  then hash_proper_subset?(right, left)
+            when :>= then hash_subset?(right, left)
+            end
+          end
+
+          def hash_subset?(left, right)
+            left.all? { |k, v| right.key?(k) && right[k] == v }
+          end
+
+          def hash_proper_subset?(left, right)
+            left.size < right.size && hash_subset?(left, right)
           end
 
           # `shape.has_key?(k)` / `key?(k)` / `member?(k)` /

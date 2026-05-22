@@ -908,4 +908,111 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: non_negative, method_name: :inspect)).to be_nil
     end
   end
+
+  describe "HashShape mid/low-priority handlers (coverage uplift)" do
+    let(:two) { hash_shape(a: constant(1), b: constant(2)) }
+    let(:one) { hash_shape(a: constant(1)) }
+    let(:empty) { hash_shape({}) }
+
+    describe "one?" do
+      it "folds to true for a single-pair shape" do
+        expect(dispatch(receiver: one, method_name: :one?)).to eq(constant(true))
+      end
+
+      it "folds to false for a two-pair or empty shape" do
+        expect(dispatch(receiver: two, method_name: :one?)).to eq(constant(false))
+        expect(dispatch(receiver: empty, method_name: :one?)).to eq(constant(false))
+      end
+    end
+
+    describe "entries / to_hash aliases" do
+      it "treats entries as to_a" do
+        expect(dispatch(receiver: one, method_name: :entries))
+          .to eq(dispatch(receiver: one, method_name: :to_a))
+      end
+
+      it "treats to_hash as to_h (the receiver shape)" do
+        expect(dispatch(receiver: two, method_name: :to_hash)).to eq(two)
+      end
+    end
+
+    describe "deconstruct_keys" do
+      it "returns the receiver shape unchanged" do
+        expect(dispatch(receiver: two, method_name: :deconstruct_keys, args: [constant(nil)])).to eq(two)
+      end
+    end
+
+    describe "fetch_values" do
+      it "lifts present keys to a Tuple of values" do
+        expect(dispatch(receiver: two, method_name: :fetch_values, args: [constant(:a), constant(:b)]))
+          .to eq(tuple(constant(1), constant(2)))
+      end
+
+      it "declines when a requested key is missing (KeyError at runtime)" do
+        expect(dispatch(receiver: two, method_name: :fetch_values, args: [constant(:a), constant(:z)]))
+          .to be_nil
+      end
+    end
+
+    describe "assoc" do
+      it "returns Tuple[key, value] for a known key" do
+        expect(dispatch(receiver: two, method_name: :assoc, args: [constant(:b)]))
+          .to eq(tuple(constant(:b), constant(2)))
+      end
+
+      it "returns Constant[nil] for a missing key" do
+        expect(dispatch(receiver: two, method_name: :assoc, args: [constant(:z)]))
+          .to eq(constant(nil))
+      end
+    end
+
+    describe "key (reverse lookup)" do
+      it "returns the first matching key" do
+        expect(dispatch(receiver: two, method_name: :key, args: [constant(2)])).to eq(constant(:b))
+      end
+
+      it "returns Constant[nil] when no value matches" do
+        expect(dispatch(receiver: two, method_name: :key, args: [constant(99)])).to eq(constant(nil))
+      end
+    end
+
+    describe "has_value? / value?" do
+      it "folds to true when a value is present" do
+        expect(dispatch(receiver: two, method_name: :has_value?, args: [constant(1)])).to eq(constant(true))
+        expect(dispatch(receiver: two, method_name: :value?, args: [constant(2)])).to eq(constant(true))
+      end
+
+      it "folds to false when no value matches" do
+        expect(dispatch(receiver: two, method_name: :has_value?, args: [constant(9)])).to eq(constant(false))
+      end
+    end
+
+    describe "default / default_proc" do
+      it "folds to Constant[nil] for a literal shape" do
+        expect(dispatch(receiver: two, method_name: :default)).to eq(constant(nil))
+        expect(dispatch(receiver: two, method_name: :default_proc)).to eq(constant(nil))
+      end
+    end
+
+    describe "containment comparison" do
+      it "folds < (proper subset)" do
+        expect(dispatch(receiver: one, method_name: :<, args: [two])).to eq(constant(true))
+        expect(dispatch(receiver: two, method_name: :<, args: [two])).to eq(constant(false))
+      end
+
+      it "folds <= (subset)" do
+        expect(dispatch(receiver: two, method_name: :<=, args: [two])).to eq(constant(true))
+      end
+
+      it "folds > / >= (superset)" do
+        expect(dispatch(receiver: two, method_name: :>, args: [one])).to eq(constant(true))
+        expect(dispatch(receiver: two, method_name: :>=, args: [two])).to eq(constant(true))
+      end
+
+      it "folds to false when a pair value differs" do
+        mismatched = hash_shape(a: constant(99))
+        expect(dispatch(receiver: mismatched, method_name: :<=, args: [two])).to eq(constant(false))
+      end
+    end
+  end
 end

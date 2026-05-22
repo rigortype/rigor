@@ -535,6 +535,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/hash_shape_handlers.rb — HashShape mid/low-priority handlers" do
+    let(:harness) { harness_for("hash_shape_handlers") }
+
+    it "folds one?/fetch_values/assoc/key/has_value?/default/deconstruct_keys/containment" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/hash_shape_transform.rb — per-pair HashShape transform_keys / transform_values fold" do
     let(:harness) { harness_for("hash_shape_transform") }
 

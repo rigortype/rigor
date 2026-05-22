@@ -47,6 +47,15 @@ Remaining: a `Plugin` hook letting plugins contribute their own recognisers (def
 
 When an upstream `ruby/rbs` RBS gap is surfaced by a single internal Rigor call site, prefer **(a')** an in-source `# rigor:disable` directive + load the library; when it surfaces across multiple call sites or in user-facing code, escalate to **(b)** a focused RBS overlay under Rigor's own `sig/`, or **(c)** an upstream `ruby/rbs` fix. The `references/rbs` branch `widen-strscan-resolv-stdlib-sigs` (widens `StringScanner#[]`, `Resolv#initialize`) is staged for an upstream PR — branch push + `ruby/rbs` PR creation are the user's task.
 
+### Mastodon cross-version sweep — FP findings (2026-05-23)
+
+The v3.5.19→v4.5.10 cross-version regression sweep ([`docs/notes/20260523-mastodon-v4.5-regression-sweep-v0.1.9.md`](notes/20260523-mastodon-v4.5-regression-sweep-v0.1.9.md) § "What is increasing") isolated four engine-side false-positive / misinference clusters. Two are already tracked; two are new:
+
+1. **`StringScanner#[]` Symbol overload** (FP, 3 sites in `signature_parser.rb`) — `scanner[:key]` (a Ruby 3.x named-capture Symbol arg) trips `call.argument-type-mismatch` because Rigor's RBS has only `(Integer) -> String?`. **Already covered** by the "Stdlib RBS coverage-gap pattern" item above — the `references/rbs` branch `widen-strscan-resolv-stdlib-sigs` widens exactly this. The sweep is empirical confirmation; close it when the upstream RBS PR lands.
+2. **AR `scope`-body method resolution** (misinference, NEW) — inside `scope :x, -> { select(...).group(:uri) }` the lambda's `self` is the model class, but `select` resolves to `Enumerable#select` (→ `Array[String]`) instead of `ActiveRecord::Querying#select` (→ a relation), so a chained `.group` reads as `undefined-method`. The empirical case for **ADR-26** (`ActiveRecord::Relation` typing); also note the model class-side query surface is the `rigor-activerecord` plugin's job. No new ADR needed — fold into ADR-26 slicing.
+3. **Ivar nil-guard / ivar-write typing** (misinference, NEW) — `@ivar.method` *after* `return if @ivar.nil?` still reports `undefined-method … for nil`: the guard does not narrow the ivar and the ivar's non-`nil` assignment is invisible to inference, so the type collapses to `nil`. Same family as flow-folding gap **G2** (ivar type taken from literal writes, not refreshed). Needs an ivar-narrowing + ivar-write-inference fix; scope against the G2 work below.
+4. **Flow-folding over-claim** (FP, 3 `flow.always-truthy-condition` sites) — **already tracked** by the "Flow-folding — loop-mutation tracking (gaps G1 / G2)" item above + the cluster-4 triage note. The sweep confirms the cluster persists across the v3.5→v4.5 line.
+
 ### Smaller queued items
 
 - **Sig-gen `update_existing`** does not collapse sibling parent / child class blocks — `merge_class` resolves each candidate's `class_name` independently, so flat-sibling layouts stay flat. Re-flowing an existing file into the nested layout is out of scope; workaround is to delete the target sig file and regenerate from scratch.

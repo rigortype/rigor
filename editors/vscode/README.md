@@ -21,17 +21,14 @@ exposes settings, and surfaces lifecycle state.
 
 - **VS Code 1.85+**.
 - A **trusted** workspace (the server is not started in restricted mode).
-- The **`rigortype` gem ≥ 0.1.6** available to the project. The usual
-  setup is a Gemfile entry:
-
-  ```ruby
-  group :development do
-    gem "rigortype"
-  end
-  ```
-
-  followed by `bundle install`. A globally installed `rigor` also
-  works.
+- The **`rigortype` gem ≥ 0.1.6**, installed so `rigor` is on `PATH`
+  (or reachable through a `mise` / `asdf` shim). See the manual's
+  [Installing Rigor](https://github.com/rigortype/rigor/blob/main/docs/manual/01-installation.md)
+  chapter — `mise` is the recommended channel and ships a stable
+  `rigor` shim the extension auto-discovers. Rigor is a tool, not a
+  library, and does **not** go in the project's `Gemfile`. A legacy
+  bundler-based install (`bundle exec rigor`) is still detected — see
+  *Server discovery* below.
 
 - A **Rigor config** (`.rigor.yml` or `.rigor.dist.yml`) at the
   project root. The extension only starts a server for folders that

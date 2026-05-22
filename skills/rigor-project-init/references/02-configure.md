@@ -33,22 +33,28 @@ from the Phase 2 mode:
 
 ## Install the gems first
 
-Rigor and every plugin are **Ruby gems** loaded by Bundler. The
-`plugins:` and `signature_paths:` config below is inert until the
-gems are installed — the plugin loader runs `require "rigor-<id>"`
-and a missing gem surfaces as a `plugin-loader` diagnostic. Add the
-selected gems to the project `Gemfile`, conventionally in a
-`:development` group, and `bundle install`:
+Each plugin is a separate **Ruby gem**. The `plugins:` and
+`signature_paths:` config below is inert until those gems are
+installed — the plugin loader runs `require "rigor-<id>"` and a
+missing gem surfaces as a `plugin-loader` diagnostic.
+
+The plugins must be loadable from the same Ruby environment that
+`rigor` itself runs in. **The `rigortype` gem itself stays out of
+the project's `Gemfile`** — install it standalone per the manual's
+[Installing Rigor](../../docs/manual/01-installation.md) chapter
+(`mise use gem:rigortype` is the recommended channel). Only the
+plugin gems land in the project's Gemfile:
 
 ```ruby
 group :development do
-  gem "rigortype", require: false
   gem "rigor-actionpack", require: false
   gem "rigor-activerecord", require: false
   # …one line per plugin chosen in Phase 3…
   gem "rigor-activesupport-core-ext", require: false
 end
 ```
+
+then `bundle install`.
 
 > **v0.1.x availability — tell the user.** The `rigortype` gem is
 > published on RubyGems. The `rigor-*` **plugin gems are not yet** —
@@ -62,6 +68,14 @@ end
 > workflow to v0.2.0. The core (`rigortype` + `rigor check` + the
 > baseline) works today; the plugin set does not install cleanly
 > from RubyGems yet.
+>
+> Because the path-referenced plugin gems need to be on `rigor`'s
+> load path, a v0.1.x plugin-using project will invoke Rigor via
+> `bundle exec rigor` (the legacy fallback called out in
+> `01-installation.md` and `09-editor-integration.md`) — a temporary
+> arrangement that v0.2.0 retires once the plugin gems publish and
+> can be co-installed with `rigortype` through the same channel
+> (`mise use gem:rigor-actionpack`, etc.).
 
 ## The template
 

@@ -27,19 +27,19 @@ design + capability matrix lives in
 
 ## Prerequisites
 
-- Ruby `>= 4.0.0` (matches the analyzer; see `rigortype.gemspec`).
-- Add `rigortype` to your project's `Gemfile`:
+The single prerequisite is **`rigor` on your `PATH`** — the same
+executable `rigor check` and `rigor type-of` already use. Any of the
+install channels in [Installing Rigor](01-installation.md) provide it;
+`mise` is the recommended one because its shims make `rigor` available
+to GUI-launched editors that do not inherit your shell environment.
 
-  ```ruby
-  group :development do
-    gem "rigortype"
-  end
-  ```
+Do **not** add `rigortype` to your project's `Gemfile`. Rigor is a
+tool, not a library — installing it standalone keeps its Ruby version
+and its dependencies out of your application's resolution. See
+[Installing Rigor § Recommended — a runtime version manager](01-installation.md#recommended--a-runtime-version-manager).
 
-- `bundle install`.
-
-The LSP server runs as `rigor lsp`. No separate gem,
-no addon registration — same binary as `rigor check` / `rigor type-of`.
+The LSP server runs as `rigor lsp`. No separate gem, no addon
+registration — same binary as `rigor check` / `rigor type-of`.
 
 ## CLI
 
@@ -57,6 +57,16 @@ rigor lsp [--transport=stdio] [--log=PATH] [--config=PATH]
 
 ## Editor wiring
 
+Every snippet below invokes `rigor lsp` directly, which works as soon
+as `rigor` is on the editor's `PATH` (the `mise` shim path, an
+`asdf` shim, or whatever your install channel set up — see
+[Installing Rigor](01-installation.md)).
+
+If you have an older, project-local install that puts `rigortype` in
+the project's `Gemfile`, swap `rigor lsp` for `bundle exec rigor lsp`
+(and add `cwd` / `BUNDLE_GEMFILE` as your editor requires). This is
+a legacy fallback; new installs should not need it.
+
 ### Neovim — nvim-lspconfig
 
 Add a custom server entry. `nvim-lspconfig` doesn't ship a built-in
@@ -69,7 +79,7 @@ local lspconfig = require('lspconfig')
 if not configs.rigor then
   configs.rigor = {
     default_config = {
-      cmd = { 'bundle', 'exec', 'rigor', 'lsp' },
+      cmd = { 'rigor', 'lsp' },
       filetypes = { 'ruby' },
       root_dir = lspconfig.util.root_pattern('.rigor.yml', '.rigor.dist.yml', 'Gemfile', '.git'),
       single_file_support = false,
@@ -82,7 +92,8 @@ lspconfig.rigor.setup({})
 
 Place this in your `init.lua` (or under `lua/plugins/`). Restart
 Neovim and open a Ruby file inside a Rigor-configured project; you
-should see diagnostics appear on save and hover work via `K`.
+should see diagnostics appear on save and hover work via `K`. For a
+legacy bundler-based install, set `cmd = { 'bundle', 'exec', 'rigor', 'lsp' }`.
 
 ### VS Code — generic LSP client
 
@@ -100,8 +111,8 @@ let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
   const serverOptions: ServerOptions = {
-    command: 'bundle',
-    args: ['exec', 'rigor', 'lsp'],
+    command: 'rigor',
+    args: ['lsp'],
     transport: TransportKind.stdio,
   };
   client = new LanguageClient(
@@ -116,6 +127,8 @@ export function activate(context: ExtensionContext) {
 export function deactivate() { return client?.stop(); }
 ```
 
+For a legacy bundler-based install, set `command: 'bundle', args: ['exec', 'rigor', 'lsp']`.
+
 Publish as a private extension or run via `--extensionDevelopmentPath`.
 A community-maintained marketplace extension may surface later;
 contributions welcome.
@@ -126,8 +139,8 @@ Add to `~/.config/helix/languages.toml`:
 
 ```toml
 [language-server.rigor]
-command = "bundle"
-args = ["exec", "rigor", "lsp"]
+command = "rigor"
+args = ["lsp"]
 
 [[language]]
 name = "ruby"
@@ -136,20 +149,22 @@ language-servers = ["rigor"]
 
 Helix auto-detects `.rigor.yml` via its project-root walk. If you
 also use Solargraph / ruby-lsp, list them alongside `rigor` —
-Helix runs multiple servers per language.
+Helix runs multiple servers per language. For a legacy bundler-based
+install, use `command = "bundle"` and `args = ["exec", "rigor", "lsp"]`.
 
 ### Emacs — Eglot
 
 ```elisp
 (require 'eglot)
 (add-to-list 'eglot-server-programs
-             '(ruby-mode . ("bundle" "exec" "rigor" "lsp")))
+             '(ruby-mode . ("rigor" "lsp")))
 ;; Or for ruby-ts-mode (Emacs 30+):
 (add-to-list 'eglot-server-programs
-             '(ruby-ts-mode . ("bundle" "exec" "rigor" "lsp")))
+             '(ruby-ts-mode . ("rigor" "lsp")))
 ```
 
-`M-x eglot` in a Ruby buffer to attach.
+`M-x eglot` in a Ruby buffer to attach. For a legacy bundler-based
+install, replace `("rigor" "lsp")` with `("bundle" "exec" "rigor" "lsp")`.
 
 ### Emacs — lsp-mode
 
@@ -157,10 +172,13 @@ Helix runs multiple servers per language.
 (with-eval-after-load 'lsp-mode
   (lsp-register-client
    (make-lsp-client
-    :new-connection (lsp-stdio-connection '("bundle" "exec" "rigor" "lsp"))
+    :new-connection (lsp-stdio-connection '("rigor" "lsp"))
     :activation-fn (lsp-activate-on "ruby")
     :server-id 'rigor)))
 ```
+
+For a legacy bundler-based install, swap the connection list to
+`'("bundle" "exec" "rigor" "lsp")`.
 
 ## Troubleshooting
 

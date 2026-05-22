@@ -118,6 +118,7 @@
   },
   "scripts": {
     "compile": "node esbuild.js --production",
+    "compile:dev": "node esbuild.js",
     "watch": "node esbuild.js --watch",
     "typecheck": "tsc --noEmit -p ./",
     "vscode:prepublish": "npm run typecheck && npm run compile",

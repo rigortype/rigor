@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Launch a new Extension Development Host with the Rigor extension
+      // loaded. Press F5 from the editors/vscode/ folder.
+      "name": "Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "Build extension",
+      "sourceMaps": true
+    },
+    {
+      // Same as above, but the watch task rebuilds on every save so
+      // you can Reload Window (Ctrl+R in the host) to pick up changes.
+      "name": "Watch + Run Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "Watch extension",
+      "sourceMaps": true
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // One-shot dev build (source maps, no minification).
+      // Used by the "Run Extension" launch config.
+      "label": "Build extension",
+      "type": "shell",
+      "command": "npm run compile:dev",
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "silent", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      // Continuous watch build — rebuilds whenever a source file changes.
+      // Used by the "Watch + Run Extension" launch config; reload the
+      // Extension Development Host window (Ctrl+R / Cmd+R) after each save.
+      "label": "Watch extension",
+      "type": "shell",
+      "command": "npm run watch",
+      "isBackground": true,
+      "group": "build",
+      "presentation": { "reveal": "silent", "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}

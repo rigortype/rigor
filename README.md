@@ -4,100 +4,104 @@
 [![GitHub License](https://img.shields.io/github/license/rigortype/rigor)](https://github.com/rigortype/rigor/blob/master/LICENSE)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rigortype/rigor)
 
-**Inference-first static analysis for Ruby.** Add Rigor to your
-Gemfile and run `rigor check` over your code — no annotations,
-no runtime dependency on the analyzer, no DSL.
+**Inference-first static analysis for Ruby.** Run `rigor check` over your
+code — no annotations, no runtime dependency, no DSL.
 
-Rigor parses Ruby with [Prism](https://github.com/ruby/prism),
-runs a flow-sensitive type-inference engine over each file,
-consults RBS signatures and the project's own `sig/` directory
-for any class it can find, and reports a small but trustworthy
-catalogue of bugs (undefined methods on typed receivers, wrong
-positional arity, provable `Integer / 0`, …).
+Rigor parses Ruby with [Prism](https://github.com/ruby/prism), runs a
+flow-sensitive type-inference engine over each file, and reports a small
+but trustworthy catalogue of bugs: undefined methods on typed receivers,
+wrong-argument-count calls, provable divisions by zero, and more.
+
+**Your team never needs to write type annotations** — Rigor derives
+everything from the code itself. An AI Skill gets a project running in
+minutes with a configuration tailored to its stack. When you want to go
+deeper — tighter checks, framework-aware analysis, your own refinements —
+Rigor's type system is remarkably powerful, and a Skill takes you there
+step-by-step.
 
 **Two design commitments drive Rigor.**
 
-1. **Types are facts, not wishes.** Hand-written type
-   annotations drift from the implementation the moment they
-   are written. Rigor infers from the code itself — every
-   carrier in its type vocabulary is derived from what your
-   source actually produces, not from a signature you authored
-   and might forget to update. When you do want RBS in
-   `sig/`, [`rigor sig-gen`](docs/adr/14-rbs-sig-generation.md)
-   emits it from inference results so the written form starts
-   in sync with reality, and `tighter-return` candidates flag
-   the cases where an existing `.rbs` is already weaker than
-   what the implementation provably returns.
+1. **Types are facts, not wishes.** Hand-written annotations drift the
+   moment they are written. Rigor infers from the code itself — every
+   type is derived from what your source actually produces. When you do
+   want RBS in `sig/`, [`rigor sig-gen`](https://rigor.typedduck.fail/reference/adr/14-rbs-sig-generation/)
+   emits it from inference results so the written form starts in sync
+   with reality.
 2. **Programmable inference beyond unions.** A plain union
-   (`Integer | nil`) is not the type story Ruby needs. Rigor
-   reasons about *what values an expression actually
-   produces* — literal values, integer ranges, refinement
-   carriers, per-position tuple / hash shapes, bound-method
-   bindings — and exposes a plugin extension API plus an
-   [ADR-16](docs/adr/16-macro-expansion.md) macro / DSL
-   expansion substrate so Rails-shape DSLs are first-class
-   type sources rather than analysis blind spots.
-
-See **[Beyond `Integer` and `String`](#beyond-integer-and-string-rigors-richer-type-vocabulary)**
-for the full type-model story; the carrier-zoo table is the
-short pitch.
-
-When you want tighter types than RBS expresses, refine them
-through the
-[`RBS::Extended`](docs/type-specification/rbs-extended.md)
-annotation surface — `rigor:v1:return:` /
-`rigor:v1:param:` / `rigor:v1:assert` directives accept the
-imported-built-in refinement names (`non-empty-string`,
-`positive-int`, `non-empty-array[Integer]`, `int<5, 10>`,
-`literal-string`, `non-lowercase-string`, …) without changing
-the underlying RBS.
+   (`Integer | nil`) is not the type story Ruby needs. Rigor reasons
+   about *what values an expression actually produces* — literal values,
+   integer ranges, refinement carriers, per-position tuple / hash shapes
+   — and exposes a plugin API plus a
+   [macro / DSL expansion substrate](https://rigor.typedduck.fail/reference/adr/16-macro-expansion/)
+   so Rails-shape DSLs become first-class type sources.
 
 ## Installation
 
-Rigor is a tool, not a library — install it on its own, **not** in
-your application's `Gemfile`. It runs on Ruby 4.0, independently of
-the Ruby version your own project targets.
+Rigor is a tool, not a library — install it independently, **not** in
+your project's `Gemfile`. It runs on Ruby 4.0, regardless of which Ruby
+version your project targets.
 
-The recommended setup uses the [`mise`](https://mise.jdx.dev/)
-runtime version manager, which provisions both Ruby 4.0 and Rigor,
-pinned per project:
+The recommended setup uses [`mise`](https://mise.jdx.dev/), which
+provisions both Ruby 4.0 and Rigor pinned per project:
 
 ```sh
 mise use ruby@4.0
 mise use gem:rigortype
 ```
 
-If you already have Ruby 4.0 available, `gem install rigortype`
-works as well. The gem is named `rigortype` (the name `rigor` was
-already taken on RubyGems); the executable it installs is `rigor`.
+If you already have Ruby 4.0 available, `gem install rigortype` works too.
+The gem is named `rigortype` (the name `rigor` was taken on RubyGems);
+the executable it installs is `rigor`.
 
-See the handbook for the full detail —
-[Installing Rigor](docs/handbook/appendix-installation.md)
-(`asdf`, `gem install`, dev containers) and
-[Running Rigor in CI](docs/handbook/appendix-ci.md).
+Full options — `asdf`, dev containers, CI workflow template — are in the
+[installation guide](https://rigor.typedduck.fail/reference/handbook/appendix-installation/)
+and [CI guide](https://rigor.typedduck.fail/reference/handbook/appendix-ci/).
+
+## Getting started with AI Skills
+
+The fastest path from zero to a running Rigor setup is the
+**`rigor-project-init` Skill** — an AI agent skill bundled under
+[`skills/`](skills/) that detects your stack, recommends the right plugins,
+and writes `.rigor.dist.yml` for you:
+
+```
+# In Claude Code or any AI assistant that supports Agent Skills:
+Use the rigor-project-init skill
+```
+
+The Skill walks your `Gemfile`, proposes a plugin set matched to your
+framework (Rails, Sinatra, dry-rb, …), lets you choose an adoption mode —
+**baseline** (acknowledge existing diagnostics and work them down
+incrementally) or **strict** (zero-diagnostic gate from day one) — then
+commits a ready-to-use configuration. No manual YAML editing required.
+
+Two companion Skills continue the journey once you are up and running:
+
+| Skill | Use when |
+| --- | --- |
+| [`rigor-baseline-reduce`](skills/rigor-baseline-reduce/) | Reducing an existing baseline: `rigor triage` prioritisation → site-by-site classification → fix / `# rigor:disable` / open a Rigor issue |
+| [`rigor-plugin-author`](skills/rigor-plugin-author/) | Teaching Rigor about a project-specific DSL or framework — authors the plugin gem or project-private plugin |
+
+All three Skills follow the [agentskills.io](https://agentskills.io/)
+convention and work with any AI assistant that discovers skills in your
+project directory.
 
 ## Quick start
 
-Drop into your project root and run the canonical commands:
-
 ```sh
-# Diagnose unknown methods, wrong-arity calls, and other
-# rule-driven bugs across `lib/`.
+# Check lib/ for bugs.
 rigor check lib
 
-# Drop a starter .rigor.yml into the project root.
+# Drop a starter .rigor.yml.
 rigor init
 
 # Print the inferred type at a precise FILE:LINE:COL position.
 rigor type-of lib/foo.rb:10:5
 
-# Report Scope#type_of coverage across a tree (handy when
-# diagnosing why a particular call site reads as `untyped`).
-rigor type-scan lib
+# Summarise the diagnostic stream: distribution, hotspots, heuristic hints.
+rigor triage lib
 
-# Emit RBS skeletons from inference results — review with
-# `--diff`, write to `sig/` with `--write`. ADR-14 sig-gen.
-rigor sig-gen --print lib/foo.rb
+# Emit RBS from inference results — review with --diff, write with --write.
 rigor sig-gen --diff  lib/foo.rb
 rigor sig-gen --write lib/foo.rb
 ```
@@ -114,477 +118,142 @@ $ rigor check /tmp/demo.rb
 /tmp/demo.rb:2:11: error: wrong number of arguments to `rotate' on Array (given 2, expected 0..1)
 ```
 
-The rule catalogue is **deliberately conservative**: a
-diagnostic fires only when the receiver type is statically
-known and the method set on that class is enumerable through
-RBS or in-source `def` / `define_method` discovery. Implicit-
-self calls, dynamic receivers, and constant-decl alias classes
-(e.g. `YAML` → `Psych`) are skipped to avoid false positives.
+Diagnostics fire only when the receiver type is statically known and the
+evidence is conclusive — Rigor never surfaces a warning it cannot prove.
 
 ### Faster runs through the cache
 
-Rigor caches expensive RBS work (the loaded `RBS::Environment`,
-constant-type translation, class hierarchy, type-parameter
-names, known-class set) under `.rigor/cache/` so the second
-`rigor check` is significantly faster than the first. The cache
-is keyed by your project's `.rbs` file digests + the locked
-`rbs` gem version, so a signature change or a gem upgrade
-invalidates exactly what it should.
+Rigor caches RBS work (loaded environment, type translation, class
+hierarchy) under `.rigor/cache/` — the second `rigor check` is
+significantly faster than the first. Add `.rigor/` to your `.gitignore`.
 
 ```sh
-# Inspect what is cached on disk and what this run did.
-rigor check --cache-stats lib
-
-# Wipe the cache (do this if you suspect staleness).
-rigor check --clear-cache lib
-
-# Run with caching disabled.
-rigor check --no-cache lib
+rigor check --cache-stats lib   # inspect cache hit/miss
+rigor check --clear-cache lib   # wipe if you suspect staleness
 ```
 
-Add `.rigor/` to your `.gitignore` — the cache is per-checkout
-and contains nothing reproducible to share.
+## The type vocabulary
 
-## Beyond `Integer` and `String`: Rigor's richer type vocabulary
-
-A vanilla static checker answers "what *class* is this object?"
-Rigor answers a much narrower question: "what *subset of values*
-can this expression actually produce?" That distinction is the
-whole point of Rigor — types like `Integer` and `String` describe
-classes, but real-world code carries far more structure (a count
-that's always non-negative, a name that's never empty, a flag
-that's one of three Symbols). Rigor reasons about that structure
-out of the box, without you writing a single annotation.
-
-### The carrier zoo
+A vanilla type checker answers "what *class* is this object?" Rigor
+answers "what *subset of values* can this expression produce?" — tracking
+literal values, integer ranges, refinement carriers, and structural shapes
+through the whole analysis, without a single annotation.
 
 | Carrier | What it records | Example |
 | --- | --- | --- |
-| **Literal types** (`Type::Constant`) | A single Ruby value | `Constant<42>`, `Constant<"hello">`, `Constant<:foo>` |
-| **Integer ranges** (`Type::IntegerRange`) | A bounded integer interval `int<a, b>` | `positive-int = int<1, max>`, `int<5, 10>` |
-| **Refinement types** — split into two halves: `Type::Difference` and `Type::Refined` | A base nominal minus a single value, or a base nominal restricted by a predicate | `non-empty-string = String - ""`, `lowercase-string = String & lowercase?`, `literal-string` |
-| **Intersection** (`Type::Intersection`) | Composition of multiple refinements | `non-empty-lowercase-string = non-empty-string ∩ lowercase-string` |
-| **Tuple / HashShape** | Heterogeneous arrays / known-key hashes that carry per-position / per-key types | `[1, "two", :three]` types as `Tuple[Constant<1>, Constant<"two">, Constant<:three>]`; `{name: "Alice", age: 30}` as `HashShape{name: Constant<"Alice">, age: Constant<30>}` |
-| **Union** (`Type::Union`) | "One of these literal values" — finite enums Rigor can enumerate | `Constant<:zero> \| Constant<:small> \| Constant<:large>` |
-| **`Method` binding** (`Type::BoundMethod`) | The receiver / method-name pair `Object#method(:sym)` produces, so `.call` / `.()` / `[]` recover the precise backing dispatch | `"1".method(:to_i).call` resolves to `Constant<1>` instead of `untyped` |
-| **`Dynamic[T]`** | The gradual carrier — wraps a static facet with a "could be anything" admission | `Dynamic[Top]` is the conservative fallback Rigor uses when it cannot prove a narrower type |
+| **Literal** (`Constant`) | A single Ruby value | `Constant<42>`, `Constant<"hello">`, `Constant<:foo>` |
+| **Integer range** | A bounded interval | `positive-int = int<1, max>`, `int<5, 10>` |
+| **Refinement** | Base type minus a point, or restricted by a predicate | `non-empty-string = String - ""`, `lowercase-string` |
+| **Tuple / HashShape** | Heterogeneous arrays / known-key hashes | `[1, "two"]` → `Tuple[Constant<1>, Constant<"two">]` |
+| **Union** | Finite enumerable set of literals | `Constant<:zero> \| Constant<:small> \| Constant<:large>` |
+| **`Dynamic[T]`** | Gradual carrier — "could be anything" | `Dynamic[Top]` when proof is unavailable |
 
-Each refinement / range / literal carrier **erases to its base
-class** for ordinary RBS interop, so importing Rigor is a
-strictly additive change: a method whose RBS sig says
-`-> String` keeps that contract, and Rigor's narrower inference
-just sits on top.
+Every narrower carrier **erases to its base class** for RBS interop, so
+importing Rigor is a strictly additive change.
 
-### What this buys you in practice
+The full type model — constant folding, `Method` bindings, LightweightHKT,
+`RBS::Extended` directives — is in the
+[handbook](https://rigor.typedduck.fail/reference/handbook/) and
+[type specification](https://rigor.typedduck.fail/reference/type-specification/).
 
-```ruby
-# Rigor doesn't just see "Integer", it sees "non-negative integer".
-n = ARGV.size                  # int<0, max>  (non-negative-int)
-m = n + 1                      # int<1, max>  (positive-int)
-m.zero?                        # Constant<false>  — proven; the
-                               # branch elision can drop the `else`
+### Unlocking tighter types with `RBS::Extended`
 
-# String composition stays as precise as the inputs allow.
-greeting = "Hello, "           # Constant<"Hello, ">
-name     = ARGV.first          # String?       — RBS-declared
-hello    = "Hello, #{name}!"   # literal-string — every part is
-                               # literal-bearing, so the result is
-                               # provably source-derived.
-
-# Tuple-shaped destructuring stays per-position.
-first, _middle, last = [10, 20, 30]
-first                          # Constant<10>
-last                           # Constant<30>
-
-# Constant folding through user methods.
-def is_odd(n) = n.odd?
-is_odd(3)                      # Constant<true>  — folded through
-                               # the body, not just typed as `bool`
-
-# Case/when narrowing produces a literal-set Union.
-label = case n
-        when 0      then :zero
-        when 1..9   then :small
-        else             :large
-        end
-label                          # Constant<:zero> | Constant<:small>
-                               #   | Constant<:large>
-
-# Method bindings keep their receiver — `.method(:sym).call`
-# round-trips through the original dispatch.
-[:to_i, :to_f, :to_sym].map { |m| "1".method(m).call }
-                       # Tuple[Constant<1>, Constant<1.0>, Constant<:"1">]
-                       # — per-element fold + BoundMethod backward fold
-
-# RBS::Extended directives let you tighten beyond what RBS expresses.
-class Slug
-  %a{rigor:v1:return: non-empty-string}
-  def normalise: (::String id) -> ::String
-end
-Slug.new.normalise("foo").size  # positive-int  — provably ≥ 1
-```
-
-Rigor never invents these answers — every narrower carrier is
-derived from literals in the source, control-flow narrowing
-(`is_a?`, `nil?`, `==` against finite literal sets, integer
-comparisons), per-class catalogues for the bundled built-ins,
-or `RBS::Extended` directives the user opted into. When the
-inference cannot prove a value is in a narrower carrier, it
-stays at the wider one (or `Dynamic[Top]`) and Rigor stays
-silent — diagnostics fire only when the narrow type is
-genuinely proved.
-
-### Where the type model is documented
-
-- **End-user handbook** — chapter-by-chapter walkthrough of
-  the type model written for Ruby programmers without prior
-  static-typing background:
-  [`docs/handbook/`](docs/handbook/README.md). Start here if
-  you want a guided tour of how Rigor sees your code rather
-  than a spec deep-dive.
-- One-page mental model:
-  [`docs/types.md`](docs/types.md).
-- Binding spec corpus:
-  [`docs/type-specification/`](docs/type-specification/README.md).
-- Imported refinement names (kebab-case catalogue):
-  [`docs/type-specification/imported-built-in-types.md`](docs/type-specification/imported-built-in-types.md).
-- The `RBS::Extended` annotation grammar that opens this
-  vocabulary up to your own RBS:
-  [`docs/type-specification/rbs-extended.md`](docs/type-specification/rbs-extended.md).
-
-## How Rigor finds your types
-
-Rigor consults, in order:
-
-1. **In-source RBS.** If your project has a `sig/` directory,
-   Rigor auto-loads it. `rigor init` writes a `.rigor.yml`
-   that points at `sig/` by default.
-2. **Bundled RBS core + stdlib.** Pathname, OptParse, JSON,
-   YAML, etc. ship with the analyzer.
-3. **Gem RBS.** RBS files vendored with installed gems
-   (Prism's own `.rbs`, the `rbs` gem's, …).
-4. **In-source class discovery.** When no RBS is available,
-   Rigor walks `def` / `define_method` / `attr_*` /
-   `Data.define(*Symbol)` so user-defined methods on a class
-   are recognised.
-5. **Opt-in gem-source inference (ADR-10).** Gems listed
-   under `dependencies.source_inference:` in `.rigor.yml`
-   have their `lib/` walked the same way project source is,
-   so methods on those gems' classes resolve even without
-   RBS. Inferred returns crossing the gem boundary are
-   wrapped in `Dynamic[T]` so the call site retains the
-   provenance — RBS / RBS::Inline / generated stubs / plugin
-   contracts always win on conflict. Default behaviour is
-   unchanged: gems not listed stay at the
-   RBS-or-`Dynamic[Top]` boundary.
-
-If a type cannot be proved, the engine returns `Dynamic[Top]`
-(Rigor's gradual carrier) and stays silent — Rigor never invents
-diagnostics it cannot prove.
-
-## Refining types through `RBS::Extended`
-
-When the RBS-declared type is too wide, attach a
-`%a{rigor:v1:…}` annotation to the relevant method in your
-`sig/` file. The annotation is a no-op for ordinary RBS tools
-and a tightening signal for Rigor.
+When you *want* to express more than RBS allows, attach a
+`%a{rigor:v1:…}` annotation in your `sig/` file. The annotation is a
+no-op for ordinary RBS tools; Rigor uses it to tighten call-site and
+body types.
 
 ```rbs
 class Slug
-  # The runtime always returns a non-empty string. The override
-  # tightens the call-site result to non-empty-string and tells
-  # the body's `assert_type` that `id` cannot be "".
   %a{rigor:v1:return: non-empty-string}
   %a{rigor:v1:param: id is non-empty-string}
   def normalise: (::String id) -> ::String
 end
 ```
 
-Right-hand side accepts:
-
-- **RBS class names** — `String`, `::Foo::Bar` (with optional
-  `~T` negation for `assert` / `predicate-if-*`).
-- **Imported-built-in refinement names** (kebab-case):
-  - Point-removal — `non-empty-string`, `non-zero-int`,
-    `non-empty-array[T]`, `non-empty-hash[K, V]`.
-  - IntegerRange aliases — `positive-int`, `non-negative-int`,
-    `negative-int`, `non-positive-int`, `int<min, max>`.
-  - Predicate refinements — `lowercase-string`,
-    `uppercase-string`, `numeric-string`, `decimal-int-string`,
-    `octal-int-string`, `hex-int-string`.
-  - Paired complements (`~T`-symmetric) —
-    `non-lowercase-string`, `non-uppercase-string`,
-    `non-numeric-string`. Writing `~lowercase-string` narrows
-    `String` to `non-lowercase-string` instead of the generic
-    `Difference[String, lowercase-string]` fallback.
-  - Composed shapes — `non-empty-lowercase-string`,
-    `non-empty-uppercase-string`, `non-empty-literal-string`.
-  - Flow-tracked source-literal — `literal-string`. Rigor lifts
-    `"hi #{name}!"`, `"a" + literal_str`, and `literal_str * 3`
-    to `literal-string` when every operand is itself
-    literal-bearing.
-
-The full directive table is in
-[`docs/type-specification/rbs-extended.md`](docs/type-specification/rbs-extended.md);
-the catalogue of refinement names is in
-[`docs/type-specification/imported-built-in-types.md`](docs/type-specification/imported-built-in-types.md).
-
-### Example: argument-type-mismatch caught at the call site
-
-```rbs
-# sig/normaliser.rbs
-class Normaliser
-  %a{rigor:v1:param: id is non-empty-string}
-  def normalise: (::String id) -> ::String
-end
-```
-
-```ruby
-# app/normaliser.rb
-class Normaliser
-  def normalise(id)
-    id.upcase
-  end
-end
-
-n = Normaliser.new
-n.normalise("hello")   # OK
-n.normalise("")        # rigor flags: argument type mismatch
-```
-
-`rigor check` reports the second call as an
-`argument-type-mismatch` because the literal `""` does not
-satisfy `non-empty-string`. Inside the method body, Rigor also
-sees `id` as `non-empty-string` (so `id.empty?` reduces to
-`Constant[false]` and `id.size` reduces to `positive-int`).
-
-## What rigor sees today
-
-- **Local / instance / class / global variables** —
-  intra-method bindings, cross-method ivar / cvar
-  accumulators, program-wide globals, and compound writes
-  (`||=`, `&&=`, `+=`).
-- **`self` typing and constant lookup** — class and method
-  body boundaries inject `Singleton[T]` / `Nominal[T]`;
-  lexical constant resolution walks RBS-core, common stdlib,
-  in-source class discovery, and in-source constant-value
-  tracking (`BUCKETS = [:a, :b]; BUCKETS.first` →
-  `Constant[:a]`).
-- **Predicate narrowing** — truthiness, `nil?`, `is_a?` /
-  `kind_of?` / `instance_of?`, finite-literal equality,
-  case-equality (`===`) for Class / Module / Range / Regexp,
-  `case` / `when` integration. Paired-complement narrowing for
-  Refined predicates (`~lowercase-string` →
-  `non-lowercase-string`).
-- **Tuple / HashShape carriers** — shape-aware element access,
-  range / start-length slices, closed / open / required /
-  optional policies, per-element block fold over
-  `map`, `select`, `filter_map`, `flat_map`, `find` /
-  `find_index`, `count`, `any?` / `all?` / `none?`, `zip`.
-  `&:symbol` block-pass on these methods is treated as
-  `{ |x| x.symbol }` and dispatches against the element type
-  so `Hash#transform_values(&:freeze)` returns `Hash[K, V]`
-  instead of `Enumerator[...]`.
-- **Constant folding** — aggressive arithmetic / string /
-  Symbol / Tuple-shaped `divmod` folding, cartesian fold over
-  `Union[Constant…]`, integer-range arithmetic
-  (`positive-int + 1` → `int<2, max>`), branch elision on
-  provably-truthy / falsey predicates,
-  `Constant<String>#%` format-string fold against
-  `Tuple` / `HashShape` arguments.
-- **Built-in catalogues** — Numeric / Integer / Float, String /
-  Symbol, Array, Hash, IO, File, Range, Set, Time, Date /
-  DateTime, Comparable, Enumerable, Rational, Complex,
-  Pathname, Random, Struct (+ `Data`), Encoding, Regexp /
-  MatchData, Proc / Method / UnboundMethod, Exception. Each
-  catalog drives the fold dispatcher with per-class blocklists
-  for indirect mutators.
-- **Refinement carriers** — `Type::Difference`,
-  `Type::Refined`, `Type::Intersection` provide the
-  imported-built-in catalogue end-to-end through
-  `Builtins::ImportedRefinements`. The parser accepts Symbol
-  / String literals and `|`-unions at type-arg position
-  (`pick_of[Shape, :a | :b]`, `Pick[T, "name" | "email"]`).
-- **`Method` carrier (`Type::BoundMethod`)** —
-  `Object#method(:sym)` lifts into a binding carrier so
-  `.call` / `.()` / `[]` recover the precise dispatch
-  (`"1".method(:to_i).call` resolves to `Constant<1>`).
-  Reflective Method members (`#owner` / `#name` / `#arity`)
-  still resolve via the Method RBS sig.
-- **`RBS::Extended` directive routes** — `return:`, `param:`
-  (call-site + body-side), `assert:` /
-  `predicate-if-(true|false)` accept refinement payloads, and
-  roll up into a single `Rigor::FlowContribution` bundle per
-  method (the v0.1.0 plugin contribution merger reads bundles
-  directly).
-- **Opt-in gem-source inference (ADR-10)** — gems listed under
-  `dependencies.source_inference:` have their `lib/` walked.
-  Per-gem budget, per-gem-version cache slice,
-  `dynamic.dependency-source.*` diagnostic family covering
-  gem-not-found / budget-exceeded / config-conflict /
-  boundary-cross (the last surfaces RBS+gem-source overlap
-  on `mode: :full` gems for audit).
-
-The full per-release surface lives in
-[`CHANGELOG.md`](CHANGELOG.md). The internal contracts the
-analyzer guarantees live under
-[`docs/internal-spec/`](docs/internal-spec/).
+This is entirely optional — Rigor runs without any annotations.
+The directive grammar and the full refinement-name catalogue are in
+[`RBS::Extended`](https://rigor.typedduck.fail/reference/type-specification/rbs-extended/)
+and [imported built-in types](https://rigor.typedduck.fail/reference/type-specification/imported-built-in-types/).
 
 ## Plugins
 
-`v0.1.0` introduced the extension API; `v0.1.x` rounds it out
-with the [ADR-9](docs/adr/9-cross-plugin-api.md) cross-plugin
-fact channel (one plugin publishes a fact like `:model_index`,
-another consumes it), [ADR-11](docs/adr/11-sorbet-input-adapter.md)
-Sorbet ingestion, [ADR-13](docs/adr/13-typenode-resolver-plugin.md)
-plugin-supplied type-vocabulary resolvers, and
-[ADR-16](docs/adr/16-macro-expansion.md) macro / DSL expansion
-substrate (declarative Tier A block-as-method / Tier B
-trait-inlining-registry / Tier C heredoc-template / Tier D
-external-file inclusion). Production plugins ship under
-[`plugins/`](plugins/) — each is a fully-shaped plugin gem
-with a runnable demo and an end-to-end integration spec.
-Plugin-contract walkthroughs (deliberately simplified
-virtual use cases that spotlight one architectural surface
-per example) live under [`examples/`](examples/).
+Production plugins ship under [`plugins/`](plugins/) for the most common
+Ruby frameworks and gems. Activate them in `.rigor.yml`:
 
-**Plugin-contract walkthroughs** (`examples/`, focus on a
-single extension-point):
+```yaml
+plugins:
+  - rigor-activerecord
+  - rigor-actionpack
+  - rigor-rspec
+```
 
-- [`rigor-deprecations`](examples/rigor-deprecations/) —
-  smallest possible plugin (~80 lines); config-driven rules.
-- [`rigor-lisp-eval`](examples/rigor-lisp-eval/) — typing literal
-  AST arguments at a method call.
-- [`rigor-pattern`](examples/rigor-pattern/) — plugin →
-  analyzer collaboration via `Scope#type_of` and the
-  literal-string carrier.
-- [`rigor-units`](examples/rigor-units/) — local-variable flow
-  tracking through arithmetic.
-- [`rigor-routes`](examples/rigor-routes/) — `Plugin::IoBoundary`
-  reads under `TrustPolicy` plus cache producers.
+**Rails ecosystem** — [`rigor-rails-routes`](plugins/rigor-rails-routes/),
+[`rigor-rails-i18n`](plugins/rigor-rails-i18n/),
+[`rigor-activerecord`](plugins/rigor-activerecord/),
+[`rigor-actionpack`](plugins/rigor-actionpack/),
+[`rigor-actionmailer`](plugins/rigor-actionmailer/),
+[`rigor-activejob`](plugins/rigor-activejob/),
+[`rigor-factorybot`](plugins/rigor-factorybot/),
+[`rigor-pundit`](plugins/rigor-pundit/),
+[`rigor-sidekiq`](plugins/rigor-sidekiq/).
 
-**Other production plugins for type-language extension** (`plugins/`):
+**Other frameworks** — [`rigor-sinatra`](plugins/rigor-sinatra/),
+[`rigor-devise`](plugins/rigor-devise/),
+[`rigor-dry-struct`](plugins/rigor-dry-struct/),
+[`rigor-rspec`](plugins/rigor-rspec/),
+[`rigor-actioncable`](plugins/rigor-actioncable/).
 
-- [`rigor-statesman`](plugins/rigor-statesman/) — two-pass DSL
-  analysis (collect declarations, then validate references)
-  for the Statesman state-machine gem.
-- [`rigor-typescript-utility-types`](plugins/rigor-typescript-utility-types/)
-  — `Plugin::TypeNodeResolver` chain wiring TS-canonical names
-  (`Pick` / `Omit` / `Partial` / `Required` / `Readonly`) onto
-  Rigor's shape-projection type functions.
+**Type-system extensions** — [`rigor-sorbet`](plugins/rigor-sorbet/)
+(ingests Sorbet `sig` / `T.let` / RBI files),
+[`rigor-statesman`](plugins/rigor-statesman/),
+[`rigor-typescript-utility-types`](plugins/rigor-typescript-utility-types/).
 
-**Macro expansion substrate consumers** (ADR-16 — declarative
-manifest entries, no walker code):
-
-- [`rigor-sinatra`](plugins/rigor-sinatra/) — **Tier A**
-  block-as-method. Recognises Sinatra's nine class-level HTTP
-  verb methods and narrows the route block's `self_type` so
-  bare `params` / `redirect` / `halt` resolve through
-  `Sinatra::Base`'s RBS.
-- [`rigor-dry-struct`](plugins/rigor-dry-struct/) — **Tier C**
-  heredoc-template. Synthesises a reader on every `Dry::Struct`
-  subclass for each `attribute :name, T` / `attribute? :name, T`
-  call.
-- [`rigor-devise`](plugins/rigor-devise/) — **Tier B**
-  trait-inlining registry mirroring `lib/devise/modules.rb`.
-  Each `devise :strategy_a, :strategy_b` call explodes the
-  included module's RBS instance methods onto the calling model
-  class (Devise's `user.valid_password?` returns the module's
-  authored `bool`).
-
-**Rails ecosystem plugins** (Tier 1 + Tier 2 + Tier 3 + Sorbet):
-
-- Tier 1: [`rigor-rails-routes`](plugins/rigor-rails-routes/),
-  [`rigor-rails-i18n`](plugins/rigor-rails-i18n/),
-  [`rigor-actionmailer`](plugins/rigor-actionmailer/),
-  [`rigor-activejob`](plugins/rigor-activejob/).
-- Tier 2: [`rigor-actionpack`](plugins/rigor-actionpack/)
-  (4 phases — routes / filters / renders / strong-params),
-  [`rigor-factorybot`](plugins/rigor-factorybot/),
-  [`rigor-activerecord`](plugins/rigor-activerecord/) —
-  publishes `:model_index` via ADR-9 for the other two
-  to consume.
-- Tier 3: [`rigor-pundit`](plugins/rigor-pundit/),
-  [`rigor-sidekiq`](plugins/rigor-sidekiq/),
-  [`rigor-rspec`](plugins/rigor-rspec/),
-  [`rigor-actioncable`](plugins/rigor-actioncable/).
-- Parallel: [`rigor-sorbet`](plugins/rigor-sorbet/) — ingests
-  Sorbet `sig` / `T.let` / `T.cast` / `T.must` / `T.bind` /
-  `T.assert_type!` / `T.reveal_type` / `T.absurd` and RBI
-  files as type sources.
-
-[`plugins/README.md`](plugins/README.md) is the production
-plugin catalogue (Rails / RSpec / dry-rb / Sorbet / etc.) and
-[`examples/README.md`](examples/README.md) is the walkthrough
-catalogue — comparison table, recommended reading order, and
-the architectural map of which surface each walkthrough
-exercises. The binding contract for the plugin API lives in
-[`docs/adr/2-extension-api.md`](docs/adr/2-extension-api.md);
-the slice-by-slice normative specs are under
-[`docs/internal-spec/plugin*.md`](docs/internal-spec/); the
-sibling ADRs that extend it ride the same surface
-([ADR-9](docs/adr/9-cross-plugin-api.md) cross-plugin facts,
-[ADR-11](docs/adr/11-sorbet-input-adapter.md) Sorbet adapter,
-[ADR-13](docs/adr/13-typenode-resolver-plugin.md) TypeNode
-resolver).
+See [`plugins/README.md`](plugins/README.md) for the full catalogue. To
+write a plugin for your own DSL or framework, use the
+[`rigor-plugin-author`](skills/rigor-plugin-author/) Skill described above.
+Plugin-contract walkthroughs (simplified virtual use cases spotlighting
+one extension surface each) are under [`examples/`](examples/).
 
 ## Configuration
 
-`rigor init` writes a starter `.rigor.yml`:
+`rigor init` writes a starter `.rigor.yml`. Most projects only need a
+handful of lines:
 
-```sh
-rigor init           # fails if .rigor.yml exists
-rigor init --force   # overwrite
+```yaml
+paths: [lib, app]
+target_ruby: "3.3"
+plugins:
+  - rigor-activerecord
+  - rigor-actionpack
+baseline: .rigor-baseline.yml   # when using baseline adoption mode
 ```
 
-Common knobs the file exposes:
+Common knobs: `disable` (rule IDs to silence project-wide),
+`signature_paths` (additional `sig/`-style directories),
+`dependencies.source_inference` (opt-in gem-source walk for gems
+without RBS). The `rigor-project-init` Skill writes and populates all
+of this for you. Full reference on the
+[website](https://rigor.typedduck.fail/).
 
-- `paths` — directories `rigor check` and `rigor type-scan`
-  scan when no path is given (defaults to `lib`).
-- `target_ruby` — minimum Ruby version your project targets.
-- `libraries` — extra stdlib libraries to load on top of the
-  bundled defaults (e.g. `["csv", "set"]`).
-- `signature_paths` — explicit list of `sig/`-style directories.
-  Leave unset (or `null`) to auto-detect `<root>/sig`. Use `[]`
-  to disable project-RBS loading entirely.
-- `disable` — rule identifiers to silence project-wide. Shipped
-  rules: `undefined-method`, `wrong-arity`,
-  `argument-type-mismatch`, `possible-nil-receiver`,
-  `dump-type`, `assert-type`, `always-raises`. In-source
-  `# rigor:disable <rule>` end-of-line comments silence
-  per-line; `# rigor:disable all` suppresses every rule.
+In-source suppression: `# rigor:disable <rule>` silences a single line;
+`# rigor:disable all` suppresses every rule on that line.
 
 ## Status
 
-Current released version: **`v0.1.5`**. The analyzer is usable
-on real Ruby code today; the rule catalogue is deliberately
-narrow — Rigor's stance is to surface zero false positives
-while the inference surface stabilises. Forward-looking commitments
-(in-flight cycle + queued work) live in
-[`docs/ROADMAP.md`](docs/ROADMAP.md); the release-by-release
-"what shipped" record is [`CHANGELOG.md`](CHANGELOG.md).
+Current released version: **`v0.1.8`** (2026-05-21). The analyzer is
+usable on real Ruby code today; the rule catalogue is deliberately
+conservative — Rigor's stance is to surface zero false positives while
+the inference surface stabilises.
 
-`v0.1.5` (released 2026-05-16) delivered (full slice list in `CHANGELOG.md` § `[0.1.5]`):
-
-- **ADR-15 Ractor migration end-to-end** (Phases 1–4c + 4b.x) — opt-in `rigor check --workers=N` parallelism; pool ≡ sequential proven on 14 real-world projects (31,840 files); spec-suite wall-clock 162s → 27s on 12 cores via `parallel_tests`.
-- **[ADR-16](docs/adr/16-macro-expansion.md) macro / DSL expansion substrate** — four-tier declarative manifest contract (block-as-method, trait-inlining registry, heredoc-template, external-file) with Tier B/C precision promotion and three worked consumer plugins (`rigor-sinatra`, `rigor-devise`, `rigor-dry-struct`). Closes ROADMAP O2 at the WD13 floor.
-- **Real-world Rails / Ruby survey** — fourteen projects swept; opt-in `rigor-activesupport-core-ext` RBS bundle delivers `−75 %` total diagnostics; built-in vendored gem RBS for six native-extension gems (`pg` / `mysql2` / `nokogiri` / `bcrypt` / `redis` / `idn-ruby`); Bundler-aware sig discovery; `RbsLoader#env` failure-memo (~550× speedup on a conflicting sig).
-- **O4 Layer 3 target-project RBS source discovery (slices 1+2+3)** — `Gemfile.lock` parse + bundle-sig filter, `rbs_collection.lock.yaml` awareness, missing-gem `:info` diagnostic.
-- **DEFAULT_LIBRARIES stdlib coverage expansion** — out-of-the-box RBS classes available 1,273 → 1,427 (+154); 31 additional stdlib libraries auto-load.
-- **`is_a?(C)` lexical-nesting constant resolution** — predicate-narrowing now mirrors Ruby's `Module.nesting`-driven lookup.
-
-Production plugins ship under [`plugins/`](plugins/) (Rails /
-RSpec / dry-rb / Sorbet / etc.) — see
-[`plugins/README.md`](plugins/README.md) for the catalogue.
-Plugin-contract walkthroughs ship under
-[`examples/`](examples/) — see
-[`examples/README.md`](examples/README.md).
+Release history: [`CHANGELOG.md`](CHANGELOG.md). Forward-looking
+commitments: [Roadmap](https://rigor.typedduck.fail/reference/roadmap/).
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the minimal
-`git clone` → green-tests path and a map of the spec / ADR /
-skill documentation contributors should know about.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the `git clone` →
+green-tests path and a map of the spec / ADR / skill documentation
+contributors should read.
 
 ## License
 

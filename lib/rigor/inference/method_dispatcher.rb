@@ -15,6 +15,7 @@ require_relative "method_dispatcher/block_folding"
 require_relative "method_dispatcher/file_folding"
 require_relative "method_dispatcher/shellwords_folding"
 require_relative "method_dispatcher/math_folding"
+require_relative "method_dispatcher/time_folding"
 require_relative "method_dispatcher/regexp_folding"
 require_relative "method_dispatcher/cgi_folding"
 require_relative "method_dispatcher/uri_folding"
@@ -658,12 +659,14 @@ module Rigor
       end
 
       # Stdlib module singleton-folding tiers: File, Shellwords, Math,
-      # Regexp, CGI, URI, Set. Extracted from `dispatch_precise_tiers`
-      # to keep the parent method within the cyclomatic-complexity limit.
+      # Time, Regexp, CGI, URI, Set. Extracted from
+      # `dispatch_precise_tiers` to keep the parent method within the
+      # cyclomatic-complexity limit.
       def dispatch_stdlib_module_tiers(receiver_type, method_name, arg_types)
         FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           ShellwordsFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           MathFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          TimeFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           RegexpFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           CGIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           URIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
@@ -798,6 +801,9 @@ module Rigor
 
         regexp_lift = regexp_new_lift(receiver_type.class_name, arg_types)
         return regexp_lift if regexp_lift
+
+        date_lift = date_new_lift(receiver_type.class_name, arg_types)
+        return date_lift if date_lift
 
         Type::Combinator.nominal_of(receiver_type.class_name)
       end
@@ -951,6 +957,32 @@ module Rigor
                end
 
         Type::Combinator.constant_of(Regexp.new(pattern_arg.value, opts))
+      rescue StandardError
+        nil
+      end
+
+      # `Date.new(y, m, d)` / `DateTime.new(y, m, d, h, min, s, off)`
+      # — folds to `Constant[Date]` / `Constant[DateTime]` when every
+      # argument is a `Constant` carrying an Integer (or, for the
+      # `DateTime` offset / `start` slots, a Rational or String).
+      # `Date.new` carries no timezone, and `DateTime.new`'s offset
+      # defaults to UTC, so the literal is machine-independent.
+      # `Date.today` / `Date.parse` are not constructors here — they
+      # are non-deterministic / string-dependent and stay
+      # `Nominal[Date]`.
+      DATE_NEW_CLASSES = %w[Date DateTime].freeze
+      private_constant :DATE_NEW_CLASSES
+
+      def date_new_lift(class_name, arg_types)
+        return nil unless DATE_NEW_CLASSES.include?(class_name)
+        return nil unless arg_types.size.between?(1, 8)
+        return nil unless arg_types.all?(Type::Constant)
+
+        values = arg_types.map(&:value)
+        return nil unless values.all? { |v| v.is_a?(Integer) || v.is_a?(Rational) || v.is_a?(String) }
+
+        klass = class_name == "Date" ? Date : DateTime
+        Type::Combinator.constant_of(klass.new(*values))
       rescue StandardError
         nil
       end

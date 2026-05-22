@@ -6,8 +6,8 @@ session (Phase 4 / Slice 4 of the post-`c9a535a` coverage-uplift line).
 Unlike the String / Integer / Hash / Math audits, the Date / Time conclusion is
 **not** a list of dispatch-tier additions. The reader surface is already
 catalog-ready; the single blocker is a missing type carrier. This document
-records that finding so the carrier decision is made deliberately rather than
-folded silently into a dispatch slice.
+records that finding. The carrier was authorised and implemented (see § 4);
+the 🟦 rows below are now ✅.
 
 ---
 
@@ -15,9 +15,8 @@ folded silently into a dispatch slice.
 
 | 記号 | 意味 |
 |------|------|
-| ✅ | 既存ティアで精密化済み |
-| 🟦 | カタログ的には fold 可能だが `Constant` キャリア不在のため `Nominal` 止まり |
-| 🚫 | 非対象（破壊的・非決定的） |
+| ✅ | `Constant[Date]` / `Constant[Time]` キャリア経由で fold 済み |
+| 🚫 | 非対象（破壊的・非決定的・マシン依存） |
 
 ---
 
@@ -48,12 +47,12 @@ fold 可能になる（カタログ分類は確認済み・`date_catalog/demo.rb
 
 | 群 | メソッド | fold 先 | 状態 |
 |----|---------|---------|------|
-| Integer リーダ | `year` `month`/`mon` `day`/`mday` `wday` `yday` `cwyear` `cweek` `cwday` `jd` | `Constant[Integer]` | 🟦 |
-| bool 述語 | `leap?` `julian?` `gregorian?` `sunday?`…`saturday?` | `Constant[bool]` | 🟦 |
-| String リーダ | `to_s` `iso8601` `strftime(fmt)` `httpdate` `rfc3339` | `Constant[String]` | 🟦 |
-| Date ナビ | `next_day` `prev_day` `next_month` `prev_year` `succ` `>>` `<<` `next` | `Constant[Date]` | 🟦 |
-| DateTime 追加 | `hour` `min` `sec` `offset` `zone` | `Constant[Integer\|String]` | 🟦 |
-| 比較 | `<=>` `==` `<` `>` (Date×Date) | `Constant[bool\|Integer]` | 🟦 |
+| Integer リーダ | `year` `month`/`mon` `day`/`mday` `wday` `yday` `cwyear` `cweek` `cwday` `jd` | `Constant[Integer]` | ✅ |
+| bool 述語 | `leap?` `julian?` `gregorian?` `sunday?`…`saturday?` | `Constant[bool]` | ✅ |
+| String リーダ | `to_s` `iso8601` `strftime(fmt)` `httpdate` `rfc3339` | `Constant[String]` | ✅ |
+| Date ナビ | `next_day` `prev_day` `next_month` `prev_year` `succ` `>>` `<<` `next` | `Constant[Date]` | ✅ |
+| DateTime 追加 | `hour` `min` `sec` `offset` `zone` | `Constant[Integer\|String]` | ✅ |
+| 比較 | `<=>` `==` `<` `>` (Date×Date) | `Constant[bool\|Integer]` | ✅ |
 | 破壊的 | （Date は不変。該当なし） | — | — |
 
 ---
@@ -64,12 +63,13 @@ fold 可能になる（カタログ分類は確認済み・`date_catalog/demo.rb
 
 | 群 | メソッド | fold 先 | 状態 |
 |----|---------|---------|------|
-| Integer リーダ | `year` `month` `day` `hour` `min` `sec` `wday` `yday` `usec` `nsec` `utc_offset` | `Constant[Integer]` | 🟦 |
-| bool 述語 | `utc?`/`gmt?` `sunday?`…`saturday?` `dst?` | `Constant[bool]` | 🟦 |
-| String リーダ | `strftime(fmt)` `to_s` `ctime`/`asctime` `inspect` | `Constant[String]` | 🟦 |
-| Time ナビ | `getlocal` `getutc`/`getgm` `+` `-`(Numeric) `round` `floor` `ceil` | `Constant[Time]` | 🟦 |
+| Integer リーダ | `year` `month` `day` `hour` `min` `sec` `wday` `yday` `usec` `nsec` `utc_offset` | `Constant[Integer]` | ✅ |
+| bool 述語 | `utc?`/`gmt?` `sunday?`…`saturday?` `dst?` | `Constant[bool]` | ✅ |
+| String リーダ | `strftime(fmt)` `to_s` `ctime`/`asctime` `inspect` | `Constant[String]` | ✅ |
+| Time ナビ | `getutc`/`getgm` `+` `-`(Numeric) `round` `floor` `ceil` | `Constant[Time]` | ✅ |
 | 破壊的 | `localtime` `gmtime` `utc` | — | 🚫 ブロックリスト済み |
-| 非決定的 | `Time.now` | — | 🚫 carrier 化対象外 |
+| マシン依存 | `getlocal` | — | 🚫 `TIME_CATALOG` ブロックリストに追加 |
+| 非決定的 | `Time.now` / `Time.at` / `Time.local` / `Time.new` | — | 🚫 carrier 化対象外（ローカルゾーン依存） |
 
 **Time の不変性の注意**: `Time#localtime` / `gmtime` / `utc` は `time_modify`
 で receiver を in-place 変更する。`Time` は純粋不変ではない。`Constant[Time]`
@@ -79,43 +79,41 @@ decline、健全）。`TIME_CATALOG` は既に 3 つの擬似ミューテータ�
 
 ---
 
-## 4. 結論 — 判断事項: `Constant` キャリアの新設
+## 4. 実装（carrier 新設、承認のうえ実施）
 
-Date / Time の精密化は **ディスパッチ層の追加では達成できない**。`Type::Constant`
-に新しいスカラキャリアを足す型システム変更が前提となる。直近に `Set` を
-キャリア化した前例があり（`[Unreleased]` の "Set constant carrier"）、手順は確立
-している。所要変更:
+Date / Time の精密化は **ディスパッチ層の追加では達成できず**、`Type::Constant`
+に新しいスカラキャリアを足す型システム変更が前提だった。`Set` キャリアの前例に
+沿って以下を実装した:
 
 1. **`lib/rigor/type/constant.rb`**
    - 先頭で `require "date"`（`Date` / `DateTime` は stdlib。`Time` は core）。
-   - `SCALAR_CLASSES` に `Date`（`DateTime` は `Date` のサブクラスなので包含）、
+   - `SCALAR_CLASSES` に `Date`（`DateTime` は `Date` のサブクラスなので包含）と
      `Time` を追加。
-   - `initialize` の凍結分岐に `Date` / `Time` を追加（`value.dup.freeze`）。
-   - `describe` を特例化 — `Date#inspect` / `Time#inspect` は冗長
-     (`#<Date: 2026-01-01 ((...j,...))>`) なので `to_s`（`"2026-01-01"`）を使う。
-   - `erase_to_rbs` は既定の `value.class.name`（`"Date"` / `"Time"`）で可。
+   - `initialize` の凍結分岐を `freezable_carrier?` に切り出し、`Date` / `Time`
+     を `value.dup.freeze` 対象に追加（凍結 `Time` への `localtime` は
+     `FrozenError` → fold は rescue で decline、健全）。
+   - `describe` を特例化 — `Date#inspect` は astronomical Julian day 表記で
+     不可読なので `iso8601`（`"2026-01-01"`）を使う。`Time#inspect` は
+     `"2026-01-01 00:00:00 UTC"` と簡潔なので既定のまま。
 
 2. **`constant_folding.rb`**
-   - `foldable_constant_value?` に `Date` / `Time` を追加。
-   - リーダ群はカタログ（`catalog_allows?`）経由で自動的に fold するため
-     UNARY/BINARY Set への追加は不要。
+   - `foldable_constant_value?` の許可クラス集合（`FOLDABLE_CONSTANT_CLASSES`）に
+     `Date` / `Time` を追加。リーダ群はカタログ（`catalog_allows?`）経由で
+     自動的に fold するため UNARY/BINARY Set への追加は不要。
 
 3. **コンストラクタ fold**（`Constant[Date]` / `Constant[Time]` を産む入口）
-   - `Date.new(y,m,d)` — `MethodDispatcher#meta_new` に `date_new_lift`
-     （`range_new_lift` / `array_new_lift` と同じ場所・同じ形）。
-   - `Time.utc(...)` / `Time.gm(...)` / `Time.at(epoch)` — Tier D
-     `TimeFolding` モジュール、または `meta_new` 拡張。`Time.now` は非決定的
-     なので **対象外**（`Nominal[Time]` を維持）。
-   - `Date.parse` / `Date.today` も非対象（前者は文字列依存だが今回スコープ外、
-     後者は非決定的）。
+   - `Date.new(y,m,d)` / `DateTime.new(...)` — `MethodDispatcher#meta_new` に
+     `date_new_lift`（`range_new_lift` / `regexp_new_lift` と同じ場所・同じ形）。
+   - `Time.utc(...)` / `Time.gm(...)` — Tier D `TimeFolding` モジュール
+     （`dispatch_stdlib_module_tiers` に配線）。UTC 固定なのでマシン非依存。
+   - `Time.now` / `Time.at` / `Time.local` / `Time.new` / `Date.today` /
+     `Date.parse` は **対象外** — 非決定的、またはローカルゾーン依存。
 
-4. **FP 規律の確認** — `Constant[Time]` を `localtime` 等のミューテータと組み
-   合わせたとき、凍結 Time が `FrozenError` を投げて fold が decline すること、
-   `rigor check lib` がクリーンであることを回帰で固定。
-
-### 推奨
-
-型キャリアの新設は本コーパスのディスパッチ拡充とは粒度が異なる意図的な判断で
-あり、`date_catalog/demo.rb` が現状を「deliberate deferral」として固定している。
-**carrier 新設を独立スライスとして明示承認のうえ着手する**ことを推奨する。承認
-されれば §4 の 4 ステップは `Set` キャリアの前例に沿ってほぼ機械的に実装できる。
+4. **FP 規律 — マシン依存の排除**
+   - `Time.utc` / `gm` のみを fold（UTC 固定）。`Time.at` / `Time.local` /
+     `Time.new`（明示オフセットなし）は解析マシンのゾーンに依存するため非対象。
+   - `Time#getlocal` を `TIME_CATALOG` のブロックリストに追加 — ミューテータでは
+     ないが結果が解析マシンのゾーンに依存するため、`Constant[Time]`（常に UTC）
+     から fold するとホスト依存の値が型に焼き込まれる。`getutc` / `getgm` は
+     UTC 結果なので fold 可能なまま。
+   - `rigor check lib` クリーン、4345 examples 0 failures で回帰固定。

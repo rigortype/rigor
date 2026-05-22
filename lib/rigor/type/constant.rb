@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "date"
 require_relative "../trinary"
 
 module Rigor
@@ -25,6 +26,12 @@ module Rigor
         Regexp,
         Pathname,
         ::Set,
+        # `Date` covers `DateTime` (a subclass). `Time` is core.
+        # Both arise only from deterministic constructor folding
+        # (`Date.new` / `Time.utc`) — there is no Date / Time
+        # literal node — so a `Constant` carrier is always sound.
+        Date,
+        Time,
         TrueClass,
         FalseClass,
         NilClass
@@ -43,12 +50,31 @@ module Rigor
           raise ArgumentError, "Rigor::Type::Constant only carries scalar literals; got #{value.class}"
         end
 
-        @value = value.is_a?(String) || value.is_a?(::Set) ? value.dup.freeze : value
+        @value = freezable_carrier?(value) ? value.dup.freeze : value
         freeze
       end
 
+      # Mutable-ish carriers are stored as a frozen copy so a later
+      # in-place mutation cannot rewrite the literal under us. `Time`
+      # joins `String` / `Set` here: `Time#localtime` mutates the
+      # receiver's zone in place, so the carrier holds a frozen copy
+      # (the catalog also blocklists the mutators). `Date` is already
+      # immutable, but is duped-and-frozen for symmetry.
+      def freezable_carrier?(value)
+        value.is_a?(String) || value.is_a?(::Set) ||
+          value.is_a?(Date) || value.is_a?(Time)
+      end
+
+      # `Date#inspect` / `DateTime#inspect` spell out the internal
+      # astronomical-Julian-day representation, which is unreadable
+      # in a diagnostic. ISO-8601 is the compact, deterministic
+      # form. `Time#inspect` is already compact (`2026-01-01
+      # 00:00:00 UTC`), so it keeps the default.
       def describe(_verbosity = :short)
-        value.inspect
+        case value
+        when Date then value.iso8601
+        else value.inspect
+        end
       end
 
       # RBS supports `Literal` types for booleans, nil, integer

@@ -1275,11 +1275,15 @@ module Rigor
         # have their own shape carriers; this method picks
         # the conservative envelope of "values that already
         # round-trip through `Type::Combinator.constant_of`".
+        FOLDABLE_CONSTANT_CLASSES = [
+          Integer, Float, Rational, Complex, String, Symbol,
+          Regexp, Pathname, ::Set, Date, Time,
+          TrueClass, FalseClass, NilClass
+        ].freeze
+        private_constant :FOLDABLE_CONSTANT_CLASSES
+
         def foldable_constant_value?(value)
-          case value
-          when Integer, Float, Rational, Complex, String, Symbol, Regexp, Pathname, ::Set, true, false, nil then true
-          else false
-          end
+          FOLDABLE_CONSTANT_CLASSES.any? { |klass| value.is_a?(klass) }
         end
 
         def safe?(receiver_value, method_name, arg_value)

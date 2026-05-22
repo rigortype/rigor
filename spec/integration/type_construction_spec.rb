@@ -709,6 +709,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/date_time_folding/ — Date / Time Constant carrier folding" do
+    let(:harness) { harness_for("date_time_folding") }
+
+    it "folds Date.new / DateTime.new / Time.utc constructors and their reader surface" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/date_catalog/ — Date / DateTime catalog-driven folding" do
     let(:harness) { harness_for("date_catalog") }
 

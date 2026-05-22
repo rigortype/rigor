@@ -55,7 +55,16 @@ module Rigor
             # as `time_localtime`: `time_modify(time)` then a
             # `time_set_vtm` write and `TZMODE_SET_UTC`. Both
             # selectors share the cfunc, so both must be blocked.
-            :gmtime, :utc
+            :gmtime, :utc,
+            # `getlocal` is not a mutator — it returns a fresh Time —
+            # but the fresh Time is pinned to the *analysis machine's*
+            # timezone. Folding it through a `Constant[Time]` carrier
+            # (which only ever holds a UTC literal from `Time.utc`)
+            # would bake a host-dependent wall clock / `utc_offset`
+            # into the inferred type. Blocked so the fold stays
+            # machine-independent; the RBS tier answers `Nominal[Time]`.
+            # `getutc` / `getgm` stay foldable — their result is UTC.
+            :getlocal
           ]
         }
       )

@@ -22,6 +22,12 @@ specification](../type-specification/README.md) — that lives
 in `docs/type-specification/` and is the binding source when
 this handbook disagrees.
 
+Operational topics — installation, the CLI command reference,
+configuration keys, baselines, CI — live in the
+[User Manual](../manual/README.md). Reach for this handbook to
+understand what a type *means*; reach for the manual to look
+up the flag, key, or command that *acts* on it.
+
 ## Table of contents
 
 1. [**Getting started**](01-getting-started.md) — running
@@ -79,20 +85,6 @@ this handbook disagrees.
     lazy "tying-the-knot" handling for recursive sums, and
     the conscious non-goals (no conditional bodies, no
     multi-arg containers yet, no plugin manifest hookup).
-
-### Appendix — Installation and CI
-
-How to install Rigor for everyday use and how to wire it into
-continuous integration. Rigor is a standalone tool, not a project
-dependency; these pages cover the channels in full, where
-[Chapter 1](01-getting-started.md) gives only the headline.
-
-- [**Installing Rigor**](appendix-installation.md) — `mise`
-  (recommended), `asdf`, `gem install`, Nix, and the dev-container
-  guidance.
-- [**Running Rigor in CI**](appendix-ci.md) — running Rigor in its
-  own job, a minimal GitHub Actions workflow, and pinning the Rigor
-  version with a CI-only `Gemfile` plus Dependabot.
 
 ### Appendix — Coming from another type checker
 

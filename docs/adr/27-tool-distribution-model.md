@@ -349,7 +349,7 @@ No slice is scheduled by this ADR.
   table, demote `gem install`, drop the `group :development`
   recommendation.
 - A dedicated `docs/installation.md` is a candidate home for the full
-  matrix; `docs/lsp-integration.md` cross-references it.
+  matrix; `docs/manual/09-editor-integration.md` cross-references it.
 - Update the `rigor-project-init` SKILL so its first step is a
   channel choice, not a `Gemfile` edit.
 

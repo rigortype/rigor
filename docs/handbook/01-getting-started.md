@@ -22,9 +22,9 @@ mise use gem:rigortype
 With mise activated in your shell, `rigor` is on your `PATH`. For
 shell activation and shims, `asdf`, `gem install`, and developing
 inside a container, see
-[Appendix — Installing Rigor](appendix-installation.md); for
+[Installing Rigor](../manual/01-installation.md); for
 continuous integration, see
-[Appendix — Running Rigor in CI](appendix-ci.md).
+[Running Rigor in CI](../manual/10-ci.md).
 
 ## What does `rigor check` look at?
 

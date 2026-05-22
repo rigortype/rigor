@@ -59,9 +59,9 @@ loaded — fix the setup and run **Rigor: Restart Server**.
 ### Runtime version managers (mise / asdf)
 
 `mise` is the recommended way to install Rigor — `mise use
-gem:rigortype` (see the handbook's
-[Installing Rigor](https://github.com/rigortype/rigor/blob/main/docs/handbook/appendix-installation.md)
-appendix). A GUI-launched VS Code does not inherit the shell `PATH`
+gem:rigortype` (see the manual's
+[Installing Rigor](https://github.com/rigortype/rigor/blob/main/docs/manual/01-installation.md)
+chapter). A GUI-launched VS Code does not inherit the shell `PATH`
 that `mise activate` sets up, so step 3 above often misses a
 mise-managed `rigor` — step 4 covers that automatically by finding
 the shim, a stable self-contained executable. `asdf` shims
@@ -110,7 +110,7 @@ diagnostics are tagged `source: "rigor"` in the Problems panel.
 
 ## Troubleshooting
 
-See the [LSP integration guide](https://github.com/rigortype/rigor/blob/main/docs/lsp-integration.md)
+See the [editor integration guide](https://github.com/rigortype/rigor/blob/main/docs/manual/09-editor-integration.md)
 for diagnostics-not-appearing, empty-completion, and `untyped`-hover
 cases. For server-side detail, set `rigor.server.logPath` and open the
 log with **Rigor: Show Server Log**.

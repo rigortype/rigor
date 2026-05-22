@@ -8,11 +8,11 @@ type-aware completion.
 
 This page is the entry point for wiring it into your editor. The
 design + capability matrix lives in
-[`docs/design/20260517-language-server.md`](design/20260517-language-server.md)
+[`docs/design/20260517-language-server.md`](../design/20260517-language-server.md)
 (v1) and
-[`docs/design/20260517-lsp-hover-completion.md`](design/20260517-lsp-hover-completion.md)
+[`docs/design/20260517-lsp-hover-completion.md`](../design/20260517-lsp-hover-completion.md)
 (v2). Packaging rationale is in
-[`docs/adr/19-language-server-packaging.md`](adr/19-language-server-packaging.md).
+[`docs/adr/19-language-server-packaging.md`](../adr/19-language-server-packaging.md).
 
 ## Features at a glance
 

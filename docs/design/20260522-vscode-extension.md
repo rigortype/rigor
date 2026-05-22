@@ -8,7 +8,7 @@ landed in v0.1.6 and is bundled in the `rigortype` gem as the
 `rigor lsp` subcommand ([ADR-19](../adr/19-language-server-packaging.md)).
 Today VSCode users are told to wire it up through a generic LSP client
 or a hand-written minimal extension — see the current
-[`docs/lsp-integration.md`](../lsp-integration.md) § "VSCode". Neovim
+[`docs/manual/09-editor-integration.md`](../manual/09-editor-integration.md) § "VSCode". Neovim
 gets a documented `lspconfig` recipe, Helix gets a `languages.toml`
 block, Emacs gets Eglot / lsp-mode snippets; VSCode — the single
 largest editor in the Ruby population — gets a "write your own"
@@ -40,7 +40,7 @@ editor-artifact section rather than re-deriving the gem rationale.
 
 - **Location: monorepo, new top-level `editors/vscode/`.** A new
   `editors/` tree joins `plugins/`, `examples/`, `skills/`. Keeps the
-  extension versioned next to `docs/lsp-integration.md`, discoverable
+  extension versioned next to `docs/manual/09-editor-integration.md`, discoverable
   in one repo, and reserves `editors/` for future editor artifacts
   (a Zed extension, an Emacs package) without re-litigating layout.
   Rejected: `plugins/` (that tree is the Ruby-gem plugin catalogue
@@ -317,7 +317,7 @@ publishing path.
 
 ## Docs follow-through
 
-When the extension ships, rewrite [`docs/lsp-integration.md`](../lsp-integration.md)
+When the extension ships, rewrite [`docs/manual/09-editor-integration.md`](../manual/09-editor-integration.md)
 § "VSCode": replace the generic-client / hand-written-extension
 workaround with "install the **Rigor** extension from the
 Marketplace (or Open VSX)", keeping the manual-wiring snippet only as

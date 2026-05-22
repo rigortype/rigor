@@ -62,8 +62,8 @@ The gem is named `rigortype` (the name `rigor` was taken on RubyGems);
 the executable it installs is `rigor`.
 
 Full options — `asdf`, dev containers, CI workflow template — are in the
-[installation guide](https://rigor.typedduck.fail/reference/handbook/appendix-installation/)
-and [CI guide](https://rigor.typedduck.fail/reference/handbook/appendix-ci/).
+[installation guide](https://rigor.typedduck.fail/reference/manual/01-installation/)
+and [CI guide](https://rigor.typedduck.fail/reference/manual/10-ci/).
 
 ## Getting started with AI Skills
 

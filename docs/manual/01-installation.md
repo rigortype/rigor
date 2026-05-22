@@ -1,4 +1,4 @@
-# Appendix — Installing Rigor
+# Installing Rigor
 
 Rigor is a tool, not a library — like a linter or a compiler, it
 analyses your project but is not part of its runtime. **Do not add
@@ -74,7 +74,7 @@ the two mechanisms:
 
 Until mise is wired in either way, you can still run Rigor
 explicitly with `mise exec gem:rigortype -- rigor`. See
-[`docs/lsp-integration.md`](../lsp-integration.md) for the editor
+[Editor integration](09-editor-integration.md) for the editor
 side.
 
 ## asdf
@@ -131,5 +131,5 @@ Rigor inside the container is the better choice.
 
 ## Continuous integration
 
-Wiring Rigor into CI has its own appendix — see
-[Appendix — Running Rigor in CI](appendix-ci.md).
+Wiring Rigor into CI has its own chapter — see
+[Running Rigor in CI](10-ci.md).

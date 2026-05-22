@@ -63,6 +63,19 @@ quickest path, but it records nothing per project: a version
 manager keeps the Rigor version pinned next to the project, so
 local runs and CI cannot drift apart.
 
+## Nix
+
+If you use Nix, Rigor's flake exposes the executable as a package,
+with Ruby 4.0 in its closure — nothing else need be on the host:
+
+```sh
+# Run without installing:
+nix run github:rigortype/rigor#rigor -- check
+
+# Or install it into your profile:
+nix profile install github:rigortype/rigor
+```
+
 ## Developing inside a container
 
 If you develop inside a dev container, install Rigor on the **host

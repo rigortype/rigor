@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
   };
 
-  outputs = { nixpkgs, ... }:
+  outputs = { self, nixpkgs, ... }:
     let
       systems = [
         "aarch64-darwin"
@@ -15,18 +15,24 @@
       ];
 
       forAllSystems = nixpkgs.lib.genAttrs systems;
+
+      # Ruby 4.0.5 — shared by the dev shell and the packaged
+      # `rigor` executable. Bump via the rigor-ruby-version-bump
+      # skill (flake.nix is Step 1).
+      mkRuby = pkgs:
+        (pkgs.mkRuby {
+          version = pkgs.mkRubyVersion "4" "0" "5" "";
+          hash = "sha256-fWFJB5pj+K4dMmyfplxgGbotwxVerns5FZgXkRyIlY4=";
+          cargoHash = "sha256-z7NwWc4TaR042hNx0xgRkh/BQEpEJtE53cfrN0qNiE0=";
+        }).override {
+          docSupport = false;
+        };
     in
     {
       devShells = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
-          ruby = (pkgs.mkRuby {
-            version = pkgs.mkRubyVersion "4" "0" "5" "";
-            hash = "sha256-fWFJB5pj+K4dMmyfplxgGbotwxVerns5FZgXkRyIlY4=";
-            cargoHash = "sha256-z7NwWc4TaR042hNx0xgRkh/BQEpEJtE53cfrN0qNiE0=";
-          }).override {
-            docSupport = false;
-          };
+          ruby = mkRuby pkgs;
           rubyEnv = ruby.withPackages (ps: [
             ps.rake
           ]);
@@ -95,11 +101,96 @@
               rubyEnv
               git
               pkgs.gnumake
+              pkgs.bundix
               waza
             ];
 
             BUNDLE_PATH = "vendor/bundle";
             BUNDLE_BIN = "bin";
+          };
+        });
+
+      # The packaged `rigor` executable — Ruby 4.0 plus the runtime
+      # gems in its closure, so `nix run` / `nix profile install`
+      # need nothing else on the host (ADR-27 slice 2).
+      packages = forAllSystems (system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          ruby = mkRuby pkgs;
+
+          # rigortype's runtime dependencies, resolved from
+          # nix/Gemfile + nix/gemset.nix. Regenerate after a
+          # dependency change with `cd nix && bundle lock && bundix`.
+          rigorDeps = pkgs.bundlerEnv {
+            name = "rigortype-deps";
+            inherit ruby;
+            gemdir = ./nix;
+          };
+
+          version =
+            let
+              m = builtins.match ''[^"]*"([^"]+)"[^"]*''
+                (builtins.readFile ./lib/rigor/version.rb);
+            in
+            builtins.head m;
+
+          rigor = pkgs.stdenv.mkDerivation {
+            pname = "rigortype";
+            inherit version;
+
+            src = pkgs.lib.fileset.toSource {
+              root = ./.;
+              fileset = pkgs.lib.fileset.unions [
+                ./lib
+                ./exe
+                ./data
+                ./sig
+              ];
+            };
+
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            dontConfigure = true;
+            dontBuild = true;
+
+            # rigortype is pure Ruby — its own code is copied in and
+            # `exe/rigor` is wrapped against a Ruby carrying the
+            # runtime gems. The script puts its own lib/ on the load
+            # path relative to itself.
+            installPhase = ''
+              runHook preInstall
+              mkdir -p $out/share/rigor $out/bin
+              cp -r lib exe data sig $out/share/rigor/
+              makeWrapper ${rigorDeps.wrappedRuby}/bin/ruby $out/bin/rigor \
+                --add-flags "$out/share/rigor/exe/rigor"
+              runHook postInstall
+            '';
+
+            meta = with pkgs.lib; {
+              description = "Inference-first static analysis for Ruby";
+              homepage = "https://github.com/rigortype/rigor";
+              license = licenses.mpl20;
+              mainProgram = "rigor";
+              platforms = systems;
+            };
+          };
+        in
+        {
+          default = rigor;
+          rigor = rigor;
+        });
+
+      apps = forAllSystems (system:
+        let
+          program = "${self.packages.${system}.default}/bin/rigor";
+        in
+        {
+          default = {
+            type = "app";
+            inherit program;
+          };
+          rigor = {
+            type = "app";
+            inherit program;
           };
         });
     };

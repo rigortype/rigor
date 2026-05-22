@@ -88,7 +88,7 @@ dependency; these pages cover the channels in full, where
 [Chapter 1](01-getting-started.md) gives only the headline.
 
 - [**Installing Rigor**](appendix-installation.md) — `mise`
-  (recommended), `asdf`, `gem install`, and the dev-container
+  (recommended), `asdf`, `gem install`, Nix, and the dev-container
   guidance.
 - [**Running Rigor in CI**](appendix-ci.md) — running Rigor in its
   own job, a minimal GitHub Actions workflow, and pinning the Rigor

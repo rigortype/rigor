@@ -95,9 +95,29 @@ updates:
 extra files — but Dependabot does not see a version inside a `run:`
 step, so updates to the pin are manual.
 
-## Other channels
+## Container image
 
-A published container image and a Nix flake package are planned as
-further CI channels — see
-[ADR-27](../adr/27-tool-distribution-model.md) for the distribution
-model behind this page.
+A standalone image is published to GHCR with Ruby 4.0 and Rigor
+baked in. It suits CI runners with no Ruby toolchain — mount the
+project on `/src`:
+
+```sh
+docker run --rm -v "$PWD:/src" ghcr.io/rigortype/rigor check
+```
+
+`rigor` is the image entrypoint, so subcommands and flags follow the
+image name. Pin a version with an explicit tag —
+`ghcr.io/rigortype/rigor:0.1.9`.
+
+## Nix
+
+For CI that already runs Nix, the flake exposes Rigor as a package
+with Ruby 4.0 in its closure — a fully hermetic run with nothing
+else on the runner:
+
+```sh
+nix run github:rigortype/rigor#rigor -- check
+```
+
+See [ADR-27](../adr/27-tool-distribution-model.md) for the
+distribution model behind this page.

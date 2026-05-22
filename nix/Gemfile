@@ -1,0 +1,18 @@
+# frozen_string_literal: true
+
+# Runtime dependencies of the rigortype gem, mirrored from
+# rigortype.gemspec. This Gemfile exists only to build the Nix
+# package (packages.default in flake.nix): bundlerEnv resolves
+# these third-party gems, and the derivation adds rigortype's own
+# code on top. It deliberately does NOT use `gemspec` — that would
+# pull in the development dependencies as well.
+#
+# Regenerate Gemfile.lock + gemset.nix after changing this file:
+#
+#   cd nix && bundle lock && bundix
+#
+source "https://rubygems.org"
+
+gem "language_server-protocol", ">= 3.17", "< 4.0"
+gem "prism", ">= 1.0", "< 2.0"
+gem "rbs", ">= 3.0", "< 5.0"

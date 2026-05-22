@@ -177,34 +177,34 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `-@`, `+@` | ✅ | INTEGER_UNARY。 |
 | `abs` / `magnitude` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
 | `bit_length` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
-| `between?` | 🔲 | 2 引数。専用ハンドラで `Constant[bool]`。中優先度。 |
-| `ceil` | 🔲 | INTEGER_UNARY 追加（引数なし → self）で `Constant[Integer]`。中優先度。 |
-| `chr` | 🔲 | INTEGER_UNARY 追加で `Constant[String]`。中優先度。 |
-| `clamp` | 🔲 | 2 引数または Range 引数。専用ハンドラ。中優先度。 |
+| `between?` | ✅ | `try_fold_ternary`（catalog 経由）→ `Constant[bool]`。 |
+| `ceil` | ✅ | INTEGER_UNARY（引数なし）→ `Constant[Integer]`。 |
+| `chr` | ✅ | INTEGER_UNARY → `Constant[String]`。 |
+| `clamp` | ✅ | `try_fold_ternary`（catalog 経由）→ `Constant[Integer]`。 |
 | `coerce` | 🚫 | 内部用。精度向上なし。 |
-| `digits` | 🔲 | INTEGER_UNARY 追加で `Tuple[Constant[Integer]…]`。中優先度。 |
-| `divmod` | 🔲 | INTEGER_BINARY 追加で `Tuple[Constant[Integer], Constant[Integer]]`。中優先度。 |
+| `digits` | ✅ | `try_fold_integer_array_unary` → `Tuple[Constant[Integer]…]`。 |
+| `divmod` | ✅ | `try_fold_divmod` → `Tuple[Constant[Integer], Constant[Integer]]`。 |
 | `even?` | ✅ | INTEGER_UNARY → `Constant[bool]`。 |
-| `fdiv` | 🔲 | INTEGER_BINARY 追加で `Constant[Float]`。中優先度。 |
-| `floor` | 🔲 | INTEGER_UNARY 追加（引数なし → self）で `Constant[Integer]`。中優先度。 |
-| `gcd` | 🔲 | INTEGER_BINARY 追加で `Constant[Integer]`。中優先度。 |
+| `fdiv` | ✅ | NUMERIC_BINARY → `Constant[Float]`。 |
+| `floor` | ✅ | INTEGER_UNARY（引数なし）→ `Constant[Integer]`。 |
+| `gcd` | ✅ | NUMERIC_BINARY → `Constant[Integer]`。 |
 | `gcdlcm` | 🔲 | INTEGER_BINARY 追加で `Tuple[Constant[Integer], Constant[Integer]]`。低優先度。 |
 | `hash` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
 | `inspect` / `to_s` | ✅ | INTEGER_UNARY → `Constant[String]`。 |
 | `integer?` | 🔲 | INTEGER_UNARY 追加で `Constant[true]`。低優先度（常に true）。 |
-| `lcm` | 🔲 | INTEGER_BINARY 追加で `Constant[Integer]`。中優先度。 |
+| `lcm` | ✅ | NUMERIC_BINARY → `Constant[Integer]`。 |
 | `negative?` / `positive?` / `zero?` | ✅ | INTEGER_UNARY → `Constant[bool]`。 |
 | `next` / `succ` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
 | `odd?` | ✅ | INTEGER_UNARY → `Constant[bool]`。 |
 | `pow` | 🔲 | `**` の別名（ただし `pow(exp, mod)` は剰余乗算）。低優先度。 |
 | `pred` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
 | `rationalize` / `to_r` | 🔲 | INTEGER_UNARY 追加で `Constant[Rational]`。低優先度。 |
-| `round` | 🔲 | INTEGER_UNARY 追加（引数なし → self）で `Constant[Integer]`。中優先度。 |
+| `round` | ✅ | INTEGER_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `size` | 🔲 | プラットフォーム依存バイト幅。低優先度。 |
 | `to_c` | 🔲 | INTEGER_UNARY 追加で `Constant[Complex]`。低優先度。 |
 | `to_f` | ✅ | INTEGER_UNARY → `Constant[Float]`。 |
 | `to_i` / `to_int` | ✅ | INTEGER_UNARY → `Constant[Integer]`。 |
-| `truncate` | 🔲 | INTEGER_UNARY 追加（引数なし → self）で `Constant[Integer]`。中優先度。 |
+| `truncate` | ✅ | INTEGER_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `upto` / `downto` / `times` | 🚫 | 反復子。 |
 
 ### 2-2. 実装チェックリスト（優先度順）
@@ -219,14 +219,14 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 [x] >>   → NUMERIC_BINARY  → Constant[Integer]
 
 中優先度:
-[ ] floor / ceil / round / truncate (引数なし) → INTEGER_UNARY → Constant[Integer]
-[ ] chr           → INTEGER_UNARY  → Constant[String]
-[ ] digits (引数なし) → INTEGER_UNARY → Tuple[Constant[Integer]…]
-[ ] gcd / lcm     → INTEGER_BINARY → Constant[Integer]
-[ ] divmod        → INTEGER_BINARY → Tuple[Constant[Integer], Constant[Integer]]
-[ ] fdiv          → INTEGER_BINARY → Constant[Float]
-[ ] between?      → 専用ハンドラ   → Constant[bool]
-[ ] clamp         → 専用ハンドラ   → Constant[Integer]
+[x] floor / ceil / round / truncate (引数なし) → INTEGER_UNARY → Constant[Integer]
+[x] chr           → INTEGER_UNARY  → Constant[String]
+[x] digits (引数なし) → try_fold_integer_array_unary → Tuple[Constant[Integer]…]
+[x] gcd / lcm     → NUMERIC_BINARY → Constant[Integer]
+[x] divmod        → try_fold_divmod → Tuple[Constant[Integer], Constant[Integer]]
+[x] fdiv          → NUMERIC_BINARY → Constant[Float]
+[x] between?      → try_fold_ternary（catalog 経由）→ Constant[bool]
+[x] clamp         → try_fold_ternary（catalog 経由）→ Constant[Integer]
 
 低優先度:
 [ ] rationalize / to_r  → INTEGER_UNARY
@@ -252,13 +252,13 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `<=>`, `<`, `<=`, `>`, `>=`, `==`, `!=` | ✅ | NUMERIC_BINARY → `Constant[bool\|Integer]`。 |
 | `-@`, `+@` | ✅ | FLOAT_UNARY。 |
 | `abs` / `magnitude` | ✅ | FLOAT_UNARY → `Constant[Float]`。 |
-| `between?` | 🔲 | 2 引数。専用ハンドラで `Constant[bool]`。中優先度。 |
+| `between?` | ✅ | `try_fold_ternary`（catalog 経由）→ `Constant[bool]`。 |
 | `ceil` | ✅ | FLOAT_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `ceil(n)` | 🔲 | 小数点指定形式の専用ハンドラ → `Constant[Float]`。低優先度。 |
-| `clamp` | 🔲 | 専用ハンドラ。中優先度。 |
+| `clamp` | ✅ | `try_fold_ternary`（catalog 経由）→ `Constant[Float]`。 |
 | `coerce` | 🚫 | 内部用。 |
-| `divmod` | 🔲 | FLOAT_BINARY 追加で `Tuple[Constant[Integer], Constant[Float]]`。中優先度。 |
-| `fdiv` | 🔲 | FLOAT_BINARY 追加で `Constant[Float]`。低優先度。 |
+| `divmod` | ✅ | `try_fold_divmod` → `Tuple[Constant[Integer], Constant[Float]]`。 |
+| `fdiv` | ✅ | NUMERIC_BINARY → `Constant[Float]`。 |
 | `finite?` | ✅ | FLOAT_UNARY → `Constant[bool]`。 |
 | `floor` | ✅ | FLOAT_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `floor(n)` | 🔲 | 小数点指定形式 → `Constant[Float]`。低優先度。 |
@@ -268,8 +268,8 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 | `modulo` | 🔷 | `%` の別名 → NUMERIC_BINARY で処理。 |
 | `nan?` | ✅ | FLOAT_UNARY → `Constant[bool]`。 |
 | `negative?` / `positive?` / `zero?` | ✅ | FLOAT_UNARY → `Constant[bool]`。 |
-| `next_float` | 🔲 | FLOAT_UNARY 追加で `Constant[Float]`。低優先度。 |
-| `prev_float` | 🔲 | FLOAT_UNARY 追加で `Constant[Float]`。低優先度。 |
+| `next_float` | ✅ | FLOAT_UNARY → `Constant[Float]`。 |
+| `prev_float` | ✅ | FLOAT_UNARY → `Constant[Float]`。 |
 | `rationalize` / `to_r` | 🔲 | FLOAT_UNARY 追加で `Constant[Rational]`。低優先度。 |
 | `round` | ✅ | FLOAT_UNARY（引数なし）→ `Constant[Integer]`。 |
 | `round(n)` | 🔲 | 小数点指定形式 → `Constant[Float]`。低優先度。 |
@@ -284,14 +284,14 @@ IntegerRange 向け専用ハンドラ群は別途 `shape_dispatch.rb` に存在�
 [x] **  → NUMERIC_BINARY → Constant[Float]
 
 中優先度:
-[ ] divmod   → FLOAT_BINARY → Tuple[Constant[Integer], Constant[Float]]
-[ ] between? → 専用ハンドラ  → Constant[bool]
-[ ] clamp    → 専用ハンドラ  → Constant[Float]
+[x] divmod   → try_fold_divmod → Tuple[Constant[Integer], Constant[Float]]
+[x] between? → try_fold_ternary（catalog 経由）→ Constant[bool]
+[x] clamp    → try_fold_ternary（catalog 経由）→ Constant[Float]
 
 低優先度:
 [ ] ceil(n) / floor(n) / round(n) → 小数点 n 指定形式専用ハンドラ
-[ ] next_float / prev_float       → FLOAT_UNARY
-[ ] fdiv                          → FLOAT_BINARY
+[x] next_float / prev_float       → FLOAT_UNARY
+[x] fdiv                          → NUMERIC_BINARY
 [ ] rationalize / to_r / to_c    → FLOAT_UNARY
 ```
 

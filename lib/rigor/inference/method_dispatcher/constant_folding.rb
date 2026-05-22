@@ -48,7 +48,11 @@ module Rigor
       module ConstantFolding # rubocop:disable Metrics/ModuleLength
         module_function
 
-        NUMERIC_BINARY = Set[:+, :-, :*, :/, :%, :**, :&, :|, :^, :<<, :>>, :<, :<=, :>, :>=, :==, :!=, :<=>].freeze
+        NUMERIC_BINARY = Set[
+          :+, :-, :*, :/, :%, :**, :&, :|, :^, :<<, :>>,
+          :<, :<=, :>, :>=, :==, :!=, :<=>,
+          :gcd, :lcm, :fdiv
+        ].freeze
         STRING_BINARY  = Set[
           :+, :*, :==, :!=, :<, :<=, :>, :>=, :<=>,
           :start_with?, :end_with?, :include?,
@@ -80,12 +84,14 @@ module Rigor
           :odd?, :even?, :zero?, :positive?, :negative?,
           :succ, :pred, :next, :abs, :magnitude,
           :bit_length, :to_s, :to_i, :to_int, :to_f,
+          :floor, :ceil, :round, :truncate, :chr,
           :inspect, :hash, :-@, :+@, :~
         ].freeze
         FLOAT_UNARY = Set[
           :zero?, :positive?, :negative?,
           :nan?, :finite?, :infinite?,
           :abs, :magnitude, :floor, :ceil, :round, :truncate,
+          :next_float, :prev_float,
           :to_s, :to_i, :to_int, :to_f,
           :inspect, :hash, :-@, :+@
         ].freeze
@@ -301,6 +307,9 @@ module Rigor
           set_lift = try_fold_set_array_unary(receiver_values, method_name)
           return set_lift if set_lift
 
+          integer_lift = try_fold_integer_array_unary(receiver_values, method_name)
+          return integer_lift if integer_lift
+
           numeric_lift = try_fold_numeric_array_unary(receiver_values, method_name)
           return numeric_lift if numeric_lift
 
@@ -429,6 +438,15 @@ module Rigor
         SET_ARRAY_UNARY_METHODS = Set[:to_a, :entries].freeze
         private_constant :SET_ARRAY_UNARY_METHODS
 
+        # `Constant<Integer>#digits` returns the base-10 (or base-n with
+        # an argument — only the no-arg form is folded here) place
+        # values as a little-endian Array of Integers. Lifted to a
+        # Tuple so downstream rules see the precise per-position type.
+        # `digits` raises `Math::DomainError` on a negative receiver,
+        # so the negative case bails to the RBS tier.
+        INTEGER_ARRAY_UNARY_METHODS = Set[:digits].freeze
+        private_constant :INTEGER_ARRAY_UNARY_METHODS
+
         # v0.0.7 — `Constant<Pathname>` delegates to a curated set
         # of pure path-manipulation methods. Pathname is immutable
         # in Ruby (per its docstring) and the catalog classifies
@@ -526,6 +544,24 @@ module Rigor
           return nil unless receiver.is_a?(::Set)
 
           lift_array_result(receiver.to_a)
+        rescue StandardError
+          nil
+        end
+
+        # `Constant<Integer>#digits` — lift the Array of base-10 place
+        # values to a Tuple[Constant[Integer]…]. Safe to evaluate at
+        # fold time: the C body is pure arithmetic. Negative receivers
+        # raise `Math::DomainError`; the fold declines so the RBS tier
+        # answers with `Array[Integer]`.
+        def try_fold_integer_array_unary(receiver_values, method_name)
+          return nil unless INTEGER_ARRAY_UNARY_METHODS.include?(method_name)
+          return nil unless receiver_values.size == 1
+
+          receiver = receiver_values.first
+          return nil unless receiver.is_a?(Integer)
+          return nil if receiver.negative?
+
+          lift_array_result(receiver.digits)
         rescue StandardError
           nil
         end

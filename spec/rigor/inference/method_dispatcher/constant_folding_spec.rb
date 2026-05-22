@@ -115,9 +115,44 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     it "returns nil when the method's result is not a foldable scalar" do
-      # `Integer#digits` returns an Array — not in the
-      # `foldable_constant_value?` envelope.
-      expect(fold(123, :digits)).to be_nil
+      # `Integer#coerce` returns an Array — not in the
+      # `foldable_constant_value?` envelope, and `:coerce` is not
+      # in any binary allow list, so the fold declines.
+      expect(fold(123, :coerce, [1])).to be_nil
+    end
+  end
+
+  describe "Integer / Float mid-priority folds (coverage uplift)" do
+    it "folds Integer#floor / #ceil / #round / #truncate (no-arg)" do
+      expect(fold(7, :floor).value).to eq(7)
+      expect(fold(7, :ceil).value).to eq(7)
+      expect(fold(7, :round).value).to eq(7)
+      expect(fold(7, :truncate).value).to eq(7)
+    end
+
+    it "folds Integer#chr to a Constant String" do
+      expect(fold(65, :chr).value).to eq("A")
+      expect(fold(97, :chr).value).to eq("a")
+    end
+
+    it "folds Integer#gcd / #lcm" do
+      expect(fold(12, :gcd, [8]).value).to eq(4)
+      expect(fold(4, :lcm, [6]).value).to eq(12)
+    end
+
+    it "folds Float#next_float / #prev_float" do
+      expect(fold(1.0, :next_float).value).to be > 1.0
+      expect(fold(1.0, :prev_float).value).to be < 1.0
+    end
+
+    it "lifts Integer#digits to a per-position Tuple" do
+      type = fold(123, :digits)
+      expect(type).to be_a(Rigor::Type::Tuple)
+      expect(type.elements.map(&:value)).to eq([3, 2, 1])
+    end
+
+    it "declines Integer#digits on a negative receiver" do
+      expect(fold(-5, :digits)).to be_nil
     end
   end
 

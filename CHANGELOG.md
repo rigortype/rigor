@@ -16,6 +16,8 @@ cycles live in dedicated archives:
 
 ### Added
 
+- **Integer / Float mid-priority constant folds.** `Integer#floor` / `#ceil` / `#round` / `#truncate` (the no-arg forms) and `Integer#chr` join `INTEGER_UNARY`; `Float#next_float` / `#prev_float` join `FLOAT_UNARY`; `Integer#gcd` / `#lcm` / `#fdiv` join `NUMERIC_BINARY` (Integer-only `gcd` / `lcm` fall through harmlessly for a Float receiver via the existing `NoMethodError` rescue). `Integer#digits` lifts to a per-position `Tuple` of base-10 place values (`123.digits` → `Tuple[Constant[3], Constant[2], Constant[1]]`) through a new `try_fold_integer_array_unary` handler — it declines on a negative receiver, where `digits` raises `Math::DomainError`. Completes the Integer / Float mid-priority checklist in the type-method-coverage audit.
+
 - **String mid-priority constant folds.** Six unary methods (`chr`, `hex`, `oct`, `succ` / `next`, `chop`) and six binary methods (`match?`, `index`, `rindex`, `center`, `ljust`, `rjust`) now fold to a precise `Constant` type when the receiver — and, for the binary forms, the argument — is a literal: `"ff".hex` → `Constant[255]`, `"hello".match?(/l+o/)` → `Constant[true]`, `"hello".index("z")` → `Constant[nil]`, `"hi".center(6)` → `Constant["  hi  "]`. Added to `STRING_UNARY` / `STRING_BINARY` in `ConstantFolding`. `center` / `ljust` / `rjust` carry a width blow-up guard (`string_pad_blow_up?`) that declines the fold when the requested width exceeds `STRING_FOLD_BYTE_LIMIT`, mirroring the existing `+` / `*` guards.
 
 - **`Regexp.new` constructor folding, `Complex#rect/rectangular/polar` Tuple lifting, `Range.new` constructor folding, and `Set` constant carrier.** Four precision additions to the constant-folding pipeline:

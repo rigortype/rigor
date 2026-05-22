@@ -664,6 +664,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/numeric_fold.rb — Integer / Float mid-priority folds" do
+    let(:harness) { harness_for("numeric_fold") }
+
+    it "folds floor/ceil/round/truncate, chr, gcd/lcm, fdiv, and lifts digits" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/union_arithmetic.rb — cartesian fold over Union[Constant…]" do
     let(:harness) { harness_for("union_arithmetic") }
 

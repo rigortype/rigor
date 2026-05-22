@@ -19,8 +19,9 @@ mise use ruby@4.0
 mise use gem:rigortype
 ```
 
-`rigor` is then on your `PATH`. For `asdf`, `gem install`, and
-developing inside a container, see
+With mise activated in your shell, `rigor` is on your `PATH`. For
+shell activation and shims, `asdf`, `gem install`, and developing
+inside a container, see
 [Appendix — Installing Rigor](appendix-installation.md); for
 continuous integration, see
 [Appendix — Running Rigor in CI](appendix-ci.md).

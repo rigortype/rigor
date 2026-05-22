@@ -24,13 +24,40 @@ mise use ruby@4.0
 mise use gem:rigortype
 ```
 
-`rigor` is then on your `PATH`. Commit the generated `mise.toml` so
-every contributor — and every CI run — uses the same versions.
+This writes a `mise.toml` — commit it so every contributor and CI
+run uses the same versions. The gem is `rigortype`; the executable
+it installs (and the only command you run) is `rigor`.
 
-An on-`PATH` `rigor` is also what editor integrations expect: they
-launch `rigor lsp` directly (see
-[`docs/lsp-integration.md`](../lsp-integration.md)), with no
-per-editor `bundle exec` prefix to configure.
+### Putting `rigor` on your PATH
+
+`mise use` installs the tool, but `rigor` only lands on your `PATH`
+once mise is **activated** in your shell. Activation is a one-time
+step from mise's own setup — for example, in `~/.zshrc`:
+
+```sh
+eval "$(mise activate zsh)"
+```
+
+(bash and fish are covered in
+[mise's docs](https://mise.jdx.dev/getting-started.html).) With mise
+activated, `cd`-ing into the project puts `rigor` on `PATH`. Until
+then you can still run it explicitly with
+`mise exec gem:rigortype -- rigor`.
+
+For `rigor` to be found **outside an interactive shell** — most
+importantly so an editor can launch `rigor lsp` — enable mise
+**shims**. Shims are fixed executables that work where the `cd`
+activation hook never fires (editors, scripts, some CI). Either add
+the shims directory to `PATH`:
+
+```sh
+export PATH="$HOME/.local/share/mise/shims:$PATH"
+```
+
+or configure your shell with `mise activate <shell> --shims`. mise
+creates the `rigor` shim automatically on install. See
+[`docs/lsp-integration.md`](../lsp-integration.md) for the editor
+side.
 
 ## asdf
 

@@ -13,34 +13,34 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 
 | # | Title | Status |
 | --- | --- | --- |
-| [0](0-concept.md) | Foundation and Core Architecture of Rigor | Accepted |
-| [1](1-types.md) | Type Model and RBS Superset Strategy | Draft |
-| [2](2-extension-api.md) | Extension API Strategy | Draft |
-| [3](3-type-representation.md) | Type Representation | — |
-| [4](4-type-inference-engine.md) | Type Inference Engine | — |
-| [5](5-robustness-principle.md) | Robustness Principle | — |
-| [6](6-cache-persistence-backend.md) | Cache Persistence Backend | — |
-| [7](7-v0.1.0-slice-decisions.md) | v0.1.0 Slice Decisions | — |
-| [8](8-steep-inspired-improvements.md) | Steep-Inspired Improvements | — |
-| [9](9-cross-plugin-api.md) | Cross-Plugin API | — |
-| [10](10-dependency-source-inference.md) | Dependency Source Inference | — |
-| [11](11-sorbet-input-adapter.md) | Sorbet Input Adapter | — |
-| [12](12-dry-rb-packaging.md) | dry-rb Packaging | — |
-| [13](13-typenode-resolver-plugin.md) | TypeNode Resolver Plugin | — |
-| [14](14-rbs-sig-generation.md) | RBS Sig Generation | — |
-| [15](15-ractor-concurrency.md) | Ractor Concurrency | — |
-| [16](16-macro-expansion.md) | Macro Expansion | — |
-| [17](17-monkey-patch-pre-evaluation.md) | Monkey Patch Pre-Evaluation | — |
-| [18](18-substrate-per-call-site-return-type.md) | Substrate Per-Call-Site Return Type | — |
-| [19](19-language-server-packaging.md) | Language Server Packaging | — |
-| [20](20-lightweight-hkt.md) | Lightweight HKT | — |
-| [21](21-rubydex-evaluation.md) | Rubydex Evaluation | — |
-| [22](22-baseline-and-project-onboarding.md) | Baseline and Project Onboarding | — |
-| [23](23-diagnostic-triage-command.md) | Diagnostic Triage Command | — |
-| [24](24-self-method-call-resolution.md) | Self Method Call Resolution | — |
-| [25](25-plugin-contributed-rbs.md) | Plugin Contributed RBS | — |
-| [26](26-activerecord-relation-typing.md) | ActiveRecord Relation Typing | — |
-| [27](27-tool-distribution-model.md) | Tool Distribution and Installation Model | — |
+| ADR-0 | [Foundation and Core Architecture of Rigor](0-concept.md) | Accepted |
+| ADR-1 | [Type Model and RBS Superset Strategy](1-types.md) | Draft |
+| ADR-2 | [Extension API Strategy](2-extension-api.md) | Draft |
+| ADR-3 | [Type Representation](3-type-representation.md) | — |
+| ADR-4 | [Type Inference Engine](4-type-inference-engine.md) | — |
+| ADR-5 | [Robustness Principle](5-robustness-principle.md) | — |
+| ADR-6 | [Cache Persistence Backend](6-cache-persistence-backend.md) | — |
+| ADR-7 | [v0.1.0 Slice Decisions](7-v0.1.0-slice-decisions.md) | — |
+| ADR-8 | [Steep-Inspired Improvements](8-steep-inspired-improvements.md) | — |
+| ADR-9 | [Cross-Plugin API](9-cross-plugin-api.md) | — |
+| ADR-10 | [Dependency Source Inference](10-dependency-source-inference.md) | — |
+| ADR-11 | [Sorbet Input Adapter](11-sorbet-input-adapter.md) | — |
+| ADR-12 | [dry-rb Packaging](12-dry-rb-packaging.md) | — |
+| ADR-13 | [TypeNode Resolver Plugin](13-typenode-resolver-plugin.md) | — |
+| ADR-14 | [RBS Sig Generation](14-rbs-sig-generation.md) | — |
+| ADR-15 | [Ractor Concurrency](15-ractor-concurrency.md) | — |
+| ADR-16 | [Macro Expansion](16-macro-expansion.md) | — |
+| ADR-17 | [Monkey Patch Pre-Evaluation](17-monkey-patch-pre-evaluation.md) | — |
+| ADR-18 | [Substrate Per-Call-Site Return Type](18-substrate-per-call-site-return-type.md) | — |
+| ADR-19 | [Language Server Packaging](19-language-server-packaging.md) | — |
+| ADR-20 | [Lightweight HKT](20-lightweight-hkt.md) | — |
+| ADR-21 | [Rubydex Evaluation](21-rubydex-evaluation.md) | — |
+| ADR-22 | [Baseline and Project Onboarding](22-baseline-and-project-onboarding.md) | — |
+| ADR-23 | [Diagnostic Triage Command](23-diagnostic-triage-command.md) | — |
+| ADR-24 | [Self Method Call Resolution](24-self-method-call-resolution.md) | — |
+| ADR-25 | [Plugin Contributed RBS](25-plugin-contributed-rbs.md) | — |
+| ADR-26 | [ActiveRecord Relation Typing](26-activerecord-relation-typing.md) | — |
+| ADR-27 | [Tool Distribution and Installation Model](27-tool-distribution-model.md) | — |
 
 ## Adding a New ADR
 

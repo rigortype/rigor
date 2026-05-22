@@ -318,6 +318,11 @@ vacuously.
 `assert_type(expected_string, expr)` calls `expr_type.describe(:short)` which calls
 `value.inspect` on `Constant` values. `inspect` doubles backslashes.
 
+`describe(:short)` returns **only** `value.inspect` — the bare `"..."` form with no wrapper.
+`%(Constant["hello.world"])` as the first argument to `assert_type` is always wrong; it checks
+against `Constant["hello.world"]` (a string that starts with the letter C) which will never
+match `describe(:short)`.
+
 When an expected string contains backslashes, use single-quoted literals and count carefully:
 
 | `assert_type` argument | String it checks against |
@@ -327,6 +332,26 @@ When an expected string contains backslashes, use single-quoted literals and cou
 
 Rule of thumb: to assert a string whose `inspect` has N visible backslashes, write 2N backslashes
 inside a single-quoted Ruby string literal as the first argument to `assert_type`.
+
+**Regexp results require extra attention** because the chain has three steps:
+`Regexp.escape` introduces one backslash per escaped meta-character → `inspect` doubles each →
+the single-quoted source must double again:
+
+```ruby
+Regexp.escape("a.b")            # value: "a\.b"   — 1 backslash
+# describe(:short) = "a\\.b"   — 2 backslashes (inspect doubled)
+assert_type('"a\\\\.b"',   …)  # ✓  4 source backslashes → 2 actual → matches
+assert_type('"a\\.b"',    …)   # ✗  2 source backslashes → 1 actual → mismatch
+```
+
+For a value with multiple escaped characters (`Regexp.escape("[a-z]")` has three backslashes):
+```ruby
+assert_type('"\\\\[a\\\\-z\\\\]"', Regexp.escape("[a-z]"))  # ✓ 4 per group = 12 total
+```
+
+When in doubt, read the `got:` field from an assert_type mismatch error — it shows the
+`actual.inspect` value. The content between the outermost `\"` delimiters in `got:` is
+exactly what belongs between the `'"` and `"'` of the correct single-quoted argument.
 
 ### Safe error handling in fold methods
 
@@ -402,7 +427,8 @@ Before declaring a coverage-uplift slice done:
       `require_relative` added to `method_dispatcher.rb`; tier inserted in `dispatch_precise_tiers`.
 - [ ] Unit spec for each new method / module in `spec/rigor/inference/method_dispatcher/`.
 - [ ] Integration fixture in `spec/integration/fixtures/<name>/demo.rb` (directory form for
-      stdlib modules; flat form for core types).
+      stdlib modules; flat form for core types). **Create together with the describe block
+      below** — a fixture file with no spec wiring is dead code and will never catch regressions.
 - [ ] Integration describe block in `spec/integration/type_construction_spec.rb`.
 - [ ] `make verify` clean.
 - [ ] `CHANGELOG.md` `[Unreleased]` entry (user-visible description of the new folds).

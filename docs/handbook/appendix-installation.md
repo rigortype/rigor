@@ -16,46 +16,64 @@ so nothing is lost by installing it separately.
 
 ## Recommended — a runtime version manager
 
-[`mise`](https://mise.jdx.dev/) installs both Ruby 4.0 and Rigor and
-pins them per project, with no `Gemfile` involvement:
+[`mise`](https://mise.jdx.dev/) is a runtime / tool version manager
+(think `rbenv` + `nvm` plus a package runner in one). It installs
+Ruby 4.0 and Rigor together and pins them per project, with no
+`Gemfile` involvement.
+
+### New to mise?
+
+After [installing mise itself](https://mise.jdx.dev/getting-started.html),
+two commands set Rigor up:
 
 ```sh
 mise use ruby@4.0
 mise use gem:rigortype
 ```
 
-This writes a `mise.toml` — commit it so every contributor and CI
-run uses the same versions. The gem is `rigortype`; the executable
-it installs (and the only command you run) is `rigor`.
+A few things worth knowing if you have not used mise before:
+
+- **`mise use` is project-level.** It writes a `mise.toml` in the
+  *current directory* recording the chosen versions, and installs
+  the tools as part of the same command — there is no separate
+  install step. (mise also reads the asdf-style `.tool-versions`.)
+- **Commit the config to share versions.** Check the generated
+  `mise.toml` into Git so every contributor — and every CI run —
+  resolves the same Ruby 4.0 and the same Rigor version.
+- **For a machine-wide install, add `-g`.** `mise use -g
+  gem:rigortype` writes mise's global config
+  (`~/.config/mise/config.toml`) instead of a project `mise.toml`,
+  making `rigor` available in every directory.
+
+The gem is `rigortype`; the executable it installs (and the only
+command you run) is `rigor`.
 
 ### Putting `rigor` on your PATH
 
-`mise use` installs the tool, but `rigor` only lands on your `PATH`
-once mise is **activated** in your shell. Activation is a one-time
-step from mise's own setup — for example, in `~/.zshrc`:
+Installing the tool is not enough on its own — `rigor` reaches your
+`PATH` only once mise is wired into your environment, and this holds
+for both project-level and global installs. mise's
+[shims guide](https://mise.jdx.dev/dev-tools/shims.html) explains
+the two mechanisms:
 
-```sh
-eval "$(mise activate zsh)"
-```
+- **`mise activate`** — add `eval "$(mise activate zsh)"` to your
+  shell rc (`~/.zshrc`; bash and fish equivalents are in
+  [mise's docs](https://mise.jdx.dev/getting-started.html)).
+  `cd`-ing into the project then puts `rigor` on `PATH`. Best for
+  interactive shells.
+- **shims** — fixed executables under `~/.local/share/mise/shims`.
+  Add that directory to `PATH`:
 
-(bash and fish are covered in
-[mise's docs](https://mise.jdx.dev/getting-started.html).) With mise
-activated, `cd`-ing into the project puts `rigor` on `PATH`. Until
-then you can still run it explicitly with
-`mise exec gem:rigortype -- rigor`.
+  ```sh
+  export PATH="$HOME/.local/share/mise/shims:$PATH"
+  ```
 
-For `rigor` to be found **outside an interactive shell** — most
-importantly so an editor can launch `rigor lsp` — enable mise
-**shims**. Shims are fixed executables that work where the `cd`
-activation hook never fires (editors, scripts, some CI). Either add
-the shims directory to `PATH`:
+  or run `mise activate <shell> --shims`. Shims work where the `cd`
+  hook never fires — editors launching `rigor lsp`, scripts, some
+  CI. mise creates the `rigor` shim automatically on install.
 
-```sh
-export PATH="$HOME/.local/share/mise/shims:$PATH"
-```
-
-or configure your shell with `mise activate <shell> --shims`. mise
-creates the `rigor` shim automatically on install. See
+Until mise is wired in either way, you can still run Rigor
+explicitly with `mise exec gem:rigortype -- rigor`. See
 [`docs/lsp-integration.md`](../lsp-integration.md) for the editor
 side.
 

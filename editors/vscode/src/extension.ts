@@ -1,4 +1,4 @@
-// Rigor VSCode extension — a thin LSP client over `rigor lsp`.
+// Rigor VS Code extension — a thin LSP client over `rigor lsp`.
 //
 // The extension implements no language features itself: diagnostics,
 // hover, completion, and the outline view all come from the language
@@ -112,6 +112,9 @@ async function startClient(folder: WorkspaceFolder): Promise<void> {
   }
 
   const server = resolveServer(folder);
+  outputChannel.appendLine(
+    `[rigor] ${folder.name}: using \`${server.command}\` (${server.kind})`,
+  );
   statusBar.set("starting");
 
   const probe = await probeServer(server, folder.uri.fsPath);
@@ -214,8 +217,9 @@ function reportProbeFailure(
   void window
     .showErrorMessage(
       `Rigor: could not run \`${server.command}\` in ${folder.name}. ` +
-        "Add `rigortype` to the project's Gemfile (or install the gem " +
-        'globally), then run "Rigor: Restart Server".',
+        "Install Rigor so `rigor` is on `PATH` (`mise use gem:rigortype` " +
+        "is the recommended setup), or set `rigor.server.path` to the " +
+        'executable, then run "Rigor: Restart Server".',
       install,
     )
     .then((choice) => {

@@ -1,4 +1,4 @@
-# Rigor for VSCode
+# Rigor for VS Code
 
 Type-aware diagnostics, hover, completion, and an outline view for
 Ruby — powered by the [Rigor](https://github.com/rigortype/rigor)
@@ -19,7 +19,7 @@ exposes settings, and surfaces lifecycle state.
 
 ## Requirements
 
-- **VSCode 1.85+**.
+- **VS Code 1.85+**.
 - A **trusted** workspace (the server is not started in restricted mode).
 - The **`rigortype` gem ≥ 0.1.6** available to the project. The usual
   setup is a Gemfile entry:
@@ -49,27 +49,33 @@ executable in this order:
 2. `bundle exec rigor`, when `rigor.server.useBundler` allows it and a
    `Gemfile.lock` pinning `rigortype` is found (`auto`, the default).
 3. `rigor` from `PATH`.
+4. A `mise` or `asdf` shim — when `rigor` is not on `PATH`, the
+   extension looks for a runtime-version-manager shim (e.g.
+   `~/.local/share/mise/shims/rigor`) and uses it directly.
 
 If none works, the extension shows an actionable message and stays
 loaded — fix the setup and run **Rigor: Restart Server**.
 
-### Using a mise-managed `rigor`
+### Runtime version managers (mise / asdf)
 
-If `rigor` is installed through [`mise`](https://mise.jdx.dev/)
-(`mise use gem:rigortype`), a GUI-launched VSCode does not inherit
-the shell `PATH` that `mise activate` sets up — so step 3 above
-cannot find it. Point `rigor.server.path` at mise's **shim**, a
-stable self-contained executable:
+`mise` is the recommended way to install Rigor — `mise use
+gem:rigortype` (see the handbook's
+[Installing Rigor](https://github.com/rigortype/rigor/blob/main/docs/handbook/appendix-installation.md)
+appendix). A GUI-launched VS Code does not inherit the shell `PATH`
+that `mise activate` sets up, so step 3 above often misses a
+mise-managed `rigor` — step 4 covers that automatically by finding
+the shim, a stable self-contained executable. `asdf` shims
+(`~/.asdf/shims/rigor`) are detected the same way.
+
+Auto-detection checks the standard shim locations, honouring
+`MISE_DATA_DIR` / `XDG_DATA_HOME` / `ASDF_DATA_DIR`. If your shims
+live elsewhere, point `rigor.server.path` at the shim explicitly:
 
 ```json
 "rigor.server.path": "/Users/you/.local/share/mise/shims/rigor"
 ```
 
-Use an absolute path — the setting is not `~`-expanded. The shim
-re-resolves the mise-pinned version per workspace, so it keeps
-working across `rigor` upgrades. Alternatively, install the
-`hverlin.mise-vscode` extension so all of VSCode sees mise's tools,
-or launch VSCode with `code .` from a shell where mise is active.
+Use an absolute path — the setting is not `~`-expanded.
 
 ## Settings
 

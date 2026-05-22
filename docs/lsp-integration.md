@@ -84,9 +84,9 @@ Place this in your `init.lua` (or under `lua/plugins/`). Restart
 Neovim and open a Ruby file inside a Rigor-configured project; you
 should see diagnostics appear on save and hover work via `K`.
 
-### VSCode — generic LSP client
+### VS Code — generic LSP client
 
-There's no first-party VSCode extension yet. Use a generic LSP
+There's no first-party VS Code extension yet. Use a generic LSP
 client wrapper such as
 [`vscode-languageclient-generic`](https://marketplace.visualstudio.com/items?itemName=mads-hartmann.bash-ide-vscode-tooltips)
 or write a minimal extension that registers the server:

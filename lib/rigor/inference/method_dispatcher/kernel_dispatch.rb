@@ -57,8 +57,60 @@ module Rigor
           return nil if receiver.nil?
           return try_array(args) if method_name == :Array
           return try_numeric_constructor(method_name, args) if NUMERIC_CONSTRUCTORS.key?(method_name)
-          return try_integer_from_refinement(args) if method_name == :Integer
+          return try_integer(args) if method_name == :Integer
+          return try_float(args) if method_name == :Float
 
+          nil
+        end
+
+        # `Kernel#Integer(arg)` / `Integer(arg, base)`. Two folding
+        # paths, tried in order:
+        #
+        # 1. A `Refined[String, predicate]` argument whose predicate
+        #    is a digit-only carrier narrows to `non-negative-int`
+        #    (see {try_integer_from_refinement}).
+        # 2. A `Constant` String or Numeric argument — optionally
+        #    with a `Constant[Integer]` base — runs the actual
+        #    `Integer()` conversion and lifts the result to
+        #    `Constant[Integer]`.
+        def try_integer(args)
+          refined = try_integer_from_refinement(args)
+          return refined if refined
+
+          try_integer_constant(args)
+        end
+
+        # Constant-folding path for `Integer()`. A non-parseable
+        # string raises `ArgumentError` (or `TypeError` for a base
+        # against a non-string) at fold time; the handler declines
+        # so the RBS tier answers with the widened `Integer`.
+        def try_integer_constant(args)
+          return nil unless [1, 2].include?(args.size)
+          return nil unless args.all?(Type::Constant)
+
+          values = args.map(&:value)
+          return nil unless values[0].is_a?(String) || values[0].is_a?(Numeric)
+          return nil if values.size == 2 && !values[1].is_a?(Integer)
+
+          Type::Combinator.constant_of(Integer(*values))
+        rescue ArgumentError, TypeError
+          nil
+        end
+
+        # `Kernel#Float(arg)` — folds a `Constant` String or Numeric
+        # argument to `Constant[Float]`. A non-parseable string
+        # raises `ArgumentError` at fold time; the handler declines.
+        def try_float(args)
+          return nil unless args.size == 1
+
+          arg = args.first
+          return nil unless arg.is_a?(Type::Constant)
+
+          value = arg.value
+          return nil unless value.is_a?(String) || value.is_a?(Numeric)
+
+          Type::Combinator.constant_of(Float(value))
+        rescue ArgumentError, TypeError
           nil
         end
 

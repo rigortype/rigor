@@ -691,6 +691,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/kernel_conversion.rb — Kernel numeric-conversion folding" do
+    let(:harness) { harness_for("kernel_conversion") }
+
+    it "folds Integer() / Float() / Rational() / Complex() on constant arguments" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/union_arithmetic.rb — cartesian fold over Union[Constant…]" do
     let(:harness) { harness_for("union_arithmetic") }
 

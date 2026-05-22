@@ -89,13 +89,49 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
       expect(integer_dispatch(nominal("String"))).to be_nil
     end
 
-    it "declines on `Integer(s, base)` (slice 2b covers no-base form only)" do
+    it "declines on `Integer(refined-string, base)` (refinement path is no-base only)" do
       result = described_class.try_dispatch(
         receiver: receiver,
         method_name: :Integer,
         args: [Rigor::Type::Combinator.decimal_int_string, constant_of(10)]
       )
       expect(result).to be_nil
+    end
+  end
+
+  describe ".try_dispatch on Kernel#Integer / Kernel#Float (constant folding)" do
+    def kernel_dispatch(method_name, *args)
+      described_class.try_dispatch(receiver: receiver, method_name: method_name, args: args)
+    end
+
+    it "folds Integer() on a constant string" do
+      expect(kernel_dispatch(:Integer, constant_of("42"))).to eq(constant_of(42))
+      expect(kernel_dispatch(:Integer, constant_of("  -7  "))).to eq(constant_of(-7))
+    end
+
+    it "folds Integer() with an explicit base" do
+      expect(kernel_dispatch(:Integer, constant_of("ff"), constant_of(16))).to eq(constant_of(255))
+    end
+
+    it "folds Integer() on a constant numeric (truncating a Float)" do
+      expect(kernel_dispatch(:Integer, constant_of(3.7))).to eq(constant_of(3))
+    end
+
+    it "declines Integer() on an unparseable string" do
+      expect(kernel_dispatch(:Integer, constant_of("not a number"))).to be_nil
+    end
+
+    it "declines Integer() on a non-string / non-numeric constant" do
+      expect(kernel_dispatch(:Integer, constant_of(nil))).to be_nil
+    end
+
+    it "folds Float() on a constant string or numeric" do
+      expect(kernel_dispatch(:Float, constant_of("3.14"))).to eq(constant_of(3.14))
+      expect(kernel_dispatch(:Float, constant_of(42))).to eq(constant_of(42.0))
+    end
+
+    it "declines Float() on an unparseable string" do
+      expect(kernel_dispatch(:Float, constant_of("abc"))).to be_nil
     end
   end
 end

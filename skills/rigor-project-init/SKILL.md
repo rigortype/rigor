@@ -15,10 +15,13 @@ output is a committed `.rigor.dist.yml`, an explicit adoption mode,
 and — if the project chooses it — a `.rigor-baseline.yml` snapshot.
 
 This skill is for **users adopting Rigor on their own project**. It
-uses the published `rigor` executable (installed via Bundler:
-`bundle add rigortype`, then `bundle exec rigor …`, or a plain
-`rigor …` if the gem is on `PATH`). It references only public CLI
-flags and config keys — the same surface `rigor --help` documents.
+uses the published `rigor` executable, installed standalone — Rigor
+is a tool, not a library, so it does **not** go in the project's
+`Gemfile`. See the handbook's
+[Installing Rigor](../../docs/handbook/appendix-installation.md)
+appendix for the install channels (`mise` recommended). This skill
+references only public CLI flags and config keys — the same surface
+`rigor --help` documents.
 
 ## Phase 0 — When to use this skill
 

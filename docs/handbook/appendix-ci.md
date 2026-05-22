@@ -1,0 +1,103 @@
+# Appendix — Running Rigor in CI
+
+Rigor runs on Ruby 4.0 (see
+[Appendix — Installing Rigor](appendix-installation.md)). In CI that
+has one consequence worth stating up front; the rest of this page
+follows from it.
+
+## Run Rigor in its own job
+
+Run Rigor in a **separate CI job** from your test suite — better
+still, a separate workflow file. The reason is concrete:
+`ruby/setup-ruby` sets the *job's* active Ruby. A test job
+provisions the Ruby your project runs (often a 3.x version, or a
+matrix of several); Rigor needs Ruby 4.0. The two cannot share a job
+without the second `setup-ruby` call clobbering the first.
+
+A separate job gives Rigor a clean runner where provisioning Ruby
+4.0 conflicts with nothing. A separate workflow file additionally
+gets its own triggers, concurrency group, and status badge — and
+keeps the analyser out of the test workflow, which is good practice
+regardless.
+
+## A minimal GitHub Actions workflow
+
+```yaml
+# .github/workflows/rigor.yml
+name: rigor
+on: [push, pull_request]
+jobs:
+  rigor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+      - run: gem install rigortype
+      - run: rigor check
+```
+
+That is the whole thing: check out the project, provision Ruby 4.0,
+install Rigor, run it.
+
+## Pinning Rigor's version
+
+The workflow above installs whatever `rigortype` is current at run
+time. To pin a version — and keep CI reproducible — choose one of:
+
+### A CI-only `Gemfile` (recommended)
+
+Commit a two-line `.github/rigor/Gemfile`:
+
+```ruby
+source "https://rubygems.org"
+gem "rigortype", "~> 0.1"
+```
+
+plus its `Gemfile.lock`, and point the Rigor job at it through
+`BUNDLE_GEMFILE`:
+
+```yaml
+jobs:
+  rigor:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_GEMFILE: .github/rigor/Gemfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+      - run: bundle exec rigor check
+```
+
+This `Gemfile` is read only by the Rigor job — it never enters your
+application's dependency resolution, and the committed lockfile
+pins Rigor and its dependencies for a reproducible run. Because it
+is an ordinary Bundler `Gemfile`, Dependabot can keep it current:
+add a `bundler` entry scoped to its directory in
+`.github/dependabot.yml`:
+
+```yaml
+version: 2
+updates:
+  - package-ecosystem: bundler
+    directory: /.github/rigor
+    schedule:
+      interval: weekly
+```
+
+### A pinned `gem install`
+
+`gem install rigortype -v "0.1.9"` in the workflow. Simpler, with no
+extra files — but Dependabot does not see a version inside a `run:`
+step, so updates to the pin are manual.
+
+## Other channels
+
+A published container image and a Nix flake package are planned as
+further CI channels — see
+[ADR-27](../adr/27-tool-distribution-model.md) for the distribution
+model behind this page.

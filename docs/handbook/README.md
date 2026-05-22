@@ -80,6 +80,20 @@ this handbook disagrees.
     the conscious non-goals (no conditional bodies, no
     multi-arg containers yet, no plugin manifest hookup).
 
+### Appendix — Installation and CI
+
+How to install Rigor for everyday use and how to wire it into
+continuous integration. Rigor is a standalone tool, not a project
+dependency; these pages cover the channels in full, where
+[Chapter 1](01-getting-started.md) gives only the headline.
+
+- [**Installing Rigor**](appendix-installation.md) — `mise`
+  (recommended), `asdf`, `gem install`, and the dev-container
+  guidance.
+- [**Running Rigor in CI**](appendix-ci.md) — running Rigor in its
+  own job, a minimal GitHub Actions workflow, and pinning the Rigor
+  version with a CI-only `Gemfile` plus Dependabot.
+
 ### Appendix — Coming from another type checker
 
 A short cross-language reference for readers whose mental

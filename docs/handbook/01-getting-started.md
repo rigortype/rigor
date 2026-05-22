@@ -1,5 +1,30 @@
 # Getting started
 
+## Installing Rigor
+
+Rigor is a tool, not a library — like a linter or a compiler, it
+analyses your project but is not part of its runtime. **Do not add
+it to your application's `Gemfile`.** Install it on its own and
+point it at your project.
+
+Rigor itself runs on Ruby 4.0, independently of the Ruby your own
+code targets — the `target_ruby:` config key (see below) tells
+Rigor which Ruby *your* project runs.
+
+The recommended setup is the [`mise`](https://mise.jdx.dev/) runtime
+version manager, which provisions both Ruby 4.0 and Rigor:
+
+```sh
+mise use ruby@4.0
+mise use gem:rigortype
+```
+
+`rigor` is then on your `PATH`. For `asdf`, `gem install`, and
+developing inside a container, see
+[Appendix — Installing Rigor](appendix-installation.md); for
+continuous integration, see
+[Appendix — Running Rigor in CI](appendix-ci.md).
+
 ## What does `rigor check` look at?
 
 Rigor reads your `.rb` files, runs a flow-sensitive type
@@ -26,7 +51,7 @@ information to be confident.
 Drop into your project root and run:
 
 ```sh
-bundle exec rigor check lib
+rigor check lib
 ```
 
 That walks every `.rb` under `lib/` and prints diagnostics —
@@ -36,13 +61,13 @@ complain about.
 If you want to run on a single file:
 
 ```sh
-bundle exec rigor check path/to/file.rb
+rigor check path/to/file.rb
 ```
 
 If you want to see what Rigor inferred at a precise position:
 
 ```sh
-bundle exec rigor type-of lib/foo.rb:10:5
+rigor type-of lib/foo.rb:10:5
 ```
 
 That prints both the rich Rigor type and the conservative

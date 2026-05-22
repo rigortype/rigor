@@ -54,31 +54,27 @@ the underlying RBS.
 
 ## Installation
 
-Add the gem to your application's Gemfile (development group is
-typical — Rigor is a static analyzer, not a runtime dependency):
+Rigor is a tool, not a library — install it on its own, **not** in
+your application's `Gemfile`. It runs on Ruby 4.0, independently of
+the Ruby version your own project targets.
 
-```ruby
-group :development do
-  gem "rigortype", require: false
-end
-```
-
-Install:
+The recommended setup uses the [`mise`](https://mise.jdx.dev/)
+runtime version manager, which provisions both Ruby 4.0 and Rigor,
+pinned per project:
 
 ```sh
-bundle install
+mise use ruby@4.0
+mise use gem:rigortype
 ```
 
-Or, for a one-off install outside Bundler:
+If you already have Ruby 4.0 available, `gem install rigortype`
+works as well. The gem is named `rigortype` (the name `rigor` was
+already taken on RubyGems); the executable it installs is `rigor`.
 
-```sh
-gem install rigortype
-```
-
-The gem ships an executable named `rigor` (gem name is
-`rigortype` because `rigor` was already taken on RubyGems).
-
-**Ruby version.** The gemspec requires `>= 4.0.0, < 4.1`.
+See the handbook for the full detail —
+[Installing Rigor](docs/handbook/appendix-installation.md)
+(`asdf`, `gem install`, dev containers) and
+[Running Rigor in CI](docs/handbook/appendix-ci.md).
 
 ## Quick start
 
@@ -87,23 +83,23 @@ Drop into your project root and run the canonical commands:
 ```sh
 # Diagnose unknown methods, wrong-arity calls, and other
 # rule-driven bugs across `lib/`.
-bundle exec rigor check lib
+rigor check lib
 
 # Drop a starter .rigor.yml into the project root.
-bundle exec rigor init
+rigor init
 
 # Print the inferred type at a precise FILE:LINE:COL position.
-bundle exec rigor type-of lib/foo.rb:10:5
+rigor type-of lib/foo.rb:10:5
 
 # Report Scope#type_of coverage across a tree (handy when
 # diagnosing why a particular call site reads as `untyped`).
-bundle exec rigor type-scan lib
+rigor type-scan lib
 
 # Emit RBS skeletons from inference results — review with
 # `--diff`, write to `sig/` with `--write`. ADR-14 sig-gen.
-bundle exec rigor sig-gen --print lib/foo.rb
-bundle exec rigor sig-gen --diff  lib/foo.rb
-bundle exec rigor sig-gen --write lib/foo.rb
+rigor sig-gen --print lib/foo.rb
+rigor sig-gen --diff  lib/foo.rb
+rigor sig-gen --write lib/foo.rb
 ```
 
 ### Sample output
@@ -113,7 +109,7 @@ $ cat /tmp/demo.rb
 "hello".no_such_method        # undefined method
 [1, 2, 3].rotate(1, 2)        # wrong number of arguments
 
-$ bundle exec rigor check /tmp/demo.rb
+$ rigor check /tmp/demo.rb
 /tmp/demo.rb:1:9: error: undefined method `no_such_method' for "hello"
 /tmp/demo.rb:2:11: error: wrong number of arguments to `rotate' on Array (given 2, expected 0..1)
 ```
@@ -137,13 +133,13 @@ invalidates exactly what it should.
 
 ```sh
 # Inspect what is cached on disk and what this run did.
-bundle exec rigor check --cache-stats lib
+rigor check --cache-stats lib
 
 # Wipe the cache (do this if you suspect staleness).
-bundle exec rigor check --clear-cache lib
+rigor check --clear-cache lib
 
 # Run with caching disabled.
-bundle exec rigor check --no-cache lib
+rigor check --no-cache lib
 ```
 
 Add `.rigor/` to your `.gitignore` — the cache is per-checkout
@@ -537,8 +533,8 @@ resolver).
 `rigor init` writes a starter `.rigor.yml`:
 
 ```sh
-bundle exec rigor init           # fails if .rigor.yml exists
-bundle exec rigor init --force   # overwrite
+rigor init           # fails if .rigor.yml exists
+rigor init --force   # overwrite
 ```
 
 Common knobs the file exposes:

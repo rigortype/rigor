@@ -19,7 +19,7 @@ deeper — tighter checks, framework-aware analysis, your own refinements —
 Rigor's type system is remarkably powerful, and a Skill takes you there
 step-by-step.
 
-**Two design commitments drive Rigor.**
+**Three design commitments drive Rigor.**
 
 1. **Types are facts, not wishes.** Hand-written annotations drift the
    moment they are written. Rigor infers from the code itself — every
@@ -27,7 +27,15 @@ step-by-step.
    want RBS in `sig/`, [`rigor sig-gen`](https://rigor.typedduck.fail/reference/adr/14-rbs-sig-generation/)
    emits it from inference results so the written form starts in sync
    with reality.
-2. **Programmable inference beyond unions.** A plain union
+2. **Your specs are types.** Do you really need to write type
+   annotations? Your `spec/` is already type information. RSpec
+   `expect(x).to be_a(T)` / `eq(literal)` assertions contribute
+   narrowing facts from that point forward; `subject` / `let` bindings
+   propagate the SUT's type into downstream `it` bodies; factory
+   definitions in `spec/factories/` feed attribute shapes back into
+   `rigor-activerecord` and `rigor-factorybot`'s cross-plugin channels.
+   The test suite you already have becomes a live type oracle.
+3. **Programmable inference beyond unions.** A plain union
    (`Integer | nil`) is not the type story Ruby needs. Rigor reasons
    about *what values an expression actually produces* — literal values,
    integer ranges, refinement carriers, per-position tuple / hash shapes

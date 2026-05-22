@@ -44,7 +44,8 @@ RSpec.describe "examples/rigor-lisp-eval" do
 
   it "unions branch types for `:if` forms with disagreeing branches" do
     result = run_plugin(source: "Lisp.eval([:if, [:<, 1, 2], 1, 2.0])\n")
-    expect(plugin_diagnostics(result).first.message).to eq("Lisp.eval return type inferred as Constant<1> | Constant<2.0>")
+    expect(plugin_diagnostics(result).first.message)
+      .to eq("Lisp.eval return type inferred as Constant<1> | Constant<2.0>")
   end
 
   it "infers bool for boolean composition" do

@@ -218,6 +218,7 @@ module Rigor
 
         def compute_arith_value(operator, left_val, right_val)
           return nil if left_val.nil? || right_val.nil?
+
           case operator
           when :+ then left_val + right_val
           when :- then left_val - right_val
@@ -228,6 +229,7 @@ module Rigor
 
         def compute_compare_value(operator, left_val, right_val)
           return nil if left_val.nil? || right_val.nil?
+
           case operator
           when :<  then left_val < right_val
           when :>  then left_val > right_val
@@ -239,6 +241,7 @@ module Rigor
 
         def compute_boolean_binop_value(operator, left_val, right_val)
           return nil if left_val.nil? || right_val.nil?
+
           case operator
           when :and then left_val && right_val
           when :or  then left_val || right_val

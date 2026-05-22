@@ -524,6 +524,152 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
   end
 
+  describe "HashShape#none? (no-arg, no-block)" do
+    it "folds none? to Constant<true> for an empty closed shape" do
+      empty = Rigor::Type::Combinator.hash_shape_of({})
+      expect(dispatch(receiver: empty, method_name: :none?)).to eq(constant(true))
+    end
+
+    it "folds none? to Constant<false> for a non-empty closed shape" do
+      shape = hash_shape(a: constant(1), b: constant("two"))
+      expect(dispatch(receiver: shape, method_name: :none?)).to eq(constant(false))
+    end
+
+    it "falls through for open shapes" do
+      open_shape = Rigor::Type::Combinator.hash_shape_of({ a: constant(1) }, extra_keys: :open)
+      expect(dispatch(receiver: open_shape, method_name: :none?)).to be_nil
+    end
+
+    it "falls through when called with arguments" do
+      shape = hash_shape(a: constant(1))
+      expect(dispatch(receiver: shape, method_name: :none?, args: [constant(:a)])).to be_nil
+    end
+  end
+
+  describe "HashShape#slice (Slice 5 phase 2)" do
+    let(:shape) { hash_shape(a: constant(1), b: constant("two"), c: constant(true)) }
+
+    it "returns a sub-HashShape containing only the specified keys" do
+      result = dispatch(receiver: shape, method_name: :slice, args: [constant(:a), constant(:c)])
+      expect(result).to eq(hash_shape(a: constant(1), c: constant(true)))
+    end
+
+    it "omits keys not present in the shape" do
+      result = dispatch(receiver: shape, method_name: :slice, args: [constant(:a), constant(:missing)])
+      expect(result).to eq(hash_shape(a: constant(1)))
+    end
+
+    it "supports string keys" do
+      string_shape = hash_shape("x" => constant(1), "y" => constant(2))
+      result = dispatch(receiver: string_shape, method_name: :slice, args: [constant("x")])
+      expect(result).to eq(hash_shape("x" => constant(1)))
+    end
+
+    it "falls through for open shapes" do
+      open_shape = Rigor::Type::Combinator.hash_shape_of({ a: constant(1) }, extra_keys: :open)
+      expect(dispatch(receiver: open_shape, method_name: :slice, args: [constant(:a)])).to be_nil
+    end
+
+    it "falls through when any argument is non-static" do
+      dyn = Rigor::Type::Combinator.untyped
+      expect(dispatch(receiver: shape, method_name: :slice, args: [constant(:a), dyn])).to be_nil
+    end
+
+    it "falls through when called with no arguments" do
+      expect(dispatch(receiver: shape, method_name: :slice, args: [])).to be_nil
+    end
+
+    it "returns keys in argument order, matching Ruby's Hash#slice semantics" do
+      # Ruby's Hash#slice follows argument order, not receiver insertion order:
+      # { a:, b:, c: }.slice(:c, :a) => { c:, a: }
+      result = dispatch(receiver: shape, method_name: :slice, args: [constant(:c), constant(:a)])
+      expect(result.pairs.keys).to eq(%i[c a])
+    end
+  end
+
+  describe "HashShape#except (Slice 5 phase 2)" do
+    let(:shape) { hash_shape(a: constant(1), b: constant("two"), c: constant(true)) }
+
+    it "returns a sub-HashShape with the specified keys removed" do
+      result = dispatch(receiver: shape, method_name: :except, args: [constant(:a)])
+      expect(result).to eq(hash_shape(b: constant("two"), c: constant(true)))
+    end
+
+    it "ignores keys not present in the shape" do
+      result = dispatch(receiver: shape, method_name: :except, args: [constant(:a), constant(:missing)])
+      expect(result).to eq(hash_shape(b: constant("two"), c: constant(true)))
+    end
+
+    it "supports string keys" do
+      string_shape = hash_shape("x" => constant(1), "y" => constant(2))
+      result = dispatch(receiver: string_shape, method_name: :except, args: [constant("x")])
+      expect(result).to eq(hash_shape("y" => constant(2)))
+    end
+
+    it "falls through for open shapes" do
+      open_shape = Rigor::Type::Combinator.hash_shape_of({ a: constant(1) }, extra_keys: :open)
+      expect(dispatch(receiver: open_shape, method_name: :except, args: [constant(:a)])).to be_nil
+    end
+
+    it "falls through when any argument is non-static" do
+      dyn = Rigor::Type::Combinator.untyped
+      expect(dispatch(receiver: shape, method_name: :except, args: [constant(:a), dyn])).to be_nil
+    end
+
+    it "falls through when called with no arguments" do
+      expect(dispatch(receiver: shape, method_name: :except, args: [])).to be_nil
+    end
+  end
+
+  describe "HashShape#has_key? / #key? / #member? / #include? (Slice 5 phase 2)" do
+    let(:shape) { hash_shape(a: constant(1), b: constant("two")) }
+
+    it "folds has_key? to Constant<true> for a known key" do
+      expect(dispatch(receiver: shape, method_name: :has_key?, args: [constant(:a)])).to eq(constant(true))
+    end
+
+    it "folds has_key? to Constant<false> for a missing key" do
+      expect(dispatch(receiver: shape, method_name: :has_key?, args: [constant(:missing)])).to eq(constant(false))
+    end
+
+    it "folds key? identically to has_key?" do
+      expect(dispatch(receiver: shape, method_name: :key?, args: [constant(:b)])).to eq(constant(true))
+      expect(dispatch(receiver: shape, method_name: :key?, args: [constant(:missing)])).to eq(constant(false))
+    end
+
+    it "folds member? identically to has_key?" do
+      expect(dispatch(receiver: shape, method_name: :member?, args: [constant(:a)])).to eq(constant(true))
+      expect(dispatch(receiver: shape, method_name: :member?, args: [constant(:missing)])).to eq(constant(false))
+    end
+
+    it "folds include? identically to has_key?" do
+      expect(dispatch(receiver: shape, method_name: :include?, args: [constant(:a)])).to eq(constant(true))
+      expect(dispatch(receiver: shape, method_name: :include?, args: [constant(:missing)])).to eq(constant(false))
+    end
+
+    it "supports string keys" do
+      string_shape = hash_shape("k" => constant(42))
+      present = dispatch(receiver: string_shape, method_name: :has_key?, args: [constant("k")])
+      absent  = dispatch(receiver: string_shape, method_name: :has_key?, args: [constant("missing")])
+      expect(present).to eq(constant(true))
+      expect(absent).to eq(constant(false))
+    end
+
+    it "falls through for open shapes" do
+      open_shape = Rigor::Type::Combinator.hash_shape_of({ a: constant(1) }, extra_keys: :open)
+      expect(dispatch(receiver: open_shape, method_name: :has_key?, args: [constant(:a)])).to be_nil
+    end
+
+    it "falls through when the argument is non-static" do
+      dyn = Rigor::Type::Combinator.untyped
+      expect(dispatch(receiver: shape, method_name: :has_key?, args: [dyn])).to be_nil
+    end
+
+    it "falls through when the argument is not a Symbol or String" do
+      expect(dispatch(receiver: shape, method_name: :has_key?, args: [constant(1)])).to be_nil
+    end
+  end
+
   describe "non-shape receivers" do
     it "returns nil for any non-Tuple/HashShape receiver (excluding the size tier below)" do
       expect(dispatch(receiver: constant(1), method_name: :first)).to be_nil

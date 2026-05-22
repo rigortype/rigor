@@ -96,6 +96,7 @@ module Rigor
           count: :hash_size,
           empty?: :hash_empty?,
           any?: :hash_any?,
+          none?: :hash_none?,
           keys: :hash_keys,
           values: :hash_values,
           first: :hash_first,
@@ -105,10 +106,16 @@ module Rigor
           to_h: :hash_to_h,
           invert: :hash_invert,
           merge: :hash_merge,
+          slice: :hash_slice,
+          except: :hash_except,
           :[] => :hash_lookup,
           fetch: :hash_lookup,
           dig: :hash_dig,
-          values_at: :hash_values_at
+          values_at: :hash_values_at,
+          has_key?: :hash_has_key?,
+          key?: :hash_has_key?,
+          member?: :hash_has_key?,
+          include?: :hash_has_key?
         }.freeze
 
         # @return [Rigor::Type, nil] the precise element/value type, or
@@ -817,6 +824,35 @@ module Rigor
 
             Type::Combinator.constant_of(!shape.pairs.empty?)
           end
+
+          # `shape.none?` (no block, no arg) — mirror of `any?`.
+          # Folds to `Constant[shape.pairs.empty?]` for closed
+          # shapes with no optional keys.
+          def hash_none?(shape, _method_name, args)
+            return nil unless args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            Type::Combinator.constant_of(shape.pairs.empty?)
+          end
+
+          # `shape.has_key?(k)` / `key?(k)` / `member?(k)` /
+          # `include?(k)` — folds to `Constant[true/false]` when
+          # the argument is a `Constant[Symbol|String]` and the
+          # shape is closed with no optional keys.
+          def hash_has_key?(shape, _method_name, args)
+            return nil unless args.size == 1
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            arg = args.first
+            return nil unless arg.is_a?(Type::Constant)
+
+            key = arg.value
+            return nil unless key.is_a?(Symbol) || key.is_a?(String)
+
+            Type::Combinator.constant_of(shape.pairs.key?(key))
+          end
           # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
 
           # `shape.keys` — returns a `Tuple[Constant<k>…]` for a
@@ -1025,6 +1061,54 @@ module Rigor
             end
 
             Type::Combinator.tuple_of(*values)
+          end
+
+          # `shape.slice(:a, :b, ...)` — returns a sub-HashShape
+          # containing only the specified keys. All arguments must
+          # be `Constant[Symbol|String]`. Keys not present in the
+          # shape are silently omitted (matching Ruby's runtime
+          # semantics — no nil padding). Declines on open shapes
+          # or when any argument is not a static key.
+          def hash_slice(shape, _method_name, args)
+            return nil if args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            requested = []
+            args.each do |arg|
+              return nil unless arg.is_a?(Type::Constant)
+
+              key = arg.value
+              return nil unless key.is_a?(Symbol) || key.is_a?(String)
+
+              requested << key
+            end
+
+            Type::Combinator.hash_shape_of(shape.pairs.slice(*requested))
+          end
+
+          # `shape.except(:a, :b, ...)` — returns a sub-HashShape
+          # with the specified keys removed. All arguments must be
+          # `Constant[Symbol|String]`. Keys not present in the shape
+          # are silently ignored. Declines on open shapes or when
+          # any argument is not a static key.
+          def hash_except(shape, _method_name, args)
+            return nil if args.empty?
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+
+            excluded = {}
+            args.each do |arg|
+              return nil unless arg.is_a?(Type::Constant)
+
+              key = arg.value
+              return nil unless key.is_a?(Symbol) || key.is_a?(String)
+
+              excluded[key] = true
+            end
+
+            kept = shape.pairs.reject { |k, _v| excluded.key?(k) }
+            Type::Combinator.hash_shape_of(kept)
           end
 
           # Continues a `dig` chain after the first step. Tuple and

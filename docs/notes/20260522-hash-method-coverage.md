@@ -63,7 +63,7 @@ Tracks which methods produce precise `HashShape` results and what is still open.
 | `each_with_object` | 🚫 | Enumerable。 |
 | `empty?` | ✅ | `hash_empty?` — 閉じた形状で `Constant[bool]`。 |
 | `entries` | 🔷 | `to_a` の別名 → RBS で `to_a` に回る（`hash_to_a` は `to_a` キーのみ登録）。`entries` も HASH_SHAPE_HANDLERS に追加すれば✅になる。低優先度。 |
-| `except` | 🔲 | **高優先度。** `slice` の補集合。静的キーリストから子 HashShape を生成。 |
+| `except` | ✅ | **高優先度。** `slice` の補集合。静的キーリストから子 HashShape を生成。`ShapeDispatch#hash_except`。 |
 | `fetch` | ✅ | `hash_lookup` — 静的キー。missing key 時は RBS fallback。 |
 | `fetch_values` | 🔲 | `values_at` と類似。静的キーリストから `Tuple[V_1…]` へ。missing key が RBS では raise なので `values_at` 実装の隣に置ける。中優先度。 |
 | `filter` | 🔷 | `select` の別名。BlockFolding 経由。 |
@@ -78,28 +78,28 @@ Tracks which methods produce precise `HashShape` results and what is still open.
 | `grep` | 🚫 | Enumerable。 |
 | `grep_v` | 🚫 | Enumerable。 |
 | `group_by` | 🚫 | Enumerable。返り値が `Hash[K, Array[V]]` で複雑。 |
-| `has_key?` | 🔲 | **高優先度。** `key?`/`member?`/`include?` と同義。静的キーで `Constant[true/false]`。 |
+| `has_key?` | ✅ | **高優先度。** `key?`/`member?`/`include?` と同義。静的キーで `Constant[true/false]`。`ShapeDispatch#hash_has_key?`。 |
 | `has_value?` | 🔲 | 全値 Constant のとき `Constant[true/false]`。低優先度。 |
-| `include?` | 🔲 | `has_key?` の別名。同上。 |
+| `include?` | ✅ | `has_key?` の別名。`ShapeDispatch#hash_has_key?` に同一ハンドラ登録。 |
 | `inject` | 🚫 | Enumerable accumulator。 |
 | `invert` | ✅ | `hash_invert` — 全値が Constant[Symbol/String] のとき反転 HashShape を返す。 |
 | `keep_if` | 🚫 | 破壊的変更（`select!` 相当）。 |
 | `key` | 🔲 | 値 → キー逆引き。全値 Constant で一意なら `Constant[k]`。低優先度。 |
-| `key?` | 🔲 | `has_key?` と同義。高優先度。 |
+| `key?` | ✅ | `has_key?` と同義。高優先度。`ShapeDispatch#hash_has_key?` に同一ハンドラ登録。 |
 | `keys` | ✅ | `hash_keys` — `Tuple[Constant[k]…]` を返す。 |
 | `lazy` | 🚫 | Enumerator::Lazy。 |
 | `length` | ✅ | `hash_size` に委譲。 |
 | `map` | 🚫 | `collect` と同義。2 引数ブロック問題あり。 |
 | `max` | 🚫 | Enumerable。ペアの順序付け比較は複雑。 |
 | `max_by` | 🚫 | Enumerable。 |
-| `member?` | 🔲 | `has_key?` と同義。高優先度。 |
+| `member?` | ✅ | `has_key?` と同義。高優先度。`ShapeDispatch#hash_has_key?` に同一ハンドラ登録。 |
 | `merge` | ✅ | `hash_merge` — 両側 closed HashShape で右辺優先マージ。 |
 | `merge!` | 🚫 | 破壊的変更。`!` ブロック済み。 |
 | `min` | 🚫 | Enumerable。 |
 | `min_by` | 🚫 | Enumerable。 |
 | `minmax` | 🚫 | Enumerable。 |
 | `minmax_by` | 🚫 | Enumerable。 |
-| `none?` | 🔲 | **高優先度。** 引数なし・ブロックなし → `Constant[shape.pairs.empty?]`。`hash_any?` のミラー。 |
+| `none?` | ✅ | **高優先度。** 引数なし・ブロックなし → `Constant[shape.pairs.empty?]`。`hash_any?` のミラー。`ShapeDispatch#hash_none?`。 |
 | `one?` | 🔲 | 引数なし・ブロックなし → `Constant[shape.pairs.size == 1]`。中優先度。 |
 | `partition` | 🚫 | Enumerable。`[[k,v],…] × 2` を返す。 |
 | `rassoc` | 🔲 | 値 → `[k, v]` 逆引き。全値 Constant で一意なら Tuple。低優先度。 |
@@ -113,7 +113,7 @@ Tracks which methods produce precise `HashShape` results and what is still open.
 | `select!` | 🚫 | 破壊的変更。 |
 | `shift` | 🚫 | 破壊的変更（先頭ペア削除）。 |
 | `size` | ✅ | `hash_size` — `Constant[pairs.size]`。 |
-| `slice` | 🔲 | **高優先度。** `slice(:k1, :k2)` → 対応する子 HashShape を返す。 |
+| `slice` | ✅ | **高優先度。** `slice(:k1, :k2)` → 対応する子 HashShape を返す。`ShapeDispatch#hash_slice`。 |
 | `slice_after` | 🚫 | Enumerable。 |
 | `slice_before` | 🚫 | Enumerable。 |
 | `slice_when` | 🚫 | Enumerable。 |
@@ -148,10 +148,10 @@ Tracks which methods produce precise `HashShape` results and what is still open.
 
 ### 高優先度
 
-- [ ] `slice(*keys)` — `slice(:name, :age)` → 対応する子 `HashShape` を返す。`except` の逆。`ShapeDispatch#hash_slice` に実装。全引数が `Constant[Symbol|String]` で対象キーが shape に存在すること。欠損キーは省略（`values_at` と異なり nil を埋めない）。
-- [ ] `except(*keys)` — `except(:debug)` → 対象キーを除いた `HashShape`。`ShapeDispatch#hash_except`。全引数が `Constant[Symbol|String]`。shape にないキーは無視。
-- [ ] `has_key?` / `key?` / `member?` / `include?` — 引数が `Constant[Symbol|String]` のとき `Constant[true/false]` に畳む。`ShapeDispatch#hash_has_key?` に実装し、4 エイリアスを同一ハンドラに登録。
-- [ ] `none?` (引数なし・ブロックなし) — `Constant[shape.pairs.empty?]`。`hash_any?` に倣い `ShapeDispatch#hash_none?` を追加。
+- [x] `slice(*keys)` — `slice(:name, :age)` → 対応する子 `HashShape` を返す。`except` の逆。`ShapeDispatch#hash_slice` に実装。全引数が `Constant[Symbol|String]` で対象キーが shape に存在すること。欠損キーは省略（`values_at` と異なり nil を埋めない）。
+- [x] `except(*keys)` — `except(:debug)` → 対象キーを除いた `HashShape`。`ShapeDispatch#hash_except`。全引数が `Constant[Symbol|String]`。shape にないキーは無視。
+- [x] `has_key?` / `key?` / `member?` / `include?` — 引数が `Constant[Symbol|String]` のとき `Constant[true/false]` に畳む。`ShapeDispatch#hash_has_key?` に実装し、4 エイリアスを同一ハンドラに登録。
+- [x] `none?` (引数なし・ブロックなし) — `Constant[shape.pairs.empty?]`。`hash_any?` に倣い `ShapeDispatch#hash_none?` を追加。
 
 ### 中優先度
 

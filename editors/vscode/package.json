@@ -1,0 +1,139 @@
+{
+  "name": "rigor",
+  "displayName": "Rigor — Ruby type checker",
+  "description": "Type-aware diagnostics, hover, completion, and outline for Ruby, powered by the Rigor analyzer.",
+  "version": "0.1.0",
+  "publisher": "rigortype",
+  "license": "MPL-2.0",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "ruby",
+    "rbs",
+    "type checking",
+    "static analysis",
+    "lsp"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rigortype/rigor.git",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/rigortype/rigor/issues"
+  },
+  "homepage": "https://github.com/rigortype/rigor/tree/main/editors/vscode",
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:ruby",
+    "workspaceContains:**/.rigor.yml",
+    "workspaceContains:**/.rigor.dist.yml"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Rigor spawns the `rigor` executable (often via `bundle exec`) from the workspace. The language server is only started in trusted workspaces."
+    }
+  },
+  "contributes": {
+    "configuration": {
+      "title": "Rigor",
+      "properties": {
+        "rigor.enable": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "Enable the Rigor language server for this workspace folder."
+        },
+        "rigor.server.path": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Explicit path to the `rigor` executable. Overrides Bundler and `PATH` discovery. Leave empty to auto-detect."
+        },
+        "rigor.server.useBundler": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Use `bundle exec rigor` when a Gemfile.lock pinning `rigortype` is found.",
+            "Always use `bundle exec rigor`.",
+            "Never use Bundler; run `rigor` from PATH."
+          ],
+          "default": "auto",
+          "scope": "resource",
+          "description": "How to resolve the rigor executable relative to Bundler."
+        },
+        "rigor.server.configPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Path to a Rigor config file, passed as `--config=PATH`. Leave empty to let the server discover `.rigor.yml` / `.rigor.dist.yml`."
+        },
+        "rigor.server.logPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Path to write the server log, passed as `--log=PATH`. Leave empty to send server logs to the output channel."
+        },
+        "rigor.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "scope": "window",
+          "description": "Trace the JSON-RPC traffic between VSCode and the Rigor language server."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "rigor.restartServer",
+        "title": "Restart Server",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.showOutputChannel",
+        "title": "Show Output Channel",
+        "category": "Rigor"
+      },
+      {
+        "command": "rigor.showServerLog",
+        "title": "Show Server Log",
+        "category": "Rigor"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "typecheck": "tsc --noEmit -p ./",
+    "vscode:prepublish": "npm run typecheck && npm run compile",
+    "package": "vsce package --no-dependencies",
+    "publish": "vsce publish --no-dependencies",
+    "publish:ovsx": "ovsx publish --no-dependencies"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.23.0",
+    "ovsx": "^0.9.0",
+    "typescript": "^5.5.0"
+  }
+}

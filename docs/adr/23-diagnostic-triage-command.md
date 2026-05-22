@@ -1,13 +1,14 @@
 # ADR-23 — Diagnostic triage command (`rigor triage`)
 
-Status: **proposed, 2026-05-20.** Records the design of a
-`check`-derived subcommand that summarises a project's diagnostic
-stream — rule-ID distribution, per-file hotspots, and heuristic
-"why" hints (likely ActiveSupport `core_ext`, likely a project
-monkey-patch, gem shipping no RBS, …). Companion to
-[ADR-22](22-baseline-and-project-onboarding.md): ADR-22 records
-*what is there today* (the baseline); ADR-23 explains *what it
-means* and *what to do next*.
+Status: **accepted, 2026-05-20; slices 1+2+3+4 implemented in v0.1.9.**
+`lib/rigor/triage/` carries the catalogue; `rigor triage` is a
+production subcommand. Plugin-contributed recognisers (WD2 extension
+point) remain deferred. Records the design of a `check`-derived
+subcommand that summarises a project's diagnostic stream — rule-ID
+distribution, per-file hotspots, and heuristic "why" hints. Companion
+to [ADR-22](22-baseline-and-project-onboarding.md): ADR-22 records
+*what is there today* (the baseline); ADR-23 explains *what it means*
+and *what to do next*.
 
 ## Context
 
@@ -279,25 +280,23 @@ Hints — heuristics, verify before acting
   structured-`Diagnostic`-fields robustness fix (WD3 / slice 4)
   are deferred, not rejected.
 
-## Implementation slicing (proposed)
+## Implementation slicing
 
-Demand-driven; no slice scheduled by this ADR.
-
-### Slice 1 — `rigor triage` skeleton + distribution + hotspots
+### Slice 1 — `rigor triage` skeleton + distribution + hotspots — LANDED (v0.1.9)
 
 - New `Rigor::CLI` `triage` subcommand reusing `Runner#run`.
 - New `Rigor::Triage` module: distribution aggregation +
   hotspot ranking + text / json renderer.
 - No hints yet (`--no-hints` behaviour is the whole command).
 
-### Slice 2 — Heuristic catalogue
+### Slice 2 — Heuristic catalogue — LANDED (v0.1.9)
 
 - `Rigor::Triage::Hint` recogniser interface + the six H1–H6
   recognisers. H1 derives its selector set from the
   `rigor-activesupport-core-ext` bundle's `sig/`.
 - Hints wired into both renderers.
 
-### Slice 3 — ADR-22 SKILL integration
+### Slice 3 — ADR-22 SKILL integration — LANDED (v0.1.9)
 
 - `rigor-project-init` phase 7 and `rigor-baseline-reduce`
   phase 1 rewritten to call `rigor triage --format json`.

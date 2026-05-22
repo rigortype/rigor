@@ -1,10 +1,11 @@
 # ADR-15 — Ractor-based concurrency model for the analyzer
 
-Status: **proposed, 2026-05-14.** Phases 1 and 2a landed
-incrementally before this ADR was written; the ADR formalises
-the commitment so phases 2b–4 land against a stable contract.
-ADR-12 (dry-rb packaging) still holds its reserved slot;
-this ADR is independent of it.
+Status: **accepted, 2026-05-14; fork-based backend is the active
+parallel backend (Amendment 2026-05-20).** Phases 1 / 2a / 2b /
+3a / 4a / 4b / 4b.x / 4c all LANDED. Ractor pool (Phase 4b/4c
+wire-up) blocked on Ruby Bug #22075; fork pool is the shipping
+backend for `workers > 0`. Phase 3b and OQ1 / OQ2 remain
+demand-driven.
 
 ## Context
 

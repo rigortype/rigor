@@ -1,9 +1,7 @@
 # ADR-11 — Sorbet input as a plugin adapter
 
-Status: **proposed, 2026-05-09.** Design fixed here so a future
-`rigor-sorbet` plugin author can proceed against a stable
-contract; no Rigor core changes are required to adopt this ADR.
-Implementation queued for v0.1.x+ (no committed milestone).
+Status: **accepted, 2026-05-09; implemented in v0.1.4** as
+`plugins/rigor-sorbet/` (production plugin, not under `examples/`).
 
 ## Context
 
@@ -553,3 +551,7 @@ compose.
   a separate `rigor-tapioca` plugin because the underlying
   semantics (mixin chain traversal during method lookup)
   are general RBI handling, not Tapioca-specific.
+- 2026-05-xx — accepted; implemented in v0.1.4 as
+  `plugins/rigor-sorbet/` (production plugin path, not
+  `examples/` — the contract stabilised before extraction
+  so it landed directly under `plugins/`).

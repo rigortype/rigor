@@ -1,6 +1,7 @@
 # ADR-28 — Path-scoped method-protocol contracts
 
-Status: **proposed, 2026-05-23.** Records the decision to add a
+Status: **accepted, 2026-05-23; implemented in the same commit
+cluster (commits 481d810, a54cd2d).** Records the decision to add a
 plugin extension point that lets a plugin make a *behavioural*
 protocol — "every class in this directory must define a method
 of this shape" — statically enforceable, without the class
@@ -9,8 +10,9 @@ opting in. The mechanism is a new `Manifest` field
 value objects, consumed at two engine sites: parameter-type
 **provision** in `Inference::MethodParameterBinder` and method
 presence + return-type **check** in the contributing plugin's
-`#diagnostics_for_file` hook. A worked example ships as
-`examples/rigor-web/`.
+`#diagnostics_for_file` hook. Two worked consumers ship:
+`examples/rigor-web/` (RigWeb framework tutorial) and
+`plugins/rigor-hanami/` (production Hanami plugin).
 
 ## Context
 
@@ -176,8 +178,11 @@ existing plugin or caller breaks; safe in v0.1.x.
   protocol with no opt-in on the conforming class.
 - Controller-style bodies gain real inference: the provided
   parameter type turns the whole body into checkable code.
-- The `examples/rigor-web/` walkthrough is the reference
-  consumer — the RigWeb framework + the `rigor-web` plugin.
+- Two consumers shipped together: `examples/rigor-web/` (the RigWeb
+  framework tutorial — the minimal reference consumer) and
+  `plugins/rigor-hanami/` (production use: Hanami 2 action classes
+  under `app/actions/` enforcing the `#handle(request) -> response`
+  protocol).
 
 ## Rejected / deferred alternatives
 

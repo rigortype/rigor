@@ -1,11 +1,10 @@
 # ADR-13 — `TypeNode` resolver plugin hook + TypeScript-utility-type adapter
 
-Status: **proposed, 2026-05-11.** Design fixed here so a
-future `rigor-typescript-utility-types` plugin author can
-proceed against a stable contract. Implementation queued for
-v0.1.x+ (no committed milestone). ADR-12 (dry-rb packaging)
-remains the next ADR slot; this ADR sits in parallel and does
-not block on it.
+Status: **accepted, 2026-05-11; implemented in v0.1.4.**
+`lib/rigor/type_node/` carries the resolver infrastructure;
+`plugins/rigor-typescript-utility-types/` is the production
+plugin. ADR-16 follow-up (resolver-chain wiring for the
+synthetic-method tier) remains demand-driven.
 
 ## Context
 
@@ -343,37 +342,34 @@ the same commit as the implementation.
 
 Recommended order; each slice independently shippable:
 
-1.  **`Rigor::TypeNode` value objects + spec.** Pure Data
-    classes; no parser changes yet. Drift snapshot landed.
-2.  **`Plugin::TypeNodeResolver` base class + manifest hook.**
+1.  **`Rigor::TypeNode` value objects + spec. — LANDED (v0.1.4)**
+    Pure Data classes; no parser changes yet. Drift snapshot landed.
+2.  **`Plugin::TypeNodeResolver` base class + manifest hook. — LANDED (v0.1.4)**
     `Plugin::Manifest#type_node_resolvers` reader; loader
     aggregates resolvers across plugins. No parser
     integration yet.
-3.  **Parser integration in `ImportedRefinements::Parser`.**
+3.  **Parser integration in `ImportedRefinements::Parser`. — LANDED (v0.1.4)**
     Inserts the "consult plugin resolvers" step at the
     correct point in the lookup chain. `dynamic.rbs-extended.unresolved`
     diagnostic for whole-payload failures.
-4.  **Core type functions — phase A (record / shape carriers).**
+4.  **Core type functions — phase A (record / shape carriers). — LANDED (v0.1.4)**
     `pick_of[T, K]`, `omit_of[T, K]`, `partial_of[T]`,
     `required_of[T]`, `readonly_of[T]` for HashShape and
     Record carriers. Spec rows added to
     `type-operators.md` and `imported-built-in-types.md`.
-5.  **Core type functions — phase B (Tuple + object shape).**
+5.  **Core type functions — phase B (Tuple + object shape). — LANDED (v0.1.4)**
     Extends phase-A coverage to Tuple and object-shape
     carriers; lossy-projection diagnostic for non-shape
     inputs.
-6.  **`plugins/rigor-typescript-utility-types/`.** Plugin
-    scaffold via `skills/rigor-plugin-author/SKILL.md`.
+6.  **`plugins/rigor-typescript-utility-types/`. — LANDED (v0.1.4)**
     Five resolvers (Pick, Omit, Partial, Required, Readonly)
     in the v1 cut; the seven "degraded" rows ship as
     `plugin.typescript-utility-types.unsupported` returns.
-7.  **Documentation update.** Handbook chapter
-    cross-references the plugin; `examples/README.md`
-    comparison table grows a TypeScript-utility-types row.
-
-The plugin extracts via `git subtree split` once the
-contract stabilises, per the existing pattern (see
-[Rails plugins roadmap][rails-roadmap]).
+    Landed directly under `plugins/` (not `examples/`).
+7.  **Documentation update. — LANDED (v0.1.4)**
+    Handbook chapter cross-references the plugin;
+    `examples/README.md` comparison table grows a
+    TypeScript-utility-types row.
 
 [rails-roadmap]: ../design/20260508-rails-plugins-roadmap.md
 
@@ -496,3 +492,6 @@ parallel analysis and caching tractable.
   (`Pick<Address, 'name' | 'surname'>`) as the reference.
   Resolution: three-piece landing — plugin hook +
   Rigor-canonical type functions + opt-in TS plugin.
+- 2026-05-xx — accepted; all seven slices implemented in v0.1.4.
+  `lib/rigor/type_node/` is the resolver infrastructure namespace;
+  `plugins/rigor-typescript-utility-types/` is the production plugin.

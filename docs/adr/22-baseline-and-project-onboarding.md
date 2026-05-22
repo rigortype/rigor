@@ -1,11 +1,12 @@
 # ADR-22 — Baseline mechanism + project-onboarding SKILLs
 
-Status: **proposed, 2026-05-19.** Records the project's stance on
-**per-project error-level pragmatism**: a baseline file (PHPStan-shaped)
-plus two companion agent SKILLs (project initialisation and
-baseline-reduction). The combination lets mature codebases adopt
-Rigor without first fixing every diagnostic, while preserving the
-guarantee that *new* regressions surface immediately.
+Status: **accepted, 2026-05-19; fully implemented across v0.1.7–v0.1.9.**
+Slices 1–5 landed; Slice 6 (IDE/LSP gutter integration) deferred.
+Records the project's stance on **per-project error-level pragmatism**:
+a baseline file (PHPStan-shaped) plus two companion agent SKILLs
+(project initialisation and baseline-reduction). The combination lets
+mature codebases adopt Rigor without first fixing every diagnostic,
+while preserving the guarantee that *new* regressions surface immediately.
 
 ## Context
 
@@ -842,12 +843,11 @@ fix next?".
 - Naming: this ADR uses **baseline** consistently. The CLI
   subcommand family lives under `rigor baseline {...}`.
 
-## Implementation slicing (proposed)
+## Implementation slicing
 
-Sliced for orthogonal landing; each slice is shippable
-on its own. Demand-driven; no slice scheduled by this ADR.
+Sliced for orthogonal landing; each slice is shippable on its own.
 
-### Slice 1 — Baseline file I/O + `rigor baseline generate`
+### Slice 1 — Baseline file I/O + `rigor baseline generate` — LANDED (v0.1.7)
 
 - New `Rigor::Analysis::Baseline` value object (frozen).
   Loads / writes `.rigor-baseline.yml` per WD1 shape.
@@ -863,13 +863,13 @@ on its own. Demand-driven; no slice scheduled by this ADR.
   existing pipeline (per WD6).
 - Summary line appended to stderr (WD7).
 
-### Slice 2 — Drift inspection (`dump`, `drift`, `prune`)
+### Slice 2 — Drift inspection (`dump`, `drift`, `prune`) — LANDED (v0.1.7)
 
 - `rigor baseline dump` — read-only inspection.
 - `rigor baseline drift` — compute baseline-vs-actual deltas.
 - `rigor baseline prune` — drop zero-count entries.
 
-### Slice 3 — `rigor-project-init` SKILL
+### Slice 3 — `rigor-project-init` SKILL — LANDED (v0.1.9)
 
 - `.claude/skills/rigor-project-init/SKILL.md` (router).
 - `skills/rigor-project-init/SKILL.md` (router; agentskills.io-shape frontmatter; absolute GitHub URLs for cross-repo references).
@@ -887,7 +887,7 @@ on its own. Demand-driven; no slice scheduled by this ADR.
   config keys.
 - Committed to v0.1.9 per WD8.
 
-### Slice 4 — `rigor-baseline-reduce` SKILL
+### Slice 4 — `rigor-baseline-reduce` SKILL — LANDED (v0.1.9)
 
 - `skills/rigor-baseline-reduce/SKILL.md` (router; agentskills.io-shape).
 - `skills/rigor-baseline-reduce/references/01-classify.md`
@@ -902,7 +902,7 @@ on its own. Demand-driven; no slice scheduled by this ADR.
   surface only.
 - Committed to v0.1.9 per WD8.
 
-### Slice 5 — `regenerate` + drift-as-warning mode
+### Slice 5 — `regenerate` + drift-as-warning mode — LANDED (v0.1.8 / v0.1.9)
 
 - `rigor baseline regenerate` (destructive rewrite).
 - `--baseline-strict` flag making excess-or-deficit drift

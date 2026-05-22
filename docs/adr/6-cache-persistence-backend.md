@@ -2,9 +2,9 @@
 
 ## Status
 
-Draft. Working decision recorded so the v0.0.8 cache persistence
-slice has a fixed target. Will be ratified once the first
-producer (the RBS environment cache) lands.
+Accepted. Working decision recorded for v0.0.8 implementation;
+ratified when the RBS environment cache, per-process memo, and
+Monitor-safe thread layer landed in v0.1.4.
 
 ## Context
 

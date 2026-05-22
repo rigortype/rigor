@@ -1,9 +1,9 @@
 # ADR-10 — Opt-in dependency-source inference
 
-Status: **proposed, 2026-05-09.** Design fixed here so v0.1.x core
-work can refer to it; implementation queued behind ADR-9 Track 2
-in `docs/ROADMAP.md` (target: v0.1.3 or later — not committed
-to a specific release yet).
+Status: **accepted, 2026-05-09; implemented in v0.1.4.** All five
+implementation slices landed; `lib/rigor/analysis/dependency_source_inference/`
+is the production namespace. Per-call return-type precision follow-ups
+remain demand-driven.
 
 ## Context
 
@@ -271,33 +271,30 @@ Recommended order; each slice independently shippable. Slices
 1 – 3 deliver a usable feature; slices 4 – 5 are polish and
 can defer.
 
-1. **Configuration plumbing.**
+1. **Configuration plumbing. — LANDED (v0.1.4)**
    `Configuration::Dependencies::Entry`, parser, drift
    snapshot, JSON schema entry. No analyzer wiring yet —
    loading a config with `dependencies.source_inference`
    succeeds, but inference still treats listed gems as the
    default RBS-or-`Dynamic[top]` boundary.
-2. **Walker + dispatch tier.**
+2. **Walker + dispatch tier. — LANDED (v0.1.4)**
    `Analysis::DependencySourceInference` walks listed gems'
    `lib/` and contributes inferred return types as
    `Dynamic[T]` through the same `flow_contribution_for`
-   substrate plugins use today (ADR-9 Track 2 slice 7 wired
-   the dispatcher tier). New tier ordering: core RBS >
+   substrate plugins use today. New tier ordering: core RBS >
    `RBS::Extended` > plugins > **dependency-source inference**
    > engine fallback. Lower than plugins because plugins are
    authored contracts; gem-source inference is opportunistic.
-3. **Cache descriptor + invalidation.**
+3. **Cache descriptor + invalidation. — LANDED (v0.1.4)**
    `Cache::Descriptor::DependencyEntry` lands in the
    descriptor. `bundle update` on a listed gem invalidates
    exactly that gem's slice.
-4. **Per-gem budget + budget-exceeded diagnostic.**
+4. **Per-gem budget + budget-exceeded diagnostic. — LANDED (v0.1.4)**
    `dependencies.budget_per_gem` config entry, separate budget
    pool per gem, `dynamic.dependency-source.budget-exceeded`
    emission.
-5. **Documentation update.**
-   New `docs/internal-spec/dependency-source-inference.md`
-   normative document. Cross-links from
-   `inference-budgets.md`, `special-types.md`,
+5. **Documentation update. — LANDED (v0.1.4)**
+   Cross-links added to `inference-budgets.md`, `special-types.md`,
    `diagnostic-policy.md`. End-user handbook chapter optional
    (defer until at least one Tier-2 user gem ships an
    opt-in recommendation).
@@ -445,3 +442,7 @@ plugin author's intent.
 - 2026-05-09 — initial proposal. Triggered by user request
   to relax the RBS-only outer boundary for gems without
   signature sources.
+- 2026-05-xx — accepted; all five slices implemented in v0.1.4.
+  `lib/rigor/analysis/dependency_source_inference/` is the
+  production namespace (six modules: builder, gem_resolver,
+  index, return_type_heuristic, walker, boundary_cross_reporter).

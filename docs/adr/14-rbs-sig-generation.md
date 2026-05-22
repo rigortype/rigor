@@ -1,10 +1,9 @@
 # ADR-14 — RBS signature generation and augmentation from inference
 
-Status: **proposed, 2026-05-12.** Design fixed here so the
-`rigor sig-gen` command can land in a future v0.1.x slice
-against a stable contract. Implementation queued (no
-committed milestone). ADR-12 (dry-rb packaging) still holds
-its reserved slot; this ADR is independent of it.
+Status: **accepted, 2026-05-12; MVP (Slice 1) implemented in v0.1.4.**
+`rigor sig-gen --print` / `--diff` for `def` methods with
+return-only emission lives under `lib/rigor/sig_gen/`.
+Slices 2–5 remain demand-driven.
 
 ## Context
 
@@ -360,7 +359,7 @@ pattern ADR-13 used. Each slice lands as a separate commit
 with its own CHANGELOG `[Unreleased]` entry.
 
 1.  **Slice 1 — MVP (`def` methods, return-only,
-    `--print`).** New command `rigor sig-gen` with
+    `--print`). — LANDED (v0.1.4)**  New command `rigor sig-gen` with
     `--print` / `--diff` modes, supporting only the
     return-type tier and only `def` methods that
     `user_method_param_shape_simple?` accepts. Parameter
@@ -574,3 +573,7 @@ independent of the packaging discussion.
 ## Revision history
 
 - 2026-05-12 — initial draft.
+- 2026-05-xx — accepted; Slice 1 MVP implemented in v0.1.4.
+  `lib/rigor/sig_gen/` is the production namespace.
+  Policy promoted to AGENTS.md § "RBS Authorship":
+  prefer `rigor sig-gen` over AI-authored RBS.

@@ -40,6 +40,24 @@ jobs:
             echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           fi
 
+      # `rake release` pushes the tag before it pushes the gem, so a
+      # tag-triggered run can start before rigortype is on RubyGems.
+      # Wait for it rather than fail the `gem install` in the build.
+      - name: Wait for the gem on RubyGems
+        run: |
+          version="${{ steps.version.outputs.value }}"
+          for attempt in $(seq 1 30); do
+            if curl -sf "https://rubygems.org/api/v1/versions/rigortype.json" \
+                 | grep -q "\"number\":\"${version}\""; then
+              echo "rigortype ${version} is available"
+              exit 0
+            fi
+            echo "attempt ${attempt}: rigortype ${version} not on RubyGems yet"
+            sleep 20
+          done
+          echo "timed out waiting for rigortype ${version} on RubyGems" >&2
+          exit 1
+
       - uses: docker/metadata-action@v5
         id: meta
         with:

@@ -50,73 +50,73 @@ Option A が低コスト。関数数が増えたら Option B に昇格を検討�
 
 | メソッド | シグネチャ | 返却型 | 状態 | 備考 |
 |----------|-----------|--------|------|------|
-| `acos(x)` | Float → Float | `[0, π]` Float | 🔲 | ドメイン外 (`\|x\| > 1`) で DomainError |
-| `acosh(x)` | Float → Float | Float ≥ 0 | 🔲 | ドメイン外 (`x < 1`) で DomainError |
-| `asin(x)` | Float → Float | `[-π/2, π/2]` Float | 🔲 | |
-| `asinh(x)` | Float → Float | Float | 🔲 | |
-| `atan(x)` | Float → Float | `(-π/2, π/2)` Float | 🔲 | |
-| `atan2(y, x)` | Float, Float → Float | `(-π, π]` Float | 🔲 | 2 引数。`y`/`x` ゼロの符号注意。 |
-| `atanh(x)` | Float → Float | Float | 🔲 | ドメイン外 (`\|x\| ≥ 1`) で DomainError |
-| `cbrt(x)` | Float → Float | Float | 🔲 | 負の実数にも対応（`(-8)***(1/3.0)` とは異なる） |
-| `cos(x)` | Float → Float | `[-1, 1]` Float | 🔲 | |
-| `cosh(x)` | Float → Float | Float ≥ 1 | 🔲 | |
-| `erf(x)` | Float → Float | `(-1, 1)` Float | 🔲 | 誤差関数 |
-| `erfc(x)` | Float → Float | `(0, 2)` Float | 🔲 | 相補誤差関数 |
-| `exp(x)` | Float → Float | Float > 0 | 🔲 | Refinement: `positive-float` 付与可能 |
-| `expm1(x)` | Float → Float | Float > -1 | 🔲 | `exp(x) - 1`（小さな x で精度良好） |
-| `frexp(x)` | Float → [Float, Integer] | `Tuple[Float, Integer]` | 🔲 | 仮数・指数分解。返値が Tuple。 |
-| `gamma(x)` | Float → Float | Float | 🔲 | ドメイン外 (`x ≤ 0` の整数) で DomainError |
-| `hypot(x, y)` | Float, Float → Float | Float ≥ 0 | 🔲 | Refinement: `non-negative-float` |
-| `ldexp(f, e)` | Float, Integer → Float | Float | 🔲 | 仮数・指数から Float 再構成 |
-| `lgamma(x)` | Float → [Float, Integer] | `Tuple[Float, Constant[1\|-1]]` | 🔲 | 対数ガンマ + 符号。Tuple 返却。 |
-| `log(x)` | Float → Float | Float | 🔲 | ドメイン外 (`x ≤ 0`) で DomainError |
-| `log(x, base)` | Float, Float → Float | Float | 🔲 | 2 引数形式別ハンドラ要 |
-| `log10(x)` | Float → Float | Float | 🔲 | |
-| `log1p(x)` | Float → Float | Float | 🔲 | `log(1+x)`（小さな x で精度良好） |
-| `log2(x)` | Float → Float | Float | 🔲 | |
-| `sin(x)` | Float → Float | `[-1, 1]` Float | 🔲 | |
-| `sinh(x)` | Float → Float | Float | 🔲 | |
-| `sqrt(x)` | Float → Float | Float ≥ 0 | 🔲 | ドメイン外 (`x < 0`) で DomainError。Refinement: `non-negative-float` |
-| `tan(x)` | Float → Float | Float | 🔲 | |
-| `tanh(x)` | Float → Float | `(-1, 1)` Float | 🔲 | |
+| `acos(x)` | Float → Float | `[0, π]` Float | ✅ | ドメイン外 (`\|x\| > 1`) で DomainError |
+| `acosh(x)` | Float → Float | Float ≥ 0 | ✅ | ドメイン外 (`x < 1`) で DomainError |
+| `asin(x)` | Float → Float | `[-π/2, π/2]` Float | ✅ | |
+| `asinh(x)` | Float → Float | Float | ✅ | |
+| `atan(x)` | Float → Float | `(-π/2, π/2)` Float | ✅ | |
+| `atan2(y, x)` | Float, Float → Float | `(-π, π]` Float | ✅ | 2 引数。`y`/`x` ゼロの符号注意。 |
+| `atanh(x)` | Float → Float | Float | ✅ | ドメイン外 (`\|x\| ≥ 1`) で DomainError |
+| `cbrt(x)` | Float → Float | Float | ✅ | 負の実数にも対応（`(-8)***(1/3.0)` とは異なる） |
+| `cos(x)` | Float → Float | `[-1, 1]` Float | ✅ | |
+| `cosh(x)` | Float → Float | Float ≥ 1 | ✅ | |
+| `erf(x)` | Float → Float | `(-1, 1)` Float | ✅ | 誤差関数 |
+| `erfc(x)` | Float → Float | `(0, 2)` Float | ✅ | 相補誤差関数 |
+| `exp(x)` | Float → Float | Float > 0 | ✅ | Refinement: `positive-float` 付与可能 |
+| `expm1(x)` | Float → Float | Float > -1 | ✅ | `exp(x) - 1`（小さな x で精度良好） |
+| `frexp(x)` | Float → [Float, Integer] | `Tuple[Float, Integer]` | ✅ | 仮数・指数分解。返値が Tuple。 |
+| `gamma(x)` | Float → Float | Float | ✅ | ドメイン外 (`x ≤ 0` の整数) で DomainError |
+| `hypot(x, y)` | Float, Float → Float | Float ≥ 0 | ✅ | Refinement: `non-negative-float` |
+| `ldexp(f, e)` | Float, Integer → Float | Float | ✅ | 仮数・指数から Float 再構成 |
+| `lgamma(x)` | Float → [Float, Integer] | `Tuple[Float, Constant[1\|-1]]` | ✅ | 対数ガンマ + 符号。Tuple 返却。 |
+| `log(x)` | Float → Float | Float | ✅ | ドメイン外 (`x ≤ 0`) で DomainError |
+| `log(x, base)` | Float, Float → Float | Float | ✅ | 2 引数形式別ハンドラ要 |
+| `log10(x)` | Float → Float | Float | ✅ | |
+| `log1p(x)` | Float → Float | Float | ✅ | `log(1+x)`（小さな x で精度良好） |
+| `log2(x)` | Float → Float | Float | ✅ | |
+| `sin(x)` | Float → Float | `[-1, 1]` Float | ✅ | |
+| `sinh(x)` | Float → Float | Float | ✅ | |
+| `sqrt(x)` | Float → Float | Float ≥ 0 | ✅ | ドメイン外 (`x < 0`) で DomainError。Refinement: `non-negative-float` |
+| `tan(x)` | Float → Float | Float | ✅ | |
+| `tanh(x)` | Float → Float | `(-1, 1)` Float | ✅ | |
 
 **Math 定数:**
-- `Math::E` → `Constant[2.718281828459045]` — 現在 Rigor が定数解決するか要確認
-- `Math::PI` → `Constant[3.141592653589793]` — 同上
+- `Math::E` → `Constant[2.718281828459045]` — 定数解決（メソッド畳み込みではない）。本スライス対象外。
+- `Math::PI` → `Constant[3.141592653589793]` — 同上。定数キャリアの課題として別途。
 
 ### 1-2. 実装チェックリスト
 
 ```
 前提:
-[ ] Math シングルトン受信者の認識方法を確認（Nominal vs Constant）
-[ ] try_fold_module_function ハンドラ骨格の追加（option A/B を決定）
+[x] Math シングルトン受信者の認識方法を確認（Type::Singleton, class_name == "Math"）
+[x] MathFolding モジュール（Tier D。option B — 独立 *_folding.rb ファイル）
 
 高優先度（頻用・返値が単純 Float）:
-[ ] sqrt    → Constant[Float] (≥ 0)
-[ ] exp     → Constant[Float] (> 0)
-[ ] log     → Constant[Float]
-[ ] log2    → Constant[Float]
-[ ] log10   → Constant[Float]
-[ ] sin / cos / tan → Constant[Float]
+[x] sqrt    → Constant[Float]
+[x] exp     → Constant[Float]
+[x] log     → Constant[Float]（1/2 引数の可変長）
+[x] log2    → Constant[Float]
+[x] log10   → Constant[Float]
+[x] sin / cos / tan → Constant[Float]
 
 中優先度（2 引数または特殊返値）:
-[ ] atan2   → Constant[Float]
-[ ] hypot   → Constant[Float]
-[ ] ldexp   → Constant[Float]
-[ ] frexp   → Constant[Tuple[Float, Integer]]
-[ ] lgamma  → Constant[Tuple[Float, Integer]]
+[x] atan2   → Constant[Float]
+[x] hypot   → Constant[Float]
+[x] ldexp   → Constant[Float]
+[x] frexp   → Tuple[Constant[Float], Constant[Integer]]
+[x] lgamma  → Tuple[Constant[Float], Constant[Integer]]
 
 低優先度（ニッチな数値解析用途）:
-[ ] erf / erfc / expm1 / log1p / cbrt
-[ ] acos / asin / atan / acosh / asinh / atanh
-[ ] cosh / sinh / tanh / gamma
+[x] erf / erfc / expm1 / log1p / cbrt
+[x] acos / asin / atan / acosh / asinh / atanh
+[x] cosh / sinh / tanh / gamma
 
-Refinement 追加（値の範囲が分かる場合）:
+Refinement 追加（値の範囲が分かる場合）— 今回は対象外:
 [ ] exp → positive-float
 [ ] sqrt / hypot → non-negative-float
 ```
 
-実装ファイル: `lib/rigor/inference/method_dispatcher/constant_folding.rb` （新規 `try_fold_math` メソッド）。
+実装ファイル: `lib/rigor/inference/method_dispatcher/math_folding.rb`（`ShellwordsFolding` パターンの Tier D モジュール。`dispatch_stdlib_module_tiers` に配線）。Refinement 付与（`positive-float` / `non-negative-float`）は需要が出たときの follow-up。
 
 ---
 
@@ -270,8 +270,8 @@ Refinement 追加（値の範囲が分かる場合）:
 | ✅ 済 | `Shellwords.escape` / `shellescape` / `split` / `shellsplit` / `join` / `shelljoin` | `Constant[String]` / `Tuple[Constant[String]…]` |
 | 🔴 高 | `CGI.escapeHTML` / `h` | `Constant[String]` |
 | 🔴 高 | `URI.encode_www_form_component` / `decode_www_form_component` | `Constant[String]` |
-| 🟡 中 | `Math.sqrt` / `exp` / `log` / `sin` / `cos` | `Constant[Float]` |
-| 🟡 中 | `Math.atan2` / `hypot` / `frexp` / `lgamma` | `Constant[Float\|Tuple]` |
+| ✅ 済 | `Math.sqrt` / `exp` / `log` / `sin` / `cos` ほか | `Constant[Float]` |
+| ✅ 済 | `Math.atan2` / `hypot` / `frexp` / `lgamma` | `Constant[Float]` / `Tuple` |
 | 🟡 中 | `CGI.escape` / `unescape` (URL) | `Constant[String]` |
-| 🟢 低 | Math 残り 20+ 関数 | `Constant[Float]` |
+| ✅ 済 | Math 全 28 関数（`MathFolding`） | `Constant[Float]` / `Tuple` |
 | 🟢 低 | `URI.encode_www_form` / `decode_www_form` | `Constant[String]` / Tuple |

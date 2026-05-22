@@ -14,6 +14,7 @@ require_relative "method_dispatcher/iterator_dispatch"
 require_relative "method_dispatcher/block_folding"
 require_relative "method_dispatcher/file_folding"
 require_relative "method_dispatcher/shellwords_folding"
+require_relative "method_dispatcher/math_folding"
 require_relative "method_dispatcher/regexp_folding"
 require_relative "method_dispatcher/cgi_folding"
 require_relative "method_dispatcher/uri_folding"
@@ -656,12 +657,13 @@ module Rigor
           )
       end
 
-      # Stdlib module singleton-folding tiers: File, Shellwords, Regexp,
-      # CGI, URI, Set. Extracted from `dispatch_precise_tiers` to keep
-      # the parent method within the cyclomatic-complexity limit.
+      # Stdlib module singleton-folding tiers: File, Shellwords, Math,
+      # Regexp, CGI, URI, Set. Extracted from `dispatch_precise_tiers`
+      # to keep the parent method within the cyclomatic-complexity limit.
       def dispatch_stdlib_module_tiers(receiver_type, method_name, arg_types)
         FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           ShellwordsFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          MathFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           RegexpFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           CGIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           URIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||

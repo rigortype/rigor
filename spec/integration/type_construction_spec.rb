@@ -673,6 +673,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/math_folding.rb — Math module-function folding" do
+    let(:harness) { harness_for("math_folding") }
+
+    it "folds Math transcendental / two-arg / log / frexp calls on constants" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/union_arithmetic.rb — cartesian fold over Union[Constant…]" do
     let(:harness) { harness_for("union_arithmetic") }
 

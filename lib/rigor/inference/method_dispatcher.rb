@@ -14,6 +14,9 @@ require_relative "method_dispatcher/iterator_dispatch"
 require_relative "method_dispatcher/block_folding"
 require_relative "method_dispatcher/file_folding"
 require_relative "method_dispatcher/shellwords_folding"
+require_relative "method_dispatcher/regexp_folding"
+require_relative "method_dispatcher/cgi_folding"
+require_relative "method_dispatcher/uri_folding"
 require_relative "method_dispatcher/kernel_dispatch"
 require_relative "method_dispatcher/method_folding"
 
@@ -646,6 +649,9 @@ module Rigor
           ShapeDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           ShellwordsFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          RegexpFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          CGIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
+          URIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           KernelDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           MethodFolding.try_forward(receiver: receiver_type, method_name: method_name, args: arg_types) ||
           BlockFolding.try_fold(

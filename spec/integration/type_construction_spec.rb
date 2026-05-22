@@ -800,5 +800,37 @@ RSpec.describe "Rigor type construction (integration)" do
         expect(result).to eq(Rigor::Type::Combinator.constant_of("git commit -m initial\\ commit"))
       end
     end
+
+    describe "fixtures/module_function_folding.rb — Regexp / CGI / URI module function folding" do
+      let(:harness) { harness_for("module_function_folding") }
+
+      it "self-asserts every Regexp.escape / CGI.escapeHTML / URI.encode_www_form_component fold" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "folds Regexp.escape to a Constant[String]" do
+        result = harness.local(:_regexp_escaped)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq("hello\\.world")
+      end
+
+      it "folds Regexp.quote to a Constant[String]" do
+        result = harness.local(:_regexp_quoted)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to eq("\\[a\\-z\\]")
+      end
+
+      it "folds CGI.escape_uri_component to the percent-encoded Constant[String]" do
+        result = harness.local(:_uri_comp)
+        expect(result).to eq(Rigor::Type::Combinator.constant_of("hello%20world"))
+      end
+
+      it "folds URI.encode_www_form_component to a Constant[String]" do
+        result = harness.local(:_encoded)
+        expect(result).to be_a(Rigor::Type::Constant)
+        expect(result.value).to be_a(String)
+      end
+    end
   end
 end

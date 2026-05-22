@@ -1056,6 +1056,9 @@ module Rigor
         per_element = try_per_element_block_fold(node, receiver)
         return per_element if per_element
 
+        hash_transform = try_hash_shape_block_fold(node, receiver)
+        return hash_transform if hash_transform
+
         result = MethodDispatcher.dispatch(
           receiver_type: receiver,
           method_name: node.name,
@@ -1459,6 +1462,12 @@ module Rigor
       ].freeze
       private_constant :PER_ELEMENT_TUPLE_METHODS
 
+      HASH_SHAPE_TRANSFORM_METHODS = Set[
+        :transform_keys, :transform_keys!,
+        :transform_values, :transform_values!
+      ].freeze
+      private_constant :HASH_SHAPE_TRANSFORM_METHODS
+
       # Cardinality cap for per-element block fold over
       # finite-bound `Constant<Range>` receivers. Walking
       # `(1..1_000_000).map { … }` element-wise would balloon
@@ -1609,6 +1618,94 @@ module Rigor
 
       def truthy_constant?(type)
         type.is_a?(Type::Constant) && type.value && type.value != false
+      end
+
+      # Per-pair block fold for `HashShape#transform_keys` and
+      # `HashShape#transform_values` (and their bang variants).
+      #
+      # When the receiver is a closed `HashShape` with no optional
+      # keys, applies the call's block (a `Prism::BlockNode` or
+      # `Prism::BlockArgumentNode`) to each key/value pair
+      # independently and assembles a new `HashShape`:
+      #
+      # - `transform_values` / `transform_values!`: re-types
+      #   each VALUE by binding it to the block parameter; keys
+      #   are preserved unchanged.
+      # - `transform_keys` / `transform_keys!`: re-types each
+      #   KEY by wrapping it in `Constant[k]` and passing it to
+      #   the block; values are preserved unchanged. The result
+      #   key must be a `Constant[Symbol | String]` — otherwise
+      #   the tier declines (the new key cannot be used as a
+      #   static HashShape index). Collisions (two old keys
+      #   mapping to the same new key) also decline.
+      #
+      # Returns `nil` on any decline so the dispatcher falls
+      # through to `RbsDispatch` and gets the widened `Hash[K, V]`
+      # answer.
+      def try_hash_shape_block_fold(call_node, receiver_type)
+        return nil unless HASH_SHAPE_TRANSFORM_METHODS.include?(call_node.name)
+        return nil unless receiver_type.is_a?(Type::HashShape)
+        return nil unless receiver_type.closed?
+        return nil unless receiver_type.optional_keys.empty?
+
+        block_arg = call_node.block
+        return nil if block_arg.nil?
+
+        if %i[transform_values transform_values!].include?(call_node.name)
+          fold_hash_shape_transform_values(receiver_type, block_arg)
+        else
+          fold_hash_shape_transform_keys(receiver_type, block_arg)
+        end
+      end
+
+      def fold_hash_shape_transform_values(shape, block_arg)
+        new_pairs = {}
+        shape.pairs.each do |key, value|
+          new_value = apply_hash_block(block_arg, value)
+          return nil if new_value.nil?
+
+          new_pairs[key] = new_value
+        end
+        Type::Combinator.hash_shape_of(new_pairs)
+      end
+
+      def fold_hash_shape_transform_keys(shape, block_arg)
+        new_pairs = {}
+        shape.pairs.each do |key, value|
+          key_type = Type::Combinator.constant_of(key)
+          new_key_type = apply_hash_block(block_arg, key_type)
+          return nil unless new_key_type.is_a?(Type::Constant)
+
+          new_key = new_key_type.value
+          return nil unless new_key.is_a?(Symbol) || new_key.is_a?(String)
+          return nil if new_pairs.key?(new_key)
+
+          new_pairs[new_key] = value
+        end
+        Type::Combinator.hash_shape_of(new_pairs)
+      end
+
+      # Applies a single-argument block (either a full BlockNode
+      # or a `&:symbol` BlockArgumentNode) to `param_type` and
+      # returns the resulting type, or `nil` on failure.
+      def apply_hash_block(block_arg, param_type)
+        case block_arg
+        when Prism::BlockNode
+          type_block_body_with_param(block_arg, [param_type])
+        when Prism::BlockArgumentNode
+          expression = block_arg.expression
+          return nil unless expression.is_a?(Prism::SymbolNode)
+
+          MethodDispatcher.dispatch(
+            receiver_type: param_type,
+            method_name: expression.unescaped.to_sym,
+            arg_types: [],
+            block_type: nil,
+            environment: scope.environment,
+            call_node: block_arg,
+            scope: scope
+          )
+        end
       end
 
       def type_block_body_with_param(block_node, expected_param_types)

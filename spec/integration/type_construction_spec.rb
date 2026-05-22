@@ -535,6 +535,42 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/hash_shape_transform.rb — per-pair HashShape transform_keys / transform_values fold" do
+    let(:harness) { harness_for("hash_shape_transform") }
+
+    it "produces no assert_type mismatches" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+
+    it "folds transform_keys(&:to_sym) on a string-keyed HashShape to a symbol-keyed HashShape" do
+      result = harness.local(:sym_keyed)
+      expect(result).to be_a(Rigor::Type::HashShape)
+      expect(result.pairs.keys).to eq(%i[name age])
+    end
+
+    it "folds transform_keys(&:to_s) on a symbol-keyed HashShape to a string-keyed HashShape" do
+      result = harness.local(:str_hash)
+      expect(result).to be_a(Rigor::Type::HashShape)
+      expect(result.pairs.keys).to eq(%w[name age])
+      expect(result.pairs.values.map(&:value)).to eq(["Alice", 30])
+    end
+
+    it "folds transform_values(&:to_s) on a symbol-keyed HashShape, converting each value to its string form" do
+      result = harness.local(:stringified)
+      expect(result).to be_a(Rigor::Type::HashShape)
+      expect(result.pairs[:name].value).to eq("Alice")
+      expect(result.pairs[:age].value).to eq("30")
+    end
+
+    it "folds transform_values with a full block per pair independently" do
+      result = harness.local(:up)
+      expect(result).to be_a(Rigor::Type::HashShape)
+      expect(result.pairs[:x].value).to eq("1")
+      expect(result.pairs[:y].value).to eq("hello")
+    end
+  end
+
   describe "fixtures/range_catalog.rb — Range catalog-driven folding" do
     let(:harness) { harness_for("range_catalog") }
 

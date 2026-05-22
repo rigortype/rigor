@@ -1003,9 +1003,13 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       type = project_scope.type_of(parse_expression('{ a: "x" }.transform_values(&:freeze)'))
 
       # Without the gap-(d) fix, this resolves to
-      # `Enumerator[...]` via the no-block overload.
-      expect(type).to be_a(Rigor::Type::Nominal)
-      expect(type.class_name).to eq("Hash")
+      # `Enumerator[...]` via the no-block overload. With the
+      # per-pair HashShape fold (added alongside ADR-14 gap-(d)),
+      # the result is a precise `HashShape` rather than the
+      # widened `Hash` — both confirm the block-bearing overload
+      # was selected.
+      expect(type).to be_a(Rigor::Type::HashShape)
+      expect(type.pairs.keys).to eq([:a])
     end
 
     it "selects the block-bearing overload of Array#map for &:to_s" do

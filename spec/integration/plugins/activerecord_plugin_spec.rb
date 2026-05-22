@@ -286,16 +286,20 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(undefined.message).to include("User")
     end
 
-    it "leaves `Model.where` at the RBS untyped return (relations deferred)" do
+    it "narrows `Model.where` to a relation whose `.find` extracts the element" do
+      # `where` → `ActiveRecord::Relation[User]`; `.find` → `User`,
+      # so a bad method on the extracted element surfaces on `User`.
+      # (`bit_length` is NOT flagged on the relation itself —
+      # `ActiveRecord::Relation` is an ADR-26 open receiver.)
       result = run_ar_with_user_sig(<<~RUBY)
-        users = User.where(admin: true)
-        users.bit_length
+        user = User.where(admin: true).find(1)
+        user.bit_length
       RUBY
-      # No contribution → RBS untyped → no method-undefined.
-      method_undefined = result.diagnostics.select do |d|
+      undefined = result.diagnostics.find do |d|
         d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("bit_length")
       end
-      expect(method_undefined).to be_empty
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("User")
     end
 
     it "does not contribute on non-model receivers" do
@@ -498,7 +502,7 @@ RSpec.describe "plugins/rigor-activerecord" do
       )
     end
 
-    it "does not contribute on has_many calls (relation types deferred)" do
+    it "contributes `ActiveRecord::Relation[Target]` on a has_many call" do
       index = model_index_after_run(models: POST_USER_MODELS)
       runner_plugin = Rigor::Plugin::Activerecord.allocate
       runner_plugin.instance_variable_set(:@model_index, index)
@@ -510,7 +514,12 @@ RSpec.describe "plugins/rigor-activerecord" do
       end
       contribution = runner_plugin.flow_contribution_for(call_node: call_node, scope: double_scope)
 
-      expect(contribution).to be_nil
+      expect(contribution.return_type).to eq(
+        Rigor::Type::Combinator.nominal_of(
+          "ActiveRecord::Relation",
+          type_args: [Rigor::Type::Combinator.nominal_of("Post")]
+        )
+      )
     end
 
     it "accepts a singular association name as a `find_by` / `where` key alias" do
@@ -1269,6 +1278,131 @@ RSpec.describe "plugins/rigor-activerecord" do
         run_ar("Report.where(target_account: a)\n", models: with_options_models, schema: reports_schema)
       )
       expect(diags.select { |d| d.rule == "unknown-column" }).to be_empty
+    end
+  end
+
+  describe "ActiveRecord::Relation typing (ADR-26)" do
+    def relation_type(model)
+      Rigor::Type::Combinator.nominal_of(
+        "ActiveRecord::Relation",
+        type_args: [Rigor::Type::Combinator.nominal_of(model)]
+      )
+    end
+
+    def relation_contribution(index:, source:, receiver_class:)
+      plugin = Rigor::Plugin::Activerecord.allocate
+      plugin.instance_variable_set(:@model_index, index)
+      call_node = Prism.parse(source).value.statements.body.first
+      scope = Object.new
+      scope.define_singleton_method(:type_of) do |_node|
+        Rigor::Type::Combinator.nominal_of(receiver_class)
+      end
+      plugin.flow_contribution_for(call_node: call_node, scope: scope)
+    end
+
+    let(:scope_models) do
+      {
+        "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+        "app/models/post.rb" => <<~RUBY
+          class Post < ApplicationRecord
+            scope :published, -> { where(published: true) }
+            has_and_belongs_to_many :tags
+          end
+        RUBY
+      }
+    end
+
+    let(:scope_schema) do
+      <<~SCHEMA
+        ActiveRecord::Schema[8.0].define do
+          create_table "posts", force: :cascade do |t|
+            t.boolean "published"
+          end
+        end
+      SCHEMA
+    end
+
+    it "declares the bundled relation RBS and the open receiver in the manifest" do
+      expect(plugin_class.manifest.signature_paths).to eq(["sig"])
+      expect(plugin_class.manifest.open_receivers).to eq(["ActiveRecord::Relation"])
+    end
+
+    it "contributes `ActiveRecord::Relation[Model]` for `Model.where`" do
+      _result, index = run_ar_with_index("x = 1\n", models: DEFAULT_MODELS, schema: DEFAULT_SCHEMA)
+      contribution = relation_contribution(index: index, source: "User.where(admin: true)", receiver_class: "User")
+
+      expect(contribution.return_type).to eq(relation_type("User"))
+    end
+
+    it "contributes a relation for a user-declared `scope`" do
+      _result, index = run_ar_with_index("x = 1\n", models: scope_models, schema: scope_schema)
+      contribution = relation_contribution(index: index, source: "Post.published", receiver_class: "Post")
+
+      expect(contribution.return_type).to eq(relation_type("Post"))
+    end
+
+    it "contributes a relation for a `has_and_belongs_to_many` accessor" do
+      _result, index = run_ar_with_index("x = 1\n", models: scope_models, schema: scope_schema)
+      contribution = relation_contribution(index: index, source: "post.tags", receiver_class: "Post")
+
+      expect(contribution.return_type).to eq(relation_type("Tag"))
+    end
+
+    it "re-contributes the relation type for a scope invoked ON a relation" do
+      # `Post.where(...).published` — the receiver of `.published`
+      # is `ActiveRecord::Relation[Post]`; the scope keeps the
+      # element type through the chain.
+      _result, index = run_ar_with_index("x = 1\n", models: scope_models, schema: scope_schema)
+      plugin = Rigor::Plugin::Activerecord.allocate
+      plugin.instance_variable_set(:@model_index, index)
+      call_node = Prism.parse("rel.published").value.statements.body.first
+      post_relation = relation_type("Post")
+      scope = Object.new
+      scope.define_singleton_method(:type_of) { |_node| post_relation }
+      contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+
+      expect(contribution.return_type).to eq(relation_type("Post"))
+    end
+
+    it "keeps a chained relation query method type-checking cleanly" do
+      # `where` opens the relation; every chained query method
+      # resolves through the bundled `ActiveRecord::Relation` RBS,
+      # so the whole chain stays `Relation[User]`.
+      result = run_ar(<<~RUBY)
+        users = User.where(admin: true).order(:name).limit(10)
+        users.first
+      RUBY
+      method_undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+      expect(method_undefined).to be_empty
+    end
+
+    it "does not flag an unknown scope called on a typed relation (ADR-26 open receiver)" do
+      # `Post.where(...).some_undeclared_scope` — the relation is
+      # typed, but `ActiveRecord::Relation` is an open receiver, so
+      # an unenumerable scope call must NOT surface as
+      # `call.undefined-method`.
+      result = run_ar(
+        "Post.where(published: true).some_undeclared_scope\n",
+        models: scope_models, schema: scope_schema
+      )
+      undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+      expect(undefined).to be_empty
+    end
+
+    it "resolves the block element type through the relation end-to-end" do
+      # `where` → Relation[User] → Enumerable[User]#each yields
+      # User → the column accessor types `u.name` as String →
+      # `bit_length` is undefined on String.
+      result = run_ar("User.where(admin: true).each { |u| u.name.bit_length }\n")
+      undefined = result.diagnostics.find do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("bit_length")
+      end
+      expect(undefined).not_to be_nil
+      expect(undefined.message).to include("String")
     end
   end
 end

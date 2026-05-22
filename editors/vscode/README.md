@@ -53,6 +53,24 @@ executable in this order:
 If none works, the extension shows an actionable message and stays
 loaded — fix the setup and run **Rigor: Restart Server**.
 
+### Using a mise-managed `rigor`
+
+If `rigor` is installed through [`mise`](https://mise.jdx.dev/)
+(`mise use gem:rigortype`), a GUI-launched VSCode does not inherit
+the shell `PATH` that `mise activate` sets up — so step 3 above
+cannot find it. Point `rigor.server.path` at mise's **shim**, a
+stable self-contained executable:
+
+```json
+"rigor.server.path": "/Users/you/.local/share/mise/shims/rigor"
+```
+
+Use an absolute path — the setting is not `~`-expanded. The shim
+re-resolves the mise-pinned version per workspace, so it keeps
+working across `rigor` upgrades. Alternatively, install the
+`hverlin.mise-vscode` extension so all of VSCode sees mise's tools,
+or launch VSCode with `code .` from a shell where mise is active.
+
 ## Settings
 
 | Setting | Default | Description |

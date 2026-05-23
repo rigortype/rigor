@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Fixed
+
+- **`rigor annotate` now reports the if-expression's union, not the last branch.** Two bugs combined to make `b = rand(10) == 0 ? 2 : 3` annotate as `dump_type: 3` (the else-branch's literal) instead of `dump_type: 2 | 3`, and `c = if rand == 0 then :then else :else end` annotate as `dump_type: :else` instead of `dump_type: :else | :then`. (1) `CLI::LineTypeCollector#each_statement` walked the AST in pre-order, yielding the outer assignment first and then the inner branch statements; because every nested statement on the same line overwrites `by_line[end_line]`, the deepest branch always won. The walker now descends before yielding (post-order), so the outermost statement closing a line is the one whose type is reported — direct siblings (`1; 2; 3`) still resolve to the last sibling because they're yielded in source order under a single `StatementsNode`. (2) `Inference::ExpressionTyper#constant_predicate_polarity` only folded when the predicate's type was a literal `Type::Constant`, leaving `Nominal[Integer]` (always truthy in Ruby) and other always-truthy / always-falsey carriers to the union fallback in expression position — even though `StatementEvaluator#eval_if` already collapsed the dead branch via three-valued `Narrowing`. The expression-position helper now uses the same `Narrowing.narrow_truthy` / `narrow_falsey` Bot probe, unifying the two paths: `1 ? a : b` → `a`, `nil ? a : b` → `b`, `rand(10) ? a : b` → `a` (Integer can't be falsey), `Union[true, false] ? a : b` → `a | b`, `Dynamic[T] ? a : b` → `a | b`. Spec coverage: +2 examples in `spec/rigor/cli_spec.rb` (single-line ternary union, single-line `if`/`else` union); the existing branch-elision and `1; 2; 3` annotate tests still pass.
+
 ## [0.1.9] - 2026-05-23
 
 ### Added

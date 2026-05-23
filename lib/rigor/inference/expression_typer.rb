@@ -8,6 +8,7 @@ require_relative "block_parameter_binder"
 require_relative "fallback"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
+require_relative "narrowing"
 
 module Rigor
   module Inference
@@ -660,16 +661,26 @@ module Rigor
       end
 
       # Returns `:truthy`, `:falsey`, or `nil` for an arbitrary
-      # predicate expression. Only `Type::Constant` answers
-      # decisively — `Union[true, false]`, `Nominal[bool]`, and
-      # `Dynamic[T]` keep both branches live.
+      # predicate expression under three-valued logic. Uses the
+      # same {Narrowing} probe as `StatementEvaluator#eval_if`:
+      # the predicate is truthy when its falsey fragment is `Bot`,
+      # falsey when its truthy fragment is `Bot`. So
+      # `Nominal[Integer]` (always truthy in Ruby), `Constant[nil]`,
+      # and `Constant[false]` fold one branch; `Union[true, false]`,
+      # `Dynamic[T]`, and `Top` keep both branches live.
       def constant_predicate_polarity(predicate)
         return nil if predicate.nil?
 
         type = type_of(predicate)
-        return nil unless type.is_a?(Type::Constant)
+        return nil if type.nil? || type.is_a?(Type::Bot)
 
-        type.value ? :truthy : :falsey
+        truthy_bot = Narrowing.narrow_truthy(type).is_a?(Type::Bot)
+        falsey_bot = Narrowing.narrow_falsey(type).is_a?(Type::Bot)
+
+        return :falsey if truthy_bot && !falsey_bot
+        return :truthy if !truthy_bot && falsey_bot
+
+        nil
       end
 
       def type_of_else(node)

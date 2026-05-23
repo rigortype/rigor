@@ -1204,6 +1204,22 @@ RSpec.describe Rigor::CLI do
       expect(lines[4]).to include("end").and include("#=> dump_type: :else")
     end
 
+    it "unions both branches of a single-line ternary on a maybe predicate" do
+      path = write_fixture("a.rb", "b = rand(10) == 0 ? 2 : 3\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      expect(out.lines[0]).to include("#=> dump_type: 2 | 3")
+    end
+
+    it "unions both branches of a single-line `if`/`else` on a maybe predicate" do
+      path = write_fixture("a.rb", "c = if rand == 0 then :then else :else end\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      expect(out.lines[0]).to include("#=> dump_type: :else | :then")
+    end
+
     it "is idempotent — re-annotating does not stack comments" do
       path = write_fixture("a.rb", "a = 1\n")
 

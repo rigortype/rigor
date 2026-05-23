@@ -170,14 +170,26 @@ module Rigor
       private
 
       # Yields each statement node (a child of any `StatementsNode`
-      # anywhere in the tree) in source order, so a later statement
-      # ending on a line overwrites an earlier one — `1; 2; 3`
-      # resolves to `3`.
-      def each_statement(node, &)
+      # anywhere in the tree) in post-order: nested statements are
+      # yielded before the enclosing statement that contains them.
+      # `by_line[end_line] = type` overwrites earlier entries, so
+      # post-order means the *outermost* statement closing a line
+      # wins — for `b = if cond then :then else :else end` the
+      # line resolves to the assignment's type (the if-expression's
+      # union), not the else-branch's inner `:else`. Direct siblings
+      # (`1; 2; 3`) are still yielded in source order so the last
+      # sibling wins.
+      def each_statement(node, &block)
         return if node.nil?
 
-        node.body.each(&) if node.is_a?(Prism::StatementsNode)
-        node.compact_child_nodes.each { |child| each_statement(child, &) }
+        if node.is_a?(Prism::StatementsNode)
+          node.body.each do |stmt|
+            each_statement(stmt, &block)
+            block.call(stmt)
+          end
+        else
+          node.compact_child_nodes.each { |child| each_statement(child, &block) }
+        end
       end
 
       # For a line no statement closes (the `if` / block header

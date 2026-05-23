@@ -23,6 +23,7 @@ specification](../type-specification/README.md), the spec binds.
 | How does `if x.is_a?(String)` change `x`'s type? | Occurrence typing / flow-sensitive narrowing | Edge-aware narrowing with trinary certainty |
 | What about side effects? | Effect systems | The engine's effect model (mutation, exception, escape) — internal, not user-visible |
 | Soundness or completeness? | Pick one (or neither) | **Neither in full** — Rigor optimises for no-false-positives, with a robustness-principle bias |
+| Why do some features force annotations everywhere? | Decidability of inference — certain combinations (Rank-3+, polymorphic recursion, subtyping + intersection) are undecidable | **The trinary `maybe`** — when inference cannot decide, Rigor stays silent rather than guessing or pestering the user for an annotation |
 
 Rigor's design pulls liberally from this catalogue but avoids the
 parts that would force a Ruby author to write annotations they did
@@ -364,6 +365,71 @@ The trade-offs to be aware of:
 - **`Dynamic[T]` is not a failure mode** in Rigor's model. It is
   a first-class carrier with full algebraic identity.
 
+## Decidability of inference
+
+A type system's *expressive power* and the *decidability of
+inferring its types* pull in opposite directions. Adding the wrong
+combination of features can push inference into undecidable
+territory — equivalent in difficulty to the halting problem.
+Language designers therefore pick a fragment that is decidable for
+inference and require annotations for anything beyond.
+
+The friendliest accessible-level survey of this landscape in
+Japanese is 水野雅之「計算機に推論できる型、できない型」
+(Wantedly Advent Calendar, 2021; see the reading list below). The
+key results it walks through, in terms of where Rigor sits:
+
+| Feature | Inference status | Rigor stance |
+| --- | --- | --- |
+| Let-polymorphism (Hindley–Milner) | Decidable; ~linear in practice | Not Rigor's strategy. Rigor is gradual, not HM-based — RBS generics resolve by walking call sites and consulting signatures, not by global unification. |
+| Higher-rank polymorphism, Rank-2 | Decidable with annotations (Kfoury & Wells, 1994) | Not exposed at the user surface. RBS generics are predicative. |
+| Higher-rank polymorphism, Rank-3+ | **Undecidable** (Wells, 1999) | Not exposed. Would force annotations wherever a polymorphic value flows. |
+| Polymorphic recursion | **Undecidable** (Henglein, 1993) | Not exposed. A generic method body sees its type parameter as fixed at the call site — recursive calls do not re-instantiate it. |
+| Recursive types as inference targets | Decidable for equi/iso-recursive forms, but most languages exclude them from inference | RBS type aliases are nominal — recursive shapes (a tree, a JSON value) live behind a name. Rigor does not synthesise an anonymous fixed-point type during inference. The OCaml cautionary example `let f g x = x x` is well-typed under unrestricted recursive types — exactly the kind of "accepted but unwanted" judgment that motivates the exclusion. |
+| Subtyping + intersection types (full) | **Undecidable in general** | Rigor exposes both `<:` and `&` (meet). Instead of restricting the language to recover decidability, it trades completeness for the trinary certainty — the `maybe` arm is what closes the gap. |
+
+### Rigor's pragmatic response: the third arm
+
+A textbook sound type checker has two ways to react when inference
+cannot decide:
+
+1. **Restrict the language** — give up the offending feature (HM
+   gives up rank-N polymorphism to keep inference total).
+2. **Demand annotations** — push the burden onto the author
+   (System F makes the user write `Λα.` themselves).
+
+Rigor's no-false-positives stance enables a third route, available
+only in the gradual setting:
+
+> When inference cannot decide, return `maybe` and stay silent.
+
+The `maybe` arm of the trinary certainty is therefore not only an
+acknowledgement of *runtime* uncertainty (the gradual concern from
+the previous section); it is also the formal acknowledgement that
+the static system is *deliberately incomplete in the inferability
+sense*. The two incompletenesses share one representation in
+Rigor's algebra because the practical answer in both cases is the
+same: do not fire a diagnostic the system cannot justify.
+
+```ruby
+# A call where deciding the subtyping-with-intersection constraint
+# would require global, undecidable inference. Rigor returns
+# `maybe` and emits no diagnostic.
+def consume(x)
+  x.frobnicate if x.respond_to?(:frobnicate)
+end
+consume(some_value_from_a_dynamic_source)  # certainty: maybe — silent
+```
+
+This stance also explains a recurring shape in Rigor's design:
+when a feature would only be addable at the cost of global,
+inference-time blow-up (closed row variables, first-class
+higher-rank polymorphism, full GADT-style constructor-driven
+narrowing), Rigor either ships a nominal substitute (capability
+roles for row polymorphism, `interface` for existentials) or
+defers the feature behind an ADR rather than degrade to a noisy
+approximation.
+
 ## What Rigor does NOT model
 
 For completeness, a short list of type-theoretic features Rigor
@@ -372,13 +438,22 @@ here so you can stop looking:
 
 - **Higher-kinded types (HKT).** `Functor[F[_]]` style
   abstraction. Tracked as a "future direction" but not in any
-  shipped slice.
+  shipped slice. (General HKT inference is undecidable; ADR-20
+  sketches a defunctionalised, annotation-driven approach that
+  sidesteps this.)
 - **Higher-rank polymorphism (System F⊤).** All RBS generics
   are predicative; type variables cannot quantify over
-  polymorphic types.
+  polymorphic types. (Rank-3 inference is undecidable per Wells,
+  1999; the predicative restriction keeps Rigor's surface
+  inferable without per-call annotations.)
+- **Polymorphic recursion.** A generic method body re-applied
+  inside itself at a *different* instantiation. Inference is
+  undecidable (Henglein, 1993); RBS does not offer the syntax
+  and Rigor does not synthesise it.
 - **Full dependent types.** No `Vec[n, T]` with `n : Integer`.
-  Integer-range refinements (`int<min, max>`) cover the most
-  common practical need.
+  Type-checking is decidable but inference is not; integer-range
+  refinements (`int<min, max>`) cover the most common practical
+  need without crossing the line.
 - **Row polymorphism as a user-quantifiable axis.** `HashShape`
   carries open-vs-closed semantics internally but does not
   expose row variables.
@@ -423,6 +498,21 @@ they map to the sections of this appendix:
   fragment).
 - Lucassen & Gifford. "Polymorphic Effect Systems."
   *POPL 1988.* Origin of effect systems.
+- Wells, J.B. "Typability and Type Checking in System F are
+  Equivalent and Undecidable." *Annals of Pure and Applied
+  Logic*, 1999. The proof that Rank-3 (and higher) type
+  inference is undecidable — the reason RBS generics stay
+  predicative.
+- Henglein, F. "Type Inference with Polymorphic Recursion."
+  *ACM TOPLAS*, 1993. Establishes that inferring polymorphic
+  recursion is undecidable.
+- 水野雅之.「計算機に推論できる型、できない型」.
+  *Wantedly Advent Calendar*, 2021.
+  <https://www.wantedly.com/companies/wantedly/post_articles/349494>.
+  A friendly Japanese-language tour of the decidability boundary
+  — Let多相, Rank-N, 多相再帰, 再帰型, サブタイピング+交差型 —
+  and the most accessible companion to the
+  "Decidability of inference" section above.
 - Matsumoto & Minamide. "Rubyプログラムの制御フロー解析と
   その健全性の証明." *IPSJ TPRO Vol.3 No.2*, 2010. The
   upstream Ruby-CFA soundness proof; Rigor-perspective review

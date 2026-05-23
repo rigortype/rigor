@@ -1126,6 +1126,43 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(type).to eq(expected)
     end
 
+    it "stops at the first definitely-matching `when` (Constant subject, Class pattern)" do
+      type = scope.type_of(parse_expression("case 1; when Integer; :int; when String; :str; else; :other; end"))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(:int))
+    end
+
+    it "unions prior `:maybe` branches with the first definitely-matching `when`" do
+      # rand(10) -> Integer (always-yes against `Integer`). Prior `when 0`
+      # is `:maybe` (Integer might be 0), so the result includes both
+      # bodies but stops before reaching the else.
+      type = scope.type_of(parse_expression("case rand(10); when 0; :zero; when Integer; :int; else; :other; end"))
+
+      expected = Rigor::Type::Combinator.union(
+        Rigor::Type::Combinator.constant_of(:zero),
+        Rigor::Type::Combinator.constant_of(:int)
+      )
+      expect(type).to eq(expected)
+    end
+
+    it "drops a definitely-no `when` and selects the next definitely-yes branch" do
+      type = scope.type_of(parse_expression("case :a; when :z; 1; when :a; 2; when :b; 3; end"))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(2))
+    end
+
+    it "falls through to the else clause when every `when` is definitely-no" do
+      type = scope.type_of(parse_expression("case :z; when :a; 1; when :b; 2; else; :fallback; end"))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(:fallback))
+    end
+
+    it "treats a multi-condition `when a, b` as `:yes` when any condition is `:yes`" do
+      type = scope.type_of(parse_expression("case 5; when 1, 2; :low; when 5, 10; :mid; else; :other; end"))
+
+      expect(type).to eq(Rigor::Type::Combinator.constant_of(:mid))
+    end
+
     it "types BeginNode/RescueNode as the union of the body and rescue chain" do
       source = "begin; 1; rescue ArgumentError; 2; rescue; 3; end"
       type = scope.type_of(parse_expression(source))

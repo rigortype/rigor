@@ -723,15 +723,135 @@ module Rigor
         type.value ? :truthy : :falsey
       end
 
+      # Three-valued evaluation of `case predicate when pattern`
+      # dispatch. For each `when` clause we ask: under static types,
+      # does `pattern === predicate` definitely match (`:yes`),
+      # definitely not match (`:no`), or possibly match (`:maybe`)?
+      # Walking in source order:
+      #
+      # - `:yes` — this branch fires, subsequent branches are
+      #   unreachable. Result = union(prior `:maybe` branches, this
+      #   `:yes` branch).
+      # - `:no`  — branch dropped.
+      # - `:maybe` — branch is a candidate, continue.
+      #
+      # If no `:yes` was reached, the else clause (or `Constant[nil]`
+      # when absent) is added to the candidate set.
+      #
+      # The `case ... in` pattern-matching form (`CaseMatchNode`) and
+      # the predicate-less form (`case; when c1; ...`) bypass the
+      # `===` analysis: pattern matching has richer semantics, and a
+      # predicate-less `case` reduces to a `if c1; ...; elsif c2`
+      # chain that statement-level narrowing already handles.
       def type_of_case(node)
-        branch_types = node.conditions.map { |branch| type_of(branch) }
-        else_type =
-          if node.else_clause
-            type_of(node.else_clause)
-          else
-            Type::Combinator.constant_of(nil)
+        return type_of_case_simple_union(node) if node.is_a?(Prism::CaseMatchNode) || node.predicate.nil?
+
+        subject_type = type_of(node.predicate)
+        candidates = []
+        reached_yes = false
+
+        node.conditions.each do |when_node|
+          case case_when_branch_certainty(subject_type, when_node)
+          when :yes
+            candidates << type_of(when_node)
+            reached_yes = true
+            break
+          when :maybe
+            candidates << type_of(when_node)
+            # :no — drop the branch
           end
-        Type::Combinator.union(*branch_types, else_type)
+        end
+
+        candidates << type_of_case_else(node) unless reached_yes
+        Type::Combinator.union(*candidates)
+      end
+
+      def type_of_case_simple_union(node)
+        branch_types = node.conditions.map { |branch| type_of(branch) }
+        Type::Combinator.union(*branch_types, type_of_case_else(node))
+      end
+
+      def type_of_case_else(node)
+        return Type::Combinator.constant_of(nil) if node.else_clause.nil?
+
+        type_of(node.else_clause)
+      end
+
+      # Combines per-pattern certainty across a `when` clause's
+      # conditions (`when a, b, c` ≡ `a === s || b === s || c === s`).
+      # `:yes` if any pattern is `:yes`; `:no` if all are `:no`;
+      # `:maybe` otherwise.
+      def case_when_branch_certainty(subject_type, when_node)
+        return :maybe unless when_node.respond_to?(:conditions)
+
+        results = when_node.conditions.map { |c| case_when_pattern_certainty(subject_type, c) }
+        return :maybe if results.empty?
+        return :yes if results.include?(:yes)
+        return :no if results.all?(:no)
+
+        :maybe
+      end
+
+      # Static three-valued certainty for `pattern === subject`.
+      # Specialises two pattern shapes:
+      #
+      # - **Class / Module reference** (`Integer`, `Foo::Bar`):
+      #   reduce to `subject.is_a?(class)` via
+      #   `Narrowing.narrow_class` / `narrow_not_class`. A Bot
+      #   truthy fragment means no inhabitant matches (`:no`); a
+      #   Bot falsey fragment means every inhabitant matches
+      #   (`:yes`).
+      # - **Value-equality literal** (numeric / String / Symbol /
+      #   true / false / nil) against a `Constant[c]` subject:
+      #   the static comparison `pattern_value === c` is exact.
+      #   Other subject carriers stay `:maybe` because the
+      #   runtime value isn't pinned.
+      #
+      # Other pattern shapes (Range, Regexp, custom `===`) stay
+      # `:maybe` — the existing union fallback handles them.
+      def case_when_pattern_certainty(subject_type, pattern_node)
+        class_name = build_constant_path_name(pattern_node)
+        return class_pattern_certainty(subject_type, class_name) if class_name
+
+        literal = literal_pattern_value(pattern_node)
+        return literal_pattern_certainty(subject_type, literal[:value]) if literal
+
+        :maybe
+      end
+
+      def class_pattern_certainty(subject_type, class_name)
+        env = scope.environment
+        truthy_bot = Narrowing.narrow_class(subject_type, class_name, environment: env).is_a?(Type::Bot)
+        falsey_bot = Narrowing.narrow_not_class(subject_type, class_name, environment: env).is_a?(Type::Bot)
+
+        return :no if truthy_bot && !falsey_bot
+        return :yes if !truthy_bot && falsey_bot
+
+        :maybe
+      end
+
+      VALUE_EQUALITY_CLASSES = [Integer, Float, Rational, Complex, String, Symbol,
+                                TrueClass, FalseClass, NilClass].freeze
+      private_constant :VALUE_EQUALITY_CLASSES
+
+      # Returns `{ value: v }` when `pattern_node` types to a
+      # `Constant[v]` of a value-equality-safe class (so `===`
+      # reduces to `==`), else nil. Wrapped in a hash so a literal
+      # `nil` / `false` value doesn't collide with the "no literal"
+      # signal.
+      def literal_pattern_value(pattern_node)
+        type = type_of(pattern_node)
+        return nil unless type.is_a?(Type::Constant)
+        return nil unless VALUE_EQUALITY_CLASSES.any? { |klass| type.value.is_a?(klass) }
+
+        { value: type.value }
+      end
+
+      def literal_pattern_certainty(subject_type, pattern_value)
+        return :maybe unless subject_type.is_a?(Type::Constant)
+        return :maybe unless VALUE_EQUALITY_CLASSES.any? { |klass| subject_type.value.is_a?(klass) }
+
+        pattern_value == subject_type.value ? :yes : :no
       end
 
       # `when` clauses for `case` and `in` clauses for `case ... in` have

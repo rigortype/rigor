@@ -1331,6 +1331,144 @@ rather than the language layer**. The same theoretical pressure
 that drove Haskell to type classes and Clojure to protocols
 drives Rigor to a structured plugin substrate.
 
+## Smaller connections, in brief
+
+A grab-bag of further type-theoretic / programming-languages
+connections. Each is summarised in a paragraph rather than a
+section because the topic either maps to mechanisms already
+covered or to a deliberate non-feature
+([§ What Rigor does NOT model](#what-rigor-does-not-model)), but
+a reader hunting for "does Rigor have a story for X?" should be
+able to find one here.
+
+### Type erasure vs reification
+
+A language **erases** types at runtime (Java generics, Haskell,
+OCaml) or **reifies** them (C#, .NET, Ruby's `.class`). Ruby is
+fully reified — `arr.class` returns `Array` at runtime, and
+`is_a?` queries are first-class. Rigor leans on this: occurrence
+typing's predicate set (`is_a?` / `kind_of?` / `instance_of?` /
+`respond_to?`) all use Ruby's reified class objects, and the
+narrowing rules are sound *because* the run-time check matches
+the type-theoretic class membership. The gradual-typing
+literature on "type-erased" vs "reified" gradual systems
+(Wrigstad et al. 2010, *Integrating Typed and Untyped Code in a
+Scripting Language*) classifies Rigor's setting as fully reified
+on the dynamic side — which is what makes `Dynamic[T]` narrow
+back to a concrete type safely whenever the runtime predicate
+fires.
+
+### Algebraic effects vs monadic effects
+
+The textbook alternative to monadic effects (Haskell `IO`, Scala
+`cats-effect`) is **algebraic effects with handlers** (Plotkin &
+Pretnar 2009; Koka / Eff / OCaml 5's effect handlers). Algebraic
+effects let an "effectful" computation be paused at the effect
+site and resumed by a handler — closer to delimited
+continuations than to monad bind. Rigor's effect model
+(§ "Effect systems") is neither monadic nor algebraic; it is
+*inferred* and *engine-internal*. Surfacing effects to the user
+(annotation grammar; pure-function marker; algebraic-effect
+signatures) is a future direction tracked in the spec corpus;
+the relevant prior art is the Koka community's surface design.
+
+### Single vs multiple dispatch
+
+Ruby is single-dispatch — method selection depends on the
+receiver's class only. Languages with **multiple dispatch**
+(CLOS, Julia, Dylan) select methods based on the runtime types
+of every argument. RBS overloads — `def m: (Integer) -> Integer
+| (String) -> String` — simulate a static-side analogue of
+multiple dispatch by picking an arm by argument type at the call
+site. Rigor honours the "most-specific arm wins" resolution that
+multiple-dispatch type systems require, but the runtime dispatch
+remains single-dispatch; the overload arm is selected at
+type-check time, not at call time.
+
+### Phantom types and brand types
+
+A **phantom type** carries a type parameter that does not appear
+in any field — e.g., `class Length<U>` where `U` is `Metres` or
+`Feet`. The type carries an invariant the runtime does not
+enforce. **Brand types** wrap a base type in a unique nominal
+type (`class ValidatedEmail < String`) so that only
+verified-via-constructor values inhabit it. Rigor's refinement
+carriers (§ "Refinement types") cover the brand-type use case
+for the common refinements (`non-empty-string`, `positive-int`,
+…); user-extensible brand types via `class X < Y` are typed
+nominally by Rigor — `ValidatedEmail` is distinct from `String`
+at the type level. The phantom-type-via-unused-parameter pattern
+is also typeable but not widely used in Ruby; the equivalent
+expressiveness usually arrives via refinements or nominal
+wrapping.
+
+### Open-world vs closed-world assumption
+
+RBS treats unknown methods on a `Dynamic[T]` receiver under the
+**open-world** assumption — "we do not know the full method set;
+an unknown method might exist at runtime." Rigor inherits this
+on dynamic receivers, which is why a `respond_to?`-narrowed call
+on a `Dynamic[T]` value does not fire `call.undefined-method`.
+On a concretely-typed receiver (e.g. `String`), Rigor uses the
+**closed-world** assumption — the RBS signature is taken as the
+authoritative method set, and an unknown method fires
+`call.undefined-method` (subject to the
+[ADR-26 `open_receivers:`](../adr/26-activerecord-relation-typing.md)
+exemption for receivers whose method set is provably open at
+runtime, like `ActiveRecord::Relation`).
+
+### Equirecursive vs isorecursive types
+
+Two formalisms for recursive types: **equirecursive** treats
+`T = μX. F(X)` as judgmentally equal to `F(μX. F(X))` (any
+recursive type can be silently unfolded); **isorecursive**
+requires explicit `fold` / `unfold` conversions at every use.
+RBS type aliases are nominally recursive — `type tree = [Symbol,
+tree?]` is the type *by name*, and Rigor compares them by name,
+not by structural unfolding. This is the conservative path that
+sidesteps the equirecursive-vs-isorecursive debate entirely:
+naming a recursive type is the only way to write it.
+
+### Polarity and variance positions
+
+Variance (§ "Variance") is derived from **positions** in a type
+expression: a type variable appearing in **positive** position
+(return type, output of a producer) is covariant; in **negative**
+position (parameter type, input to a consumer) is contravariant;
+in both (mutable storage) is invariant. The polarity reading is
+the standard textbook derivation (Pierce, *Types and Programming
+Languages*, ch. 15). RBS's `out T` / `in T` annotations express
+the result directly without forcing the user to read variance
+off a type expression's polarity structure; Rigor honours the
+declared variance without re-deriving it.
+
+### Subtype-with-bounded-existentials
+
+The standard encoding of "a value with a hidden type that
+satisfies an interface" is **bounded existential types** — `∃X
+<: I. T(X)`. Most industrial languages encode this via
+*structural interfaces* instead: a parameter typed `I` accepts
+any value with `I`'s method set, hiding the receiver's concrete
+type. Rigor follows the industrial convention — `interface
+_Comparable` (§ "Nominal vs structural typing") is the
+existential-bound mechanism users actually reach for. The pack /
+unpack syntax of ML-style existential types is not exposed.
+
+### Refinement-as-types vs refinement-as-predicates
+
+The § "Refinement types" section covers Rigor's curated
+refinement catalogue (`non-empty-string`, `positive-int`, …),
+which sits in the **refinements-as-types** tradition. The
+alternative — **refinements-as-predicates** (SMT-backed Liquid
+Types; F\*'s subset types) — keeps the predicate as a first-class
+formula attached to the base type, and discharges it via SMT at
+each constraint site. Rigor uses a much weaker, decidable
+fragment: the predicate is a named refinement carrier (not an
+arbitrary formula), and the "narrow into the refinement" rule is
+a deterministic engine step (not an SMT call). The Rondon-
+Kawaguchi-Jhala Liquid Types reference in the reading list is
+the technical seed Rigor's catalogue draws from at a distance.
+
 ## What Rigor does NOT model
 
 For completeness, a short list of type-theoretic features Rigor
@@ -1447,6 +1585,16 @@ they map to the sections of this appendix:
   fragment).
 - Lucassen & Gifford. "Polymorphic Effect Systems."
   *POPL 1988.* Origin of effect systems.
+- Plotkin & Pretnar. "Handlers of Algebraic Effects."
+  *ESOP 2009.* The algebraic-effect-handler design that Koka,
+  Eff, and OCaml 5's effect system descend from — background
+  for the § "Smaller connections" note on algebraic vs monadic
+  effects.
+- Wrigstad, Nardelli, Lebresne, Östlund & Vitek. "Integrating
+  Typed and Untyped Code in a Scripting Language."
+  *POPL 2010.* The taxonomy of type-erased vs reified gradual
+  systems — background for § "Smaller connections" on Ruby's
+  fully reified dynamic side.
 - Milner, R. "A Theory of Type Polymorphism in Programming."
   *JCSS*, 1978. The Hindley–Milner system in its original form
   — the canonical type system that achieves soundness,

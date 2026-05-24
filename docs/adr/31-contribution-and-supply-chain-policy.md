@@ -1,16 +1,24 @@
 # ADR-31 — Contribution and supply-chain policy
 
-Status: **proposed, 2026-05-25.** Records the project-wide policy
-that Rigor does not accept external pull requests into any path
-that ships in the `rigortype` gem — `lib/` (the engine),
-`plugins/`, `examples/`, `ext/`, `exe/`, and the gemspec. New
-shipped code (engine features, fixes, bundled plugins) is
-authored by the Rigor team, optionally crediting the proposer
-via `Co-authored-by:`. For the plugin-specific subdomain (the
-ADR's most active worked example): third-party plugins as
-separate `rigor-*` gems in the author's own repo are explicitly
-welcomed, and subtree merge of a proven third-party plugin into
-the monorepo is reserved as an optional, conditional path.
+Status: **proposed, 2026-05-25.** Records the project-wide
+contribution policy, organised by **change magnitude**:
+
+- **Minor focused changes anywhere in the repo** — code,
+  documentation, tests, fixtures, tooling — are welcomed as
+  direct pull requests under ordinary review.
+- **Sweeping changes** — re-architectures, code-style sweeps,
+  large refactors, new analyser features, new bundled plugins —
+  go through an **issue-first** proposal route. If accepted, the
+  Rigor team implements; the proposer is credited via
+  `Co-authored-by:` on the implementation commit(s).
+- **Third-party plugins** as separate `rigor-*` gems in the
+  author's own repo are explicitly welcomed (WD4); subtree merge
+  of a proven third-party plugin into the monorepo is reserved
+  as an optional path (WD5).
+
+Plugins remain the most active worked subdomain — WD2 through
+WD5 record the plugin-specific instances of the general
+issue-first / third-party / subtree-merge mechanisms.
 
 ## Context
 
@@ -21,64 +29,65 @@ and the recurring npm-ecosystem incidents. A malicious commit
 inserted via an outside pull request — anywhere along the
 analysis path, whether engine internals or a bundled plugin's
 recognizer — would execute in the rigor process during every
-analysis of every downstream user's code, regardless of which
-gem or feature triggered the change.
+analysis of every downstream user's code.
 
-All currently-shipped code in `rigortype` was authored by the
-Rigor team. This applies symmetrically to the engine
-(`lib/rigor/`) and the bundled plugins / examples
-(`plugins/rigor-rails-*`, `plugins/rigor-dry-*`,
-`plugins/rigor-hanami`, the ADR-16 substrate consumers, the four
-FFI consumers queued by [ADR-30](30-rigor-ffi-plugin-shape.md),
-the five `examples/` walkthroughs). No external pull request has
-ever been merged into `rigortype`'s shipped Covered Software.
-This ADR codifies that de facto practice as binding policy and
-clarifies the welcoming alternative routes for the community.
+The supply-chain argument is real but **calibrated by what code
+review can reliably catch**. A small, focused PR is auditable at
+merge time — diff is small, the change is scoped, malicious
+patterns are visible to a careful reviewer. A sweeping PR
+(thousand-line refactor, project-wide code-style sweep,
+architectural rewrite) is not — the cognitive load of reading
+the diff exceeds what merge-time review can deliver, and a
+subtle malicious or behaviour-changing line can slip through.
+The policy below maps this asymmetry onto the contribution
+shape: small PRs land via ordinary review, sweeping changes go
+through issue-first proposal so the team can engage with the
+intent and own the implementation.
+
+Plugins are a distinct category. A new bundled plugin defines
+ecosystem identity (`plugins/rigor-foo/` carries an implicit
+"this is the official rigor plugin for foo" signal), which is
+a project-governance concern beyond per-PR review. The plugin-
+specific paths (WD2's promotion-by-issue, WD3's vagueness, WD4's
+third-party route, WD5's subtree merge) handle that boundary
+regardless of any one plugin proposal's diff size.
 
 The trigger to write this ADR was [ADR-30](30-rigor-ffi-plugin-shape.md)
 WD10's initial draft, which proposed "PR accepted for OSS gems
-subject to three conditions." On review, the supply-chain argument
-was found to be both **plugin-shape-agnostic** (FFI plugins are
-not more or less risky than Rails plugins) AND **code-shape-
-agnostic** (a malicious engine PR has the same blast radius as a
-malicious plugin PR — strictly higher if anything, since the
-engine is load-bearing for every analysis). The policy therefore
-lifts out of ADR-30, broadens beyond plugins, and becomes
-project-wide for shipped code. Plugins remain the worked
-subdomain — WD2 through WD5 record the plugin-specific paths —
-because external contribution interest concentrates there.
+subject to three conditions." Iterative review (recorded in the
+git history of this ADR) led through "no plugin PRs" → "no
+shipped-code PRs" → the current change-magnitude formulation.
+The earlier "no PRs to shipped code" framing was too coarse: it
+disincentivised the minor-PR contribution flow OSS projects
+depend on. The change-magnitude axis captures the actual
+risk / value trade-off.
 
-### Scope — what this policy applies to
+### What ships in `rigortype`
 
-The policy applies to **everything that ships in the `rigortype`
-gem and executes in the analyser process**:
+For reference (the policy below applies to all paths, not just
+shipped ones — but knowing what is shipped helps reason about
+the relative supply-chain weight of changes in different areas):
 
-| Path | In `rigortype`? | Executes during analysis? | In scope? |
-| --- | --- | --- | --- |
-| `lib/rigor/` (engine) | yes | yes | **yes** |
-| `plugins/` (bundled plugins) | yes | yes | **yes** |
-| `examples/` (walkthrough plugins) | yes | yes | **yes** |
-| `ext/` (native extensions, if any) | yes | yes | **yes** |
-| `exe/` (CLI entry points) | yes | yes | **yes** |
-| Gemspec + executable scripts | yes | yes | **yes** |
-| `spec/` (test suite) | no — dev-only | no | **out of scope** |
-| `sig/` (RBS for `lib/`) | yes | no (consumed at analyser-load) | **in scope** (treated as code per [WD1](#wd1)) |
-| `docs/` (this corpus) | no | no | **out of scope** |
-| `references/` (vendored read-only sources) | no | no | **out of scope** |
-| `CONTRIBUTING.md` / `AGENTS.md` / `CLAUDE.md` / `README.md` | no | no | **out of scope** |
-| `.claude/` / `.github/` (tooling) | no | no | **out of scope** |
+| Path | Ships in `rigortype`? | Executes during analysis? |
+| --- | --- | --- |
+| `lib/rigor/` (engine) | yes | yes |
+| `plugins/` (bundled plugins) | yes | yes |
+| `examples/` (walkthrough plugins) | yes | yes |
+| `ext/` (native extensions, if any) | yes | yes |
+| `exe/` (CLI entry points) | yes | yes |
+| `sig/` (RBS for `lib/`) | yes | yes (analyser-load) |
+| Gemspec + executable scripts | yes | yes |
+| `spec/` (test suite) | no — dev-only | no |
+| `docs/` (this corpus) | no | no |
+| `references/` (vendored read-only sources) | no | no |
+| `CONTRIBUTING.md` / `AGENTS.md` / `CLAUDE.md` / `README.md` | no | no |
+| `.claude/` / `.github/` (tooling) | no | no |
 
-**Out-of-scope paths follow conventional OSS contribution norms** —
-documentation fixes, typo corrections, spec / test additions, and
-similar PRs are accepted under ordinary review (`make verify` +
-maintainer code review). This ADR does not change how
-non-shipped-code contributions are handled.
-
-The `sig/` directory is treated as code (in scope) because its
-contents reach the analyser's type environment at load time and
-could influence inference output; an adversary modifying `sig/`
-to widen a return type would propagate effects similarly to an
-adversary modifying `lib/`.
+A change to shipped code carries higher supply-chain weight per
+diff line than a change to docs / tests, but **both can be either
+minor or sweeping** — the policy axis is magnitude, not path. A
+small bug fix in `lib/rigor/inference/` is welcome as a direct
+PR; a large rewrite of `docs/handbook/` is issue-first.
 
 ### Licensing framework
 
@@ -116,96 +125,166 @@ imported files **into** Covered Software as Modifications under
 
 ## Decision
 
-Adopt a single project-wide contribution policy with five
-working decisions covering: (a) the no-external-PR rule for
-shipped code, (b) the proposal-and-credit route into bundled
-plugins (with core engine proposals following the same shape),
-(c) the intentionally vague "widely used" criterion, (d) the
-welcomed third-party plugin ecosystem, (e) the reserved
-subtree-merge option for third-party plugins.
+Adopt a project-wide contribution policy organised by **change
+magnitude**, with five working decisions: (a) the magnitude axis
+itself — minor PRs direct, sweeping changes issue-first;
+(b) the issue-first proposal route with `Co-authored-by:`
+attribution; (c) the intentionally vague "widely used" criterion
+that gates plugin promotion; (d) the welcomed third-party plugin
+ecosystem; (e) the reserved subtree-merge option for third-party
+plugins.
 
 ## Working decisions
 
-### WD1 — No external Contributions into Covered Software via pull request
+### WD1 — PR receptivity by change magnitude
 
-In MPL terms: **the only Contributors to Covered Software are
-the Rigor team**. External pull requests against any in-scope
-path (see the table in the [Scope](#scope--what-this-policy-applies-to)
-subsection — `lib/rigor/`, `plugins/`, `examples/`, `ext/`,
-`exe/`, `sig/`, gemspec) are not accepted, so no party outside
-the Rigor team becomes a Contributor and the MPL §2.5
-representation surface stays bounded to people the team can vet
-directly. Out-of-scope paths (`spec/`, `docs/`, `references/`,
-`CONTRIBUTING.md`, `.claude/`, `.github/`) follow conventional
-OSS PR review — see the Scope subsection for the full table.
+The policy axis is **how big and how scoped the change is**, not
+which path it lands in.
 
-The supply-chain rationale governs **uniformly across shipped
-code**:
+#### Direct pull requests — welcomed
 
-- The `rigortype` gem (Covered Software) runs in every analysed
-  user's CI / dev environment.
-- A malicious commit anywhere in shipped Covered Software can
-  execute arbitrary Ruby in the rigor process during analysis —
-  including reading the analysed project's source, exfiltrating
-  environment variables, writing files, or making network calls
-  if the host permits.
-- The blast radius extends to **every rigor user**, not just
-  users of the affected feature or wrapped gem.
-- This risk is **independent of what the code does** — a
-  malicious engine PR has the same attack surface as a malicious
-  plugin PR, and strictly the larger surface (the engine is
-  load-bearing for every analysis; a plugin is load-bearing only
-  when its wrapped gem is in the resolved dependency set).
+Pull requests for **minor, focused changes** are welcomed against
+any path in the repo, including shipped code. Examples:
 
-Scope notes specific to this WD:
+- Bug fixes with clear scope (one or a few files, one root cause).
+- Documentation improvements: typo fixes, clarifications, broken-
+  link fixes, small section rewrites.
+- Test additions / fixture corrections.
+- Tooling improvements (`.github/`, `.claude/`, `Makefile` tweaks).
+- Small refactors that don't change architectural decisions
+  recorded in ADRs.
+- Maintenance: dependency bumps consistent with project policy
+  (`AGENTS.md`), CI updates.
 
-- Applies uniformly to **code, RBS files, fixtures, and config**
-  within in-scope paths. Drawing a "pure RBS contributions are
-  safe" carve-out adds judgement cost without changing the
-  policy meaningfully: RBS still flows attributes / annotations
-  to the engine, MPL §1.10 treats any new file as a Modification
-  regardless of language, and maintainer time spent classifying
-  "is this just data?" exceeds the savings from accepting
-  low-risk drops.
-- Applies to **new code and maintenance equally**. Bug fixes,
-  refactors, dependency bumps, and new features on existing
-  shipped code are all by Rigor team only — no external PR path
-  for any of these.
-- **Out-of-scope contributions (docs, specs, tooling) keep their
-  normal PR path.** This ADR does not retract the welcome on
-  documentation fixes, test additions, or tooling improvements;
-  see [CONTRIBUTING.md](../../CONTRIBUTING.md) for those.
+The heuristic — intentionally informal, like WD3's "widely used"
+criterion — is "could a careful reviewer audit this diff in one
+sitting and be confident nothing harmful is hiding in it." If
+yes: send the PR, run `make verify` first, follow
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md). The merge-time review
+is real: the team will read the diff carefully, run the test
+suite, and ask questions before merging.
 
-This codifies existing practice. No external PR has ever been
-merged into `rigortype`'s shipped Covered Software (engine or
-bundled plugins), so the policy introduces no retroactive
-inconsistency.
+Bug fixes to existing bundled plugins (`plugins/rigor-*`) are
+covered by this path — they're minor, scoped, and clearly
+valuable.
 
-**Rejected alternative.** "PR accepted with strict code review":
-the audit cost per PR is high, the cost of one missed malicious
-contribution is catastrophic, and the asymmetry doesn't pay back.
-The Linux kernel / curl / OpenSSL projects all use variants of
-"maintainer-authors" precisely because the
-threat-model-vs-velocity trade-off lands the same way for
-high-trust upstream packages.
+#### Issue-first — for sweeping changes
 
-### WD2 — Promotion path via issue + `Co-authored-by:` attribution
+The following kinds of changes go through an issue-first
+proposal route rather than a direct PR:
 
-WD2 is the plugin-specific worked example of the general
-"propose via issue, team implements, proposer credited via
-`Co-authored-by:`" shape. Core engine proposals (new analyser
-features, refactors, bug-fix-driven cleanups) follow the same
-shape — file an issue describing the proposal, optionally point
-at a sample implementation in your own fork, the team
-implements, you are credited via `Co-authored-by:` on the
-implementing commit(s) if your contribution materially informed
-the work. The WD2 mechanics below are the plugin instance of
-that general shape; the only thing plugin-specific is the
-adoption-evidence requirement (WD3), which is structurally
-inapplicable to engine work.
+- **Architectural rewrites or non-trivial refactors** of engine
+  code (anything that changes how `Inference::` or `Analysis::`
+  modules wire together, anything that touches a contract
+  recorded in `docs/internal-spec/`).
+- **New analyser features**, new diagnostic families, new
+  inference passes.
+- **Code-style sweeps / formatting reflows** across many files.
+  These are often controversial (style preferences are personal)
+  and the diff-noise cost is high relative to any individual
+  improvement; alignment matters more than the implementation
+  itself.
+- **New bundled plugins** (`plugins/rigor-<gem>/`) — see WD2
+  through WD5 for the plugin-specific paths.
+- **Changes to spec / ADR corpus** that retract or modify an
+  existing normative decision (additions / clarifications can be
+  minor PRs).
 
-Anyone wanting an officially-bundled plugin for a real OSS gem
-files an **issue** with:
+For these: file an issue with the proposal and the rational
+reasons. If the team agrees with the direction, the team
+implements; the proposer is credited via `Co-authored-by:` on
+the implementation commit(s) per WD2. The team may also accept a
+sample implementation as reference material, but won't merge it
+directly — see WD2's note on why re-authoring matters for both
+license cleanliness and supply-chain hygiene.
+
+#### Why the asymmetry — calibrated supply-chain weight
+
+Merge-time code review can reliably catch malicious or
+behaviour-changing patterns in a small focused diff (the entire
+change fits in a reviewer's working memory). It can't reliably
+catch them in a thousand-line refactor (cognitive load exceeds
+review capacity; subtle behaviour drift hides in legitimate-
+looking code motion). The change-magnitude axis maps onto the
+review capacity asymmetry directly: where review is reliable,
+direct PR is fine; where review is unreliable, the team takes
+ownership of the implementation so the supply-chain guarantee
+stays as strong as for any other team-authored line.
+
+This is the same asymmetry every mature OSS project navigates;
+this WD makes the rigor-specific cut explicit rather than
+leaving it to maintainer discretion case-by-case.
+
+#### Scope notes
+
+- The boundary between "minor" and "sweeping" is **a judgement
+  call**, deliberately. If unsure, file an issue first describing
+  what you want to do — the team will tell you whether a PR is
+  fine or whether to discuss the design before implementation.
+  No PR is rejected for "being too small to bother with an
+  issue"; PRs that turn out to be sweeping mid-review may be
+  asked to be re-shaped as an issue.
+- **All PRs are licensed under MPL-2.0 on merge** per the
+  existing CONTRIBUTING.md note. The contributor becomes an
+  MPL §1.1 Contributor on the files they touch and makes the
+  §2.5 representation by submitting the PR. This is the same
+  licensing posture as any other OSS contribution.
+
+#### Rejected alternatives
+
+- **Path-based scope (the previous version of this WD).** "No
+  PRs to `lib/`, `plugins/`, `examples/`, `ext/`, `exe/`, `sig/`,
+  gemspec." Too coarse: it blocked the minor-PR flow that OSS
+  projects depend on for healthy maintenance. The change-magnitude
+  axis captures the actual review-capacity / risk trade-off.
+- **No external PRs anywhere.** Maximum supply-chain conservatism
+  but at the cost of community participation. The merge-time
+  review is sufficient for scoped changes; "no PRs" is a tax on
+  every legitimate small contributor for a marginal incremental
+  guarantee.
+- **All PRs accepted with strict code review.** Sweeping diffs
+  cannot be reliably audited at merge time; the asymmetry
+  between minor and sweeping is real, and pretending it isn't
+  invites the supply-chain risk the issue-first path defuses.
+
+### WD2 — Issue-first proposal mechanics + `Co-authored-by:` attribution
+
+WD1 splits the contribution shape into direct-PR (minor) and
+issue-first (sweeping). WD2 records the mechanics of the
+issue-first path. The same mechanics apply to **any** sweeping
+proposal — engine refactors, new analyser features, new bundled
+plugins — the only plugin-specific bit is the WD3 adoption-
+evidence requirement (which is structurally inapplicable to
+engine proposals).
+
+**General shape (any sweeping change).** File a GitHub issue
+that describes the proposal:
+
+- What you want to change and why (the "rational reasons"
+  alignment, per WD1's issue-first scoping).
+- For engine / refactor proposals: which ADR / spec is affected,
+  the design alternatives considered.
+- Optional: a working sample implementation (in your own fork or
+  a gist) the team can read as reference material.
+
+The Rigor team responds with accept / decline / "let's iterate
+on the design first". If accepted, the team **implements** the
+change in this repository. When a sample implementation or
+substantive analysis was provided, the implementation commit(s)
+credit the proposer via the GitHub
+[`Co-authored-by:` trailer](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/creating-a-commit-with-multiple-authors)
+— one trailer per contributor:
+
+```
+Add foo subsystem
+
+…subject and body…
+
+Co-authored-by: Jane Doe <jane@example.com>
+```
+
+**Plugin-specific issue fields.** Anyone wanting an officially-
+bundled plugin for a real OSS gem files an **issue** with:
 
 - The wrapped gem's identity and homepage.
 - Evidence of community adoption (see WD3 for the criterion).
@@ -214,27 +293,16 @@ files an **issue** with:
 - Optional: confirmation that the wrapped gem's upstream
   maintainers are not authoring a parallel rigor plugin.
 
-Rigor team evaluates against WD3, accepts or declines (with
-reasons if declined). If accepted, the team **re-implements**
-the plugin in `plugins/` from scratch. When a sample
-implementation or substantive analysis was provided by the
-proposer, the implementation commit(s) credit them via the
-GitHub
-[`Co-authored-by:` trailer](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/creating-a-commit-with-multiple-authors)
-— one trailer per contributor:
+For plugin proposals, the Rigor team evaluates against WD3
+(adoption evidence), accepts or declines (with reasons if
+declined). If accepted, the team **re-implements** the plugin
+in `plugins/` from scratch and credits the proposer via
+`Co-authored-by:` per the general mechanic above.
 
-```
-Add rigor-foo plugin
-
-…subject and body…
-
-Co-authored-by: Jane Doe <jane@example.com>
-```
-
-`Co-authored-by:` is **informational attribution**, not a
+**`Co-authored-by:` is informational attribution**, not a
 transfer of MPL Contributor status. The MPL Contribution (in the
 §1.3 sense) is made by the Rigor team member who authors the
-re-implementation; that team member also makes the §2.5
+implementation; that team member also makes the §2.5
 representation that the code is their original creation. The
 proposer's sample implementation is referenced material the team
 draws inspiration from rather than text the team imports; if a
@@ -244,14 +312,15 @@ sufficient rights to share it — equivalent to the §2.5
 representation but extended courtesy. The team should rewrite
 the sample's code structure rather than transcribe it verbatim,
 both for license cleanliness and because re-authoring is the
-whole point of WD1.
+whole point of the issue-first path (per WD1).
 
 **Rejected alternative.** "Pre-review PR then squash-merge under
-maintainer's signature": still ingests external commits into
-git history, weakens the supply-chain guarantee that the
-maintainer authored every line. `Co-authored-by:` on a re-authored
-commit is the right shape — explicit signal that the maintainer
-wrote the code, the proposer informed it.
+maintainer's signature" for sweeping changes: still ingests
+external commits into git history, weakens the supply-chain
+guarantee that the maintainer authored every line of the
+sweeping diff. `Co-authored-by:` on a re-authored commit is the
+right shape — explicit signal that the maintainer wrote the
+code, the proposer informed it.
 
 ### WD3 — "Widely used" criterion stays intentionally vague
 
@@ -375,42 +444,46 @@ is the right baseline; subtree merge is the exception.
 
 ## Consequences
 
-- **Contribution velocity is slower than typical OSS norms** for
-  shipped-code contributions (engine and plugins). A user with a
-  working change must file an issue and wait for maintainer-
-  authored implementation, rather than opening a PR. Counter-
-  balance: explicit attribution (Co-authored-by) + welcomed
-  third-party plugin ecosystem (WD4) means contribution is
-  acknowledged, just not directly merged.
-- **Out-of-scope paths retain conventional OSS PR velocity.**
-  Docs / spec / fixture / tooling PRs follow the normal review
-  cycle. The policy is "shipped code is maintainer-authored", not
-  "rigor is closed to outside contributions"; the latter framing
-  would be misleading.
-- **Maintainer workload for plugin promotion is bounded by WD3's
-  "widely used" filter.** Re-implementation cost per accepted
-  plugin is real but capped — and the proposer's sample
-  implementation, when provided, dramatically reduces it (the
-  sample documents the recognizer's intended behaviour, the
-  maintainer re-authors the code).
-- **Newcomer-friendliness.** The policy is welcoming when read
-  in full: "docs / spec / tooling PRs land the normal way; for
-  shipped code, propose via issue and get Co-authored-by credit
-  on the implementation; for plugins specifically, build
-  privately, propose for bundling once adopted." It's only
-  unwelcoming if read as just "no PRs to shipped code".
-  Documentation should foreground the issue-driven shape +
-  attribution promise + third-party-plugin welcome.
+- **Minor PRs land at typical OSS velocity.** A bug-fix PR or a
+  documentation improvement against any path in the repo follows
+  ordinary review — clone, fix, `make verify`, open PR, merge
+  when ready. This is the most common contribution shape and the
+  policy explicitly invites it.
+- **Sweeping changes are slower than they would be under
+  "PRs always welcome" norms** because they take an issue-first
+  detour. Counter-balance: explicit attribution
+  (`Co-authored-by:`) + the work-investment-protection of having
+  the team confirm direction before the proposer writes the full
+  implementation. Many proposers prefer issue-first anyway — it
+  avoids investing in code only to find the team would have gone
+  a different direction.
+- **The minor / sweeping boundary is a judgement call.** WD1
+  scopes this explicitly — when in doubt, file an issue first
+  and the team will route. Some PRs may be asked to be re-shaped
+  as issues mid-review when the diff turns out larger than
+  initially expected.
+- **Plugin promotion workload is bounded by WD3's "widely used"
+  filter.** Re-implementation cost per accepted plugin is real
+  but capped — and the proposer's third-party plugin (when
+  provided) dramatically reduces it (it documents the
+  recognizer's intended behaviour, the maintainer re-authors the
+  code).
 - **Shipped code grows slowly and deliberately.** This is
   intended — every line shipped in `rigortype` is maintenance
   burden for the team and trust surface for every downstream
   user. A small, high-quality shipped set + a vibrant third-
-  party plugin ecosystem is the target.
-- **Consistency across all shipped code.** Whether someone
-  proposes an engine optimisation, an FFI binding plugin
-  (`rigor-myffigem`), or a Rails-side extension
-  (`rigor-foo-graphql-extension`), the same WD1 policy applies.
-  No special-casing by code domain.
+  party plugin ecosystem + an active minor-PR contributor base
+  is the target.
+- **Newcomer-friendliness.** The policy is welcoming when read
+  in full: "minor PRs land the normal way against any path;
+  sweeping changes go through issue-first with `Co-authored-by:`
+  attribution; for new bundled plugins specifically, build a
+  third-party gem first and propose for bundling once adopted."
+  It is only unwelcoming if read as "no PRs to shipped code",
+  which the prior version of this ADR (now superseded) implied.
+  Documentation should foreground the welcome on minor PRs +
+  the attribution promise on sweeping proposals + the third-
+  party-plugin welcome.
 
 ## Implementation slicing
 

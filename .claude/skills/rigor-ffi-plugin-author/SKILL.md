@@ -283,9 +283,15 @@ the plugin from scratch in `plugins/rigor-<gem>/`, crediting your
 work via `Co-authored-by:` in the implementation commit(s)
 ([ADR-31 WD2](../../../docs/adr/31-contribution-and-supply-chain-policy.md)).
 
-You don't open a PR. There is no PR path. The re-implementation
-is by Rigor team only; the rationale is the supply-chain argument
-in [ADR-31 WD1](../../../docs/adr/31-contribution-and-supply-chain-policy.md).
+You don't open a PR for a new bundled plugin — new bundled
+plugins are classified as sweeping changes under
+[ADR-31 WD1](../../../docs/adr/31-contribution-and-supply-chain-policy.md)
+and go through the issue-first route. The re-implementation is
+by Rigor team only; the rationale is the supply-chain + review-
+capacity argument in ADR-31 WD1. (Bug fixes to your own
+third-party plugin land in your own repo; bug fixes to existing
+bundled `plugins/rigor-*` from the rigor monorepo are welcome as
+minor direct PRs per ADR-31's direct-PR path.)
 
 ## What "done" looks like
 
@@ -315,9 +321,12 @@ in [ADR-31 WD1](../../../docs/adr/31-contribution-and-supply-chain-policy.md).
   yet" rather than "I need a plugin." Check the
   [CHANGELOG](../../../CHANGELOG.md) for `rigor-ffi` slice status
   before authoring.
-- **Attempting to open a PR to this repo for a new plugin.** There
-  is no PR path per [ADR-31 WD1](../../../docs/adr/31-contribution-and-supply-chain-policy.md).
-  File an issue with the Phase 2 fields instead.
+- **Attempting to open a PR to this repo for a new bundled plugin.**
+  New bundled plugins are sweeping changes under
+  [ADR-31 WD1](../../../docs/adr/31-contribution-and-supply-chain-policy.md)
+  and take the issue-first path. File an issue with the Phase 2
+  fields instead. (Bug fixes to existing bundled plugins are
+  minor PRs and welcome directly.)
 - **Skipping the upstream-effort check.** Duplicating a plugin
   the wrapped gem's maintainers are authoring wastes both efforts.
   Search the wrapped gem's repo before authoring.

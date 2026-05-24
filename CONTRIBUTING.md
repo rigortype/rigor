@@ -102,62 +102,70 @@ bundle exec rspec spec/rigor/type/refined_spec.rb  # one file
   internal contracts (engine surface, type-object public
   API).
 
-## Where pull requests are accepted
+## Submitting changes
 
-The PR shape applies to **out-of-scope paths** under
-[ADR-31](docs/adr/31-contribution-and-supply-chain-policy.md) —
-documentation, specs / tests, vendored references, tooling, and
-this file itself. Concretely: `spec/`, `docs/`, `references/`,
-`CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`, `README.md`,
-`.claude/`, `.github/`. PRs against these paths follow ordinary
-review (`make verify` green, maintainer code review, merged
-when ready).
+Rigor's contribution policy is organised by **change magnitude**
+per [ADR-31](docs/adr/31-contribution-and-supply-chain-policy.md):
+minor focused changes are welcomed as direct pull requests
+against any path in the repo; sweeping changes go through an
+issue-first proposal route. Plugin authorship has its own
+companion paths (see "Plugin contributions" below).
 
-For **shipped code** (the engine `lib/rigor/`, `plugins/`,
-`examples/`, `ext/`, `exe/`, `sig/`, gemspec) the contribution
-shape is **issue-driven, not PR-driven** — see "Shipped-code
-contributions" below.
+### Direct pull requests are welcomed for minor changes
 
-When you do open a PR (for an in-scope-for-PR path):
+Send a PR for any **minor, focused** improvement — bug fixes,
+documentation improvements, typo / broken-link fixes, test
+additions, small refactors, tooling improvements, bug fixes to
+existing bundled plugins. The heuristic is informal: "could a
+careful reviewer audit this diff in one sitting and be confident
+nothing harmful is hiding in it." If yes, send the PR.
 
-- Keep the change small and aligned with the existing
-  structure. The ADR / spec corpus binds: changes that touch
-  type-model behaviour or analyzer-internal contracts MUST be
-  reflected in the relevant `docs/type-specification/` or
-  `docs/internal-spec/` document in the same patch.
+When opening a PR:
+
+- Keep the change small and aligned with the existing structure.
+  The ADR / spec corpus binds: changes that touch type-model
+  behaviour or analyzer-internal contracts MUST be reflected in
+  the relevant `docs/type-specification/` or `docs/internal-spec/`
+  document in the same patch.
 - Run `make verify` before pushing.
 - Use plain imperative subject lines in sentence case
   (`Add Type::Refined acceptance rule`, not
-  `feat: add type::refined acceptance`). See
-  [`AGENTS.md`](AGENTS.md) for the commit-message conventions.
-- Open a pull request against `master`. CI must be green
+  `feat: add type::refined acceptance`). See [`AGENTS.md`](AGENTS.md)
+  for the commit-message conventions.
+- Open the pull request against `master`. CI must be green
   before review.
 
-## Shipped-code contributions
+### Issue-first for sweeping changes
 
-For everything that ships in the `rigortype` gem — engine,
-bundled plugins, examples, native extensions, executables, RBS
-for `lib/`, gemspec — Rigor does **not** accept external pull
-requests. The supply-chain rationale (`rigortype` runs in every
-analysed user's CI / dev environment, so the blast radius of a
-malicious commit anywhere in shipped code reaches every rigor
-user) and the welcoming alternative routes are recorded in
-[`docs/adr/31-contribution-and-supply-chain-policy.md`](docs/adr/31-contribution-and-supply-chain-policy.md).
-
-### Engine and core-feature proposals
-
-File a GitHub issue describing the proposal. If you have a
-sample implementation in your own fork, link to it as reference
-material. If accepted, the Rigor team re-implements in this
-repository and credits you via
+For larger changes — architectural rewrites, non-trivial engine
+refactors, new analyser features, code-style sweeps / formatting
+reflows, new bundled plugins, retractions of normative ADR / spec
+decisions — please file a GitHub issue first describing the
+proposal and the rational reasons behind it, rather than opening
+the PR directly. If the team agrees with the direction, the team
+implements; your contribution is recorded via
 [`Co-authored-by:`](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/creating-a-commit-with-multiple-authors)
-on the implementation commit(s) when your contribution
-materially informed the work. See
-[ADR-31 WD1 / WD2](docs/adr/31-contribution-and-supply-chain-policy.md).
+on the implementation commit(s) — please be assured that
+attribution is preserved.
 
-### Plugin contributions
+The asymmetry exists because merge-time code review can reliably
+audit small focused diffs but not thousand-line refactors;
+issue-first ensures both alignment (you don't invest in code the
+team would have wanted to go a different way) and the supply-
+chain hygiene that comes from the team owning the implementation
+for changes too large to review post-hoc. See
+[ADR-31 WD1](docs/adr/31-contribution-and-supply-chain-policy.md)
+for the full rationale.
 
-Plugins are the most active subdomain of WD2; the routes are:
+If you're unsure whether a change counts as minor or sweeping,
+**file an issue first** — the team will tell you whether a PR
+is fine or whether to iterate on the design before coding.
+
+## Plugin contributions
+
+New bundled plugins (`plugins/rigor-<gem>/`) follow their own
+paths per
+[ADR-31 WD2–WD5](docs/adr/31-contribution-and-supply-chain-policy.md):
 
 - **Third-party plugin (default).** Author a `rigor-<gem>` gem
   in **your own repo**, depending on `gem "rigortype"`. This is
@@ -187,6 +195,12 @@ Plugins are the most active subdomain of WD2; the routes are:
   plugin when core covers your case. See
   [ADR-30 WD10](docs/adr/30-rigor-ffi-plugin-shape.md).
 
+Bug fixes to **existing** bundled plugins
+(`plugins/rigor-rails-routes/`, `plugins/rigor-activerecord/`,
+etc.) are minor PRs and follow the "Direct pull requests" path
+above — they don't go through the WD2 route, which is for
+**new** bundled plugins.
+
 Subtree merge of a proven third-party plugin into the monorepo
 is reserved as a rare optional path subject to four conjunctive
 conditions ([ADR-31 WD5](docs/adr/31-contribution-and-supply-chain-policy.md));
@@ -197,17 +211,17 @@ it is not a path third-party authors should plan around.
 Rigor is licensed under the
 [Mozilla Public License Version 2.0](LICENSE).
 
-- **Core code contributions** (commits the Rigor team authors
-  and merges into this repository) are licensed under the MPL-2.0
-  the same as the rest of the project; the author becomes an MPL
-  §1.1 Contributor and makes the §2.5 representation that the
-  Contribution is their original creation or that they have
-  sufficient rights to grant the conveyed licence.
-- **Out-of-scope PR contributions** (docs, specs, fixtures,
-  tooling per "Where pull requests are accepted" above) by
-  outside contributors are licensed under MPL-2.0 on merge; the
-  contributor becomes an MPL §1.1 Contributor on the files they
-  touch and makes the §2.5 representation by submitting the PR.
+- **All pull request contributions** are licensed under MPL-2.0
+  on merge; the contributor becomes an MPL §1.1 Contributor on
+  the files they touch and makes the §2.5 representation by
+  submitting the PR (Contributions are the contributor's
+  original creation or they have sufficient rights to grant the
+  conveyed licence).
+- **Issue-driven proposals** (sweeping changes implemented by
+  the Rigor team) make the Rigor team member who authors the
+  code the MPL §1.1 Contributor of record; the proposer's
+  `Co-authored-by:` trailer is informational attribution rather
+  than transfer of Contributor status.
 - **Third-party plugins** (separate `rigor-<gem>` gems in their
   own repos per "Plugin contributions" above) are Larger Work
   under §3.3; their authors are free to license their own files

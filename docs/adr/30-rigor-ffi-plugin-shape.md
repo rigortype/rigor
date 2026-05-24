@@ -403,13 +403,16 @@ implementation.
 
 **Distribution governance: see [ADR-31](31-contribution-and-supply-chain-policy.md).**
 
-The project-wide policy applies — no external PRs into
-`plugins/`, third-party plugin authoring is welcomed (WD4),
-promotion for bundling happens via issue with `Co-authored-by:`
-attribution (WD2), `Subtree merge` of a proven third-party
-plugin is reserved as an optional path (WD5). This ADR does not
-re-state the policy; the FFI plugin family is one of several
-plugin families it governs.
+The project-wide policy applies — minor focused changes (e.g.
+bug fixes to an already-bundled FFI sub-plugin) are welcomed as
+direct PRs (WD1 direct-PR path); a **new** bundled FFI sub-plugin
+is a sweeping change that goes through the issue-first route
+(WD1 + WD2) with `Co-authored-by:` attribution on the
+team-authored implementation; third-party `rigor-<gem>` plugin
+authoring is welcomed in the author's own repo (WD4); subtree
+merge of a proven third-party plugin is reserved as an optional
+path (WD5). This ADR does not re-state the policy; the FFI
+plugin family is one of several plugin families it governs.
 
 ## Implementation slicing
 

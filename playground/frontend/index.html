@@ -4,7 +4,68 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rigor Playground</title>
+  <!-- Set theme before first paint to avoid flash of wrong theme -->
+  <script>
+    (function () {
+      const stored = localStorage.getItem("rigor-theme") || "system"
+      const dark   = stored === "dark" ||
+                     (stored === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
+      document.documentElement.dataset.theme = dark ? "dark" : "light"
+    })()
+  </script>
   <style>
+    /* ── CSS custom properties ──────────────────────────────────────────── */
+
+    :root {
+      /* Dark theme — Catppuccin Mocha */
+      --bg:          #1e1e2e;
+      --surface:     #181825;
+      --border:      #313244;
+      --text:        #cdd6f4;
+      --accent:      #cba6f7;
+      --muted:       #6c7086;
+      --inactive:    #45475a;
+      --hover:       #313244;
+      --active-line: #2a2a3d;
+      --selection:   #45475a;
+      --gutter-fg:   #585b70;
+      --anno:        #45475a;
+      --sev-fg:      #1e1e2e;
+      --c-error:     #f38ba8;
+      --c-warning:   #fab387;
+      --c-info:      #89dceb;
+      --c-ok:        #a6e3a1;
+      --lint-error:  #f38ba8;
+      --lint-warn:   #fab387;
+      --caret:       #cba6f7;
+    }
+
+    :root[data-theme="light"] {
+      /* Light theme — Catppuccin Latte */
+      --bg:          #eff1f5;
+      --surface:     #e6e9ef;
+      --border:      #ccd0da;
+      --text:        #4c4f69;
+      --accent:      #8839ef;
+      --muted:       #8c8fa1;
+      --inactive:    #bcc0cc;
+      --hover:       #dce0e8;
+      --active-line: #e1e4ee;
+      --selection:   #acb0be;
+      --gutter-fg:   #9ca0b0;
+      --anno:        #bcc0cc;
+      --sev-fg:      #eff1f5;
+      --c-error:     #d20f39;
+      --c-warning:   #fe640b;
+      --c-info:      #04a5e5;
+      --c-ok:        #40a02b;
+      --lint-error:  #d20f39;
+      --lint-warn:   #fe640b;
+      --caret:       #8839ef;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────────── */
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -12,47 +73,49 @@
       flex-direction: column;
       height: 100vh;
       font-family: system-ui, sans-serif;
-      background: #1e1e2e;
-      color: #cdd6f4;
+      background: var(--bg);
+      color: var(--text);
     }
 
     header {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
       padding: 8px 16px;
-      background: #181825;
-      border-bottom: 1px solid #313244;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
 
     header strong {
       font-size: 15px;
-      color: #cba6f7;
+      color: var(--accent);
       letter-spacing: 0.02em;
     }
 
     #status {
       font-size: 12px;
-      color: #6c7086;
+      color: var(--muted);
       margin-left: 4px;
     }
-    #status.checking { color: #fab387; }
-    #status.ok       { color: #a6e3a1; }
-    #status.error    { color: #f38ba8; }
+    #status.checking { color: var(--c-warning); }
+    #status.ok       { color: var(--c-ok); }
+    #status.error    { color: var(--c-error); }
 
     header button {
-      margin-left: auto;
       padding: 4px 12px;
       border-radius: 6px;
-      border: 1px solid #45475a;
-      background: #313244;
-      color: #cdd6f4;
+      border: 1px solid var(--inactive);
+      background: var(--hover);
+      color: var(--text);
       font-size: 13px;
       cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
-    header button:hover  { background: #45475a; }
-    header button.active { border-color: #cba6f7; color: #cba6f7; }
+    header button:hover  { background: var(--selection); }
+    header button.active { border-color: var(--accent); color: var(--accent); }
+
+    #theme-btn { margin-left: auto; }
 
     main { display: flex; flex: 1; overflow: hidden; }
 
@@ -63,30 +126,30 @@
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
-      border-left: 1px solid #313244;
+      border-left: 1px solid var(--border);
       overflow: hidden;
     }
 
     #sidebar-header {
       padding: 8px 12px;
       font-size: 12px;
-      color: #6c7086;
-      border-bottom: 1px solid #313244;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
 
     #diagnostics { flex: 1; overflow-y: auto; padding: 8px 0; }
 
-    .diag-empty { padding: 12px; font-size: 13px; color: #6c7086; }
+    .diag-empty { padding: 12px; font-size: 13px; color: var(--muted); }
 
     .diag-item {
       display: flex;
       gap: 8px;
       padding: 6px 12px;
       cursor: pointer;
-      border-bottom: 1px solid #181825;
+      border-bottom: 1px solid var(--surface);
     }
-    .diag-item:hover { background: #313244; }
+    .diag-item:hover { background: var(--hover); }
 
     .diag-sev {
       font-size: 11px;
@@ -96,24 +159,25 @@
       flex-shrink: 0;
       align-self: flex-start;
       margin-top: 1px;
+      color: var(--sev-fg);
     }
-    .diag-sev.error   { background: #f38ba8; color: #1e1e2e; }
-    .diag-sev.warning { background: #fab387; color: #1e1e2e; }
-    .diag-sev.info    { background: #89dceb; color: #1e1e2e; }
+    .diag-sev.error   { background: var(--c-error); }
+    .diag-sev.warning { background: var(--c-warning); }
+    .diag-sev.info    { background: var(--c-info); }
 
     .diag-body  { flex: 1; min-width: 0; }
-    .diag-loc   { font-size: 11px; color: #6c7086; margin-bottom: 2px; }
+    .diag-loc   { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
     .diag-msg   { font-size: 12px; line-height: 1.4; word-break: break-word; }
-    .diag-rule  { font-size: 11px; color: #6c7086; margin-top: 2px; }
+    .diag-rule  { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-    /* CodeMirror base */
+    /* ── CodeMirror base ─────────────────────────────────────────────────── */
     .cm-editor         { height: 100%; font-size: 14px; }
     .cm-editor.cm-focused { outline: none; }
     .cm-scroller       { height: 100%; }
 
-    /* Type annotation ghost text */
+    /* ── Type annotation ghost text ──────────────────────────────────────── */
     .cm-type-annotation {
-      color: #45475a;
+      color: var(--anno);
       font-style: italic;
       pointer-events: none;
       user-select: none;
@@ -124,6 +188,7 @@
   <header>
     <strong>Rigor Playground</strong>
     <span id="status">Ready</span>
+    <button id="theme-btn" title="Cycle theme">Dark</button>
     <button id="type-btn">Show types</button>
   </header>
 
@@ -225,6 +290,11 @@ x.upcase   # possible-nil-receiver
     }
 
     // ── Editor ────────────────────────────────────────────────────────────
+    // The EditorView.theme() values use CSS custom properties (var(--*)).
+    // When the data-theme attribute on <html> changes, the browser resolves
+    // the new property values automatically — no Compartment swap needed.
+
+    const MONO_FONT = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
     const view = new EditorView({
       state: EditorState.create({
@@ -240,15 +310,15 @@ x.upcase   # possible-nil-receiver
             scheduleCheck()
           }),
           EditorView.theme({
-            "&"                         : { backgroundColor: "#1e1e2e", color: "#cdd6f4", height: "100%" },
-            ".cm-content"               : { caretColor: "#cba6f7", fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace' },
-            ".cm-cursor"                : { borderLeftColor: "#cba6f7" },
-            ".cm-gutters"               : { backgroundColor: "#181825", color: "#585b70", border: "none" },
-            ".cm-activeLineGutter"      : { backgroundColor: "#313244" },
-            ".cm-activeLine"            : { backgroundColor: "#2a2a3d" },
-            ".cm-selectionBackground"   : { backgroundColor: "#45475a" },
-            ".cm-lintRange-error"       : { textDecoration: "underline wavy #f38ba8" },
-            ".cm-lintRange-warning"     : { textDecoration: "underline wavy #fab387" },
+            "&"                       : { backgroundColor: "var(--bg)",          color: "var(--text)",      height: "100%" },
+            ".cm-content"             : { caretColor: "var(--caret)",             fontFamily: MONO_FONT },
+            ".cm-cursor"              : { borderLeftColor: "var(--caret)" },
+            ".cm-gutters"             : { backgroundColor: "var(--surface)",      color: "var(--gutter-fg)", border: "none" },
+            ".cm-activeLineGutter"    : { backgroundColor: "var(--hover)" },
+            ".cm-activeLine"          : { backgroundColor: "var(--active-line)" },
+            ".cm-selectionBackground" : { backgroundColor: "var(--selection)" },
+            ".cm-lintRange-error"     : { textDecoration: "underline wavy var(--lint-error)" },
+            ".cm-lintRange-warning"   : { textDecoration: "underline wavy var(--lint-warn)" },
           })
         ]
       }),
@@ -260,6 +330,40 @@ x.upcase   # possible-nil-receiver
     let debounceTimer    = null
     let typesVisible     = false
     let lastDiagnostics  = []
+
+    // ── Theme ─────────────────────────────────────────────────────────────
+
+    const THEME_CYCLE  = ["dark", "light", "system"]
+    const THEME_LABELS = { dark: "Dark", light: "Light", system: "Auto" }
+
+    let themeMode = localStorage.getItem("rigor-theme") || "system"
+    const mediaDark = window.matchMedia("(prefers-color-scheme: dark)")
+
+    function isDarkResolved() {
+      if (themeMode === "dark")  return true
+      if (themeMode === "light") return false
+      return mediaDark.matches
+    }
+
+    function applyTheme() {
+      document.documentElement.dataset.theme = isDarkResolved() ? "dark" : "light"
+      themeBtn.textContent = THEME_LABELS[themeMode]
+    }
+
+    const themeBtn = document.getElementById("theme-btn")
+    themeBtn.addEventListener("click", () => {
+      themeMode = THEME_CYCLE[(THEME_CYCLE.indexOf(themeMode) + 1) % THEME_CYCLE.length]
+      localStorage.setItem("rigor-theme", themeMode)
+      applyTheme()
+    })
+
+    // Follow OS preference when in "Auto" mode
+    mediaDark.addEventListener("change", () => {
+      if (themeMode === "system") applyTheme()
+    })
+
+    // Sync button label with the stored mode on load
+    applyTheme()
 
     // ── Check ─────────────────────────────────────────────────────────────
 
@@ -302,7 +406,7 @@ x.upcase   # possible-nil-receiver
     }
 
     function applyLintMarkers(diagnostics) {
-      const doc    = view.state.doc
+      const doc     = view.state.doc
       const cmDiags = diagnostics.map(d => {
         const lineNum = Math.max(1, Math.min(d.line, doc.lines))
         const line    = doc.line(lineNum)
@@ -339,10 +443,10 @@ x.upcase   # possible-nil-receiver
 
       container.querySelectorAll(".diag-item").forEach(el =>
         el.addEventListener("click", () => {
-          const d    = diagnostics[+el.dataset.index]
-          const doc  = view.state.doc
-          const n    = Math.max(1, Math.min(d.line, doc.lines))
-          const pos  = doc.line(n).from + Math.max(0, (d.column || 1) - 1)
+          const d   = diagnostics[+el.dataset.index]
+          const doc = view.state.doc
+          const n   = Math.max(1, Math.min(d.line, doc.lines))
+          const pos = doc.line(n).from + Math.max(0, (d.column || 1) - 1)
           view.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
           view.focus()
         })

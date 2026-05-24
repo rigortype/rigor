@@ -336,7 +336,7 @@ internal / private FFI gems an external user might author. This
 WD records what each gets from core `rigor-ffi` versus what
 needs a sub-plugin, and routes the latter through the
 project-wide contribution policy defined in
-[ADR-31](31-plugin-contribution-policy.md).
+[ADR-31](31-plugin-contribution-and-supply-chain-policy.md).
 
 **Coverage scope of core `rigor-ffi` for a "vanilla" FFI gem.**
 
@@ -401,7 +401,7 @@ sketched and grows authoritative as slice 1 (core MVP) ships
 and slice 2 (sassc-ruby) provides the first concrete reference
 implementation.
 
-**Distribution governance: see [ADR-31](31-plugin-contribution-policy.md).**
+**Distribution governance: see [ADR-31](31-plugin-contribution-and-supply-chain-policy.md).**
 
 The project-wide policy applies — no external PRs into
 `plugins/`, third-party plugin authoring is welcomed (WD4),

@@ -123,7 +123,7 @@ Plugins follow a separate contribution policy from core changes:
 **Rigor does not accept external pull requests into `plugins/`
 or `examples/`**. The supply-chain rationale and the welcoming
 alternative routes are recorded in
-[`docs/adr/31-plugin-contribution-policy.md`](docs/adr/31-plugin-contribution-policy.md);
+[`docs/adr/31-plugin-contribution-and-supply-chain-policy.md`](docs/adr/31-plugin-contribution-and-supply-chain-policy.md);
 the short summary:
 
 - **Third-party plugin (default).** Author a `rigor-<gem>` gem
@@ -133,7 +133,7 @@ the short summary:
   licence permitted by the wrapped gem; the rigor code you
   redistribute stays MPL. Fully supported, no upstream
   involvement required. See
-  [ADR-31 WD4](docs/adr/31-plugin-contribution-policy.md)
+  [ADR-31 WD4](docs/adr/31-plugin-contribution-and-supply-chain-policy.md)
   and the
   [`rigor-plugin-author`](.claude/skills/rigor-plugin-author/SKILL.md)
   SKILL (Phase 0.5 routes non-maintainers to this path).
@@ -145,7 +145,7 @@ the short summary:
   in `plugins/` from scratch and credits you via
   [`Co-authored-by:`](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/creating-a-commit-with-multiple-authors)
   on the implementation commit(s). See
-  [ADR-31 WD2 / WD3](docs/adr/31-plugin-contribution-policy.md).
+  [ADR-31 WD2 / WD3](docs/adr/31-plugin-contribution-and-supply-chain-policy.md).
 - **FFI plugins specifically.** Start with the
   [`rigor-ffi-plugin-author`](.claude/skills/rigor-ffi-plugin-author/SKILL.md)
   SKILL's coverage assessment — for the typical "literal
@@ -157,7 +157,7 @@ the short summary:
 
 Subtree merge of a proven third-party plugin into the monorepo
 is reserved as a rare optional path subject to four conjunctive
-conditions ([ADR-31 WD5](docs/adr/31-plugin-contribution-policy.md));
+conditions ([ADR-31 WD5](docs/adr/31-plugin-contribution-and-supply-chain-policy.md));
 it is not a path third-party authors should plan around.
 
 ## License

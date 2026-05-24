@@ -74,11 +74,11 @@ plugin needed** — just list the gem under `dependencies:` in
 
 ## Phase 2 — Where this plugin will live (per ADR-31)
 
-Per [ADR-31](../../../docs/adr/31-plugin-contribution-policy.md)
+Per [ADR-31](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md)
 (project-wide plugin contribution policy), the default for **all**
 new plugins — private, public, anyone — is the same: **author the
 plugin as a third-party `rigor-<gem>` gem in your own repo**,
-depending on `gem "rigortype"` ([ADR-31 WD4](../../../docs/adr/31-plugin-contribution-policy.md)).
+depending on `gem "rigortype"` ([ADR-31 WD4](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md)).
 There is no path to land a new plugin via a pull request to this
 monorepo.
 
@@ -100,7 +100,7 @@ pick. Continue to Phase 3+ inside whichever tree you chose.
 ### Optional: propose for official bundling
 
 If the wrapped gem reaches significant community adoption
-([ADR-31 WD3](../../../docs/adr/31-plugin-contribution-policy.md)),
+([ADR-31 WD3](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md)),
 you can file an issue at
 [rigortype/rigor](https://github.com/rigortype/rigor) proposing
 the plugin for bundling. The issue should include:
@@ -115,7 +115,7 @@ the plugin for bundling. The issue should include:
   not authoring a parallel rigor plugin in their own repo.
 
 If accepted, the Rigor team **re-implements** the plugin in
-`plugins/rigor-<gem>/` from scratch ([ADR-31 WD2](../../../docs/adr/31-plugin-contribution-policy.md)).
+`plugins/rigor-<gem>/` from scratch ([ADR-31 WD2](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md)).
 Your contribution is credited via `Co-authored-by:` in the
 implementation commit(s) (GitHub renders the co-author on the commit
 and counts it toward your profile). The supply-chain rationale —
@@ -126,7 +126,7 @@ In rare cases where re-implementation would be strictly redundant
 with a well-shaped third-party plugin (significant adoption,
 maintenance-transfer willingness, code-style match, MPL-2.0
 license or relicensable), `git subtree merge` is available as an
-option ([ADR-31 WD5](../../../docs/adr/31-plugin-contribution-policy.md))
+option ([ADR-31 WD5](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md))
 to absorb your plugin while preserving its git history. This is
 not a path to plan around — default expectation is "your plugin
 stays in your repo, indefinitely."
@@ -154,7 +154,7 @@ spec.add_dependency "acme", "~> 1.4"   # match the version your bindings target
 When the wrapped gem releases a new version that changes its
 `attach_function` declarations, RBS surface, or DSL shape, **the
 plugin author tracks the change by updating the plugin in their
-own repo** ([ADR-31 WD4](../../../docs/adr/31-plugin-contribution-policy.md)).
+own repo** ([ADR-31 WD4](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md)).
 Orphan-plugin risk (the wrapped gem evolves, the plugin doesn't)
 is the plugin author's responsibility, not Rigor's. The version
 pin makes the supported-wrapped-version boundary explicit so
@@ -276,16 +276,16 @@ release process — the plugin is consumed in-tree.
 ### Optional: propose for official bundling
 
 If the wrapped gem reaches significant community adoption later
-([ADR-31 WD3](../../../docs/adr/31-plugin-contribution-policy.md)),
+([ADR-31 WD3](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md)),
 file an issue per Phase 2's "propose for bundling" template. The
 Rigor team evaluates the request; if accepted, they re-implement
 the plugin from scratch in `plugins/rigor-<gem>/`, crediting your
 work via `Co-authored-by:` in the implementation commit(s)
-([ADR-31 WD2](../../../docs/adr/31-plugin-contribution-policy.md)).
+([ADR-31 WD2](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md)).
 
 You don't open a PR. There is no PR path. The re-implementation
 is by Rigor team only; the rationale is the supply-chain argument
-in [ADR-31 WD1](../../../docs/adr/31-plugin-contribution-policy.md).
+in [ADR-31 WD1](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md).
 
 ## What "done" looks like
 
@@ -316,7 +316,7 @@ in [ADR-31 WD1](../../../docs/adr/31-plugin-contribution-policy.md).
   [CHANGELOG](../../../CHANGELOG.md) for `rigor-ffi` slice status
   before authoring.
 - **Attempting to open a PR to this repo for a new plugin.** There
-  is no PR path per [ADR-31 WD1](../../../docs/adr/31-plugin-contribution-policy.md).
+  is no PR path per [ADR-31 WD1](../../../docs/adr/31-plugin-contribution-and-supply-chain-policy.md).
   File an issue with the Phase 2 fields instead.
 - **Skipping the upstream-effort check.** Duplicating a plugin
   the wrapped gem's maintainers are authoring wastes both efforts.

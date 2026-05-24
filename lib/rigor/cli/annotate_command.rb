@@ -84,7 +84,15 @@ module Rigor
 
       def execute(file, options)
         configuration = Configuration.load(options.fetch(:config))
-        source = File.read(file)
+        # Force UTF-8 (with BOM tolerance) regardless of
+        # `Encoding.default_external`. Under a minimal locale
+        # the default is US-ASCII; reading multi-byte source
+        # under that tag makes the post-parse `String#sub` /
+        # `String#lines` calls in `#annotate` raise
+        # `invalid byte sequence in US-ASCII`. Ruby source is
+        # UTF-8 by convention (the parser's own assumption
+        # absent a magic comment).
+        source = File.read(file, mode: "r:bom|utf-8")
         parse_result = Prism.parse(source, filepath: file, version: configuration.target_ruby)
         return 1 if parse_errors?(parse_result, file)
 

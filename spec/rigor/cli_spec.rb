@@ -1249,6 +1249,26 @@ RSpec.describe Rigor::CLI do
       expect(out.lines[0]).not_to include("dump_type")
     end
 
+    it "reads UTF-8 source even when `Encoding.default_external` is US-ASCII" do
+      # Em-dash + Japanese — the multi-byte content that triggers
+      # `invalid byte sequence in US-ASCII` from `String#sub`
+      # downstream when the file is read under a US-ASCII default
+      # external encoding (the Nix sandbox / minimal locale shape).
+      path = write_fixture("a.rb", "# Hello — こんにちは\n1\n")
+
+      original = Encoding.default_external
+      begin
+        Encoding.default_external = Encoding::US_ASCII
+        status, out, err = run_cli("annotate", "--no-color", path)
+      ensure
+        Encoding.default_external = original
+      end
+
+      expect(err).to eq("")
+      expect(status).to eq(0)
+      expect(out).to include("こんにちは").and include("#=> dump_type: 1")
+    end
+
     it "is idempotent — re-annotating does not stack comments" do
       path = write_fixture("a.rb", "a = 1\n")
 

@@ -63,6 +63,99 @@ assert_type(n, "Constant<1> | Constant<\"a\">")
 Spec: [`docs/type-specification/value-lattice.md`](../type-specification/value-lattice.md),
 [`docs/type-specification/special-types.md`](../type-specification/special-types.md).
 
+## Set-theoretic foundations of the lattice
+
+The previous section described `Top` / `Bot` / `|` (join) / `&`
+(meet) as "the standard textbook picture." The semantic
+foundation that makes that picture *work* — where union and
+intersection on types behave the way the user expects — is the
+**set-theoretic** view of types.
+
+In the set-theoretic view, a type `T` is interpreted as the *set
+of values inhabiting it*, and the type operators correspond to
+set operations:
+
+| Type operator | Set operation |
+| --- | --- |
+| `T \| U` | `T ∪ U` (union of inhabitants) |
+| `T & U` | `T ∩ U` (intersection of inhabitants) |
+| `T - U` | `T ∖ U` (set-theoretic difference; sometimes written `T ¬ U`) |
+| `Top` | the universal set |
+| `Bot` | the empty set |
+
+This is the semantics behind **semantic subtyping**: `T <: U` iff
+every inhabitant of `T` is also an inhabitant of `U`. Subtyping
+becomes set inclusion.
+
+### Academic root
+
+**Frisch, Castagna & Benzaken** developed semantic subtyping in
+the early 2000s as the type-theoretic foundation of CDuce — a
+language for processing XML where union, intersection, and
+negation types are first-class. The framework was consolidated
+in **Castagna's 2024 textbook *Programming with Union,
+Intersection, and Negation Types***, the current canonical
+reference for the area.
+
+The headline result: under semantic subtyping, the lattice
+operators are *exactly* the set-theoretic ones, and a decidable
+subtyping algorithm exists for the resulting fragment — much
+richer than HM but still tractable.
+
+### Industrial uptake
+
+- **TypeScript** and **Flow** use union / intersection
+  arithmetic informally — the spec talks about "subtype-of-T-or-U"
+  rather than committing to a semantic model, but the resulting
+  behaviour matches the set-theoretic reading in most cases.
+- **Elixir's set-theoretic type system** (José Valim + Giuseppe
+  Castagna collaboration, 2023–) is the first major industrial
+  language to *deliberately* adopt the formal framework. The
+  decision to ground Elixir's typed surface in semantic subtyping
+  rather than a syntactic ad-hoc subtyping relation is the most
+  consequential design choice the project has made.
+- **Scala 3** ships union types and intersection types as
+  first-class constructs; the semantics are loosely
+  set-theoretic.
+- **Ceylon** (now retired) was an early industrial experiment
+  with explicit union / intersection types at the surface.
+
+### Rigor's position
+
+Rigor's lattice **is** set-theoretic in spirit:
+
+- `T | U`, `T & U`, `T - U` are present at the surface
+  ([`docs/type-specification/type-operators.md`](../type-specification/type-operators.md)).
+- Top / Bot behave as the universal / empty sets.
+- The difference operator `T - U` is what lets occurrence typing
+  express "in the `else` branch of `if x.is_a?(String)`, the type
+  of `x` is `Top - String`" precisely, rather than as an
+  approximation.
+
+Rigor does NOT formalise its lattice as a semantic-subtyping
+system in the Castagna sense. Three reasons:
+
+1. **The trinary certainty already absorbs the hard cases.**
+   Semantic subtyping's value is a decision procedure for full
+   union / intersection / negation. Rigor's `maybe` arm handles
+   "cannot decide" without needing the decision procedure to
+   terminate.
+2. **Nominal-first conflicts with pure semantic subtyping.**
+   A semantic-subtyping reading would collapse two distinct
+   nominal classes with identical method sets (§ "Nominal vs
+   structural typing"), which Ruby authors do not want.
+3. **Implementation cost.** Castagna's decision procedure is
+   theoretically elegant but operationally heavy for an analyser
+   that walks an AST per file under a per-file budget
+   ([`inference-budgets.md`](../type-specification/inference-budgets.md)).
+
+The takeaway: Rigor's `T | U` / `T & U` / `T - U` operators are
+best read with the set-theoretic interpretation in mind, even
+though Rigor's algorithms do not formally lean on it. A reader
+coming from Elixir's set-theoretic types or from Castagna's
+textbook will find the surface familiar; the gap is in the
+formalisation depth, not the surface design.
+
 ## Subtyping and gradual consistency
 
 Static type theory uses one relation: **subtyping (`<:`)**.
@@ -452,6 +545,97 @@ Two Rigor-specific extensions matter:
 Spec: [`docs/type-specification/special-types.md`](../type-specification/special-types.md),
 [`docs/type-specification/value-lattice.md`](../type-specification/value-lattice.md).
 
+## Blame, the gradual guarantee, and trust boundaries
+
+The previous section described `Dynamic[T]` and the consistency
+relation `~` but stopped at the static side. The full
+gradual-typing literature has a substantial run-time-and-policy
+theory built on those static foundations. Rigor inherits part of
+it; the rest is deliberately out of scope.
+
+### Blame
+
+**Findler & Felleisen 2002** (*Contracts for Higher-Order
+Functions*) introduced the **blame** principle: when a value
+flows across a static / dynamic boundary and a contract violation
+is detected at runtime, *whose code is at fault*? The answer must
+be unambiguous and inferable from the boundary topology — a value
+crossing from typed code into untyped code carries a positive
+contract obligation; from untyped to typed, a negative one.
+
+**Wadler & Findler 2009** (*Well-Typed Programs Can't Be Blamed*)
+gave the slogan: a typed module that follows its declared
+interface is never the cause of a blame error — only untyped code
+(or a static / dynamic interface mismatch) can be.
+
+### The gradual guarantee
+
+**Siek, Vitousek, Cimini & Boyland 2015** (*Refined Criteria for
+Gradual Typing*) formalised the property a gradual type system is
+most commonly *expected* to satisfy:
+
+> Adding type annotations to a previously well-typed program does
+> not introduce new errors. Removing annotations from a previously
+> well-typed program does not introduce new errors either.
+
+This is the **gradual guarantee**. It is the property that makes
+gradual adoption psychologically viable: a developer adding an
+RBS annotation to a working method should never break a
+previously-passing call site, and removing an annotation should
+never fire a new diagnostic.
+
+### Rigor's position
+
+Rigor does not insert runtime contracts. Blame in the
+Findler-Felleisen sense has no direct operational analogue —
+Rigor is static-only, and a `Dynamic[T]`-to-concrete-`T` flow is
+a static decision, not a runtime check that could "blame" anyone.
+
+The **gradual guarantee** *is* a property Rigor can be measured
+against:
+
+- **In spirit**, the no-false-positives stance
+  ([ADR-5](../adr/5-robustness-principle.md)) is strictly
+  stronger than the gradual guarantee. If Rigor was silent on a
+  call site before an annotation was added, it remains silent
+  after — unless the annotation provably contradicts the runtime
+  behaviour, in which case the diagnostic fires on the annotation
+  rather than on the call. The asymmetry "strict on returns,
+  lenient on parameters" is calibrated to satisfy this property
+  by construction.
+- **In practice**, the gradual guarantee in Rigor reads as: a
+  project's baseline of "passes without annotation" should never
+  regress when an RBS file is added. This is exactly the property
+  the [PHPStan-shaped baseline mechanism](../adr/22-baseline-and-project-onboarding.md)
+  enforces — adding annotations shrinks the baseline; it never
+  grows it on un-annotated code.
+
+### What Rigor explicitly does NOT do
+
+- **Runtime contract insertion at the static / dynamic boundary.**
+  The opt-in [`rigor-sorbet`](../../plugins/rigor-sorbet/) plugin
+  reads Sorbet's `T.let` / `T.cast` / `T.must` as cast forms, but
+  the contract *enforcement* is `sorbet-runtime`'s job, not
+  Rigor's. Rigor's static analysis uses the cast as a hint, not
+  as a check.
+- **Blame-tracking algebra.** Rigor's dynamic-origin tracking
+  records *why* a value became `Dynamic[T]` (which plugin / which
+  file / which boundary) and is consulted by refactoring tools,
+  but does not assign run-time fault. There is no positive /
+  negative contract obligation in Rigor's algebra.
+- **Trust polarity at boundaries.** The "typed code is trusted;
+  untyped code is suspect" framing that the
+  Wadler-Findler-Greenberg lineage builds on is replaced in
+  Rigor by the simpler "we report only diagnostics we can
+  prove" framing — which removes the question of who is to
+  blame by removing the runtime decision point.
+
+The gradual-typing trinity for Rigor: **consistency `~`** (the
+static side, § "Gradual typing"); the **gradual guarantee** (the
+migration story, this section); and **no runtime cost** (the
+engineering stance — Rigor is a compile-time tool, not a
+contract system).
+
 ## Effect systems
 
 A textbook **effect system** annotates each expression with two
@@ -684,6 +868,88 @@ formalise the bidirectional rules because the gradual setting and
 the trinary certainty make the "could not decide" case explicit
 rather than a typing-rule failure.
 
+The next section makes this informal claim concrete.
+
+## Bidirectional type checking
+
+The HM section noted in passing that Rigor's walker is
+"bidirectional in everything but formalisation." That is the
+short version of the relationship between Rigor and a substantial
+contemporary line of type-system work, and worth its own
+treatment.
+
+### The synthesis / checking split
+
+**Pierce & Turner 2000** (*Local Type Inference*) and the modern
+canonical reformulation by **Dunfield & Krishnaswami 2013**
+(*Complete and Easy Bidirectional Typechecking for Higher-Rank
+Polymorphism*) split typing judgments into two modes:
+
+- **Synthesis** (`Γ ⊢ e ⇒ T`): given an expression `e`, compute
+  its type `T`. The type flows out.
+- **Checking** (`Γ ⊢ e ⇐ T`): given `e` and an expected type
+  `T`, verify that `e` has type `T`. The type flows in.
+
+Every typing rule is one or the other. The two modes alternate
+top-down (checking propagates expected types) and bottom-up
+(synthesis returns types) through the AST, replacing the global
+unification of HM with *local* constraint discharge. The same
+machine handles subtyping, intersections, and higher-rank
+polymorphism without needing a global solver.
+
+### Industrial uptake
+
+- **Steep** is explicitly bidirectional and the closest Ruby
+  analogue — its rules are authored in `⇒` / `⇐` form.
+- **TypeScript**'s "contextual typing" is bidirectional in
+  everything but the name.
+- **Scala 3**'s match types and contextual typing.
+- **OCaml** uses local type inference (Pierce & Turner directly)
+  for higher-rank-polymorphic positions where HM cannot decide.
+- **Roc**, **ReScript**, **Idris 2** — all bidirectional in the
+  modern Dunfield-Krishnaswami style.
+
+### Rigor's bidirectional behaviour, informal
+
+Rigor's walker performs the two modes without naming them:
+
+| Walker behaviour | Bidirectional mode |
+| --- | --- |
+| Computing the type of an argument expression at a call site | Synthesis |
+| Verifying the argument type against the RBS parameter type | Checking |
+| Inferring `HashShape` for a hash literal | Synthesis |
+| Inferring `Tuple` for an array literal | Synthesis |
+| Walking the `then` / `else` branches of an `if` under a narrowed environment | Synthesis under each branch + join (no expected-type checking) |
+| Verifying a plugin protocol contract ([ADR-28](../adr/28-path-scoped-protocol-contracts.md)) — method exists + return-type matches | Checking |
+| Honouring an `RBS::Extended` `assert_type` directive | Checking |
+
+What Rigor does NOT do that a fully formalised bidirectional
+system would:
+
+- **Constraint propagation across non-adjacent expressions.**
+  Each expression's type is decided when the walker reaches it;
+  later uses see the decision as a fixed fact, not as a
+  constraint to be solved together with theirs.
+- **Local generalisation.** HM's `let`-binding generalisation
+  step does not exist in Rigor; the walker does not introduce
+  fresh type variables to be solved later.
+- **Formal mode discipline.** Rigor's rules are not authored as
+  `⇒` / `⇐` judgments; the walker's behaviour matches a
+  bidirectional reading but the spec does not enforce it.
+
+The practical consequence: Rigor's inference is faster than a
+constraint-based bidirectional system (no global solving) and
+gives a definite "what type is this expression?" answer at every
+point — at the cost of not being able to defer typing decisions,
+which a more constraint-based system would allow when context
+arrives later in the walk.
+
+For a reader who has internalised the bidirectional literature,
+the mental model is: **synthesis everywhere except at the RBS /
+plugin-contribution boundary, where the declared type is the
+check side.** That is the entire bidirectional discipline Rigor
+needs.
+
 ## Beyond pure inference: reach and precision
 
 The previous sections framed "what cannot be statically inferred"
@@ -859,6 +1125,29 @@ they map to the sections of this appendix:
 - Garcia, Clark & Tanter. "Abstracting Gradual Typing."
   *POPL 2016.* The modern reformulation of gradual typing in
   terms of abstract interpretation.
+- Findler & Felleisen. "Contracts for Higher-Order Functions."
+  *ICFP 2002.* The origin of blame as a formal principle —
+  background for § "Blame, the gradual guarantee, and trust
+  boundaries."
+- Wadler & Findler. "Well-Typed Programs Can't Be Blamed."
+  *ESOP 2009.* The headline result on the asymmetry between
+  typed and untyped code at the boundary.
+- Siek, Vitousek, Cimini & Boyland. "Refined Criteria for
+  Gradual Typing." *SNAPL 2015.* The original statement of the
+  gradual guarantee.
+- Frisch, Castagna & Benzaken. "Semantic Subtyping: Dealing
+  Set-Theoretically with Function, Union, Intersection, and
+  Negation Types." *Journal of the ACM*, 2008. The foundational
+  treatment of set-theoretic types — background for § "Set-
+  theoretic foundations of the lattice."
+- Castagna, G. *Programming with Union, Intersection, and
+  Negation Types.* 2024. The current canonical reference for
+  semantic-subtyping-based type systems; the framework behind
+  Elixir's set-theoretic types.
+- Dunfield & Krishnaswami. "Complete and Easy Bidirectional
+  Typechecking for Higher-Rank Polymorphism." *ICFP 2013.* The
+  modern canonical reference for bidirectional type checking —
+  background for § "Bidirectional type checking."
 - Tobin-Hochstadt & Felleisen. "The Design and Implementation
   of Typed Scheme." *POPL 2008.* Origin of occurrence typing.
 - Rondon, Kawaguchi & Jhala. "Liquid Types." *PLDI 2008.* The

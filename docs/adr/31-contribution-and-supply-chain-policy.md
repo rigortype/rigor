@@ -1,42 +1,84 @@
-# ADR-31 — Plugin contribution and supply-chain policy
+# ADR-31 — Contribution and supply-chain policy
 
 Status: **proposed, 2026-05-25.** Records the project-wide policy
-that Rigor does not accept external pull requests into
-`plugins/`. New officially-bundled plugins are authored by the
-Rigor team, optionally crediting the proposer via
-`Co-authored-by:`. Third-party plugins (separate `rigor-*` gems in
-the author's own repo, depending on `gem "rigortype"`) are
-explicitly welcomed as a parallel ecosystem. Subtree merge of a
-proven third-party plugin into the monorepo is reserved as an
-optional, conditional path.
+that Rigor does not accept external pull requests into any path
+that ships in the `rigortype` gem — `lib/` (the engine),
+`plugins/`, `examples/`, `ext/`, `exe/`, and the gemspec. New
+shipped code (engine features, fixes, bundled plugins) is
+authored by the Rigor team, optionally crediting the proposer
+via `Co-authored-by:`. For the plugin-specific subdomain (the
+ADR's most active worked example): third-party plugins as
+separate `rigor-*` gems in the author's own repo are explicitly
+welcomed, and subtree merge of a proven third-party plugin into
+the monorepo is reserved as an optional, conditional path.
 
 ## Context
 
 Rigor is a static analyzer that runs in every user's CI / dev
 environment — a high-leverage target for supply-chain attacks
 analogous to `xz-utils` (2024), `ua-parser-js`, `event-stream`,
-and the recurring npm-ecosystem incidents. A malicious recognizer
-inserted via an outside pull request would execute in the rigor
-process during every analysis of every downstream user's code,
-regardless of whether that user depends on the wrapped gem.
+and the recurring npm-ecosystem incidents. A malicious commit
+inserted via an outside pull request — anywhere along the
+analysis path, whether engine internals or a bundled plugin's
+recognizer — would execute in the rigor process during every
+analysis of every downstream user's code, regardless of which
+gem or feature triggered the change.
 
-All currently-bundled plugins under `plugins/` and `examples/` —
-the Rails family, dry-rb adapters, ADR-16 substrate consumers
-(`rigor-sinatra`, `rigor-devise`, `rigor-dry-struct`),
-`rigor-hanami` (ADR-28), and the four FFI consumers queued by
-[ADR-30](30-rigor-ffi-plugin-shape.md) — were and will be
-authored by the Rigor team. No bundled plugin has ever been
-merged from an external PR. This ADR codifies that de facto
-practice as binding policy and clarifies the welcoming
-alternative routes for the community.
+All currently-shipped code in `rigortype` was authored by the
+Rigor team. This applies symmetrically to the engine
+(`lib/rigor/`) and the bundled plugins / examples
+(`plugins/rigor-rails-*`, `plugins/rigor-dry-*`,
+`plugins/rigor-hanami`, the ADR-16 substrate consumers, the four
+FFI consumers queued by [ADR-30](30-rigor-ffi-plugin-shape.md),
+the five `examples/` walkthroughs). No external pull request has
+ever been merged into `rigortype`'s shipped Covered Software.
+This ADR codifies that de facto practice as binding policy and
+clarifies the welcoming alternative routes for the community.
 
 The trigger to write this ADR was [ADR-30](30-rigor-ffi-plugin-shape.md)
 WD10's initial draft, which proposed "PR accepted for OSS gems
 subject to three conditions." On review, the supply-chain argument
-was found to be **plugin-shape-agnostic** — there is no reason
-FFI plugins are more or less risky than Rails plugins or dry-rb
-adapters. The policy therefore lifts out of ADR-30 and becomes
-project-wide.
+was found to be both **plugin-shape-agnostic** (FFI plugins are
+not more or less risky than Rails plugins) AND **code-shape-
+agnostic** (a malicious engine PR has the same blast radius as a
+malicious plugin PR — strictly higher if anything, since the
+engine is load-bearing for every analysis). The policy therefore
+lifts out of ADR-30, broadens beyond plugins, and becomes
+project-wide for shipped code. Plugins remain the worked
+subdomain — WD2 through WD5 record the plugin-specific paths —
+because external contribution interest concentrates there.
+
+### Scope — what this policy applies to
+
+The policy applies to **everything that ships in the `rigortype`
+gem and executes in the analyser process**:
+
+| Path | In `rigortype`? | Executes during analysis? | In scope? |
+| --- | --- | --- | --- |
+| `lib/rigor/` (engine) | yes | yes | **yes** |
+| `plugins/` (bundled plugins) | yes | yes | **yes** |
+| `examples/` (walkthrough plugins) | yes | yes | **yes** |
+| `ext/` (native extensions, if any) | yes | yes | **yes** |
+| `exe/` (CLI entry points) | yes | yes | **yes** |
+| Gemspec + executable scripts | yes | yes | **yes** |
+| `spec/` (test suite) | no — dev-only | no | **out of scope** |
+| `sig/` (RBS for `lib/`) | yes | no (consumed at analyser-load) | **in scope** (treated as code per [WD1](#wd1)) |
+| `docs/` (this corpus) | no | no | **out of scope** |
+| `references/` (vendored read-only sources) | no | no | **out of scope** |
+| `CONTRIBUTING.md` / `AGENTS.md` / `CLAUDE.md` / `README.md` | no | no | **out of scope** |
+| `.claude/` / `.github/` (tooling) | no | no | **out of scope** |
+
+**Out-of-scope paths follow conventional OSS contribution norms** —
+documentation fixes, typo corrections, spec / test additions, and
+similar PRs are accepted under ordinary review (`make verify` +
+maintainer code review). This ADR does not change how
+non-shipped-code contributions are handled.
+
+The `sig/` directory is treated as code (in scope) because its
+contents reach the analyser's type environment at load time and
+could influence inference output; an adversary modifying `sig/`
+to widen a return type would propagate effects similarly to an
+adversary modifying `lib/`.
 
 ### Licensing framework
 
@@ -46,9 +88,10 @@ shapes how this ADR talks about authorship, code provenance, and
 the boundary between the bundled `rigortype` gem and third-party
 extensions:
 
-- **Covered Software** (§1.4) is the `rigortype` gem itself
-  including the bundled `plugins/` and `examples/` trees plus
-  any **Modifications** (§1.10) thereto.
+- **Covered Software** (§1.4) is the `rigortype` gem — every
+  path enumerated as "in scope" in the table above
+  (`lib/rigor/`, `plugins/`, `examples/`, `ext/`, `exe/`,
+  `sig/`, gemspec) plus any **Modifications** (§1.10) thereto.
 - **Contributor** (§1.1) is anyone who creates, contributes to,
   or owns Covered Software. Each Contributor grants the rights
   in §2.1 and makes the §2.5 representation (their Contributions
@@ -64,60 +107,78 @@ extensions:
   for the non-Covered-Software portion.
 
 The policy below reads naturally against these terms: WD1 limits
-who may make a Contribution, WD2 distinguishes informational
-authorship credit from Contributor status, WD4 frames third-party
-plugins as Larger Work under §3.3, and WD5 notes that subtree
-merge brings imported files **into** Covered Software as
-Modifications under §1.10.
+who may make a Contribution (to all of Covered Software, not
+just plugins), WD2 distinguishes informational authorship credit
+from Contributor status, WD4 frames third-party plugins as
+Larger Work under §3.3, and WD5 notes that subtree merge brings
+imported files **into** Covered Software as Modifications under
+§1.10.
 
 ## Decision
 
-Adopt a single project-wide plugin contribution policy with five
-working decisions covering: (a) the no-external-PR rule, (b) the
-proposal-and-credit route into bundled plugins, (c) the
-intentionally vague "widely used" criterion, (d) the welcomed
-third-party ecosystem, (e) the reserved subtree-merge option.
+Adopt a single project-wide contribution policy with five
+working decisions covering: (a) the no-external-PR rule for
+shipped code, (b) the proposal-and-credit route into bundled
+plugins (with core engine proposals following the same shape),
+(c) the intentionally vague "widely used" criterion, (d) the
+welcomed third-party plugin ecosystem, (e) the reserved
+subtree-merge option for third-party plugins.
 
 ## Working decisions
 
 ### WD1 — No external Contributions into Covered Software via pull request
 
 In MPL terms: **the only Contributors to Covered Software are
-the Rigor team**. External pull requests against `plugins/`,
-`examples/`, or any other path inside the bundled `rigortype`
-gem are not accepted, so no party outside the Rigor team becomes
-a Contributor and the MPL §2.5 representation surface stays
-bounded to people the team can vet directly.
+the Rigor team**. External pull requests against any in-scope
+path (see the table in the [Scope](#scope--what-this-policy-applies-to)
+subsection — `lib/rigor/`, `plugins/`, `examples/`, `ext/`,
+`exe/`, `sig/`, gemspec) are not accepted, so no party outside
+the Rigor team becomes a Contributor and the MPL §2.5
+representation surface stays bounded to people the team can vet
+directly. Out-of-scope paths (`spec/`, `docs/`, `references/`,
+`CONTRIBUTING.md`, `.claude/`, `.github/`) follow conventional
+OSS PR review — see the Scope subsection for the full table.
 
-The supply-chain rationale governs **uniformly**:
+The supply-chain rationale governs **uniformly across shipped
+code**:
 
-- Bundled plugins ship inside the `rigortype` gem (Covered
-  Software), which runs in every analysed user's CI / dev
-  environment.
-- A malicious recognizer can execute arbitrary Ruby in the rigor
-  process during analysis — including reading the analysed project's
-  source, exfiltrating environment variables, writing files, or
-  making network calls if the host permits.
-- The blast radius extends to **every rigor user**, not just users
-  of the wrapped gem.
-- This risk is **independent of what the plugin wraps** — a
-  Rails-adapter PR has the same attack surface as an FFI-binding PR.
+- The `rigortype` gem (Covered Software) runs in every analysed
+  user's CI / dev environment.
+- A malicious commit anywhere in shipped Covered Software can
+  execute arbitrary Ruby in the rigor process during analysis —
+  including reading the analysed project's source, exfiltrating
+  environment variables, writing files, or making network calls
+  if the host permits.
+- The blast radius extends to **every rigor user**, not just
+  users of the affected feature or wrapped gem.
+- This risk is **independent of what the code does** — a
+  malicious engine PR has the same attack surface as a malicious
+  plugin PR, and strictly the larger surface (the engine is
+  load-bearing for every analysis; a plugin is load-bearing only
+  when its wrapped gem is in the resolved dependency set).
 
-Scope:
+Scope notes specific to this WD:
 
-- Applies uniformly to **code, RBS files, fixtures, and config**.
-  Drawing a "pure RBS contributions are safe" carve-out adds
-  judgement cost without changing the policy meaningfully:
-  RBS still flows attributes / annotations to the engine, MPL §1.10
-  treats any new file as a Modification regardless of language,
-  and maintainer time spent classifying "is this just data?"
-  exceeds the savings from accepting low-risk drops.
-- Applies to **new plugins**. Maintenance of existing bundled
-  plugins (bug fixes, refactors, dependency bumps) is by Rigor
-  team only — no external PR path here either.
+- Applies uniformly to **code, RBS files, fixtures, and config**
+  within in-scope paths. Drawing a "pure RBS contributions are
+  safe" carve-out adds judgement cost without changing the
+  policy meaningfully: RBS still flows attributes / annotations
+  to the engine, MPL §1.10 treats any new file as a Modification
+  regardless of language, and maintainer time spent classifying
+  "is this just data?" exceeds the savings from accepting
+  low-risk drops.
+- Applies to **new code and maintenance equally**. Bug fixes,
+  refactors, dependency bumps, and new features on existing
+  shipped code are all by Rigor team only — no external PR path
+  for any of these.
+- **Out-of-scope contributions (docs, specs, tooling) keep their
+  normal PR path.** This ADR does not retract the welcome on
+  documentation fixes, test additions, or tooling improvements;
+  see [CONTRIBUTING.md](../../CONTRIBUTING.md) for those.
 
-This codifies existing practice. No current bundled plugin came
-from an external PR, so the policy introduces no retroactive
+This codifies existing practice. No external PR has ever been
+merged into `rigortype`'s shipped Covered Software (engine or
+bundled plugins), so the policy introduces no retroactive
 inconsistency.
 
 **Rejected alternative.** "PR accepted with strict code review":
@@ -129,6 +190,19 @@ threat-model-vs-velocity trade-off lands the same way for
 high-trust upstream packages.
 
 ### WD2 — Promotion path via issue + `Co-authored-by:` attribution
+
+WD2 is the plugin-specific worked example of the general
+"propose via issue, team implements, proposer credited via
+`Co-authored-by:`" shape. Core engine proposals (new analyser
+features, refactors, bug-fix-driven cleanups) follow the same
+shape — file an issue describing the proposal, optionally point
+at a sample implementation in your own fork, the team
+implements, you are credited via `Co-authored-by:` on the
+implementing commit(s) if your contribution materially informed
+the work. The WD2 mechanics below are the plugin instance of
+that general shape; the only thing plugin-specific is the
+adoption-evidence requirement (WD3), which is structurally
+inapplicable to engine work.
 
 Anyone wanting an officially-bundled plugin for a real OSS gem
 files an **issue** with:
@@ -301,31 +375,42 @@ is the right baseline; subtree merge is the exception.
 
 ## Consequences
 
-- **Contribution velocity is slower than typical OSS norms.** A
-  user with a working plugin must file an issue and wait for
-  maintainer-authored implementation, rather than opening a PR.
-  Counter-balance: explicit attribution (Co-authored-by) +
-  welcomed third-party ecosystem (WD4) means contribution is
+- **Contribution velocity is slower than typical OSS norms** for
+  shipped-code contributions (engine and plugins). A user with a
+  working change must file an issue and wait for maintainer-
+  authored implementation, rather than opening a PR. Counter-
+  balance: explicit attribution (Co-authored-by) + welcomed
+  third-party plugin ecosystem (WD4) means contribution is
   acknowledged, just not directly merged.
-- **Maintainer workload is bounded by WD3's "widely used"
-  filter.** Re-implementation cost per accepted plugin is real
-  but capped — and the proposer's sample implementation, when
-  provided, dramatically reduces it (the sample documents the
-  recognizer's intended behaviour, the maintainer re-authors the
-  code).
-- **Newcomer-friendliness.** The policy is welcoming when read in
-  full: "build it privately today, use it forever, propose for
-  bundling when you have evidence of community uptake, get credit
-  when accepted." It's only unwelcoming if read as just "no PRs".
-  Documentation should foreground WD4 + WD2's attribution promise.
-- **The bundled plugin set grows slowly and deliberately.** This
-  is intended — every bundled plugin is maintenance burden for
-  the Rigor team and trust surface for every downstream user. A
-  small, high-quality bundled set + a vibrant third-party
-  ecosystem is the target.
-- **Consistency across rigor-* plugin types.** Whether someone
-  proposes `rigor-foo-graphql-extension` or `rigor-myffigem`, the
-  same policy applies. No special-casing by plugin domain.
+- **Out-of-scope paths retain conventional OSS PR velocity.**
+  Docs / spec / fixture / tooling PRs follow the normal review
+  cycle. The policy is "shipped code is maintainer-authored", not
+  "rigor is closed to outside contributions"; the latter framing
+  would be misleading.
+- **Maintainer workload for plugin promotion is bounded by WD3's
+  "widely used" filter.** Re-implementation cost per accepted
+  plugin is real but capped — and the proposer's sample
+  implementation, when provided, dramatically reduces it (the
+  sample documents the recognizer's intended behaviour, the
+  maintainer re-authors the code).
+- **Newcomer-friendliness.** The policy is welcoming when read
+  in full: "docs / spec / tooling PRs land the normal way; for
+  shipped code, propose via issue and get Co-authored-by credit
+  on the implementation; for plugins specifically, build
+  privately, propose for bundling once adopted." It's only
+  unwelcoming if read as just "no PRs to shipped code".
+  Documentation should foreground the issue-driven shape +
+  attribution promise + third-party-plugin welcome.
+- **Shipped code grows slowly and deliberately.** This is
+  intended — every line shipped in `rigortype` is maintenance
+  burden for the team and trust surface for every downstream
+  user. A small, high-quality shipped set + a vibrant third-
+  party plugin ecosystem is the target.
+- **Consistency across all shipped code.** Whether someone
+  proposes an engine optimisation, an FFI binding plugin
+  (`rigor-myffigem`), or a Rails-side extension
+  (`rigor-foo-graphql-extension`), the same WD1 policy applies.
+  No special-casing by code domain.
 
 ## Implementation slicing
 

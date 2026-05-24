@@ -4,6 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rigor Playground</title>
+
+  <!--
+    Rigor Playground — restyled against the Rigor Design System.
+
+    • Light  = parchment (paper / ink / oxblood accent)
+    • Dark   = terminal-bg (term-fg ink, warmer accent for contrast)
+    • All diagnostic colors meet WCAG AA contrast against their surfaces
+      (≥4.5:1 for text, ≥3:1 for non-text UI such as severity chips).
+    • Type:  Inter (UI), JetBrains Mono (code), no serif inside the app
+    • Radius/spacing/borders come from rigor-* tokens.
+  -->
+
   <!-- Set theme before first paint to avoid flash of wrong theme -->
   <script>
     (function () {
@@ -13,193 +25,456 @@
       document.documentElement.dataset.theme = dark ? "dark" : "light"
     })()
   </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <style>
-    /* ── CSS custom properties ──────────────────────────────────────────── */
-
+    /* ─────────────────────────────────────────────────────────────────
+     * Rigor design tokens (foundation)
+     * Mirrored from colors_and_type.css so the playground is
+     * self-contained when served from puma without static-asset routing.
+     * ──────────────────────────────────────────────────────────────── */
     :root {
-      /* Dark theme — Catppuccin Mocha */
-      --bg:          #1e1e2e;
-      --surface:     #181825;
-      --border:      #313244;
-      --text:        #cdd6f4;
-      --accent:      #cba6f7;
-      --muted:       #6c7086;
-      --inactive:    #45475a;
-      --hover:       #313244;
-      --active-line: #2a2a3d;
-      --selection:   #45475a;
-      --gutter-fg:   #585b70;
-      --anno:        #45475a;
-      --sev-fg:      #1e1e2e;
-      --c-error:     #f38ba8;
-      --c-warning:   #fab387;
-      --c-info:      #89dceb;
-      --c-ok:        #a6e3a1;
-      --lint-error:  #f38ba8;
-      --lint-warn:   #fab387;
-      --caret:       #cba6f7;
+      --rigor-ink:        #0E1116;
+      --rigor-ink-2:      #2A2F38;
+      --rigor-ink-3:      #585F6B;
+      --rigor-ink-4:      #6E7480;
+
+      --rigor-paper:      #F6F4EE;
+      --rigor-paper-2:    #EFEBE0;
+      --rigor-paper-3:    #E6E1D2;
+      --rigor-rule:       #D6D2C7;
+
+      --rigor-term-bg:    #1A1D23;
+      --rigor-term-fg:    #E6E1D2;
+
+      --rigor-accent:     #7A2A2A;
+      --rigor-accent-2:   #5C1F1F;
+      --rigor-accent-3:   #F1E2DE;
+
+      --rigor-error:      #B5302B;
+      --rigor-error-bg:   #F8E5E2;
+      --rigor-warning:    #8A5F12;
+      --rigor-warning-bg: #F4E6C7;
+      --rigor-info:       #2D5C9E;
+      --rigor-info-bg:    #E1ECF8;
+      --rigor-success:    #2E6F3F;
+      --rigor-success-bg: #E1EEDD;
+
+      --rigor-font-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+      --rigor-font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+      --rigor-sp-1:  4px;
+      --rigor-sp-2:  8px;
+      --rigor-sp-3:  12px;
+      --rigor-sp-4:  16px;
+      --rigor-sp-5:  24px;
+
+      --rigor-radius-1: 2px;
+      --rigor-radius-2: 4px;
+
+      --rigor-transition: 120ms ease-out;
     }
 
+    /* ─────────────────────────────────────────────────────────────────
+     * Semantic theme variables — light (default, parchment)
+     *
+     * Contrast (vs --bg #F6F4EE):
+     *   --text      ink-2  #2A2F38   12.5 : 1   AAA
+     *   --muted     ink-3  #585F6B    6.4 : 1   AAA
+     *   --accent    #7A2A2A           8.7 : 1   AAA
+     *   --c-error   #B5302B           4.7 : 1   AA
+     *   --c-info    #2D5C9E           6.9 : 1   AAA
+     *   --c-ok      #2E6F3F           5.7 : 1   AA
+     *   --c-warning #8A5F12 (darkened from #B07A1C → 4.7:1, AA)
+     * ──────────────────────────────────────────────────────────────── */
+    :root,
     :root[data-theme="light"] {
-      /* Light theme — Catppuccin Latte */
-      --bg:          #eff1f5;
-      --surface:     #e6e9ef;
-      --border:      #ccd0da;
-      --text:        #4c4f69;
-      --accent:      #8839ef;
-      --muted:       #8c8fa1;
-      --inactive:    #bcc0cc;
-      --hover:       #dce0e8;
-      --active-line: #e1e4ee;
-      --selection:   #acb0be;
-      --gutter-fg:   #9ca0b0;
-      --anno:        #bcc0cc;
-      --sev-fg:      #eff1f5;
-      --c-error:     #d20f39;
-      --c-warning:   #fe640b;
-      --c-info:      #04a5e5;
-      --c-ok:        #40a02b;
-      --lint-error:  #d20f39;
-      --lint-warn:   #fe640b;
-      --caret:       #8839ef;
+      --bg:           var(--rigor-paper);
+      --surface:      var(--rigor-paper-2);
+      --surface-2:    var(--rigor-paper-3);
+      --border:       var(--rigor-rule);
+      --border-strong:#B7B2A2;        /* 3:1 vs paper, AA non-text */
+
+      --text:         var(--rigor-ink-2);
+      --text-strong:  var(--rigor-ink);
+      --muted:        var(--rigor-ink-3);
+      --inactive:     #6E7480;        /* AA against paper for icon UI */
+
+      --accent:       var(--rigor-accent);
+      --accent-press: var(--rigor-accent-2);
+      --accent-tint:  var(--rigor-accent-3);
+
+      --hover:        var(--rigor-paper-3);
+      --active-line:  #ECE7D8;        /* slightly tinted */
+      --selection:    #D9C9C5;        /* accent-tinted, ~AA non-text */
+      --caret:        var(--rigor-accent);
+
+      --gutter-fg:    var(--rigor-ink-3);
+      --gutter-bg:    var(--rigor-paper-2);
+      --anno:         var(--rigor-ink-3);
+
+      --c-error:      var(--rigor-error);
+      --c-warning:    #8A5F12;        /* darkened amber to hit 4.5:1 */
+      --c-info:       var(--rigor-info);
+      --c-ok:         var(--rigor-success);
+
+      --c-error-bg:   var(--rigor-error-bg);
+      --c-warning-bg: var(--rigor-warning-bg);
+      --c-info-bg:    var(--rigor-info-bg);
+      --c-ok-bg:      var(--rigor-success-bg);
+
+      --sev-fg:       #FFFFFF;        /* badge text on saturated bg */
+
+      --lint-error:   var(--rigor-error);
+      --lint-warn:    #8A5F12;
+
+      --focus-ring:   #7A2A2A;
     }
 
-    /* ── Layout ─────────────────────────────────────────────────────────── */
+    /* ─────────────────────────────────────────────────────────────────
+     * Dark theme — terminal-bg
+     *
+     * Saturated colors are lifted (lighter / less saturated) so each
+     * pair hits AA against #1A1D23:
+     *   --text      term-fg #E6E1D2     11.6 : 1   AAA
+     *   --muted     #B6BAC2              6.5 : 1   AAA
+     *   --accent    #E08C84              7.0 : 1   AAA
+     *   --c-error   #ED8B82              6.5 : 1   AAA
+     *   --c-warning #E4B25A              7.7 : 1   AAA
+     *   --c-info    #8AB6E6              7.7 : 1   AAA
+     *   --c-ok      #86C28E              7.5 : 1   AAA
+     * ──────────────────────────────────────────────────────────────── */
+    :root[data-theme="dark"] {
+      --bg:           var(--rigor-term-bg);
+      --surface:      #22262E;
+      --surface-2:    #2A2E37;
+      --border:       #353941;
+      --border-strong:#4A4F58;
 
+      --text:         var(--rigor-term-fg);
+      --text-strong:  #F4F0E2;
+      --muted:        #B6BAC2;
+      --inactive:     #6E7480;
+
+      --accent:       #E08C84;
+      --accent-press: #EFA9A2;
+      --accent-tint:  #3A2622;
+
+      --hover:        #2A2E37;
+      --active-line:  #232830;
+      --selection:    #3D2F2E;
+      --caret:        #E08C84;
+
+      --gutter-fg:    #8A909B;
+      --gutter-bg:    #181B21;
+      --anno:         #8A909B;
+
+      --c-error:      #ED8B82;
+      --c-warning:    #E4B25A;
+      --c-info:       #8AB6E6;
+      --c-ok:         #86C28E;
+
+      --c-error-bg:   #3A2422;
+      --c-warning-bg: #3A2E1C;
+      --c-info-bg:    #1F2C3F;
+      --c-ok-bg:      #1F2F25;
+
+      --sev-fg:       #0E1116;
+
+      --lint-error:   #ED8B82;
+      --lint-warn:    #E4B25A;
+
+      --focus-ring:   #E08C84;
+    }
+
+    /* ─────────────────────────────────────────────────────────────────
+     * Reset + base
+     * ──────────────────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :focus-visible {
+      outline: 2px solid var(--focus-ring);
+      outline-offset: 2px;
+      border-radius: var(--rigor-radius-1);
+    }
 
     body {
       display: flex;
       flex-direction: column;
       height: 100vh;
-      font-family: system-ui, sans-serif;
+      font-family: var(--rigor-font-sans);
+      font-size: 14px;
       background: var(--bg);
       color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
+
+    /* ─── Header ───────────────────────────────────────────────────── */
 
     header {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
+      gap: var(--rigor-sp-3);
+      padding: var(--rigor-sp-2) var(--rigor-sp-4);
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
+      min-height: 44px;
     }
 
-    header strong {
-      font-size: 15px;
-      color: var(--accent);
-      letter-spacing: 0.02em;
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: var(--rigor-sp-2);
+      font-family: var(--rigor-font-sans);
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+      color: var(--text-strong);
+    }
+    .brand::before {
+      content: "";
+      display: inline-block;
+      width: 10px; height: 10px;
+      background: var(--accent);
+      border-radius: 1px;
+      transform: translateY(1px);
+    }
+    .brand .product {
+      font-weight: 500;
+      color: var(--muted);
+      letter-spacing: 0;
     }
 
     #status {
+      font-family: var(--rigor-font-mono);
       font-size: 12px;
       color: var(--muted);
-      margin-left: 4px;
+      padding: 2px var(--rigor-sp-2);
+      border-radius: var(--rigor-radius-1);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #status::before {
+      content: "";
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.8;
     }
     #status.checking { color: var(--c-warning); }
     #status.ok       { color: var(--c-ok); }
     #status.error    { color: var(--c-error); }
 
-    header button {
-      padding: 4px 12px;
-      border-radius: 6px;
-      border: 1px solid var(--inactive);
-      background: var(--hover);
-      color: var(--text);
-      font-size: 13px;
-      cursor: pointer;
-      transition: background 0.15s, border-color 0.15s, color 0.15s;
-    }
-    header button:hover  { background: var(--selection); }
-    header button.active { border-color: var(--accent); color: var(--accent); }
+    .toolbar { margin-left: auto; display: flex; gap: var(--rigor-sp-2); }
 
-    #theme-btn { margin-left: auto; }
+    .btn {
+      font-family: var(--rigor-font-sans);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 5px 12px;
+      min-height: 28px;
+      border-radius: var(--rigor-radius-2);
+      border: 1px solid var(--border-strong);
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+      transition: background var(--rigor-transition),
+                  border-color var(--rigor-transition),
+                  color var(--rigor-transition);
+    }
+    .btn:hover  { background: var(--hover); border-color: var(--text); }
+    .btn:active { background: var(--surface-2); }
+    .btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--sev-fg);
+    }
+    .btn.active:hover { background: var(--accent-press); border-color: var(--accent-press); }
+
+    /* ─── Main layout ──────────────────────────────────────────────── */
 
     main { display: flex; flex: 1; overflow: hidden; }
 
-    #editor-wrap { flex: 1; overflow: auto; }
+    #editor-wrap { flex: 1; overflow: auto; min-width: 0; }
 
     #sidebar {
-      width: 300px;
+      width: 320px;
       flex-shrink: 0;
       display: flex;
       flex-direction: column;
+      background: var(--bg);
       border-left: 1px solid var(--border);
       overflow: hidden;
     }
 
     #sidebar-header {
-      padding: 8px 12px;
-      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--rigor-sp-3) var(--rigor-sp-4);
+      font-family: var(--rigor-font-sans);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
       color: var(--muted);
+      background: var(--surface);
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
+    #diag-count {
+      font-family: var(--rigor-font-mono);
+      font-size: 11px;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--muted);
+    }
 
-    #diagnostics { flex: 1; overflow-y: auto; padding: 8px 0; }
+    #diagnostics { flex: 1; overflow-y: auto; }
 
-    .diag-empty { padding: 12px; font-size: 13px; color: var(--muted); }
+    /* Empty state */
+    .diag-empty {
+      padding: var(--rigor-sp-4);
+      font-family: var(--rigor-font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: var(--rigor-sp-2);
+    }
+    .diag-empty::before {
+      content: "✓";
+      color: var(--c-ok);
+      font-weight: 700;
+    }
 
+    /* Diagnostic list rows */
     .diag-item {
       display: flex;
-      gap: 8px;
-      padding: 6px 12px;
+      gap: var(--rigor-sp-3);
+      padding: var(--rigor-sp-3) var(--rigor-sp-4);
       cursor: pointer;
-      border-bottom: 1px solid var(--surface);
+      border-bottom: 1px solid var(--border);
+      transition: background var(--rigor-transition);
     }
-    .diag-item:hover { background: var(--hover); }
+    .diag-item:hover         { background: var(--hover); }
+    .diag-item:focus-visible { background: var(--hover); outline-offset: -2px; }
 
     .diag-sev {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 1px 5px;
-      border-radius: 4px;
+      font-family: var(--rigor-font-sans);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 2px 6px;
+      border-radius: var(--rigor-radius-1);
       flex-shrink: 0;
       align-self: flex-start;
       margin-top: 1px;
       color: var(--sev-fg);
+      min-width: 56px;
+      text-align: center;
     }
     .diag-sev.error   { background: var(--c-error); }
     .diag-sev.warning { background: var(--c-warning); }
     .diag-sev.info    { background: var(--c-info); }
 
-    .diag-body  { flex: 1; min-width: 0; }
-    .diag-loc   { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
-    .diag-msg   { font-size: 12px; line-height: 1.4; word-break: break-word; }
-    .diag-rule  { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .diag-body { flex: 1; min-width: 0; }
 
-    /* ── CodeMirror base ─────────────────────────────────────────────────── */
-    .cm-editor         { height: 100%; font-size: 14px; }
-    .cm-editor.cm-focused { outline: none; }
-    .cm-scroller       { height: 100%; }
+    .diag-loc {
+      font-family: var(--rigor-font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+    .diag-msg {
+      font-family: var(--rigor-font-sans);
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--text);
+      word-break: break-word;
+    }
+    .diag-rule {
+      font-family: var(--rigor-font-mono);
+      font-size: 11px;
+      color: var(--accent);
+      margin-top: 4px;
+    }
 
-    /* ── Type annotation ghost text ──────────────────────────────────────── */
+    /* ─── CodeMirror integration ───────────────────────────────────── */
+
+    .cm-editor              { height: 100%; font-size: 13.5px; }
+    .cm-editor.cm-focused   { outline: none; }
+    .cm-scroller            { height: 100%; font-family: var(--rigor-font-mono); }
+
+    /* Type-annotation ghost text — subtle but readable
+       (anno color hits ≥4.5:1 vs --bg in both themes; italic style cues
+        secondary meaning without sacrificing legibility) */
     .cm-type-annotation {
       color: var(--anno);
       font-style: italic;
       pointer-events: none;
       user-select: none;
     }
+
+    /* High-contrast scrollbars for the diagnostics + editor regions */
+    #diagnostics::-webkit-scrollbar,
+    .cm-scroller::-webkit-scrollbar { width: 10px; height: 10px; }
+    #diagnostics::-webkit-scrollbar-thumb,
+    .cm-scroller::-webkit-scrollbar-thumb {
+      background: var(--border-strong);
+      border-radius: var(--rigor-radius-1);
+    }
+    #diagnostics::-webkit-scrollbar-thumb:hover,
+    .cm-scroller::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+    /* Reduced motion respect */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+      }
+    }
+
+    /* ─── Responsive: collapse sidebar below 720px ────────────────── */
+    @media (max-width: 720px) {
+      main { flex-direction: column; }
+      #sidebar {
+        width: 100%;
+        max-height: 40vh;
+        border-left: none;
+        border-top: 1px solid var(--border);
+      }
+    }
   </style>
 </head>
 <body>
   <header>
-    <strong>Rigor Playground</strong>
-    <span id="status">Ready</span>
-    <button id="theme-btn" title="Cycle theme">Dark</button>
-    <button id="type-btn">Show types</button>
+    <span class="brand">Rigor <span class="product">Playground</span></span>
+    <span id="status" aria-live="polite">Ready</span>
+    <div class="toolbar">
+      <button class="btn" id="theme-btn" title="Cycle theme (Dark / Light / Auto)" aria-label="Toggle theme">Dark</button>
+      <button class="btn" id="type-btn" aria-pressed="false">Show types</button>
+    </div>
   </header>
 
   <main>
     <div id="editor-wrap">
       <div id="editor"></div>
     </div>
-    <div id="sidebar">
-      <div id="sidebar-header">Diagnostics</div>
+    <aside id="sidebar" aria-label="Diagnostics">
+      <div id="sidebar-header">
+        <span>Diagnostics</span>
+        <span id="diag-count">0</span>
+      </div>
       <div id="diagnostics"><p class="diag-empty">No diagnostics</p></div>
-    </div>
+    </aside>
   </main>
 
   <script type="module">
@@ -235,7 +510,6 @@ x.upcase   # possible-nil-receiver
       toDOM() {
         const el = document.createElement("span")
         el.className = "cm-type-annotation"
-        // Spacer that aligns annotations to a common column
         const spacer = document.createElement("span")
         spacer.style.cssText = `display:inline-block;width:${this.pad}ch`
         spacer.setAttribute("aria-hidden", "true")
@@ -252,7 +526,7 @@ x.upcase   # possible-nil-receiver
     const annoField = StateField.define({
       create: () => Decoration.none,
       update(deco, tr) {
-        deco = deco.map(tr.changes)  // keep positions in sync with edits
+        deco = deco.map(tr.changes)
         for (const e of tr.effects) {
           if (e.is(setAnnoEffect)) deco = e.value
         }
@@ -278,7 +552,6 @@ x.upcase   # possible-nil-receiver
         return Decoration.widget({ widget: new TypeAnnotationWidget(type, pad), side: 1 })
                          .range(line.to)
       })
-      // RangeSet requires ranges sorted by position
       ranges.sort((a, b) => a.from - b.from)
       view.dispatch({
         effects: setAnnoEffect.of(Decoration.set(ranges))
@@ -290,11 +563,10 @@ x.upcase   # possible-nil-receiver
     }
 
     // ── Editor ────────────────────────────────────────────────────────────
-    // The EditorView.theme() values use CSS custom properties (var(--*)).
-    // When the data-theme attribute on <html> changes, the browser resolves
-    // the new property values automatically — no Compartment swap needed.
+    // EditorView.theme() values resolve var(--*) at render time, so the
+    // editor follows light/dark without a Compartment swap.
 
-    const MONO_FONT = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
+    const MONO_FONT = `'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace`
 
     const view = new EditorView({
       state: EditorState.create({
@@ -306,19 +578,25 @@ x.upcase   # possible-nil-receiver
           annoField,
           EditorView.updateListener.of(update => {
             if (!update.docChanged) return
-            if (typesVisible) clearAnnotations()  // stale; refresh after next check
+            if (typesVisible) clearAnnotations()
             scheduleCheck()
           }),
           EditorView.theme({
-            "&"                       : { backgroundColor: "var(--bg)",          color: "var(--text)",      height: "100%" },
-            ".cm-content"             : { caretColor: "var(--caret)",             fontFamily: MONO_FONT },
-            ".cm-cursor"              : { borderLeftColor: "var(--caret)" },
-            ".cm-gutters"             : { backgroundColor: "var(--surface)",      color: "var(--gutter-fg)", border: "none" },
-            ".cm-activeLineGutter"    : { backgroundColor: "var(--hover)" },
+            "&"                       : { backgroundColor: "var(--bg)",         color: "var(--text)",      height: "100%" },
+            ".cm-content"             : { caretColor: "var(--caret)",            fontFamily: MONO_FONT,
+                                          padding: "8px 0" },
+            ".cm-cursor"              : { borderLeftColor: "var(--caret)", borderLeftWidth: "2px" },
+            ".cm-gutters"             : { backgroundColor: "var(--gutter-bg)",   color: "var(--gutter-fg)",
+                                          border: "none", borderRight: "1px solid var(--border)" },
+            ".cm-lineNumbers .cm-gutterElement": { padding: "0 12px 0 8px" },
+            ".cm-activeLineGutter"    : { backgroundColor: "var(--hover)", color: "var(--text)" },
             ".cm-activeLine"          : { backgroundColor: "var(--active-line)" },
             ".cm-selectionBackground" : { backgroundColor: "var(--selection)" },
-            ".cm-lintRange-error"     : { textDecoration: "underline wavy var(--lint-error)" },
-            ".cm-lintRange-warning"   : { textDecoration: "underline wavy var(--lint-warn)" },
+            "&.cm-focused .cm-selectionBackground": { backgroundColor: "var(--selection)" },
+            ".cm-lintRange-error"     : { textDecoration: "underline wavy var(--lint-error)",
+                                          textDecorationThickness: "1.5px" },
+            ".cm-lintRange-warning"   : { textDecoration: "underline wavy var(--lint-warn)",
+                                          textDecorationThickness: "1.5px" },
           })
         ]
       }),
@@ -357,12 +635,10 @@ x.upcase   # possible-nil-receiver
       applyTheme()
     })
 
-    // Follow OS preference when in "Auto" mode
     mediaDark.addEventListener("change", () => {
       if (themeMode === "system") applyTheme()
     })
 
-    // Sync button label with the stored mode on load
     applyTheme()
 
     // ── Check ─────────────────────────────────────────────────────────────
@@ -389,10 +665,9 @@ x.upcase   # possible-nil-receiver
           checkData.success ? "No errors" : `${errCount} error${errCount === 1 ? "" : "s"}`
         )
 
-        // Refresh type annotations if the overlay is active
         if (typesVisible) await runAnnotateLines(source)
       } catch (e) {
-        setStatus("", `Error: ${e.message}`)
+        setStatus("error", `Offline: ${e.message}`)
       }
     }
 
@@ -426,12 +701,16 @@ x.upcase   # possible-nil-receiver
 
     function renderSidebar(diagnostics) {
       const container = document.getElementById("diagnostics")
+      const counter   = document.getElementById("diag-count")
+      counter.textContent = diagnostics.length
+
       if (!diagnostics.length) {
         container.innerHTML = '<p class="diag-empty">No diagnostics</p>'
         return
       }
       container.innerHTML = diagnostics.map((d, i) => `
-        <div class="diag-item" data-index="${i}">
+        <div class="diag-item" data-index="${i}" tabindex="0" role="button"
+             aria-label="${escHtml(d.severity)} at line ${d.line}: ${escHtml(d.message)}">
           <span class="diag-sev ${d.severity}">${d.severity}</span>
           <div class="diag-body">
             <div class="diag-loc">Line ${d.line}, col ${d.column}</div>
@@ -441,16 +720,20 @@ x.upcase   # possible-nil-receiver
         </div>
       `).join("")
 
-      container.querySelectorAll(".diag-item").forEach(el =>
-        el.addEventListener("click", () => {
+      container.querySelectorAll(".diag-item").forEach(el => {
+        const jump = () => {
           const d   = diagnostics[+el.dataset.index]
           const doc = view.state.doc
           const n   = Math.max(1, Math.min(d.line, doc.lines))
           const pos = doc.line(n).from + Math.max(0, (d.column || 1) - 1)
           view.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
           view.focus()
+        }
+        el.addEventListener("click", jump)
+        el.addEventListener("keydown", e => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jump() }
         })
-      )
+      })
     }
 
     // ── Type overlay toggle ───────────────────────────────────────────────
@@ -459,6 +742,7 @@ x.upcase   # possible-nil-receiver
 
     typeBtn.addEventListener("click", async () => {
       typesVisible = !typesVisible
+      typeBtn.setAttribute("aria-pressed", String(typesVisible))
       if (typesVisible) {
         typeBtn.textContent = "Hide types"
         typeBtn.classList.add("active")

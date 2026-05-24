@@ -135,6 +135,19 @@ Items that have surfaced across v0.1.x work and that the next implementer benefi
 ### Sig-gen (ADR-14)
 - **`update_existing` does not yet collapse sibling parent / child class blocks.** Gap (c)'s tree-builder fix lives in `Writer#render_new_file` (the create-new path). When updating an existing target file, `merge_class` resolves each candidate's `class_name` independently — flat-sibling layouts stay flat. Re-flowing an existing file into the nested layout would require parsing the existing decl tree and rewriting it, which is out of scope for a follow-up fix. Users who want the canonical nested layout regenerate from scratch (delete the target sig file and rerun).
 
+### Browser playground (ADR-29)
+
+A browser-based playground — CodeMirror 6 editor with real-time
+diagnostics and annotate-style type comments — backed by a thin
+Rack/Puma API on Fly.io and a static Cloudflare Pages frontend.
+Five implementation slices: backend `/check` endpoint → frontend
+editor + lint markers → `/annotate` toggle view → `/type-of` hover
+→ (demand-driven) ruby.wasm migration once three gating conditions
+hold (official Ruby 4.0 WASM build + `prism`/`rbs` WASM packages
++ Rigor test suite passing under WASM). No slice is scheduled;
+the playground is a parallel track that does not block the 0.2.x
+evaluation line. See [ADR-29](adr/29-browser-playground.md).
+
 ### Open research questions queued in ADRs
 - **ADR-15 § OQ1** — per-Ractor `Cache::Store`-shared facade. Today each worker builds its own RBS env from cache; OQ1 explores sharing the in-memory env across workers via a shareable facade. Would lower the pool wall-clock crossover with sequential (currently around 1.3–1.8 K files).
 - **ADR-13 § "Open questions"** — extending the shape-projection surface beyond the five core functions (`pick_of` / `omit_of` / `partial_of` / `required_of` / `readonly_of`). Authoritative when adding new mapped-type vocabulary.

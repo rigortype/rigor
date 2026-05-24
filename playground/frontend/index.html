@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rigor Playground</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      font-family: system-ui, sans-serif;
+      background: #1e1e2e;
+      color: #cdd6f4;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: #181825;
+      border-bottom: 1px solid #313244;
+      flex-shrink: 0;
+    }
+
+    header strong {
+      font-size: 15px;
+      color: #cba6f7;
+      letter-spacing: 0.02em;
+    }
+
+    #status {
+      font-size: 12px;
+      color: #6c7086;
+      margin-left: 4px;
+    }
+    #status.checking { color: #fab387; }
+    #status.ok       { color: #a6e3a1; }
+    #status.error    { color: #f38ba8; }
+
+    header button {
+      margin-left: auto;
+      padding: 4px 12px;
+      border-radius: 6px;
+      border: 1px solid #45475a;
+      background: #313244;
+      color: #cdd6f4;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    header button:hover  { background: #45475a; }
+    header button.active { border-color: #cba6f7; color: #cba6f7; }
+
+    main { display: flex; flex: 1; overflow: hidden; }
+
+    #editor-wrap { flex: 1; overflow: auto; }
+
+    #sidebar {
+      width: 300px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid #313244;
+      overflow: hidden;
+    }
+
+    #sidebar-header {
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #6c7086;
+      border-bottom: 1px solid #313244;
+      flex-shrink: 0;
+    }
+
+    #diagnostics { flex: 1; overflow-y: auto; padding: 8px 0; }
+
+    .diag-empty { padding: 12px; font-size: 13px; color: #6c7086; }
+
+    .diag-item {
+      display: flex;
+      gap: 8px;
+      padding: 6px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #181825;
+    }
+    .diag-item:hover { background: #313244; }
+
+    .diag-sev {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      align-self: flex-start;
+      margin-top: 1px;
+    }
+    .diag-sev.error   { background: #f38ba8; color: #1e1e2e; }
+    .diag-sev.warning { background: #fab387; color: #1e1e2e; }
+    .diag-sev.info    { background: #89dceb; color: #1e1e2e; }
+
+    .diag-body  { flex: 1; min-width: 0; }
+    .diag-loc   { font-size: 11px; color: #6c7086; margin-bottom: 2px; }
+    .diag-msg   { font-size: 12px; line-height: 1.4; word-break: break-word; }
+    .diag-rule  { font-size: 11px; color: #6c7086; margin-top: 2px; }
+
+    /* CodeMirror base */
+    .cm-editor         { height: 100%; font-size: 14px; }
+    .cm-editor.cm-focused { outline: none; }
+    .cm-scroller       { height: 100%; }
+
+    /* Type annotation ghost text */
+    .cm-type-annotation {
+      color: #45475a;
+      font-style: italic;
+      pointer-events: none;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>Rigor Playground</strong>
+    <span id="status">Ready</span>
+    <button id="type-btn">Show types</button>
+  </header>
+
+  <main>
+    <div id="editor-wrap">
+      <div id="editor"></div>
+    </div>
+    <div id="sidebar">
+      <div id="sidebar-header">Diagnostics</div>
+      <div id="diagnostics"><p class="diag-empty">No diagnostics</p></div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { basicSetup, EditorView, EditorState } from "https://esm.sh/@codemirror/basic-setup@0.20"
+    import { StateField, StateEffect }             from "https://esm.sh/@codemirror/state@0.20"
+    import { Decoration, WidgetType }              from "https://esm.sh/@codemirror/view@0.20"
+    import { StreamLanguage }                      from "https://esm.sh/@codemirror/language@0.20"
+    import { ruby }                                from "https://esm.sh/@codemirror/legacy-modes@0.20/mode/ruby"
+    import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
+
+    const API = ""
+
+    const SAMPLE = `# Rigor Playground — edit this code and see diagnostics in real time
+
+def greet(name)
+  "Hello, " + name
+end
+
+result = greet("World")
+result.upcase
+
+# Try introducing an error:
+x = nil
+x.upcase   # possible-nil-receiver
+`
+
+    // ── Type annotation widget ─────────────────────────────────────────────
+
+    class TypeAnnotationWidget extends WidgetType {
+      constructor(type, pad) { super(); this.type = type; this.pad = pad }
+      eq(other)              { return other.type === this.type && other.pad === this.pad }
+      ignoreEvent()          { return true }
+      toDOM() {
+        const el = document.createElement("span")
+        el.className = "cm-type-annotation"
+        // Spacer that aligns annotations to a common column
+        const spacer = document.createElement("span")
+        spacer.style.cssText = `display:inline-block;width:${this.pad}ch`
+        spacer.setAttribute("aria-hidden", "true")
+        el.appendChild(spacer)
+        el.appendChild(document.createTextNode(this.type))
+        return el
+      }
+    }
+
+    // ── Decoration state field ─────────────────────────────────────────────
+
+    const setAnnoEffect = StateEffect.define()
+
+    const annoField = StateField.define({
+      create: () => Decoration.none,
+      update(deco, tr) {
+        deco = deco.map(tr.changes)  // keep positions in sync with edits
+        for (const e of tr.effects) {
+          if (e.is(setAnnoEffect)) deco = e.value
+        }
+        return deco
+      },
+      provide: f => EditorView.decorations.from(f)
+    })
+
+    function applyAnnotations(annotations) {
+      const BASE_GAP = 3
+      const doc     = view.state.doc
+      const entries = Object.entries(annotations)
+        .map(([lineStr, type]) => ({ n: parseInt(lineStr, 10), type }))
+        .filter(({ n }) => n >= 1 && n <= doc.lines)
+      if (!entries.length) {
+        view.dispatch({ effects: setAnnoEffect.of(Decoration.none) })
+        return
+      }
+      const maxLen = Math.max(...entries.map(({ n }) => doc.line(n).length))
+      const ranges = entries.map(({ n, type }) => {
+        const line = doc.line(n)
+        const pad  = maxLen - line.length + BASE_GAP
+        return Decoration.widget({ widget: new TypeAnnotationWidget(type, pad), side: 1 })
+                         .range(line.to)
+      })
+      // RangeSet requires ranges sorted by position
+      ranges.sort((a, b) => a.from - b.from)
+      view.dispatch({
+        effects: setAnnoEffect.of(Decoration.set(ranges))
+      })
+    }
+
+    function clearAnnotations() {
+      view.dispatch({ effects: setAnnoEffect.of(Decoration.none) })
+    }
+
+    // ── Editor ────────────────────────────────────────────────────────────
+
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: SAMPLE,
+        extensions: [
+          basicSetup,
+          StreamLanguage.define(ruby),
+          lintGutter(),
+          annoField,
+          EditorView.updateListener.of(update => {
+            if (!update.docChanged) return
+            if (typesVisible) clearAnnotations()  // stale; refresh after next check
+            scheduleCheck()
+          }),
+          EditorView.theme({
+            "&"                         : { backgroundColor: "#1e1e2e", color: "#cdd6f4", height: "100%" },
+            ".cm-content"               : { caretColor: "#cba6f7", fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace' },
+            ".cm-cursor"                : { borderLeftColor: "#cba6f7" },
+            ".cm-gutters"               : { backgroundColor: "#181825", color: "#585b70", border: "none" },
+            ".cm-activeLineGutter"      : { backgroundColor: "#313244" },
+            ".cm-activeLine"            : { backgroundColor: "#2a2a3d" },
+            ".cm-selectionBackground"   : { backgroundColor: "#45475a" },
+            ".cm-lintRange-error"       : { textDecoration: "underline wavy #f38ba8" },
+            ".cm-lintRange-warning"     : { textDecoration: "underline wavy #fab387" },
+          })
+        ]
+      }),
+      parent: document.getElementById("editor")
+    })
+
+    // ── State ─────────────────────────────────────────────────────────────
+
+    let debounceTimer    = null
+    let typesVisible     = false
+    let lastDiagnostics  = []
+
+    // ── Check ─────────────────────────────────────────────────────────────
+
+    function scheduleCheck() {
+      clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(runCheck, 600)
+    }
+
+    async function runCheck() {
+      const source = view.state.doc.toString()
+      setStatus("checking", "Checking…")
+      try {
+        const checkRes  = await post("/check", { source })
+        if (!checkRes.ok) throw new Error(`HTTP ${checkRes.status}`)
+        const checkData = await checkRes.json()
+
+        lastDiagnostics = checkData.diagnostics || []
+        applyLintMarkers(lastDiagnostics)
+        renderSidebar(lastDiagnostics)
+        const errCount = checkData.error_count ?? 0
+        setStatus(
+          checkData.success ? "ok" : "error",
+          checkData.success ? "No errors" : `${errCount} error${errCount === 1 ? "" : "s"}`
+        )
+
+        // Refresh type annotations if the overlay is active
+        if (typesVisible) await runAnnotateLines(source)
+      } catch (e) {
+        setStatus("", `Error: ${e.message}`)
+      }
+    }
+
+    async function runAnnotateLines(source) {
+      try {
+        const res  = await post("/annotate-lines", { source })
+        if (!res.ok) return
+        const data = await res.json()
+        applyAnnotations(data.annotations || {})
+      } catch (_) { /* best-effort */ }
+    }
+
+    function applyLintMarkers(diagnostics) {
+      const doc    = view.state.doc
+      const cmDiags = diagnostics.map(d => {
+        const lineNum = Math.max(1, Math.min(d.line, doc.lines))
+        const line    = doc.line(lineNum)
+        const from    = line.from + Math.max(0, (d.column || 1) - 1)
+        const to      = Math.max(from + 1, Math.min(line.to, from + 10))
+        return {
+          from,
+          to,
+          severity: d.severity === "error" ? "error" : d.severity === "warning" ? "warning" : "info",
+          message:  d.message + (d.rule ? `  [${d.rule}]` : "")
+        }
+      })
+      view.dispatch(setDiagnostics(view.state, cmDiags))
+    }
+
+    // ── Sidebar ───────────────────────────────────────────────────────────
+
+    function renderSidebar(diagnostics) {
+      const container = document.getElementById("diagnostics")
+      if (!diagnostics.length) {
+        container.innerHTML = '<p class="diag-empty">No diagnostics</p>'
+        return
+      }
+      container.innerHTML = diagnostics.map((d, i) => `
+        <div class="diag-item" data-index="${i}">
+          <span class="diag-sev ${d.severity}">${d.severity}</span>
+          <div class="diag-body">
+            <div class="diag-loc">Line ${d.line}, col ${d.column}</div>
+            <div class="diag-msg">${escHtml(d.message)}</div>
+            ${d.rule ? `<div class="diag-rule">${escHtml(d.rule)}</div>` : ""}
+          </div>
+        </div>
+      `).join("")
+
+      container.querySelectorAll(".diag-item").forEach(el =>
+        el.addEventListener("click", () => {
+          const d    = diagnostics[+el.dataset.index]
+          const doc  = view.state.doc
+          const n    = Math.max(1, Math.min(d.line, doc.lines))
+          const pos  = doc.line(n).from + Math.max(0, (d.column || 1) - 1)
+          view.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+          view.focus()
+        })
+      )
+    }
+
+    // ── Type overlay toggle ───────────────────────────────────────────────
+
+    const typeBtn = document.getElementById("type-btn")
+
+    typeBtn.addEventListener("click", async () => {
+      typesVisible = !typesVisible
+      if (typesVisible) {
+        typeBtn.textContent = "Hide types"
+        typeBtn.classList.add("active")
+        await runAnnotateLines(view.state.doc.toString())
+      } else {
+        typeBtn.textContent = "Show types"
+        typeBtn.classList.remove("active")
+        clearAnnotations()
+      }
+    })
+
+    // ── Utilities ─────────────────────────────────────────────────────────
+
+    function post(path, body) {
+      return fetch(`${API}${path}`, {
+        method:  "POST",
+        headers: { "content-type": "application/json" },
+        body:    JSON.stringify(body)
+      })
+    }
+
+    function setStatus(cls, text) {
+      const el = document.getElementById("status")
+      el.className   = cls
+      el.textContent = text
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    }
+
+    // ── Boot ──────────────────────────────────────────────────────────────
+    scheduleCheck()
+  </script>
+</body>
+</html>

@@ -117,8 +117,62 @@ bundle exec rspec spec/rigor/type/refined_spec.rb  # one file
 - Open a pull request against `master`. CI must be green
   before review.
 
+## Plugin contributions
+
+Plugins follow a separate contribution policy from core changes:
+**Rigor does not accept external pull requests into `plugins/`
+or `examples/`**. The supply-chain rationale and the welcoming
+alternative routes are recorded in
+[`docs/adr/31-plugin-contribution-policy.md`](docs/adr/31-plugin-contribution-policy.md);
+the short summary:
+
+- **Third-party plugin (default).** Author a `rigor-<gem>` gem
+  in **your own repo**, depending on `gem "rigortype"`. This is
+  a Larger Work under [MPL §3.3](LICENSE) — your own plugin
+  files can be MIT, BSD, Apache 2.0, MPL-2.0, or any other
+  licence permitted by the wrapped gem; the rigor code you
+  redistribute stays MPL. Fully supported, no upstream
+  involvement required. See
+  [ADR-31 WD4](docs/adr/31-plugin-contribution-policy.md)
+  and the
+  [`rigor-plugin-author`](.claude/skills/rigor-plugin-author/SKILL.md)
+  SKILL (Phase 0.5 routes non-maintainers to this path).
+- **Propose for official bundling via issue.** When a third-party
+  plugin reaches significant community adoption, file a GitHub
+  issue with the wrapped gem's identity, evidence of adoption,
+  and a pointer to your working third-party plugin as reference
+  material. If accepted, the Rigor team re-implements the plugin
+  in `plugins/` from scratch and credits you via
+  [`Co-authored-by:`](https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/creating-a-commit-with-multiple-authors)
+  on the implementation commit(s). See
+  [ADR-31 WD2 / WD3](docs/adr/31-plugin-contribution-policy.md).
+- **FFI plugins specifically.** Start with the
+  [`rigor-ffi-plugin-author`](.claude/skills/rigor-ffi-plugin-author/SKILL.md)
+  SKILL's coverage assessment — for the typical "literal
+  `attach_function` + thin Ruby wrapper" gem, the bundled core
+  `rigor-ffi` plugin suffices and no per-gem plugin is needed at
+  all. The SKILL is designed to talk you out of authoring a
+  plugin when core covers your case. See
+  [ADR-30 WD10](docs/adr/30-rigor-ffi-plugin-shape.md).
+
+Subtree merge of a proven third-party plugin into the monorepo
+is reserved as a rare optional path subject to four conjunctive
+conditions ([ADR-31 WD5](docs/adr/31-plugin-contribution-policy.md));
+it is not a path third-party authors should plan around.
+
 ## License
 
-By contributing to Rigor you agree that your contribution is
-licensed under the [Mozilla Public License Version 2.0](LICENSE),
-the same license the project ships under.
+Rigor is licensed under the
+[Mozilla Public License Version 2.0](LICENSE).
+
+- **Core code contributions** (commits the Rigor team authors
+  and merges into this repository) are licensed under the MPL-2.0
+  the same as the rest of the project; the author becomes an MPL
+  §1.1 Contributor and makes the §2.5 representation that the
+  Contribution is their original creation or that they have
+  sufficient rights to grant the conveyed licence.
+- **Third-party plugins** (separate `rigor-<gem>` gems in their
+  own repos per the previous section) are Larger Work under
+  §3.3; their authors are free to license their own files under
+  the licence of their choice, subject to compliance with the
+  MPL for the rigor code they redistribute.

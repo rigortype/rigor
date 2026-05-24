@@ -38,6 +38,38 @@ FFI plugins are more or less risky than Rails plugins or dry-rb
 adapters. The policy therefore lifts out of ADR-30 and becomes
 project-wide.
 
+### Licensing framework
+
+Rigor is licensed under the [Mozilla Public License Version 2.0](../../LICENSE)
+(MPL-2.0). The MPL's vocabulary ([§1](../../LICENSE), Definitions)
+shapes how this ADR talks about authorship, code provenance, and
+the boundary between the bundled `rigortype` gem and third-party
+extensions:
+
+- **Covered Software** (§1.4) is the `rigortype` gem itself
+  including the bundled `plugins/` and `examples/` trees plus
+  any **Modifications** (§1.10) thereto.
+- **Contributor** (§1.1) is anyone who creates, contributes to,
+  or owns Covered Software. Each Contributor grants the rights
+  in §2.1 and makes the §2.5 representation (their Contributions
+  are their original creation, or they have sufficient rights to
+  grant the conveyed license).
+- **Contribution** (§1.3) is the Covered Software of a particular
+  Contributor.
+- **Larger Work** (§1.7) is a work that combines Covered Software
+  with other material **in a separate file or files** — the
+  shape a third-party `rigor-<gem>` gem (in the author's own
+  repo, depending on `gem "rigortype"`) takes. §3.3 permits
+  distributing a Larger Work under terms of the author's choice
+  for the non-Covered-Software portion.
+
+The policy below reads naturally against these terms: WD1 limits
+who may make a Contribution, WD2 distinguishes informational
+authorship credit from Contributor status, WD4 frames third-party
+plugins as Larger Work under §3.3, and WD5 notes that subtree
+merge brings imported files **into** Covered Software as
+Modifications under §1.10.
+
 ## Decision
 
 Adopt a single project-wide plugin contribution policy with five
@@ -48,12 +80,20 @@ third-party ecosystem, (e) the reserved subtree-merge option.
 
 ## Working decisions
 
-### WD1 — No external pull requests into `plugins/` or `examples/`
+### WD1 — No external Contributions into Covered Software via pull request
+
+In MPL terms: **the only Contributors to Covered Software are
+the Rigor team**. External pull requests against `plugins/`,
+`examples/`, or any other path inside the bundled `rigortype`
+gem are not accepted, so no party outside the Rigor team becomes
+a Contributor and the MPL §2.5 representation surface stays
+bounded to people the team can vet directly.
 
 The supply-chain rationale governs **uniformly**:
 
-- Bundled plugins ship inside the `rigortype` gem, which runs in
-  every analysed user's CI / dev environment.
+- Bundled plugins ship inside the `rigortype` gem (Covered
+  Software), which runs in every analysed user's CI / dev
+  environment.
 - A malicious recognizer can execute arbitrary Ruby in the rigor
   process during analysis — including reading the analysed project's
   source, exfiltrating environment variables, writing files, or
@@ -68,9 +108,10 @@ Scope:
 - Applies uniformly to **code, RBS files, fixtures, and config**.
   Drawing a "pure RBS contributions are safe" carve-out adds
   judgement cost without changing the policy meaningfully:
-  RBS still flows attributes / annotations to the engine, and
-  maintainer time spent classifying "is this just data?" exceeds
-  the savings from accepting low-risk drops.
+  RBS still flows attributes / annotations to the engine, MPL §1.10
+  treats any new file as a Modification regardless of language,
+  and maintainer time spent classifying "is this just data?"
+  exceeds the savings from accepting low-risk drops.
 - Applies to **new plugins**. Maintenance of existing bundled
   plugins (bug fixes, refactors, dependency bumps) is by Rigor
   team only — no external PR path here either.
@@ -116,9 +157,20 @@ Add rigor-foo plugin
 Co-authored-by: Jane Doe <jane@example.com>
 ```
 
-This preserves attribution (GitHub renders co-authors on the
-commit and counts the contribution toward the proposer's profile)
-without granting write access through the PR-merge code path.
+`Co-authored-by:` is **informational attribution**, not a
+transfer of MPL Contributor status. The MPL Contribution (in the
+§1.3 sense) is made by the Rigor team member who authors the
+re-implementation; that team member also makes the §2.5
+representation that the code is their original creation. The
+proposer's sample implementation is referenced material the team
+draws inspiration from rather than text the team imports; if a
+proposer ships a sample, by submitting it they implicitly
+represent it is their original creation or that they have
+sufficient rights to share it — equivalent to the §2.5
+representation but extended courtesy. The team should rewrite
+the sample's code structure rather than transcribe it verbatim,
+both for license cleanliness and because re-authoring is the
+whole point of WD1.
 
 **Rejected alternative.** "Pre-review PR then squash-merge under
 maintainer's signature": still ingests external commits into
@@ -149,11 +201,23 @@ A decline can always be revisited if the gem's footprint grows.
 decision but invites gaming, which is precisely the kind of
 adversarial pressure a supply-chain policy must resist.
 
-### WD4 — Third-party plugins are explicitly welcomed
+### WD4 — Third-party plugins are explicitly welcomed (Larger Work under MPL §3.3)
 
 Authoring a `rigor-<gem>` gem in **your own repo**, depending on
 `gem "rigortype"`, is a fully supported path for any plugin the
-Rigor team doesn't (yet) bundle. This includes:
+Rigor team doesn't (yet) bundle. A third-party plugin gem is a
+**Larger Work** in the MPL §1.7 sense — it combines Covered
+Software (rigor's code, loaded via `require "rigor"`) with the
+plugin author's own files (the plugin's `lib/`, `sig/`, gemspec,
+tests). Under MPL §3.3, the plugin author distributes their
+Larger Work under license terms of their choice for the
+non-Covered-Software portion, as long as they comply with the
+MPL for the Covered Software they redistribute. Concretely: the
+plugin author's own files can be MIT, BSD, Apache 2.0, MPL, or
+any other license they prefer; rigor's code stays under MPL when
+their downstream users install both.
+
+This includes:
 
 - Private / internal company gem wrappers (no upstream
   intention).
@@ -174,9 +238,12 @@ Operational notes for third-party plugin authors:
   plugin in your own repo. Orphan-plugin risk (the wrapped gem
   evolves, the plugin doesn't) is **the plugin author's
   responsibility**, not Rigor's.
-- **License:** free choice — MPL-2.0 (matching Rigor), MIT, BSD,
-  Apache 2.0, or others. The only constraint is what your wrapped
-  gem's license permits.
+- **License:** free choice per §3.3 — MPL-2.0 (matching Rigor),
+  MIT, BSD, Apache 2.0, or any other licence permitted by your
+  wrapped gem's licence. If you ever expect the plugin to be a
+  candidate for WD5 subtree merge into the monorepo, licensing
+  the plugin as MPL-2.0 from day one keeps that option open
+  without a later relicensing pass.
 - **Discovery:** the Rigor team will (separately, not in this ADR)
   set up an informational catalog (Wiki page or pinned forum
   thread) where third-party plugin authors can list their work.
@@ -194,7 +261,10 @@ maintenance to Rigor team AND the code style matches Rigor's
 conventions, `git subtree merge` is available as an option to
 absorb the plugin into the monorepo. Subtree merge preserves
 git history including the original author's commits — the
-strongest form of contributor recognition.
+strongest form of contributor recognition under the §1.1
+Contributor definition (every imported commit's author becomes
+a Contributor to Covered Software, with their §2.5 representation
+attached at import time).
 
 All four conditions must hold:
 
@@ -206,7 +276,16 @@ All four conditions must hold:
    bundled-plugins shape (`Plugin::Base`, `signature_paths:`,
    spec layout, demo fixture, CHANGELOG discipline).
 4. **License compatibility** — the plugin is MPL-2.0 or the
-   author agrees to relicense to MPL-2.0 (the project license).
+   author agrees to relicense it MPL-2.0 before the merge. This
+   condition is load-bearing: once subtree-merged, the imported
+   files **become Modifications** to Covered Software (§1.10) and
+   so must ship under the MPL alongside the rest of `rigortype`.
+   Plugins under MIT / BSD / Apache 2.0 / ISC are relicensable
+   in the standard direction (the original author re-publishes
+   their files under MPL-2.0 prior to the merge); plugins under
+   GPL-family Secondary Licenses (§1.12) are eligible because
+   the MPL is explicitly compatible with them at the file-
+   combination level, but the author must consent to the change.
 
 Subtree merge is **not a path third-party authors should plan
 around**. The default expectation is "your plugin stays in your
@@ -216,9 +295,9 @@ strictly redundant with a well-shaped existing implementation.
 
 **Rejected alternative.** "Subtree merge as the default
 promotion mechanism": the WD1 supply-chain guarantee would be
-diluted (third-party commits enter monorepo history). WD2's
-re-implementation default is the right baseline; subtree merge
-is the exception.
+diluted (third-party commits enter monorepo history and the
+Contributor set grows unbounded). WD2's re-implementation default
+is the right baseline; subtree merge is the exception.
 
 ## Consequences
 

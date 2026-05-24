@@ -430,6 +430,213 @@ roles for row polymorphism, `interface` for existentials) or
 defers the feature behind an ADR rather than degrade to a noisy
 approximation.
 
+## Hindley–Milner, principal types, and Rigor's inference architecture
+
+The previous two sections discussed **soundness** (does the
+system reject only programs that really would crash?) and
+**decidability** (does the system always give an answer in finite
+time?). Type-theory textbooks bundle these with a third property
+that the appendix has not named so far:
+
+- **Principal type property** — every well-typed expression has a
+  *most general* type, of which every other valid typing is a
+  substitution-instance. In a system with the principal type
+  property, "the type of `e`" is a canonical, unambiguous answer
+  — not a guess among many.
+
+These three properties interact in a way worth understanding,
+because **Hindley–Milner (HM)** — the type system underlying ML,
+OCaml, and Haskell — is the canonical example of having all three
+at once.
+
+### What HM achieves and what it gives up
+
+The classical Damas–Milner theorem (1982) is roughly:
+
+> Every term typable in HM has a unique principal type, computable
+> by unification (Algorithm W). The system is sound, decidable,
+> and inference is "free" — the user writes no type annotations.
+
+The cost is structural. HM accepts only a language without:
+
+- rank-N polymorphism beyond let-bound generalisation;
+- subtyping;
+- intersection types;
+- unrestricted recursive types at the user surface;
+- polymorphic recursion.
+
+Each excluded feature is exactly the kind that breaks one of the
+three properties when added back:
+
+| Added feature | Property that breaks first |
+| --- | --- |
+| Rank-3+ polymorphism | Decidability (Wells, 1999) |
+| Polymorphic recursion | Decidability (Henglein, 1993) |
+| Subtyping in general | Principal types (a value can satisfy several incomparable interfaces; "most general" stops being unique) |
+| Subtyping + intersection (full) | Decidability |
+| Unrestricted recursive types | The "principle of least surprise" — terms like `λx. x x` become well-typed |
+
+### Why Rigor cannot be HM
+
+Rigor's surface **already contains the features HM excludes**.
+Subtyping is the foundation of the lattice (`<:`); intersection
+(`&`) is in the algebra; refinements add predicate subtyping;
+generics + occurrence typing + capability roles cover the
+polymorphism uses Ruby programmers actually have. An HM-style
+"infer a principal type for every expression by global
+unification" architecture is therefore not available to Rigor in
+principle — not a missing feature, but a structural consequence of
+the type language Ruby authors expect.
+
+Rigor's inference is instead **local and walker-driven**:
+
+- The walker descends the AST once.
+- At each expression site it consults RBS signatures, narrowing
+  facts, mutation effects, and plugin contributions.
+- It returns *the* type of the expression *at that point in the
+  control flow* — the most specific type the local walk can
+  justify, not a canonically most-general one.
+
+The same expression appearing at two program points may yield two
+different types (narrowing, flow merges, mutation, plugin
+contributions can all enter). This is closer in spirit to
+TypeScript's contextual / flow-sensitive typing than to HM's
+unification, and it matches how Ruby authors actually reason about
+their code — `arr` after `arr.compact!` is not "the same type" as
+`arr` before it.
+
+### Property ledger
+
+The three properties laid against Rigor and HM:
+
+| Property | Hindley–Milner | Rigor |
+| --- | --- | --- |
+| **Soundness** | Yes | **No, by design** — `maybe` cases stay silent (§ "Soundness, completeness, and the no-false-positives stance"). |
+| **Decidability** | Yes (DEXPTIME worst-case, near-linear in practice) | Decidable per local walk; whatever the walker cannot decide, it returns `maybe` (§ "Decidability of inference"). |
+| **Principal type property** | Yes | **No** — subtyping + intersection break it. Rigor reports a *per-occurrence* type, not a canonical most-general one. |
+
+The headline observation: HM trades expressiveness for the
+trinity (soundness + decidability + principal types). Rigor
+trades the trinity for expressiveness, and recovers what it can
+through the trinary certainty and the no-false-positives stance.
+
+### A note on bidirectional / local type inference
+
+Once subtyping enters the picture, the textbook fallback for
+HM-style global unification is **bidirectional** or **local type
+inference** (Pierce & Turner, 2000): split typing rules into a
+*synthesis* mode (compute the type of `e` from `e`) and a
+*checking* mode (verify that `e` has an expected type). Steep is
+in this lineage. Rigor's walker is bidirectional in this informal
+sense — call sites synthesise; RBS signatures check parameters
+against the synthesised argument types — but Rigor does not
+formalise the bidirectional rules because the gradual setting and
+the trinary certainty make the "could not decide" case explicit
+rather than a typing-rule failure.
+
+## Beyond pure inference: reach and precision
+
+The previous sections framed "what cannot be statically inferred"
+in terms of theoretical decidability — `maybe` as the response
+when no proof is available. That covers one half of the design
+space. There is a second half that the reading-order of this
+appendix has implied but not yet named: phenomena that are *not*
+theoretically undecidable, where a pure AST-walking inference
+*could* return a type but the type it would return either (a)
+does not exist in the AST at all, or (b) exists but is too wide
+to be useful.
+
+Both halves are addressed by the same substrate — `RBS::Extended`
+directives, plugin contributions, the specialised carrier zoo —
+but for different reasons. It is worth giving them separate
+names.
+
+### Reach: the AST does not describe the program
+
+The walker reads the AST. For a Ruby program, the AST is not a
+complete description of the program's runtime behaviour:
+
+- `define_method` synthesises methods whose names are computed at
+  evaluation time.
+- `attr_accessor :name` defines `#name` / `#name=` whose existence
+  the walker recognises by pattern, not by general reasoning.
+- `class_eval` / `instance_eval` over a block injects code under
+  a different `self`.
+- DSL forms like `has_many :posts` or
+  `attribute :name, Types::String` declare *both* a method and a
+  type contract through a single helper call.
+- `eval(string)` with an arbitrary string is genuinely outside
+  the AST.
+
+None of these is "undecidable" in the sense of the previous two
+sections. The semantics are perfectly well-defined; the walker
+simply cannot *read* them from the AST. This is the **reach**
+problem, distinct from the decidability problem:
+
+| Problem class | Example | Rigor's response |
+| --- | --- | --- |
+| Theoretical undecidability of inference | Rank-3 polymorphism; subtyping + intersection | The trinary `maybe` |
+| Reach — the AST does not contain the semantics | `define_method`, Rails DSL, `attr_*` | Plugin contributions + `RBS::Extended` + the [ADR-16](../adr/16-macro-expansion.md) macro substrate |
+| Genuine runtime opacity | `eval(user_input)` | `Dynamic[Top]`, then `maybe` at use sites |
+
+Plugins are written in Ruby because the reach problem cannot be
+solved in the type language alone — it needs a Ruby-side
+recogniser that walks the AST, decides "this `has_many :posts`
+declares an accessor returning `Relation[Post]`," and contributes
+that fact to the walker's worldview.
+[ADR-2](../adr/2-extension-api.md),
+[ADR-16](../adr/16-macro-expansion.md),
+[ADR-25](../adr/25-plugin-contributed-rbs.md), and
+[ADR-28](../adr/28-path-scoped-protocol-contracts.md) define the
+structured extension points where this knowledge enters.
+
+### Precision: naive inference produces useless joins
+
+The second motivation is subtler but at least as important. The
+simplest "correct" inference rules for compound expressions
+produce types so wide they tell the user nothing useful:
+
+| Expression | Naive join | More useful type | Mechanism in Rigor |
+| --- | --- | --- | --- |
+| `{user: u, count: 3, msg: "ok"}` | `Hash[Symbol, User \| Integer \| String]` | `HashShape{user: User, count: Integer, msg: String}` | `HashShape` carrier (built-in for hash literals) |
+| `[1, "a", :sym]` | `Array[Integer \| String \| Symbol]` | `Tuple[Integer, String, Symbol]` | `Tuple` carrier (built-in for array literals) |
+| A provably-constant value (e.g. `42`, `"ok"`) | `Integer`, `String` | `Constant<42>`, `Constant<"ok">` | `Constant<T>` carrier |
+| `JSON.parse(input)` | `Hash[String, untyped] \| Array[untyped] \| String \| Integer \| Float \| true \| false \| nil` | `App[json::value, K]` per option `K` | [ADR-20](../adr/20-lightweight-hkt.md) Lightweight HKT + `METHOD_RETURN_OVERRIDES` |
+| A method whose return depends on its arguments | A wide union of every observed exit | A per-call-site discriminated return | `RBS::Extended` `return_override` directive |
+| A DSL-managed accessor (`has_many`, `attribute`) | `Dynamic[Top]` | `Relation[Model]`, a model-specific shape | Plugin `flow_contribution_for` + macro substrate |
+
+These are not undecidability cases — the inference can decide a
+type, it just decides a *useless* one. A type like
+`Hash[Symbol, Foo | Bar | Buz]` or
+`true | false | String | Integer | Float` is technically the
+correct join of observed values, but its consumer cannot do
+anything with it without narrowing first; the union has erased
+exactly the information the type system existed to carry.
+
+The shared design principle is **strictness on returns** — the
+robustness principle ([ADR-5](../adr/5-robustness-principle.md))
+treats "the most specific type the analysis can justify" as the
+goal, not "the smallest type that covers every observed exit."
+Naive join-widening fails that test in nearly every case where
+the inputs are heterogeneous.
+
+This is also why `HashShape` and `Tuple` are not "exotic
+refinements" but **foundational carriers** — without them every
+hash literal would degrade to a `Hash`-with-union and the
+inferred type language would describe almost nothing useful in
+practice.
+
+### One substrate, two problems
+
+The plugin contract and the `RBS::Extended` directive family
+therefore serve two complementary roles. They extend *where*
+Rigor can produce a type at all (reach), and they raise *how
+specific* that type is when produced (precision). The two roles
+share a substrate but answer different limitations — one of
+static-analysis scope, one of useful-type design — and neither
+is the same as the decidability question that the trinary
+`maybe` answers.
+
 ## What Rigor does NOT model
 
 For completeness, a short list of type-theoretic features Rigor
@@ -498,6 +705,21 @@ they map to the sections of this appendix:
   fragment).
 - Lucassen & Gifford. "Polymorphic Effect Systems."
   *POPL 1988.* Origin of effect systems.
+- Milner, R. "A Theory of Type Polymorphism in Programming."
+  *JCSS*, 1978. The Hindley–Milner system in its original form
+  — the canonical type system that achieves soundness,
+  decidability, and the principal type property simultaneously
+  by restricting the language.
+- Damas, L. & Milner, R. "Principal Type-Schemes for Functional
+  Programs." *POPL 1982.* The principal-type theorem and
+  Algorithm W. The reference for what Rigor consciously does
+  *not* attempt.
+- Pierce, B.C. & Turner, D.N. "Local Type Inference." *ACM
+  TOPLAS*, 2000. The bidirectional / local-inference design that
+  the Ruby static-typing landscape (Steep especially) draws from
+  once subtyping is in the picture — the practical successor to
+  HM under those conditions, and the closest textbook analogue
+  to Rigor's walker.
 - Wells, J.B. "Typability and Type Checking in System F are
   Equivalent and Undecidable." *Annals of Pure and Applied
   Logic*, 1999. The proof that Rank-3 (and higher) type

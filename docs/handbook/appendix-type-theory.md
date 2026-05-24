@@ -152,7 +152,7 @@ The Cardelli/Wegner taxonomy of polymorphism maps cleanly onto Rigor:
 | **Subtype** | `<:` over the lattice | Standard; method calls dispatch by inferred receiver type. |
 | **Ad-hoc** (overloading) | RBS method overloads (`def m: (Integer) -> Integer \| (String) -> String`) | Resolution picks the most specific arm. |
 | **Coercion** | Rigor's Ruby-coercion model (`Integer#coerce`, etc.) | Inferred per the runtime semantics; not a user-visible operator. |
-| **Row polymorphism** | (not exposed at the user surface) | `HashShape` carries closed-vs-open key sets internally; not a quantifiable axis. |
+| **Row polymorphism** | (not exposed at the user surface) | `HashShape` carries closed-vs-open key sets internally; not a quantifiable axis. See § "Object shapes" for the lineage. |
 
 ```ruby
 # Parametric — method generics in RBS
@@ -170,6 +170,156 @@ total([1, 2.0, 3])    # ns: Array[Numeric]
 ```
 
 Spec: [`docs/type-specification/rbs-compatible-types.md`](../type-specification/rbs-compatible-types.md).
+
+## Object shapes — row polymorphism, Hack, and HashShape's lineage
+
+The `HashShape{...}` carrier and the closely related `Tuple[...]`
+appeared first in § "Nominal vs structural typing" and again in
+the precision table of § "Beyond pure inference," where they turn
+an otherwise-`Hash[Symbol, A | B | C]`-shaped join into something
+a downstream caller can use. They sit in a family of *structural
+shape* designs with both an academic root and an industrial
+lineage. Tracing those threads is the easiest way to explain why
+`HashShape` looks the way it does.
+
+### The academic root: row polymorphism
+
+**Row polymorphism** (Wand, 1987; Rémy, 1989; Cardelli & Mitchell,
+1991) is the formal mechanism for typing "records that may carry
+additional fields beyond the ones I named." A *row variable* `ρ`
+quantifies over the trailing fields of a record type:
+
+> `{ name: String; age: Integer | ρ }` — "any record with at
+> least these two fields; ρ is the rest."
+
+Garrigue (1990s) extended the framework with **kinds**, letting
+OCaml's polymorphic-record system distinguish "the class of
+records carrying `name: String`" from "the class of records
+carrying `length: Int`." OCaml's open object types
+(`< get_name : string; .. >`) sit on this foundation.
+
+**Matsumoto & Minamide (2008)** applied the Garrigue-kinded
+framework directly to Ruby — 多相レコード型に基づくRuby
+プログラムの型推論. The paper demonstrated that Ruby's
+"duck typing" surface admits a row-polymorphic reading: a method
+`def shout(x); x.upcase; end` infers as roughly
+`∀α, ρ. {upcase: () -> α | ρ} -> α`. The inference algorithm
+works, but the inferred types — together with the kind constraints
+they drag along — are dense for everyday Ruby code, where users
+overwhelmingly reason in nominal classes rather than structural
+rows.
+
+The [Rigor-perspective review of the
+paper](../notes/20260518-matsumoto-2008-poly-records-rigor-review.md)
+records the retrospective: the experiment *worked* but it
+**retroactively justified Rigor's nominal-first design** rather
+than recommending row variables as the primary modeling tool.
+Rigor's carrier zoo treats nominal classes as the unit of
+modelling, with structural shapes as inference-precision fallbacks.
+
+### The industrial lineage: Hack → Psalm/PHPStan
+
+In parallel with the academic line, the practical "typed
+dictionary" trajectory went a different way. Facebook's
+[**Hack `shape(...)`**](https://docs.hhvm.com/hack/built-in-types/shape/)
+introduced first-class shape types as part of the migration story
+from dynamic PHP arrays to a typed surface:
+
+- Per-key typing — `shape('name' => string, 'age' => int)`.
+- Optional keys via `?'key' => T`.
+- Closed by default; `...` opens the shape to additional keys.
+
+**Psalm** and **PHPStan** adopted the same idea under the PHPDoc
+syntax `array{name: string, age: int}`, with one important
+emphasis flipped: the shape is *inferred* from the literal at the
+use site rather than declared up front. TypeScript's object-type
+literal `{ name: string; age: number }` is the same idea under
+different syntax, with structural subtyping turned on by default.
+
+The industrial design **deliberately avoids row variables**.
+There is no `array{name: string, ...ρ}` quantified over the
+trailing keys; every shape is closed (or fully open) with no
+quantifiable in-between. The price is loss of full
+row-polymorphic expressiveness; the benefit is tractable inference
+and *readable* inferred types.
+
+### HashShape's position
+
+Rigor's `HashShape{...}` sits squarely in the Hack / Psalm
+lineage rather than the row-polymorphic one:
+
+| Property | Row polymorphism | Hack `shape(...)` | Psalm `array{...}` | Rigor `HashShape{...}` |
+| --- | --- | --- | --- | --- |
+| Per-key typing | Yes | Yes | Yes | Yes |
+| Optional keys | Yes (via row constraints) | Yes (`?'k'`) | Yes (`?k:`) | Yes (open/closed flag internally) |
+| Row variables quantifiable by the user | **Yes** | No | No | **No** |
+| Inferred from literals | (Inference is global) | No — user-declared | Yes (per call site) | **Yes** — built-in for hash literals |
+| Primary modelling vehicle for users | Yes (in ML-family languages that adopt it) | Yes (idiomatic Hack) | Sometimes (alongside classes) | **No** — nominal classes are primary; HashShape is the inference-precision fallback |
+
+Two specific choices stand out:
+
+1. **No row variables at the user surface.** Like Hack and Psalm,
+   Rigor does not let the user write
+   `HashShape{name: String, *rest}` quantified over the trailing
+   keys. Internally `HashShape` carries an open/closed flag, so
+   the analyser can still answer "is this set of keys finite?",
+   but the type language has no `ρ`. This is the same trade Hack
+   made: more readable inferred types and tractable inference, at
+   the cost of full row-polymorphic expressivity.
+2. **Inferred, not declared.** Where Hack expects the user to
+   write `shape(...)` explicitly, Rigor produces `HashShape`
+   automatically from hash literals. The common Ruby-author
+   experience is "I wrote `{a: 1, b: 'x'}` and Rigor reported
+   `HashShape{a: Constant<1>, b: Constant<"x">}`," not "I
+   declared a shape type and Rigor checked my literal against
+   it." This matches the Psalm / PHPStan emphasis more closely
+   than Hack's declaration-first design.
+
+The combination — inferred-from-literal + Hack/Psalm-shaped
+surface + nominal-first ecosystem — is what makes `HashShape` a
+**precision carrier** (§ "Beyond pure inference") rather than a
+*modelling primitive*. It exists to sharpen the type of a hash
+literal that would otherwise widen to
+`Hash[Symbol, A | B | C]`. It is not the unit a Rigor user
+reaches for to describe a domain object — that role belongs to
+`class User; end` plus the surrounding RBS, exactly as the
+Matsumoto retrospective recommends.
+
+### `Tuple` and the same lineage
+
+`Tuple[A, B, C]` is the array analogue, and the same lineage
+applies — TypeScript's `[A, B, C]`, Hack's `tuple(A, B, C)`,
+Psalm/PHPStan's `array{0: A, 1: B, 2: C}` shorthand. The
+motivation is identical: a literal `[1, "a", :sym]` carries
+per-index information that the `Array[Integer | String | Symbol]`
+join discards.
+
+### Why not full row polymorphism in Rigor?
+
+The temptation — surface row variables for users who want them —
+is real, and the question is open at the ADR level. The reasons
+it has not landed at the user surface in v0.1.x:
+
+- **Inference cost.** Garrigue-kinded inference is decidable but
+  more expensive than Rigor's local walker; the analyser's
+  per-file budget (see
+  [`inference-budgets.md`](../type-specification/inference-budgets.md))
+  would have to accommodate global row-constraint solving.
+- **Readability.** The Matsumoto experiment found that inferred
+  row-polymorphic types for everyday Ruby code are dense and hard
+  to skim — a problem amplified by Rigor's no-false-positives
+  stance, which makes the inferred type a thing the user actually
+  reads in `rigor annotate`.
+- **Empirical demand.** Hash literals in real Ruby code are
+  typically per-call ad-hoc dictionaries, not polymorphic-record
+  values flowing through multiple operations. The closed-or-open
+  per-call structural type matches the observed use; the row
+  quantification rarely earns its complexity.
+
+If row variables ever become genuinely needed — for a typed
+`merge` / `transform_keys` / `slice` story that benefits from
+quantifying over rows — the question opens through an ADR rather
+than at the user surface by default.
 
 ## Variance
 
@@ -663,7 +813,8 @@ here so you can stop looking:
   need without crossing the line.
 - **Row polymorphism as a user-quantifiable axis.** `HashShape`
   carries open-vs-closed semantics internally but does not
-  expose row variables.
+  expose row variables. See § "Object shapes — row polymorphism,
+  Hack, and HashShape's lineage" for the design rationale.
 - **Existential types.** No `pack` / `unpack`. Closest analogue
   is structural `interface`.
 - **GADTs.** No type-refinement-by-constructor; pattern
@@ -692,6 +843,17 @@ they map to the sections of this appendix:
 - Cardelli & Wegner. "On Understanding Types, Data
   Abstraction, and Polymorphism." *ACM Computing Surveys*,
   1985. Origin of the polymorphism taxonomy.
+- Wand, M. "Complete Type Inference for Simple Objects."
+  *LICS*, 1987. The seed of row polymorphism — first
+  formulation of "infer object types with extra fields."
+- Rémy, D. "Type Checking Records and Variants in a Natural
+  Extension of ML." *POPL 1989.* The row-variable mechanism in
+  the form it is most commonly cited.
+- Cardelli, L. & Mitchell, J.C. "Operations on Records."
+  *Mathematical Structures in Computer Science*, 1991. The
+  algebraic treatment of record operations under row
+  polymorphism — the substrate Garrigue and then Matsumoto &
+  Minamide build on.
 - Siek & Taha. "Gradual Typing for Functional Languages."
   *Scheme Workshop*, 2006. The original gradual-typing paper.
 - Garcia, Clark & Tanter. "Abstracting Gradual Typing."

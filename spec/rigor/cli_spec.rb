@@ -1220,6 +1220,35 @@ RSpec.describe Rigor::CLI do
       expect(out.lines[0]).to include("#=> dump_type: :else | :then")
     end
 
+    it "annotates a `def` header line with the method's inferred return type" do
+      path = write_fixture("a.rb", "def greet(name)\n  \"Hello, \" + name\nend\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      lines = out.lines
+      expect(lines[0]).to include("def greet(name)").and include("#=> dump_type: String")
+      # The default annotation for the parameter (`Dynamic[top]`)
+      # is replaced by the return-type override on the header line.
+      expect(lines[0]).not_to include("Dynamic")
+    end
+
+    it "unions explicit `return` with the trailing expression on the def header" do
+      path = write_fixture("a.rb", "def f(x)\n  return :odd if x.odd?\n  :even\nend\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      expect(out.lines[0]).to include("def f(x)").and include("#=> dump_type: :even | :odd")
+    end
+
+    it "omits the annotation on a `def` whose return type cannot be inferred (empty body)" do
+      path = write_fixture("a.rb", "def empty\nend\n")
+
+      _status, out, _err = run_cli("annotate", "--no-color", path)
+
+      expect(out.lines[0]).to include("def empty")
+      expect(out.lines[0]).not_to include("dump_type")
+    end
+
     it "is idempotent — re-annotating does not stack comments" do
       path = write_fixture("a.rb", "a = 1\n")
 

@@ -6,6 +6,7 @@ require "prism"
 require_relative "../configuration"
 require_relative "../environment"
 require_relative "../scope"
+require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "prism_colorizer"
 
@@ -164,6 +165,7 @@ module Rigor
           by_line[statement.location.end_line] = type unless type.nil?
         end
         fill_uncovered_lines(program, by_line)
+        override_def_header_lines(program, by_line)
         by_line
       end
 
@@ -230,6 +232,34 @@ module Rigor
         @scope_index[node].type_of(node)
       rescue StandardError
         nil
+      end
+
+      # For every `def`, replace the annotation on the header line
+      # (where the `def` keyword sits) with the method's inferred
+      # return type. The default annotation there comes from the
+      # parameter list (`name` typing as `Dynamic[top]`), which is
+      # noise; the return type is what readers actually want next
+      # to the method signature. When the return type cannot be
+      # inferred (empty body, scope-lookup miss, or any error
+      # under `DefReturnTyper.call`), the entry is deleted so no
+      # annotation is shown on that line.
+      def override_def_header_lines(program, by_line)
+        each_def_node(program) do |def_node|
+          line = def_node.location.start_line
+          return_type = Inference::DefReturnTyper.call(def_node, @scope_index)
+          if return_type.nil?
+            by_line.delete(line)
+          else
+            by_line[line] = return_type
+          end
+        end
+      end
+
+      def each_def_node(node, &block)
+        return if node.nil?
+
+        block.call(node) if node.is_a?(Prism::DefNode)
+        node.compact_child_nodes.each { |child| each_def_node(child, &block) }
       end
     end
   end

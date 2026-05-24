@@ -264,6 +264,92 @@ total([1, 2.0, 3])    # ns: Array[Numeric]
 
 Spec: [`docs/type-specification/rbs-compatible-types.md`](../type-specification/rbs-compatible-types.md).
 
+## F-bounded polymorphism and self types
+
+A recurring concrete need in object-oriented languages: a method
+that "returns an instance of the actual receiver's class." Ruby's
+`Object#tap` is the canonical example — `arr.tap { |x| ... }`
+returns the same `arr`, with the same type, not the widened
+`Object` ancestor.
+
+Expressing "I return *my own* class" needs a mechanism beyond
+plain parametric polymorphism, because the return-type parameter
+must track the *runtime* class of `self`, not just a static type
+variable bound at the call site. Two related mechanisms in the
+literature:
+
+### Self types
+
+A reserved keyword (`self`, `Self`, `this`) inside a class
+declaration meaning "the type of the actual receiver." A method
+declared `def m: () -> self` in class `Foo` returns `Foo` in
+`Foo` but returns `Bar` in `class Bar < Foo`. RBS uses `self`
+exactly this way:
+
+```ruby
+# RBS for Object#tap (excerpt)
+class Object
+  def tap: { (self) -> void } -> self
+end
+```
+
+When called on an `Array[Integer]`, the block sees the receiver
+typed as `Array[Integer]` and the call returns `Array[Integer]` —
+not `Object`.
+
+### F-bounded polymorphism
+
+A more general mechanism — a type parameter constrained to
+extend its own parameterisation: `T <: Comparable[T]`. The
+classical reference is **Canning, Cook, Hill, Olthoff &
+Mitchell 1989** (*F-Bounded Polymorphism for Object-Oriented
+Programming*). The motivating problem is the same — "a method on
+`Comparable` should return the comparing class itself, not the
+abstract `Comparable` interface" — but the encoding is via a
+constrained type parameter rather than a `self` keyword.
+
+### Industrial uptake
+
+| Language | Self-type form | F-bounded form |
+| --- | --- | --- |
+| Java | (none direct) | `<T extends Comparable<T>>` |
+| Scala | `this: T =>` self-type | `[T <: Comparable[T]]` |
+| TypeScript | `this` type in method signatures | `<T extends C<T>>` |
+| Sorbet | `T.self_type`, `T.attached_class` | Limited via generic class |
+| RBS | `self` keyword | `[T < Comparable[T]]` (syntactically supported, limited) |
+
+### Rigor's position
+
+Rigor honours the RBS `self` keyword in method signatures. The
+walker substitutes the actual receiver type for `self` when
+synthesising the return type — so `Array[Integer]#dup` (declared
+as `def dup: () -> self`) returns `Array[Integer]`, not the
+ancestor's `Object`. This is the small mechanism that quietly
+removes a major source of unwanted widening in OO Ruby code:
+
+```ruby
+arr = [1, 2, 3]
+copy = arr.dup
+# Without self-type: copy : Object  (useless)
+# With self-type:    copy : Array[Integer]  (load-bearing)
+```
+
+F-bounded polymorphism in its full generality is harder. The
+inference machinery has to solve a constraint that mentions the
+type variable on both sides of `<:`. Rigor's RBS surface accepts
+the constrained form `[T < C[T]]` but the walker treats
+unresolved F-bounded constraints conservatively (`Dynamic[Top]`
+fallback when the bound cannot be solved locally). This matches
+the no-false-positives stance: an over-precise F-bounded
+inference would spread `T`-mention errors through the codebase,
+and the practical Ruby idiom — declare `self` rather than
+quantify over `T <: C[T]` — sidesteps the harder cases anyway.
+
+The type-theoretic family extends further (G-bounded polymorphism;
+parameterised self-types; ML-style first-class modules with
+`with type self = ...`) but those forms are not exposed at the
+Rigor surface.
+
 ## Object shapes — row polymorphism, Hack, and HashShape's lineage
 
 The `HashShape{...}` carrier and the closely related `Tuple[...]`
@@ -507,6 +593,101 @@ end
 
 Spec: [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md),
 [`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md).
+
+## Pattern matching and exhaustiveness
+
+The previous section noted that Rigor narrows along
+`case x; in pattern` branches the same way it narrows along
+`if x.is_a?(...)`. There is a related but distinct property that
+pattern matching enables in type systems built around **algebraic
+data types** (ADTs) or **tagged unions**: **exhaustiveness
+checking**.
+
+A `case` that does not cover every value the scrutinee can take
+*should*, under exhaustiveness, be a type error — not a runtime
+fallthrough. The compiler verifies that for every possible shape
+of the scrutinee, some arm matches.
+
+### Academic root
+
+**Maranget 2007** (*Warnings for Pattern Matching*) gave the
+algorithm OCaml uses to compute pattern-matching warnings —
+non-exhaustive matches and redundant arms. The broader topic
+sits in the ML / Haskell lineage where exhaustiveness has been
+load-bearing since the late 1970s.
+
+### Industrial uptake
+
+- **OCaml**: emits warnings for non-exhaustive matches; can be
+  turned into hard errors via `-strict-formats` or per-pattern
+  attributes.
+- **Rust**: requires exhaustiveness on `match` against an `enum`
+  type; non-exhaustive matches are *compile* errors.
+- **Scala**: warns on non-exhaustive `match`; raises
+  `MatchError` at runtime if unmatched.
+- **TypeScript**: simulates exhaustiveness via the "exhaustive
+  `never` check" idiom — assigning the scrutinee to a `never`-
+  typed variable in the default branch fails to type-check if
+  any case was missed.
+- **Sorbet**: `T.absurd(x)` checks that every case of a union
+  has been narrowed away by the point of the call.
+
+### Ruby and Rigor's position
+
+Ruby's `case/in` is non-exhaustive at runtime — an unmatched
+scrutinee silently falls through the `case` expression (returns
+`nil`), or raises `NoMatchingPatternError` if the strict
+`case/in` form is used without an `else`. Rigor inherits the
+language behaviour:
+
+- Occurrence-typing narrowing through `case/in` is implemented
+  and load-bearing for downstream precision.
+- Exhaustiveness checking is **NOT** implemented in v0.1.x.
+
+The choice is consistent with Rigor's no-false-positives stance.
+A `pattern.non-exhaustive` diagnostic would fire on:
+
+1. A scrutinee inferred as a union whose arms were not all
+   matched — but the inferred union itself may be approximate
+   (`Dynamic[T]` widening, capability-role narrowing, plugin
+   contributions), so the "missing arm" cluster could be
+   pathological.
+2. A scrutinee whose "exhaustive set" is open-ended at runtime —
+   open class hierarchies, user-defined `===`, monkey-patched
+   `kind_of?`. These shapes are common in Ruby and rarely typed
+   precisely enough for an exhaustiveness check to be reliable.
+3. A developer deliberately relying on the fall-through return
+   of `nil`. Idiomatic in some Ruby styles.
+
+The false-positive surface is uncomfortably large for a language
+without ADTs. A `pattern.non-exhaustive` diagnostic is a future
+direction (no committed milestone). Users wanting exhaustiveness
+*today* can replicate the TypeScript / Sorbet idiom — call a
+method declared to take `Bot` in the default branch — and
+Rigor's narrowing will surface the missed arm via the
+`call.argument-type-mismatch` diagnostic that already exists.
+
+```ruby
+# Self-rolled exhaustiveness via the Bot-receiver idiom
+def unreachable(x)
+  raise "unreachable: #{x.inspect}"
+end
+# RBS:  def unreachable: (bot) -> bot
+
+case shape
+in :circle then ...
+in :square then ...
+# missing :triangle
+else unreachable(shape)
+  # If `shape` could still be :triangle here, the
+  # `unreachable` call's argument type mismatches `bot`
+  # and call.argument-type-mismatch fires.
+end
+```
+
+This is not as ergonomic as a first-class
+`pattern.non-exhaustive`, but it is sound under Rigor's
+no-false-positives discipline and works today.
 
 ## Gradual typing
 
@@ -1053,6 +1234,103 @@ static-analysis scope, one of useful-type design — and neither
 is the same as the decidability question that the trinary
 `maybe` answers.
 
+## The expression problem and Rigor's plugin contract
+
+A theoretical framing for one of Rigor's central design choices
+— the plugin contract — comes from a paper that gave the framing
+its name.
+
+### The problem
+
+**Wadler 1998** (*The Expression Problem*, informal note) posed
+the challenge: in a typed language, can you simultaneously
+support
+
+1. **Adding new types** (new data variants) without modifying
+   existing operations, *and*
+2. **Adding new operations** (new functions over existing data)
+   without modifying existing types?
+
+Most type-system paradigms handle one or the other:
+
+| Paradigm | Easy to add | Hard to add |
+| --- | --- | --- |
+| OO (subtyping + dispatch) | New types (subclass) | New operations (must touch every class) |
+| Functional ADTs + pattern matching | New operations (new function) | New types (must touch every operation) |
+| Haskell type classes | Either, with care | The other requires `OverlappingInstances` etc. |
+| Scala traits + pattern matching | Either, with elaboration support | Boilerplate on the unsupported side |
+| Clojure / Elixir protocols | Either (protocol dispatch) | (Solved by design) |
+| Ruby open classes | Both! (reopen + monkey-patch) | (Solved by design — sometimes too directly) |
+
+Ruby sits in the "open classes" row — a non-typed language where
+the expression problem is solved by `module Foo; def bar; …;
+end; class String; include Foo; end`. The language solution
+trades safety for flexibility.
+
+### Rigor's plugin contract as the tool-side answer
+
+Rigor's plugin substrate ([ADR-2](../adr/2-extension-api.md),
+[ADR-16](../adr/16-macro-expansion.md),
+[ADR-25](../adr/25-plugin-contributed-rbs.md),
+[ADR-28](../adr/28-path-scoped-protocol-contracts.md), …) solves
+the **tool-level** version of the same problem:
+
+- **Adding new type knowledge** the engine can act on — new RBS
+  bundles, new structural shapes via `signature_paths:`, new
+  TypeNode resolvers ([ADR-13](../adr/13-typenode-resolver-plugin.md))
+  — **without modifying the engine**.
+- **Adding new analyses / operations** over existing types — new
+  diagnostic rules, new flow contributions, new protocol
+  contracts ([ADR-28](../adr/28-path-scoped-protocol-contracts.md))
+  — **without modifying the type language**.
+
+The plugin contract is therefore the **expression problem solved
+at the analyser's extension boundary**, where the language-level
+solution (open classes) is too coarse for static analysis.
+
+A worked example:
+
+- `rigor-activesupport-core-ext` adds a *new fact* about existing
+  classes (`Numeric#hours`, `String#blank?`, `Hash#stringify_keys`)
+  — type-extension axis.
+- `rigor-web` adds a *new analysis* over existing classes
+  (every class under `lib/controller/` must define
+  `#get(Rack::Request) -> Rack::Response`) — operation-extension
+  axis ([ADR-28](../adr/28-path-scoped-protocol-contracts.md)).
+
+Neither plugin requires modifying the Rigor engine, and they
+*compose* — a single plugin can do both axes ([ADR-12 dry-rb
+packaging](../adr/12-dry-rb-packaging.md) discusses the
+production examples).
+
+### Connection to earlier appendix sections
+
+This framing also retroactively explains several design choices:
+
+- **Nominal-first** (§ "Nominal vs structural typing"):
+  nominal class names are the stable attachment point for
+  plugin-contributed facts. Structural shapes are inferred
+  per-call; a plugin would have no name to bind its knowledge
+  to. The expression problem framing prefers explicit `class`
+  declarations precisely because the name is the extension
+  handle.
+- **The macro substrate** ([ADR-16](../adr/16-macro-expansion.md)):
+  each tier (A: block-as-method, B: trait-inlining, C: heredoc
+  template, D: external-file inclusion) is a different way to
+  add knowledge about a class's behaviour without modifying the
+  class — the type-extension axis made plural.
+- **Path-scoped protocol contracts**
+  ([ADR-28](../adr/28-path-scoped-protocol-contracts.md)): a
+  plugin can declare a behavioural contract for an entire
+  directory of user-authored classes without the classes
+  opting in — the operation-extension axis made tool-side.
+
+The plugin contract is therefore not an ad-hoc Rigor design
+choice but **the expression problem solved at the analyser layer
+rather than the language layer**. The same theoretical pressure
+that drove Haskell to type classes and Clojure to protocols
+drives Rigor to a structured plugin substrate.
+
 ## What Rigor does NOT model
 
 For completeness, a short list of type-theoretic features Rigor
@@ -1109,6 +1387,15 @@ they map to the sections of this appendix:
 - Cardelli & Wegner. "On Understanding Types, Data
   Abstraction, and Polymorphism." *ACM Computing Surveys*,
   1985. Origin of the polymorphism taxonomy.
+- Canning, Cook, Hill, Olthoff & Mitchell. "F-Bounded
+  Polymorphism for Object-Oriented Programming." *FPCA 1989.*
+  The classical reference for F-bounded polymorphism — the
+  type-theoretic root of RBS's `self` keyword and Sorbet's
+  `T.attached_class`.
+- Wadler, P. "The Expression Problem." Informal note posted to
+  the `java-genericity` mailing list, 1998. The challenge that
+  motivates Rigor's plugin substrate as the analyser-layer
+  answer.
 - Wand, M. "Complete Type Inference for Simple Objects."
   *LICS*, 1987. The seed of row polymorphism — first
   formulation of "infer object types with extra fields."
@@ -1150,6 +1437,10 @@ they map to the sections of this appendix:
   background for § "Bidirectional type checking."
 - Tobin-Hochstadt & Felleisen. "The Design and Implementation
   of Typed Scheme." *POPL 2008.* Origin of occurrence typing.
+- Maranget, L. "Warnings for Pattern Matching." *Journal of
+  Functional Programming*, 2007. The algorithm OCaml uses for
+  pattern-match exhaustiveness — background for § "Pattern
+  matching and exhaustiveness."
 - Rondon, Kawaguchi & Jhala. "Liquid Types." *PLDI 2008.* The
   refinement-types-with-SMT framework that informs the
   `int<min, max>` carrier (Rigor uses a much weaker, decidable

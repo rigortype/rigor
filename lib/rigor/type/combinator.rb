@@ -283,6 +283,36 @@ module Rigor
         diff.removed.value == ""
       end
 
+      # Returns true when `type` is statically known to be a
+      # non-zero Integer — i.e. its value can never be `0`.
+      # Used at Integer arithmetic dispatch sites to propagate
+      # the non-zero guarantee through `*` and identity methods.
+      #
+      # - `Constant[n]` where `n != 0` — a concrete non-zero literal.
+      # - `Difference[Nominal[Integer], Constant[0]]` — the canonical
+      #   `non-zero-int` carrier.
+      # - `IntegerRange` that does not cover 0 — both `positive-int`
+      #   ([1,+∞)) and `negative-int` ([-∞,-1]) qualify.
+      # - `Intersection[…]` — any member suffices.
+      # - `Union[…]` — all members must qualify.
+      def non_zero_int_compatible?(type)
+        case type
+        when Constant then type.value.is_a?(Integer) && !type.value.zero?
+        when Difference then non_zero_int_difference?(type)
+        when IntegerRange then !type.covers?(0)
+        when Intersection then type.members.any? { |m| non_zero_int_compatible?(m) }
+        when Union then !type.members.empty? && type.members.all? { |m| non_zero_int_compatible?(m) }
+        else false
+        end
+      end
+
+      def non_zero_int_difference?(diff)
+        return false unless diff.base.is_a?(Nominal) && diff.base.class_name == "Integer"
+        return false unless diff.removed.is_a?(Constant)
+
+        diff.removed.value.zero?
+      end
+
       # Normalised intersection. Flattens nested Intersections,
       # drops `Top` members, collapses to `Bot` if any member is
       # `Bot`, deduplicates structurally-equal members, sorts the

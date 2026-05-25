@@ -458,6 +458,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     non_positive_int()
     non_uppercase_string()
     non_zero_int()
+    non_zero_int_compatible?(req:type)
+    non_zero_int_difference?(req:diff)
     numeric_string()
     octal_int_string()
     omit_of(req:type,req:keys)

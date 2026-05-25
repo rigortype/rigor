@@ -988,6 +988,11 @@ module Rigor
           magnitude: :range_unary_abs,
           "-@": :range_unary_negate,
           "+@": :range_unary_identity,
+          # `Integer#to_i` / `Integer#to_int` are identity operations —
+          # they return `self` — so the IntegerRange carrier is preserved.
+          # `positive-int.to_i → positive-int`, etc.
+          to_i: :range_unary_identity,
+          to_int: :range_unary_identity,
           bit_length: :range_unary_bit_length
         }.freeze
         private_constant :UNARY_RANGE_DIRECT

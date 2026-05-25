@@ -222,6 +222,11 @@ module Rigor
               return string_binary if string_binary
             end
 
+            if nominal.class_name == "Integer" && args.size == 1
+              integer_binary = dispatch_integer_binary_from_arg(method_name, args.first)
+              return integer_binary if integer_binary
+            end
+
             return nil unless args.empty?
 
             selectors = SIZE_RETURNING_NOMINALS[nominal.class_name]
@@ -248,6 +253,18 @@ module Rigor
               end
             end
             nil
+          end
+
+          # Arg-type-driven Integer binary projections for any Integer-typed
+          # receiver (including Nominal, Refined, and Difference fallbacks).
+          #
+          # - `Integer * Constant[0]` → `Constant[0]`
+          #   (any integer multiplied by 0 is 0)
+          def dispatch_integer_binary_from_arg(method_name, arg)
+            return nil unless method_name == :*
+            return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Integer) && arg.value.zero?
+
+            Type::Combinator.constant_of(0)
           end
 
           # `IntegerRange#to_s` precision (v0.1.1 Track 1 slice 5b).
@@ -333,36 +350,59 @@ module Rigor
           # Methods on a non-empty String that preserve non-emptiness
           # (they transform characters but never reduce the string to "").
           NON_EMPTY_STRING_PRESERVING_UNARY = Set[:upcase, :downcase, :capitalize, :swapcase, :reverse].freeze
-          private_constant :NON_EMPTY_STRING_PRESERVING_UNARY
+          # Methods on non-zero-int that return a non-zero-int (identity ops).
+          # Negation of a non-zero integer is non-zero; `to_i`/`to_int` are
+          # identity operations on Integer.
+          NON_ZERO_INT_PRESERVING_UNARY = Set[:-@, :+@, :to_i, :to_int].freeze
+          private_constant :NON_EMPTY_STRING_PRESERVING_UNARY, :NON_ZERO_INT_PRESERVING_UNARY
 
           def empty_removal_projection(difference, method_name, args)
             base = difference.base
+            return empty_removal_unary(difference, base, method_name) if args.empty?
 
-            if args.empty?
-              if %i[size length count bytesize].include?(method_name)
-                return size_returning_for_empty_removal(base, method_name)
-              end
+            empty_removal_binary(difference, base, method_name, args)
+          end
 
-              predicate_result = empty_predicate_projection(base, method_name)
-              return predicate_result if predicate_result
+          def empty_removal_unary(difference, base, method_name)
+            return size_returning_for_empty_removal(base, method_name) if
+              %i[size length count bytesize].include?(method_name)
 
-              if base.class_name == "String" && NON_EMPTY_STRING_PRESERVING_UNARY.include?(method_name)
-                return difference
-              end
+            predicate_result = empty_predicate_projection(base, method_name)
+            return predicate_result if predicate_result
 
-              return nil
-            end
+            return difference if base.class_name == "String" &&
+                                 NON_EMPTY_STRING_PRESERVING_UNARY.include?(method_name)
 
-            return nil unless base.class_name == "String"
+            non_zero_int_unary_projection(difference, base, method_name)
+          end
 
-            case method_name
-            when :+
-              return difference if args.size == 1
-            when :*
-              return non_empty_string_repeat(difference, args.first) if args.size == 1
-            end
+          def non_zero_int_unary_projection(difference, base, method_name)
+            return nil unless base.class_name == "Integer"
+            return Type::Combinator.positive_int if %i[abs magnitude].include?(method_name)
+            return difference if NON_ZERO_INT_PRESERVING_UNARY.include?(method_name)
 
             nil
+          end
+
+          def empty_removal_binary(difference, base, method_name, args)
+            return empty_string_binary(difference, method_name, args) if base.class_name == "String"
+            return empty_integer_binary(difference, method_name, args) if base.class_name == "Integer"
+
+            nil
+          end
+
+          def empty_string_binary(difference, method_name, args)
+            return difference if method_name == :+ && args.size == 1
+            return non_empty_string_repeat(difference, args.first) if method_name == :* && args.size == 1
+
+            nil
+          end
+
+          def empty_integer_binary(difference, method_name, args)
+            return nil unless method_name == :* && args.size == 1
+            return nil unless Type::Combinator.non_zero_int_compatible?(args.first)
+
+            difference
           end
 
           def empty_predicate_projection(base, method_name)

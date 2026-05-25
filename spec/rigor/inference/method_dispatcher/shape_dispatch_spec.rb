@@ -1100,4 +1100,81 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       end
     end
   end
+
+  describe "non-zero-int / positive-int propagation through Integer operations" do
+    let(:non_zero) { Rigor::Type::Combinator.non_zero_int }
+    let(:positive_int) { Rigor::Type::Combinator.positive_int }
+    let(:non_negative_int) { Rigor::Type::Combinator.non_negative_int }
+    let(:nominal_integer) { Rigor::Type::Combinator.nominal_of("Integer") }
+
+    describe "non-zero-int unary methods" do
+      it "non-zero-int.abs → positive-int (|n| >= 1 for n != 0)" do
+        expect(dispatch(receiver: non_zero, method_name: :abs)).to eq(positive_int)
+      end
+
+      it "non-zero-int.magnitude → positive-int" do
+        expect(dispatch(receiver: non_zero, method_name: :magnitude)).to eq(positive_int)
+      end
+
+      it "non-zero-int.-@ → non-zero-int (negation of non-zero is non-zero)" do
+        expect(dispatch(receiver: non_zero, method_name: :-@)).to eq(non_zero)
+      end
+
+      it "non-zero-int.+@ → non-zero-int (unary plus is identity)" do
+        expect(dispatch(receiver: non_zero, method_name: :+@)).to eq(non_zero)
+      end
+
+      it "non-zero-int.to_i → non-zero-int (identity)" do
+        expect(dispatch(receiver: non_zero, method_name: :to_i)).to eq(non_zero)
+      end
+
+      it "non-zero-int.to_int → non-zero-int (identity)" do
+        expect(dispatch(receiver: non_zero, method_name: :to_int)).to eq(non_zero)
+      end
+
+      it "non-zero-int.zero? → Constant[false]" do
+        expect(dispatch(receiver: non_zero, method_name: :zero?)).to eq(constant(false))
+      end
+
+      it "non-zero-int.succ falls through (pred/succ may cross zero)" do
+        expect(dispatch(receiver: non_zero, method_name: :succ)).to be_nil
+      end
+    end
+
+    describe "non-zero-int * non-zero-int → non-zero-int" do
+      it "non-zero-int * non-zero-int stays non-zero-int" do
+        expect(dispatch(receiver: non_zero, method_name: :*, args: [non_zero])).to eq(non_zero)
+      end
+
+      it "non-zero-int * positive-int → non-zero-int" do
+        expect(dispatch(receiver: non_zero, method_name: :*, args: [positive_int])).to eq(non_zero)
+      end
+
+      it "non-zero-int * Constant[3] → non-zero-int" do
+        expect(dispatch(receiver: non_zero, method_name: :*, args: [constant(3)])).to eq(non_zero)
+      end
+
+      it "non-zero-int * Constant[-2] → non-zero-int" do
+        expect(dispatch(receiver: non_zero, method_name: :*, args: [constant(-2)])).to eq(non_zero)
+      end
+
+      it "non-zero-int * Nominal[Integer] falls through (receiver×0 could be zero)" do
+        expect(dispatch(receiver: non_zero, method_name: :*, args: [nominal_integer])).to be_nil
+      end
+
+      it "non-zero-int * Constant[0] → Constant[0] (any n * 0 = 0)" do
+        expect(dispatch(receiver: non_zero, method_name: :*, args: [constant(0)])).to eq(constant(0))
+      end
+    end
+
+    describe "Nominal[Integer] * Constant[0] → Constant[0]" do
+      it "any Integer * 0 is always 0" do
+        expect(dispatch(receiver: nominal_integer, method_name: :*, args: [constant(0)])).to eq(constant(0))
+      end
+
+      it "Nominal[Integer] * positive-int falls through" do
+        expect(dispatch(receiver: nominal_integer, method_name: :*, args: [positive_int])).to be_nil
+      end
+    end
+  end
 end

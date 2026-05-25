@@ -492,6 +492,25 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       end
     end
 
+    describe "to_i / to_int identity on IntegerRange" do
+      it "positive-int.to_i → positive-int (identity)" do
+        expect(fold_types(positive_int, :to_i)).to eq(positive_int)
+      end
+
+      it "non-negative-int.to_i → non-negative-int" do
+        expect(fold_types(non_negative_int, :to_i)).to eq(non_negative_int)
+      end
+
+      it "positive-int.to_int → positive-int" do
+        expect(fold_types(positive_int, :to_int)).to eq(positive_int)
+      end
+
+      it "int<3, 7>.to_i → int<3, 7> (finite range preserved)" do
+        r = integer_range(3, 7)
+        expect(fold_types(r, :to_i)).to eq(r)
+      end
+    end
+
     describe "unary shifts and abs" do
       it "succ shifts the range by +1" do
         expect(fold_types(integer_range(1, 5), :succ)).to eq(integer_range(2, 6))

@@ -268,6 +268,8 @@ module Rigor
       def self?.literal_string_compatible?: (Type::t type) -> bool
       def self?.non_empty_string_compatible?: (Type::t type) -> bool
       def self?.non_empty_string_difference?: (Type::t diff) -> bool
+      def self?.non_zero_int_compatible?: (Type::t type) -> bool
+      def self?.non_zero_int_difference?: (Type::t diff) -> bool
       def self?.intersection: (*Type::t members) -> Type::t
       def self?.non_empty_lowercase_string: () -> Type::t
       def self?.non_empty_uppercase_string: () -> Type::t

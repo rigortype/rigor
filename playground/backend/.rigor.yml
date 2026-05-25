@@ -1,0 +1,23 @@
+# ADR-29 WD4 amendment (2026-05-25) + ADR-32 WD10
+#
+# The browser playground pre-loads `rigor-rbs-inline` so a
+# pasted snippet with `# @rbs name: T`-shaped comments is
+# analysed as inline-RBS from the first request. The
+# `require_magic_comment: false` plugin config skips the
+# upstream `# rbs_inline: enabled` per-file gate so users
+# don't have to type a magic comment to see the diagnostic
+# behaviour — the playground is a single-buffer exploration
+# surface, not a multi-file project.
+#
+# This file is auto-discovered by `Rigor::CLI.start` from the
+# Puma process's CWD (`playground/backend/`); each `run_cli`
+# call in `lib/playground/app.rb` inherits it.
+plugins:
+  - gem: rigor-rbs-inline
+    id: rbs-inline
+    config:
+      require_magic_comment: false
+
+# Strict severity profile per ADR-29 WD4 — exploration code
+# should see every diagnostic at its authored severity.
+severity_profile: strict

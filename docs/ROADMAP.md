@@ -115,7 +115,7 @@ Governance: [ADR-31](adr/31-contribution-and-supply-chain-policy.md) is the proj
 - **ADR-10 — per-call return-type precision from gem source.** Walker currently catalogs only `(class_name, method_name) → kind` triples. Inferring per-method return types from gem source (so `mode: :full` could contribute richer than `Dynamic[Top]`) is a larger walker enhancement deferred until concrete user demand surfaces.
 - **Plugin-contributed RBS signatures.** [ADR-25](adr/25-plugin-contributed-rbs.md) proposed (2026-05-21): an optional `signature_paths:` `Manifest` field lets a plugin gem contribute RBS directories, resolved by `Plugin::Loader` and merged into the RBS environment. Closes the gap that today forces an RBS-only bundle gem (`rigor-activesupport-core-ext`) to be hand-wired via a non-portable `signature_paths:` path. Three slices (manifest field + loader resolution + environment merge → convert `rigor-activesupport-core-ext` to a trivial plugin → `rigor-project-init` SKILL follow-through); additive to the pre-1.0 plugin contract, safe within v0.1.x. Companion follow-up (separate, smaller): extend `Environment::BundleSigDiscovery` auto-detection beyond the `vendor/bundle` / `.bundle/config` layouts to the default `bundle install` gem path.
 - **ADR-28 path-scoped protocol contracts — open ecosystem item.** `rigor-actioncable` `#receive(data)` parameter-type provision: a contract with `method_name: :receive, param_types: [{index: 0, type_name: "Hash"}]` would type `data` as `Hash` inside every channel's receive body. Demand-driven.
-- **Inline-RBS comment ingestion ([ADR-32](adr/32-rbs-inline-comment-ingestion.md)).** Proposed (2026-05-25): ship a bundled `rigor-rbs-inline` plugin that calls the upstream [rbs-inline](https://github.com/soutaro/rbs-inline) library at env-build time and contributes the synthesised RBS to the analysis environment, gated by the upstream `# rbs_inline: enabled` magic comment (WD2). Adds an optional `Plugin::Manifest` field `source_rbs_synthesizer:` (a `(source_file_path) -> rbs_source_string | nil` callable) — distinct from ADR-25's static `signature_paths:` because the contribution is synthesised from project source at env build, not bundled inside the plugin gem (WD4). Core `rigortype` stays zero-runtime-dependency per ADR-0: the `rbs-inline` gem is a runtime dependency of the **plugin gem**, not the core (WD1). Re-implementing the rbs-inline grammar inside Rigor was considered and rejected — the grammar is broad (`#: () -> T`, `# @rbs () -> T`, doc-style per-param, attributes `#:`, ivars, constants, generics, `# @rbs override`, block-as-method `# @rbs class/module`, `# @rbs!` raw embedding) and still evolving upstream, so grammar drift is the larger long-term cost (WD3). Three slices sketched (manifest field + engine hook + plugin skeleton → failure handling + per-file cache → plugin polish + docs). Top-level `def` semantics are inherited from upstream rbs-inline (WD9) — to be verified in slice 1; the class-wrapped variant of the diagnostic example works today against a real `.rbs` file. Closes the "the `# @rbs` comment in my `.rb` looks like it should just work" UX gap. No slice scheduled.
+- **Inline-RBS comment ingestion ([ADR-32](adr/32-rbs-inline-comment-ingestion.md)) — LANDED.** All three slices + the WD10 CLI carry-over shipped in the v0.1.x cycle: slice 1 (engine hook + bundled `rigor-rbs-inline` plugin) + slice 2 (per-file cache keyed on `(content SHA, plugin id + version + config_hash)` + env-cache invalidation + `source-rbs-synthesis-failed` info diagnostic via the new `Plugin::SourceRbsSynthesisReporter`) + slice 3 (plugin README + handbook chapter 7 § "Inline RBS in Ruby source") + the `rigor check --treat-all-as-inline-rbs` CLI flag for single-file ad-hoc CI use. WD9 top-level-`def` caveat verified against rbs-inline 0.14.0 (no output for bare top-level defs; class-wrap to engage). Remaining demand-driven follow-ups: LSP incremental flow integration around the new `source_rbs_synthesizer:` hook (queued under the ADR-19 LSP roadmap). See `CHANGELOG.md` § `[Unreleased]` for the full list of public-API drift surfaces.
 - **`rigor-ffi` plugin family ([ADR-30](adr/30-rigor-ffi-plugin-shape.md)).** Core `rigor-ffi` covers the `ffi` gem's common machinery (`extend FFI::Library`, `attach_function`, `callback`, `typedef`, `enum`, `bitmask`, `FFI::Struct`/`Union`/`AutoPointer`/`MemoryPointer`/`Pointer`/`Function`/`Buffer`) and — because tenderlove's `ffx` gem ships a strict subset of the same DSL — also serves ffx-targeted projects for free, plus a new `ffx.unsupported-*` diagnostic family that surfaces declarations ffx will refuse at gem-install time. Per-library sub-plugins (`rigor-rbnacl`, `rigor-ethon`, `rigor-ffi-rzmq`, `rigor-sassc`) contribute DSL recognizers, option-catalog → setter generation, and high-level API RBS refinements. WD9: implementation justified by zero non-user overhead (sub-plugins activate only on resolved-dependency match) rather than direct demand, which is weak across all four worked consumers (sassc-ruby is EOL, typhoeus/ethon and rbnacl are specialized, ffi-rzmq is niche). WD10: for a "vanilla" FFI gem (literal `attach_function` + thin Ruby wrapper class) core suffices and no plugin is needed — just declare the dependency. A new SKILL [`.claude/skills/rigor-ffi-plugin-author/SKILL.md`](../.claude/skills/rigor-ffi-plugin-author/SKILL.md) walks authors through a coverage assessment first (designed to *talk users out of authoring* when core suffices) and then routes the remaining cases through the project-wide [ADR-31](adr/31-contribution-and-supply-chain-policy.md) contribution policy. FFI-specific add: pin the wrapped gem's version range in the plugin's gemspec (orphan-plugin risk is the plugin author's responsibility per ADR-31 WD4). Six slices sketched: core MVP → `rigor-sassc` (experience-building) → `rigor-ethon` → `rigor-rbnacl` + the `Plugin::FFI::BindingRecognizer` extension point → ffx target detection + diagnostics → `rigor-ffi-rzmq` (gated on ADR-10 per-call return-type precision). Grounding survey: [`docs/notes/20260525-ffi-library-survey.md`](notes/20260525-ffi-library-survey.md). Sibling `rigor-fiddle` plugin (Fiddle's DSL diverges enough to warrant separate authoring) is explicitly out of scope of ADR-30. No slice scheduled.
 
 ### Editor / IDE integration
@@ -145,20 +145,28 @@ Governance: [ADR-31](adr/31-contribution-and-supply-chain-policy.md) is the proj
 A browser-based playground — CodeMirror 6 editor with real-time
 diagnostics and annotate-style type comments — backed by a thin
 Rack/Puma API on Fly.io and a static Cloudflare Pages frontend.
-Five implementation slices: backend `/check` endpoint → frontend
-editor + lint markers → `/annotate` toggle view → `/type-of` hover
-→ (demand-driven) ruby.wasm migration once three gating conditions
-hold (official Ruby 4.0 WASM build + `prism`/`rbs` WASM packages
-+ Rigor test suite passing under WASM). No slice is scheduled;
-the playground is a parallel track that does not block the 0.2.x
-evaluation line. **ADR-29 WD4 amendment (2026-05-25)**:
-`rigor-rbs-inline` is loaded by default with
-`require_magic_comment: false` (per [ADR-32](adr/32-rbs-inline-comment-ingestion.md)
-WD10), so a pasted snippet with `# @rbs`-shaped comments is
-analysed as inline-RBS from the first request — this makes
-slice 1 of ADR-29 gated on slice 1 of ADR-32 (the
-`source_rbs_synthesizer:` manifest field + the `rigor-rbs-inline`
-plugin). See [ADR-29](adr/29-browser-playground.md).
+**Slices 1-4 LANDED in the v0.1.x cycle:** backend `/check`
+endpoint with `Tempfile`-per-request isolation + 64 KB cap +
+CORS preflight (slice 1); CodeMirror 6 editor with debounced
+lint markers (slice 2); `/annotate-lines` toggle view (slice 3);
+`/type-of` hover via CodeMirror's `hoverTooltip` extension
+(slice 4). Slice 1's Fly.io deploy artefacts (`playground/backend/Dockerfile`
++ `playground/backend/fly.toml`) and slice 2's Cloudflare Pages
+deploy config (`playground/frontend/_headers` + `_redirects` +
+README) ship as committable config; the actual `fly deploy` /
+`wrangler pages deploy` steps require credentials and are not
+part of any landed cycle. Slice 5 (ruby.wasm migration) stays
+demand-driven, gated on three external conditions (official
+Ruby 4.0 WASM build + `prism`/`rbs` WASM packages + Rigor test
+suite passing under WASM).
+
+The **ADR-29 WD4 amendment (2026-05-25)** is live: the backend
+pre-loads `rigor-rbs-inline` with `require_magic_comment: false`
+(per [ADR-32](adr/32-rbs-inline-comment-ingestion.md) WD10), so
+a snippet with `# @rbs`-shaped comments is analysed as inline-
+RBS from the first request — the seeded SAMPLE in `index.html`
+showcases this against the ADR-32 ascdesc pattern. See
+[ADR-29](adr/29-browser-playground.md).
 
 ### Open research questions queued in ADRs
 - **ADR-15 § OQ1** — per-Ractor `Cache::Store`-shared facade. Today each worker builds its own RBS env from cache; OQ1 explores sharing the in-memory env across workers via a shareable facade. Would lower the pool wall-clock crossover with sequential (currently around 1.3–1.8 K files).

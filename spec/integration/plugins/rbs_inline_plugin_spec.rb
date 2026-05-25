@@ -132,12 +132,14 @@ RSpec.describe "plugins/rigor-rbs-inline" do
   end
 
   describe "per-file cache (ADR-32 WD5)" do
-    # The shared cache_store from PluginHelpers is reused across
-    # the two invocations to confirm a cache hit on identical input.
     let(:cache_root) { Dir.mktmpdir("rigor-rbs-inline-cache-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: cache_root) }
+    let(:project_dir) { Dir.mktmpdir("rigor-rbs-inline-project-") }
 
-    after { FileUtils.remove_entry(cache_root) if File.directory?(cache_root) }
+    after do
+      FileUtils.remove_entry(cache_root) if File.directory?(cache_root)
+      FileUtils.remove_entry(project_dir) if File.directory?(project_dir)
+    end
 
     it "memoises synthesizer output across runs with unchanged source" do
       source = <<~RUBY
@@ -151,10 +153,18 @@ RSpec.describe "plugins/rigor-rbs-inline" do
 
         AscDesc.new.ascdesc(:bad)
       RUBY
-      run_plugin(source: source, cache_store: cache_store)
+      # Re-use the same `project_dir` across both runs so the
+      # cache key (which includes the source file path) is stable.
+      Rigor::Plugin.unregister!
+      run_plugin_in_dir(dir: project_dir, source: source, cache_store: cache_store)
+      writes_before = cache_store.stats.fetch(:writes)
       hits_before = cache_store.stats.fetch(:hits)
-      run_plugin(source: source, cache_store: cache_store)
+
+      Rigor::Plugin.unregister!
+      run_plugin_in_dir(dir: project_dir, source: source, cache_store: cache_store)
       hits_after = cache_store.stats.fetch(:hits)
+
+      expect(writes_before).to be > 0
       expect(hits_after).to be > hits_before
     end
   end

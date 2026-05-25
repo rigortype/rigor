@@ -42,7 +42,8 @@ module Rigor
       def self.compute(loader)
         Rigor::Environment::RbsLoader.build_env_for(
           libraries: loader.libraries,
-          signature_paths: loader.signature_paths
+          signature_paths: loader.signature_paths,
+          virtual_rbs: loader.respond_to?(:virtual_rbs) ? loader.virtual_rbs : []
         )
       end
 

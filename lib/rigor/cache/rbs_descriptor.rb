@@ -19,7 +19,7 @@ module Rigor
         Descriptor.new(
           gems: [rbs_gem_entry],
           files: file_entries(loader),
-          configs: [libraries_entry(loader)]
+          configs: [libraries_entry(loader), virtual_rbs_entry(loader)].compact
         )
       end
 
@@ -51,7 +51,26 @@ module Rigor
         )
       end
 
-      private_class_method :rbs_gem_entry, :file_entries, :libraries_entry
+      # ADR-32 WD5 — encode the loader's virtual_rbs set into a
+      # `ConfigEntry` so the env cache invalidates when a
+      # plugin-contributed synthesised RBS string changes (or
+      # appears for the first time). Returns nil when the
+      # loader has no virtual_rbs entries, so callers without
+      # any synthesizer-emitting plugin pay zero descriptor
+      # cost.
+      def self.virtual_rbs_entry(loader)
+        return nil unless loader.respond_to?(:virtual_rbs)
+        return nil if loader.virtual_rbs.nil? || loader.virtual_rbs.empty?
+
+        sorted_pairs = loader.virtual_rbs.sort_by { |name, _content| name }
+        joined = sorted_pairs.map { |name, content| "#{name}\0#{content}" }.join("\n\0\n")
+        Descriptor::ConfigEntry.new(
+          key: "rbs.virtual_rbs",
+          value_hash: Digest::SHA256.hexdigest(joined)
+        )
+      end
+
+      private_class_method :rbs_gem_entry, :file_entries, :libraries_entry, :virtual_rbs_entry
     end
   end
 end

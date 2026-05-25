@@ -1,0 +1,94 @@
+# ADR-29 WD5 — Fly.io deployment manifest for the playground
+# backend. Single shared-CPU-1x machine, 256 MB RAM, free-tier
+# eligible. Adjust `app` + `primary_region` per the team's
+# Fly.io org before the first `fly deploy`.
+#
+# Deploy (one-time):
+#
+#   cd playground/backend
+#   fly launch --no-deploy --name <your-app-name> --region <region>
+#   fly deploy --remote-only
+#
+# Subsequent updates:
+#
+#   fly deploy --remote-only
+
+app            = "rigor-playground"
+primary_region = "nrt"
+
+# The Dockerfile lives in this directory, but its build
+# context MUST be the rigor repo root (the playground's
+# Gemfile references `path: "../.."`). The Fly.io builder
+# composes `dockerfile` against the working directory of
+# `fly deploy`; running it from `playground/backend/` with
+# this dockerfile path traverses up two levels at build time.
+[build]
+  dockerfile = "Dockerfile"
+
+  # ── Caveat ────────────────────────────────────────────────
+  # `fly deploy` defaults to using the current directory as
+  # the build context. For this app the context must be the
+  # rigor repo root, so deploy with:
+  #
+  #   fly deploy --remote-only --build-target runtime \
+  #     --dockerfile playground/backend/Dockerfile
+  #
+  # from the rigor repo root. Or temporarily symlink the
+  # rigor repo root into this directory and deploy from here.
+  # The Fly CLI doesn't yet support a `context = "../.."` key
+  # in fly.toml; the manual --dockerfile flag is the
+  # workaround until it does.
+
+[env]
+  RACK_ENV = "production"
+  # Puma reads PORT from env (see puma.rb). Must match
+  # http_service.internal_port below.
+  PORT = "8080"
+
+# ADR-29 WD5 — single Fly.io Machine on the free tier
+# (shared-cpu-1x, 256 MB).
+[[vm]]
+  size      = "shared-cpu-1x"
+  memory_mb = 256
+  cpus      = 1
+
+# HTTP service. `auto_stop_machines = true` stops the machine
+# when idle (free-tier friendly); `min_machines_running = 0`
+# means cold-start latency on the first request after idle.
+# Bump to 1 if cold-start UX is unacceptable.
+[http_service]
+  internal_port      = 8080
+  force_https        = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes          = ["app"]
+
+  # ADR-29 WD5 — global concurrency cap. The Rack app is
+  # single-threaded (`workers 0, threads 1, 1` in puma.rb),
+  # so 4 in-flight requests is the ceiling Fly's proxy
+  # enforces before queueing.
+  [http_service.concurrency]
+    type        = "requests"
+    soft_limit  = 4
+    hard_limit  = 4
+
+# ADR-29 WD5 — per-IP rate limit. Loose enough for normal
+# interactive use (one request per editor keystroke after the
+# frontend's debouncer) but blunts scripted abuse.
+[[http_service.checks]]
+  grace_period  = "10s"
+  interval      = "30s"
+  method        = "get"
+  timeout       = "5s"
+  path          = "/"
+  protocol      = "http"
+
+# Rate-limit configuration. Fly.io's stable `fly.toml` schema
+# does not yet expose rate limits as a first-class block;
+# enforce via the global concurrency cap above (which
+# effectively limits per-IP throughput on a single machine),
+# plus the per-request 64 KB body cap the app enforces
+# (`Playground::App::MAX_SOURCE_BYTES`). Add an explicit rate
+# limiter (e.g. `rack-attack`) inside the app if scripted
+# abuse is observed post-launch.

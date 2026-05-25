@@ -114,8 +114,75 @@ jobs:
           key: rigor-cache-${{ runner.os }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml', 'Gemfile.lock') }}
           restore-keys: rigor-cache-${{ runner.os }}-
 
+      # Run once with --format json so we get both structured output for
+      # the warm-vs-cold diff and a human-readable summary in the CI log.
+      # continue-on-error keeps the job alive long enough to upload the
+      # artifact even when errors are found; we re-raise at the end.
       - name: Run rigor self-check
-        run: make check
+        id: check
+        continue-on-error: true
+        run: |
+          bundle exec exe/rigor check --format json lib > rigor-raw.json
+          rigor_exit=$?
+          # Print human-readable diagnostic lines to the CI log.
+          jq -r '.diagnostics[] |
+            "\(.path):\(.line):\(.column): \(.severity): \(.message)"' \
+            rigor-raw.json >&2 || true
+          # Normalize for comparison: keep only stable fields, sort
+          # deterministically so output order cannot produce a false diff.
+          jq '[.diagnostics[] | {path, line, column, severity, rule, message}]
+              | sort_by(.path, .line, .column, .rule)' \
+            rigor-raw.json > rigor-diagnostics-${{ matrix.cache }}.json || true
+          exit $rigor_exit
+
+      # Upload even when the check found errors so the diff job always
+      # has both artifacts to compare.
+      - name: Upload diagnostics artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rigor-diagnostics-${{ matrix.cache }}
+          path: rigor-diagnostics-${{ matrix.cache }}.json
+          retention-days: 1
+
+      - name: Fail if self-check found errors
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "rigor self-check found errors — see diagnostic output above"
+          exit 1
+
+  # ── 4. Warm-vs-cold diagnostic diff ─────────────────────────────
+  # The two self-check variants must agree on every diagnostic.  Any
+  # difference means the cache is altering analysis results — a bug.
+  # Runs whenever self-check was not outright cancelled (so the diff
+  # still executes when one variant failed, surfacing a discrepancy).
+  self-check-diff:
+    name: Self-check diff (warm == cold)
+    needs: self-check
+    runs-on: ubuntu-latest
+    if: always() && needs.self-check.result != 'cancelled'
+    steps:
+      - name: Download warm diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          name: rigor-diagnostics-warm
+          path: .
+
+      - name: Download cold diagnostics
+        uses: actions/download-artifact@v4
+        with:
+          name: rigor-diagnostics-cold
+          path: .
+
+      - name: Assert warm == cold
+        run: |
+          if diff -u rigor-diagnostics-warm.json rigor-diagnostics-cold.json; then
+            echo "warm and cold diagnostics are identical"
+          else
+            echo "Cache-dependent diagnostics detected — warm and cold differ."
+            echo "A stale or corrupt cache entry is producing different results."
+            exit 1
+          fi
 
   # ── Fan-in: single required-check target for branch protection ───
   # Configure branch protection to require only "CI required" rather
@@ -123,7 +190,7 @@ jobs:
   # gated without touching protection rules.
   required:
     name: CI required
-    needs: [test, lint, self-check]
+    needs: [test, lint, self-check, self-check-diff]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -132,9 +199,10 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           LINT_RESULT: ${{ needs.lint.result }}
           SELF_CHECK_RESULT: ${{ needs.self-check.result }}
+          SELF_CHECK_DIFF_RESULT: ${{ needs.self-check-diff.result }}
         run: |
           failed=0
-          for job_result in "$TEST_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT"; do
+          for job_result in "$TEST_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT"; do
             if [[ "$job_result" != "success" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

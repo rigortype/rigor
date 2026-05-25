@@ -27,7 +27,7 @@ jobs:
           - "4.0"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: false
 
@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: false
 
@@ -61,7 +61,7 @@ jobs:
       # gem-version or source change that does not touch linting rules
       # reuses the warm cache and skips re-inspecting unchanged files.
       - name: Restore RuboCop cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/rubocop_cache
           key: rubocop-${{ runner.os }}-${{ hashFiles('.rubocop.yml', '.rubocop_todo.yml', 'Gemfile.lock') }}
@@ -89,7 +89,7 @@ jobs:
         cache: [warm, cold]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: false
 
@@ -108,7 +108,7 @@ jobs:
       # Skipped entirely for the cold variant — no restore, no save.
       - name: Restore Rigor analysis cache
         if: matrix.cache == 'warm'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .rigor/cache
           key: rigor-cache-${{ runner.os }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml', 'Gemfile.lock') }}

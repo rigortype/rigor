@@ -43,14 +43,15 @@ module Rigor
       attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
                   :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
                   :heredoc_templates, :trait_registries, :external_files, :hkt_registrations,
-                  :hkt_definitions, :signature_paths, :protocol_contracts
+                  :hkt_definitions, :signature_paths, :protocol_contracts, :source_rbs_synthesizer
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
         produces: [], consumes: [], owns_receivers: [], open_receivers: [], type_node_resolvers: [],
         block_as_methods: [], heredoc_templates: [], trait_registries: [], external_files: [],
-        hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: []
+        hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
+        source_rbs_synthesizer: nil
       )
         validate_id!(id)
         validate_version!(version)
@@ -68,10 +69,12 @@ module Rigor
         validate_hkt_definitions!(hkt_definitions)
         validate_signature_paths!(signature_paths)
         validate_protocol_contracts!(protocol_contracts)
+        validate_source_rbs_synthesizer!(source_rbs_synthesizer)
 
         assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
                       open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
-                      external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts)
+                      external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
+                      source_rbs_synthesizer)
         freeze
       end
 
@@ -80,7 +83,8 @@ module Rigor
       # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
       def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
                         open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
-                        external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts)
+                        external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
+                        source_rbs_synthesizer)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
@@ -99,6 +103,7 @@ module Rigor
         @hkt_definitions = hkt_definitions.dup.freeze
         @signature_paths = signature_paths.map { |p| p.to_s.dup.freeze }.freeze
         @protocol_contracts = protocol_contracts.dup.freeze
+        @source_rbs_synthesizer = source_rbs_synthesizer
       end
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
@@ -146,7 +151,8 @@ module Rigor
           "hkt_registrations" => hkt_registrations.map(&:to_h),
           "hkt_definitions" => hkt_definitions.map { |d| { "uri" => d.uri, "params" => d.params } },
           "signature_paths" => signature_paths,
-          "protocol_contracts" => protocol_contracts.map(&:to_h)
+          "protocol_contracts" => protocol_contracts.map(&:to_h),
+          "source_rbs_synthesizer" => source_rbs_synthesizer&.class&.name
         }
       end
 
@@ -387,6 +393,28 @@ module Rigor
         raise ArgumentError,
               "plugin manifest protocol_contracts must be an Array of " \
               "Rigor::Plugin::ProtocolContract instances, got #{entries.inspect}"
+      end
+
+      # ADR-32 WD4 — `source_rbs_synthesizer:` declares a callable
+      # the engine invokes once per analysed Ruby source file at
+      # env-build time. The callable receives a source file path
+      # (String) and returns either an RBS source String to merge
+      # into the analysis environment or `nil` (no contribution
+      # for this file). Distinct from `signature_paths:` (static,
+      # bundled RBS): the synthesizer derives RBS from project
+      # source on each run.
+      #
+      # The value is held as-given (no dup / freeze) because a
+      # callable instance is opaque to the manifest; the plugin
+      # author is responsible for thread-/Ractor-safety of any
+      # captured state (per ADR-15).
+      def validate_source_rbs_synthesizer!(synthesizer)
+        return if synthesizer.nil?
+        return if synthesizer.respond_to?(:call)
+
+        raise ArgumentError,
+              "plugin manifest source_rbs_synthesizer must respond to :call, " \
+              "got #{synthesizer.inspect}"
       end
 
       def coerce_consumes(consumes)

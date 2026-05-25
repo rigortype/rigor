@@ -93,15 +93,20 @@ module Rigor
       #   emits one `:info` `fallback` diagnostic per
       #   directly-unrecognised node, mirroring
       #   {Rigor::Analysis::Runner#explain_diagnostics}.
-      def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength
+      def initialize(configuration:, cache_store: nil, # rubocop:disable Metrics/MethodLength,Metrics/ParameterLists
                      plugin_blueprints: [], explain: false, buffer: nil,
-                     synthetic_method_index: nil, project_patched_methods: nil)
+                     synthetic_method_index: nil, project_patched_methods: nil,
+                     source_files: [])
         @configuration = configuration
         @cache_store = cache_store
         @explain = explain
         @buffer = buffer
         @synthetic_method_index = synthetic_method_index
         @project_patched_methods = project_patched_methods
+        # ADR-32 WD4 — full project file list (frozen
+        # Array<String>) for env-build-time invocation of any
+        # loaded plugin's `source_rbs_synthesizer` callable.
+        @source_files = source_files
 
         # NOTE: `Inference::MethodDispatcher::FileFolding.fold_platform_specific_paths`
         # is process-global state. Writing it from a non-main
@@ -138,7 +143,8 @@ module Rigor
           rbs_collection_lockfile: configuration.rbs_collection_lockfile,
           rbs_collection_auto_detect: configuration.rbs_collection_auto_detect,
           synthetic_method_index: @synthetic_method_index,
-          project_patched_methods: @project_patched_methods
+          project_patched_methods: @project_patched_methods,
+          source_files: @source_files
         )
         @prepare_diagnostics = run_plugin_prepare.freeze
       end

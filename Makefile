@@ -89,7 +89,7 @@ test-parallel:
 	bundle exec rake spec_parallel
 
 lint:
-	bundle exec rubocop
+	bundle exec rubocop lib/ spec/ plugins/ examples/
 
 check:
 	bundle exec exe/rigor check lib

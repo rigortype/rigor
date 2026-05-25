@@ -160,6 +160,24 @@ module Rigor
         protocol_contracts.select { |contract| path_matches_glob?(contract.path_glob, path_s) }
       end
 
+      # ADR-32 WD4 — flat ordered list of `[plugin_id, callable]`
+      # pairs for every loaded plugin that declares a
+      # `source_rbs_synthesizer:` in its manifest. The engine
+      # invokes each callable once per analysed Ruby source file
+      # at env-build time; non-nil return strings are merged into
+      # the RBS environment as virtual signature sources. The
+      # `plugin_id` is carried alongside the callable so caching
+      # (slice 2) and failure diagnostics (WD6) can attribute the
+      # contribution back to its plugin.
+      def source_rbs_synthesizers
+        plugins.filter_map do |plugin|
+          synthesizer = plugin.manifest.source_rbs_synthesizer
+          next nil if synthesizer.nil?
+
+          [plugin.manifest.id, synthesizer]
+        end
+      end
+
       FNMATCH_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
       private_constant :FNMATCH_FLAGS
 

@@ -56,7 +56,7 @@ module Rigor
         # run. The gem stubs are intentionally read-only and
         # appended LAST so user-supplied `signature_paths` win on
         # name conflicts.
-        def build_env_for(libraries:, signature_paths:)
+        def build_env_for(libraries:, signature_paths:, virtual_rbs: [])
           rbs_loader = RBS::EnvironmentLoader.new
           libraries.each do |library|
             next unless rbs_loader.has_library?(library: library, version: nil)
@@ -70,7 +70,36 @@ module Rigor
           vendored_gem_sig_paths.each do |path|
             rbs_loader.add(path: path) if path.directory?
           end
-          RBS::Environment.from_loader(rbs_loader).resolve_type_names
+          env = RBS::Environment.from_loader(rbs_loader)
+          add_virtual_rbs(env, virtual_rbs)
+          env.resolve_type_names
+        end
+
+        # ADR-32 WD4 — merge synthesised-from-source RBS strings
+        # into the freshly-built environment. Each entry is a
+        # `[virtual_filename, rbs_source]` pair. `virtual_filename`
+        # is purely for diagnostic provenance (RBS parse errors
+        # cite it) — it is not a real file path. Per WD6 the
+        # synthesizer-emit path is responsible for catching its
+        # own parse errors and returning `nil` rather than
+        # garbage; this method assumes its input is parseable
+        # and only rescues `RBS::ParsingError` as a fail-soft.
+        def add_virtual_rbs(env, virtual_rbs)
+          return if virtual_rbs.nil? || virtual_rbs.empty?
+
+          virtual_rbs.each do |filename, content|
+            next if content.nil? || content.empty?
+
+            buffer = ::RBS::Buffer.new(name: filename.to_s, content: content.to_s)
+            _, directives, decls = ::RBS::Parser.parse_signature(buffer)
+            source = ::RBS::Source::RBS.new(buffer, directives || [], decls || [])
+            env.add_source(source)
+          rescue ::RBS::BaseError
+            # WD6 fail-soft: a single broken virtual RBS contribution
+            # does not pull the whole env down. The plugin layer
+            # records a `source-rbs-synthesis-failed` info diagnostic
+            # in slice 2; here we just skip the entry.
+          end
         end
 
         # Per-gem `data/vendored_gem_sigs/<gem>/` directories that
@@ -95,7 +124,7 @@ module Rigor
         end
       end
 
-      attr_reader :libraries, :signature_paths, :cache_store
+      attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs
 
       # @param libraries [Array<String, Symbol>] stdlib library names to
       #   load on top of core (e.g., `["pathname", "json"]`). Empty by
@@ -114,10 +143,18 @@ module Rigor
       #   reflection artefacts). Pass `nil` (the default) to skip
       #   the cache entirely; the runner threads its own Store
       #   through here when caching is enabled.
-      def initialize(libraries: [], signature_paths: [], cache_store: nil)
+      # @param virtual_rbs [Array<[String, String]>] ADR-32 WD4 —
+      #   `[virtual_filename, rbs_source]` pairs synthesised from
+      #   project source by a plugin's
+      #   `Manifest#source_rbs_synthesizer`. Merged into the env
+      #   after `signature_paths:` and the vendored stubs. Pass
+      #   `[]` (the default) when no synthesizer-emitting plugin
+      #   is loaded.
+      def initialize(libraries: [], signature_paths: [], cache_store: nil, virtual_rbs: [])
         @libraries = libraries.map(&:to_s).freeze
         @signature_paths = signature_paths.map { |p| Pathname(p) }.freeze
         @cache_store = cache_store
+        @virtual_rbs = virtual_rbs.map { |name, content| [name.to_s.dup.freeze, content.to_s.dup.freeze].freeze }.freeze
         # Per-loader memoization bucket. Held as a single
         # mutable Hash so the loader instance itself can be
         # `.freeze`d (per ADR-15 reflection-facade contract)
@@ -642,7 +679,11 @@ module Rigor
       end
 
       def build_env
-        self.class.build_env_for(libraries: @libraries, signature_paths: @signature_paths)
+        self.class.build_env_for(
+          libraries: @libraries,
+          signature_paths: @signature_paths,
+          virtual_rbs: @virtual_rbs
+        )
       end
 
       def build_instance_definition(class_name)

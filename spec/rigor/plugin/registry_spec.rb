@@ -206,4 +206,39 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(registry.contracts_for_path("lib/services/widget.rb")).to eq([])
     end
   end
+
+  describe "#source_rbs_synthesizers (ADR-32 WD4)" do
+    let(:synth_plugin_class) do
+      synth = ->(_path) { "# synthesised" }
+      Class.new(Rigor::Plugin::Base) do
+        manifest(id: "synth-spec-plugin", version: "0.0.1", source_rbs_synthesizer: synth)
+      end
+    end
+
+    it "is empty when no plugin declares source_rbs_synthesizer" do
+      expect(described_class::EMPTY.source_rbs_synthesizers).to eq([])
+      registry = described_class.new(plugins: [plugin_class.new(services: services)])
+      expect(registry.source_rbs_synthesizers).to eq([])
+    end
+
+    it "aggregates [plugin_id, callable] pairs across loaded plugins" do
+      plugin = synth_plugin_class.new(services: services)
+      registry = described_class.new(plugins: [plugin])
+
+      pairs = registry.source_rbs_synthesizers
+      expect(pairs.size).to eq(1)
+      expect(pairs.first.first).to eq("synth-spec-plugin")
+      expect(pairs.first.last).to respond_to(:call)
+    end
+
+    it "skips plugins whose manifest carries no synthesizer" do
+      mixed = [
+        synth_plugin_class.new(services: services),
+        plugin_class.new(services: services)
+      ]
+      registry = described_class.new(plugins: mixed)
+      pairs = registry.source_rbs_synthesizers
+      expect(pairs.map(&:first)).to eq(["synth-spec-plugin"])
+    end
+  end
 end

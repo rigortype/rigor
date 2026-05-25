@@ -42,6 +42,13 @@ Gem::Specification.new do |spec|
 
   spec.add_development_dependency "parallel_tests", ">= 4.0", "< 6.0"
   spec.add_development_dependency "rake", ">= 13.0", "< 15.0"
+  # ADR-32 — the `rigor-rbs-inline` plugin under `plugins/`
+  # depends on the upstream `rbs-inline` gem at runtime. The
+  # production dependency lives on the plugin's own gemspec;
+  # listed here as a development dep so the repo's integration
+  # spec suite can exercise the plugin end-to-end without
+  # users of `rigortype` paying the cost (ADR-0 zero-runtime-dep).
+  spec.add_development_dependency "rbs-inline", ">= 0.5", "< 1.0"
   spec.add_development_dependency "rspec", ">= 3.13", "< 4.0"
   spec.add_development_dependency "rubocop", ">= 1.70", "< 2.0"
   spec.add_development_dependency "rubocop-rake", ">= 0.6", "< 1.0"

@@ -294,7 +294,7 @@ module Rigor
         if pool_mode?
           dispatch_pool(files)
         else
-          environment = resolve_sequential_environment
+          environment = resolve_sequential_environment(source_files: files)
           result = files.flat_map { |path| analyze_file(path, environment) }
           if @collect_stats
             loader = environment.rbs_loader
@@ -311,8 +311,8 @@ module Rigor
       # runner's diagnostics) when present; otherwise builds a
       # fresh Environment per-call via {#build_runner_environment}
       # — preserving the pre-override behaviour bit-for-bit.
-      def resolve_sequential_environment
-        return build_runner_environment unless @environment_override
+      def resolve_sequential_environment(source_files: [])
+        return build_runner_environment(source_files: source_files) unless @environment_override
 
         @environment_override.attach_reporters!(
           rbs_extended_reporter: @rbs_extended_reporter,
@@ -505,7 +505,14 @@ module Rigor
       # Coordinator-side Environment used by the sequential code
       # path. Pool mode builds one Environment per worker inside
       # the worker Ractor's body instead.
-      def build_runner_environment
+      #
+      # ADR-32 WD4 — `source_files:` is threaded down so that
+      # `Environment.for_project` can invoke each loaded plugin's
+      # `source_rbs_synthesizer` callable per project source file
+      # at env-build time. Defaults to `[]` for callers that don't
+      # have a file list yet (e.g. pre-pass-only build paths); in
+      # that case no synthesised RBS is contributed.
+      def build_runner_environment(source_files: [])
         Environment.for_project(
           libraries: @configuration.libraries,
           signature_paths: @configuration.signature_paths,
@@ -520,7 +527,8 @@ module Rigor
           rbs_collection_lockfile: @configuration.rbs_collection_lockfile,
           rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect,
           synthetic_method_index: @synthetic_method_index,
-          project_patched_methods: @project_patched_methods
+          project_patched_methods: @project_patched_methods,
+          source_files: source_files
         )
       end
 
@@ -559,7 +567,7 @@ module Rigor
       # which dedupe on the same keys as a single-session run
       # would. Net result: reporter state is identical to the
       # sequential path.
-      def analyze_files_in_pool(files) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity
+      def analyze_files_in_pool(files) # rubocop:disable Metrics/MethodLength,Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
         # Pre-warm class-level lazy memos on the MAIN Ractor.
         # `Environment::ClassRegistry.default` is the
         # default kwarg threaded through `Environment.new`
@@ -591,15 +599,22 @@ module Rigor
         cache_root = @cache_store&.root
         blueprints = @plugin_registry.blueprints
         explain = @explain
+        # ADR-32 WD4 — the full project file list travels into
+        # every Ractor worker so each worker's WorkerSession
+        # can invoke loaded plugins' source_rbs_synthesizers at
+        # env-build time. The list is a frozen Array<String>;
+        # cheaply shareable.
+        shareable_source_files = files.map { |path| path.to_s.dup.freeze }.freeze
 
         pool = Array.new(@workers) do
-          Ractor.new(configuration, cache_root, blueprints, explain) do |configuration, cache_root, blueprints, explain|
+          Ractor.new(configuration, cache_root, blueprints, explain, shareable_source_files) do |configuration, cache_root, blueprints, explain, shareable_source_files| # rubocop:disable Layout/LineLength
             cache_store = cache_root ? Rigor::Cache::Store.new(root: cache_root) : nil
             session = Rigor::Analysis::WorkerSession.new(
               configuration: configuration,
               cache_store: cache_store,
               plugin_blueprints: blueprints,
-              explain: explain
+              explain: explain,
+              source_files: shareable_source_files
             )
             main = Ractor.main
             main.send([:prepare, session.prepare_diagnostics])
@@ -665,7 +680,8 @@ module Rigor
           plugin_blueprints: @plugin_registry.blueprints,
           explain: @explain,
           synthetic_method_index: @synthetic_method_index,
-          project_patched_methods: @project_patched_methods
+          project_patched_methods: @project_patched_methods,
+          source_files: files
         )
         # Force the full RBS load on the parent so children
         # copy-on-write inherit a warm Environment rather than each

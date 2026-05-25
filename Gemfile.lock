@@ -29,6 +29,9 @@ GEM
       logger
       prism (>= 1.6.0)
       tsort
+    rbs-inline (0.14.0)
+      prism (>= 0.29)
+      rbs (~> 4.0)
     regexp_parser (2.12.0)
     rspec (3.13.2)
       rspec-core (~> 3.13.0)
@@ -76,6 +79,7 @@ PLATFORMS
 DEPENDENCIES
   parallel_tests (>= 4.0, < 6.0)
   rake (>= 13.0, < 15.0)
+  rbs-inline (>= 0.5, < 1.0)
   rigortype!
   rspec (>= 3.13, < 4.0)
   rubocop (>= 1.70, < 2.0)
@@ -98,6 +102,7 @@ CHECKSUMS
   rainbow (3.1.1) sha256=039491aa3a89f42efa1d6dec2fc4e62ede96eb6acd95e52f1ad581182b79bc6a
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
   rbs (4.0.2) sha256=af75671e66cd03434cc546622741ebf83f6197ec4328375805306330bf78ef25
+  rbs-inline (0.14.0) sha256=eaf47b46690d63acddab1f6804c9cc205a4bc78e637cfc421a0b1239874ef51c
   regexp_parser (2.12.0) sha256=35a916a1d63190ab5c9009457136ae5f3c0c7512d60291d0d1378ba18ce08ebb
   rigortype (0.1.9)
   rspec (3.13.2) sha256=206284a08ad798e61f86d7ca3e376718d52c0bc944626b2349266f239f820587

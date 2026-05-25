@@ -9,6 +9,13 @@ hosted. Two approaches were evaluated: a fully in-browser WASM runtime
 gating conditions (WD6) defines when migration to in-browser WASM
 becomes viable.
 
+**Amended 2026-05-25**: WD4 flips the default plugin set from
+empty to `rigor-rbs-inline` enabled (per [ADR-32](32-rbs-inline-comment-ingestion.md)
+WD10, with `require_magic_comment: false`) so that pasted
+snippets carrying `# @rbs`-shaped comments are analysed as
+inline-RBS from the first request, with no user-side
+configuration.
+
 ## Context
 
 A publicly accessible playground lets users try Rigor against an
@@ -239,9 +246,30 @@ Each HTTP request is handled in isolation:
 5. Input is capped at **64 KB** of source text. The UI enforces this
    client-side; the backend enforces it server-side with a 413 response.
 
-The backend does not load any plugins by default. The playground's
-`.rigor.yml` (embedded in the backend) is a fixed minimal config:
-`plugins: []`, `severity_profile: strict`.
+The backend loads **`rigor-rbs-inline`** by default (per
+[ADR-32](32-rbs-inline-comment-ingestion.md) WD10) so that a
+pasted snippet carrying `# @rbs`-shaped comments is analysed as
+inline-RBS the moment the page loads — no plugin configuration
+to discover, no `# rbs_inline: enabled` magic comment to type.
+The plugin's `require_magic_comment:` config key is set to
+`false` for the same reason: the playground is a single-buffer
+exploration surface, so the multi-file-project friction WD2 of
+ADR-32 mitigates does not exist.
+
+The playground's `.rigor.yml` (embedded in the backend) is a
+fixed minimal config:
+
+```yaml
+plugins:
+  - id: rigor-rbs-inline
+    config:
+      require_magic_comment: false
+severity_profile: strict
+```
+
+No other plugins are loaded by default. A future slice may
+expose a plugin-picker UI for the user to toggle additional
+plugins per request; ADR-29 v1 keeps the surface narrow.
 
 ### WD5 — Backend deployment: Fly.io free-tier (single machine)
 
@@ -308,7 +336,7 @@ track that does not block the `0.2.x` evaluation line.
 
 | Slice | Scope |
 | --- | --- |
-| 1 | `playground/backend/` — Rack application, `/check` endpoint, `Tempfile`-per-request isolation, 10 s timeout, 64 KB cap, fixed `.rigor.yml`. Deployed to Fly.io. |
+| 1 | `playground/backend/` — Rack application, `/check` endpoint, `Tempfile`-per-request isolation, 10 s timeout, 64 KB cap, fixed `.rigor.yml` (loads `rigor-rbs-inline` with `require_magic_comment: false` per WD4 / ADR-32 WD10). Deployed to Fly.io. Slice 1 is gated on ADR-32 slice 1 (the `source_rbs_synthesizer:` manifest field and the `rigor-rbs-inline` plugin existing). |
 | 2 | `playground/frontend/` — CodeMirror 6, debounced `/check` calls, lint markers, Cloudflare Pages deploy config. |
 | 3 | `/annotate` endpoint + frontend toggle view. |
 | 4 | `/type-of` endpoint + frontend hover integration. |

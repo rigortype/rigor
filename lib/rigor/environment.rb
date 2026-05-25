@@ -213,7 +213,8 @@ module Rigor
                       bundler_bundle_path: nil, bundler_auto_detect: false,
                       bundler_lockfile: nil,
                       rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
-                      synthetic_method_index: nil, project_patched_methods: nil)
+                      synthetic_method_index: nil, project_patched_methods: nil,
+                      source_files: [])
         resolved_paths = signature_paths || default_signature_paths(root)
         # O4 MVP — append per-gem `sig/` directories discovered
         # under the target project's bundler install root. Empty
@@ -262,10 +263,19 @@ module Rigor
         plugin_sig_paths = plugin_registry ? plugin_registry.signature_paths.map(&:to_s) : []
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths + collection_paths
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
+        # ADR-32 WD4 — invoke each loaded plugin's
+        # `source_rbs_synthesizer` once per project source file
+        # and collect non-nil `[filename, rbs_source]` pairs.
+        # The synthesizer-emitting plugin (currently only
+        # `rigor-rbs-inline`) is responsible for its own
+        # fail-soft on parse errors per WD6; this loop only
+        # filters `nil` returns.
+        virtual_rbs = collect_virtual_rbs(plugin_registry, source_files)
         loader = RbsLoader.new(
           libraries: merged_libraries,
           signature_paths: loader_signature_paths,
-          cache_store: cache_store
+          cache_store: cache_store,
+          virtual_rbs: virtual_rbs
         )
         # ADR-20 slice 2c + 2e — seed hkt_registry with the
         # bundled builtins. The Environment's `#hkt_registry`
@@ -294,6 +304,51 @@ module Rigor
       def default_signature_paths(root)
         sig = Pathname(root) / DEFAULT_PROJECT_SIG_DIR
         sig.directory? ? [sig] : []
+      end
+
+      # ADR-32 WD4 — for each project source file, invoke every
+      # plugin-registered synthesizer once and collect non-nil
+      # returns. The returned array is `[[virtual_filename,
+      # rbs_source], ...]`; the loader threads it through to
+      # `RbsLoader.new(virtual_rbs: ...)`.
+      #
+      # `virtual_filename` is the source file path prefixed with
+      # the plugin id so RBS parse errors point back to the
+      # contributing plugin in their diagnostic location string.
+      #
+      # When no plugin declares a synthesizer (the common case),
+      # the registry's `source_rbs_synthesizers` is empty and
+      # this method short-circuits to `[]` without walking the
+      # file list.
+      def collect_virtual_rbs(plugin_registry, source_files)
+        return [] if plugin_registry.nil?
+
+        synthesizers = plugin_registry.source_rbs_synthesizers
+        return [] if synthesizers.empty?
+        return [] if source_files.nil? || source_files.empty?
+
+        result = []
+        source_files.each do |path|
+          synthesizers.each do |plugin_id, callable|
+            rbs_source = invoke_synthesizer_safely(callable, path)
+            next if rbs_source.nil? || rbs_source.empty?
+
+            virtual_name = "virtual:#{plugin_id}:#{path}"
+            result << [virtual_name, rbs_source]
+          end
+        end
+        result
+      end
+
+      def invoke_synthesizer_safely(callable, path)
+        callable.call(path.to_s)
+      rescue StandardError
+        # WD6 fail-soft — a synthesizer that raises does NOT
+        # crash analysis. Slice 2 records this as a
+        # `source-rbs-synthesis-failed` info diagnostic; slice
+        # 1's contract is "no analysis crash on a misbehaving
+        # synthesizer".
+        nil
       end
     end
 

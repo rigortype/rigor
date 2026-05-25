@@ -216,6 +216,43 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(m.to_h["protocol_contracts"]).to eq([contract.to_h])
     end
 
+    it "accepts source_rbs_synthesizer as a callable (ADR-32 WD4)" do
+      synth = ->(path) { "# from #{path}" }
+      m = described_class.new(id: "ri", version: "0.1.0", source_rbs_synthesizer: synth)
+      expect(m.source_rbs_synthesizer).to be(synth)
+    end
+
+    it "accepts any object that responds to :call as source_rbs_synthesizer" do
+      callable = Object.new
+      def callable.call(_path)
+        nil
+      end
+      m = described_class.new(id: "ri", version: "0.1.0", source_rbs_synthesizer: callable)
+      expect(m.source_rbs_synthesizer).to be(callable)
+    end
+
+    it "defaults source_rbs_synthesizer to nil" do
+      m = described_class.new(id: "ri", version: "0.1.0")
+      expect(m.source_rbs_synthesizer).to be_nil
+    end
+
+    it "rejects source_rbs_synthesizer that does not respond to :call" do
+      expect do
+        described_class.new(id: "ri", version: "0.1.0", source_rbs_synthesizer: "not callable")
+      end.to raise_error(ArgumentError, /source_rbs_synthesizer/)
+    end
+
+    it "round-trips source_rbs_synthesizer through #to_h as the class name" do
+      synth = ->(_path) {}
+      m = described_class.new(id: "ri", version: "0.1.0", source_rbs_synthesizer: synth)
+      expect(m.to_h["source_rbs_synthesizer"]).to eq("Proc")
+    end
+
+    it "round-trips a nil source_rbs_synthesizer through #to_h as nil" do
+      m = described_class.new(id: "ri", version: "0.1.0")
+      expect(m.to_h["source_rbs_synthesizer"]).to be_nil
+    end
+
     it "coerces consumes hashes into Consumption value objects" do
       m = described_class.new(
         id: "ap",

@@ -1,0 +1,16 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+ruby ">= 4.0.0", "< 4.1"
+
+# Mirror the main project's runtime dependencies so tapioca can
+# load and introspect each gem to generate accurate RBI files.
+gem "language_server-protocol", ">= 3.17", "< 4.0"
+gem "prism", ">= 1.0", "< 2.0"
+gem "rbs", ">= 3.0", "< 5.0"
+
+# Sorbet toolchain — isolated from the project Gemfile,
+# following the same pattern as tool/steep/Gemfile.
+gem "sorbet"
+gem "tapioca", require: false

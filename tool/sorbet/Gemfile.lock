@@ -1,0 +1,101 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    benchmark (0.5.0)
+    erubi (1.13.1)
+    language_server-protocol (3.17.0.5)
+    logger (1.7.0)
+    netrc (0.11.0)
+    parallel (2.1.0)
+    prism (1.9.0)
+    rbi (0.3.12)
+      prism (~> 1.0)
+      rbs (>= 4.0.1)
+    rbs (4.0.2)
+      logger
+      prism (>= 1.6.0)
+      tsort
+    require-hooks (0.4.0)
+    rexml (3.4.4)
+    rubydex (0.2.3-aarch64-linux)
+    rubydex (0.2.3-arm64-darwin)
+    rubydex (0.2.3-x86_64-darwin)
+    rubydex (0.2.3-x86_64-linux)
+    sorbet (0.6.13249)
+      sorbet-static (= 0.6.13249)
+    sorbet-runtime (0.6.13249)
+    sorbet-static (0.6.13249-aarch64-linux)
+    sorbet-static (0.6.13249-universal-darwin)
+    sorbet-static (0.6.13249-x86_64-linux)
+    sorbet-static-and-runtime (0.6.13249)
+      sorbet (= 0.6.13249)
+      sorbet-runtime (= 0.6.13249)
+    spoom (1.7.15)
+      erubi (>= 1.10.0)
+      prism (>= 0.28.0)
+      rbi (>= 0.3.3)
+      rbs (>= 4.0.0.dev.5)
+      rexml (>= 3.2.6)
+      sorbet-static-and-runtime (>= 0.5.10187)
+      thor (>= 0.19.2)
+    tapioca (0.19.1)
+      benchmark
+      bundler (>= 2.2.25)
+      netrc (>= 0.11.0)
+      parallel (>= 1.21.0)
+      rbi (>= 0.3.7)
+      require-hooks (>= 0.2.2)
+      rubydex (>= 0.1.0.beta10)
+      sorbet-static-and-runtime (>= 0.6.12698)
+      spoom (>= 1.7.9)
+      thor (>= 1.2.0)
+      tsort
+    thor (1.5.0)
+    tsort (0.2.0)
+
+PLATFORMS
+  aarch64-linux
+  arm64-darwin
+  universal-darwin
+  x86_64-darwin
+  x86_64-linux
+
+DEPENDENCIES
+  language_server-protocol (>= 3.17, < 4.0)
+  prism (>= 1.0, < 2.0)
+  rbs (>= 3.0, < 5.0)
+  sorbet
+  tapioca
+
+CHECKSUMS
+  benchmark (0.5.0) sha256=465df122341aedcb81a2a24b4d3bd19b6c67c1530713fd533f3ff034e419236c
+  erubi (1.13.1) sha256=a082103b0885dbc5ecf1172fede897f9ebdb745a4b97a5e8dc63953db1ee4ad9
+  language_server-protocol (3.17.0.5) sha256=fd1e39a51a28bf3eec959379985a72e296e9f9acfce46f6a79d31ca8760803cc
+  logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
+  netrc (0.11.0) sha256=de1ce33da8c99ab1d97871726cba75151113f117146becbe45aa85cb3dabee3f
+  parallel (2.1.0) sha256=b35258865c2e31134c5ecb708beaaf6772adf9d5efae28e93e99260877b09356
+  prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
+  rbi (0.3.12) sha256=406ea58265942e7f2316744a11de742fdef8b2325bb6066c71c9765f53298eb2
+  rbs (4.0.2) sha256=af75671e66cd03434cc546622741ebf83f6197ec4328375805306330bf78ef25
+  require-hooks (0.4.0) sha256=005f4c6435b4edae73e358cdbaba48370a4121f9ce893d5d2a3c66fce855677d
+  rexml (3.4.4) sha256=19e0a2c3425dfbf2d4fc1189747bdb2f849b6c5e74180401b15734bc97b5d142
+  rubydex (0.2.3-aarch64-linux) sha256=f666ff383430cc800cb0889d52c77da7457e99165b5eef7c0d45491a5fafea87
+  rubydex (0.2.3-arm64-darwin) sha256=997d7895a0208ec3d7ef922c9d29243b62e10c67bc3c2396a9f978d7df117390
+  rubydex (0.2.3-x86_64-darwin) sha256=de4890f91bedb59bfefb90c528939e52475da3afa105feaf855594ad527b0fb9
+  rubydex (0.2.3-x86_64-linux) sha256=796a54c1af9f8868c87bf92fee5f9ccc39ffd40eb8386e0875058a18beb76b09
+  sorbet (0.6.13249) sha256=1d4f07caf6402399d05fb61c9485c85b1d27c153fdcc11a77c672df420647c20
+  sorbet-runtime (0.6.13249) sha256=bec5cc161dab7470428557a054d502b80c7ca55a8b7ce4dd6f139d8e2ff6329b
+  sorbet-static (0.6.13249-aarch64-linux) sha256=dc2d07f87c89d4c54c90a1c0ad7c96debb26afa267827a5cf0fa86396f8cdac1
+  sorbet-static (0.6.13249-universal-darwin) sha256=ab4c79baf38bd307630bc49914667e35f50066966054a4a60dd124011aa42045
+  sorbet-static (0.6.13249-x86_64-linux) sha256=7b70fb9e7288fb4651d6c8b33faeaad8297edd1c87054b8e6b8f374ae042a577
+  sorbet-static-and-runtime (0.6.13249) sha256=873c1a29a82411625001e0159e0835679d90d348b1cbb07451ba144b683fff84
+  spoom (1.7.15) sha256=39698a3bf7841841ae83c6145d5e008290ddb9433e84d9025e017b915bd36a83
+  tapioca (0.19.1) sha256=5de94d458950897ffe3d4e86a21eec48bb6a8775af85f80b1486b7ae7ba51823
+  thor (1.5.0) sha256=e3a9e55fe857e44859ce104a84675ab6e8cd59c650a49106a05f55f136425e73
+  tsort (0.2.0) sha256=9650a793f6859a43b6641671278f79cfead60ac714148aabe4e3f0060480089f
+
+RUBY VERSION
+  ruby 4.0.5
+
+BUNDLED WITH
+  4.0.10

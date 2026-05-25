@@ -18,11 +18,12 @@ Status: research note, no design commitments.
 Ruby のサブセット **SemiRuby**（class 定義は事前所与・`def` はクラス名・
 メソッド名・定義識別子の三つ組へ簡約・block はラムダ式・`return`/`break`
 は `throw`/`catch` ペアに翻訳）に対して操作的意味論を与え、その上で
-**半フロー感度 (semi-flow-sensitive) な制御フロー解析** を設計する。各
-プログラム点に「クラス×メソッド名 → メソッド定義」の写像である
-**メソッド状況 (method configuration)** を関連付け、`def` 式の評価で
-これを更新、`if` 合流で集合的和をとる。値そのものはフロー非感度、
-しかし *どの定義が見えているか* はフロー感度、という非対称設計が新規性。
+**メソッド定義について制御フロー依存な制御フロー解析 (semi-flow-sensitive)**
+を設計する。各プログラム点に「クラス×メソッド名 → メソッド定義」の写像
+である **メソッド状況 (method configuration)** を関連付け、`def` 式の
+評価でこれを更新、`if` 合流で集合的和をとる。値そのものは制御フロー
+非依存、しかし *どの定義が見えているか* は制御フロー依存、という
+非対称設計が新規性。
 最後に Palsberg–Schwartzbach 型の安全性解析（未定義メソッド呼び出し
 なし／`yield` の対象はラムダ式）を定義し、**保存 + Progress** で
 健全性を証明する。実装は OCaml + BDDBDDB（Datalog 処理系）。
@@ -31,9 +32,9 @@ Ruby のサブセット **SemiRuby**（class 定義は事前所与・`def` は�
 
 | 論文側の概念 | Rigor 側の対応物 | 一致度・所見 |
 | --- | --- | --- |
-| **半フロー感度** という指針 | [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md) のエッジ感度ナローイング、trinary certainty、fact stability | 一致。値のフルフロー感度を避けるという論文の現実主義は、Rigor の certainty/effect モデルとも整合。 |
+| **セミフローセンシティブ** という指針 | [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md) のエッジ感度ナローイング、trinary certainty、fact stability | 一致。値のフルフローセンシティブ性を避けるという論文の現実主義は、Rigor の certainty/effect モデルとも整合。 |
 | **メソッド状況 D = {(C,f) → d}** | Rigor の dispatcher 階層（plugin → dependency-source → bundled）+ Plugin::FactStore（[ADR-9](../adr/9-cross-plugin-api.md)） | Rigor は静的に "どの定義が見えるか" を per-walker でしか決めていない。論文の D はプログラム点ごとに動的に切り替わる点で Rigor より強力。 |
-| **例1：トップレベル class A 再オープン** | [ADR-17 `pre_eval:`](../adr/17-monkey-patch-pre-evaluation.md) | 論文では半フロー感度 CFA が "x:Fixnum / y:String" を**そのまま**区別する。Rigor は同等の精度を「先に一度走らせて project-wide な ProjectPatchedMethods を作る」二段階アプローチで近似する設計。論文側の方が解析機構としては美しく、ADR-17 は工学的妥協であることが浮き彫りになる。 |
+| **例1：トップレベル class A 再オープン** | [ADR-17 `pre_eval:`](../adr/17-monkey-patch-pre-evaluation.md) | 論文ではセミフローセンシティブ CFA が "x:Fixnum / y:String" を**そのまま**区別する。Rigor は同等の精度を「先に一度走らせて project-wide な ProjectPatchedMethods を作る」二段階アプローチで近似する設計。論文側の方が解析機構としては美しく、ADR-17 は工学的妥協であることが浮き彫りになる。 |
 | **例2：def の中で def を上書き** | Rigor では事実上ハンドルしていない | 論文の解析はこれも精度よく解析する。Rigor は ADR-5 robustness principle（Postel 流の非対称規律）で「実務でそう頻繁には起きない」と切る側。代償として精度差は埋まらない。 |
 | **例3：if 分岐内の def** | Rigor の Union narrowing | 双方とも保守的な和になる点で一致。論文も Rigor も "本質的に静的解析不可能" と同じ判断。 |
 | **SemiRuby の throw/catch による return/break モデル化** | Rigor の non-local-exit 扱い（diagnostic family の制御部分） | 設計判断としては同型。 |
@@ -44,7 +45,7 @@ Ruby のサブセット **SemiRuby**（class 定義は事前所与・`def` は�
 
 ## 3. 論文が Rigor に示唆する具体ポイント
 
-1. **「メソッド定義の見え方だけはフロー感度」というスライス** は、
+1. **「メソッド定義の見え方だけはフローセンシティブ」というスライス** は、
    Rigor が次に精度を稼ぐ余地の一つを明確化している。現状 Rigor は
    `:leaf` 規律 + [ADR-17](../adr/17-monkey-patch-pre-evaluation.md) の
    事前評価でほぼ静的に決めてしまうが、**部分的にプログラム点単位の
@@ -53,7 +54,8 @@ Ruby のサブセット **SemiRuby**（class 定義は事前所与・`def` は�
 
 2. **ADR-17 の MVP（明示的ファイル列挙）で十分か** の議論補強材料に
    なる。論文の例1のような top-level 上書きはまさに ADR-17 のユース
-   ケースで、論文は「半フロー感度 CFA で解ける」と示している。
+   ケースで、論文は「メソッド定義に関して制御フローを区別する」
+   解析でこれを解いて見せている。
    つまり ADR-17 の "explicit list" 路線は精度の下限を確実に押し上げる、
    安価で正しい第一歩であると追認される。
 
@@ -82,7 +84,7 @@ Ruby のサブセット **SemiRuby**（class 定義は事前所与・`def` は�
 根本問題を、SemiRuby という最小核に絞ることで形式的に解いて見せた成果
 である。Rigor は工学的にはより広い Ruby 表面をカバーしているが、
 (a) `pre_eval` のような事前評価による近似に頼っており、(b) 健全性の
-機械的証明を持たない。論文の半フロー感度 CFA とその健全性証明は、Rigor
+機械的証明を持たない。論文のセミフローセンシティブ CFA とその健全性証明は、Rigor
 の **将来の "Rigor Kernel" 切り出し** と **method configuration を部分
 採用するナローイング強化** の両方向に、信頼できる出発点を提供している。
 

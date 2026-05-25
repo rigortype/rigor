@@ -237,6 +237,71 @@ only fire when read from RBS — that is a design choice (see
 ADR-5, the robustness principle: strict on returns, lenient
 on parameters).
 
+## Inline RBS in Ruby source — the `rigor-rbs-inline` plugin
+
+A separate, opt-in plugin lets you write method types directly
+above the `def` in your Ruby file, using the
+[rbs-inline](https://github.com/soutaro/rbs-inline) comment
+vocabulary upstream defines:
+
+```rb
+# rbs_inline: enabled
+
+class AscDesc
+  # @rbs asc_or_desc: :asc | :desc
+  def ascdesc(asc_or_desc)
+    asc_or_desc
+  end
+end
+
+AscDesc.new.ascdesc(:bad)
+# => error: argument type mismatch at parameter `asc_or_desc' of
+#    `ascdesc' on AscDesc: expected :asc | :desc, got :bad
+```
+
+The `# @rbs name: T` doc-style annotation, the `#: () -> T`
+inline method-type comment, `# @rbs return: T`, attribute `#:`
+casts, `# @rbs @ivar: T`, `# @rbs override`, and `# @rbs!` raw
+RBS embedding all work — anything upstream rbs-inline accepts
+flows through to Rigor's RBS environment as if you had hand-
+written the equivalent `.rbs` file.
+
+This is **not** RBS::Extended. The `# @rbs` comments are
+upstream rbs-inline's grammar; the plugin transcribes them to
+ordinary RBS at env build. RBS::Extended `%a{rigor:v1:…}`
+directives, by contrast, are Rigor-only annotations that live
+in `.rbs` files (see the rest of this chapter for those).
+
+To enable it, add the plugin gem to your bundle and list it:
+
+```yaml
+# .rigor.yml
+plugins:
+  - rigor-rbs-inline
+```
+
+Per file, opt in with the upstream `# rbs_inline: enabled`
+magic comment at the top — files without it are unaffected.
+
+Notes:
+
+- The core `rigortype` analyzer stays zero-runtime-dependency
+  (ADR-0). The `rbs-inline` upstream library is a dependency
+  of the plugin gem, not of the core, so projects that don't
+  opt in pay nothing.
+- A bare top-level `def` produces no RBS output through
+  upstream rbs-inline. Wrap method definitions in a class or
+  module when you need the annotation to take effect.
+- A failed rbs-inline parse surfaces as a
+  `source-rbs-synthesis-failed` `:info` diagnostic; the file
+  falls back to no inline-RBS contribution and analysis
+  continues.
+
+Full plugin documentation, configuration options (including
+the `require_magic_comment: false` host-context override the
+browser playground uses), and the caching contract:
+[`plugins/rigor-rbs-inline/README.md`](../../plugins/rigor-rbs-inline/README.md).
+
 ## Falling back to `untyped`
 
 When a method's signature involves a type RBS cannot express,

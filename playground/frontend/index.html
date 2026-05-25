@@ -423,6 +423,26 @@
       user-select: none;
     }
 
+    /* ADR-29 slice 4 — /type-of hover tooltip. CodeMirror 6
+       wraps our tooltip DOM in a `.cm-tooltip` container; the
+       inner `.cm-type-tooltip` carries the type string. */
+    .cm-tooltip.cm-tooltip-above {
+      background: var(--rigor-paper-3);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--rigor-radius-1);
+      padding: 0;
+    }
+    .cm-type-tooltip {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 12px;
+      padding: 4px 8px;
+      color: var(--text);
+      white-space: pre;
+      max-width: 60ch;
+      overflow-x: auto;
+    }
+
     /* High-contrast scrollbars for the diagnostics + editor regions */
     #diagnostics::-webkit-scrollbar,
     .cm-scroller::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -480,7 +500,7 @@
   <script type="module">
     import { basicSetup, EditorView, EditorState } from "https://esm.sh/@codemirror/basic-setup@0.20"
     import { StateField, StateEffect }             from "https://esm.sh/@codemirror/state@0.20"
-    import { Decoration, WidgetType }              from "https://esm.sh/@codemirror/view@0.20"
+    import { Decoration, WidgetType, hoverTooltip } from "https://esm.sh/@codemirror/view@0.20"
     import { StreamLanguage }                      from "https://esm.sh/@codemirror/language@0.20"
     import { ruby }                                from "https://esm.sh/@codemirror/legacy-modes@0.20/mode/ruby"
     import { lintGutter, setDiagnostics }          from "https://esm.sh/@codemirror/lint@0.20"
@@ -581,6 +601,54 @@ AscDesc.new.ascdesc(:bad)
 
     const MONO_FONT = `'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace`
 
+    // ── Type-of hover (ADR-29 slice 4) ────────────────────────────────────
+    //
+    // CodeMirror 6's hoverTooltip fires after a short hover dwell (default
+    // 300 ms). On each fire, we compute the (1-based line, 0-based column)
+    // pair for the hovered position and POST to /type-of. A 422 response
+    // (no resolvable type) renders no tooltip; a 200 with a `type` field
+    // renders the type as a small dark popover anchored above the cursor.
+    //
+    // Concurrency: hoverTooltip serialises by hover event, and the
+    // backend's per-IP concurrency is capped at 4 in-flight requests by
+    // fly.toml (ADR-29 WD5). A user hovering rapidly across the document
+    // would still only fire one request per dwell.
+    const typeHover = hoverTooltip(async (view, pos) => {
+      const line       = view.state.doc.lineAt(pos)
+      const lineNumber = line.number
+      const column     = pos - line.from
+
+      let data
+      try {
+        const response = await fetch(`${API}/type-of`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            source: view.state.doc.toString(),
+            line:   lineNumber,
+            column: column
+          })
+        })
+        if (!response.ok) return null
+        data = await response.json()
+      } catch (_e) {
+        return null
+      }
+
+      if (!data || !data.type) return null
+
+      return {
+        pos,
+        above: true,
+        create() {
+          const dom = document.createElement("div")
+          dom.className   = "cm-type-tooltip"
+          dom.textContent = data.type
+          return { dom }
+        }
+      }
+    }, { hideOn: () => false })
+
     const view = new EditorView({
       state: EditorState.create({
         doc: SAMPLE,
@@ -589,6 +657,7 @@ AscDesc.new.ascdesc(:bad)
           StreamLanguage.define(ruby),
           lintGutter(),
           annoField,
+          typeHover,
           EditorView.updateListener.of(update => {
             if (!update.docChanged) return
             if (typesVisible) clearAnnotations()

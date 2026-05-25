@@ -84,4 +84,35 @@ RSpec.describe Playground::App do
       expect(last_response.headers["access-control-allow-origin"]).to eq("*")
     end
   end
+
+  # ADR-29 slice 4 — the backend endpoint that the frontend's
+  # hoverTooltip extension consumes.
+  describe "POST /type-of" do
+    let(:source) { "x = \"hello\"\nputs x\n" }
+
+    it "returns the inferred type at a resolvable position" do
+      post "/type-of",
+           JSON.generate(source: source, line: 2, column: 6),
+           "CONTENT_TYPE" => "application/json"
+      expect(last_response.status).to eq(200)
+      body = JSON.parse(last_response.body)
+      expect(body).to include("type")
+      expect(body["type"]).to match(/hello/)
+    end
+
+    it "returns 422 when the position has no resolvable type" do
+      post "/type-of",
+           JSON.generate(source: source, line: 99, column: 99),
+           "CONTENT_TYPE" => "application/json"
+      expect(last_response.status).to eq(422)
+    end
+
+    it "rejects oversized source with 413" do
+      oversized = "x = 1\n" * 20_000
+      post "/type-of",
+           JSON.generate(source: oversized, line: 1, column: 1),
+           "CONTENT_TYPE" => "application/json"
+      expect(last_response.status).to eq(413)
+    end
+  end
 end

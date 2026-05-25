@@ -1,0 +1,30 @@
+# Cloudflare Pages — URL redirects + proxying rules
+# https://developers.cloudflare.com/pages/configuration/redirects/
+#
+# ADR-29 WD1 deploys the frontend to Cloudflare Pages and the
+# backend to Fly.io. The frontend's `const API = ""` (see
+# index.html) posts to relative paths (`/check`,
+# `/annotate-lines`, `/type-of`); for this to work in
+# production the same origin must serve both.
+#
+# Cloudflare Pages `_redirects` can proxy same-domain paths
+# but NOT cross-origin paths. Choose one of:
+#
+# (a) Custom-domain co-hosting via Cloudflare Workers /
+#     Rules:
+#       - Set up a custom domain on the Pages project.
+#       - Add a Cloudflare Rule (Workers, Load Balancer, or
+#         Page Rules) routing `/check`, `/annotate*`,
+#         `/type-of` to the Fly.io app's host.
+#     This file stays empty.
+#
+# (b) Cross-origin (frontend on `<app>.pages.dev`, backend
+#     on `<app>.fly.dev`): set the frontend's `API` constant
+#     to the absolute backend URL (e.g. via a `<meta>` tag
+#     read in index.html, or a build-time replacement). The
+#     backend already serves the right CORS preflight (see
+#     `playground/backend/lib/playground/app.rb`'s
+#     `CORS_HEADERS`).
+#
+# The recommended path is (a) — keeps `API = ""` simple and
+# preserves first-party request semantics.

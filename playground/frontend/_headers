@@ -1,0 +1,22 @@
+# Cloudflare Pages — HTTP response headers
+# https://developers.cloudflare.com/pages/configuration/headers/
+#
+# ADR-29 WD1: frontend deploys to Cloudflare Pages, backend on
+# Fly.io. The frontend is static (no Cloudflare Functions in
+# use today), so these headers only affect the index.html
+# response.
+#
+# Anything Cloudflare adds by default (HSTS on a custom
+# domain, CF caching) layers on top.
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  # CSP: deliberately lenient on script-src because the
+  # frontend imports CodeMirror 6 from esm.sh at runtime
+  # (see the `import` statements in index.html). Tighten to
+  # specific module URLs once the import surface stabilises
+  # or vendor the bundles into the static deploy.
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline' https://esm.sh; img-src 'self' data:; connect-src 'self' https://*.fly.dev https://esm.sh; font-src 'self' https://esm.sh data:;

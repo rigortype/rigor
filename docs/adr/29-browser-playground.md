@@ -135,6 +135,7 @@ The playground exposes three endpoints wrapping existing CLI commands:
 | --- | --- | --- |
 | `POST /check` | `rigor check --format json` | JSON diagnostic array |
 | `POST /annotate` | `rigor annotate` | annotated source text |
+| `POST /annotate-lines` | `rigor annotate` (reshape) | `{ line_number → type }` map |
 | `POST /type-of` | `rigor type-of` | type string for a position |
 
 The frontend is a static Cloudflare Pages site. The backend is a
@@ -194,6 +195,24 @@ Response (mirrors `rigor check --format json` → `Result#to_h`):
 
 Request: `{ "source": "..." }`
 Response: `{ "annotated": "# annotated source with type comments..." }`
+
+**`POST /annotate-lines`** (amendment 2026-05-25)
+
+Same input as `/annotate`. Returns the same analysis
+reshaped for clients (the slice-3 frontend's "Show types"
+toggle) that want to render type annotations as inlay-hint-
+style overlays without reparsing the comment grammar:
+
+Request: `{ "source": "..." }`
+Response: `{ "annotations": { "1": "String", "5": ":asc | :desc" } }`
+
+The map is keyed by 1-based line number (JSON object keys
+are strings); the value is the type comment payload
+(everything after `#=> dump_type:` in the corresponding
+`/annotate` output). Lines without an annotation are absent
+from the map. Both endpoints share the same `rigor annotate`
+invocation; `/annotate-lines` is purely a presentation
+variant.
 
 **`POST /type-of`**
 

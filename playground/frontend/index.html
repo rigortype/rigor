@@ -499,6 +499,19 @@ result.upcase
 # Try introducing an error:
 x = nil
 x.upcase   # possible-nil-receiver
+
+# Inline-RBS annotations work here without a magic comment.
+# The playground pre-loads rigor-rbs-inline with
+# require_magic_comment: false (per ADR-32 WD10). The call
+# below should flag :bad as an argument-type-mismatch.
+class AscDesc
+  # @rbs asc_or_desc: :asc | :desc
+  def ascdesc(asc_or_desc)
+    asc_or_desc
+  end
+end
+
+AscDesc.new.ascdesc(:bad)
 `
 
     // ── Type annotation widget ─────────────────────────────────────────────

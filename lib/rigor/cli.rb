@@ -81,7 +81,7 @@ module Rigor
       buffer = resolve_buffer_binding(options)
       return EXIT_USAGE if buffer == :usage_error
 
-      configuration = Configuration.load(options.fetch(:config))
+      configuration = load_check_configuration(options)
       cache_root = configuration.cache_path
       handle_clear_cache(cache_root) if options.fetch(:clear_cache)
 
@@ -281,7 +281,16 @@ module Rigor
         baseline: :unset,
         # ADR-22 slice 5 — `--baseline-strict` CI gate: fail the
         # run on any baseline drift, in either direction.
-        baseline_strict: false
+        baseline_strict: false,
+        # ADR-32 WD10 carry-over — `--treat-all-as-inline-rbs`
+        # forces the `rigor-rbs-inline` plugin into the loaded
+        # plugin set with `require_magic_comment: false` so a
+        # single ad-hoc `rigor check` invocation treats every
+        # analysed file as inline-RBS without the user editing
+        # `.rigor.yml`. Intended for single-file / ad-hoc CI use;
+        # ordinary projects should configure the plugin in
+        # `.rigor.yml`.
+        treat_all_as_inline_rbs: false
       }
       parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
         opts.banner = "Usage: rigor check [options] [paths]"
@@ -319,9 +328,54 @@ module Rigor
                 "ADR-22: fail the run on any baseline drift (CI gate)") do
           options[:baseline_strict] = true
         end
+        opts.on("--treat-all-as-inline-rbs",
+                "ADR-32: force-load rigor-rbs-inline with require_magic_comment: false") do
+          options[:treat_all_as_inline_rbs] = true
+        end
       end
       parser.parse!(@argv)
       options
+    end
+
+    # ADR-32 WD10 carry-over — wraps `Configuration.load` so the
+    # CLI's `--treat-all-as-inline-rbs` flag can inject a
+    # `rigor-rbs-inline` plugin entry with
+    # `require_magic_comment: false` into the loaded plugin
+    # set. Re-runs the include-aware YAML load and applies the
+    # injection before `Configuration.new` so the new entry
+    # follows the normal coercion path. A pre-existing
+    # `rigor-rbs-inline` entry (by gem name or `id: rbs-inline`)
+    # is removed first so the synthesised entry's
+    # `require_magic_comment: false` wins unconditionally.
+    def load_check_configuration(options)
+      return Configuration.load(options.fetch(:config)) unless options.fetch(:treat_all_as_inline_rbs)
+
+      path = options.fetch(:config) || Configuration.discover
+      data = path && File.exist?(path) ? Configuration.load_with_includes(path) : {}
+      data = data.dup
+      data["plugins"] = inject_treat_all_as_inline_rbs(Array(data["plugins"]))
+      Configuration.new(Configuration::DEFAULTS.merge(data))
+    end
+
+    def inject_treat_all_as_inline_rbs(entries)
+      filtered = entries.reject { |entry| rigor_rbs_inline_entry?(entry) }
+      filtered + [{
+        "gem" => "rigor-rbs-inline",
+        "id" => "rbs-inline",
+        "config" => { "require_magic_comment" => false }
+      }]
+    end
+
+    def rigor_rbs_inline_entry?(entry)
+      case entry
+      when String
+        entry == "rigor-rbs-inline"
+      when Hash
+        string_keyed = entry.to_h { |k, v| [k.to_s, v] }
+        string_keyed["gem"] == "rigor-rbs-inline" || string_keyed["id"] == "rbs-inline"
+      else
+        false
+      end
     end
 
     def handle_clear_cache(cache_root)

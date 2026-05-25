@@ -405,13 +405,15 @@ place. A plugin-config knob is both surfaces.
   ADR-19 LSP roadmap.
 - **Workspace-wide `# rbs_inline: enabled` activation**
   (matching rbs-inline's CLI `--opt-in` / `--opt-out` modes)
-  for ordinary projects remains deferred. The
-  `require_magic_comment:` knob added by WD10 is the same
-  mechanism scoped to a single plugin instance — a project
-  that wants project-wide activation can already set it to
-  `false` in its `.rigor.yml`. The deferred work is the
-  CLI-side ergonomic surface (a single `rigor check` flag
-  rather than a plugin-config entry).
+  for ordinary projects is **delivered**: the
+  `require_magic_comment:` knob added by WD10 lets a project
+  set it once in `.rigor.yml`, and the CLI ships a
+  `--treat-all-as-inline-rbs` flag (post-WD10 follow-up) that
+  injects the same plugin entry on the command line for
+  single-file / ad-hoc CI use. A pre-existing
+  `rigor-rbs-inline` entry in `.rigor.yml` (by gem name or
+  `id: rbs-inline`) is replaced so the flag's
+  `require_magic_comment: false` wins unconditionally.
 
 ## Implementation slicing (proposed)
 

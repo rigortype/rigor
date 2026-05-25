@@ -422,6 +422,70 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  describe "check --treat-all-as-inline-rbs (ADR-32 WD10 carry-over)" do
+    let(:tmpdir) { Dir.mktmpdir }
+    let(:ascdesc_source) do
+      <<~RUBY
+        class AscDesc
+          # @rbs asc_or_desc: :asc | :desc
+          def ascdesc(asc_or_desc)
+            asc_or_desc
+          end
+        end
+
+        AscDesc.new.ascdesc(:bad)
+      RUBY
+    end
+
+    after do
+      FileUtils.remove_entry(tmpdir)
+      Rigor::Plugin.unregister!
+    end
+
+    before do
+      # Load the plugin gem into $LOAD_PATH and register it so
+      # the flag's injected entry can resolve through
+      # `Plugin::Loader.require_gem!`.
+      plugin_lib = File.expand_path("../../plugins/rigor-rbs-inline/lib", __dir__)
+      $LOAD_PATH.unshift(plugin_lib) unless $LOAD_PATH.include?(plugin_lib)
+      require "rigor-rbs-inline"
+    end
+
+    def write_check_fixture(name, contents)
+      path = File.join(tmpdir, name)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      path
+    end
+
+    it "force-loads rigor-rbs-inline with require_magic_comment: false" do
+      write_check_fixture("demo.rb", ascdesc_source)
+      Dir.chdir(tmpdir) do
+        status, out, _err = run_cli("check", "--no-cache", "--no-stats",
+                                    "--format=json", "--treat-all-as-inline-rbs", "demo.rb")
+        expect(status).to eq(1)
+        payload = JSON.parse(out)
+        rules = payload.fetch("diagnostics").map { |d| d["rule"] }
+        expect(rules).to include("call.argument-type-mismatch")
+        messages = payload.fetch("diagnostics").map { |d| d["message"] }
+        expect(messages).to include(a_string_matching(/:asc \| :desc/))
+        expect(messages).to include(a_string_matching(/:bad/))
+      end
+    end
+
+    it "is a no-op without the flag (proves the flag changed behaviour)" do
+      write_check_fixture("demo.rb", ascdesc_source)
+      Dir.chdir(tmpdir) do
+        status, out, _err = run_cli("check", "--no-cache", "--no-stats",
+                                    "--format=json", "demo.rb")
+        expect(status).to eq(0)
+        payload = JSON.parse(out)
+        rules = payload.fetch("diagnostics").map { |d| d["rule"] }
+        expect(rules).not_to include("call.argument-type-mismatch")
+      end
+    end
+  end
+
   describe "check --workers / RIGOR_RACTOR_WORKERS / parallel.workers: (ADR-15 Phase 4c)" do
     let(:tmpdir) { Dir.mktmpdir }
 

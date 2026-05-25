@@ -2,16 +2,23 @@ name: CI
 
 on:
   push:
-    branches:
-      - master
+    branches: [master]
   pull_request:
+
+# Cancel any in-progress run on the same branch when a new commit
+# arrives. Pushes to master are always run to completion so the
+# commit-level status is always present.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 permissions:
   contents: read
 
 jobs:
-  verify:
-    name: make verify (Ruby ${{ matrix.ruby }})
+  # ── 1. RSpec suite ───────────────────────────────────────────────
+  test:
+    name: Tests (Ruby ${{ matrix.ruby }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -30,5 +37,92 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
 
-      - name: Run make verify
-        run: make verify
+      - name: Run tests
+        run: make test-parallel
+
+  # ── 2. RuboCop ───────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      # RuboCop stores its result cache under ~/.cache/rubocop_cache
+      # on Linux. Cache it keyed on the cop config + lock so a pure
+      # gem-version or source change that does not touch linting rules
+      # reuses the warm cache and skips re-inspecting unchanged files.
+      - name: Restore RuboCop cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/rubocop_cache
+          key: rubocop-${{ runner.os }}-${{ hashFiles('.rubocop.yml', '.rubocop_todo.yml', 'Gemfile.lock') }}
+          restore-keys: rubocop-${{ runner.os }}-
+
+      - name: Run lint
+        run: make lint
+
+  # ── 3. Rigor self-check ──────────────────────────────────────────
+  self-check:
+    name: Self-check (rigor check lib)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      # ADR-6: the analysis cache grows monotonically and is
+      # content-addressed; restoring a warm cache from a prior run
+      # skips recomputing slices for unchanged (path, sha, config)
+      # tuples.  The key encodes every input that could change the
+      # analysis result; a partial match restores the closest ancestor
+      # cache and Rigor fills any missing slices on the fly.
+      - name: Restore Rigor analysis cache
+        uses: actions/cache@v4
+        with:
+          path: .rigor/cache
+          key: rigor-cache-${{ runner.os }}-${{ hashFiles('lib/**/*.rb', 'sig/**/*.rbs', 'data/builtins/**/*.yml', 'Gemfile.lock') }}
+          restore-keys: rigor-cache-${{ runner.os }}-
+
+      - name: Run rigor self-check
+        run: make check
+
+  # ── Fan-in: single required-check target for branch protection ───
+  # Configure branch protection to require only "CI required" rather
+  # than each individual job. New jobs added above are automatically
+  # gated without touching protection rules.
+  required:
+    name: CI required
+    needs: [test, lint, self-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: All checks passed
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          SELF_CHECK_RESULT: ${{ needs.self-check.result }}
+        run: |
+          failed=0
+          for job_result in "$TEST_RESULT" "$LINT_RESULT" "$SELF_CHECK_RESULT"; do
+            if [[ "$job_result" != "success" ]]; then
+              echo "A required job did not succeed (result: $job_result)"
+              failed=1
+            fi
+          done
+          exit $failed

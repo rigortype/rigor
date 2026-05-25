@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Keep GitHub Actions versions current. All actions are grouped
+  # into a single weekly PR so version bumps stay low-noise.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Keep the root Gemfile.lock current. Weekly PRs let Dependabot
+  # propose gem updates; maintainers review before merging.
+  - package-ecosystem: bundler
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

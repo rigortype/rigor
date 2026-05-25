@@ -7,6 +7,7 @@ require_relative "../environment"
 require_relative "../scope"
 require_relative "../cache/store"
 require_relative "../plugin"
+require_relative "../plugin/source_rbs_synthesis_reporter"
 require_relative "../rbs_extended/reporter"
 require_relative "../reflection"
 require_relative "../type/combinator"
@@ -97,6 +98,7 @@ module Rigor
         @dependency_source_index = DependencySourceInference::Index::EMPTY
         @rbs_extended_reporter = RbsExtended::Reporter.new
         @boundary_cross_reporter = DependencySourceInference::BoundaryCrossReporter.new
+        @source_rbs_synthesis_reporter = Plugin::SourceRbsSynthesisReporter.new
         # `#run` resets these for each invocation; pre-seed them to
         # empty containers so `build_run_stats` / `pre_file_diagnostics`
         # (private, called only from `#run`) can read them without
@@ -147,6 +149,7 @@ module Rigor
         diagnostics += analyze_files(target_files(expansion))
         diagnostics += rbs_extended_reporter_diagnostics
         diagnostics += boundary_cross_diagnostics
+        diagnostics += source_rbs_synthesis_diagnostics
 
         Result.new(
           diagnostics: apply_severity_profile(diagnostics),
@@ -521,6 +524,7 @@ module Rigor
           dependency_source_index: @dependency_source_index,
           rbs_extended_reporter: @rbs_extended_reporter,
           boundary_cross_reporter: @boundary_cross_reporter,
+          source_rbs_synthesis_reporter: @source_rbs_synthesis_reporter,
           bundler_bundle_path: @configuration.bundler_bundle_path,
           bundler_auto_detect: @configuration.bundler_auto_detect,
           bundler_lockfile: @configuration.bundler_lockfile,
@@ -867,6 +871,15 @@ module Rigor
             rbs_display: entry.rbs_display
           )
         end
+        # ADR-32 WD6 — merge per-worker synthesizer failures
+        # back into the coordinator's reporter. Fetched with a
+        # default empty array so older drains (pre-slice-2)
+        # remain compatible.
+        Array(drained[:source_rbs_synthesis]).each do |entry|
+          @source_rbs_synthesis_reporter.record(
+            plugin_id: entry.plugin_id, path: entry.path, message: entry.message
+          )
+        end
       end
 
       # Loads project-configured plugins through {Rigor::Plugin::Loader}
@@ -1176,6 +1189,35 @@ module Rigor
       # per-call-site — the diagnostic anchors at `.rigor.yml`
       # like the other `dependency-source.*` diagnostics that
       # report on opt-in configuration.
+      # ADR-32 WD6 — drains the per-run
+      # {Plugin::SourceRbsSynthesisReporter} into
+      # `source-rbs-synthesis-failed` `:info` diagnostics. Each
+      # entry names the plugin that owns the synthesizer, the
+      # source file the rbs-inline parser couldn't process, and
+      # the upstream error message. The synthesizer-emitting
+      # plugin (currently only `rigor-rbs-inline`) treats a
+      # parse failure as a no-contribution event so analysis
+      # continues; this stream surfaces the failure so the user
+      # can see which files contributed nothing and why.
+      #
+      # Severity profile re-stamps the rule per project taste.
+      def source_rbs_synthesis_diagnostics
+        return [] if @source_rbs_synthesis_reporter.empty?
+
+        @source_rbs_synthesis_reporter.entries.map do |entry|
+          Diagnostic.new(
+            path: entry.path, line: 1, column: 1,
+            message: "plugin `#{entry.plugin_id}` failed to synthesise RBS from this file: " \
+                     "#{entry.message}. The file's analysis falls back to no inline-RBS " \
+                     "contribution. Fix the inline-RBS comment grammar or remove the " \
+                     "annotation to silence this diagnostic.",
+            severity: :info,
+            rule: "source-rbs-synthesis-failed",
+            source_family: :builtin
+          )
+        end
+      end
+
       def boundary_cross_diagnostics
         return [] if @boundary_cross_reporter.empty?
 

@@ -221,13 +221,14 @@ RSpec.describe Rigor::Plugin::Registry do
       expect(registry.source_rbs_synthesizers).to eq([])
     end
 
-    it "aggregates [plugin_id, callable] pairs across loaded plugins" do
+    it "aggregates [plugin, callable] pairs across loaded plugins" do
       plugin = synth_plugin_class.new(services: services)
       registry = described_class.new(plugins: [plugin])
 
       pairs = registry.source_rbs_synthesizers
       expect(pairs.size).to eq(1)
-      expect(pairs.first.first).to eq("synth-spec-plugin")
+      expect(pairs.first.first).to be(plugin)
+      expect(pairs.first.first.manifest.id).to eq("synth-spec-plugin")
       expect(pairs.first.last).to respond_to(:call)
     end
 
@@ -238,7 +239,7 @@ RSpec.describe Rigor::Plugin::Registry do
       ]
       registry = described_class.new(plugins: mixed)
       pairs = registry.source_rbs_synthesizers
-      expect(pairs.map(&:first)).to eq(["synth-spec-plugin"])
+      expect(pairs.map { |p, _| p.manifest.id }).to eq(["synth-spec-plugin"])
     end
   end
 end

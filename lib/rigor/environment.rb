@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "digest"
+
 require_relative "environment/class_registry"
 require_relative "environment/rbs_loader"
 require_relative "environment/reflection"
@@ -24,7 +26,7 @@ module Rigor
   # constant-folding tiers cannot answer.
   #
   # See docs/internal-spec/inference-engine.md for the binding contract.
-  class Environment
+  class Environment # rubocop:disable Metrics/ClassLength
     DEFAULT_PROJECT_SIG_DIR = "sig"
     private_constant :DEFAULT_PROJECT_SIG_DIR
 
@@ -87,6 +89,7 @@ module Rigor
     def initialize(class_registry: ClassRegistry.default, rbs_loader: nil, # rubocop:disable Metrics/ParameterLists
                    plugin_registry: nil, dependency_source_index: nil,
                    rbs_extended_reporter: nil, boundary_cross_reporter: nil,
+                   source_rbs_synthesis_reporter: nil,
                    synthetic_method_index: nil, project_patched_methods: nil,
                    hkt_registry: nil)
       @class_registry = class_registry
@@ -100,7 +103,8 @@ module Rigor
       # accessors below preserve the public lookup shape.
       @reporters = Reporters.new(
         rbs_extended: rbs_extended_reporter,
-        boundary_cross: boundary_cross_reporter
+        boundary_cross: boundary_cross_reporter,
+        source_rbs_synthesis: source_rbs_synthesis_reporter
       )
       @synthetic_method_index = synthetic_method_index || Inference::SyntheticMethodIndex::EMPTY
       @project_patched_methods = project_patched_methods || Inference::ProjectPatchedMethods::EMPTY
@@ -159,6 +163,17 @@ module Rigor
       @reporters.boundary_cross
     end
 
+    # ADR-32 WD6 — the per-run accumulator for synthesizer
+    # failure events. `Environment.for_project` records
+    # `[:error, message]` returns from a plugin's
+    # `source_rbs_synthesizer` here so the Runner can emit
+    # `source-rbs-synthesis-failed` `:info` diagnostics after
+    # analysis completes. Nil when no plugin contributes a
+    # synthesizer.
+    def source_rbs_synthesis_reporter
+      @reporters.source_rbs_synthesis
+    end
+
     # Replaces the env's per-run reporter slots. Intended for
     # long-lived integrations (LSP `ProjectContext`) that share one
     # Environment instance across many `Runner.run` calls: each call
@@ -210,6 +225,7 @@ module Rigor
       def for_project(root: Dir.pwd, libraries: [], signature_paths: nil, cache_store: nil,
                       plugin_registry: nil, dependency_source_index: nil,
                       rbs_extended_reporter: nil, boundary_cross_reporter: nil,
+                      source_rbs_synthesis_reporter: nil,
                       bundler_bundle_path: nil, bundler_auto_detect: false,
                       bundler_lockfile: nil,
                       rbs_collection_lockfile: nil, rbs_collection_auto_detect: false,
@@ -263,14 +279,24 @@ module Rigor
         plugin_sig_paths = plugin_registry ? plugin_registry.signature_paths.map(&:to_s) : []
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths + collection_paths
         merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
-        # ADR-32 WD4 — invoke each loaded plugin's
+        # ADR-32 WD4 + WD5 — invoke each loaded plugin's
         # `source_rbs_synthesizer` once per project source file
         # and collect non-nil `[filename, rbs_source]` pairs.
         # The synthesizer-emitting plugin (currently only
         # `rigor-rbs-inline`) is responsible for its own
         # fail-soft on parse errors per WD6; this loop only
         # filters `nil` returns.
-        virtual_rbs = collect_virtual_rbs(plugin_registry, source_files)
+        #
+        # When a `cache_store` is supplied, each synthesizer
+        # invocation is memoised per
+        # `(file path + content SHA, plugin id + version + config_hash)`
+        # — WD5's cache key — so a second run with unchanged
+        # source skips the rbs-inline parse cost. The empty
+        # string is the sentinel for "no contribution" so the
+        # Store (which treats `nil` as cache miss) can persist
+        # the no-contribution decision too.
+        virtual_rbs = collect_virtual_rbs(plugin_registry, source_files, cache_store,
+                                          source_rbs_synthesis_reporter)
         loader = RbsLoader.new(
           libraries: merged_libraries,
           signature_paths: loader_signature_paths,
@@ -292,6 +318,7 @@ module Rigor
           dependency_source_index: dependency_source_index,
           rbs_extended_reporter: rbs_extended_reporter,
           boundary_cross_reporter: boundary_cross_reporter,
+          source_rbs_synthesis_reporter: source_rbs_synthesis_reporter,
           synthetic_method_index: synthetic_method_index,
           project_patched_methods: project_patched_methods,
           hkt_registry: Builtins::HktBuiltins.registry
@@ -306,9 +333,9 @@ module Rigor
         sig.directory? ? [sig] : []
       end
 
-      # ADR-32 WD4 — for each project source file, invoke every
-      # plugin-registered synthesizer once and collect non-nil
-      # returns. The returned array is `[[virtual_filename,
+      # ADR-32 WD4 + WD5 — for each project source file, invoke
+      # every plugin-registered synthesizer once and collect
+      # non-nil returns. The returned array is `[[virtual_filename,
       # rbs_source], ...]`; the loader threads it through to
       # `RbsLoader.new(virtual_rbs: ...)`.
       #
@@ -320,7 +347,14 @@ module Rigor
       # the registry's `source_rbs_synthesizers` is empty and
       # this method short-circuits to `[]` without walking the
       # file list.
-      def collect_virtual_rbs(plugin_registry, source_files)
+      #
+      # WD5 — when `cache_store` is supplied, each (file, plugin)
+      # synthesizer call is memoised through `Cache::Store`. The
+      # cache key composes the file's content SHA with the
+      # plugin's `PluginEntry` (id + version + config_hash) so a
+      # config change or content change invalidates the entry
+      # automatically.
+      def collect_virtual_rbs(plugin_registry, source_files, cache_store, reporter)
         return [] if plugin_registry.nil?
 
         synthesizers = plugin_registry.source_rbs_synthesizers
@@ -329,24 +363,90 @@ module Rigor
 
         result = []
         source_files.each do |path|
-          synthesizers.each do |plugin_id, callable|
-            rbs_source = invoke_synthesizer_safely(callable, path)
-            next if rbs_source.nil? || rbs_source.empty?
+          synthesizers.each do |plugin, callable|
+            outcome = synthesizer_output_for(plugin, callable, path, cache_store)
+            outcome = interpret_synthesizer_outcome(outcome, plugin, path, reporter)
+            next if outcome.nil? || outcome.empty?
 
-            virtual_name = "virtual:#{plugin_id}:#{path}"
-            result << [virtual_name, rbs_source]
+            virtual_name = "virtual:#{plugin.manifest.id}:#{path}"
+            result << [virtual_name, outcome]
           end
         end
         result
+      end
+
+      # ADR-32 WD5 — cache wrapper around a single (plugin,
+      # file) invocation. The cache stores the empty string
+      # `""` as the "no contribution" sentinel because
+      # `Cache::Store` treats `nil` as a cache miss. Error
+      # tuples are stored as the canonical
+      # `[:error, message_string]` Array so the same wrapper
+      # short-circuits subsequent runs against unchanged broken
+      # input.
+      def synthesizer_output_for(plugin, callable, path, cache_store)
+        return invoke_synthesizer_safely(callable, path) if cache_store.nil?
+        return invoke_synthesizer_safely(callable, path) unless File.file?(path)
+
+        descriptor = build_synthesizer_cache_descriptor(plugin, path)
+        cache_store.fetch_or_compute(
+          producer_id: SYNTHESIZER_CACHE_PRODUCER_ID,
+          params: {},
+          descriptor: descriptor
+        ) { invoke_synthesizer_safely(callable, path) || "" }
+      end
+
+      # ADR-32 WD6 — route a synthesizer return value through
+      # the per-run failure reporter. The synthesizer's contract
+      # (declared in `plugins/rigor-rbs-inline/lib/rigor/plugin/rbs_inline.rb`)
+      # admits three return shapes:
+      #   - `String` (non-empty) → successful RBS source
+      #   - `nil` / `""`         → no contribution
+      #   - `[:error, message]`  → parse failed
+      # The error tuple is converted into a reporter entry +
+      # treated as "no contribution" so the analysis pipeline
+      # continues. Reporter is `nil` for callers that don't care
+      # (legacy Environment.new, tests).
+      def interpret_synthesizer_outcome(outcome, plugin, path, reporter)
+        return outcome unless outcome.is_a?(Array) && outcome[0] == :error
+
+        reporter&.record(
+          plugin_id: plugin.manifest.id,
+          path: path,
+          message: outcome[1].to_s
+        )
+        nil
+      end
+
+      SYNTHESIZER_CACHE_PRODUCER_ID = "plugin.source_rbs_synthesizer"
+      private_constant :SYNTHESIZER_CACHE_PRODUCER_ID
+
+      def build_synthesizer_cache_descriptor(plugin, path)
+        Cache::Descriptor.new(
+          files: [Cache::Descriptor::FileEntry.new(
+            path: path.to_s,
+            comparator: :digest,
+            value: synthesizer_input_digest(path)
+          )],
+          plugins: [plugin.plugin_entry]
+        )
+      end
+
+      def synthesizer_input_digest(path)
+        Digest::SHA256.hexdigest(File.binread(path))
+      rescue ::SystemCallError
+        # Unreadable file → key on the path alone; the
+        # synthesizer's File.file?/File.read will see the same
+        # failure and return nil.
+        Digest::SHA256.hexdigest(path.to_s)
       end
 
       def invoke_synthesizer_safely(callable, path)
         callable.call(path.to_s)
       rescue StandardError
         # WD6 fail-soft — a synthesizer that raises does NOT
-        # crash analysis. Slice 2 records this as a
-        # `source-rbs-synthesis-failed` info diagnostic; slice
-        # 1's contract is "no analysis crash on a misbehaving
+        # crash analysis. Slice 2b will turn this into a
+        # `source-rbs-synthesis-failed` info diagnostic; for now
+        # the contract is "no analysis crash on a misbehaving
         # synthesizer".
         nil
       end

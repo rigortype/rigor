@@ -29,11 +29,12 @@ module Rigor
     # return nil, and the consumer sites short-circuit on
     # `reporter.nil?`.
     class Reporters
-      attr_accessor :rbs_extended, :boundary_cross
+      attr_accessor :rbs_extended, :boundary_cross, :source_rbs_synthesis
 
-      def initialize(rbs_extended: nil, boundary_cross: nil)
+      def initialize(rbs_extended: nil, boundary_cross: nil, source_rbs_synthesis: nil)
         @rbs_extended = rbs_extended
         @boundary_cross = boundary_cross
+        @source_rbs_synthesis = source_rbs_synthesis
       end
     end
   end

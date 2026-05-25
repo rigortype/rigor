@@ -351,17 +351,40 @@ module Rigor
       # descriptor from (1) the plugin's PluginEntry template
       # and (2) the IoBoundary's accumulated FileEntry rows.
       def build_plugin_cache_descriptor
-        plugin_entry = Cache::Descriptor::PluginEntry.new(
-          id: manifest.id,
-          version: manifest.version,
-          config_hash: digest_config(config)
-        )
         boundary_descriptor = io_boundary.cache_descriptor
         Cache::Descriptor.new(
           plugins: [plugin_entry],
           files: boundary_descriptor.files
         )
       end
+
+      public
+
+      # ADR-32 WD5 — the `Cache::Descriptor::PluginEntry`
+      # template carrying this plugin's id, version, and a
+      # SHA-256 digest of its (canonicalised) config hash.
+      # Callers outside the plugin (e.g. `Environment.for_project`
+      # caching per-file synthesizer output) compose this entry
+      # into their own cache descriptor so a config change to
+      # the plugin (e.g. flipping `require_magic_comment:`)
+      # invalidates the dependent cache.
+      def plugin_entry
+        # Built fresh on each call rather than memoised so a
+        # plugin subclass that freezes itself in `initialize`
+        # (e.g. `Rigor::Plugin::RbsInline` per ADR-32) doesn't
+        # trip a FrozenError on first read. The construction
+        # cost is a single `Data.define`-backed value-object
+        # build; the cache key derivation downstream is the
+        # expensive step, and it's already memoised inside
+        # `Cache::Store`.
+        Cache::Descriptor::PluginEntry.new(
+          id: manifest.id,
+          version: manifest.version,
+          config_hash: digest_config(config)
+        )
+      end
+
+      private
 
       # ADR-7 § "Slice 6" follow-up — composes the auto-built
       # cache descriptor with an optional plugin-author-supplied

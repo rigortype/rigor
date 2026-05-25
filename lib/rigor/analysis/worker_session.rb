@@ -117,6 +117,7 @@ module Rigor
         # pool. The substrate stays Ractor-safe by construction.
         @rbs_extended_reporter = RbsExtended::Reporter.new
         @boundary_cross_reporter = DependencySourceInference::BoundaryCrossReporter.new
+        @source_rbs_synthesis_reporter = Plugin::SourceRbsSynthesisReporter.new
         @dependency_source_index = DependencySourceInference::Builder.build(configuration.dependencies)
 
         @services = Plugin::Services.new(
@@ -137,6 +138,7 @@ module Rigor
           dependency_source_index: @dependency_source_index,
           rbs_extended_reporter: @rbs_extended_reporter,
           boundary_cross_reporter: @boundary_cross_reporter,
+          source_rbs_synthesis_reporter: @source_rbs_synthesis_reporter,
           bundler_bundle_path: configuration.bundler_bundle_path,
           bundler_auto_detect: configuration.bundler_auto_detect,
           bundler_lockfile: configuration.bundler_lockfile,
@@ -186,7 +188,8 @@ module Rigor
             unresolved_payloads: @rbs_extended_reporter.unresolved_payloads,
             lossy_projections: @rbs_extended_reporter.lossy_projections
           },
-          boundary_cross: @boundary_cross_reporter.entries
+          boundary_cross: @boundary_cross_reporter.entries,
+          source_rbs_synthesis: @source_rbs_synthesis_reporter.entries
         }
       end
 

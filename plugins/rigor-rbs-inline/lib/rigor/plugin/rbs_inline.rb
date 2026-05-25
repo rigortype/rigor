@@ -54,6 +54,11 @@ module Rigor
           freeze
         end
 
+        # Return value contract:
+        # - `String` (non-empty)         → successful synthesis
+        # - `nil`                        → no contribution
+        # - `[:error, message_string]`   → parse failed, surface
+        #   info diagnostic per ADR-32 WD6
         def call(source_file_path)
           return nil unless RBS_INLINE_AVAILABLE
           return nil unless File.file?(source_file_path)
@@ -74,11 +79,13 @@ module Rigor
           return nil if rendered.nil? || rendered.strip.empty?
 
           rendered
-        rescue ::StandardError
-          # WD6 fail-soft — slice 2 turns this into an info
-          # diagnostic naming the file + the upstream error
-          # message. v1 silently skips the contribution.
-          nil
+        rescue ::StandardError => e
+          # WD6 fail-soft — surface a structured error tuple so
+          # the engine's `Environment.for_project` can emit a
+          # `source-rbs-synthesis-failed` info diagnostic
+          # naming the file + the upstream error message,
+          # without crashing analysis.
+          [:error, "#{e.class}: #{e.message.to_s.lines.first.to_s.strip}"]
         end
       end
 

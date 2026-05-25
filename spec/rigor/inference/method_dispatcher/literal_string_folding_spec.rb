@@ -15,20 +15,28 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
       expect(result).to eq(literal_string)
     end
 
-    it "lifts literal-string + Constant<String> to literal-string" do
+    it "lifts literal-string + Constant<non-empty-string> to non-empty-literal-string" do
+      # string_const = "hi" which is non-empty, so the concatenation is provably non-empty
       result = described_class.try_dispatch(receiver: literal_string, method_name: :+, args: [string_const])
+      expect(result).to eq(Rigor::Type::Combinator.non_empty_literal_string)
+    end
+
+    it "lifts literal-string + Constant[\"\"] to literal-string (empty arg gives no non-empty guarantee)" do
+      empty_const = Rigor::Type::Combinator.constant_of("")
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :+, args: [empty_const])
       expect(result).to eq(literal_string)
     end
 
-    it "lifts Constant<String> + literal-string to literal-string" do
+    it "lifts Constant<non-empty-string> + literal-string to non-empty-literal-string" do
+      # string_const = "hi" which is non-empty
       result = described_class.try_dispatch(receiver: string_const, method_name: :+, args: [literal_string])
-      expect(result).to eq(literal_string)
+      expect(result).to eq(Rigor::Type::Combinator.non_empty_literal_string)
     end
 
-    it "lifts non-empty-literal-string + literal-string (Intersection containing literal-string)" do
+    it "lifts non-empty-literal-string + literal-string to non-empty-literal-string" do
       nels = Rigor::Type::Combinator.non_empty_literal_string
       result = described_class.try_dispatch(receiver: nels, method_name: :+, args: [literal_string])
-      expect(result).to eq(literal_string)
+      expect(result).to eq(nels)
     end
 
     it "declines when the argument is plain Nominal[String] (not necessarily literal)" do
@@ -48,9 +56,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
       expect(result).to eq(literal_string)
     end
 
-    it "lifts literal-string << Constant<String> to literal-string" do
+    it "lifts literal-string << Constant<non-empty-string> to non-empty-literal-string" do
       result = described_class.try_dispatch(receiver: literal_string, method_name: :<<, args: [string_const])
-      expect(result).to eq(literal_string)
+      expect(result).to eq(Rigor::Type::Combinator.non_empty_literal_string)
     end
 
     it "declines literal-string << Nominal[String] (arg is not literal-bearing)" do
@@ -286,7 +294,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
 
   describe "unrecognised method names" do
     it "declines for methods outside the recognised set" do
-      result = described_class.try_dispatch(receiver: literal_string, method_name: :upcase, args: [literal_string])
+      result = described_class.try_dispatch(receiver: literal_string, method_name: :gsub, args: [literal_string])
       expect(result).to be_nil
     end
   end
@@ -296,6 +304,106 @@ RSpec.describe Rigor::Inference::MethodDispatcher::LiteralStringFolding do
       expect(described_class.try_dispatch(receiver: literal_string, method_name: :+, args: [])).to be_nil
       two_args = [literal_string, literal_string]
       expect(described_class.try_dispatch(receiver: literal_string, method_name: :+, args: two_args)).to be_nil
+    end
+  end
+
+  describe "non-empty-string propagation through + and *" do
+    let(:non_empty_literal) { Rigor::Type::Combinator.non_empty_literal_string }
+    let(:pos_int) { Rigor::Type::Combinator.positive_int }
+
+    describe "+ (non-empty propagation)" do
+      it "non-empty-literal-string + literal-string → non-empty-literal-string" do
+        result = described_class.try_dispatch(receiver: non_empty_literal, method_name: :+, args: [literal_string])
+        expect(result).to eq(non_empty_literal)
+      end
+
+      it "literal-string + non-empty-literal-string → non-empty-literal-string" do
+        result = described_class.try_dispatch(receiver: literal_string, method_name: :+, args: [non_empty_literal])
+        expect(result).to eq(non_empty_literal)
+      end
+
+      it "non-empty-literal-string + non-empty-literal-string → non-empty-literal-string" do
+        result = described_class.try_dispatch(receiver: non_empty_literal, method_name: :+, args: [non_empty_literal])
+        expect(result).to eq(non_empty_literal)
+      end
+
+      it "literal-string + literal-string remains literal-string (no non-empty uplift)" do
+        result = described_class.try_dispatch(receiver: literal_string, method_name: :+, args: [literal_string])
+        expect(result).to eq(literal_string)
+      end
+
+      it "literal-string + Constant[non-empty] → non-empty-literal-string" do
+        result = described_class.try_dispatch(
+          receiver: literal_string, method_name: :+, args: [Rigor::Type::Combinator.constant_of("hi")]
+        )
+        expect(result).to eq(non_empty_literal)
+      end
+    end
+
+    describe "* (repetition with zero and positive multiplier)" do
+      it "literal-string * Constant[0] → Constant[\"\"]" do
+        result = described_class.try_dispatch(
+          receiver: literal_string, method_name: :*, args: [Rigor::Type::Combinator.constant_of(0)]
+        )
+        expect(result).to eq(Rigor::Type::Combinator.constant_of(""))
+      end
+
+      it "non-empty-literal-string * Constant[0] → Constant[\"\"]" do
+        result = described_class.try_dispatch(
+          receiver: non_empty_literal, method_name: :*, args: [Rigor::Type::Combinator.constant_of(0)]
+        )
+        expect(result).to eq(Rigor::Type::Combinator.constant_of(""))
+      end
+
+      it "non-empty-literal-string * Constant[3] → non-empty-literal-string" do
+        result = described_class.try_dispatch(
+          receiver: non_empty_literal, method_name: :*, args: [Rigor::Type::Combinator.constant_of(3)]
+        )
+        expect(result).to eq(non_empty_literal)
+      end
+
+      it "non-empty-literal-string * positive-int → non-empty-literal-string" do
+        result = described_class.try_dispatch(receiver: non_empty_literal, method_name: :*, args: [pos_int])
+        expect(result).to eq(non_empty_literal)
+      end
+
+      it "literal-string * positive-int stays literal-string (receiver may be empty)" do
+        result = described_class.try_dispatch(receiver: literal_string, method_name: :*, args: [pos_int])
+        expect(result).to eq(literal_string)
+      end
+
+      it "literal-string * Nominal[Integer] stays literal-string (multiplier unknown)" do
+        result = described_class.try_dispatch(receiver: literal_string, method_name: :*, args: [nominal_integer])
+        expect(result).to eq(literal_string)
+      end
+    end
+  end
+
+  describe "#upcase / #downcase / #capitalize / #swapcase / #reverse — non-empty-literal preservation" do
+    let(:non_empty_literal) { Rigor::Type::Combinator.non_empty_literal_string }
+
+    %i[upcase downcase capitalize swapcase reverse].each do |sel|
+      it "##{sel} on literal-string → literal-string" do
+        result = described_class.try_dispatch(receiver: literal_string, method_name: sel, args: [])
+        expect(result).to eq(literal_string)
+      end
+
+      it "##{sel} on non-empty-literal-string → non-empty-literal-string" do
+        result = described_class.try_dispatch(receiver: non_empty_literal, method_name: sel, args: [])
+        expect(result).to eq(non_empty_literal)
+      end
+
+      it "declines ##{sel} when receiver is plain Nominal[String]" do
+        result = described_class.try_dispatch(receiver: nominal_string, method_name: sel, args: [])
+        expect(result).to be_nil
+      end
+
+      it "declines ##{sel} when an argument is supplied (no-arg only)" do
+        result = described_class.try_dispatch(
+          receiver: literal_string, method_name: sel, args: [literal_string]
+        )
+        expect(result).to be_nil
+      end
     end
   end
 end

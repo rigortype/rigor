@@ -256,6 +256,33 @@ module Rigor
           refined.base.class_name == "String"
       end
 
+      # Returns true when `type` is statically known to be a
+      # non-empty String — i.e. its value can never be `""`.
+      # Used at String binary-operator dispatch sites to propagate
+      # the non-empty guarantee through `+` and `*`.
+      #
+      # - `Constant[s]` where `s != ""` — a concrete non-empty literal.
+      # - `Difference[Nominal[String], Constant[""]]` — the canonical
+      #   `non-empty-string` carrier.
+      # - `Intersection[…]` — any member suffices (set-theoretic subset).
+      # - `Union[…]` — all members must qualify (the join may include "").
+      def non_empty_string_compatible?(type)
+        case type
+        when Constant then type.value.is_a?(String) && !type.value.empty?
+        when Difference then non_empty_string_difference?(type)
+        when Intersection then type.members.any? { |m| non_empty_string_compatible?(m) }
+        when Union then !type.members.empty? && type.members.all? { |m| non_empty_string_compatible?(m) }
+        else false
+        end
+      end
+
+      def non_empty_string_difference?(diff)
+        return false unless diff.base.is_a?(Nominal) && diff.base.class_name == "String"
+        return false unless diff.removed.is_a?(Constant)
+
+        diff.removed.value == ""
+      end
+
       # Normalised intersection. Flattens nested Intersections,
       # drops `Top` members, collapses to `Bot` if any member is
       # `Bot`, deduplicates structurally-equal members, sorts the

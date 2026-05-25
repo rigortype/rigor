@@ -1015,4 +1015,89 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       end
     end
   end
+
+  describe "non-empty-string binary operator propagation" do
+    let(:non_empty_str) { Rigor::Type::Combinator.non_empty_string }
+    let(:nominal_string) { Rigor::Type::Combinator.nominal_of("String") }
+    let(:positive_int) { Rigor::Type::Combinator.positive_int }
+    let(:non_negative_int) { Rigor::Type::Combinator.non_negative_int }
+
+    describe "non-empty-string receiver + any-string arg → non-empty-string" do
+      it "non-empty-string + Nominal[String] → non-empty-string" do
+        expect(dispatch(receiver: non_empty_str, method_name: :+, args: [nominal_string])).to eq(non_empty_str)
+      end
+
+      it "non-empty-string + non-empty-string → non-empty-string" do
+        expect(dispatch(receiver: non_empty_str, method_name: :+, args: [non_empty_str])).to eq(non_empty_str)
+      end
+
+      it "non-empty-string + Constant[String] → non-empty-string" do
+        expect(dispatch(receiver: non_empty_str, method_name: :+, args: [constant("hi")])).to eq(non_empty_str)
+      end
+    end
+
+    describe "Nominal[String] / Refined[String] receiver + non-empty-string arg → non-empty-string" do
+      it "Nominal[String] + non-empty-string → non-empty-string" do
+        expect(dispatch(receiver: nominal_string, method_name: :+, args: [non_empty_str])).to eq(non_empty_str)
+      end
+
+      it "lowercase-string + non-empty-string → non-empty-string" do
+        lowercase = Rigor::Type::Combinator.lowercase_string
+        expect(dispatch(receiver: lowercase, method_name: :+, args: [non_empty_str])).to eq(non_empty_str)
+      end
+
+      it "Nominal[String] + Nominal[String] → falls through (nil)" do
+        expect(dispatch(receiver: nominal_string, method_name: :+, args: [nominal_string])).to be_nil
+      end
+    end
+
+    describe "non-empty-string receiver * multiplier" do
+      it "non-empty-string * Constant[0] → Constant[\"\"]" do
+        expect(dispatch(receiver: non_empty_str, method_name: :*, args: [constant(0)])).to eq(constant(""))
+      end
+
+      it "non-empty-string * Constant[3] → non-empty-string" do
+        expect(dispatch(receiver: non_empty_str, method_name: :*, args: [constant(3)])).to eq(non_empty_str)
+      end
+
+      it "non-empty-string * positive-int → non-empty-string" do
+        expect(dispatch(receiver: non_empty_str, method_name: :*, args: [positive_int])).to eq(non_empty_str)
+      end
+
+      it "non-empty-string * non-negative-int → falls through (could be 0)" do
+        expect(dispatch(receiver: non_empty_str, method_name: :*, args: [non_negative_int])).to be_nil
+      end
+
+      it "non-empty-string * Nominal[Integer] → falls through" do
+        expect(dispatch(receiver: non_empty_str, method_name: :*,
+                        args: [Rigor::Type::Combinator.nominal_of("Integer")])).to be_nil
+      end
+    end
+
+    describe "Nominal[String] * Constant[0] → Constant[\"\"]" do
+      it "any String * 0 is always empty" do
+        expect(dispatch(receiver: nominal_string, method_name: :*, args: [constant(0)])).to eq(constant(""))
+      end
+
+      it "Nominal[String] * positive-int falls through (receiver may be empty)" do
+        expect(dispatch(receiver: nominal_string, method_name: :*, args: [positive_int])).to be_nil
+      end
+    end
+
+    describe "non-empty-string preserving unary methods" do
+      %i[upcase downcase capitalize swapcase reverse].each do |sel|
+        it "non-empty-string.#{sel} → non-empty-string" do
+          expect(dispatch(receiver: non_empty_str, method_name: sel)).to eq(non_empty_str)
+        end
+
+        it "non-empty-string.#{sel}(arg) falls through (no-arg only)" do
+          expect(dispatch(receiver: non_empty_str, method_name: sel, args: [nominal_string])).to be_nil
+        end
+      end
+
+      it "non-empty-string.strip falls through (strip may empty a whitespace-only string)" do
+        expect(dispatch(receiver: non_empty_str, method_name: :strip)).to be_nil
+      end
+    end
+  end
 end

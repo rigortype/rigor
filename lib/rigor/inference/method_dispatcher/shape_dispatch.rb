@@ -217,12 +217,37 @@ module Rigor
           end
 
           def dispatch_nominal_size(nominal, method_name, args)
+            if nominal.class_name == "String" && args.size == 1
+              string_binary = dispatch_string_binary_from_arg(method_name, args.first)
+              return string_binary if string_binary
+            end
+
             return nil unless args.empty?
 
             selectors = SIZE_RETURNING_NOMINALS[nominal.class_name]
             return nil unless selectors&.include?(method_name)
 
             Type::Combinator.non_negative_int
+          end
+
+          # Arg-type-driven String binary projections for any String-typed
+          # receiver (including Nominal, Refined, and Difference fallbacks).
+          # Called before the no-arg size guard so binary operators are seen.
+          #
+          # - `String + non-empty-string` → `non-empty-string`
+          #   (arg guarantees the concatenation is non-empty)
+          # - `String * Constant[0]` → `Constant[""]`
+          #   (every string repeated 0 times is the empty string)
+          def dispatch_string_binary_from_arg(method_name, arg)
+            case method_name
+            when :+
+              return Type::Combinator.non_empty_string if Type::Combinator.non_empty_string_compatible?(arg)
+            when :*
+              if arg.is_a?(Type::Constant) && arg.value.is_a?(Integer) && arg.value.zero?
+                return Type::Combinator.constant_of("")
+              end
+            end
+            nil
           end
 
           # `IntegerRange#to_s` precision (v0.1.1 Track 1 slice 5b).
@@ -281,7 +306,7 @@ module Rigor
             return nil unless base.is_a?(Type::Nominal)
 
             if removes_empty_witness?(difference)
-              precise = empty_removal_projection(base, method_name, args)
+              precise = empty_removal_projection(difference, method_name, args)
               return precise if precise
             end
 
@@ -305,14 +330,39 @@ module Rigor
             !!(predicate && predicate.call(difference.removed))
           end
 
-          def empty_removal_projection(base, method_name, args)
-            return nil unless args.empty?
+          # Methods on a non-empty String that preserve non-emptiness
+          # (they transform characters but never reduce the string to "").
+          NON_EMPTY_STRING_PRESERVING_UNARY = Set[:upcase, :downcase, :capitalize, :swapcase, :reverse].freeze
+          private_constant :NON_EMPTY_STRING_PRESERVING_UNARY
 
-            if %i[size length count bytesize].include?(method_name)
-              return size_returning_for_empty_removal(base, method_name)
+          def empty_removal_projection(difference, method_name, args)
+            base = difference.base
+
+            if args.empty?
+              if %i[size length count bytesize].include?(method_name)
+                return size_returning_for_empty_removal(base, method_name)
+              end
+
+              predicate_result = empty_predicate_projection(base, method_name)
+              return predicate_result if predicate_result
+
+              if base.class_name == "String" && NON_EMPTY_STRING_PRESERVING_UNARY.include?(method_name)
+                return difference
+              end
+
+              return nil
             end
 
-            empty_predicate_projection(base, method_name)
+            return nil unless base.class_name == "String"
+
+            case method_name
+            when :+
+              return difference if args.size == 1
+            when :*
+              return non_empty_string_repeat(difference, args.first) if args.size == 1
+            end
+
+            nil
           end
 
           def empty_predicate_projection(base, method_name)
@@ -322,6 +372,24 @@ module Rigor
             when :zero?
               base.class_name == "Integer" ? Type::Combinator.constant_of(false) : nil
             end
+          end
+
+          # `non-empty-string * n` result:
+          # - `n == 0`  → `Constant[""]` (any string repeated 0 times is empty)
+          # - `n >= 1`  → `difference` (non-empty-string stays non-empty)
+          # - otherwise → nil (fall through, e.g. unknown n or non-negative-int)
+          def non_empty_string_repeat(difference, arg)
+            case arg
+            when Type::Constant
+              return nil unless arg.value.is_a?(Integer)
+
+              return Type::Combinator.constant_of("") if arg.value.zero?
+              return difference if arg.value.positive?
+            when Type::IntegerRange
+              return Type::Combinator.constant_of("") if arg.lower.zero? && arg.upper.zero?
+              return difference if arg.lower >= 1
+            end
+            nil
           end
 
           def size_returning_for_empty_removal(base, method_name)

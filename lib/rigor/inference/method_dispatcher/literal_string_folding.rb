@@ -65,6 +65,11 @@ module Rigor
         # == ""`); the carrier collapses from `non-empty-literal-string`
         # down to plain `literal-string`.
         LITERAL_PRESERVING_METHODS = %i[strip lstrip rstrip chomp chop scrub].freeze
+        # Methods that preserve literal-bearing AND non-empty-string-ness.
+        # Unlike `LITERAL_PRESERVING_METHODS` (strip/chomp/etc.) these do
+        # not reduce the string — they transform characters without
+        # removing any, so a non-empty receiver stays non-empty.
+        NON_EMPTY_LITERAL_PRESERVING_METHODS = %i[upcase downcase capitalize swapcase reverse].freeze
         # v0.1.1 Track 1 slice 5c — width-padding methods. `center`
         # / `ljust` / `rjust` take a `width` Integer plus an
         # optional literal padding `String`. When the receiver
@@ -72,26 +77,30 @@ module Rigor
         # literal-bearing, the result is literal-bearing too.
         WIDTH_PADDING_METHODS = %i[center ljust rjust].freeze
         private_constant :CONCAT_METHODS, :FORMAT_METHODS,
-                         :LITERAL_PRESERVING_METHODS, :WIDTH_PADDING_METHODS
+                         :LITERAL_PRESERVING_METHODS, :NON_EMPTY_LITERAL_PRESERVING_METHODS,
+                         :WIDTH_PADDING_METHODS
 
         def try_dispatch(receiver:, method_name:, args:, **)
           return fold_array_join(receiver, args) if method_name == :join
           return fold_format(args) if FORMAT_METHODS.include?(method_name)
-
           return nil unless Type::Combinator.literal_string_compatible?(receiver)
-
           return fold_string_percent(args) if method_name == :%
-          if args.empty?
-            return LITERAL_PRESERVING_METHODS.include?(method_name) ? Type::Combinator.literal_string : nil
-          end
+          return fold_no_arg(receiver, method_name) if args.empty?
           return fold_width_pad(args) if WIDTH_PADDING_METHODS.include?(method_name)
           return nil unless args.size == 1
 
           if CONCAT_METHODS.include?(method_name)
-            fold_concat(args.first)
+            fold_concat(receiver, args.first)
           elsif method_name == :*
-            fold_repeat(args.first)
+            fold_repeat(receiver, args.first)
           end
+        end
+
+        def fold_no_arg(receiver, method_name)
+          return Type::Combinator.literal_string if LITERAL_PRESERVING_METHODS.include?(method_name)
+          return non_empty_literal_result(receiver) if NON_EMPTY_LITERAL_PRESERVING_METHODS.include?(method_name)
+
+          nil
         end
 
         # `String#center` / `#ljust` / `#rjust` — first argument is
@@ -111,17 +120,37 @@ module Rigor
           Type::Combinator.literal_string
         end
 
-        def fold_concat(arg_type)
-          return nil unless Type::Combinator.literal_string_compatible?(arg_type)
+        def fold_concat(receiver, arg)
+          return nil unless Type::Combinator.literal_string_compatible?(arg)
+
+          if Type::Combinator.non_empty_string_compatible?(receiver) ||
+             Type::Combinator.non_empty_string_compatible?(arg)
+            return Type::Combinator.non_empty_literal_string
+          end
 
           Type::Combinator.literal_string
         end
 
-        def fold_repeat(arg_type)
-          return nil unless integer_typed?(arg_type)
-          return nil if known_negative_integer?(arg_type)
+        def fold_repeat(receiver, arg)
+          return nil unless integer_typed?(arg)
+          return nil if known_negative_integer?(arg)
+          return Type::Combinator.constant_of("") if known_zero_integer?(arg)
+
+          if Type::Combinator.non_empty_string_compatible?(receiver) && known_positive_integer?(arg)
+            return Type::Combinator.non_empty_literal_string
+          end
 
           Type::Combinator.literal_string
+        end
+
+        # Returns `non_empty_literal_string` when the receiver is provably
+        # non-empty; otherwise collapses to plain `literal_string`.
+        def non_empty_literal_result(receiver)
+          if Type::Combinator.non_empty_string_compatible?(receiver)
+            Type::Combinator.non_empty_literal_string
+          else
+            Type::Combinator.literal_string
+          end
         end
 
         # `[lit, lit].join(sep)` — receiver must be a Tuple
@@ -205,9 +234,27 @@ module Rigor
           type.is_a?(Type::Constant) && type.value.is_a?(Integer) && type.value.negative?
         end
 
-        private_class_method :fold_concat, :fold_repeat, :fold_array_join,
+        def known_zero_integer?(type)
+          case type
+          when Type::Constant then type.value.is_a?(Integer) && type.value.zero?
+          when Type::IntegerRange then type.lower.zero? && type.upper.zero?
+          else false
+          end
+        end
+
+        def known_positive_integer?(type)
+          case type
+          when Type::Constant then type.value.is_a?(Integer) && type.value.positive?
+          when Type::IntegerRange then type.lower >= 1
+          else false
+          end
+        end
+
+        private_class_method :fold_no_arg, :fold_concat, :fold_repeat, :fold_array_join,
                              :fold_format, :fold_string_percent, :fold_width_pad,
-                             :literal_or_constant?, :integer_typed?
+                             :non_empty_literal_result, :literal_or_constant?,
+                             :integer_typed?, :known_negative_integer?,
+                             :known_zero_integer?, :known_positive_integer?
       end
     end
   end

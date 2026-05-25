@@ -21,8 +21,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       expect(dispatch(receiver: nil, method_name: :foo)).to be_nil
     end
 
-    it "returns nil when the receiver is not a Constant" do
-      expect(dispatch(receiver: nominal_string, method_name: :+, args: [constant("hi")])).to be_nil
+    it "promotes Nominal[String] + Constant<non-empty> to non-empty-string (arg-driven uplift)" do
+      expect(dispatch(receiver: nominal_string, method_name: :+, args: [constant("hi")])).to eq(
+        Rigor::Type::Combinator.non_empty_string
+      )
     end
 
     it "returns nil when any argument is not a Constant" do
@@ -111,17 +113,17 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(dispatch(receiver: constant("a"), method_name: :*, args: [constant(-1)])).to be_nil
       end
 
-      it "lifts a size-capped Constant + Constant concat to literal-string (v0.0.9 F)" do
+      it "lifts a size-capped Constant + Constant concat to non-empty-literal-string (v0.0.9 F, non-empty uplift)" do
         big = "a" * 4000
         more = "b" * 1000
 
         result = dispatch(receiver: constant(big), method_name: :+, args: [constant(more)])
-        expect(result).to eq(Rigor::Type::Combinator.literal_string)
+        expect(result).to eq(Rigor::Type::Combinator.non_empty_literal_string)
       end
 
-      it "lifts a size-capped Constant * Constant repeat to literal-string (v0.0.9 F)" do
+      it "lifts a size-capped Constant * Constant repeat to non-empty-literal-string (v0.0.9 F, non-empty uplift)" do
         result = dispatch(receiver: constant("xyz"), method_name: :*, args: [constant(10_000)])
-        expect(result).to eq(Rigor::Type::Combinator.literal_string)
+        expect(result).to eq(Rigor::Type::Combinator.non_empty_literal_string)
       end
 
       it "folds String == String comparisons" do

@@ -70,10 +70,23 @@ jobs:
       - name: Run lint
         run: make lint
 
-  # ── 3. Rigor self-check ──────────────────────────────────────────
+  # ── 3. Rigor self-check (warm + cold) ───────────────────────────
+  # Two matrix variants run in parallel:
+  #   warm — restores .rigor/cache from the previous run so Rigor
+  #           exercises the cache read/write path and skips slices
+  #           for unchanged (path, sha, config) tuples (ADR-6).
+  #   cold — starts with an empty cache directory every time so the
+  #           full analysis path is exercised without any cached
+  #           state; catches regressions that only surface on a
+  #           first-run / cache-miss code path.
+  # Both must pass for the required fan-in job to succeed.
   self-check:
-    name: Self-check (rigor check lib)
+    name: Self-check (${{ matrix.cache }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cache: [warm, cold]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -92,7 +105,9 @@ jobs:
       # tuples.  The key encodes every input that could change the
       # analysis result; a partial match restores the closest ancestor
       # cache and Rigor fills any missing slices on the fly.
+      # Skipped entirely for the cold variant — no restore, no save.
       - name: Restore Rigor analysis cache
+        if: matrix.cache == 'warm'
         uses: actions/cache@v4
         with:
           path: .rigor/cache

@@ -347,7 +347,20 @@ module Rigor
         # result type is precise (`Constant[:even]` instead of the
         # joined `Constant[:even] | Constant[:odd]`).
         live = live_branch_for_if(node, pred_type, post_pred)
-        return live if live
+        if live
+          live_type, _live_scope = live
+          # When the provably-live then-branch terminates and there is no
+          # else, apply the same falsey-scope narrowing as the standard
+          # early-return path below. Without this, `return if @ivar.nil?`
+          # with an ivar seeded as Constant[nil] (making nil? = Constant[true]
+          # and the then-branch "provably live") propagates the un-narrowed
+          # nil scope past the guard instead of Bot.
+          if branch_terminates?(node.statements, live_type) && node.subsequent.nil?
+            _, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_pred)
+            return [live_type, falsey_scope]
+          end
+          return live
+        end
 
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_pred)
         then_type, then_scope = eval_branch_or_nil(node.statements, truthy_scope)
@@ -376,7 +389,18 @@ module Rigor
         pred_type, post_pred = sub_eval(node.predicate, scope)
 
         live = live_branch_for_unless(node, pred_type, post_pred)
-        return live if live
+        if live
+          live_type, _live_scope = live
+          # Mirror of the eval_if fix: when the provably-live unless-body
+          # terminates and there is no else, apply the truthy-scope narrowing
+          # so `return unless @ivar` with a nil-seeded ivar doesn't propagate
+          # the nil scope past the guard.
+          if branch_terminates?(node.statements, live_type) && node.else_clause.nil?
+            truthy_scope, = Narrowing.predicate_scopes(node.predicate, post_pred)
+            return [live_type, truthy_scope]
+          end
+          return live
+        end
 
         truthy_scope, falsey_scope = Narrowing.predicate_scopes(node.predicate, post_pred)
         then_type, then_scope = eval_branch_or_nil(node.statements, falsey_scope)

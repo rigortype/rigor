@@ -1098,6 +1098,27 @@ RSpec.describe Rigor::Analysis::Runner do
 
           expect(result).to be_success
         end
+
+        it "is suppressed when an ivar nil-guard fires on an ivar seeded as Constant[nil]" do
+          # Regression: when @ivar is seeded Constant[nil] by the class-ivar
+          # accumulator, @ivar.nil? folds to Constant[true] (always-live branch
+          # optimisation). The fix ensures the early-return narrowing path still
+          # applies so downstream code doesn't see the stale nil type.
+          result = analyze(<<~RUBY)
+            class GuardedService
+              def initialize
+                @event = nil
+              end
+
+              def run
+                return if @event.nil?
+                @event.process
+              end
+            end
+          RUBY
+
+          expect(result).to be_success
+        end
       end
 
       it "skips methods with required keyword arguments" do

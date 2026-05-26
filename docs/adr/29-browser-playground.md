@@ -155,9 +155,9 @@ Railway). It runs Ruby 4.0 + `rigortype` + a thin Rack/Puma layer.
 CORS headers on the backend allow cross-origin requests from the Pages
 domain.
 
-The frontend and backend are developed in separate subdirectories —
-`playground/frontend/` and `playground/backend/` — within a new
-top-level `playground/` tree in this repository. They are deployed
+The frontend and backend are co-located in
+`plugins/rigor-playground/` — `frontend/` for the static assets
+and the gem root for the Rack/Puma backend. They are deployed
 independently; the frontend's `RIGOR_API_URL` is injected at build
 time as an environment variable.
 
@@ -300,7 +300,7 @@ configuration without cost.
 If traffic warrants scaling, Fly.io autoscaling or a move to a
 different host is straightforward — the backend is a plain Rack app
 with no stateful coupling to the host. The backend deployment manifest
-(`playground/backend/fly.toml`) is committed to the repository.
+(`plugins/rigor-playground/fly.toml`) is committed to the repository.
 
 Rate limiting (50 requests/minute per IP) is enforced at the Fly.io
 proxy layer via `fly.toml` `http_service.rate_limiting`. A global
@@ -355,8 +355,8 @@ track that does not block the `0.2.x` evaluation line.
 
 | Slice | Scope |
 | --- | --- |
-| 1 | `playground/backend/` — Rack application, `/check` endpoint, `Tempfile`-per-request isolation, 10 s timeout, 64 KB cap, fixed `.rigor.yml` (loads `rigor-rbs-inline` with `require_magic_comment: false` per WD4 / ADR-32 WD10). Deployed to Fly.io. Slice 1 is gated on ADR-32 slice 1 (the `source_rbs_synthesizer:` manifest field and the `rigor-rbs-inline` plugin existing). |
-| 2 | `playground/frontend/` — CodeMirror 6, debounced `/check` calls, lint markers, Cloudflare Pages deploy config. |
+| 1 | `plugins/rigor-playground/` — Rack application, `/check` endpoint, `Tempfile`-per-request isolation, 10 s timeout, 64 KB cap, fixed `.rigor.yml` (loads `rigor-rbs-inline` with `require_magic_comment: false` per WD4 / ADR-32 WD10). Deployed to Fly.io. Slice 1 is gated on ADR-32 slice 1 (the `source_rbs_synthesizer:` manifest field and the `rigor-rbs-inline` plugin existing). |
+| 2 | `plugins/rigor-playground/frontend/` — CodeMirror 6, debounced `/check` calls, lint markers, Cloudflare Pages deploy config. |
 | 3 | `/annotate` endpoint + frontend toggle view. |
 | 4 | `/type-of` endpoint + frontend hover integration. |
 | 5 | (Demand-driven) ruby.wasm migration once WD6 conditions hold. |

@@ -1,0 +1,13 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+gem "rigor-rbs-inline", path: "../rigor-rbs-inline"
+gem "rigortype",        path: "../.."
+
+group :development, :test do
+  gem "rack-test", ">= 2.0", "< 3.0"
+  gem "rspec",     ">= 3.13", "< 4.0"
+end

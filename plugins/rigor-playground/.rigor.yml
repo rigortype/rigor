@@ -10,8 +10,8 @@
 # surface, not a multi-file project.
 #
 # This file is auto-discovered by `Rigor::CLI.start` from the
-# Puma process's CWD (`playground/backend/`); each `run_cli`
-# call in `lib/playground/app.rb` inherits it.
+# Puma process's CWD (`plugins/rigor-playground/`); each `run_cli`
+# call in `lib/rigor/playground/app.rb` inherits it.
 plugins:
   - gem: rigor-rbs-inline
     id: rbs-inline

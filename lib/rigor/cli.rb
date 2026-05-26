@@ -31,7 +31,8 @@ module Rigor
       "mcp" => :run_mcp,
       "baseline" => :run_baseline,
       "triage" => :run_triage,
-      "coverage" => :run_coverage
+      "coverage" => :run_coverage,
+      "playground" => :run_playground
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -596,6 +597,17 @@ module Rigor
       CLI::CoverageCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_playground
+      begin
+        require "rigor/playground"
+      rescue LoadError
+        @err.puts "rigor playground requires the rigor-playground gem."
+        @err.puts "Install it with: gem install rigor-playground"
+        return EXIT_USAGE
+      end
+      Rigor::CLI::PlaygroundCommand.new(@argv[1..], @out, @err).run
+    end
+
     def write_result(result, format)
       case format
       when "json"
@@ -641,6 +653,7 @@ module Rigor
           mcp        Run the Rigor MCP server over stdio (ADR-33)
           triage     Summarise diagnostics: distribution, hotspots, hints (ADR-23)
           coverage   Report type-precision coverage (precise vs Dynamic ratio)
+          playground Start the browser playground (requires rigor-playground gem)
           version    Print the Rigor version
           help       Print this help
       HELP

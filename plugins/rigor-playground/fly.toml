@@ -5,7 +5,7 @@
 #
 # Deploy (one-time):
 #
-#   cd playground/backend
+#   cd plugins/rigor-playground
 #   fly launch --no-deploy --name <your-app-name> --region <region>
 #   fly deploy --remote-only
 #
@@ -20,7 +20,7 @@ primary_region = "nrt"
 # context MUST be the rigor repo root (the playground's
 # Gemfile references `path: "../.."`). The Fly.io builder
 # composes `dockerfile` against the working directory of
-# `fly deploy`; running it from `playground/backend/` with
+# `fly deploy`; running it from `plugins/rigor-playground/` with
 # this dockerfile path traverses up two levels at build time.
 [build]
   dockerfile = "Dockerfile"
@@ -31,7 +31,7 @@ primary_region = "nrt"
   # rigor repo root, so deploy with:
   #
   #   fly deploy --remote-only --build-target runtime \
-  #     --dockerfile playground/backend/Dockerfile
+  #     --dockerfile plugins/rigor-playground/Dockerfile
   #
   # from the rigor repo root. Or temporarily symlink the
   # rigor repo root into this directory and deploy from here.
@@ -89,6 +89,6 @@ primary_region = "nrt"
 # enforce via the global concurrency cap above (which
 # effectively limits per-IP throughput on a single machine),
 # plus the per-request 64 KB body cap the app enforces
-# (`Playground::App::MAX_SOURCE_BYTES`). Add an explicit rate
+# (`Rigor::Playground::App::MAX_SOURCE_BYTES`). Add an explicit rate
 # limiter (e.g. `rack-attack`) inside the app if scripted
 # abuse is observed post-launch.

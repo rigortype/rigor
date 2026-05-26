@@ -34,7 +34,7 @@ cycles live in dedicated archives:
   - Files must contain `# rbs_inline: enabled` by default. Set `require_magic_comment: false` in the plugin config to disable the gate for contexts that own the whole analysis scope.
   - A failed parse surfaces as a `source-rbs-synthesis-failed` info diagnostic naming the file and the error message.
 
-- **[playground]** Browser playground end-to-end ([ADR-29](docs/adr/29-browser-playground.md) slices 1–4): Rack/Puma backend (`playground/backend/`) + CodeMirror 6 frontend (`playground/frontend/`), deployable to Fly.io + Cloudflare Pages.
+- **[playground]** Browser playground end-to-end ([ADR-29](docs/adr/29-browser-playground.md) slices 1–4): Rack/Puma backend + CodeMirror 6 frontend in `plugins/rigor-playground/`, deployable to Fly.io + Cloudflare Pages.
   - Inline-RBS annotations (`# @rbs …`) are recognised on load without `# rbs_inline: enabled`. A 300 ms hover tooltip calls `/type-of` and displays the inferred type inline.
 
 - **[rigor annotate]** `rigor annotate` now annotates each `def` header line with the method's inferred return type instead of the parameter list.

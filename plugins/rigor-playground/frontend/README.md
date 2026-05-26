@@ -1,18 +1,18 @@
-# playground/frontend — Rigor playground frontend
+# plugins/rigor-playground/frontend — Rigor playground frontend
 
 The static frontend for the browser playground (backend lives
-at [`../backend/`](../backend/)). A single `index.html` that
-imports [CodeMirror 6](https://codemirror.net/) from
-[esm.sh](https://esm.sh/) at runtime, applies design-system
+at [`../`](../), i.e. `plugins/rigor-playground/`). A single
+`index.html` that imports [CodeMirror 6](https://codemirror.net/)
+from [esm.sh](https://esm.sh/) at runtime, applies design-system
 styling, and talks to the backend over `/check`,
 `/annotate-lines`, and eventually `/type-of` (slice 4,
 demand-driven).
 
 ADR references:
 
-- [ADR-29](../../docs/adr/29-browser-playground.md) — the
+- [ADR-29](../../../docs/adr/29-browser-playground.md) — the
   overall playground design.
-- [ADR-32](../../docs/adr/32-rbs-inline-comment-ingestion.md)
+- [ADR-32](../../../docs/adr/32-rbs-inline-comment-ingestion.md)
   — the inline-RBS plugin the backend pre-loads, showcased
   in the seeded SAMPLE.
 
@@ -29,12 +29,12 @@ ADR references:
 
 ## Local development
 
-The backend at [`../backend/`](../backend/) serves the
-frontend on the same origin (`Playground::App` falls back to
-serving `index.html` on `GET /`). So:
+The backend at [`../`](../) serves the frontend on the same
+origin (`Rigor::Playground::App` falls back to serving
+`index.html` on `GET /`). So:
 
 ```sh
-cd playground/backend
+cd plugins/rigor-playground
 bundle install              # one-time
 bundle exec puma -C puma.rb  # serves on http://localhost:9292
 ```
@@ -52,7 +52,7 @@ The directory is deploy-ready for Cloudflare Pages: drag-and-
 drop it into the dashboard or use Wrangler:
 
 ```sh
-cd playground/frontend
+cd plugins/rigor-playground/frontend
 npx wrangler pages deploy . --project-name=rigor-playground
 ```
 
@@ -70,8 +70,8 @@ and backend in production. Choose one:
 | Path | How |
 | --- | --- |
 | **Same-origin (recommended)** | Set up a custom domain on the Pages project; configure a Cloudflare Rule (Workers / Load Balancer / Page Rules) routing `/check`, `/annotate*`, `/type-of` to the Fly.io app's host. The frontend stays unchanged. |
-| **Cross-origin** | Frontend on `<app>.pages.dev`, backend on `<app>.fly.dev`. Change the `API` constant in `index.html` to the absolute backend URL (e.g. read from a `<meta name="rigor-api" content="...">` tag injected at build time). The backend already serves the necessary CORS preflight (see `playground/backend/lib/playground/app.rb`'s `CORS_HEADERS`). |
+| **Cross-origin** | Frontend on `<app>.pages.dev`, backend on `<app>.fly.dev`. Change the `API` constant in `index.html` to the absolute backend URL (e.g. read from a `<meta name="rigor-api" content="...">` tag injected at build time). The backend already serves the necessary CORS preflight (see `lib/rigor/playground/app.rb`'s `CORS_HEADERS`). |
 
 ## License
 
-[MPL-2.0](../../LICENSE), same as the parent project.
+[MPL-2.0](../../../LICENSE), same as the parent project.

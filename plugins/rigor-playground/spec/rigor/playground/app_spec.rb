@@ -4,21 +4,21 @@ require "json"
 require "rack/test"
 require "rspec"
 
-require_relative "../lib/playground/app"
+require_relative "../../../lib/rigor/playground/app"
 
 # ADR-29 backend smoke tests. Runs against an in-process
-# `Playground::App` via `Rack::Test::Methods`; no Puma boot.
+# `Rigor::Playground::App` via `Rack::Test::Methods`; no Puma boot.
 #
-# Run from `playground/backend/`:
+# Run from `plugins/rigor-playground/`:
 #
-#   bundle exec rspec spec/app_spec.rb
+#   bundle exec rspec spec/rigor/playground/app_spec.rb
 #
 # These specs are intentionally separate from the main Rigor
 # spec suite (`spec/` at the project root) because the
 # playground backend has its own Gemfile (`puma`, `rack`,
 # `rack-test`) and a different `BUNDLE_GEMFILE` boundary. They
 # are NOT part of `make verify`.
-RSpec.describe Playground::App do
+RSpec.describe Rigor::Playground::App do
   include Rack::Test::Methods
 
   let(:app) { described_class.new }

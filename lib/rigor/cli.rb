@@ -28,6 +28,7 @@ module Rigor
       "diff" => :run_diff,
       "sig-gen" => :run_sig_gen,
       "lsp" => :run_lsp,
+      "mcp" => :run_mcp,
       "baseline" => :run_baseline,
       "triage" => :run_triage,
       "coverage" => :run_coverage
@@ -571,6 +572,12 @@ module Rigor
       LspCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_mcp
+      require_relative "cli/mcp_command"
+
+      McpCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def run_baseline
       require_relative "cli/baseline_command"
 
@@ -631,6 +638,7 @@ module Rigor
           diff       Compare current diagnostics to a saved baseline JSON
           sig-gen    Emit RBS skeletons inferred from .rb sources (ADR-14)
           lsp        Run the Rigor Language Server (LSP) over stdio
+          mcp        Run the Rigor MCP server over stdio (ADR-33)
           triage     Summarise diagnostics: distribution, hotspots, hints (ADR-23)
           coverage   Report type-precision coverage (precise vs Dynamic ratio)
           version    Print the Rigor version

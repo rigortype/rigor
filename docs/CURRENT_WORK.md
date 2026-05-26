@@ -28,6 +28,16 @@ v0.1.9 closes the preview-track commitments so v0.2.0 starts the evaluation line
 
 The v0.1.7 / v0.1.8 cycles were the lead-up — collecting real-project error data so the SKILL trio's plugin / severity / baseline-rule defaults rest on empirical evidence.
 
+## MCP server — `rigor mcp` (LANDED 2026-05-27)
+
+`rigor mcp --transport stdio` exposes Rigor's analysis tools as a Model Context
+Protocol server ([ADR-33](adr/33-mcp-server.md)).  Seven read-only tools:
+`rigor_check`, `rigor_type_of`, `rigor_triage`, `rigor_annotate`, `rigor_sig_gen`,
+`rigor_explain`, `rigor_coverage`.  Each delegates to the existing CLI command via
+in-process `CLI.new(argv, out:, err:).run` with StringIO capture.  No new runtime
+dependency.  HTTP transport and across-call environment caching are deferred (slices
+2/3, demand-driven).
+
 ## Inference quality regression infrastructure (LANDED 2026-05-26)
 
 Three complementary layers now guard inference precision:

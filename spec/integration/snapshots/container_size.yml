@@ -1,0 +1,6 @@
+---
+locals:
+  acc: Hash
+  "n": Dynamic[top]
+  text: String
+  words: Dynamic[top]

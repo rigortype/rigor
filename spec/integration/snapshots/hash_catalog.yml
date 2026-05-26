@@ -1,0 +1,5 @@
+---
+locals:
+  acc: Dynamic[top]
+  cleared: Dynamic[top]
+  shape: '{ name: "Alice", age: 30 }'

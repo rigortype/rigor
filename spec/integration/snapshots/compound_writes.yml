@@ -1,0 +1,4 @@
+---
+locals:
+  cached: '"hit"'
+  "n": '12'

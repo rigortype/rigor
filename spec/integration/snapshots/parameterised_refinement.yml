@@ -1,0 +1,6 @@
+---
+locals:
+  attrs: non-empty-hash[Symbol, Integer]
+  c: Catalog
+  ids: non-empty-array[Integer]
+  idx: int<5, 10>

@@ -1,0 +1,9 @@
+---
+locals:
+  d: decimal-int-string
+  h: hex-int-string
+  "n": numeric-string
+  o: octal-int-string
+  s: lowercase-string
+  t: uppercase-string
+  user: Username

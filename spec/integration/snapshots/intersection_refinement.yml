@@ -1,0 +1,5 @@
+---
+locals:
+  l: non-empty-lowercase-string
+  s: Slug
+  u: non-empty-uppercase-string

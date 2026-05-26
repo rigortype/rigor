@@ -1,0 +1,9 @@
+---
+locals:
+  cached: '"hit"'
+  counter: '12'
+  h: '{ name: "Alice", age: 30 }'
+  label: ":large | :small | :zero"
+  "n": '4'
+  parity: ":even"
+  xs: "[10, 20, 30]"

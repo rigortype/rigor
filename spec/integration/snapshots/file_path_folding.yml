@@ -1,0 +1,3 @@
+---
+locals:
+  contents: '"fallback" | String'

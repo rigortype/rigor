@@ -1,0 +1,20 @@
+---
+locals:
+  collected: "[15, 25]"
+  filter_mapped_drop: "[]"
+  filter_mapped_evens: '["2"]'
+  filter_mapped_keep: '["1", "2", "3"]'
+  first_even: '2'
+  flat_all_empty: "[]"
+  flat_pairs: "[1, 10, 2, 20, 3, 30]"
+  flat_scalar: '["1", "2", "3"]'
+  flat_varied: "[1, 2, 2]"
+  idx_alias: '1'
+  idx_first_even: '1'
+  mixed: '["1", "two", "three"]'
+  no_match: nil
+  numbered: "[2, 3, 4]"
+  range_first_even: '2'
+  range_first_idx: '1'
+  range_mapped: '["1", "2", "3"]'
+  shifts: "[10, 20, 30]"

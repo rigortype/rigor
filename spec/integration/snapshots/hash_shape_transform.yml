@@ -1,0 +1,12 @@
+---
+locals:
+  block_keys: '{ "name": "Alice", "age": 30 }'
+  block_vals: '{ name: "Alice", age: "30" }'
+  hetero: '{ x: 1, y: "hello" }'
+  str_hash: '{ "name": "Alice", "age": 30 }'
+  str_keyed: '{ "name": "Alice", "age": 30 }'
+  stringified: '{ name: "Alice", age: "30" }'
+  sym_hash: '{ name: "Alice", age: 30 }'
+  sym_keyed: '{ name: "Alice", age: 30 }'
+  sym_noop: '{ name: "Alice", age: 30 }'
+  up: '{ x: "1", y: "hello" }'

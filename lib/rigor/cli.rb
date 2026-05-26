@@ -29,7 +29,8 @@ module Rigor
       "sig-gen" => :run_sig_gen,
       "lsp" => :run_lsp,
       "baseline" => :run_baseline,
-      "triage" => :run_triage
+      "triage" => :run_triage,
+      "coverage" => :run_coverage
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -582,6 +583,12 @@ module Rigor
       CLI::TriageCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_coverage
+      require_relative "cli/coverage_command"
+
+      CLI::CoverageCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def write_result(result, format)
       case format
       when "json"
@@ -625,6 +632,7 @@ module Rigor
           sig-gen    Emit RBS skeletons inferred from .rb sources (ADR-14)
           lsp        Run the Rigor Language Server (LSP) over stdio
           triage     Summarise diagnostics: distribution, hotspots, hints (ADR-23)
+          coverage   Report type-precision coverage (precise vs Dynamic ratio)
           version    Print the Rigor version
           help       Print this help
       HELP

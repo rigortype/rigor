@@ -1,0 +1,6 @@
+---
+locals:
+  first: '10'
+  last: '30'
+  middle: '20'
+  xs: "[10, 20, 30]"

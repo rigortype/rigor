@@ -1,0 +1,4 @@
+---
+locals:
+  name: non-empty-string
+  v: Validator

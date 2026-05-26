@@ -1,0 +1,6 @@
+---
+locals:
+  _escape_space: '"hello\\ world"'
+  _join_arr: '"git commit -m initial\\ commit"'
+  _split_cmd: '["git", "commit", "-m", "initial commit"]'
+  str: '"a b" | "c d"'

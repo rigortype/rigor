@@ -1,0 +1,7 @@
+---
+locals:
+  err: Exception
+  ke: KeyError
+  ne: NameError
+  nme: NoMethodError
+  re: RuntimeError

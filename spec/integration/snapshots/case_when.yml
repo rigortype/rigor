@@ -1,0 +1,8 @@
+---
+locals:
+  i: 0 | Integer
+  j: Integer | int<100, max> | negative-int
+  k: Integer | int<0, 9>
+  label: ":large | :small | :zero"
+  m: Integer | int<1, 10> | int<11, 20>
+  "n": '0'

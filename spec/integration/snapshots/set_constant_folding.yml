@@ -1,0 +1,14 @@
+---
+locals:
+  _arr: "[:x, :y]"
+  _entries: "[:a, :b, :c]"
+  _s: Set[:a, :b, :c]
+  _s2: Set[:a, :b, :c]
+  _set_empty_bracket: Set[]
+  _set_empty_new: Set[]
+  _set_from_tuple: Set[:x, :y]
+  _set_symbols: Set[:a, :b, :c]
+  _to_a: "[:a, :b, :c]"
+  _union: Set[:a, :b, :c, :d]
+  arr_dyn: "[1, Integer]"
+  s_dynamic: Set

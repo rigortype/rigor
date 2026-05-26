@@ -1,0 +1,8 @@
+---
+locals:
+  k: negative-int | non-negative-int
+  m: Integer | int<0, 5> | nil
+  mask: '15'
+  "n": 0 | negative-int | positive-int
+  power: '125'
+  shift: '256'

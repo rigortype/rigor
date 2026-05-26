@@ -1,0 +1,5 @@
+---
+locals:
+  all_truthy: 'true'
+  empty_select: "[]"
+  non_empty_any: 'true'

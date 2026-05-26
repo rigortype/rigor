@@ -1,0 +1,4 @@
+---
+locals:
+  inst: Dynamic[top]
+  klass: Struct

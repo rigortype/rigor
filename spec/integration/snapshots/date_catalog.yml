@@ -1,0 +1,5 @@
+---
+locals:
+  d: Date
+  dt: DateTime
+  parsed: Date

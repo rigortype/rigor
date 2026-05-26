@@ -1,0 +1,7 @@
+---
+locals:
+  mixed: "[2, 0.0]"
+  neg_result: "[-3, 2]"
+  q: '2'
+  r: '3'
+  result: "[1, 2]"

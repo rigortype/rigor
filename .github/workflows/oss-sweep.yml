@@ -1,0 +1,164 @@
+name: OSS sweep
+
+# Weekly regression sweep: run Rigor against Mastodon at a pinned tag and
+# gate on two signals:
+#   1. Diagnostic count must not exceed the stored threshold (no new FPs).
+#   2. Precision ratio must not drop below the stored threshold (no regression
+#      in type-inference quality, measured by `rigor coverage`).
+#
+# First run (thresholds not yet calibrated): always passes and writes fresh
+# thresholds as a workflow artifact.  Download the artifact and commit
+# data/oss-sweep/mastodon-thresholds.json to activate the gate.
+#
+# Pinned target: data/oss-sweep/mastodon-sha.txt
+# Rigor config:  data/oss-sweep/mastodon-rigor.yml
+# Thresholds:    data/oss-sweep/mastodon-thresholds.json
+
+on:
+  schedule:
+    # Every Monday at 03:00 UTC — after the regular CI window.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      recalibrate:
+        description: "Recalibrate thresholds from this run (deletes stored values)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    name: Mastodon sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Rigor
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set up Ruby (Rigor runtime)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      # Read the pinned tag/SHA from the data file.
+      - name: Read pinned Mastodon tag
+        id: mastodon_tag
+        run: |
+          TAG=$(cat data/oss-sweep/mastodon-sha.txt | tr -d '[:space:]')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # Sparse-clone Mastodon: only app/ lib/ config/ to keep clone fast.
+      - name: Clone Mastodon (sparse, pinned tag)
+        run: |
+          git clone \
+            --depth 1 \
+            --filter=blob:none \
+            --sparse \
+            --branch "${{ steps.mastodon_tag.outputs.tag }}" \
+            https://github.com/mastodon/mastodon.git \
+            /tmp/mastodon
+          git -C /tmp/mastodon sparse-checkout set app lib config
+
+      # Restore the Rigor analysis cache to skip re-analysing unchanged files
+      # across weekly runs (ADR-6). Key encodes Rigor source + Mastodon tag.
+      - name: Restore Rigor analysis cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/mastodon/.rigor/cache
+          key: rigor-oss-mastodon-${{ steps.mastodon_tag.outputs.tag }}-${{ hashFiles('lib/**/*.rb', 'data/builtins/**/*.yml', 'Gemfile.lock') }}
+          restore-keys: rigor-oss-mastodon-${{ steps.mastodon_tag.outputs.tag }}-
+
+      - name: Copy Rigor config into Mastodon checkout
+        run: cp data/oss-sweep/mastodon-rigor.yml /tmp/mastodon/.rigor.yml
+
+      # Recalibration: delete stored thresholds so the compare script writes
+      # fresh ones. Only honoured when the workflow_dispatch input is true.
+      - name: Delete thresholds for recalibration
+        if: ${{ github.event.inputs.recalibrate == 'true' }}
+        run: |
+          echo '{"calibrated":false,"note":"recalibration run"}' \
+            > data/oss-sweep/mastodon-thresholds.json
+
+      # Run `rigor check` against Mastodon. continue-on-error so the coverage
+      # step runs even when errors are found; the compare script does the gate.
+      - name: Run rigor check
+        id: rigor_check
+        continue-on-error: true
+        working-directory: /tmp/mastodon
+        run: |
+          BUNDLE_GEMFILE=$GITHUB_WORKSPACE/Gemfile \
+            bundle exec "$GITHUB_WORKSPACE/exe/rigor" check \
+              --format json \
+              --config .rigor.yml \
+              --no-stats \
+              app lib config \
+            > /tmp/mastodon-diagnostics.json
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+
+      # Run `rigor coverage` against the same paths.
+      - name: Run rigor coverage
+        working-directory: /tmp/mastodon
+        run: |
+          BUNDLE_GEMFILE=$GITHUB_WORKSPACE/Gemfile \
+            bundle exec "$GITHUB_WORKSPACE/exe/rigor" coverage \
+              --format json \
+              --config .rigor.yml \
+              app lib config \
+            > /tmp/mastodon-coverage.json
+
+      # Compare results against stored thresholds. On first run (uncalibrated)
+      # the script writes fresh thresholds and exits 0.
+      - name: Compare against thresholds
+        id: compare
+        run: |
+          bundle exec ruby scripts/oss_sweep_compare.rb \
+            --diagnostics-json /tmp/mastodon-diagnostics.json \
+            --coverage-json    /tmp/mastodon-coverage.json \
+            --thresholds-json  data/oss-sweep/mastodon-thresholds.json \
+            --write-thresholds /tmp/mastodon-thresholds-updated.json
+
+      # Upload all results as artifacts so engineers can inspect diffs between
+      # weekly runs even when no gate fires.
+      - name: Upload sweep artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oss-sweep-mastodon-${{ steps.mastodon_tag.outputs.tag }}-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            /tmp/mastodon-diagnostics.json
+            /tmp/mastodon-coverage.json
+            /tmp/mastodon-thresholds-updated.json
+
+      # Surface a plain-text summary in the Actions UI for quick scanning.
+      - name: Print diagnostic summary
+        if: always()
+        run: |
+          echo "=== Diagnostics ==="
+          python3 -c "
+          import json, sys
+          d = json.load(open('/tmp/mastodon-diagnostics.json'))
+          diags = d.get('diagnostics', [])
+          from collections import Counter
+          by_rule = Counter(x['rule'] for x in diags)
+          print(f'Total: {len(diags)}')
+          for rule, n in by_rule.most_common(10):
+              print(f'  {rule}: {n}')
+          " || true
+
+          echo "=== Coverage ==="
+          python3 -c "
+          import json
+          c = json.load(open('/tmp/mastodon-coverage.json'))
+          s = c['summary']
+          print(f'Precision ratio: {s[\"precise_ratio\"]*100:.2f}%')
+          print(f'Expressions typed: {s[\"expressions_typed\"]}')
+          print(f'Precise: {s[\"precise_count\"]}')
+          print(f'Dynamic (opaque): {s[\"dynamic_opaque_count\"]}')
+          " || true

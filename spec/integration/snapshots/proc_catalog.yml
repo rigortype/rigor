@@ -1,0 +1,5 @@
+---
+locals:
+  m: Method<5#+>
+  prc: Proc
+  um: UnboundMethod

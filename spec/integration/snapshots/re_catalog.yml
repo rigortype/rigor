@@ -1,0 +1,5 @@
+---
+locals:
+  dyn: "/abc/"
+  flagged: "/abc/mi"
+  r: "/abc/"

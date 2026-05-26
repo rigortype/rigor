@@ -1,0 +1,9 @@
+---
+locals:
+  _encoded: '"hello+world"'
+  _regexp_escaped: '"hello\\.world"'
+  _regexp_new_flags: "/world/i"
+  _regexp_plain: "/hello/"
+  _regexp_quoted: '"\\[a\\-z\\]"'
+  _uri_comp: '"hello%20world"'
+  str: '"hello" | "world"'

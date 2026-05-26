@@ -28,6 +28,15 @@ v0.1.9 closes the preview-track commitments so v0.2.0 starts the evaluation line
 
 The v0.1.7 / v0.1.8 cycles were the lead-up — collecting real-project error data so the SKILL trio's plugin / severity / baseline-rule defaults rest on empirical evidence.
 
+## Inference quality regression infrastructure (LANDED 2026-05-26)
+
+Three complementary layers now guard inference precision:
+
+- **`Inference::PrecisionScanner`** (`lib/rigor/inference/precision_scanner.rb`) — classifies every inferred type into eight precision tiers, reports `precision_ratio` / `opaque_ratio`. Complements the existing `CoverageScanner` (node recognition rate) with a type-quality signal.
+- **`rigor coverage`** CLI command — runs `PrecisionScanner` over paths, outputs text (per-file table + tier breakdown) or `--format json` (SKILL-consumable). `--threshold RATIO` gates CI. Running against `lib/` yields ≈44% precision baseline. The `rigor-type-coverage-uplift` SKILL can use the JSON output to measure the impact of each fold added.
+- **Precision snapshot spec** (`spec/integration/precision_snapshot_spec.rb` + `spec/integration/snapshots/`) — golden-file regression gate for all 70 fixtures. Any type change (improvement or regression) fails the example; regenerate with `UPDATE_SNAPSHOTS=1 bundle exec rspec`.
+- **OSS sweep CI** (`.github/workflows/oss-sweep.yml`) — weekly job sparse-clones Mastodon at the pinned tag, runs `rigor check` + `rigor coverage`, gates on stored thresholds in `data/oss-sweep/mastodon-thresholds.json`. First run calibrates thresholds; subsequent runs enforce them. Two-signal gate: max diagnostic count + min precision ratio.
+
 ## Open engineering items
 
 Engine-internal items the next implementer benefits from seeing directly. The full demand-driven backlog (editor mode, LSP capabilities, dry-rb continuations, ADR-10/13/16 follow-ups, performance levers) lives in [`docs/ROADMAP.md`](ROADMAP.md) § "Future cycles" and is, under the new plan, the v0.2.x completion target. This section holds only items with engine-internal detail not captured there.

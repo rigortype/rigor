@@ -1,0 +1,12 @@
+---
+locals:
+  a: Integer
+  b: Integer
+  c: Integer
+  d: Integer
+  e: Integer
+  f: "[Integer, Integer]"
+  g: Infinity
+  h: Infinity
+  i: Infinity
+  "n": Integer

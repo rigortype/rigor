@@ -1,0 +1,13 @@
+# Rigor configuration for the Mastodon OSS regression sweep.
+# Used by .github/workflows/oss-sweep.yml to analyse Mastodon at a pinned tag.
+# Keep in sync with mastodon-sha.txt when the pinned tag changes.
+
+paths:
+  - app
+  - lib
+  - config
+
+severity_profile: lenient
+
+dependencies:
+  source_inference: false

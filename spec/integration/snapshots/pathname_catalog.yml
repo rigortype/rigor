@@ -1,0 +1,4 @@
+---
+locals:
+  exists: false | true
+  p1: "#<Pathname:/usr/bin/ruby>"

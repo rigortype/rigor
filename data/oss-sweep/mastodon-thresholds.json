@@ -1,0 +1,6 @@
+{
+  "calibrated": false,
+  "note": "Delete this file and re-run the workflow to calibrate thresholds against the current Rigor version.",
+  "max_diagnostics": 999999,
+  "min_precision_ratio": 0.0
+}

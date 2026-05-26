@@ -1,0 +1,7 @@
+---
+locals:
+  a: 1 | 2
+  b: 2 | 3
+  mask: '0'
+  parity: 1 | 2 | 3
+  spread: int<11, 55>

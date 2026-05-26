@@ -35,13 +35,20 @@ Use these rules:
 - Use Keep a Changelog section headings: `Added`, `Changed`, `Deprecated`,
   `Removed`, `Fixed`, and `Security`. Each version uses these headings
   verbatim — do NOT inline a short description into the heading
-  (`### Added — feature X` is wrong; the heading is `### Added` and the
-  feature description is a `####` sub-heading or the bullet text below).
-- When a section has many distinct changes, group them under `####`
-  sub-headings (free-form titles) so the bullet stream stays readable.
+  (`### Added — feature X` is wrong; the heading is just `### Added`).
+- Do NOT use `####` sub-headings inside a version block. All entries are
+  bullet items under the standard headings.
+- Each top-level bullet has the form `**[subsystem]** One sentence.` — a
+  bracketed subsystem label (`[rigor check]`, `[type system]`, `[sig-gen]`,
+  `[false positives]`, etc.) followed by one concise user-facing sentence.
+  ADR links are welcome and may repeat within a version.
+- Child items (indented `  - …`) add supplementary detail: two to three
+  sentences max, roughly one screen line each. One topic per child item.
+- Keep entries strictly user-facing. No internal class or method names, no
+  spec-coverage counts, no implementation-detail prose. Internal
+  infrastructure (test files, CI jobs, regression gates) is omitted unless
+  the user directly benefits.
 - Group the same kinds of changes under the same section heading.
-- Keep changelog entries user-facing. Do not list internal refactors unless
-  they affect users.
 - Keep version headings and bottom-of-file links consistent so releases and
   compare ranges stay linkable.
 - Preserve the release date in every version heading.

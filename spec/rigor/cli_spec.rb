@@ -449,6 +449,11 @@ RSpec.describe Rigor::CLI do
       plugin_lib = File.expand_path("../../plugins/rigor-rbs-inline/lib", __dir__)
       $LOAD_PATH.unshift(plugin_lib) unless $LOAD_PATH.include?(plugin_lib)
       require "rigor-rbs-inline"
+      # Explicitly re-register in case another spec in the same
+      # parallel-worker process already loaded the gem and then
+      # called `Rigor::Plugin.unregister!` — `require` would be
+      # a no-op and the class would stay unregistered.
+      Rigor::Plugin.register(Rigor::Plugin::RbsInline) unless Rigor::Plugin.registered_for("rbs-inline")
     end
 
     def write_check_fixture(name, contents)

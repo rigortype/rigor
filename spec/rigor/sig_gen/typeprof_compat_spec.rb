@@ -18,90 +18,100 @@ require "rbs"
 # upstream scenario corpus (test/typeprof/core/class/) and confirmed against
 # TypeProf 2.x behaviour. If TypeProf changes its output format, update the
 # fixture strings.
+
+# ── fixture data ───────────────────────────────────────────────────────────────
+
+TYPEPROF_COMPAT_FIXTURES = [
+  {
+    description: "literal-returning instance methods",
+    ruby_source: <<~RUBY,
+      class Literals
+        def greet; "hello"; end
+        def count; 42; end
+        def rate; 1.5; end
+        def nothing; nil; end
+        def tag; :done; end
+      end
+    RUBY
+    # TypeProf infers nominal types for String / Integer / Float literals;
+    # it does preserve Symbol and nil literal types.
+    typeprof_rbs: <<~RBS
+      class Literals
+        def greet: () -> String
+        def count: () -> Integer
+        def rate: () -> Float
+        def nothing: () -> nil
+        def tag: () -> :done
+      end
+    RBS
+  },
+  {
+    description: "singleton and instance methods on the same class",
+    ruby_source: <<~RUBY,
+      class Counter
+        def self.initial; 0; end
+        def self.label; "counter"; end
+        def value; 1; end
+      end
+    RUBY
+    typeprof_rbs: <<~RBS
+      class Counter
+        def self.initial: () -> Integer
+        def self.label: () -> String
+        def value: () -> Integer
+      end
+    RBS
+  },
+  {
+    description: "mixed return kinds in a single class",
+    ruby_source: <<~RUBY,
+      class Status
+        def code; 200; end
+        def message; "ok"; end
+        def kind; :success; end
+        def missing; nil; end
+      end
+    RUBY
+    typeprof_rbs: <<~RBS
+      class Status
+        def code: () -> Integer
+        def message: () -> String
+        def kind: () -> :success
+        def missing: () -> nil
+      end
+    RBS
+  },
+  {
+    description: "nested module and class",
+    ruby_source: <<~RUBY,
+      module Api
+        class Response
+          def status; 201; end
+          def body; "created"; end
+        end
+      end
+    RUBY
+    typeprof_rbs: <<~RBS
+      module Api
+        class Response
+          def status: () -> Integer
+          def body: () -> String
+        end
+      end
+    RBS
+  }
+].freeze
+
+# Rigor emits RBS literal types (42, "hello") where TypeProf emits nominal
+# class names (Integer, String). A Rigor literal is considered at least as
+# specific as the corresponding base class.
+TYPEPROF_LITERAL_TO_BASE = {
+  /\A-?\d+\z/ => "Integer", # integer literals: 0, 42, 200, 201
+  /\A"/ => "String",    # string literals:  "hello", "ok"
+  /\A:/ => "Symbol"     # symbol literals:  :done, :success
+}.freeze
+
 RSpec.describe "Rigor::SigGen::Generator TypeProf compatibility" do
-  # ── fixture data ─────────────────────────────────────────────────────────────
-
-  TYPEPROF_COMPAT_FIXTURES = [
-    {
-      description: "literal-returning instance methods",
-      ruby_source: <<~RUBY,
-        class Literals
-          def greet; "hello"; end
-          def count; 42; end
-          def rate; 1.5; end
-          def nothing; nil; end
-          def tag; :done; end
-        end
-      RUBY
-      # TypeProf infers nominal types for String / Integer / Float literals;
-      # it does preserve Symbol and nil literal types.
-      typeprof_rbs: <<~RBS
-        class Literals
-          def greet: () -> String
-          def count: () -> Integer
-          def rate: () -> Float
-          def nothing: () -> nil
-          def tag: () -> :done
-        end
-      RBS
-    },
-    {
-      description: "singleton and instance methods on the same class",
-      ruby_source: <<~RUBY,
-        class Counter
-          def self.initial; 0; end
-          def self.label; "counter"; end
-          def value; 1; end
-        end
-      RUBY
-      typeprof_rbs: <<~RBS
-        class Counter
-          def self.initial: () -> Integer
-          def self.label: () -> String
-          def value: () -> Integer
-        end
-      RBS
-    },
-    {
-      description: "mixed return kinds in a single class",
-      ruby_source: <<~RUBY,
-        class Status
-          def code; 200; end
-          def message; "ok"; end
-          def kind; :success; end
-          def missing; nil; end
-        end
-      RUBY
-      typeprof_rbs: <<~RBS
-        class Status
-          def code: () -> Integer
-          def message: () -> String
-          def kind: () -> :success
-          def missing: () -> nil
-        end
-      RBS
-    },
-    {
-      description: "nested module and class",
-      ruby_source: <<~RUBY,
-        module Api
-          class Response
-            def status; 201; end
-            def body; "created"; end
-          end
-        end
-      RUBY
-      typeprof_rbs: <<~RBS
-        module Api
-          class Response
-            def status: () -> Integer
-            def body: () -> String
-          end
-        end
-      RBS
-    }
-  ].freeze
-
   # ── helpers ──────────────────────────────────────────────────────────────────
 
   let(:tmpdir) { Dir.mktmpdir }
@@ -172,21 +182,12 @@ RSpec.describe "Rigor::SigGen::Generator TypeProf compatibility" do
     end
   end
 
-  # Rigor emits RBS literal types (42, "hello") where TypeProf emits nominal
-  # class names (Integer, String). A Rigor literal is considered at least as
-  # specific as the corresponding base class.
-  LITERAL_TO_BASE = {
-    /\A-?\d+\z/ => "Integer", # integer literals: 0, 42, 200, 201
-    /\A"/ => "String",    # string literals:  "hello", "ok"
-    /\A:/ => "Symbol"     # symbol literals:  :done, :success
-  }.freeze
-
   def at_least_as_specific?(rigor_return, typeprof_return)
     return true if typeprof_return == "untyped"
     return false if rigor_return == "untyped"
     return true if rigor_return == typeprof_return
 
-    LITERAL_TO_BASE.any? { |pattern, base| rigor_return.match?(pattern) && typeprof_return == base }
+    TYPEPROF_LITERAL_TO_BASE.any? { |pattern, base| rigor_return.match?(pattern) && typeprof_return == base }
   end
 
   # ── examples ─────────────────────────────────────────────────────────────────

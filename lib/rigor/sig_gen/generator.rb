@@ -119,7 +119,8 @@ module Rigor
         candidates_from_defs = defs.filter_map do |def_node, class_name, kind|
           classify_def(path, def_node, class_name, kind, scope_index)
         end
-        candidates_from_defs + collect_attr_candidates(parse_result.value, path, scope_index)
+        obs_ivar_map = build_observed_ivar_map(parse_result.value)
+        candidates_from_defs + collect_attr_candidates(parse_result.value, path, scope_index, obs_ivar_map)
       end
 
       # Walks the AST collecting `(def_node, class_name, kind)`
@@ -837,11 +838,15 @@ module Rigor
 
       # Per-file context the attr_* walker threads through its
       # recursive descent. Keeps parameter lists in check.
-      AttrWalkContext = Struct.new(:path, :scope_index, :out, keyword_init: true)
+      # `obs_ivar_map` carries the observation-derived fallback types
+      # built by {#build_observed_ivar_map}; it is empty when sig-gen
+      # is invoked without `--params=observed`.
+      AttrWalkContext = Struct.new(:path, :scope_index, :obs_ivar_map, :out, keyword_init: true)
       private_constant :AttrWalkContext
 
-      def collect_attr_candidates(root, path, scope_index)
-        ctx = AttrWalkContext.new(path: path, scope_index: scope_index, out: [])
+      def collect_attr_candidates(root, path, scope_index, obs_ivar_map = {})
+        ctx = AttrWalkContext.new(path: path, scope_index: scope_index,
+                                  obs_ivar_map: obs_ivar_map, out: [])
         walk_attr_calls(root, [], false, ctx)
         ctx.out
       end
@@ -880,7 +885,7 @@ module Rigor
         symbol_names = extract_symbol_arguments(call_node)
         return if symbol_names.empty?
 
-        ivar_lookup = ivar_type_lookup(ctx.scope_index, class_name)
+        ivar_lookup = ivar_type_lookup(ctx.scope_index, class_name, ctx.obs_ivar_map)
         symbol_names.each do |attr_name|
           ivar_type = ivar_lookup.call(attr_name)
           ctx.out.concat(build_attr_candidates(call_node.name, class_name, attr_name, ivar_type, ctx))
@@ -900,12 +905,143 @@ module Rigor
       # before any statement evaluation runs, so the lookup
       # works even when attr_* declarations come before the
       # corresponding ivar writes lexically.
-      def ivar_type_lookup(scope_index, class_name)
+      #
+      # When `obs_ivar_map` is non-empty (i.e. `--params=observed`
+      # was used), it acts as a fallback: if the ivar pre-pass
+      # resolved the type to `nil` or `Dynamic[top]` — typically
+      # because `@ivar = param` inside `initialize` typed the param
+      # as `untyped` — the observation-derived type is substituted.
+      # This lets `attr_reader :name` emit a concrete type when
+      # `ClassName.new("alice")` call sites are visible to the
+      # observation scan.
+      def ivar_type_lookup(scope_index, class_name, obs_ivar_map = {})
         any_scope = scope_index.each_value.first
         return ->(_) {} if any_scope.nil?
 
-        ivars = any_scope.class_ivars_for(class_name)
-        ->(attr_name) { ivars[:"@#{attr_name}"] }
+        ivars     = any_scope.class_ivars_for(class_name)
+        obs_ivars = obs_ivar_map[class_name] || {}
+        lambda do |attr_name|
+          type = ivars[:"@#{attr_name}"]
+          type.nil? || dynamic_top?(type) ? obs_ivars[attr_name] : type
+        end
+      end
+
+      # Build a { class_name => { attr_name_sym => Type } } map that
+      # records observation-derived types for ivars assigned directly
+      # from `def initialize` parameters. Only populated when
+      # `@observations` is non-empty (i.e. `--params=observed` was
+      # supplied). Matches the pattern `@ivar_name = param_name` where
+      # `param_name` is a required / optional positional or keyword
+      # parameter of `initialize`.
+      def build_observed_ivar_map(root)
+        return {} if @observations.empty?
+
+        result = {}
+        collect_init_ivar_obs(root, [], result)
+        result
+      end
+
+      def collect_init_ivar_obs(node, prefix, result)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode, Prism::ModuleNode
+          name = qualified_constant_path(node.constant_path)
+          if name
+            collect_init_ivar_obs(node.body, prefix + [name], result) if node.body
+            return
+          end
+        when Prism::DefNode
+          if node.name == :initialize && !prefix.empty?
+            class_name = prefix.join("::")
+            map = ivar_obs_from_initialize(class_name, node)
+            result[class_name] = (result[class_name] || {}).merge(map) unless map.empty?
+          end
+          return
+        end
+
+        node.compact_child_nodes.each { |c| collect_init_ivar_obs(c, prefix, result) }
+      end
+
+      # Derive { attr_name_sym => Type } for a single `def initialize`
+      # by matching `@ivar = param_name` assignments against the
+      # available `[class_name, :initialize]` observations.
+      def ivar_obs_from_initialize(class_name, def_node)
+        obs_list = @observations[[class_name, :initialize]]
+        return {} if obs_list.nil? || obs_list.empty?
+        return {} if def_node.body.nil? || def_node.parameters.nil?
+
+        param_index = build_init_param_index(def_node.parameters)
+        return {} if param_index.empty?
+
+        ivar_to_param = {}
+        scan_ivar_param_assignments(def_node.body, param_index.keys.to_set, ivar_to_param)
+        build_ivar_obs_type_map(ivar_to_param, param_index, obs_list)
+      end
+
+      # Map `{ ivar_name => param_name }` → `{ attr_name_sym => Type }`
+      # by looking up each param's observation types and unioning them.
+      def build_ivar_obs_type_map(ivar_to_param, param_index, obs_list)
+        ivar_to_param.filter_map do |ivar_name, param_name|
+          types = collect_param_obs_types(obs_list, param_name, param_index[param_name])
+          next if types.empty?
+
+          attr_name = ivar_name.to_s.delete_prefix("@").to_sym
+          [attr_name, types.reduce { |acc, t| Type::Combinator.union(acc, t) }]
+        end.to_h
+      end
+
+      # Collect observed argument types for a single parameter across all
+      # call-site observations. Returns an array of Type objects (may be empty).
+      def collect_param_obs_types(obs_list, param_name, param_info)
+        case param_info[:kind]
+        when :positional then obs_list.filter_map { |obs| obs.positional[param_info[:index]] }
+        when :keyword    then obs_list.filter_map { |obs| obs.keyword[param_name] }
+        else []
+        end
+      end
+
+      # Map param_name_sym → { kind: :positional, index: N } or
+      # { kind: :keyword } for required / optional positionals and
+      # required / optional keywords of a ParametersNode.
+      def build_init_param_index(parameters)
+        index  = {}
+        offset = 0
+
+        (parameters.requireds || []).each_with_index do |p, i|
+          index[p.name] = { kind: :positional, index: offset + i } if p.respond_to?(:name)
+        end
+        offset += parameters.requireds&.size || 0
+
+        (parameters.optionals || []).each_with_index do |p, i|
+          index[p.name] = { kind: :positional, index: offset + i } if p.respond_to?(:name)
+        end
+
+        (parameters.keywords || []).each do |kw|
+          index[kw.name] = { kind: :keyword } if kw.respond_to?(:name)
+        end
+
+        index
+      end
+
+      # Walk a def body for direct `@ivar = local_var` assignments
+      # where `local_var` is one of the listed parameter names.
+      # Records ivar_name (Symbol with `@` prefix) → param_name.
+      # Does not recurse into nested defs / classes / modules.
+      def scan_ivar_param_assignments(node, param_names, result)
+        return unless node.is_a?(Prism::Node)
+
+        if node.is_a?(Prism::InstanceVariableWriteNode) &&
+           node.value.is_a?(Prism::LocalVariableReadNode) &&
+           param_names.include?(node.value.name)
+          result[node.name] ||= node.value.name
+        end
+
+        return if node.is_a?(Prism::DefNode) ||
+                  node.is_a?(Prism::ClassNode) ||
+                  node.is_a?(Prism::ModuleNode)
+
+        node.compact_child_nodes.each { |c| scan_ivar_param_assignments(c, param_names, result) }
       end
 
       def build_attr_candidates(call_name, class_name, attr_name, ivar_type, ctx)

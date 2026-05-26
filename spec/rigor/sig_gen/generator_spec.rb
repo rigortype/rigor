@@ -522,6 +522,84 @@ RSpec.describe Rigor::SigGen::Generator do
 
       expect(candidate.rbs).to eq(%(def m: ("a" | "b") -> "r"))
     end
+
+    # attr_reader + initialize-param observations
+    #
+    # When `--params=observed` is active and the observation scan sees
+    # `Person.new("Alice")`, the observed String type flows through the
+    # ivar pre-pass fallback so that `attr_reader :name` can emit a
+    # concrete return type even though the ivar pre-pass itself only
+    # sees `@name = name` with an untyped `name` parameter.
+    it "resolves attr_reader type from initialize positional-param observations" do
+      path = write_fixture("lib/person.rb", <<~RUBY)
+        class Person
+          def initialize(name)
+            @name = name
+          end
+          attr_reader :name
+        end
+      RUBY
+
+      observations = {
+        ["Person", :initialize] => [
+          [Rigor::Type::Combinator.constant_of("Alice")],
+          [Rigor::Type::Combinator.constant_of("Bob")]
+        ]
+      }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      candidate = described_class.new(configuration: config, paths: [path], observations: observations)
+                                 .run.find { |c| c.method_name == :name }
+
+      expect(candidate.classification).to eq(Rigor::SigGen::Classification::NEW_METHOD)
+      expect(candidate.rbs).to eq(%(def name: () -> ("Alice" | "Bob")))
+    end
+
+    it "resolves attr_reader type from initialize keyword-param observations" do
+      path = write_fixture("lib/point.rb", <<~RUBY)
+        class Point
+          def initialize(x:, y:)
+            @x = x
+            @y = y
+          end
+          attr_reader :x, :y
+        end
+      RUBY
+
+      t_int  = Rigor::Type::Combinator.constant_of(0)
+      t_str  = Rigor::Type::Combinator.constant_of("origin")
+      obs    = Rigor::SigGen::ObservedCall.new(keyword: { x: t_int, y: t_str })
+      observations = { ["Point", :initialize] => [obs] }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      candidates = described_class.new(configuration: config, paths: [path], observations: observations)
+                                  .run.select { |c| %i[x y].include?(c.method_name) }
+                                      .to_h { |c| [c.method_name, c.rbs] }
+
+      expect(candidates[:x]).to eq("def x: () -> 0")
+      expect(candidates[:y]).to eq(%(def y: () -> "origin"))
+    end
+
+    it "falls back to skipped when no observations exist for initialize" do
+      path = write_fixture("lib/empty.rb", <<~RUBY)
+        class Widget
+          def initialize(label)
+            @label = label
+          end
+          attr_reader :label
+        end
+      RUBY
+
+      # observations for a different class — Widget gets nothing
+      observations = { ["Other", :initialize] => [[Rigor::Type::Combinator.constant_of("x")]] }
+
+      config = Rigor::Configuration.new(Rigor::Configuration::DEFAULTS)
+      candidate = described_class.new(configuration: config, paths: [path], observations: observations)
+                                 .run.find { |c| c.method_name == :label }
+
+      expect(candidate.classification).to eq(Rigor::SigGen::Classification::SKIPPED)
+      expect(candidate.skip_reason).to eq(:untyped_return)
+    end
   end
 
   describe "#run output shape" do

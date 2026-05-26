@@ -48,7 +48,7 @@ cycles live in dedicated archives:
 
 ### Fixed
 
-- **[false positives]** `return if @ivar.nil?` (and `unless @ivar`) now correctly narrows the ivar to non-`nil` after the guard when the ivar's only visible assignment was `nil`. Previously the guard was a no-op and subsequent calls on the ivar raised `call.undefined-method`.
+- **[type system]** Fixed: `return if @ivar.nil?` (and `unless @ivar`) now correctly narrows the ivar to non-`nil` after the guard when the ivar's only visible assignment was `nil`. Previously the guard was a no-op and subsequent calls on the ivar raised `call.undefined-method`.
 
 - **[rigor annotate]** Fixed a crash on files containing non-ASCII characters (em-dash, Japanese comments) in environments where `Encoding.default_external` is `US-ASCII`.
 

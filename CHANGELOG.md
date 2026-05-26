@@ -14,6 +14,8 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-05-27
+
 ### Added
 
 - **`rigor mcp` — MCP (Model Context Protocol) server ([ADR-33](docs/adr/33-mcp-server.md)).** New `rigor mcp --transport stdio` subcommand starts a long-running MCP server that exposes Rigor's analysis tools as JSON-RPC 2.0 tool calls over a newline-delimited stdio stream.  Seven read-only tools: `rigor_check` (type diagnostics → JSON), `rigor_type_of` (type at FILE:LINE:COL → JSON), `rigor_triage` (diagnostic distribution + hotspots + hints → JSON), `rigor_annotate` (source annotated with per-line types), `rigor_sig_gen` (RBS skeleton candidates → JSON), `rigor_explain` (rule catalog entry → JSON), `rigor_coverage` (precision-tier breakdown → JSON).  Each tool delegates to the corresponding CLI command via in-process `CLI.new(argv, out:, err:).run` with `StringIO` capture so tool output stays in sync with CLI improvements automatically (ADR-33 WD4).  `isError: true` is set only on EXIT_USAGE (64) — analysis diagnostics found by `rigor_check` set `isError: false` (WD6).  Session-level `--config=PATH` provides a default config for all tools; per-call `config` argument overrides it.  Pure-Ruby implementation (no MCP gem dependency, ADR-0 zero-runtime-dep stance).  To wire into Claude Desktop, Cursor, or any MCP-aware client, point the tool at `rigor mcp --transport stdio`.  HTTP transport and across-call environment caching are deferred to demand (slices 2/3).  Implementation: `lib/rigor/mcp.rb`, `lib/rigor/mcp/server.rb` (`MCP::Server`), `lib/rigor/mcp/loop.rb` (`MCP::Loop`), `lib/rigor/cli/mcp_command.rb`.
@@ -901,7 +903,8 @@ Each example ships `lib/`, runnable `demo/`, README, and an end-to-end integrati
 - **Cache load order for CLI flow.** `lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`. In CLI flow, the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). Fixed; `--cache-stats` now reports real activity.
 - **Fail-soft `rescue StandardError` was masking analyzer-internal bugs.** Tightened to `rescue ::RBS::BaseError` across the RBS-touching code paths — `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`. Analyzer-internal `NameError` / `NoMethodError` / `LoadError` now propagate so similar bugs surface immediately rather than silently degrading user-visible behaviour.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/rigortype/rigor/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/rigortype/rigor/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/rigortype/rigor/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/rigortype/rigor/compare/v0.1.6...v0.1.7

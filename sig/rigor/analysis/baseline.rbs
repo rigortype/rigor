@@ -1,0 +1,39 @@
+module Rigor
+  module Analysis
+    # ADR-22 Slice 1 — per-project baseline filter.
+    # See lib/rigor/analysis/baseline.rb for the full contract.
+    class Baseline
+      class LoadError < ::StandardError
+      end
+
+      # Load a baseline file from disk.
+      # Returns `nil` when `path` is nil (no baseline configured).
+      # Raises {LoadError} on malformed or unsupported content.
+      def self.load: (::String? path) -> Baseline?
+
+      # Build a baseline from a current run's diagnostic stream.
+      def self.from_diagnostics: (untyped diagnostics, ?match_mode: :rule | :message) -> Baseline
+
+      attr_reader buckets: untyped
+
+      def initialize: (untyped buckets) -> void
+
+      # Apply the baseline filter. Returns [surfaced_diagnostics, silenced_count].
+      def filter: (untyped diagnostics) -> [untyped, ::Integer]
+
+      # Report bucket-level drift for each recorded baseline bucket.
+      def audit: (untyped diagnostics) -> untyped
+
+      # Return a new Baseline with the given buckets removed.
+      def without: (untyped buckets_to_drop) -> Baseline
+
+      # Serialise to a YAML string.
+      def to_yaml: () -> ::String
+
+      # Number of recorded buckets.
+      def size: () -> ::Integer
+
+      def empty?: () -> bool
+    end
+  end
+end

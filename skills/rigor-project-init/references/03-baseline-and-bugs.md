@@ -1,9 +1,9 @@
 # 03 — Triage, baseline, and surfacing real bugs
 
-Covers **Phase 5** (triage), **Phase 6** (baseline — acknowledge mode
-only), and **Phase 7** (real bugs + escalation).
+Covers **Phase 6** (triage), **Phase 7** (baseline — acknowledge mode
+only), and **Phase 8** (real bugs + escalation).
 
-## Phase 5 — Triage the diagnostic stream
+## Phase 6 — Triage the diagnostic stream
 
 Do **not** read the raw `rigor check` output to decide what to do. A
 mature codebase's raw stream is hundreds of lines and reads as
@@ -60,7 +60,7 @@ If triage flags `activesupport-core-ext` (or any config gap),
 baseline and the real-bug review should both run against the
 post-config diagnostic set, not the inflated one.
 
-## Phase 6 — Generate the baseline (acknowledge mode only)
+## Phase 7 — Generate the baseline (acknowledge mode only)
 
 **Strict mode skips this phase entirely.** A strict project has no
 baseline; every diagnostic stays live.
@@ -107,7 +107,7 @@ Commit `.rigor-baseline.yml` — it documents project state.
 Print the suppression summary for the user: "N diagnostics recorded
 as baseline; M will surface on subsequent runs."
 
-## Phase 7 — Surface real bugs & offer escalation
+## Phase 8 — Surface real bugs & offer escalation
 
 The triage `genuine-bugs` hint (and any low-count, scattered rule in
 `distribution`) points at the diagnostics most likely to be **actual

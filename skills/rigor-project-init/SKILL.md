@@ -94,13 +94,15 @@ Below that, either mode is reasonable — ask.
 | 2 | Present the two adoption modes; record the user's choice. | (this file — § "The central decision") |
 | 3 | Select the plugin set matching the detected stack. | [`references/01-detect.md`](references/01-detect.md) |
 | 4 | Write `.rigor.dist.yml` — severity profile follows the mode. | [`references/02-configure.md`](references/02-configure.md) |
-| 5 | Run `rigor triage --format json` to diagnose the diagnostic stream. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
-| 6 | Acknowledge mode only — generate the baseline and wire `baseline:`. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
-| 7 | Surface likely real bugs; offer the two escalation paths. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
+| 5 | Generate initial RBS sigs; uplift attr_reader precision with `--params=observed`. | [`references/04-sig-uplift.md`](references/04-sig-uplift.md) |
+| 6 | Run `rigor triage --format json` to diagnose the diagnostic stream. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
+| 7 | Acknowledge mode only — generate the baseline and wire `baseline:`. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
+| 8 | Surface likely real bugs; offer the two escalation paths. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
 
 Load each reference when you reach its phase. Phases run in order;
-the only branch is Phase 6 (acknowledge mode runs it, strict mode
-skips it).
+the only branch is Phase 7 (acknowledge mode runs it, strict mode
+skips it). Phase 5 is also optional if the project already has a
+committed `sig/` directory.
 
 ## Reading order — modules
 
@@ -108,7 +110,8 @@ skips it).
 | --- | --- | --- |
 | 1 | [`references/01-detect.md`](references/01-detect.md) | **Phases 1 + 3.** Gemfile / Gemfile.lock walk → framework family. The plugin-recommendation table (Rails / dry-rb / Sinatra / RSpec / plain Ruby). RBS-collection presence check. |
 | 2 | [`references/02-configure.md`](references/02-configure.md) | **Phase 4.** Severity-profile choice tied to the mode. The `.rigor.dist.yml` template and every key it uses. The `.rigor.dist.yml` vs `.rigor.yml` convention. |
-| 3 | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) | **Phases 5–7.** `rigor triage` as the diagnosis layer. `rigor baseline generate` + wiring `baseline:`. Surfacing likely real bugs. The two escalation paths — write a project plugin, or open a Rigor issue. |
+| 3 | [`references/04-sig-uplift.md`](references/04-sig-uplift.md) | **Phase 5.** `rigor sig-gen --write` baseline. `rigor sig-gen --params=observed --write` attr_reader precision uplift. Handling residual `untyped` methods. Committing `sig/`. |
+| 4 | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) | **Phases 6–8.** `rigor triage` as the diagnosis layer. `rigor baseline generate` + wiring `baseline:`. Surfacing likely real bugs. The two escalation paths — write a project plugin, or open a Rigor issue. |
 
 ## Escalation paths (Phase 7 preview)
 

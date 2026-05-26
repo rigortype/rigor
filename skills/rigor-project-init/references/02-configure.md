@@ -152,4 +152,4 @@ on v0.1.x, wired by `path:` to a rigor checkout), plus a committed
 `.rigor.dist.yml` with `paths:`, `exclude:`, `plugins:`, and
 `severity_profile:` set — and no active `baseline:` line.
 
-Proceed to Phase 5 ([`03-baseline-and-bugs.md`](03-baseline-and-bugs.md)).
+Proceed to Phase 5 ([`04-sig-uplift.md`](04-sig-uplift.md)).

@@ -84,12 +84,14 @@ Phases 1–4 landed (String / Integer / Float / Comparable / Math / HashShape / 
 
 ## Reading order for a returning implementer
 
-The v0.1.9 SKILL trio + ADR-22 baseline slice 5 + sig-gen attr_reader observation inference have all landed on `master`. The **immediate next task** is updating `CHANGELOG.md § [Unreleased]` to record the sig-gen improvement and TypeProf compat spec, then cutting the v0.1.9 version bump (when authorised). Read in this order:
+All [Unreleased] CHANGELOG entries are up to date (including sig-gen attr_reader inference + TypeProf compat spec added 2026-05-26). The inference-quality regression infrastructure (PrecisionScanner, `rigor coverage`, precision snapshot spec, OSS sweep CI, Makefile/CI precision gate) also landed 2026-05-26 and is recorded in [Unreleased].
+
+**`[Unreleased]` is ready to cut as the next version bump (v0.2.0 or, if a patch cycle is needed, v0.1.10).** The version bump itself requires explicit authorisation — see release cadence in `AGENTS.md`. Read in this order:
 
 1. [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0" — the v0.1.9 / v0.2.0 / v0.2.x plan and what gates each.
-2. `CHANGELOG.md` § `[Unreleased]` — **needs two new entries for this session's work** before the v0.1.9 bump: (a) sig-gen `--params=observed` attr_reader / attr_writer / attr_accessor inference from `initialize` observations; (b) TypeProf compatibility spec + the `rigor-project-init` SKILL Phase 5 sig precision uplift.
+2. `CHANGELOG.md` § `[Unreleased]` — all entries current.
 3. [`docs/adr/22-baseline-and-project-onboarding.md`](adr/22-baseline-and-project-onboarding.md) — WD8 + the two onboarding-SKILL sketches; the baseline mechanism.
-4. [`docs/adr/23-diagnostic-triage-command.md`](adr/23-diagnostic-triage-command.md) — `rigor triage`; WD5 / slice 3 is the triage ↔ SKILL data-layer contract. Note: the `rigor-project-init` SKILL now has `rigor triage` at Phase 6 (was Phase 5 before the sig-uplift insertion in `04-sig-uplift.md`).
+4. [`docs/adr/23-diagnostic-triage-command.md`](adr/23-diagnostic-triage-command.md) — `rigor triage`; WD5 / slice 3 is the triage ↔ SKILL data-layer contract.
 5. [`.claude/skills/rigor-plugin-author/SKILL.md`](../.claude/skills/rigor-plugin-author/SKILL.md) — the contributor SKILL; the template for the external-author `skills/rigor-plugin-author/` variant.
 6. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — the public-vs-internal stability boundary. v0.2.0 stabilises the plugin-contract surface for external `rigor-*` gems, so cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
 7. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — the plugin contract v0.2.0 must stabilise.

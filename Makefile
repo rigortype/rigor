@@ -97,6 +97,13 @@ check:
 check-json:
 	bundle exec exe/rigor check --format=json lib
 
+# Report type-precision coverage for `lib/`.
+# Exits non-zero when precision ratio drops below 43 % (the calibrated
+# baseline measured against Rigor's own source on 2026-05-26).
+# Use `rigor coverage lib/` without --threshold for a non-gating report.
+coverage:
+	bundle exec exe/rigor coverage --threshold 0.43 lib
+
 # `verify` chains the spec suite, rubocop, and `rigor check lib`.
 # The spec phase runs in parallel by default (3-4× faster on
 # multi-core hosts than the sequential rspec invocation). `lint`

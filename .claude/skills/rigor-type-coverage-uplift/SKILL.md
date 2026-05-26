@@ -385,6 +385,43 @@ consistent.
 
 ---
 
+## Measuring precision impact
+
+Use `rigor coverage --format json` to get a before/after machine-readable precision score.
+Run once before implementation begins and again after each slice to confirm the uplift is real:
+
+```sh
+# Before implementing the slice:
+nix --extra-experimental-features 'nix-command flakes' develop --command \
+  bundle exec exe/rigor coverage --format json \
+  spec/integration/fixtures/<name>/demo.rb > /tmp/before.json
+
+# After implementing:
+nix --extra-experimental-features 'nix-command flakes' develop --command \
+  bundle exec exe/rigor coverage --format json \
+  spec/integration/fixtures/<name>/demo.rb > /tmp/after.json
+
+# Compare:
+ruby -r json -e '
+  b = JSON.parse(File.read("/tmp/before.json"))["summary"]
+  a = JSON.parse(File.read("/tmp/after.json"))["summary"]
+  puts "precise_ratio: #{(b["precise_ratio"]*100).round(2)}% → #{(a["precise_ratio"]*100).round(2)}%"
+  puts "dynamic_opaque: #{b["dynamic_opaque_count"]} → #{a["dynamic_opaque_count"]}"
+'
+```
+
+For a broader signal (impact on all of `lib/`):
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' develop --command \
+  bundle exec exe/rigor coverage lib
+```
+
+The baseline for `lib/` is ≈43.8 % precision (calibrated 2026-05-26).
+`make coverage` enforces this as a 43 % floor — any slice that regresses precision fails CI.
+
+---
+
 ## Verification
 
 After every implementation slice:
@@ -430,7 +467,11 @@ Before declaring a coverage-uplift slice done:
       stdlib modules; flat form for core types). **Create together with the describe block
       below** — a fixture file with no spec wiring is dead code and will never catch regressions.
 - [ ] Integration describe block in `spec/integration/type_construction_spec.rb`.
+- [ ] Precision snapshots updated: `UPDATE_SNAPSHOTS=1 bundle exec rspec spec/integration/precision_snapshot_spec.rb`.
+      Run this whenever you add or modify a fixture — the golden files in `spec/integration/snapshots/`
+      must reflect the new precise types or the CI snapshot gate will fail.
 - [ ] `make verify` clean.
+- [ ] `make coverage` clean (precision ratio ≥ 43 % on `lib/`).
 - [ ] `CHANGELOG.md` `[Unreleased]` entry (user-visible description of the new folds).
 - [ ] Implemented 🔲 entries updated to ✅ in the coverage doc.
 

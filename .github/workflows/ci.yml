@@ -151,6 +151,15 @@ jobs:
           echo "rigor self-check found errors — see diagnostic output above"
           exit 1
 
+      # Precision gate: `rigor coverage --threshold 0.43 lib` fails when the
+      # type-inference precision ratio on Rigor's own source drops below 43 %.
+      # The cold variant runs this so the gate exercises the full analysis path
+      # without any cached assistance; the warm variant skips it to avoid
+      # double-counting in CI time.
+      - name: Run precision coverage gate
+        if: matrix.cache == 'cold'
+        run: make coverage
+
   # ── 4. Warm-vs-cold diagnostic diff ─────────────────────────────
   # The two self-check variants must agree on every diagnostic.  Any
   # difference means the cache is altering analysis results — a bug.

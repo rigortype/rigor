@@ -29,6 +29,12 @@ Use these rules:
   1.1.0](https://keepachangelog.com/en/1.1.0/) and [Semantic
   Versioning](https://semver.org/spec/v2.0.0.html).
 - Write the changelog for humans, not machines.
+- **A changelog entry is not a commit description.** One entry may span many
+  commits; several commits may be collapsed into one entry. At release time,
+  review the `[Unreleased]` section and rewrite or consolidate any entries
+  that read like commit messages (e.g., "Fix X in Y", "Add Z to W") into
+  user-meaningful change descriptions. The reader wants to know what changed
+  for them, not how the codebase evolved step by step.
 - Add an entry for every released version.
 - Keep the newest released version directly below `Unreleased`.
 - Add a new `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
@@ -180,8 +186,10 @@ accepted by RubyGems.
 - Working tree starts clean or every pending change is understood.
 - `Rigor::VERSION` (`lib/rigor/version.rb`) and `Gemfile.lock` agree on the
   new version.
-- `CHANGELOG.md` describes only user-visible release changes and the
-  `[Unreleased]` / `[x.y.z]` compare links resolve.
+- `CHANGELOG.md` entries read as user-meaningful change descriptions, not
+  commit summaries. `[Unreleased]` entries that look like commit messages
+  have been consolidated or rewritten before sealing the version.
+- `[Unreleased]` / `[x.y.z]` compare links resolve.
 - `make verify` passed.
 - `gem build rigor.gemspec` succeeded and the produced `.gem` is not
   committed.

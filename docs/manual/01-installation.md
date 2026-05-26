@@ -132,4 +132,4 @@ Rigor inside the container is the better choice.
 ## Continuous integration
 
 Wiring Rigor into CI has its own chapter — see
-[Running Rigor in CI](10-ci.md).
+[Running Rigor in CI](11-ci.md).

@@ -79,7 +79,7 @@ cache:
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `cache.path` | String | `.rigor/cache` | Persistent cache directory. See [Caching](11-caching.md). |
+| `cache.path` | String | `.rigor/cache` | Persistent cache directory. See [Caching](12-caching.md). |
 | `parallel.workers` | Integer | `0` | Ractor workers for per-file analysis; `0` is sequential. CLI `--workers` and `RIGOR_RACTOR_WORKERS` take precedence. |
 | `plugins_io.network` | String | `"disabled"` | Plugin network policy — `disabled` or `allowlist`. |
 | `plugins_io.allowed_paths` | Array | `[]` | Filesystem paths plugins may read. |

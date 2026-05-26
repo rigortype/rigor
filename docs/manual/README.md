@@ -46,11 +46,14 @@ flag, key, or command that *acts* on it.
 
 9. [Editor integration](09-editor-integration.md) — wiring
    `rigor lsp` into Neovim, VS Code, Helix, and Emacs.
-10. [Running Rigor in CI](10-ci.md) — a clean CI job, a
+10. [MCP server](10-mcp-server.md) — exposing Rigor's
+    analysis tools to AI coding agents (Claude Code, Cursor,
+    Cline, …) via `rigor mcp`.
+11. [Running Rigor in CI](11-ci.md) — a clean CI job, a
     minimal GitHub Actions workflow, and version pinning.
-11. [Caching](11-caching.md) — where the cache lives, what
+12. [Caching](12-caching.md) — where the cache lives, what
     invalidates it, and how to clear it.
-12. [Troubleshooting](12-troubleshooting.md) — common
+13. [Troubleshooting](13-troubleshooting.md) — common
     problems and their fixes.
 
 ## See also

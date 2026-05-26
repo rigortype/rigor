@@ -67,7 +67,7 @@ it, a [baseline](06-baseline.md) is the right tool.
 ## A result looks stale
 
 It should not — cache entries are keyed by content and
-invalidate themselves (see [Caching](11-caching.md)). If you
+invalidate themselves (see [Caching](12-caching.md)). If you
 suspect the cache anyway, `rigor check --clear-cache` rules it
 out. A result that survives a cleared cache is real analyzer
 behaviour, not a caching artefact.

@@ -24,7 +24,7 @@ shell activation and shims, `asdf`, `gem install`, and developing
 inside a container, see
 [Installing Rigor](../manual/01-installation.md); for
 continuous integration, see
-[Running Rigor in CI](../manual/10-ci.md).
+[Running Rigor in CI](../manual/11-ci.md).
 
 ## What does `rigor check` look at?
 

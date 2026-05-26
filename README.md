@@ -63,7 +63,7 @@ the executable it installs is `rigor`.
 
 Full options — `asdf`, dev containers, CI workflow template — are in the
 [installation guide](https://rigor.typedduck.fail/reference/manual/01-installation/)
-and [CI guide](https://rigor.typedduck.fail/reference/manual/10-ci/).
+and [CI guide](https://rigor.typedduck.fail/reference/manual/11-ci/).
 
 ## Getting started with AI Skills
 

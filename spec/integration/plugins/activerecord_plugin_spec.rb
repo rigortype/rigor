@@ -132,6 +132,81 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  describe "migration files are excluded from column validation" do
+    # Rails migration files (`db/migrate/<timestamp>_*.rb`)
+    # and post-migration files reference the EVOLVING schema
+    # at the time the migration ran. The current `db/schema.rb`
+    # may not have the columns those files mention (the
+    # migration's purpose was often to add/remove them).
+    # Validating these files against the current schema is a
+    # category error — the AR plugin must stay silent on
+    # them.
+
+    let(:migration_source) { "Account.where(suspended: true)\n" }
+
+    it "stays silent on `db/migrate/<timestamp>_*.rb` even when columns don't exist" do
+      Dir.mktmpdir do |dir|
+        plugin_class = Rigor::Plugin::Activerecord
+        materialize_files(dir, "db/schema.rb" => DEFAULT_SCHEMA)
+        FileUtils.mkdir_p(File.join(dir, "db", "migrate"))
+        migration_path = File.join(dir, "db", "migrate", "20240101000001_test_migration.rb")
+        File.write(migration_path, migration_source)
+        Dir.chdir(dir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [migration_path],
+            "plugins" => ["rigor-activerecord"]
+          )
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil,
+            plugin_requirer: lambda { |name|
+              Rigor::Plugin.register(plugin_class) if name == "rigor-activerecord"
+              true
+            }
+          )
+          result = runner.run
+          ar_diags = result.diagnostics.select { |d| d.source_family == "plugin.activerecord" }
+          # Only the schema-loading info / load-error
+          # diagnostics may pass through; no per-file column
+          # errors.
+          expect(ar_diags.select { |d| d.rule == "unknown-column" }).to be_empty
+        end
+      end
+    end
+
+    it "stays silent on `db/post_migrate/` files too" do
+      Dir.mktmpdir do |dir|
+        plugin_class = Rigor::Plugin::Activerecord
+        materialize_files(dir, "db/schema.rb" => DEFAULT_SCHEMA)
+        FileUtils.mkdir_p(File.join(dir, "db", "post_migrate"))
+        path = File.join(dir, "db", "post_migrate", "20240102000001_cleanup.rb")
+        File.write(path, migration_source)
+        Dir.chdir(dir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [path],
+            "plugins" => ["rigor-activerecord"]
+          )
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil,
+            plugin_requirer: lambda { |name|
+              Rigor::Plugin.register(plugin_class) if name == "rigor-activerecord"
+              true
+            }
+          )
+          ar_diags = runner.run.diagnostics.select { |d| d.source_family == "plugin.activerecord" }
+          expect(ar_diags.select { |d| d.rule == "unknown-column" }).to be_empty
+        end
+      end
+    end
+
+    it "still fires unknown-column on a regular app/ file (precision floor)" do
+      # `:emial` typo on User — pattern from the surrounding
+      # `unknown-column diagnostics` block, known to fire.
+      diags = plugin_diagnostics(run_ar("User.where(emial: 'a')\n"))
+      err = diags.find { |d| d.rule == "unknown-column" }
+      expect(err).not_to be_nil
+    end
+  end
+
   describe "unknown-column diagnostics" do
     it "errors on a typo with a Levenshtein-suggested name" do
       diags = plugin_diagnostics(run_ar("User.where(emial: 'a')\n"))

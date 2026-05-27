@@ -63,6 +63,45 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(info).not_to be_nil
     end
 
+    it "generates `new_admin_widget_path` not `admin_new_widget_path` (prefix before new/edit)" do
+      # Rails convention: new_ / edit_ prefix comes FIRST, then the namespace prefix.
+      # `namespace :admin { resources :widgets }` → `new_admin_widget_path`,
+      # not `admin_new_widget_path`.
+      result = run_plugin(
+        source: "new_admin_widget_path\nedit_admin_widget_path(1)\n",
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+      expect(diags.map(&:message).join).to include("new_admin_widget_path")
+    end
+
+    it "flags the wrong-order form `admin_new_widget_path` as unknown" do
+      result = run_plugin(
+        source: "admin_new_widget_path\n",
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      err = plugin_diagnostics(result).find { |d| d.rule == "unknown-helper" }
+      expect(err).not_to be_nil
+    end
+
+    it "recognises an anonymous `get` route by path-derived name (`login_path`)" do
+      # `get "/login", to: "sessions#new"` — no `as:` key; Rails derives
+      # the helper name from the path string.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          get "/login", to: "sessions#new"
+          get "/about/team", to: "static#team"
+        end
+      RUBY
+      result = run_plugin(
+        source: "login_path\nabout_team_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+
     it "recognises explicit `get '/about', as: :about` as `about_path`" do
       result = run_plugin(
         source: "about_path\n",

@@ -303,11 +303,14 @@ module Rigor
           as_name = keyword_symbol(node, :as)
           return if as_name.nil? && path.nil?
 
-          # When `as:` is omitted, Rails generates a helper
-          # name from the path. For our static analysis
-          # we only register helpers when we can name them
-          # confidently — i.e. when `as:` is present.
-          return if as_name.nil?
+          # When `as:` is omitted, Rails derives a helper name
+          # from the path for static paths (no :segment). We
+          # do the same when the path has no placeholders.
+          if as_name.nil?
+            return if path.nil? || path.include?(":")
+
+            as_name = path.delete_prefix("/").tr("/", "_")
+          end
 
           name = "#{context.helper_prefix}#{as_name}_path"
           arity = context.parent_segment_count + count_path_placeholders(path)
@@ -367,7 +370,7 @@ module Rigor
           when :show then show_entry(plural, helper_prefix, singular, base_arity, path_base)
           when :new
             HelperTable::Entry.new(
-              name: "#{helper_prefix}new_#{singular}_path",
+              name: "new_#{helper_prefix}#{singular}_path",
               arity: base_arity, path: "#{path_base}/new",
               http_method: :get, action: :new
             )
@@ -399,7 +402,7 @@ module Rigor
           edit_path = plural ? "#{path_base}/:id/edit" : "#{path_base}/edit"
           edit_arity = plural ? base_arity + 1 : base_arity
           HelperTable::Entry.new(
-            name: "#{helper_prefix}edit_#{singular}_path",
+            name: "edit_#{helper_prefix}#{singular}_path",
             arity: edit_arity, path: edit_path,
             http_method: :get, action: :edit
           )

@@ -30,6 +30,8 @@ cycles live in dedicated archives:
 ### Fixed
 
 - **[rigor baseline generate]** Fixed a crash when `plugins:` entries in `.rigor.yml` were plain strings (e.g. `plugins: [rigor-rails]`).
+- **[rigor-rails-routes]** Fixed incorrect helper names for `new` and `edit` actions inside namespaced resources — `new_admin_widget_path` is now generated correctly instead of the wrong `admin_new_widget_path` form.
+- **[rigor-rails-routes]** `get "/login", to: "sessions#new"` (no `as:` key) now registers `login_path`; previously anonymous static routes were silently skipped, producing false-positive `unknown-helper` diagnostics.
 
 ## [0.1.10] - 2026-05-27
 

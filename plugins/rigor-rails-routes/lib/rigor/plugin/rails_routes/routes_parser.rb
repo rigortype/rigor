@@ -63,9 +63,9 @@ module Rigor
         #   draw partial from `config/routes/name.rb`. Returns file contents
         #   or nil when the file is absent.
         # @return [HelperTable]
-        def parse(contents, file_reader: nil)
+        def parse(contents, file_reader: nil, custom_helpers: [])
           parse_result = Prism.parse(contents)
-          return HelperTable.new([]) unless parse_result.errors.empty?
+          return HelperTable.new([], custom_helpers: custom_helpers) unless parse_result.errors.empty?
 
           context = Context.new(file_reader: file_reader)
           interpret(parse_result.value, context)
@@ -83,14 +83,14 @@ module Rigor
               )
             ]
           end
-          HelperTable.new(paired)
+          HelperTable.new(paired, custom_helpers: custom_helpers, devise_resources: context.devise_resources)
         end
 
         # Per-parse mutable accumulator. Tracks the current
         # nesting prefix (namespaces + parent resource) and the
         # entries collected so far.
         class Context
-          attr_reader :entries, :file_reader
+          attr_reader :entries, :file_reader, :devise_resources
 
           def initialize(file_reader: nil)
             @entries = []
@@ -100,6 +100,14 @@ module Rigor
             # - `{ kind: :scope, parent: "user", arity_segments: [":user_id"] }`
             # - `{ kind: :as_scope, name: "event", path: "/:event_slug", arity: 1 }`
             @stack = []
+            # Devise resource segments (singularised) declared
+            # via `devise_for :resource`. Drives the
+            # OmniAuth-helper recognition in `HelperTable#omniauth_match?`.
+            @devise_resources = []
+          end
+
+          def record_devise_resource(name)
+            @devise_resources << name.to_s
           end
 
           def push_namespace(name)
@@ -255,6 +263,8 @@ module Rigor
             # routes. Interpreted only when we have a parent
             # scope (otherwise the call is meaningless).
             handle_member_or_collection(node, context)
+          when :devise_for
+            handle_devise_for(node, context)
           when :concern
             # `concern :name do ... end` — intentional no-op.
             # Concerns are injected into resource blocks via
@@ -282,6 +292,31 @@ module Rigor
           return interpret_block_body(node, context) if name.nil?
 
           context.push_namespace(name) { interpret_block_body(node, context) }
+        end
+
+        # `devise_for :users [, skip: [...], path: "..."]` —
+        # generates the standard Devise route-helper catalogue
+        # for the named resource. Symbol-literal first arg
+        # only; non-literal forms (e.g. dynamic resource names
+        # built from constants) are silently skipped because the
+        # helper SET depends on the literal name and we cannot
+        # statically resolve a variable here. `skip:` is read
+        # so the project's omitted controllers do not register.
+        def handle_devise_for(node, context)
+          resource = symbol_argument(node, 0)
+          return if resource.nil?
+
+          skip = Array(keyword_array(node, :skip)).map(&:to_sym)
+          resource_segment = DeviseRoutes.singularize(resource.to_s)
+          context.record_devise_resource(resource_segment)
+          DeviseRoutes.generate(resource: resource, skip: skip).each do |entry|
+            context.entries << entry
+          end
+        end
+
+        def keyword_array(node, key)
+          arg = options_hash(node)[key]
+          arg.is_a?(Array) ? arg : nil
         end
 
         # `scope "/:slug", as: "event" do ... end`

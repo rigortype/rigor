@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "devise_routes"
+
 module Rigor
   module Plugin
     class RailsRoutes < Rigor::Plugin::Base
@@ -30,11 +32,27 @@ module Rigor
       class HelperTable
         Entry = Data.define(:name, :arity, :path, :http_method, :action)
 
-        attr_reader :entries
+        attr_reader :entries, :custom_helpers, :devise_resources
 
         # @param entries [Array<Entry>] freshly built; the
         #   factory below is the canonical construction path.
-        def initialize(entries)
+        # @param custom_helpers [Enumerable<String>] names of
+        #   project-defined helper methods (typically pulled
+        #   from `app/helpers/**/*.rb` by
+        #   {HelperDiscoverer}) that the analyzer should treat
+        #   as known — they do NOT correspond to a route but
+        #   their presence MUST NOT fire `unknown-helper`. No
+        #   arity / path metadata is recorded; the analyzer
+        #   skips the route-side checks for these names.
+        # @param devise_resources [Enumerable<String>] resource
+        #   names declared via `devise_for :resource` (already
+        #   singularised, e.g. `"user"`). Used to recognise the
+        #   dynamic OmniAuth helper family
+        #   (`<resource>_<provider>_omniauth_(authorize|callback)_(path|url)`)
+        #   whose provider segment is supplied at runtime — no
+        #   per-name entry is registered for them but they MUST
+        #   NOT fire `unknown-helper` either.
+        def initialize(entries, custom_helpers: [], devise_resources: [])
           @entries = entries.freeze
           # Multimap: a single helper name can map to multiple
           # entries when an uncountable-noun resource registers
@@ -43,6 +61,8 @@ module Rigor
           # returns the first entry (preserving the previous
           # API); `accepts_arity?` checks against every entry.
           @by_name = entries.group_by(&:name).transform_values(&:freeze).freeze
+          @custom_helpers = custom_helpers.to_set.freeze
+          @devise_resources = devise_resources.to_set(&:to_s).freeze
           freeze
         end
 
@@ -57,6 +77,41 @@ module Rigor
         # @return [Boolean]
         def known?(helper_name)
           @by_name.key?(helper_name.to_s)
+        end
+
+        # True when `helper_name` is either a registered route
+        # helper, a discovered project-defined custom helper,
+        # OR a dynamic OmniAuth-shaped helper for one of the
+        # declared `devise_for` resources. The
+        # `unknown-helper` rule consults this predicate to
+        # decide whether to fire — `known?` alone misses
+        # custom helpers and OmniAuth providers, which would
+        # then false-fire on canonical Rails-app patterns.
+        def recognised?(helper_name)
+          name = helper_name.to_s
+          return true if @by_name.key?(name)
+          return true if @custom_helpers.include?(name)
+
+          omniauth_match?(name)
+        end
+
+        # `<resource>_<provider>_omniauth_(authorize|callback)_(path|url)` — when
+        # `<resource>` matches a declared `devise_for` resource
+        # the helper is dynamic-provider Devise OmniAuth. The
+        # provider segment is opaque to a static parser, so we
+        # accept any non-empty token between the resource and
+        # the omniauth suffix.
+        def omniauth_match?(name)
+          return false if @devise_resources.empty?
+
+          DeviseRoutes::OMNIAUTH_SUFFIXES.any? do |suffix|
+            next false unless name.end_with?(suffix)
+
+            stem = name.delete_suffix(suffix)
+            @devise_resources.any? do |resource|
+              stem.start_with?("#{resource}_") && stem.length > resource.length + 1
+            end
+          end
         end
 
         # @return [Boolean] true when any entry under this

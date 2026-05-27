@@ -4,6 +4,7 @@ require "rigor/plugin"
 
 require_relative "rails_routes/helper_table"
 require_relative "rails_routes/routes_parser"
+require_relative "rails_routes/helper_discoverer"
 require_relative "rails_routes/analyzer"
 
 module Rigor
@@ -55,12 +56,14 @@ module Rigor
         version: "0.1.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
-          "routes_file" => :string
+          "routes_file" => :string,
+          "helper_paths" => :array
         },
         produces: [:helper_table]
       )
 
       DEFAULT_ROUTES_FILE = "config/routes.rb"
+      DEFAULT_HELPER_PATHS = ["app/helpers"].freeze
 
       # Cached producer — reads `config/routes.rb` through
       # the trusted `IoBoundary` and parses through
@@ -78,13 +81,50 @@ module Rigor
           nil
         end
         contents = io_boundary.read_file(@routes_file)
-        RoutesParser.parse(contents, file_reader: file_reader)
+        custom_helpers = discover_custom_helpers
+        RoutesParser.parse(contents, file_reader: file_reader, custom_helpers: custom_helpers)
       end
 
       def init(_services)
         @routes_file = config.fetch("routes_file", DEFAULT_ROUTES_FILE)
+        @helper_paths = Array(config.fetch("helper_paths", DEFAULT_HELPER_PATHS)).map(&:to_s)
         @helper_table = nil
         @load_error = nil
+      end
+
+      # Walks every configured `helper_paths:` directory
+      # through the trusted `IoBoundary` and returns the set
+      # of project-defined `*_path` / `*_url` method names
+      # for {HelperDiscoverer}. Each file digest is captured
+      # by the boundary so editing a helper file invalidates
+      # the `:helper_table` cache automatically. Returns the
+      # empty set when nothing under `helper_paths:` exists —
+      # the routes table still works.
+      def discover_custom_helpers
+        contents_per_path = {}
+        each_helper_file do |path|
+          contents_per_path[path] = io_boundary.read_file(path)
+        rescue Plugin::AccessDeniedError, Errno::ENOENT
+          next
+        end
+        HelperDiscoverer.discover(contents_per_path)
+      end
+
+      def pre_read_helper_files
+        each_helper_file do |path|
+          io_boundary.read_file(path)
+        rescue Plugin::AccessDeniedError, Errno::ENOENT
+          next
+        end
+      end
+
+      def each_helper_file(&)
+        @helper_paths.each do |dir|
+          absolute = File.expand_path(dir)
+          next unless File.directory?(absolute)
+
+          Dir.glob(File.join(absolute, "**", "*.rb")).each(&)
+        end
       end
 
       # Publishes the parsed table to the cross-plugin fact
@@ -131,8 +171,12 @@ module Rigor
         # Read first so the IoBoundary's FileEntry digest
         # captures into the descriptor before `cache_for`
         # snapshots it (the same pattern documented in
-        # rigor-routes / rigor-activerecord).
+        # rigor-routes / rigor-activerecord). Helper files are
+        # pre-read for the same reason — editing a file under
+        # `app/helpers/` MUST invalidate the helper_table cache
+        # so the new custom-helper set is picked up.
         io_boundary.read_file(@routes_file)
+        pre_read_helper_files
         @helper_table = cache_for(:helper_table, params: {}).call
       rescue Plugin::AccessDeniedError => e
         @load_error = "rigor-rails-routes: #{e.message}"

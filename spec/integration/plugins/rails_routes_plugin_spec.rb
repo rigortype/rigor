@@ -504,6 +504,182 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "custom helper discovery (app/helpers/)" do
+    let(:helper_module) do
+      <<~RUBY
+        module RoutingHelper
+          def full_asset_url(source)
+            source
+          end
+
+          def host_to_url(host)
+            host
+          end
+
+          private
+
+          def internal_path(arg)
+            arg
+          end
+        end
+      RUBY
+    end
+
+    it "suppresses unknown-helper for a project-defined `_url` helper" do
+      result = run_plugin(
+        source: "full_asset_url('foo.png')\n",
+        files: {
+          "config/routes.rb" => DEFAULT_ROUTES_RB,
+          "app/helpers/routing_helper.rb" => helper_module
+        }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "still flags a misspelt helper that is neither in routes nor in app/helpers/" do
+      # Name MUST end in `_path` / `_url` to reach the rule
+      # at all — pick a name not present in either source.
+      result = run_plugin(
+        source: "definitely_not_real_url('foo.png')\n",
+        files: {
+          "config/routes.rb" => DEFAULT_ROUTES_RB,
+          "app/helpers/routing_helper.rb" => helper_module
+        }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns.size).to eq(1)
+      expect(unknowns.first.message).to include("definitely_not_real_url")
+    end
+
+    it "ignores `_path` / `_url` methods marked private in the helper module" do
+      result = run_plugin(
+        source: "internal_path('x')\n",
+        files: {
+          "config/routes.rb" => DEFAULT_ROUTES_RB,
+          "app/helpers/routing_helper.rb" => helper_module
+        }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns.size).to eq(1)
+      expect(unknowns.first.message).to include("internal_path")
+    end
+
+    it "ignores singleton-method `_url` definitions (def self.x)" do
+      module_with_singleton = <<~RUBY
+        module Helpers
+          def self.class_side_url(s)
+            s
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "class_side_url('x')\n",
+        files: {
+          "config/routes.rb" => DEFAULT_ROUTES_RB,
+          "app/helpers/helpers.rb" => module_with_singleton
+        }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns.size).to eq(1)
+    end
+
+    it "walks nested modules / classes for helper definitions" do
+      nested = <<~RUBY
+        module Outer
+          module Inner
+            def deeply_nested_url(s)
+              s
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "deeply_nested_url('x')\n",
+        files: {
+          "config/routes.rb" => DEFAULT_ROUTES_RB,
+          "app/helpers/nested.rb" => nested
+        }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+  end
+
+  describe "devise_for route generation" do
+    let(:routes_with_devise) do
+      <<~RUBY
+        Rails.application.routes.draw do
+          devise_for :users
+        end
+      RUBY
+    end
+
+    it "recognises the standard Devise session helper" do
+      result = run_plugin(
+        source: "new_user_session_path\n",
+        files: { "config/routes.rb" => routes_with_devise }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "recognises every helper in the standard six-controller catalogue" do
+      helpers = %w[
+        new_user_session_path user_session_path destroy_user_session_path
+        new_user_password_path edit_user_password_path user_password_path
+        new_user_confirmation_path user_confirmation_path
+        new_user_unlock_path user_unlock_path
+        new_user_registration_path edit_user_registration_path
+        user_registration_path cancel_user_registration_path
+      ]
+      result = run_plugin(
+        source: "#{helpers.join("\n")}\n",
+        files: { "config/routes.rb" => routes_with_devise }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "honours `skip:` to omit controllers the project disables" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          devise_for :users, skip: [:registrations]
+        end
+      RUBY
+      result = run_plugin(
+        source: "new_user_session_path\nnew_user_registration_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns.size).to eq(1)
+      expect(unknowns.first.message).to include("new_user_registration_path")
+    end
+
+    it "recognises dynamic OmniAuth helpers (`<resource>_<provider>_omniauth_*`)" do
+      result = run_plugin(
+        source: "user_facebook_omniauth_authorize_path\nuser_github_omniauth_callback_url\n",
+        files: { "config/routes.rb" => routes_with_devise }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "does NOT recognise an OmniAuth-shaped helper for an undeclared resource" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          devise_for :users
+        end
+      RUBY
+      result = run_plugin(
+        source: "admin_facebook_omniauth_authorize_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns.size).to eq(1)
+    end
+  end
+
   describe "ADR-9 cross-plugin fact publication" do
     it "publishes the `:helper_table` fact during prepare" do
       # FactStore is constructed once per Services / per run;

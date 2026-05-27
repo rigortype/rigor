@@ -43,6 +43,15 @@ module Rigor
               diagnostics << info_diagnostic(path, call_node, entry)
               arity_diagnostic = arity_check(path, call_node, entry, helper_table)
               diagnostics << arity_diagnostic if arity_diagnostic
+            elsif helper_table.recognised?(name)
+              # Custom helper (discovered via
+              # `app/helpers/**/*.rb`) or a dynamic-provider
+              # Devise OmniAuth helper. We do NOT have an
+              # arity / path to validate — the helper is just
+              # known-to-exist. Skip the arity / info
+              # diagnostic; the absence of an `unknown-helper`
+              # error is the user-visible outcome.
+              next
             else
               diagnostics << unknown_helper_diagnostic(path, call_node, name, helper_table)
             end

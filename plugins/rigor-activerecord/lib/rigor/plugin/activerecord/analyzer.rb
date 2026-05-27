@@ -90,6 +90,16 @@ module Rigor
           keyword_pairs = keyword_argument_pairs(node)
           return push_recognised(node, entry) if keyword_pairs.empty?
 
+          # Models with no schema-side columns are virtual — backed
+          # by a database VIEW (Mastodon's `Instance` model wraps a
+          # SQL view that isn't in `db/schema.rb`), seeded from an
+          # external source, or otherwise opaque to our schema
+          # parser. Without a column set we cannot meaningfully
+          # check query keys; surface the call as recognised and
+          # skip column validation entirely rather than firing a
+          # false `unknown-column` against every key.
+          return push_recognised(node, entry, keyword_pairs.map { |p| p[:key] }) if entry.column_names.empty?
+
           unknown = keyword_pairs.reject { |pair| valid_query_key?(entry, pair[:key]) }
           if unknown.empty?
             keyword_pairs.each { |pair| validate_enum_value(node, entry, pair) }

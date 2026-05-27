@@ -59,12 +59,12 @@ module Rigor
     class Activerecord < Rigor::Plugin::Base
       manifest(
         id: "activerecord",
-        # Bumped 2026-05-28 — exclude `db/migrate/` and
-        # `db/post_migrate/` files from column validation
-        # (migrations reference the evolving schema; validating
-        # them against the current `db/schema.rb` is a
-        # category error).
-        version: "0.2.0",
+        # Bumped 2026-05-28 — virtual-model exemption: models
+        # whose schema has no columns (DB-view-backed, external-
+        # source, etc.) skip column validation entirely.
+        # Mastodon's `Instance` wraps a SQL view absent from
+        # `db/schema.rb`.
+        version: "0.3.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => :string,

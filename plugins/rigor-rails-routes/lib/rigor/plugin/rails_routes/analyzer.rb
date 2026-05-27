@@ -15,12 +15,14 @@ module Rigor
 
         # Built-in Rails helpers we don't want to flag as
         # unknown. The plugin's HelperTable describes
-        # user-declared routes; Rails ships built-in helpers
-        # (`url_for`, `polymorphic_path`, …) the plugin
-        # deliberately ignores.
+        # user-declared routes; Rails (and a small set of
+        # widely-used asset gems) ship built-in helpers
+        # (`url_for`, `polymorphic_path`, vite_ruby's
+        # `vite_asset_path`, …) the plugin deliberately ignores.
         BUILTIN_PASSTHROUGH = %w[
           url_for_path url_for_url
           polymorphic_path polymorphic_url
+          vite_asset_path vite_asset_url
         ].freeze
 
         Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
@@ -37,11 +39,31 @@ module Rigor
           subject subject!
         ].freeze
 
+        # Paths under which `unknown-helper` is suppressed. Route
+        # helpers are not customarily resolved through these
+        # directories, so a bare `shared_inbox_url` call inside
+        # `app/models/account.rb` (the call-site is the
+        # `accounts.shared_inbox_url` AR column accessor — same
+        # name as a hypothetical route helper) or a `default_url`
+        # inside `lib/paperclip/url_generator_extensions.rb` (the
+        # call-site is `Paperclip::UrlGenerator#default_url`, a
+        # gem-side instance method) would be a false positive.
+        # The core engine's `call.undefined-method` still catches
+        # a genuinely unreachable receiver. Cheap path-prefix
+        # check; no AR-column / gem-include analysis required.
+        SKIP_UNKNOWN_HELPER_PATHS = [
+          %r{(?:\A|/)app/models/},
+          %r{(?:\A|/)lib/},
+          %r{(?:\A|/)db/},
+          %r{(?:\A|/)config/}
+        ].freeze
+
         # @param path [String] file being analysed
         # @param root [Prism::Node]
         # @param helper_table [HelperTable]
         # @return [Array<Diagnostic>]
         def diagnose(path:, root:, helper_table:)
+          suppress_unknown = SKIP_UNKNOWN_HELPER_PATHS.any? { |re| path.match?(re) }
           diagnostics = []
           # Pre-walk the file to collect every name that
           # shadows a route helper at call time: `let(:foo)`,
@@ -73,6 +95,14 @@ module Rigor
               # known-to-exist. Skip the arity / info
               # diagnostic; the absence of an `unknown-helper`
               # error is the user-visible outcome.
+              next
+            elsif suppress_unknown
+              # File is in a directory where route helpers are
+              # not customarily resolved (models / lib / db /
+              # config). Skip `unknown-helper` to avoid false
+              # positives on AR column accessors / gem-side
+              # instance methods that happen to end in `_url` /
+              # `_path`.
               next
             else
               diagnostics << unknown_helper_diagnostic(path, call_node, name, helper_table)

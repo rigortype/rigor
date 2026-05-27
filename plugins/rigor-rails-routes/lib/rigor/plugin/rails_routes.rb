@@ -53,12 +53,11 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-28 — `with_options X do ... end`
-        # propagates X defaults into inner resources/resource
-        # calls. Closes Mastodon's `with_options only:
-        # [:index], concerns: :batch do resources :links; ...`
-        # shape (`batch_admin_trends_*` cluster).
-        version: "0.10.0",
+        # Bumped 2026-05-28 — unknown-helper FP scrub (path
+        # exclusion for models/lib/db/config, Devise scoped
+        # bare helpers + omniauth_authorize_path, ss-preserving
+        # singularize, vite_asset_path passthrough).
+        version: "0.11.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

@@ -127,7 +127,65 @@ module Rigor
               )
             end
           end
+
+          # Devise also ships *scoped* helpers
+          # (`Devise::Controllers::UrlHelpers`) that DROP the
+          # resource segment and take the scope as a positional
+          # argument: `new_password_path(resource_name)` is the
+          # bare form of `new_user_password_path`. Used inside
+          # `Auth::PasswordsController < Devise::PasswordsController`
+          # (Mastodon's idiom). Arity 1 (the scope), and a
+          # trailing options-hash bumps it via the existing
+          # `arity + 1` rule.
+          entries.concat(scoped_helpers(skip_set))
+
+          # `omniauth_authorize_path(scope, provider)` and
+          # `omniauth_callback_path(scope, provider)` are
+          # `Devise::Controllers::UrlHelpers` scoped helpers
+          # that delegate to the OmniAuth gem. Arity 2.
+          unless skip_set.include?(:omniauth_callbacks)
+            %w[omniauth_authorize_path omniauth_callback_path].each do |name|
+              entries << HelperTable::Entry.new(
+                name: name,
+                arity: 2,
+                path: "/users/auth/:provider",
+                http_method: :get,
+                action: :show
+              )
+            end
+          end
+
           entries
+        end
+
+        # Scoped helpers Devise exposes inside its controllers.
+        # The arity-1 family — caller supplies the resource
+        # scope (`:user` etc.) as the first positional arg.
+        # Names mirror the qualified `<scope>_<name>_path`
+        # entries above, minus the scope segment.
+        SCOPED_HELPERS = {
+          sessions: %w[new_session_path session_path destroy_session_path],
+          passwords: %w[new_password_path edit_password_path password_path],
+          confirmations: %w[new_confirmation_path confirmation_path],
+          unlocks: %w[new_unlock_path unlock_path],
+          registrations: %w[cancel_registration_path new_registration_path edit_registration_path registration_path]
+        }.freeze
+        private_constant :SCOPED_HELPERS
+
+        def scoped_helpers(skip_set)
+          SCOPED_HELPERS.flat_map do |controller, names|
+            next [] if skip_set.include?(controller)
+
+            names.map do |name|
+              HelperTable::Entry.new(
+                name: name,
+                arity: 1,
+                path: "/<scope>",
+                http_method: :get,
+                action: :show
+              )
+            end
+          end
         end
 
         # Returns the set of OmniAuth pattern suffixes the
@@ -153,6 +211,8 @@ module Rigor
           return word if UNCOUNTABLE.include?(word)
           return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
           return word.chomp("es") if word.end_with?("ses") || word.end_with?("xes")
+          # `ss` preserved — Rails default inflector behaviour.
+          return word if word.end_with?("ss")
           return word.chomp("s") if word.end_with?("s")
 
           word

@@ -334,6 +334,13 @@ module Rigor
             return word if UNCOUNTABLE.include?(word)
             return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
             return word.chomp("es") if word.end_with?("ses", "shes", "ches", "xes", "zes")
+            # Words ending in `ss` are their own singular —
+            # Rails' default inflector ships
+            # `inflect.singular(/(ss)$/i, '\1')` that preserves
+            # the double-s. Mastodon's `resources :custom_css`
+            # was singularising to `custom_cs` and producing a
+            # bogus `custom_cs_path(id)`.
+            return word if word.end_with?("ss")
             return word.chomp("s") if word.end_with?("s")
 
             word
@@ -342,14 +349,14 @@ module Rigor
           def pluralize(word)
             return IRREGULAR_SINGULARS.key(word) if IRREGULAR_SINGULARS.value?(word)
             return word if UNCOUNTABLE.include?(word)
-            return word if word.end_with?("s")
+            return word if word.end_with?("s") && !word.end_with?("ss")
             return "#{word.chomp('y')}ies" if word.end_with?("y") && word.length > 1
             # Words ending in s/sh/ch/x/z take "es" in plural,
             # matching Rails' default inflector. Without this
             # `async_refresh` (singular) pluralised to
             # `async_refreshs`, mismatching the actual
             # `/async_refreshes` URL.
-            return "#{word}es" if word.end_with?("sh", "ch", "x", "z")
+            return "#{word}es" if word.end_with?("ss", "sh", "ch", "x", "z")
 
             "#{word}s"
           end
@@ -1039,6 +1046,10 @@ module Rigor
           return word if UNCOUNTABLE.include?(word)
           return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
           return word.chomp("es") if word.end_with?("ses", "shes", "ches", "xes", "zes")
+          # Preserve trailing `ss` — Rails ships
+          # `inflect.singular(/(ss)$/i, '\1')` so `custom_css`
+          # singularises as `custom_css`, not `custom_cs`.
+          return word if word.end_with?("ss")
           return word.chomp("s") if word.end_with?("s")
 
           word

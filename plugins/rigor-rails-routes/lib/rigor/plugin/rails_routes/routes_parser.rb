@@ -174,6 +174,37 @@ module Rigor
             @stack.pop
           end
 
+          # `with_options only: [:index], concerns: :batch do
+          # ... end` — every call inside the block inherits
+          # these default options (each call's own options
+          # override the defaults). `effective_options_for`
+          # below merges them in caller-precedence order.
+          def push_with_options(defaults)
+            @stack.push(kind: :with_options, defaults: defaults)
+            yield
+          ensure
+            @stack.pop
+          end
+
+          # The merged default-options chain from every
+          # enclosing `with_options` frame on the stack
+          # (outer-most first; inner frames take precedence).
+          # `handle_resources` / `handle_resource` merge this
+          # with the node's own option hash so a bare
+          # `resources :links` inside `with_options only:
+          # [:index], concerns: :batch do ... end` is
+          # treated as if it had those options written
+          # inline.
+          def with_options_defaults
+            defaults = {}
+            @stack.each do |frame|
+              next unless frame[:kind] == :with_options
+
+              defaults = defaults.merge(frame[:defaults])
+            end
+            defaults
+          end
+
           # Returns the top-most `:scope` frame's singular /
           # plural names, or `nil` when not inside a resources
           # / resource block. Used by `handle_member_or_collection`
@@ -370,6 +401,8 @@ module Rigor
             handle_use_doorkeeper(node, context)
           when :mount
             handle_mount(node, context)
+          when :with_options
+            handle_with_options(node, context)
           when :concern
             handle_concern_definition(node, context)
           else
@@ -408,6 +441,25 @@ module Rigor
           context.record_devise_resource(resource_segment)
           DeviseRoutes.generate(resource: resource, skip: skip).each do |entry|
             context.entries << entry
+          end
+        end
+
+        # `with_options X do ... end` — applies the `X`
+        # options hash as defaults for every call inside the
+        # block. Mastodon's `with_options only: [:index],
+        # concerns: :batch do resources :links; resources
+        # :tags; end` lets us register the inner resources
+        # with the implicit defaults — closing `batch_*_path`
+        # cluster generated via the `:batch` concern.
+        #
+        # We push a `:with_options` frame carrying the
+        # defaults; `effective_options_for(node)` (in
+        # `handle_resources` / `handle_resource`) merges them
+        # in before reading specific option keys.
+        def handle_with_options(node, context)
+          defaults = options_hash(node)
+          context.push_with_options(defaults) do
+            interpret_block_body(node, context)
           end
         end
 
@@ -506,7 +558,8 @@ module Rigor
           name = symbol_argument(node, 0)
           return interpret_block_body(node, context) if name.nil?
 
-          actions = restrict_actions(node, DEFAULT_RESOURCE_ACTIONS)
+          options = effective_options_for(node, context)
+          actions = restrict_actions_from(options, DEFAULT_RESOURCE_ACTIONS)
           base_arity = context.parent_segment_count
           # `resources :collections, as: :actor_collections`
           # remaps the helper name family —
@@ -515,12 +568,12 @@ module Rigor
           # are unaffected. Mastodon uses this inside a
           # concern (`resources :collections, only: [:show],
           # as: :actor_collections`).
-          helper_name = keyword_symbol(node, :as) || name
+          helper_name = options[:as] || name
 
           register_resourceful_helpers(helper_name, actions, base_arity, context, plural: true)
 
           context.push_resource(name) do
-            replay_concerns(node, context)
+            replay_concerns_from_options(options, context)
             interpret_block_body(node, context)
           end
         end
@@ -529,9 +582,10 @@ module Rigor
           name = symbol_argument(node, 0)
           return interpret_block_body(node, context) if name.nil?
 
-          actions = restrict_actions(node, DEFAULT_SINGULAR_ACTIONS)
+          options = effective_options_for(node, context)
+          actions = restrict_actions_from(options, DEFAULT_SINGULAR_ACTIONS)
           base_arity = context.parent_segment_count
-          helper_name = keyword_symbol(node, :as) || name
+          helper_name = options[:as] || name
 
           # Singular resource — no `:id` segment, no `:index`
           # / pluralised helper. The "show" helper is
@@ -572,7 +626,11 @@ module Rigor
         # (`concerns: :name`) and array-of-symbols
         # (`concerns: [:a, :b]`) forms.
         def replay_concerns(resource_node, context)
-          concerns_value = keyword_value(resource_node, :concerns)
+          replay_concerns_from_options(effective_options_for(resource_node, context), context)
+        end
+
+        def replay_concerns_from_options(options, context)
+          concerns_value = options[:concerns]
           return if concerns_value.nil?
 
           Array(concerns_value).each do |concern_name|
@@ -581,6 +639,17 @@ module Rigor
 
             body.compact_child_nodes.each { |child| interpret(child, context) }
           end
+        end
+
+        # Returns the merged option hash for a node — the
+        # caller's own options override `with_options`
+        # defaults from the surrounding Context stack. Used by
+        # `handle_resources` / `handle_resource` so a bare
+        # `resources :foo` inside `with_options only: [:index],
+        # concerns: :batch do ... end` is treated as if it
+        # had those options written inline.
+        def effective_options_for(node, context)
+          context.with_options_defaults.merge(options_hash(node))
         end
 
         # Reads the value of an options-hash key. Distinct from
@@ -884,7 +953,10 @@ module Rigor
         end
 
         def restrict_actions(node, default)
-          options = options_hash(node)
+          restrict_actions_from(options_hash(node), default)
+        end
+
+        def restrict_actions_from(options, default)
           # `resources :foo, only: :show` is the same as
           # `only: [:show]` in Rails; `options_hash` preserves the
           # Symbol shape from the source, so coerce here.

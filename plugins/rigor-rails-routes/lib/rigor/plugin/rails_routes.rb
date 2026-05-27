@@ -53,11 +53,12 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-28 — extended singularize for
-        # *shes/*ches/*xes/*zes rule; `resources :foo, as:
-        # :bar` overrides helper name root; `mount Foo, at:
-        # '/x', as: :name` registers `<name>_path` helper.
-        version: "0.9.0",
+        # Bumped 2026-05-28 — `with_options X do ... end`
+        # propagates X defaults into inner resources/resource
+        # calls. Closes Mastodon's `with_options only:
+        # [:index], concerns: :batch do resources :links; ...`
+        # shape (`batch_admin_trends_*` cluster).
+        version: "0.10.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

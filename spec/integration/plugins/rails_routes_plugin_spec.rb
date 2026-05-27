@@ -817,6 +817,75 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "with_options applies defaults to inner resources" do
+    # Mastodon's `with_options only: [:index], concerns:
+    # :batch do resources :links; resources :tags; ... end`
+    # — inner declarations inherit `only:` + `concerns:`.
+
+    it "applies `only:` to a bare `resources :foo` inside the block" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          with_options only: [:index] do
+            resources :links
+            resources :tags
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "links_path\ntags_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "applies `concerns:` defaults so concern bodies replay for inner resources" do
+      # The Mastodon shape: `concern :batch do collection {
+      # post :batch }; end` + `with_options only: [:index],
+      # concerns: :batch do resources :links; ... end` →
+      # `batch_links_path` registers.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          namespace :admin do
+            concern :batch do
+              collection { post :batch }
+            end
+
+            namespace :trends do
+              with_options only: [:index], concerns: :batch do
+                resources :links
+                resources :tags
+                resources :statuses
+              end
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "batch_admin_trends_links_path\nbatch_admin_trends_tags_path\nbatch_admin_trends_statuses_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "lets the inner call's own options override with_options defaults" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          with_options only: [:index] do
+            resources :books, only: [:show, :index]
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "book_path(1)\nbooks_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+  end
+
   describe "extended singularize rules (sh / ch / x / z + es)" do
     it "singularises `async_refreshes` to `async_refresh`" do
       routes_rb = <<~RUBY

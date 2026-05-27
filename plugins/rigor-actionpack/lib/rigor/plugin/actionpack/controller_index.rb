@@ -28,7 +28,16 @@ module Rigor
         # names passed to `include X` calls inside the
         # class / module body (Strings). `parent_class_name` is
         # the immediate superclass (nil for plain modules).
-        Entry = Data.define(:class_name, :defined_methods, :parent_class_name, :included_module_names)
+        # `enclosing_namespace` is the qualifier chain of the
+        # declaration's *lexical* enclosing scope (e.g.
+        # `["Admin"]` for an `Admin::Foo` declared via
+        # `module Admin; class Foo; end; end`). Used by the
+        # index's parent / module lookup to try lexically-scoped
+        # constant resolution before falling through to the
+        # top-level form — Ruby's constant lookup walks the
+        # enclosing scope chain before `Object`.
+        Entry = Data.define(:class_name, :defined_methods, :parent_class_name, :included_module_names,
+                            :enclosing_namespace)
 
         attr_reader :entries
 
@@ -43,16 +52,36 @@ module Rigor
         end
 
         # Resolves the **effective** method set for a controller,
-        # including methods inherited from its parent class
-        # (one level) and methods contributed by every module the
-        # controller / its parent transitively `include`s
-        # (unbounded depth, cycle-safe via a visited set).
+        # including methods contributed by every module the
+        # controller / any ancestor transitively `include`s AND
+        # methods inherited from the ancestor chain (unbounded
+        # depth, cycle-safe via a visited set).
+        #
+        # Parent / module lookups are **lexically scoped** — a
+        # bare `BaseController` reference inside `module Admin`
+        # first tries `Admin::BaseController`, then falls
+        # through to the top-level `BaseController`. Matches
+        # Ruby's constant-resolution semantics. Without this an
+        # `Admin::Foo < BaseController` declaration would
+        # incorrectly walk the top-level `BaseController` even
+        # when an `Admin::BaseController` exists.
         def effective_methods_for(class_name)
-          seen = {}
+          seen_classes = {}
+          seen_modules = {}
           methods = []
-          collect_methods(class_name, seen, methods)
-          if (parent = @entries[class_name]&.parent_class_name)
-            collect_methods(parent, seen, methods)
+          current = class_name
+          while current && !seen_classes[current]
+            seen_classes[current] = true
+            entry = @entries[current]
+            break if entry.nil?
+
+            methods.concat(entry.defined_methods)
+            entry.included_module_names.each do |included|
+              resolved_include = resolve_constant_lexically(included, entry.enclosing_namespace)
+              collect_methods(resolved_include, seen_modules, methods)
+            end
+            next_parent = entry.parent_class_name
+            current = next_parent && resolve_constant_lexically(next_parent, entry.enclosing_namespace)
           end
           methods.uniq.freeze
         end
@@ -69,12 +98,26 @@ module Rigor
           entry = @entries[class_name]
           return false if entry.nil?
 
-          chain = [class_name]
-          chain << entry.parent_class_name if entry.parent_class_name
-          chain.any? do |c|
-            walk_includes(c, {}) { |m| return true unless @entries.key?(m) }
-            false
+          # Walk the full ancestor chain, not just one level.
+          # `Admin::Foo < BaseController < ApplicationController`
+          # should report an unresolved include if ANY of the
+          # three references a gem-shipped concern we cannot
+          # index.
+          seen_classes = {}
+          current = class_name
+          while current && !seen_classes[current]
+            seen_classes[current] = true
+            current_entry = @entries[current]
+            break if current_entry.nil?
+
+            current_entry.included_module_names.each do |included|
+              resolved = resolve_constant_lexically(included, current_entry.enclosing_namespace)
+              return true if resolved.nil? || !@entries.key?(resolved)
+            end
+            next_parent = current_entry.parent_class_name
+            current = next_parent && resolve_constant_lexically(next_parent, current_entry.enclosing_namespace)
           end
+          false
         end
 
         def empty?
@@ -92,30 +135,48 @@ module Rigor
         private
 
         def collect_methods(name, seen, into)
+          return if name.nil?
+
           entry = @entries[name]
           return if entry.nil? || seen[name]
 
           seen[name] = true
           into.concat(entry.defined_methods)
           entry.included_module_names.each do |included|
-            collect_methods(included, seen, into)
+            resolved = resolve_constant_lexically(included, entry.enclosing_namespace)
+            collect_methods(resolved, seen, into)
           end
         end
 
-        # Yields each transitively-included module name (whether
-        # we have an entry for it or not). Returns nil; callers
-        # use it for visit-and-classify, not to collect.
-        def walk_includes(name, seen, &)
-          return if seen[name]
+        # Ruby's constant-lookup walk: a bare constant name
+        # inside `module Admin` first tries `Admin::Const`,
+        # then walks outward, and finally falls through to
+        # top-level `Const`. We approximate that by trying
+        # the candidate `enclosing + name` chains from
+        # deepest to shallowest, and returning the first
+        # candidate that has an entry in the index. When
+        # nothing resolves, return the original name
+        # unchanged — the caller treats unresolved entries as
+        # "gem-shipped concerns we cannot see" (the
+        # `unresolved_include?` predicate).
+        #
+        # `name` may already be qualified (`Foo::Bar`); we
+        # only try lexical prefixing when the unqualified
+        # first segment doesn't match a top-level entry.
+        def resolve_constant_lexically(name, enclosing)
+          return nil if name.nil?
+          # Constant already absolute or no enclosing scope.
+          return name if enclosing.nil? || enclosing.empty?
 
-          seen[name] = true
-          entry = @entries[name]
-          return unless entry
-
-          entry.included_module_names.each do |included|
-            yield included
-            walk_includes(included, seen, &)
+          # Try the deepest enclosing scope first, walking
+          # outward. `enclosing = ["A", "B"]` produces
+          # candidates `["A::B::name", "A::name", "name"]`.
+          enclosing.length.downto(0).each do |depth|
+            prefix = enclosing[0, depth]
+            candidate = prefix.empty? ? name : "#{prefix.join('::')}::#{name}"
+            return candidate if @entries.key?(candidate)
           end
+          name
         end
       end
     end

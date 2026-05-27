@@ -373,6 +373,119 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
+    # ──────────────────────────────────────────────────────
+    # Mastodon shape: `module Admin; class AccountsController
+    # < BaseController; end; end` (nested-module form).
+    # Pre-fix this registered the inner class as bare
+    # `AccountsController`, clobbering the top-level
+    # `app/controllers/accounts_controller.rb` entry. The fix
+    # threads the enclosing module qualifier through the AST
+    # walk so the entry's `class_name` is fully qualified.
+    # ──────────────────────────────────────────────────────
+
+    it "qualifies a nested-module class declaration with its enclosing scope" do
+      with_controllers(controllers: {
+                         "application_controller.rb" => "class ApplicationController\n  def require_user!; end\nend\n",
+                         "admin/base_controller.rb" => <<~RUBY,
+                           module Admin
+                             class BaseController < ApplicationController
+                               def admin_only!; end
+                             end
+                           end
+                         RUBY
+                         "admin/accounts_controller.rb" => <<~RUBY
+                           module Admin
+                             class AccountsController < BaseController
+                               before_action :admin_only!
+                               before_action :require_user!
+                             end
+                           end
+                         RUBY
+                       }) do |result|
+        unknown = actionpack_diagnostics(result).select { |d| d.rule == "unknown-filter-method" }
+        expect(unknown).to be_empty
+      end
+    end
+
+    it "walks the full ancestor chain (multi-level inheritance)" do
+      # `Admin::AccountsController < Admin::BaseController <
+      # ApplicationController` — `require_user!` is defined on
+      # the GRANDPARENT. Pre-fix only the immediate parent was
+      # walked, so this case false-fired.
+      with_controllers(controllers: {
+                         "application_controller.rb" => <<~RUBY,
+                           class ApplicationController
+                             def require_user!; end
+                           end
+                         RUBY
+                         "admin/base_controller.rb" => <<~RUBY,
+                           module Admin
+                             class BaseController < ApplicationController
+                             end
+                           end
+                         RUBY
+                         "admin/accounts_controller.rb" => <<~RUBY
+                           module Admin
+                             class AccountsController < BaseController
+                               before_action :require_user!
+                             end
+                           end
+                         RUBY
+                       }) do |result|
+        unknown = actionpack_diagnostics(result).select { |d| d.rule == "unknown-filter-method" }
+        expect(unknown).to be_empty
+      end
+    end
+
+    it "resolves a parent class name lexically (Admin::BaseController over top-level BaseController)" do
+      with_controllers(controllers: {
+                         "base_controller.rb" => <<~RUBY,
+                           class BaseController
+                             def top_level_only!; end
+                           end
+                         RUBY
+                         "admin/base_controller.rb" => <<~RUBY,
+                           module Admin
+                             class BaseController
+                               def admin_only!; end
+                             end
+                           end
+                         RUBY
+                         "admin/accounts_controller.rb" => <<~RUBY
+                           module Admin
+                             class AccountsController < BaseController
+                               before_action :admin_only!
+                             end
+                           end
+                         RUBY
+                       }) do |result|
+        unknown = actionpack_diagnostics(result).select { |d| d.rule == "unknown-filter-method" }
+        expect(unknown).to be_empty
+      end
+    end
+
+    it "resolves skip_before_action :name through the ancestor chain" do
+      # The dominant Mastodon case (13 of 42 errors pre-fix):
+      # `skip_before_action :require_functional!` references
+      # a filter declared on the parent.
+      with_controllers(controllers: {
+                         "application_controller.rb" => <<~RUBY,
+                           class ApplicationController
+                             before_action :require_functional!
+                             def require_functional!; end
+                           end
+                         RUBY
+                         "accounts_controller.rb" => <<~RUBY
+                           class AccountsController < ApplicationController
+                             skip_before_action :require_functional!
+                           end
+                         RUBY
+                       }) do |result|
+        unknown = actionpack_diagnostics(result).select { |d| d.rule == "unknown-filter-method" }
+        expect(unknown).to be_empty
+      end
+    end
+
     it "suppresses unknown-filter-method when the controller includes a gem-shipped (unresolved) concern" do
       # Devise / Pundit-style: the controller `include`s a module
       # whose source isn't in `app/controllers/`. We can't see

@@ -68,7 +68,12 @@ module Rigor
     class Actionpack < Rigor::Plugin::Base
       manifest(
         id: "actionpack",
-        version: "0.1.0",
+        # Bumped 2026-05-27 — controller-discoverer slice
+        # (nested-module qualification + multi-level inheritance
+        # + lexical parent lookup). Invalidates any cached
+        # :controller_index from earlier installs so the new
+        # qualified name set takes effect on the next run.
+        version: "0.2.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers.",
         config_schema: {
           "controller_search_paths" => :array,

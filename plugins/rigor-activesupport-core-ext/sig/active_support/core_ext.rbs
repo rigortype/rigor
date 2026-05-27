@@ -413,8 +413,11 @@ class Hash[unchecked out K, unchecked out V]
                  | (Hash[K, V]) { (K, V, V) -> V } -> self
 
   # `core_ext/hash/except` — `Hash#except` is in core RBS as of
-  # Ruby 3.0+; `except!` is ActiveSupport-only.
+  # Ruby 3.0+; `except!` is ActiveSupport-only. ActiveSupport
+  # also aliases `Hash#without` to `Hash#except`, used by
+  # `Mastodon`-shaped `options.without('type').merge(...)` chains.
   def except!: (*K) -> self
+  def without: (*K) -> Hash[K, V]
 
   # `core_ext/hash/conversions`
   def to_query: (?String namespace) -> String

@@ -504,6 +504,137 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "only: with non-show actions still registers the path helper" do
+    # Mastodon shape: `resource :inbox, only: [:create]` —
+    # Rails registers POST /inbox under the same `inbox_path`
+    # helper Rails uses for show forms; the plugin must too,
+    # otherwise the caller's `inbox_path` reads as unknown.
+    it "registers the path helper for a singular resource with `only: [:create]`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resource :inbox, only: [:create]
+        end
+      RUBY
+      result = run_plugin(source: "inbox_path\n", files: { "config/routes.rb" => routes_rb })
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "registers the show-shape path helper for plural resources with `except: [:show]`" do
+      # Mastodon `resources :roles, except: [:show]` — Rails
+      # generates PATCH / PUT / DELETE under `admin_role_path(id)`
+      # even though :show is excluded.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          namespace :admin do
+            resources :roles, except: [:show]
+          end
+        end
+      RUBY
+      result = run_plugin(source: "admin_role_path(@role)\n", files: { "config/routes.rb" => routes_rb })
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "registers the collection path helper for plural resources with `only: [:create]`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :widgets, only: [:create]
+        end
+      RUBY
+      result = run_plugin(source: "widgets_path\n", files: { "config/routes.rb" => routes_rb })
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+  end
+
+  describe "singular resource with plural-looking name keeps the as-given name" do
+    # Mastodon shape: `resource :relationships, only: [:show, :update]`
+    # — singular DSL with a plural-looking name. Rails generates
+    # `relationships_path` (no singularising); the parser used
+    # to mangle this to `relationship_path`.
+    it "does not singularise a singular-resource's helper" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resource :relationships, only: [:show, :update]
+        end
+      RUBY
+      result = run_plugin(source: "relationships_path\n", files: { "config/routes.rb" => routes_rb })
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "still derives the singular form from a plural-resources declaration" do
+      # Make sure the Bug B fix does not break the normal
+      # `resources :foos` → `foo_path(id)` derivation.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :widgets
+        end
+      RUBY
+      result = run_plugin(source: "widget_path(1)\nwidgets_path\n", files: { "config/routes.rb" => routes_rb })
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+  end
+
+  describe "helper discovery walks the whole app/ tree by default" do
+    let(:controller_with_private_helper) do
+      <<~RUBY
+        class FollowerAccountsController < ApplicationController
+          private
+
+          # Visibility-agnostic discovery (see HelperDiscoverer
+          # docstring): this private method IS registered so
+          # the paired view's `link_to "Next", page_url(2)`
+          # does not false-fire `unknown-helper`.
+          def page_url(page)
+            page
+          end
+        end
+      RUBY
+    end
+
+    let(:lib_helper) do
+      <<~RUBY
+        module TranslationService
+          class DeepL
+            def base_url
+              "https://api.deepl.com"
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "finds a `private _url` method declared in a controller" do
+      # Mastodon's exact shape:
+      # `app/controllers/follower_accounts_controller.rb` has
+      # `private; def page_url(page) ... end`.
+      result = run_plugin(
+        source: "page_url(1)\n",
+        files: {
+          "config/routes.rb" => DEFAULT_ROUTES_RB,
+          "app/controllers/follower_accounts_controller.rb" => controller_with_private_helper
+        }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "finds a `_url` method declared under `app/lib/`" do
+      result = run_plugin(
+        source: "base_url\n",
+        files: {
+          "config/routes.rb" => DEFAULT_ROUTES_RB,
+          "app/lib/translation_service/deepl.rb" => lib_helper
+        }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+  end
+
   describe "custom helper discovery (app/helpers/)" do
     let(:helper_module) do
       <<~RUBY
@@ -552,7 +683,14 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(unknowns.first.message).to include("definitely_not_real_url")
     end
 
-    it "ignores `_path` / `_url` methods marked private in the helper module" do
+    it "includes `_path` / `_url` methods marked private (visibility-agnostic by design)" do
+      # Visibility-agnostic discovery: a `private def
+      # internal_path(arg)` IS registered so a paired view or
+      # cross-controller call site does not false-fire
+      # `unknown-helper`. The core engine's
+      # `call.undefined-method` rule still catches the case
+      # where the call's receiver genuinely cannot see the
+      # method.
       result = run_plugin(
         source: "internal_path('x')\n",
         files: {
@@ -561,8 +699,7 @@ RSpec.describe "plugins/rigor-rails-routes" do
         }
       )
       unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
-      expect(unknowns.size).to eq(1)
-      expect(unknowns.first.message).to include("internal_path")
+      expect(unknowns).to be_empty
     end
 
     it "ignores singleton-method `_url` definitions (def self.x)" do

@@ -22,9 +22,16 @@ module Rigor
       #   reason `rigor-actionpack` is not the canonical
       #   custom-helper source — metaprogrammed helpers are out
       #   of scope for a static scan).
-      # - Respects `private` / `protected` markers: a `def`
-      #   appearing AFTER a bare `private` / `protected` call in
-      #   the surrounding scope is skipped.
+      # - **Visibility-agnostic.** A `private` / `protected`
+      #   `def some_url` IS registered. The `unknown-helper`
+      #   rule is a project-wide name-presence check, not a
+      #   visibility check — if the user wrote a `_path` /
+      #   `_url` method anywhere in `app/`, they very likely
+      #   intend to call it (often Mastodon's pattern: a
+      #   controller's `private def page_url(page)` invoked
+      #   by a `link_to` in its own view). The core engine's
+      #   `call.undefined-method` rule still catches the case
+      #   where the receiver genuinely cannot see the method.
       # - Ignores `def self.x` (singleton-method definitions) —
       #   Rails helpers are instance methods on the helper
       #   module; class-side `self.x` shapes are usually
@@ -127,22 +134,18 @@ module Rigor
           def visit_statements(body)
             return if body.nil?
 
-            visibility = :public
+            # Visibility tracking is intentionally absent — see
+            # the "visibility-agnostic" point in the module
+            # docstring. A `private def page_url(page)` inside
+            # a controller IS registered so a caller in the
+            # paired view does not false-fire `unknown-helper`.
             statements_of(body).each do |stmt|
               case stmt
               when Prism::DefNode
-                next unless visibility == :public
-
                 record_helper(stmt)
-              when Prism::CallNode
-                new_visibility = visibility_call(stmt, visibility)
-                visibility = new_visibility if new_visibility
               when Prism::ModuleNode, Prism::ClassNode
                 visit_module_or_class(stmt)
               when Prism::StatementsNode
-                # Nested statements wrapper — recurse but DO
-                # NOT reset the visibility marker; nested
-                # statements run under the same visibility.
                 visit_statements(stmt)
               end
             end
@@ -154,19 +157,6 @@ module Rigor
             when Prism::BeginNode      then statements_of(node.statements)
             else [node]
             end
-          end
-
-          # Detects a bare `private` / `protected` / `public`
-          # call (no arguments). The single-arg form
-          # (`private :foo`) only flips visibility for the
-          # named method; we conservatively ignore it so we do
-          # not need a name-by-name visibility map.
-          def visibility_call(call_node, _current)
-            return nil if call_node.receiver
-            return nil unless %i[private protected public].include?(call_node.name)
-            return nil unless call_node.arguments.nil?
-
-            call_node.name
           end
 
           def record_helper(def_node)

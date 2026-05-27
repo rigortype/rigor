@@ -466,9 +466,23 @@ module Rigor
         # `plural: true` for `resources :users`, `false` for
         # `resource :profile`.
         def register_resourceful_helpers(name, actions, base_arity, context, plural:)
-          singular = singularize_word(name.to_s)
-          plural_form = plural ? name.to_s : singular # `resource :foo` uses singular path
-          path_base = "#{context.path_prefix}/#{plural_form}"
+          # Singular resources (`resource :foo`) use the
+          # given name AS-IS for both path and helper —
+          # singularising would mangle a deliberately-plural
+          # singular-DSL name like Mastodon's
+          # `resource :relationships, only: [:show, :update]`
+          # (Rails generates `relationships_path`, not
+          # `relationship_path`). Plural resources still
+          # singularise for the show / new / edit helpers.
+          # Plural resources singularise for show / new / edit
+          # helpers (`resources :users` → `user_path(id)`);
+          # singular resources use the name AS-IS even when it
+          # looks plural (Mastodon's `resource :relationships,
+          # only: [:show, :update]` → `relationships_path`).
+          # The path segment uses `name` in both shapes — Rails
+          # never singularises the URL.
+          singular = plural ? singularize_word(name.to_s) : name.to_s
+          path_base = "#{context.path_prefix}/#{name}"
 
           actions.each do |action|
             entry = entry_for_action(
@@ -480,11 +494,20 @@ module Rigor
           end
         end
 
-        # `:create` / `:update` / `:destroy` don't generate
-        # `*_path` helpers separate from the show / index
-        # helper Rails reuses for their forms; the case
-        # statement returns nil for those and the caller
-        # skips them.
+        # Maps an action keyword to the route-helper entry it
+        # produces. The five "named-helper" actions
+        # (`:index` / `:show` / `:new` / `:edit` plus
+        # singular-resource `:show`) generate a distinct
+        # helper; the three "verb-only" actions (`:create` /
+        # `:update` / `:destroy`) Rails serves under the same
+        # path-helper Rails reuses for show / index forms — so
+        # we emit them too, otherwise an `only: [:create]`
+        # resource (e.g. Mastodon's `resource :inbox, only:
+        # [:create]`) registers NO helpers and downstream
+        # callers see a false `unknown-helper inbox_path`.
+        # The HelperTable already dedupes by name, so a
+        # resource that lists both `:show` and `:update` does
+        # not double-register.
         def entry_for_action(action, name:, singular:, base_arity:, path_base:, helper_prefix:, plural:)
           case action
           when :index then index_entry(plural, helper_prefix, name, base_arity, path_base)
@@ -496,6 +519,36 @@ module Rigor
               http_method: :get, action: :new
             )
           when :edit then edit_entry(plural, helper_prefix, singular, base_arity, path_base)
+          when :create
+            # Plural `resources` collection POST shares the
+            # index helper (`<name>_path` → collection URL).
+            # Singular `resource` POST shares the show helper
+            # (`<name>_path` → resource URL). Both shapes
+            # produce a `<prefix><name>_path` entry; only the
+            # arity / path differ.
+            create_entry(plural, helper_prefix, name, singular, base_arity, path_base)
+          when :update, :destroy
+            # Member PATCH / PUT / DELETE on plural resources
+            # share the show helper (`<prefix><singular>_path(id)`).
+            # Singular-resource PATCH / DELETE shares
+            # `<prefix><name>_path` (no `:id`).
+            show_entry(plural, helper_prefix, singular, base_arity, path_base)
+          end
+        end
+
+        def create_entry(plural, helper_prefix, name, singular, base_arity, path_base)
+          if plural
+            HelperTable::Entry.new(
+              name: "#{helper_prefix}#{name}_path",
+              arity: base_arity, path: path_base,
+              http_method: :post, action: :create
+            )
+          else
+            HelperTable::Entry.new(
+              name: "#{helper_prefix}#{singular}_path",
+              arity: base_arity, path: path_base,
+              http_method: :post, action: :create
+            )
           end
         end
 

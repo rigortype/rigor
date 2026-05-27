@@ -53,7 +53,14 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        version: "0.1.0",
+        # Bumped 2026-05-27 — helper-discovery + Devise +
+        # resource bug-fix slice. The version bump
+        # invalidates any cached `:helper_table` entries from
+        # earlier rigor installs so the broader default
+        # `helper_paths: ["app"]` and the `only:`-action /
+        # singular-resource-name fixes take effect on the
+        # next run without `--clear-cache`.
+        version: "0.2.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,
@@ -63,7 +70,21 @@ module Rigor
       )
 
       DEFAULT_ROUTES_FILE = "config/routes.rb"
-      DEFAULT_HELPER_PATHS = ["app/helpers"].freeze
+
+      # The directories `HelperDiscoverer` walks for project-
+      # defined `*_path` / `*_url` methods. Default to the whole
+      # `app/` tree — the suffix filter inside the discoverer
+      # keeps the registered set tight, and real-world Rails
+      # apps routinely keep URL builders under `app/controllers`
+      # (private `def page_url`, `def callback_url` shapes),
+      # `app/lib` (Mastodon's `TranslationService::DeepL#base_url`),
+      # `app/services` (`SoftwareUpdateCheckService#api_url`),
+      # `app/serializers`, `app/presenters`, `app/decorators`,
+      # not only `app/helpers/`. Walking the whole tree is the
+      # honest answer to "does this `_path` / `_url` name exist
+      # anywhere in the project?"; the cost is a one-time Prism
+      # parse per file at startup, which is bounded.
+      DEFAULT_HELPER_PATHS = ["app"].freeze
 
       # Cached producer — reads `config/routes.rb` through
       # the trusted `IoBoundary` and parses through

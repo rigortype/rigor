@@ -53,12 +53,11 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-28 — `use_doorkeeper do ... end`
-        # recognition (standard OAuth helpers + skip_controllers)
-        # + Latin/Greek irregular singulars (media → medium,
-        # etc.). Closes Mastodon's oauth_* cluster and the
-        # `medium_path` shape.
-        version: "0.8.0",
+        # Bumped 2026-05-28 — extended singularize for
+        # *shes/*ches/*xes/*zes rule; `resources :foo, as:
+        # :bar` overrides helper name root; `mount Foo, at:
+        # '/x', as: :name` registers `<name>_path` helper.
+        version: "0.9.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

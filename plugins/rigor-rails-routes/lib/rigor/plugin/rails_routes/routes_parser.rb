@@ -247,7 +247,15 @@ module Rigor
           def frame_path_segments(frame)
             case frame[:kind]
             when :namespace then ["/#{frame[:name]}"]
-            when :scope then ["/#{pluralize(frame[:parent])}/:#{frame[:parent]}_id"]
+            when :scope
+              # Use the as-given plural when available
+              # (`parent_plural` was captured at
+              # push_resource time) — the singularize /
+              # pluralize round-trip is lossy for irregular
+              # forms (`media → medium → medias`) but the
+              # original name is always correct.
+              plural = frame[:parent_plural] || pluralize(frame[:parent])
+              ["/#{plural}/:#{frame[:parent]}_id"]
             when :as_scope then frame[:path] ? [frame[:path]] : []
             when :singular_scope then [frame[:path_segment]]
             else []
@@ -294,16 +302,23 @@ module Rigor
             return IRREGULAR_SINGULARS[word] if IRREGULAR_SINGULARS.key?(word)
             return word if UNCOUNTABLE.include?(word)
             return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
-            return word.chomp("es") if word.end_with?("ses") || word.end_with?("xes")
+            return word.chomp("es") if word.end_with?("ses", "shes", "ches", "xes", "zes")
             return word.chomp("s") if word.end_with?("s")
 
             word
           end
 
           def pluralize(word)
+            return IRREGULAR_SINGULARS.key(word) if IRREGULAR_SINGULARS.value?(word)
             return word if UNCOUNTABLE.include?(word)
             return word if word.end_with?("s")
             return "#{word.chomp('y')}ies" if word.end_with?("y") && word.length > 1
+            # Words ending in s/sh/ch/x/z take "es" in plural,
+            # matching Rails' default inflector. Without this
+            # `async_refresh` (singular) pluralised to
+            # `async_refreshs`, mismatching the actual
+            # `/async_refreshes` URL.
+            return "#{word}es" if word.end_with?("sh", "ch", "x", "z")
 
             "#{word}s"
           end
@@ -353,6 +368,8 @@ module Rigor
             handle_devise_for(node, context)
           when :use_doorkeeper
             handle_use_doorkeeper(node, context)
+          when :mount
+            handle_mount(node, context)
           when :concern
             handle_concern_definition(node, context)
           else
@@ -392,6 +409,33 @@ module Rigor
           DeviseRoutes.generate(resource: resource, skip: skip).each do |entry|
             context.entries << entry
           end
+        end
+
+        # `mount Foo::Engine, at: '/path', as: :name` —
+        # mounted Rails engines. The mount adds a single
+        # helper for the mount point itself: `<as>_path` /
+        # `<as>_url` (arity 0). The engine's own internal
+        # helpers are out of scope (they'd need the engine's
+        # routes.rb available; almost no static parser
+        # follows that). Mastodon uses `mount Sidekiq::Web,
+        # at: 'sidekiq', as: :sidekiq` and similar.
+        #
+        # When `as:` is omitted Rails derives a helper name
+        # from the engine class — that's harder to compute
+        # statically, so we silently skip.
+        def handle_mount(node, context)
+          options = options_hash(node)
+          as_name = options[:as]
+          return if as_name.nil?
+
+          at_path = options[:at]
+          path = at_path.is_a?(String) ? "/#{at_path.delete_prefix('/')}" : "/#{as_name}"
+          context.entries << HelperTable::Entry.new(
+            name: "#{context.helper_prefix}#{as_name}_path",
+            arity: context.parent_segment_count,
+            path: "#{context.path_prefix}#{path}",
+            http_method: nil, action: :mount
+          )
         end
 
         # `use_doorkeeper do ... end` — Doorkeeper gem's
@@ -464,8 +508,16 @@ module Rigor
 
           actions = restrict_actions(node, DEFAULT_RESOURCE_ACTIONS)
           base_arity = context.parent_segment_count
+          # `resources :collections, as: :actor_collections`
+          # remaps the helper name family —
+          # `actor_collections_path` for index,
+          # `actor_collection_path(id)` for show. Path / arity
+          # are unaffected. Mastodon uses this inside a
+          # concern (`resources :collections, only: [:show],
+          # as: :actor_collections`).
+          helper_name = keyword_symbol(node, :as) || name
 
-          register_resourceful_helpers(name, actions, base_arity, context, plural: true)
+          register_resourceful_helpers(helper_name, actions, base_arity, context, plural: true)
 
           context.push_resource(name) do
             replay_concerns(node, context)
@@ -479,11 +531,12 @@ module Rigor
 
           actions = restrict_actions(node, DEFAULT_SINGULAR_ACTIONS)
           base_arity = context.parent_segment_count
+          helper_name = keyword_symbol(node, :as) || name
 
           # Singular resource — no `:id` segment, no `:index`
           # / pluralised helper. The "show" helper is
           # `<name>_path` (singular).
-          register_resourceful_helpers(name, actions, base_arity, context, plural: false)
+          register_resourceful_helpers(helper_name, actions, base_arity, context, plural: false)
 
           # Push a `:singular_scope` frame so nested
           # declarations pick up the singular resource's
@@ -913,7 +966,7 @@ module Rigor
           return IRREGULAR_SINGULARS[word] if IRREGULAR_SINGULARS.key?(word)
           return word if UNCOUNTABLE.include?(word)
           return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
-          return word.chomp("es") if word.end_with?("ses") || word.end_with?("xes")
+          return word.chomp("es") if word.end_with?("ses", "shes", "ches", "xes", "zes")
           return word.chomp("s") if word.end_with?("s")
 
           word

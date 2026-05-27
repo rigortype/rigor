@@ -817,6 +817,103 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "extended singularize rules (sh / ch / x / z + es)" do
+    it "singularises `async_refreshes` to `async_refresh`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :async_refreshes, only: :show
+        end
+      RUBY
+      result = run_plugin(
+        source: "async_refresh_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "singularises `boxes` to `box` (xes rule)" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :boxes, only: :show
+        end
+      RUBY
+      result = run_plugin(source: "box_path(1)\n", files: { "config/routes.rb" => routes_rb })
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+  end
+
+  describe "resources `as:` overrides the helper name root" do
+    it "uses :as for the show helper when `only: [:show]`" do
+      # `resources :collections, only: [:show], as:
+      # :actor_collections` — Rails' show helper becomes
+      # `actor_collection_path(id)` (the URL stays
+      # `/collections/:id`).
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :collections, only: [:show], as: :actor_collections
+        end
+      RUBY
+      result = run_plugin(
+        source: "actor_collection_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "uses :as for both index and show when all actions are present" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :collections, as: :actor_collections
+        end
+      RUBY
+      result = run_plugin(
+        source: "actor_collections_path\nactor_collection_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+  end
+
+  describe "mounted engines register the `<as>_path` helper" do
+    it "registers `sidekiq_path` for `mount Sidekiq::Web, at: 'sidekiq', as: :sidekiq`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          mount Sidekiq::Web, at: 'sidekiq', as: :sidekiq
+        end
+      RUBY
+      result = run_plugin(
+        source: "sidekiq_path\nsidekiq_url\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "silently skips a `mount` without `as:`" do
+      # `mount LetterOpenerWeb::Engine, at: 'letter_opener'`
+      # — no `as:`, so we don't fabricate a helper name.
+      # Include `resources :users` so the helper table isn't
+      # empty (the plugin silences all diagnostics on an
+      # empty table to avoid noise on routes-less files).
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :users
+          mount LetterOpenerWeb::Engine, at: 'letter_opener'
+        end
+      RUBY
+      result = run_plugin(
+        source: "missing_mount_helper_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns.size).to eq(1)
+    end
+  end
+
   describe "use_doorkeeper recognises the standard OAuth helpers" do
     let(:routes_with_doorkeeper) do
       <<~RUBY

@@ -87,28 +87,41 @@ module Rigor
         end
 
         # @return [Boolean] true when the class has at least one
-        #   include we couldn't resolve in the index (typically
-        #   a gem-shipped concern such as Devise's
-        #   `Devise::Controllers::Helpers`). Phase 2 uses this
-        #   to downgrade `unknown-filter-method` to silence —
-        #   the unresolved module may legitimately contribute
-        #   the filter, and there's no way for the static
-        #   analyzer to verify.
+        #   include OR parent class we couldn't resolve in the
+        #   index (typically a gem-shipped concern such as Devise's
+        #   `Devise::Controllers::Helpers`, or a gem-shipped
+        #   parent controller such as `Devise::ConfirmationsController`
+        #   or `Doorkeeper::AuthorizedApplicationsController`).
+        #   Phase 2 uses this to downgrade `unknown-filter-method`
+        #   to silence — the unresolved module / parent may
+        #   legitimately contribute the filter (either directly,
+        #   or via its own ancestor chain which the static
+        #   analyzer cannot follow), and there's no way to verify.
         def unresolved_include?(class_name)
           entry = @entries[class_name]
           return false if entry.nil?
 
-          # Walk the full ancestor chain, not just one level.
-          # `Admin::Foo < BaseController < ApplicationController`
-          # should report an unresolved include if ANY of the
-          # three references a gem-shipped concern we cannot
-          # index.
+          # Walk the full ancestor chain. `Admin::Foo <
+          # BaseController < ApplicationController` should report
+          # an unresolved include if ANY of the three references
+          # a gem-shipped concern OR a gem-shipped parent class
+          # we cannot index. The first iteration's `current_entry`
+          # is always resolved (caller verified `known?`); a nil
+          # `current_entry` on a subsequent iteration means the
+          # AST-side `< Parent` reached a gem-shipped class
+          # whose ancestor methods are invisible to us.
           seen_classes = {}
           current = class_name
+          first = true
           while current && !seen_classes[current]
             seen_classes[current] = true
             current_entry = @entries[current]
-            break if current_entry.nil?
+            if current_entry.nil?
+              return true unless first
+
+              break
+            end
+            first = false
 
             current_entry.included_module_names.each do |included|
               resolved = resolve_constant_lexically(included, current_entry.enclosing_namespace)

@@ -506,6 +506,27 @@ RSpec.describe "plugins/rigor-actionpack" do
         expect(diags.select { |d| d.rule == "unknown-filter-method" }).to be_empty
       end
     end
+
+    it "suppresses unknown-filter-method when the controller inherits from a gem-shipped (unresolved) parent" do
+      # Devise/Doorkeeper-style:
+      #   class Auth::ConfirmationsController < Devise::ConfirmationsController
+      # The gem-shipped parent's own ancestor chain is invisible
+      # to us, so a `skip_before_action :check_self_destruct!`
+      # against a filter that the parent's ancestors might
+      # legitimately define MUST stay silent — same rationale as
+      # the unresolved-include case above.
+      with_controllers(controllers: {
+                         "auth/confirmations_controller.rb" => <<~RUBY
+                           class Auth::ConfirmationsController < Devise::ConfirmationsController
+                             skip_before_action :check_self_destruct!
+                             skip_before_action :require_functional!
+                           end
+                         RUBY
+                       }) do |result|
+        diags = actionpack_diagnostics(result)
+        expect(diags.select { |d| d.rule == "unknown-filter-method" }).to be_empty
+      end
+    end
   end
 
   describe "render targets (Phase 3)" do

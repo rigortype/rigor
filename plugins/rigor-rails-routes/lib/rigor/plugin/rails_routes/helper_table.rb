@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "devise_routes"
+require_relative "doorkeeper_routes"
 
 module Rigor
   module Plugin

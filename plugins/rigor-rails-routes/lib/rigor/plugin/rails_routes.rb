@@ -53,12 +53,12 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-28 — `concern :name do ... end`
-        # bodies are now captured at definition time and
-        # replayed at every `resources :foo, concerns: :name`
-        # site. Closes Mastodon's `account_followers_url`,
-        # `account_outbox_path` etc. cluster.
-        version: "0.7.0",
+        # Bumped 2026-05-28 — `use_doorkeeper do ... end`
+        # recognition (standard OAuth helpers + skip_controllers)
+        # + Latin/Greek irregular singulars (media → medium,
+        # etc.). Closes Mastodon's oauth_* cluster and the
+        # `medium_path` shape.
+        version: "0.8.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

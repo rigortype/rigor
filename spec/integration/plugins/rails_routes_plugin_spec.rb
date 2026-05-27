@@ -817,6 +817,70 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "use_doorkeeper recognises the standard OAuth helpers" do
+    let(:routes_with_doorkeeper) do
+      <<~RUBY
+        Rails.application.routes.draw do
+          use_doorkeeper
+        end
+      RUBY
+    end
+
+    it "registers oauth_token_path / oauth_revoke_path / oauth_authorization_path" do
+      result = run_plugin(
+        source: "oauth_token_path\noauth_revoke_path\noauth_authorization_path\n",
+        files: { "config/routes.rb" => routes_with_doorkeeper }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "registers oauth_application_path with arity 1" do
+      result = run_plugin(
+        source: "oauth_application_path(1)\noauth_applications_path\n",
+        files: { "config/routes.rb" => routes_with_doorkeeper }
+      )
+      diags = plugin_diagnostics(result).select { |d| %w[unknown-helper wrong-arity].include?(d.rule) }
+      expect(diags).to be_empty
+    end
+
+    it "honours `skip_controllers :name` inside the block" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          use_doorkeeper do
+            skip_controllers :applications
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "oauth_application_path(1)\noauth_token_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns.size).to eq(1)
+      expect(unknowns.first.message).to include("oauth_application_path")
+    end
+  end
+
+  describe "irregular singulars (Latin / Greek plurals)" do
+    it "singularises `media` to `medium` for `resources :media`" do
+      # Mastodon's `resources :media, only: [:show]` →
+      # `medium_path(id)` (arity 1). Pre-fix `media` was in
+      # UNCOUNTABLE and the helper resolved as `media_path`.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :media, only: [:show]
+        end
+      RUBY
+      result = run_plugin(
+        source: "medium_path(id: 1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result).select { |d| %w[unknown-helper wrong-arity].include?(d.rule) }
+      expect(diags).to be_empty
+    end
+  end
+
   describe "concern-injected route bodies" do
     # Mastodon shape: `concern :account_resources do ...
     # end` then `resources :accounts, concerns:

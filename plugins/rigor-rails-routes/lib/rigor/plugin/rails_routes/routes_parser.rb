@@ -271,11 +271,27 @@ module Rigor
           # Redmine hit this 81× across `news_path(id)` calls.
           UNCOUNTABLE = %w[
             equipment information rice money species series fish
-            sheep jeans police news media settings
+            sheep jeans police news settings
           ].to_set.freeze
           private_constant :UNCOUNTABLE
 
+          # Latin / Greek irregular plurals Rails ships in its
+          # default inflector. `media` → `medium` is the
+          # dominant Rails-app case (Mastodon's `resources
+          # :media, only: [:show]` generates `medium_path(id)`,
+          # not `media_path`). Pre-fix `media` was in
+          # UNCOUNTABLE which produced `media_path` for both
+          # index and show — incorrect.
+          IRREGULAR_SINGULARS = {
+            "media" => "medium",
+            "data" => "datum",
+            "criteria" => "criterion",
+            "phenomena" => "phenomenon"
+          }.freeze
+          private_constant :IRREGULAR_SINGULARS
+
           def singularize(word)
+            return IRREGULAR_SINGULARS[word] if IRREGULAR_SINGULARS.key?(word)
             return word if UNCOUNTABLE.include?(word)
             return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
             return word.chomp("es") if word.end_with?("ses") || word.end_with?("xes")
@@ -335,6 +351,8 @@ module Rigor
             handle_member_or_collection(node, context)
           when :devise_for
             handle_devise_for(node, context)
+          when :use_doorkeeper
+            handle_use_doorkeeper(node, context)
           when :concern
             handle_concern_definition(node, context)
           else
@@ -374,6 +392,38 @@ module Rigor
           DeviseRoutes.generate(resource: resource, skip: skip).each do |entry|
             context.entries << entry
           end
+        end
+
+        # `use_doorkeeper do ... end` — Doorkeeper gem's
+        # standard OAuth route helpers (`oauth_token_path`,
+        # `oauth_authorization_path`, `oauth_application_path`,
+        # etc.). We generate the full catalogue plus walk the
+        # block body for `skip_controllers <names>` calls so
+        # the project's omitted controllers don't register.
+        # `controllers <hash>` mappings inside the block change
+        # the serving controller class but not the helper
+        # names — they can stay unmodelled.
+        def handle_use_doorkeeper(node, context)
+          skip = collect_doorkeeper_skips(node)
+          DoorkeeperRoutes.generate(skip: skip).each do |entry|
+            context.entries << entry
+          end
+        end
+
+        def collect_doorkeeper_skips(node)
+          body = node.block&.body
+          return [] if body.nil?
+
+          skips = []
+          body.compact_child_nodes.each do |child|
+            next unless child.is_a?(Prism::CallNode) && child.name == :skip_controllers
+            next if child.receiver
+
+            (child.arguments&.arguments || []).each do |arg|
+              skips << arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode)
+            end
+          end
+          skips
         end
 
         def keyword_array(node, key)
@@ -848,10 +898,19 @@ module Rigor
         # other.
         UNCOUNTABLE = %w[
           equipment information rice money species series fish
-          sheep jeans police news media settings
+          sheep jeans police news settings
         ].to_set.freeze
 
+        # Same `IRREGULAR_SINGULARS` map as `Context#singularize`.
+        IRREGULAR_SINGULARS = {
+          "media" => "medium",
+          "data" => "datum",
+          "criteria" => "criterion",
+          "phenomena" => "phenomenon"
+        }.freeze
+
         def singularize_word(word)
+          return IRREGULAR_SINGULARS[word] if IRREGULAR_SINGULARS.key?(word)
           return word if UNCOUNTABLE.include?(word)
           return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
           return word.chomp("es") if word.end_with?("ses") || word.end_with?("xes")

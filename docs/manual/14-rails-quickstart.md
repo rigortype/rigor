@@ -218,6 +218,15 @@ that a gem ships no RBS and `rbs collection install` would help.
 Use the triage output to decide where to start: genuine bugs
 first, then large clusters to record in a baseline.
 
+> **Rails route diagnostics.** `rigor-rails-routes` checks route
+> helpers statically. Anonymous `get "/path"` routes (no explicit
+> `as:` key) and routes inside repeated `namespace` blocks may not
+> be recognised in v0.1.x, producing false-positive
+> `unknown-helper` errors. If you see a cluster of these on routes
+> that you know exist, acknowledge mode is the right call — record
+> them in a baseline and let the remaining diagnostics surface the
+> real issues.
+
 ### Step 6 — Generate a baseline (acknowledge mode)
 
 *Skip this step if you chose strict mode.*

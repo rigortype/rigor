@@ -28,10 +28,19 @@ Also note per-gem markers that have their own plugin: `devise`,
 
 - Read the **locked versions** of the framework gems — a plugin
   recommendation can depend on a major version.
-- Check for `rbs_collection.lock.yaml` (or `rbs_collection.yaml`) at
-  the project root. **Present** → the project already curates RBS for
-  its gems; Rigor will consume it. **Absent** → note it; Phase 5's
-  triage may recommend `rbs collection install`.
+- Check for `rbs_collection.lock.yaml` at the project root AND whether
+  `.gem_rbs_collection/` exists alongside it.
+  - **Lockfile present, `.gem_rbs_collection/` present** → the collection
+    is installed; Rigor will auto-detect and consume it via
+    `rbs_collection.auto_detect: true` (the default).
+  - **Lockfile present, `.gem_rbs_collection/` absent** → the lockfile
+    was generated but the gems were never downloaded. Rigor loads the
+    lockfile but finds no RBS files. Note this for Phase 6: if triage
+    reports `gem-without-rbs` hints for gems that appear in
+    `rbs_collection.yaml`, run `rbs collection install` first and
+    re-run triage.
+  - **Both absent** → note it; Phase 6's triage may recommend
+    `rbs collection install` if `gem-without-rbs` hints appear.
 
 ### Path scope
 

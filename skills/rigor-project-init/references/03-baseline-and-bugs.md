@@ -53,7 +53,7 @@ Use the three sections like this:
 | `project-monkey-patch` | An in-project monkey-patch / refinement Rigor did not see. | Phase 7 escalation — register the defining file via `pre_eval:`, or (if it is a DSL) write a project plugin. |
 | `activerecord-relation-misinference` | An ActiveRecord relation inferred as `Array`. | Ensure `rigor-activerecord` is enabled (Phase 3). If it persists, it is an engine gap — open a Rigor issue. |
 | `systemic-file-cluster` | One file × one rule, large count. | Acknowledge mode: a clean baseline bucket. Strict mode: a single fix may clear many — review that file first. |
-| `genuine-bugs` | Low-count rules scattered across files. | **Phase 7** — these are the localised bugs Rigor caught. Review first, in both modes. |
+| `genuine-bugs` | Low-count rules scattered across files. | **Phase 7** — these are the localised bugs Rigor caught. Review first, in both modes. Note: the hint groups all low-count rules regardless of severity — filter for `error` severity when prioritising actionable items. |
 
 If triage flags `activesupport-core-ext` (or any config gap),
 **fix the config and re-run `rigor triage` before continuing**. The

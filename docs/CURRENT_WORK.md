@@ -6,7 +6,9 @@ A transient bookmark for the next implementer: the immediate next-session entry 
 
 **v0.1.11 released (2026-05-27).** Version bumped, CHANGELOG sealed, `make verify` passes. **`bundle exec rake release` has not yet been run** — publication to RubyGems requires explicit authorisation.
 
-`[Unreleased]` carries fifteen post-v0.1.11 slices (2026-05-27 / 28):
+**`[Unreleased]` carries fifteen post-v0.1.11 slices (2026-05-27 / 28) — cumulative Mastodon empirical effect: errors 789 → 120 (−669, −84.8%); `wrong-arity` eliminated entirely; `unknown-helper` 567 → 21; `unknown-filter-method` 42 → 8; `missing-template` 27 → 3; `unknown-column` 12 → 4; `call.undefined-method` 49 → 22.** The cycle is at strong diminishing returns — the remaining 120 errors are mostly Capybara matchers, gem-shipped concern sigs, and project-specific single-occurrence stragglers; see "Reading order" below for the next-implementer decision points (cut a patch / roll to v0.2.0 / start new-plugin work).
+
+Slices (in landing order):
 
 1. **`rigor plugins` activation-readiness command** — the Mastodon investigation surfaced a silent-failure surface where running `rigor check` with the wrong cwd or Gemfile context leaves configured plugins inert, so the false positives that follow get attributed to "missing types" rather than to a config gap (the original 1271-error Mastodon run came from rigor's own `.rigor.dist.yml` being used instead of mastodon's, not from any genuine engine miss). Shape: per-plugin status row (loaded / load-error) plus every manifest-declared extension surface (`signature_paths:` with per-directory `.rbs` count, `open_receivers:`, `owns_receivers:`, `produces:`, `consumes:`, macro-substrate counts, `protocol_contracts:`, `source_rbs_synthesizer:`, `type_node_resolvers:`, HKT registration counts). `--format json` for tooling, `--strict` exits 1 on any load error (CI gate shape). Companion changes: `rigor init` now prints a "Next steps" hint pointing at `rigor plugins`; `rigor-project-init` SKILL Phase 4 ([`skills/rigor-project-init/references/02-configure.md`](../skills/rigor-project-init/references/02-configure.md) § "Verify plugin activation") gained a verification sub-step with a load-error → cause → fix table.
 
@@ -45,7 +47,7 @@ v0.1.11 recaps two back-to-back patch cycles of real-world trial work:
 
 The release-line plan is in [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0". v0.1.9 was the designated "last preview cut" but the trail work extended the preview line to v0.1.10 / v0.1.11; v0.2.0 remains the next named milestone (first evaluation / publicly-announced release).
 
-## Mastodon trial — outcome summary (2026-05-27)
+## Mastodon trial — outcome summary (2026-05-27 / 28)
 
 `/Users/megurine/repo/ruby/mastodon` is fully configured:
 
@@ -53,11 +55,29 @@ The release-line plan is in [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy
 - `.rigor-baseline.yml` generated — 1258 buckets covering 2496 diagnostics
 - `rigor check` exits clean with the baseline active
 
-Starting from 590 errors pre-fixes, the v0.1.11 routes improvements brought the error count to 301 (zero `wrong-arity`). Remaining 217 `unknown-helper` diagnostics are structural (devise_for, concern-injected routes) and cleanly in the baseline.
+**The 14 post-v0.1.11 engine / plugin slices reduced Mastodon's `--no-baseline` error count from 789 to 120 (−84.8%)**. Per-cluster breakdown:
 
-Genuine bugs surfaced: `instances.domain` unknown column ×3, `NotificationMailer` action misuse ×2, missing view template ×1, missing i18n key ×1, Pundit info ×2. These are in the baseline at threshold 0 and will surface again when any file that contains them is edited.
+| Rule | v0.1.11 | now | Δ |
+|---|---:|---:|---:|
+| `unknown-helper` | 567 | 21 | −546 |
+| `unknown-filter-method` | 42 | 8 | −34 |
+| `call.undefined-method` | 49 | 22 | −27 |
+| `missing-template` | 27 | 3 | −24 |
+| `wrong-arity` | 30 | 0 | −30 |
+| `unknown-column` | 12 | 4 | −8 |
+| `flow.always-truthy` (warn) | 9 | 8 | −1 |
+| Total errors | **789** | **120** | **−669** |
 
-The OSS sweep CI job (`.github/workflows/oss-sweep.yml`) will need its stored thresholds refreshed after the v0.1.11 publish so the weekly gate reflects the new diagnostic count.
+**Remaining 120 errors** split into four categories, none addressable by the existing plugin set without new scope:
+
+1. **Test-framework helpers (~12)** — `have_current_path` × 10 (Capybara matcher) + `file_fixture_path` × 2 (Rails test helper). Would need a new `rigor-capybara` plugin or a `rigor-rspec-rails` extension.
+2. **Gem-shipped concern sigs (8)** — `unknown-filter-method` remaining 8 are Pundit's `verify_authorized`, Devise's `authenticate_resource_owner!`, etc. Would need plugin-contributed RBS for the gem concerns (ADR-25 territory) or a "this controller includes a gem-side concern" hint.
+3. **Genuine nil-chain bugs (~22)** — most `call.undefined-method` residue is `*_for_nil` in spec fixtures; these ARE the diagnostic, not false positives. Mastodon side fix.
+4. **Single-occurrence stragglers (~10)** — Devise bare forms (`new_password_path`, `sign_in_url` × 1 each), Vite helpers (`vite_asset_path` × 1), custom `default_url` / `shared_inbox_url` / `settings_preferences_path`, the `Instance.where(domain:)` virtual-model case (4). Each needs its own targeted fix; low ROI per call site.
+
+Genuine bugs surfaced pre-cycle that are in the baseline at threshold 0: `instances.domain` unknown column ×3 (still flagged — virtual model), `NotificationMailer` action misuse ×2, missing view template ×1, missing i18n key ×1, Pundit info ×2. These resurface on file edit.
+
+The OSS sweep CI job (`.github/workflows/oss-sweep.yml`) will need its stored thresholds refreshed after the next `rigortype` publish so the weekly gate reflects the new diagnostic count.
 
 ## Open engineering items
 
@@ -114,12 +134,41 @@ Phases 1–4 landed (String / Integer / Float / Comparable / Math / HashShape / 
 
 ## Reading order for a returning implementer
 
-**`[Unreleased]` is empty. v0.1.11 is code-complete; `bundle exec rake release` is the next action (requires explicit user authorisation).** Read in this order:
+**`[Unreleased]` carries fifteen post-v0.1.11 slices (15 commits, master is 14 ahead of `origin/master`).** `make verify` is clean. Pick one of the three branches below; nothing forces a particular one.
 
-1. `CHANGELOG.md` § `[0.1.11]` and `[0.1.10]` — full recap of the last two patch cycles.
-2. [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0" — what gates the next named milestone.
-3. [`docs/manual/14-rails-quickstart.md`](manual/14-rails-quickstart.md) — the new Rails onboarding guide; reflects the kaigionrails + Mastodon trial findings.
-4. [`docs/adr/22-baseline-and-project-onboarding.md`](adr/22-baseline-and-project-onboarding.md) — baseline mechanism + SKILL trio (WD8); the `rigor-project-init` / `rigor-baseline-reduce` / `rigor-plugin-author` external-user SKILLs under `skills/` all landed.
-5. [`docs/adr/23-diagnostic-triage-command.md`](adr/23-diagnostic-triage-command.md) — `rigor triage`; WD5 / slice 3 (SKILL data-layer contract) landed; slice 4 plugin-contributed recognisers deferred.
-6. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — the public-vs-internal stability boundary. v0.2.0 stabilises the plugin-contract surface for external `rigor-*` gems, so cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
-7. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — the plugin contract v0.2.0 must stabilise.
+### Branch A — cut the release
+
+If the next intent is to ship the accumulated work, the natural cadence is a patch bump (`v0.1.12`) since every slice is a backwards-compatible plugin or analyser improvement. Procedure:
+
+1. Run the `rigor-release-prep` SKILL (or the manual checklist in `AGENTS.md` § "Release Cadence"). Version bump in `lib/rigor/version.rb`, CHANGELOG re-section under `[0.1.12] - YYYY-MM-DD`, regenerate `Gemfile.lock`, `make verify`.
+2. **Release authorisation required** — `bundle exec rake release` tags + pushes + publishes to RubyGems.
+3. After publish: refresh `data/oss-sweep/mastodon-thresholds.json` so the weekly OSS sweep gate reflects the new ~120 baseline.
+
+Alternatively roll to `v0.2.0` ("first evaluation release" per ROADMAP § "Release strategy") if the intent is to bless this body of work as the evaluation cut. v0.2.0 was always the "publicly-announced" line, and the 84.8% Mastodon error reduction is a defensible publicity story.
+
+### Branch B — continue closing Mastodon error count
+
+The Mastodon residue (120 errors) is dominated by four well-defined sub-clusters, each requiring a NEW direction rather than another rails-routes / actionpack iteration:
+
+1. **`rigor-capybara` plugin (~10 errors)** — recognise Capybara matchers (`have_current_path`, `have_link`, etc.) as known method names so the existing rules don't false-fire when they appear in spec files. Pattern: a small RBS bundle + a recognition list. Mirrors the shape of `rigor-rspec-rails`. Likely the most user-facing of the residue (every Capybara-using Rails app would benefit).
+2. **Gem-shipped concern sig support (~8 errors)** — Mastodon's `unknown-filter-method` residue is `verify_authorized` (Pundit) and `authenticate_resource_owner!` (Devise/Doorkeeper). The actionpack discoverer correctly notices the controller includes an unresolved module and silences `unknown-filter-method` only when the WHOLE include set is unresolved. When one resolved + one unresolved include coexists, the unresolved hint is lost. Either (a) loosen the silence rule to "any unresolved include = ambiguous", or (b) ship plugin-contributed RBS sigs for Pundit / Devise concerns (ADR-25 path).
+3. **"Model registered without table" exemption (~4 errors)** — Mastodon's `Instance` is backed by a database VIEW; `db/schema.rb` has no `instances` table, so `Instance.where(domain:)` looks like unknown-column. Add a `Plugin::Manifest` `virtual_models: ["Instance"]` field (or a `.rigor.yml` `dependencies.virtual_models:` knob) that exempts the named class from column validation.
+4. **Single-occurrence stragglers (~10 errors)** — `vite_asset_path`, `default_url`, `shared_inbox_url`, etc. Each is one custom helper a project author wrote. No systematic fix; users add a `# rigor:disable unknown-helper` directive or extend `helper_paths:` in their `.rigor.yml`.
+
+### Branch C — engine-internal items not driven by Mastodon
+
+These are the queued engine items unaffected by this cycle:
+
+1. **ADR-24 slice 4** — gated `undefined-method` / arity diagnostics on resolved closed-class self-calls. See "ADR-24 — implicit-self method-call resolution, remaining" below.
+2. **G2 flow-folding remaining cases** — `retry` flow edge, intervening method-call ivar invalidation, read-before-write nil. See "Flow-folding" below. Each is a separate medium-sized engine change.
+3. **AR scope-body method resolution** — `scope :x, -> { select(...).group(:uri) }` lambda's `self` not rebound to model class. See "Mastodon cross-version sweep — FP findings" item 2 below. The empirical case for ADR-26's next slicing.
+4. **Stdlib RBS gaps push** — the `references/rbs` branch `widen-strscan-resolv-stdlib-sigs` is staged for an upstream `ruby/rbs` PR; not yet pushed / not yet opened.
+
+### Reference reading
+
+When in doubt, the canonical entry points:
+
+1. `CHANGELOG.md` § `[Unreleased]` — full recap of the 15 post-v0.1.11 slices with empirical per-slice impact.
+2. [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0" — what gates the v0.2.0 milestone.
+3. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — the public-vs-internal stability boundary. v0.2.0 stabilises the plugin-contract surface for external `rigor-*` gems, so cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
+4. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — the plugin contract v0.2.0 must stabilise.

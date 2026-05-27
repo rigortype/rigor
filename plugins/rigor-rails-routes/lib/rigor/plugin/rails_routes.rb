@@ -53,14 +53,11 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-27 — shadowing-locals + kwargs-arity
-        # tolerance slice (`let(:foo_url)` / `subject(:foo_url)`
-        # in spec files no longer false-fires `unknown-helper`;
-        # `helper_url(account_username:, id:)` kwargs-only
-        # form no longer false-fires `wrong-arity`). The
-        # version bump invalidates any cached :helper_table
-        # entries from earlier rigor installs.
-        version: "0.3.0",
+        # Bumped 2026-05-28 — member/collection shorthand
+        # routes + `<name>_index_path` for same-singular-plural
+        # resources (`resources :reblogged_by`,
+        # `resources :terms_of_service`, etc.).
+        version: "0.5.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

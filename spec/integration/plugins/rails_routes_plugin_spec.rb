@@ -817,6 +817,152 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "same-singular-plural names get the `_index_` suffix" do
+    # Rails appends `_index_` to the index helper when the
+    # singular form equals the plural form AND the name is not
+    # in the canonical UNCOUNTABLE list. The disambiguation
+    # exists because show/index would otherwise collide.
+
+    it "registers `<name>_index_path` for `resources :reblogged_by`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :reblogged_by, controller: :reblogged_by_accounts, only: :index
+        end
+      RUBY
+      result = run_plugin(
+        source: "reblogged_by_index_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "registers `terms_of_service_index_path` for `resources :terms_of_service`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          namespace :admin do
+            resources :terms_of_service, only: [:index]
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "admin_terms_of_service_index_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "keeps UNCOUNTABLE-noun index under the bare name (no `_index_` suffix)" do
+      # `resources :news` → `news_path` for both index AND
+      # show (Rails-compatible). Precision floor against
+      # over-eager `_index_` suffixing.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :news
+        end
+      RUBY
+      result = run_plugin(
+        source: "news_path\nnews_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result).select { |d| %w[unknown-helper wrong-arity].include?(d.rule) }
+      expect(diags).to be_empty
+    end
+  end
+
+  describe "member/collection block shorthand routes" do
+    # Mastodon shape: `resources :accounts do; member { post
+    # :memorialize }; end` inside a namespace. Rails generates
+    # `memorialize_admin_account_path(id)` (member) and
+    # `memorialize_admin_accounts_path` (collection). Pre-fix
+    # the parser silently skipped these because
+    # `handle_explicit_route` rejected the symbol-only call
+    # shape (`post :memorialize` with no path arg).
+
+    it "registers a member action helper inside `resources do member { post :action } end`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          namespace :admin do
+            resources :accounts do
+              member do
+                post :memorialize
+              end
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "memorialize_admin_account_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "registers a collection action helper inside `resources do collection { post :action } end`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          namespace :admin do
+            resources :accounts do
+              collection do
+                post :batch
+              end
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "batch_admin_accounts_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "registers multiple member actions in the same `member do` block" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :accounts do
+            member do
+              post :enable
+              post :memorialize
+              post :reject
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "enable_account_path(1)\nmemorialize_account_path(1)\nreject_account_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "applies the correct arity to member actions (parent resource segments only)" do
+      # `resources :users do; resources :accounts do; member { post :memorialize }; end; end`
+      # → `memorialize_user_account_path(user_id, id)` arity 2.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :users do
+            resources :accounts do
+              member do
+                post :memorialize
+              end
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "memorialize_user_account_path(1, 2)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result).select { |d| %w[unknown-helper wrong-arity].include?(d.rule) }
+      expect(diags).to be_empty
+    end
+  end
+
   describe "shadowing locals suppress diagnostics" do
     # When a file declares a local that shadows a route helper
     # name (`let(:foo_url)`, `def foo_path`, `foo_url = ...`),

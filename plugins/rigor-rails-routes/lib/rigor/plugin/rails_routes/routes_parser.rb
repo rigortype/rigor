@@ -119,10 +119,46 @@ module Rigor
 
           def push_resource(parent_name)
             singular = singularize(parent_name.to_s)
-            @stack.push(kind: :scope, parent: singular, arity_segments: [":#{singular}_id"])
+            @stack.push(kind: :scope, parent: singular, parent_plural: parent_name.to_s,
+                        arity_segments: [":#{singular}_id"])
             yield
           ensure
             @stack.pop
+          end
+
+          # `member do ... end` / `collection do ... end` —
+          # records the mode so subsequent shorthand HTTP-verb
+          # calls (`post :memorialize`) inside the block can
+          # derive their helper name from the enclosing
+          # resource. The frame also carries the immediate
+          # parent's singular / plural names so member /
+          # collection actions can pick the correct form
+          # (`memorialize_account_path(id)` vs
+          # `memorialize_accounts_path`).
+          def push_action_block(mode, parent_singular, parent_plural)
+            @stack.push(kind: :"#{mode}_block", parent_singular: parent_singular, parent_plural: parent_plural)
+            yield
+          ensure
+            @stack.pop
+          end
+
+          # Returns the top-most `:scope` frame's singular /
+          # plural names, or `nil` when not inside a resources
+          # / resource block. Used by `handle_member_or_collection`
+          # to push the action-block frame.
+          def innermost_resource
+            scope_frame = @stack.rfind { |f| f[:kind] == :scope }
+            return nil if scope_frame.nil?
+
+            { singular: scope_frame[:parent], plural: scope_frame[:parent_plural] || scope_frame[:parent] }
+          end
+
+          # Top-most `:member_block` / `:collection_block`
+          # frame, or nil when not in a shorthand action
+          # context. `handle_explicit_route` uses this to
+          # detect a `post :memorialize` symbol-only call shape.
+          def innermost_action_block
+            @stack.rfind { |f| %i[member_block collection_block].include?(f[:kind]) }
           end
 
           # `scope "/:slug", as: "foo" do ... end` — adds a
@@ -403,6 +439,15 @@ module Rigor
         end
 
         def handle_explicit_route(node, context)
+          # Member / collection block shorthand: `post :memorialize`
+          # inside `member do ... end` (no path arg, just a
+          # SymbolNode). Rails generates a helper based on the
+          # action name + the enclosing resource: a member
+          # action becomes `<action>_<singular_chain>_path(id)`,
+          # a collection action becomes
+          # `<action>_<plural_chain>_path`.
+          return register_member_collection_action(node, context) if member_collection_shorthand?(node, context)
+
           # `get "/about", to: "static#about", as: :about`
           path = string_argument(node, 0)
           as_name = keyword_symbol(node, :as)
@@ -427,6 +472,65 @@ module Rigor
           )
         end
 
+        # True when we're inside `member do ... end` / `collection
+        # do ... end` AND the call is of the form
+        # `<verb> :symbol [, options...]` — a shorthand action
+        # declaration whose first positional argument is the
+        # action name (no explicit path).
+        def member_collection_shorthand?(node, context)
+          return false unless context.innermost_action_block
+
+          first_arg = node.arguments&.arguments&.first
+          first_arg.is_a?(Prism::SymbolNode)
+        end
+
+        # Generates the member / collection action helper.
+        # Member: `<action>_<helper_prefix>path(id)`, arity =
+        #   parent_segment_count (which already includes the
+        #   enclosing resource's `:id`).
+        # Collection: `<action>_<plural_helper_prefix>path`,
+        #   arity = parent_segment_count - 1 (no `:id` segment;
+        #   the collection URL is /<resource>/<action>).
+        def register_member_collection_action(node, context)
+          action_name = symbol_argument(node, 0).to_s
+          frame = context.innermost_action_block
+          if frame[:kind] == :member_block
+            register_member_action(node, context, action_name)
+          else
+            register_collection_action(node, context, action_name, frame)
+          end
+        end
+
+        def register_member_action(node, context, action_name)
+          # `helper_prefix` already ends with "_" (each segment
+          # appends one); the formula below yields e.g.
+          # `memorialize_admin_account_path`. Arity equals the
+          # parent segment count — Rails member URLs carry the
+          # enclosing resource's `:id`, which the :scope frame
+          # already counts.
+          name = "#{action_name}_#{context.helper_prefix}path"
+          context.entries << HelperTable::Entry.new(
+            name: name, arity: context.parent_segment_count,
+            path: "#{context.path_prefix}/#{action_name}",
+            http_method: node.name, action: :custom
+          )
+        end
+
+        def register_collection_action(node, context, action_name, frame)
+          # Collection URL drops the immediate parent's `:id`
+          # segment. The plural helper prefix swaps the
+          # singular form (in `helper_prefix`) for the plural
+          # — the immediate-resource frame stored both.
+          plural_prefix = context.helper_prefix.sub(/#{frame[:parent_singular]}_\z/, "#{frame[:parent_plural]}_")
+          name = "#{action_name}_#{plural_prefix}path"
+          arity = [context.parent_segment_count - 1, 0].max
+          context.entries << HelperTable::Entry.new(
+            name: name, arity: arity,
+            path: "#{context.path_prefix}/#{action_name}",
+            http_method: node.name, action: :custom
+          )
+        end
+
         def load_drawn_routes(node, context)
           return unless context.file_reader
 
@@ -445,14 +549,13 @@ module Rigor
         def handle_member_or_collection(node, context)
           # Only meaningful when we're inside a `resources` /
           # `resource` block. The Context's stack tells us.
-          return unless context.parent_segment_count.positive? || in_singular_resource?(context)
+          resource = context.innermost_resource
+          return interpret_block_body(node, context) if resource.nil?
 
-          # The Context doesn't currently distinguish
-          # "inside resources" from "inside resource" — for
-          # v0.1.0 we treat both the same way and let the
-          # explicit `as:` in member/collection do the
-          # naming work.
-          interpret_block_body(node, context)
+          mode = node.name # :member or :collection
+          context.push_action_block(mode, resource[:singular], resource[:plural]) do
+            interpret_block_body(node, context)
+          end
         end
 
         def in_singular_resource?(*)
@@ -510,7 +613,7 @@ module Rigor
         # not double-register.
         def entry_for_action(action, name:, singular:, base_arity:, path_base:, helper_prefix:, plural:)
           case action
-          when :index then index_entry(plural, helper_prefix, name, base_arity, path_base)
+          when :index then index_entry(plural, helper_prefix, name, base_arity, path_base, singular)
           when :show then show_entry(plural, helper_prefix, singular, base_arity, path_base)
           when :new
             HelperTable::Entry.new(
@@ -552,11 +655,32 @@ module Rigor
           end
         end
 
-        def index_entry(plural, helper_prefix, name, base_arity, path_base)
+        def index_entry(plural, helper_prefix, name, base_arity, path_base, singular)
           return nil unless plural
 
+          # Rails appends `_index_path` to the index helper
+          # name when the singular form of the resource matches
+          # the plural form AND the noun isn't in the canonical
+          # UNCOUNTABLE list. The collision would otherwise put
+          # both the index (`:id`-less) and show (`:id`-bearing)
+          # helpers under the same name, and Rails disambiguates
+          # by suffixing the index form. Mastodon's
+          # `resources :reblogged_by, controller:
+          # :reblogged_by_accounts, only: :index` and similar
+          # rely on this — calls like
+          # `api_v1_status_reblogged_by_index_url(status.id)`
+          # would otherwise read as `unknown-helper`.
+          #
+          # UNCOUNTABLE nouns (`news`, `series`, `media`, …)
+          # keep both helpers under the same name on the Rails
+          # side — they don't get the `_index_` suffix.
+          index_name = if name.to_s == singular && !UNCOUNTABLE.include?(name.to_s)
+                         "#{helper_prefix}#{name}_index_path"
+                       else
+                         "#{helper_prefix}#{name}_path"
+                       end
           HelperTable::Entry.new(
-            name: "#{helper_prefix}#{name}_path",
+            name: index_name,
             arity: base_arity, path: path_base,
             http_method: :get, action: :index
           )

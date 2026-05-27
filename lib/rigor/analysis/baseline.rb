@@ -52,6 +52,15 @@ module Rigor
     # CLI or `baseline: <path>` in `.rigor.yml`). The presence
     # of `.rigor-baseline.yml` on disk alone never triggers a
     # load — that's the CLI / Configuration's job to enforce.
+    #
+    # ## Path handling
+    #
+    # Baselines store file paths **relative to the project root**
+    # (the working directory when `rigor` is run). This makes the
+    # generated `.rigor-baseline.yml` portable across machines and
+    # checkout locations. When filtering a live diagnostic stream,
+    # the instance normalises each diagnostic's absolute path to a
+    # relative one before the bucket lookup.
     class Baseline
       # The bucket key is intentionally tuple-shaped so rule-ID
       # rows and message-pattern rows can coexist in a single
@@ -69,12 +78,16 @@ module Rigor
         # path is nil (the caller's "no baseline configured"
         # state). Raises {LoadError} on malformed content;
         # callers translate to a user-facing diagnostic.
-        def load(path)
+        #
+        # `project_root:` is the working directory against which
+        # stored relative paths are resolved during filtering.
+        # Defaults to `Dir.pwd`.
+        def load(path, project_root: Dir.pwd)
           return nil if path.nil?
-          return new([]) unless File.exist?(path)
+          return new([], project_root: project_root) unless File.exist?(path)
 
           raw = YAML.safe_load_file(path, permitted_classes: [Symbol])
-          parse_loaded(raw, path: path)
+          parse_loaded(raw, path: path, project_root: project_root)
         end
 
         # Build a baseline from a current run's diagnostic stream.
@@ -82,10 +95,14 @@ module Rigor
         # message-mode generator passes literal messages through
         # `Regexp.escape` so generated rows never accidentally
         # over-match on punctuation.
-        def from_diagnostics(diagnostics, match_mode: :rule)
+        #
+        # `project_root:` is used to convert absolute diagnostic
+        # paths to relative paths in the generated YAML. Defaults
+        # to `Dir.pwd`.
+        def from_diagnostics(diagnostics, match_mode: :rule, project_root: Dir.pwd)
           raise ArgumentError, "match_mode must be :rule or :message" unless %i[rule message].include?(match_mode)
 
-          grouped = group_for_baseline(diagnostics, match_mode)
+          grouped = group_for_baseline(diagnostics, match_mode, project_root)
           buckets = grouped.map do |key, entries|
             Bucket.new(
               file: key[0],
@@ -94,12 +111,12 @@ module Rigor
               count: entries.size
             )
           end
-          new(buckets)
+          new(buckets, project_root: project_root)
         end
 
         private
 
-        def parse_loaded(raw, path:)
+        def parse_loaded(raw, path:, project_root:)
           raise LoadError, "#{path}: expected a Hash at top level, got #{raw.class}" unless raw.is_a?(Hash)
 
           version = raw["version"]
@@ -110,7 +127,8 @@ module Rigor
           rows = raw["ignored"] || []
           raise LoadError, "#{path}: `ignored:` must be an Array" unless rows.is_a?(Array)
 
-          new(rows.each_with_index.map { |row, idx| parse_row(row, path: path, index: idx) })
+          new(rows.each_with_index.map { |row, idx| parse_row(row, path: path, index: idx) },
+              project_root: project_root)
         end
 
         def parse_row(row, path:, index:)
@@ -141,16 +159,19 @@ module Rigor
         # In message mode, each unique message gets its own bucket;
         # in rule mode, every diagnostic for a (file, rule) pair
         # contributes to a single bucket regardless of message.
-        def group_for_baseline(diagnostics, match_mode)
+        # File paths are normalised to relative before keying.
+        def group_for_baseline(diagnostics, match_mode, project_root)
+          root = Pathname.new(project_root)
           diagnostics.each_with_object({}) do |diag, into|
             next if diag.qualified_rule.nil?
             next if diag.path.nil?
 
+            rel = relative_path(diag.path, root)
             key = case match_mode
                   when :rule
-                    [diag.path, diag.qualified_rule, nil]
+                    [rel, diag.qualified_rule, nil]
                   when :message
-                    [diag.path, diag.qualified_rule, message_pattern_for(diag.message)]
+                    [rel, diag.qualified_rule, message_pattern_for(diag.message)]
                   end
             (into[key] ||= []) << diag
           end
@@ -164,13 +185,20 @@ module Rigor
         def message_pattern_for(message)
           Regexp.new(Regexp.escape(message.to_s))
         end
+
+        def relative_path(path, root_pathname)
+          Pathname.new(path).relative_path_from(root_pathname).to_s
+        rescue ArgumentError
+          path # different drive letter on Windows or non-child path
+        end
       end
 
       class LoadError < StandardError; end
 
       attr_reader :buckets
 
-      def initialize(buckets)
+      def initialize(buckets, project_root: Dir.pwd)
+        @project_root = Pathname.new(project_root)
         @buckets = buckets.freeze
         # For each (file, qualified_rule) pair, two arrays:
         # - rule-ID rows (message_regex == nil)
@@ -264,7 +292,7 @@ module Rigor
       # cleared buckets (`actual == 0`) from the on-disk file.
       def without(buckets_to_drop)
         dropset = buckets_to_drop.to_set
-        self.class.new(buckets.reject { |b| dropset.include?(b) })
+        self.class.new(buckets.reject { |b| dropset.include?(b) }, project_root: @project_root)
       end
 
       # Serialise to a YAML string. The generator path writes
@@ -307,6 +335,14 @@ module Rigor
         [bucket.file, bucket.rule, bucket.message_regex&.source]
       end
 
+      def normalize_path(path)
+        return path if path.nil?
+
+        Pathname.new(path).relative_path_from(@project_root).to_s
+      rescue ArgumentError
+        path # different drive letter on Windows or non-child path
+      end
+
       def group_diagnostics_for_filtering(diagnostics)
         # First pass: bin each diagnostic into the bucket that
         # claims it. Message-pattern rows take precedence over
@@ -322,7 +358,7 @@ module Rigor
                   [bucket.file, bucket.rule,
                    bucket.message_regex&.source]
                 else
-                  [diag.path, diag.qualified_rule, :__none__]
+                  [normalize_path(diag.path), diag.qualified_rule, :__none__]
                 end
           bin = (bins[key] ||= { bucket: bucket, diagnostics: [] })
           bin[:diagnostics] << diag
@@ -331,7 +367,7 @@ module Rigor
       end
 
       def claim_bucket_for(diagnostic)
-        candidates = @by_pair[[diagnostic.path, diagnostic.qualified_rule]]
+        candidates = @by_pair[[normalize_path(diagnostic.path), diagnostic.qualified_rule]]
         return nil if candidates.nil? || candidates.empty?
 
         # Tighter (message-pattern) buckets first, then the

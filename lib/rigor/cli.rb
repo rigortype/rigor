@@ -121,7 +121,7 @@ module Rigor
         return false
       end
 
-      baseline = Analysis::Baseline.load(path)
+      baseline = Analysis::Baseline.load(path, project_root: Dir.pwd)
       return false if baseline.nil? || baseline.empty?
 
       drifted = baseline.audit(raw_diagnostics).reject { |row| row.status == :within }
@@ -164,7 +164,7 @@ module Rigor
       path = resolve_baseline_path(configuration, options)
       return result if path.nil?
 
-      baseline = Analysis::Baseline.load(path)
+      baseline = Analysis::Baseline.load(path, project_root: Dir.pwd)
       return result if baseline.nil?
 
       surfaced, silenced_count = baseline.filter(result.diagnostics)

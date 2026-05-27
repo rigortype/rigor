@@ -31,10 +31,12 @@ Gem::Specification.new do |spec|
       sig/**/*.rbs
       data/builtins/**/*.yml
     ]
-  )
+  ) + Dir.glob("plugins/*/lib/**/*.rb").reject { |f| f.include?("/rigor-playground/") } \
+    + Dir.glob("plugins/*/sig/**/*.rbs").reject { |f| f.include?("/rigor-playground/") }
   spec.bindir = "exe"
   spec.executables = ["rigor"]
-  spec.require_paths = ["lib"]
+  spec.require_paths = ["lib"] +
+                       Dir.glob("plugins/*/lib").reject { |f| f.include?("/rigor-playground/") }
 
   spec.add_dependency "language_server-protocol", ">= 3.17", "< 4.0"
   spec.add_dependency "prism", ">= 1.0", "< 2.0"

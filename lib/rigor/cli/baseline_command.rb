@@ -84,7 +84,8 @@ module Rigor
         configuration = Configuration.load(options.fetch(:config))
         diagnostics = collect_diagnostics(configuration, options)
 
-        baseline = Analysis::Baseline.from_diagnostics(diagnostics, match_mode: options.fetch(:match_mode))
+        baseline = Analysis::Baseline.from_diagnostics(diagnostics, match_mode: options.fetch(:match_mode),
+                                                                    project_root: Dir.pwd)
         File.write(path, baseline.to_yaml)
 
         @err.puts(
@@ -372,7 +373,7 @@ module Rigor
           @err.puts("rigor: baseline file not found: #{path}")
           return :error
         end
-        Analysis::Baseline.load(path)
+        Analysis::Baseline.load(path, project_root: Dir.pwd)
       rescue Analysis::Baseline::LoadError => e
         @err.puts("rigor: baseline load failed: #{e.message}")
         :error

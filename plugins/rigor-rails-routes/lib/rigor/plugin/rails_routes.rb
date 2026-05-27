@@ -53,11 +53,15 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-28 — unknown-helper FP scrub (path
-        # exclusion for models/lib/db/config, Devise scoped
-        # bare helpers + omniauth_authorize_path, ss-preserving
-        # singularize, vite_asset_path passthrough).
-        version: "0.11.0",
+        # Bumped 2026-05-28 — Redmine-driven additions:
+        # `match` dispatch (shares `get`/`post` handler with
+        # different HTTP-method set), optional `(/:tab)`
+        # path-segment arity range, inline `:on => :collection`
+        # / `:on => :member`, string-named `get 'foo'` inside
+        # member/collection blocks, member-style `<as>_<singular>_path`
+        # for explicit `:as` inside resources, `_index_` suffix
+        # whenever singular == plural (including UNCOUNTABLE).
+        version: "0.12.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

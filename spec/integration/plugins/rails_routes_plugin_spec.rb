@@ -190,23 +190,24 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(load_errors.size).to eq(1)
     end
 
-    it "handles uncountable-noun resources (`resources :news`, index + show share `news_path`)" do
-      # Redmine's `config/routes.rb` declares `resources :news`
-      # with the full action set. ActiveSupport's inflector
-      # knows `news` is uncountable, so both the index helper
-      # AND the show helper are named `news_path` — index takes
-      # 0 args, show takes 1. Pre-fix the parser stripped the
-      # 's', registering `news_path` (index, arity 0) +
-      # `new_path` (show, arity 1) + `new_news_path` (new) —
-      # so legitimate `news_path(@news)` calls (81× across
-      # Redmine) surfaced as wrong-arity.
+    it "handles uncountable-noun resources (`resources :news`, _index_ on index helper)" do
+      # `resources :news` with `singular == plural`: Rails
+      # generates `news_index_path` (collection / index, arity 0)
+      # and `news_path(:id)` (show, arity 1). The `_index_`
+      # suffix on the index helper disambiguates the two — it is
+      # added whenever `singular == plural`, INCLUDING for
+      # uncountable nouns. Redmine's
+      # `app/controllers/news_controller.rb` calls
+      # `news_index_path` and `project_news_index_path(@project)`
+      # for the index form; legitimate `news_path(@news)` calls
+      # the show.
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           resources :news, only: [:index, :show, :new, :edit]
         end
       RUBY
       result = run_plugin(
-        source: "news_path\nnews_path(1)\nnew_news_path\nedit_news_path(1)\n",
+        source: "news_index_path\nnews_path(1)\nnew_news_path\nedit_news_path(1)\n",
         files: { "config/routes.rb" => routes_rb }
       )
       diags = plugin_diagnostics(result)

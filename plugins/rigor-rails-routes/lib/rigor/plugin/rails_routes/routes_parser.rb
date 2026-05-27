@@ -241,6 +241,55 @@ module Rigor
             segments.map { |segment| "#{segment}_" }.join
           end
 
+          # The chain of resource-singular segments above the
+          # current scope, in order — used to form member-route
+          # helper names of the form `<as>_<singular_chain>_path`.
+          # Includes nested resources (`resources :projects do;
+          # resources :issues do; get 'foo', as: 'bar'; end; end`
+          # → `bar_project_issue_path`). Returns `""` outside any
+          # `:scope` / `:singular_scope` frame.
+          def resource_singular_chain
+            segments = @stack.filter_map do |frame|
+              case frame[:kind]
+              when :scope then frame[:parent]
+              when :singular_scope then frame[:parent]
+              end
+            end
+            segments.empty? ? "" : "#{segments.join('_')}_"
+          end
+
+          # Namespace-only prefix (drops the resource-singular
+          # segments that `helper_prefix` includes). Used so that
+          # an `:as => 'foo'` inside `namespace :admin do
+          # resources :projects do; ...; end; end` generates
+          # `admin_foo_project_path` — namespace first, then
+          # `:as` action prefix, then singular chain.
+          def namespace_only_prefix
+            segments = @stack.filter_map do |frame|
+              case frame[:kind]
+              when :namespace then frame[:name]
+              when :as_scope then frame[:name]
+              end
+            end
+            segments.empty? ? "" : "#{segments.join('_')}_"
+          end
+
+          # True when we're inside a `resources` or `resource`
+          # scope (the AST has pushed a `:scope` or
+          # `:singular_scope` frame). Drives member-route
+          # helper-name generation in `handle_explicit_route`.
+          def inside_resource_scope?
+            @stack.any? { |frame| %i[scope singular_scope].include?(frame[:kind]) }
+          end
+
+          # The innermost `:scope` frame (plural resource),
+          # carrying `parent` (singular) and `parent_plural`.
+          # Used by the inline `:on => :collection` / `:on =>
+          # :member` form to derive the helper name.
+          def innermost_scope_frame
+            @stack.rfind { |f| f[:kind] == :scope }
+          end
+
           # Path prefix — including the parent's `:user_id`
           # segments for nested resources and the namespace
           # path prefix.
@@ -394,7 +443,16 @@ module Rigor
             handle_root(node, context)
           when :scope
             handle_scope(node, context)
-          when :get, :post, :patch, :put, :delete
+          when :get, :post, :patch, :put, :delete, :match
+            # `match 'login', :to => 'a#b', :as => :signin, :via => [:get, :post]`
+            # generates the same helper-name shape as `get` /
+            # `post` (first arg = path string, `:as` overrides the
+            # derived helper name). The only difference is the
+            # HTTP-method set (driven by `:via`); the helper-name
+            # generation logic is identical, so reuse the same
+            # handler. Redmine relies heavily on `match` for
+            # multi-method endpoints (`account/lost_password`,
+            # `news/preview`, etc.).
             handle_explicit_route(node, context)
           when :member, :collection
             # Inside a `resources` block, `member do ... end`
@@ -701,6 +759,21 @@ module Rigor
           # `<action>_<plural_chain>_path`.
           return register_member_collection_action(node, context) if member_collection_shorthand?(node, context)
 
+          # `:on => :collection` / `:on => :member` inline form
+          # — Rails accepts this as a shorthand for `collection
+          # do ... end` / `member do ... end` wrappers around a
+          # single action. `get 'report', :on => :collection`
+          # inside `resources :time_entries` generates
+          # `report_time_entries_path` (collection-style: action
+          # prefix on the plural resource name). Treat the action
+          # name as the path's basename string (Redmine's idiom).
+          on_target = keyword_symbol(node, :on)
+          if on_target && context.inside_resource_scope?
+            path_arg = string_argument(node, 0) || symbol_argument(node, 0)&.to_s
+            as_name = keyword_symbol(node, :as) || path_arg
+            return register_on_target_action(node, context, as_name, on_target) if as_name
+          end
+
           # `get "/about", to: "static#about", as: :about`
           path = string_argument(node, 0)
           as_name = keyword_symbol(node, :as)
@@ -716,25 +789,67 @@ module Rigor
             return if as_name.empty?
           end
 
-          name = "#{context.helper_prefix}#{as_name}_path"
-          arity = context.parent_segment_count + count_path_placeholders(path)
-          context.entries << HelperTable::Entry.new(
-            name: name, arity: arity,
-            path: "#{context.path_prefix}#{path || ''}",
-            http_method: node.name, action: :custom
-          )
+          name = explicit_route_helper_name(context, as_name)
+          total_placeholders = count_path_placeholders(path)
+          optional = count_optional_path_placeholders(path)
+          base_arity = context.parent_segment_count + total_placeholders
+          # Register the maximum-arity entry; if the path
+          # carries `(...)` optional segments (e.g.
+          # `'settings(/:tab)'`), register additional entries
+          # for each smaller arity so the call-site arity check
+          # accepts `settings_project_path(:id)` (no `:tab`).
+          (0..optional).each do |drop|
+            context.entries << HelperTable::Entry.new(
+              name: name, arity: base_arity - drop,
+              path: "#{context.path_prefix}#{path || ''}",
+              http_method: node.name, action: :custom
+            )
+          end
+        end
+
+        # Builds the helper name for an explicit `get` / `post`
+        # / `match` route. Rails uses two distinct shapes:
+        #
+        # - **Outside a `resources` scope** (top-level or inside
+        #   `namespace` / `scope`): `<namespace_prefix><as>_path`
+        #   — e.g. `match 'login', as: :signin` →
+        #   `signin_path`; inside `namespace :admin` →
+        #   `admin_signin_path`.
+        # - **Inside a `resources` scope**: the `:as` acts as
+        #   the ACTION prefix on the resource's singular chain.
+        #   `resources :projects do; get 'settings', as:
+        #   :settings; end` → `settings_project_path(:id)` (NOT
+        #   `project_settings_path`). The namespace prefix still
+        #   leads: `namespace :admin do; resources :projects do;
+        #   get 'foo', as: :bar; end; end` →
+        #   `admin_bar_project_path(:id)`.
+        def explicit_route_helper_name(context, as_name)
+          if context.inside_resource_scope?
+            "#{context.namespace_only_prefix}#{as_name}_#{context.resource_singular_chain}path"
+          else
+            "#{context.helper_prefix}#{as_name}_path"
+          end
         end
 
         # True when we're inside `member do ... end` / `collection
         # do ... end` AND the call is of the form
-        # `<verb> :symbol [, options...]` — a shorthand action
+        # `<verb> :symbol [, options...]` OR `<verb> 'string'`
+        # (the latter is Redmine's idiom — `get 'report'` inside
+        # a `collection do` block) — a shorthand action
         # declaration whose first positional argument is the
-        # action name (no explicit path).
+        # action name (no explicit path placeholders).
         def member_collection_shorthand?(node, context)
           return false unless context.innermost_action_block
 
           first_arg = node.arguments&.arguments&.first
-          first_arg.is_a?(Prism::SymbolNode)
+          return true if first_arg.is_a?(Prism::SymbolNode)
+
+          # A plain action-name string with no `/` or `:` —
+          # treat it as if it were a symbol (`get 'report'` ==
+          # `get :report` inside member/collection block).
+          first_arg.is_a?(Prism::StringNode) &&
+            !first_arg.unescaped.include?("/") &&
+            !first_arg.unescaped.include?(":")
         end
 
         # Generates the member / collection action helper.
@@ -745,13 +860,46 @@ module Rigor
         #   arity = parent_segment_count - 1 (no `:id` segment;
         #   the collection URL is /<resource>/<action>).
         def register_member_collection_action(node, context)
-          action_name = symbol_argument(node, 0).to_s
+          action_name = symbol_argument(node, 0)&.to_s ||
+                        string_argument(node, 0).to_s
           frame = context.innermost_action_block
           if frame[:kind] == :member_block
             register_member_action(node, context, action_name)
           else
             register_collection_action(node, context, action_name, frame)
           end
+        end
+
+        # `get 'report', :on => :collection` (or `:member`)
+        # inline form inside `resources`. The helper name shape
+        # matches member_action / collection_action: the action
+        # name prefixes the resource's singular (member) or
+        # plural (collection). Closes Redmine's
+        # `report_time_entries_path` cluster.
+        def register_on_target_action(node, context, action_name, on_target)
+          scope_frame = context.innermost_scope_frame
+          return if scope_frame.nil?
+
+          parent_singular = scope_frame[:parent]
+          parent_plural = scope_frame[:parent_plural] || parent_singular
+
+          case on_target
+          when :member
+            name = "#{action_name}_#{context.helper_prefix}path"
+            arity = context.parent_segment_count
+          when :collection
+            plural_prefix = context.helper_prefix.sub(/#{parent_singular}_\z/, "#{parent_plural}_")
+            name = "#{action_name}_#{plural_prefix}path"
+            arity = [context.parent_segment_count - 1, 0].max
+          else
+            return
+          end
+
+          context.entries << HelperTable::Entry.new(
+            name: name, arity: arity,
+            path: "#{context.path_prefix}/#{action_name}",
+            http_method: node.name, action: :custom
+          )
         end
 
         def register_member_action(node, context, action_name)
@@ -924,10 +1072,15 @@ module Rigor
           # `api_v1_status_reblogged_by_index_url(status.id)`
           # would otherwise read as `unknown-helper`.
           #
-          # UNCOUNTABLE nouns (`news`, `series`, `media`, …)
-          # keep both helpers under the same name on the Rails
-          # side — they don't get the `_index_` suffix.
-          index_name = if name.to_s == singular && !UNCOUNTABLE.include?(name.to_s)
+          # Rails adds `_index_` whenever `singular == plural`
+          # — including for UNCOUNTABLE nouns (Redmine's
+          # `resources :news` registers `news_index_path` for
+          # the index). The earlier "skip UNCOUNTABLE" carve-out
+          # was empirically wrong; only the
+          # IRREGULAR-singular path (e.g. `media → medium`)
+          # actually has `singular != plural` and skips
+          # `_index_`.
+          index_name = if name.to_s == singular
                          "#{helper_prefix}#{name}_index_path"
                        else
                          "#{helper_prefix}#{name}_path"
@@ -1023,6 +1176,17 @@ module Rigor
           return 0 if path.nil?
 
           path.scan(/:[a-z_][a-z0-9_]*/).size
+        end
+
+        # Number of placeholders inside `(...)` groups — Rails'
+        # optional-segment syntax (`'settings(/:tab)'`). Required
+        # arity is `count_path_placeholders - count_optional`;
+        # callers accepting a `(required..required+optional)`
+        # arity range register an entry per achievable arity.
+        def count_optional_path_placeholders(path)
+          return 0 if path.nil?
+
+          path.scan(/\([^)]*\)/).sum { |group| group.scan(/:[a-z_][a-z0-9_]*/).size }
         end
 
         # Shared with `Context::Inflector#singularize` — kept in

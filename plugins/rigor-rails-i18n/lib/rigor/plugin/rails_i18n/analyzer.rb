@@ -49,9 +49,40 @@ module Rigor
           fallback_in_progress separator deep_interpolation
         ].to_set.freeze
 
+        # Key prefixes Rails / `rails-i18n` ship in every
+        # locale by default. Projects whose own locale files
+        # don't redeclare them still get them at runtime (via
+        # the `rails-i18n` gem's bundled locale catalogues).
+        # `t('date.order')` is the canonical Mastodon case —
+        # used by `Settings::Date::Order` and date-of-birth
+        # selects, never authored project-side. Skip
+        # `unknown-key` for these; downstream interpolation
+        # checks have nothing to validate without a leaf entry
+        # so they decline silently too.
+        RAILS_SHIPPED_KEY_PREFIXES = %w[
+          date.
+          time.
+          datetime.
+          support.array.
+          errors.format
+          errors.messages.
+          number.
+          helpers.select.
+          helpers.submit.
+          helpers.label.
+          i18n.transliterate.
+          activerecord.errors.messages.
+          activerecord.errors.models.
+        ].freeze
+
         Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
 
         module_function
+
+        def rails_shipped_key?(literal_key)
+          key_str = literal_key.to_s
+          RAILS_SHIPPED_KEY_PREFIXES.any? { |prefix| key_str.start_with?(prefix) }
+        end
 
         # @param path [String]
         # @param root [Prism::Node]
@@ -79,6 +110,14 @@ module Rigor
               # don't apply (no single entry to read placeholders
               # from).
               next if locale_index.pluralization_namespace?(literal_key)
+
+              # Rails / rails-i18n ship `date.order`, `time.am`,
+              # `support.array.words_connector`, etc. in every
+              # locale at runtime even when the project's own
+              # locale files don't repeat them. Accept silently
+              # — no leaf entry → no downstream interpolation
+              # check to run.
+              next if rails_shipped_key?(literal_key)
 
               diagnostics << unknown_key_diagnostic(path, call_node, literal_key, locale_index)
               next

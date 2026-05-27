@@ -50,7 +50,13 @@ module Rigor
     class Actionmailer < Rigor::Plugin::Base
       manifest(
         id: "actionmailer",
-        version: "0.1.0",
+        # Bumped 2026-05-28 — extended RESERVED_CLASS_METHODS to
+        # include `respond_to?` / `public_send` / `send` /
+        # `__send__` / `method` and friends so dynamic-dispatch
+        # idioms (`Mailer.respond_to?(action)` /
+        # `Mailer.public_send(action)`) stop firing
+        # `unknown-action` against the Ruby reflection method.
+        version: "0.2.0",
         description: "Validates ActionMailer call shape and view template existence.",
         config_schema: {
           "mailer_search_paths" => :array,

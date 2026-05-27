@@ -61,7 +61,10 @@ module Rigor
     class RailsI18n < Rigor::Plugin::Base
       manifest(
         id: "rails-i18n",
-        version: "0.1.0",
+        # Bumped 2026-05-28 — skip `unknown-key` on Rails / rails-
+        # i18n shipped defaults (`date.order`, `time.am`,
+        # `support.array.*`, `errors.format`, …).
+        version: "0.2.0",
         description: "Validates I18n `t(key)` calls against `config/locales/*.yml`.",
         config_schema: {
           "locale_search_paths" => :array,

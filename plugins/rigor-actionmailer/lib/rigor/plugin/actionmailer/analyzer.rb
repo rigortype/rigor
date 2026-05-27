@@ -40,6 +40,9 @@ module Rigor
           deliver_later deliver_now deliver_later! deliver_now!
           mail headers attachments default
           with parameters
+          respond_to? respond_to_missing? method_defined?
+          public_send send __send__ public_method
+          method instance_method methods
         ].freeze
 
         Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)

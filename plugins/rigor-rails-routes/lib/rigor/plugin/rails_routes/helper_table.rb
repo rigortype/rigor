@@ -61,8 +61,13 @@ module Rigor
 
         # @return [Boolean] true when any entry under this
         #   helper name accepts the given positional arity.
+        #
+        # Rails helpers have the signature `helper(*segments, options = {})`,
+        # so `expected + 1` is always valid — the extra argument is treated
+        # as a query-params/options hash (e.g. `users_path(page: 2)` or
+        # `user_path(@u, pagination_params(...))`).
         def accepts_arity?(helper_name, arity)
-          (@by_name[helper_name.to_s] || []).any? { |entry| entry.arity == arity }
+          (@by_name[helper_name.to_s] || []).any? { |entry| entry.arity == arity || entry.arity + 1 == arity }
         end
 
         # @return [Array<Integer>] all accepted positional

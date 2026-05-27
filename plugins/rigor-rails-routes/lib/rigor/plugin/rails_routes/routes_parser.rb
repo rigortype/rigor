@@ -255,6 +255,16 @@ module Rigor
             # routes. Interpreted only when we have a parent
             # scope (otherwise the call is meaningless).
             handle_member_or_collection(node, context)
+          when :concern
+            # `concern :name do ... end` — intentional no-op.
+            # Concerns are injected into resource blocks via
+            # `concerns: :name`; evaluating the concern body
+            # at definition time registers helpers with no
+            # parent-resource arity, producing wrong-arity
+            # false positives. Skip the body here; helpers
+            # defined only inside concerns are silently absent
+            # (unknown-helper) which is less harmful.
+            nil
           else
             interpret_block_body(node, context)
           end

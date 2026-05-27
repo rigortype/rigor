@@ -34,6 +34,9 @@ cycles live in dedicated archives:
 - **[rigor-rails-routes]** Fixed incorrect helper names for `new` and `edit` actions inside namespaced resources — `new_admin_widget_path` is now generated correctly instead of the wrong `admin_new_widget_path` form.
 - **[rigor-rails-routes]** `get "/login", to: "sessions#new"` (no `as:` key) now registers `login_path`; previously anonymous static routes were silently skipped, producing false-positive `unknown-helper` diagnostics.
 - **[rigor-rails-routes]** `scope "/:event_slug", as: "event" do ... end` now generates correctly prefixed helpers (`event_talks_path`, `event_talk_path`, etc.) and counts the scope's dynamic path segments in helper arity. Previously the `as:` prefix was silently ignored, producing false-positive `unknown-helper` diagnostics for every helper defined inside such a block.
+- **[rigor-rails-routes]** `draw(:admin)` routing partials (`config/routes/admin.rb`, etc.) are now followed; previously all helpers defined in split routes files were missing, producing false-positive `unknown-helper` diagnostics for every call to those helpers.
+- **[rigor-rails-routes]** `concern :name do ... end` blocks are now skipped during parsing; previously the concern body was evaluated at definition time with no parent-resource arity, producing false-positive `wrong-arity` diagnostics for every helper call that included a URL segment argument.
+- **[rigor-rails-routes]** Route helpers now accept one trailing options/query-params hash without triggering `wrong-arity`; calls such as `users_path(page: 2)` or `user_path(@user, pagination_params(...))` are no longer flagged.
 
 ## [0.1.10] - 2026-05-27
 

@@ -214,14 +214,16 @@ RSpec.describe "plugins/rigor-rails-routes" do
       expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
     end
 
-    it "still fires wrong-arity for an uncountable resource with the wrong number of args" do
+    it "still fires wrong-arity for an uncountable resource with too many args" do
       routes_rb = <<~RUBY
         Rails.application.routes.draw do
           resources :news, only: [:index, :show]
         end
       RUBY
+      # news_path accepts 0 (index) or 1 (show), plus one trailing options hash.
+      # 3 args exceeds even the most permissive interpretation.
       result = run_plugin(
-        source: "news_path(1, 2)\n", # neither 0 nor 1 — should fail
+        source: "news_path(1, 2, 3)\n",
         files: { "config/routes.rb" => routes_rb }
       )
       diags = plugin_diagnostics(result)
@@ -273,6 +275,40 @@ RSpec.describe "plugins/rigor-rails-routes" do
       helper_names = diags.map(&:message).join("\n")
       expect(helper_names).to include("custom_css_path")
       expect(helper_names).to include("statuses_path")
+    end
+  end
+
+  describe "trailing options hash is not counted as a URL segment" do
+    it "accepts users_path(page: 2) as arity 0 (hash is query params)" do
+      result = run_plugin(
+        source: "users_path(page: 2)\n",
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "wrong-arity" }).to be_empty
+    end
+
+    it "accepts user_path(1, 2) as valid (second arg can be options hash)" do
+      # Rails: `user_path(@user, anchor: 'top')` is arity 1 + options.
+      # Since Rigor cannot tell an options hash from a positional arg at
+      # the type level, it allows expected+1 args for every helper.
+      result = run_plugin(
+        source: "user_path(1, 2)\n",
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "wrong-arity" }).to be_empty
+    end
+
+    it "still catches a genuinely wrong arity (expected+2 args)" do
+      # user_path expects 1 segment; user_path(1, 2, 3) has 3 args —
+      # even allowing one trailing options hash, that is still one too many.
+      result = run_plugin(
+        source: "user_path(1, 2, 3)\n",
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      err = plugin_diagnostics(result).find { |d| d.rule == "wrong-arity" }
+      expect(err).not_to be_nil
     end
   end
 

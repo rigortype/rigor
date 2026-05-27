@@ -103,10 +103,10 @@ module Rigor
         # method. Files that don't contain a known controller
         # contribute no diagnostics.
         def diagnose_filters(path:, root:, controller_index:)
-          class_node = first_class_node(root)
+          class_node, enclosing = first_class_node_with_namespace(root)
           return [] if class_node.nil?
 
-          class_name = qualified_name_for(class_node.constant_path)
+          class_name = qualified_name_with_enclosing(class_node.constant_path, enclosing)
           return [] if class_name.nil?
           return [] unless controller_index.known?(class_name)
 
@@ -179,14 +179,67 @@ module Rigor
         end
 
         def first_class_node(node)
-          return nil unless node.is_a?(Prism::Node)
-          return node if node.is_a?(Prism::ClassNode)
+          class_node, = first_class_node_with_namespace(node)
+          class_node
+        end
 
+        # Returns `[class_node, enclosing_namespace_array]` for
+        # the first `ClassNode` reachable from `node`. The
+        # namespace chain accumulates every enclosing
+        # `ModuleNode` / `ClassNode` qualifier, so the
+        # nested-module declaration shape
+        #
+        #   module Admin
+        #     class DomainBlocksController < BaseController
+        #     end
+        #   end
+        #
+        # is recovered as the qualified name
+        # `Admin::DomainBlocksController` — the same name the
+        # `ControllerDiscoverer` registers under (see the
+        # nested-module qualification fix on
+        # `ControllerDiscoverer#walk_declarations`). Without
+        # this, the analyzer used the bare inner-class name
+        # for index lookups + `controller_path_for`, silently
+        # skipping filter validation and pointing render
+        # template paths at the wrong directory (Mastodon's
+        # `admin/domain_blocks` rendered as bare
+        # `domain_blocks`).
+        def first_class_node_with_namespace(node, namespace = [])
+          return [nil, namespace] unless node.is_a?(Prism::Node)
+          return [node, namespace] if node.is_a?(Prism::ClassNode)
+
+          inner_namespace = if node.is_a?(Prism::ModuleNode)
+                              namespace + namespace_segments_for(node)
+                            else
+                              namespace
+                            end
           node.compact_child_nodes.each do |child|
-            found = first_class_node(child)
-            return found if found
+            found, found_namespace = first_class_node_with_namespace(child, inner_namespace)
+            return [found, found_namespace] if found
           end
-          nil
+          [nil, namespace]
+        end
+
+        def namespace_segments_for(declaration_node)
+          path = qualified_name_for(declaration_node.constant_path)
+          path ? path.split("::") : []
+        end
+
+        # Resolves a class-name AST node against an enclosing
+        # namespace chain. A `ConstantPathNode` (e.g.
+        # `class Admin::Foo`) is already absolute and ignores
+        # the chain; a `ConstantReadNode` (bare `class Foo`
+        # inside `module Admin`) is qualified against it.
+        def qualified_name_with_enclosing(node, enclosing)
+          return nil unless node.is_a?(Prism::Node)
+
+          local = qualified_name_for(node)
+          return nil if local.nil?
+          return local if node.is_a?(Prism::ConstantPathNode) && !node.parent.nil?
+          return local if enclosing.empty?
+
+          "#{enclosing.join('::')}::#{local}"
         end
 
         def qualified_name_for(node)
@@ -317,10 +370,10 @@ module Rigor
         # path would false-positive on `redirect_to` / `head`
         # / early returns.
         def diagnose_renders(path:, root:, view_search_roots:)
-          class_node = first_class_node(root)
+          class_node, enclosing = first_class_node_with_namespace(root)
           return [] if class_node.nil?
 
-          class_name = qualified_name_for(class_node.constant_path)
+          class_name = qualified_name_with_enclosing(class_node.constant_path, enclosing)
           return [] if class_name.nil?
 
           controller_path = controller_path_for(class_name)

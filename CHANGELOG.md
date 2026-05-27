@@ -40,7 +40,9 @@ cycles live in dedicated archives:
 
 - **[rigor-rails-routes]** **Kwargs-only arity tolerance**: a call like `short_account_status_url(account_username: u, id: i)` against a route declared as `get '/@:account_username/:id', as: :short_account_status` (arity 2) now passes the arity check. The trailing `KeywordHashNode` may supply route segments by name, so when it is present the positional count must only be `≤ expected_arity` (not exactly equal). Plugin version bumped `0.2.0 → 0.3.0`.
 
-- **[rigor-rails-routes]** Cumulative Mastodon effect across the two follow-up slices: **errors 424 → 320 (−104), `unknown-helper` 261 → 187 (−74), `wrong-arity` 30 → 0 (eliminated entirely)**. **Cumulative post-v0.1.11 cycle: errors 789 → 320 (−469, −59.4%)**.
+- **[rigor-rails-routes]** Cumulative Mastodon effect across the two follow-up slices: **errors 424 → 320 (−104), `unknown-helper` 261 → 187 (−74), `wrong-arity` 30 → 0 (eliminated entirely)**.
+
+- **[rigor-actionpack]** Analyzer-side **nested-module qualification** for `diagnose_filters` and `diagnose_renders`. The discoverer slice (v0.2.0) already qualified `module Admin; class DomainBlocksController` as `Admin::DomainBlocksController` in the `ControllerIndex`, but the analyzer was still reading the AST as bare `DomainBlocksController` — silently missing the `controller_index.known?` lookup and resolving render targets against the wrong directory (`domain_blocks/new.html.erb` instead of `admin/domain_blocks/new.html.haml`). New `first_class_node_with_namespace` walker threads the enclosing module chain through the AST descent, so the analyzer now produces the same qualified class name the discoverer registers under. Plugin version bumped `0.2.0 → 0.3.0`. Mastodon empirical effect: **`missing-template` 27 → 3 (−24)**. **Cumulative post-v0.1.11 cycle: errors 789 → 296 (−493, −62.4%)**.
 
 ## [0.1.11] - 2026-05-27
 

@@ -714,6 +714,98 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
   end
 
+  describe "nested-module controllers — analyzer matches discoverer qualification" do
+    # The `ControllerDiscoverer` (separate slice) qualifies a
+    # nested-module declaration as `Admin::DomainBlocksController`.
+    # The analyzer's `diagnose_filters` / `diagnose_renders`
+    # MUST resolve the same qualified name from the AST, or
+    # filter validation silently no-ops and render-target
+    # paths point at the wrong directory (`domain_blocks/` vs
+    # `admin/domain_blocks/`).
+
+    def with_nested_module_controller(path:, contents:, views: {})
+      Dir.mktmpdir do |dir|
+        materialise_nested_module_fixture(dir, path, contents, views)
+        Dir.chdir(dir) do
+          yield nested_module_runner(dir).run
+        end
+      end
+    end
+
+    def materialise_nested_module_fixture(dir, path, contents, views)
+      FileUtils.mkdir_p(File.join(dir, "config"))
+      File.write(File.join(dir, "config", "routes.rb"), DEFAULT_AP_ROUTES_RB)
+      full = File.join(dir, "app", "controllers", path)
+      FileUtils.mkdir_p(File.dirname(full))
+      File.write(full, contents)
+      views.each do |relative, body|
+        view_full = File.join(dir, "app", "views", relative)
+        FileUtils.mkdir_p(File.dirname(view_full))
+        File.write(view_full, body)
+      end
+    end
+
+    def nested_module_runner(dir)
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge(
+          "paths" => [File.join(dir, "app", "controllers")],
+          "plugins" => %w[rigor-rails-routes rigor-actionpack]
+        )
+      )
+      Rigor::Analysis::Runner.new(
+        configuration: configuration, cache_store: nil,
+        plugin_requirer: lambda { |name|
+          case name
+          when "rigor-rails-routes" then Rigor::Plugin.register(Rigor::Plugin::RailsRoutes)
+          when "rigor-actionpack" then Rigor::Plugin.register(Rigor::Plugin::Actionpack)
+          end
+          true
+        }
+      )
+    end
+
+    it "resolves `render :new` from a nested-module controller against the qualified view directory" do
+      with_nested_module_controller(
+        path: "admin/domain_blocks_controller.rb",
+        contents: <<~RUBY,
+          module Admin
+            class DomainBlocksController
+              def new
+                render :new
+              end
+            end
+          end
+        RUBY
+        views: { "admin/domain_blocks/new.html.erb" => "<h1>New</h1>\n" }
+      ) do |result|
+        info = actionpack_diagnostics(result).find { |d| d.rule == "render-target" }
+        expect(info).not_to be_nil
+        expect(info.message).to include("admin/domain_blocks/new")
+        missing = actionpack_diagnostics(result).select { |d| d.rule == "missing-template" }
+        expect(missing).to be_empty
+      end
+    end
+
+    it "validates filter chains on a nested-module controller via the qualified ControllerIndex entry" do
+      with_nested_module_controller(
+        path: "admin/domain_blocks_controller.rb",
+        contents: <<~RUBY
+          module Admin
+            class DomainBlocksController
+              before_action :authenticate_admin!
+              def authenticate_admin!; end
+            end
+          end
+        RUBY
+      ) do |result|
+        unknown = actionpack_diagnostics(result).select { |d| d.rule == "unknown-filter-method" }
+        expect(unknown).to be_empty
+        info = actionpack_diagnostics(result).find { |d| d.rule == "filter-call" }
+        expect(info).not_to be_nil
+      end
+    end
+  end
+
   describe "graceful degradation" do
     it "runs as a no-op when rigor-rails-routes isn't loaded (helper table absent)" do # rubocop:disable RSpec/ExampleLength
       Dir.mktmpdir do |dir|

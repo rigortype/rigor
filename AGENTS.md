@@ -183,6 +183,43 @@ Treat any tightening that **loses union members** compared to the declared RBS a
 - **Single-digit version components.** Each `x.y.z` component stays single-digit. `0.0.9`'s successor is `0.1.0` — never `0.0.10`. `0.9.x`'s successor is `1.0.0`. Same rule applies recursively at every position.
 - The `bundle exec rake release` task (which tags `vx.y.z`, pushes to origin, and publishes to RubyGems) is gated separately — never run it without explicit user authorisation, even when the version is already bumped.
 
+## CHANGELOG Style
+
+`CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). The goal is for users to scan changes quickly, so every entry is written from the user's perspective, not the implementer's.
+
+**Entry shape:**
+
+- Each top-level bullet is a **single, complete sentence** — one period, no em-dash clauses or run-ons. It must be self-contained enough that a user understands the change without reading the body.
+  - Prefix with a bracketed subsystem label: `**[rigor check]**`, `**[type system]**`, `**[baseline]**`, `**[plugins]**`, etc.
+  - End with a GitHub issue / PR link and `thank you @handle!` when applicable.
+- Child items (`  - …`) add supplementary detail: one topic per item, two to three sentences max. Use further nesting only to enumerate a short list.
+- **Do not document internal changes.** Implementation detail (class renames, gemspec deletions, internal refactors, test coverage counts) is omitted unless it directly affects what users can do or observe. Ask: "Would a user care about this if they weren't reading the source?"
+- A changelog entry is **not** a commit message. Many commits may collapse into one entry; one entry may span many commits. Rewrite `[Unreleased]` commit-style lines into user-meaningful descriptions at release time.
+
+**Correct shape:**
+
+```markdown
+- **[rigor baseline generate]** Fixed a crash when `plugins:` entries in `.rigor.yml` were plain strings.
+
+- **[plugins]** All bundled plugins now ship inside the `rigortype` gem, so `require "rigor-foo"` works without any `RUBYLIB` or `Gemfile` workaround.
+  - Activate any plugin with one line in `.rigor.yml`: `plugins: [rigor-foo]`.
+```
+
+**Incorrect — do not write like this:**
+
+```markdown
+# ✗ two sentences joined by em-dash
+- **[plugins]** All bundled plugins now ship inside the `rigortype` gem — `require "rigor-foo"` resolves without any workaround. Activate with `plugins: [rigor-foo]`.
+
+# ✗ internal implementation detail as child item
+  - Individual gemspecs inside `plugins/` are removed; the plugin family ships as a single unit.
+
+# ✗ commit-message prose instead of user-meaningful description
+- **[baseline]** Fix `group_for_baseline` to normalise paths to relative before building bucket keys.
+```
+
+The full release-prep flow (archival rule, link format, sealing `[Unreleased]`) is in [`.claude/skills/rigor-release-prep/SKILL.md`](.claude/skills/rigor-release-prep/SKILL.md).
+
 ## Verification Notes
 
 After making changes, run:

@@ -14,6 +14,23 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-05-27
+
+### Added
+
+- **[plugins]** All bundled plugins now ship inside the `rigortype` gem, so `require "rigor-foo"` works without any `RUBYLIB` or `Gemfile` workaround.
+  - Activate any plugin with one line in `.rigor.yml`: `plugins: [rigor-foo]`.
+- **[playground]** New `rigor playground` command starts the browser playground server ([ADR-29](docs/adr/29-browser-playground.md)).
+- **[docs]** A new [Rails quickstart guide](docs/manual/14-rails-quickstart.md) covers end-to-end setup from `mise install` to a first `rigor check` on a Rails project.
+
+### Changed
+
+- **[baseline]** Generated `.rigor-baseline.yml` files now use project-relative paths, making them portable across machines and CI.
+
+### Fixed
+
+- **[rigor baseline generate]** Fixed a crash when `plugins:` entries in `.rigor.yml` were plain strings (e.g. `plugins: [rigor-rails]`).
+
 ## [0.1.10] - 2026-05-27
 
 ### Added
@@ -890,7 +907,8 @@ Each example ships `lib/`, runnable `demo/`, README, and an end-to-end integrati
 - **Cache load order for CLI flow.** `lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`. In CLI flow, the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). Fixed; `--cache-stats` now reports real activity.
 - **Fail-soft `rescue StandardError` was masking analyzer-internal bugs.** Tightened to `rescue ::RBS::BaseError` across the RBS-touching code paths — `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`. Analyzer-internal `NameError` / `NoMethodError` / `LoadError` now propagate so similar bugs surface immediately rather than silently degrading user-visible behaviour.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/rigortype/rigor/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/rigortype/rigor/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/rigortype/rigor/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/rigortype/rigor/compare/v0.1.7...v0.1.8

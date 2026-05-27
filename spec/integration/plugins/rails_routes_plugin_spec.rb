@@ -817,6 +817,134 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "shadowing locals suppress diagnostics" do
+    # When a file declares a local that shadows a route helper
+    # name (`let(:foo_url)`, `def foo_path`, `foo_url = ...`),
+    # the analyzer MUST treat the call as the local, not the
+    # registered helper. Mastodon's `spec/` has 200+ such
+    # patterns that pre-fix surfaced as bogus `unknown-helper`
+    # / `wrong-arity` against route helpers that happen to
+    # share the name.
+
+    it "skips unknown-helper for a `let(:foo_url)`-shadowed call" do
+      result = run_plugin(
+        source: <<~RUBY,
+          RSpec.describe "x" do
+            let(:collection_url) { 'https://example.com/x' }
+            it { collection_url }
+          end
+        RUBY
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "skips wrong-arity for a `let(:helper_path)` that shadows a known route helper" do
+      # `resources :users` registers `user_path(id)` with
+      # arity 1; a `let(:user_path) { ... }` followed by
+      # `user_path` (no args) used to fire `wrong-arity`.
+      result = run_plugin(
+        source: <<~RUBY,
+          RSpec.describe "x" do
+            let(:user_path) { 'https://example.com/users/1' }
+            it { user_path }
+          end
+        RUBY
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      diags = plugin_diagnostics(result).select { |d| %w[unknown-helper wrong-arity].include?(d.rule) }
+      expect(diags).to be_empty
+    end
+
+    it "skips diagnostics for `subject(:foo_url)` declarations" do
+      result = run_plugin(
+        source: <<~RUBY,
+          RSpec.describe "x" do
+            subject(:fancy_path) { 'x' }
+            it { fancy_path }
+          end
+        RUBY
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      expect(plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+
+    it "skips diagnostics for `def foo_url` (a method shadowing the helper)" do
+      result = run_plugin(
+        source: <<~RUBY,
+          class Helper
+            def something_url
+              "x"
+            end
+
+            def caller_method
+              something_url
+            end
+          end
+        RUBY
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      expect(plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+
+    it "still fires unknown-helper for a non-shadowed unknown name" do
+      # Precision floor — make sure the shadow check doesn't
+      # silently swallow real typos.
+      result = run_plugin(
+        source: "definitely_not_a_real_path\n",
+        files: { "config/routes.rb" => DEFAULT_ROUTES_RB }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns.size).to eq(1)
+    end
+  end
+
+  describe "arity check accepts kwargs-only call shapes" do
+    # Mastodon shape: a multi-segment route called via
+    # keyword args carrying every segment name —
+    # `short_account_status_url(account_username: u, id: i)`
+    # for `/@:account_username/:id`. Rails accepts this form;
+    # our strict positional-arity check used to false-fire.
+
+    let(:routes_with_kwargs_helper) do
+      <<~RUBY
+        Rails.application.routes.draw do
+          get '/@:account_username/:id', to: 'statuses#show', as: :short_account_status
+        end
+      RUBY
+    end
+
+    it "does NOT fire wrong-arity on a call that supplies all segments via kwargs" do
+      result = run_plugin(
+        source: "short_account_status_url(account_username: 'alice', id: 1)\n",
+        files: { "config/routes.rb" => routes_with_kwargs_helper }
+      )
+      diags = plugin_diagnostics(result).select { |d| d.rule == "wrong-arity" }
+      expect(diags).to be_empty
+    end
+
+    it "does NOT fire wrong-arity on a call mixing positional + trailing kwargs" do
+      result = run_plugin(
+        source: "short_account_status_url('alice', id: 1)\n",
+        files: { "config/routes.rb" => routes_with_kwargs_helper }
+      )
+      diags = plugin_diagnostics(result).select { |d| d.rule == "wrong-arity" }
+      expect(diags).to be_empty
+    end
+
+    it "still fires wrong-arity when actual positional exceeds expected even with kwargs" do
+      # Precision floor: 3 positionals (over expected 2) plus
+      # trailing kwargs is still wrong.
+      result = run_plugin(
+        source: "short_account_status_url('a', 'b', 'c', id: 1)\n",
+        files: { "config/routes.rb" => routes_with_kwargs_helper }
+      )
+      diags = plugin_diagnostics(result).select { |d| d.rule == "wrong-arity" }
+      expect(diags).not_to be_empty
+    end
+  end
+
   describe "ADR-9 cross-plugin fact publication" do
     it "publishes the `:helper_table` fact during prepare" do
       # FactStore is constructed once per Services / per run;

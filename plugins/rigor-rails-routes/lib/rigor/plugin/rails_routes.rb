@@ -53,14 +53,14 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-27 — helper-discovery + Devise +
-        # resource bug-fix slice. The version bump
-        # invalidates any cached `:helper_table` entries from
-        # earlier rigor installs so the broader default
-        # `helper_paths: ["app"]` and the `only:`-action /
-        # singular-resource-name fixes take effect on the
-        # next run without `--clear-cache`.
-        version: "0.2.0",
+        # Bumped 2026-05-27 — shadowing-locals + kwargs-arity
+        # tolerance slice (`let(:foo_url)` / `subject(:foo_url)`
+        # in spec files no longer false-fires `unknown-helper`;
+        # `helper_url(account_username:, id:)` kwargs-only
+        # form no longer false-fires `wrong-arity`). The
+        # version bump invalidates any cached :helper_table
+        # entries from earlier rigor installs.
+        version: "0.3.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

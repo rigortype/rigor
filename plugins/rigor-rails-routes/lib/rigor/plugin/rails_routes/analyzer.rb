@@ -27,16 +27,38 @@ module Rigor
 
         module_function
 
+        # RSpec / Minitest DSL methods that DECLARE a memoized
+        # local — `let(:foo) { ... }`, `subject(:foo) { ... }`,
+        # plus the bang and let_it_be variants. The first
+        # positional Symbol argument is the local name. A bare
+        # `subject { ... }` (no arg) defines `:subject` itself.
+        SHADOWING_DSL = %i[
+          let let! let_it_be let_it_be!
+          subject subject!
+        ].freeze
+
         # @param path [String] file being analysed
         # @param root [Prism::Node]
         # @param helper_table [HelperTable]
         # @return [Array<Diagnostic>]
         def diagnose(path:, root:, helper_table:)
           diagnostics = []
+          # Pre-walk the file to collect every name that
+          # shadows a route helper at call time: `let(:foo)`,
+          # `subject(:foo)`, `def foo`, and explicit local
+          # assignments (`foo_url = "..."`). At the call site
+          # `foo` then resolves to the shadowing local, not to
+          # the registered route helper — firing `unknown-helper`
+          # / `wrong-arity` against the helper would be a false
+          # positive against canonical RSpec idioms (Mastodon
+          # has 200+ such patterns in `spec/`).
+          shadowing = collect_shadowing_names(root)
+
           walk(root) do |call_node|
             name = call_node.name.to_s
             next unless name.end_with?("_path") || name.end_with?("_url")
             next if BUILTIN_PASSTHROUGH.include?(name)
+            next if shadowing.include?(name)
 
             entry = helper_table.find(name)
             if entry
@@ -57,6 +79,52 @@ module Rigor
             end
           end
           diagnostics
+        end
+
+        # Walks the AST once and returns the Set of names that
+        # shadow a route helper for this file. Includes:
+        #
+        # - `def name` declarations (any level — the
+        #   per-method-scope visibility model Ruby uses means a
+        #   local `def` shadows the helper at every call site
+        #   reachable from where it is defined; we approximate
+        #   "reachable" with "anywhere in the same file").
+        # - RSpec `let` / `let!` / `let_it_be` / `let_it_be!` /
+        #   `subject` / `subject!` declarations.
+        # - Local assignments at any scope
+        #   (`foo_url = "..."`).
+        def collect_shadowing_names(root)
+          names = Set.new
+          walk_for_shadowing(root, names)
+          names
+        end
+
+        def walk_for_shadowing(node, names)
+          return unless node.is_a?(Prism::Node)
+
+          case node
+          when Prism::DefNode
+            names << node.name.to_s if node.receiver.nil?
+          when Prism::LocalVariableWriteNode
+            names << node.name.to_s
+          when Prism::CallNode
+            record_let_like_name(node, names)
+          end
+
+          node.compact_child_nodes.each { |child| walk_for_shadowing(child, names) }
+        end
+
+        def record_let_like_name(call_node, names)
+          return unless call_node.receiver.nil?
+          return unless SHADOWING_DSL.include?(call_node.name)
+
+          arg = call_node.arguments&.arguments&.first
+          if arg.is_a?(Prism::SymbolNode)
+            names << arg.unescaped
+          elsif call_node.name == :subject && call_node.arguments.nil?
+            # Bare `subject { ... }` defines `:subject` itself.
+            names << "subject"
+          end
         end
 
         def walk(node, &)
@@ -89,13 +157,29 @@ module Rigor
         end
 
         def arity_check(path, call_node, entry, helper_table)
-          actual = (call_node.arguments&.arguments || []).size
+          args = call_node.arguments&.arguments || []
+          actual = args.size
           # Uncountable nouns (`news` / `series` / `media`) cause
           # Rails to register two entries under the same helper
           # name — `news_path` accepts both arity 0 (index) and
           # arity 1 (show). The HelperTable multimap stores both;
           # accepts_arity? checks the full set.
           return nil if helper_table.accepts_arity?(entry.name, actual)
+
+          # Rails accepts a kwargs-only call shape that supplies
+          # route segments by name:
+          #   short_account_status_url(account_username: u, id: i)
+          # for the route `/@:account_username/:id` (arity 2).
+          # Our positional-arg count is 1 (the KeywordHashNode),
+          # so the strict check rejects — but Rails would
+          # resolve every segment from the hash. When the call
+          # has a trailing KeywordHashNode AND the positional
+          # count (excluding it) is `<= expected_arity`, accept
+          # — the kwargs may carry the missing segments.
+          if args.last.is_a?(Prism::KeywordHashNode)
+            positional = actual - 1
+            return nil if helper_table.acceptable_arities(entry.name).any? { |exp| positional <= exp }
+          end
 
           arities = helper_table.acceptable_arities(entry.name).sort
           expected = arities.length == 1 ? arities.first.to_s : "#{arities.first}..#{arities.last}"

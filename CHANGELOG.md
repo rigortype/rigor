@@ -22,6 +22,10 @@ cycles live in dedicated archives:
 
 - **[rigor init]** After writing the configuration template, `rigor init` now prints a "Next steps" hint that points the user at `rigor plugins` for activation verification. The hint also names `--strict` as the canonical CI-gate shape.
 
+### Fixed
+
+- **[inference]** Closes the **flow-folding G1 / G2** gaps documented in [`docs/notes/20260521-mastodon-cluster4-flow-folding-triage.md`](docs/notes/20260521-mastodon-cluster4-flow-folding-triage.md). A local / instance variable seeded as a literal-shape carrier (`Tuple` from an array literal, `HashShape` from a hash literal) is now **widened to the underlying `Nominal[Array, ...]` / `Nominal[Hash, ...]`** whenever an in-place mutator (`<<`, `push`, `pop`, `[]=`, `merge!`, `delete*`, `*!` siblings, etc.) is called on it — including when the mutator runs inside a non-escaping block body (e.g. `arr = []; items.each { |x| arr << x }`). Eliminates the false-positive `flow.always-truthy-condition` on `arr.size == N` / `arr.empty?` checks that follow mutation. Always type-safe (only LOSES precision, never invents facts). The three pre-existing self-check warnings in `lib/rigor/inference/hkt_body_parser.rb` and `lib/rigor/inference/hkt_registry.rb` are now silent; `rigor check lib` is completely clean for the first time since the warning class was introduced.
+
 ## [0.1.11] - 2026-05-27
 
 ### Added

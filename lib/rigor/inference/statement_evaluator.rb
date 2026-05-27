@@ -11,6 +11,7 @@ require_relative "closure_escape_analyzer"
 require_relative "method_dispatcher"
 require_relative "method_parameter_binder"
 require_relative "multi_target_binder"
+require_relative "mutation_widening"
 require_relative "narrowing"
 
 module Rigor
@@ -876,6 +877,21 @@ module Rigor
         post_scope = apply_rbs_extended_assertions(node, post_scope)
         post_scope = apply_plugin_assertions(node, post_scope)
         post_scope = apply_rspec_matcher_narrowing(node, post_scope)
+        # Flow-folding G1 / G2 — widen a local- or instance-variable
+        # binding when the call is an in-place mutator on it (e.g.
+        # `arms << x`, `@tags << hashtag`). Stops a literal-shape
+        # carrier (`Tuple` / `HashShape`) from outliving its
+        # justification when the value is mutated. Always-safe
+        # (loses precision, never invents facts).
+        post_scope = MutationWidening.widen_after_call(call_node: node, current_scope: post_scope)
+        # And the same widening for outer-scope locals / ivars
+        # mutated inside the block body (`items.each { |x| arr << x }`):
+        # the block lives in a child scope so without an explicit
+        # propagation step the outer `arr` keeps its pre-mutation
+        # binding. Sound for the same reason — only ever LOSES
+        # precision — so blindly applying is safe regardless of
+        # whether the block actually runs.
+        post_scope = MutationWidening.widen_after_block(call_node: node, outer_scope: post_scope)
         [call_type, post_scope]
       end
 

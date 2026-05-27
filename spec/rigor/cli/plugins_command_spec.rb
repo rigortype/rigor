@@ -29,6 +29,23 @@ RSpec.describe Rigor::CLI::PluginsCommand do
     end
   end
 
+  # Other plugin integration specs in the suite call
+  # `Rigor::Plugin.unregister!` in their before/after hooks,
+  # which can leave the global registry empty when our spec runs
+  # after them. Since `require` is a no-op for an already-loaded
+  # plugin file, the file's top-level `Rigor::Plugin.register(...)`
+  # call does NOT re-run; the loader then can't match the gem
+  # name to a registered class. Re-register the plugins our
+  # examples reference so the spec is order-independent.
+  before do
+    require "rigor-activesupport-core-ext"
+    require "rigor-activerecord"
+    unless Rigor::Plugin.registered_for("activesupport-core-ext")
+      Rigor::Plugin.register(Rigor::Plugin::ActivesupportCoreExt)
+    end
+    Rigor::Plugin.register(Rigor::Plugin::Activerecord) unless Rigor::Plugin.registered_for("activerecord")
+  end
+
   context "with no plugins configured" do
     before { File.write(".rigor.yml", "paths: [.]\nplugins: []\n") }
 

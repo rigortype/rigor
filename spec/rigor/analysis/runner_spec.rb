@@ -1360,6 +1360,98 @@ RSpec.describe Rigor::Analysis::Runner do
         RUBY
         expect(truthy_diags(result)).to be_empty
       end
+
+      # Flow-folding gap G1 — closed via the
+      # `Rigor::Inference::MutationWidening` hook in `eval_call`.
+      # The pre-fix shape used to fold `arms.size == 1` to
+      # `Constant[true]` because the body's `arms << x` mutation
+      # was not reflected in the post-loop binding. Mirrors the
+      # parse_union FP at lib/rigor/inference/hkt_body_parser.rb:140
+      # documented in CURRENT_WORK.md § Flow-folding.
+      context "when a loop body mutates the seeded collection (G1, Mastodon cluster 4)" do
+        it "does NOT fire on a tuple seeded then mutated inside a `while`" do
+          result = analyze(<<~RUBY)
+            def parse_union(tokens)
+              arms = [tokens.first]
+              while tokens.size > 1
+                tokens.shift
+                arms << tokens.first
+              end
+              return arms.first if arms.size == 1
+
+              arms
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does NOT fire on a tuple mutated by `push` inside a `while`" do
+          result = analyze(<<~RUBY)
+            def collect(n)
+              buf = [n]
+              i = 0
+              while i < n
+                buf.push(i)
+                i += 1
+              end
+              puts "single" if buf.size == 1
+
+              buf
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does NOT fire on an instance-variable Tuple mutated by `<<` (G2 row)" do
+          result = analyze(<<~RUBY)
+            class Bag
+              def initialize
+                @tags = []
+              end
+
+              def absorb(items)
+                items.each { |i| @tags << i }
+                return if @tags.empty?
+
+                @tags
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does NOT fire on an outer-scope tuple mutated INSIDE an `each {}` block" do
+          # This is the hkt_registry.rb:212 shape: a local seeded
+          # as a tuple literal, mutated only inside an iterator
+          # block, then probed with `.empty?` after the block. The
+          # block lives in a child scope; the propagation in
+          # `MutationWidening.widen_after_block` carries the
+          # widening back to the outer scope.
+          result = analyze(<<~RUBY)
+            def collect_things(items)
+              registrations = []
+              items.each do |item|
+                registrations << item
+              end
+              return :nothing if registrations.empty?
+
+              registrations
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "still fires on a tuple that is genuinely never mutated" do
+          # The widening only triggers on an in-place mutator call;
+          # a tuple whose size is a fact at the predicate site
+          # MUST still fold. This pins the precision floor.
+          result = analyze(<<~RUBY)
+            arr = [1]
+            puts "single" if arr.size == 1
+          RUBY
+          expect(truthy_diags(result)).not_to be_empty
+        end
+      end
     end
 
     describe "method-visibility-mismatch rule (v0.1.2)" do

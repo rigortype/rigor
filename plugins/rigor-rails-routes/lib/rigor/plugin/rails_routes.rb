@@ -53,11 +53,13 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-28 — member/collection shorthand
-        # routes + `<name>_index_path` for same-singular-plural
-        # resources (`resources :reblogged_by`,
-        # `resources :terms_of_service`, etc.).
-        version: "0.5.0",
+        # Bumped 2026-05-28 — singular `resource :foo do
+        # ... end` now pushes a `:singular_scope` Context
+        # frame so nested declarations pick up the
+        # resource's name in their helper prefix (Mastodon's
+        # `resource :instance do resources :domain_blocks
+        # end` → `instance_domain_blocks_path`).
+        version: "0.6.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

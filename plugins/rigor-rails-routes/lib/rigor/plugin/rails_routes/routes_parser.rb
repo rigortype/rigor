@@ -126,6 +126,25 @@ module Rigor
             @stack.pop
           end
 
+          # `resource :foo do ... end` (SINGULAR resource) —
+          # adds the resource name to the helper prefix and
+          # path for nested declarations, but DOESN'T
+          # contribute a dynamic `:id` segment (singular
+          # resources have no `:id`). So `resource :instance
+          # do; resources :domain_blocks; end` generates
+          # `instance_domain_blocks_path` (arity 0), not
+          # `instance_domain_blocks_path(:id)`.
+          #
+          # Helper-prefix segment uses the AS-GIVEN name (no
+          # singularising — `resource :foo` keeps `foo`).
+          def push_singular_resource(parent_name)
+            name = parent_name.to_s
+            @stack.push(kind: :singular_scope, parent: name, path_segment: "/#{name}")
+            yield
+          ensure
+            @stack.pop
+          end
+
           # `member do ... end` / `collection do ... end` —
           # records the mode so subsequent shorthand HTTP-verb
           # calls (`post :memorialize`) inside the block can
@@ -208,6 +227,7 @@ module Rigor
             when :namespace then frame[:name]
             when :scope then frame[:parent]
             when :as_scope then frame[:name]
+            when :singular_scope then frame[:parent]
             end
           end
 
@@ -216,6 +236,7 @@ module Rigor
             when :namespace then ["/#{frame[:name]}"]
             when :scope then ["/#{pluralize(frame[:parent])}/:#{frame[:parent]}_id"]
             when :as_scope then frame[:path] ? [frame[:path]] : []
+            when :singular_scope then [frame[:path_segment]]
             else []
             end
           end
@@ -408,10 +429,17 @@ module Rigor
           # `<name>_path` (singular).
           register_resourceful_helpers(name, actions, base_arity, context, plural: false)
 
-          # Nested `resources :things` inside `resource :profile`
-          # is rare; we still descend so the inner declarations
-          # collect their own helpers.
-          interpret_block_body(node, context)
+          # Push a `:singular_scope` frame so nested
+          # declarations pick up the singular resource's
+          # name in their helper prefix (Mastodon's
+          # `resource :instance do; scope module: :instances
+          # do; resources :domain_blocks; end; end` →
+          # `instance_domain_blocks_path`). The singular
+          # frame adds NO `:id` segment to arity — singular
+          # resources don't carry one.
+          context.push_singular_resource(name) do
+            interpret_block_body(node, context)
+          end
         end
 
         def handle_root(node, context)

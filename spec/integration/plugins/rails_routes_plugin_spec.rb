@@ -817,6 +817,72 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "singular `resource` adds the name to helper prefix for nested declarations" do
+    # Mastodon shape: `resource :instance, only: [:show] do
+    # scope module: :instances do resources :domain_blocks
+    # only: [:index]; end; end` — generates
+    # `api_v1_instance_domain_blocks_path` (NOT
+    # `api_v1_domain_blocks_path`).
+
+    it "prefixes nested resources helpers with the singular resource's name" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resource :instance, only: [:show] do
+            resources :domain_blocks, only: [:index]
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "instance_domain_blocks_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "works through a `scope module:` inside the singular resource block" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          namespace :api do
+            namespace :v1 do
+              resource :instance, only: [:show] do
+                scope module: :instances do
+                  resources :domain_blocks, only: [:index]
+                end
+              end
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "api_v1_instance_domain_blocks_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "does NOT contribute a `:id` arity segment for the singular parent" do
+      # `resource :instance do resources :domain_blocks end`
+      # → index helper takes 0 args (instance has no :id,
+      # domain_blocks index has no :id either). Precision
+      # floor against accidentally adding 1 to arity.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resource :instance, only: [:show] do
+            resources :domain_blocks, only: [:index]
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "instance_domain_blocks_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      arity_diags = plugin_diagnostics(result).select { |d| d.rule == "wrong-arity" }
+      expect(arity_diags).to be_empty
+    end
+  end
+
   describe "same-singular-plural names get the `_index_` suffix" do
     # Rails appends `_index_` to the index helper when the
     # singular form equals the plural form AND the name is not

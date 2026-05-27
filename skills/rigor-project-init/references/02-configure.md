@@ -31,51 +31,19 @@ from the Phase 2 mode:
 
 `balanced` is the built-in default — omit the key to get it.
 
-## Install the gems first
+## No separate installation needed
 
-Each plugin is a separate **Ruby gem**. The `plugins:` and
-`signature_paths:` config below is inert until those gems are
-installed — the plugin loader runs `require "rigor-<id>"` and a
-missing gem surfaces as a `plugin-loader` diagnostic.
+All plugins ship **bundled inside the `rigortype` gem**. The
+`plugins:` list in the config is all that is needed to activate
+them — the plugin loader runs `require "rigor-<id>"` from within
+the gem's own load path. No Gemfile entry, no `bundle install`,
+no separate gem channel.
 
-The plugins must be loadable from the same Ruby environment that
-`rigor` itself runs in. **The `rigortype` gem itself stays out of
-the project's `Gemfile`** — install it standalone per the manual's
+**The `rigortype` gem itself stays out of the project's
+`Gemfile`** — install it standalone per the manual's
 [Installing Rigor](../../docs/manual/01-installation.md) chapter
-(`mise use gem:rigortype` is the recommended channel). Only the
-plugin gems land in the project's Gemfile:
-
-```ruby
-group :development do
-  gem "rigor-actionpack", require: false
-  gem "rigor-activerecord", require: false
-  # …one line per plugin chosen in Phase 3…
-  gem "rigor-activesupport-core-ext", require: false
-end
-```
-
-then `bundle install`.
-
-> **v0.1.x availability — tell the user.** The `rigortype` gem is
-> published on RubyGems. The `rigor-*` **plugin gems are not yet** —
-> in the v0.1.x preview line they live in the rigor monorepo, and an
-> external project consumes them with a `path:` or `git:` reference
-> to a checkout, e.g.
-> `gem "rigor-actionpack", path: "../rigor/plugins/rigor-actionpack"`.
-> RubyGems publication of the plugin family is a **v0.2.0**
-> deliverable. So on v0.1.x a project either vendors the plugins it
-> needs from a checkout or defers the plugin-backed parts of this
-> workflow to v0.2.0. The core (`rigortype` + `rigor check` + the
-> baseline) works today; the plugin set does not install cleanly
-> from RubyGems yet.
->
-> Because the path-referenced plugin gems need to be on `rigor`'s
-> load path, a v0.1.x plugin-using project will invoke Rigor via
-> `bundle exec rigor` (the legacy fallback called out in
-> `01-installation.md` and `09-editor-integration.md`) — a temporary
-> arrangement that v0.2.0 retires once the plugin gems publish and
-> can be co-installed with `rigortype` through the same channel
-> (`mise use gem:rigor-actionpack`, etc.).
+(`mise use gem:rigortype` is the recommended channel). The
+project's Gemfile is untouched by this workflow.
 
 ## The template
 
@@ -147,9 +115,9 @@ Strict mode never adds `baseline:` at all.
 
 ## Output of this module
 
-The selected gems added to the `Gemfile` and `bundle install`d (or,
-on v0.1.x, wired by `path:` to a rigor checkout), plus a committed
-`.rigor.dist.yml` with `paths:`, `exclude:`, `plugins:`, and
-`severity_profile:` set — and no active `baseline:` line.
+A committed `.rigor.dist.yml` with `paths:`, `exclude:`,
+`plugins:`, and `severity_profile:` set — and no active
+`baseline:` line. No Gemfile changes; plugins are bundled inside
+`rigortype`.
 
 Proceed to Phase 5 ([`04-sig-uplift.md`](04-sig-uplift.md)).

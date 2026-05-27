@@ -18,10 +18,10 @@ plugins:
   - rigor-rails-routes
 ```
 
-Each name is a plugin gem that must be installed and
-reachable — through your Gemfile if it is published, or via a
-git / path Gemfile entry during the v0.1.x preview. A plugin
-that needs configuration takes the object form:
+Each name is a plugin that ships bundled inside the `rigortype`
+gem — no separate installation is needed. Listing a plugin under
+`plugins:` is enough to activate it. A plugin that needs
+configuration takes the object form:
 
 ```yaml
 plugins:

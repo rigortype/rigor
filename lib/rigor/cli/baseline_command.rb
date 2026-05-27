@@ -149,7 +149,7 @@ module Rigor
         defaults = Configuration::DEFAULTS.merge(
           "paths" => configuration.paths,
           "exclude" => configuration.exclude_patterns,
-          "plugins" => configuration.plugins.map(&:to_h),
+          "plugins" => configuration.plugins,
           "disable" => configuration.disabled_rules,
           "libraries" => configuration.libraries,
           "signature_paths" => configuration.signature_paths,

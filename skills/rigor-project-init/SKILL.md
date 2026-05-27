@@ -40,18 +40,14 @@ Do NOT trigger for:
 - **Tweaking an already-configured project** — ordinary edits to an
   existing `.rigor.yml`; no onboarding pipeline needed.
 
-## Note — plugin availability in v0.1.x
+## Note — plugin installation
 
-The `rigortype` gem is published; the **`rigor-*` plugin gems are
-not yet on RubyGems** in the v0.1.x preview line — they live in the
-rigor monorepo and are consumed by a `path:` / `git:` Gemfile
-reference to a checkout. RubyGems publication of the plugin family
-is a v0.2.0 deliverable. The core workflow (`.rigor.dist.yml`,
-`rigor check`, `rigor triage`, the baseline) works today on
-v0.1.x; the plugin-backed parts need a checkout until v0.2.0.
-[`references/02-configure.md`](references/02-configure.md) § "Install
-the gems first" has the detail — surface it to the user before they
-expect a clean `bundle add`.
+All `rigor-*` plugins ship **bundled inside the `rigortype` gem**.
+No separate installation is needed. Listing a plugin under
+`plugins:` in `.rigor.dist.yml` is sufficient to activate it.
+The project's `Gemfile` is untouched by this workflow.
+See [`references/02-configure.md`](references/02-configure.md)
+§ "No separate installation needed" for detail.
 
 ## The central decision — adoption mode
 

@@ -18,6 +18,10 @@ flag, key, or command that *acts* on it.
 1. [Installing Rigor](01-installation.md) — `mise`, `asdf`,
    `gem install`, Nix, and the dev-container guidance. Rigor
    is a tool, not a project dependency.
+14. [Rigor for Rails — step-by-step setup with mise](14-rails-quickstart.md) —
+    install Ruby 4.0 + Rigor via `mise`, activate the Rails
+    plugin set, run `rigor check`, and share the config with
+    your team in about ten minutes.
 
 ### Reference
 

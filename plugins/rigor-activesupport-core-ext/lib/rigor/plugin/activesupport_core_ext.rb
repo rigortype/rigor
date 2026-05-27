@@ -23,7 +23,10 @@ module Rigor
     class ActivesupportCoreExt < Rigor::Plugin::Base
       manifest(
         id: "activesupport-core-ext",
-        version: "0.1.0",
+        # Bumped 2026-05-28 — added Date#midnight /
+        # at_midnight / beginning_of_day / end_of_day (Rails
+        # aliases that return Time, not Date).
+        version: "0.2.0",
         description: "RBS bundle for the most-frequently-flagged ActiveSupport core_ext extensions.",
         signature_paths: ["sig"]
       )

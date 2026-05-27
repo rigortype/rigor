@@ -302,6 +302,18 @@ class Date
   def ago: (Numeric seconds) -> Time
   def since: (Numeric seconds) -> Time
   def acts_like_date?: () -> true
+
+  # `core_ext/date/calculations` — `Date#midnight` /
+  # `Date#at_midnight` are aliases for `beginning_of_day`.
+  # Rails' `beginning_of_day` on Date returns a Time at
+  # midnight of that day (not a Date). Mastodon's
+  # `Date.current.at_midnight` shape relies on this.
+  def beginning_of_day: () -> Time
+  def midnight: () -> Time
+  def at_midnight: () -> Time
+  def at_beginning_of_day: () -> Time
+  def end_of_day: () -> Time
+  def at_end_of_day: () -> Time
 end
 
 # ---------------------------------------------------------------

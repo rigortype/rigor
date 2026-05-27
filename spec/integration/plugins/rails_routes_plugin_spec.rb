@@ -276,6 +276,198 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "draw partials (config/routes/name.rb)" do
+    let(:main_routes) do
+      <<~RUBY
+        Rails.application.routes.draw do
+          root "home#index"
+          draw(:admin)
+          draw(:api)
+        end
+      RUBY
+    end
+
+    let(:admin_routes) do
+      <<~RUBY
+        namespace :admin do
+          resources :users
+          resources :reports, only: [:index, :show]
+        end
+      RUBY
+    end
+
+    let(:api_routes) do
+      <<~RUBY
+        namespace :api do
+          namespace :v1 do
+            resources :statuses, only: [:index, :show, :create]
+          end
+        end
+      RUBY
+    end
+
+    it "includes helpers from drawn partials" do
+      result = run_plugin(
+        source: "admin_users_path\nnew_admin_user_path\n",
+        files: {
+          "config/routes.rb" => main_routes,
+          "config/routes/admin.rb" => admin_routes,
+          "config/routes/api.rb" => api_routes
+        }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+      expect(diags.map(&:message).join).to include("admin_users_path")
+    end
+
+    it "recognises helpers from both drawn partials" do
+      result = run_plugin(
+        source: "api_v1_statuses_path\n",
+        files: {
+          "config/routes.rb" => main_routes,
+          "config/routes/admin.rb" => admin_routes,
+          "config/routes/api.rb" => api_routes
+        }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+
+    it "stays silent when a drawn partial is absent (no crash, no unknown-helper flood)" do
+      result = run_plugin(
+        source: "root_path\n",
+        files: { "config/routes.rb" => main_routes }
+        # config/routes/admin.rb and api.rb are intentionally absent
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.find { |d| d.rule == "load-error" }).to be_nil
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+  end
+
+  describe "scope routing" do
+    it "generates prefixed helpers for `scope as:` blocks" do
+      # `scope "/:event_slug", as: "event" do; resources :talks; end`
+      # is the conference-app kaigionrails pattern. Without the fix
+      # the parser ignored the `as:` prefix and registered `talks_path`
+      # instead of `event_talks_path`, producing unknown-helper FPs.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          scope "/:event_slug", as: "event" do
+            resources :talks, only: [:index, :show]
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "event_talks_path('slug')\nevent_talk_path('slug', 1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+
+    it "does not register un-prefixed helpers for scope-body resources" do
+      # Pre-fix the parser processed the scope block as a plain block,
+      # registering `talks_path` / `talk_path` as if the resources were
+      # top-level — those helpers don't actually exist.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          scope "/:event_slug", as: "event" do
+            resources :talks, only: [:index, :show]
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "talks_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      err = plugin_diagnostics(result).find { |d| d.rule == "unknown-helper" }
+      expect(err).not_to be_nil
+    end
+
+    it "counts dynamic scope segments in helper arity" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          scope "/:event_slug", as: "event" do
+            resources :talks, only: [:index]
+          end
+        end
+      RUBY
+      # event_talks_path requires 1 arg (the event_slug segment)
+      result = run_plugin(
+        source: "event_talks_path\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      err = plugin_diagnostics(result).find { |d| d.rule == "wrong-arity" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("event_talks_path")
+    end
+
+    it "exposes `_url` form for scope helpers" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          scope "/:event_slug", as: "event" do
+            resources :talks, only: [:index]
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "event_talks_url('slug')\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+
+    it "places new_/edit_ prefix before the scope name (`new_event_talk_path`)" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          scope "/:event_slug", as: "event" do
+            resources :talks
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "new_event_talk_path('slug')\nedit_event_talk_path('slug', 1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+
+    it "applies scope prefix to explicit `get` routes with `as:`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          scope "/:event_slug", as: "event" do
+            get "/live", to: "live_streams#index", as: "live_streams"
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "event_live_streams_path('slug')\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-helper" }).to be_empty
+    end
+
+    it "skips `get '/'` inside a scope (would produce an empty path-derived name)" do
+      # `get "/"` inside a scope derives as_name "" which, combined with
+      # a scope prefix, would produce a `event__path` double-underscore entry.
+      # The parser now returns early on empty derived names.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          scope "/:event_slug", as: "event" do
+            get "/", to: "events#show"
+          end
+        end
+      RUBY
+      result = run_plugin(source: "x\n", files: { "config/routes.rb" => routes_rb })
+      helper_names = plugin_diagnostics(result).map(&:message).join
+      expect(helper_names).not_to include("__path")
+    end
+  end
+
   describe "ADR-9 cross-plugin fact publication" do
     it "publishes the `:helper_table` fact during prepare" do
       # FactStore is constructed once per Services / per run;

@@ -36,6 +36,12 @@ module Rigor
         # `::I18n.t`).
         I18N_RECEIVER_NAMES = %w[I18n ::I18n].freeze
 
+        # Matches controller file paths so lazy keys (`.key`)
+        # can be expanded to `<controller_scope>.<action>.<key>`.
+        # Captures the path segment between `controllers/` and
+        # `_controller.rb` (e.g. `users`, `admin/users`).
+        CONTROLLER_PATH_RE = %r{(?:^|/)controllers/(.+)_controller\.rb$}
+
         # Reserved option keys — these are recognised by I18n
         # itself and not treated as interpolation variables.
         RESERVED_OPTION_KEYS = %i[
@@ -53,9 +59,13 @@ module Rigor
         # @param configured_locales [Array<String>]
         # @return [Array<Diagnostic>]
         def diagnose(path:, root:, locale_index:, configured_locales:)
+          controller_scope = controller_scope_from_path(path)
           diagnostics = []
-          walk(root) do |call_node|
-            literal_key = literal_key_for(call_node)
+          walk(root) do |call_node, action|
+            raw_key = literal_key_for(call_node)
+            next if raw_key.nil?
+
+            literal_key = expand_key(raw_key, controller_scope: controller_scope, action: action)
             next if literal_key.nil?
 
             options = options_hash(call_node)
@@ -85,11 +95,38 @@ module Rigor
           diagnostics
         end
 
-        def walk(node, &)
+        # Walks the AST yielding `[call_node, action]` pairs where
+        # `action` is the name of the innermost enclosing `def`
+        # method (or `nil` when the call is at the top level).
+        def walk(node, action: nil, &)
           return unless node.is_a?(Prism::Node)
 
-          yield node if node.is_a?(Prism::CallNode) && translate_call_candidate?(node)
-          node.compact_child_nodes.each { |child| walk(child, &) }
+          current_action = node.is_a?(Prism::DefNode) ? node.name.to_s : action
+          yield node, current_action if node.is_a?(Prism::CallNode) && translate_call_candidate?(node)
+          node.compact_child_nodes.each { |child| walk(child, action: current_action, &) }
+        end
+
+        # Derives the Rails controller scope from the file path,
+        # e.g. `app/controllers/admin/users_controller.rb` → `admin.users`.
+        # Returns nil for non-controller paths.
+        def controller_scope_from_path(path)
+          m = CONTROLLER_PATH_RE.match(path.to_s)
+          return nil unless m
+
+          m[1].tr("/", ".")
+        end
+
+        # Expands a lazy key (starting with `.`) to its full
+        # dotted path using the controller scope and action name.
+        # Returns the raw key unchanged for absolute keys.
+        # Returns nil for lazy keys outside a controller context
+        # or without an enclosing action — these are silently
+        # skipped to avoid false positives.
+        def expand_key(raw_key, controller_scope:, action:)
+          return raw_key unless raw_key.start_with?(".")
+          return nil unless controller_scope && action
+
+          "#{controller_scope}.#{action}#{raw_key}"
         end
 
         def translate_call_candidate?(node)

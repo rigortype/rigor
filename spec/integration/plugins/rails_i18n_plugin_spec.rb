@@ -180,6 +180,106 @@ RSpec.describe "plugins/rigor-rails-i18n" do
     end
   end
 
+  describe "lazy key expansion" do
+    let(:controller_locales) do
+      {
+        "config/locales/en.yml" => <<~YAML
+          en:
+            users:
+              show:
+                qr_code_expired: "QR code has expired"
+              index:
+                title: "Users"
+            admin:
+              reports:
+                index:
+                  heading: "Reports"
+        YAML
+      }
+    end
+
+    it "expands `.key` in a controller action to `controller.action.key`" do
+      ctrl_source = <<~RUBY
+        class UsersController
+          def show
+            t(".qr_code_expired")
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "# noop\n",
+        files: controller_locales.merge("app/controllers/users_controller.rb" => ctrl_source),
+        paths: ["app/controllers/users_controller.rb"]
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-key" }).to be_empty
+      info = diags.find { |d| d.rule == "translation-call" }
+      expect(info).not_to be_nil
+      expect(info.message).to include("users.show.qr_code_expired")
+    end
+
+    it "expands `.key` for a namespaced controller (admin/reports_controller.rb)" do
+      ctrl_source = <<~RUBY
+        module Admin
+          class ReportsController
+            def index
+              t(".heading")
+            end
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "# noop\n",
+        files: controller_locales.merge("app/controllers/admin/reports_controller.rb" => ctrl_source),
+        paths: ["app/controllers/admin/reports_controller.rb"]
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-key" }).to be_empty
+      info = diags.find { |d| d.rule == "translation-call" }
+      expect(info).not_to be_nil
+      expect(info.message).to include("admin.reports.index.heading")
+    end
+
+    it "silently skips a lazy key used outside any controller file" do
+      result = run_plugin(
+        source: "t('.title')\n",
+        files: controller_locales
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-key" }).to be_empty
+      expect(diags.select { |d| d.rule == "translation-call" }).to be_empty
+    end
+
+    it "silently skips a lazy key at the top level of a controller file (no enclosing def)" do
+      ctrl_source = "LABEL = t(\".title\")\n"
+      result = run_plugin(
+        source: "# noop\n",
+        files: controller_locales.merge("app/controllers/users_controller.rb" => ctrl_source),
+        paths: ["app/controllers/users_controller.rb"]
+      )
+      diags = plugin_diagnostics(result)
+      expect(diags.select { |d| d.rule == "unknown-key" }).to be_empty
+    end
+
+    it "flags a lazy key that does not exist in the locale after expansion" do
+      ctrl_source = <<~RUBY
+        class UsersController
+          def show
+            t(".nonexistent_key")
+          end
+        end
+      RUBY
+      result = run_plugin(
+        source: "# noop\n",
+        files: controller_locales.merge("app/controllers/users_controller.rb" => ctrl_source),
+        paths: ["app/controllers/users_controller.rb"]
+      )
+      err = plugin_diagnostics(result).find { |d| d.rule == "unknown-key" }
+      expect(err).not_to be_nil
+      expect(err.message).to include("users.show.nonexistent_key")
+    end
+  end
+
   describe "load errors" do
     it "emits a `load-error` warning for a malformed YAML file" do
       malformed_yaml = "en:\n  bad:\n :: oops"

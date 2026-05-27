@@ -67,9 +67,18 @@ module Rigor
       # {RoutesParser}. The descriptor's auto-collected
       # `FileEntry` digest invalidates the cache on routes-
       # file edits.
+      #
+      # Passes a `file_reader` lambda so the parser can follow
+      # `draw(:admin)` → `config/routes/admin.rb` partials.
       producer :helper_table do |_params|
+        routes_dir = "#{File.dirname(@routes_file)}/routes"
+        file_reader = lambda do |name|
+          io_boundary.read_file("#{routes_dir}/#{name}")
+        rescue StandardError
+          nil
+        end
         contents = io_boundary.read_file(@routes_file)
-        RoutesParser.parse(contents)
+        RoutesParser.parse(contents, file_reader: file_reader)
       end
 
       def init(_services)

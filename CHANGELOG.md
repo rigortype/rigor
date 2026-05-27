@@ -29,9 +29,11 @@ cycles live in dedicated archives:
 
 ### Fixed
 
+- **[rigor-rails-i18n]** Lazy translation keys (`t(".key")`) in controller files no longer produce false-positive `unknown-key` diagnostics. The key is now expanded to `<controller_scope>.<action>.<key>` using the file path and the innermost enclosing `def` — matching Rails' lazy lookup convention. Lazy keys in non-controller `.rb` files (models, helpers, mailers, …) are silently skipped since the controller/action scope cannot be determined statically.
 - **[rigor baseline generate]** Fixed a crash when `plugins:` entries in `.rigor.yml` were plain strings (e.g. `plugins: [rigor-rails]`).
 - **[rigor-rails-routes]** Fixed incorrect helper names for `new` and `edit` actions inside namespaced resources — `new_admin_widget_path` is now generated correctly instead of the wrong `admin_new_widget_path` form.
 - **[rigor-rails-routes]** `get "/login", to: "sessions#new"` (no `as:` key) now registers `login_path`; previously anonymous static routes were silently skipped, producing false-positive `unknown-helper` diagnostics.
+- **[rigor-rails-routes]** `scope "/:event_slug", as: "event" do ... end` now generates correctly prefixed helpers (`event_talks_path`, `event_talk_path`, etc.) and counts the scope's dynamic path segments in helper arity. Previously the `as:` prefix was silently ignored, producing false-positive `unknown-helper` diagnostics for every helper defined inside such a block.
 
 ## [0.1.10] - 2026-05-27
 

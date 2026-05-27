@@ -44,8 +44,13 @@ module Rigor
     #
     # - Only literal-string keys are validated. `t(key)` with
     #   a variable receiver is silently passed through.
-    # - Lazy lookup (`t('.title')` resolved against the
-    #   rendered controller / view path) is out of scope.
+    # - Lazy lookup (`t('.key')`) is supported for controller
+    #   files (`app/controllers/**/*_controller.rb`): the key
+    #   is expanded to `<controller_scope>.<action>.<key>`
+    #   using the file path and the innermost enclosing `def`.
+    #   Lazy keys in non-controller `.rb` files (models, helpers,
+    #   mailers, …) are silently skipped — the controller/action
+    #   scope cannot be statically determined there.
     # - Pluralization (`t('errors.messages.too_short',
     #   count: n)`) is recognised at the call site but the
     #   `count` key is not used to validate the locale's

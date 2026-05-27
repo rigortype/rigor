@@ -22,6 +22,7 @@ module Rigor
       # - `resource :name`
       # - `get/post/patch/put/delete "path", to:, as:`
       # - `root to: "..."` / `root "..."`
+      # - `scope "path", as: :name do ... end` (with `as:` key)
       # - One level of `namespace :foo do ... end`
       # - One level of nested `resources` (`resources :users
       #   do; resources :posts; end`)
@@ -30,7 +31,7 @@ module Rigor
       #
       # Out of scope for v0.1.0 (silent skips):
       #
-      # - `scope :path:` / `scope :module:` / `scope :as:`
+      # - `scope path:` / `scope module:` (path/module-only, no `as:`)
       # - Constraints (`constraints: { id: /\d+/ }`)
       # - `mount` / engine routes
       # - `direct(:name) { |obj| ... }`
@@ -58,12 +59,15 @@ module Rigor
         module_function
 
         # @param contents [String] raw `config/routes.rb` source
+        # @param file_reader [Proc, nil] called with `"name.rb"` to load a
+        #   draw partial from `config/routes/name.rb`. Returns file contents
+        #   or nil when the file is absent.
         # @return [HelperTable]
-        def parse(contents)
+        def parse(contents, file_reader: nil)
           parse_result = Prism.parse(contents)
           return HelperTable.new([]) unless parse_result.errors.empty?
 
-          context = Context.new
+          context = Context.new(file_reader: file_reader)
           interpret(parse_result.value, context)
 
           # Each helper has both `_path` and `_url` forms.
@@ -86,13 +90,15 @@ module Rigor
         # nesting prefix (namespaces + parent resource) and the
         # entries collected so far.
         class Context
-          attr_reader :entries
+          attr_reader :entries, :file_reader
 
-          def initialize
+          def initialize(file_reader: nil)
             @entries = []
+            @file_reader = file_reader
             # Stack of prefix segments. Each entry is one of:
             # - `{ kind: :namespace, name: "admin" }`
             # - `{ kind: :scope, parent: "user", arity_segments: [":user_id"] }`
+            # - `{ kind: :as_scope, name: "event", path: "/:event_slug", arity: 1 }`
             @stack = []
           end
 
@@ -106,6 +112,16 @@ module Rigor
           def push_resource(parent_name)
             singular = singularize(parent_name.to_s)
             @stack.push(kind: :scope, parent: singular, arity_segments: [":#{singular}_id"])
+            yield
+          ensure
+            @stack.pop
+          end
+
+          # `scope "/:slug", as: "foo" do ... end` — adds a
+          # helper-name prefix without the "parent resource" arity
+          # arithmetic that push_resource uses.
+          def push_as_scope(name, path, arity_count)
+            @stack.push(kind: :as_scope, name: name.to_s, path: path, arity: arity_count)
             yield
           ensure
             @stack.pop
@@ -129,8 +145,16 @@ module Rigor
           # Number of dynamic segments (`:user_id`-style)
           # captured by the parent scope chain. Used to
           # compute helper arity for nested resources.
+          # Each nested-resource `:scope` frame contributes 1;
+          # each `:as_scope` frame contributes its own arity.
           def parent_segment_count
-            @stack.count { |frame| frame[:kind] == :scope }
+            @stack.sum do |frame|
+              case frame[:kind]
+              when :scope then 1
+              when :as_scope then frame[:arity]
+              else 0
+              end
+            end
           end
 
           private
@@ -139,6 +163,7 @@ module Rigor
             case frame[:kind]
             when :namespace then frame[:name]
             when :scope then frame[:parent]
+            when :as_scope then frame[:name]
             end
           end
 
@@ -146,6 +171,7 @@ module Rigor
             case frame[:kind]
             when :namespace then ["/#{frame[:name]}"]
             when :scope then ["/#{pluralize(frame[:parent])}/:#{frame[:parent]}_id"]
+            when :as_scope then frame[:path] ? [frame[:path]] : []
             else []
             end
           end
@@ -203,9 +229,14 @@ module Rigor
         def interpret_call(node, context)
           case node.name
           when :draw
-            # `Rails.application.routes.draw do ... end` —
-            # interpret the block body.
-            interpret_block_body(node, context)
+            if node.block
+              # `Rails.application.routes.draw do ... end`
+              interpret_block_body(node, context)
+            else
+              # `draw(:admin)` — routing partial at
+              # config/routes/{name}.rb.
+              load_drawn_routes(node, context)
+            end
           when :namespace
             handle_namespace(node, context)
           when :resources
@@ -214,6 +245,8 @@ module Rigor
             handle_resource(node, context)
           when :root
             handle_root(node, context)
+          when :scope
+            handle_scope(node, context)
           when :get, :post, :patch, :put, :delete
             handle_explicit_route(node, context)
           when :member, :collection
@@ -239,6 +272,33 @@ module Rigor
           return interpret_block_body(node, context) if name.nil?
 
           context.push_namespace(name) { interpret_block_body(node, context) }
+        end
+
+        # `scope "/:slug", as: "event" do ... end`
+        #
+        # When `as:` is present the block body is interpreted under a
+        # new `:as_scope` stack frame that adds the given prefix to
+        # every helper registered inside.  Dynamic path segments
+        # (`:slug`) are counted so nested-resource arities stay
+        # correct.
+        #
+        # When `as:` is absent the block is interpreted without any
+        # prefix change — helper names are unaffected by the scope's
+        # path, which matches Rails' behaviour for path-only scopes.
+        def handle_scope(node, context)
+          as_name = keyword_symbol(node, :as)
+
+          if as_name.nil?
+            interpret_block_body(node, context)
+            return
+          end
+
+          path = string_argument(node, 0)
+          arity = path ? count_path_placeholders(path) : 0
+
+          context.push_as_scope(as_name.to_s, path, arity) do
+            interpret_block_body(node, context)
+          end
         end
 
         def handle_resources(node, context)
@@ -310,6 +370,7 @@ module Rigor
             return if path.nil? || path.include?(":")
 
             as_name = path.delete_prefix("/").tr("/", "_")
+            return if as_name.empty?
           end
 
           name = "#{context.helper_prefix}#{as_name}_path"
@@ -319,6 +380,21 @@ module Rigor
             path: "#{context.path_prefix}#{path || ''}",
             http_method: node.name, action: :custom
           )
+        end
+
+        def load_drawn_routes(node, context)
+          return unless context.file_reader
+
+          name = symbol_argument(node, 0) || string_argument(node, 0)&.to_sym
+          return unless name
+
+          sub_contents = context.file_reader.call("#{name}.rb")
+          return unless sub_contents
+
+          sub_result = Prism.parse(sub_contents)
+          return if sub_result.errors.any?
+
+          interpret(sub_result.value, context)
         end
 
         def handle_member_or_collection(node, context)

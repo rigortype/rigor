@@ -376,10 +376,69 @@ module Rigor
           class_name = qualified_name_with_enclosing(class_node.constant_path, enclosing)
           return [] if class_name.nil?
 
-          controller_path = controller_path_for(class_name)
+          # Prefer the file-path-derived controller path when the
+          # source lives under `app/controllers/` — Rails autoload
+          # is the runtime authority on `Admin::Users::RolesController`
+          # vs `Users::RolesController` (a declaration like
+          # `module Admin; class Users::RolesController` resolves
+          # to whichever `Users` constant Ruby finds first, and
+          # the file path is the disambiguator Rails picks). Fall
+          # back to the AST-derived class name for files outside
+          # `app/controllers/` (libraries, test fixtures).
+          controller_path = controller_path_from_file(path) || controller_path_for(class_name)
           return [] if controller_path.nil?
 
+          # Abstract base controllers: a `*BaseController` (`Admin::
+          # BaseController`, `Settings::Preferences::BaseController`,
+          # …) typically has no view of its own; its `render :show`
+          # bodies are resolved by Rails against the calling
+          # subclass's controller path at request time, NOT the
+          # base's. Same for parent controllers whose view
+          # directory exists but contains only subdirectories
+          # (Mastodon's `Admin::SettingsController` whose
+          # `app/views/admin/settings/` holds about/, appearance/,
+          # … but no top-level templates). Skip render checks for
+          # these — the diagnostic would be a false positive
+          # against intentional Rails abstract-base layouts.
+          return [] if abstract_base_controller?(class_name, controller_path, view_search_roots)
+
           collect_render_diagnostics(path, class_node.body, controller_path, view_search_roots)
+        end
+
+        # Convert `<root>/app/controllers/admin/users/roles_controller.rb`
+        # to `admin/users/roles`. Returns nil if the path is not
+        # under an `app/controllers/` segment.
+        def controller_path_from_file(path)
+          match = path.match(%r{(?:\A|/)app/controllers/(.+)_controller\.rb\z})
+          match&.[](1)
+        end
+
+        # An abstract base controller — its `render` bodies don't
+        # validate against its own controller_path because Rails
+        # resolves at request time against the actual subclass.
+        # Two conservative heuristics:
+        #   (1) The class name ends with `BaseController`. Strong
+        #       Rails-convention signal (Settings::Preferences::
+        #       BaseController, Admin::BaseController, …).
+        #   (2) The controller's view directory exists but contains
+        #       ONLY subdirectories (no template files at its
+        #       top). Mastodon's Admin::SettingsController whose
+        #       app/views/admin/settings/ holds only about/,
+        #       appearance/, … — the parent of nested controllers.
+        # Deliberately NOT triggered by "no view directory at
+        # all" because that fires the diagnostic we DO want for
+        # genuinely-missing views (the typo / forgot-to-create
+        # case).
+        def abstract_base_controller?(class_name, controller_path, view_search_roots)
+          return true if class_name.end_with?("BaseController")
+
+          view_search_roots.any? do |root|
+            dir = File.join(root, controller_path)
+            next false unless File.directory?(dir)
+
+            entries = Dir.children(dir)
+            entries.any? && entries.all? { |e| File.directory?(File.join(dir, e)) }
+          end
         end
 
         def collect_render_diagnostics(path, body, controller_path, view_search_roots)

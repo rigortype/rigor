@@ -79,7 +79,7 @@ module Rigor
         # paths (`admin/domain_blocks/new` not bare
         # `domain_blocks/new`) and filter-chain validation
         # silently skipping nested controllers.
-        version: "0.4.0",
+        version: "0.5.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers.",
         config_schema: {
           "controller_search_paths" => :array,

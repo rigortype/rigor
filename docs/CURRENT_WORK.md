@@ -4,48 +4,30 @@ A transient bookmark for the next implementer: the immediate next-session entry 
 
 ## Status
 
-**v0.1.8 released (2026-05-21).** Recap in `CHANGELOG.md` § `[0.1.8]` — the Mastodon-survey false-positive-reduction cycle: ADR-15 fork-based worker pool (the active `workers > 0` backend), ADR-23 `rigor triage` (slices 1+2+4), ADR-24 implicit-self method-call resolution (slices 1+2+3 + included/prepended-module resolution), the explicit-receiver private-method resolution fix, and survey-driven plugin fixes (`rigor-activerecord` v0.2.0, `rigor-activesupport-core-ext`).
+**v0.1.11 released (2026-05-27).** Version bumped, CHANGELOG sealed, `make verify` passes. **`bundle exec rake release` has not yet been run** — publication to RubyGems requires explicit authorisation.
 
-The release-line plan is recorded in [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0":
+`[Unreleased]` carries one post-v0.1.11 slice (2026-05-27): **`rigor plugins` activation-readiness command** — the Mastodon investigation surfaced a silent-failure surface where running `rigor check` with the wrong cwd or Gemfile context leaves configured plugins inert, so the false positives that follow get attributed to "missing types" rather than to a config gap (the original 1271-error Mastodon run came from rigor's own `.rigor.dist.yml` being used instead of mastodon's, not from any genuine engine miss). Shape: per-plugin status row (loaded / load-error) plus every manifest-declared extension surface (`signature_paths:` with per-directory `.rbs` count, `open_receivers:`, `owns_receivers:`, `produces:`, `consumes:`, macro-substrate counts, `protocol_contracts:`, `source_rbs_synthesizer:`, `type_node_resolvers:`, HKT registration counts). `--format json` for tooling, `--strict` exits 1 on any load error (CI gate shape). Companion changes: `rigor init` now prints a "Next steps" hint pointing at `rigor plugins`; `rigor-project-init` SKILL Phase 4 ([`skills/rigor-project-init/references/02-configure.md`](../skills/rigor-project-init/references/02-configure.md) § "Verify plugin activation") gained a verification sub-step with a load-error → cause → fix table.
 
-- **v0.1.9** — the last preview cut, a near-complete (準完成版) release.
-- **v0.2.0** — the first evaluation release: publicly announced, intended for real-product trial deployment (not a formal / GA version).
-- **v0.2.x** — the evaluation line; the goal is to bring every planned feature to high completion **except the Ractor concurrency track** (parked behind the fork pool / ADR-15 § OQ1).
+v0.1.11 recaps two back-to-back patch cycles of real-world trial work:
 
-## Next entry — v0.1.9 (last preview cut)
+- **v0.1.10** (2026-05-27) — `rigor mcp --transport stdio` (ADR-33, seven read-only tools); `rigor sig-gen --params=observed` attr_reader inference; `rigor coverage` precision gate; `rigor check --treat-all-as-inline-rbs`; `rigor-rbs-inline` plugin (ADR-32); browser playground (ADR-29 slices 1–4); `rigor annotate` return-type annotation; ADR-28 path-scoped protocol contracts + `rigor-hanami`; constant folding (Date/DateTime/Time, Math, String/Integer/Float mid-priority, Hash shape handlers); `return if @ivar.nil?` ivar-guard narrowing fix.
+- **v0.1.11** (2026-05-27) — Plugin bundling into `rigortype` gem; portable baseline paths; `rigor-rails-routes` **five false-positive sources eliminated** (grounded in kaigionrails conference-app + Mastodon trials): `new_`/`edit_` prefix order, anonymous-`get` route registration, `scope as:` prefix + arity, `draw(:name)` partial loading, `concern` body no-op, trailing options-hash +1 arity rule; `rigor-rails-i18n` lazy translation keys in controllers; Rails quickstart manual ([`docs/manual/14-rails-quickstart.md`](manual/14-rails-quickstart.md)).
 
-v0.1.9 closes the preview-track commitments so v0.2.0 starts the evaluation line from a near-complete base. All committed deliverables plus two additional improvements have **LANDED** on `master` (`[Unreleased]` in `CHANGELOG.md`); v0.1.9 is ready to cut once the version bump is authorised.
+The release-line plan is in [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0". v0.1.9 was the designated "last preview cut" but the trail work extended the preview line to v0.1.10 / v0.1.11; v0.2.0 remains the next named milestone (first evaluation / publicly-announced release).
 
-1. **External-user SKILL trio** ([ADR-22 § WD8](adr/22-baseline-and-project-onboarding.md)) — **complete, updated.** Three SKILLs aimed at Rigor newcomers running `gem install rigortype` against their own projects, under the top-level `skills/` tree (agentskills.io portable conventions, `waza check` spec-compliant, public CLI surface only):
-   - `skills/rigor-project-init/` — first-time onboarding: Gemfile / Gemfile.lock walk → propose a plugin set → **adoption-mode choice** (acknowledge / baseline vs. strict) → write `.rigor.dist.yml` → **[new] generate initial RBS sigs + `--params=observed` attr_reader precision uplift** → run `rigor triage --format json` → (acknowledge mode) write `.rigor-baseline.yml` + the `baseline:` config line → surface likely real bugs → offer the two escalation paths (project plugin / Rigor issue). SKILL.md + **four** `references/` modules (added `04-sig-uplift.md` covering Phase 5; triage / baseline / bugs now phases 6–8).
-   - `skills/rigor-baseline-reduce/` — ongoing-quality: prioritise with the `rigor triage` hints + `rigor baseline dump` → walk `.rigor-baseline.yml` rule-by-rule → sample sites → classify (real bug / stylistic-safe / FP) → fix / `# rigor:disable` / open a Rigor issue → `rigor baseline drift` + `regenerate`. SKILL.md + two `references/` modules.
-   - `skills/rigor-plugin-author/` — external-author variant of the plugin-authoring workflow (distinct from the `.claude/skills/rigor-plugin-author/` contributor SKILL): authoring a `rigor-`-prefixed gem or project-private plugin against the published `rigortype` API; threads the pre-1.0-contract caveat. SKILL.md + three `references/` modules.
-2. **ADR-22 baseline slice 5** — **complete.** `rigor baseline regenerate` (unconditional rewrite) + the `rigor check --baseline-strict` CI gate (fails on any drift, including deficit drift). The `rigor baseline {generate, regenerate, dump, drift, prune}` family is now whole.
-3. **Sig-gen `--params=observed` attr_reader inference** — **LANDED** (commit `f2aa8de`). `rigor sig-gen --params=observed --write` now resolves `attr_reader` / `attr_writer` / `attr_accessor` methods whose `@ivar` is assigned from an `initialize` parameter. Previously `ScopeIndexer` evaluated `@name = name` in a blank scope (parameter resolves to `Dynamic[top]` → ivar stays `untyped` → method skipped as `:untyped_return`). Fix lives entirely in `Generator` to keep `inference/` and `sig_gen/` decoupled: `build_observed_ivar_map` / `collect_init_ivar_obs` / `ivar_obs_from_initialize` / `build_ivar_obs_type_map` / `collect_param_obs_types`. Observation-driven fallback in `ivar_type_lookup` activates only when scope-inferred type is nil or `Dynamic[top]`. Zero overhead on non-observed runs (`@observations.empty?` guard). Important empirical finding from the bootstrap measurement experiment: iterative `sig-gen --write` → re-measure does NOT improve `untyped` returns (written `@name: untyped` → next pass sees `equivalent` → type stays untyped); the fix must come from the observation infrastructure, which this commit provides.
-4. **TypeProf compatibility spec** — **LANDED** (commit `90e4a5a`). `spec/rigor/sig_gen/typeprof_compat_spec.rb` asserts Rigor covers ≥ all methods TypeProf recognises and returns a type at least as specific for every shared method. Four fixtures from the upstream TypeProf scenario corpus. Key insight encoded: TypeProf uses nominal class names for literals (String, Integer); Rigor emits RBS literal types ("hello", 42) which are more specific.
+## Mastodon trial — outcome summary (2026-05-27)
 
-`rigor triage` slice 3 (SKILL integration — [ADR-23 WD5](adr/23-diagnostic-triage-command.md)) landed with the trio: `rigor-project-init` Phase 6 (was Phase 5 before the sig-uplift insertion) and `rigor-baseline-reduce` Phase 1 both consume `rigor triage --format json` instead of ad-hoc LLM counting. ADR-23's only remaining carry-over is the deferred plugin-contributed-recogniser hook (slice 4 second half).
+`/Users/megurine/repo/ruby/mastodon` is fully configured:
 
-The v0.1.7 / v0.1.8 cycles were the lead-up — collecting real-project error data so the SKILL trio's plugin / severity / baseline-rule defaults rest on empirical evidence.
+- `.rigor.dist.yml` written (all relevant Rails plugins active, `severity_profile: lenient`)
+- `.rigor-baseline.yml` generated — 1258 buckets covering 2496 diagnostics
+- `rigor check` exits clean with the baseline active
 
-## MCP server — `rigor mcp` (LANDED 2026-05-27)
+Starting from 590 errors pre-fixes, the v0.1.11 routes improvements brought the error count to 301 (zero `wrong-arity`). Remaining 217 `unknown-helper` diagnostics are structural (devise_for, concern-injected routes) and cleanly in the baseline.
 
-`rigor mcp --transport stdio` exposes Rigor's analysis tools as a Model Context
-Protocol server ([ADR-33](adr/33-mcp-server.md)).  Seven read-only tools:
-`rigor_check`, `rigor_type_of`, `rigor_triage`, `rigor_annotate`, `rigor_sig_gen`,
-`rigor_explain`, `rigor_coverage`.  Each delegates to the existing CLI command via
-in-process `CLI.new(argv, out:, err:).run` with StringIO capture.  No new runtime
-dependency.  HTTP transport and across-call environment caching are deferred (slices
-2/3, demand-driven).
+Genuine bugs surfaced: `instances.domain` unknown column ×3, `NotificationMailer` action misuse ×2, missing view template ×1, missing i18n key ×1, Pundit info ×2. These are in the baseline at threshold 0 and will surface again when any file that contains them is edited.
 
-## Inference quality regression infrastructure (LANDED 2026-05-26)
-
-Three complementary layers now guard inference precision:
-
-- **`Inference::PrecisionScanner`** (`lib/rigor/inference/precision_scanner.rb`) — classifies every inferred type into eight precision tiers, reports `precision_ratio` / `opaque_ratio`. Complements the existing `CoverageScanner` (node recognition rate) with a type-quality signal.
-- **`rigor coverage`** CLI command — runs `PrecisionScanner` over paths, outputs text (per-file table + tier breakdown) or `--format json` (SKILL-consumable). `--threshold RATIO` gates CI. Running against `lib/` yields ≈44% precision baseline. The `rigor-type-coverage-uplift` SKILL can use the JSON output to measure the impact of each fold added.
-- **Precision snapshot spec** (`spec/integration/precision_snapshot_spec.rb` + `spec/integration/snapshots/`) — golden-file regression gate for all 70 fixtures. Any type change (improvement or regression) fails the example; regenerate with `UPDATE_SNAPSHOTS=1 bundle exec rspec`.
-- **OSS sweep CI** (`.github/workflows/oss-sweep.yml`) — weekly job sparse-clones Mastodon at the pinned tag, runs `rigor check` + `rigor coverage`, gates on stored thresholds in `data/oss-sweep/mastodon-thresholds.json`. First run calibrates thresholds; subsequent runs enforce them. Two-signal gate: max diagnostic count + min precision ratio.
+The OSS sweep CI job (`.github/workflows/oss-sweep.yml`) will need its stored thresholds refreshed after the v0.1.11 publish so the weekly gate reflects the new diagnostic count.
 
 ## Open engineering items
 
@@ -94,14 +76,12 @@ Phases 1–4 landed (String / Integer / Float / Comparable / Math / HashShape / 
 
 ## Reading order for a returning implementer
 
-All [Unreleased] CHANGELOG entries are up to date (including sig-gen attr_reader inference + TypeProf compat spec added 2026-05-26). The inference-quality regression infrastructure (PrecisionScanner, `rigor coverage`, precision snapshot spec, OSS sweep CI, Makefile/CI precision gate) also landed 2026-05-26 and is recorded in [Unreleased].
+**`[Unreleased]` is empty. v0.1.11 is code-complete; `bundle exec rake release` is the next action (requires explicit user authorisation).** Read in this order:
 
-**`[Unreleased]` is ready to cut as the next version bump (v0.2.0 or, if a patch cycle is needed, v0.1.10).** The version bump itself requires explicit authorisation — see release cadence in `AGENTS.md`. Read in this order:
-
-1. [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0" — the v0.1.9 / v0.2.0 / v0.2.x plan and what gates each.
-2. `CHANGELOG.md` § `[Unreleased]` — all entries current.
-3. [`docs/adr/22-baseline-and-project-onboarding.md`](adr/22-baseline-and-project-onboarding.md) — WD8 + the two onboarding-SKILL sketches; the baseline mechanism.
-4. [`docs/adr/23-diagnostic-triage-command.md`](adr/23-diagnostic-triage-command.md) — `rigor triage`; WD5 / slice 3 is the triage ↔ SKILL data-layer contract.
-5. [`.claude/skills/rigor-plugin-author/SKILL.md`](../.claude/skills/rigor-plugin-author/SKILL.md) — the contributor SKILL; the template for the external-author `skills/rigor-plugin-author/` variant.
+1. `CHANGELOG.md` § `[0.1.11]` and `[0.1.10]` — full recap of the last two patch cycles.
+2. [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0" — what gates the next named milestone.
+3. [`docs/manual/14-rails-quickstart.md`](manual/14-rails-quickstart.md) — the new Rails onboarding guide; reflects the kaigionrails + Mastodon trial findings.
+4. [`docs/adr/22-baseline-and-project-onboarding.md`](adr/22-baseline-and-project-onboarding.md) — baseline mechanism + SKILL trio (WD8); the `rigor-project-init` / `rigor-baseline-reduce` / `rigor-plugin-author` external-user SKILLs under `skills/` all landed.
+5. [`docs/adr/23-diagnostic-triage-command.md`](adr/23-diagnostic-triage-command.md) — `rigor triage`; WD5 / slice 3 (SKILL data-layer contract) landed; slice 4 plugin-contributed recognisers deferred.
 6. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — the public-vs-internal stability boundary. v0.2.0 stabilises the plugin-contract surface for external `rigor-*` gems, so cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
 7. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — the plugin contract v0.2.0 must stabilise.

@@ -32,6 +32,7 @@ module Rigor
       "baseline" => :run_baseline,
       "triage" => :run_triage,
       "coverage" => :run_coverage,
+      "plugins" => :run_plugins,
       "playground" => :run_playground
     }.freeze
 
@@ -475,7 +476,27 @@ module Rigor
 
       File.write(path, init_template)
       @out.puts("Created #{path}")
+      print_init_next_steps(path)
       0
+    end
+
+    # `rigor init`'s template ships empty `plugins:` so a fresh
+    # init has nothing to validate — but the moment the user adds
+    # any plugin entry, the activation-failure surfaces enumerated
+    # in `rigor plugins`'s docstring become real. Point them at
+    # the verification command + the canonical readiness flow so
+    # silent failures (the cwd / Gemfile / signature_paths
+    # mismatches that surfaced during the Mastodon trial) get
+    # caught the first time the user wires a plugin, not the first
+    # time `rigor check` reports false positives that should have
+    # been covered.
+    def print_init_next_steps(path)
+      @out.puts ""
+      @out.puts "Next steps:"
+      @out.puts "  1. Edit #{path} — add the `plugins:` your project needs."
+      @out.puts "  2. Run `rigor plugins` to verify every configured plugin loads."
+      @out.puts "     (`--strict` exits 1 on failure; ideal CI gate.)"
+      @out.puts "  3. Run `rigor check` to analyse your code."
     end
 
     # Renders the starter `.rigor.yml` body. The template
@@ -597,6 +618,12 @@ module Rigor
       CLI::CoverageCommand.new(argv: @argv, out: @out, err: @err).run
     end
 
+    def run_plugins
+      require_relative "cli/plugins_command"
+
+      CLI::PluginsCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def run_playground
       begin
         require "rigor/playground"
@@ -653,6 +680,7 @@ module Rigor
           mcp        Run the Rigor MCP server over stdio (ADR-33)
           triage     Summarise diagnostics: distribution, hotspots, hints (ADR-23)
           coverage   Report type-precision coverage (precise vs Dynamic ratio)
+          plugins    Report activation status of every configured plugin
           playground Start the browser playground (requires rigor-playground gem)
           version    Print the Rigor version
           help       Print this help

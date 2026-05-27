@@ -14,6 +14,14 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **[rigor plugins]** New `rigor plugins` subcommand reports the activation status of every plugin entry in `.rigor.yml`, surfacing each plugin's load status (`loaded` / `load-error` with reason), resolved manifest id and version, `signature_paths:` (with per-directory `.rbs` file count), and every other manifest-declared extension surface (`open_receivers:` / `owns_receivers:` / `produces:` / `consumes:` / macro substrate counts / `protocol_contracts:` / `source_rbs_synthesizer:` / `type_node_resolvers:` / HKT registration counts). Closes the silent-failure gap where a plugin in `.rigor.yml` looked active but did not actually contribute (cwd / Gemfile context mismatch, missing gem, broken `signature_paths:`, etc.). Text output by default, `--format json` for tooling (SKILLs, CI), `--strict` exits 1 if any configured plugin failed to load (CI gate).
+
+### Changed
+
+- **[rigor init]** After writing the configuration template, `rigor init` now prints a "Next steps" hint that points the user at `rigor plugins` for activation verification. The hint also names `--strict` as the canonical CI-gate shape.
+
 ## [0.1.11] - 2026-05-27
 
 ### Added

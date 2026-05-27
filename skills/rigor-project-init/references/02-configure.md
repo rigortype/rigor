@@ -134,11 +134,52 @@ the file and uncomments / appends the line in one step.
 
 Strict mode never adds `baseline:` at all.
 
+## Verify plugin activation (`rigor plugins`)
+
+Before proceeding to sig uplift, **run `rigor plugins`** from the
+project root to confirm every entry under `plugins:` actually
+loaded. The activation surface is the part of the configuration
+most prone to silent failure — a typoed gem name, a missing
+third-party plugin gem, or running rigor from a different cwd
+(so a different `.rigor.yml` is discovered) all leave plugins
+inert, which the per-file diagnostic stream then attributes to
+"missing types" rather than to a config gap.
+
+```sh
+rigor plugins
+```
+
+Expected: every entry shows `[OK ]`, the `loaded: N` count
+matches the entries in `plugins:`, and `load-error: 0`. The
+report also lists each plugin's `signature_paths:` (with a
+per-directory `.rbs` file count) and any `open_receivers:` /
+`owns_receivers:` / `produces:` / `consumes:` / macro substrate
+contributions — useful for confirming the plugin is contributing
+what you expect.
+
+If any entry shows `[ERR]`, read the `load error:` line:
+
+| Error fragment | Cause | Fix |
+| --- | --- | --- |
+| `could not load plugin gem "rigor-foo"` | The gem is not on the load path. Either misspelled in `plugins:`, or a third-party plugin (per ADR-31 WD4) that is not installed in the rigor runtime environment. | Check spelling against the catalogue in `01-detect.md`; for third-party plugins, install via the same channel that installed `rigortype` (mise / gem install). |
+| `did not register any plugin via Rigor::Plugin.register` | The require succeeded but the gem did not call `Rigor::Plugin.register`. Usually a version mismatch (older / forked rigor-foo) or a partial install. | Reinstall the plugin gem; verify the version matches `rigortype`'s. |
+| `signature path "..." is not a directory` | The bundled `sig/` directory is missing — a packaging bug in the plugin gem. | File an issue against the plugin gem's repo. |
+| `plugin "foo" config invalid: ...` | The `config:` block under the plugin entry has a typo or wrong value type. | Compare against the plugin's documented `config_schema:`. |
+
+Re-run `rigor plugins` until `load-error: 0`. Add `--strict` to
+the invocation when you want it to exit 1 (the canonical CI gate
+shape):
+
+```sh
+rigor plugins --strict
+```
+
 ## Output of this module
 
 A committed `.rigor.dist.yml` with `paths:`, `exclude:`,
 `plugins:`, and `severity_profile:` set — and no active
-`baseline:` line. No Gemfile changes; plugins are bundled inside
+`baseline:` line. `rigor plugins` reports every entry loaded,
+zero load errors. No Gemfile changes; plugins are bundled inside
 `rigortype`.
 
 Proceed to Phase 5 ([`04-sig-uplift.md`](04-sig-uplift.md)).

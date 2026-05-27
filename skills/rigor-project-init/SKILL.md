@@ -89,7 +89,7 @@ Below that, either mode is reasonable — ask.
 | 1 | Detect the project shape (Gemfile / Gemfile.lock walk). | [`references/01-detect.md`](references/01-detect.md) |
 | 2 | Present the two adoption modes; record the user's choice. | (this file — § "The central decision") |
 | 3 | Select the plugin set matching the detected stack. | [`references/01-detect.md`](references/01-detect.md) |
-| 4 | Write `.rigor.dist.yml` — severity profile follows the mode. | [`references/02-configure.md`](references/02-configure.md) |
+| 4 | Write `.rigor.dist.yml` — severity profile follows the mode. Verify activation with `rigor plugins`. | [`references/02-configure.md`](references/02-configure.md) |
 | 5 | Generate initial RBS sigs; uplift attr_reader precision with `--params=observed`. | [`references/04-sig-uplift.md`](references/04-sig-uplift.md) |
 | 6 | Run `rigor triage --format json` to diagnose the diagnostic stream. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
 | 7 | Acknowledge mode only — generate the baseline and wire `baseline:`. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |

@@ -817,6 +817,93 @@ RSpec.describe "plugins/rigor-rails-routes" do
     end
   end
 
+  describe "concern-injected route bodies" do
+    # Mastodon shape: `concern :account_resources do ...
+    # end` then `resources :accounts, concerns:
+    # :account_resources do ... end` injects the concern body
+    # inside the accounts resource block. Pre-fix the parser
+    # silently skipped concern bodies (per v0.1.11's
+    # `:concern` no-op) — so every helper defined ONLY inside
+    # a concern surfaced as `unknown-helper` at the call site.
+
+    it "replays a single concern's body inside `concerns: :name`" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          concern :account_resources do
+            resources :followers, only: [:index]
+          end
+
+          resources :accounts, concerns: :account_resources
+        end
+      RUBY
+      result = run_plugin(
+        source: "account_followers_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "supports an array of concerns" do
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          concern :followable do
+            resources :followers, only: [:index]
+          end
+          concern :commentable do
+            resources :comments, only: [:index]
+          end
+
+          resources :accounts, concerns: [:followable, :commentable]
+        end
+      RUBY
+      result = run_plugin(
+        source: "account_followers_path(1)\naccount_comments_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns).to be_empty
+    end
+
+    it "replays the concern body with the resource's arity context" do
+      # `resources :accounts do concern body { resource :inbox } end`
+      # → `account_inbox_path(account_id)` arity 1 (the
+      # concern's resource picks up the outer `:account_id`).
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          concern :inbox_target do
+            resource :inbox, only: [:create]
+          end
+
+          resources :accounts, concerns: :inbox_target
+        end
+      RUBY
+      result = run_plugin(
+        source: "account_inbox_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      diags = plugin_diagnostics(result).select { |d| %w[unknown-helper wrong-arity].include?(d.rule) }
+      expect(diags).to be_empty
+    end
+
+    it "still fires unknown-helper for a misspelt concern reference (precision floor)" do
+      # Concern not declared → bodies aren't replayed →
+      # call to a helper that would have come from a missing
+      # concern still surfaces as unknown-helper.
+      routes_rb = <<~RUBY
+        Rails.application.routes.draw do
+          resources :accounts, concerns: :nonexistent
+        end
+      RUBY
+      result = run_plugin(
+        source: "account_imaginary_path(1)\n",
+        files: { "config/routes.rb" => routes_rb }
+      )
+      unknowns = plugin_diagnostics(result).select { |d| d.rule == "unknown-helper" }
+      expect(unknowns.size).to eq(1)
+    end
+  end
+
   describe "singular `resource` adds the name to helper prefix for nested declarations" do
     # Mastodon shape: `resource :instance, only: [:show] do
     # scope module: :instances do resources :domain_blocks

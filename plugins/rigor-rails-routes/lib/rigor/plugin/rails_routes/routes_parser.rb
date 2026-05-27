@@ -104,10 +104,23 @@ module Rigor
             # via `devise_for :resource`. Drives the
             # OmniAuth-helper recognition in `HelperTable#omniauth_match?`.
             @devise_resources = []
+            # Registered `concern :name do ... end` blocks.
+            # Keyed by Symbol name; value is the block's body
+            # node. `resources :foo, concerns: :name do ... end`
+            # replays the body at the resource's site.
+            @concerns = {}
           end
 
           def record_devise_resource(name)
             @devise_resources << name.to_s
+          end
+
+          def register_concern(name, body_node)
+            @concerns[name.to_sym] = body_node
+          end
+
+          def concern_body(name)
+            @concerns[name.to_sym]
           end
 
           def push_namespace(name)
@@ -323,15 +336,7 @@ module Rigor
           when :devise_for
             handle_devise_for(node, context)
           when :concern
-            # `concern :name do ... end` — intentional no-op.
-            # Concerns are injected into resource blocks via
-            # `concerns: :name`; evaluating the concern body
-            # at definition time registers helpers with no
-            # parent-resource arity, producing wrong-arity
-            # false positives. Skip the body here; helpers
-            # defined only inside concerns are silently absent
-            # (unknown-helper) which is less harmful.
-            nil
+            handle_concern_definition(node, context)
           else
             interpret_block_body(node, context)
           end
@@ -413,6 +418,7 @@ module Rigor
           register_resourceful_helpers(name, actions, base_arity, context, plural: true)
 
           context.push_resource(name) do
+            replay_concerns(node, context)
             interpret_block_body(node, context)
           end
         end
@@ -438,8 +444,48 @@ module Rigor
           # frame adds NO `:id` segment to arity — singular
           # resources don't carry one.
           context.push_singular_resource(name) do
+            replay_concerns(node, context)
             interpret_block_body(node, context)
           end
+        end
+
+        # `concern :account_resources do ... end` registers the
+        # body for later replay; we DO NOT interpret it at the
+        # definition site (the body has no parent-resource
+        # context yet). Concerns at the top level land in the
+        # Context's `concerns` map by Symbol name.
+        def handle_concern_definition(node, context)
+          name = symbol_argument(node, 0)
+          body = node.block&.body
+          return if name.nil? || body.nil?
+
+          context.register_concern(name, body)
+        end
+
+        # `resources :accounts, concerns: :account_resources do ... end`
+        # — replays the registered concern body inside the
+        # current Context (which already has the accounts
+        # resource frame pushed). Supports both single-symbol
+        # (`concerns: :name`) and array-of-symbols
+        # (`concerns: [:a, :b]`) forms.
+        def replay_concerns(resource_node, context)
+          concerns_value = keyword_value(resource_node, :concerns)
+          return if concerns_value.nil?
+
+          Array(concerns_value).each do |concern_name|
+            body = context.concern_body(concern_name)
+            next if body.nil?
+
+            body.compact_child_nodes.each { |child| interpret(child, context) }
+          end
+        end
+
+        # Reads the value of an options-hash key. Distinct from
+        # `keyword_symbol` / `keyword_array` because `concerns:`
+        # accepts EITHER a single Symbol or an Array of Symbols
+        # — same Rails idiom Rails accepts.
+        def keyword_value(node, key)
+          options_hash(node)[key]
         end
 
         def handle_root(node, context)

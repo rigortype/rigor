@@ -53,13 +53,12 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-28 — singular `resource :foo do
-        # ... end` now pushes a `:singular_scope` Context
-        # frame so nested declarations pick up the
-        # resource's name in their helper prefix (Mastodon's
-        # `resource :instance do resources :domain_blocks
-        # end` → `instance_domain_blocks_path`).
-        version: "0.6.0",
+        # Bumped 2026-05-28 — `concern :name do ... end`
+        # bodies are now captured at definition time and
+        # replayed at every `resources :foo, concerns: :name`
+        # site. Closes Mastodon's `account_followers_url`,
+        # `account_outbox_path` etc. cluster.
+        version: "0.7.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

@@ -701,5 +701,67 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(def_node).to be_a(Prism::DefNode)
       expect(def_node.name).to eq(:greet)
     end
+
+    describe "class-ivar widening on observed mutation" do
+      it "widens a Tuple-seeded ivar to Array[untyped] when any class method mutates it" do
+        program = parse(<<~RUBY)
+          class Builder
+            def initialize
+              @struct = [{}]
+            end
+
+            def push!
+              @struct << []
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("Builder")[:@struct]
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Array")
+        expect(type.type_args.first).to be_a(Rigor::Type::Dynamic)
+      end
+
+      it "widens a HashShape-seeded ivar to Hash[untyped, untyped] on observed []=" do
+        program = parse(<<~RUBY)
+          class Bag
+            def initialize
+              @bag = { a: 1 }
+            end
+
+            def add(k, v)
+              @bag[k] = v
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("Bag")[:@bag]
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Hash")
+        expect(type.type_args.map(&:class)).to all(eq(Rigor::Type::Dynamic))
+      end
+
+      it "leaves a Tuple-seeded ivar unchanged when no mutator is observed" do
+        program = parse(<<~RUBY)
+          class Pure
+            def initialize
+              @struct = [{}]
+            end
+
+            def read
+              @struct.last
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        type = outer.class_ivars_for("Pure")[:@struct]
+        # `.last` is NOT a mutator, so no widening fires; the
+        # seed precision is preserved.
+        expect(type).to be_a(Rigor::Type::Tuple)
+      end
+    end
   end
 end

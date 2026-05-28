@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../scope"
 require_relative "../type"
+require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "statement_evaluator"
 
@@ -172,11 +173,87 @@ module Rigor
       # via `Type::Combinator.union`.
       def build_class_ivar_index(root, default_scope)
         accumulator = {}
-        walk_class_ivars(root, [], default_scope, accumulator)
+        mutated_ivars = {}
+        walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars)
+        widen_mutated_ivar_entries!(accumulator, mutated_ivars)
         accumulator.transform_values(&:freeze).freeze
       end
 
-      def walk_class_ivars(node, qualified_prefix, default_scope, accumulator)
+      # Walks the post-collected accumulator and widens any Tuple
+      # / HashShape entry for an ivar that observed a mutator call
+      # anywhere in the same class body. The mutation evidence
+      # comes from `gather_ivar_writes` recording every
+      # `@ivar.<method>(...)` call whose method is in
+      # `MutationWidening::ARRAY_MUTATORS` or `HASH_MUTATORS`.
+      #
+      # The widening uses `MutationWidening.widen_for_mutator` —
+      # the same primitive `Inference::StatementEvaluator#eval_call`
+      # applies for per-method-body widening on a local / ivar
+      # receiver. The class-level pass extends that primitive's
+      # reach so a `Tuple`-seeded ivar in `initialize` is observed
+      # as `Nominal[Array]` at the entry of every OTHER method
+      # body in the class — closing the cross-method gap noted in
+      # ROADMAP § Future cycles / Type-language / engine
+      # ("Tuple / HashShape widening for ivar-seeded literals
+      # after mutation"; Redmine 6.1.2
+      # `Redmine::Views::Builders::Structure` is the canonical
+      # worked site).
+      #
+      # Always-safe: the widening can only LOSE precision; the
+      # underlying nominal (`Array` / `Hash`) and the element
+      # union are preserved.
+      def widen_mutated_ivar_entries!(accumulator, mutated_ivars)
+        accumulator.each do |class_name, ivars|
+          observed = mutated_ivars[class_name]
+          next if observed.nil? || observed.empty?
+
+          ivars.each do |ivar_name, type|
+            methods = observed[ivar_name]
+            next if methods.nil? || methods.empty?
+
+            ivars[ivar_name] = widen_type_for_observed_mutators(type, methods)
+          end
+        end
+      end
+
+      # Walks a class-ivar accumulator entry (which may be a
+      # `Union` of multiple write rvalues) and widens any
+      # `Tuple` or `HashShape` member whose corresponding
+      # mutator family was observed against the ivar somewhere
+      # in the class. Class-level widening is more aggressive
+      # than the per-method-body `MutationWidening` primitive:
+      # it widens both the SHAPE carrier (Tuple → Array,
+      # HashShape → Hash) AND the element types to
+      # `Dynamic[Top]`. The justification — once any method
+      # mutates the ivar, its post-mutation contents are
+      # statically unknown across method boundaries, so
+      # preserving the seed-write's element precision would be
+      # an unsound over-claim (e.g. `@struct = [{}]; somewhere:
+      # @struct << []` makes the next read's element no longer
+      # `Constant[{}]`).
+      def widen_type_for_observed_mutators(type, observed_methods)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        widened = members.map { |m| widen_member_for_observed_mutators(m, observed_methods) }
+        Type::Combinator.union(*widened)
+      end
+
+      def widen_member_for_observed_mutators(member, observed_methods)
+        case member
+        when Type::Tuple
+          return member unless observed_methods.any? { |m| MutationWidening::ARRAY_MUTATORS.include?(m) }
+
+          Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
+        when Type::HashShape
+          return member unless observed_methods.any? { |m| MutationWidening::HASH_MUTATORS.include?(m) }
+
+          Type::Combinator.nominal_of("Hash",
+                                      type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
+        else
+          member
+        end
+      end
+
+      def walk_class_ivars(node, qualified_prefix, default_scope, accumulator, mutated_ivars)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -184,20 +261,20 @@ module Rigor
           name = qualified_name_for(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
-            walk_class_ivars(node.body, child_prefix, default_scope, accumulator) if node.body
+            walk_class_ivars(node.body, child_prefix, default_scope, accumulator, mutated_ivars) if node.body
             return
           end
         when Prism::DefNode
-          collect_def_ivar_writes(node, qualified_prefix, default_scope, accumulator)
+          collect_def_ivar_writes(node, qualified_prefix, default_scope, accumulator, mutated_ivars)
           return
         end
 
         node.compact_child_nodes.each do |child|
-          walk_class_ivars(child, qualified_prefix, default_scope, accumulator)
+          walk_class_ivars(child, qualified_prefix, default_scope, accumulator, mutated_ivars)
         end
       end
 
-      def collect_def_ivar_writes(def_node, qualified_prefix, default_scope, accumulator)
+      def collect_def_ivar_writes(def_node, qualified_prefix, default_scope, accumulator, mutated_ivars)
         return if def_node.body.nil? || qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
@@ -211,7 +288,7 @@ module Rigor
           end
         body_scope = default_scope.with_self_type(self_type)
 
-        gather_ivar_writes(def_node.body, body_scope, class_name, accumulator)
+        gather_ivar_writes(def_node.body, body_scope, class_name, accumulator, EMPTY_GUARDED_IVARS, mutated_ivars)
       end
 
       IVAR_BARRIER_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze
@@ -220,24 +297,46 @@ module Rigor
       EMPTY_GUARDED_IVARS = Set.new.freeze
       private_constant :EMPTY_GUARDED_IVARS
 
-      def gather_ivar_writes(node, scope, class_name, accumulator, guarded_ivars = EMPTY_GUARDED_IVARS)
+      def gather_ivar_writes(node, scope, class_name, accumulator, guarded_ivars = EMPTY_GUARDED_IVARS,
+                             mutated_ivars = nil)
         return unless node.is_a?(Prism::Node)
 
         if node.is_a?(Prism::InstanceVariableWriteNode)
           record_ivar_write(node, scope, class_name, accumulator,
                             guarded: guarded_ivars.include?(node.name))
         end
+        record_ivar_mutator_call(node, class_name, mutated_ivars) if mutated_ivars && node.is_a?(Prism::CallNode)
 
         # Don't recurse into nested defs, classes, or modules; their
         # ivars belong to their own enclosing class.
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
         if node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
-          walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars)
+          walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars, mutated_ivars)
           return
         end
 
-        node.compact_child_nodes.each { |c| gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars) }
+        node.compact_child_nodes.each do |c|
+          gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars, mutated_ivars)
+        end
+      end
+
+      # Records `@ivar.<method>(...)` calls whose method is in
+      # `MutationWidening::ARRAY_MUTATORS` or `HASH_MUTATORS`.
+      # The class-ivar pre-pass uses the resulting set to widen
+      # the post-collected accumulator entries (see
+      # {.widen_mutated_ivar_entries!}). Always-safe to over-
+      # collect: any name that the widening primitive declines
+      # is ignored at finalization.
+      def record_ivar_mutator_call(node, class_name, mutated_ivars)
+        receiver = node.receiver
+        return unless receiver.is_a?(Prism::InstanceVariableReadNode)
+        return unless MutationWidening::ARRAY_MUTATORS.include?(node.name) ||
+                      MutationWidening::HASH_MUTATORS.include?(node.name)
+
+        per_class = (mutated_ivars[class_name] ||= {})
+        per_ivar = (per_class[receiver.name] ||= Set.new)
+        per_ivar << node.name
       end
 
       # Walk an `IfNode` / `UnlessNode` so writes inside the THEN body
@@ -256,14 +355,16 @@ module Rigor
       # reads of `@x` would then surface a nil-receiver FP. The
       # ELSE branch is left ungarded so those reads continue to type
       # as they did before this fix.
-      def walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars)
+      def walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars, mutated_ivars = nil)
         then_guards = then_body_guarded_ivars(node)
         then_guarded = then_guards.empty? ? guarded_ivars : (guarded_ivars | then_guards)
 
-        gather_ivar_writes(node.predicate, scope, class_name, accumulator, guarded_ivars)
-        gather_ivar_writes(node.statements, scope, class_name, accumulator, then_guarded) if node.statements
+        gather_ivar_writes(node.predicate, scope, class_name, accumulator, guarded_ivars, mutated_ivars)
+        if node.statements
+          gather_ivar_writes(node.statements, scope, class_name, accumulator, then_guarded, mutated_ivars)
+        end
         branch = node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause
-        gather_ivar_writes(branch, scope, class_name, accumulator, guarded_ivars) if branch
+        gather_ivar_writes(branch, scope, class_name, accumulator, guarded_ivars, mutated_ivars) if branch
       end
 
       # Returns the set of ivar names that, in the THEN body of this

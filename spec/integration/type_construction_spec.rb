@@ -75,6 +75,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/ivar_mutation_widening.rb — class-ivar Tuple/HashShape widening on mutation" do
+    let(:harness) { harness_for("ivar_mutation_widening") }
+
+    it "is diagnostic-clean — the Redmine `Structure` worked site no longer fires `undefined method '<<' for {}`" do
+      messages = harness.errors.map(&:message)
+      expect(messages).to be_empty
+    end
+  end
+
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 

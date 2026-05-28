@@ -84,6 +84,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/method_chain_narrowing.rb — stable single-hop method-chain narrowing" do
+    let(:harness) { harness_for("method_chain_narrowing") }
+
+    it "is diagnostic-clean — chain-narrowed `x.last << y` / `@list.last << y` dispatch through `Array`" do
+      messages = harness.errors.map(&:message)
+      expect(messages).to be_empty
+    end
+  end
+
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 

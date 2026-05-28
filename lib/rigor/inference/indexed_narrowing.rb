@@ -160,6 +160,28 @@ module Rigor
 
         current_scope.without_indexed_narrowings_for(*receiver)
       end
+
+      # Companion invalidator for single-hop method-chain
+      # narrowings (ROADMAP § Future cycles — "Method-call
+      # receiver narrowing across stable receivers", B2 from
+      # the slice's design notes). Drops every
+      # `(receiver, *)` chain narrowing rooted at the call's
+      # OUTER stable receiver — matching the ROADMAP's "any
+      # intervening method call against the same receiver"
+      # criterion. A call against `x.last` (the OUTER receiver
+      # is a `CallNode`, not a stable root) does NOT drop
+      # narrowings keyed on `x`, so the worked-site
+      # `x.last << y` pattern correctly preserves the chain
+      # narrowing for any further `x.last` read in the same
+      # body. Always-safe (only forgets; never invents).
+      def invalidate_chain_after_call(call_node:, current_scope:)
+        return current_scope unless call_node.is_a?(Prism::CallNode)
+
+        receiver = stable_receiver(call_node.receiver)
+        return current_scope if receiver.nil?
+
+        current_scope.without_method_chain_narrowings_for(*receiver)
+      end
     end
   end
 end

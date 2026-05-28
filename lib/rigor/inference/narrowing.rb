@@ -1371,15 +1371,11 @@ module Rigor
         # can resolve to a qualified class name. Anything else falls
         # through to "no narrowing".
         def analyse_class_predicate(node, scope, exact:)
-          return nil unless node.receiver.is_a?(Prism::LocalVariableReadNode)
           return nil if node.arguments.nil?
           return nil unless node.arguments.arguments.size == 1
 
           bare_name = static_class_name(node.arguments.arguments.first)
           return nil if bare_name.nil?
-
-          current = scope.local(node.receiver.name)
-          return nil if current.nil?
 
           # Resolve `bare_name` through the lexical-scope chain
           # so a name shadowed by the current class / enclosing
@@ -1392,7 +1388,79 @@ module Rigor
           # surface as a spurious `undefined-method` on
           # subsequent `other.class_name` calls).
           class_name = resolve_class_name_lexically(bare_name, scope)
+
+          case node.receiver
+          when Prism::LocalVariableReadNode
+            analyse_class_predicate_on_local(node, scope, class_name, exact)
+          when Prism::CallNode
+            analyse_class_predicate_on_chain(node, scope, class_name, exact)
+          end
+        end
+
+        def analyse_class_predicate_on_local(node, scope, class_name, exact)
+          current = scope.local(node.receiver.name)
+          return nil if current.nil?
+
           class_predicate_scopes(scope, node.receiver.name, current, class_name, exact: exact)
+        end
+
+        # Stable single-hop method-chain narrowing (ROADMAP §
+        # Future cycles — "Method-call receiver narrowing across
+        # stable receivers"). When the predicate's receiver is
+        # `<local/ivar>.<method>` with no args and no block,
+        # record the truthy / falsey narrowing in
+        # `Scope#method_chain_narrowings` keyed on the chain
+        # address. The dominated body's identical chain reads
+        # then observe the narrowed type through
+        # `ExpressionTyper#call_type_for`'s lookup.
+        #
+        # Heuristic-by-design (ROADMAP § "Soundness gap"): a
+        # second call to `x.last` could in principle return a
+        # different value than the first. The chain is dropped
+        # on (1) receiver variable rebind (handled inside
+        # `Scope#with_local` / `#with_ivar`), and (2) any
+        # intervening call against the same root receiver
+        # (handled by `StatementEvaluator#eval_call`'s
+        # invalidation step). The Law of Demeter justifies the
+        # single-hop restriction: a single-hop chain is the
+        # idiomatic Ruby shape where re-evaluation soundness is
+        # the strongest.
+        def analyse_class_predicate_on_chain(node, scope, class_name, exact)
+          address = stable_chain_address(node.receiver)
+          return nil if address.nil?
+
+          current = scope.type_of(node.receiver)
+          return nil if current.nil?
+
+          truthy_type = narrow_class(current, class_name, exact: exact, environment: scope.environment)
+          falsey_type = narrow_not_class(current, class_name, exact: exact, environment: scope.environment)
+
+          [
+            scope.with_method_chain_narrowing(*address, truthy_type),
+            scope.with_method_chain_narrowing(*address, falsey_type)
+          ]
+        end
+
+        # Returns `[receiver_kind, receiver_name, method_name]`
+        # iff `chain_call` is a stable single-hop chain whose
+        # root is a local / ivar read and whose own call shape
+        # has no positional arguments and no block. Other shapes
+        # (multi-hop, args, block, method-defined-on-arbitrary-
+        # receiver) lose stability for one of the reasons
+        # enumerated in the slice's design notes.
+        def stable_chain_address(chain_call)
+          return nil unless chain_call.is_a?(Prism::CallNode)
+          return nil unless chain_call.block.nil?
+
+          args = chain_call.arguments
+          return nil unless args.nil? || args.arguments.empty?
+
+          case chain_call.receiver
+          when Prism::LocalVariableReadNode
+            [:local, chain_call.receiver.name, chain_call.name]
+          when Prism::InstanceVariableReadNode
+            [:ivar, chain_call.receiver.name, chain_call.name]
+          end
         end
 
         # Walks the lexical-nesting chain derived from

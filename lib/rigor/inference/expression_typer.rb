@@ -1143,7 +1143,28 @@ module Rigor
       # `Tuple[]`) does not override the narrowing. See
       # {Inference::IndexedNarrowing}.
       def indexed_narrowing_for(node)
-        IndexedNarrowing.lookup_for_call(node, scope)
+        IndexedNarrowing.lookup_for_call(node, scope) || method_chain_narrowing_for(node)
+      end
+
+      # Stable single-hop chain narrowing — `receiver.method`
+      # after an `is_a?` / `kind_of?` / `instance_of?` predicate
+      # established the narrowing on the dominated edge. The
+      # call MUST be no-arg + no-block + rooted at a local-var /
+      # ivar read; everything else falls through to the
+      # standard dispatcher. ROADMAP § Future cycles —
+      # "Method-call receiver narrowing across stable
+      # receivers" — Law-of-Demeter-justified single-hop scope.
+      def method_chain_narrowing_for(node)
+        return nil unless node.is_a?(Prism::CallNode)
+        return nil unless node.block.nil?
+        return nil unless node.arguments.nil? || node.arguments.arguments.empty?
+
+        case node.receiver
+        when Prism::LocalVariableReadNode
+          scope.method_chain_narrowing(:local, node.receiver.name, node.name)
+        when Prism::InstanceVariableReadNode
+          scope.method_chain_narrowing(:ivar, node.receiver.name, node.name)
+        end
       end
 
       # v0.0.3 A — implicit-self calls prefer a same-named

@@ -22,7 +22,7 @@ module Rigor
                 :discovered_classes, :in_source_constants, :discovered_methods,
                 :discovered_def_nodes, :discovered_method_visibilities,
                 :discovered_superclasses, :discovered_includes,
-                :indexed_narrowings,
+                :indexed_narrowings, :method_chain_narrowings,
                 :source_path
 
     # Narrowing key for an indexed read `receiver[key]` where both
@@ -38,12 +38,34 @@ module Rigor
     #   not recorded; they have no stable address.
     IndexedKey = Data.define(:receiver_kind, :receiver_name, :key)
 
+    # Narrowing key for a no-arg / no-block method-call chain
+    # `receiver.method_name` (a "single-hop" chain per A1 from the
+    # ROADMAP § Future cycles slice). The value of the map at this
+    # key is the narrowed type the next read of the same chain
+    # MUST observe — typically the post-`is_a?(C)` narrowing
+    # established on a predicate edge.
+    #
+    # - `receiver_kind` ∈ `{:local, :ivar}` — the analyzer only
+    #   tracks chains rooted at a local or instance variable
+    #   today (Law-of-Demeter-style single-hop).
+    # - `receiver_name` is the root variable's Symbol.
+    # - `method_name` is the no-arg method invoked on the root.
+    #
+    # Chains with arguments (`x.first(3)`), with a block
+    # (`x.detect { ... }`), or with intermediate links
+    # (`x.foo.bar`) are NOT recorded; each loses stability for
+    # different reasons (args / block alter the call's return;
+    # multi-hop loses the LoD guarantee).
+    ChainKey = Data.define(:receiver_kind, :receiver_name, :method_name)
+
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
     EMPTY_CLASS_BINDINGS = {}.freeze
     EMPTY_INDEXED_NARROWINGS = {}.freeze
+    EMPTY_CHAIN_NARROWINGS = {}.freeze
     private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS,
-                     :EMPTY_CLASS_BINDINGS, :EMPTY_INDEXED_NARROWINGS
+                     :EMPTY_CLASS_BINDINGS, :EMPTY_INDEXED_NARROWINGS,
+                     :EMPTY_CHAIN_NARROWINGS
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -71,6 +93,7 @@ module Rigor
       discovered_superclasses: EMPTY_CLASS_BINDINGS,
       discovered_includes: EMPTY_CLASS_BINDINGS,
       indexed_narrowings: EMPTY_INDEXED_NARROWINGS,
+      method_chain_narrowings: EMPTY_CHAIN_NARROWINGS,
       source_path: nil
     )
       @environment = environment
@@ -92,6 +115,7 @@ module Rigor
       @discovered_superclasses = discovered_superclasses
       @discovered_includes = discovered_includes
       @indexed_narrowings = indexed_narrowings
+      @method_chain_narrowings = method_chain_narrowings
       @source_path = source_path
       freeze
     end
@@ -107,10 +131,15 @@ module Rigor
       # ||= default`" narrowing keyed on it — the slot at `name[*]`
       # is reachable through the old binding only, so the
       # next read against the new binding does not inherit the
-      # earlier non-nil guarantee.
+      # earlier non-nil guarantee. The same logic applies to
+      # method-chain narrowings: `x.last` after `x = something_new`
+      # is a call on the new binding and any prior `is_a?`-driven
+      # narrowing keyed on `(local, :x, :last)` no longer holds.
       new_indexed_narrowings = drop_indexed_narrowings_for(:local, name)
+      new_chain_narrowings = drop_chain_narrowings_for(:local, name)
       rebuild(locals: new_locals, fact_store: new_fact_store,
-              indexed_narrowings: new_indexed_narrowings)
+              indexed_narrowings: new_indexed_narrowings,
+              method_chain_narrowings: new_chain_narrowings)
     end
 
     def with_fact(fact)
@@ -176,8 +205,10 @@ module Rigor
 
     def with_ivar(name, type)
       new_indexed_narrowings = drop_indexed_narrowings_for(:ivar, name)
+      new_chain_narrowings = drop_chain_narrowings_for(:ivar, name)
       rebuild(ivars: @ivars.merge(name.to_sym => type).freeze,
-              indexed_narrowings: new_indexed_narrowings)
+              indexed_narrowings: new_indexed_narrowings,
+              method_chain_narrowings: new_chain_narrowings)
     end
 
     def with_cvar(name, type)
@@ -407,6 +438,43 @@ module Rigor
       rebuild(indexed_narrowings: new_table)
     end
 
+    # Closes the "stable receiver method-chain narrowing" gap
+    # (ROADMAP § Future cycles / Type-language / engine —
+    # "Method-call receiver narrowing across stable receivers";
+    # 2026-05-28 Redmine survey). After `if x.last.is_a?(Array)`
+    # the dominated body's `x.last` reads MUST observe the
+    # truthy-narrowed type; the same chain reaching the falsey
+    # edge observes the negative narrowing.
+    #
+    # Address shape mirrors {.indexed_narrowing}: stable root
+    # variable + no-arg single-hop method name. See
+    # {ChainKey} for the precise contract.
+    def method_chain_narrowing(receiver_kind, receiver_name, method_name)
+      @method_chain_narrowings[chain_key(receiver_kind, receiver_name, method_name)]
+    end
+
+    def with_method_chain_narrowing(receiver_kind, receiver_name, method_name, type)
+      new_table = @method_chain_narrowings.merge(
+        chain_key(receiver_kind, receiver_name, method_name) => type
+      ).freeze
+      rebuild(method_chain_narrowings: new_table)
+    end
+
+    def without_method_chain_narrowing(receiver_kind, receiver_name, method_name)
+      lookup = chain_key(receiver_kind, receiver_name, method_name)
+      return self unless @method_chain_narrowings.key?(lookup)
+
+      new_table = @method_chain_narrowings.reject { |k, _| k == lookup }.freeze
+      rebuild(method_chain_narrowings: new_table)
+    end
+
+    def without_method_chain_narrowings_for(receiver_kind, receiver_name)
+      new_table = drop_chain_narrowings_for(receiver_kind, receiver_name)
+      return self if new_table.equal?(@method_chain_narrowings)
+
+      rebuild(method_chain_narrowings: new_table)
+    end
+
     def facts_for(target: nil, bucket: nil)
       fact_store.facts_for(target: target, bucket: bucket)
     end
@@ -459,7 +527,8 @@ module Rigor
         @ivars == other.ivars &&
         @cvars == other.cvars &&
         @globals == other.globals &&
-        @indexed_narrowings == other.indexed_narrowings
+        @indexed_narrowings == other.indexed_narrowings &&
+        @method_chain_narrowings == other.method_chain_narrowings
     end
     alias eql? ==
 
@@ -479,6 +548,7 @@ module Rigor
       discovered_superclasses: @discovered_superclasses,
       discovered_includes: @discovered_includes,
       indexed_narrowings: @indexed_narrowings,
+      method_chain_narrowings: @method_chain_narrowings,
       source_path: @source_path
     )
       self.class.new(
@@ -496,6 +566,7 @@ module Rigor
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,
         indexed_narrowings: indexed_narrowings,
+        method_chain_narrowings: method_chain_narrowings,
         source_path: source_path
       )
     end
@@ -526,6 +597,7 @@ module Rigor
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,
         indexed_narrowings: join_bindings(@indexed_narrowings, other.indexed_narrowings),
+        method_chain_narrowings: join_bindings(@method_chain_narrowings, other.method_chain_narrowings),
         source_path: source_path
       )
     end
@@ -538,6 +610,14 @@ module Rigor
       )
     end
 
+    def chain_key(receiver_kind, receiver_name, method_name)
+      ChainKey.new(
+        receiver_kind: receiver_kind.to_sym,
+        receiver_name: receiver_name.to_sym,
+        method_name: method_name.to_sym
+      )
+    end
+
     def drop_indexed_narrowings_for(receiver_kind, receiver_name)
       return @indexed_narrowings if @indexed_narrowings.empty?
 
@@ -547,6 +627,17 @@ module Rigor
         k.receiver_kind == sym_kind && k.receiver_name == sym_name
       end
       filtered.size == @indexed_narrowings.size ? @indexed_narrowings : filtered.freeze
+    end
+
+    def drop_chain_narrowings_for(receiver_kind, receiver_name)
+      return @method_chain_narrowings if @method_chain_narrowings.empty?
+
+      sym_kind = receiver_kind.to_sym
+      sym_name = receiver_name.to_sym
+      filtered = @method_chain_narrowings.reject do |k, _|
+        k.receiver_kind == sym_kind && k.receiver_name == sym_name
+      end
+      filtered.size == @method_chain_narrowings.size ? @method_chain_narrowings : filtered.freeze
     end
   end
   # rubocop:enable Metrics/ClassLength,Metrics/ParameterLists

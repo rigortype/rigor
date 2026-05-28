@@ -56,6 +56,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     local(req:name)
     local_facts(req:name,key:bucket)
     locals()
+    method_chain_narrowing(req:receiver_kind,req:receiver_name,req:method_name)
+    method_chain_narrowings()
     program_globals()
     self_type()
     source_path()
@@ -79,11 +81,14 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     with_indexed_narrowing(req:receiver_kind,req:receiver_name,req:key,req:type)
     with_ivar(req:name,req:type)
     with_local(req:name,req:type)
+    with_method_chain_narrowing(req:receiver_kind,req:receiver_name,req:method_name,req:type)
     with_program_globals(req:table)
     with_self_type(req:type)
     with_source_path(req:path)
     without_indexed_narrowing(req:receiver_kind,req:receiver_name,req:key)
     without_indexed_narrowings_for(req:receiver_kind,req:receiver_name)
+    without_method_chain_narrowing(req:receiver_kind,req:receiver_name,req:method_name)
+    without_method_chain_narrowings_for(req:receiver_kind,req:receiver_name)
   ].freeze
 
   SCOPE_SINGLETON = %w[empty(key:environment,key:source_path)].freeze

@@ -947,6 +947,15 @@ module Rigor
         # same slot or any other mutator runs against the
         # receiver. Always-safe (only forgets; never invents).
         post_scope = IndexedNarrowing.invalidate_after_call(call_node: node, current_scope: post_scope)
+        # Single-hop method-chain narrowing — drop every
+        # `(receiver, *)` chain narrowing rooted at the call's
+        # outer stable receiver (any-call-against-the-root
+        # invalidation rule, B2 from the slice's design
+        # notes). Calls whose outer receiver is itself a chain
+        # node (e.g. `x.last << y`) do NOT drop narrowings
+        # keyed on `x` — only direct calls against the root
+        # variable invalidate the chain.
+        post_scope = IndexedNarrowing.invalidate_chain_after_call(call_node: node, current_scope: post_scope)
         [call_type, post_scope]
       end
 

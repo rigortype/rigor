@@ -48,7 +48,7 @@ You need:
 > automatically.
 >
 > <details>
-> <summary>日本語 / 简体中文 / 繁體中文 / 한국어 / Português (Brasil) / Español / Tiếng Việt / Français</summary>
+> <summary>日本語 / 简体中文 / 繁體中文 / 한국어 / Português (Brasil) / Español / Tiếng Việt / Français / ภาษาไทย / Bahasa Indonesia / Polski / Українська / Русский / Türkçe</summary>
 >
 > **日本語**
 > ```
@@ -95,6 +95,42 @@ You need:
 > **Français**
 > ```
 > Installez Rigor dans ce projet en suivant les instructions à l'adresse :
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **ภาษาไทย**
+> ```
+> ติดตั้ง Rigor ในโปรเจกต์นี้โดยทำตามคำแนะนำที่:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **Bahasa Indonesia**
+> ```
+> Instal Rigor di proyek ini dengan mengikuti petunjuk di:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **Polski**
+> ```
+> Zainstaluj Rigor w tym projekcie, postępując zgodnie z instrukcjami pod adresem:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **Українська**
+> ```
+> Встановіть Rigor у цьому проєкті, дотримуючись інструкцій за посиланням:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **Русский**
+> ```
+> Установите Rigor в этом проекте, следуя инструкциям по адресу:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **Türkçe**
+> ```
+> Bu projeye Rigor'u şu adresdeki talimatları izleyerek yükleyin:
 > https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 > ```
 >

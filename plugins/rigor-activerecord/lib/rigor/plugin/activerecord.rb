@@ -59,14 +59,14 @@ module Rigor
     class Activerecord < Rigor::Plugin::Base
       manifest(
         id: "activerecord",
-        # Bumped 2026-05-28 — Postgres array columns: a
-        # `t.<type> "name", array: true` (or `t.column "name",
-        # :type, array: true`) declaration now propagates through
-        # the column's instance accessor as `Array[<inner>]`
-        # rather than just `<inner>`. Mastodon's
-        # `reports.status_ids` (bigint array) used to type as
-        # `Integer`, breaking `(status_ids + ids).uniq`.
-        version: "0.4.0",
+        # Bumped 2026-05-28 — implicit-self class-side AR call
+        # resolution: `select(:uri).group(:uri)` inside a scope
+        # lambda body / class-method body now contributes
+        # `Relation[Model]` via `scope.self_type` instead of
+        # falling through to `Kernel#select` (the IO multiplexer,
+        # `Array[String]` return). Plus `:select` added to the
+        # relation-entry-point list.
+        version: "0.5.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => :string,

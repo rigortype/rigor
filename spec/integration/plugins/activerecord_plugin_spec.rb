@@ -725,6 +725,47 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(entry.scope?("published")).to be(true)
       expect(entry.scope?("nonexistent")).to be(false)
     end
+
+    it "types an implicit-self `select(...)` inside a scope lambda as Relation[Model]" do
+      # The lambda body's `self_type` is `Singleton[Post]`, so
+      # `select(:title).group(:title)` opens a relation via the
+      # AR plugin instead of falling through to `Kernel#select`'s
+      # IO-multiplexer return (`Array[String]`).
+      source = <<~RUBY
+        Post.published.merge(Post.where(title: 'x'))
+      RUBY
+      result = run_ar(source, models: SCOPE_MODELS, schema: SCOPE_SCHEMA)
+      undefined = result.diagnostics.select do |d|
+        d.path.end_with?("demo.rb") && d.rule == "call.undefined-method"
+      end
+      expect(undefined).to be_empty
+    end
+
+    it "contributes Relation[Model] for an implicit-self class-side call" do
+      _result, index = run_ar_with_index("x = 1\n", models: SCOPE_MODELS, schema: SCOPE_SCHEMA)
+      plugin = Rigor::Plugin::Activerecord.allocate
+      plugin.instance_variable_set(:@model_index, index)
+      call_node = Prism.parse("select(:title).group(:title)").value.statements.body.first.receiver
+      scope = Object.new
+      scope.define_singleton_method(:self_type) { Rigor::Type::Combinator.singleton_of("Post") }
+      contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+      expect(contribution.return_type).to eq(
+        Rigor::Type::Combinator.nominal_of(
+          "ActiveRecord::Relation",
+          type_args: [Rigor::Type::Combinator.nominal_of("Post")]
+        )
+      )
+    end
+
+    it "declines an implicit-self call when the surrounding self_type is not a known model" do
+      _result, index = run_ar_with_index("x = 1\n", models: SCOPE_MODELS, schema: SCOPE_SCHEMA)
+      plugin = Rigor::Plugin::Activerecord.allocate
+      plugin.instance_variable_set(:@model_index, index)
+      call_node = Prism.parse("select(:title)").value.statements.body.first
+      scope = Object.new
+      scope.define_singleton_method(:self_type) { Rigor::Type::Combinator.singleton_of("RandomClass") }
+      expect(plugin.flow_contribution_for(call_node: call_node, scope: scope)).to be_nil
+    end
   end
 
   describe "validations + callbacks — v0.1.5" do

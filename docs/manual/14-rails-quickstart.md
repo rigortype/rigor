@@ -48,7 +48,7 @@ You need:
 > automatically.
 >
 > <details>
-> <summary>[JP] 日本語</summary>
+> <summary>[JA] 日本語</summary>
 >
 > ```
 > 次の手順に従って、このプロジェクトに Rigor をインストールしてください:

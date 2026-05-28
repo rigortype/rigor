@@ -20,7 +20,7 @@ module Rigor
                 :ivars, :cvars, :globals,
                 :class_ivars, :class_cvars, :program_globals,
                 :discovered_classes, :in_source_constants, :discovered_methods,
-                :discovered_def_nodes, :discovered_method_visibilities,
+                :discovered_def_nodes, :discovered_def_sources, :discovered_method_visibilities,
                 :discovered_superclasses, :discovered_includes,
                 :indexed_narrowings, :method_chain_narrowings,
                 :source_path
@@ -89,6 +89,7 @@ module Rigor
       in_source_constants: EMPTY_VAR_BINDINGS,
       discovered_methods: EMPTY_CLASS_BINDINGS,
       discovered_def_nodes: EMPTY_CLASS_BINDINGS,
+      discovered_def_sources: EMPTY_CLASS_BINDINGS,
       discovered_method_visibilities: EMPTY_CLASS_BINDINGS,
       discovered_superclasses: EMPTY_CLASS_BINDINGS,
       discovered_includes: EMPTY_CLASS_BINDINGS,
@@ -111,6 +112,7 @@ module Rigor
       @in_source_constants = in_source_constants
       @discovered_methods = discovered_methods
       @discovered_def_nodes = discovered_def_nodes
+      @discovered_def_sources = discovered_def_sources
       @discovered_method_visibilities = discovered_method_visibilities
       @discovered_superclasses = discovered_superclasses
       @discovered_includes = discovered_includes
@@ -361,6 +363,27 @@ module Rigor
       rebuild(discovered_def_nodes: table)
     end
 
+    # Companion to {#user_def_for}: returns the `"path:line"` where
+    # the project defines `class_name#method_name` (instance-side),
+    # or nil. Populated only by the cross-file project pre-pass
+    # ({Inference::ScopeIndexer.discovered_def_index_for_paths}) — a
+    # `Prism::Location` hides its source file, so the site is recorded
+    # at scan time. `CheckRules#undefined_method_diagnostic` consults
+    # this to name the defining file when a project monkey-patch on a
+    # core/stdlib/gem class is called cross-file, so the diagnostic
+    # can point at `pre_eval:` (ADR-17) instead of reading as a bare
+    # unresolved call.
+    def user_def_site_for(class_name, method_name)
+      table = @discovered_def_sources[class_name.to_s]
+      return nil unless table
+
+      table[method_name.to_sym]
+    end
+
+    def with_discovered_def_sources(table)
+      rebuild(discovered_def_sources: table)
+    end
+
     # ADR-24 slice 2 — per-class table mapping a fully
     # qualified user-class name to its superclass name AS
     # WRITTEN at the `class Foo < Bar` declaration (`"Bar"`,
@@ -558,6 +581,7 @@ module Rigor
       class_ivars: @class_ivars, class_cvars: @class_cvars, program_globals: @program_globals,
       discovered_classes: @discovered_classes, in_source_constants: @in_source_constants,
       discovered_methods: @discovered_methods, discovered_def_nodes: @discovered_def_nodes,
+      discovered_def_sources: @discovered_def_sources,
       discovered_method_visibilities: @discovered_method_visibilities,
       discovered_superclasses: @discovered_superclasses,
       discovered_includes: @discovered_includes,
@@ -576,6 +600,7 @@ module Rigor
         in_source_constants: in_source_constants,
         discovered_methods: discovered_methods,
         discovered_def_nodes: discovered_def_nodes,
+        discovered_def_sources: discovered_def_sources,
         discovered_method_visibilities: discovered_method_visibilities,
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,
@@ -607,6 +632,7 @@ module Rigor
         in_source_constants: in_source_constants,
         discovered_methods: discovered_methods,
         discovered_def_nodes: discovered_def_nodes,
+        discovered_def_sources: discovered_def_sources,
         discovered_method_visibilities: discovered_method_visibilities,
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,

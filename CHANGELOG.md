@@ -14,6 +14,15 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+Sharpens how Rigor reports — and how `rigor triage` explains — undefined-method diagnostics that are really uninstalled project monkey-patches.
+
+### Added
+
+- **[rigor check]** When `call.undefined-method` fires on a method the project itself defines on the receiver class somewhere in the analyzed file set (a reopened core/stdlib/gem class Rigor does not apply cross-file), the diagnostic now names that definition site and points at `pre_eval:` — e.g. `undefined method 'shout' for "hi"; the project defines 'String#shout' at lib/core_ext.rb:4 — Rigor does not apply project monkey-patches cross-file; list that file in '.rigor.yml''s 'pre_eval:' (ADR-17)`. The diagnostic still fires (auto-application of project monkey-patches remains deferred per ADR-17), but it is now actionable rather than mistakable for a typo. The site is also exposed as a structured `project_definition_site` field on the diagnostic (and in `--format json`).
+- **[rigor triage]** Two new heuristic recognisers:
+  - `project-monkey-patch-known` (high confidence) keys on the new `project_definition_site` field — when the engine has *proven* a project file defines the called method, triage names that file and recommends copying it straight into `pre_eval:`, instead of the spread-based guess.
+  - `unresolved-toplevel` groups `call.unresolved-toplevel` diagnostics (ADR-34) and routes them to `pre_eval:` (a monkey-patch / required helper Rigor did not walk) or to the genuine-typo review path.
+
 ## [0.1.14] - 2026-05-29
 
 Improves the AI-assisted onboarding experience and fixes a silent environment failure when `rbs collection install` has been run.

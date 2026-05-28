@@ -109,6 +109,7 @@ module Rigor
         @cached_plugin_prepare_diagnostics = [].freeze
         @project_discovered_classes = {}.freeze
         @project_discovered_def_nodes = {}.freeze
+        @project_discovered_def_sources = {}.freeze
         @project_discovered_superclasses = {}.freeze
         @project_discovered_includes = {}.freeze
       end
@@ -257,6 +258,7 @@ module Rigor
         def_index =
           Inference::ScopeIndexer.discovered_def_index_for_paths(expansion.fetch(:files), buffer: @buffer)
         @project_discovered_def_nodes = def_index.fetch(:def_nodes)
+        @project_discovered_def_sources = def_index.fetch(:def_sources)
         @project_discovered_superclasses = def_index.fetch(:superclasses)
         @project_discovered_includes = def_index.fetch(:includes)
       end
@@ -1448,6 +1450,9 @@ module Rigor
         scope = scope.with_discovered_classes(@project_discovered_classes) unless @project_discovered_classes.empty?
         unless @project_discovered_def_nodes.empty?
           scope = scope.with_discovered_def_nodes(@project_discovered_def_nodes)
+        end
+        unless @project_discovered_def_sources.empty?
+          scope = scope.with_discovered_def_sources(@project_discovered_def_sources)
         end
         unless @project_discovered_superclasses.empty?
           scope = scope.with_discovered_superclasses(@project_discovered_superclasses)

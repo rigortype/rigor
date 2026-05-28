@@ -104,4 +104,21 @@ RSpec.describe Rigor::Analysis::Diagnostic do
       expect([diagnostic.receiver_type, diagnostic.method_name]).to eq(%w[Integer days])
     end
   end
+
+  describe "project_definition_site field (ADR-17)" do
+    it "defaults to nil and is omitted from to_h" do
+      diagnostic = described_class.new(path: "f.rb", line: 1, column: 1, message: "x")
+      expect(diagnostic.project_definition_site).to be_nil
+      expect(diagnostic.to_h).not_to have_key("project_definition_site")
+    end
+
+    it "carries the project def site and serialises it when present" do
+      diagnostic = described_class.new(
+        path: "use.rb", line: 4, column: 15, message: "undefined method `shout' for \"hi\"",
+        rule: "call.undefined-method", project_definition_site: "lib/core_ext.rb:4"
+      )
+      expect(diagnostic.project_definition_site).to eq("lib/core_ext.rb:4")
+      expect(diagnostic.to_h).to include("project_definition_site" => "lib/core_ext.rb:4")
+    end
+  end
 end

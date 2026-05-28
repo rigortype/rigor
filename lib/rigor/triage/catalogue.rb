@@ -22,6 +22,7 @@ module Rigor
       module_function
 
       UNDEFINED_METHOD_RULE = "call.undefined-method"
+      UNRESOLVED_TOPLEVEL_RULE = "call.unresolved-toplevel"
 
       # `undefined method `foo' for <receiver>`
       UNDEF_METHOD = /\Aundefined method [`'"]([^`'"]+)['"`] for (.+)\z/
@@ -104,9 +105,19 @@ module Rigor
       # monkey-patch): a known AR method on `Array[...]` deserves
       # the precise relation-misinference hint, not the generic
       # "project core-ext" guess H2 would otherwise claim it for.
+      #
+      # H2K (known project patch) runs before the generic H2: the
+      # engine has already proved the defining site via the
+      # `project_definition_site` field (ADR-17), so those
+      # diagnostics get the high-confidence file-naming hint rather
+      # than the spread-based guess. H7 (unresolved toplevel) runs
+      # before the systemic / genuine-bug catch-alls so toplevel
+      # resolution misses route to `pre_eval:` (ADR-34) instead of
+      # reading as scattered bugs.
       def recognisers
         %i[h1_activesupport h4_ar_relation h3_gem_without_rbs
-           h2_monkey_patch h5_systemic_cluster h6_genuine_bugs]
+           h2k_known_project_patch h2_monkey_patch h7_unresolved_toplevel
+           h5_systemic_cluster h6_genuine_bugs]
       end
 
       # --- H1 — likely ActiveSupport core_ext --------------------
@@ -124,6 +135,31 @@ module Rigor
                    "ActiveSupport monkey-patches these",
           action: "Add rigor-activesupport-core-ext to `plugins:` in .rigor.yml " \
                   "(it is an RBS-bundle plugin — ADR-25)."
+        ), matched]
+      end
+
+      # --- H2K — known project monkey-patch (engine-proven) ------
+      # ADR-17 / WD3 slice 4: the `call.undefined-method` rule sets
+      # `project_definition_site` when the project itself defines the
+      # called method on the receiver class somewhere in the file set
+      # (a reopened core/stdlib/gem class the dispatcher does not
+      # apply cross-file). That is direct evidence — not a spread
+      # heuristic — so this recogniser is `:likely` and names the
+      # defining files outright. It runs before the generic H2.
+      def h2k_known_project_patch(pool)
+        matched = pool.select(&:project_definition_site)
+        return nil if matched.empty?
+
+        files = matched.map { |d| d.project_definition_site.sub(/:\d+\z/, "") }
+                       .uniq.sort
+        [Hint.new(
+          id: "project-monkey-patch-known", confidence: :likely,
+          diagnostic_count: matched.size,
+          summary: "#{matched.size} undefined-method site(s) resolve to project " \
+                   "definitions in #{files.first(3).join(', ')} — reopened core/" \
+                   "stdlib/gem classes Rigor does not apply cross-file",
+          action: "List #{files.size == 1 ? 'this file' : 'these files'} in " \
+                  "`.rigor.yml`'s `pre_eval:` (ADR-17): #{files.join(', ')}"
         ), matched]
       end
 
@@ -176,6 +212,30 @@ module Rigor
                    "on an `Array[...]` receiver",
           action: "Enable rigor-activerecord; if it persists the receiver is an " \
                   "engine misinference (an AR relation read as Array) — worth a Rigor issue."
+        ), matched]
+      end
+
+      # --- H7 — unresolved toplevel implicit-self calls ----------
+      # ADR-34: `call.unresolved-toplevel` fires on a toplevel
+      # implicit-self call (no receiver, outside any def / class /
+      # module) that resolves against no visible contributor. The
+      # canonical opt-out is `pre_eval:` — the file is usually a
+      # script relying on methods defined by a monkey-patch or a
+      # required helper Rigor did not walk. Grouped, not per-site,
+      # so the report names the cluster once.
+      def h7_unresolved_toplevel(pool)
+        matched = pool.select { |d| rule_of(d) == UNRESOLVED_TOPLEVEL_RULE }
+        return nil if matched.empty?
+
+        files = matched.map(&:path).uniq.sort
+        [Hint.new(
+          id: "unresolved-toplevel", confidence: :possible,
+          diagnostic_count: matched.size,
+          summary: "#{matched.size} toplevel call(s) resolve to nothing visible " \
+                   "across #{files.size} file(s) (#{top_methods(matched, parser: :toplevel)})",
+          action: "If a monkey-patch or required helper defines these, list its " \
+                  "file in `.rigor.yml`'s `pre_eval:` (ADR-17); otherwise they may " \
+                  "be genuine typos or missing requires."
         ), matched]
       end
 
@@ -282,10 +342,16 @@ module Rigor
         groups.keys.first(3).map { |method, recv| "`#{method}` on #{recv}" }.join(", ")
       end
 
-      def top_methods(diagnostics, limit: 5)
-        diagnostics.filter_map { |d| parse_undefined_method(d)&.fetch(:method) }
-                   .tally.sort_by { |method, count| [-count, method] }
-                         .first(limit).map { |method, count| "#{method}×#{count}" }.join(" ")
+      # `parser: :undefined_method` (default) reads the method from
+      # the parsed `undefined-method` shape; `parser: :toplevel`
+      # reads the structured `method_name` field directly (the
+      # `unresolved-toplevel` rule carries no receiver to parse).
+      def top_methods(diagnostics, limit: 5, parser: :undefined_method)
+        names = diagnostics.filter_map do |d|
+          parser == :toplevel ? d.method_name : parse_undefined_method(d)&.fetch(:method)
+        end
+        names.tally.sort_by { |method, count| [-count, method] }
+                   .first(limit).map { |method, count| "#{method}×#{count}" }.join(" ")
       end
 
       def rule_of(diag)

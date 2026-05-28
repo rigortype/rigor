@@ -551,6 +551,40 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
     end
+
+    # ADR-17 — when a project patch is NOT registered via `pre_eval:`,
+    # the call still fires `call.undefined-method`, but the diagnostic
+    # names the proven definition site and carries it as the structured
+    # `project_definition_site` field for `rigor triage` to key on.
+    describe "ADR-17 — enriched undefined-method for un-registered project patches" do
+      it "names the cross-file def site and sets project_definition_site" do
+        Dir.mktmpdir("rigor-mp-enrich-") do |tmpdir|
+          File.write(File.join(tmpdir, "core_ext.rb"), <<~RUBY)
+            class String
+              def shout
+                upcase + "!"
+              end
+            end
+          RUBY
+          File.write(File.join(tmpdir, "user.rb"), <<~RUBY)
+            greeting = "hello"
+            puts greeting.shout
+          RUBY
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new("paths" => [tmpdir])
+            result = described_class.new(configuration: configuration, cache_store: nil).run
+            diag = result.diagnostics.find do |d|
+              d.rule.to_s.include?("undefined-method") && d.message.include?("shout")
+            end
+
+            expect(diag).not_to be_nil
+            expect(diag.message).to include("the project defines `String#shout' at")
+            expect(diag.message).to include("pre_eval:")
+            expect(diag.project_definition_site).to match(/core_ext\.rb:2/)
+          end
+        end
+      end
+    end
   end
 
   describe "ADR-24 slice 2 — cross-file superclass-chain resolution" do

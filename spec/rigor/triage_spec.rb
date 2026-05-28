@@ -8,10 +8,11 @@ require "rigor/analysis/diagnostic"
 # with synthetic `Diagnostic` arrays (no Runner / no analysis pass).
 RSpec.describe Rigor::Triage do
   def diag(path: "a.rb", rule: "call.undefined-method", message: "boom", severity: :error,
-           receiver_type: nil, method_name: nil)
+           receiver_type: nil, method_name: nil, project_definition_site: nil)
     Rigor::Analysis::Diagnostic.new(
       path: path, line: 1, column: 1, message: message, severity: severity, rule: rule,
-      receiver_type: receiver_type, method_name: method_name
+      receiver_type: receiver_type, method_name: method_name,
+      project_definition_site: project_definition_site
     )
   end
 
@@ -109,6 +110,31 @@ RSpec.describe Rigor::Triage do
       report = described_class.analyze([udm("days", "5")] * 3)
       expect(hint(report, "activesupport-core-ext")).not_to be_nil
       expect(hint(report, "genuine-bugs")).to be_nil
+    end
+
+    it "H2K — flags an engine-proven project patch and names the defining file" do
+      d = udm("shout", "String", path: "use.rb", project_definition_site: "lib/core_ext.rb:4")
+      h = hint(described_class.analyze([d]), "project-monkey-patch-known")
+      expect([h&.confidence, h&.diagnostic_count]).to eq([:likely, 1])
+      expect(h.action).to include("lib/core_ext.rb")
+    end
+
+    it "H2K — takes precedence over H2 and the genuine-bug catch-all" do
+      d = udm("shout", "String", path: "use.rb", project_definition_site: "lib/core_ext.rb:4")
+      report = described_class.analyze([d])
+      expect(hint(report, "project-monkey-patch-known")).not_to be_nil
+      expect(hint(report, "project-monkey-patch")).to be_nil
+      expect(hint(report, "genuine-bugs")).to be_nil
+    end
+
+    it "H7 — flags unresolved toplevel calls and points at pre_eval" do
+      diags = %w[helper_one helper_two].map do |m|
+        diag(rule: "call.unresolved-toplevel", severity: :warning, method_name: m,
+             message: "unresolved toplevel call to `#{m}`")
+      end
+      h = hint(described_class.analyze(diags), "unresolved-toplevel")
+      expect([h&.confidence, h&.diagnostic_count]).to eq([:possible, 2])
+      expect(h.summary).to include("helper_one")
     end
   end
 

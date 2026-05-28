@@ -401,7 +401,24 @@ module Rigor
           return nil if module_mixin_receiver?(receiver_type, scope) &&
                         lookup_method(receiver_type, "Object", call_node.name, scope)
 
-          build_undefined_method_diagnostic(path, call_node, receiver_type)
+          definition_site = project_definition_site(scope, class_name, call_node.name, kind)
+          build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site, class_name)
+        end
+
+        # ADR-17 — when the project itself defines this method on the
+        # receiver class somewhere in the analyzed file set (a reopened
+        # core/stdlib/gem class the dispatcher does not apply cross-
+        # file), return that `"path:line"` site so the diagnostic points
+        # at `pre_eval:` instead of reading as a bare unresolved call.
+        # Instance-side only (the cross-file def-source index tracks
+        # `def` instance methods); the diagnostic still fires — Rigor
+        # does not auto-apply project monkey-patches (the full-project
+        # pre-pass is deferred per ADR-17 slice 5) — but it is now
+        # actionable rather than mistakable for a typo.
+        def project_definition_site(scope, class_name, method_name, kind)
+          return nil unless kind == :instance
+
+          scope.user_def_site_for(class_name, method_name)
         end
 
         def module_mixin_receiver?(receiver_type, scope)
@@ -493,7 +510,8 @@ module Rigor
                      "`def` or a monkey-patch on Object/Kernel, list that file in " \
                      "`.rigor.yml`'s `pre_eval:` (ADR-17) so the analyzer sees it.",
             severity: :warning,
-            rule: RULE_UNRESOLVED_TOPLEVEL
+            rule: RULE_UNRESOLVED_TOPLEVEL,
+            method_name: call_node.name.to_s
           )
         end
 
@@ -1319,18 +1337,33 @@ module Rigor
           )
         end
 
-        def build_undefined_method_diagnostic(path, call_node, receiver_type)
+        def build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site = nil, class_name = nil)
           location = call_node.message_loc || call_node.location
           rendered_receiver = receiver_type.describe
+          message = "undefined method `#{call_node.name}' for #{rendered_receiver}"
+          # ADR-17 — when the project itself defines this method on the
+          # receiver class somewhere in the file set, name the site and
+          # point at `pre_eval:`. Rigor does not apply project monkey-
+          # patches cross-file automatically, so the diagnostic still
+          # fires, but the enriched message makes it actionable (and
+          # `rigor triage` keys on the structured `project_definition_site`
+          # field to recommend `pre_eval:` with high confidence).
+          if definition_site
+            def_owner = class_name || rendered_receiver
+            message += "; the project defines `#{def_owner}##{call_node.name}' at " \
+                       "#{definition_site} — Rigor does not apply project monkey-patches " \
+                       "cross-file; list that file in `.rigor.yml`'s `pre_eval:` (ADR-17)"
+          end
           Diagnostic.new(
             rule: RULE_UNDEFINED_METHOD,
             path: path,
             line: location.start_line,
             column: location.start_column + 1,
-            message: "undefined method `#{call_node.name}' for #{rendered_receiver}",
+            message: message,
             severity: :error,
             receiver_type: rendered_receiver,
-            method_name: call_node.name.to_s
+            method_name: call_node.name.to_s,
+            project_definition_site: definition_site
           )
         end
 

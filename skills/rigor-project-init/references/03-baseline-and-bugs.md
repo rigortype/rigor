@@ -50,7 +50,9 @@ Use the three sections like this:
 | --- | --- | --- |
 | `activesupport-core-ext` | ActiveSupport core-class monkey-patches not loaded. | Go back to Phase 3/4: add `rigor-activesupport-core-ext` to `plugins:` (it is an RBS-bundle plugin), re-run triage. This is a config gap, not a bug. |
 | `gem-without-rbs` | A dependency ships no RBS. | If `rbs_collection.lock.yaml` was present and Phase 1 installed the collection, re-run `rigor triage` — the hint may shrink or disappear. Otherwise: Phase 8 escalation — `bundle exec rbs collection install`, or `dependencies.source_inference:`, or open a Rigor issue. |
-| `project-monkey-patch` | An in-project monkey-patch / refinement Rigor did not see. | Phase 7 escalation — register the defining file via `pre_eval:`, or (if it is a DSL) write a project plugin. |
+| `project-monkey-patch-known` | **High confidence.** The engine proved the called method *is* defined by a project file (a reopened core/stdlib/gem class) but is not applied cross-file. The hint **names the defining file(s)**. | Phase 7 escalation — copy the named file(s) straight into `pre_eval:`. No detective work needed; the diagnostic already found the source. |
+| `project-monkey-patch` | An in-project monkey-patch / refinement Rigor did not see, inferred from the *spread* of the same method across ≥3 files (no proven def site). | Phase 7 escalation — find the defining file (grep for `def <method>` / `class <Receiver>`), register it via `pre_eval:`, or (if it is a DSL) write a project plugin. |
+| `unresolved-toplevel` | Toplevel calls (outside any `def`/`class`/`module`) that resolve to nothing visible — usually a script relying on a monkey-patch or a `require`d helper Rigor did not walk (ADR-34). | Phase 7 escalation — if a project file defines these (toplevel `def`, or a patch on `Object`/`Kernel`), list it in `pre_eval:`. If nothing defines them, treat as genuine typos / missing requires (Phase 8). |
 | `activerecord-relation-misinference` | An ActiveRecord relation inferred as `Array`. | Ensure `rigor-activerecord` is enabled (Phase 3). If it persists, it is an engine gap — open a Rigor issue. |
 | `systemic-file-cluster` | One file × one rule, large count. | Acknowledge mode: a clean baseline bucket. Strict mode: a single fix may clear many — review that file first. |
 | `genuine-bugs` | Low-count rules scattered across files. | **Phase 7** — these are the localised bugs Rigor caught. Review first, in both modes. Note: the hint groups all low-count rules regardless of severity — filter for `error` severity when prioritising actionable items. |
@@ -122,15 +124,20 @@ skill next to work them down.
 
 ### Escalation path A — application-specific metaprogramming
 
-If triage reports `project-monkey-patch`, or a `call.undefined-method`
-cluster lands on the project's own DSL / `define_method` factory /
-in-house macro, Rigor cannot follow it by default. Two answers,
-cheapest first:
+If triage reports `project-monkey-patch-known`, `project-monkey-patch`,
+`unresolved-toplevel`, or a `call.undefined-method` cluster lands on
+the project's own DSL / `define_method` factory / in-house macro,
+Rigor cannot follow it by default. Two answers, cheapest first:
 
 1. **A plain monkey-patch in a known file** (e.g.
    `lib/core_ext/string_extensions.rb`) — register it via `pre_eval:`
    in `.rigor.dist.yml`. Rigor walks those files before per-file
-   inference, so the added methods become visible.
+   inference, so the added methods become visible. When triage
+   reports `project-monkey-patch-known`, the defining file is **named
+   in the hint's action line** — copy it straight in. For the
+   spread-based `project-monkey-patch` / `unresolved-toplevel` hints
+   no def site was proven, so locate it first (`grep -rn 'def
+   <method>'`).
 2. **A genuine project DSL** — the durable fix is a **project-private
    Rigor plugin** that teaches Rigor the DSL's shape. Offer to hand
    off to the `rigor-plugin-author` skill. The plugin can live under

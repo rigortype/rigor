@@ -15,6 +15,7 @@ module Rigor
     attr_reader in_source_constants: Hash[String, Type::t]
     attr_reader discovered_methods: Hash[String, Hash[Symbol, Symbol]]
     attr_reader discovered_def_nodes: Hash[String, Hash[Symbol, untyped]]
+    attr_reader discovered_def_sources: Hash[String, Hash[Symbol, String]]
     attr_reader discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]]
     attr_reader discovered_superclasses: Hash[String, String]
     attr_reader discovered_includes: Hash[String, Array[String]]
@@ -56,7 +57,9 @@ module Rigor
     def with_discovered_methods: (Hash[String, Hash[Symbol, Symbol]] table) -> Scope
     def discovered_method?: (String | Symbol class_name, String | Symbol method_name, Symbol kind) -> bool
     def with_discovered_def_nodes: (Hash[String, Hash[Symbol, untyped]] table) -> Scope
+    def with_discovered_def_sources: (Hash[String, Hash[Symbol, String]] table) -> Scope
     def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
+    def user_def_site_for: (String | Symbol class_name, String | Symbol method_name) -> String?
     def top_level_def_for: (String | Symbol method_name) -> untyped?
     def toplevel?: () -> bool
     def with_discovered_method_visibilities: (Hash[String, Hash[Symbol, Symbol]] table) -> Scope

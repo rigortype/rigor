@@ -1365,19 +1365,29 @@ module Rigor
       # (`Mastodon::CLI::Accounts` calling a helper defined in
       # `Mastodon::CLI::Base`).
       #
+      # The returned `def_sources` map mirrors `def_nodes` but stores
+      # a `"path:line"` String per `(class_name, method_name)` instead
+      # of the `Prism::DefNode`. A `Prism::Location` does not expose
+      # its source file through public API, so the source site is
+      # captured here, in the pre-pass loop that still holds `path`.
+      # `CheckRules#undefined_method_diagnostic` consults the seeded
+      # copy to name the defining file when a project monkey-patch on
+      # a core/stdlib/gem class is called cross-file (ADR-17). First
+      # write wins, matching `def_nodes`' own merge order.
+      #
       # @param paths  [Array<String>] project file paths.
       # @param buffer [Rigor::Analysis::BufferBinding, nil]
-      # @return [Hash{Symbol => Hash}] `{ def_nodes:, superclasses: }`
+      # @return [Hash{Symbol => Hash}]
+      #   `{ def_nodes:, def_sources:, superclasses:, includes: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
         def_nodes = {}
+        def_sources = {}
         superclasses = {}
         includes = {}
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
-          build_discovered_def_nodes(root).each do |class_name, methods|
-            (def_nodes[class_name] ||= {}).merge!(methods)
-          end
+          merge_discovered_defs(def_nodes, def_sources, path, root)
           superclasses.merge!(build_discovered_superclasses(root))
           build_discovered_includes(root).each do |class_name, mods|
             includes[class_name] = ((includes[class_name] || []) + mods).uniq
@@ -1388,8 +1398,27 @@ module Rigor
           next
         end
         def_nodes.each_value(&:freeze)
+        def_sources.each_value(&:freeze)
         includes.each_value(&:freeze)
-        { def_nodes: def_nodes.freeze, superclasses: superclasses.freeze, includes: includes.freeze }
+        {
+          def_nodes: def_nodes.freeze, def_sources: def_sources.freeze,
+          superclasses: superclasses.freeze, includes: includes.freeze
+        }
+      end
+
+      # Merges one file's `class → method → DefNode` map into the
+      # cross-file `def_nodes` index and records each method's first-
+      # seen `"path:line"` definition site in `def_sources` (ADR-17 —
+      # the un-registered-project-patch signal `call.undefined-method`
+      # and `rigor triage` key on).
+      def merge_discovered_defs(def_nodes, def_sources, path, root)
+        build_discovered_def_nodes(root).each do |class_name, methods|
+          (def_nodes[class_name] ||= {}).merge!(methods)
+          sources = (def_sources[class_name] ||= {})
+          methods.each do |method_name, def_node|
+            sources[method_name] ||= "#{path}:#{def_node.location&.start_line || 1}"
+          end
+        end
       end
 
       # Class-only variant of `record_declarations` — descends

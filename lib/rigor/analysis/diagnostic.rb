@@ -9,7 +9,7 @@ module Rigor
       DEFAULT_SOURCE_FAMILY = :builtin
 
       attr_reader :path, :line, :column, :message, :severity, :rule, :source_family,
-                  :receiver_type, :method_name
+                  :receiver_type, :method_name, :project_definition_site
 
       # `rule:` is the stable identifier (a kebab-case string)
       # of the diagnostic's source rule. It is used by the
@@ -35,9 +35,18 @@ module Rigor
       # message wording. Both stay nil for rules that have no such
       # pair; a consumer that finds them nil falls back to message
       # parsing.
+      #
+      # `project_definition_site:` is an optional `"path:line"` string
+      # set by `call.undefined-method` when the project itself defines
+      # the called method on the receiver class somewhere in the
+      # analyzed file set (a reopened core/stdlib/gem class the
+      # dispatcher does not apply cross-file — see ADR-17). Its presence
+      # is the high-confidence "this is a project monkey-patch, not a
+      # bug" signal `rigor triage` keys on to recommend `pre_eval:`.
+      # Nil for every other diagnostic.
       def initialize(path:, line:, column:, message:, severity: :error, rule: nil, # rubocop:disable Metrics/ParameterLists
                      source_family: DEFAULT_SOURCE_FAMILY,
-                     receiver_type: nil, method_name: nil)
+                     receiver_type: nil, method_name: nil, project_definition_site: nil)
         @path = path
         @line = line
         @column = column
@@ -47,6 +56,7 @@ module Rigor
         @source_family = source_family
         @receiver_type = receiver_type
         @method_name = method_name
+        @project_definition_site = project_definition_site
       end
 
       def error?
@@ -65,7 +75,7 @@ module Rigor
       end
 
       def to_h
-        {
+        base = {
           "path" => path,
           "line" => line,
           "column" => column,
@@ -74,6 +84,8 @@ module Rigor
           "source_family" => source_family.to_s,
           "message" => message
         }
+        base["project_definition_site"] = project_definition_site if project_definition_site
+        base
       end
 
       # Text rendering for `rigor check`. The qualified rule

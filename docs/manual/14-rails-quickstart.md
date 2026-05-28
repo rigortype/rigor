@@ -47,7 +47,8 @@ You need:
 > install the right tools, and hand off to `rigor-project-init`
 > automatically.
 
-<div data-lang-details>
+<details data-lang-details>
+<summary>Set up in your language</summary>
 
 <details lang="ja"><summary>[ja] 日本語</summary>
 
@@ -211,7 +212,7 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 
 </details>
 
-</div>
+</details>
 
 Open a terminal **in your project root** and run:
 

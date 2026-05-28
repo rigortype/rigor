@@ -48,7 +48,7 @@ You need:
 > automatically.
 >
 > <details>
-> <summary>日本語</summary>
+> <summary>[JP] 日本語</summary>
 >
 > ```
 > 次の手順に従って、このプロジェクトに Rigor をインストールしてください:
@@ -58,7 +58,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>简体中文</summary>
+> <summary>[ZH-Hans] 简体中文</summary>
 >
 > ```
 > 请按照以下地址的说明在此项目中安装 Rigor:
@@ -68,7 +68,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>繁體中文</summary>
+> <summary>[ZH-Hant] 繁體中文</summary>
 >
 > ```
 > 請依照以下網址的說明在此專案中安裝 Rigor:
@@ -78,7 +78,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>한국어</summary>
+> <summary>[KO] 한국어</summary>
 >
 > ```
 > 다음 주소의 안내에 따라 이 프로젝트에 Rigor를 설치해 주세요:
@@ -88,7 +88,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>Português (Brasil)</summary>
+> <summary>[PT-BR] Português (Brasil)</summary>
 >
 > ```
 > Instale o Rigor neste projeto seguindo as instruções em:
@@ -98,7 +98,17 @@ You need:
 > </details>
 >
 > <details>
-> <summary>Español</summary>
+> <summary>[PT] Português</summary>
+>
+> ```
+> Utilizando o português de Portugal, instala o Rigor neste projeto seguindo as instruções em:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> </details>
+>
+> <details>
+> <summary>[ES] Español</summary>
 >
 > ```
 > Instala Rigor en este proyecto siguiendo las instrucciones en:
@@ -108,7 +118,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>Tiếng Việt</summary>
+> <summary>[VI] Tiếng Việt</summary>
 >
 > ```
 > Hãy cài đặt Rigor vào dự án này theo hướng dẫn tại:
@@ -118,7 +128,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>Français</summary>
+> <summary>[FR] Français</summary>
 >
 > ```
 > Installez Rigor dans ce projet en suivant les instructions à l'adresse :
@@ -128,7 +138,27 @@ You need:
 > </details>
 >
 > <details>
-> <summary>ภาษาไทย</summary>
+> <summary>[DE] Deutsch</summary>
+>
+> ```
+> Installieren Sie Rigor in diesem Projekt, indem Sie den Anweisungen unter diesem Link folgen:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> </details>
+>
+> <details>
+> <summary>[IT] Italiano</summary>
+>
+> ```
+> Installa Rigor in questo progetto seguendo le istruzioni a questo link:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> </details>
+>
+> <details>
+> <summary>[TH] ภาษาไทย</summary>
 >
 > ```
 > ติดตั้ง Rigor ในโปรเจกต์นี้โดยทำตามคำแนะนำที่:
@@ -138,7 +168,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>Bahasa Indonesia</summary>
+> <summary>[ID] Bahasa Indonesia</summary>
 >
 > ```
 > Instal Rigor di proyek ini dengan mengikuti instruksi di:
@@ -148,7 +178,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>Polski</summary>
+> <summary>[PL] Polski</summary>
 >
 > ```
 > Zainstaluj Rigor w tym projekcie, postępując zgodnie z instrukcjami pod adresem:
@@ -158,7 +188,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>Українська</summary>
+> <summary>[UK] Українська</summary>
 >
 > ```
 > Встановіть Rigor у цей проєкт, дотримуючись інструкцій за посиланням:
@@ -168,7 +198,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>Русский</summary>
+> <summary>[RU] Русский</summary>
 >
 > ```
 > Установите Rigor в этот проект, следуя инструкциям по ссылке:
@@ -178,7 +208,17 @@ You need:
 > </details>
 >
 > <details>
-> <summary>Türkçe</summary>
+> <summary>[RO] Română</summary>
+>
+> ```
+> Instalați Rigor în acest proiect urmând instrucțiunile de la adresa:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> </details>
+>
+> <details>
+> <summary>[TR] Türkçe</summary>
 >
 > ```
 > Bu projeye Rigor'u şu adresteki talimatları izleyerek kurun:

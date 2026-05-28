@@ -59,8 +59,8 @@ https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install
 ```
 
 Prefer to set up in your language? Find prompts for Japanese, Chinese,
-Korean, Spanish, Portuguese, French, Vietnamese, Thai, Indonesian,
-Polish, Ukrainian, Russian, and Turkish at
+Korean, Portuguese, Spanish, French, German, Italian, Vietnamese, Thai,
+Indonesian, Polish, Ukrainian, Russian, Romanian, and Turkish at
 [docs/manual/14-rails-quickstart.md](docs/manual/14-rails-quickstart.md#step-1--install-ruby-40-and-rigor-common-to-both-paths)
 (or the [online version](https://rigor.typedduck.fail/reference/manual/14-rails-quickstart/)).
 

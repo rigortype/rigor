@@ -134,8 +134,18 @@ module Rigor
         end
 
         def arity_check(path, call_node, class_entry, action_entry)
-          actual = (call_node.arguments&.arguments || []).size
+          args = call_node.arguments&.arguments || []
+          actual = args.size
           return nil if action_entry.accepts?(actual)
+
+          # Trailing keyword-hash relaxation. `Notify.foo(uid,
+          # gid, success_count: 5)` is 3 positional args from
+          # Prism's perspective (2 + a KeywordHashNode); the
+          # action's `def foo(uid, gid, success_count:)` has
+          # arity 2. When the call's trailing arg is a kwargs
+          # hash, allow `(actual - 1) ≤ max_arity` so kwargs-
+          # carrying calls don't surface as wrong-arity.
+          return nil if args.last.is_a?(Prism::KeywordHashNode) && action_entry.accepts?(actual - 1)
 
           location = call_node.location
           Diagnostic.new(

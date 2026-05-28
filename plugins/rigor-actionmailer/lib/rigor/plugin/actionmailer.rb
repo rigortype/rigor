@@ -56,7 +56,7 @@ module Rigor
         # idioms (`Mailer.respond_to?(action)` /
         # `Mailer.public_send(action)`) stop firing
         # `unknown-action` against the Ruby reflection method.
-        version: "0.3.0",
+        version: "0.4.0",
         description: "Validates ActionMailer call shape and view template existence.",
         config_schema: {
           "mailer_search_paths" => :array,

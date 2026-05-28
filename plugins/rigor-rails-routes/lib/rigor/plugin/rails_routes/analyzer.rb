@@ -61,6 +61,12 @@ module Rigor
         # check; no AR-column / gem-include analysis required.
         SKIP_UNKNOWN_HELPER_PATHS = [
           %r{(?:\A|/)app/models/},
+          %r{(?:\A|/)app/services/},
+          %r{(?:\A|/)app/workers/},
+          %r{(?:\A|/)app/finders/},
+          %r{(?:\A|/)app/policies/},
+          %r{(?:\A|/)app/validators/},
+          %r{(?:\A|/)app/uploaders/},
           %r{(?:\A|/)lib/},
           %r{(?:\A|/)db/},
           %r{(?:\A|/)config/}

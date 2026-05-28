@@ -63,7 +63,7 @@ module Rigor
         # alias-generation idiom — generates `<TO>_*` aliases
         # for every registered `<FROM>_*` helper. GitLab uses
         # this to shorten `namespace_project_*` → `project_*`.
-        version: "0.24.0",
+        version: "0.25.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

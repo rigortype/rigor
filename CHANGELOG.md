@@ -14,19 +14,26 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-05-29
+
+Targets two user-experience surfaces: AI-assisted onboarding and single-file script analysis. The new `rigor skill` subcommand lets any AI coding agent installed alongside `rigortype` (via `mise use gem:rigortype` and friends) discover and follow Rigor's bundled Agent Skills without a project-side source checkout, and the new `call.unresolved-toplevel` rule means a typo at the top of a standalone script — silent until now — surfaces as a diagnostic the first time `rigor check` runs.
+
 ### Added
 
-- **[rigor skill]** New subcommand exposes the Agent Skills bundled under `skills/` (`rigor-project-init`, `rigor-baseline-reduce`, `rigor-plugin-author`) to AI coding agents that have no a priori knowledge of where Rigor's gem checkout lives.
-  - `rigor skill list` — name + absolute SKILL.md path for every bundled skill.
-  - `rigor skill print <name>` — header (paths + how to read the `references/` directory) followed by the SKILL.md body, in one stdout stream the agent can act on directly.
-  - `rigor skill path <name>` — single-line absolute path, ideal as input to a file-reading tool.
-  - The `skills/` tree is now shipped inside the `rigortype` gem so `mise use gem:rigortype` (the recommended install channel) makes the skills reachable without cloning the repo.
-- **[manual]** Rails quickstart (Path A) now invokes the `rigor-project-init` skill via `rigor skill print rigor-project-init` instead of pointing at the in-repo `skills/` path.
-- **[rule: call.unresolved-toplevel]** New diagnostic flips the silent-`Dynamic[top]` default on **toplevel** implicit-self call sites (no enclosing `def` / `class` / `module`) that fail to resolve against any visible contributor. Standalone scripts and the [ADR-29](docs/adr/29-browser-playground.md) Playground now surface typos and forgotten `require`s; `foo 1` at the top of a file emits a `:warning` (severity profile `balanced`, the default), `:error` under `strict`, and is suppressed under `lenient`. Escape hatch for projects that introduce toplevel methods via monkey-patching is [ADR-17](docs/adr/17-monkey-patch-pre-evaluation.md)'s `pre_eval:` mechanism — no new config surface added. The class-body / `def`-body case stays lenient per [ADR-24 WD3](docs/adr/24-self-method-call-resolution.md). See [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) for the full design.
+- **[rigor skill]** New subcommand exposes the bundled Agent Skills so AI coding agents installed via `mise use gem:rigortype` can find and follow them without a project-side source checkout.
+  - `rigor skill list` prints name + absolute path for every bundled skill (`rigor-project-init`, `rigor-baseline-reduce`, `rigor-plugin-author`).
+  - `rigor skill print <name>` writes the SKILL body to stdout with a header pointing at the `references/` directory, so a single stdout stream is enough for the agent to act on.
+  - `rigor skill path <name>` writes the single-line absolute SKILL.md path, suitable as input to a file-reading tool.
+  - The `skills/` tree now ships inside the `rigortype` gem itself; the Rails quickstart (Path A) was updated to invoke the project-init skill via `rigor skill print rigor-project-init` instead of pointing at the in-repo `skills/` path.
+- **[rigor check]** New diagnostic `call.unresolved-toplevel` warns when an implicit-self call at the top of a file (outside any `def` / `class` / `module`) does not resolve against a same-file `def`, an [ADR-17](docs/adr/17-monkey-patch-pre-evaluation.md) `pre_eval:` monkey-patch, or a `Kernel` / `Object` method — surfacing typos in standalone scripts and the Playground that previously typed silently as `Dynamic[top]`.
+  - Severity is mapped through `severity_profile:`: `strict` → `:error`, `balanced` (default) → `:warning`, `lenient` → suppressed.
+  - Calls inside class / module / `def` bodies stay lenient per [ADR-24 WD3](docs/adr/24-self-method-call-resolution.md); this rule is intentionally toplevel-only.
+  - The escape hatch for projects with toplevel monkey-patches is `.rigor.yml`'s `pre_eval:` array — list the file that declares the method on `Object` / `Kernel` and the diagnostic is suppressed at the same precedence the dispatcher resolves the call.
+  - See [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) for the full design.
 
 ### Fixed
 
-- **[ADR-17 / pre_eval]** A method declared in a `pre_eval:` file on a concretely-typed receiver (`s = "hello"; s.patched_method`) was resolving correctly through the dispatcher's `try_project_patched_method` tier but still firing `call.undefined-method` from `Analysis::CheckRules`, which ran an independent "does this method exist?" probe that ignored the registry. CheckRules now consults `Environment#project_patched_methods` at the same precedence the dispatcher does. Methods declared via `pre_eval:` are now consistently suppressed across both the type and check paths.
+- **[rigor check]** A method patched in a `pre_eval:` file is no longer reported as `call.undefined-method` when called on a concretely-typed receiver (`s = "hello"; s.patched_method`). The diagnostic check now consults the same project-side monkey-patch registry (`Environment#project_patched_methods`) the dispatcher uses, so `pre_eval:` suppression is consistent across type inference and rule emission.
 
 ## [0.1.12] - 2026-05-28
 
@@ -991,7 +998,8 @@ Each example ships `lib/`, runnable `demo/`, README, and an end-to-end integrati
 - **Cache load order for CLI flow.** `lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`. In CLI flow, the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). Fixed; `--cache-stats` now reports real activity.
 - **Fail-soft `rescue StandardError` was masking analyzer-internal bugs.** Tightened to `rescue ::RBS::BaseError` across the RBS-touching code paths — `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`. Analyzer-internal `NameError` / `NoMethodError` / `LoadError` now propagate so similar bugs surface immediately rather than silently degrading user-visible behaviour.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/rigortype/rigor/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/rigortype/rigor/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/rigortype/rigor/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/rigortype/rigor/compare/v0.1.9...v0.1.10

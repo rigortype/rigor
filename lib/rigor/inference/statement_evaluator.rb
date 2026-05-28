@@ -1081,7 +1081,54 @@ module Rigor
         # keyed on `x` — only direct calls against the root
         # variable invalidate the chain.
         post_scope = IndexedNarrowing.invalidate_chain_after_call(call_node: node, current_scope: post_scope)
+        # B2.2 — intervening method call ivar invalidation.
+        # An implicit-self / self-receiver call could mutate any
+        # ivar of the enclosing class (we cannot prove purity
+        # without an effect system). Reset each ivar whose
+        # current local binding has narrowed below the class-ivar
+        # seed back to the seed itself, so a subsequent
+        # `if @flag` predicate observes the seed's union (not the
+        # pre-call narrowed value). Always-safe (only widens; no
+        # new facts). See [`docs/CURRENT_WORK.md`](../../../docs/CURRENT_WORK.md)
+        # § "Flow-folding" — G2 intervening-call case.
+        post_scope = invalidate_ivars_for_intervening_call(node, post_scope)
         [call_type, post_scope]
+      end
+
+      # Returns a scope with each ivar's narrowed local binding
+      # widened back to its class-ivar seed value when the call
+      # is one that could plausibly mutate ivars on the enclosing
+      # class (implicit-self or explicit `self.foo`). External-
+      # receiver calls (`obj.method`) cannot reach the caller's
+      # ivars; they pass through unchanged.
+      def invalidate_ivars_for_intervening_call(call_node, current_scope)
+        return current_scope unless intervening_call_candidate?(call_node)
+
+        class_name = enclosing_class_name_for(current_scope.self_type)
+        return current_scope if class_name.nil?
+
+        seed = current_scope.class_ivars_for(class_name)
+        return current_scope if seed.empty?
+
+        seed.reduce(current_scope) do |acc, (ivar_name, seed_type)|
+          local_type = current_scope.ivar(ivar_name)
+          next acc if local_type.nil? || local_type == seed_type
+
+          acc.with_ivar(ivar_name, Type::Combinator.union(local_type, seed_type))
+        end
+      end
+
+      def intervening_call_candidate?(call_node)
+        return false unless call_node.is_a?(Prism::CallNode)
+
+        receiver = call_node.receiver
+        receiver.nil? || receiver.is_a?(Prism::SelfNode)
+      end
+
+      def enclosing_class_name_for(self_type)
+        case self_type
+        when Type::Nominal, Type::Singleton then self_type.class_name
+        end
       end
 
       def evaluate_def_arguments(call_node)

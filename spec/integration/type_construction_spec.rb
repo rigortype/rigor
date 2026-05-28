@@ -111,6 +111,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/intervening_call_ivar_invalidation.rb — implicit-self call invalidates ivar narrowings" do
+    let(:harness) { harness_for("intervening_call_ivar_invalidation") }
+
+    it "is diagnostic-clean — `if @performed` after `perform_request` no longer folds" do
+      messages = harness.diagnostics.map(&:message)
+      expect(messages.grep(/always-(truthy|falsey)|condition is always/)).to be_empty
+    end
+  end
+
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 

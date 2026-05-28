@@ -809,6 +809,67 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(type).not_to be_nil
       end
 
+      describe "read-before-write nil contribution (B2.3)" do
+        it "adds nil to the seed on read-before-write, no init / class-body write" do
+          program = parse(<<~RUBY)
+            class BypassWithWarning
+              def update
+                puts "warn" unless @warning_issued
+                @warning_issued = true
+              end
+            end
+          RUBY
+          idx = described_class.index(program, default_scope: default_scope)
+          outer = idx[program]
+          type = outer.class_ivars_for("BypassWithWarning")[:@warning_issued]
+          expect(type).to be_a(Rigor::Type::Union)
+          values = type.members.grep(Rigor::Type::Constant).map(&:value)
+          expect(values).to include(nil, true)
+        end
+
+        it "does NOT add nil when `initialize` writes the ivar (soundness gate)" do
+          program = parse(<<~RUBY)
+            class Builder
+              def initialize
+                @struct = "init"
+              end
+
+              def use
+                @struct + "!" unless @struct
+              end
+            end
+          RUBY
+          idx = described_class.index(program, default_scope: default_scope)
+          outer = idx[program]
+          type = outer.class_ivars_for("Builder")[:@struct]
+          expect(type).to be_a(Rigor::Type::Constant)
+          expect(type.value).to eq("init")
+        end
+
+        it "does NOT add nil when a class-body `@x = nil` write exists (author acknowledgement)" do
+          program = parse(<<~RUBY)
+            class StreamingServerManager
+              @running_thread = nil
+
+              def start
+                return if @running_thread
+
+                @running_thread = Thread.new { @running_thread }
+              end
+            end
+          RUBY
+          idx = described_class.index(program, default_scope: default_scope)
+          outer = idx[program]
+          type = outer.class_ivars_for("StreamingServerManager")[:@running_thread]
+          # Class-body write exempts the read-before-write nil
+          # contribution. Without the exemption, an unjustified
+          # nil widening would propagate into Thread.new's block
+          # body and produce a `.kill for nil` style FP.
+          members = type.is_a?(Rigor::Type::Union) ? type.members : [type]
+          expect(members.find { |m| m.is_a?(Rigor::Type::Constant) && m.value.nil? }).to be_nil
+        end
+      end
+
       it "still accumulates other writes when one write is a skipped falsey default" do
         program = parse(<<~RUBY)
           class C
@@ -823,11 +884,22 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         RUBY
         idx = described_class.index(program, default_scope: default_scope)
         outer = idx[program]
-        # The skip drops only the defensive write; the `init`
-        # write still seeds `@w` to its rvalue type.
+        # The falsey-default write itself is skipped — the
+        # `init` write still seeds `@w` to its rvalue type. The
+        # B2.3 read-before-write pre-pass additionally unions
+        # `nil` here because `configure` reads `@w` before any
+        # write IN THAT METHOD BODY and `init` is NOT
+        # `initialize` (so the soundness gate's "constructor
+        # initialised" exemption does not apply).
         type = outer.class_ivars_for("C")[:@w]
-        expect(type).to be_a(Rigor::Type::Constant)
-        expect(type.value).to eq("hello")
+        expect(type).to be_a(Rigor::Type::Union)
+        member_kinds = type.members.map(&:class)
+        expect(member_kinds).to include(Rigor::Type::Constant)
+        # And `init`'s rvalue precision survives — the union
+        # carries `Constant["hello"]` (plus the read-before-write
+        # `Constant[nil]`).
+        constant_member = type.members.find { |m| m.is_a?(Rigor::Type::Constant) && m.value == "hello" }
+        expect(constant_member).not_to be_nil
       end
     end
   end

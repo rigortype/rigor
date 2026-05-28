@@ -1601,9 +1601,13 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
 
   describe "cross-method ivar tracking via class accumulator (Slice 7 phase 2)" do
     it "seeds an instance method body's ivars from sibling-method writes when routed through ScopeIndexer" do
+      # `def initialize` (not `def init`) is the soundness gate
+      # for the B2.3 read-before-write nil contribution: a write
+      # in `initialize` runs before any other method body, so
+      # the analyzer does NOT widen `@cache` with nil here.
       ast = parse_program(<<~RUBY)
         class Foo
-          def init; @cache = "hello"; end
+          def initialize; @cache = "hello"; end
           def get; @cache; end
         end
       RUBY

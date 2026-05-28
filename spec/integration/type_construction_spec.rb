@@ -120,6 +120,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/read_before_write_nil.rb — `read-before-write` adds nil to the seed" do
+    let(:harness) { harness_for("read_before_write_nil") }
+
+    it "is diagnostic-clean — `unless @warning_issued` and `return if @done` no longer fold" do
+      messages = harness.diagnostics.map(&:message)
+      expect(messages.grep(/always-(truthy|falsey)|condition is always/)).to be_empty
+    end
+  end
+
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 

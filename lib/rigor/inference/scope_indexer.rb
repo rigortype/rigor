@@ -183,9 +183,56 @@ module Rigor
       def build_class_ivar_index(root, default_scope)
         accumulator = {}
         mutated_ivars = {}
-        walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars)
+        read_before_write = {}
+        init_writes = {}
+        walk_class_ivars(root, [], default_scope, accumulator, mutated_ivars,
+                         read_before_write, init_writes)
         widen_mutated_ivar_entries!(accumulator, mutated_ivars)
+        contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
         accumulator.transform_values(&:freeze).freeze
+      end
+
+      # B2.3 — finalize the read-before-write nil contribution.
+      # For each class, for each ivar where SOME method body
+      # observed a read-before-write AND no `initialize` write
+      # exists for that ivar, contribute `Constant[nil]` to the
+      # class-wide accumulator.
+      #
+      # The `initialize` filter is the soundness gate: Ruby
+      # semantics guarantee `initialize` runs first (via
+      # `Class.new`), so a write there reaches every other
+      # method body's read. Read-before-write in a non-init
+      # method is then NOT a nil-at-runtime case — it's just
+      # AST-order coincidence. Without this filter a normal
+      # `def initialize; @x = ... end` / `def use; @x.foo end`
+      # class would have `@x` widened with nil, producing FPs
+      # at every `@x.foo` call.
+      def contribute_read_before_write_nil!(accumulator, read_before_write, init_writes)
+        nil_t = Type::Combinator.constant_of(nil)
+        read_before_write.each do |class_name, ivar_set|
+          init_set = init_writes[class_name] || EMPTY_GUARDED_IVARS
+          per_class = accumulator[class_name]
+          next if per_class.nil?
+
+          ivar_set.each do |ivar_name|
+            # Soundness gates (in order):
+            # (1) `initialize` writes the ivar → it's set
+            #     before any other method runs, so the
+            #     read-before-write in a sibling method is
+            #     NOT a runtime nil case.
+            # (2) The accumulator has NO entry for the ivar
+            #     → some write was deliberately skipped (the
+            #     falsey-default `@x = nil unless @x` slice's
+            #     no-seed behaviour). Adding nil here would
+            #     defeat that skip and re-introduce the
+            #     `Constant[nil]` FP the skip silenced.
+            next if init_set.include?(ivar_name)
+            next unless per_class.key?(ivar_name)
+
+            existing = per_class[ivar_name]
+            per_class[ivar_name] = Type::Combinator.union(existing, nil_t)
+          end
+        end
       end
 
       # Walks the post-collected accumulator and widens any Tuple
@@ -262,7 +309,8 @@ module Rigor
         end
       end
 
-      def walk_class_ivars(node, qualified_prefix, default_scope, accumulator, mutated_ivars)
+      def walk_class_ivars(node, qualified_prefix, default_scope, accumulator, mutated_ivars,
+                           read_before_write = nil, init_writes = nil)
         return unless node.is_a?(Prism::Node)
 
         case node
@@ -270,20 +318,42 @@ module Rigor
           name = qualified_name_for(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
-            walk_class_ivars(node.body, child_prefix, default_scope, accumulator, mutated_ivars) if node.body
+            if node.body
+              # Class-body level `@x = nil` writes don't
+              # initialise instance ivars at runtime (the
+              # class's own singleton ivars and the instance's
+              # ivars are separate stores), but they signal
+              # "the author KNOWS @x could be nil" and extend
+              # the B2.3 soundness gate: an ivar with a
+              # class-body write is exempted from the
+              # read-before-write nil contribution because the
+              # seed already reflects the author's acknowledged
+              # nullability via the def-body writes' union.
+              # Without this exemption, code that explicitly
+              # `@x = nil`s at class-body level then writes
+              # `@x = SomeClass.new` inside an instance method
+              # gains an unjustified nil widening at every
+              # read.
+              collect_class_body_ivar_writes(node.body, child_prefix.join("::"), init_writes) if init_writes
+              walk_class_ivars(node.body, child_prefix, default_scope, accumulator,
+                               mutated_ivars, read_before_write, init_writes)
+            end
             return
           end
         when Prism::DefNode
-          collect_def_ivar_writes(node, qualified_prefix, default_scope, accumulator, mutated_ivars)
+          collect_def_ivar_writes(node, qualified_prefix, default_scope, accumulator,
+                                  mutated_ivars, read_before_write, init_writes)
           return
         end
 
         node.compact_child_nodes.each do |child|
-          walk_class_ivars(child, qualified_prefix, default_scope, accumulator, mutated_ivars)
+          walk_class_ivars(child, qualified_prefix, default_scope, accumulator,
+                           mutated_ivars, read_before_write, init_writes)
         end
       end
 
-      def collect_def_ivar_writes(def_node, qualified_prefix, default_scope, accumulator, mutated_ivars)
+      def collect_def_ivar_writes(def_node, qualified_prefix, default_scope, accumulator, mutated_ivars,
+                                  read_before_write = nil, init_writes = nil)
         return if def_node.body.nil? || qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
@@ -298,6 +368,95 @@ module Rigor
         body_scope = default_scope.with_self_type(self_type)
 
         gather_ivar_writes(def_node.body, body_scope, class_name, accumulator, EMPTY_GUARDED_IVARS, mutated_ivars)
+
+        # B2.3 — collect per-method evidence for the read-before-
+        # write nil contribution. The accumulator-level decision
+        # ("is this ivar truly read-before-write across the
+        # class lifetime?") is finalised at
+        # `contribute_read_before_write_nil!` after the whole
+        # class body has been walked, using `init_writes` as
+        # the soundness gate (an ivar written in `initialize`
+        # is initialised before any other method body runs).
+        collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes)
+      end
+
+      # Walks the method body in AST (== execution) order
+      # tracking ivar names whose first reference is a read.
+      # The set is unioned into the class-wide
+      # `read_before_write` accumulator. For `initialize` def
+      # bodies, every write target is unioned into
+      # `init_writes` instead — used by the finalisation step
+      # to suppress nil contribution for ivars the constructor
+      # guarantees are initialised.
+      def collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes)
+        return if read_before_write.nil? || init_writes.nil?
+
+        seen_writes = Set.new
+        read_first = Set.new
+        detect_read_before_write(def_node.body, seen_writes, read_first)
+
+        if def_node.name == :initialize
+          init_set = (init_writes[class_name] ||= Set.new)
+          seen_writes.each { |name| init_set << name }
+          return
+        end
+
+        return if read_first.empty?
+
+        rbw_set = (read_before_write[class_name] ||= Set.new)
+        read_first.each { |name| rbw_set << name }
+      end
+
+      IVAR_WRITE_NODES = [
+        Prism::InstanceVariableWriteNode,
+        Prism::InstanceVariableOrWriteNode,
+        Prism::InstanceVariableAndWriteNode,
+        Prism::InstanceVariableOperatorWriteNode
+      ].freeze
+      private_constant :IVAR_WRITE_NODES
+
+      # Walks class-body level statements (i.e. NOT inside any
+      # nested DefNode / ClassNode / ModuleNode) and records
+      # every `@x = …` write target as a class-body init.
+      # Consumed by `contribute_read_before_write_nil!` to
+      # exempt ivars the author already knows might be nil
+      # (the `@x = nil` at class-body level is the canonical
+      # nullability acknowledgement; the instance @x is
+      # technically a separate store, but the pragmatic intent
+      # is unambiguous).
+      def collect_class_body_ivar_writes(node, class_name, init_writes)
+        return unless node.is_a?(Prism::Node)
+        return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        if node.is_a?(Prism::InstanceVariableWriteNode) ||
+           node.is_a?(Prism::InstanceVariableOrWriteNode) ||
+           node.is_a?(Prism::InstanceVariableAndWriteNode) ||
+           node.is_a?(Prism::InstanceVariableOperatorWriteNode)
+          (init_writes[class_name] ||= Set.new) << node.name
+        end
+
+        node.compact_child_nodes.each do |child|
+          collect_class_body_ivar_writes(child, class_name, init_writes)
+        end
+      end
+
+      def detect_read_before_write(node, seen_writes, read_first)
+        return unless node.is_a?(Prism::Node)
+        return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+
+        read_first << node.name if node.is_a?(Prism::InstanceVariableReadNode) && !seen_writes.include?(node.name)
+
+        # Descend BEFORE recording a write — `@x = @x + 1`'s
+        # RHS is an `InstanceVariableReadNode` that runs before
+        # the write is committed; the read is therefore
+        # read-before-write semantically. Prism's
+        # `compact_child_nodes` returns the value child before
+        # the lvalue target, matching this order.
+        node.compact_child_nodes.each do |c|
+          detect_read_before_write(c, seen_writes, read_first)
+        end
+
+        seen_writes << node.name if IVAR_WRITE_NODES.any? { |klass| node.is_a?(klass) }
       end
 
       IVAR_BARRIER_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze

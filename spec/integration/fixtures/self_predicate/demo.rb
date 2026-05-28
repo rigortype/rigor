@@ -36,7 +36,7 @@ end
 # now covers three receiver shapes beyond the local-variable
 # case already supported in v0.1.0.
 class User
-  def setup
+  def initialize
     @buddy = User.new
   end
 

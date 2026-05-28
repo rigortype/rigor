@@ -165,8 +165,14 @@ RSpec.describe "plugins/rigor-actionpack" do
       end
     end
 
-    it "rigor-rails-routes fires the arity-mismatch diagnostic when an arg is missing" do
-      source = "class C\n  def show\n    user_path\n  end\nend\n"
+    it "rigor-rails-routes fires the arity-mismatch diagnostic on overflow" do
+      # `about_path` is arity 0 — `accepts_arity?` allows
+      # `arity + 1` for the trailing-options-hash idiom, so we
+      # pass 2 explicit args to overflow past the `0 + 1`
+      # tolerance. Underflow (passing 0 args to a non-zero-arity
+      # helper) is silenced inside controller paths because of
+      # Rails' implicit-params-fill pattern.
+      source = "class C\n  def show\n    about_path(1, 2)\n  end\nend\n"
       with_demo(source) do |result|
         err = result.diagnostics.find do |d|
           d.source_family == "plugin.rails-routes" && d.rule == "wrong-arity"
@@ -177,7 +183,7 @@ RSpec.describe "plugins/rigor-actionpack" do
     end
 
     it "actionpack stays silent on the arity mismatch (no duplicate)" do
-      source = "class C\n  def show\n    user_path\n  end\nend\n"
+      source = "class C\n  def show\n    about_path(1, 2)\n  end\nend\n"
       with_demo(source) do |result|
         ap_arity = actionpack_diagnostics(result).select { |d| d.rule == "wrong-helper-arity" }
         expect(ap_arity).to be_empty

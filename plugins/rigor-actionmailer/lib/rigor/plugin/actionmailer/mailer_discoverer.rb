@@ -65,7 +65,6 @@ module Rigor
 
         # @return [MailerIndex]
         def discover
-          entries = []
           # Two-pass: first collect every module's defs (for
           # the include-following step), then build per-class
           # entries that pull in actions from include'd modules.
@@ -85,8 +84,8 @@ module Rigor
             collect_module_actions(tree, [], module_actions)
           end
 
-          class_visits.each do |class_name, path, def_nodes, includes|
-            entries << build_class_entry(class_name, path, def_nodes, includes, module_actions)
+          entries = class_visits.map do |class_name, path, def_nodes, includes|
+            build_class_entry(class_name, path, def_nodes, includes, module_actions)
           end
           MailerIndex.new(entries)
         end

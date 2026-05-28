@@ -92,8 +92,9 @@ Below that, either mode is reasonable — ask.
 | 4 | Write `.rigor.dist.yml` — severity profile follows the mode. Verify activation with `rigor plugins`. | [`references/02-configure.md`](references/02-configure.md) |
 | 5 | Generate initial RBS sigs; uplift attr_reader precision with `--params=observed`. | [`references/04-sig-uplift.md`](references/04-sig-uplift.md) |
 | 6 | Run `rigor triage --format json` to diagnose the diagnostic stream. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
+| 6a | **Pre-baseline cleanup** — apply quick fixes that triage diagnosed (`pre_eval:` for monkey-patch hints, `rbs collection install` if still needed). Re-run triage; repeat until the count is stable. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) § "Phase 6a" |
 | 7 | Acknowledge mode only — generate the baseline and wire `baseline:`. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
-| 8 | Surface likely real bugs; offer the two escalation paths. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
+| 8 | Surface likely real bugs; distinguish sig quality FPs from real bugs; offer escalation paths. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
 | 9 | Confirm the generated files with the user — what each is, and whether to commit it. | (this file — § "Final step") |
 
 Load each reference when you reach its phase. Phases run in order;
@@ -108,7 +109,7 @@ committed `sig/` directory.
 | 1 | [`references/01-detect.md`](references/01-detect.md) | **Phases 1 + 3.** Gemfile / Gemfile.lock walk → framework family. The plugin-recommendation table (Rails / dry-rb / Sinatra / RSpec / plain Ruby). RBS-collection presence check. |
 | 2 | [`references/02-configure.md`](references/02-configure.md) | **Phase 4.** Severity-profile choice tied to the mode. The `.rigor.dist.yml` template and every key it uses. The `.rigor.dist.yml` vs `.rigor.yml` convention. |
 | 3 | [`references/04-sig-uplift.md`](references/04-sig-uplift.md) | **Phase 5.** `rigor sig-gen --write` baseline. `rigor sig-gen --params=observed --write` attr_reader precision uplift. Handling residual `untyped` methods. Committing `sig/`. |
-| 4 | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) | **Phases 6–8.** `rigor triage` as the diagnosis layer. `rigor baseline generate` + wiring `baseline:`. Surfacing likely real bugs. The two escalation paths — write a project plugin, or open a Rigor issue. |
+| 4 | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) | **Phases 6–8.** `rigor triage` as the diagnosis layer. Phase 6a pre-baseline cleanup loop (`pre_eval:` for monkey-patch hints, `rbs collection install`). `rigor baseline generate` + wiring `baseline:`. Surfacing likely real bugs; sig quality FP recognition (Struct `call.wrong-arity`, `-> bot` return-type-mismatch, regex-capture `$1` FPs). The two escalation paths — write a project plugin, or open a Rigor issue. |
 
 ## Escalation paths (Phase 7 preview)
 

@@ -62,6 +62,70 @@ If triage flags `activesupport-core-ext` (or any config gap),
 baseline and the real-bug review should both run against the
 post-config diagnostic set, not the inflated one.
 
+## Phase 6a — Pre-baseline cleanup
+
+Before generating the baseline, **apply every quick fix that triage
+has already diagnosed**. A smaller baseline is a better baseline: each
+bucket it omits is a regression that will surface the moment it
+appears, rather than hiding behind a ceiling that the monkey-patch
+noise inflated.
+
+Quick fixes that belong here (apply now, not as post-baseline
+escalation):
+
+### `project-monkey-patch` / `project-monkey-patch-known` → `pre_eval:`
+
+When triage reports either hint, act before Phase 7:
+
+1. **`project-monkey-patch-known`** — the hint's action line **names
+   the defining file(s)**. Copy them straight into `pre_eval:` in
+   `.rigor.dist.yml`:
+
+   ```yaml
+   pre_eval:
+     - lib/core_ext/user_extensions.rb   # exact path(s) named by the hint
+   ```
+
+2. **`project-monkey-patch`** (spread-based, no proven def site) —
+   find the defining file manually:
+
+   ```sh
+   # Replace `current` / `User` with the method and receiver named in the hint
+   grep -rn "def self\.current\|cattr_accessor.*current" app/ lib/
+   grep -rn "def deliver_\|def find_by_" app/ lib/
+   ```
+
+   Then add the file(s) to `pre_eval:`.
+
+After adding `pre_eval:` entries, **re-run `rigor triage`** and note
+the new total. If the count dropped by more than ~50 diagnostics,
+the reduction is significant enough to justify this round; proceed
+with the new, smaller count.
+
+Repeat the loop (find → `pre_eval:` → re-triage) until the hint
+disappears or the remaining count is stable. Then move to Phase 7.
+
+> **Why `pre_eval:` reduces the count.** `pre_eval:` files are walked
+> before per-file inference. Methods defined in them — including those
+> added to existing classes via `class Foo; def bar; end; end` — become
+> visible to every subsequent file analysis. The monkey-patched methods
+> are no longer unknown, so `call.undefined-method` diagnostics that
+> depended on them disappear.
+
+### `gem-without-rbs` (if rbs collection was not yet installed)
+
+If Phase 1 did not install the collection (project had no
+`rbs_collection.lock.yaml`) and triage now reports `gem-without-rbs`,
+this is the right moment to act before the baseline:
+
+```sh
+bundle exec rbs collection install   # if rbs is in Gemfile
+# or: rbs collection install
+```
+
+Re-run `rigor triage`. If the `gem-without-rbs` count drops,
+re-generate the baseline against the new number.
+
 ## Phase 7 — Generate the baseline (acknowledge mode only)
 
 **Strict mode skips this phase entirely.** A strict project has no
@@ -121,6 +185,74 @@ In acknowledge mode these still went into the baseline — that is
 fine; the baseline is a starting envelope, not a verdict that the
 bug is acceptable. Recommend the user run the `rigor-baseline-reduce`
 skill next to work them down.
+
+### Distinguishing sig quality false positives from real bugs
+
+Some diagnostics in the `call.wrong-arity` and
+`def.return-type-mismatch` families are caused by **incomplete or
+incorrect `sig/` declarations**, not by real bugs in the project code.
+Identify them before presenting findings to the user — a sig FP looks
+alarming but needs a sig fix, not a code fix.
+
+#### `call.wrong-arity` on `Struct.new(...)` subclasses
+
+When a project defines a class as:
+
+```ruby
+MyStruct = Struct.new(:foo, :bar, :baz)
+# or
+class MyRecord < Struct.new(:id, :name)
+```
+
+and its `sig/` entry is an empty shell:
+
+```rbs
+class MyRecord
+end
+```
+
+Rigor reads the empty sig and infers `initialize` takes 0 arguments
+(the default). Any `MyRecord.new(x, y)` call then fires
+`call.wrong-arity`. This is a **sig quality issue** — the sig is
+missing the generated `initialize`.
+
+To confirm: check the sig file for the class. If the sig has no
+`initialize` def AND the Ruby source inherits from `Struct.new(...)`,
+the diagnostic is a FP. Note it as a sig improvement task (add
+`initialize` matching the Struct fields) rather than a code bug.
+
+#### `def.return-type-mismatch` when the declared type is `bot`
+
+A sig that declares `-> bot` (or `-> void` for a `raises`-only
+method) says: "this method never returns normally". If Rigor infers
+an actual return value, it fires `def.return-type-mismatch`.
+
+Two interpretations:
+
+| Sig says `-> bot` and … | Interpretation |
+| --- | --- |
+| the implementation has a missing `raise` on one branch | **Likely real bug** — the method was *intended* to always raise, but a code path escapes. High priority: review the branch. |
+| the sig was written conservatively (e.g. auto-generated) and the method does sometimes return | **Sig quality issue** — the sig is too strict. Fix by loosening the return type in the sig. |
+
+To distinguish: read the method body. If every branch ends in `raise`
+or `exit` except one, the missing raise is likely a bug. If the
+method has intentional return values but the sig says `bot`, it is a
+sig issue.
+
+#### `call.argument-type-mismatch` on regex capture variables (`$1`, `$~`)
+
+Rigor infers `$1`, `$~`, and similar capture variables as
+`String | nil` everywhere, even inside `gsub`/`match` blocks where
+they are guaranteed non-nil by the match condition. Diagnostics of
+the form:
+
+```
+expected String, got String | nil   (on $1 / $~)
+```
+
+are **engine FPs** (ADR-24 WD3 / known limitation). Note them as
+noise rather than surfacing them as bugs. They belong in the
+baseline.
 
 ### Escalation path A — application-specific metaprogramming
 

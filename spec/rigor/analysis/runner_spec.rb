@@ -50,6 +50,35 @@ RSpec.describe Rigor::Analysis::Runner do
     expect(result.diagnostics.first.message).not_to be_empty
   end
 
+  # Regression: Rails generator templates ship as `.rb` files but contain
+  # ERB interpolation (`<%= ... %>`), which Prism cannot parse and the
+  # analyzer used to surface as up to ~20 noisy parse-error diagnostics
+  # per file. Redmine's `lib/generators/redmine_plugin_model/templates/
+  # migration.rb` is the canonical example. The closing `%>` marker
+  # cannot appear in valid Ruby (`%` is a binary operator that requires
+  # an operand on its right), so its presence is sufficient evidence
+  # that the file is an ERB template; analysis silently skips it.
+  context "with an ERB-templated `.rb` file (Rails generator shape)" do
+    it "silently skips a file whose source uses `<%= ... %>` interpolation" do
+      result = analyze(<<~ERB)
+        class <%= @migration_class_name %> < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
+          def change
+            create_table :<%= @table_name %> do |t|
+            end
+          end
+        end
+      ERB
+
+      expect(result.diagnostics).to be_empty
+    end
+
+    it "still surfaces parse errors in non-templated files" do
+      # Sanity check that the ERB skip does not hide ordinary syntax errors.
+      result = analyze("def broken\n")
+      expect(result.diagnostics).not_to be_empty
+    end
+  end
+
   describe "exclude: patterns filter directory globs" do
     # Each test plants a parse-error-shaped file (unclosed `def`)
     # so analysis attempts surface as diagnostics; the test then

@@ -15,6 +15,7 @@ require_relative "../inference/method_dispatcher/file_folding"
 require_relative "check_rules"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
+require_relative "erb_template_detector"
 
 module Rigor
   module Analysis
@@ -158,7 +159,11 @@ module Rigor
       # is a per-run aggregate concern handled by the caller.
       def analyze(path)
         parse_result = parse_source(path)
-        return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
+        unless parse_result.errors.empty?
+          return [] if ErbTemplateDetector.template?(parse_result)
+
+          return parse_diagnostics(path, parse_result)
+        end
 
         scope = Scope.empty(environment: @environment, source_path: path)
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)

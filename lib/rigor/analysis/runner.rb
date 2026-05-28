@@ -20,6 +20,7 @@ require_relative "buffer_binding"
 require_relative "check_rules"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
+require_relative "erb_template_detector"
 require_relative "project_scan"
 require_relative "result"
 require_relative "run_stats"
@@ -1457,7 +1458,11 @@ module Rigor
 
       def analyze_file(path, environment) # rubocop:disable Metrics/MethodLength
         parse_result = parse_source(path)
-        return parse_diagnostics(path, parse_result) unless parse_result.errors.empty?
+        unless parse_result.errors.empty?
+          return [] if ErbTemplateDetector.template?(parse_result)
+
+          return parse_diagnostics(path, parse_result)
+        end
 
         scope = seed_project_scope(Scope.empty(environment: environment, source_path: path))
         index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)

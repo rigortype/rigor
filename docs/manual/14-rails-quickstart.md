@@ -48,7 +48,7 @@ You need:
 > automatically.
 >
 > <details>
-> <summary>[JA] 日本語</summary>
+> <summary>[ja] 日本語</summary>
 >
 > ```
 > 次の手順に従って、このプロジェクトに Rigor をインストールしてください:
@@ -58,7 +58,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[ZH-Hans] 简体中文</summary>
+> <summary>[zh-Hans] 简体中文</summary>
 >
 > ```
 > 请按照以下地址的说明在此项目中安装 Rigor:
@@ -68,7 +68,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[ZH-Hant] 繁體中文</summary>
+> <summary>[zh-Hant] 繁體中文</summary>
 >
 > ```
 > 請依照以下網址的說明在此專案中安裝 Rigor:
@@ -78,7 +78,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[KO] 한국어</summary>
+> <summary>[ko] 한국어</summary>
 >
 > ```
 > 다음 주소의 안내에 따라 이 프로젝트에 Rigor를 설치해 주세요:
@@ -88,7 +88,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[PT-BR] Português (Brasil)</summary>
+> <summary>[pt-BR] Português (Brasil)</summary>
 >
 > ```
 > Instale o Rigor neste projeto seguindo as instruções em:
@@ -98,7 +98,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[PT] Português</summary>
+> <summary>[pt] Português</summary>
 >
 > ```
 > Utilizando o português de Portugal, instala o Rigor neste projeto seguindo as instruções em:
@@ -108,7 +108,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[ES] Español</summary>
+> <summary>[es] Español</summary>
 >
 > ```
 > Instala Rigor en este proyecto siguiendo las instrucciones en:
@@ -118,7 +118,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[VI] Tiếng Việt</summary>
+> <summary>[vi] Tiếng Việt</summary>
 >
 > ```
 > Hãy cài đặt Rigor vào dự án này theo hướng dẫn tại:
@@ -128,7 +128,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[FR] Français</summary>
+> <summary>[fr] Français</summary>
 >
 > ```
 > Installez Rigor dans ce projet en suivant les instructions à l'adresse :
@@ -138,7 +138,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[DE] Deutsch</summary>
+> <summary>[de] Deutsch</summary>
 >
 > ```
 > Installieren Sie Rigor in diesem Projekt, indem Sie den Anweisungen unter diesem Link folgen:
@@ -148,7 +148,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[IT] Italiano</summary>
+> <summary>[it] Italiano</summary>
 >
 > ```
 > Installa Rigor in questo progetto seguendo le istruzioni a questo link:
@@ -158,7 +158,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[TH] ภาษาไทย</summary>
+> <summary>[th] ภาษาไทย</summary>
 >
 > ```
 > ติดตั้ง Rigor ในโปรเจกต์นี้โดยทำตามคำแนะนำที่:
@@ -168,7 +168,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[ID] Bahasa Indonesia</summary>
+> <summary>[id] Bahasa Indonesia</summary>
 >
 > ```
 > Instal Rigor di proyek ini dengan mengikuti instruksi di:
@@ -178,7 +178,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[PL] Polski</summary>
+> <summary>[pl] Polski</summary>
 >
 > ```
 > Zainstaluj Rigor w tym projekcie, postępując zgodnie z instrukcjami pod adresem:
@@ -188,7 +188,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[UK] Українська</summary>
+> <summary>[uk] Українська</summary>
 >
 > ```
 > Встановіть Rigor у цей проєкт, дотримуючись інструкцій за посиланням:
@@ -198,7 +198,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[RU] Русский</summary>
+> <summary>[ru] Русский</summary>
 >
 > ```
 > Установите Rigor в этот проект, следуя инструкциям по ссылке:
@@ -208,7 +208,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[RO] Română</summary>
+> <summary>[ro] Română</summary>
 >
 > ```
 > Instalați Rigor în acest proiect urmând instrucțiunile de la adresa:
@@ -218,7 +218,7 @@ You need:
 > </details>
 >
 > <details>
-> <summary>[TR] Türkçe</summary>
+> <summary>[tr] Türkçe</summary>
 >
 > ```
 > Bu projeye Rigor'u şu adresteki talimatları izleyerek kurun:

@@ -92,15 +92,21 @@ module Rigor
           HelperTable.new(paired, custom_helpers: custom_helpers, devise_resources: context.devise_resources)
         end
 
-        # For every registered alias rule `(from_str, to_str)`,
-        # find every existing entry whose name contains `from_str`
-        # and register an aliased entry with `from_str → to_str`
-        # substitution. The pattern matches GitLab's shorthand-
-        # helper idiom: a loop over registered route names that
-        # invokes `direct(new_name)` where `new_name = name.sub(
-        # FROM, TO)`. The substituted names route through the
-        # same underlying URL helper, so the arity / path stay
-        # the same on the alias.
+        # For every registered alias rule `(from_str, to_str,
+        # arity_delta)`, find every existing entry whose name
+        # contains `from_str` and register an aliased entry with
+        # `from_str → to_str` substitution. The pattern matches
+        # GitLab's shorthand-helper idiom: a loop over registered
+        # route names that invokes `direct(new_name) do |project,
+        # *args| send("#{name}_url", project&.namespace,
+        # project, *args) end` where `new_name = name.sub(FROM,
+        # TO)`. The direct block extracts the namespace from
+        # `project` and forwards the rest, so the alias's arity
+        # is one LESS than the original helper's
+        # (`namespace_project_blob_path(namespace_id, project_id,
+        # blob_id)` → `project_blob_path(project, blob_id)`).
+        # We register each alias under the original entry's
+        # arity AND `original - 1` to span both interpretations.
         def apply_alias_rules(context)
           return if context.alias_rules.empty?
 
@@ -112,11 +118,17 @@ module Rigor
               new_name = entry.name.sub(from, to)
               next if new_name == entry.name
 
-              aliases << HelperTable::Entry.new(
-                name: new_name, arity: entry.arity,
-                path: entry.path, http_method: entry.http_method,
-                action: entry.action
-              )
+              # Register at original arity AND at arity-1 so the
+              # common GitLab `|project, *args|` pattern (which
+              # collapses namespace_id + project_id into project)
+              # passes the arity check.
+              [entry.arity, [entry.arity - 1, 0].max].uniq.each do |arity|
+                aliases << HelperTable::Entry.new(
+                  name: new_name, arity: arity,
+                  path: entry.path, http_method: entry.http_method,
+                  action: entry.action
+                )
+              end
             end
           end
           context.entries.concat(aliases)
@@ -530,6 +542,15 @@ module Rigor
             handle_with_options(node, context)
           when :concern
             handle_concern_definition(node, context)
+          when :direct
+            # `direct(:name) do |args...| ... end` — Rails DSL
+            # for a custom URL helper. We register `name_path`
+            # and (auto-paired) `name_url`. The arity comes
+            # from the block's required-parameter count. Only
+            # literal Symbol/String names are handled here;
+            # non-literal forms are caught by the
+            # `detect_alias_rule_in_each` walker upstream.
+            handle_direct(node, context)
           when :each
             # `.each do |name| ... end` — scan the block for
             # the GitLab `direct(name.sub(X, Y)) do ... end`
@@ -541,6 +562,41 @@ module Rigor
           else
             interpret_block_body(node, context)
           end
+        end
+
+        # `direct(:name) do |arg1, arg2, ...| ... end` — Rails
+        # adds a custom URL helper. We register `name_path`
+        # with the block's required-arg count as the arity (the
+        # auto-pairing in `parse` adds `name_url`). Only handled
+        # for literal Symbol or String first-arg.
+        def handle_direct(node, context)
+          first = node.arguments&.arguments&.first
+          name = case first
+                 when Prism::SymbolNode then first.unescaped
+                 when Prism::StringNode then first.unescaped
+                 end
+          return if name.nil? || name.empty?
+
+          block = node.block
+          arity = if block.is_a?(Prism::BlockNode)
+                    block_required_arity(block)
+                  else
+                    0
+                  end
+
+          context.entries << HelperTable::Entry.new(
+            name: name.end_with?("_path") || name.end_with?("_url") ? name : "#{name}_path",
+            arity: arity, path: "/<direct:#{name}>",
+            http_method: :get, action: :custom
+          )
+        end
+
+        def block_required_arity(block_node)
+          params = block_node.parameters
+          return 0 unless params.is_a?(Prism::BlockParametersNode)
+          return 0 unless params.parameters.is_a?(Prism::ParametersNode)
+
+          (params.parameters.requireds || []).size
         end
 
         # Walks a `.each do |loop_var| ... end` body looking for:
@@ -927,19 +983,38 @@ module Rigor
             return register_on_target_action(node, context, as_name, on_target) if as_name
           end
 
-          # `get "/about", to: "static#about", as: :about`
-          path = string_argument(node, 0)
+          # `get "/about", to: "static#about", as: :about` —
+          # path as the first positional arg. Also handle the
+          # hashrocket-key form `get 'help/*path' => 'help#show',
+          # as: :help_page` where the path is the String key in
+          # the trailing keyword/options hash (its value is the
+          # `controller#action`). Without this, the arity check
+          # underestimates because the placeholder count comes
+          # from a nil path.
+          path = string_argument(node, 0) || hashrocket_path_key(node)
           as_name = keyword_symbol(node, :as)
           return if as_name.nil? && path.nil?
 
           # When `as:` is omitted, Rails derives a helper name
           # from the path for static paths (no :segment). We
-          # do the same when the path has no placeholders.
+          # do the same when the path has no placeholders. The
+          # special case `get '/'` inside a `:as_scope` (e.g.
+          # `scope path: '/blob/*id', as: :blob do; get '/' end`)
+          # has empty path content after stripping the leading
+          # slash — Rails reuses the enclosing as_scope's name.
+          # We surface that by registering the helper with an
+          # empty `as_name`, which `explicit_route_helper_name`
+          # then composes from `helper_prefix.chomp("_")`.
           if as_name.nil?
             return if path.nil? || path.include?(":")
 
             as_name = path.delete_prefix("/").tr("/", "_")
-            return if as_name.empty?
+            if as_name.empty? && context.helper_prefix.empty?
+              # `get '/'` style — only meaningful when the
+              # helper_prefix is non-empty (otherwise Rails would
+              # generate a root helper, handled elsewhere).
+              return
+            end
           end
 
           name = explicit_route_helper_name(context, as_name)
@@ -977,6 +1052,13 @@ module Rigor
         #   get 'foo', as: :bar; end; end` →
         #   `admin_bar_project_path(:id)`.
         def explicit_route_helper_name(context, as_name)
+          # Empty `as_name` is the `get '/'`-inside-an-as_scope
+          # case (e.g. `scope path: '/blob/*id', as: :blob do;
+          # get '/' end` → `blob_path(:id)`). Use the
+          # helper_prefix as-is (drop the trailing underscore)
+          # — Rails reuses the enclosing scope's name verbatim.
+          return "#{context.helper_prefix.chomp('_')}_path" if as_name.to_s.empty?
+
           if context.inside_resource_scope?
             "#{context.namespace_only_prefix}#{as_name}_#{context.resource_singular_chain}path"
           else
@@ -1320,6 +1402,25 @@ module Rigor
           value.is_a?(String) ? value : nil
         end
 
+        # `get 'help/*path' => 'help#show', as: :help_page` —
+        # the path lives in a String-keyed AssocNode of the
+        # trailing keyword/options hash (its value is the
+        # `controller#action` String). Returns the path String,
+        # or nil when no such hashrocket-key entry exists.
+        def hashrocket_path_key(node)
+          args = node.arguments&.arguments || []
+          last = args.last
+          return nil unless last.is_a?(Prism::KeywordHashNode)
+
+          last.elements.each do |element|
+            next unless element.is_a?(Prism::AssocNode)
+            next unless element.key.is_a?(Prism::StringNode)
+
+            return element.key.unescaped
+          end
+          nil
+        end
+
         def symbol_value(node)
           node.is_a?(Prism::SymbolNode) ? node.unescaped.to_sym : nil
         end
@@ -1338,7 +1439,12 @@ module Rigor
         def count_path_placeholders(path)
           return 0 if path.nil?
 
-          path.scan(/:[a-z_][a-z0-9_]*/).size
+          # Both `:name` (regular segment) and `*name` (wildcard
+          # / "globbing" segment) are Rails path parameters and
+          # contribute to helper arity. GitLab's
+          # `path: '*namespace_id'` outer scope adds 1 to the
+          # arity of every helper underneath.
+          path.scan(/[:*][a-z_][a-z0-9_]*/).size
         end
 
         # Number of placeholders inside `(...)` groups — Rails'
@@ -1349,7 +1455,7 @@ module Rigor
         def count_optional_path_placeholders(path)
           return 0 if path.nil?
 
-          path.scan(/\([^)]*\)/).sum { |group| group.scan(/:[a-z_][a-z0-9_]*/).size }
+          path.scan(/\([^)]*\)/).sum { |group| group.scan(/[:*][a-z_][a-z0-9_]*/).size }
         end
 
         # Shared with `Context::Inflector#singularize` — kept in

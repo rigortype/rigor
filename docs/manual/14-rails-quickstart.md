@@ -35,6 +35,18 @@ You need:
 
 ## Step 1 — Install Ruby 4.0 and Rigor (common to both paths)
 
+> **Using an AI agent?** Point it at the machine-readable install
+> guide instead:
+>
+> ```
+> Install Rigor in this project by following the instructions at
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> The agent will detect your environment (mise / asdf / plain Ruby),
+> install the right tools, and hand off to `rigor-project-init`
+> automatically.
+
 Open a terminal **in your project root** and run:
 
 ```sh

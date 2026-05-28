@@ -102,6 +102,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/retry_edge_widening.rb — `tries += 1; retry` widens the counter" do
+    let(:harness) { harness_for("retry_edge_widening") }
+
+    it "is diagnostic-clean — `if tries > 100` and `if @attempts > 10` no longer fold" do
+      messages = harness.diagnostics.map(&:message)
+      expect(messages.grep(/always-(truthy|falsey)|condition is always/)).to be_empty
+    end
+  end
+
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 

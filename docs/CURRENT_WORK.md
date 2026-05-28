@@ -126,7 +126,7 @@ Remaining: a `Plugin` hook letting plugins contribute their own recognisers (def
 
 **Remaining G2 cases** that this slice deliberately did NOT address (documented in the module docstring as out-of-scope):
 
-- **`retry` flow edge** — `tries = 0; begin ...; rescue; tries += 1; retry; end` doesn't reflect the `retry`-side rebind into the post-block scope. Different problem (flow edge, not call-site mutation). Example: `lib/mastodon/snowflake.rb:19`.
+- ~~**`retry` flow edge**~~ — **LANDED** (B2.1 slice). `StatementEvaluator#eval_begin` now detects a `Prism::RetryNode` in any rescue body, widens rebound locals / ivars to their Nominal envelope (Constant → Nominal[<class>], Tuple → Array, HashShape → Hash), and re-evaluates the primary body + rescue chain once under the widened entry. Closes the `lib/mastodon/snowflake.rb:19` `tries > 100` always-falsey FP. The scope index also switched to "last-visit-wins" so the re-evaluation's widened entries reach the diagnostic layer.
 - **Intervening method call invalidates the ivar binding** — `if @performed; perform!; if @performed` — the intra-procedural call effect on ivars is not modelled. Example: `app/workers/activitypub/delivery_worker.rb:39 / :41`.
 - **Read-before-write nil** — `unless @warning_issued; ...; @warning_issued = true` — the ivar accumulator unions writes only, missing the read-before-write `nil`. Example: `lib/chewy/strategy/bypass_with_warning.rb:7`.
 

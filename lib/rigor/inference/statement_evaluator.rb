@@ -569,8 +569,30 @@ module Rigor
       # joined exit scope so locals bound exclusively in `ensure` stay
       # observable.
       def eval_begin(node)
-        primary_type, primary_scope = eval_begin_primary(node)
-        rescue_chain = collect_rescue_chain_results(node.rescue_clause, scope)
+        entry = scope
+        primary_type, primary_scope = eval_begin_primary_under(node, entry)
+        rescue_chain = collect_rescue_chain_results(node.rescue_clause, entry)
+
+        # B2.1 — retry-edge widening. When any rescue body
+        # contains `Prism::RetryNode`, control re-enters the
+        # primary body with the rescue arm's rebinds visible.
+        # Today's flow loses that effect, so a counter like
+        # `tries = 0; ...; rescue; tries += 1; retry; end`
+        # observes `tries: Constant[0]` inside the body and any
+        # `tries > 100` predicate folds to always-falsey.
+        # The fix: widen rebound locals / ivars in any
+        # retry-emitting arm to their Nominal envelope (Constant
+        # → Nominal[<class>], Tuple → Array, HashShape → Hash),
+        # then re-evaluate primary body AND rescue chain once
+        # under the widened entry. Nominal envelope is the
+        # maximally widened form so the re-evaluation converges
+        # in one step.
+        widened_entry = widen_entry_for_retry(entry, rescue_chain)
+        if widened_entry
+          primary_type, primary_scope = eval_begin_primary_under(node, widened_entry)
+          rescue_chain = collect_rescue_chain_results(node.rescue_clause, widened_entry)
+        end
+
         # Rescue arms whose body unconditionally exits (`return`,
         # `next`, `break`, `raise`, `throw`, `exit`, `abort`,
         # `fail`) contribute neither a type fragment NOR a scope
@@ -606,11 +628,15 @@ module Rigor
       # body's scope effects still apply because the body did run
       # before the else.
       def eval_begin_primary(node)
+        eval_begin_primary_under(node, scope)
+      end
+
+      def eval_begin_primary_under(node, entry_scope)
         body_type, body_scope =
           if node.statements
-            sub_eval(node.statements, scope)
+            sub_eval(node.statements, entry_scope)
           else
-            [Type::Combinator.constant_of(nil), scope]
+            [Type::Combinator.constant_of(nil), entry_scope]
           end
 
         if node.else_clause
@@ -618,6 +644,105 @@ module Rigor
           [else_type, else_scope]
         else
           [body_type, body_scope]
+        end
+      end
+
+      # B2.1 — return a widened entry scope when at least one
+      # rescue arm in `rescue_chain` contains a `Prism::RetryNode`
+      # AND that arm rebinds at least one local or ivar relative
+      # to the original entry. Returns nil when no widening is
+      # needed (no retry, or no rebinds reachable across the
+      # retry edge).
+      #
+      # Always-safe: the widening can only LOSE precision; it
+      # never invents a fact (Nominal envelope is a superset of
+      # the Constant / shape carrier it widens from). Convergent
+      # in one step because Nominal envelope is the maximally
+      # widened form against the engine's current carrier set.
+      def widen_entry_for_retry(entry_scope, rescue_chain)
+        widened = nil
+        rescue_chain.each do |(_arm_type, arm_post_scope), arm_node|
+          next unless arm_contains_retry?(arm_node)
+
+          accumulator = widened || entry_scope
+          accumulator = absorb_retry_rebinds(accumulator, entry_scope, arm_post_scope)
+          widened = accumulator
+        end
+        return nil if widened.nil? || widened == entry_scope
+
+        widened
+      end
+
+      def arm_contains_retry?(node)
+        return false unless node.is_a?(Prism::Node)
+        return true if node.is_a?(Prism::RetryNode)
+        # Don't descend into nested blocks / defs / classes /
+        # modules — a `retry` inside a nested method body or
+        # block targets its own enclosing `begin`, not this one.
+        return false if node.is_a?(Prism::DefNode) ||
+                        node.is_a?(Prism::ClassNode) ||
+                        node.is_a?(Prism::ModuleNode) ||
+                        node.is_a?(Prism::BlockNode)
+
+        node.compact_child_nodes.any? { |c| arm_contains_retry?(c) }
+      end
+
+      def absorb_retry_rebinds(accumulator, entry_scope, arm_post_scope)
+        scope_acc = accumulator
+        # Walk every local visible in either side, compare types,
+        # widen to Nominal envelope on a difference.
+        local_keys = arm_post_scope.locals.keys | entry_scope.locals.keys
+        local_keys.each do |name|
+          pre = entry_scope.local(name)
+          post = arm_post_scope.local(name)
+          next if pre == post || post.nil?
+
+          widened = retry_widened_type(pre, post)
+          scope_acc = scope_acc.with_local(name, widened)
+        end
+        ivar_keys = arm_post_scope.ivars.keys | entry_scope.ivars.keys
+        ivar_keys.each do |name|
+          pre = entry_scope.ivar(name)
+          post = arm_post_scope.ivar(name)
+          next if pre == post || post.nil?
+
+          widened = retry_widened_type(pre, post)
+          scope_acc = scope_acc.with_ivar(name, widened)
+        end
+        scope_acc
+      end
+
+      def retry_widened_type(pre, post)
+        # `pre` is nil when the local was introduced inside the
+        # rescue body. The retry edge brings it back into the
+        # primary body's entry — widen the post type itself.
+        envelope = nominal_envelope_for(post)
+        return envelope if pre.nil?
+
+        nominal_envelope_for(Type::Combinator.union(pre, envelope))
+      end
+
+      # Nominal envelope of a value type: widens Constant /
+      # Tuple / HashShape carriers to the underlying class's
+      # `Nominal`, preserving everything else (`Nominal`,
+      # `Union` of non-shape members, `Top`, `Dynamic`, `Bot`).
+      # Union members are walked individually.
+      def nominal_envelope_for(type)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        widened = members.map { |m| nominal_envelope_member(m) }
+        Type::Combinator.union(*widened)
+      end
+
+      def nominal_envelope_member(member)
+        case member
+        when Type::Constant
+          Type::Combinator.nominal_of(member.value.class.name)
+        when Type::Tuple
+          MutationWidening.widen_tuple(member)
+        when Type::HashShape
+          MutationWidening.widen_hash_shape(member)
+        else
+          member
         end
       end
 

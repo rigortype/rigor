@@ -127,7 +127,16 @@ module Rigor
         table = {}.compare_by_identity
         table.default = seeded_scope
 
-        on_enter = ->(node, scope) { table[node] = scope unless table.key?(node) }
+        # Last-visit-wins, not first: when `StatementEvaluator`
+        # internally re-evaluates a subtree (notably `eval_begin`'s
+        # retry-edge widening pass), the LATER visit carries the
+        # corrected entry scope (e.g. a `tries` widened to
+        # `Nominal[Integer]` after the rescue body's `tries += 1;
+        # retry` is observed). The diagnostic layer reads
+        # `table[node]` to type predicates; the second pass's
+        # entry is the one that reflects all flow-derived
+        # rebinds, so it MUST overwrite the first.
+        on_enter = ->(node, scope) { table[node] = scope }
         StatementEvaluator.new(scope: seeded_scope, on_enter: on_enter).evaluate(root)
 
         propagate(root, table, seeded_scope)

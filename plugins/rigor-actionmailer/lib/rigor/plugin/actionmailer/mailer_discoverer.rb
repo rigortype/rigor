@@ -66,14 +66,27 @@ module Rigor
         # @return [MailerIndex]
         def discover
           entries = []
+          # Two-pass: first collect every module's defs (for
+          # the include-following step), then build per-class
+          # entries that pull in actions from include'd modules.
+          # GitLab's `Notify` mailer derives every action from
+          # `Emails::*` concerns under `app/mailers/emails/`.
+          module_actions = {} # module_fqn => Hash<Symbol, ActionEntry>
+          class_visits = []   # collected (class_name, path, def_nodes, includes)
+
           ruby_files_under(@search_paths).each do |path|
             contents = read_safely(path)
             next if contents.nil?
 
             tree = Prism.parse(contents).value
-            walk_for_mailers(tree, []) do |class_name, def_nodes|
-              entries << build_class_entry(class_name, path, def_nodes)
+            walk_for_mailers(tree, []) do |class_name, def_nodes, includes|
+              class_visits << [class_name, path, def_nodes, includes]
             end
+            collect_module_actions(tree, [], module_actions)
+          end
+
+          class_visits.each do |class_name, path, def_nodes, includes|
+            entries << build_class_entry(class_name, path, def_nodes, includes, module_actions)
           end
           MailerIndex.new(entries)
         end
@@ -114,11 +127,60 @@ module Rigor
           superclass = constant_path_name(node.superclass) if node.superclass
           if superclass && @base_classes.include?(superclass)
             def_nodes = collect_action_defs(node.body)
-            yield full_name, def_nodes
+            includes = collect_includes(node.body)
+            yield full_name, def_nodes, includes
           end
 
           inner_path = lexical_path + [class_local_name]
           walk_for_mailers(node.body, inner_path, &) if node.body
+        end
+
+        # Collects qualified-constant names passed to `include
+        # X` calls inside the class body. Used to look up
+        # concern-module action definitions (GitLab's
+        # `Notify` mailer derives every action from
+        # `Emails::Issues`, `Emails::MergeRequests`, etc.).
+        def collect_includes(body)
+          return [] if body.nil?
+
+          names = []
+          body.compact_child_nodes.each do |node|
+            next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :include
+
+            (node.arguments&.arguments || []).each do |arg|
+              name = constant_path_name(arg)
+              names << name.delete_prefix("::") if name
+            end
+          end
+          names
+        end
+
+        # Walks the AST collecting every module's instance-side
+        # def nodes by fully-qualified module name. The same
+        # `collect_action_defs` filter applies (private /
+        # `_`-prefixed / callback-target methods skipped).
+        def collect_module_actions(node, lexical_path, accumulator)
+          return if node.nil?
+
+          case node
+          when Prism::ModuleNode
+            local_name = constant_path_name(node.constant_path)
+            return if local_name.nil?
+
+            full_name = (lexical_path + [local_name.delete_prefix("::")]).join("::")
+            if node.body
+              def_nodes = collect_action_defs(node.body)
+              entries = def_nodes.to_h { |def_node| [def_node.name, build_action_entry(def_node)] }
+              accumulator[full_name] = entries unless entries.empty?
+              collect_module_actions(node.body, lexical_path + [local_name.delete_prefix("::")], accumulator)
+            end
+          when Prism::ClassNode
+            local_name = constant_path_name(node.constant_path)
+            inner = local_name ? lexical_path + [local_name.delete_prefix("::")] : lexical_path
+            collect_module_actions(node.body, inner, accumulator) if node.body
+          else
+            node.compact_child_nodes.each { |child| collect_module_actions(child, lexical_path, accumulator) }
+          end
         end
 
         def visit_module(node, lexical_path, &)
@@ -233,10 +295,36 @@ module Rigor
           end
         end
 
-        def build_class_entry(class_name, file_path, def_nodes)
+        def build_class_entry(class_name, file_path, def_nodes, includes = [], module_actions = {})
           actions = def_nodes.to_h do |def_node|
             entry = build_action_entry(def_node)
             [entry.method_name, entry]
+          end
+
+          # Merge in actions from include'd modules. The
+          # discoverer pre-collected every module's defs as
+          # `module_actions` keyed by fully-qualified module
+          # name. We resolve each include against that map —
+          # tries the full include name first, then walks down
+          # the class's lexical chain looking for a nested
+          # match (e.g. `Emails::Issues` inside `class Notify`
+          # at top-level resolves to top-level `Emails::Issues`).
+          # Includes we cannot resolve are silently skipped;
+          # the per-mailer `unresolved_includes?` predicate
+          # below (consumed by the analyzer) downgrades
+          # `unknown-action` to silence when any include is
+          # unresolved.
+          unresolved_includes = []
+          includes.each do |include_name|
+            inc_actions = module_actions[include_name]
+            if inc_actions.nil?
+              unresolved_includes << include_name
+              next
+            end
+
+            inc_actions.each do |method_name, entry|
+              actions[method_name] ||= entry
+            end
           end
 
           missing_views = actions.keys.reject { |action| view_exists?(class_name, action) }
@@ -245,7 +333,8 @@ module Rigor
             class_name: class_name,
             file_path: file_path,
             actions: actions,
-            missing_views: missing_views
+            missing_views: missing_views,
+            unresolved_includes: unresolved_includes.freeze
           )
         end
 

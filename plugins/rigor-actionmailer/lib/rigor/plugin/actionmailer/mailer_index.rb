@@ -28,9 +28,19 @@ module Rigor
           end
         end
 
-        ClassEntry = Data.define(:class_name, :file_path, :actions, :missing_views) do
+        ClassEntry = Data.define(:class_name, :file_path, :actions, :missing_views, :unresolved_includes) do
           def find_action(method_name)
             actions[method_name.to_sym]
+          end
+
+          # True when the mailer `include`s a module whose
+          # source we couldn't index (typically a gem-shipped
+          # concern that defines additional mailer actions).
+          # Analyzer downgrades `unknown-action` to silence in
+          # this case — the unresolved module may legitimately
+          # provide the action.
+          def unresolved_includes?
+            !unresolved_includes.empty?
           end
         end
 

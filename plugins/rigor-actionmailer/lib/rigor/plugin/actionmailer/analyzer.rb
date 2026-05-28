@@ -65,6 +65,14 @@ module Rigor
 
             action_entry = class_entry.find_action(call_node.name)
             if action_entry.nil?
+              # Skip `unknown-action` when the mailer's include
+              # set has any unresolved module — the unresolved
+              # module may legitimately define the action
+              # (gem-shipped concern, dynamically loaded
+              # mailer extension). Mirrors the same predicate
+              # `rigor-actionpack` uses for unknown-filter-method.
+              next if class_entry.unresolved_includes?
+
               diagnostics << unknown_action_diagnostic(path, call_node, class_entry)
               next
             end

@@ -81,7 +81,15 @@ module Rigor
               collect_methods(resolved_include, seen_modules, methods)
             end
             next_parent = entry.parent_class_name
-            current = next_parent && resolve_constant_lexically(next_parent, entry.enclosing_namespace)
+            # Same self-reference guard as `unresolved_include?`:
+            # `class ActivityPub::ApplicationController <
+            # ::ApplicationController` lexically resolves
+            # `ApplicationController` to itself; fall back to
+            # the unprefixed top-level name in that case.
+            current = if next_parent
+                        resolved = resolve_constant_lexically(next_parent, entry.enclosing_namespace)
+                        resolved == current ? next_parent.sub(/\A::/, "") : resolved
+                      end
           end
           methods.uniq.freeze
         end
@@ -128,7 +136,19 @@ module Rigor
               return true if resolved.nil? || !@entries.key?(resolved)
             end
             next_parent = current_entry.parent_class_name
-            current = next_parent && resolve_constant_lexically(next_parent, current_entry.enclosing_namespace)
+            # Avoid lexically resolving to ourselves. `class
+            # ActivityPub::ApplicationController < ::ApplicationController`
+            # would otherwise resolve `ApplicationController` (in
+            # the lexical scope `["ActivityPub"]`) to
+            # `ActivityPub::ApplicationController` and short-
+            # circuit the walk before reaching the top-level
+            # parent. When the lexical match is the current
+            # class itself, fall back to the unprefixed
+            # top-level name.
+            current = if next_parent
+                        resolved = resolve_constant_lexically(next_parent, current_entry.enclosing_namespace)
+                        resolved == current ? next_parent.sub(/\A::/, "") : resolved
+                      end
           end
           false
         end
@@ -178,6 +198,15 @@ module Rigor
         # first segment doesn't match a top-level entry.
         def resolve_constant_lexically(name, enclosing)
           return nil if name.nil?
+
+          # A leading `::` denotes the top-level constant
+          # explicitly (`< ::ApplicationController`). Strip it
+          # for index lookup — the discoverer registers entries
+          # under their unprefixed name. Without this strip a
+          # `class ActivityPub::ApplicationController <
+          # ::ApplicationController` parent never resolved.
+          name = name.sub(/\A::/, "")
+
           # Constant already absolute or no enclosing scope.
           return name if enclosing.nil? || enclosing.empty?
 

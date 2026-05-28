@@ -24,6 +24,13 @@ module Rigor
           polymorphic_path polymorphic_url
           vite_asset_path vite_asset_url
           expose_path expose_url
+          asset_path asset_url
+          image_path image_url
+          javascript_path javascript_url
+          stylesheet_path stylesheet_url
+          font_path font_url
+          video_path video_url
+          audio_path audio_url
         ].freeze
 
         Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)

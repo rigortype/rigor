@@ -79,7 +79,7 @@ module Rigor
         # paths (`admin/domain_blocks/new` not bare
         # `domain_blocks/new`) and filter-chain validation
         # silently skipping nested controllers.
-        version: "0.5.0",
+        version: "0.7.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers.",
         config_schema: {
           "controller_search_paths" => :array,
@@ -158,8 +158,11 @@ module Rigor
       # render shapes are recognised purely from the call site
       # + class name, no per-controller pre-discovery needed.
       def render_diagnostics(path, root)
-        Analyzer.diagnose_renders(path: path, root: root, view_search_roots: @view_search_paths)
-                .map { |diag| build_diagnostic(diag) }
+        Analyzer.diagnose_renders(
+          path: path, root: root,
+          view_search_roots: @view_search_paths,
+          controller_index: controller_index_or_nil
+        ).map { |diag| build_diagnostic(diag) }
       end
 
       # Phase 1 — strong-parameter validation. Reads the

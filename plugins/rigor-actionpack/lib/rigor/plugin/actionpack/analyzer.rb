@@ -369,7 +369,7 @@ module Rigor
         # validates explicit renders only, since the implicit
         # path would false-positive on `redirect_to` / `head`
         # / early returns.
-        def diagnose_renders(path:, root:, view_search_roots:)
+        def diagnose_renders(path:, root:, view_search_roots:, controller_index: nil)
           class_node, enclosing = first_class_node_with_namespace(root)
           return [] if class_node.nil?
 
@@ -387,6 +387,18 @@ module Rigor
           # `app/controllers/` (libraries, test fixtures).
           controller_path = controller_path_from_file(path) || controller_path_for(class_name)
           return [] if controller_path.nil?
+
+          # Render checks silence when the controller (or its
+          # ancestor chain) inherits from a gem-shipped parent
+          # (Devise::ConfirmationsController,
+          # Doorkeeper::ApplicationsController, …). The gem
+          # ships its own views; the local subclass calling
+          # `render :show` resolves through the gem's view path,
+          # which our static analyser doesn't know about.
+          if controller_index && controller_index.known?(class_name) &&
+             controller_index.unresolved_include?(class_name)
+            return []
+          end
 
           # Abstract base controllers: a `*BaseController` (`Admin::
           # BaseController`, `Settings::Preferences::BaseController`,

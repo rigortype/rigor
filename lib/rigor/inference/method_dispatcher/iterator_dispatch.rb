@@ -42,7 +42,31 @@ module Rigor
           when :inject, :reduce then inject_block_params(receiver, args)
           when :group_by, :partition then single_element_block_params(receiver)
           when :each_slice, :each_cons then slice_block_params(receiver)
+          when :new then class_new_block_params(receiver, args)
           end
+        end
+
+        # `Class.new { |c| … }` and `Class.new(Parent) { |c| … }`
+        # — the block parameter is the freshly-created anonymous
+        # class, statically representable as the parent's singleton
+        # type (the new class inherits every singleton method the
+        # parent exposes, which is what callers use this form to
+        # configure: `c.table_name = …`, `c.attribute :foo`, etc.).
+        # No parent → `singleton(Object)`. RBS would otherwise widen
+        # the block param to bare `Nominal[Class]`, dropping access
+        # to the parent's class-side surface.
+        def class_new_block_params(receiver, args)
+          return nil unless class_metaclass_receiver?(receiver)
+
+          parent = args.first
+          return [Type::Combinator.singleton_of("Object")] if parent.nil?
+          return [parent] if parent.is_a?(Type::Singleton)
+
+          nil
+        end
+
+        def class_metaclass_receiver?(type)
+          type.is_a?(Type::Singleton) && type.class_name == "Class"
         end
 
         def times_block_params(receiver)

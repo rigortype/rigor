@@ -737,5 +737,32 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to eq(non_empty_string)
       end
     end
+
+    describe "Class.new return-type lift (meta_new — anonymous-subclass shape)" do
+      def singleton(name) = Rigor::Type::Combinator.singleton_of(name)
+
+      it "lifts `Class.new(Parent)` to Singleton[Parent]" do
+        result = dispatch(
+          receiver: singleton("Class"),
+          method_name: :new,
+          args: [singleton("ApplicationRecord")]
+        )
+        expect(result).to eq(singleton("ApplicationRecord"))
+      end
+
+      it "lifts `Class.new` (no parent) to Singleton[Object]" do
+        result = dispatch(receiver: singleton("Class"), method_name: :new, args: [])
+        expect(result).to eq(singleton("Object"))
+      end
+
+      it "declines (falls back to Nominal[Class]) when the parent argument is not a Singleton" do
+        result = dispatch(
+          receiver: singleton("Class"),
+          method_name: :new,
+          args: [Rigor::Type::Combinator.nominal_of("Class")]
+        )
+        expect(result).to eq(Rigor::Type::Combinator.nominal_of("Class"))
+      end
+    end
   end
 end

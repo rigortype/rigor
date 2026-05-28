@@ -251,6 +251,31 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
     end
   end
 
+  describe ".new (Class metaclass — `Class.new(Parent) { |c| … }`)" do
+    def singleton(name) = Rigor::Type::Combinator.singleton_of(name)
+    def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+
+    it "binds the block param to the parent Singleton for `Class.new(Parent)`" do
+      expect(block_params(singleton("Class"), :new, [singleton("ApplicationRecord")]))
+        .to eq([singleton("ApplicationRecord")])
+    end
+
+    it "binds the block param to Singleton[Object] for the no-parent form `Class.new { |c| … }`" do
+      expect(block_params(singleton("Class"), :new, []))
+        .to eq([singleton("Object")])
+    end
+
+    it "declines (so RBS answers) when the receiver is not the Class metaclass" do
+      expect(block_params(singleton("Hash"), :new, [singleton("String")])).to be_nil
+    end
+
+    it "declines when the parent argument is not a Singleton (dynamic / nominal / constant)" do
+      expect(block_params(singleton("Class"), :new, [Rigor::Type::Combinator.untyped])).to be_nil
+      expect(block_params(singleton("Class"), :new, [nominal("Class")])).to be_nil
+      expect(block_params(singleton("Class"), :new, [constant_of(:foo)])).to be_nil
+    end
+  end
+
   describe "non-iterator methods" do
     it "declines and lets RBS answer" do
       expect(block_params(constant_of(1), :+, [constant_of(2)])).to be_nil

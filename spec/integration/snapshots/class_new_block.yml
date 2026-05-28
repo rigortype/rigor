@@ -1,0 +1,4 @@
+---
+locals:
+  empty_klass: singleton(Object)
+  klass_with_parent: singleton(StandardError)

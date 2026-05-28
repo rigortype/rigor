@@ -805,7 +805,30 @@ module Rigor
         date_lift = date_new_lift(receiver_type.class_name, arg_types)
         return date_lift if date_lift
 
+        class_new_lift = class_new_lift(receiver_type.class_name, arg_types)
+        return class_new_lift if class_new_lift
+
         Type::Combinator.nominal_of(receiver_type.class_name)
+      end
+
+      # `Class.new` and `Class.new(Parent)` create a brand-new
+      # anonymous class. Statically that class is representable as
+      # the parent's singleton type — its singleton-method surface
+      # is the parent's (plus whatever the block defines, which we
+      # do not statically track here), so `Singleton[Parent]` lets
+      # downstream `klass.some_class_method` resolve. No parent →
+      # `singleton(Object)`. Anything else (dynamic parent, more
+      # than one positional, …) falls back to `Nominal[Class]` via
+      # the surrounding `meta_new` tail.
+      def class_new_lift(class_name, arg_types)
+        return nil unless class_name == "Class"
+        return Type::Combinator.singleton_of("Object") if arg_types.empty?
+        return nil unless arg_types.size == 1
+
+        parent = arg_types.first
+        return parent if parent.is_a?(Type::Singleton)
+
+        nil
       end
 
       # ADR-15 Phase 4b.x — `Ractor.make_shareable` on both the

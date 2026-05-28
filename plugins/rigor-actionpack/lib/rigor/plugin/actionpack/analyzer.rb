@@ -395,7 +395,7 @@ module Rigor
           # ships its own views; the local subclass calling
           # `render :show` resolves through the gem's view path,
           # which our static analyser doesn't know about.
-          if controller_index && controller_index.known?(class_name) &&
+          if controller_index&.known?(class_name) &&
              controller_index.unresolved_include?(class_name)
             return []
           end

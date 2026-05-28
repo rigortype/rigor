@@ -145,12 +145,31 @@ nix --extra-experimental-features 'nix-command flakes' develop --command bundle 
 ```
 
 `rake release` verifies a clean working tree, tags the release as `vx.y.z`,
-pushes the tag to `origin`, and publishes the gem to RubyGems. It requires:
+pushes the tag to `origin`, publishes the gem to RubyGems, AND creates the
+matching GitHub Release (the post-publish hook in `Rakefile` invokes
+`rake release:github`). It requires:
 
 - A clean working tree on the release branch.
 - A RubyGems API key with MFA configured — `rigortype.gemspec` sets
   `rubygems_mfa_required => "true"`, so non-MFA pushes will be rejected.
 - Push access to `origin`.
+- `gh auth status` clean — the GitHub Release step shells out to
+  `gh release create`.
+
+If the GitHub Release step fails after the gem is already published (transient
+`gh` / network error), the standalone task retries that step alone — the gem
+is not republished:
+
+```sh
+nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec rake release:github
+```
+
+The standalone task reads `Rigor::VERSION`, requires the matching `vx.y.z` tag
+to exist locally, extracts the `## [x.y.z] - YYYY-MM-DD` section from
+`CHANGELOG.md` verbatim as the release body, derives the previous tag via
+`git describe --tags --abbrev=0 vx.y.z^`, and appends a `**Full Changelog**:
+compare/v(prev)...v(this)` footer. The release title is the section heading
+without the leading `## ` (e.g. `[0.1.12] - 2026-05-28`).
 
 If publishing must be split across people or machines, build locally and
 hand the artefact to the publisher:
@@ -162,7 +181,8 @@ nix --extra-experimental-features 'nix-command flakes' develop --command gem pus
 ```
 
 In the split-publish case, push the `vx.y.z` tag manually after the gem is
-accepted by RubyGems.
+accepted by RubyGems, then run `rake release:github` once the tag is on
+`origin` to create the GitHub Release.
 
 ## Quick Checklist
 

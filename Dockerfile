@@ -15,7 +15,8 @@ ARG RIGOR_VERSION
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends build-essential; \
-    gem install rigortype ${RIGOR_VERSION:+--version "$RIGOR_VERSION"}; \
+    gem install rigortype ${RIGOR_VERSION:+--version "$RIGOR_VERSION"} \
+      || (sleep 60 && gem install rigortype ${RIGOR_VERSION:+--version "$RIGOR_VERSION"}); \
     apt-get purge -y --auto-remove build-essential; \
     rm -rf /var/lib/apt/lists/* /usr/local/lib/ruby/gems/*/cache
 

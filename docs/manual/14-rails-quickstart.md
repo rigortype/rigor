@@ -48,7 +48,7 @@ You need:
 > automatically.
 >
 > <details>
-> <summary>Japanese / 日本語, Simplified Chinese / 简体中文, Traditional Chinese / 繁體中文, Korean / 한국어</summary>
+> <summary>日本語 / 简体中文 / 繁體中文 / 한국어 / Português (Brasil) / Español / Tiếng Việt / Français</summary>
 >
 > **日本語**
 > ```
@@ -71,6 +71,30 @@ You need:
 > **한국어**
 > ```
 > 다음 주소의 안내에 따라 이 프로젝트에 Rigor를 설치해 주세요:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **Português (Brasil)**
+> ```
+> Instale o Rigor neste projeto seguindo as instruções em:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **Español**
+> ```
+> Instala Rigor en este proyecto siguiendo las instrucciones en:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **Tiếng Việt**
+> ```
+> Hãy cài đặt Rigor vào dự án này theo hướng dẫn tại:
+> https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+> ```
+>
+> **Français**
+> ```
+> Installez Rigor dans ce projet en suivant les instructions à l'adresse :
 > https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 > ```
 >

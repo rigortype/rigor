@@ -1066,15 +1066,18 @@ module Rigor
           end
         end
 
-        # True when we're inside `member do ... end` / `collection
-        # do ... end` AND the call is of the form
-        # `<verb> :symbol [, options...]` OR `<verb> 'string'`
-        # (the latter is Redmine's idiom — `get 'report'` inside
-        # a `collection do` block) — a shorthand action
-        # declaration whose first positional argument is the
-        # action name (no explicit path placeholders).
+        # True when the call is `<verb> :symbol [, options...]`
+        # or `<verb> 'string'` inside one of:
+        # - a `member do ... end` / `collection do ... end`
+        #   block (canonical shorthand context), or
+        # - a `resources :name do ... end` / `resource :name
+        #   do ... end` block at the *direct* nesting level.
+        #   Rails defaults a bare symbol- or string-named verb
+        #   inside resources to a member action (GitLab's
+        #   `resource :application_settings do; match :general,
+        #   via: [...] end` → `general_application_settings_path`).
         def member_collection_shorthand?(node, context)
-          return false unless context.innermost_action_block
+          return false unless context.innermost_action_block || context.inside_resource_scope?
 
           first_arg = node.arguments&.arguments&.first
           return true if first_arg.is_a?(Prism::SymbolNode)
@@ -1098,7 +1101,14 @@ module Rigor
           action_name = symbol_argument(node, 0)&.to_s ||
                         string_argument(node, 0).to_s
           frame = context.innermost_action_block
-          if frame[:kind] == :member_block
+          # No `member do` / `collection do` wrapper but we're
+          # inside a resources block — Rails defaults a bare
+          # `<verb> :symbol` inside resources to a MEMBER
+          # action (e.g. `get :preview` → `preview_<singular>_path
+          # (:id)`).
+          if frame.nil?
+            register_member_action(node, context, action_name)
+          elsif frame[:kind] == :member_block
             register_member_action(node, context, action_name)
           else
             register_collection_action(node, context, action_name, frame)

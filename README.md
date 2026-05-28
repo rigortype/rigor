@@ -58,6 +58,39 @@ Install Rigor in this project by following the instructions at
 https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
 ```
 
+<details>
+<summary>Japanese / 日本語, Simplified Chinese / 简体中文, Traditional Chinese / 繁體中文, Korean / 한국어</summary>
+
+**日本語**
+
+```
+次の手順に従って、このプロジェクトに Rigor をインストールしてください:
+https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+```
+
+**简体中文**
+
+```
+请按照以下地址的说明在此项目中安装 Rigor:
+https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+```
+
+**繁體中文**
+
+```
+請依照以下網址的說明在此專案中安裝 Rigor:
+https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+```
+
+**한국어**
+
+```
+다음 주소의 안내에 따라 이 프로젝트에 Rigor를 설치해 주세요:
+https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+```
+
+</details>
+
 **Manual install** — the recommended path uses
 [`mise`](https://mise.jdx.dev/), which provisions both Ruby 4.0 and
 Rigor pinned per project:

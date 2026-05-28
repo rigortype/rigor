@@ -18,6 +18,23 @@ config as `.rigor.dist.yml` lets a contributor opt out locally (for
 example, run without the baseline) without touching the committed
 file.
 
+## Selecting `target_ruby`
+
+Read the project's declared Ruby version from `.ruby-version`, the
+`Gemfile` `ruby "…"` line, or `.tool-versions`. Use the **minimum**
+version of the declared range (e.g. `>= 3.2.0, < 3.5.0` → `3.2`).
+
+Then apply this decision table — **do not ask the user**; act
+automatically and emit the message described:
+
+| Declared minimum | `target_ruby` to write | Action |
+| --- | --- | --- |
+| 4.x | `"4.0"` (or exact patch) | Write as-is. |
+| 3.3 – 3.x | `"3.3"` (or exact minor) | Write as-is. |
+| 3.0 – 3.2 | `"3.3"` | Write `"3.3"` automatically. Emit: *"Project targets Ruby X.Y, but Prism (the parser bundled with rigortype) supports Ruby 3.3 as its minimum. Setting `target_ruby: \"3.3\"` — syntax parsing is compatible across 3.0–3.3, but RBS type definitions in `.gem_rbs_collection/` or community libraries may be authored for 3.3+ and could produce type-level false positives on APIs that changed between 3.0 and 3.3."* |
+| 2.x | — | **Stop.** Emit: *"Project targets Ruby 2.x. Rigor's bundled Prism parser does not support Ruby 2.x syntax (removed keyword argument syntax, pattern matching differences). Rigor cannot reliably analyse this project. Consider upgrading the project to Ruby 3.3+ before onboarding Rigor."* Do not write a config; do not continue the skill. |
+| Unknown / not declared | `"4.0"` (Rigor's default) | Write as-is; note that the default was used. |
+
 ## Severity profile — follows the mode
 
 The `severity_profile:` key re-stamps every rule's severity. Set it

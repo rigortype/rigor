@@ -187,6 +187,25 @@ module Rigor
           node.receiver.nil? && (node.name.to_s.end_with?("_path") || node.name.to_s.end_with?("_url"))
         end
 
+        # Paths where the implicit-params-fill pattern is
+        # idiomatic — controllers / mailers / views routinely
+        # call `*_path` / `*_url` helpers with fewer args than
+        # the route's static placeholder count because Rails
+        # fills `:foo_id` segments from `request.params` at
+        # runtime (controllers / views) or from the call's
+        # polymorphic-friendly receiver (mailers).
+        IMPLICIT_FILL_PATHS = [
+          %r{(?:\A|/)app/controllers/},
+          %r{(?:\A|/)app/mailers/},
+          %r{(?:\A|/)app/views/},
+          %r{(?:\A|/)app/components/},
+          %r{(?:\A|/)app/helpers/}
+        ].freeze
+
+        def implicit_fill_path?(path)
+          IMPLICIT_FILL_PATHS.any? { |re| path.match?(re) }
+        end
+
         def info_diagnostic(path, call_node, entry)
           location = call_node.location
           method_label = entry.http_method ? entry.http_method.to_s.upcase : "*"
@@ -225,7 +244,23 @@ module Rigor
             return nil if helper_table.acceptable_arities(entry.name).any? { |exp| positional <= exp }
           end
 
-          arities = helper_table.acceptable_arities(entry.name).sort
+          # Underflow tolerance for controllers / mailers /
+          # views. A `redirect_to namespace_project_milestones_path`
+          # inside `Projects::MilestonesController` legitimately
+          # passes 0 args — Rails fills the missing `:namespace_id`
+          # / `:project_id` segments from `request.params` at
+          # runtime. Mailers reach helpers polymorphically too
+          # (`project_commit_url(commit)` resolves project from
+          # commit.project). Silence when `actual < min_arity`
+          # AND the call site is in a controller / mailer / view
+          # directory (where the implicit-params-fill pattern is
+          # idiomatic). Overflow (`actual > max_arity`) still
+          # fires — that's almost always a typo.
+          arities_set = helper_table.acceptable_arities(entry.name)
+          min_arity = arities_set.min
+          return nil if actual < min_arity && implicit_fill_path?(path)
+
+          arities = arities_set.sort
           expected = arities.length == 1 ? arities.first.to_s : "#{arities.first}..#{arities.last}"
           location = call_node.location
           Diagnostic.new(

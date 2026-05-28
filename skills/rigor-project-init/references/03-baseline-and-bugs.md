@@ -49,7 +49,7 @@ Use the three sections like this:
 | Hint `id` | Cause | Where this skill handles it |
 | --- | --- | --- |
 | `activesupport-core-ext` | ActiveSupport core-class monkey-patches not loaded. | Go back to Phase 3/4: add `rigor-activesupport-core-ext` to `plugins:` (it is an RBS-bundle plugin), re-run triage. This is a config gap, not a bug. |
-| `gem-without-rbs` | A dependency ships no RBS. | Phase 7 escalation — `rbs collection install`, or `dependencies.source_inference:`, or open a Rigor issue. |
+| `gem-without-rbs` | A dependency ships no RBS. | If `rbs_collection.lock.yaml` was present and Phase 1 installed the collection, re-run `rigor triage` — the hint may shrink or disappear. Otherwise: Phase 8 escalation — `bundle exec rbs collection install`, or `dependencies.source_inference:`, or open a Rigor issue. |
 | `project-monkey-patch` | An in-project monkey-patch / refinement Rigor did not see. | Phase 7 escalation — register the defining file via `pre_eval:`, or (if it is a DSL) write a project plugin. |
 | `activerecord-relation-misinference` | An ActiveRecord relation inferred as `Array`. | Ensure `rigor-activerecord` is enabled (Phase 3). If it persists, it is an engine gap — open a Rigor issue. |
 | `systemic-file-cluster` | One file × one rule, large count. | Acknowledge mode: a clean baseline bucket. Strict mode: a single fix may clear many — review that file first. |
@@ -142,8 +142,9 @@ cheapest first:
 If triage reports `gem-without-rbs`, a dependency ships no type
 information and Rigor has no built-in coverage. In order:
 
-1. `rbs collection install` — pulls community RBS for the gem if it
-   exists. Re-run triage afterwards.
+1. `bundle exec rbs collection install` (bare `rbs collection install`
+   if `rbs` is not in the project's Gemfile) — pulls community RBS for
+   the gem if it exists. Re-run triage afterwards.
 2. `dependencies.source_inference:` in `.rigor.dist.yml` — opt the
    gem into Rigor inferring `Dynamic`-typed returns from its source.
 3. If the gem is widely used and genuinely warrants first-class

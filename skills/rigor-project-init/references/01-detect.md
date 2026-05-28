@@ -35,12 +35,50 @@ Also note per-gem markers that have their own plugin: `devise`,
     `rbs_collection.auto_detect: true` (the default).
   - **Lockfile present, `.gem_rbs_collection/` absent** → the lockfile
     was generated but the gems were never downloaded. Rigor loads the
-    lockfile but finds no RBS files. Note this for Phase 6: if triage
-    reports `gem-without-rbs` hints for gems that appear in
-    `rbs_collection.yaml`, run `rbs collection install` first and
-    re-run triage.
+    lockfile but finds no RBS files. **Act now — see below.**
   - **Both absent** → note it; Phase 6's triage may recommend
     `rbs collection install` if `gem-without-rbs` hints appear.
+
+### RBS collection — install if absent
+
+When `rbs_collection.lock.yaml` is present **and** `.gem_rbs_collection/`
+is absent, the collection was configured (e.g. by Steep or `rbs_rails`)
+but never installed. Installing it now — before writing the config or
+running triage — gives Rigor community RBS for dozens of gems and avoids
+a triage → config-fix → re-triage cycle.
+
+Offer to run:
+
+```sh
+bundle exec rbs collection install
+```
+
+Use `bundle exec` when `rbs` appears in `Gemfile` or `Gemfile.lock`
+(the common case — Steep / rbs_rails workflows put it there). If `rbs`
+is not in the Gemfile, use the bare `rbs collection install` instead.
+
+Ask the user for permission before running, since this installs files
+into `.gem_rbs_collection/` (a generated directory that belongs in
+`.gitignore`). Only proceed with their confirmation.
+
+After installation, verify with:
+
+```sh
+ls .gem_rbs_collection/
+```
+
+The directory should contain RBS gem subdirectories. Continue to
+Phase 2 — the collection will be auto-detected by Rigor at analysis
+time.
+
+**Note: RBS collision after install.** Some gems (e.g. `cgi`, `logger`,
+`base64`) were extracted from Ruby's stdlib into standalone gems from
+Ruby 3.3 onwards. When these appear in both `.gem_rbs_collection/` and
+Rigor's bundled stdlib, `rigor triage` may print a
+`RBS::DuplicatedDeclarationError`. If this happens, note the error and
+continue — plugin-based diagnostics are unaffected. File a Rigor issue
+at <https://github.com/rigortype/rigor/issues> so the engine can
+deduplicate stdlib gems from the collection automatically.
 
 ### Path scope
 

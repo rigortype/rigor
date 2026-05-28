@@ -217,20 +217,123 @@ module Rigor
       IVAR_BARRIER_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze
       private_constant :IVAR_BARRIER_NODES
 
-      def gather_ivar_writes(node, scope, class_name, accumulator)
+      EMPTY_GUARDED_IVARS = Set.new.freeze
+      private_constant :EMPTY_GUARDED_IVARS
+
+      def gather_ivar_writes(node, scope, class_name, accumulator, guarded_ivars = EMPTY_GUARDED_IVARS)
         return unless node.is_a?(Prism::Node)
 
-        record_ivar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::InstanceVariableWriteNode)
+        if node.is_a?(Prism::InstanceVariableWriteNode)
+          record_ivar_write(node, scope, class_name, accumulator,
+                            guarded: guarded_ivars.include?(node.name))
+        end
 
         # Don't recurse into nested defs, classes, or modules; their
         # ivars belong to their own enclosing class.
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
-        node.compact_child_nodes.each { |c| gather_ivar_writes(c, scope, class_name, accumulator) }
+        if node.is_a?(Prism::IfNode) || node.is_a?(Prism::UnlessNode)
+          walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars)
+          return
+        end
+
+        node.compact_child_nodes.each { |c| gather_ivar_writes(c, scope, class_name, accumulator, guarded_ivars) }
       end
 
-      def record_ivar_write(node, scope, class_name, accumulator)
+      # Walk an `IfNode` / `UnlessNode` so writes inside the THEN body
+      # that look like defensive ivar initialisation gain a `nil` union
+      # in the seeded type. Without this, `@x = v unless @x` records
+      # `Constant[v]` for `@x`, then the predicate folds to that same
+      # constant and `flow.always-truthy-condition` fires against a
+      # working program. Mirrors the existing skip for `@x ||= v`
+      # (`Prism::InstanceVariableOrWriteNode`, which the pre-pass does
+      # not seed at all).
+      #
+      # Polarity-aware on purpose: only the THEN body picks up the
+      # guard. The ELSE branch of `if @x; ...; else; @x = init; end`
+      # would otherwise be marked too — but that pattern (write @x in
+      # the else of `if @x`) is a separate idiom whose surrounding
+      # reads of `@x` would then surface a nil-receiver FP. The
+      # ELSE branch is left ungarded so those reads continue to type
+      # as they did before this fix.
+      def walk_conditional_ivar_writes(node, scope, class_name, accumulator, guarded_ivars)
+        then_guards = then_body_guarded_ivars(node)
+        then_guarded = then_guards.empty? ? guarded_ivars : (guarded_ivars | then_guards)
+
+        gather_ivar_writes(node.predicate, scope, class_name, accumulator, guarded_ivars)
+        gather_ivar_writes(node.statements, scope, class_name, accumulator, then_guarded) if node.statements
+        branch = node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause
+        gather_ivar_writes(branch, scope, class_name, accumulator, guarded_ivars) if branch
+      end
+
+      # Returns the set of ivar names that, in the THEN body of this
+      # conditional, are statically known to be in a nil / unset state
+      # — i.e. the body really IS the defensive-init half of the
+      # idiom. Conservative on purpose: only the shapes that
+      # idiomatically express "the ivar is missing" qualify.
+      #
+      # For `unless P; body; end`, body runs when `P` is falsey:
+      #   - `P = @x` (or `@x && other` / `@x || other`)            → @x is falsey
+      #   - `P = defined?(@x)`                                     → @x is undefined
+      #
+      # For `if P; body; ...`, body runs when `P` is truthy:
+      #   - `P = @x.nil?`                                          → @x is nil
+      #   - `P = !@x` / `not @x`                                   → @x is falsey
+      def then_body_guarded_ivars(node)
+        names = Set.new
+        if node.is_a?(Prism::UnlessNode)
+          collect_truthy_test_ivars(node.predicate, names)
+          collect_defined_test_ivars(node.predicate, names)
+        else
+          collect_nil_test_ivars(node.predicate, names)
+        end
+        names
+      end
+
+      def collect_truthy_test_ivars(node, names)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::InstanceVariableReadNode
+          names << node.name
+        when Prism::AndNode, Prism::OrNode
+          collect_truthy_test_ivars(node.left, names)
+          collect_truthy_test_ivars(node.right, names)
+        end
+      end
+
+      def collect_defined_test_ivars(node, names)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::DefinedNode
+          target = node.value
+          names << target.name if target.is_a?(Prism::InstanceVariableReadNode)
+        when Prism::AndNode, Prism::OrNode
+          collect_defined_test_ivars(node.left, names)
+          collect_defined_test_ivars(node.right, names)
+        end
+      end
+
+      def collect_nil_test_ivars(node, names)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::CallNode
+          receiver = node.receiver
+          if receiver.is_a?(Prism::InstanceVariableReadNode) &&
+             %i[nil? !].include?(node.name)
+            names << receiver.name
+          end
+        when Prism::AndNode, Prism::OrNode
+          collect_nil_test_ivars(node.left, names)
+          collect_nil_test_ivars(node.right, names)
+        end
+      end
+
+      def record_ivar_write(node, scope, class_name, accumulator, guarded: false)
         rvalue_type = scope.type_of(node.value)
+        rvalue_type = Type::Combinator.union(rvalue_type, Type::Combinator.constant_of(nil)) if guarded
         accumulator[class_name] ||= {}
         existing = accumulator[class_name][node.name]
         accumulator[class_name][node.name] =

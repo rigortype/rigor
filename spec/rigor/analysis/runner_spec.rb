@@ -1361,6 +1361,94 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(truthy_diags(result)).to be_empty
       end
 
+      # Regression: the class-ivar pre-pass seeds every InstanceVariableWriteNode
+      # rvalue into a per-class accumulator. Defensive-init idioms
+      # (`@x = v unless @x` / `@x = v if @x.nil?` / `unless defined?(@x); @x = v; end`)
+      # used to seed `@x` as `Constant[v]`, then the predicate `@x` folded
+      # to that same constant and fired this rule against working programs —
+      # most visibly in tdiary-core's `TDiary::Configuration#configure_attrs`
+      # (≈ 20 false positives across a single block of consecutive defaults).
+      # The pre-pass now unions `Constant[nil]` into the seeded type for
+      # writes that sit in the THEN body of a conditional whose predicate
+      # tests the same ivar's truthiness / nil-ness / definedness.
+      context "with defensive ivar-init idioms (tdiary-core configuration.rb cluster)" do
+        it "does not fire on `@x = v unless @x`" do
+          result = analyze(<<~RUBY)
+            class Foo
+              def setup
+                @lang = "ja" unless @lang
+                @style = "tDiary" unless @style
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `@x = v if @x.nil?`" do
+          result = analyze(<<~RUBY)
+            class Foo
+              def setup
+                @lang = "ja" if @lang.nil?
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `unless defined?(@x); @x = v; end`" do
+          result = analyze(<<~RUBY)
+            class Foo
+              def setup
+                @hide_form = false unless defined?(@hide_form)
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `unless @x` block body that initialises @x" do
+          result = analyze(<<~RUBY)
+            class Foo
+              def setup
+                unless @lang
+                  @lang = "ja"
+                end
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        # Polarity check: the ELSE branch of `if @x; ...; else; @x = init; end`
+        # is also a defensive-init shape, but treating its write as "guarded
+        # by nil" forces the read of `@x` elsewhere in the class to fold to
+        # `union(init_type, nil)` and surfaces a possible-nil-receiver FP on
+        # any later call against `@x` that relies on a method-call invariant
+        # (the tdiary `TDiary::TDiaryBase#do_eval_rhtml` shape). The fix
+        # leaves the ELSE branch unguarded so those reads continue to type
+        # as they did before.
+        it "does not over-mark the else branch of `if @x; ...; else; @x = init; end`" do
+          result = analyze(<<~RUBY)
+            class Foo
+              def load_plugin
+                if @plugin
+                  @plugin
+                else
+                  @plugin = Object.new
+                end
+              end
+
+              def use
+                load_plugin
+                @plugin.inspect
+              end
+            end
+          RUBY
+          nil_receiver_diags = result.diagnostics.select { |d| d.rule == "call.possible-nil-receiver" }
+          expect(nil_receiver_diags).to be_empty
+        end
+      end
+
       # Flow-folding gap G1 — closed via the
       # `Rigor::Inference::MutationWidening` hook in `eval_call`.
       # The pre-fix shape used to fold `arms.size == 1` to

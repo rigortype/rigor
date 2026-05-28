@@ -763,5 +763,72 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         expect(type).to be_a(Rigor::Type::Tuple)
       end
     end
+
+    describe "defensive ivar-init with falsey-Constant rvalue" do
+      it "skips the seed for `@x = nil unless @x` so the predicate does not fold to Constant[nil]" do
+        program = parse(<<~RUBY)
+          class C
+            def configure
+              @x = nil unless @x
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        # No other writes to @x in the class — the skip means
+        # the accumulator has no entry for @x at all.
+        expect(outer.class_ivars_for("C")).not_to have_key(:@x)
+      end
+
+      it "skips the seed for `@y = false unless @y`" do
+        program = parse(<<~RUBY)
+          class C
+            def configure
+              @y = false unless @y
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        expect(outer.class_ivars_for("C")).not_to have_key(:@y)
+      end
+
+      it "PRESERVES seed for a non-falsey-Constant rvalue under the same guard" do
+        program = parse(<<~RUBY)
+          class C
+            def configure
+              @z = "default" unless @z
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        # The non-falsey rvalue's union with `Constant[nil]`
+        # does NOT collapse, so the seed is preserved.
+        type = outer.class_ivars_for("C")[:@z]
+        expect(type).not_to be_nil
+      end
+
+      it "still accumulates other writes when one write is a skipped falsey default" do
+        program = parse(<<~RUBY)
+          class C
+            def init
+              @w = "hello"
+            end
+
+            def configure
+              @w = nil unless @w
+            end
+          end
+        RUBY
+        idx = described_class.index(program, default_scope: default_scope)
+        outer = idx[program]
+        # The skip drops only the defensive write; the `init`
+        # write still seeds `@w` to its rvalue type.
+        type = outer.class_ivars_for("C")[:@w]
+        expect(type).to be_a(Rigor::Type::Constant)
+        expect(type.value).to eq("hello")
+      end
+    end
   end
 end

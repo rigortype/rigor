@@ -93,6 +93,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/defensive_ivar_falsey_rvalue.rb — `@x = nil/false unless @x` doesn't false-fire" do
+    let(:harness) { harness_for("defensive_ivar_falsey_rvalue") }
+
+    it "is diagnostic-clean — no flow.always-truthy / always-falsey on the falsey-rvalue idiom" do
+      messages = harness.diagnostics.map(&:message)
+      expect(messages.grep(/always-(truthy|falsey)|condition is always/)).to be_empty
+    end
+  end
+
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 

@@ -434,11 +434,36 @@ module Rigor
 
       def record_ivar_write(node, scope, class_name, accumulator, guarded: false)
         rvalue_type = scope.type_of(node.value)
+
+        # `@x = nil unless @x` / `@y = false unless @y` —
+        # follow-up to the polarity-aware defensive-init guard
+        # fix (ROADMAP § Future cycles — "Defensive ivar-init
+        # with nil / false rvalue"). When the rvalue is itself a
+        # falsey Constant, `union(rvalue, Constant[nil])`
+        # collapses (for `nil`) or doesn't widen the type's
+        # truthiness profile (for `false`) — the predicate
+        # `unless @x` then folds to a single `Constant[nil]` /
+        # `Constant[false]` and the
+        # `flow.always-truthy-condition` / `-always-falsey-`
+        # rule false-fires on the no-op-but-documented-default
+        # idiom. Skip the seed contribution for this write
+        # (matches the existing skip for `@x ||= v`, which the
+        # pre-pass also does not seed). Other writes to the
+        # same ivar still contribute; the falsey-default write
+        # carries no useful precision the predicate hasn't
+        # already given us. See tdiary-core HEAD `ee40c2b`
+        # `lib/tdiary/configuration.rb:157` for the worked site.
+        return if guarded && falsey_constant?(rvalue_type)
+
         rvalue_type = Type::Combinator.union(rvalue_type, Type::Combinator.constant_of(nil)) if guarded
         accumulator[class_name] ||= {}
         existing = accumulator[class_name][node.name]
         accumulator[class_name][node.name] =
           existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+      end
+
+      def falsey_constant?(type)
+        type.is_a?(Type::Constant) && (type.value.nil? || type.value == false)
       end
 
       # Slice 7 phase 6 — class-cvar pre-pass. Same shape as the

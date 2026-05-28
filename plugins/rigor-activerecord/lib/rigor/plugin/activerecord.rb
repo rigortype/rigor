@@ -213,14 +213,18 @@ module Rigor
       # more precise than the RBS envelope.
       def flow_contribution_for(call_node:, scope:)
         return nil unless call_node.is_a?(Prism::CallNode)
-        return nil if call_node.receiver.nil?
 
         index = model_index
         return nil if index.nil? || index.empty?
 
-        return_type = class_call_return_type(call_node, index) ||
-                      relation_call_return_type(call_node, scope, index) ||
-                      instance_call_return_type(call_node, scope, index)
+        return_type =
+          if call_node.receiver
+            class_call_return_type(call_node, index) ||
+              relation_call_return_type(call_node, scope, index) ||
+              instance_call_return_type(call_node, scope, index)
+          else
+            implicit_self_class_call_return_type(call_node, scope, index)
+          end
         return nil if return_type.nil?
 
         Rigor::FlowContribution.new(
@@ -241,6 +245,37 @@ module Rigor
         return nil if model_name.nil?
 
         entry = index.find(model_name) || index.find("::#{model_name}")
+        return nil if entry.nil?
+
+        finder_return_type(call_node, entry) ||
+          class_scope_return_type(call_node, entry)
+      end
+
+      # Implicit-self class-side call: `select(:uri)` /
+      # `where(active: true)` inside a `def self.<method>` body,
+      # a class body, or a scope lambda body (`scope :x, -> { ... }`).
+      # The surrounding `self_type` is `Singleton[Model]` in all
+      # three cases, so the same finder / scope / relation entry-
+      # point resolution that handles `Model.where(...)` applies.
+      #
+      # Without this, `select(:uri)` inside a class body falls
+      # through to RBS dispatch on `Singleton[Account]`, which
+      # finds `Kernel#select` (the IO multiplexer) at
+      # `core/kernel.rbs` — its `Array[String]` return masks the
+      # AR class-side `select`'s relation return type, so the
+      # canonical scope-body idiom
+      #
+      #   scope :duplicate_uris, -> { select(:uri).group(:uri) }
+      #
+      # types `select(:uri)` as `Array[String]` and the chained
+      # `.group` as `undefined-method`.
+      def implicit_self_class_call_return_type(call_node, scope, index)
+        return nil if scope.nil?
+
+        self_type = scope.self_type
+        return nil unless self_type.is_a?(Rigor::Type::Singleton)
+
+        entry = index.find(self_type.class_name) || index.find("::#{self_type.class_name}")
         return nil if entry.nil?
 
         finder_return_type(call_node, entry) ||
@@ -268,7 +303,15 @@ module Rigor
             Rigor::Type::Combinator.nominal_of(entry.class_name),
             Rigor::Type::Combinator.constant_of(nil)
           )
-        when :where, :all, :order, :limit, :none
+        when :where, :all, :order, :limit, :none, :select
+          # `:select` was added to close Mastodon's
+          # `scope :duplicate_uris, -> { select(:uri).group(:uri).having(...) }`
+          # shape: the implicit-self `select(:uri)` inside the
+          # scope lambda body had been resolving to `Kernel#select`
+          # (IO multiplexer, return `Array[String]`), masking the
+          # AR class-side relation entry point. The rest of the
+          # query DSL chains through the bundled `ActiveRecord::Relation`
+          # RBS once a relation is open.
           relation_of(entry.class_name)
         end
       end

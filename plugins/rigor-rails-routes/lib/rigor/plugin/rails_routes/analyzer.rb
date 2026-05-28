@@ -23,6 +23,7 @@ module Rigor
           url_for_path url_for_url
           polymorphic_path polymorphic_url
           vite_asset_path vite_asset_url
+          expose_path expose_url
         ].freeze
 
         Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)

@@ -379,7 +379,12 @@ module Rigor
             case frame[:kind]
             when :namespace then frame[:name]
             when :scope then frame[:parent]
-            when :as_scope then frame[:name]
+            when :as_scope
+              # An `:as_scope` frame with an empty `:name` is a
+              # path-only frame pushed by `scope(path: 'X')`
+              # without `:as` — contributes path/arity but no
+              # helper-prefix segment.
+              frame[:name].to_s.empty? ? nil : frame[:name]
             when :singular_scope then frame[:parent]
             end
           end
@@ -442,7 +447,18 @@ module Rigor
             return IRREGULAR_SINGULARS[word] if IRREGULAR_SINGULARS.key?(word)
             return word if UNCOUNTABLE.include?(word)
             return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
-            return word.chomp("es") if word.end_with?("ses", "shes", "ches", "xes", "zes")
+            # Rails ships specific `*es$` → `*` rules for
+            # `(alias|status)es` and `(bus)es` (these have
+            # singular endings that the generic-chomp rules
+            # would mis-singularise to `aliase` / `statuse` /
+            # `buse`).
+            return word.chomp("es") if /(?:alias|status|bus)es\z/.match?(word)
+            # Rails only chomps `es` after `x|ch|ss|sh|z` for
+            # the generic case (`inflect.singular(/(x|ch|ss|sh)
+            # es$/i, '\1')`). A generic `ses` suffix removed
+            # `es` and broke `databases` → `databas` (correct:
+            # `database`). Restrict to the explicit suffix set.
+            return word.chomp("es") if word.end_with?("ches", "shes", "sses", "xes", "zes")
             # Words ending in `ss` are their own singular —
             # Rails' default inflector ships
             # `inflect.singular(/(ss)$/i, '\1')` that preserves
@@ -806,12 +822,6 @@ module Rigor
         # path, which matches Rails' behaviour for path-only scopes.
         def handle_scope(node, context)
           as_name = keyword_symbol(node, :as)
-
-          if as_name.nil?
-            interpret_block_body(node, context)
-            return
-          end
-
           # `scope :path_arg, as: :name` (path as a positional
           # arg) vs `scope(path: ':project_id', as: :project)`
           # (path as a `:path` keyword). GitLab's project routes
@@ -822,6 +832,23 @@ module Rigor
           path = string_argument(node, 0) || keyword_value_string(node, :path)
           path = "/#{path}" if path && !path.start_with?("/")
           arity = path ? count_path_placeholders(path) : 0
+
+          if as_name.nil?
+            # Even without `:as`, a `scope(path: 'groups/*id')`
+            # still contributes its path / arity segments to
+            # helpers declared inside (GitLab's
+            # `scope(path: 'groups/*id', controller: :groups)
+            # do; get :edit, as: :edit_group end` → arity 1).
+            # Skip the frame when there's also no path
+            # contribution (a pure `scope(module: :foo)` with
+            # no helper-name / path effect).
+            return interpret_block_body(node, context) if path.nil? || arity.zero?
+
+            context.push_as_scope("", path, arity) do
+              interpret_block_body(node, context)
+            end
+            return
+          end
 
           context.push_as_scope(as_name.to_s, path, arity) do
             interpret_block_body(node, context)
@@ -1488,7 +1515,15 @@ module Rigor
           return IRREGULAR_SINGULARS[word] if IRREGULAR_SINGULARS.key?(word)
           return word if UNCOUNTABLE.include?(word)
           return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
-          return word.chomp("es") if word.end_with?("ses", "shes", "ches", "xes", "zes")
+          # Rails-shipped `(alias|status|bus)es$` → `$1`
+          # specifics — without these the generic chomp rules
+          # mis-singularise `statuses` → `statuse` and
+          # `aliases` → `aliase`.
+          return word.chomp("es") if /(?:alias|status|bus)es\z/.match?(word)
+          # Match the Rails default-inflector rule:
+          # `(x|ch|ss|sh)es$` → strip "es". A generic `ses`
+          # suffix would over-strip (`databases` → `databas`).
+          return word.chomp("es") if word.end_with?("ches", "shes", "sses", "xes", "zes")
           # Preserve trailing `ss` — Rails ships
           # `inflect.singular(/(ss)$/i, '\1')` so `custom_css`
           # singularises as `custom_css`, not `custom_cs`.

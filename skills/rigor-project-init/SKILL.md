@@ -94,6 +94,7 @@ Below that, either mode is reasonable — ask.
 | 6 | Run `rigor triage --format json` to diagnose the diagnostic stream. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
 | 7 | Acknowledge mode only — generate the baseline and wire `baseline:`. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
 | 8 | Surface likely real bugs; offer the two escalation paths. | [`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md) |
+| 9 | Confirm the generated files with the user — what each is, and whether to commit it. | (this file — § "Final step") |
 
 Load each reference when you reach its phase. Phases run in order;
 the only branch is Phase 7 (acknowledge mode runs it, strict mode
@@ -127,3 +128,31 @@ material. Two of them have a dedicated answer this skill hands off to:
 
 Neither is a Phase 7 obligation — they are options to *offer* the
 user when the triage report points at one of these causes.
+
+## Final step — confirm the generated files with the user
+
+Onboarding scatters new files across the project root. Before
+finishing, present the user with a short message that names **each
+file the workflow produced**, says what it is, and recommends
+whether to commit it — so the team shares one consistent setup
+rather than each developer reinventing it. Do not silently leave the
+files for the user to discover.
+
+Run `git status --short` first; only describe files that actually
+exist (e.g. `sig/` exists only if Phase 5 ran; `.rigor-baseline.yml`
+only in acknowledge mode). For each, give the commit recommendation:
+
+| File | What it is | Commit? |
+| --- | --- | --- |
+| `.rigor.dist.yml` | The shared project config (Phase 4) — `target_ruby`, `paths:`, `plugins:`, `severity_profile:`, and the `baseline:` pointer. The single source of truth every contributor's `rigor check` reads. | **Yes** — it is the shared config; sharing it is the whole point. |
+| `.rigor-baseline.yml` | Acknowledge mode only (Phase 7) — the snapshot of today's known diagnostics. Doubles as a record of project state; without it each developer's baseline diverges and the regression guard means different things per machine. | **Yes** — commit it; it documents project state and pins the regression envelope. |
+| `sig/` | RBS skeletons from `rigor sig-gen` (Phase 5), if that phase ran. A first-class project artefact — it sharpens inference for everyone. | **Yes** — commit it (see [`references/04-sig-uplift.md`](references/04-sig-uplift.md) § "Commit the sig/ directory"). |
+| `.rigor/` (contains `cache/`) | The per-file analysis cache `rigor check` writes to speed up re-runs. Regenerable and machine-local. | **No** — add `.rigor/` to `.gitignore`. |
+| `.rigor.yml` | Optional per-developer local override (not written by this skill). Takes precedence over `.rigor.dist.yml`; used to opt out locally (e.g. run without the baseline). | **No** — gitignore it if a developer creates one. |
+
+Recommend the two concrete actions and **ask before doing them**
+(both touch the user's repo): (1) add `.rigor/` — and `.rigor.yml`
+if present — to `.gitignore`; (2) commit `.rigor.dist.yml`,
+`.rigor-baseline.yml`, and `sig/` as the shared Rigor setup. Per the
+git-safety default, do not commit on the user's behalf until they
+confirm.

@@ -22,6 +22,11 @@ cycles live in dedicated archives:
   - `rigor skill path <name>` — single-line absolute path, ideal as input to a file-reading tool.
   - The `skills/` tree is now shipped inside the `rigortype` gem so `mise use gem:rigortype` (the recommended install channel) makes the skills reachable without cloning the repo.
 - **[manual]** Rails quickstart (Path A) now invokes the `rigor-project-init` skill via `rigor skill print rigor-project-init` instead of pointing at the in-repo `skills/` path.
+- **[rule: call.unresolved-toplevel]** New diagnostic flips the silent-`Dynamic[top]` default on **toplevel** implicit-self call sites (no enclosing `def` / `class` / `module`) that fail to resolve against any visible contributor. Standalone scripts and the [ADR-29](docs/adr/29-browser-playground.md) Playground now surface typos and forgotten `require`s; `foo 1` at the top of a file emits a `:warning` (severity profile `balanced`, the default), `:error` under `strict`, and is suppressed under `lenient`. Escape hatch for projects that introduce toplevel methods via monkey-patching is [ADR-17](docs/adr/17-monkey-patch-pre-evaluation.md)'s `pre_eval:` mechanism — no new config surface added. The class-body / `def`-body case stays lenient per [ADR-24 WD3](docs/adr/24-self-method-call-resolution.md). See [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) for the full design.
+
+### Fixed
+
+- **[ADR-17 / pre_eval]** A method declared in a `pre_eval:` file on a concretely-typed receiver (`s = "hello"; s.patched_method`) was resolving correctly through the dispatcher's `try_project_patched_method` tier but still firing `call.undefined-method` from `Analysis::CheckRules`, which ran an independent "does this method exist?" probe that ignored the registry. CheckRules now consults `Environment#project_patched_methods` at the same precedence the dispatcher does. Methods declared via `pre_eval:` are now consistently suppressed across both the type and check paths.
 
 ## [0.1.12] - 2026-05-28
 

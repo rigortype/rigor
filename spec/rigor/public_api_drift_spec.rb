@@ -63,6 +63,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     source_path()
     superclass_of(req:class_name)
     top_level_def_for(req:method_name)
+    toplevel?()
     type_of(req:node,key:tracer)
     user_def_for(req:class_name,req:method_name)
     with_class_cvars(req:table)

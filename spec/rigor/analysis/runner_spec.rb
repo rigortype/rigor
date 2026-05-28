@@ -493,6 +493,47 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # Regression: the dispatcher's `try_project_patched_method`
+      # tier resolved the call's TYPE through the registry, but
+      # `CheckRules#undefined_method_diagnostic` ran an independent
+      # "does this method exist?" probe that ignored the registry —
+      # so a patched method on a concretely-typed receiver
+      # (`Nominal[String]` / `Constant["hello"]`) would type
+      # correctly yet still fire `call.undefined-method`. The fix
+      # consults the registry in CheckRules at the same precedence
+      # the dispatcher does.
+      it "suppresses `call.undefined-method` on a patched method called on a concrete receiver" do # rubocop:disable RSpec/ExampleLength
+        Dir.mktmpdir("rigor-pre-eval-concrete-") do |tmpdir|
+          ext_path = File.join(tmpdir, "string_ext.rb")
+          consumer_path = File.join(tmpdir, "consumer.rb")
+          File.write(ext_path, <<~RUBY)
+            class String
+              def to_url
+                gsub(/\\W/, "-")
+              end
+            end
+          RUBY
+          File.write(consumer_path, <<~RUBY)
+            s = "hello world"
+            puts s.to_url
+            puts s.to_url_typo
+          RUBY
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new(
+              "paths" => [consumer_path],
+              "pre_eval" => [ext_path]
+            )
+            result = described_class.new(configuration: configuration, cache_store: nil).run
+            messages = result.diagnostics
+                             .select { |d| d.rule.to_s.include?("undefined-method") }
+                             .map(&:message)
+
+            expect(messages.grep(/to_url[^_]/)).to be_empty
+            expect(messages.grep(/to_url_typo/).size).to eq(1)
+          end
+        end
+      end
+
       it "surfaces `pre-eval.parse-error` :warning when a pre_eval file has a parse error" do
         Dir.mktmpdir("rigor-pre-eval-parse-") do |tmpdir|
           broken_path = File.join(tmpdir, "broken.rb")
@@ -579,6 +620,116 @@ RSpec.describe Rigor::Analysis::Runner do
             "expected `boom` to resolve cross-file to `Helpers#boom` (`bot`); got: " \
             "#{mismatches.map(&:message).inspect}"
           )
+        end
+      end
+    end
+  end
+
+  describe "ADR-34 slice 1 — call.unresolved-toplevel" do
+    def write_main(dir, body)
+      path = File.join(dir, "main.rb")
+      File.write(path, body)
+      path
+    end
+
+    it "emits the diagnostic on an unresolved toplevel implicit-self call (balanced default)" do
+      Dir.mktmpdir("rigor-adr34-emit-") do |tmpdir|
+        main = write_main(tmpdir, "foo 1\n")
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [main])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          diags = result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }
+          expect(diags.size).to eq(1)
+          expect(diags.first.severity).to eq(:warning)
+          expect(diags.first.message).to include("`foo`")
+          expect(diags.first.message).to include("pre_eval")
+        end
+      end
+    end
+
+    it "stays silent for Kernel/Object-resolved toplevel calls (`puts`)" do
+      Dir.mktmpdir("rigor-adr34-kernel-") do |tmpdir|
+        main = write_main(tmpdir, %(puts "hi"\n))
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [main])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
+        end
+      end
+    end
+
+    it "stays silent when a same-file toplevel `def` declares the method" do
+      Dir.mktmpdir("rigor-adr34-localdef-") do |tmpdir|
+        main = write_main(tmpdir, <<~RUBY)
+          def helper(x); x + 1; end
+          helper(42)
+        RUBY
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [main])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
+        end
+      end
+    end
+
+    it "stays silent when ADR-17 `pre_eval:` declares an Object monkey-patch (the escape hatch)" do
+      Dir.mktmpdir("rigor-adr34-preeval-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "lib"))
+        patch_path = File.join(tmpdir, "lib", "patch.rb")
+        File.write(patch_path, <<~RUBY)
+          class Object
+            def my_global_helper(x); "wrapped:\#{x}"; end
+          end
+        RUBY
+        main = write_main(tmpdir, %(my_global_helper("hi")\n))
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [main],
+            "pre_eval" => [patch_path]
+          )
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
+        end
+      end
+    end
+
+    it "stays silent for unresolved implicit-self calls INSIDE a class body (ADR-24 WD4 stays closed)" do
+      Dir.mktmpdir("rigor-adr34-classbody-") do |tmpdir|
+        main = write_main(tmpdir, <<~RUBY)
+          class C
+            def m
+              some_dsl_macro :x
+            end
+          end
+        RUBY
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [main])
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
+        end
+      end
+    end
+
+    it "escalates to :error under severity_profile: strict" do
+      Dir.mktmpdir("rigor-adr34-strict-") do |tmpdir|
+        main = write_main(tmpdir, "foo 1\n")
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [main], "severity_profile" => "strict")
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          diags = result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }
+          expect(diags.size).to eq(1)
+          expect(diags.first.severity).to eq(:error)
+        end
+      end
+    end
+
+    it "is suppressed under severity_profile: lenient" do
+      Dir.mktmpdir("rigor-adr34-lenient-") do |tmpdir|
+        main = write_main(tmpdir, "foo 1\n")
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new("paths" => [main], "severity_profile" => "lenient")
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          expect(result.diagnostics.select { |d| d.rule == "call.unresolved-toplevel" }).to be_empty
         end
       end
     end

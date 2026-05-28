@@ -39,6 +39,7 @@ module Rigor
       PROFILES = {
         lenient: {
           "call.undefined-method" => :error,
+          "call.unresolved-toplevel" => :off,
           "call.wrong-arity" => :error,
           "call.argument-type-mismatch" => :warning,
           "call.possible-nil-receiver" => :warning,
@@ -54,6 +55,7 @@ module Rigor
         }.freeze,
         balanced: {
           "call.undefined-method" => :error,
+          "call.unresolved-toplevel" => :warning,
           "call.wrong-arity" => :error,
           "call.argument-type-mismatch" => :error,
           "call.possible-nil-receiver" => :error,
@@ -69,6 +71,7 @@ module Rigor
         }.freeze,
         strict: {
           "call.undefined-method" => :error,
+          "call.unresolved-toplevel" => :error,
           "call.wrong-arity" => :error,
           "call.argument-type-mismatch" => :error,
           "call.possible-nil-receiver" => :error,

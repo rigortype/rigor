@@ -58,6 +58,7 @@ module Rigor
     def with_discovered_def_nodes: (Hash[String, Hash[Symbol, untyped]] table) -> Scope
     def user_def_for: (String | Symbol class_name, String | Symbol method_name) -> untyped?
     def top_level_def_for: (String | Symbol method_name) -> untyped?
+    def toplevel?: () -> bool
     def with_discovered_method_visibilities: (Hash[String, Hash[Symbol, Symbol]] table) -> Scope
     def discovered_method_visibility: (String | Symbol class_name, String | Symbol method_name) -> Symbol?
     def superclass_of: (String | Symbol class_name) -> String?

@@ -57,6 +57,7 @@ module Rigor
       # system; new rules MUST register here so user configuration
       # can refer to them.
       RULE_UNDEFINED_METHOD = "call.undefined-method"
+      RULE_UNRESOLVED_TOPLEVEL = "call.unresolved-toplevel"
       RULE_WRONG_ARITY = "call.wrong-arity"
       RULE_ARGUMENT_TYPE = "call.argument-type-mismatch"
       RULE_NIL_RECEIVER = "call.possible-nil-receiver"
@@ -72,6 +73,7 @@ module Rigor
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
+        RULE_UNRESOLVED_TOPLEVEL,
         RULE_WRONG_ARITY,
         RULE_ARGUMENT_TYPE,
         RULE_NIL_RECEIVER,
@@ -162,6 +164,7 @@ module Rigor
       def call_node_diagnostics(path, node, scope_index)
         [
           undefined_method_diagnostic(path, node, scope_index),
+          unresolved_toplevel_diagnostic(path, node, scope_index),
           wrong_arity_diagnostic(path, node, scope_index),
           argument_type_diagnostic(path, node, scope_index),
           nil_receiver_diagnostic(path, node, scope_index),
@@ -365,10 +368,14 @@ module Rigor
           return nil if open_receiver?(class_name, scope)
 
           # Slice 7 phase 12 — suppress when the user has
-          # declared the method in source (instance `def`,
-          # `def self.foo`, or recognised `define_method`).
+          # declared the method in source (`def` /
+          # `define_method`) OR in a `pre_eval:` monkey-patch
+          # file (ADR-17). Both paths are project-side method
+          # contributions the dispatcher already resolved; the
+          # rule must not surface a false `undefined-method`
+          # for them.
           kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-          return nil if scope.discovered_method?(class_name, call_node.name, kind)
+          return nil if source_declared_method?(scope, class_name, call_node.name, kind)
 
           return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
 
@@ -402,6 +409,92 @@ module Rigor
           return false if scope.environment.nil?
 
           scope.environment.rbs_module?(receiver_type.class_name)
+        end
+
+        # Combined suppression probe for `undefined-method` /
+        # `unresolved-toplevel`. Returns true when the method is
+        # declared by any project-side contributor the dispatcher
+        # already resolves: an in-source `def` / `define_method`
+        # (`scope.discovered_method?`) OR an ADR-17 `pre_eval:`
+        # monkey-patch (`Environment#project_patched_methods`).
+        # Both paths sit at the same dispatcher precedence; the
+        # check must hold them together so neither rule fires a
+        # false positive.
+        def source_declared_method?(scope, class_name, method_name, kind)
+          return true if scope.discovered_method?(class_name, method_name, kind)
+
+          project_patched_method?(scope, class_name, method_name, kind)
+        end
+
+        # ADR-17 § "Inference contract" — consults
+        # `Environment#project_patched_methods` so a `def` declared
+        # in a `pre_eval:` file suppresses the diagnostic at the
+        # same dispatcher precedence the registry holds for type
+        # inference (between plugins and dependency-source).
+        # Returns false when the environment carries no registry
+        # (legacy path) or the lookup misses.
+        def project_patched_method?(scope, class_name, method_name, kind)
+          environment = scope.environment
+          registry = environment&.project_patched_methods
+          return false if registry.nil? || registry.empty?
+
+          !registry.lookup(class_name: class_name.to_s, method_name: method_name.to_sym, kind: kind).nil?
+        end
+
+        # ADR-34 — `call.unresolved-toplevel`. Fires on an
+        # implicit-self call (no explicit receiver) at toplevel
+        # scope (`scope.toplevel?`, i.e. outside any class /
+        # module body) whose name does not resolve against:
+        #
+        # 1. A same-file toplevel `def` via
+        #    {Scope#top_level_def_for}.
+        # 2. The ADR-17 `ProjectPatchedMethods` registry under
+        #    `(Object, name, :instance)` — projects declare
+        #    their toplevel-injecting monkey-patches in
+        #    `.rigor.yml`'s `pre_eval:` array as the canonical
+        #    opt-out per ADR-34 WD2.
+        # 3. The standard `Kernel` / `Object` private-method
+        #    surface (`puts`, `p`, `require`, `loop`, `raise`,
+        #    …) drawn from the loaded RBS environment.
+        #
+        # The rule deliberately does NOT generalise to
+        # implicit-self calls inside `def` / `class` / `module`
+        # bodies — ADR-24 WD3's lenient-on-unresolved default
+        # stays in force there. ADR-24 WD4's gated class-body
+        # diagnostic is a separate decision this ADR does not
+        # open.
+        #
+        # Authored severity is `:warning`; the severity profile
+        # remaps it (`strict` → `:error`, `balanced` →
+        # `:warning`, `lenient` → `:off` / suppressed).
+        def unresolved_toplevel_diagnostic(path, call_node, scope_index)
+          return nil unless call_node.receiver.nil?
+
+          scope = scope_index[call_node]
+          return nil if scope.nil?
+          return nil unless scope.toplevel?
+
+          name = call_node.name
+          return nil if scope.top_level_def_for(name)
+          return nil if source_declared_method?(scope, "Object", name, :instance)
+          return nil if Rigor::Reflection.instance_method_definition("Object", name, scope: scope)
+
+          build_unresolved_toplevel_diagnostic(path, call_node)
+        end
+
+        def build_unresolved_toplevel_diagnostic(path, call_node)
+          location = call_node.message_loc || call_node.location
+          Diagnostic.new(
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "unresolved toplevel call to `#{call_node.name}`. " \
+                     "If a project file defines `#{call_node.name}` via a toplevel " \
+                     "`def` or a monkey-patch on Object/Kernel, list that file in " \
+                     "`.rigor.yml`'s `pre_eval:` (ADR-17) so the analyzer sees it.",
+            severity: :warning,
+            rule: RULE_UNRESOLVED_TOPLEVEL
+          )
         end
 
         # Returns a qualified class name for the in-scope check.

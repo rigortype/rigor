@@ -14,6 +14,15 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **[rigor skill]** New subcommand exposes the Agent Skills bundled under `skills/` (`rigor-project-init`, `rigor-baseline-reduce`, `rigor-plugin-author`) to AI coding agents that have no a priori knowledge of where Rigor's gem checkout lives.
+  - `rigor skill list` — name + absolute SKILL.md path for every bundled skill.
+  - `rigor skill print <name>` — header (paths + how to read the `references/` directory) followed by the SKILL.md body, in one stdout stream the agent can act on directly.
+  - `rigor skill path <name>` — single-line absolute path, ideal as input to a file-reading tool.
+  - The `skills/` tree is now shipped inside the `rigortype` gem so `mise use gem:rigortype` (the recommended install channel) makes the skills reachable without cloning the repo.
+- **[manual]** Rails quickstart (Path A) now invokes the `rigor-project-init` skill via `rigor skill print rigor-project-init` instead of pointing at the in-repo `skills/` path.
+
 ## [0.1.12] - 2026-05-28
 
 This release is dominated by realism work against three OSS Rails codebases — Mastodon, Redmine, and GitLab FOSS — driving down the analyzer's false-positive rate. Cumulative effect: Mastodon `app + lib` errors **789 → 6 (−99.2%)**, Redmine errors **163 → 79 (−51%)**, GitLab FOSS `app/{controllers,mailers,workers,services}` errors **~670 → ~140**. The flow-folding "G2" follow-ups (retry edge, intervening method call, read-before-write nil) are all closed.

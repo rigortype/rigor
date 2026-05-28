@@ -59,8 +59,8 @@ differs between projects.
 ## Path A — the rigor-project-init skill (recommended)
 
 The `rigor-project-init` skill automates the rest of the setup.
-It works inside any AI coding agent that has Rigor's bundled
-skills available (Claude Code in this repository, for example).
+It works inside any AI coding agent that can read a file and run
+a shell command — there is no Claude-specific machinery involved.
 
 ### What the skill does
 
@@ -97,9 +97,32 @@ Say one of the following to your AI coding agent:
 > "Configure Rigor for this Rails app."
 > "Add type checking."
 
-Or explicitly: **"Run the rigor-project-init skill."**
+The agent should respond by running:
 
-The skill is at
+```sh
+rigor skill print rigor-project-init
+```
+
+That prints the SKILL definition to stdout — a short header
+(with the absolute paths of the SKILL file and its `references/`
+directory) followed by the SKILL body. The agent then follows
+those instructions, reading the `references/NN-*.md` files in
+turn from the directory the header points at.
+
+If the agent does not pick the command up on its own, ask
+explicitly: **"Run `rigor skill print rigor-project-init` and
+follow the instructions it prints."**
+
+The same flow works against any bundled skill:
+
+- `rigor skill list` — list every bundled skill with its path.
+- `rigor skill print <name>` — print the SKILL body.
+- `rigor skill path <name>` — print just the absolute SKILL.md
+  path (handy if your agent prefers to read the file directly).
+
+The skill lives inside the installed `rigortype` gem at
+the path printed by `rigor skill path rigor-project-init`. The
+source-of-truth copy is
 [`skills/rigor-project-init/SKILL.md`](../../skills/rigor-project-init/SKILL.md).
 
 ---

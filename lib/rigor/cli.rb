@@ -33,7 +33,8 @@ module Rigor
       "triage" => :run_triage,
       "coverage" => :run_coverage,
       "plugins" => :run_plugins,
-      "playground" => :run_playground
+      "playground" => :run_playground,
+      "skill" => :run_skill
     }.freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
@@ -635,6 +636,12 @@ module Rigor
       Rigor::CLI::PlaygroundCommand.new(@argv[1..], @out, @err).run
     end
 
+    def run_skill
+      require_relative "cli/skill_command"
+
+      CLI::SkillCommand.new(argv: @argv, out: @out, err: @err).run
+    end
+
     def write_result(result, format)
       case format
       when "json"
@@ -682,6 +689,7 @@ module Rigor
           coverage   Report type-precision coverage (precise vs Dynamic ratio)
           plugins    Report activation status of every configured plugin
           playground Start the browser playground (requires rigor-playground gem)
+          skill      List or print bundled Agent Skills (rigor-project-init, ...)
           version    Print the Rigor version
           help       Print this help
       HELP

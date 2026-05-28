@@ -34,6 +34,20 @@ module Rigor
       # `sig/`), and `local` (a user-managed RBS dir) — all
       # produce a directory under the collection root and are
       # admitted.
+      #
+      # The `source.type` filter alone is NOT sufficient: gems
+      # that were extracted from Ruby's stdlib into standalone
+      # default gems (e.g. `cgi`, `logger`, `base64`, `csv`,
+      # `bigdecimal`) are published in `ruby/gem_rbs_collection`
+      # under a `git` source type, yet rigor ALSO loads them
+      # from its bundled stdlib via `DEFAULT_LIBRARIES`. Loading
+      # both copies triggers the very
+      # `RBS::DuplicatedDeclarationError` this module exists to
+      # avoid (observed on a Rails 8 app: `.gem_rbs_collection/
+      # cgi/0.5/` vs the bundled `stdlib/cgi`). The
+      # `skip_gem_names:` parameter lets the caller pass the set
+      # of library names rigor already loads so those gems are
+      # dropped regardless of `source.type`.
       SKIPPED_SOURCE_TYPES = Set["stdlib"].freeze
 
       DEFAULT_COLLECTION_PATH = ".gem_rbs_collection"
@@ -47,14 +61,21 @@ module Rigor
       # @param auto_detect [Boolean] when true and
       #   `lockfile_path:` is nil, look for
       #   `<project_root>/rbs_collection.lock.yaml`.
+      # @param skip_gem_names [Array<String>, Set<String>] gem
+      #   names rigor already loads from its bundled stdlib (the
+      #   merged `DEFAULT_LIBRARIES + libraries:` set). Entries
+      #   whose `name` is in this set are dropped regardless of
+      #   `source.type` to avoid `RBS::DuplicatedDeclarationError`
+      #   on stdlib-extracted default gems. Defaults to empty.
       # @return [Array<Pathname>] every
       #   `<collection_path>/<gem-name>/<gem-version>/`
       #   directory listed in the lockfile whose entry has a
-      #   non-skipped source type and whose directory exists on
-      #   disk. Returns `[]` when no lockfile is resolvable,
-      #   when the YAML is unreadable, or when the collection
-      #   path doesn't exist.
-      def self.discover(lockfile_path:, project_root: Dir.pwd, auto_detect: true)
+      #   non-skipped source type, whose `name` is not in
+      #   `skip_gem_names:`, and whose directory exists on disk.
+      #   Returns `[]` when no lockfile is resolvable, when the
+      #   YAML is unreadable, or when the collection path
+      #   doesn't exist.
+      def self.discover(lockfile_path:, project_root: Dir.pwd, auto_detect: true, skip_gem_names: [])
         resolved = resolve_lockfile_path(
           lockfile_path: lockfile_path,
           project_root: project_root,
@@ -68,7 +89,7 @@ module Rigor
         collection_root = resolve_collection_root(resolved, data)
         return [] unless collection_root.directory?
 
-        gem_paths_from(collection_root, data)
+        gem_paths_from(collection_root, data, skip_gem_names.to_set)
       end
 
       # Returns the resolved lockfile path (`Pathname`) or `nil`
@@ -105,7 +126,7 @@ module Rigor
       end
       private_class_method :resolve_collection_root
 
-      def self.gem_paths_from(collection_root, data)
+      def self.gem_paths_from(collection_root, data, skip_gem_names)
         Array(data["gems"]).filter_map do |entry|
           next unless entry.is_a?(Hash)
 
@@ -115,6 +136,7 @@ module Rigor
           name = entry["name"]
           version = entry["version"]
           next if name.nil? || version.nil?
+          next if skip_gem_names.include?(name.to_s)
 
           gem_root = collection_root + name.to_s + version.to_s
           gem_root if gem_root.directory?

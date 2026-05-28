@@ -81,6 +81,67 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
       expect(gem_names).to eq(["activerecord"])
     end
 
+    it "skips gems named in skip_gem_names regardless of source type" do # rubocop:disable RSpec/ExampleLength
+      # `cgi` / `logger` are stdlib-extracted default gems that
+      # ruby/gem_rbs_collection ships under a `git` source, yet
+      # rigor loads them from its bundled stdlib — admitting the
+      # collection copy double-declares and raises
+      # RBS::DuplicatedDeclarationError.
+      make_collection(
+        File.join(tmpdir, ".gem_rbs_collection"),
+        ["cgi", "0.5"], ["logger", "1.7"], ["activerecord", "7.1"]
+      )
+      body = <<~YAML
+        ---
+        path: ".gem_rbs_collection"
+        gems:
+        - name: cgi
+          version: '0.5'
+          source:
+            type: git
+        - name: logger
+          version: '1.7'
+          source:
+            type: git
+        - name: activerecord
+          version: '7.1'
+          source:
+            type: git
+        gemfile_lock_path: Gemfile.lock
+      YAML
+      path = write_lockfile(body)
+
+      result = described_class.discover(
+        lockfile_path: path, project_root: tmpdir, auto_detect: false,
+        skip_gem_names: %w[cgi logger uri date base64]
+      )
+      gem_names = result.map { |p| p.parent.basename.to_s }
+      expect(gem_names).to eq(["activerecord"])
+    end
+
+    it "admits all gems when skip_gem_names is empty (default)" do
+      make_collection(File.join(tmpdir, ".gem_rbs_collection"), ["cgi", "0.5"], ["rack", "3.0"])
+      body = <<~YAML
+        ---
+        path: ".gem_rbs_collection"
+        gems:
+        - name: cgi
+          version: '0.5'
+          source:
+            type: git
+        - name: rack
+          version: '3.0'
+          source:
+            type: git
+        gemfile_lock_path: Gemfile.lock
+      YAML
+      path = write_lockfile(body)
+
+      result = described_class.discover(lockfile_path: path, project_root: tmpdir, auto_detect: false)
+      gem_names = result.map { |p| p.parent.basename.to_s }.sort
+      expect(gem_names).to eq(%w[cgi rack])
+    end
+
     it "drops entries whose <collection>/<name>/<version>/ directory is missing" do
       # Lockfile names two gems but only one is actually installed.
       make_collection(File.join(tmpdir, ".gem_rbs_collection"), ["rack", "3.0"])

@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Fixed
+
+- **[rigor check]** Running `rbs collection install` in a project no longer breaks Rigor's RBS environment with `RBS::DuplicatedDeclarationError`. Gems whose RBS Rigor already loads from another source — stdlib-extracted default gems (`cgi`, `logger`, `base64`, …, shipped by `ruby/gem_rbs_collection` under a `git` source) and the `data/vendored_gem_sigs/` bundle (`redis`, `nokogiri`, `pg`, …) — are now dropped from the discovered `.gem_rbs_collection/` signature paths so the collection copy cannot double-declare against the bundled RBS. Previously the collision left the whole environment unbuilt, silently degrading most type-of queries to `Dynamic[top]` and suppressing rule diagnostics. Discovered while onboarding a Rails 8 app with an installed RBS collection.
+
 ## [0.1.13] - 2026-05-29
 
 Targets two user-experience surfaces: AI-assisted onboarding and single-file script analysis. The new `rigor skill` subcommand lets any AI coding agent installed alongside `rigortype` (via `mise use gem:rigortype` and friends) discover and follow Rigor's bundled Agent Skills without a project-side source checkout, and the new `call.unresolved-toplevel` rule means a typo at the top of a standalone script — silent until now — surfaces as a diagnostic the first time `rigor check` runs.

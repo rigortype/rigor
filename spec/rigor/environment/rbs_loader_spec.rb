@@ -22,6 +22,20 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe ".vendored_gem_names" do
+    it "returns the gem subdirectory names under data/vendored_gem_sigs/" do
+      names = described_class.vendored_gem_names
+      # The set is the source of truth for RbsCollectionDiscovery's
+      # skip list; assert the known native-ext / Rails-ubiquitous
+      # gems that drove the collision fix are present.
+      expect(names).to include("redis", "nokogiri", "pg", "bcrypt", "cgi")
+    end
+
+    it "excludes the non-gem README.md sibling file" do
+      expect(described_class.vendored_gem_names).not_to include("README.md")
+    end
+  end
+
   describe "with stdlib library opt-in" do
     let(:custom_loader) { described_class.new(libraries: ["pathname"]) }
 

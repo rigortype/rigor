@@ -263,11 +263,22 @@ module Rigor
         # resulting `rbs_collection.lock.yaml` and feed each
         # gem's `<collection_path>/<name>/<version>/` directory
         # into `signature_paths:`. Stdlib-typed entries are
-        # skipped (already covered by `DEFAULT_LIBRARIES`).
+        # skipped (already covered by `DEFAULT_LIBRARIES`), as
+        # are gems whose RBS rigor already loads from another
+        # source — stdlib-extracted default gems (`cgi`,
+        # `logger`, …, shipped by the collection under a `git`
+        # source) and the `data/vendored_gem_sigs/` bundle
+        # (`redis`, `nokogiri`, `pg`, …). `skip_gem_names:`
+        # passes both sets so the collection copy doesn't
+        # double-declare against rigor's bundled RBS (the
+        # `RBS::DuplicatedDeclarationError` hazard).
+        merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
+        skip_gem_names = merged_libraries + RbsLoader.vendored_gem_names
         collection_paths = RbsCollectionDiscovery.discover(
           lockfile_path: rbs_collection_lockfile,
           project_root: root,
-          auto_detect: rbs_collection_auto_detect
+          auto_detect: rbs_collection_auto_detect,
+          skip_gem_names: skip_gem_names
         ).map(&:to_s)
         # ADR-25 — RBS signature directories contributed by loaded
         # plugins via their manifest `signature_paths:`. Resolved
@@ -278,7 +289,6 @@ module Rigor
         # degrades through the same O7 failure-memo path.
         plugin_sig_paths = plugin_registry ? plugin_registry.signature_paths.map(&:to_s) : []
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths + collection_paths
-        merged_libraries = (DEFAULT_LIBRARIES + libraries.map(&:to_s)).uniq
         # ADR-32 WD4 + WD5 — invoke each loaded plugin's
         # `source_rbs_synthesizer` once per project source file
         # and collect non-nil `[filename, rbs_source]` pairs.

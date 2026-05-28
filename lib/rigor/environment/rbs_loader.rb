@@ -122,6 +122,23 @@ module Rigor
             Pathname(File.join(VENDORED_GEM_SIGS_ROOT, gem_dir))
           end
         end
+
+        # Gem names whose RBS ships under
+        # `data/vendored_gem_sigs/<gem>/`. The directory walk is
+        # the source of truth (the `README.md` sibling is not a
+        # gem and is excluded). Callers building the RBS env use
+        # this set to drop the matching `rbs collection install`
+        # directory before it double-declares against the
+        # vendored copy — the same hazard `DEFAULT_LIBRARIES`
+        # creates for stdlib-extracted gems. See
+        # `RbsCollectionDiscovery`'s `skip_gem_names:`.
+        def vendored_gem_names
+          return [] unless File.directory?(VENDORED_GEM_SIGS_ROOT)
+
+          Dir.children(VENDORED_GEM_SIGS_ROOT).reject do |child|
+            File.file?(File.join(VENDORED_GEM_SIGS_ROOT, child))
+          end
+        end
       end
 
       attr_reader :libraries, :signature_paths, :cache_store, :virtual_rbs

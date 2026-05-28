@@ -28,6 +28,10 @@ that shaped each cut are preserved in git history (see
 | v0.1.6 | 2026-05-19 | ADR-12 / ADR-17 / ADR-18 floors + worked consumers; editor mode v1 + Language Server v1/v2; ADR-20 Lightweight HKT; ecosystem plugins + the `rigor-rails` meta-gem scaffold. See `CHANGELOG.md` § `[0.1.6]`. |
 | v0.1.7 | 2026-05-20 | ADR-22 baseline mechanism (slices 1+2) + project-onboarding groundwork; survey-driven plugin / engine false-positive fixes; Pillar 2 "your specs are types" slices 1+2+3. See `CHANGELOG.md` § `[0.1.7]`. |
 | v0.1.8 | 2026-05-21 | Mastodon-survey false-positive reduction: ADR-15 fork-based worker pool (the active `workers > 0` backend), ADR-23 `rigor triage` diagnostic-triage subcommand, ADR-24 implicit-self method-call resolution. See `CHANGELOG.md` § `[0.1.8]`. |
+| v0.1.9 | 2026-05-23 | Designated "last preview cut": external-user SKILL trio (`rigor-project-init`, `rigor-baseline-reduce`, external-author `rigor-plugin-author` variant per [ADR-22 WD8](adr/22-baseline-and-project-onboarding.md)); ADR-22 baseline slice 5 (`rigor baseline regenerate` + `--baseline-strict` CI gate); empirical-defaults tightening across v0.1.7 / v0.1.8 survey data. See `CHANGELOG.md` § `[0.1.9]`. |
+| v0.1.10 | 2026-05-27 | `rigor mcp --transport stdio` (ADR-33, seven read-only tools); `rigor sig-gen --params=observed` attr_reader inference; `rigor coverage` precision gate; `rigor check --treat-all-as-inline-rbs`; `rigor-rbs-inline` plugin (ADR-32); browser playground (ADR-29 slices 1–4); `rigor annotate` return-type annotation; ADR-28 path-scoped protocol contracts + `rigor-hanami`; constant folding (Date/DateTime/Time, Math, String/Integer/Float mid-priority, Hash shape handlers); `return if @ivar.nil?` ivar-guard narrowing fix. See `CHANGELOG.md` § `[0.1.10]`. |
+| v0.1.11 | 2026-05-27 | Plugin bundling into `rigortype` gem; portable baseline paths; `rigor-rails-routes` five false-positive sources eliminated against kaigionrails conference-app + Mastodon trials (`new_`/`edit_` prefix order, anonymous-`get` routes, `scope as:` prefix + arity, `draw(:name)` partial loading, `concern` body no-op, trailing options-hash +1 arity rule); `rigor-rails-i18n` lazy translation keys in controllers; Rails quickstart manual. See `CHANGELOG.md` § `[0.1.11]`. |
+| v0.1.12 | 2026-05-28 | OSS-realism cycle against Mastodon / Redmine / GitLab FOSS: Mastodon `app + lib` errors **789 → 6 (−99.2%)**, Redmine **163 → 79 (−51%)**, GitLab FOSS `app/{controllers,mailers,workers,services}` **~670 → ~140**. Six `flow.always-truthy / always-falsey` FP patterns closed (read-before-write nil, intervening method-call, retry edge, falsey-rvalue defensive init, polarity-aware guard, mutator widening). New narrowing primitives (`receiver[key] ||= default`, single-hop method-chain `is_a?`). `Class.new(Parent) { |c| ... }` and `Hash#each { |k, v| ... }` auto-splat typing. Comprehensive plugin expansion: `rigor-rails-routes` recognises devise_for / use_doorkeeper / mount / concern / with_options / member-collection-shorthand etc.; `rigor-actionpack` filter & render with nested-module qualification; `rigor-activerecord` migration exclusion / virtual-table models / Postgres array columns / scope-body resolution; `rigor-actionmailer` include-of-concerns; `rigor-rails-i18n` Rails-shipped key prefixes. New `rigor plugins` subcommand. See `CHANGELOG.md` § `[0.1.12]`. |
 
 ## Release strategy — the road to v0.2.0
 
@@ -38,28 +42,19 @@ real products.
 
 | Line | Role |
 | --- | --- |
-| `0.1.x` | Preview. **v0.1.9 is the last preview cut — a near-complete (準完成版) release** that closes the outstanding preview-track commitments. |
+| `0.1.x` | Preview. v0.1.9 was the originally-designated "last preview cut", but trial work against Mastodon / Redmine / tdiary / GitLab FOSS extended the line through v0.1.10 / v0.1.11 / v0.1.12 with substantial false-positive-reduction cycles. v0.1.12 leaves Mastodon `app + lib` at 6 unrelated errors (5 nil-receiver in test fixtures + 1 stdlib RBS gap). |
 | `v0.2.0` | **First evaluation release.** Publicly announced as the first version intended for real-product trial deployment; opens the evaluation period and invites outside feedback. |
 | `0.2.x` | Evaluation line. Not yet a formal version, but the goal is to bring **every planned feature except the Ractor concurrency track** to high completion / production quality. |
 
-### v0.1.9 — last preview (near-complete)
+### Where we stand after v0.1.12
 
-The final `0.1.x` cut. It closes the preview-track commitments so
-v0.2.0 starts the evaluation line from a near-complete base:
+The v0.1.9 "last preview cut" intent has been met (SKILL trio, ADR-22 slice 5, empirical-defaults tightening shipped) and the line has been *extended* through three additional trial-driven patch cuts (v0.1.10 / v0.1.11 / v0.1.12) with the Mastodon / Redmine / GitLab FOSS realism story. The preview line is now in a strong RC posture for v0.2.0:
 
-- The **external-user SKILL trio** — `rigor-project-init`,
-  `rigor-baseline-reduce`, and the external-author
-  `rigor-plugin-author` variant ([ADR-22 WD8](adr/22-baseline-and-project-onboarding.md));
-  all three live under `skills/` (LANDED in the v0.1.9 cycle).
-- **ADR-22 baseline slice 5** — `rigor baseline regenerate` plus
-  the `--baseline-strict` CI gate.
-- Tightening defaults (plugin / severity / baseline-rule
-  recommendations) against the empirical project-survey data
-  collected across the v0.1.7 / v0.1.8 cycles.
+- 99.2% Mastodon FP reduction empirically demonstrated; Redmine 51%, GitLab FOSS ~80% on the surveyed scopes.
+- All three flow-folding G2 follow-ups (`retry`, intervening call, read-before-write nil) are closed (v0.1.12).
+- The `rigor plugins` activation-readiness subcommand closes the silent-failure gap for plugin configuration (v0.1.12).
 
-Treated as a release candidate for the v0.2.0 evaluation line:
-the bar is "no known release-blocking defect", not "every
-demand-driven backlog item closed".
+The remaining v0.2.0 gates are the same three listed below — they have not changed.
 
 ### v0.2.0 — first evaluation release
 

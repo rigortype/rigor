@@ -53,15 +53,17 @@ module Rigor
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
-        # Bumped 2026-05-28 — Redmine-driven additions:
-        # `match` dispatch (shares `get`/`post` handler with
-        # different HTTP-method set), optional `(/:tab)`
-        # path-segment arity range, inline `:on => :collection`
-        # / `:on => :member`, string-named `get 'foo'` inside
-        # member/collection blocks, member-style `<as>_<singular>_path`
-        # for explicit `:as` inside resources, `_index_` suffix
-        # whenever singular == plural (including UNCOUNTABLE).
-        version: "0.12.0",
+        # Bumped 2026-05-28 — GitLab FOSS sweep adds: (a)
+        # `draw_all :name` support (action_dispatch-draw_all
+        # gem; single-file load semantics matching `draw :name`);
+        # (b) keyword-style `scope(path: ':project_id',
+        # as: :project)` — path read from the `:path` keyword,
+        # not only from the positional first arg; (c) detection
+        # of iterative `direct(name.sub(FROM, TO)) do ... end`
+        # alias-generation idiom — generates `<TO>_*` aliases
+        # for every registered `<FROM>_*` helper. GitLab uses
+        # this to shorten `namespace_project_*` → `project_*`.
+        version: "0.15.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
           "routes_file" => :string,

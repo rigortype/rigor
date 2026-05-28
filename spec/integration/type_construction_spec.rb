@@ -272,6 +272,15 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/block_auto_splat.rb — single Tuple yield destructures across multi-param block" do
+    let(:harness) { harness_for("block_auto_splat") }
+
+    it "binds Hash#each `|k, v|` to (key, value) via Ruby's block auto-splat" do
+      mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+      expect(mismatches).to be_empty
+    end
+  end
+
   describe "fixtures/assertions.rb — self-asserting via `assert_type`" do
     let(:harness) { harness_for("assertions") }
 

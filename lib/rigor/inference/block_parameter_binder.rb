@@ -106,6 +106,8 @@ module Rigor
         params_node = params_root.parameters
         return {} if params_node.nil?
 
+        apply_auto_splat(params_node)
+
         bindings = {}
         bind_positionals(params_node, bindings, 0)
         bind_rest(params_node, bindings)
@@ -113,6 +115,39 @@ module Rigor
         bind_keyword_rest(params_node, bindings)
         bind_block_param(params_node, bindings)
         bindings
+      end
+
+      # Ruby blocks (NOT lambdas) auto-splat a single yielded
+      # Tuple-shaped value when the block declares more than one
+      # required positional parameter:
+      #
+      #   { a: 1 }.each { |k, v| ... }
+      #
+      # yields `[key, value]` as a single arg, but the two-param
+      # block sees `k = key, v = value`. RBS / IteratorDispatch
+      # encode this as the block taking ONE `[K, V]` Tuple
+      # parameter; without this fix-up the binder would assign
+      # `k = Tuple[K, V]` and `v = Dynamic[Top]`, and any call
+      # on `k.<method-not-on-Tuple>` would false-fire.
+      #
+      # The rule fires only when (a) the receiver yields exactly
+      # one value (`expected_param_types.size == 1`), (b) the
+      # block declares more than one positional slot, and (c)
+      # that single expected element is a Tuple. Multi-arg yields
+      # (e.g. `each_with_index`'s `(element, index)` pair) are
+      # NOT auto-splatted — matching Ruby semantics where a
+      # multi-arg yield to a `|a, b, c|` block fills the extra
+      # slot with nil rather than splatting any element.
+      def apply_auto_splat(params_node)
+        return unless @expected_param_types.size == 1
+
+        pos_count = params_node.requireds.size + params_node.optionals.size + params_node.posts.size
+        return unless pos_count > 1
+
+        first = @expected_param_types[0]
+        return unless first.is_a?(Type::Tuple)
+
+        @expected_param_types = first.elements
       end
 
       def bind_positionals(params_node, bindings, cursor)

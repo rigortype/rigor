@@ -70,6 +70,12 @@ module Rigor
           context = Context.new(file_reader: file_reader)
           interpret(parse_result.value, context)
 
+          # Apply name-transform alias rules discovered during
+          # the walk (the `direct(name.sub(X, Y)) do |...| send(
+          # "#{name}_url", ...) end` GitLab pattern — see
+          # `collect_alias_rules` below).
+          apply_alias_rules(context)
+
           # Each helper has both `_path` and `_url` forms.
           paired = context.entries.flat_map do |entry|
             [
@@ -86,11 +92,41 @@ module Rigor
           HelperTable.new(paired, custom_helpers: custom_helpers, devise_resources: context.devise_resources)
         end
 
+        # For every registered alias rule `(from_str, to_str)`,
+        # find every existing entry whose name contains `from_str`
+        # and register an aliased entry with `from_str → to_str`
+        # substitution. The pattern matches GitLab's shorthand-
+        # helper idiom: a loop over registered route names that
+        # invokes `direct(new_name)` where `new_name = name.sub(
+        # FROM, TO)`. The substituted names route through the
+        # same underlying URL helper, so the arity / path stay
+        # the same on the alias.
+        def apply_alias_rules(context)
+          return if context.alias_rules.empty?
+
+          aliases = []
+          context.alias_rules.each do |from, to|
+            context.entries.each do |entry|
+              next unless entry.name.include?(from)
+
+              new_name = entry.name.sub(from, to)
+              next if new_name == entry.name
+
+              aliases << HelperTable::Entry.new(
+                name: new_name, arity: entry.arity,
+                path: entry.path, http_method: entry.http_method,
+                action: entry.action
+              )
+            end
+          end
+          context.entries.concat(aliases)
+        end
+
         # Per-parse mutable accumulator. Tracks the current
         # nesting prefix (namespaces + parent resource) and the
         # entries collected so far.
         class Context
-          attr_reader :entries, :file_reader, :devise_resources
+          attr_reader :entries, :file_reader, :devise_resources, :alias_rules
 
           def initialize(file_reader: nil)
             @entries = []
@@ -109,6 +145,18 @@ module Rigor
             # node. `resources :foo, concerns: :name do ... end`
             # replays the body at the resource's site.
             @concerns = {}
+            # `(from_str, to_str)` pairs collected from
+            # iterative `direct(name.sub(FROM, TO)) do ... end`
+            # patterns. Applied after parsing via
+            # `apply_alias_rules` to generate substituted-name
+            # aliases for every matching entry — closes
+            # GitLab's `namespace_project_*` → `project_*`
+            # shorthand idiom.
+            @alias_rules = []
+          end
+
+          def register_alias_rule(from, to)
+            @alias_rules << [from, to]
           end
 
           def record_devise_resource(name)
@@ -433,6 +481,18 @@ module Rigor
               # config/routes/{name}.rb.
               load_drawn_routes(node, context)
             end
+          when :draw_all
+            # `draw_all :user` — from the
+            # `action_dispatch-draw_all` gem (used by GitLab
+            # FOSS). Same single-file load semantics as `draw`
+            # — the gem just allows multiple route-dir search
+            # paths (we look in the one we know about).
+            # GitLab's `draw_all :user` loads
+            # `config/routes/user.rb` containing `devise_for
+            # :users, controllers: ...` plus the broader user
+            # route catalogue; without this every Devise
+            # session helper reads as `unknown-helper`.
+            load_drawn_routes(node, context)
           when :namespace
             handle_namespace(node, context)
           when :resources
@@ -470,9 +530,94 @@ module Rigor
             handle_with_options(node, context)
           when :concern
             handle_concern_definition(node, context)
+          when :each
+            # `.each do |name| ... end` — scan the block for
+            # the GitLab `direct(name.sub(X, Y)) do ... end`
+            # alias-generation idiom. If found, record the
+            # (X, Y) pair so `apply_alias_rules` can expand
+            # every matching registered entry.
+            detect_alias_rule_in_each(node, context)
+            interpret_block_body(node, context)
           else
             interpret_block_body(node, context)
           end
+        end
+
+        # Walks a `.each do |loop_var| ... end` body looking for:
+        #   - `<new_name_var> = <loop_var>.sub(FROM_STR, TO_STR)`
+        #   - `direct(<new_name_var>) do |...| ... end`
+        # When both shapes appear with the same `<new_name_var>`,
+        # registers `(FROM_STR, TO_STR)` as an alias rule. The
+        # iterated collection (`Rails.application.routes.set`)
+        # is assumed to yield the names of already-registered
+        # helpers — GitLab's idiom. Other iterations that happen
+        # to match the shape are rare; the FP risk is bounded
+        # because alias generation only adds entries.
+        def detect_alias_rule_in_each(each_node, context)
+          block = each_node.block
+          return unless block.is_a?(Prism::BlockNode)
+
+          loop_var = first_block_parameter_name(block)
+          return if loop_var.nil?
+
+          body = block.body
+          return if body.nil?
+
+          # First pass: gather every `<var> = <loop_var>.sub(FROM, TO)`
+          # assignment.
+          sub_assignments = {}
+          walk_for_alias_pattern(body) do |node|
+            next unless node.is_a?(Prism::LocalVariableWriteNode)
+            next unless node.value.is_a?(Prism::CallNode)
+            next unless node.value.name == :sub
+
+            recv = node.value.receiver
+            next unless recv.is_a?(Prism::LocalVariableReadNode) && recv.name == loop_var
+
+            args = node.value.arguments&.arguments || []
+            next if args.size != 2
+
+            from = string_value(args[0])
+            to = string_value(args[1])
+            next if from.nil? || to.nil?
+
+            sub_assignments[node.name] = [from, to]
+          end
+
+          return if sub_assignments.empty?
+
+          # Second pass: find `direct(<var>) do ... end` calls
+          # whose first arg is one of the captured assignment
+          # variables.
+          walk_for_alias_pattern(body) do |node|
+            next unless node.is_a?(Prism::CallNode) && node.name == :direct
+            next if node.arguments.nil?
+
+            first = node.arguments.arguments.first
+            next unless first.is_a?(Prism::LocalVariableReadNode)
+            next unless (rule = sub_assignments[first.name])
+
+            context.register_alias_rule(rule[0], rule[1])
+          end
+        end
+
+        def walk_for_alias_pattern(node, &)
+          return unless node.is_a?(Prism::Node)
+
+          yield node
+          node.compact_child_nodes.each { |child| walk_for_alias_pattern(child, &) }
+        end
+
+        def first_block_parameter_name(block_node)
+          params = block_node.parameters
+          return nil unless params.is_a?(Prism::BlockParametersNode)
+          return nil unless params.parameters.is_a?(Prism::ParametersNode)
+
+          required = params.parameters.requireds
+          return nil if required.nil? || required.empty?
+
+          first = required.first
+          first.respond_to?(:name) ? first.name : nil
         end
 
         def interpret_block_body(node, context)
@@ -611,7 +756,15 @@ module Rigor
             return
           end
 
-          path = string_argument(node, 0)
+          # `scope :path_arg, as: :name` (path as a positional
+          # arg) vs `scope(path: ':project_id', as: :project)`
+          # (path as a `:path` keyword). GitLab's project routes
+          # rely on the latter for the `*namespace_id` /
+          # `:project_id` outer scopes. The leading `/` is added
+          # if missing so the path-prefix join produces clean
+          # segments.
+          path = string_argument(node, 0) || keyword_value_string(node, :path)
+          path = "/#{path}" if path && !path.start_with?("/")
           arity = path ? count_path_placeholders(path) : 0
 
           context.push_as_scope(as_name.to_s, path, arity) do
@@ -1155,6 +1308,16 @@ module Rigor
 
         def keyword_symbol(node, key)
           options_hash(node)[key]
+        end
+
+        # Reads a keyword option whose value is a literal String
+        # (returned as-is). Returns nil when the key is missing
+        # or the value is non-literal. Used for `scope(path:
+        # ':project_id', ...)` shape parsing where `:path` is
+        # passed as a keyword rather than a positional arg.
+        def keyword_value_string(node, key)
+          value = options_hash(node)[key]
+          value.is_a?(String) ? value : nil
         end
 
         def symbol_value(node)

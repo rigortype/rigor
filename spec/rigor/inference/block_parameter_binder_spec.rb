@@ -171,5 +171,45 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
       dyn = Rigor::Type::Combinator.untyped
       expect(bindings).to eq(a: dyn, b: dyn)
     end
+
+    describe "block auto-splat (single Tuple yield -> multi-param destructure)" do
+      it "splats Tuple[K, V] across |k, v| (Hash#each shape)" do
+        block = parse_block("hash.each { |k, v| k }")
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(block)
+        expect(bindings).to eq(k: integer_nominal, v: string_nominal)
+      end
+
+      it "leaves |pair| (single-param block) as Tuple[K, V] — no splat" do
+        block = parse_block("hash.each { |pair| pair }")
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(block)
+        expect(bindings).to eq(pair: tuple)
+      end
+
+      it "pads with Dynamic[Top] when the block has more params than the Tuple elements" do
+        block = parse_block("hash.each { |k, v, extra| extra }")
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        bindings = described_class.new(expected_param_types: [tuple]).bind(block)
+        expect(bindings).to eq(k: integer_nominal, v: string_nominal, extra: untyped)
+      end
+
+      it "does NOT splat when the receiver yields multiple args (each_with_index shape)" do
+        # `each_with_index` yields `(element, index)` as two args.
+        # Block `|p, i|` is a direct positional bind — no auto-splat
+        # of the first element, even though it is a Tuple.
+        block = parse_block("hash.each_with_index { |p, i| p }")
+        tuple = Rigor::Type::Combinator.tuple_of(integer_nominal, string_nominal)
+        non_neg = Rigor::Type::Combinator.non_negative_int
+        bindings = described_class.new(expected_param_types: [tuple, non_neg]).bind(block)
+        expect(bindings).to eq(p: tuple, i: non_neg)
+      end
+
+      it "leaves non-Tuple single expected element unchanged (no auto-splat for Nominal[Array])" do
+        block = parse_block("foo { |a, b| a }")
+        bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)
+        expect(bindings).to eq(a: integer_nominal, b: untyped)
+      end
+    end
   end
 end

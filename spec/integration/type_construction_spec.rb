@@ -61,6 +61,20 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/indexed_or_narrowing.rb — `receiver[key] ||= default` narrowing" do
+    let(:harness) { harness_for("indexed_or_narrowing") }
+
+    it "is diagnostic-clean — the post-`||=` `<<` / `[]=` chains dispatch on non-nil" do
+      messages = harness.errors.map(&:message)
+      expect(messages).to be_empty
+    end
+
+    it "records a per-slot narrowing keyed on `(receiver_kind, receiver_name, literal_key)`" do
+      key = Rigor::Scope::IndexedKey.new(receiver_kind: :local, receiver_name: :params, key: :f)
+      expect(harness.post_scope.indexed_narrowings).to have_key(key)
+    end
+  end
+
   describe "fixtures/is_a_narrowing.rb — String | nil narrowing" do
     let(:harness) { harness_for("is_a_narrowing") }
 

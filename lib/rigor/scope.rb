@@ -22,12 +22,28 @@ module Rigor
                 :discovered_classes, :in_source_constants, :discovered_methods,
                 :discovered_def_nodes, :discovered_method_visibilities,
                 :discovered_superclasses, :discovered_includes,
+                :indexed_narrowings,
                 :source_path
+
+    # Narrowing key for an indexed read `receiver[key]` where both
+    # the receiver and the key are stable enough to address. The
+    # value of the map at this key is the narrowed type the next
+    # read at the same address MUST observe.
+    #
+    # - `receiver_kind` ∈ `{:local, :ivar}` — the analyzer only
+    #   tracks reads against a local or instance variable today.
+    # - `receiver_name` is the variable's Symbol.
+    # - `key` is the Ruby value of the literal index (Symbol /
+    #   String / Integer). Non-literal keys (`params[field]`) are
+    #   not recorded; they have no stable address.
+    IndexedKey = Data.define(:receiver_kind, :receiver_name, :key)
 
     EMPTY_DECLARED_TYPES = {}.compare_by_identity.freeze
     EMPTY_VAR_BINDINGS = {}.freeze
     EMPTY_CLASS_BINDINGS = {}.freeze
-    private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS, :EMPTY_CLASS_BINDINGS
+    EMPTY_INDEXED_NARROWINGS = {}.freeze
+    private_constant :EMPTY_DECLARED_TYPES, :EMPTY_VAR_BINDINGS,
+                     :EMPTY_CLASS_BINDINGS, :EMPTY_INDEXED_NARROWINGS
 
     class << self
       def empty(environment: Environment.default, source_path: nil)
@@ -54,6 +70,7 @@ module Rigor
       discovered_method_visibilities: EMPTY_CLASS_BINDINGS,
       discovered_superclasses: EMPTY_CLASS_BINDINGS,
       discovered_includes: EMPTY_CLASS_BINDINGS,
+      indexed_narrowings: EMPTY_INDEXED_NARROWINGS,
       source_path: nil
     )
       @environment = environment
@@ -74,6 +91,7 @@ module Rigor
       @discovered_method_visibilities = discovered_method_visibilities
       @discovered_superclasses = discovered_superclasses
       @discovered_includes = discovered_includes
+      @indexed_narrowings = indexed_narrowings
       @source_path = source_path
       freeze
     end
@@ -85,7 +103,14 @@ module Rigor
     def with_local(name, type)
       new_locals = @locals.merge(name.to_sym => type).freeze
       new_fact_store = fact_store.invalidate_target(Analysis::FactStore::Target.local(name))
-      rebuild(locals: new_locals, fact_store: new_fact_store)
+      # Rebinding `name` invalidates every "after `receiver[key]
+      # ||= default`" narrowing keyed on it — the slot at `name[*]`
+      # is reachable through the old binding only, so the
+      # next read against the new binding does not inherit the
+      # earlier non-nil guarantee.
+      new_indexed_narrowings = drop_indexed_narrowings_for(:local, name)
+      rebuild(locals: new_locals, fact_store: new_fact_store,
+              indexed_narrowings: new_indexed_narrowings)
     end
 
     def with_fact(fact)
@@ -150,7 +175,9 @@ module Rigor
     end
 
     def with_ivar(name, type)
-      rebuild(ivars: @ivars.merge(name.to_sym => type).freeze)
+      new_indexed_narrowings = drop_indexed_narrowings_for(:ivar, name)
+      rebuild(ivars: @ivars.merge(name.to_sym => type).freeze,
+              indexed_narrowings: new_indexed_narrowings)
     end
 
     def with_cvar(name, type)
@@ -344,6 +371,42 @@ module Rigor
       rebuild(discovered_method_visibilities: table)
     end
 
+    # Closes the "`params[:f] ||= []; params[:f] << x`" precision
+    # gap (ROADMAP § Type-language / engine — indexed-collection
+    # narrowing through `Hash[k] ||= default`). After
+    # `receiver[key] ||= default`, the next read at `receiver[key]`
+    # is known non-nil; recording the post-`||=` type keyed on
+    # `(receiver_kind, receiver_name, literal_key)` lets the
+    # ExpressionTyper's `[]` dispatch hand back the narrowed
+    # type. Receiver-rebind and `[]=`/mutator invalidation rules
+    # are documented at the call sites in
+    # `Inference::StatementEvaluator`.
+    def indexed_narrowing(receiver_kind, receiver_name, key)
+      @indexed_narrowings[indexed_key(receiver_kind, receiver_name, key)]
+    end
+
+    def with_indexed_narrowing(receiver_kind, receiver_name, key, type)
+      new_table = @indexed_narrowings.merge(
+        indexed_key(receiver_kind, receiver_name, key) => type
+      ).freeze
+      rebuild(indexed_narrowings: new_table)
+    end
+
+    def without_indexed_narrowing(receiver_kind, receiver_name, key)
+      lookup = indexed_key(receiver_kind, receiver_name, key)
+      return self unless @indexed_narrowings.key?(lookup)
+
+      new_table = @indexed_narrowings.reject { |k, _| k == lookup }.freeze
+      rebuild(indexed_narrowings: new_table)
+    end
+
+    def without_indexed_narrowings_for(receiver_kind, receiver_name)
+      new_table = drop_indexed_narrowings_for(receiver_kind, receiver_name)
+      return self if new_table.equal?(@indexed_narrowings)
+
+      rebuild(indexed_narrowings: new_table)
+    end
+
     def facts_for(target: nil, bucket: nil)
       fact_store.facts_for(target: target, bucket: bucket)
     end
@@ -395,7 +458,8 @@ module Rigor
         self_type == other.self_type &&
         @ivars == other.ivars &&
         @cvars == other.cvars &&
-        @globals == other.globals
+        @globals == other.globals &&
+        @indexed_narrowings == other.indexed_narrowings
     end
     alias eql? ==
 
@@ -414,6 +478,7 @@ module Rigor
       discovered_method_visibilities: @discovered_method_visibilities,
       discovered_superclasses: @discovered_superclasses,
       discovered_includes: @discovered_includes,
+      indexed_narrowings: @indexed_narrowings,
       source_path: @source_path
     )
       self.class.new(
@@ -430,6 +495,7 @@ module Rigor
         discovered_method_visibilities: discovered_method_visibilities,
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,
+        indexed_narrowings: indexed_narrowings,
         source_path: source_path
       )
     end
@@ -459,8 +525,28 @@ module Rigor
         discovered_method_visibilities: discovered_method_visibilities,
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,
+        indexed_narrowings: join_bindings(@indexed_narrowings, other.indexed_narrowings),
         source_path: source_path
       )
+    end
+
+    def indexed_key(receiver_kind, receiver_name, key)
+      IndexedKey.new(
+        receiver_kind: receiver_kind.to_sym,
+        receiver_name: receiver_name.to_sym,
+        key: key
+      )
+    end
+
+    def drop_indexed_narrowings_for(receiver_kind, receiver_name)
+      return @indexed_narrowings if @indexed_narrowings.empty?
+
+      sym_kind = receiver_kind.to_sym
+      sym_name = receiver_name.to_sym
+      filtered = @indexed_narrowings.reject do |k, _|
+        k.receiver_kind == sym_kind && k.receiver_name == sym_name
+      end
+      filtered.size == @indexed_narrowings.size ? @indexed_narrowings : filtered.freeze
     end
   end
   # rubocop:enable Metrics/ClassLength,Metrics/ParameterLists

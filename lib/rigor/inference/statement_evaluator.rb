@@ -8,6 +8,7 @@ require_relative "../analysis/fact_store"
 require_relative "../source/node_walker"
 require_relative "block_parameter_binder"
 require_relative "closure_escape_analyzer"
+require_relative "indexed_narrowing"
 require_relative "method_dispatcher"
 require_relative "method_parameter_binder"
 require_relative "multi_target_binder"
@@ -73,6 +74,7 @@ module Rigor
         Prism::GlobalVariableOrWriteNode => :eval_global_or_write,
         Prism::GlobalVariableAndWriteNode => :eval_global_and_write,
         Prism::GlobalVariableOperatorWriteNode => :eval_global_operator_write,
+        Prism::IndexOrWriteNode => :eval_index_or_write,
         Prism::MultiWriteNode => :eval_multi_write,
         Prism::IfNode => :eval_if,
         Prism::UnlessNode => :eval_unless,
@@ -299,6 +301,53 @@ module Rigor
         else
           dispatch_operator(current, rhs, operator)
         end
+      end
+
+      # `receiver[key] ||= default` — the Redmine `Query#as_params`
+      # idiom (ROADMAP § Future cycles / Type-language / engine —
+      # "Indexed-collection narrowing through `Hash[k] ||= default`").
+      # After the `||=`, the next read at `receiver[key]` is known
+      # non-nil; the next `<<` / `[]=` / other mutator runs against
+      # a Tuple / Hash carrier instead of the `Constant[nil]` an
+      # empty `HashShape{}` lookup would otherwise fold to.
+      #
+      # The handler:
+      # 1. Types the equivalent `receiver[key]` read under the
+      #    entry scope (so any previously-recorded narrowing for
+      #    the same address is already applied).
+      # 2. Types the rvalue under the entry scope.
+      # 3. Computes `union(narrow_truthy(current), rhs)` — the
+      #    standard `||=` result shape used by locals / ivars /
+      #    cvars / globals.
+      # 4. Records the result type in the post-scope as a
+      #    narrowing keyed on `(receiver_kind, receiver_name,
+      #    literal_key)` when both receiver and key are stable
+      #    (see {Inference::IndexedNarrowing}). Unstable shapes
+      #    fall through to "no scope effect", matching the old
+      #    `Prism::IndexOrWriteNode` default-branch behaviour.
+      #
+      # The expression value is the result type, matching Ruby's
+      # semantics: `(x = params[:f] ||= []); x` observes the
+      # post-`||=` value, not the rvalue alone.
+      def eval_index_or_write(node)
+        rhs_type, post_rhs = sub_eval(node.value, scope)
+        current_type = scope.type_of(node, tracer: tracer)
+        result_type = Type::Combinator.union(Narrowing.narrow_truthy(current_type), rhs_type)
+
+        key_node = first_index_argument(node)
+        address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
+        post = post_rhs
+        post = post.with_indexed_narrowing(*address, result_type) if address
+
+        [result_type, post]
+      end
+
+      def first_index_argument(node)
+        args = node.arguments
+        return nil if args.nil?
+
+        list = args.respond_to?(:arguments) ? args.arguments : args
+        list.first
       end
 
       def dispatch_operator(current, rhs, operator)
@@ -892,6 +941,12 @@ module Rigor
         # precision — so blindly applying is safe regardless of
         # whether the block actually runs.
         post_scope = MutationWidening.widen_after_block(call_node: node, outer_scope: post_scope)
+        # Indexed-collection narrowing — drop any
+        # `receiver[key] ||= default` narrowing the analyzer
+        # recorded earlier when an intervening `[]=` writes the
+        # same slot or any other mutator runs against the
+        # receiver. Always-safe (only forgets; never invents).
+        post_scope = IndexedNarrowing.invalidate_after_call(call_node: node, current_scope: post_scope)
         [call_type, post_scope]
       end
 

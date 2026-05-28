@@ -48,6 +48,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     hash()
     in_source_constants()
     includes_of(req:class_name)
+    indexed_narrowing(req:receiver_kind,req:receiver_name,req:key)
+    indexed_narrowings()
     ivar(req:name)
     ivars()
     join(req:other)
@@ -74,11 +76,14 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     with_fact(req:fact)
     with_global(req:name,req:type)
     with_in_source_constants(req:table)
+    with_indexed_narrowing(req:receiver_kind,req:receiver_name,req:key,req:type)
     with_ivar(req:name,req:type)
     with_local(req:name,req:type)
     with_program_globals(req:table)
     with_self_type(req:type)
     with_source_path(req:path)
+    without_indexed_narrowing(req:receiver_kind,req:receiver_name,req:key)
+    without_indexed_narrowings_for(req:receiver_kind,req:receiver_name)
   ].freeze
 
   SCOPE_SINGLETON = %w[empty(key:environment,key:source_path)].freeze

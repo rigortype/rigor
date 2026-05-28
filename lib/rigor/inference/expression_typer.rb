@@ -6,6 +6,7 @@ require_relative "../type"
 require_relative "../ast"
 require_relative "block_parameter_binder"
 require_relative "fallback"
+require_relative "indexed_narrowing"
 require_relative "macro_block_self_type"
 require_relative "method_dispatcher"
 require_relative "narrowing"
@@ -1133,6 +1134,48 @@ module Rigor
         type_of(body.last)
       end
 
+      # Indexed-collection narrowing — `receiver[key]` after a
+      # prior `receiver[key] ||= default` reads the post-`||=`
+      # type when the receiver and key are stable enough to
+      # address. Sits ahead of `MethodDispatcher.dispatch` so
+      # the standard `Hash#[]` / `Array#[]` answer (which would
+      # fold to `Constant[nil]` for an empty `HashShape{}` or
+      # `Tuple[]`) does not override the narrowing. See
+      # {Inference::IndexedNarrowing}.
+      def indexed_narrowing_for(node)
+        IndexedNarrowing.lookup_for_call(node, scope)
+      end
+
+      # v0.0.3 A — implicit-self calls prefer a same-named
+      # top-level `def` over RBS dispatch. Without this,
+      # a helper like `def select(...)` defined inside an
+      # `RSpec.describe ... do ... end` block mis-routes
+      # through `Enumerable#select` / `Object#select` and
+      # the caller observes `Array[Elem]` instead of the
+      # helper's actual return type. The check fires only
+      # for `node.receiver.nil?` (true implicit self), so
+      # explicit-receiver dispatch is unaffected.
+      def try_local_def_dispatch(node, receiver, arg_types)
+        local_def = node.receiver.nil? ? scope.top_level_def_for(node.name) : nil
+        return nil unless local_def
+
+        local_inference = infer_top_level_user_method(local_def, receiver, arg_types)
+        return local_inference if local_inference && adoptable_self_call_result?(local_inference)
+
+        # The local def matches by name but the inference was
+        # disqualified — either the parameter shape is too complex
+        # for the first-iteration binder (kwargs / optionals /
+        # rest), or ADR-24 slice 1's conservative gate declined
+        # the resolved return type inside a class body (see
+        # `adoptable_self_call_result?`). `Dynamic[Top]` is the
+        # safest answer: RBS dispatch would be wrong (the method
+        # is user-defined and shadows whatever ancestor method the
+        # dispatch would find), and `Dynamic[Top]` propagates
+        # correctly through downstream call chains without
+        # surfacing misleading false-positive diagnostics.
+        dynamic_top
+      end
+
       # Slice 2 routes call expressions through `MethodDispatcher`. The
       # receiver and every argument are typed first, then the dispatcher is
       # asked for a result type. A nil result triggers the fail-soft fallback
@@ -1140,40 +1183,15 @@ module Rigor
       # their own fallbacks for unrecognised receivers/args, so the tracer
       # captures both the immediate dispatch miss and the deeper cause).
       def call_type_for(node)
+        narrowed = indexed_narrowing_for(node)
+        return narrowed if narrowed
+
         receiver = call_receiver_type_for(node)
         arg_types = call_arg_types(node)
         block_type = block_return_type_for(node, receiver, arg_types)
 
-        # v0.0.3 A — implicit-self calls prefer a same-named
-        # top-level `def` over RBS dispatch. Without this,
-        # a helper like `def select(...)` defined inside an
-        # `RSpec.describe ... do ... end` block mis-routes
-        # through `Enumerable#select` / `Object#select` and
-        # the caller observes `Array[Elem]` instead of the
-        # helper's actual return type. The check fires only
-        # for `node.receiver.nil?` (true implicit self), so
-        # explicit-receiver dispatch is unaffected.
-        local_def = node.receiver.nil? ? scope.top_level_def_for(node.name) : nil
-        if local_def
-          local_inference = infer_top_level_user_method(local_def, receiver, arg_types)
-          return local_inference if local_inference && adoptable_self_call_result?(local_inference)
-
-          # The local def matches by name but the inference
-          # was disqualified — either the parameter shape is
-          # too complex for the first-iteration binder
-          # (kwargs / optionals / rest), or ADR-24 slice 1's
-          # conservative gate declined the resolved return
-          # type inside a class body (see
-          # `adoptable_self_call_result?`).
-          # Returning `Dynamic[Top]` is the safest answer:
-          # we know RBS dispatch would be wrong (the
-          # method is user-defined and shadows whatever
-          # ancestor method the dispatch would find), and
-          # `Dynamic[Top]` propagates correctly through
-          # downstream call chains without surfacing
-          # misleading false-positive diagnostics.
-          return dynamic_top
-        end
+        local_def_result = try_local_def_dispatch(node, receiver, arg_types)
+        return local_def_result if local_def_result
 
         # v0.0.6 phase 2 — per-element block fold for Tuple
         # receivers. When `[a, b, c].map { |x| f(x) }` and the

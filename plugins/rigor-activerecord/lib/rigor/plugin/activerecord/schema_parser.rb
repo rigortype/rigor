@@ -157,7 +157,8 @@ module Rigor
           SchemaTable::Column.new(
             name: name,
             type: type,
-            ruby_type: SchemaTable.ruby_type_for(type)
+            ruby_type: SchemaTable.ruby_type_for(type),
+            array: keyword_true?(call_node, :array)
           )
         end
 
@@ -180,6 +181,14 @@ module Rigor
         end
 
         def references_polymorphic?(call_node)
+          keyword_true?(call_node, :polymorphic)
+        end
+
+        # Returns true iff `call_node` has a `name: true` keyword
+        # argument. Used to detect schema modifiers like
+        # `t.bigint "status_ids", array: true` (Postgres array
+        # column) and `t.references "x", polymorphic: true`.
+        def keyword_true?(call_node, name)
           return false if call_node.arguments.nil?
 
           call_node.arguments.arguments.each do |arg|
@@ -187,7 +196,7 @@ module Rigor
 
             arg.elements.each do |pair|
               next unless pair.is_a?(Prism::AssocNode)
-              next unless symbol_key(pair.key) == :polymorphic
+              next unless symbol_key(pair.key) == name
 
               return pair.value.is_a?(Prism::TrueNode)
             end
@@ -207,7 +216,8 @@ module Rigor
           SchemaTable::Column.new(
             name: name,
             type: type_sym,
-            ruby_type: SchemaTable.ruby_type_for(type_sym)
+            ruby_type: SchemaTable.ruby_type_for(type_sym),
+            array: keyword_true?(call_node, :array)
           )
         end
 

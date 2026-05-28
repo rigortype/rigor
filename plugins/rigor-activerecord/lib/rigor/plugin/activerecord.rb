@@ -59,12 +59,14 @@ module Rigor
     class Activerecord < Rigor::Plugin::Base
       manifest(
         id: "activerecord",
-        # Bumped 2026-05-28 — virtual-model exemption: models
-        # whose schema has no columns (DB-view-backed, external-
-        # source, etc.) skip column validation entirely.
-        # Mastodon's `Instance` wraps a SQL view absent from
-        # `db/schema.rb`.
-        version: "0.3.0",
+        # Bumped 2026-05-28 — Postgres array columns: a
+        # `t.<type> "name", array: true` (or `t.column "name",
+        # :type, array: true`) declaration now propagates through
+        # the column's instance accessor as `Array[<inner>]`
+        # rather than just `<inner>`. Mastodon's
+        # `reports.status_ids` (bigint array) used to type as
+        # `Integer`, breaking `(status_ids + ids).uniq`.
+        version: "0.4.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => :string,
@@ -411,7 +413,10 @@ module Rigor
         return nil if column.nil?
         return bool_type if predicate
 
-        ruby_type_to_type(column.ruby_type)
+        inner = ruby_type_to_type(column.ruby_type)
+        return nil if inner.nil?
+
+        column.array? ? Rigor::Type::Combinator.nominal_of("Array", type_args: [inner]) : inner
       end
 
       # Maps a `SchemaTable::Column#ruby_type` string to a Rigor

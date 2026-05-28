@@ -1302,6 +1302,63 @@ RSpec.describe "plugins/rigor-activerecord" do
       end
       expect(undefined).to be_empty
     end
+
+    describe "Postgres array columns (`t.<type> ..., array: true`)" do
+      let(:array_schema) do
+        <<~SCHEMA
+          ActiveRecord::Schema[8.0].define do
+            create_table "reports", force: :cascade do |t|
+              t.bigint "status_ids", default: [], null: false, array: true
+              t.string "tag_names", array: true
+              t.column "preferences", :string, array: true
+            end
+          end
+        SCHEMA
+      end
+
+      let(:array_models) do
+        {
+          "app/models/application_record.rb" => "class ApplicationRecord\nend\n",
+          "app/models/report.rb" => "class Report < ApplicationRecord\nend\n"
+        }
+      end
+
+      it "wraps a `t.bigint ..., array: true` accessor in Array[Integer]" do
+        _result, index = run_ar_with_index("x = 1\n", models: array_models, schema: array_schema)
+        contribution = column_contribution(index: index, source: "report.status_ids", receiver_class: "Report")
+        expect(contribution.return_type).to eq(
+          Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("Integer")])
+        )
+      end
+
+      it "wraps a `t.string ..., array: true` accessor in Array[String]" do
+        _result, index = run_ar_with_index("x = 1\n", models: array_models, schema: array_schema)
+        contribution = column_contribution(index: index, source: "report.tag_names", receiver_class: "Report")
+        expect(contribution.return_type).to eq(
+          Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")])
+        )
+      end
+
+      it "wraps a `t.column ..., array: true` accessor in Array[<inner>]" do
+        _result, index = run_ar_with_index("x = 1\n", models: array_models, schema: array_schema)
+        contribution = column_contribution(index: index, source: "report.preferences", receiver_class: "Report")
+        expect(contribution.return_type).to eq(
+          Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of("String")])
+        )
+      end
+
+      it "lets an array-column accessor chain through Array#uniq without false-firing call.undefined-method" do
+        source = <<~RUBY
+          r = Report.find(1)
+          (r.status_ids + [1, 2]).uniq
+        RUBY
+        result = run_ar(source, models: array_models, schema: array_schema)
+        undefined = result.diagnostics.select do |d|
+          d.path.end_with?("demo.rb") && d.rule == "call.undefined-method" && d.message.include?("uniq")
+        end
+        expect(undefined).to be_empty
+      end
+    end
   end
 
   describe "declarations inside a `with_options` block" do

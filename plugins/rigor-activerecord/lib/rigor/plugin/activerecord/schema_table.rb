@@ -16,8 +16,12 @@ module Rigor
       # ltree, hstore, custom) fall back to `Object` so the
       # plugin stays silent rather than guessing.
       class SchemaTable
-        Column = Struct.new(:name, :type, :ruby_type, keyword_init: true) do
-          def to_h = { name: name, type: type, ruby_type: ruby_type }
+        Column = Struct.new(:name, :type, :ruby_type, :array, keyword_init: true) do
+          def to_h = { name: name, type: type, ruby_type: ruby_type, array: array }
+
+          def array?
+            array == true
+          end
         end
 
         # Map ActiveRecord column types → Ruby class names.

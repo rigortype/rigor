@@ -78,6 +78,12 @@ module Rigor
         # @return [Array<Diagnostic>]
         def diagnose(path:, root:, helper_table:)
           suppress_unknown = SKIP_UNKNOWN_HELPER_PATHS.any? { |re| path.match?(re) }
+          # Same SKIP set silences `wrong-arity` too. A call
+          # like `group_path` inside `app/services/groups/nested_
+          # create_service.rb` is almost certainly the service's
+          # own instance method (`attr_accessor :group_path`) —
+          # both the unknown-helper check and the arity check
+          # against a registered route helper would FP.
           diagnostics = []
           # Pre-walk the file to collect every name that
           # shadows a route helper at call time: `let(:foo)`,
@@ -98,6 +104,17 @@ module Rigor
 
             entry = helper_table.find(name)
             if entry
+              # When the file is in a `SKIP_UNKNOWN_HELPER_PATHS`
+              # directory (models / services / workers / lib /
+              # …), don't emit the info or arity diagnostic
+              # against a registered helper either — the call
+              # is more likely the file's own instance method
+              # (e.g. `group_path` as an `attr_accessor`) that
+              # happens to share a name with a registered
+              # route helper. The unknown-helper suppression
+              # already silences the inverse case.
+              next if suppress_unknown
+
               diagnostics << info_diagnostic(path, call_node, entry)
               arity_diagnostic = arity_check(path, call_node, entry, helper_table)
               diagnostics << arity_diagnostic if arity_diagnostic

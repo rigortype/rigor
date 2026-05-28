@@ -14,9 +14,19 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-05-29
+
+Improves the AI-assisted onboarding experience and fixes a silent environment failure when `rbs collection install` has been run.
+
+### Added
+
+- **[docs]** New machine-readable install guide at `docs/install.md` lets an AI coding agent detect the available tool manager (mise / asdf / Ruby 4.0 on PATH), install `rigortype`, and hand off to `rigor skill print rigor-project-init` from a single prompt.
+  - The Rails quickstart (`docs/manual/14-rails-quickstart.md`) gains a callout at Step 1 pointing AI-assisted setups at the guide URL.
+  - `README.md`'s Installation section now opens with the one-line agent prompt so users arrive at a working setup without reading the full manual.
+
 ### Fixed
 
-- **[rigor check]** Running `rbs collection install` in a project no longer breaks Rigor's RBS environment with `RBS::DuplicatedDeclarationError`. Gems whose RBS Rigor already loads from another source — stdlib-extracted default gems (`cgi`, `logger`, `base64`, …, shipped by `ruby/gem_rbs_collection` under a `git` source) and the `data/vendored_gem_sigs/` bundle (`redis`, `nokogiri`, `pg`, …) — are now dropped from the discovered `.gem_rbs_collection/` signature paths so the collection copy cannot double-declare against the bundled RBS. Previously the collision left the whole environment unbuilt, silently degrading most type-of queries to `Dynamic[top]` and suppressing rule diagnostics. Discovered while onboarding a Rails 8 app with an installed RBS collection.
+- **[rigor check]** Running `rbs collection install` in a project no longer breaks Rigor's RBS environment with `RBS::DuplicatedDeclarationError`. Gems whose RBS Rigor already loads from another source — stdlib-extracted default gems (`cgi`, `logger`, `base64`, …, shipped by `ruby/gem_rbs_collection` under a `git` source) and the `data/vendored_gem_sigs/` bundle (`redis`, `nokogiri`, `pg`, …) — are now dropped from the discovered `.gem_rbs_collection/` signature paths so the collection copy cannot double-declare against the bundled RBS. Previously the collision left the whole environment unbuilt, silently degrading most type-of queries to `Dynamic[top]` and suppressing rule diagnostics.
 
 ## [0.1.13] - 2026-05-29
 
@@ -1002,7 +1012,8 @@ Each example ships `lib/`, runnable `demo/`, README, and an end-to-end integrati
 - **Cache load order for CLI flow.** `lib/rigor/cache/store.rb` and `lib/rigor/cache/rbs_descriptor.rb` now `require_relative "descriptor"`. In CLI flow, the umbrella `lib/rigor.rb` is never loaded, so `Cache::Descriptor` was undefined when the cache producers fired. The resulting `NameError` was being silently swallowed by `RbsLoader#cached_class_known`'s `rescue StandardError` (and friends), causing the cache layer to be effectively dead in production CLI runs (`--cache-stats` showed `0 hits, 0 misses, 0 writes` despite `cache_store` being set). Fixed; `--cache-stats` now reports real activity.
 - **Fail-soft `rescue StandardError` was masking analyzer-internal bugs.** Tightened to `rescue ::RBS::BaseError` across the RBS-touching code paths — `environment/rbs_loader.rb`, `cache/rbs_constant_table.rb`, `cache/rbs_class_ancestor_table.rb`, `cache/rbs_class_type_param_names.rb`, `reflection.rb`. Analyzer-internal `NameError` / `NoMethodError` / `LoadError` now propagate so similar bugs surface immediately rather than silently degrading user-visible behaviour.
 
-[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/rigortype/rigor/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/rigortype/rigor/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/rigortype/rigor/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/rigortype/rigor/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/rigortype/rigor/compare/v0.1.10...v0.1.11

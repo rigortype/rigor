@@ -49,8 +49,18 @@ Rigor is a tool, not a library — install it independently, **not** in
 your project's `Gemfile`. It runs on Ruby 4.0, regardless of which Ruby
 version your project targets.
 
-The recommended setup uses [`mise`](https://mise.jdx.dev/), which
-provisions both Ruby 4.0 and Rigor pinned per project:
+**Using an AI coding agent?** Hand it this prompt and it will detect
+your environment, install Rigor, and kick off the project-init Skill
+automatically:
+
+```
+Install Rigor in this project by following the instructions at
+https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+```
+
+**Manual install** — the recommended path uses
+[`mise`](https://mise.jdx.dev/), which provisions both Ruby 4.0 and
+Rigor pinned per project:
 
 ```sh
 mise use ruby@4.0

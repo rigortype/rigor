@@ -5,6 +5,14 @@ work can refer to it; implementation queued (no committed
 milestone). Targets the "explicit list MVP" floor first; pattern
 discovery and full-project pre-pass remain demand-driven.
 
+**Note 2026-05-29** — [ADR-34](34-toplevel-unresolved-self-call-default.md)
+elevates this mechanism from "opportunistic precision uplift" to
+"the canonical escape hatch for toplevel unresolved-self-call
+diagnostics". ADR-34 names ADR-17 slices 1+2 as a hard
+implementation precondition: the default flip cannot land before
+the `pre_eval:` registry exists, or projects with toplevel
+monkey-patches would have no opt-out.
+
 ## Context
 
 Real-world Ruby projects routinely reopen core / stdlib classes to

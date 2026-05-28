@@ -16,6 +16,15 @@ snippets carrying `# @rbs`-shaped comments are analysed as
 inline-RBS from the first request, with no user-side
 configuration.
 
+**Amended 2026-05-29**: per [ADR-34](34-toplevel-unresolved-self-call-default.md)
+WD7, the per-request sandbox sets `severity_profile: strict` (or
+the equivalent per-rule override) so the new
+`call.unresolved-toplevel` rule fires on pasted snippets like
+`foo 1`. Inheriting the `balanced` default would map the rule to
+`:warning` — surfacing it, but de-emphasising exactly the example
+most likely to be the user's first interaction with the
+Playground.
+
 ## Context
 
 A publicly accessible playground lets users try Rigor against an

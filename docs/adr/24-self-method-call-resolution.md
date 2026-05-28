@@ -207,6 +207,13 @@ unbounded walk.
 
 - Slice 4 (`undefined-method` on closed-class self-calls) is
   deferred, not rejected.
+- **[ADR-34](34-toplevel-unresolved-self-call-default.md) (2026-05-29)**
+  carves out the toplevel slice of WD4 as a separate decision:
+  unresolved implicit-self calls at toplevel (no enclosing `def` /
+  `class` / `module`) warn by default once ADR-17's `pre_eval:`
+  escape hatch is in place. The class-body / `def`-body case this
+  ADR's WD4 left closed stays closed; ADR-34 explicitly does not
+  re-open it.
 
 ## Implementation slicing (proposed)
 

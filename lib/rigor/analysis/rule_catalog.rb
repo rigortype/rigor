@@ -311,6 +311,30 @@ module Rigor
           since: "0.1.15"
         ),
 
+        CheckRules::RULE_OVERRIDE_RETURN_WIDENED => Entry.new(
+          id: CheckRules::RULE_OVERRIDE_RETURN_WIDENED,
+          summary: "Instance-method override widens the return type it inherits from an ancestor.",
+          fires_when: [
+            "An instance `def` with an authored RBS signature overrides a same-name method whose " \
+            "RBS signature is declared by a project-discovered ancestor (module or superclass).",
+            "The override's declared return is not acceptable where the ancestor's declared return " \
+            "is expected (`parent_return.accepts(override_return)` is `:no`) — a covariance violation."
+          ],
+          does_not_fire_when: [
+            "Either side lacks an authored RBS signature (WD1 both-sides-authored gate).",
+            "The override narrows or preserves the return (covariant-safe).",
+            "The ancestor's return is `untyped` / `self` / an unbound generic (degrades to " \
+            "`Dynamic[Top]`, which accepts everything — FP-safe).",
+            "`def self.foo` singleton methods (instance-side only in v1).",
+            "The shadowed method lives only on an RBS-known / third-party ancestor not in the " \
+            "project-discovered chain (user-source ancestor scope in v1)."
+          ],
+          suppression: "`# rigor:disable def.override-return-widened` on the override.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :off, balanced: :warning, strict: :error },
+          since: "0.1.15"
+        ),
+
         CheckRules::RULE_IVAR_WRITE_MISMATCH => Entry.new(
           id: CheckRules::RULE_IVAR_WRITE_MISMATCH,
           summary: "Same instance variable assigned a different concrete class within one class.",

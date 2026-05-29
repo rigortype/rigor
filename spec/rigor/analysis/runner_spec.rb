@@ -2075,6 +2075,180 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # ADR-35 slice 2 — Liskov signature rule for returns (covariance).
+    describe "override-return-widened rule (ADR-35 slice 2)" do
+      def override_return_diags(result)
+        result.diagnostics.select { |d| d.rule == "def.override-return-widened" }
+      end
+
+      let(:widen_sig) do
+        { "demo.rbs" => <<~RBS }
+          class Base
+            def value: () -> Integer
+          end
+
+          class Sub < Base
+            def value: () -> Object
+          end
+        RBS
+      end
+
+      it "flags an override that widens the inherited return type" do
+        result = analyze(<<~RUBY, sig: widen_sig)
+          class Base
+            def value
+              1
+            end
+          end
+
+          class Sub < Base
+            def value
+              Object.new
+            end
+          end
+        RUBY
+        diag = override_return_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.severity).to eq(:warning)
+        expect(diag.message).to include("`value'")
+        expect(diag.message).to include("Base")
+      end
+
+      it "does not flag an override that narrows the return (covariant-safe)" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def value
+              1
+            end
+          end
+
+          class Sub < Base
+            def value
+              1
+            end
+          end
+        RUBY
+          class Base
+            def value: () -> Numeric
+          end
+
+          class Sub < Base
+            def value: () -> Integer
+          end
+        RBS
+        expect(override_return_diags(result)).to be_empty
+      end
+
+      it "flags a widening of a return inherited from an included module" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          module Producer
+            def value
+              1
+            end
+          end
+
+          class Host
+            include Producer
+
+            def value
+              Object.new
+            end
+          end
+        RUBY
+          module Producer
+            def value: () -> Integer
+          end
+
+          class Host
+            include Producer
+
+            def value: () -> Object
+          end
+        RBS
+        expect(override_return_diags(result).size).to eq(1)
+      end
+
+      it "does not fire when the override has no authored signature" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def value
+              1
+            end
+          end
+
+          class Sub < Base
+            def value
+              Object.new
+            end
+          end
+        RUBY
+          class Base
+            def value: () -> Integer
+          end
+        RBS
+        expect(override_return_diags(result)).to be_empty
+      end
+
+      it "does not fire when the parent return is untyped" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def value
+              1
+            end
+          end
+
+          class Sub < Base
+            def value
+              Object.new
+            end
+          end
+        RUBY
+          class Base
+            def value: () -> untyped
+          end
+
+          class Sub < Base
+            def value: () -> Object
+          end
+        RBS
+        expect(override_return_diags(result)).to be_empty
+      end
+
+      it "is suppressed under the lenient profile" do
+        result = analyze(<<~RUBY, sig: widen_sig, config: { "severity_profile" => "lenient" })
+          class Base
+            def value
+              1
+            end
+          end
+
+          class Sub < Base
+            def value
+              Object.new
+            end
+          end
+        RUBY
+        expect(override_return_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable def.override-return-widened`" do
+        result = analyze(<<~RUBY, sig: widen_sig)
+          class Base
+            def value
+              1
+            end
+          end
+
+          class Sub < Base
+            def value # rigor:disable def.override-return-widened
+              Object.new
+            end
+          end
+        RUBY
+        expect(override_return_diags(result)).to be_empty
+      end
+    end
+
     describe "dead-assignment rule (v0.1.2)" do
       def dead_diags(result)
         result.diagnostics.select { |d| d.rule == "flow.dead-assignment" }

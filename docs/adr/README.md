@@ -48,7 +48,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-32 | [Inline-RBS Comment Ingestion](32-rbs-inline-comment-ingestion.md) | Proposed |
 | ADR-33 | [MCP Server Packaging](33-mcp-server.md) | Proposed |
 | ADR-34 | [Toplevel Unresolved Implicit-self Calls Warn by Default](34-toplevel-unresolved-self-call-default.md) | Proposed |
-| ADR-35 | [Override Signature Compatibility (Liskov signature rule)](35-override-signature-compatibility.md) | Accepted (slice 1 implemented) |
+| ADR-35 | [Override Signature Compatibility (Liskov signature rule)](35-override-signature-compatibility.md) | Accepted (slices 1–2 implemented) |
 
 ## Adding a New ADR
 

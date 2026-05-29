@@ -68,6 +68,7 @@ module Rigor
       RULE_RETURN_TYPE = "def.return-type-mismatch"
       RULE_VISIBILITY_MISMATCH = "def.method-visibility-mismatch"
       RULE_OVERRIDE_VISIBILITY_REDUCED = "def.override-visibility-reduced"
+      RULE_OVERRIDE_RETURN_WIDENED = "def.override-return-widened"
       RULE_IVAR_WRITE_MISMATCH = "def.ivar-write-mismatch"
       RULE_DEAD_ASSIGNMENT = "flow.dead-assignment"
       RULE_ALWAYS_TRUTHY_CONDITION = "flow.always-truthy-condition"
@@ -87,6 +88,7 @@ module Rigor
         RULE_RETURN_TYPE,
         RULE_VISIBILITY_MISMATCH,
         RULE_OVERRIDE_VISIBILITY_REDUCED,
+        RULE_OVERRIDE_RETURN_WIDENED,
         RULE_IVAR_WRITE_MISMATCH
       ].freeze
 
@@ -160,6 +162,8 @@ module Rigor
             diagnostics << return_diagnostic if return_diagnostic
             override_vis = override_visibility_diagnostic(path, node, scope_index)
             diagnostics << override_vis if override_vis
+            override_return = override_return_widened_diagnostic(path, node, scope_index)
+            diagnostics << override_return if override_return
           when Prism::IfNode, Prism::UnlessNode
             unreachable = unreachable_branch_diagnostic(path, node, scope_index)
             diagnostics << unreachable if unreachable
@@ -1579,13 +1583,13 @@ module Rigor
 
         # Breadth-first walk of the project-discovered ancestor chain
         # (included / prepended modules first, then the superclass —
-        # Ruby's MRO ordering), returning `[defining_class, visibility]`
-        # for the nearest user-source ancestor that defines an instance
-        # method `method_name`, or nil. Cross-file: the chain is
-        # followed through the scope tables the runner seeds from the
-        # project pre-pass (ADR-24 WD1). Mirrors
+        # Ruby's MRO ordering), yielding each resolved ancestor class
+        # name nearest-first. Returns the first truthy value the block
+        # produces, or nil. Cross-file: the chain is followed through
+        # the scope tables the runner seeds from the project pre-pass
+        # (ADR-24 WD1). Cycle-guarded and node-count-capped. Mirrors
         # `ExpressionTyper#resolve_user_def_through_ancestors`.
-        def nearest_ancestor_visibility(scope, class_name, method_name)
+        def each_project_ancestor(scope, class_name)
           queue = ancestor_class_names(scope, class_name)
           seen = { class_name.to_s => true }
           visited = 0
@@ -1597,14 +1601,22 @@ module Rigor
             visited += 1
             return nil if visited > OVERRIDE_ANCESTOR_WALK_LIMIT
 
-            if scope.user_def_for(current, method_name)
-              visibility = scope.discovered_method_visibility(current, method_name) || :public
-              return [current, visibility]
-            end
+            result = yield current
+            return result if result
 
             ancestor_class_names(scope, current).each { |name| queue.push(name) }
           end
           nil
+        end
+
+        # `[defining_class, visibility]` for the nearest user-source
+        # ancestor that defines an instance method `method_name`, or nil.
+        def nearest_ancestor_visibility(scope, class_name, method_name)
+          each_project_ancestor(scope, class_name) do |ancestor|
+            if scope.user_def_for(ancestor, method_name)
+              [ancestor, scope.discovered_method_visibility(ancestor, method_name) || :public]
+            end
+          end
         end
 
         # Direct ancestors of `class_name` as project-discovered,
@@ -1650,6 +1662,101 @@ module Rigor
             column: location.start_column + 1,
             message: "visibility of `#{def_node.name}' reduced from #{parent_visibility} to " \
                      "#{override_visibility} (overrides #{parent_class}##{def_node.name}); " \
+                     "breaks substitutability",
+            severity: :warning
+          )
+        end
+
+        # ADR-35 slice 2 — `def.override-return-widened`. The Liskov
+        # signature rule for returns (covariance): an override may
+        # *narrow* the return it inherits (return a more specific type)
+        # but MUST NOT *widen* it. A caller holding the supertype uses
+        # the result as the parent's return type; a wider override
+        # return breaks that use.
+        #
+        # WD1 gate (proper, type-direction): both the override and the
+        # shadowed ancestor method must carry an explicitly-authored
+        # RBS signature. The override side is gated by
+        # `defined_on?` (the RBS method is declared on the overriding
+        # class itself, not merely inherited); the parent side is the
+        # nearest project-discovered ancestor whose RBS declares the
+        # method. Inference-only either side → silent.
+        #
+        # Fires only on a proven (`:no`) widening; generic / `untyped`
+        # / `self` parent returns degrade to `Dynamic[Top]` and accept
+        # everything, so they stay silent (FP-safe). `self`/`instance`
+        # are translated with `self_type: nil` on both sides, so a
+        # parent `-> self` and an override `-> self` never fire.
+        def override_return_widened_diagnostic(path, def_node, scope_index)
+          return nil unless def_node.receiver.nil? # instance methods only (singleton: follow-on)
+
+          scope = scope_index[def_node]
+          return nil if scope.nil?
+
+          self_type = scope.self_type
+          return nil unless self_type.respond_to?(:class_name)
+
+          class_name = self_type.class_name.to_s
+          method_name = def_node.name
+
+          override_method = safe_instance_method_definition(class_name, method_name, scope)
+          return nil if override_method.nil?
+          return nil unless defined_on?(override_method, class_name)
+
+          parent = nearest_ancestor_method_def(scope, class_name, method_name)
+          return nil if parent.nil?
+
+          parent_class, parent_method = parent
+          override_return = declared_return_union(override_method, scope.environment)
+          parent_return = declared_return_union(parent_method, scope.environment)
+          return nil if override_return.nil? || parent_return.nil?
+          return nil if dynamic_top?(parent_return) # untyped / unbound-generic parent contract
+
+          return nil unless parent_return.accepts(override_return).no?
+
+          build_override_return_widened_diagnostic(
+            path, def_node, parent_class, parent_return, override_return
+          )
+        end
+
+        # `[defining_class, RBS::Definition::Method]` for the nearest
+        # project-discovered ancestor whose RBS declares `method_name`
+        # (not the starting class's own declaration), or nil.
+        def nearest_ancestor_method_def(scope, class_name, method_name)
+          each_project_ancestor(scope, class_name) do |ancestor|
+            method_def = safe_instance_method_definition(ancestor, method_name, scope)
+            [ancestor, method_def] if method_def && !defined_on?(method_def, class_name)
+          end
+        end
+
+        def safe_instance_method_definition(class_name, method_name, scope)
+          Reflection.instance_method_definition(class_name, method_name, scope: scope)
+        rescue StandardError
+          nil
+        end
+
+        # True when `method_def`'s RBS declaration lives on `class_name`
+        # itself (rather than being inherited from an ancestor).
+        def defined_on?(method_def, class_name)
+          defined_in = method_def.defined_in
+          return false if defined_in.nil?
+
+          normalize_class_name(defined_in.to_s) == normalize_class_name(class_name)
+        end
+
+        def normalize_class_name(name)
+          name.to_s.delete_prefix("::")
+        end
+
+        def build_override_return_widened_diagnostic(path, def_node, parent_class, parent_return, override_return)
+          location = def_node.name_loc || def_node.location
+          Diagnostic.new(
+            rule: RULE_OVERRIDE_RETURN_WIDENED,
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "return type of `#{def_node.name}' widened from #{parent_return.describe(:short)} " \
+                     "to #{override_return.describe(:short)} (overrides #{parent_class}##{def_node.name}); " \
                      "breaks substitutability",
             severity: :warning
           )

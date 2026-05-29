@@ -1,7 +1,7 @@
 # ADR-35 — Override signature compatibility (Liskov signature rule)
 
-Status: **accepted, 2026-05-29 (slice 1 implemented).** Records the
-decision to add a new family of diagnostics that check a method
+Status: **accepted, 2026-05-29 (slices 1–2 implemented).** Records
+the decision to add a new family of diagnostics that check a method
 override against the contract it inherits — the **Liskov Substitution Principle (LSP)
 signature rule** applied across a class/module hierarchy:
 parameters must be **contravariant** (an override may not strengthen
@@ -189,12 +189,23 @@ new IDs.
 The two type-direction checks point opposite ways, and getting the
 direction right is the whole correctness of the rule:
 
-- **Parameter:** fire when `parent_param.accepts(override_param)` is
+- **Parameter:** fire when `override_param.accepts(parent_param)` is
   `:no`. The override may *widen* a parameter freely (accepting more
-  is contravariant-safe); it may not *narrow* it.
+  is contravariant-safe); it may not *narrow* it. The direction is
+  the override's slot accepting the parent's argument type — a
+  narrowed override slot cannot accept the wider parent type, so
+  `accepts` returns `:no`. (An earlier draft of this ADR wrote
+  `parent_param.accepts(override_param)`, which is inverted: with
+  `A.accepts(B)` meaning "B is passable to A" (B <: A), the parent
+  direction fires on the *safe widening* and stays silent on the
+  *narrowing violation*. Slice 1's implementation confirmed the
+  `accepts` semantics — see `Inference::Acceptance` — and slice 3
+  uses the override direction.)
 - **Return:** fire when `parent_return.accepts(override_return)` is
   `:no`. The override may *narrow* a return freely (returning
   something more specific is covariant-safe); it may not *widen* it.
+  Here the parent direction is correct: a widened override return is
+  not passable where the parent's return is expected.
 
 **Why:** this is the LSP signature rule, and it is the same
 asymmetry the robustness principle ([ADR-5](5-robustness-principle.md))
@@ -334,18 +345,34 @@ class SendMailConsumer
 end
 ```
 
-For this to *not* fire, the ADR-35 comparison MUST be
-generic-instantiation-aware: when the override's defining class
-binds the ancestor's type parameters (`class Sub < Parent[Concrete]`
-or `include _Iface[Concrete]`), substitute those type arguments into
-the parent signature **before** the `accepts` comparison (WD3),
-reusing the [ADR-4](4-type-inference-engine.md) Phase 2d `type_vars`
-threading. The "narrowing" then matches the *instantiated* parent
-contract and no diagnostic is produced — because there was never a
-violation. Bounded generics (`[T < Bound]`) are already in the RBS
-surface (handbook appendix § "F-bounded polymorphism and self
-types"). This is the recommended fix and the direct analogue of the
+When the override's defining class binds the ancestor's type
+parameters (`class Sub < Parent[Concrete]` or `include
+_Iface[Concrete]`), the ADR-35 comparison SHOULD substitute those
+type arguments into the parent signature **before** the `accepts`
+comparison (WD3), reusing the [ADR-4](4-type-inference-engine.md)
+Phase 2d `type_vars` threading, so the "narrowing" matches the
+*instantiated* parent contract. Bounded generics (`[T < Bound]`) are
+already in the RBS surface (handbook appendix § "F-bounded
+polymorphism and self types"). This is the recommended way to
+express a legitimate specialization and the direct analogue of the
 article's resolution.
+
+**Slice 1/2 finding — substitution is a precision feature, not an
+FP-safety requirement.** An earlier revision of this WD called
+generic-instantiation-aware comparison "a correctness requirement."
+The slice-2 implementation showed that is too strong: an *unbound*
+ancestor type parameter translates to `Dynamic[Top]`
+([ADR-4](4-type-inference-engine.md) — unbound `Variable` degrades
+to `Dynamic[Top]`), and `Dynamic[Top]` accepts everything under
+gradual rules (`:yes` / `:maybe`, never `:no`). So a generic
+ancestor contract whose type arguments are *not* substituted simply
+**degrades to silence** on the override — which is the FP-safe
+outcome. Substitution therefore does not *prevent false positives*
+(the degrade already does); it *adds precision*, letting the check
+still catch a genuine violation inside a generic context
+(e.g. an override binding `_Iface[String]` that returns `Object`).
+The param/return slices ship FP-safely without it; substitution is a
+follow-on precision uplift.
 
 **Tier 2 — The body-narrowing dual layer (the everyday case).** Most
 "I want a narrower type here" situations need no escape hatch at all.
@@ -405,12 +432,19 @@ Recommended order; each slice independently shippable.
    (RBS models accessibility as public/private only, no `protected`)
    are a deferred follow-on. `def.return-type-mismatch`'s
    `:maybe`-silent / both-sides-observable discipline is preserved.
-2. **Return covariance.** `def.override-return-widened` — reuses the
-   slice-1 probe + the `accepts` query in the return direction (WD3)
-   + the `:maybe`-silent discipline (WD7). Honours `self`/`instance`
-   substitution before comparison, and ancestor `type_args`
-   substitution (WD9 tier 1) so a generic-instantiated covariant
-   return never fires.
+2. **Return covariance. — LANDED (v0.1.x, 2026-05-29).**
+   `def.override-return-widened` — reuses the slice-1 ancestor probe
+   (now the shared `each_project_ancestor` BFS) + the `accepts` query
+   in the return direction (WD3) + the `:no`-only discipline (WD7).
+   WD1 proper gate (both sides authored RBS): the override side is
+   gated by `defined_on?` (RBS declared on the overriding class, not
+   merely inherited); the parent side is the nearest
+   project-discovered ancestor whose RBS declares the method. `self`/
+   `instance`/`untyped`/unbound-generic parent returns degrade to
+   `Dynamic[Top]` and stay silent (FP-safe per WD9 finding). Scoped
+   to **user-source ancestors** + **instance methods** in this slice;
+   RBS-only ancestors and singleton (`def self.`) methods are
+   follow-ons.
 3. **Parameter contravariance.** `def.override-param-narrowed` —
    per-position type comparison in the parameter direction (WD3,
    WD4). Type-only; arity divergence stays out of scope. This is the

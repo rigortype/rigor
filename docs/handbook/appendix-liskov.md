@@ -460,12 +460,16 @@ For completeness, the LSP obligations Rigor does **not** statically
 enforce in v0.1.x — named here so you can stop looking:
 
 - **Cross-hierarchy override signature compatibility.** Rigor does
-  not compare a subtype's override against the supertype's declared
-  parameter/return to verify contravariance/covariance across the
-  chain. Each signature is checked against its own contract
-  (`def.return-type-mismatch`, `call.argument-type-mismatch`), not
-  against an inherited one. A future direction; no committed
-  milestone.
+  not *yet* compare a subtype's override against the supertype's
+  declared parameter/return to verify contravariance/covariance
+  across the chain. Each signature is checked against its own
+  contract (`def.return-type-mismatch`, `call.argument-type-mismatch`),
+  not against an inherited one. This is the highest-value unshipped
+  LSP obligation, and the proposed design is
+  [ADR-35](../adr/35-override-signature-compatibility.md) — three
+  `def.override-*` rules (parameter narrowing, return widening,
+  visibility reduction) gated to both-sides-authored signatures and
+  provable (`:no`) violations only. Proposed; no committed milestone.
 - **Exception compatibility.** The signature rule's "no new
   exceptions in a subtype" is not checked. Rigor has an internal
   exception/non-local-exit effect

@@ -93,6 +93,71 @@ discipline (Bertrand Meyer, Eiffel) stated as a subtyping law:
 `require` clauses weaken down the hierarchy, `ensure` clauses
 strengthen, `invariant` clauses accumulate.
 
+## LSP is about behaviour, not static types
+
+A claim surfaces occasionally: *"Ruby is dynamically typed, so LSP
+is a static-typing rule that does not strictly apply."* This gets
+the principle backwards, and it is worth saying why plainly.
+
+LSP is not a rule *about* type checkers. It is a rule about
+**observable behaviour under substitution** — Liskov's own framing
+quantifies over "all programs `P` defined in terms of `T`" and asks
+that their *behaviour* be unchanged when an `S` is substituted. The
+1994 paper's title is deliberate: *A **Behavioral** Notion of
+Subtyping*. The signature rule is only the type-system-shaped half;
+the load-bearing half is the behavioral rule — preconditions,
+postconditions, invariants, history — and those are statements about
+what code *does at runtime*, not about what a compiler accepts.
+
+That behavioral focus is exactly what makes LSP **more** applicable
+to a language like Ruby, not less:
+
+- In a nominally-typed language a compiler enforces the signature
+  half for you, so LSP feels like "a thing the type checker already
+  did." The interesting, un-automated part is the behavioral half.
+- In Ruby there is no compiler enforcing *either* half — so the
+  *entire* principle, signature and behaviour both, is a discipline
+  the programmer carries. "Subtype" in Ruby is defined by
+  substitutability of *messages and behaviour* (duck typing), which
+  is precisely the relation LSP is stated over. A language that is
+  hard to formalise is the case where a behavioural substitutability
+  discipline earns the most — it is the only safety net available
+  when a static one is not.
+
+So "Ruby is not statically typed" is an argument *for* taking LSP
+seriously, not against. LSP is the tool that lets you reason about
+the *behavioural* safety of substitution in a language whose shape a
+classical type system cannot fully capture. Every working
+duck-typed Ruby program already depends on something LSP-shaped
+holding — the caller assumes the object it received behaves
+compatibly with the contract it was written against.
+
+### Rigor's relationship to this
+
+Rigor does **not** provide a direct *static guarantee* that a
+program obeys LSP. It does not prove behavioral subtyping, does not
+check cross-hierarchy override compatibility, and does not verify
+pre/postcondition contracts (§ "What Rigor does NOT check"). On that
+narrow reading, "Rigor is not an LSP checker" is true.
+
+But the *ideas* have substantial common ground, and that is the
+point of this whole appendix. Rigor's design is steered by the same
+behavioural-substitutability instinct LSP formalises:
+
+- The robustness principle infers the LSP-correct signature shape
+  (wide parameters, narrow returns) by default (§ next).
+- Capability roles model substitutability the way duck typing does —
+  by behaviour (messages answered), not by nominal identity.
+- The mutation-effect and fact-stability model refuses to keep
+  trusting a property a state change could have broken — the
+  history-constraint instinct, applied locally.
+
+Rigor is therefore best read as *tooling that shares LSP's
+behavioural worldview and mechanises the parts of it that are
+statically provable in Ruby*, while leaving the rest as the
+discipline it has always been. The principle and the tool are
+aligned in spirit even where the tool stops short of a proof.
+
 ## The signature rule is Rigor's robustness principle
 
 This is the heart of the page. Lay the two rules side by side:

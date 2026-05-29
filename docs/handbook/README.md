@@ -136,16 +136,19 @@ deliberately short on theory.
   higher-rank, full dependent types, …) — each with the
   matching Rigor surface and a pointer into the spec corpus.
 - [**The Liskov Substitution Principle**](appendix-liskov.md) —
-  how Rigor's robustness principle (strict returns, lenient
-  parameters) re-derives the LSP signature rule (covariant
-  returns, contravariant parameters) from Ruby-adoption
-  ergonomics rather than substitutability proofs, why that
-  convergence means Rigor's defaults do not fight duck typing
-  or the "L" of SOLID, and which behavioral-subtyping
-  obligations (cross-hierarchy override compatibility, exception
-  rules, Design-by-Contract, the history constraint) Rigor does
-  *not* statically enforce. On this page only, "LSP" means
-  Liskov — not the Language Server.
+  why LSP is a *behavioural* discipline that applies to Ruby
+  *more* than to a statically-checked language (not less — the
+  "Ruby isn't statically typed so LSP is optional" claim gets
+  the principle backwards), how Rigor's robustness principle
+  (strict returns, lenient parameters) re-derives the LSP
+  signature rule (covariant returns, contravariant parameters)
+  from Ruby-adoption ergonomics rather than substitutability
+  proofs, why that convergence means Rigor's defaults do not
+  fight duck typing or the "L" of SOLID, and which
+  behavioral-subtyping obligations (cross-hierarchy override
+  compatibility, exception rules, Design-by-Contract, the
+  history constraint) Rigor does *not* statically enforce. On
+  this page only, "LSP" means Liskov — not the Language Server.
 
 ## How to read this handbook
 

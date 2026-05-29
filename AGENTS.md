@@ -8,7 +8,7 @@ All project-authored documentation in this repository should be written in Engli
 
 Rigor is an inference-first static analyzer for Ruby. It keeps application code free of type annotations and runtime dependencies, and starts with a CLI-first development experience.
 
-The implementation sits on top of the v0.1.0 plugin contract. It parses Ruby with `Prism`, runs a flow-sensitive type-inference engine over each file, consults RBS signatures (bundled stdlib + project `sig/` + gem RBS) plus in-source `def` / `define_method` / `attr_*` / `Data.define` discovery, and reports a deliberately-narrow rule catalogue (the `call.*` / `flow.*` / `def.*` / `assert.*` / `dump.*` families). **Production plugins** for real gems / frameworks (Rails, RSpec, dry-rb, Sorbet, Devise, Sidekiq, etc.) live under [`plugins/`](plugins/README.md); plugin-contract **walkthroughs** (tutorials over deliberately simplified virtual use cases — `rigor-deprecations`, `rigor-lisp-eval`, `rigor-pattern`, `rigor-routes`, `rigor-units`) live under [`examples/`](examples/README.md). Both counts drift as new entries land, so consult each README for the canonical list rather than hard-coding it elsewhere. The nine-chapter end-user handbook lives under [`docs/handbook/`](docs/handbook/README.md).
+The implementation sits on top of the v0.1.0 plugin contract. It parses Ruby with `Prism`, runs a flow-sensitive type-inference engine over each file, consults RBS signatures (bundled stdlib + project `sig/` + gem RBS) plus in-source `def` / `define_method` / `attr_*` / `Data.define` discovery, and reports a deliberately-narrow rule catalogue (the `call.*` / `flow.*` / `def.*` / `assert.*` / `dump.*` families). **Production plugins** for real gems / frameworks (Rails, RSpec, dry-rb, Sorbet, Devise, Sidekiq, etc.) live under [`plugins/`](plugins/README.md); plugin-contract **walkthroughs** (tutorials over deliberately simplified virtual use cases — `rigor-deprecations`, `rigor-lisp-eval`, `rigor-pattern`, `rigor-routes`, `rigor-units`) live under [`examples/`](examples/README.md). Both counts drift as new entries land, so consult each README for the canonical list rather than hard-coding it elsewhere. The twelve-chapter (plus six appendices) end-user handbook lives under [`docs/handbook/`](docs/handbook/README.md).
 
 **Where the "what is true today" state lives.** This file is the cross-version agent contract; it intentionally does NOT name the version in progress, the recently-landed slices, or the deferred work. The canonical resume bookmark is [`docs/CURRENT_WORK.md`](docs/CURRENT_WORK.md); the forward-looking commitment envelope (active cycle + queued work) is [`docs/ROADMAP.md`](docs/ROADMAP.md); the released-version record is `CHANGELOG.md`; the ADR index sits in [`CLAUDE.md`](CLAUDE.md) § "Architecture decision records". Always start a session by reading the first three for current state. AGENTS.md changes only when the contract itself changes — the Flake mandate, commit conventions, release cadence, references / submodule rules, the spec-binds-on-conflict invariants below.
 
@@ -29,7 +29,7 @@ Enter the Flake shell for interactive work:
 nix --extra-experimental-features 'nix-command flakes' develop
 ```
 
-Or prefix one-shot invocations with `nix --extra-experimental-features 'nix-command flakes' develop --command`. The command listings below use that prefix in full so each line is directly runnable. If `nix` is not on `PATH`, substitute `/nix/var/nix/profiles/default/bin/nix`.
+Or prefix one-shot invocations with `nix --extra-experimental-features 'nix-command flakes' develop --command` — abbreviated `nix … develop --command` in the example blocks below (expand `…` to `--extra-experimental-features 'nix-command flakes'`). If `nix` is not on `PATH`, substitute `/nix/var/nix/profiles/default/bin/nix`.
 
 ### Basic setup
 
@@ -42,7 +42,7 @@ make setup
 From outside the Flake shell, prefix the same target:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make setup
+nix … develop --command make setup
 ```
 
 `make setup` runs `bundle install`, then `make init-git-config` (applies local git submodule-safety defaults — see below), and then `make init-submodules`. After it finishes, follow the steps in [Verification Notes](#verification-notes).
@@ -56,12 +56,12 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make se
 
 ## Common Commands
 
-Primary workflows (from the Flake shell, `make test`, `make lint`, `make check`; from outside, prefix with `nix --extra-experimental-features 'nix-command flakes' develop --command`):
+Primary workflows, shown in their in-shell form. From outside the shell, prefix each with the one-shot runner from above (`nix … develop --command`):
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make test
-nix --extra-experimental-features 'nix-command flakes' develop --command make lint
-nix --extra-experimental-features 'nix-command flakes' develop --command make check
+make test
+make lint
+make check
 ```
 
 - `make verify` runs `test-parallel` (the spec suite across `PARALLEL_TEST_PROCESSORS` workers — defaults to CPU count via `parallel_tests`), `lint`, and `check`. Total wall time on a 12-core laptop ≈ 60s vs ≈ 220s for the sequential variant. Use `make verify-sequential` when chasing parallel-only flakes; `make verify-parallel` is a backward-compatible alias for the default.
@@ -77,10 +77,11 @@ nix --extra-experimental-features 'nix-command flakes' develop --command make ch
 `rigor type-scan PATH...` is the file/directory-level companion. It walks every Prism node, runs `Scope#type_of` on each, and reports per-node-class coverage (visits vs. directly-unrecognized counts) plus a list of fallback example sites. Use it to track which expression shapes the engine still has to learn and to gate CI builds with `--threshold=RATIO`.
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor type-of lib/foo.rb:10:5
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor type-of --trace --format=json lib/foo.rb:10:5
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor type-scan lib
-nix --extra-experimental-features 'nix-command flakes' develop --command bundle exec exe/rigor type-scan --format=json --threshold=0.7 lib
+# In-shell forms (prefix with `nix … develop --command` from outside):
+bundle exec exe/rigor type-of lib/foo.rb:10:5
+bundle exec exe/rigor type-of --trace --format=json lib/foo.rb:10:5
+bundle exec exe/rigor type-scan lib
+bundle exec exe/rigor type-scan --format=json --threshold=0.7 lib
 ```
 
 ## Directory Layout
@@ -91,7 +92,7 @@ nix --extra-experimental-features 'nix-command flakes' develop --command bundle 
 - `spec`: RSpec test suite
 - `plugins/`: **production plugins** targeting real gems / frameworks (Rails, RSpec, dry-rb, Sorbet, Devise, Sidekiq, etc.). Each gem has `lib/`, optionally a runnable `demo/`, a README, and an end-to-end integration spec under `spec/integration/plugins/`. Read [`plugins/README.md`](plugins/README.md) for the canonical inventory + comparison table; the list drifts, so do not duplicate it here.
 - `examples/`: **plugin-contract walkthroughs** (tutorials over deliberately simplified virtual use cases — `rigor-deprecations`, `rigor-lisp-eval`, `rigor-pattern`, `rigor-routes`, `rigor-units`). Each spotlights a single architectural surface so plugin authors can read the smallest possible code that demonstrates one slice of the contract at a time. Integration specs under `spec/integration/examples/`. Read [`examples/README.md`](examples/README.md) for the recommended reading order.
-- `docs/handbook/`: nine-chapter end-user walkthrough of the type model, written for Ruby programmers without prior static-typing background. Informational — `docs/type-specification/` binds when they disagree.
+- `docs/handbook/`: twelve-chapter (plus six appendices) end-user walkthrough of the type model, written for Ruby programmers without prior static-typing background. Informational — `docs/type-specification/` binds when they disagree.
 - `docs/types.md`: one-page quick guide to the Rigor type system
 - `docs/type-specification`: normative type specification, split into topical documents
 - `docs/internal-spec`: analyzer-internal contracts (engine surface, type-object public API)
@@ -124,7 +125,7 @@ rg PATTERN --no-ignore references/python-typing
 
 - These submodules are reference material, not Rigor runtime code. Do not require, import, or copy upstream implementation into Rigor product code. Read the relevant specification or behavior, then implement the smallest appropriate Rigor-side behavior.
 - Update a submodule only when intentionally changing the referenced revision.
-- If a submodule is empty after cloning, run `nix --extra-experimental-features 'nix-command flakes' develop --command make init-submodules`.
+- If a submodule is empty after cloning, run `nix … develop --command make init-submodules`.
 - Drive submodule lifecycle through Make targets: `make init-submodules`, `make pull-submodules`. Avoid raw `git submodule update --recursive` against the whole tree — it bypasses the sparse-checkout setup baked into `init-submodules` for `references/phpstan` and `references/TypeScript-Website`.
 - Do **not** hand-edit `.gitmodules` or `.git/config` for renames. Use `git mv old/path new/path` and then `git submodule sync` so `.git/config` follows `.gitmodules`. Hand edits leave stale `submodule.<name>.*` sections in `.git/config` and orphan `.git/modules/<old>/` directories, which can crash later parent operations with a `submodule.c` BUG assertion.
 - Run `make doctor-submodules` if anything looks off (e.g. `git status` failing, parent operations exploding on a submodule). It detects: stale `.git/config` sections without a matching `.gitmodules` entry, dangling `.git` pointers in submodule worktrees, orphaned `.git/modules/<name>/` directories, and incomplete gitdirs (missing `HEAD` or `objects`). It reports issues and suggested fixes; it does not modify anything itself.
@@ -225,14 +226,14 @@ The full release-prep flow (archival rule, link format, sealing `[Unreleased]`) 
 After making changes, run:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command make verify
-nix --extra-experimental-features 'nix-command flakes' develop --command git diff --check
+nix … develop --command make verify
+nix … develop --command git diff --check
 ```
 
-Inside the Flake shell, `make verify` is enough for the project checks.
+Inside the Flake shell, `make verify` (without the prefix) is enough for the project checks.
 
 If the Flake shell or its dependencies are unavailable, mention any skipped verification in the final report. For a minimal syntax-only check:
 
 ```sh
-nix --extra-experimental-features 'nix-command flakes' develop --command sh -c 'for f in $(find bin exe lib spec -name "*.rb"); do ruby -c "$f" || exit 1; done'
+nix … develop --command sh -c 'for f in $(find bin exe lib spec -name "*.rb"); do ruby -c "$f" || exit 1; done'
 ```

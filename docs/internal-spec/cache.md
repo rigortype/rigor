@@ -1,7 +1,10 @@
 # Cache Layer — `Rigor::Cache`
 
-Status: **In progress (v0.0.8).** This document tracks the cache
-layer's public read shape as it lands. Slices 1–2 are in place:
+Status: **Stable (introduced v0.0.8; current descriptor schema v2).**
+This document tracks the cache layer's public read shape. The
+slices below all landed and are stable across v0.1.x; the descriptor
+`SCHEMA_VERSION` was bumped to `2` for the ADR-10 per-gem-version
+`dependencies` slot. Slices 1–2 are in place:
 `Rigor::Cache::Descriptor` (the substrate every cached value
 attaches to) and `Rigor::Cache::Store` (the filesystem-backed
 storage that consumes a descriptor + producer + params and
@@ -67,8 +70,9 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `1`). Bumping this
-   constant invalidates every cached value.
+1. `Descriptor::SCHEMA_VERSION` (currently `2` — v2 added the
+   `dependencies` slot for the ADR-10 per-gem-version cache slice).
+   Bumping this constant invalidates every cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).
 3. `params` (the producer's input hash). Recursively

@@ -179,7 +179,7 @@ works. The initialization sequence:
 
 ```
 →  {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"my-agent","version":"1.0"}}}
-←  {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"rigor","version":"0.1.9"}}}
+←  {"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"rigor","version":"0.1.15"}}}
 →  {"jsonrpc":"2.0","method":"notifications/initialized"}
 →  {"jsonrpc":"2.0","id":1,"method":"tools/list"}
 ←  {"jsonrpc":"2.0","id":1,"result":{"tools":[...]}}
@@ -316,7 +316,7 @@ the method's inferred return type.
 
 ```ruby
 module Rigor
-  VERSION = "0.1.9"  #=> dump_type: "0.1.9"
+  VERSION = "0.1.15"  #=> dump_type: "0.1.15"
 end
 ```
 
@@ -495,8 +495,8 @@ warmed by a prior `rigor check` run reduces it significantly.
 
 ## Status and roadmap
 
-`rigor mcp` ships in the v0.2.0 evaluation release with all seven
-tools and stdio transport. Queued follow-ups are demand-driven:
+`rigor mcp` shipped in v0.1.10 with all seven tools and stdio
+transport. Queued follow-ups are demand-driven:
 
 - **HTTP transport** (slice 2) — `--transport=http` for CI / remote
   agent use; a minimal Rack endpoint.

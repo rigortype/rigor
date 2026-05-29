@@ -22,6 +22,7 @@ This document is the catalog of internal-only forms that the analyzer uses but t
 | Conditional type | Models type-level branching when needed for library signatures | Conservative union or bound |
 | Indexed access type | Projects member, tuple, record, or shape component types | Projected RBS type when expressible, otherwise conservative base |
 | Template literal-like string refinement | Tracks formatted string families | `String` |
+| Higher-kinded type application, such as `App[json::value, K]` | Defunctionalised application of a registered type constructor to arguments, for type-level computation in signatures (ADR-20). Authored in `.rbs` via the `%a{rigor:v1:hkt_register}` / `%a{rigor:v1:hkt_define}` directives — see [rbs-extended.md](rbs-extended.md). | Bound type resolved at definition time, otherwise `untyped` |
 
 ## Authoring rules
 

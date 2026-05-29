@@ -1,13 +1,19 @@
 # ADR-29 — Browser playground
 
-Status: **proposed, 2026-05-23.** Records the decision to build a
-browser-based Rigor playground — a text editor that shows real-time
-diagnostics and `annotate`-style type comments — and how it should be
-hosted. Two approaches were evaluated: a fully in-browser WASM runtime
-(`ruby.wasm`) and a server-side API fronted by a static site. The
-**server-side API** is the accepted short-term path; a concrete set of
-gating conditions (WD6) defines when migration to in-browser WASM
-becomes viable.
+Status: **accepted, 2026-05-23; implemented in v0.1.10–0.1.11.**
+Records the decision to build a browser-based Rigor playground — a
+text editor that shows real-time diagnostics and `annotate`-style
+type comments — and how it should be hosted. Two approaches were
+evaluated: a fully in-browser WASM runtime (`ruby.wasm`) and a
+server-side API fronted by a static site. The **server-side API** is
+the accepted short-term path; a concrete set of gating conditions
+(WD6) defines when migration to in-browser WASM becomes viable. The
+server-side API + static frontend shipped as the
+`plugins/rigor-playground/` plugin and the `rigor playground`
+command (local serving, with `rigor-rbs-inline` loaded at
+`require_magic_comment: false` per WD4 / ADR-32 WD10); deploying it
+to Cloudflare Pages / Fly.io is an ops step, and the ruby.wasm
+migration stays gated on WD6.
 
 **Amended 2026-05-25**: WD4 flips the default plugin set from
 empty to `rigor-rbs-inline` enabled (per [ADR-32](32-rbs-inline-comment-ingestion.md)

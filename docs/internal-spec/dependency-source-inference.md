@@ -1,12 +1,13 @@
 # Opt-in Dependency-Source Inference
 
-Status: **v0.1.3 in progress.** Slices 1, 2a, 2b-i, 2b-ii, 3,
-4, and 5 of
-[ADR-10](../adr/10-dependency-source-inference.md) have all
-landed unreleased on `master`; ADR-10's implementation envelope
-is complete. This document fixes the analyzer contract for the
-delivered surface and names the open follow-ups still tracked
-on ADR-10 § "Open questions".
+Status: **Stable (shipped in v0.1.4).** Slices 1, 2a, 2b-i,
+2b-ii, 3, 4, and 5 of
+[ADR-10](../adr/10-dependency-source-inference.md) all landed
+and shipped (the v0.1.3 envelope cut as v0.1.4); ADR-10's
+implementation envelope is complete. This document fixes the
+analyzer contract for the delivered surface and names the open
+follow-ups still tracked on ADR-10 § "Open questions" (notably
+per-call return-type precision from gem source).
 
 The binding design surface is
 [ADR-10](../adr/10-dependency-source-inference.md); the

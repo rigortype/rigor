@@ -45,10 +45,28 @@ type contributions, and tests.
 Reach for it when no bundled plugin covers a framework or DSL
 your project depends on.
 
+## Discovering skills from the CLI
+
+The three skills above ship inside the `rigortype` gem, so they
+are reachable even when Rigor is installed via `mise` / `gem
+install` with no project-side source checkout. The `rigor skill`
+command surfaces them:
+
+```sh
+rigor skill list            # name + absolute path for each bundled skill
+rigor skill print <name>    # print the SKILL.md body (with a references/ header)
+rigor skill path  <name>    # one-line absolute SKILL.md path, for a file-reading tool
+```
+
+`rigor skill print rigor-project-init` is the canonical way to
+hand an AI agent the onboarding workflow without pointing it at
+the repository. See [CLI reference](02-cli-reference.md#rigor-skill).
+
 ## Running a skill
 
 In an agent that supports Agent Skills, invoke the skill by
 name (in Claude Code, `/rigor-project-init`). The agent reads
-the skill definition from `skills/` and follows it. If your
-tool does not support skills, each skill's `SKILL.md` still
+the skill definition (from `skills/` in a source checkout, or
+via `rigor skill print <name>` otherwise) and follows it. If
+your tool does not support skills, each skill's `SKILL.md` still
 reads as a plain checklist you can follow yourself.

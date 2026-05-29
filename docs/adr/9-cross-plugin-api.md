@@ -1,8 +1,12 @@
 # ADR-9 — Cross-plugin API
 
-Status: **proposed, 2026-05-08.** Implementation queued for
-v0.1.x; this ADR fixes the design so Tier 1 plugin authoring
-can proceed without depending on its arrival.
+Status: **accepted, 2026-05-08; implemented in v0.1.1.** Track 2
+of v0.1.1 shipped `Plugin::FactStore`, `Plugin::Base#prepare(services)`,
+`manifest(produces:/consumes:)`, topologically-sorted plugin loading,
+and the `#flow_contribution_for` return-type tier (slices 1 → 5 +
+slice 7). The cross-plugin fact channels (`:model_index`,
+`:factory_index`, `:dry_type_aliases`, `:graphql_type_table`, …) are
+now in active use across the bundled plugins.
 
 ## Context
 

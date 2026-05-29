@@ -141,14 +141,17 @@ semantics. Callers that care about parameter contracts keep
 using `RbsExtended.read_param_type_overrides` /
 `RbsExtended.param_type_override_map`.
 
-## Element-list flattening (deferred)
+## Element-list flattening
 
 ADR-2 mentions an analyzer-internal flattening of each bundle
 into a tagged element list keyed by `(target, flow edge, effect
 kind)`. That representation is the implementation surface the
-merge policy will consume; v0.0.9 deliberately does not ship it.
-The merger and the element-list form land together in v0.1.0.
-Plugin authors should not rely on the element-list form.
+merge policy consumes; it **shipped in v0.1.0** as
+`FlowContribution#to_element_list`, alongside the merger (see
+[flow-contribution-merger.md](flow-contribution-merger.md)).
+The element-list form is an analyzer-internal surface — plugin
+authors should still construct `FlowContribution` bundles and
+not rely on the element-list shape directly.
 
 ## Stability
 

@@ -76,6 +76,19 @@ publish under another plugin's id. Plugin exceptions inside the
 hook isolate as a `:plugin_loader` `runtime-error` diagnostic
 rather than crashing `rigor check`.
 
+`#prepare(services)` (ADR-9) is the project-wide pre-pass hook,
+invoked once before per-file analysis begins. Plugins that publish
+cross-plugin facts (`manifest(produces:)`) override it to walk the
+project and call `services.fact_store.publish(...)`; the loader's
+topological ordering guarantees a producer's `prepare` runs before
+any consumer's. The default is a no-op.
+
+`#flow_contribution_for(call_node:, scope:)` (ADR-9 / ADR-2) is the
+return-type contribution hook, consulted at the dispatcher's plugin
+tier. It returns a `Rigor::FlowContribution` (carrying a precise
+`return_type` and/or narrowing facts) for a recognised call edge, or
+`nil` to decline. The default returns `nil`.
+
 ### `Rigor::Plugin::Manifest`
 
 Frozen value object describing one plugin's identity. Fields:
@@ -85,16 +98,34 @@ Frozen value object describing one plugin's identity. Fields:
 | `id` | `String` matching `/\A[a-z][a-z0-9._-]*\z/` | Stable identifier; used as the `PluginEntry#id` and the `plugin.<id>.<rule>` diagnostic prefix. |
 | `version` | non-empty `String` | Plugin version; lands in `PluginEntry#version` for cache invalidation. |
 | `description` | `String?` | Human-readable summary. |
-| `protocols` | `Array<Symbol>` | Protocol names this plugin implements. Slice 1 leaves this empty; protocol slices populate it. |
+| `protocols` | `Array<Symbol>` | Protocol names this plugin implements. |
 | `config_schema` | `{ String => Symbol }` | Accepted config keys mapped to value kinds (`:string`, `:boolean`, `:integer`, `:array`, `:hash`, `:any`). |
 
+The following **extension fields** were added across the `0.1.x`
+cycle. All are optional and additive to the pre-1.0 plugin contract;
+a plugin declaring none of them is a plain per-file analyzer:
+
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `produces` | `Array<Symbol>` | Cross-plugin facts this plugin publishes (ADR-9). |
+| `consumes` | `Array<Consumption>` | Cross-plugin facts this plugin reads (`{ plugin_id:, name:, optional: }`); drives the loader's topological ordering (ADR-9). |
+| `signature_paths` | `Array<String>` | RBS signature directories the plugin contributes, relative to the plugin gem root; resolved by `Loader` and merged into the environment (ADR-25). |
+| `owns_receivers` | `Array<String>` | Receiver class names this plugin owns for dispatch routing. |
+| `open_receivers` | `Array<String>` | Receiver class names exempted from `call.undefined-method` (their method surface is unbounded — e.g. `ActiveRecord::Relation`) (ADR-26). |
+| `type_node_resolvers` | `Array` | `Plugin::TypeNodeResolver` entries contributing custom RBS type-name resolution (ADR-13). |
+| `protocol_contracts` | `Array<ProtocolContract>` | Path-scoped behavioural contracts (`path_glob` + `method_name` + param/return types + severity); provide-and-check (ADR-28). |
+| `source_rbs_synthesizer` | `#call(path) -> String?` | A callable that synthesises RBS from a project source file at env-build time (e.g. rbs-inline ingestion) (ADR-32). |
+| `block_as_methods`, `heredoc_templates`, `trait_registries`, `external_files` | `Array` | The four ADR-16 macro / DSL expansion substrate tiers (A / C / B / D). |
+| `hkt_registrations`, `hkt_definitions` | `Array` | Lightweight-HKT type-function registrations (ADR-20). |
+
 `#validate_config(config)` returns an array of error strings; the
-loader converts a non-empty result into a `LoadError`.
+loader converts a non-empty result into a `LoadError`. Each extension
+field carries its own validation in `Manifest#initialize`.
 
 ### `Rigor::Plugin::Services`
 
-Frozen DI container handed to every plugin's `#initialize` and
-`#init`. Slice-1 surface:
+Frozen DI container handed to every plugin's `#initialize`,
+`#init`, and `#prepare`:
 
 | Service | Type |
 | --- | --- |
@@ -102,6 +133,8 @@ Frozen DI container handed to every plugin's `#initialize` and
 | `type` | `Rigor::Type::Combinator` (module). |
 | `configuration` | `Rigor::Configuration` (read-only project config). |
 | `cache_store` | `Rigor::Cache::Store` or `nil` (slice 6 wires plugin-side cache producers through this). |
+| `trust_policy` | `Rigor::Plugin::TrustPolicy` (slice 2; see [`plugin-trust.md`](plugin-trust.md)). |
+| `fact_store` | `Rigor::Plugin::FactStore` (ADR-9 / v0.1.1) — the per-run cross-plugin fact store; `#prepare` publishes to it, `#diagnostics_for_file` / `#flow_contribution_for` read from it. |
 
 A logger service will join this list when the diagnostics
 formatter grows a progress channel.
@@ -184,24 +217,31 @@ entry does not abort the others. Each failure is collected as a
 `rigor check` continues with the analysis; plugins that loaded
 successfully still participate in later v0.1.0 slices.
 
-## Slice-1 boundaries (intentionally NOT covered)
+## Where each capability landed (historical slice map)
+
+The v0.1.0 plugin contract shipped in six slices; all of the
+following are now in place and are documented in their own specs:
 
 - **Plugin contribution emission** (`FlowContribution` bundles,
-  capability roles, dynamic returns). Slice 3 has shipped the
-  standalone {Rigor::FlowContribution::Merger}
-  ([`flow-contribution-merger.md`](flow-contribution-merger.md));
-  protocols on `Rigor::Plugin::Base` that produce bundles arrive
-  alongside slice 4 (FlowContribution wiring through internal
-  narrowing).
-- **Plugin diagnostic provenance** beyond the `:plugin_loader`
-  family for load failures. Slice 5 routes plugin-emitted
+  capability roles, dynamic returns). The standalone
+  {Rigor::FlowContribution::Merger}
+  ([`flow-contribution-merger.md`](flow-contribution-merger.md))
+  shipped in slice 3; `#flow_contribution_for` on
+  `Rigor::Plugin::Base` (the return-type contribution tier) shipped
+  in slice 4 and was extended by the v0.1.1 cross-plugin work
+  (ADR-9).
+- **Plugin diagnostic provenance.** Slice 5 routes plugin-emitted
   diagnostics through `Diagnostic#source_family` with
   `plugin.<id>.<rule>` prefixes.
-- **Plugin trust / I/O policy enforcement.** Slice 2 ships the
+- **Plugin trust / I/O policy enforcement.** Slice 2 shipped the
   declarative {Rigor::Plugin::TrustPolicy} + {Rigor::Plugin::IoBoundary}
-  surface plugins are expected to use; see [`plugin-trust.md`](plugin-trust.md).
+  surface; see [`plugin-trust.md`](plugin-trust.md).
 - **Plugin-side cache producers.** Slice 6 wires
   `Store#fetch_or_compute` for plugins via `PluginEntry`
-  descriptors.
-- **Per-method Reflection caches.** Carry-over from v0.0.9; lands
-  alongside slice 6.
+  descriptors; see [`plugin-cache-producers.md`](plugin-cache-producers.md).
+- **Cross-plugin facts + pre-pass.** `#prepare(services)` +
+  `services.fact_store` + `manifest(produces:/consumes:)` shipped in
+  v0.1.1 (ADR-9). The extension fields in the `Manifest` table above
+  (`signature_paths:`, `open_receivers:`, `protocol_contracts:`,
+  `source_rbs_synthesizer:`, the macro substrate, HKT) accreted
+  across the `0.1.x` cycle.

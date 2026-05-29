@@ -1,9 +1,14 @@
 # ADR-17 — Project-side monkey-patch pre-evaluation
 
-Status: **proposed, 2026-05-16.** Design fixed here so v0.1.x core
-work can refer to it; implementation queued (no committed
-milestone). Targets the "explicit list MVP" floor first; pattern
-discovery and full-project pre-pass remain demand-driven.
+Status: **accepted, 2026-05-16; implemented in v0.1.13.** The
+`pre_eval:` config axis and the project-wide
+`Inference::ProjectPatchedMethods` registry ship, populated by a
+bounded pre-pass and consulted at the dispatcher tier between
+plugins and dependency-source inference, as well as by
+`call.undefined-method` / `call.unresolved-toplevel` ([ADR-34](34-toplevel-unresolved-self-call-default.md))
+emission. The "explicit list MVP" floor plus glob expansion landed;
+the plugin-API discovery hook and full-project two-pass remain
+demand-driven.
 
 **Note 2026-05-29** — [ADR-34](34-toplevel-unresolved-self-call-default.md)
 elevates this mechanism from "opportunistic precision uplift" to

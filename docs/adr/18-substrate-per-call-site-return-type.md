@@ -1,12 +1,16 @@
 # ADR-18 — Substrate per-call-site return-type DSL
 
-Status: **proposed, 2026-05-16.** Amends [ADR-16](16-macro-expansion.md)'s
-macro-expansion substrate to support per-call-site return types
-on synthesised methods. Builds on the v0.1.6 work that landed
-`rigor-dry-types` ([ADR-12](12-dry-rb-packaging.md)) and the
-ADR-9 `:dry_type_aliases` fact: the natural consumer
-(`rigor-dry-struct` precision uplift) cannot land without this
-amendment.
+Status: **accepted, 2026-05-16; implemented in v0.1.6.** Amends
+[ADR-16](16-macro-expansion.md)'s macro-expansion substrate to
+support per-call-site return types on synthesised methods. The
+`returns_from_arg:` / `lookup_via:` DSL on
+`Plugin::Macro::HeredocTemplate::Emit` rows shipped, and its first
+worked consumer — `rigor-dry-struct` resolving `attribute :city,
+Types::String` through the ADR-9 `:dry_type_aliases` fact published
+by `rigor-dry-types` ([ADR-12](12-dry-rb-packaging.md)) — landed
+end-to-end in the same release (`Nominal[String]` at the
+dispatcher, with a silent `Dynamic[Top]` fallback when the fact is
+absent or the call shape is unresolvable).
 
 ## Context
 

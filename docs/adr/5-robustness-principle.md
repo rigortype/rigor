@@ -2,7 +2,10 @@
 
 ## Status
 
-Draft.
+Accepted; implemented and shipped. The robustness principle (strict
+on returns, lenient on parameters) governs Rigor-authored signatures
+and inference; its normative companion is
+[`docs/type-specification/robustness-principle.md`](../type-specification/robustness-principle.md).
 
 ADR-5 records the design rationale for adopting Postel's law — *be conservative in what you produce, be liberal in what you accept* — as a guiding principle for Rigor's type catalog and inferred signatures. The companion normative document is [`docs/type-specification/robustness-principle.md`](../type-specification/robustness-principle.md). When the two documents diverge in observable behavior, the specification binds and ADR-5 should be amended.
 

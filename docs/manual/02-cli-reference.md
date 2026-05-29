@@ -36,6 +36,7 @@ the `paths:` list from the configuration file.
 | `--baseline=PATH` | Load a baseline file, overriding config. |
 | `--no-baseline` | Ignore any configured baseline. |
 | `--baseline-strict` | Fail the run on any baseline drift — a CI gate. |
+| `--treat-all-as-inline-rbs` | Force-load `rigor-rbs-inline` with `require_magic_comment: false`, so every analysed file is treated as inline-RBS without the `# rbs_inline: enabled` comment (ADR-32). |
 | `--tmp-file=PATH --instead-of=PATH` | Editor mode: analyse `PATH` using the buffer in `--tmp-file`. Both required together. |
 
 Exit `0` when no error-severity diagnostics remain, `1` when
@@ -189,6 +190,106 @@ rigor triage [paths]
 `--top=N` sets the hotspot count (default 10); `--hints-only`
 and `--no-hints` select which sections print. `triage` is
 advisory and always exits `0` — it never gates a build.
+
+## `rigor coverage`
+
+Report type-precision coverage — the ratio of call sites that
+resolve to a precise type versus those that fall back to
+`Dynamic`. A quality gate for "how much is Rigor actually
+inferring".
+
+```sh
+rigor coverage [paths]
+```
+
+`--format=text|json` selects the output format and
+`--config=PATH` overrides config discovery. `--threshold=RATIO`
+exits `1` when the precision ratio falls below `RATIO`
+(`0.0`–`1.0`), making it a CI gate.
+
+## `rigor mcp`
+
+Run the Rigor MCP (Model Context Protocol) server over stdio,
+so AI coding assistants can call Rigor tools directly. See
+[MCP server](10-mcp-server.md).
+
+```sh
+rigor mcp [--transport=stdio] [--config=PATH]
+```
+
+`stdio` is the only transport. The server is a pure-Ruby
+JSON-RPC 2.0 implementation exposing seven read-only tools:
+`rigor_check`, `rigor_type_of`, `rigor_triage`,
+`rigor_annotate`, `rigor_sig_gen`, `rigor_explain`,
+`rigor_coverage`.
+
+## `rigor lsp` vs `rigor mcp`
+
+`lsp` speaks the Language Server Protocol to editors; `mcp`
+speaks the Model Context Protocol to AI assistants. Both run
+over stdio and wrap the same analysis engine.
+
+## `rigor plugins`
+
+Report the activation status of every plugin configured in
+`.rigor.yml` — loaded, load-error (with reason), and each
+plugin's declared extension surfaces. See [Plugins](07-plugins.md).
+
+```sh
+rigor plugins [--format=text|json] [--strict] [--config=PATH]
+```
+
+Without `--strict` the command always exits `0`; with
+`--strict` it exits `1` when any plugin failed to load (a CI
+gate). Not to be confused with the singular `rigor plugin`.
+
+## `rigor plugin`
+
+Browse the on-disk source of the plugins bundled in the
+toolchain, so you can read a real, working plugin as a worked
+example when authoring your own.
+
+```sh
+rigor plugin <list|path|print|root> [name]
+```
+
+| Subcommand | Purpose |
+| --- | --- |
+| `list` | Table of every bundled plugin and example, name + absolute directory path (default when no subcommand given). |
+| `path <name>` | One-line absolute path to the plugin's directory. |
+| `print <name>` | A header (dir / lib / sig / README paths) followed by the plugin's main source body inlined. |
+| `root` | The `rigortype` gem root and its key subdirectories. |
+
+Paths resolve at runtime from the gem location (a documented
+caveat for container / cross-filesystem setups).
+
+## `rigor playground`
+
+Start the browser playground (a CodeMirror editor with
+real-time diagnostics). Requires the separate `rigor-playground`
+gem; if it is not installed the command prints an install hint
+and exits `64`.
+
+```sh
+rigor playground
+```
+
+## `rigor skill`
+
+List or print the bundled Agent Skills shipped inside the
+`rigortype` gem, so an AI coding agent installed alongside
+Rigor can discover and follow them without a project-side
+source checkout. See [Skills](08-skills.md).
+
+```sh
+rigor skill <list|print|path> [name]
+```
+
+| Subcommand | Purpose |
+| --- | --- |
+| `list` | Table of every bundled skill (name + absolute path); the default when no subcommand is given. |
+| `print <name>` | Print the `SKILL.md` body to stdout, with a header pointing at the skill's `references/` directory. |
+| `path <name>` | Print the single-line absolute `SKILL.md` path, suitable as input to a file-reading tool. |
 
 ## Exit codes
 

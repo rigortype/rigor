@@ -265,10 +265,12 @@ In-source suppression: `# rigor:disable <rule>` silences a single line;
 
 ## Status
 
-Current released version: **`v0.1.8`** (2026-05-21). The analyzer is
+Current released version: **`v0.1.15`** (2026-05-29). The analyzer is
 usable on real Ruby code today; the rule catalogue is deliberately
 conservative — Rigor's stance is to surface zero false positives while
-the inference surface stabilises.
+the inference surface stabilises. The `0.1.x` preview line has been
+hardened against real OSS Rails codebases (Mastodon / Redmine / GitLab
+FOSS); `v0.2.0` will open the first evaluation release.
 
 Release history: [`CHANGELOG.md`](CHANGELOG.md). Forward-looking
 commitments: [Roadmap](https://rigor.typedduck.fail/reference/roadmap/).

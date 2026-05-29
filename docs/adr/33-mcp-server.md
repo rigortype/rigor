@@ -1,6 +1,11 @@
 # ADR-33 — MCP Server packaging
 
-**Status:** Proposed (2026-05-27)
+**Status:** Accepted (2026-05-27); implemented in v0.1.10. The
+`rigor mcp --transport stdio` subcommand ships a pure-Ruby JSON-RPC
+2.0 MCP server exposing seven tools — `rigor_check`, `rigor_type_of`,
+`rigor_triage`, `rigor_annotate`, `rigor_sig_gen`, `rigor_explain`,
+`rigor_coverage`. HTTP transport and per-session environment caching
+remain deferred.
 
 ## Context
 

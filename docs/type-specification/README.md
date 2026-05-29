@@ -10,7 +10,7 @@ Analyzer-internal contracts — the engine-surface that downstream features depe
 
 Design rationale, the decision history, options that were rejected or deferred, and open questions live in `docs/adr/1-types.md` (and `docs/adr/2-*` for plugin extension API decisions, `docs/adr/3-*` for the internal type representation rationale). When the specification and an ADR appear to disagree on what the analyzer does, **the specification binds** and the ADR should be amended.
 
-This specification covers the long-term type model. It is normative for the eventual analyzer behavior. The first user-visible release (v1) ships a deliberately scoped slice of the surface; sections that distinguish v1 from v1.1 mark the difference inline.
+This specification covers the long-term type model. It is normative for the eventual analyzer behavior. The first user-visible release (v1) ships a deliberately scoped slice of the surface; sections that distinguish the shipped surface from still-deferred work mark the difference inline.
 
 ## Conventions
 

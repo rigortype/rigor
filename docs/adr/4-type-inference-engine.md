@@ -2,7 +2,11 @@
 
 ## Status
 
-Draft.
+Accepted; implemented and shipped. The inference engine (`Scope`,
+fact store, effect model, capability-role inference, normalization,
+RBS erasure routing) is live; the
+[`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md)
+contract is its normative surface.
 
 ADR-4 records the design decisions that turn the static type model (ADR-1, ADR-3) into a working inference engine. The central concrete deliverable is the analyzer query that takes a Prism AST node and an immutable `Rigor::Scope`, and returns the `Rigor::Type` the expression is proven to produce at that program point. This is the Ruby/Rigor counterpart of PHPStan's `$scope->getType($node)` and is the query that every CLI rule, plugin, and refactor tool eventually calls.
 

@@ -1,11 +1,18 @@
 # Public API Stability Boundary
 
-Status: **Pre-v0.1.0 surface declaration.** Lists the namespaces
-the v0.1.0 plugin contract will be designed against and pins them
-in place via the [public-API drift spec](../../spec/rigor/public_api_drift_spec.rb).
-Until v0.1.0 ships, the surface is allowed to evolve commit-by-commit;
-the drift spec catches accidental signature changes so changes are
-deliberate and reviewable.
+Status: **Active (v0.1.0 contract shipped; stabilising toward v0.2.0).**
+Lists the namespaces the plugin contract is designed against and pins
+them in place via the [public-API drift spec](../../spec/rigor/public_api_drift_spec.rb).
+The v0.1.0 plugin contract shipped and the `0.1.x` preview line has
+extended the surface (cross-plugin facts, `signature_paths:`,
+`open_receivers:`, `protocol_contracts:`, `source_rbs_synthesizer:`);
+v0.2.0 is the first line where this surface is stabilised for external
+`rigor-*` gems. (The `rigor <command>` CLI itself — including newer
+subcommands like `mcp`, `triage`, `baseline`, `plugin`, `skill` — stays
+internal plumbing per the exclusion list below; its user-facing
+contract lives in `docs/manual/`.) The drift spec
+catches accidental signature changes so every change stays deliberate
+and reviewable.
 
 ## Why this boundary exists
 

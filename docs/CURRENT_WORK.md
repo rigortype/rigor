@@ -4,9 +4,15 @@ A transient bookmark for the next implementer: the immediate next-session entry 
 
 ## Status
 
-**v0.1.12 released (2026-05-28).** Twenty-eight post-v0.1.11 slices were sealed into the cut — the OSS-realism cycle against Mastodon / Redmine / GitLab FOSS plus all three G2 flow-folding follow-ups (`retry` edge, intervening method-call, read-before-write nil). `bundle exec rake release` has been run; the gem is on RubyGems. Per-version detail lives in `CHANGELOG.md` § `[0.1.12]`.
+**v0.1.15 released (2026-05-29).** The preview line was extended past the v0.1.12 OSS-realism cut with three further patch cuts:
 
-Cumulative survey results at the v0.1.12 cut:
+- **v0.1.13** — AI-assisted onboarding (`rigor skill`) + single-file script analysis: `call.unresolved-toplevel` ([ADR-34](adr/34-toplevel-unresolved-self-call-default.md)) + the `pre_eval:` project monkey-patch pre-evaluation mechanism ([ADR-17](adr/17-monkey-patch-pre-evaluation.md)).
+- **v0.1.14** — machine-readable install guide (`docs/install.md`, [ADR-27](adr/27-tool-distribution-model.md)); `RBS::DuplicatedDeclarationError`-after-`rbs collection install` fix.
+- **v0.1.15** — Liskov override-compatibility diagnostic family (`def.override-*`, [ADR-35](adr/35-override-signature-compatibility.md), slices 1–4); `rigor plugin` source-browsing command; sharper undefined-method reporting for uninstalled project monkey-patches / generated DSLs.
+
+`bundle exec rake release` has been run for each; the gems are on RubyGems. Per-version detail lives in `CHANGELOG.md` § `[0.1.13]` / `[0.1.14]` / `[0.1.15]`.
+
+Cumulative survey results (measured at the v0.1.12 OSS-realism cut; still the headline realism numbers — v0.1.13–v0.1.15 added onboarding + the `def.override-*` family rather than running new full surveys, though ADR-35 slice 4 re-verified the Mastodon corpus):
 
 | Project | Scope | Before | After | Delta |
 |---|---|---:|---:|---:|
@@ -18,7 +24,7 @@ The 6 remaining Mastodon errors are all unrelated to engine precision: 5 nil-rec
 
 ## Reading order for a returning implementer
 
-`make verify` is clean. `[Unreleased]` is empty (the v0.1.12 cut sealed everything that had accumulated). Three branches are queued; nothing forces a particular one.
+`make verify` is clean. `[Unreleased]` is empty (the v0.1.15 cut sealed everything that had accumulated). Three branches are queued; nothing forces a particular one.
 
 ### Branch A — v0.2.0 evaluation release
 
@@ -50,7 +56,7 @@ These are the queued engine items unaffected by the v0.1.12 cycle:
 
 When in doubt, the canonical entry points:
 
-1. [`CHANGELOG.md`](../CHANGELOG.md) § `[0.1.12]` — full release-notes for the v0.1.12 cut (the OSS-realism cycle).
+1. [`CHANGELOG.md`](../CHANGELOG.md) § `[0.1.13]` – `[0.1.15]` — release-notes for the latest cuts (onboarding, `pre_eval:`, the `def.override-*` family); § `[0.1.12]` for the OSS-realism cycle.
 2. [`docs/ROADMAP.md`](ROADMAP.md) § "Release strategy — the road to v0.2.0" — what gates v0.2.0.
 3. [`docs/internal-spec/public-api.md`](internal-spec/public-api.md) — public-vs-internal stability boundary. v0.2.0 stabilises the plugin-contract surface for external `rigor-*` gems; cross-reference `spec/rigor/public_api_drift_spec.rb` before extending any pinned namespace.
 4. [`docs/adr/2-extension-api.md`](adr/2-extension-api.md) — the plugin contract v0.2.0 must stabilise.

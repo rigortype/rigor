@@ -32,7 +32,11 @@ Ruby identifiers (`Rigor::Type`, `Rigor::Trinary`, `Rigor::Type::Combinator`, �
 | [reflection.md](reflection.md) | `Rigor::Reflection` read-side facade — unified read shape over `ClassRegistry` + `RbsLoader` + `Scope` discovered facts. Public read shape for v0.1.0 plugin-API readiness. |
 | [cache.md](cache.md) | `Rigor::Cache` layer — descriptor schema, filesystem-backed Store, first cached producer (`RbsConstantTable`), CLI observability, diagnostic provenance. |
 | [flow-contribution.md](flow-contribution.md) | `Rigor::FlowContribution` bundle — the public packaging plugins, `RBS::Extended` annotations, and built-in narrowing rules use to hand the analyzer facts and effects at a single call edge. |
-| [public-api.md](public-api.md) | Public-API stability boundary — which namespaces (`Rigor::Scope`, `Type`, `Environment`, `Reflection`, `FlowContribution`, `Diagnostic`) the v0.1.0 plugin contract is designed against, and which surfaces stay internal. |
+| [flow-contribution-merger.md](flow-contribution-merger.md) | `Rigor::FlowContribution::Merger` — the deterministic merge policy that folds multiple contributions at one call edge into a single tagged element list, with authority tiers and conflict detection. |
+| [plugin.md](plugin.md) | Plugin contract — `Rigor::Plugin::Base`, `Manifest` (all extension fields), `Loader` / `Registry` registration + topological ordering, and `Services` injection. |
+| [plugin-trust.md](plugin-trust.md) | Plugin trust & I/O policy — `TrustPolicy` (`trusted_gems`, `allowed_read_roots`, `network_policy`), the `IoBoundary` mediated file/network surface, and the `Services` additions. |
+| [plugin-cache-producers.md](plugin-cache-producers.md) | Plugin-side cache producers — the `Plugin::Base.producer` DSL, `#cache_for` callable, descriptor auto-prefixing, and `glob_descriptor` discovery helper. |
+| [public-api.md](public-api.md) | Public-API stability boundary — which namespaces (`Rigor::Scope`, `Type`, `Environment`, `Reflection`, `FlowContribution`, `Diagnostic`) the plugin contract is designed against, and which surfaces stay internal. |
 | [dependency-source-inference.md](dependency-source-inference.md) | Opt-in dependency-source inference (ADR-10) — `dependencies.source_inference:` configuration, walker / dispatcher tier, `DependencyEntry` cache slice, `dynamic.dependency-source.*` diagnostic family. |
 
-This list is expected to grow as further internal contracts (fact store schema, cache and invalidation rules, plugin lifecycle internals) stabilize.
+This list grows as further internal contracts stabilize.

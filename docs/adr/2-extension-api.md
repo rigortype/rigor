@@ -2,10 +2,20 @@
 
 ## Status
 
-Draft. Working decisions for the in-flight v0.1.0 implementation
-slices (4 — FlowContribution wiring through internal narrowing,
-5 — plugin diagnostic emission protocol, 6 — plugin-side cache
-producers) are pinned in [ADR-7](7-v0.1.0-slice-decisions.md).
+Accepted; implemented and shipped. The v0.1.0 implementation slices
+(4 — FlowContribution wiring through internal narrowing, 5 — plugin
+diagnostic emission protocol, 6 — plugin-side cache producers),
+whose working decisions are pinned in [ADR-7](7-v0.1.0-slice-decisions.md),
+all landed. The extension API has since grown the surfaces recorded
+in [ADR-9](9-cross-plugin-api.md) (cross-plugin facts),
+[ADR-13](13-typenode-resolver-plugin.md) (TypeNode resolvers),
+[ADR-16](16-macro-expansion.md) (macro substrate),
+[ADR-25](25-plugin-contributed-rbs.md) (`signature_paths:`),
+[ADR-26](26-activerecord-relation-typing.md) (`open_receivers:`),
+[ADR-28](28-path-scoped-protocol-contracts.md) (`protocol_contracts:`),
+and [ADR-32](32-rbs-inline-comment-ingestion.md)
+(`source_rbs_synthesizer:`). The type model and spec corpus remain
+authoritative for *what* the analyzer does; this ADR records *why*.
 
 ## Context
 

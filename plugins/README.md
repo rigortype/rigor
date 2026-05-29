@@ -1,10 +1,13 @@
 # Rigor production plugins
 
-Twenty-eight plugins targeting real Ruby gems, frameworks,
-and DSLs. Each ships as a standalone gem (`lib/` +
-`<id>.gemspec` + README + demo + integration spec) and is
-intended to be installed alongside the analyzer in a project's
-`Gemfile` and activated through `.rigor.yml`.
+Thirty entries targeting real Ruby gems, frameworks, and DSLs.
+Each keeps a standalone-gem layout (`lib/` + `<id>.gemspec` +
+README + demo + integration spec), but the set now **ships
+bundled inside the `rigortype` gem** (v0.1.11) — you do not add
+them to your project's `Gemfile`; you activate the ones you want
+through `.rigor.yml`'s `plugins:` list. The standalone gemspecs
+remain so any plugin can be subtree-split and published
+independently later.
 
 > **Authoring a new plugin?** Read the
 > [walkthroughs](../examples/README.md) under `examples/`
@@ -102,6 +105,8 @@ subset; they cross-reference through ADR-9 facts.
 | [`rigor-statesman`](rigor-statesman/) | State machine DSL recognition (`state` + `transition` declarations) and `transition_to(:state)` / `can_transition_to?(:state)` validation against the per-class state set. Two-pass collect → validate analysis. |
 | [`rigor-activesupport-core-ext`](rigor-activesupport-core-ext/) | **RBS-only community bundle** (not a plugin in the contract sense — no `Rigor::Plugin::Base` subclass). Top ~50 ActiveSupport `core_ext` selectors that dominated the nine-project Rails survey: `Integer`/`Float` Duration & Bytes multipliers; `Time`/`Date`/`DateTime` calculations; `String` inflections / filters / `#exclude?`; `Array.wrap` + `Array#to_sentence` / `#in_groups_of`; `Hash#deep_dup` / `#deep_merge` / `#symbolize_keys`; `Object#blank?` / `#present?` / `#presence` / `#try`. Measured impact across nine survey projects: total diagnostics 12,502 → 3,071 (−75%). Wire via `signature_paths:` in `.rigor.yml`. |
 | [`rigor-typescript-utility-types`](rigor-typescript-utility-types/) | **Type-language vocabulary extension** via `Plugin::TypeNodeResolver` ([ADR-13](../docs/adr/13-typenode-resolver-plugin.md)) — maps `Pick<T, K>` / `Omit<T, K>` / `Partial<T>` / `Required<T>` / `Readonly<T>` onto Rigor-canonical shape-projection type functions. |
+| [`rigor-rbs-inline`](rigor-rbs-inline/) | **Inline-RBS ingestion** ([ADR-32](../docs/adr/32-rbs-inline-comment-ingestion.md)) — runs the upstream rbs-inline library at env-build time via the `source_rbs_synthesizer:` manifest field and contributes the synthesised RBS, gated by the `# rbs_inline: enabled` magic comment (override with the `require_magic_comment: false` plugin-config knob). Backs `rigor check --treat-all-as-inline-rbs`. |
+| [`rigor-playground`](rigor-playground/) | **Browser-playground backend** ([ADR-29](../docs/adr/29-browser-playground.md)) — a Rack/Puma app exposing `/check` / `/annotate-lines` / `/type-of` JSON endpoints behind a CodeMirror frontend. A companion gem, **not an analyzer plugin**; the `rigor playground` CLI command requires it. Loads `rigor-rbs-inline` with `require_magic_comment: false` so pasted snippets are analysed as inline-RBS. |
 
 ## What's in scope for each plugin
 

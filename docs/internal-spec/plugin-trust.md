@@ -43,11 +43,13 @@ Frozen value object describing the per-run trust scope.
 | --- | --- |
 | `trusted_gems` | Sorted, deduplicated list of gem names the user has authorised. Derived from the gem-name half of every `.rigor.yml` `plugins:` entry. |
 | `allowed_read_roots` | Sorted absolute paths plugins may read from through the {IoBoundary}. Default contents: project root (CWD), every `signature_paths` entry, each trusted gem's `Gem::Specification#full_gem_path`, and any extra paths the user lists under `plugins_io.allowed_paths`. |
-| `network_policy` | `:disabled` in slice 2 — the only value `Configuration` accepts today. |
+| `network_policy` | `:disabled` (default) or `:allowlist` (v0.1.2). The two values `Configuration` accepts. |
+| `allowed_url_hosts` | Sorted, deduplicated, lower-cased list of hostnames plugins may fetch from when `network_policy` is `:allowlist`. Empty (and ignored) under `:disabled`. |
 
 Predicates: `#allow_read?(path)` (absolute-path containment under
-any allowed root), `#network_allowed?` (always `false` while the
-policy is `:disabled`), `#gem_trusted?(name)`. `#to_h` returns a
+any allowed root), `#network_allowed?` (`true` only when the policy
+is `:allowlist`), `#allow_url?(url)` (HTTPS + parsed host in
+`allowed_url_hosts`), `#gem_trusted?(name)`. `#to_h` returns a
 serialisable Hash for diagnostics and cache descriptors.
 
 ### `Rigor::Plugin::IoBoundary`
@@ -59,7 +61,7 @@ Per-plugin helper service constructed by
 | Method | Purpose |
 | --- | --- |
 | `#read_file(path)` | Validates the absolute path against the policy, reads the bytes, and adds a `:digest` {Cache::Descriptor::FileEntry} to the boundary's accumulated entries. Raises {Rigor::Plugin::AccessDeniedError} (`reason: :read_outside_scope`) on a denied path. |
-| `#open_url(url)` | Always raises {Rigor::Plugin::AccessDeniedError} (`reason: :network_disabled`) while the policy is `:disabled` (slice 2's only setting). The hook is reserved so future slices can lift the gate without re-defining the API. |
+| `#open_url(url)` | Under `:disabled` raises {Rigor::Plugin::AccessDeniedError} (`reason: :network_disabled`). Under `:allowlist` (v0.1.2) performs a GET over HTTPS when the parsed host is in `allowed_url_hosts`, enforcing a request timeout (10 s) and a response-body size cap (10 MB); raises `AccessDeniedError` with `reason:` one of `:invalid_url_scheme`, `:host_not_allowed`, `:http_error`, `:request_timeout`, `:body_too_large` on failure. |
 | `#cache_descriptor` | Returns a fresh frozen {Cache::Descriptor} with the boundary's accumulated `FileEntry` rows. Subsequent reads expand the underlying record table; each call returns a new descriptor reflecting the read history at that moment. |
 
 Per-path reads are deduplicated by absolute path; re-reading a
@@ -67,29 +69,35 @@ file with changed content updates the entry's digest in place.
 
 ### `Rigor::Plugin::AccessDeniedError`
 
-Public exception for boundary violations. Slice-2 reasons:
+Public exception for boundary violations. Reasons:
 
 - `:read_outside_scope` — `read_file` called with a path outside
   every allowed read root.
 - `:network_disabled` — `open_url` called while
   `network_policy == :disabled`.
+- `:invalid_url_scheme` / `:host_not_allowed` / `:http_error` /
+  `:request_timeout` / `:body_too_large` — `open_url` failures under
+  the `:allowlist` policy (v0.1.2).
 
 Carries the offending `resource` (path or URL).
 
-### `Rigor::Plugin::Services` (slice-2 additions)
+### `Rigor::Plugin::Services` (trust + fact-store additions)
 
-Slice 2 adds two surfaces:
+Slice 2 added the trust surfaces; v0.1.1 (ADR-9) added `fact_store`:
 
 | Method | Purpose |
 | --- | --- |
 | `#trust_policy` | The {TrustPolicy} for the run. Constructed by `Analysis::Runner` from the project's `.rigor.yml`. |
 | `#io_boundary_for(plugin_id)` | Returns a fresh per-plugin {IoBoundary}. The contribution merger (slice 3) constructs one per plugin per run and feeds the resulting cache descriptor through the same pipeline as built-in producers. |
+| `#fact_store` | The per-run cross-plugin {Rigor::Plugin::FactStore} (ADR-9 / v0.1.1). Producers publish via `#prepare(services)`; consumers read in `#diagnostics_for_file` / `#flow_contribution_for`. |
 
 ## `.rigor.yml` `plugins_io` section
 
 ```yaml
 plugins_io:
-  network: disabled              # only :disabled accepted in slice 2
+  network: disabled              # :disabled (default) or :allowlist (v0.1.2)
+  allowed_url_hosts:             # required hostnames when network: allowlist
+    - example.com
   allowed_paths:                 # extra read roots beyond project + sig + trusted gems
     - vendor/generated
     - db/schema.rb
@@ -115,7 +123,8 @@ Slice 2's runner builds a `TrustPolicy` once per run:
    - Every `Configuration#plugins_io_allowed_paths` entry,
      expanded.
 3. `network_policy` ← `Configuration#plugins_io_network`
-   (`:disabled` in slice 2).
+   (`:disabled` default, or `:allowlist` with
+   `Configuration#plugins_io_allowed_url_hosts`, v0.1.2).
 
 The policy lands on `Plugin::Services` and from there on every
 plugin's `Services#io_boundary_for` call. Plugins that do not use
@@ -131,10 +140,11 @@ for documentation.
   option, not a slice-2 commitment.
 - **Resolve symlinks via `realpath`.** `File.expand_path` is the
   only normalisation step. Adversarial plugins are out of scope.
-- **Enable any network policy other than `:disabled`.** The
-  `network_allowed?` hook exists so slices that need offline-replay
-  / cached-fetch behaviour can lift the gate without re-defining
-  the API; slice 2's accepted set is `[:disabled]`.
+
+(v0.1.2 lifted the network gate: `network_policy` now also accepts
+`:allowlist`, which permits HTTPS GETs to hosts in
+`allowed_url_hosts` through `IoBoundary#open_url`, with a request
+timeout and a response-size cap. The default stays `:disabled`.)
 - **Wire the boundary's cache descriptor into `Cache::Store`.**
   That's slice 6's job — plugin-side cache producers ride
   `Store#fetch_or_compute(serialize:, deserialize:)` with

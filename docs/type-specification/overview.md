@@ -51,9 +51,9 @@ This specification describes the long-term type model. The first user-visible re
 
 - The full specification — fact-stability buckets, capability-role catalog, mutation summary set, `Dynamic[T]` algebra, type operators, the `RBS::Extended` schema — is normative. Internal data structures MAY be present in v1 even when the user-visible narrowing surface does not yet exploit them.
 - The v1 narrowing surface is the subset of derivation rules that are turned on for end users in the first release.
-- v1.1 is the next user-visible release. It expands the narrowing surface using rules that the data structures already support. Each v1.1 surface ships behind a feature flag so v1 behavior is preserved.
+- Later releases expand the narrowing surface using rules the data structures already support. Across the `0.1.x` preview line much of this has already shipped (intra-procedural fact propagation, plugin-supplied flow contributions, the `def.override-*` family); each addition lands incrementally so previously shipped behavior is preserved.
 
-The detailed v1 versus v1.1 boundaries appear in the relevant topical sections, including [control-flow-analysis.md](control-flow-analysis.md), [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md), and [rbs-extended.md](rbs-extended.md).
+The detailed shipped-versus-deferred boundaries appear in the relevant topical sections, including [control-flow-analysis.md](control-flow-analysis.md), [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md), and [rbs-extended.md](rbs-extended.md).
 
 ## Compatibility hierarchy
 

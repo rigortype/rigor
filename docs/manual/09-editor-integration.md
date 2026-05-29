@@ -232,7 +232,7 @@ Cold start is dominated by RBS environment build; warm starts
 
 ## Status + roadmap
 
-LSP v1 + v2 land in v0.1.6 (accumulating on `master`). Queued
+LSP v1 + v2 landed in v0.1.6 and ship in the `0.1.x` line. Queued
 follow-ups (`textDocument/signatureHelp`, hash-key completion,
 `textDocument/definition`, incremental `didChange` sync, Ractor
 pool dispatch, codeAction / rename / semanticTokens / inlayHint)

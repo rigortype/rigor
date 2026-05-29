@@ -126,6 +126,26 @@ The directive instructs Rigor to verify the conformance regardless of whether an
 
 The directive is purely additive. Implicit structural compatibility continues to apply, and a class that already satisfies the interface continues to type-check without the annotation.
 
+## Higher-kinded type directives (ADR-20)
+
+Two declaration-level directives register and define defunctionalised type constructors for the lightweight HKT mechanism ([ADR-20](../adr/20-lightweight-hkt.md)); the resulting `App[<uri>, <args...>]` carrier is documented in [rigor-extensions.md](rigor-extensions.md). Unlike the per-method directives above, these attach to a `class` / `module` declaration and take **space-separated `key=value` pairs** (RBS's `%a{...}` grammar does not accept nested punctuation, so values are bare tokens):
+
+| Directive | Effect |
+| --- | --- |
+| `rigor:v1:hkt_register: uri=<uri> arity=<int> variance=<v1>,<v2>,... bound=<class_or_untyped>` | Registers a type-constructor URI with its arity, per-position variance, and erasure `bound` (`untyped` → `Dynamic[Top]`, ADR-20 WD2 default). |
+| `rigor:v1:hkt_define: uri=<uri> params=<P1>,<P2>,... body=<body_text>` | Binds the URI to a type-function body; `body=` gobbles the remainder of the payload and is parsed into a union tree. |
+
+```rbs
+%a{rigor:v1:hkt_register: uri=json::value arity=1 variance=out bound=untyped}
+%a{rigor:v1:hkt_define: uri=json::value params=K
+   body=nil | true | false | Integer | Float | String |
+        Array[App[json::value, K]] | Hash[K, App[json::value, K]]}
+module JsonOverlay
+end
+```
+
+The bundled `json::value` registration backs `JSON.parse` / `YAML.safe_load`'s return discrimination; see handbook chapter 12 for the worked authoring walkthrough.
+
 ## Flow effects and extension contributions
 
 This section is the canonical semantic schema for flow-effect bundles. Extension API documents (ADR-2 and onward) MUST reference this schema when describing how plugins package and return contributions.

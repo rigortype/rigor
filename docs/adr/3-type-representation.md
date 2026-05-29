@@ -2,7 +2,11 @@
 
 ## Status
 
-Draft.
+Accepted; implemented and shipped. The internal type-object layout
+(including the OQ1–OQ3 working decisions) is live; the
+`Rigor::Type::*` carriers and the
+[`docs/internal-spec/internal-type-api.md`](../internal-spec/internal-type-api.md)
+contract realize it.
 
 ADR-3 records the design space for Rigor's internal type-object layout: the Ruby classes, modules, methods, and value objects that implement the type model. ADR-3 does **not** redefine semantics — those are owned by ADR-1 and the type specification — and it does **not** define the plugin contract — that is owned by ADR-2. ADR-3 captures the rationale and the open questions that surround the analyzer-side data shapes that ADR-1 and ADR-2 attach to.
 

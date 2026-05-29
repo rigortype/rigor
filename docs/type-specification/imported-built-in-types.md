@@ -25,6 +25,8 @@ This document defines the reserved built-in **names** Rigor uses for refinements
 | `literal-string` | String known to come from source literals and literal-only composition. v0.0.9 tracks the carrier through string interpolation `"#{...}"`, through `String#+` / `String#*` whose every operand is itself literal-bearing, and through the mutating composition methods `String#<<` / `String#concat` (whose return value is the receiver, so a literal-bearing receiver with literal-bearing args stays literal-string). | `String` |
 | `numeric-string` | String accepted by Rigor's Ruby numeric-string predicate | `String` |
 | `decimal-int-string` | String accepted by Rigor's Ruby decimal-integer-string predicate | `String` |
+| `octal-int-string` | String accepted by Rigor's Ruby octal-integer-string predicate | `String` |
+| `hex-int-string` | String accepted by Rigor's Ruby hex-integer-string predicate | `String` |
 | `lowercase-string` | String equal to its lowercase normalization | `String` |
 | `non-lowercase-string` | String NOT equal to its lowercase normalization (i.e. contains at least one non-lowercase character). Paired complement of `lowercase-string` under `~T` | `String` |
 | `uppercase-string` | String equal to its uppercase normalization | `String` |

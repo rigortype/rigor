@@ -1,7 +1,10 @@
 # ADR-31 — Contribution and supply-chain policy
 
-Status: **proposed, 2026-05-25.** Records the project-wide
-contribution policy, organised by **change magnitude**:
+Status: **accepted, 2026-05-25; in force.** The policy is reflected
+in [`CONTRIBUTING.md`](../../CONTRIBUTING.md), `AGENTS.md`, and the
+`rigor-plugin-author` / `rigor-ffi-plugin-author` SKILLs (Phase 0.5
+routing). Records the project-wide contribution policy, organised by
+**change magnitude**:
 
 - **Minor focused changes anywhere in the repo** — code,
   documentation, tests, fixtures, tooling — are welcomed as

@@ -216,10 +216,10 @@ def parse_date(s)
 end
 ```
 
-(In a future release the truthy edge will narrow further to
-specific refinement carriers — `\d{4}` would produce
-`decimal-int-string`. Tracked under
-[`docs/ROADMAP.md`](../ROADMAP.md) § "v0.1.1 — Planned".)
+(Narrowing the truthy edge further to specific refinement
+carriers — so `\d{4}` would produce `decimal-int-string` — is a
+demand-driven follow-up on the regex-pattern → refinement-name
+recogniser track; see [`docs/ROADMAP.md`](../ROADMAP.md).)
 
 ## `!=` and `unless`
 

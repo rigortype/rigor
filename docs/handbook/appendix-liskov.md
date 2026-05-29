@@ -324,12 +324,14 @@ This is the postcondition rule applied to a single method against
 its *own* declared contract. Note the scope precisely (it matters
 for the next section): `def.return-type-mismatch` checks the body
 against the method's **own** RBS signature, not against a
-superclass's signature. Rigor does not, in v0.1.x, compare a
+superclass's signature. The complementary check — comparing a
 subtype's override against the supertype's declared return to verify
-covariance across the hierarchy. The robustness principle keeps
-each *individually authored* signature honest; cross-hierarchy
-override-compatibility checking is a separate, unshipped feature
-(§ "What Rigor does NOT check").
+covariance across the hierarchy — shipped in v0.1.15 as the
+`def.override-*` rule family (§ "Cross-hierarchy override
+compatibility" below). The robustness principle keeps each
+*individually authored* signature honest; the override family then
+verifies that the authored child contract substitutes for the
+authored parent contract.
 
 The covariant-return half is also why **self types** earn their
 keep here, mirrored from the variance section: `def dup: () -> self`
@@ -454,31 +456,57 @@ trying, writing overrides that don't strengthen preconditions or
 weaken postconditions. Rigor nudges toward LSP compliance through
 its defaults rather than policing it through diagnostics.
 
+## Cross-hierarchy override compatibility
+
+Since v0.1.15 ([ADR-35](../adr/35-override-signature-compatibility.md)),
+Rigor *does* compare an override against the contract it inherits —
+the signature rule applied across a project-defined class/module
+hierarchy. Three rules make up the `def.override-*` family:
+
+- **`def.override-param-narrowed`** — parameter contravariance: an
+  override may not strengthen its precondition by narrowing a
+  parameter type.
+- **`def.override-return-widened`** — return covariance: an override
+  may not weaken its postcondition by widening a return type.
+- **`def.override-visibility-reduced`** — an override may not reduce
+  inherited visibility (public → protected/private).
+
+The family is the load-bearing-discipline counterpart to the
+robustness principle: where the principle *biases inferred*
+signatures toward substitutability, these rules *verify authored*
+ones. They are gated for false-positive discipline — both the
+override and the shadowed ancestor must carry an authored signature
+(hand-written / rbs-inline / bundled RBS; inference-only either side
+stays silent), only a proven (`:no`) violation fires, and severity
+maps through `severity_profile:` (`lenient` → off, `balanced` →
+warning, `strict` → error). The ancestor scope is the superclass
+chain plus included/prepended modules, resolved cross-file.
+
+The escape hatch for a *legitimate* specialization that looks like a
+narrowing is **generics first, not suppression**: declare the parent
+with a bounded type parameter (`interface _Consumer[T < Message]`)
+and have the subtype bind it (`include _Consumer[SendMailMessage]`),
+so the override matches the *instantiated* contract — the same
+resolution PHPStan reaches for in [*Generics in PHP using
+PHPDocs*](https://medium.com/@ondrejmirtes/generics-in-php-using-phpdocs-14e7301953)
+("even Barbara Liskov is happy with it"). Second is keeping the
+declared parameter wide and recovering the narrow type in the body
+via occurrence typing; `# rigor:disable def.override-*` is the last
+resort.
+
 ## What Rigor does NOT check (LSP-wise)
 
 For completeness, the LSP obligations Rigor does **not** statically
 enforce in v0.1.x — named here so you can stop looking:
 
-- **Cross-hierarchy override signature compatibility.** Rigor does
-  not *yet* compare a subtype's override against the supertype's
-  declared parameter/return to verify contravariance/covariance
-  across the chain. Each signature is checked against its own
-  contract (`def.return-type-mismatch`, `call.argument-type-mismatch`),
-  not against an inherited one. This is the highest-value unshipped
-  LSP obligation, and the proposed design is
-  [ADR-35](../adr/35-override-signature-compatibility.md) — three
-  `def.override-*` rules (parameter narrowing, return widening,
-  visibility reduction) gated to both-sides-authored signatures and
-  provable (`:no`) violations only. The design's escape hatch for a
-  *legitimate* specialization that looks like a narrowing is
-  generics, not suppression: declare the parent with a bounded type
-  parameter (`interface _Consumer[T < Message]`) and have the
-  subtype bind it (`include _Consumer[SendMailMessage]`), so the
-  override matches the *instantiated* contract — the same resolution
-  PHPStan reaches for in [*Generics in PHP using
-  PHPDocs*](https://medium.com/@ondrejmirtes/generics-in-php-using-phpdocs-14e7301953)
-  ("even Barbara Liskov is happy with it"). Proposed; no committed
-  milestone.
+- **The inferred-side of cross-hierarchy override compatibility.**
+  The shipped `def.override-*` family (§ "Cross-hierarchy override
+  compatibility" above) gates on *both sides carrying an authored
+  signature*. The complementary case — checking a child's *inferred*
+  return against an authored parent return ([ADR-35](../adr/35-override-signature-compatibility.md)
+  slice 5) — plus RBS-only-ancestor reach and singleton (`def self.`)
+  method coverage remain deferred (demand-driven, higher
+  false-positive surface).
 - **Exception compatibility.** The signature rule's "no new
   exceptions in a subtype" is not checked. Rigor has an internal
   exception/non-local-exit effect

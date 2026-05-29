@@ -46,6 +46,7 @@ Fire when a method call's shape is wrong.
 | `call.wrong-arity` | The number of positional arguments does not satisfy any overload's arity. | error |
 | `call.argument-type-mismatch` | An argument's type provably does not satisfy the parameter contract (RBS or `RBS::Extended` `param:`). | error |
 | `call.possible-nil-receiver` | The receiver type is `T | nil` and the method is not defined on `NilClass`. | warning |
+| `call.unresolved-toplevel` | An implicit-self call at the top level (outside any `def` / `class` / `module`) resolves against no same-file `def`, `pre_eval:` monkey-patch, or `Kernel` / `Object` method — surfacing typos in standalone scripts. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
 
 `call.*` rules are the highest-volume diagnostics on
 real-world code. They are also the most refined — every one
@@ -72,6 +73,15 @@ contract.
 | `def.return-type-mismatch` | The body's last expression's inferred type cannot satisfy the RBS-declared return type. Honors `%a{rigor:v1:return: <refinement>}` overrides. | warning under `balanced` profile, error under `strict` |
 | `def.ivar-write-mismatch` | A later `@var = ...` write's concrete class disagrees with the first write's class in the same class body (NilClass-to-clear is allowlisted). | error |
 | `def.method-visibility-mismatch` | An explicit-receiver call targets a `Nominal[X]` whose discovered method is `:private` in the surrounding class body. | error |
+| `def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor (public → protected/private, protected → private), breaking a caller that holds the supertype. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
+| `def.override-return-widened` | An override's declared return widens the inherited return (covariance). Fires only on a proven violation when both sides carry an authored RBS signature. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
+| `def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance), comparing matching positional parameters. Requires an authored single-overload RBS signature on both sides. | warning under `balanced`, error under `strict`, suppressed under `lenient` |
+
+The three `def.override-*` rules are the Liskov Substitution
+Principle signature rule applied across a project-defined
+class/module hierarchy (superclass chain + included/prepended
+modules, resolved cross-file). They are the conceptual subject of
+[appendix: Liskov substitution](appendix-liskov.md).
 
 ### `assert.*` — runtime assertion rules
 

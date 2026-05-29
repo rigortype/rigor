@@ -49,26 +49,23 @@ Diagnostic identifiers are hierarchical so plugin authors, RBS metadata, and use
 
 ## Suppression markers
 
-Rigor MUST recognize three families of suppression markers so the analyzer can interoperate with existing ecosystems while keeping a clean Rigor-native form.
-
-### Steep-style markers
-
-Steep-style markers such as `# steep:ignore` are recognized by default. Only line-scoped Steep markers are accepted, and Rigor maps them to its own diagnostic suppression. Nothing in Steep's marker grammar is reinterpreted as Rigor configuration.
-
-### Sorbet- and RuboCop-style markers (opt-in)
-
-Sorbet-style file-level markers (`# typed:`) and RuboCop-style suppression comments (`# rubocop:disable`, `# rubocop:enable`) are opt-in. Projects enable them with `compat.sorbet_ignore` and `compat.rubocop_disable` switches in `.rigor.yml`. Sorbet's typed-mode policy and RuboCop's lint scope are not the same as Rigor's diagnostic suppression, so defaulting them on would conflate concerns.
+Rigor recognizes an in-source comment grammar for suppressing specific diagnostics on a single line or across a whole file. The Rigor-native markers below are the shipped surface; recognizing other ecosystems' markers is a designed-but-unshipped compatibility extension.
 
 ### Rigor-native markers
 
-Rigor-native markers use a Ruby comment grammar that mirrors PHPStan's annotation feel without inventing application-side type DSL.
+Rigor-native markers use a Ruby comment grammar that mirrors PHPStan's annotation feel without inventing an application-side type DSL.
 
-- **Line form**: `# rigor:ignore[<diagnostic.id>]`
-- **Block form**: `# rigor:ignore-start[<diagnostic.id>]` paired with `# rigor:ignore-end`
+- **Line form**: `# rigor:disable <rule1>, <rule2>` — suppresses the listed rules on that physical line. `# rigor:disable all` suppresses every rule on the line.
+- **File-level form** (v0.1.2): `# rigor:disable-file <rule1>, <rule2>` — suppresses the listed rules for every line in the file. `# rigor:disable-file all` suppresses every diagnostic in the file.
 
-The diagnostic identifier list uses the prefixes above.
+The rule list is comma- and/or whitespace-separated and uses the rule-ID prefixes above (`call.undefined-method`); the literal `all` keyword and short legacy aliases resolve through the same expansion `rigor explain` uses. There is no block-scoped (`start` / `end`) form.
+
+Inline markers are applied before the configured `severity_profile:` and before the project baseline (ADR-22), which is the last suppression layer. See the User Manual § "Diagnostics" for the operational guide.
+
+### Ecosystem-compat markers (planned, not yet implemented)
+
+Recognizing other ecosystems' markers — Steep's line-scoped `# steep:ignore`, and opt-in Sorbet `# typed:` / RuboCop `# rubocop:disable` via `.rigor.yml` `compat.*` switches — is a designed compatibility surface that has not shipped. Until it lands, only the Rigor-native markers above are honored, and a foreign marker is treated as an ordinary comment.
 
 ### Validity rules
 
-- A marker that names an unknown diagnostic identifier MUST produce a warning so dead suppressions surface during refactoring.
-- A marker without an identifier list MUST be a diagnostic by default; strict mode MUST reject it entirely.
+- An unknown or empty marker is currently treated as an ordinary comment (silently ignored) rather than flagged. Warning on dead (unknown-rule) suppressions so they surface during refactoring is a planned refinement.

@@ -2,7 +2,9 @@
 
 ## Status
 
-Draft.
+Accepted; implemented and shipped. The type model is live across the
+analyzer; `docs/type-specification/` and `docs/types.md` are
+authoritative for *what* the analyzer does, this ADR for *why*.
 
 ADR-1 records type-model design decisions and their rationale. The companion document `docs/types.md` is the type specification: it defines how the analyzer behaves at the level of normalization, narrowing, erasure, signature handling, and diagnostic surfaces. When the two documents discuss the same area:
 

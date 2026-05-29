@@ -1,15 +1,19 @@
 # ADR-27 — Tool distribution and installation model
 
-Status: **proposed, 2026-05-22.** Records how Rigor is distributed
-to and installed by end users. The core principle — **Rigor is not
-added to the target project's `Gemfile`** — is ratified, as is the
-latest-Ruby-only stance it rests on (WD7). The channel
-recommendations follow: a runtime-version manager (`mise` / `asdf`)
-is the front-line path, a copy-pasteable standalone CI workflow
-template is the CI path (Nix is an alternative, not the headline),
-and a container image plus a self-contained single binary are the
-secondary / future options. Implementation is queued; no slice is
-scheduled by this ADR.
+Status: **accepted, 2026-05-22; partially implemented.** Records how
+Rigor is distributed to and installed by end users. The core
+principle — **Rigor is not added to the target project's `Gemfile`**
+— is ratified, as is the latest-Ruby-only stance it rests on (WD7).
+The channel recommendations follow: a runtime-version manager
+(`mise` / `asdf`) is the front-line path, a copy-pasteable standalone
+CI workflow template is the CI path (Nix is an alternative, not the
+headline), and a container image plus a self-contained single binary
+are the secondary / future options. **Shipped so far:** the Nix flake
+`packages` / `apps` outputs, a published container image (`Dockerfile`
++ `.github/workflows/container.yml`), and the machine-readable install
+guide (`docs/install.md`, v0.1.14) de-recommending the `Gemfile`
+entry. **Still queued:** the copy-pasteable standalone CI workflow
+template and the self-contained single binary.
 
 ## Context
 

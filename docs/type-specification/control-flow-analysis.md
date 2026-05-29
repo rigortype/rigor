@@ -8,7 +8,7 @@ This document defines:
 - supported narrowing sources;
 - Ruby equality semantics for narrowing;
 - fact stability, invalidation, and mutation effects;
-- the pre-plugin v1 narrowing surface and what is deferred to v1.1.
+- the shipped narrowing surface and what is still deferred.
 
 The flow-effect bundle schema used by `RBS::Extended` annotations and plugin contributions is in [rbs-extended.md](rbs-extended.md).
 
@@ -185,7 +185,7 @@ The first user-visible milestone (v1) ships built-in mutation, purity, and call-
 
 Classes outside this set follow the impure-by-default policy until ordinary RBS, `RBS::Extended`, or plugin facts say otherwise. Rigor MUST NOT silently assume purity or mutation behavior for them.
 
-The v1.1 roadmap extends coverage to additional core classes (`Numeric` and its descendants, `Symbol`, `Range`, `Regexp`, `Proc`, `Method`, `Time`, `Date`, `DateTime`), broadly used stdlib (`Date`, `JSON`, `URI`, `OpenStruct`, `Forwardable`, `Comparable`-bearing classes that need explicit mutation summaries), and selected metaprogramming-adjacent core APIs (`Module`, `Class`, `BasicObject`). Each addition ships behind a feature flag so v1 behavior is not perturbed as the larger surface lands.
+The deferred roadmap extends coverage to additional core classes (`Numeric` and its descendants, `Symbol`, `Range`, `Regexp`, `Proc`, `Method`, `Time`, `Date`, `DateTime`), broadly used stdlib (`Date`, `JSON`, `URI`, `OpenStruct`, `Forwardable`, `Comparable`-bearing classes that need explicit mutation summaries), and selected metaprogramming-adjacent core APIs (`Module`, `Class`, `BasicObject`). Each addition lands incrementally so previously shipped behavior is not perturbed as the larger surface lands.
 
 Built-in mutation summaries are not a closed list. New entries MAY be added in any minor release as long as their addition does not change the meaning of code that does not call them; the published roadmap is a planning aid, not a contract.
 
@@ -193,22 +193,23 @@ Built-in mutation summaries are not a closed list. New entries MAY be added in a
 
 The pre-plugin narrowing surface is the set of facts Rigor produces in heavily `Dynamic[top]` code before any user plugin is loaded.
 
-This specification describes the full pre-plugin surface that the analyzer ultimately supports. The first user-visible product release (v1) is a scoped slice of that surface; it does not redefine the spec. Internal data structures such as fact buckets, the capability-role catalog, and built-in mutation summaries are normative from v1; the *derivation rules* exposed to users are tightened in v1 and broaden in v1.1.
+This specification describes the full pre-plugin surface that the analyzer ultimately supports. The first user-visible product release (v1) is a scoped slice of that surface; it does not redefine the spec. Internal data structures such as fact buckets, the capability-role catalog, and built-in mutation summaries are normative from v1; the *derivation rules* exposed to users are tightened in v1 and broaden across later releases.
 
 ### v1 narrowing surface
 
 - Literal narrowing for `nil`, `true`, `false`, integer and string literals, and finite literal-union refinements produced by equality checks against trusted built-in domains.
 - Syntax-level guards: `is_a?`, `kind_of?`, `instance_of?`, `nil?`, truthiness, `respond_to?`, equality with literal sets, and class- or pattern-matching narrowing in `case` and `case/in` forms that do not require dataflow across statements.
 - Method-call resolution that uses RBS or `RBS::Extended` for core Ruby and a curated subset of stdlib without requiring user plugins. Generated signatures from `RBS::Extended` MAY participate.
-- Direct application of the bundled core/stdlib mutation summaries at call sites where the receiver is statically known. Summaries drive bucket invalidation locally; cross-statement propagation of those effects is a v1.1 surface.
+- Direct application of the bundled core/stdlib mutation summaries at call sites where the receiver is statically known. Summaries drive bucket invalidation locally.
+- Intra-procedural propagation of narrowing facts across straight-line code, branch joins, and loop bodies (shipped across the `0.1.x` line). Concrete mechanisms: read-before-write `nil` contribution, intervening- / mutating-call fact invalidation, `retry`-edge widening, `receiver[key] ||= default` indexed narrowing, single-hop method-chain narrowing (`x.last` after `if x.last.is_a?(Array)`), and instance-variable guard narrowing (`return if @ivar.nil?`).
+- Plugin-supplied flow contributions via `FlowContribution` — a plugin's `truthy_facts` / `falsey_facts` / `post_return_facts` flow through the narrowing engine (ADR-9, v0.1.1+).
 
-### Deferred to v1.1
+### Deferred
 
-- intra-procedural propagation of facts and mutation effects across straight-line code, joins, and loops;
-- capability-role *requirement inference* from method bodies (the catalog and explicit `conforms-to` directives are already available; deriving "what role does this body require" is v1.1);
-- plugin-supplied flow contributions.
+- capability-role *requirement inference* from method bodies (the catalog and explicit `conforms-to` directives are already available; deriving "what role does this body require" is deferred);
+- full cross-statement propagation of *mutation effects* (as distinct from the narrowing-fact propagation above), beyond the local bucket-invalidation cases.
 
-Each v1.1 surface ships behind a feature flag so v1 behavior stays stable while the larger surface lands.
+Each deferred surface ships incrementally so the shipped behavior stays stable while the larger surface lands.
 
 ## Diagnostics
 

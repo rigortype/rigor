@@ -1,13 +1,17 @@
 # ADR-34 — Toplevel unresolved implicit-self calls warn by default
 
-Status: **proposed, 2026-05-29.** Records the decision to flip the
-current silent-`Dynamic[top]` behaviour on toplevel implicit-self
-call sites that fail to resolve against any visible method
-contributor, emitting a dedicated `call.unresolved-toplevel`
-diagnostic instead. The escape hatch — for projects that introduce
-toplevel methods via monkey-patching or metaprogramming — is
-[ADR-17](17-monkey-patch-pre-evaluation.md)'s `pre_eval:` config
-axis. Implementation is gated on ADR-17 landing first.
+Status: **accepted, 2026-05-29; implemented in v0.1.13.** Records the
+decision to flip the current silent-`Dynamic[top]` behaviour on
+toplevel implicit-self call sites that fail to resolve against any
+visible method contributor, emitting a dedicated
+`call.unresolved-toplevel` diagnostic instead. The escape hatch — for
+projects that introduce toplevel methods via monkey-patching or
+metaprogramming — is [ADR-17](17-monkey-patch-pre-evaluation.md)'s
+`pre_eval:` config axis, which landed in the same release. The
+`call.unresolved-toplevel` rule and the `Scope#toplevel?` predicate
+ship, with severity mapped through `severity_profile:` and the
+cross-file toplevel-`def` index in place; the ADR-29 Playground
+default-severity wiring is the remaining slice.
 
 This ADR is intentionally narrow: only the **toplevel** slice flips
 default. Implicit-self calls inside `class` / `module` bodies stay

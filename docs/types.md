@@ -23,6 +23,7 @@ This file is the one-page entry point. The full normative specification lives in
 | Capability roles (`_RewindableStream`, `_ClosableStream`, …) for IO-like compatibility | [structural-interfaces-and-object-shapes.md](type-specification/structural-interfaces-and-object-shapes.md) |
 | Refinements (`non-empty-string`, `positive-int`, hash-shape extra-key policy, …) | [imported-built-in-types.md](type-specification/imported-built-in-types.md), [rigor-extensions.md](type-specification/rigor-extensions.md) |
 | `RBS::Extended` annotations (`%a{rigor:v1:…}` for predicates, assertions, conformance) | [rbs-extended.md](type-specification/rbs-extended.md) |
+| Lightweight HKT — defunctionalised `App[F, A]` type constructors (e.g. `JSON.parse` return discrimination) | [rigor-extensions.md](type-specification/rigor-extensions.md), [rbs-extended.md](type-specification/rbs-extended.md), [adr/20-lightweight-hkt.md](adr/20-lightweight-hkt.md) |
 | Inference budgets and boundary contracts for recursion / operator ambiguity | [inference-budgets.md](type-specification/inference-budgets.md) |
 | Diagnostic identifier taxonomy and suppression markers | [diagnostic-policy.md](type-specification/diagnostic-policy.md) |
 | Conservative RBS erasure and hash-shape erasure algorithm | [rbs-erasure.md](type-specification/rbs-erasure.md) |

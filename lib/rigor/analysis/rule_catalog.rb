@@ -325,11 +325,44 @@ module Rigor
             "The override narrows or preserves the return (covariant-safe).",
             "The ancestor's return is `untyped` / `self` / an unbound generic (degrades to " \
             "`Dynamic[Top]`, which accepts everything — FP-safe).",
+            "The subtype relationship between the two return types is not resolvable from loaded " \
+            "Ruby classes / their ancestors (a user-only class hierarchy degrades to `:maybe` and " \
+            "stays silent — the check has reach over core / stdlib / loadable-gem hierarchies).",
             "`def self.foo` singleton methods (instance-side only in v1).",
             "The shadowed method lives only on an RBS-known / third-party ancestor not in the " \
             "project-discovered chain (user-source ancestor scope in v1)."
           ],
           suppression: "`# rigor:disable def.override-return-widened` on the override.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :off, balanced: :warning, strict: :error },
+          since: "0.1.15"
+        ),
+
+        CheckRules::RULE_OVERRIDE_PARAM_NARROWED => Entry.new(
+          id: CheckRules::RULE_OVERRIDE_PARAM_NARROWED,
+          summary: "Instance-method override narrows a parameter type it inherits from an ancestor.",
+          fires_when: [
+            "An instance `def` with an authored RBS signature overrides a same-name method whose " \
+            "RBS signature is declared by a project-discovered ancestor (module or superclass).",
+            "At some matching positional parameter index, the override's slot cannot accept the " \
+            "ancestor's parameter type (`override_param.accepts(parent_param)` is `:no`) — a " \
+            "contravariance violation (the override narrowed the parameter)."
+          ],
+          does_not_fire_when: [
+            "Either side lacks an authored RBS signature (WD1 both-sides-authored gate).",
+            "The override widens or preserves the parameter (contravariant-safe).",
+            "Either side is overloaded (more than one method type — arm mapping is ambiguous).",
+            "The ancestor's parameter is `untyped` / an unbound generic / an interface (degrades " \
+            "to `Dynamic[Top]`, which is passable to anything — FP-safe).",
+            "The subtype relationship between the two parameter types is not resolvable from loaded " \
+            "Ruby classes / their ancestors (a user-only class hierarchy degrades to `:maybe` and " \
+            "stays silent — the check has reach over core / stdlib / loadable-gem hierarchies).",
+            "Arity / keyword-requiredness divergence (out of scope for v1 — positional types only).",
+            "`def self.foo` singleton methods (instance-side only in v1).",
+            "The shadowed method lives only on an RBS-known / third-party ancestor (user-source " \
+            "ancestor scope in v1)."
+          ],
+          suppression: "`# rigor:disable def.override-param-narrowed` on the override.",
           severity_authored: :warning,
           severity_by_profile: { lenient: :off, balanced: :warning, strict: :error },
           since: "0.1.15"

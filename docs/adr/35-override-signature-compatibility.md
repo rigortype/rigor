@@ -1,8 +1,9 @@
 # ADR-35 — Override signature compatibility (Liskov signature rule)
 
-Status: **accepted, 2026-05-29 (slices 1–2 implemented).** Records
-the decision to add a new family of diagnostics that check a method
-override against the contract it inherits — the **Liskov Substitution Principle (LSP)
+Status: **accepted, 2026-05-29 (slices 1–3 implemented; slice 4
+corpus verification pending).** Records the decision to add a new
+family of diagnostics that check a method override against the
+contract it inherits — the **Liskov Substitution Principle (LSP)
 signature rule** applied across a class/module hierarchy:
 parameters must be **contravariant** (an override may not strengthen
 its preconditions by narrowing a parameter), returns must be
@@ -445,13 +446,24 @@ Recommended order; each slice independently shippable.
    to **user-source ancestors** + **instance methods** in this slice;
    RBS-only ancestors and singleton (`def self.`) methods are
    follow-ons.
-3. **Parameter contravariance.** `def.override-param-narrowed` —
-   per-position type comparison in the parameter direction (WD3,
-   WD4). Type-only; arity divergence stays out of scope. This is the
-   slice where WD9 tier 1 (generic-instantiation-aware comparison)
-   is load-bearing — the `Consumer[T < Message]` specialization
-   pattern depends on substituting the bound `type_args` before the
-   `accepts` check, otherwise the legitimate narrowing false-fires.
+3. **Parameter contravariance. — LANDED (v0.1.x, 2026-05-29).**
+   `def.override-param-narrowed` — per-position type comparison in
+   the corrected parameter direction `override_param.accepts(parent_param)
+   == :no` (WD3, WD4). Reuses the slice-2 gate + ancestor probe;
+   positional types only (arity / keyword-requiredness out of scope),
+   single-method-type only (overload arms are ambiguous). `untyped` /
+   unbound-generic / interface parent params degrade to `Dynamic[Top]`
+   and are skipped. **Reach finding:** the nominal subtype check
+   (`Inference::Acceptance#class_subtype_result`) resolves *loaded*
+   Ruby classes (and their ancestors); a user-only class hierarchy
+   that Rigor cannot load resolves to `:maybe`, so the check stays
+   silent on it (FP-safe per WD7). Reach is therefore over core /
+   stdlib / loadable-gem hierarchies; firing on app-only hierarchies
+   would need a project-RBS-ancestor-aware subtype path (follow-on).
+   WD9 tier 1 (generic-instantiation-aware comparison) is the
+   *precision* follow-on noted in WD9 — it is **not** required for
+   FP-safety here, since unbound generics already degrade to
+   `Dynamic[Top]`.
 4. **Mastodon-corpus FP verification.** Run all three against
    Mastodon's `app/models` + `app/controllers` (the corpus ADR-26 /
    ADR-24 used) with authored RBS where available; tabulate fires,

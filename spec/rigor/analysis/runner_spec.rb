@@ -2249,6 +2249,133 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # ADR-35 slice 3 — Liskov signature rule for parameters (contravariance).
+    # Uses real (loadable) classes Numeric/Integer so the nominal subtype
+    # check resolves to :no rather than the FP-safe :maybe it returns for
+    # unloadable user-only class hierarchies.
+    describe "override-param-narrowed rule (ADR-35 slice 3)" do
+      def override_param_diags(result)
+        result.diagnostics.select { |d| d.rule == "def.override-param-narrowed" }
+      end
+
+      let(:base_sub_source) do
+        <<~RUBY
+          class Base
+            def consume(value)
+            end
+          end
+
+          class Sub < Base
+            def consume(value)
+            end
+          end
+        RUBY
+      end
+
+      let(:narrow_sig) do
+        { "demo.rbs" => <<~RBS }
+          class Base
+            def consume: (Numeric) -> void
+          end
+
+          class Sub < Base
+            def consume: (Integer) -> void
+          end
+        RBS
+      end
+
+      it "flags an override that narrows a parameter type" do
+        result = analyze(base_sub_source, sig: narrow_sig)
+        diag = override_param_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.severity).to eq(:warning)
+        expect(diag.message).to include("`consume'")
+        expect(diag.message).to include("Base")
+      end
+
+      it "does not flag an override that widens a parameter (contravariant-safe)" do
+        result = analyze(base_sub_source, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def consume: (Integer) -> void
+          end
+
+          class Sub < Base
+            def consume: (Numeric) -> void
+          end
+        RBS
+        expect(override_param_diags(result)).to be_empty
+      end
+
+      it "flags a parameter narrowing inherited from an included module" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          module Consumer
+            def consume(value)
+            end
+          end
+
+          class Host
+            include Consumer
+
+            def consume(value)
+            end
+          end
+        RUBY
+          module Consumer
+            def consume: (Numeric) -> void
+          end
+
+          class Host
+            include Consumer
+
+            def consume: (Integer) -> void
+          end
+        RBS
+        expect(override_param_diags(result).size).to eq(1)
+      end
+
+      it "does not fire when the parent parameter is untyped" do
+        result = analyze(base_sub_source, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def consume: (untyped) -> void
+          end
+
+          class Sub < Base
+            def consume: (Integer) -> void
+          end
+        RBS
+        expect(override_param_diags(result)).to be_empty
+      end
+
+      it "does not fire when the override has no authored signature" do
+        result = analyze(base_sub_source, sig: { "demo.rbs" => <<~RBS })
+          class Base
+            def consume: (Numeric) -> void
+          end
+        RBS
+        expect(override_param_diags(result)).to be_empty
+      end
+
+      it "is suppressed under the lenient profile" do
+        result = analyze(base_sub_source, sig: narrow_sig, config: { "severity_profile" => "lenient" })
+        expect(override_param_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable def.override-param-narrowed`" do
+        result = analyze(<<~RUBY, sig: narrow_sig)
+          class Base
+            def consume(value)
+            end
+          end
+
+          class Sub < Base
+            def consume(value) # rigor:disable def.override-param-narrowed
+            end
+          end
+        RUBY
+        expect(override_param_diags(result)).to be_empty
+      end
+    end
+
     describe "dead-assignment rule (v0.1.2)" do
       def dead_diags(result)
         result.diagnostics.select { |d| d.rule == "flow.dead-assignment" }

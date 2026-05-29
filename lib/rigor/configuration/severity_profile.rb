@@ -53,6 +53,7 @@ module Rigor
           "def.method-visibility-mismatch" => :warning,
           "def.override-visibility-reduced" => :off,
           "def.override-return-widened" => :off,
+          "def.override-param-narrowed" => :off,
           "def.ivar-write-mismatch" => :warning
         }.freeze,
         balanced: {
@@ -71,6 +72,7 @@ module Rigor
           "def.method-visibility-mismatch" => :error,
           "def.override-visibility-reduced" => :warning,
           "def.override-return-widened" => :warning,
+          "def.override-param-narrowed" => :warning,
           "def.ivar-write-mismatch" => :warning
         }.freeze,
         strict: {
@@ -89,6 +91,7 @@ module Rigor
           "def.method-visibility-mismatch" => :error,
           "def.override-visibility-reduced" => :error,
           "def.override-return-widened" => :error,
+          "def.override-param-narrowed" => :error,
           "def.ivar-write-mismatch" => :error
         }.freeze
       }.freeze

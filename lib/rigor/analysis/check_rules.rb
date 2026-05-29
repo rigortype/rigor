@@ -69,6 +69,7 @@ module Rigor
       RULE_VISIBILITY_MISMATCH = "def.method-visibility-mismatch"
       RULE_OVERRIDE_VISIBILITY_REDUCED = "def.override-visibility-reduced"
       RULE_OVERRIDE_RETURN_WIDENED = "def.override-return-widened"
+      RULE_OVERRIDE_PARAM_NARROWED = "def.override-param-narrowed"
       RULE_IVAR_WRITE_MISMATCH = "def.ivar-write-mismatch"
       RULE_DEAD_ASSIGNMENT = "flow.dead-assignment"
       RULE_ALWAYS_TRUTHY_CONDITION = "flow.always-truthy-condition"
@@ -89,6 +90,7 @@ module Rigor
         RULE_VISIBILITY_MISMATCH,
         RULE_OVERRIDE_VISIBILITY_REDUCED,
         RULE_OVERRIDE_RETURN_WIDENED,
+        RULE_OVERRIDE_PARAM_NARROWED,
         RULE_IVAR_WRITE_MISMATCH
       ].freeze
 
@@ -164,6 +166,8 @@ module Rigor
             diagnostics << override_vis if override_vis
             override_return = override_return_widened_diagnostic(path, node, scope_index)
             diagnostics << override_return if override_return
+            override_param = override_param_narrowed_diagnostic(path, node, scope_index)
+            diagnostics << override_param if override_param
           when Prism::IfNode, Prism::UnlessNode
             unreachable = unreachable_branch_diagnostic(path, node, scope_index)
             diagnostics << unreachable if unreachable
@@ -1758,6 +1762,112 @@ module Rigor
             message: "return type of `#{def_node.name}' widened from #{parent_return.describe(:short)} " \
                      "to #{override_return.describe(:short)} (overrides #{parent_class}##{def_node.name}); " \
                      "breaks substitutability",
+            severity: :warning
+          )
+        end
+
+        # ADR-35 slice 3 — `def.override-param-narrowed`. The Liskov
+        # signature rule for parameters (contravariance): an override
+        # may *widen* a parameter (accept a supertype — accepting more
+        # is safe) but MUST NOT *narrow* it. A caller holding the
+        # supertype passes a parent-typed argument; a narrowed override
+        # parameter cannot accept it.
+        #
+        # Direction (ADR-35 WD3, corrected): fire on
+        # `override_param.accepts(parent_param) == :no` — the override's
+        # (narrowed) slot cannot accept the wider parent argument type.
+        # WD4: type comparison at matching POSITIONAL parameter indices
+        # only; arity / keyword-requiredness divergence is out of scope
+        # for v1. Same WD1 both-sides-authored gate as slice 2;
+        # `untyped` / unbound-generic / interface parent params degrade
+        # to `Dynamic[Top]` and are skipped (FP-safe). To avoid
+        # overload-arm ambiguity, both sides must have exactly one
+        # method type.
+        def override_param_narrowed_diagnostic(path, def_node, scope_index)
+          return nil unless def_node.receiver.nil? # instance methods only
+
+          scope = scope_index[def_node]
+          return nil if scope.nil?
+
+          self_type = scope.self_type
+          return nil unless self_type.respond_to?(:class_name)
+
+          class_name = self_type.class_name.to_s
+          method_name = def_node.name
+
+          override_method = safe_instance_method_definition(class_name, method_name, scope)
+          return nil if override_method.nil?
+          return nil unless defined_on?(override_method, class_name)
+
+          parent = nearest_ancestor_method_def(scope, class_name, method_name)
+          return nil if parent.nil?
+
+          parent_class, parent_method = parent
+          override_params = positional_param_types(override_method)
+          parent_params = positional_param_types(parent_method)
+          return nil if override_params.nil? || parent_params.nil?
+
+          index = first_narrowed_param_index(override_params, parent_params)
+          return nil if index.nil?
+
+          build_override_param_narrowed_diagnostic(
+            path, def_node, parent_class, index, parent_params[index], override_params[index]
+          )
+        end
+
+        # Translated positional (required + optional) parameter types of
+        # a method's single method type, or nil when the method is
+        # overloaded (multiple method types — arm mapping is ambiguous)
+        # or the parameter list is not introspectable. Per-position
+        # translation failures yield `nil` at that slot (skipped by the
+        # comparison). `self`/`instance` translate with `self_type: nil`
+        # (→ `Dynamic[Top]`), matching the return-side handling.
+        def positional_param_types(method_def)
+          method_types = method_def.method_types
+          return nil unless method_types.size == 1
+
+          func = method_types.first.type
+          return nil unless func.respond_to?(:required_positionals)
+
+          (func.required_positionals + func.optional_positionals).map do |param|
+            Inference::RbsTypeTranslator.translate(
+              param.type, self_type: nil, instance_type: nil, type_vars: {}
+            )
+          rescue StandardError
+            nil
+          end
+        end
+
+        # Index of the first positional parameter the override narrows
+        # relative to the parent, or nil. A position is a violation when
+        # the override's slot cannot accept the parent's argument type
+        # (`override_param.accepts(parent_param) == :no`). Positions
+        # where either side is missing/untranslatable, or the parent
+        # type degraded to `Dynamic[Top]` (untyped / unbound generic /
+        # interface), are skipped.
+        def first_narrowed_param_index(override_params, parent_params)
+          count = [override_params.size, parent_params.size].min
+          count.times do |i|
+            override_param = override_params[i]
+            parent_param = parent_params[i]
+            next if override_param.nil? || parent_param.nil?
+            next if dynamic_top?(parent_param) || dynamic_top?(override_param)
+
+            return i if override_param.accepts(parent_param).no?
+          end
+          nil
+        end
+
+        def build_override_param_narrowed_diagnostic(path, def_node, parent_class, index, parent_param, override_param)
+          location = def_node.name_loc || def_node.location
+          Diagnostic.new(
+            rule: RULE_OVERRIDE_PARAM_NARROWED,
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "parameter #{index + 1} of `#{def_node.name}' narrowed from " \
+                     "#{parent_param.describe(:short)} to #{override_param.describe(:short)} " \
+                     "(overrides #{parent_class}##{def_node.name}); breaks substitutability",
             severity: :warning
           )
         end

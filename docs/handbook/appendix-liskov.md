@@ -469,7 +469,16 @@ enforce in v0.1.x — named here so you can stop looking:
   [ADR-35](../adr/35-override-signature-compatibility.md) — three
   `def.override-*` rules (parameter narrowing, return widening,
   visibility reduction) gated to both-sides-authored signatures and
-  provable (`:no`) violations only. Proposed; no committed milestone.
+  provable (`:no`) violations only. The design's escape hatch for a
+  *legitimate* specialization that looks like a narrowing is
+  generics, not suppression: declare the parent with a bounded type
+  parameter (`interface _Consumer[T < Message]`) and have the
+  subtype bind it (`include _Consumer[SendMailMessage]`), so the
+  override matches the *instantiated* contract — the same resolution
+  PHPStan reaches for in [*Generics in PHP using
+  PHPDocs*](https://medium.com/@ondrejmirtes/generics-in-php-using-phpdocs-14e7301953)
+  ("even Barbara Liskov is happy with it"). Proposed; no committed
+  milestone.
 - **Exception compatibility.** The signature rule's "no new
   exceptions in a subtype" is not checked. Rigor has an internal
   exception/non-local-exit effect

@@ -281,6 +281,95 @@ check.
 **How to apply:** wire into the ADR-8 severity-profile table; no new
 mechanism.
 
+### WD9 — Escape hatches: generics first, body-narrowing second, suppression last
+
+A diagnostic that flags an override needs a way out for the cases
+the author knows are fine. The lesson of PHPStan's generics design
+(Mirtes, *Generics in PHP using PHPDocs* — see Background research
+notes) is that the *best* escape hatch is not a suppression comment
+but a **richer type construct that makes the code genuinely
+LSP-safe**. ADR-35 offers three tiers, in strict order of
+preference.
+
+**Tier 1 — Generics (the principled, non-suppressing hatch).** The
+article's worked case is a `Consumer::consume(Message)` whose
+implementation wants `consume(SendMailMessage)` — a parameter
+narrowing that *looks* like an LSP violation. PHPStan's resolution
+is not `@phpstan-ignore`; it is to make the interface generic
+(`@template T of Message`, method `@param T`) and have the
+implementation bind it (`@implements Consumer<SendMailMessage>`).
+The native parameter stays the wide `Message` (contravariance
+satisfied at the language level); the analyzer understands the
+specialization through the generic binding. "Even Barbara Liskov is
+happy with it."
+
+The RBS analogue already exists:
+
+```rbs
+interface _Consumer[T < Message]
+  def consume: (T) -> void
+end
+
+class SendMailConsumer
+  include _Consumer[SendMailMessage]
+  # def consume: (SendMailMessage) -> void  — consistent with the
+  # interface instantiated at T = SendMailMessage; NOT a violation.
+end
+```
+
+For this to *not* fire, the ADR-35 comparison MUST be
+generic-instantiation-aware: when the override's defining class
+binds the ancestor's type parameters (`class Sub < Parent[Concrete]`
+or `include _Iface[Concrete]`), substitute those type arguments into
+the parent signature **before** the `accepts` comparison (WD3),
+reusing the [ADR-4](4-type-inference-engine.md) Phase 2d `type_vars`
+threading. The "narrowing" then matches the *instantiated* parent
+contract and no diagnostic is produced — because there was never a
+violation. Bounded generics (`[T < Bound]`) are already in the RBS
+surface (handbook appendix § "F-bounded polymorphism and self
+types"). This is the recommended fix and the direct analogue of the
+article's resolution.
+
+**Tier 2 — The body-narrowing dual layer (the everyday case).** Most
+"I want a narrower type here" situations need no escape hatch at all.
+Keep the *declared* parameter at the parent's wide type (LSP-safe)
+and recover the specific type *inside the body* via occurrence
+typing. This is the robustness principle's clause-2 + narrowing
+pairing ([ADR-5](5-robustness-principle.md)): the wide declared
+parameter is the LSP-correct contract, the narrow body type is
+recovered for free. It is Rigor's analogue of PHPStan's
+native-wide-plus-annotation-narrow dual layer — except Rigor's
+"narrow layer" is the *inferred body type*, not a second annotation,
+so the user writes nothing extra. A method that genuinely only
+handles `SendMailMessage` but declares `(Message)` and guards with
+`return unless message.is_a?(SendMailMessage)` is both LSP-correct
+and fully precise inside the body.
+
+**Tier 3 — Suppression (last resort).** For the residue — genuine
+Ruby patterns the analyzer cannot prove safe and the author asserts
+(metaprogramming, deliberate divergence) — `# rigor:disable
+def.override-param-narrowed` at the site, or a family-level
+`severity_overrides:` entry. Carries no structure; use only when
+tiers 1–2 do not apply.
+
+**Why:** the ordering keeps ADR-35 from degrading into
+"annotate-away the warnings." Generics make the specialization case
+*safe* rather than *silenced*; body-narrowing makes the wide-contract
+case both safe and precise; suppression is the explicitly-blunt
+fallback. This is also why the WD1 both-sides-authored gate is
+synergistic: a user who has authored both signatures is already in
+"I am declaring contracts" territory, so rewriting the parent as a
+bounded generic (tier 1) is a natural, in-language move rather than
+a foreign imposition.
+
+**How to apply:** tier 1 requires the WD3 / WD6 comparison to
+substitute ancestor `type_args` into the parent signature before
+`accepts`; unbound / unresolved type parameters degrade to `:maybe`
+(silent per WD7), never a false `:no`. Tiers 2–3 need no new
+mechanism. A structured RBS::Extended opt-out annotation
+(`%a{rigor:v1:override-exempt}`-shape) as a middle ground between
+tier 1 and tier 3 is deferred — see Open Questions.
+
 ## Implementation slicing
 
 Recommended order; each slice independently shippable.
@@ -292,10 +381,16 @@ Recommended order; each slice independently shippable.
 2. **Return covariance.** `def.override-return-widened` — reuses the
    slice-1 probe + the `accepts` query in the return direction (WD3)
    + the `:maybe`-silent discipline (WD7). Honours `self`/`instance`
-   substitution before comparison.
+   substitution before comparison, and ancestor `type_args`
+   substitution (WD9 tier 1) so a generic-instantiated covariant
+   return never fires.
 3. **Parameter contravariance.** `def.override-param-narrowed` —
    per-position type comparison in the parameter direction (WD3,
-   WD4). Type-only; arity divergence stays out of scope.
+   WD4). Type-only; arity divergence stays out of scope. This is the
+   slice where WD9 tier 1 (generic-instantiation-aware comparison)
+   is load-bearing — the `Consumer[T < Message]` specialization
+   pattern depends on substituting the bound `type_args` before the
+   `accepts` check, otherwise the legitimate narrowing false-fires.
 4. **Mastodon-corpus FP verification.** Run all three against
    Mastodon's `app/models` + `app/controllers` (the corpus ADR-26 /
    ADR-24 used) with authored RBS where available; tabulate fires,
@@ -365,7 +460,22 @@ Recommended order; each slice independently shippable.
 - **Should the message hint at the robustness principle?** A
   `def.override-param-narrowed` message could point at "widen the
   parameter or accept the parent's type" with an ADR-5 reference.
-  Costs nothing; might rot. Deferred to implementation.
+  Costs nothing; might rot. Deferred to implementation. The message
+  could equally hint at WD9 tier 1 ("make the parent generic and bind
+  the type parameter") for the specialization case.
+- **A structured `%a{rigor:v1:override-exempt}` annotation (WD9
+  middle tier)?** Between tier-1 generics and tier-3 bare
+  `# rigor:disable`, a dedicated RBS::Extended annotation would be
+  greppable, intention-revealing, and auditable (it says "this
+  override intentionally diverges and the author vouches for it",
+  not "hide this line"). Cost: a new annotation token in the
+  rbs-extended grammar plus its own maintenance and documentation
+  surface. The provisional call is to *not* ship it — generics
+  (tier 1) cover the principled cases and `# rigor:disable` (tier 3)
+  covers the residue, so the middle tier earns its keep only if
+  slice-4 corpus data shows a recurring pattern that is neither
+  generic-expressible nor a one-off suppression. Decide on that
+  data.
 
 ## Background research notes
 
@@ -380,6 +490,22 @@ Ruby-adoption ergonomics — is the reason this check is a natural fit
 rather than a foreign imposition: it verifies, for hand-authored
 signatures, the same property ADR-5 already biases inferred
 signatures toward.
+
+Ondřej Mirtes, *Generics in PHP using PHPDocs*
+(<https://medium.com/@ondrejmirtes/generics-in-php-using-phpdocs-14e7301953>),
+is the direct driver for WD9. Its key lesson — that a parameter
+narrowing which *looks* like an LSP violation is best resolved by
+making the parent generic (`@template T of Message` +
+`@implements Consumer<SendMailMessage>`) rather than by suppressing
+the warning ("even Barbara Liskov is happy with it") — is exactly
+the tier-1 escape hatch ADR-35 adopts. The RBS bounded-generic
+surface (`interface _Consumer[T < Message]`) already expresses the
+same construct, so the work is making the ADR-35 comparison
+generic-instantiation-aware (WD9 "How to apply") rather than
+inventing a new annotation. The article also models the dual-layer
+(native-wide parameter + annotation-narrow precision) that WD9
+tier 2 reproduces via Rigor's wide-declared-parameter +
+inferred-narrow-body pairing.
 
 Steep performs the analogous override-compatibility check against
 RBS; ADR-8 ("Steep-inspired improvements") is the lineage this ADR
@@ -399,3 +525,13 @@ for an inherited contract.
   out of scope), `:maybe` silent — so the rule honours the
   false-positive discipline that gates every diagnostic-adding
   change.
+- 2026-05-29 — added WD9 (escape hatches) after a user question
+  about providing a PHPDoc-style escape hatch, citing Mirtes'
+  *Generics in PHP using PHPDocs*. Records the tiered design
+  (generics first → body-narrowing → suppression) and the decision
+  that tier-1 generic-instantiation-aware comparison is a
+  correctness requirement of the param/return checks, not merely an
+  opt-out — the legitimate `Consumer[T < Message]` specialization
+  must never false-fire. A structured `%a{rigor:v1:override-exempt}`
+  annotation is floated as an open question and provisionally
+  declined.

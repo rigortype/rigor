@@ -1,9 +1,8 @@
 # ADR-35 — Override signature compatibility (Liskov signature rule)
 
-Status: **accepted, 2026-05-29 (slices 1–3 implemented; slice 4
-corpus verification pending).** Records the decision to add a new
-family of diagnostics that check a method override against the
-contract it inherits — the **Liskov Substitution Principle (LSP)
+Status: **accepted, 2026-05-29 (slices 1–4 done; slice 5 deferred).**
+Records the decision to add a new family of diagnostics that check a
+method override against the contract it inherits — the **Liskov Substitution Principle (LSP)
 signature rule** applied across a class/module hierarchy:
 parameters must be **contravariant** (an override may not strengthen
 its preconditions by narrowing a parameter), returns must be
@@ -464,12 +463,35 @@ Recommended order; each slice independently shippable.
    *precision* follow-on noted in WD9 — it is **not** required for
    FP-safety here, since unbound generics already degrade to
    `Dynamic[Top]`.
-4. **Mastodon-corpus FP verification.** Run all three against
-   Mastodon's `app/models` + `app/controllers` (the corpus ADR-26 /
-   ADR-24 used) with authored RBS where available; tabulate fires,
-   confirm each is a real LSP violation or a calibration miss. Gate
-   promotion of any rule's `balanced` default to `:error` on this
-   data.
+4. **Mastodon-corpus FP verification. — DONE (v0.1.x, 2026-05-29).**
+   Ran all three against the full Mastodon `app` + `lib` (1219 files)
+   under a forced `strict` profile. Findings (full write-up:
+   [`docs/notes/20260529-adr35-mastodon-fp-verification.md`](../notes/20260529-adr35-mastodon-fp-verification.md)):
+   - `def.override-return-widened` / `def.override-param-narrowed`:
+     **0 fires** — Mastodon ships no authored RBS for its app classes,
+     so the both-sides-authored gate (WD1) is never satisfied. The
+     rules are correctly inert without RBS.
+   - `def.override-visibility-reduced`: **160 fires → 35 after a
+     false-positive fix.** The 160 were a real FP cluster: method
+     visibilities were tracked **per-file only** while the
+     def-node / ancestor indexes were seeded **cross-file**, so an
+     ancestor's visibility declared in a sibling file (the Rails
+     concern pattern — `private` helpers in `app/controllers/concerns/`)
+     came back unknown, and a `nil → :public` fallback fabricated a
+     "public" parent → bogus reduction. Fix: seed method visibilities
+     cross-file (`discovered_def_index_for_paths` +
+     `merge_project_method_indexes` + runner `seed_project_scope`) and
+     **never fabricate `:public` from unknown** (bail to silence). The
+     remaining 35 are *true* reductions (`pundit_user` genuinely public
+     in the `Authorization` concern, `pagination_*` genuinely
+     `protected` in `Api::Pagination`, overridden `private` in
+     controllers) — surfaced only under `strict`; Mastodon's actual
+     `lenient` config surfaces **zero**.
+   - Calibration outcome: keep the current mapping
+     (`lenient → off`, `balanced → :warning`, `strict → :error`). No
+     `balanced → :error` promotion — the residual true positives are
+     stylistically common in Rails and do not warrant erroring a
+     `balanced` project.
 5. **(Deferred) parent-authored + child-inferred covariance.** A
    covariance-only extension: when the parent return is authored but
    the child is inference-only, check the child's *inferred* return

@@ -1567,6 +1567,9 @@ module Rigor
           return nil if parent.nil?
 
           parent_class, parent_visibility = parent
+          # Unknown ancestor visibility (e.g. the defining file was not
+          # in the analyzed set) → cannot prove a reduction, stay silent.
+          return nil if parent_visibility.nil?
           return nil unless visibility_reduced?(parent_visibility, override_visibility)
 
           build_override_visibility_diagnostic(
@@ -1617,9 +1620,13 @@ module Rigor
         # ancestor that defines an instance method `method_name`, or nil.
         def nearest_ancestor_visibility(scope, class_name, method_name)
           each_project_ancestor(scope, class_name) do |ancestor|
-            if scope.user_def_for(ancestor, method_name)
-              [ancestor, scope.discovered_method_visibility(ancestor, method_name) || :public]
-            end
+            # Stop at the nearest ancestor that DEFINES the method; its
+            # visibility may be nil (unknown) — the caller treats unknown
+            # as "cannot prove a reduction" and stays silent. Never
+            # fabricate `:public` from a missing entry (that produced a
+            # large false-positive cluster on cross-file Rails concerns).
+            [ancestor, scope.discovered_method_visibility(ancestor, method_name)] if scope.user_def_for(ancestor,
+                                                                                                        method_name)
           end
         end
 

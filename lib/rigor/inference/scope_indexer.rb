@@ -114,15 +114,14 @@ module Rigor
         # def nodes, the class -> superclass map, and the
         # class/module -> included-modules map, each merged under
         # the cross-file pre-pass seed (see below).
-        seeded_scope = merge_project_method_indexes(seeded_scope, default_scope, root)
-
         # v0.1.2 — per-class table of method visibilities
         # (`:public` / `:private` / `:protected`). The
-        # `def.method-visibility-mismatch` CheckRule consults
-        # the table to flag explicit-non-self calls to a
-        # private user method.
-        discovered_method_visibilities = build_discovered_method_visibilities(root)
-        seeded_scope = seeded_scope.with_discovered_method_visibilities(discovered_method_visibilities)
+        # `def.method-visibility-mismatch` and ADR-35
+        # `def.override-visibility-reduced` CheckRules consult the
+        # table. Seeded inside `merge_project_method_indexes` so the
+        # per-file visibilities merge OVER the cross-file project seed
+        # rather than overwriting it.
+        seeded_scope = merge_project_method_indexes(seeded_scope, default_scope, root)
 
         table = {}.compare_by_identity
         table.default = seeded_scope
@@ -161,11 +160,18 @@ module Rigor
         includes = default_scope.discovered_includes.merge(
           build_discovered_includes(root)
         ) { |_class, cross_file, per_file| (cross_file + per_file).uniq }
+        # ADR-35 — per-file visibilities merged OVER the cross-file
+        # seed (the current file is authoritative for its own classes;
+        # sibling-file ancestors are preserved from the project seed).
+        method_visibilities = default_scope.discovered_method_visibilities.merge(
+          build_discovered_method_visibilities(root)
+        ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
 
         seeded_scope
           .with_discovered_def_nodes(def_nodes)
           .with_discovered_superclasses(superclasses)
           .with_discovered_includes(includes)
+          .with_discovered_method_visibilities(method_visibilities)
       end
 
       # Slice 7 phase 2. Builds the class-level ivar accumulator
@@ -1380,30 +1386,33 @@ module Rigor
       # @return [Hash{Symbol => Hash}]
       #   `{ def_nodes:, def_sources:, superclasses:, includes: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
-        def_nodes = {}
-        def_sources = {}
-        superclasses = {}
-        includes = {}
+        acc = { def_nodes: {}, def_sources: {}, superclasses: {}, includes: {}, method_visibilities: {} }
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
-          merge_discovered_defs(def_nodes, def_sources, path, root)
-          superclasses.merge!(build_discovered_superclasses(root))
-          build_discovered_includes(root).each do |class_name, mods|
-            includes[class_name] = ((includes[class_name] || []) + mods).uniq
-          end
+          accumulate_project_index(acc, path, root)
         rescue StandardError
           # Skip files that fail to parse or read; the per-file
           # analyzer surfaces the parse error separately.
           next
         end
-        def_nodes.each_value(&:freeze)
-        def_sources.each_value(&:freeze)
-        includes.each_value(&:freeze)
-        {
-          def_nodes: def_nodes.freeze, def_sources: def_sources.freeze,
-          superclasses: superclasses.freeze, includes: includes.freeze
-        }
+        %i[def_nodes def_sources includes method_visibilities].each { |key| acc[key].each_value(&:freeze) }
+        acc.transform_values(&:freeze)
+      end
+
+      # Folds one file's class-keyed indexes into the cross-file
+      # accumulator. `method_visibilities` (ADR-35) is collected here so
+      # the override-visibility-reduced rule can read an ancestor's
+      # visibility declared in a sibling file.
+      def accumulate_project_index(acc, path, root)
+        merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, root)
+        acc[:superclasses].merge!(build_discovered_superclasses(root))
+        build_discovered_includes(root).each do |class_name, mods|
+          acc[:includes][class_name] = ((acc[:includes][class_name] || []) + mods).uniq
+        end
+        build_discovered_method_visibilities(root).each do |class_name, table|
+          (acc[:method_visibilities][class_name] ||= {}).merge!(table)
+        end
       end
 
       # Merges one file's `class → method → DefNode` map into the

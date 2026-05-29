@@ -117,10 +117,23 @@ Some diagnostic clusters are neither a quick fix nor honest baseline
 material. Two of them have a dedicated answer this skill hands off to:
 
 - **Application-specific metaprogramming** — a project DSL,
-  `define_method` factory, or in-house macro that Rigor cannot follow
-  produces a cluster of `call.undefined-method`. The durable fix is a
-  **project-private Rigor plugin** that teaches Rigor the DSL. Hand
-  off to the `rigor-plugin-author` skill.
+  `define_method` factory, `method_missing` accessor, or `class_eval`
+  heredoc generator that Rigor cannot follow produces a cluster of
+  `call.undefined-method` (or `unresolved-toplevel`). **First decide
+  whether `pre_eval:` can fix it** — it resolves only methods written
+  as *literal* `def` / `def self.` in a project file. When the methods
+  are **generated dynamically** (computed `define_method` names,
+  `method_missing`, a `class_eval <<~RUBY … def #{name} … RUBY`
+  template), `pre_eval:` walks the file and finds no literal method to
+  register, so the cluster *survives*. That residue is the signal that
+  the durable fix is a **project-private Rigor plugin** which teaches
+  Rigor the DSL's shape. **This is the recommended next step**, and
+  Rigor does **not** ship per-application plugins for it — a Redmine
+  app's `Setting.define_setting` accessors, an in-house
+  `acts_as_*`, etc. are the *project's* plugin to own (ADR-16 §
+  Audience: application-specific homegrown DSLs are out of scope for
+  the bundled substrate). Surface it and offer to launch the
+  **`rigor-plugin-author`** skill (see § "Next step" below).
 - **An external gem Rigor does not understand** — a dependency ships
   no RBS and Rigor has no built-in coverage for it. Try
   `rbs collection install` first; if that gem genuinely needs Rigor
@@ -128,7 +141,29 @@ material. Two of them have a dedicated answer this skill hands off to:
   <https://github.com/rigortype/rigor/issues>.
 
 Neither is a Phase 7 obligation — they are options to *offer* the
-user when the triage report points at one of these causes.
+user when the triage report points at one of these causes. The
+project-DSL handoff is detailed in
+[`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md)
+§ "Escalation path A".
+
+## Next step — hand off to plugin authoring when a project DSL remains
+
+Onboarding's job ends at a committed config + (acknowledge mode) a
+baseline. But if Phase 6a/8 found a **dynamically-generated project
+DSL** that `pre_eval:` could not resolve (a `define_method` factory,
+`method_missing`, or a `class_eval` heredoc generator), the onboarding
+is not *complete* until the user knows the durable fix — a
+**project-owned Rigor plugin**, which Rigor does not bundle per app.
+
+Before the final file-confirmation step, when such a cluster exists:
+name it and its generator, say plainly that the fix is a project plugin
+(not a baseline entry), and **offer to launch the `rigor-plugin-author`
+skill** — on the user's confirmation, invoke it (Skill tool). The full
+detection-and-handoff recipe is
+[`references/03-baseline-and-bugs.md`](references/03-baseline-and-bugs.md)
+§ "Escalation path A". The offer is not automatic — the user may
+baseline the cluster now and author the plugin later — but never leave
+a generated-DSL cluster in the baseline without naming its real fix.
 
 ## Final step — confirm the generated files with the user
 

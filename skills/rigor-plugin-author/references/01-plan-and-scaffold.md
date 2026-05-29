@@ -63,9 +63,57 @@ on it directly.
 ## Project-private layout
 
 A project-private plugin lives inside the application repo and is
-never published. Two ways to make `require "rigor-<id>"` succeed:
+never published. Rigor activates it by `require "rigor-<id>"`, so the
+plugin's `lib/` must be on the **load path of the Ruby process that
+runs `rigor`**. *Which* mechanism puts it there depends entirely on
+**how `rigor` is installed** — and getting this wrong is the most
+common project-private activation failure (`could not load plugin gem
+"rigor-<id>"`).
 
-### Recommended — a path gem
+> **First answer this: how does `rigor` run?** Per the
+> `rigor-project-init` workflow and the manual's installation chapter,
+> the recommended install is **standalone** (`mise` / `gem install`) —
+> and crucially **`rigortype` is NOT in your app's `Gemfile`**. A
+> standalone `rigor` does **not** load your project's bundle, so a
+> `path:`-gem in the `Gemfile` + `bundle install` puts the plugin on
+> the *bundle's* load path, which the standalone `rigor` never reads.
+> The path-gem route below works **only** if you deliberately run
+> `rigor` from a bundle that includes `rigortype` (an advanced / CI
+> setup). For the default standalone install, use `RUBYLIB`.
+
+### Recommended for a standalone (mise / gem install) `rigor` — `RUBYLIB`
+
+Drop the plugin under the app and put its `lib/` (or its root, if the
+entry file sits at the top) on `RUBYLIB` as an **absolute path**:
+
+```text
+your-app/rigor-ext/rigor-myapp.rb     # requires the plugin class
+```
+
+```sh
+# Absolute path — a relative RUBYLIB is resolved against the process
+# CWD and frequently does not match; use $(pwd).
+RUBYLIB="$(pwd)/rigor-ext" rigor check
+```
+
+Ruby adds `RUBYLIB` entries to `$LOAD_PATH` at startup, so the
+standalone `rigor` binary finds `require "rigor-myapp"`. Set it on
+every invocation (CI included); a `Rakefile` task or a shell alias
+keeps it ergonomic.
+
+> **Pitfall — do not wrap this in `bundle exec`.** `bundle exec`
+> rebuilds `$LOAD_PATH` from the bundle and drops `RUBYLIB` entries, so
+> `RUBYLIB=… bundle exec rigor` fails to find the plugin. If for some
+> reason you must run `rigor` through `bundle exec` (or any wrapper
+> that resets the load path), pass the directory as a Ruby flag
+> instead — `RUBYOPT="-I$(pwd)/rigor-ext" rigor check` — which Bundler
+> preserves.
+
+Verify activation with `rigor plugins` (plural): the entry should show
+`[OK ]` with `load-error: 0`. If it shows `[ERR] could not load plugin
+gem`, the load path is the problem, not the plugin code.
+
+### Advanced (only when `rigor` runs from a bundle) — a path gem
 
 Keep the plugin in a subdirectory with its own gemspec, and reference
 it from the app's `Gemfile` by path:
@@ -87,25 +135,15 @@ gem "rigortype", "~> 0.1.0"
 gem "rigor-myapp", path: "rigor-plugin"
 ```
 
-`bundle install` then puts `rigor-myapp` on the load path, so Rigor's
-`require "rigor-myapp"` resolves. This keeps the plugin versioned,
-testable, and trivially promotable to a real gem later.
-
-### Simplest — a bare file on the load path
-
-If you do not want a gemspec at all, drop `rigor-myapp.rb` somewhere
-and run `rigor` with that directory on `RUBYLIB`:
-
-```text
-your-app/rigor-ext/rigor-myapp.rb     # requires the plugin class
-```
-
-```sh
-RUBYLIB=rigor-ext rigor check
-```
-
-Workable, but the `RUBYLIB` has to be set on every invocation (CI
-included). Prefer the path gem unless the plugin is a throwaway.
+`bundle install` puts `rigor-myapp` on the bundle's load path — but
+this only helps if you then **run `rigor` through that bundle**
+(`bundle exec rigor`, or a bundle whose `bin/` is on `PATH`). It also
+means `rigortype` *is* in this `Gemfile`, which the `rigor-project-init`
+workflow recommends against for the analyzer-as-tool install. So treat
+this route as the **CI / isolated-bundle** option, not the default. It
+keeps the plugin versioned, testable, and trivially promotable to a
+real gem later — choose it when your `rigor` already runs from a
+bundle; otherwise use `RUBYLIB` above.
 
 ## The plugin class skeleton
 

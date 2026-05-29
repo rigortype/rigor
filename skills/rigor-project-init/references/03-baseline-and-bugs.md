@@ -105,6 +105,16 @@ with the new, smaller count.
 Repeat the loop (find → `pre_eval:` → re-triage) until the hint
 disappears or the remaining count is stable. Then move to Phase 7.
 
+> **If a cluster does NOT drop after you add its file to `pre_eval:`**,
+> the methods are almost certainly **generated dynamically**
+> (`define_method` with a computed name, `method_missing`, or a
+> `class_eval` heredoc) — the pre-eval walker found no literal `def` to
+> register. That is not a `pre_eval:` failure to retry; it is the signal
+> that the durable fix is a **project-owned plugin**. Leave the file in
+> `pre_eval:` only if it also defines literal methods; otherwise remove
+> it and carry the cluster to Phase 8 § "Escalation path A", which
+> hands off to the `rigor-plugin-author` skill.
+
 > **Why `pre_eval:` reduces the count.** `pre_eval:` files are walked
 > before per-file inference. Methods defined in them — including those
 > added to existing classes via `class Foo; def bar; end; end` — become
@@ -259,22 +269,78 @@ baseline.
 If triage reports `project-monkey-patch-known`, `project-monkey-patch`,
 `unresolved-toplevel`, or a `call.undefined-method` cluster lands on
 the project's own DSL / `define_method` factory / in-house macro,
-Rigor cannot follow it by default. Two answers, cheapest first:
+Rigor cannot follow it by default.
 
-1. **A plain monkey-patch in a known file** (e.g.
-   `lib/core_ext/string_extensions.rb`) — register it via `pre_eval:`
-   in `.rigor.dist.yml`. Rigor walks those files before per-file
-   inference, so the added methods become visible. When triage
-   reports `project-monkey-patch-known`, the defining file is **named
-   in the hint's action line** — copy it straight in. For the
-   spread-based `project-monkey-patch` / `unresolved-toplevel` hints
-   no def site was proven, so locate it first (`grep -rn 'def
-   <method>'`).
-2. **A genuine project DSL** — the durable fix is a **project-private
-   Rigor plugin** that teaches Rigor the DSL's shape. Offer to hand
-   off to the `rigor-plugin-author` skill. The plugin can live under
-   the project's own `lib/` (loaded without a gemspec) or as a
-   separate `rigor-<name>` gem.
+**The decision that picks the fix is static-vs-dynamic.** Find the
+defining file (named by the hint, or `grep -rn 'def <method>\|<Receiver>'
+app/ lib/`) and look at *how* the method is defined:
+
+| How the method is defined | Fix | Why |
+| --- | --- | --- |
+| **Literal `def foo` / `def self.foo`** in a project file (a plain reopen / monkey-patch, e.g. `lib/core_ext/string_extensions.rb`, `User.current`) | **`pre_eval:`** — copy the file into `pre_eval:` in `.rigor.dist.yml`. | Rigor walks `pre_eval:` files before per-file inference, so the literal method becomes visible everywhere. This is Phase 6a; do it now. |
+| **Dynamically generated** — computed-name `define_method`, `method_missing`, or a `class_eval <<~RUBY … def #{name} … RUBY` heredoc template | **A project-owned Rigor plugin** (escalation, below). `pre_eval:` will *not* help. | The pre-eval walker finds no literal `def` to register, so the cluster survives `pre_eval:`. If you added the file to `pre_eval:` and re-triage shows the cluster unchanged, this is the case you are in. |
+
+So the routine is: try `pre_eval:` for the static case in Phase 6a; if a
+cluster **survives** because the methods are generated, that surviving
+residue is the plugin signal.
+
+#### The plugin handoff (the recommended next step)
+
+A genuine generated DSL is **the project's own plugin to own** — Rigor
+does not bundle per-application plugins for it. The textbook example is
+Redmine's settings accessors:
+
+```ruby
+# app/models/setting.rb — generated, NOT a literal def
+def self.define_setting(name, options = {})
+  # class_eval a heredoc that defines  self.#{name} / #{name}? / #{name}=
+end
+# names come from config/settings.yml, iterated — not source literals
+```
+
+`Setting.app_title`, `Setting.default_language`, … are never written as
+literal `def`s, so `pre_eval:` cannot see them; the durable fix is a
+project plugin (it matches ADR-16's Tier C heredoc-template shape).
+Rigor's stance: application-specific homegrown DSLs are out of scope for
+the bundled substrate (ADR-16 § Audience) — the app authors the plugin
+in their own repo.
+
+> **Sizing the cluster — `rigor triage` may not isolate it.** Triage's
+> `project-monkey-patch` hint groups by method spread and often lumps a
+> generated-DSL cluster in with unrelated patches (or buries it), so the
+> hint count is not the per-receiver size. To measure the actual cluster,
+> drop to the raw stream and count by receiver:
+>
+> ```sh
+> rigor check --format json | \
+>   ruby -rjson -e 'd=JSON.parse(File.read(0, encoding: "UTF-8").scrub); \
+>     puts d["diagnostics"].count { |x| x["message"].to_s.include?("for singleton(Setting)") }'
+> # or quick-and-dirty: rigor check 2>&1 | grep -c "for singleton(Setting)"
+> ```
+>
+> (Force UTF-8 + `.scrub` — diagnostic messages can carry non-ASCII from
+> the project's own strings, e.g. i18n content.) Swap `Setting` for the
+> receiver the def-site grep identified.
+
+When you reach this point:
+
+1. **Name the cluster and its generator** for the user — the count, the
+   receiver, and the defining method (e.g. *"~60 `call.undefined-method`
+   on `Setting.<name>`, generated by `Setting.define_setting`"*). Use the
+   raw-JSON count above, not the triage hint number.
+2. Say plainly that the durable fix is a **project-owned plugin**, not a
+   baseline entry — the baseline only parenthesises the noise; the
+   plugin removes it and types the synthetic methods.
+3. **Offer to launch the `rigor-plugin-author` skill**, and on the
+   user's confirmation, invoke it (Skill tool, `rigor-plugin-author`).
+   That skill scaffolds a standalone `rigor-<id>` gem or a
+   project-private plugin (loadable from the project's own `lib/`
+   without a gemspec) in the *user's* repo.
+
+The offer is not mandatory — acknowledge mode may baseline the cluster
+for now and author the plugin later. But make the next step explicit:
+never leave a generated-DSL cluster in the baseline without telling the
+user it has a real fix and what skill builds it.
 
 ### Escalation path B — an unsupported external gem
 
@@ -302,7 +368,16 @@ the cause; the user decides whether to act now or defer.
   `baseline:` line. Strict mode: neither.
 - The user has seen the likely real bugs and knows the two escalation
   paths.
+- If a **dynamically-generated project DSL** was found, the user has
+  been told it needs a project-owned plugin and offered the
+  `rigor-plugin-author` handoff (path A) — not left silently in the
+  baseline.
 
-Next sessions: `rigor-baseline-reduce` to work the baseline down
-(acknowledge mode), or `rigor-plugin-author` if escalation path A
-applies.
+Next sessions, by what the onboarding surfaced:
+
+- **`rigor-plugin-author`** — when a generated project DSL survived
+  `pre_eval:` (escalation path A). This is the durable fix for the
+  cluster and the most impactful follow-up; offer it as the next step
+  before the user reaches for the baseline-reduce loop.
+- **`rigor-baseline-reduce`** — acknowledge mode, to work the recorded
+  baseline down.

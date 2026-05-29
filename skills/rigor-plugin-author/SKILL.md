@@ -43,6 +43,26 @@ release as potentially contract-changing:
 Tell the user this up front. A plugin written today is a preview
 artefact, valuable but not yet on a stable foundation.
 
+## Read a real plugin — `rigor plugin`
+
+You do not have to learn the `Rigor::Plugin::Base` surface from this
+prose alone. Because Rigor is installed on disk (`mise` / `gem
+install`), every plugin bundled in the toolchain is readable source.
+Use it as a worked-example library throughout this skill:
+
+```sh
+rigor plugin list                              # all bundled + example plugins, with paths
+rigor plugin print rigor-activesupport-core-ext  # a plugin's main source, inline
+rigor plugin path  rigor-units                 # the dir, to browse with your file tool
+rigor plugin root                              # gem root + public API (lib/rigor/plugin.rb)
+```
+
+`rigor plugin` (singular) browses the toolchain's plugins; `rigor
+plugins` (plural) reports your own `.rigor.yml` activation — different
+commands. When a step below is thinner than you need, read a shipped
+plugin that does the same thing. (Paths are local to where `rigor`
+runs — see the command's own note about containers.)
+
 ## Phase 0 — Standalone gem or project-private?
 
 Decide where the plugin lives before scaffolding anything.

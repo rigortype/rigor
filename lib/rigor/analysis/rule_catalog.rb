@@ -288,6 +288,29 @@ module Rigor
           since: "0.1.2"
         ),
 
+        CheckRules::RULE_OVERRIDE_VISIBILITY_REDUCED => Entry.new(
+          id: CheckRules::RULE_OVERRIDE_VISIBILITY_REDUCED,
+          summary: "Instance-method override reduces the visibility it inherits from an ancestor.",
+          fires_when: [
+            "An instance `def` shadows a same-name instance method defined by a project-discovered " \
+            "ancestor (included/prepended module or superclass, cross-file).",
+            "The override's source-discovered visibility is strictly more restrictive than the " \
+            "ancestor's (public → protected/private, or protected → private).",
+            "Both visibilities are statically observable from project source."
+          ],
+          does_not_fire_when: [
+            "Override raises or preserves visibility (only reductions break substitutability).",
+            "The shadowed method lives on an RBS-known / third-party ancestor (RBS models only " \
+            "public/private; RBS-parent visibility is a deferred follow-on).",
+            "`def self.foo` singleton methods (visibility is instance-side only).",
+            "The `private def foo; end` wrap-around form (not yet tracked by the visibility walker)."
+          ],
+          suppression: "`# rigor:disable def.override-visibility-reduced` on the override.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :off, balanced: :warning, strict: :error },
+          since: "0.1.15"
+        ),
+
         CheckRules::RULE_IVAR_WRITE_MISMATCH => Entry.new(
           id: CheckRules::RULE_IVAR_WRITE_MISMATCH,
           summary: "Same instance variable assigned a different concrete class within one class.",

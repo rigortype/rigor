@@ -1887,6 +1887,194 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # ADR-35 slice 1 — Liskov signature rule for visibility.
+    describe "override-visibility-reduced rule (ADR-35 slice 1)" do
+      def override_visibility_diags(result)
+        result.diagnostics.select { |d| d.rule == "def.override-visibility-reduced" }
+      end
+
+      it "flags a subclass override that makes a public method private" do
+        result = analyze(<<~RUBY)
+          class Base
+            def greet
+              "hi"
+            end
+          end
+
+          class Sub < Base
+            private
+
+            def greet
+              "hello"
+            end
+          end
+        RUBY
+        diag = override_visibility_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.severity).to eq(:warning)
+        expect(diag.message).to include("`greet'")
+        expect(diag.message).to include("private")
+        expect(diag.message).to include("Base")
+      end
+
+      it "flags a reduction from an included module's public method" do
+        result = analyze(<<~RUBY)
+          module Greeter
+            def greet
+              "hi"
+            end
+          end
+
+          class Host
+            include Greeter
+
+            private
+
+            def greet
+              "hello"
+            end
+          end
+        RUBY
+        expect(override_visibility_diags(result).size).to eq(1)
+      end
+
+      it "flags a protected -> private reduction" do
+        result = analyze(<<~RUBY)
+          class Base
+            protected
+
+            def helper
+              1
+            end
+          end
+
+          class Sub < Base
+            private
+
+            def helper
+              2
+            end
+          end
+        RUBY
+        expect(override_visibility_diags(result).size).to eq(1)
+      end
+
+      it "does not flag an override that preserves visibility" do
+        result = analyze(<<~RUBY)
+          class Base
+            def greet
+              "hi"
+            end
+          end
+
+          class Sub < Base
+            def greet
+              "hello"
+            end
+          end
+        RUBY
+        expect(override_visibility_diags(result)).to be_empty
+      end
+
+      it "does not flag widening (private parent -> public override)" do
+        result = analyze(<<~RUBY)
+          class Base
+            private
+
+            def helper
+              1
+            end
+          end
+
+          class Sub < Base
+            def helper
+              2
+            end
+          end
+        RUBY
+        expect(override_visibility_diags(result)).to be_empty
+      end
+
+      it "does not flag a method that overrides nothing" do
+        result = analyze(<<~RUBY)
+          class Base
+            def greet
+              "hi"
+            end
+          end
+
+          class Sub < Base
+            private
+
+            def fresh
+              "new"
+            end
+          end
+        RUBY
+        expect(override_visibility_diags(result)).to be_empty
+      end
+
+      it "resolves the ancestor cross-file" do
+        result = analyze(files: {
+                           "base.rb" => <<~RUBY,
+                             class Base
+                               def greet
+                                 "hi"
+                               end
+                             end
+                           RUBY
+                           "sub.rb" => <<~RUBY
+                             class Sub < Base
+                               private
+
+                               def greet
+                                 "hello"
+                               end
+                             end
+                           RUBY
+                         })
+        expect(override_visibility_diags(result).size).to eq(1)
+      end
+
+      it "is suppressed under the lenient profile" do
+        result = analyze(<<~RUBY, config: { "severity_profile" => "lenient" })
+          class Base
+            def greet
+              "hi"
+            end
+          end
+
+          class Sub < Base
+            private
+
+            def greet
+              "hello"
+            end
+          end
+        RUBY
+        expect(override_visibility_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable def.override-visibility-reduced`" do
+        result = analyze(<<~RUBY)
+          class Base
+            def greet
+              "hi"
+            end
+          end
+
+          class Sub < Base
+            private
+
+            def greet # rigor:disable def.override-visibility-reduced
+              "hello"
+            end
+          end
+        RUBY
+        expect(override_visibility_diags(result)).to be_empty
+      end
+    end
+
     describe "dead-assignment rule (v0.1.2)" do
       def dead_diags(result)
         result.diagnostics.select { |d| d.rule == "flow.dead-assignment" }

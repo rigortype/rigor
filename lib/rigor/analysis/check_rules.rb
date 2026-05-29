@@ -67,6 +67,7 @@ module Rigor
       RULE_UNREACHABLE_BRANCH = "flow.unreachable-branch"
       RULE_RETURN_TYPE = "def.return-type-mismatch"
       RULE_VISIBILITY_MISMATCH = "def.method-visibility-mismatch"
+      RULE_OVERRIDE_VISIBILITY_REDUCED = "def.override-visibility-reduced"
       RULE_IVAR_WRITE_MISMATCH = "def.ivar-write-mismatch"
       RULE_DEAD_ASSIGNMENT = "flow.dead-assignment"
       RULE_ALWAYS_TRUTHY_CONDITION = "flow.always-truthy-condition"
@@ -85,6 +86,7 @@ module Rigor
         RULE_ALWAYS_TRUTHY_CONDITION,
         RULE_RETURN_TYPE,
         RULE_VISIBILITY_MISMATCH,
+        RULE_OVERRIDE_VISIBILITY_REDUCED,
         RULE_IVAR_WRITE_MISMATCH
       ].freeze
 
@@ -115,6 +117,12 @@ module Rigor
       # comment or `disable:` list disables every rule whose
       # canonical id starts with `<family>.`. Per ADR-8 § "1".
       RULE_FAMILIES = %w[call flow assert dump def].freeze
+
+      # ADR-35 slice 1 — bound for the `def.override-visibility-reduced`
+      # ancestor walk, and the public > protected > private ordering
+      # used to decide whether an override reduces visibility.
+      OVERRIDE_ANCESTOR_WALK_LIMIT = 100
+      VISIBILITY_RANK = { public: 2, protected: 1, private: 0 }.freeze
 
       # Resolves a user-supplied rule token (`undefined-method`,
       # `call.undefined-method`, or the family wildcard `call`)
@@ -150,6 +158,8 @@ module Rigor
           when Prism::DefNode
             return_diagnostic = return_type_mismatch_diagnostic(path, node, scope_index)
             diagnostics << return_diagnostic if return_diagnostic
+            override_vis = override_visibility_diagnostic(path, node, scope_index)
+            diagnostics << override_vis if override_vis
           when Prism::IfNode, Prism::UnlessNode
             unreachable = unreachable_branch_diagnostic(path, node, scope_index)
             diagnostics << unreachable if unreachable
@@ -1511,6 +1521,137 @@ module Rigor
             message: "return-type mismatch on `#{def_node.name}': " \
                      "declared #{declared.describe(:short)}, inferred #{inferred.describe(:short)}",
             severity: severity
+          )
+        end
+
+        # ADR-35 slice 1 — `def.override-visibility-reduced`. The
+        # Liskov signature rule for visibility: an instance-method
+        # override MUST NOT reduce the visibility it inherits
+        # (public → protected/private, or protected → private),
+        # because a caller holding the supertype that invokes the
+        # method breaks when handed the subtype.
+        #
+        # Slice-1 scope (ADR-35 WD1, visibility carve-out): both the
+        # override and the shadowed method must have a STATICALLY
+        # OBSERVABLE visibility. The override's visibility is read
+        # from the source-discovered table; the parent is resolved
+        # against the project-discovered ancestor chain (user-source
+        # classes / modules only — RBS-known ancestors, whose
+        # accessibility RBS models as public/private only, are a
+        # deferred follow-on). When either side is not observable
+        # the rule stays silent.
+        def override_visibility_diagnostic(path, def_node, scope_index)
+          return nil unless def_node.receiver.nil? # instance methods only
+
+          scope = scope_index[def_node]
+          return nil if scope.nil?
+
+          self_type = scope.self_type
+          return nil unless self_type.respond_to?(:class_name)
+
+          class_name = self_type.class_name.to_s
+          method_name = def_node.name
+
+          override_visibility = scope.discovered_method_visibility(class_name, method_name)
+          return nil if override_visibility.nil?
+
+          parent = nearest_ancestor_visibility(scope, class_name, method_name)
+          return nil if parent.nil?
+
+          parent_class, parent_visibility = parent
+          return nil unless visibility_reduced?(parent_visibility, override_visibility)
+
+          build_override_visibility_diagnostic(
+            path, def_node, parent_class, parent_visibility, override_visibility
+          )
+        end
+
+        # Returns true when `override_visibility` is strictly more
+        # restrictive than `parent_visibility` under the
+        # public > protected > private ordering.
+        def visibility_reduced?(parent_visibility, override_visibility)
+          parent_rank = VISIBILITY_RANK[parent_visibility]
+          override_rank = VISIBILITY_RANK[override_visibility]
+          return false if parent_rank.nil? || override_rank.nil?
+
+          override_rank < parent_rank
+        end
+
+        # Breadth-first walk of the project-discovered ancestor chain
+        # (included / prepended modules first, then the superclass —
+        # Ruby's MRO ordering), returning `[defining_class, visibility]`
+        # for the nearest user-source ancestor that defines an instance
+        # method `method_name`, or nil. Cross-file: the chain is
+        # followed through the scope tables the runner seeds from the
+        # project pre-pass (ADR-24 WD1). Mirrors
+        # `ExpressionTyper#resolve_user_def_through_ancestors`.
+        def nearest_ancestor_visibility(scope, class_name, method_name)
+          queue = ancestor_class_names(scope, class_name)
+          seen = { class_name.to_s => true }
+          visited = 0
+          until queue.empty?
+            current = queue.shift
+            next if current.nil? || seen[current]
+
+            seen[current] = true
+            visited += 1
+            return nil if visited > OVERRIDE_ANCESTOR_WALK_LIMIT
+
+            if scope.user_def_for(current, method_name)
+              visibility = scope.discovered_method_visibility(current, method_name) || :public
+              return [current, visibility]
+            end
+
+            ancestor_class_names(scope, current).each { |name| queue.push(name) }
+          end
+          nil
+        end
+
+        # Direct ancestors of `class_name` as project-discovered,
+        # qualified names: included / prepended modules first, then
+        # the superclass. As-written names are resolved against the
+        # subclass's lexical nesting; names that resolve to no
+        # project class/module (RBS-known / third-party) are dropped.
+        def ancestor_class_names(scope, class_name)
+          names = []
+          scope.includes_of(class_name).each do |raw|
+            resolved = resolve_override_ancestor_name(scope, class_name, raw)
+            names << resolved if resolved
+          end
+          raw_super = scope.superclass_of(class_name)
+          if raw_super
+            resolved_super = resolve_override_ancestor_name(scope, class_name, raw_super)
+            names << resolved_super if resolved_super
+          end
+          names
+        end
+
+        def resolve_override_ancestor_name(scope, subclass_qualified, raw_ancestor)
+          segments = subclass_qualified.to_s.split("::")
+          (segments.length - 1).downto(0) do |i|
+            candidate = (segments[0, i] + [raw_ancestor]).join("::")
+            return candidate if known_user_class?(scope, candidate)
+          end
+          nil
+        end
+
+        def known_user_class?(scope, name)
+          scope.discovered_superclasses.key?(name) ||
+            scope.discovered_def_nodes.key?(name) ||
+            scope.discovered_includes.key?(name)
+        end
+
+        def build_override_visibility_diagnostic(path, def_node, parent_class, parent_visibility, override_visibility)
+          location = def_node.name_loc || def_node.location
+          Diagnostic.new(
+            rule: RULE_OVERRIDE_VISIBILITY_REDUCED,
+            path: path,
+            line: location.start_line,
+            column: location.start_column + 1,
+            message: "visibility of `#{def_node.name}' reduced from #{parent_visibility} to " \
+                     "#{override_visibility} (overrides #{parent_class}##{def_node.name}); " \
+                     "breaks substitutability",
+            severity: :warning
           )
         end
       end

@@ -1,8 +1,8 @@
 # ADR-35 — Override signature compatibility (Liskov signature rule)
 
-Status: **proposed, 2026-05-29.** Records the decision to add a new
-family of diagnostics that check a method override against the
-contract it inherits — the **Liskov Substitution Principle (LSP)
+Status: **accepted, 2026-05-29 (slice 1 implemented).** Records the
+decision to add a new family of diagnostics that check a method
+override against the contract it inherits — the **Liskov Substitution Principle (LSP)
 signature rule** applied across a class/module hierarchy:
 parameters must be **contravariant** (an override may not strengthen
 its preconditions by narrowing a parameter), returns must be
@@ -147,6 +147,23 @@ two never overlap.
 with a Reflection-visible signature; the ancestor probe accepts a
 parent only if it too has a Reflection-visible signature. A miss on
 either side short-circuits to silence.
+
+**Carve-out for the visibility rule (slice 1).** "Explicitly-authored
+signature" is the right gate for the *type* checks
+(`def.override-param-narrowed` / `def.override-return-widened`), where
+the contract being compared is the RBS-declared type. For
+`def.override-visibility-reduced` the contract is **visibility**, which
+Ruby source expresses directly (`private` / `protected` / `public`
+modifiers) independent of any RBS type authorship. The gate is
+therefore specialised to "both visibilities **statically
+observable**": the override's visibility from the source-discovered
+table, the ancestor's from the project-discovered ancestor chain. The
+shipped slice 1 scopes the ancestor side to **user-source** classes /
+modules; RBS-known ancestors (RBS models accessibility as
+public/private only, with no `protected`) are a deferred follow-on.
+The FP discipline is preserved a different way — both facts must be
+positively observed and the override must *strictly* reduce — so an
+unknown visibility on either side stays silent.
 
 ### WD2 — Three rules, not one `def.override-incompatible`
 
@@ -374,10 +391,20 @@ tier 1 and tier 3 is deferred — see Open Questions.
 
 Recommended order; each slice independently shippable.
 
-1. **Visibility rule.** `def.override-visibility-reduced` — the
-   lowest-FP, no-subtyping-required check. Needs only the
-   ancestor-method probe (WD6) and a visibility comparison. Ships
-   the override-detection pass and the new family registration.
+1. **Visibility rule. — LANDED (v0.1.x, 2026-05-29).**
+   `def.override-visibility-reduced` — the lowest-FP,
+   no-subtyping-required check. Needs only the ancestor-method probe
+   (WD6) and a visibility comparison. Ships the override-detection
+   pass and the new family registration. Implementation note: the
+   WD1 both-sides-authored *type-signature* gate is carved out for
+   this rule — visibility is source-observable independent of RBS
+   type authorship, so the gate is "both visibilities statically
+   determinable" (override from the source-discovered visibility
+   table; ancestor through the project-discovered chain). Scoped to
+   **user-source ancestors** in this slice; RBS-known ancestors
+   (RBS models accessibility as public/private only, no `protected`)
+   are a deferred follow-on. `def.return-type-mismatch`'s
+   `:maybe`-silent / both-sides-observable discipline is preserved.
 2. **Return covariance.** `def.override-return-widened` — reuses the
    slice-1 probe + the `accepts` query in the return direction (WD3)
    + the `:maybe`-silent discipline (WD7). Honours `self`/`instance`

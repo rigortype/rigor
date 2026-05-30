@@ -169,6 +169,90 @@ analogue is `rigor sig-gen --diff` — but the mindset shifts
 from "scaffold then edit" to "if the scaffold is wrong, fix
 the inference."
 
+## Tests as inference fuel — the bidirectional question
+
+A natural follow-on to the analysis-model section: if TypeProf
+learns parameter types from call sites, and tests are nothing
+*but* call sites, how do the two tools use your `spec/` (or
+`test/`) suite? There are really two directions, and the tools
+differ on each.
+
+### Direction 1 — tests → method types
+
+Tests are a pile of concrete examples of how a method is
+called, so they are evidence for parameter types. This is
+where the analysis models show through most sharply.
+
+- **TypeProf treats tests as mandatory fuel.** Because it
+  infers parameters by abstractly interpreting the whole
+  program, a spec that runs `Foo.new.bar(42)` *is* how
+  TypeProf learns `bar` takes an `Integer`. With no caller, the
+  parameter stays `untyped`. Writing the test and writing the
+  type-inference harness are the same act — which is why the
+  canonical TypeProf workflow points the tool at a file plus a
+  small driver.
+- **Rigor does not read tests for `rigor check`.** Its local
+  model leaves un-narrowed parameters at `Dynamic[Top]`; the
+  bug-finding gate never consults `spec/` to tighten them.
+  Tests become a parameter signal only in the opt-in
+  `rigor sig-gen --params=observed --observe=spec/` path
+  ([Chapter 11](11-sig-gen.md)), which unions the observed
+  argument type per position across every call site.
+
+And where TypeProf interprets a spec as ordinary Ruby, Rigor's
+sig-gen collector models the RSpec DSL *structurally* —
+`described_class`, `subject`, and `let` are recognised as
+bindings, not just executed:
+
+```ruby
+RSpec.describe Calc do
+  subject { Calc.new }                  # :subject → Nominal[Calc]
+  let(:other) { Calc.new }              # :other   → Nominal[Calc]
+  it { subject.greet("Alice") }         # observed: Calc#greet receives String
+  it { described_class.new.add(1, 2) }  # observed: Calc#add receives Integer, Integer
+end
+```
+
+### Direction 2 — method types → tests
+
+The reverse flow: once signatures land in `sig/`, they make
+the *spec itself* checkable. `rigor check` (and the
+`rigor-rspec` plugin) types `subject` / `let` bodies against
+the real return types and checks matchers, which sharpens the
+next `sig-gen` run — a genuine loop. (Note the two RSpec
+machines are separate: sig-gen's collector is built in and
+needs no plugin; `rigor-rspec` is the standalone diagnostic
+analyser. They run side by side, not shared.)
+
+### The decisive difference — ADR-5
+
+Observation-derived parameters are almost always **too
+narrow**: a method only ever exercised with `String` in the
+suite looks like it takes `(String)` even when it accepts far
+more. The tools split on what to do about that.
+
+- **TypeProf emits the observed-narrow parameter** — its job
+  is to report what the type-level run saw.
+- **Rigor refuses to make that the default.** Under the
+  [robustness principle](../type-specification/robustness-principle.md)
+  (strict returns, lenient parameters), `--params=observed` is
+  a deliberate opt-in and its output is a *suggestion to
+  review*, not a frozen contract. The default `untyped` is the
+  stance that the suite's current usage should not silently
+  become every future caller's obligation.
+
+| | TypeProf | Rigor |
+| --- | --- | --- |
+| Role of tests | Mandatory inference fuel | Opt-in fuel for `sig-gen` only (never the `check` gate) |
+| How a spec is read | Executed as ordinary Ruby | `subject` / `let` / `described_class` recognised structurally |
+| Observed-narrow params | Emitted as-is | Treated as a reviewable suggestion (ADR-5, opt-in, human gate) |
+| Bidirectional loop | arg ↔ return within one pass | spec → sig → spec-checking → sharper sig |
+
+Two honest limits on the Rigor side (both in Chapter 11):
+same-name `let` bindings nested across `describe` / `context`
+are last-wins, and `before` / `around` hook bodies are not
+consulted for binding mutations.
+
 ## Diagnostics — a side effect vs the main product
 
 TypeProf reports some errors as it interprets — an undefined

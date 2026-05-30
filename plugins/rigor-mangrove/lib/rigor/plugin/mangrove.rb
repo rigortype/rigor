@@ -77,9 +77,33 @@ module Rigor
     class Mangrove < Rigor::Plugin::Base
       manifest(
         id: "mangrove",
-        version: "0.1.0",
+        version: "0.2.0",
         description: "Instantiates Mangrove Result/Option carrier generics at unwrap call sites, " \
-                     "sharpening `unwrap!` / `unwrap_in` / `unwrap_or` from `untyped` to the carried type."
+                     "sharpening `unwrap!` / `unwrap_in` / `unwrap_or` from `untyped` to the carried type; " \
+                     "synthesises `Enum` variant subclasses from the `variants do … end` DSL (ADR-36).",
+        # ADR-36 nested-class emission — Mangrove's `Enum`:
+        #
+        #   class Shape
+        #     extend Mangrove::Enum
+        #     variants do
+        #       variant Circle, Float
+        #     end
+        #   end
+        #
+        # mints `Shape::Circle < Shape` with `#inner : Float`. The
+        # substrate resolves the variant constant + its `#inner`
+        # reader statically so `Shape::Circle.new(1.0).inner`
+        # types as `Float` without running Mangrove's `const_missing`.
+        nested_class_templates: [
+          Rigor::Plugin::Macro::NestedClassTemplate.new(
+            receiver_constraint: "Mangrove::Enum",
+            block_method: :variants,
+            variant_method: :variant,
+            name_arg_position: 0,
+            inner_arg_position: 1,
+            inner_reader: :inner
+          )
+        ]
       )
 
       # Carrier class names whose FIRST type argument is the

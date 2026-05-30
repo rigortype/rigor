@@ -46,6 +46,20 @@ MANGROVE_RBS = <<~RBS
   end
 RBS
 
+ENUM_SOURCE = <<~RUBY
+  module Mangrove
+    module Enum; end
+  end
+
+  class Shape
+    extend Mangrove::Enum
+    variants do
+      variant Circle, Float
+      variant Label, String
+    end
+  end
+RUBY
+
 RSpec.describe "plugins/rigor-mangrove" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
@@ -130,6 +144,49 @@ RSpec.describe "plugins/rigor-mangrove" do
 
       result = run_plugin(source: source, files: { "sig/mangrove.rbs" => MANGROVE_RBS }, signature_paths: ["sig"])
       expect(plugin_diagnostics(result)).to be_empty
+    end
+  end
+
+  # ADR-36 nested-class emission — the `variants do … end` Enum DSL
+  # mints a nested subclass per variant with a typed `#inner` reader.
+  describe "Enum variant synthesis (ADR-36)" do
+    it "resolves the variant constant + `.new` + a payload-typed `#inner`" do
+      source = <<~RUBY
+        #{ENUM_SOURCE}
+        def demo
+          Shape::Circle.new(1.5).inner.floor
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      # `#inner` resolves to Float, `Float#floor` is valid → no undefined-method.
+      expect(undefined_methods(result)).to be_empty
+    end
+
+    it "catches a typo on the variant payload (inner resolved to Float)" do
+      source = <<~RUBY
+        #{ENUM_SOURCE}
+        def demo
+          Shape::Circle.new(1.5).inner.no_such_float_method
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(undefined_methods(result).map(&:message))
+        .to include(a_string_matching(/no_such_float_method.*for Float/))
+    end
+
+    it "types each variant's `#inner` to its own declared payload" do
+      source = <<~RUBY
+        #{ENUM_SOURCE}
+        def demo
+          Shape::Label.new("hi").inner.no_such_string_method
+        end
+      RUBY
+
+      result = run_plugin(source: source)
+      expect(undefined_methods(result).map(&:message))
+        .to include(a_string_matching(/no_such_string_method.*for String/))
     end
   end
 end

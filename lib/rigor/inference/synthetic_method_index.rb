@@ -29,9 +29,19 @@ module Rigor
     # floor — the recorded string is the input to a later slice's
     # precision promotion via ADR-13's `Plugin::TypeNodeResolver`.
     class SyntheticMethodIndex
-      attr_reader :entries
+      attr_reader :entries, :class_names
 
-      def initialize(entries: [])
+      # @param entries [Array<SyntheticMethod>]
+      # @param class_names [Array<String>, Set<String>] names of
+      #   classes the substrate synthesises wholesale (ADR-36
+      #   nested-class emission — the variant subclasses that have
+      #   no RBS/source declaration of their own). Recorded so
+      #   `Environment#class_known?` can resolve them as classes
+      #   (their constant reference + `.new` dispatch) even though
+      #   nothing else in the type universe declares them. Tier B/C
+      #   method emissions leave this empty (their receiver classes
+      #   are already real).
+      def initialize(entries: [], class_names: [])
         unless entries.is_a?(Array) && entries.all?(SyntheticMethod)
           raise ArgumentError,
                 "SyntheticMethodIndex#entries must be an Array of SyntheticMethod, got #{entries.inspect}"
@@ -40,11 +50,20 @@ module Rigor
         @entries = Ractor.make_shareable(entries.dup)
         @by_instance = Ractor.make_shareable(bucket(entries, SyntheticMethod::INSTANCE))
         @by_singleton = Ractor.make_shareable(bucket(entries, SyntheticMethod::SINGLETON))
+        @class_names = Ractor.make_shareable(class_names.to_a.map(&:to_s).uniq.freeze)
+        @class_name_set = Ractor.make_shareable(@class_names.to_set)
         freeze
       end
 
       def empty?
-        entries.empty?
+        entries.empty? && class_names.empty?
+      end
+
+      # True when `name` is a substrate-synthesised class (an
+      # ADR-36 variant subclass). Used by `Environment#class_known?`
+      # so the constant resolves and `.new` dispatches.
+      def knows_class?(name)
+        @class_name_set.include?(name.to_s)
       end
 
       # Returns an Array of matching {SyntheticMethod} records in
@@ -59,7 +78,7 @@ module Rigor
       end
 
       def to_h
-        { "entries" => entries.map(&:to_h) }
+        { "entries" => entries.map(&:to_h), "class_names" => class_names }
       end
 
       EMPTY_ROW = [].freeze

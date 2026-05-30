@@ -49,7 +49,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-33 | [MCP Server Packaging](33-mcp-server.md) | Accepted (implemented in v0.1.10) |
 | ADR-34 | [Toplevel Unresolved Implicit-self Calls Warn by Default](34-toplevel-unresolved-self-call-default.md) | Accepted (implemented in v0.1.13; Playground severity wiring deferred) |
 | ADR-35 | [Override Signature Compatibility (Liskov signature rule)](35-override-signature-compatibility.md) | Accepted (slices 1–4 done; slice 5 deferred) |
-| ADR-36 | [Macro-substrate Nested-class Emission Tier (Mangrove `Enum`)](36-mangrove-enum-nested-class-emission.md) | Proposed (not implemented) |
+| ADR-36 | [Macro-substrate Nested-class Emission Tier (Mangrove `Enum`)](36-mangrove-enum-nested-class-emission.md) | Accepted (Slice A implemented; `is_a?` exhaustiveness deferred) |
 
 ## Adding a New ADR
 

@@ -1,6 +1,7 @@
 paths:
   - demo.rb
   - errors_demo.rb
+  - enum_demo.rb
 
 signature_paths:
   - sig

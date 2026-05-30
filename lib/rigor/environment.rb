@@ -512,8 +512,14 @@ module Rigor
     # presence check without materialising a type carrier.
     def class_known?(name)
       return true if class_registry.nominal_for_name(name)
+      return true if class_known_in_rbs?(name)
 
-      class_known_in_rbs?(name)
+      # ADR-36 nested-class emission — a variant subclass the
+      # substrate synthesised (e.g. `Shape::Circle` from a
+      # `variants do variant Circle, Float end` block) is a real
+      # class for resolution purposes even though no RBS / source
+      # declares it.
+      @synthetic_method_index&.knows_class?(name) || false
     end
 
     # ADR-15 Phase 2b — returns the loader's read-only,

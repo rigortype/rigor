@@ -188,6 +188,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     hkt_definitions()
     hkt_registrations()
     id()
+    nested_class_templates()
     open_receivers()
     owns_receivers()
     produces()

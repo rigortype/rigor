@@ -361,4 +361,61 @@ RSpec.describe Rigor::Inference::SyntheticMethodScanner do
       expect(index).to be_empty
     end
   end
+
+  describe "nested-class emission (ADR-36)" do
+    let(:enum_plugin) do
+      Class.new(Rigor::Plugin::Base) do
+        manifest(
+          id: "enumfixture",
+          version: "0.1.0",
+          nested_class_templates: [
+            Rigor::Plugin::Macro::NestedClassTemplate.new(receiver_constraint: "My::Enum")
+          ]
+        )
+      end
+    end
+    let(:enum_source) do
+      <<~RUBY
+        class Shape
+          extend My::Enum
+          variants do
+            variant Circle, Float
+            variant Label, String
+          end
+        end
+      RUBY
+    end
+
+    def scan_enum(source)
+      registry = Rigor::Plugin::Registry.new(plugins: [enum_plugin.new(services: services)])
+      _, paths = write_files("shape.rb" => source)
+      described_class.scan(plugin_registry: registry, paths: paths)
+    end
+
+    it "records each variant subclass name as a known synthetic class" do
+      index = scan_enum(enum_source)
+      expect(index.class_names).to contain_exactly("Shape::Circle", "Shape::Label")
+      expect(index.knows_class?("Shape::Circle")).to be(true)
+      expect(index.knows_class?("Shape::Missing")).to be(false)
+    end
+
+    it "synthesises a payload-typed `#inner` reader per variant" do
+      index = scan_enum(enum_source)
+      circle = index.lookup_instance("Shape::Circle", :inner).first
+      label = index.lookup_instance("Shape::Label", :inner).first
+      expect(circle.return_type).to eq("Float")
+      expect(label.return_type).to eq("String")
+    end
+
+    it "ignores a `variants` block on a class that does not extend the constraint" do
+      index = scan_enum(<<~RUBY)
+        class Shape
+          variants do
+            variant Circle, Float
+          end
+        end
+      RUBY
+      expect(index).to be_empty
+    end
+  end
 end

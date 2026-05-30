@@ -24,4 +24,9 @@ def demo(ctx)
   # `String#revrse` typo — caught because `unwrap_or` resolved
   # to String.
   session.cached_user.unwrap_or("guest").revrse
+
+  # ADR-36 Enum: `Shape::Circle` (synthesised from enum_demo.rb's
+  # `variants do … end`) resolves, and `#inner` resolves to Float,
+  # so this non-Float method is caught as a real error.
+  Shape::Circle.new(1.5).inner.no_such_float_method
 end

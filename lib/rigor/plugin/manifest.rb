@@ -42,14 +42,16 @@ module Rigor
 
       attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
                   :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
-                  :heredoc_templates, :trait_registries, :external_files, :hkt_registrations,
-                  :hkt_definitions, :signature_paths, :protocol_contracts, :source_rbs_synthesizer
+                  :heredoc_templates, :nested_class_templates, :trait_registries, :external_files,
+                  :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
+                  :source_rbs_synthesizer
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
         description: nil, protocols: [], config_schema: {},
         produces: [], consumes: [], owns_receivers: [], open_receivers: [], type_node_resolvers: [],
-        block_as_methods: [], heredoc_templates: [], trait_registries: [], external_files: [],
+        block_as_methods: [], heredoc_templates: [], nested_class_templates: [],
+        trait_registries: [], external_files: [],
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
         source_rbs_synthesizer: nil
       )
@@ -63,6 +65,7 @@ module Rigor
         validate_type_node_resolvers!(type_node_resolvers)
         validate_block_as_methods!(block_as_methods)
         validate_heredoc_templates!(heredoc_templates)
+        validate_nested_class_templates!(nested_class_templates)
         validate_trait_registries!(trait_registries)
         validate_external_files!(external_files)
         validate_hkt_registrations!(hkt_registrations)
@@ -75,6 +78,7 @@ module Rigor
                       open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
                       external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
                       source_rbs_synthesizer)
+        assign_nested_class_templates(nested_class_templates)
         freeze
       end
 
@@ -105,6 +109,14 @@ module Rigor
         @protocol_contracts = protocol_contracts.dup.freeze
         @source_rbs_synthesizer = source_rbs_synthesizer
       end
+
+      # Assigned outside assign_fields (which already carries the
+      # maximum positional arity) — set in `initialize` before the
+      # final freeze. ADR-36 nested-class emission tier.
+      def assign_nested_class_templates(nested_class_templates)
+        @nested_class_templates = nested_class_templates.dup.freeze
+      end
+      private :assign_nested_class_templates
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
       public
@@ -146,6 +158,7 @@ module Rigor
           "type_node_resolvers" => type_node_resolvers.map { |r| r.class.name },
           "block_as_methods" => block_as_methods.map(&:to_h),
           "heredoc_templates" => heredoc_templates.map(&:to_h),
+          "nested_class_templates" => nested_class_templates.map(&:to_h),
           "trait_registries" => trait_registries.map(&:to_h),
           "external_files" => external_files.map(&:to_h),
           "hkt_registrations" => hkt_registrations.map(&:to_h),
@@ -292,6 +305,20 @@ module Rigor
         raise ArgumentError,
               "plugin manifest heredoc_templates must be an Array of " \
               "Rigor::Plugin::Macro::HeredocTemplate instances, got #{entries.inspect}"
+      end
+
+      # ADR-36 — `nested_class_templates:` declares the
+      # nested-class emission tier (enum-shaped block DSLs that mint
+      # nested subclasses, e.g. Mangrove's `variants do variant
+      # Const, Type end`). The scanner synthesises the variant
+      # subclasses + their `#inner` reader through the existing
+      # `SyntheticMethodIndex` primitive.
+      def validate_nested_class_templates!(entries)
+        return if entries.is_a?(Array) && entries.all?(Macro::NestedClassTemplate)
+
+        raise ArgumentError,
+              "plugin manifest nested_class_templates must be an Array of " \
+              "Rigor::Plugin::Macro::NestedClassTemplate instances, got #{entries.inspect}"
       end
 
       # ADR-16 slice 3a — `trait_registries:` declares the Tier B

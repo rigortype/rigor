@@ -92,6 +92,42 @@ cd demo
 RUBYLIB="$PWD/../lib" bundle exec rigor check
 ```
 
+## Enum variants (ADR-36)
+
+Mangrove's `Enum` DSL declares an algebraic data type:
+
+```ruby
+class Shape
+  extend Mangrove::Enum
+  variants do
+    variant Circle, Float
+    variant Label, String
+  end
+end
+```
+
+At runtime each `variant <Const>, <Type>` row mints a nested subclass
+(`Shape::Circle < Shape`) carrying `#inner : <Type>`, via
+`const_missing` + `class_eval` — invisible to a static reader. This
+plugin replays the contract statically through the
+[ADR-36](../../docs/adr/36-mangrove-enum-nested-class-emission.md)
+nested-class emission tier (`Macro::NestedClassTemplate`): the variant
+constant resolves, `.new` dispatches, and `#inner` resolves to the
+declared payload type.
+
+```ruby
+Shape::Circle.new(1.5).inner   # => Float   (not Dynamic[Top])
+Shape::Label.new("hi").inner   # => String
+```
+
+So a typo on a variant payload is caught
+(`Shape::Circle.new(1.5).inner.no_such_float_method` →
+`undefined method 'no_such_float_method' for Float`), and variant
+constants no longer read as `call.undefined-constant`. Slice A covers
+constant resolution + `.new` + the typed `#inner` reader. `is_a?`
+cross-variant exhaustive narrowing and non-constant payload shapes
+(shape hashes) are deferred — see the ADR.
+
 ## Why it cannot frighten working code
 
 The plugin only fires when the receiver already resolves to a

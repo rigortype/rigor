@@ -69,13 +69,15 @@ module Rigor
       def scan(plugin_registry:, paths:, environment: nil, fact_store: nil, buffer: nil)
         templates = collect_templates(plugin_registry)
         registries = collect_trait_registries(plugin_registry)
-        return SyntheticMethodIndex::EMPTY if templates.empty? && registries.empty?
+        nested_templates = collect_nested_class_templates(plugin_registry)
+        return SyntheticMethodIndex::EMPTY if templates.empty? && registries.empty? && nested_templates.empty?
 
         asts = parse_paths(paths, buffer: buffer)
         hierarchy = build_hierarchy(asts)
         concern_index = build_concern_index(asts)
 
         entries = []
+        class_names = []
         asts.each do |path, ast|
           walk_class_bodies(ast) do |class_name, call_node|
             collect_entries(entries, templates, class_name, call_node, hierarchy, environment, path, fact_store)
@@ -85,9 +87,10 @@ module Rigor
               templates, registries, hierarchy, environment, path, fact_store
             )
           end
+          collect_nested_class_entries(entries, class_names, nested_templates, ast, path) unless nested_templates.empty?
         end
 
-        SyntheticMethodIndex.new(entries: entries)
+        SyntheticMethodIndex.new(entries: entries, class_names: class_names)
       end
 
       # Aggregates `(plugin_id, template)` pairs across every
@@ -117,6 +120,146 @@ module Rigor
             [plugin.manifest.id, registry]
           end
         end
+      end
+
+      # ADR-36 — aggregates `(plugin_id, template)` pairs across
+      # every plugin's `manifest.nested_class_templates`. Empty when
+      # no plugin contributes the nested-class emission tier.
+      def collect_nested_class_templates(plugin_registry)
+        return [] if plugin_registry.nil? || plugin_registry.empty?
+
+        plugin_registry.plugins.flat_map do |plugin|
+          # rigor:disable undefined-method
+          plugin.manifest.nested_class_templates.map do |template|
+            [plugin.manifest.id, template]
+          end
+        end
+      end
+
+      # ADR-36 nested-class emission. For each class that `extend`s a
+      # template's `receiver_constraint` and carries a
+      # `<block_method> do ... end` block, mint one synthetic
+      # subclass per `<variant_method> <Const>, <Type>` row:
+      #
+      #   class Shape
+      #     extend Mangrove::Enum
+      #     variants do
+      #       variant Circle, Float
+      #     end
+      #   end
+      #
+      # yields synthetic class `Shape::Circle` + instance method
+      # `Shape::Circle#inner -> Float`. The variant subclass name is
+      # recorded in `class_names` so `Environment#class_known?`
+      # resolves the constant (and `.new` dispatches through
+      # `meta_new`); `#inner`'s return type is the literal constant
+      # type argument (non-constant inner shapes degrade to
+      # `Dynamic[Top]` per the slice-A floor).
+      def collect_nested_class_entries(entries, class_names, nested_templates, ast, path)
+        return if ast.nil?
+
+        walk_classes(ast) do |class_name, class_node|
+          body = class_body_statements(class_node)
+          next if body.empty?
+
+          nested_templates.each do |(plugin_id, template)|
+            next unless body_extends?(body, template.receiver_constraint)
+
+            each_variant_call(body, template) do |variant_const, inner_node|
+              emit_variant(entries, class_names, class_name, variant_const, inner_node, template, plugin_id, path)
+            end
+          end
+        end
+      end
+
+      # Walks every class declaration, yielding its fully-qualified
+      # name and the `Prism::ClassNode`. Mirrors `walk_class_bodies`'
+      # scope-stack bookkeeping but hands back the class node itself.
+      def walk_classes(node, scope_stack = [], &)
+        return unless node.respond_to?(:compact_child_nodes)
+
+        case node
+        when Prism::ClassNode
+          name = class_name_from(node, scope_stack)
+          yield name, node if name
+          new_stack = scope_stack + [node]
+          node.body&.compact_child_nodes&.each { |child| walk_classes(child, new_stack, &) }
+        when Prism::ModuleNode
+          new_stack = scope_stack + [node]
+          node.body&.compact_child_nodes&.each { |child| walk_classes(child, new_stack, &) }
+        else
+          node.compact_child_nodes.each { |child| walk_classes(child, scope_stack, &) }
+        end
+      end
+
+      def class_body_statements(class_node)
+        body = class_node.body
+        body.respond_to?(:body) ? body.body.compact : []
+      end
+
+      # True when the class body carries `extend <constraint>`
+      # (receiverless `extend` call with the constraint constant as
+      # its first argument).
+      def body_extends?(body, constraint)
+        body.any? do |stmt|
+          stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? && stmt.name == :extend &&
+            const_name_string(first_arg(stmt)) == constraint
+        end
+      end
+
+      # Yields `(variant_const_name, inner_type_node)` for every
+      # `<variant_method> <Const>, <Type>` call inside the template's
+      # `<block_method> do ... end` block(s).
+      def each_variant_call(body, template, &)
+        body.each do |stmt|
+          next unless variants_block_call?(stmt, template)
+
+          block_body_statements(stmt.block).each { |call| yield_variant(call, template, &) }
+        end
+      end
+
+      def variants_block_call?(stmt, template)
+        stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? &&
+          stmt.name == template.block_method && stmt.block.is_a?(Prism::BlockNode)
+      end
+
+      def yield_variant(call, template)
+        return unless call.is_a?(Prism::CallNode) && call.receiver.nil? && call.name == template.variant_method
+
+        args = call.arguments&.arguments || []
+        variant_const = const_name_string(args[template.name_arg_position])
+        return if variant_const.nil?
+
+        yield variant_const, args[template.inner_arg_position]
+      end
+
+      def block_body_statements(block_node)
+        body = block_node.body
+        body.respond_to?(:body) ? body.body.compact : []
+      end
+
+      def emit_variant(entries, class_names, enclosing, variant_const, inner_node, template, plugin_id, path) # rubocop:disable Metrics/ParameterLists
+        variant_class = "#{enclosing}::#{variant_const}"
+        class_names << variant_class
+        inner_type = const_name_string(inner_node) || "untyped"
+
+        entries << SyntheticMethod.new(
+          class_name: variant_class,
+          method_name: template.inner_reader,
+          return_type: inner_type,
+          kind: SyntheticMethod::INSTANCE,
+          provenance: {
+            plugin_id: plugin_id,
+            tier: "nested_class",
+            enclosing: enclosing,
+            variant: variant_const,
+            source_path: path
+          }
+        )
+      end
+
+      def first_arg(call_node)
+        call_node.arguments&.arguments&.first
       end
 
       def parse_paths(paths, buffer: nil)

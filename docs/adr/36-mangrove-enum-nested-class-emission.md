@@ -1,6 +1,6 @@
 # ADR-36 — Macro-substrate nested-class emission tier (Mangrove `Enum`)
 
-Status: **proposed, 2026-05-30. Not implemented.**
+Status: **accepted, 2026-05-30; Slice A implemented.**
 Records the decision to extend the [ADR-16](16-macro-expansion.md)
 macro-expansion substrate with a new tier that mints **nested
 subclasses** (not just methods) from a class-level DSL block, motivated
@@ -8,7 +8,22 @@ by the [Mangrove](https://github.com/kazzix14/mangrove) `Enum` DSL. The
 shippable, in-contract part of Mangrove support (carrier-generic
 instantiation at unwrap call sites) landed separately as
 `plugins/rigor-mangrove`; this ADR scopes the part that today's plugin
-contract cannot express.
+contract could not express.
+
+**Slice A implemented (2026-05-30):** `Plugin::Macro::NestedClassTemplate`
+(manifest slot `nested_class_templates:`) + a scanner pass in
+`SyntheticMethodScanner` that, for each `variant <Const>, <Type>` row in
+a `<block_method> do … end` block on a class that `extend`s the
+`receiver_constraint`, records the variant subclass name (so
+`Environment#class_known?` resolves it → constant reference + `.new`
+dispatch via `meta_new`) and synthesises a `#inner` reader returning the
+literal constant payload type through the existing
+`SyntheticMethodIndex`. Wired into `rigor-mangrove` for `Mangrove::Enum`.
+`Shape::Circle.new(1.0).inner` now types as `Float`. **Deferred (the WD3
+ceiling):** the `sealed`-parent fact + `is_a?` cross-variant exhaustive
+narrowing, which needs the synthetic-class hierarchy threaded into
+`Environment#class_ordering`; and non-constant inner shapes (shape
+hashes), which degrade to `Dynamic[Top]` today.
 
 Grounding survey:
 [`docs/notes/20260530-mangrove-library-survey.md`](../notes/20260530-mangrove-library-survey.md).

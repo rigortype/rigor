@@ -1,0 +1,12 @@
+paths:
+  - demo.rb
+  - errors_demo.rb
+
+signature_paths:
+  - sig
+
+plugins:
+  - rigor-mangrove
+
+cache:
+  path: tmp/.rigor/cache

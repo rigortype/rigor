@@ -14,6 +14,12 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **[plugins/rigor-mangrove]** New precision plugin for the [Mangrove](https://github.com/kazzix14/mangrove) functional toolkit (Result / Option carriers). It instantiates a carrier's generic type-member at the unwrap call site — `result.unwrap!`, `result.unwrap_in(ctx)`, `option.unwrap_or(x)` and their siblings now resolve to the carried value type (`type_args[0]`, the `OkType` / `InnerType`) instead of degrading to `untyped`, so a typo'd chained call against the unwrapped value is caught as `call.undefined-method`.
+  - It is **not** a type-source plugin: Mangrove's signatures already flow in through [`rigor-sorbet`](plugins/rigor-sorbet/README.md). This plugin adds the one thing sig ingestion cannot — generic instantiation at the call site — and emits no diagnostics of its own, firing only when the receiver already resolves to a known carrier carrying a non-empty `type_args` (it no-ops on the bare-constructor shape, preserving the false-positive floor).
+  - Two further Mangrove surfaces are deferred to engine / contract work and recorded in [`docs/notes/20260530-mangrove-library-survey.md`](docs/notes/20260530-mangrove-library-survey.md): `is_a?(Result::Ok)` exhaustive narrowing (core control-flow analysis) and the `variants do … end` Enum DSL ([ADR-36](docs/adr/36-mangrove-enum-nested-class-emission.md), proposed — needs an ADR-16 nested-class emission tier).
+
 ## [0.1.15] - 2026-05-29
 
 Adds the Liskov override-compatibility diagnostic family (ADR-35) and the `rigor plugin` source-browsing command, and sharpens how Rigor reports — and how `rigor triage` explains and the onboarding skills route — undefined-method diagnostics that are really uninstalled project monkey-patches or project-specific generated DSLs.

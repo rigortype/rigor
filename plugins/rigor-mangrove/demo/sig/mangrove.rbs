@@ -1,0 +1,56 @@
+# Permissive runtime signatures for the Mangrove carriers.
+#
+# Faithful to the real gem: Mangrove ships NO usable RBS
+# (`sig/mangrove.rbs` upstream is `VERSION: String` only) — its
+# types live in Sorbet `sig {}` blocks + Tapioca-generated RBI.
+#
+# These stubs declare the carriers as applied generics so a
+# method whose return type is `Result::Ok[String, StandardError]`
+# gives the receiver a Nominal carrying `type_args = [String, …]`.
+# The unwrap methods are deliberately left at `untyped` — exactly
+# what a generic-unaware sig source yields: the receiver type is
+# known, but the carrier's `OkType` / `InnerType` type-member is
+# not instantiated to the concrete argument at the call site.
+#
+# rigor-mangrove closes that gap by reading the receiver's
+# `type_args` and contributing `type_args[0]` as each unwrap
+# call's return type. Drop the plugin and every unwrap below
+# falls back to `untyped`, so the typo'd chains in
+# `errors_demo.rb` go unnoticed.
+
+module Mangrove
+  module Result
+    class Ok[OkType, ErrType]
+      def initialize: (OkType inner) -> void
+      def unwrap!: () -> untyped
+      def unwrap_in: (untyped ctx) -> untyped
+      def expect!: (String message) -> untyped
+    end
+
+    class Err[OkType, ErrType]
+      def initialize: (ErrType inner) -> void
+      def unwrap_in: (untyped ctx) -> untyped
+    end
+  end
+
+  module Option
+    class Some[InnerType]
+      def initialize: (InnerType inner) -> void
+      def unwrap: () -> untyped
+      def unwrap_or: (InnerType default) -> untyped
+    end
+
+    class None[InnerType]
+      def unwrap_or: (InnerType default) -> untyped
+    end
+  end
+end
+
+# A small producer whose declared return types are applied
+# generics — the realistic Mangrove shape (methods that return a
+# Result / Option). This is what makes the receiver carry
+# `type_args` at the unwrap call sites in demo.rb / errors_demo.rb.
+class Session
+  def token: () -> Mangrove::Result::Ok[String, StandardError]
+  def cached_user: () -> Mangrove::Option::Some[String]
+end

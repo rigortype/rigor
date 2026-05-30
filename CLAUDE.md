@@ -92,6 +92,7 @@ ADRs record design rationale and rejected / deferred alternatives. **The canonic
 - [ADR-33](docs/adr/33-mcp-server.md) — MCP server packaging (`rigor mcp`)
 - [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) — Toplevel unresolved-self-call diagnostic
 - [ADR-35](docs/adr/35-override-signature-compatibility.md) — Override signature compatibility (Liskov signature rule)
+- [ADR-36](docs/adr/36-mangrove-enum-nested-class-emission.md) — Macro-substrate nested-class emission tier (Mangrove `Enum`; proposed, not implemented)
 
 ## Skills available in this repository
 

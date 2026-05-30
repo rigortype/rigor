@@ -138,3 +138,71 @@ only**. ② is engine work; ③ needs an ADR-16 amendment. Per the
 `rigor-plugin-author` "stop and ask rather than invent a workaround" rule, the
 scope decision (ship ① alone vs. open the ②/③ engine/ADR work) goes back to the
 maintainer.
+
+(Note: slice ① as built is *not* the `unwrap_in` control-flow walker sketched in
+the table above — measurement during authoring redirected it to the simpler,
+in-contract **carrier-generic instantiation** at unwrap call sites. The engine
+does not infer generics from `Result::Ok.new("x")` (raw Nominal, no `type_args`),
+but a method whose declared return is an applied generic (`-> Result[String, E]`)
+*does* carry `type_args`, so the plugin reads `type_args[0]` and contributes it as
+the unwrap return. This shipped as `plugins/rigor-mangrove` in commit f7b20275.)
+
+## Survey-fixture findings (2026-05-30, post-landing)
+
+Validated slice ① against the **real chain** — Mangrove typed via Sorbet sigs
+(its actual type source), not the hand-authored RBS the plugin's own demo uses.
+Fixture: `~/repo/ruby/rigor-survey/_mangrove-probe/` (+ a shallow clone of the
+upstream gem at `~/repo/ruby/rigor-survey/mangrove/`, which carries real inline
+sigs and a `sorbet/rbi/` tree).
+
+Probe (the realistic shape — a producer whose return is a user-defined generic):
+
+```ruby
+# typed: true
+class Factory
+  extend T::Sig
+  sig { returns(Mangrove::Result::Ok[String, StandardError]) }
+  def self.make = Mangrove::Result::Ok.new("ok")
+end
+Factory.make.unwrap!.uppercaze   # typo on the unwrapped value
+```
+
+Run with `rigor-sorbet` + `rigor-mangrove` both active (both report `[OK]` under
+`rigor plugins`): **zero diagnostics.** `Factory.make` resolves to `Dynamic[top]`,
+so `unwrap!`'s receiver has no carrier Nominal, rigor-mangrove no-ops, and the
+typo ships silently.
+
+**Root cause (confirmed in source).** `rigor-sorbet`'s
+`TypeTranslator#translate_t_subscript` (`type_translator.rb:177-188`) instantiates
+a generic application into `Nominal[name, type_args]` **only for `T::`-namespaced
+constants** (`T::Array[E]`, `T::Hash[K,V]`, `T::Class[T]`). A user-defined generic
+like `Mangrove::Result::Ok[String, StandardError]` is not `T::`-namespaced, so
+`translate_call` falls through to `degraded` → `untyped`. The receiver type is
+lost before rigor-mangrove ever sees it.
+
+**Consequence — the chain that works vs. the chain that doesn't:**
+
+| Type source for the carrier + producer return | Receiver at unwrap | rigor-mangrove |
+| --- | --- | --- |
+| **RBS** (`-> Mangrove::Result::Ok[String, E]`) | `Nominal[…, [String, E]]` (engine instantiates natively) | **fires** ✓ (demo + 6 specs) |
+| **Sorbet sig** via `rigor-sorbet` | `Dynamic[top]` (user generic degraded) | no-ops ✗ |
+
+So the plugin is correct and useful, but on the **RBS-typed path only**. Mangrove
+projects are Sorbet-first, so the realistic path is the one that doesn't fire
+today. The plugin's value is currently gated behind a source-of-types it rarely
+has.
+
+**Highest-leverage follow-up (surfaced by this survey).** Extend `rigor-sorbet`'s
+`TypeTranslator` to instantiate **user-defined** generic applications
+(`Const[A, B]` → `Nominal[Const, [A, B]]`), not just `T::`-namespaced ones. This
+is a small, well-scoped change to one existing plugin (an ordinary edit, not the
+plugin-author pipeline), and it would unlock rigor-mangrove on the real
+Sorbet-typed chain — plus benefit *any* generic user type expressed in a sig
+(`MyBox[T]`, `Pagy::Result[T]`, …). A cheaper stopgap — ship a carrier RBS overlay
+with rigor-mangrove via `signature_paths:` — only helps if the consumer's producer
+methods are *also* RBS-typed, which a Sorbet project's are not, so it does not
+close the gap on its own.
+
+Recommended order: **rigor-sorbet user-generic translation → re-run this probe →
+(then) rigor-mangrove ②/③**. Without the first, ②/③ would layer more precision on
+a receiver type that is still `untyped` in practice.

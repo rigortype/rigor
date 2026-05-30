@@ -230,6 +230,28 @@ real Mangrove shape.)
 ②/③ remain the open items, in that order, now that the receiver actually carries
 its type at the unwrap site.
 
+### Real-project false-positive validation (2026-05-30)
+
+The user-generic translation turns previously-`untyped` sig returns into typed
+`Nominal`s, which means more method calls become checkable — a precision win that
+could, in principle, *introduce* false positives on real code. Validated with a
+**before/after diff** on the most generic-heavy real Sorbet project available — the
+upstream Mangrove gem itself (`~/repo/ruby/rigor-survey/mangrove/`, `lib` + `spec`,
+under `rigor-sorbet`): run `rigor check --format json` with the
+`translate_user_subscript` branch live, then with it commented out, and diff the
+diagnostic sets.
+
+Result: **860 diagnostics before, 860 after — 0 introduced, 0 removed.** The change
+*does* fire (Mangrove's sigs return `Mangrove::Result[…]` / `Option[…]`, and the
+spec chains carrier methods off those returns), yet it surfaced no new diagnostic
+and silenced none. So on real Sorbet code the translation is **false-positive
+neutral** — it sharpens types without frightening working code, honouring the
+project's top-tier FP discipline. (It also added no *precision* diagnostics here,
+because Mangrove's spec constructs carriers via `Result::Ok.new(...)` — a raw
+nominal, no generic inference from the constructor — rather than consuming
+sig-returned generics; the path the change sharpens is real but not Mangrove-spec's
+dominant usage.)
+
 ## Survey-fixture findings — ② is_a? narrowing (2026-05-30)
 
 Probed `is_a?(Result::Ok)` / `Err` narrowing against the engine directly

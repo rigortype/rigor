@@ -328,4 +328,5 @@ section sequentially. Three useful pointers:
 
 If you want to compare against another tool, the sibling
 appendix pages cover [TypeScript](appendix-typescript.md),
-[mypy](appendix-mypy.md), and [Steep](appendix-steep.md).
+[mypy](appendix-mypy.md), [Steep](appendix-steep.md), and
+[TypeProf](appendix-typeprof.md).

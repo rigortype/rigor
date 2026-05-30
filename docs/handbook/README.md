@@ -116,6 +116,12 @@ different choices.
   files; this page covers the layer each tool adds on top
   and the coexistence pattern for projects that want to run
   both.
+- [**Coming from TypeProf**](appendix-typeprof.md) — Ruby's
+  official type *inference* tool. Both infer without
+  annotations; this page covers the whole-program-vs-local
+  analysis trade, why `rigor sig-gen` is the direct analogue
+  to the `typeprof` CLI, and the diagnostics-vs-RBS-output
+  split.
 
 ### Appendix — Connections to type theory
 

@@ -329,4 +329,6 @@ section sequentially. Three useful pointers:
 
 If you want to compare against another tool, the sibling
 appendix pages cover [TypeScript](appendix-typescript.md),
-[PHPStan](appendix-phpstan.md), and [mypy](appendix-mypy.md).
+[PHPStan](appendix-phpstan.md), [mypy](appendix-mypy.md), and
+[TypeProf](appendix-typeprof.md) — Ruby's inference-first tool,
+the closest cousin to Rigor's own `sig-gen`.

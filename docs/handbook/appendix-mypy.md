@@ -358,4 +358,5 @@ section sequentially. Three useful pointers:
 
 If you want to compare against another tool, the sibling
 appendix pages cover [TypeScript](appendix-typescript.md),
-[PHPStan](appendix-phpstan.md), and [Steep](appendix-steep.md).
+[PHPStan](appendix-phpstan.md), [Steep](appendix-steep.md), and
+[TypeProf](appendix-typeprof.md).

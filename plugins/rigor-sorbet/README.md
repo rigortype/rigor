@@ -42,12 +42,19 @@ GeneratedAttributeMethods; module GeneratedAttributeMethods;
 sig { ... }; def body; end; end; end` resolves
 `post.body` correctly).
 
+A `sig { returns(T) }` above an `attr_reader` / `attr_writer` /
+`attr_accessor` types the generated accessor (the reader,
+the `name=` writer, or both) rather than warning that the sig
+is "not immediately followed by a method definition" — a
+pervasive Sorbet idiom (dependabot-core leans on it heavily).
+
 This is **slices 1–8 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**
 plus the light follow-ups that add `T.must_because`,
-`T.reveal_type`, `T.assert_type!`, `T.bind`, and per-file
-sigil enforcement (`enforce_sigil` config knob, default
-`true`). The plugin's primary surface is feature-complete and
-covers the realistic Tapioca-using project shape.
+`T.reveal_type`, `T.assert_type!`, `T.bind`, attribute-accessor
+sigs, and per-file sigil enforcement (`enforce_sigil` config
+knob, default `true`). The plugin's primary surface is
+feature-complete and covers the realistic Tapioca-using project
+shape.
 
 ## What the plugin recognises
 

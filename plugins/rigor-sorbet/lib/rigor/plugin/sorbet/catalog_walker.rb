@@ -106,6 +106,14 @@ module Rigor
             if pending_sig && def_node?(child)
               record_def_with_sig(child, pending_sig, state, lexical_path, in_singleton_class)
               pending_sig = nil
+            elsif pending_sig && attr_macro_call?(child)
+              # `sig { returns(T) }` above `attr_reader :name` /
+              # `attr_accessor` / `attr_writer` types the generated
+              # accessor(s). This is a first-class Sorbet idiom — not
+              # a dangling sig — so record the accessor signature(s)
+              # instead of warning.
+              record_attr_with_sig(child, pending_sig, state, lexical_path, in_singleton_class)
+              pending_sig = nil
             elsif sig_call?(child)
               state.record_error(:duplicate_sig, pending_sig) if pending_sig
               pending_sig = child
@@ -169,6 +177,43 @@ module Rigor
 
         def def_node?(node)
           node.is_a?(Prism::DefNode)
+        end
+
+        ATTR_MACROS = %i[attr_reader attr_writer attr_accessor].freeze
+
+        # `attr_reader :a, :b` / `attr_writer` / `attr_accessor` —
+        # a receiverless attribute macro whose arguments are all
+        # symbol literals (the only shape a preceding `sig` types).
+        def attr_macro_call?(node)
+          return false unless node.is_a?(Prism::CallNode) && node.receiver.nil?
+          return false unless ATTR_MACROS.include?(node.name)
+
+          args = node.arguments&.arguments
+          !args.nil? && !args.empty? && args.all?(Prism::SymbolNode)
+        end
+
+        # Records the method signature(s) a `sig` contributes to the
+        # accessor(s) it precedes: the reader `name` and/or the
+        # writer `name=`, each carrying the sig's `returns(...)`
+        # type. `attr_reader` emits the reader, `attr_writer` the
+        # writer, `attr_accessor` both — for every symbol argument.
+        def record_attr_with_sig(attr_node, sig_call, state, lexical_path, in_singleton_class)
+          parsed = SigParser.parse(sig_call)
+          if parsed.is_a?(SigParser::ParseError)
+            state.record_error(parsed.reason, sig_call)
+            return
+          end
+
+          class_name = lexical_path.empty? ? "Object" : lexical_path.join("::")
+          kind = in_singleton_class ? :singleton : :instance
+          reader = attr_node.name != :attr_writer
+          writer = attr_node.name != :attr_reader
+
+          attr_node.arguments.arguments.each do |arg|
+            name = arg.unescaped
+            catalog_record(state.catalog, class_name, name.to_sym, kind, parsed) if reader
+            catalog_record(state.catalog, class_name, :"#{name}=", kind, parsed) if writer
+          end
         end
 
         def record_def_with_sig(def_node, sig_call, state, lexical_path, in_singleton_class)

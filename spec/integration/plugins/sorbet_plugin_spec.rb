@@ -142,6 +142,78 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
   end
 
+  # A `sig { returns(T) }` above an `attr_reader` / `attr_writer` /
+  # `attr_accessor` types the generated accessor — a first-class
+  # Sorbet idiom (dependabot-core uses it pervasively). It must NOT
+  # warn as a dangling sig, and SHOULD contribute the accessor's
+  # type at call sites.
+  describe "attribute-accessor sigs" do
+    it "does not warn when a sig precedes an attr_reader" do
+      source = <<~RUBY
+        #{SIG_STUB}
+        class User
+          extend T::Sig
+          sig { returns(String) }
+          attr_reader :name
+        end
+      RUBY
+
+      diags = plugin_diagnostics(run_plugin(source: source))
+      expect(diags.select { |d| d.rule == "parse-error" }).to be_empty
+    end
+
+    it "contributes the reader's return type so a typo'd chain is caught" do
+      source = <<~RUBY
+        # typed: true
+        #{SIG_STUB}
+        class User
+          extend T::Sig
+          sig { returns(String) }
+          attr_reader :name
+        end
+        User.new.name.no_such_string_method
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/no_such_string_method.*for String/))
+    end
+
+    it "types both the reader and writer for attr_accessor" do
+      source = <<~RUBY
+        # typed: true
+        #{SIG_STUB}
+        class User
+          extend T::Sig
+          sig { returns(Integer) }
+          attr_accessor :age
+        end
+        User.new.age.no_such_int_method
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/no_such_int_method.*for Integer/))
+    end
+
+    it "types every name in a multi-name attr_reader" do
+      source = <<~RUBY
+        # typed: true
+        #{SIG_STUB}
+        class Point
+          extend T::Sig
+          sig { returns(Integer) }
+          attr_reader :x, :y
+        end
+        Point.new.y.no_such_int_method
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/no_such_int_method.*for Integer/))
+    end
+  end
+
   describe "type vocabulary translation" do
     it "translates `T.nilable(X)` to a Union with nil so a guarded call type-checks" do
       source = <<~RUBY

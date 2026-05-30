@@ -229,3 +229,55 @@ real Mangrove shape.)
 
 ②/③ remain the open items, in that order, now that the receiver actually carries
 its type at the unwrap site.
+
+## Survey-fixture findings — ② is_a? narrowing (2026-05-30)
+
+Probed `is_a?(Result::Ok)` / `Err` narrowing against the engine directly
+(`~/repo/ruby/rigor-survey/_mangrove-probe/narrow/`). **The contract-fit table's
+②-row ("engine territory; no narrowing") was too pessimistic — measured against a
+clean cache, the core narrowing already works.** (The first probe that suggested
+otherwise was a stale-cache / formatter-shifted-column artifact; always
+`rm -rf tmp` between narrowing probes.)
+
+For a value typed as a **union of applied-generic variants** — the shape you get
+from a producer whose RBS/sig return is `Ok[String, Integer] | Err[String,
+Integer]` — `is_a?` narrowing is correct **and** type-arg-preserving in both
+edges:
+
+| Position | Inferred type |
+| --- | --- |
+| `if r.is_a?(Mangrove::Result::Ok)` → `r` | `Mangrove::Result::Ok[String, Integer]` ✓ |
+| … `r.value` (Ok#value → OkType) | `String` ✓ |
+| `else` → `r` | `Mangrove::Result::Err[String, Integer]` ✓ |
+| … `r.error` (Err#error → ErrType) | `Integer` ✓ |
+
+No false positive either way (and union method-dispatch is lenient, so even
+*without* narrowing, calling an `Ok`-only method on `Ok | Err` does not
+mis-fire). The engine path is `Narrowing#narrow_union_class` → per-member
+`narrow_nominal_to_class`, with `Environment#class_ordering` returning
+`:disjoint` for the sibling it drops. Core-class unions (`Array[String] |
+Hash[…]`) behave identically; existing coverage lives in
+`spec/rigor/inference/narrowing_spec.rb` ("narrows Union element-wise, dropping
+disjoint members").
+
+**The one real ② gap — downcast type-arg propagation.** When the value is typed
+as the *parent / interface* generic (`Mangrove::Result[String, E]`) rather than a
+union of the variants — which is the shape a Sorbet sig produces — narrowing
+`is_a?(Result::Ok)` resolves the subtype but **drops the type args**:
+`narrow_nominal_to_class`'s `:superclass` branch (narrowing.rb:2033) returns a
+bare `Type::Combinator.nominal_of(class_name)`, so `Res[String, Integer]` narrows
+to bare `ResOk` and `ResOk#value` degrades to `untyped` (measured). Carrying the
+args correctly needs **generic substitution through the inheritance edge** (map
+the parent's type args onto the child's params per the RBS `class Child[..] <
+Parent[..]` decl) — positional copy is unsound in general (`class Foo[T] <
+Bar[T, Integer]`). That is genuine, subtle core-engine work, normative under
+`docs/type-specification/control-flow-analysis.md`, with **no false-positive
+pressure** (it loses precision, never frightens working code). Demand-driven;
+deferred. It is also what would let rigor-mangrove's unwrap fire after an
+`is_a?` downcast (vs. only on already-union-typed receivers) — but that, again,
+is a precision uplift, not a correctness fix.
+
+Net: ② needs **no** narrowing-logic change for the common case (it works); the
+remaining work is the downcast type-arg-propagation precision uplift, which is
+core-engine generic-substitution and should be scoped + design-reviewed on its
+own, not bundled into Mangrove work.

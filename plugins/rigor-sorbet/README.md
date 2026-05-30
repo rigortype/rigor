@@ -47,6 +47,10 @@ A `sig { returns(T) }` above an `attr_reader` / `attr_writer` /
 the `name=` writer, or both) rather than warning that the sig
 is "not immediately followed by a method definition" — a
 pervasive Sorbet idiom (dependabot-core leans on it heavily).
+The same holds for a sig above a **visibility-wrapped def**
+(`private def foo`, `private_class_method def self.bar`,
+`module_function def baz`): the macro is unwrapped and the
+inner def typed.
 
 This is **slices 1–8 of [ADR-11](../../docs/adr/11-sorbet-input-adapter.md)**
 plus the light follow-ups that add `T.must_because`,

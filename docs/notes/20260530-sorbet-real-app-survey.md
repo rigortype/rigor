@@ -48,6 +48,15 @@ recognises the attribute macros as sig targets, records the accessor signature(s
 (reader `name`, writer `name=`, both for `attr_accessor`, each name for multi-name
 forms), and stops warning. Subset diagnostics dropped **87 → 2**.
 
+A second instance of the same root cause (sig paired only with a bare `def`):
+a sig above a **visibility-wrapped def** — `private def foo`,
+`private_class_method def self.bar`, `module_function def baz` (and the `public`
+/ `protected` / `public_class_method` variants) — also read as a dangling sig.
+dependabot's `registry_client.rb` uses `private_class_method def self.x`. **Fixed**
+(commit-pending): the walker unwraps the macro and types the inner def. With both
+fixes, a **34-file `common/lib` subset goes from many false parse-errors to 0**
+(only an `rbs.coverage.missing-gem` info remains).
+
 ## Finding 3 — operational notes
 
 - **Dependency RBS coverage:** dependabot's `Gemfile.lock` has **125 gems with no

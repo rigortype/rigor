@@ -24,6 +24,7 @@ cycles live in dedicated archives:
 ### Fixed
 
 - **[plugins/rigor-sorbet]** A `sig { returns(T) }` placed above an `attr_reader` / `attr_writer` / `attr_accessor` — a pervasive Sorbet idiom — no longer raises a spurious `plugin.sorbet.parse-error` ("`sig` block is not immediately followed by a method definition"). The walker now recognises the attribute macros as valid sig targets **and** contributes the accessor's type at call sites: `sig { returns(String) }; attr_reader :name` makes `obj.name` resolve to `String` (and `attr_accessor` types both the reader and the `name=` writer; multi-name `attr_reader :a, :b` types each). Surfaced by analysing dependabot-core, where this one idiom produced 85 false `parse-error` warnings across 10 files (now 0).
+- **[plugins/rigor-sorbet]** A `sig { ... }` above a **visibility-wrapped def** — `private def foo`, `private_class_method def self.bar`, `module_function def baz`, and the `public` / `protected` / `public_class_method` variants — likewise no longer raises a spurious dangling-sig `parse-error`. The walker unwraps the visibility macro and types the inner def (the def's own receiver still drives instance-vs-singleton, so `private_class_method def self.x` records as a singleton method). Also surfaced by dependabot-core; with the two fixes a 34-file `common/lib` subset goes from many false parse-errors to zero.
 
 ### Changed
 

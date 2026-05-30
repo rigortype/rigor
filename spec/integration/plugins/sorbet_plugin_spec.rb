@@ -214,6 +214,47 @@ RSpec.describe "plugins/rigor-sorbet" do
     end
   end
 
+  # A `sig { ... }` above a visibility-wrapped def — `private def foo`,
+  # `private_class_method def self.bar`, `module_function def baz` — is a
+  # common Ruby/Sorbet idiom (dependabot-core uses `private_class_method def
+  # self.x`). It must NOT warn as a dangling sig, and SHOULD type the wrapped
+  # method.
+  describe "visibility-wrapped def sigs" do
+    %w[private public protected private_class_method public_class_method module_function].each do |macro|
+      it "does not warn for `#{macro} def`" do
+        receiver = macro.include?("class_method") ? "self." : ""
+        source = <<~RUBY
+          #{SIG_STUB}
+          class Worker
+            extend T::Sig
+            sig { returns(Integer) }
+            #{macro} def #{receiver}run; 1; end
+          end
+        RUBY
+
+        diags = plugin_diagnostics(run_plugin(source: source))
+        expect(diags.select { |d| d.rule == "parse-error" }).to be_empty
+      end
+    end
+
+    it "contributes the wrapped def's return type at the call site" do
+      source = <<~RUBY
+        # typed: true
+        #{SIG_STUB}
+        class Registry
+          extend T::Sig
+          sig { returns(String) }
+          public_class_method def self.host; compute_host; end
+        end
+        Registry.host.no_such_string_method
+      RUBY
+
+      result = run_plugin(source: source)
+      offenders = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+      expect(offenders.map(&:message)).to include(a_string_matching(/no_such_string_method.*for String/))
+    end
+  end
+
   describe "type vocabulary translation" do
     it "translates `T.nilable(X)` to a Union with nil so a guarded call type-checks" do
       source = <<~RUBY

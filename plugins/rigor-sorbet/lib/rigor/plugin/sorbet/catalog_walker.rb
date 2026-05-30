@@ -114,6 +114,13 @@ module Rigor
               # instead of warning.
               record_attr_with_sig(child, pending_sig, state, lexical_path, in_singleton_class)
               pending_sig = nil
+            elsif pending_sig && (inner_def = visibility_wrapped_def(child))
+              # `sig { ... }` above `private def foo` /
+              # `private_class_method def self.foo` / `module_function
+              # def bar` — a visibility macro wrapping the very def the
+              # sig types. Record the inner def, not a dangling sig.
+              record_def_with_sig(inner_def, pending_sig, state, lexical_path, in_singleton_class)
+              pending_sig = nil
             elsif sig_call?(child)
               state.record_error(:duplicate_sig, pending_sig) if pending_sig
               pending_sig = child
@@ -177,6 +184,27 @@ module Rigor
 
         def def_node?(node)
           node.is_a?(Prism::DefNode)
+        end
+
+        VISIBILITY_MACROS = %i[
+          private public protected
+          private_class_method public_class_method module_function
+        ].freeze
+
+        # `private def foo` / `private_class_method def self.bar` /
+        # `module_function def baz` — a receiverless visibility macro
+        # whose single argument is the `def` it wraps. Returns the
+        # inner `Prism::DefNode` (so a preceding sig types it), or nil.
+        # The def's own receiver still drives instance-vs-singleton, so
+        # `private_class_method def self.bar` records as singleton.
+        def visibility_wrapped_def(node)
+          return nil unless node.is_a?(Prism::CallNode) && node.receiver.nil?
+          return nil unless VISIBILITY_MACROS.include?(node.name)
+
+          args = node.arguments&.arguments
+          return nil unless args&.size == 1 && args.first.is_a?(Prism::DefNode)
+
+          args.first
         end
 
         ATTR_MACROS = %i[attr_reader attr_writer attr_accessor].freeze

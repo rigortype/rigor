@@ -20,6 +20,10 @@ cycles live in dedicated archives:
   - It is **not** a type-source plugin: Mangrove's signatures already flow in through [`rigor-sorbet`](plugins/rigor-sorbet/README.md). This plugin adds the one thing sig ingestion cannot — generic instantiation at the call site — and emits no diagnostics of its own, firing only when the receiver already resolves to a known carrier carrying a non-empty `type_args` (it no-ops on the bare-constructor shape, preserving the false-positive floor).
   - Two further Mangrove surfaces are deferred to engine / contract work and recorded in [`docs/notes/20260530-mangrove-library-survey.md`](docs/notes/20260530-mangrove-library-survey.md): `is_a?(Result::Ok)` exhaustive narrowing (core control-flow analysis) and the `variants do … end` Enum DSL ([ADR-36](docs/adr/36-mangrove-enum-nested-class-emission.md), proposed — needs an ADR-16 nested-class emission tier).
 
+### Changed
+
+- **[plugins/rigor-sorbet]** The Sorbet type-vocabulary translator now maps a **user-defined generic application** in `sig` position (`Mangrove::Result::Ok[String, StandardError]`, `Box[Integer]`, any non-`T::`-namespaced `Const[A, B]`) to `Nominal[name, type_args]` instead of degrading it to `untyped`. Previously only Sorbet's own `T::Array[E]` / `T::Hash[K, V]` family carried its arguments through; a generic carrier authored outside the `T::*` set silently dropped them at the call site. This makes generic receivers — Result/Option carriers, custom containers — keep their instantiation, which is what lets `plugins/rigor-mangrove` read `type_args` and fire on the real Sorbet-typed chain (validated against the upstream gem in the survey fixture).
+
 ## [0.1.15] - 2026-05-29
 
 Adds the Liskov override-compatibility diagnostic family (ADR-35) and the `rigor plugin` source-browsing command, and sharpens how Rigor reports — and how `rigor triage` explains and the onboarding skills route — undefined-method diagnostics that are really uninstalled project monkey-patches or project-specific generated DSLs.

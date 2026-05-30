@@ -233,6 +233,48 @@ RSpec.describe "plugins/rigor-sorbet" do
       expect(result.diagnostics.select { |d| d.rule == "call.undefined-method" }).to be_empty
     end
 
+    # The fix that unblocks rigor-mangrove on the real
+    # Sorbet-sig chain: a non-`T::`-namespaced generic
+    # application in sig position now maps to
+    # `Nominal[name, type_args]` instead of degrading to
+    # `untyped`, so the receiver's generic arguments survive to
+    # the call site. Verified directly against the translator —
+    # the end-to-end chain (sig → translation → rigor-mangrove
+    # unwrap) is exercised by the survey fixture in
+    # `docs/notes/20260530-mangrove-library-survey.md`.
+    describe "user-defined generic application (non-`T::`)" do
+      def translate_sig_type(expr)
+        node = Prism.parse(expr).value.statements.body.first
+        Rigor::Plugin::Sorbet::TypeTranslator.translate(node)
+      end
+
+      it "maps `Foo::Bar[A, B]` to a `Nominal` carrying type_args" do
+        type = translate_sig_type("Mangrove::Result::Ok[String, StandardError]")
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Mangrove::Result::Ok")
+        expect(type.type_args.map(&:class_name)).to eq(%w[String StandardError])
+      end
+
+      it "maps a top-level `Box[Integer]` too" do
+        type = translate_sig_type("Box[Integer]")
+        expect(type).to be_a(Rigor::Type::Nominal)
+        expect(type.class_name).to eq("Box")
+        expect(type.type_args.map(&:class_name)).to eq(%w[Integer])
+      end
+
+      it "translates nested `T::Array[...]` arguments recursively" do
+        type = translate_sig_type("Box[T::Array[String]]")
+        expect(type.class_name).to eq("Box")
+        inner = type.type_args.first
+        expect(inner.class_name).to eq("Array")
+        expect(inner.type_args.map(&:class_name)).to eq(%w[String])
+      end
+
+      it "still degrades a `[]` call on a non-constant receiver" do
+        expect(translate_sig_type("foo[bar]")).not_to be_a(Rigor::Type::Nominal)
+      end
+    end
+
     it "translates `T.class_of(C)` to a `Singleton[C]`" do
       source = <<~RUBY
         #{SIG_STUB}

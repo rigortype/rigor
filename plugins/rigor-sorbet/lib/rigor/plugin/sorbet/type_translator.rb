@@ -38,6 +38,7 @@ module Rigor
       # | `T.class_of(C)`          | `Singleton[C]`                           |
       # | `[A, B]` (tuple in sig)  | `Tuple[A, B]`                            |
       # | `{a: A, b: B}` (shape)   | `HashShape{a: A, b: B}` (closed)         |
+      # | `Foo::Bar[A, B]` (user)  | `Nominal["Foo::Bar", [A, B]]`            |
       #
       # Anything else (`T.proc`, `T.attached_class`,
       # `T.self_type`, `T.type_parameter`, `T::Struct` / `T::Enum`
@@ -101,16 +102,26 @@ module Rigor
           Rigor::Type::Combinator.nominal_of(name)
         end
 
-        # `Prism::CallNode` covers two distinct surfaces:
+        # `Prism::CallNode` covers three distinct surfaces:
         #
         # 1. `T.something(...)` — `untyped` / `anything` /
         #    `noreturn` / `nilable` / `any` / `all` / `class_of`.
         # 2. `T::SomeClass[...]` — the `[]` method on a generic
         #    `T::*` constant (slice 3 widening). Maps to
         #    `Nominal[name, type_args]`.
+        # 3. `Some::User::Generic[...]` — the `[]` method on any
+        #    OTHER constant (a user-defined generic application,
+        #    e.g. `Mangrove::Result::Ok[String, StandardError]`).
+        #    Maps to `Nominal[name, type_args]` so generic carriers
+        #    authored outside Sorbet's `T::*` set round-trip with
+        #    their instantiation intact (the unwrap-site receiver a
+        #    plugin like rigor-mangrove reads `type_args` from).
+        #    Without this branch such forms degraded to `untyped`,
+        #    silently dropping the receiver's generic arguments.
         def translate_call(node)
           return translate_t_method(node) if sorbet_t_namespaced?(node.receiver)
           return translate_t_subscript(node) if sorbet_subscript?(node)
+          return translate_user_subscript(node) if user_generic_subscript?(node)
 
           degraded
         end
@@ -186,6 +197,37 @@ module Rigor
           else
             degraded
           end
+        end
+
+        # A user-defined generic application — a `[]` call on a
+        # constant that is NOT `T`-rooted, e.g.
+        # `Mangrove::Result::Ok[String, StandardError]` or a
+        # top-level `Box[Integer]`. Translates to
+        # `Nominal[name, type_args]`, recursively translating each
+        # argument (so nested `T::Array[...]` inside a user generic
+        # still resolves). Ordered AFTER `translate_t_subscript` in
+        # `translate_call`, so the `T::*` forms never reach here.
+        def user_generic_subscript?(node)
+          return false unless node.name == :[]
+
+          receiver = node.receiver
+          return false unless receiver.is_a?(Prism::ConstantReadNode) ||
+                              receiver.is_a?(Prism::ConstantPathNode)
+
+          # `T::Foo[...]` is handled by translate_t_subscript; only
+          # non-`T`-rooted constants are user generics.
+          !sorbet_t_qualified?(receiver)
+        end
+
+        def translate_user_subscript(node)
+          # Parity with translate_constant_path: the constant's
+          # rendered name (carrying a leading `::` for absolute
+          # paths) becomes the nominal class name.
+          name = constant_path_name(node.receiver)
+          return degraded if name.nil?
+
+          args = call_arguments(node).map { |arg| translate(arg) }
+          Rigor::Type::Combinator.nominal_of(name, type_args: args)
         end
 
         # `T::Class[T]` — Sorbet's "any class object whose

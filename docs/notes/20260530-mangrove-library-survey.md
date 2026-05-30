@@ -206,3 +206,26 @@ close the gap on its own.
 Recommended order: **rigor-sorbet user-generic translation → re-run this probe →
 (then) rigor-mangrove ②/③**. Without the first, ②/③ would layer more precision on
 a receiver type that is still `untyped` in practice.
+
+### Update — the rigor-sorbet fix landed (2026-05-30)
+
+`rigor-sorbet`'s `TypeTranslator` now translates user-defined generic
+applications (`translate_user_subscript`): any non-`T::`-rooted `Const[A, B]` in
+sig position maps to `Nominal[name, type_args]` (recursively translating the
+arguments). Re-running the probe above with the fix:
+`chain.rb:12:22: error: undefined method 'uppercaze' for String` — the chain now
+resolves end-to-end (`Factory.make` → `Nominal["Mangrove::Result::Ok", [String,
+StandardError]]` → rigor-mangrove reads `type_args[0]` → `String` → the typo is
+caught). So on a Sorbet-typed Mangrove project, enabling `rigor-sorbet` +
+`rigor-mangrove` together now delivers the precision; the RBS-only gating is
+lifted.
+
+False-positive check: a `sig { returns(KnownClass[T]) }` over a normally-defined
+(Ruby/Sorbet) carrier does **not** produce a spurious `undefined method []`
+diagnostic — the engine does not analyse the sig block body as code for such
+classes. (The only setup that surfaced a `[]` diagnostic was an artificial one
+where the carrier was declared *only* in hand-written generic RBS, which is not a
+real Mangrove shape.)
+
+②/③ remain the open items, in that order, now that the receiver actually carries
+its type at the unwrap site.

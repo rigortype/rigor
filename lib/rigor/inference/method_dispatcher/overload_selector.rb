@@ -115,14 +115,31 @@ module Rigor
           # overload-list position.
           overloads = ReceiverAffinity.reorder(overloads, self_type: self_type, environment: environment)
 
-          match = run_selection_passes(
-            overloads, arg_types: arg_types, self_type: self_type, instance_type: instance_type,
-                       type_vars: type_vars, block_required: block_required, param_overrides: param_overrides
-          )
-          return match if match
-          return overloads.find { |mt| overload_has_block?(mt) } if block_required
+          passes = lambda do |require_block|
+            run_selection_passes(
+              overloads, arg_types: arg_types, self_type: self_type, instance_type: instance_type,
+                         type_vars: type_vars, block_required: require_block, param_overrides: param_overrides
+            )
+          end
 
-          # No block at the call site: prefer an overload that does
+          match = passes.call(block_required)
+          return match if match
+
+          # A block at the call site that no block-declaring overload
+          # matched: Ruby ignores a block handed to a method that never
+          # yields it, so retry treating the block as ignorable rather
+          # than failing the dispatch. Without this, a block-bearing
+          # call to a method whose RBS declares no block (e.g.
+          # `define_command(:x) do … end` against
+          # `def define_command: (Symbol) -> Symbol`) degraded to
+          # `Dynamic[Top]` — and on a self-send suppressed the whole
+          # method's return type.
+          if block_required
+            match = passes.call(false)
+            return match if match
+          end
+
+          # No (usable) block at the call site: prefer an overload that does
           # not REQUIRE a block over `overloads.first`. Methods like
           # `Array#filter` / `Enumerable#map` declare the block-
           # bearing overload first (`() { ... } -> Array[Elem]`) and

@@ -38,6 +38,16 @@ module Rigor
       # rides along on each synthetic declaration's location.
       SYNTHETIC_NAMESPACE_BUFFER = "(rigor: synthesized namespaces)"
 
+      # Buffer name stamped on the stub `class` / `module` declarations
+      # synthesized by {.stub_missing_referenced_types} for types the
+      # project's RBS references but no loaded signature declares.
+      # {#synthesized_stub_types} reads them back off the built env (so
+      # the answer survives the marshalled env cache), and
+      # {#synthesized_type_names} folds them together with the
+      # namespace stubs into the set {MethodDispatcher} resolves to
+      # `Dynamic[Top]` (no false `call.undefined-method`).
+      SYNTHETIC_STUB_BUFFER = "(rigor: synthesized stub types)"
+
       class << self
         def default
           @default ||= new.freeze
@@ -81,7 +91,53 @@ module Rigor
           env = RBS::Environment.from_loader(rbs_loader)
           add_virtual_rbs(env, virtual_rbs)
           synthesize_missing_namespaces(env)
-          env.resolve_type_names
+          resolved = env.resolve_type_names
+          stub_missing_referenced_types(env, resolved, project_sig_files(signature_paths))
+        end
+
+        # ADR-5 robustness, second tier. A project `signature_paths:`
+        # RBS that *references* a type no loaded signature declares —
+        # `def x: () -> DRb::DRbServer` when the `drb` RBS is not
+        # available, or a stale reference to its own removed
+        # `Textbringer::EditorError` — makes
+        # `RBS::DefinitionBuilder#build_instance` raise
+        # `NoTypeFoundError`, and (per RBS's all-or-nothing per-class
+        # build) that single unresolved reference takes down EVERY
+        # method on the class, not just the one signature. Observed on
+        # shugo/textbringer: one `DRb::DRbServer` reference left the
+        # whole `Textbringer::Commands` module — including its
+        # 186-call-site `define_command` DSL — resolving as
+        # `Dynamic[Top]`.
+        #
+        # We synthesize an empty stub for each such referenced-but-
+        # undeclared type so the rest of the class builds. A leaf type
+        # is stubbed as `class`, its enclosing namespaces as `module`.
+        # Stubbed types carry no methods, so a call against a value of
+        # a stubbed type would otherwise mis-fire `call.undefined-method`;
+        # {MethodDispatcher} consults {#synthesized_type_names} and
+        # resolves such calls to `Dynamic[Top]` instead (the same
+        # no-false-positive contract as the dependency-source tier).
+        #
+        # Detection re-uses RBS's own builder (correct by construction):
+        # build every PROJECT class and read the missing name out of the
+        # raised error. Bounded to `signature_paths` classes (stdlib /
+        # vendored RBS is well-formed) and to {MAX_STUB_PASSES}
+        # iterations — a fresh stub can expose a deeper reference the
+        # first build error hid, but empty stubs reference nothing, so
+        # the fixpoint converges quickly.
+        MAX_STUB_PASSES = 5
+
+        def stub_missing_referenced_types(base_env, resolved, project_files)
+          return resolved if project_files.empty?
+
+          MAX_STUB_PASSES.times do
+            missing = unresolved_referenced_types(resolved, project_files)
+            break if missing.empty?
+
+            append_stub_declarations(base_env, missing)
+            resolved = base_env.resolve_type_names
+          end
+          resolved
         end
 
         # Robustness (ADR-5): a project whose RBS declares qualified
@@ -129,6 +185,77 @@ module Rigor
             end
           end
           missing.sort_by { |_name, depth| depth }.map(&:first)
+        end
+
+        # The absolute paths of every `.rbs` file under the project's
+        # `signature_paths:` (NOT vendored / stdlib RBS — those are
+        # well-formed, so attempting to build them would only waste
+        # time). Used to scope the referenced-type build sweep.
+        def project_sig_files(signature_paths)
+          signature_paths.flat_map do |path|
+            path = Pathname(path) unless path.is_a?(Pathname)
+            next [] unless path.directory?
+
+            Dir.glob(path.join("**", "*.rbs")).map { |p| File.expand_path(p) }
+          end.to_set
+        end
+
+        # Builds every project class (instance + singleton side) and
+        # returns the `::`-stripped names of the types whose absence
+        # raised `NoTypeFoundError`. Only the FIRST missing reference
+        # per class surfaces per build, which is why the caller loops.
+        def unresolved_referenced_types(env, project_files)
+          builder = ::RBS::DefinitionBuilder.new(env: env)
+          missing = []
+          env.class_decls.each do |type_name, entry|
+            next unless project_entry?(entry, project_files)
+
+            %i[build_instance build_singleton].each do |build|
+              builder.public_send(build, type_name)
+            rescue ::RBS::NoTypeFoundError => e
+              name = e.message[/Could not find (\S+)/, 1]
+              missing << name.sub(/\A::/, "") if name
+            rescue ::RBS::BaseError
+              # Other build failures (duplicate decl, mixin cycle, ...)
+              # are not ours to repair here — leave them fail-soft.
+            end
+          end
+          missing.uniq
+        end
+
+        # True when a `class_decls` entry was declared in one of the
+        # project's own signature files (by declaration location), so
+        # the sweep skips the bundled stdlib / vendored universe.
+        def project_entry?(entry, project_files)
+          decl = entry.respond_to?(:primary_decl) ? entry.primary_decl : nil
+          location = decl&.location
+          buffer_name = location&.buffer&.name
+          return false unless buffer_name
+
+          project_files.include?(File.expand_path(buffer_name.to_s))
+        end
+
+        # Adds empty stub declarations for the missing referenced types
+        # (and any enclosing namespace they need) to the pre-resolve
+        # env, tagged with {SYNTHETIC_STUB_BUFFER}. A name that is a
+        # prefix of another name is declared `module` (it is a
+        # namespace); a leaf is declared `class` (referenced types
+        # appear in instance position far more often than as mixins).
+        def append_stub_declarations(base_env, missing)
+          names = missing.to_set
+          missing.each do |name|
+            parts = name.split("::")
+            (1...parts.length).each { |i| names << parts[0, i].join("::") }
+          end
+          source = names.sort_by { |n| n.count(":") }.map do |name|
+            keyword = names.any? { |other| other != name && other.start_with?("#{name}::") } ? "module" : "class"
+            "#{keyword} #{name}\nend\n"
+          end.join
+          buffer = ::RBS::Buffer.new(name: SYNTHETIC_STUB_BUFFER, content: source)
+          _, directives, decls = ::RBS::Parser.parse_signature(buffer)
+          base_env.add_source(::RBS::Source::RBS.new(buffer, directives || [], decls || []))
+        rescue ::RBS::BaseError
+          nil
         end
 
         # ADR-32 WD4 — merge synthesised-from-source RBS strings
@@ -258,17 +385,28 @@ module Rigor
       # Empty for a well-formed sig set (the common case) and whenever
       # the env failed to build.
       def synthesized_namespaces
-        e = env
-        return [] if e.nil?
+        names_synthesized_in(SYNTHETIC_NAMESPACE_BUFFER)
+      end
 
-        names = e.class_decls.filter_map do |type_name, entry|
-          decls = entry_declarations(entry)
-          next if decls.empty?
-          next unless decls.all? { |decl| synthetic_namespace_decl?(decl) }
+      # The referenced-but-undeclared types
+      # {.stub_missing_referenced_types} stubbed so the project classes
+      # that mention them could build (e.g. an unavailable
+      # `DRb::DRbServer`, or a stale `Textbringer::EditorError`).
+      # Recovered off the built env like {#synthesized_namespaces}, so
+      # it survives the marshalled-env cache.
+      def synthesized_stub_types
+        names_synthesized_in(SYNTHETIC_STUB_BUFFER)
+      end
 
-          type_name.to_s.sub(/\A::/, "")
-        end
-        names.sort_by { |name| name.count("::") }
+      # Every type name Rigor invented to make an otherwise-inert /
+      # unbuildable project signature set resolve — both the namespace
+      # stubs and the referenced-type stubs. {MethodDispatcher} resolves
+      # a call whose receiver is one of these (and that no real
+      # signature answered) to `Dynamic[Top]`, so the empty stub never
+      # mis-fires `call.undefined-method`. Memoised; empty (and cheap)
+      # for the common well-formed sig set.
+      def synthesized_type_names
+        @state[:synthesized_type_names] ||= (synthesized_namespaces + synthesized_stub_types).to_set
       end
 
       # Returns true when an RBS class or module declaration with the given
@@ -625,6 +763,25 @@ module Rigor
 
       private
 
+      # The `::`-stripped names of every class/module entry whose
+      # declarations ALL originated from the given sentinel buffer —
+      # i.e. names Rigor synthesized, not names the project declared.
+      # Reads off the built env so the answer survives the marshalled
+      # env cache; shallowest-first. Empty when the env failed to build.
+      def names_synthesized_in(buffer_name)
+        e = env
+        return [] if e.nil?
+
+        names = e.class_decls.filter_map do |type_name, entry|
+          decls = entry_declarations(entry)
+          next if decls.empty?
+          next unless decls.all? { |decl| synthetic_decl?(decl, buffer_name) }
+
+          type_name.to_s.sub(/\A::/, "")
+        end
+        names.sort_by { |name| name.count("::") }
+      end
+
       # Collects the AST declaration nodes behind a `class_decls`
       # entry. RBS 4's `ModuleEntry` / `ClassEntry` expose `each_decl`;
       # the older single-`decl` shape is handled defensively so the
@@ -639,12 +796,12 @@ module Rigor
         end
       end
 
-      # True when an AST declaration was emitted by
-      # {.synthesize_missing_namespaces} — identified by the sentinel
+      # True when an AST declaration was emitted into `buffer_name`
+      # (one of the synthetic-source sentinels) — identified by the
       # buffer name on its location.
-      def synthetic_namespace_decl?(decl)
+      def synthetic_decl?(decl, buffer_name)
         location = decl.respond_to?(:location) ? decl.location : nil
-        location&.buffer&.name.to_s == SYNTHETIC_NAMESPACE_BUFFER
+        location&.buffer&.name.to_s == buffer_name
       end
 
       def constant_type_table

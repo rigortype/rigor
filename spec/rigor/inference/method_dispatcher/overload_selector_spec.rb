@@ -248,5 +248,21 @@ RSpec.describe Rigor::Inference::MethodDispatcher::OverloadSelector do
         expect(param_class.name.relative!.to_s).to eq("Float")
       end
     end
+
+    describe "block passed to a method whose overloads declare none" do
+      # In Ruby a block handed to a method that never yields it is
+      # simply ignored. `Integer#succ` (`() -> Integer`, no block
+      # clause) must therefore still resolve when the call site carries
+      # a block — otherwise the call degrades to Dynamic[Top] (and on a
+      # self-send suppresses the method's whole return type).
+      it "falls back to the block-less overload instead of returning nil" do
+        without_block = select("Integer", :succ, [], block_required: false)
+        with_block = select("Integer", :succ, [], block_required: true)
+
+        expect(with_block).not_to be_nil
+        expect(with_block.type.return_type.name.relative!.to_s).to eq("Integer")
+        expect(with_block).to eq(without_block)
+      end
+    end
   end
 end

@@ -383,7 +383,16 @@ module Rigor
           # its model). Flagging an undefined method on a class
           # with an open dynamic surface is unsound, so the rule
           # skips it.
-          return nil if open_receiver?(class_name, scope)
+          # An unbounded receiver surface: either a plugin-declared
+          # open receiver (ADR-26 — e.g. `ActiveRecord::Relation`), or
+          # a type Rigor synthesized (a missing-namespace module / a
+          # stub for a referenced-but-undeclared type) to keep a
+          # malformed project signature buildable. A synthesized stub's
+          # method table is empty only because Rigor invented it, not
+          # because the real type is empty (the real `DRb` has
+          # `start_service`), so enumerating it to prove a call
+          # "undefined" would be a false positive.
+          return nil if unbounded_receiver_surface?(class_name, scope)
 
           # Slice 7 phase 12 — suppress when the user has
           # declared the method in source (`def` /
@@ -566,11 +575,26 @@ module Rigor
         # loaded plugin (manifest `open_receivers:`). An open
         # class responds beyond its RBS surface, so the
         # `call.undefined-method` rule must not fire for it.
+        # True when the receiver class responds beyond an enumerable
+        # RBS method table, so proving a call "undefined" against it is
+        # unsound: a plugin-declared open receiver, or a Rigor-
+        # synthesized stub type (see `RbsLoader#synthesized_type_names`).
+        def unbounded_receiver_surface?(class_name, scope)
+          open_receiver?(class_name, scope) || synthesized_stub_receiver?(class_name, scope)
+        end
+
         def open_receiver?(class_name, scope)
           registry = scope.environment&.plugin_registry
           return false if registry.nil?
 
           registry.open_receiver?(class_name)
+        end
+
+        def synthesized_stub_receiver?(class_name, scope)
+          loader = scope.environment&.rbs_loader
+          return false if loader.nil? || !loader.respond_to?(:synthesized_type_names)
+
+          loader.synthesized_type_names.include?(class_name.to_s.sub(/\A::/, ""))
         end
 
         def definition_available?(receiver_type, class_name, scope)

@@ -358,6 +358,55 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "referenced-type stub synthesis (ADR-5 robustness)" do
+    # A single reference to a type no loaded signature declares makes
+    # RBS's per-class build fail wholesale, so EVERY method on the
+    # referencing class degrades to Dynamic[Top]. Stubbing the missing
+    # type lets the rest of the class build.
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-stub-spec-") }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "resolves the unaffected methods of a class that references an undeclared type" do
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        <<~RBS
+          module Acme
+            class Widget
+              def size: () -> Integer
+              def remote: () -> Net::FakeService
+            end
+          end
+        RBS
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+      # `size` does not touch the missing type and must resolve...
+      expect(loader.instance_method(class_name: "Acme::Widget", method_name: :size)).not_to be_nil
+      # ...and the missing referenced type is reported as stubbed.
+      expect(loader.synthesized_stub_types).to include("Net::FakeService")
+    end
+
+    it "folds namespace + stub names into synthesized_type_names for dispatch" do
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        "class Acme::Widget\n  def remote: () -> Net::FakeService\nend\n"
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+      names = loader.synthesized_type_names
+      expect(names).to be_a(Set)
+      expect(names).to include("Net::FakeService")
+    end
+
+    it "is a no-op for a sig set whose references all resolve" do
+      File.write(
+        File.join(tmpdir, "widget.rbs"),
+        "module Acme\n  class Widget\n    def size: () -> Integer\n  end\nend\n"
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+      expect(loader.synthesized_stub_types).to eq([])
+    end
+  end
+
   describe "env via cache_store (v0.0.9 C2)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-env-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

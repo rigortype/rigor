@@ -71,7 +71,7 @@ module Rigor
       # @param environment [Rigor::Environment, nil] required for
       #   RBS-backed dispatch; when nil only constant folding can fire.
       # @return [Rigor::Type, nil] inferred result type, or `nil` for "no rule".
-      def dispatch(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/MethodLength
+      def dispatch(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
                    block_type: nil, environment: nil,
                    call_node: nil, scope: nil)
         return nil if receiver_type.nil?
@@ -187,6 +187,19 @@ module Rigor
         discovered_result = try_discovered_method(receiver_type, method_name, scope)
         return discovered_result if discovered_result
 
+        # ADR-5 robustness — synthesized-stub-type tier. When the
+        # receiver is a type Rigor invented to make an otherwise-
+        # unbuildable project signature resolve (a missing-namespace
+        # module, or a stub for a referenced-but-undeclared type like
+        # an unavailable `DRb::DRbServer`), the stub carries no methods,
+        # so an unresolved call against it would otherwise mis-fire
+        # `call.undefined-method`. Resolve it to `Dynamic[Top]` instead
+        # — the same no-false-positive contract as the dependency-
+        # source tier. Sits below every real resolution tier so a
+        # genuine signature always wins.
+        stub_result = try_synthesized_stub_type(receiver_type, environment)
+        return stub_result if stub_result
+
         # Slice 7 phase 10 — user-class ancestor fallback. When
         # the receiver is `Nominal[T]` or `Singleton[T]` for a
         # class not in the RBS environment (typically a
@@ -251,6 +264,31 @@ module Rigor
         when Type::Singleton then [receiver_type.class_name, :singleton]
         else [nil, nil]
         end
+      end
+
+      # ADR-5 robustness — returns `Dynamic[Top]` when the receiver is
+      # an instance or singleton of a type Rigor synthesized (a
+      # missing-namespace module or a referenced-type stub). The stub
+      # has no methods, so the call would otherwise reach the
+      # user-class fallback and surface `call.undefined-method`; the
+      # honest answer for a type Rigor invented is "unknown shape",
+      # i.e. `Dynamic[Top]`. Returns nil (declines) for any real type.
+      def try_synthesized_stub_type(receiver_type, environment)
+        return nil if environment.nil?
+
+        loader = environment.rbs_loader
+        return nil if loader.nil? || !loader.respond_to?(:synthesized_type_names)
+
+        names = loader.synthesized_type_names
+        return nil if names.empty?
+
+        class_name =
+          case receiver_type
+          when Type::Nominal, Type::Singleton then receiver_type.class_name.to_s.sub(/\A::/, "")
+          end
+        return nil unless class_name && names.include?(class_name)
+
+        Type::Combinator.untyped
       end
 
       # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2

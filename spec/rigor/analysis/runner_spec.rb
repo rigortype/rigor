@@ -449,6 +449,37 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    it "does not emit `call.undefined-method` on a value of a synthesized stub type" do
+      Dir.mktmpdir("rigor-stub-no-fp-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+        # `Acme::Widget#remote` references `Net::FakeService`, which no
+        # loaded signature declares — Rigor stubs it so Widget builds.
+        File.write(File.join(tmpdir, "sig", "widget.rbs"), <<~RBS)
+          class Acme::Widget
+            def remote: () -> Net::FakeService
+          end
+        RBS
+        # The call against the stub-typed value must NOT mis-fire
+        # undefined-method (the real Net::FakeService might define it).
+        File.write(File.join(tmpdir, "code.rb"), <<~RUBY)
+          w = Acme::Widget.new
+          r = w.remote
+          r.do_something
+        RUBY
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [File.join(tmpdir, "code.rb")],
+            "signature_paths" => [File.join(tmpdir, "sig")]
+          )
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
+
+          expect(undefined).to be_empty
+        end
+      end
+    end
+
     describe "pre_eval: file-existence validation (ADR-17 slice 1)" do
       it "surfaces `pre-eval.file-not-found` :error for each missing pre_eval entry" do
         Dir.mktmpdir("rigor-pre-eval-missing-") do |tmpdir|

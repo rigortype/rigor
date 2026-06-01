@@ -121,4 +121,29 @@ RSpec.describe Rigor::Analysis::Diagnostic do
       expect(diagnostic.to_h).to include("project_definition_site" => "lib/core_ext.rb:4")
     end
   end
+
+  describe ".from_node" do
+    let(:node) { Prism.parse("  foo(:bar)").value.statements.body.first }
+
+    it "derives 1-based line and start_column + 1 from the node location" do
+      diagnostic = described_class.from_node(node, path: "demo.rb", message: "boom", rule: "x")
+      expect(diagnostic.line).to eq(node.location.start_line)
+      expect(diagnostic.column).to eq(node.location.start_column + 1)
+      expect(diagnostic.path).to eq("demo.rb")
+      expect(diagnostic.message).to eq("boom")
+      expect(diagnostic.rule).to eq("x")
+      expect(diagnostic.severity).to eq(:error)
+    end
+
+    it "forwards optional structured fields" do
+      diagnostic = described_class.from_node(
+        node, path: "demo.rb", message: "m", severity: :warning,
+              source_family: "plugin.demo", receiver_type: "Foo", method_name: "bar"
+      )
+      expect(diagnostic.severity).to eq(:warning)
+      expect(diagnostic.source_family).to eq("plugin.demo")
+      expect(diagnostic.receiver_type).to eq("Foo")
+      expect(diagnostic.method_name).to eq("bar")
+    end
+  end
 end

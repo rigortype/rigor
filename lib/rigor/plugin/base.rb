@@ -4,6 +4,7 @@ require "digest"
 require "json"
 
 require_relative "manifest"
+require_relative "../analysis/diagnostic"
 
 module Rigor
   module Plugin
@@ -175,6 +176,22 @@ module Rigor
       # slice-6 cache producers) do not have to override.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         []
+      end
+
+      # Builds a `Rigor::Analysis::Diagnostic` positioned at a Prism
+      # `node` for return from `#diagnostics_for_file`. Internalises the
+      # 1-based `line` / `start_column + 1` convention every plugin
+      # otherwise re-derives by hand, so authors pass the node and the
+      # message/severity/rule rather than unpacking `node.location`.
+      #
+      # `source_family` is intentionally NOT accepted — the runner
+      # stamps `plugin.<manifest.id>` on every returned diagnostic
+      # (ADR-7 § "Slice 5-B"), so any value set here would be
+      # overwritten.
+      def diagnostic(node, path:, message:, severity: :error, rule: nil)
+        Analysis::Diagnostic.from_node(
+          node, path: path, message: message, severity: severity, rule: rule
+        )
       end
 
       # Convenience accessor — `manifest` on the instance returns

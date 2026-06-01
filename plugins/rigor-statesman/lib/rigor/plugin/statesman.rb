@@ -111,16 +111,16 @@ module Rigor
       def build_diagnostic(path, node, sym, states)
         if states.include?(sym)
           diagnostic(
-            path, node,
-            severity: :info,
-            rule: "known-state",
-            message: "#{@transition_method}(:#{sym}) — declared state"
+            node, path: path,
+                  severity: :info,
+                  rule: "known-state",
+                  message: "#{@transition_method}(:#{sym}) — declared state"
           )
         else
           hint = did_you_mean(sym, states)
           message = "unknown state :#{sym}"
           message += " (did you mean :#{hint}?)" if hint
-          diagnostic(path, node, severity: :error, rule: "unknown-state", message: message)
+          diagnostic(node, path: path, severity: :error, rule: "unknown-state", message: message)
         end
       end
 
@@ -189,18 +189,6 @@ module Rigor
           end
         end
         rows[a.length][b.length]
-      end
-
-      def diagnostic(path, node, severity:, rule:, message:)
-        location = node.location
-        Rigor::Analysis::Diagnostic.new(
-          path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
-          message: message,
-          severity: severity,
-          rule: rule
-        )
       end
     end
 

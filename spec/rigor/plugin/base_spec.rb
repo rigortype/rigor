@@ -188,4 +188,25 @@ RSpec.describe Rigor::Plugin::Base do
       end
     end
   end
+
+  describe "#diagnostic" do
+    let(:plugin) do
+      Class.new(described_class) { manifest(id: "demo", version: "0.1.0") }.new(services: services)
+    end
+    let(:node) { Prism.parse("foo(:bar)").value.statements.body.first }
+
+    it "builds a Diagnostic positioned at the node with the 1-based column convention" do
+      diag = plugin.diagnostic(node, path: "demo.rb", message: "boom", rule: "x")
+      expect(diag).to be_a(Rigor::Analysis::Diagnostic)
+      expect(diag.path).to eq("demo.rb")
+      expect(diag.line).to eq(node.location.start_line)
+      expect(diag.column).to eq(node.location.start_column + 1)
+      expect(diag.message).to eq("boom")
+      expect(diag.rule).to eq("x")
+    end
+
+    it "defaults severity to :error" do
+      expect(plugin.diagnostic(node, path: "demo.rb", message: "m").severity).to eq(:error)
+    end
+  end
 end

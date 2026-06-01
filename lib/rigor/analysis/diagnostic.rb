@@ -59,6 +59,30 @@ module Rigor
         @project_definition_site = project_definition_site
       end
 
+      # Builds a Diagnostic positioned at a Prism node. Internalises
+      # the load-bearing convention every caller otherwise repeats:
+      # the line is the node's 1-based `start_line` and the column is
+      # `start_column + 1` (Prism columns are 0-based; Rigor reports
+      # 1-based). Pass any node responding to `#location`; all other
+      # fields forward to `#initialize` unchanged.
+      #
+      # `Plugin::Base#diagnostic` wraps this for plugin authors (who
+      # must not set `source_family` — the runner stamps it); core
+      # rules and other producers call it directly.
+      def self.from_node(node, path:, message:, severity: :error, rule: nil, # rubocop:disable Metrics/ParameterLists
+                         source_family: DEFAULT_SOURCE_FAMILY,
+                         receiver_type: nil, method_name: nil, project_definition_site: nil)
+        location = node.location
+        new(
+          path: path,
+          line: location.start_line,
+          column: location.start_column + 1,
+          message: message, severity: severity, rule: rule, source_family: source_family,
+          receiver_type: receiver_type, method_name: method_name,
+          project_definition_site: project_definition_site
+        )
+      end
+
       def error?
         severity == :error
       end

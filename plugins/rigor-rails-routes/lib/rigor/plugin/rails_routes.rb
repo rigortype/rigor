@@ -165,6 +165,10 @@ module Rigor
         )
       end
 
+      # File-level only: the once-per-run load-error emission. Per-call
+      # helper validation runs over the engine-owned walk via the
+      # node_rule below (ADR-37), with the same-file `shadowing` set
+      # built once as the node-rule file context.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         table = helper_table_or_nil
         if table.nil? && @load_error
@@ -173,10 +177,21 @@ module Rigor
           @load_error_emitted = true
           return [load_error_diagnostic(path)]
         end
-        return [] if table.nil? || table.empty?
 
-        Analyzer.diagnose(path: path, root: root, helper_table: table)
-                .map { |diag| build_diagnostic(diag) }
+        []
+      end
+
+      node_file_context do |root, _scope|
+        Analyzer.collect_shadowing_names(root)
+      end
+
+      node_rule Prism::CallNode do |node, _scope, path, shadowing|
+        table = helper_table_or_nil
+        next [] if table.nil? || table.empty?
+
+        Analyzer.violations_for(call_node: node, helper_table: table, shadowing: shadowing, path: path).map do |violation|
+          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
+        end
       end
 
       private
@@ -219,13 +234,6 @@ module Rigor
           message: @load_error,
           severity: :warning,
           rule: "load-error"
-        )
-      end
-
-      def build_diagnostic(diag)
-        Rigor::Analysis::Diagnostic.new(
-          path: diag.path, line: diag.line, column: diag.column,
-          message: diag.message, severity: diag.severity, rule: diag.rule
         )
       end
     end

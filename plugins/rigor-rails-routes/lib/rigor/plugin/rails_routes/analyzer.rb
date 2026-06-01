@@ -33,7 +33,10 @@ module Rigor
           audio_path audio_url
         ].freeze
 
-        Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
+        # One route-helper observation. Carries no path/location — the
+        # caller (the `node_rule` block) positions it via
+        # `Plugin::Base#diagnostic`.
+        Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
 
@@ -76,70 +79,45 @@ module Rigor
         # @param root [Prism::Node]
         # @param helper_table [HelperTable]
         # @return [Array<Diagnostic>]
-        def diagnose(path:, root:, helper_table:)
+        # The route-helper violations for a single call node (0..2),
+        # or `[]` when the node is not an implicit `*_path` / `*_url`
+        # helper call, is shadowed by a same-file binding, or is in a
+        # suppressed directory. ADR-37: the engine owns the walk; the
+        # same-file `shadowing` set is built once as the node-rule file
+        # context.
+        #
+        # @param call_node [Prism::Node]
+        # @param helper_table [HelperTable]
+        # @param shadowing [Set<String>]
+        # @param path [String]
+        # @return [Array<Violation>]
+        def violations_for(call_node:, helper_table:, shadowing:, path:)
+          return [] unless call_node.is_a?(Prism::CallNode) && implicit_helper_call?(call_node)
+
+          name = call_node.name.to_s
+          return [] if BUILTIN_PASSTHROUGH.include?(name)
+          return [] if shadowing.include?(name)
+
+          # The SKIP set silences both `unknown-helper` and `wrong-arity`:
+          # a `group_path` inside `app/services/...` is more likely the
+          # file's own method (an `attr_accessor`) than a route helper.
           suppress_unknown = SKIP_UNKNOWN_HELPER_PATHS.any? { |re| path.match?(re) }
-          # Same SKIP set silences `wrong-arity` too. A call
-          # like `group_path` inside `app/services/groups/nested_
-          # create_service.rb` is almost certainly the service's
-          # own instance method (`attr_accessor :group_path`) —
-          # both the unknown-helper check and the arity check
-          # against a registered route helper would FP.
-          diagnostics = []
-          # Pre-walk the file to collect every name that
-          # shadows a route helper at call time: `let(:foo)`,
-          # `subject(:foo)`, `def foo`, and explicit local
-          # assignments (`foo_url = "..."`). At the call site
-          # `foo` then resolves to the shadowing local, not to
-          # the registered route helper — firing `unknown-helper`
-          # / `wrong-arity` against the helper would be a false
-          # positive against canonical RSpec idioms (Mastodon
-          # has 200+ such patterns in `spec/`).
-          shadowing = collect_shadowing_names(root)
 
-          walk(root) do |call_node|
-            name = call_node.name.to_s
-            next unless name.end_with?("_path") || name.end_with?("_url")
-            next if BUILTIN_PASSTHROUGH.include?(name)
-            next if shadowing.include?(name)
+          entry = helper_table.find(name)
+          if entry
+            return [] if suppress_unknown
 
-            entry = helper_table.find(name)
-            if entry
-              # When the file is in a `SKIP_UNKNOWN_HELPER_PATHS`
-              # directory (models / services / workers / lib /
-              # …), don't emit the info or arity diagnostic
-              # against a registered helper either — the call
-              # is more likely the file's own instance method
-              # (e.g. `group_path` as an `attr_accessor`) that
-              # happens to share a name with a registered
-              # route helper. The unknown-helper suppression
-              # already silences the inverse case.
-              next if suppress_unknown
-
-              diagnostics << info_diagnostic(path, call_node, entry)
-              arity_diagnostic = arity_check(path, call_node, entry, helper_table)
-              diagnostics << arity_diagnostic if arity_diagnostic
-            elsif helper_table.recognised?(name)
-              # Custom helper (discovered via
-              # `app/helpers/**/*.rb`) or a dynamic-provider
-              # Devise OmniAuth helper. We do NOT have an
-              # arity / path to validate — the helper is just
-              # known-to-exist. Skip the arity / info
-              # diagnostic; the absence of an `unknown-helper`
-              # error is the user-visible outcome.
-              next
-            elsif suppress_unknown
-              # File is in a directory where route helpers are
-              # not customarily resolved (models / lib / db /
-              # config). Skip `unknown-helper` to avoid false
-              # positives on AR column accessors / gem-side
-              # instance methods that happen to end in `_url` /
-              # `_path`.
-              next
-            else
-              diagnostics << unknown_helper_diagnostic(path, call_node, name, helper_table)
-            end
+            violations = [info_violation(entry)]
+            arity = arity_violation(call_node, entry, helper_table, path)
+            violations << arity if arity
+            violations
+          elsif helper_table.recognised?(name) || suppress_unknown
+            # Recognised custom / dynamic helper (no arity to check), or
+            # a directory where helpers aren't customarily resolved.
+            []
+          else
+            [unknown_helper_violation(name, helper_table)]
           end
-          diagnostics
         end
 
         # Walks the AST once and returns the Set of names that
@@ -156,23 +134,17 @@ module Rigor
         #   (`foo_url = "..."`).
         def collect_shadowing_names(root)
           names = Set.new
-          walk_for_shadowing(root, names)
-          names
-        end
-
-        def walk_for_shadowing(node, names)
-          return unless node.is_a?(Prism::Node)
-
-          case node
-          when Prism::DefNode
-            names << node.name.to_s if node.receiver.nil?
-          when Prism::LocalVariableWriteNode
-            names << node.name.to_s
-          when Prism::CallNode
-            record_let_like_name(node, names)
+          Source::NodeWalker.each(root) do |node|
+            case node
+            when Prism::DefNode
+              names << node.name.to_s if node.receiver.nil?
+            when Prism::LocalVariableWriteNode
+              names << node.name.to_s
+            when Prism::CallNode
+              record_let_like_name(node, names)
+            end
           end
-
-          node.compact_child_nodes.each { |child| walk_for_shadowing(child, names) }
+          names
         end
 
         def record_let_like_name(call_node, names)
@@ -186,13 +158,6 @@ module Rigor
             # Bare `subject { ... }` defines `:subject` itself.
             names << "subject"
           end
-        end
-
-        def walk(node, &)
-          return unless node.is_a?(Prism::Node)
-
-          yield node if node.is_a?(Prism::CallNode) && implicit_helper_call?(node)
-          node.compact_child_nodes.each { |child| walk(child, &) }
         end
 
         # `*_path` / `*_url` calls without an explicit
@@ -223,20 +188,16 @@ module Rigor
           IMPLICIT_FILL_PATHS.any? { |re| path.match?(re) }
         end
 
-        def info_diagnostic(path, call_node, entry)
-          location = call_node.location
+        def info_violation(entry)
           method_label = entry.http_method ? entry.http_method.to_s.upcase : "*"
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :info,
             rule: "helper",
             message: "`#{entry.name}` → #{method_label} #{entry.path}"
           )
         end
 
-        def arity_check(path, call_node, entry, helper_table)
+        def arity_violation(call_node, entry, helper_table, path)
           args = call_node.arguments&.arguments || []
           actual = args.size
           # Uncountable nouns (`news` / `series` / `media`) cause
@@ -279,27 +240,19 @@ module Rigor
 
           arities = arities_set.sort
           expected = arities.length == 1 ? arities.first.to_s : "#{arities.first}..#{arities.last}"
-          location = call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :error,
             rule: "wrong-arity",
             message: "`#{entry.name}` expects #{expected} argument(s), got #{actual}"
           )
         end
 
-        def unknown_helper_diagnostic(path, call_node, name, helper_table)
-          location = call_node.location
+        def unknown_helper_violation(name, helper_table)
           suggestion = did_you_mean(name, helper_table.names)
           message = "no route helper `#{name}`"
           message += " (did you mean `#{suggestion}`?)" if suggestion
 
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :error,
             rule: "unknown-helper",
             message: message

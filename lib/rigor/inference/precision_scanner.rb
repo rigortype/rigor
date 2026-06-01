@@ -10,7 +10,11 @@ module Rigor
     # engine recognises an AST node class (that is `CoverageScanner`'s job),
     # but whether the type it produces carries useful static information.
     #
-    # Each visited node is classified into one of eight precision tiers:
+    # Each visited *expression* node is classified into one of eight
+    # precision tiers (non-expression syntax nodes — argument /
+    # parameter lists, parameter declarations, hash pairs, statement
+    # wrappers, clause headers — are skipped; see
+    # {NON_EXPRESSION_NODE_TYPES}):
     #
     #   :constant         — Constant[T]: literal value known exactly
     #   :nominal          — Nominal/Singleton: class identity known
@@ -32,6 +36,59 @@ module Rigor
         constant nominal shaped refined bot
         dynamic_specific dynamic_top top
       ].freeze
+
+      # Prism node classes that do not denote a value-producing
+      # expression, so typing them is meaningless — they have no
+      # runtime value to carry a type. Counting them (they always fall
+      # to the `dynamic_top` fallback) silently diluted the precision
+      # ratio: on a real survey target (shugo/textbringer) they were
+      # ~49% of every "opaque" node, dragging the headline number ~13
+      # points below the true expression-level precision. We exclude
+      # them from BOTH numerator and denominator so the ratio measures
+      # what it claims to — the type quality of actual expressions.
+      #
+      # The set is deliberately CONSERVATIVE: only nodes that are
+      # unambiguously non-expressions in Ruby's grammar are listed —
+      # argument / parameter list containers and the parameter
+      # declarations inside them; the `key => value` pair node (its key
+      # and value are themselves walked and counted); the program /
+      # statements sequence wrappers (their value is the last child,
+      # already counted — listing them avoids double-counting); and the
+      # clause-header nodes whose body, not the header, carries the
+      # value. Anything that *could* be a value expression (`BlockNode`,
+      # `BeginNode`, `ImplicitNode`, `ParenthesesNode`, splats, …) is
+      # left in so a genuine inference gap stays visible.
+      #
+      # Compared by class NAME so a Prism version that lacks one of the
+      # newer node classes does not break loading.
+      NON_EXPRESSION_NODE_TYPES = %w[
+        Prism::ProgramNode
+        Prism::StatementsNode
+        Prism::ArgumentsNode
+        Prism::BlockArgumentNode
+        Prism::ParametersNode
+        Prism::BlockParametersNode
+        Prism::NumberedParametersNode
+        Prism::ItParametersNode
+        Prism::KeywordHashNode
+        Prism::RequiredParameterNode
+        Prism::OptionalParameterNode
+        Prism::RestParameterNode
+        Prism::KeywordRestParameterNode
+        Prism::BlockParameterNode
+        Prism::RequiredKeywordParameterNode
+        Prism::OptionalKeywordParameterNode
+        Prism::ForwardingParameterNode
+        Prism::NoKeywordsParameterNode
+        Prism::ImplicitRestNode
+        Prism::AssocNode
+        Prism::AssocSplatNode
+        Prism::WhenNode
+        Prism::InNode
+        Prism::ElseNode
+        Prism::EnsureNode
+        Prism::RescueNode
+      ].to_set.freeze
 
       TIER_RANK = TIERS.each_with_index.to_h.freeze
       private_constant :TIER_RANK
@@ -87,6 +144,8 @@ module Rigor
         total = 0
 
         Source::NodeWalker.each(root) do |node|
+          next if NON_EXPRESSION_NODE_TYPES.include?(node.class.name)
+
           type = scope_index[node].type_of(node)
           tier = classify(type)
           tier_counts[tier] += 1

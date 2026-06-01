@@ -135,39 +135,19 @@ module Rigor
       # (`type_args[0]`).
       OPTION_UNWRAP_METHODS = %i[unwrap unwrap! unwrap_or expect! expect_with!].freeze
 
-      def init(_services); end
-
-      # Slice 1 emits no diagnostics of its own — it is a pure
-      # precision contributor. The hook is present so the plugin
-      # satisfies the contract surface; it always returns an empty
-      # list.
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        []
-      end
-
-      def flow_contribution_for(call_node:, scope:)
-        return nil unless call_node.is_a?(Prism::CallNode)
-        return nil if scope.nil?
-
-        method_name = call_node.name
+      # ADR-37 slice 2 — a pure return-type contributor. The engine
+      # gates on the receiver being a known carrier class (so the block
+      # only runs on Result/Option receivers); the block then confirms
+      # the call is an unwrap method on an instantiated carrier and
+      # yields the carried `type_args[0]`.
+      dynamic_return receivers: (RESULT_CARRIERS + OPTION_CARRIERS) do |call_node, scope|
         receiver = call_node.receiver
-        return nil if receiver.nil?
+        next nil if receiver.nil?
 
         receiver_type = receiver_type_of(receiver, scope)
-        return nil unless receiver_type.is_a?(Rigor::Type::Nominal)
+        next nil unless receiver_type.is_a?(Rigor::Type::Nominal)
 
-        carried = carried_type(receiver_type, method_name)
-        return nil if carried.nil?
-
-        Rigor::FlowContribution.new(
-          return_type: carried,
-          provenance: Rigor::FlowContribution::Provenance.new(
-            source_family: "plugin.#{manifest.id}",
-            plugin_id: manifest.id,
-            node: call_node,
-            descriptor: nil
-          )
-        )
+        carried_type(receiver_type, call_node.name)
       end
 
       private

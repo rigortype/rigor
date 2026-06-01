@@ -34,6 +34,7 @@ Diagnostic identifiers are hierarchical so plugin authors, RBS metadata, and use
 | `flow.*` | Control-flow narrowing failures, equality and predicate refinement issues, fact-stability violations |
 | `compat.*` | RBS, rbs-inline, and Steep-compatible signature compatibility |
 | `rbs_extended.*` | `RBS::Extended` payload validity, version compatibility, and conflict reports |
+| `rbs.coverage.*` | RBS environment coverage / well-formedness telemetry. `rbs.coverage.missing-gem` reports locked gems with no available RBS; `rbs.coverage.synthesized-namespace` reports project `signature_paths:` RBS that declares qualified names (`class Foo::Bar`) without the enclosing namespace — invalid upstream (`rbs validate` rejects it), which Rigor synthesizes a `module` for so the signatures still resolve. Both authored `:info`. |
 | `plugin.<plugin-id>.*` | Plugin-contributed diagnostics |
 | `generated.<provider>.*` | Generated-signature provider diagnostics |
 | `hint.*` | Style and refactor suggestions, gated by configuration (for example `hint.role-generalization.*`) |

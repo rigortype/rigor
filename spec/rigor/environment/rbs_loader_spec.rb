@@ -305,6 +305,59 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
+  describe "missing-namespace synthesis (ADR-5 robustness)" do
+    # A project sig set that declares qualified names without ever
+    # declaring the enclosing namespace is invalid upstream (`rbs
+    # validate` rejects it); pre-fix every method on every such class
+    # degraded to Dynamic[Top] because `build_instance` raised
+    # `NoTypeFoundError`. The loader now synthesizes the missing
+    # `module` so the otherwise-inert signatures resolve.
+    let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-namespace-spec-") }
+
+    after { FileUtils.rm_rf(tmpdir) }
+
+    it "resolves an instance method declared under a never-declared namespace" do
+      File.write(
+        File.join(tmpdir, "qualified.rbs"),
+        "class Acme::Widget\n  def size: () -> Integer\nend\n"
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+      method = loader.instance_method(class_name: "Acme::Widget", method_name: :size)
+      expect(method).not_to be_nil
+      expect(method.method_types.map(&:to_s)).to eq(["() -> ::Integer"])
+    end
+
+    it "reports the synthesized namespace name(s), shallowest-first" do
+      File.write(
+        File.join(tmpdir, "nested.rbs"),
+        "class Acme::Sub::Widget\n  def size: () -> Integer\nend\n"
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+      expect(loader.synthesized_namespaces).to eq(["Acme", "Acme::Sub"])
+    end
+
+    it "is a no-op for a well-formed sig set that declares its namespace" do
+      File.write(
+        File.join(tmpdir, "wellformed.rbs"),
+        "module Acme\n  class Widget\n    def size: () -> Integer\n  end\nend\n"
+      )
+      loader = described_class.new(signature_paths: [tmpdir])
+      expect(loader.synthesized_namespaces).to eq([])
+      expect(loader.instance_method(class_name: "Acme::Widget", method_name: :size)).not_to be_nil
+    end
+
+    it "recovers the synthesized names from the marshalled env cache" do
+      File.write(
+        File.join(tmpdir, "qualified.rbs"),
+        "class Acme::Widget\n  def size: () -> Integer\nend\n"
+      )
+      cache_store = Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache"))
+      described_class.new(signature_paths: [tmpdir], cache_store: cache_store).send(:env) # populate cache
+      fresh = described_class.new(signature_paths: [tmpdir], cache_store: cache_store)
+      expect(fresh.synthesized_namespaces).to eq(["Acme"])
+    end
+  end
+
   describe "env via cache_store (v0.0.9 C2)" do
     let(:tmpdir) { Dir.mktmpdir("rigor-rbs-loader-env-spec-") }
     let(:cache_store) { Rigor::Cache::Store.new(root: File.join(tmpdir, ".rigor", "cache")) }

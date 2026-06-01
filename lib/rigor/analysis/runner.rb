@@ -106,6 +106,7 @@ module Rigor
         # nil-guards.
         @class_decl_paths_snapshot = {}.freeze
         @signature_paths_snapshot = [].freeze
+        @synthesized_namespaces_snapshot = [].freeze
         @cached_plugin_prepare_diagnostics = [].freeze
         @project_discovered_classes = {}.freeze
         @project_discovered_def_nodes = {}.freeze
@@ -141,6 +142,7 @@ module Rigor
         expansion = expand_paths(paths)
         @class_decl_paths_snapshot = {}.freeze
         @signature_paths_snapshot = []
+        @synthesized_namespaces_snapshot = []
 
         if @prebuilt
           adopt_prebuilt_project_scan(@prebuilt)
@@ -150,6 +152,7 @@ module Rigor
 
         diagnostics = pre_file_diagnostics(expansion)
         diagnostics += analyze_files(target_files(expansion))
+        diagnostics += rbs_synthesized_namespace_diagnostics
         diagnostics += rbs_extended_reporter_diagnostics
         diagnostics += boundary_cross_diagnostics
         diagnostics += source_rbs_synthesis_diagnostics
@@ -303,6 +306,16 @@ module Rigor
           dispatch_pool(files)
         else
           environment = resolve_sequential_environment(source_files: files)
+          # Snapshot the small synthesized-namespace name list (NOT the
+          # env — see the method comment) so #run can surface the
+          # malformed-RBS `:info` diagnostic without rebuilding the env.
+          # Gated on the project actually declaring `signature_paths:`:
+          # synthesis only matters for the project's own RBS, and
+          # `#synthesized_namespaces` forces the (otherwise-lazy) RBS env
+          # to build — doing so when there is no project sig set would
+          # warm `.rigor/cache` on a bare `--no-stats` run.
+          @synthesized_namespaces_snapshot =
+            project_signature_paths? ? (environment.rbs_loader&.synthesized_namespaces || []) : []
           result = files.flat_map { |path| analyze_file(path, environment) }
           if @collect_stats
             loader = environment.rbs_loader
@@ -1114,6 +1127,48 @@ module Rigor
         return [] if missing.empty?
 
         [build_rbs_coverage_missing_diagnostic(missing)]
+      end
+
+      # Robustness uplift companion (ADR-5) — when the project's
+      # `signature_paths:` RBS declared qualified names without their
+      # enclosing namespace, `RbsLoader` synthesizes the missing
+      # `module`s so the otherwise-inert signatures resolve. Surface a
+      # single `:info` diagnostic naming them so the user knows their
+      # sig set is malformed (`rbs validate` rejects it) and can fix it
+      # at the source. Authored `:info`: the analysis already succeeded;
+      # this is advisory, never a gate. Empty for a well-formed sig set.
+      def rbs_synthesized_namespace_diagnostics
+        synthesized = @synthesized_namespaces_snapshot
+        return [] if synthesized.nil? || synthesized.empty?
+
+        [build_rbs_synthesized_namespace_diagnostic(synthesized)]
+      end
+
+      # True when the project declares its own `signature_paths:` (the
+      # only place the qualified-name-without-namespace mistake lives).
+      def project_signature_paths?
+        paths = @configuration.signature_paths
+        !(paths.nil? || paths.empty?)
+      end
+
+      def build_rbs_synthesized_namespace_diagnostic(synthesized)
+        sample_size = 5
+        sample = synthesized.first(sample_size)
+        suffix = synthesized.size > sample_size ? ", and #{synthesized.size - sample_size} more" : ""
+        Diagnostic.new(
+          path: ".rigor.yml",
+          line: 1,
+          column: 1,
+          message: "#{synthesized.size} RBS namespace(s) under `signature_paths:` are " \
+                   "referenced by qualified declarations (e.g. `class Foo::Bar`) but never " \
+                   "declared: #{sample.join(', ')}#{suffix}. `rbs validate` rejects this; " \
+                   "Rigor synthesized the missing `module`(s) so the signatures still " \
+                   "resolve. Declare each (`module <name>` / `class <name>`) in your RBS to " \
+                   "make the sig set valid upstream.",
+          severity: :info,
+          rule: "rbs.coverage.synthesized-namespace",
+          source_family: :builtin
+        )
       end
 
       def build_rbs_coverage_missing_diagnostic(missing)

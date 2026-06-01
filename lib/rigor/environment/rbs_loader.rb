@@ -30,6 +30,14 @@ module Rigor
     # See docs/internal-spec/inference-engine.md for the binding contract.
     # rubocop:disable Metrics/ClassLength
     class RbsLoader
+      # Buffer name stamped on the `module` declarations synthesized by
+      # {.synthesize_missing_namespaces}. Re-read off the built env by
+      # {#synthesized_namespaces} so the analysis layer can surface an
+      # `:info` diagnostic naming the project's malformed-RBS namespaces
+      # — robust across the marshalled env cache, since the sentinel
+      # rides along on each synthetic declaration's location.
+      SYNTHETIC_NAMESPACE_BUFFER = "(rigor: synthesized namespaces)"
+
       class << self
         def default
           @default ||= new.freeze
@@ -72,7 +80,55 @@ module Rigor
           end
           env = RBS::Environment.from_loader(rbs_loader)
           add_virtual_rbs(env, virtual_rbs)
+          synthesize_missing_namespaces(env)
           env.resolve_type_names
+        end
+
+        # Robustness (ADR-5): a project whose RBS declares qualified
+        # names (`class Foo::Bar`) without ever declaring the enclosing
+        # namespace (`module Foo`) is invalid by upstream RBS rules —
+        # `RBS::DefinitionBuilder#build_instance` raises
+        # `NoTypeFoundError: Could not find ::Foo`, which the loader's
+        # fail-soft rescue turns into a silent dispatch miss (every
+        # method on every such class degrades to `Dynamic[Top]`). This
+        # is a common authoring mistake (e.g. shugo/textbringer ships a
+        # `sig/` that `rbs validate` itself rejects). Rather than let an
+        # otherwise-usable signature set contribute nothing, synthesize
+        # an empty `module` declaration for each undeclared enclosing
+        # namespace so the definitions build. We only ever add names
+        # that are absent — a genuinely-declared namespace (module or
+        # class, here or in a loaded gem) is left untouched.
+        def synthesize_missing_namespaces(env)
+          missing = collect_missing_namespaces(env)
+          return if missing.empty?
+
+          source = missing.map { |name| "module #{name}\nend\n" }.join
+          buffer = ::RBS::Buffer.new(name: SYNTHETIC_NAMESPACE_BUFFER, content: source)
+          _, directives, decls = ::RBS::Parser.parse_signature(buffer)
+          env.add_source(::RBS::Source::RBS.new(buffer, directives || [], decls || []))
+        rescue ::RBS::BaseError
+          # Fail-soft: synthesis is an opportunistic uplift, never a
+          # hard requirement. A parse failure here just leaves the env
+          # as it was (dispatch misses on the affected classes).
+          nil
+        end
+
+        # Returns the `::`-stripped names of every enclosing namespace
+        # that some declaration references but no declaration defines,
+        # shallowest-first so the synthesized source declares `Foo`
+        # before `Foo::Bar`.
+        def collect_missing_namespaces(env)
+          declared = env.class_decls.keys.to_set
+          missing = {}
+          env.class_decls.each_key do |type_name|
+            path = type_name.namespace.path
+            path.each_index do |i|
+              prefix = path[0..i]
+              full = ::RBS::TypeName.parse("::#{prefix.join('::')}")
+              missing[prefix.join("::")] = prefix.length unless declared.include?(full)
+            end
+          end
+          missing.sort_by { |_name, depth| depth }.map(&:first)
         end
 
         # ADR-32 WD4 — merge synthesised-from-source RBS strings
@@ -190,6 +246,29 @@ module Rigor
         @singleton_definition_cache = {}
         @class_known_cache = {}
         @hierarchy = RbsHierarchy.new(self)
+      end
+
+      # The enclosing namespaces {.synthesize_missing_namespaces} had to
+      # invent because the project's `signature_paths:` RBS declared
+      # qualified names (`class Foo::Bar`) without ever declaring `Foo`.
+      # Recovered by scanning the built env for class/module entries
+      # whose every declaration originated from the synthetic buffer, so
+      # the answer survives the marshalled-env cache (where no build-time
+      # collector would). Returns `::`-stripped names, shallowest-first.
+      # Empty for a well-formed sig set (the common case) and whenever
+      # the env failed to build.
+      def synthesized_namespaces
+        e = env
+        return [] if e.nil?
+
+        names = e.class_decls.filter_map do |type_name, entry|
+          decls = entry_declarations(entry)
+          next if decls.empty?
+          next unless decls.all? { |decl| synthetic_namespace_decl?(decl) }
+
+          type_name.to_s.sub(/\A::/, "")
+        end
+        names.sort_by { |name| name.count("::") }
       end
 
       # Returns true when an RBS class or module declaration with the given
@@ -545,6 +624,28 @@ module Rigor
       end
 
       private
+
+      # Collects the AST declaration nodes behind a `class_decls`
+      # entry. RBS 4's `ModuleEntry` / `ClassEntry` expose `each_decl`;
+      # the older single-`decl` shape is handled defensively so the
+      # loader survives an rbs-gem minor bump.
+      def entry_declarations(entry)
+        if entry.respond_to?(:each_decl)
+          [].tap { |acc| entry.each_decl { |decl| acc << decl } }
+        elsif entry.respond_to?(:decl)
+          [entry.decl]
+        else
+          []
+        end
+      end
+
+      # True when an AST declaration was emitted by
+      # {.synthesize_missing_namespaces} — identified by the sentinel
+      # buffer name on its location.
+      def synthetic_namespace_decl?(decl)
+        location = decl.respond_to?(:location) ? decl.location : nil
+        location&.buffer&.name.to_s == SYNTHETIC_NAMESPACE_BUFFER
+      end
 
       def constant_type_table
         @constant_type_table ||= begin

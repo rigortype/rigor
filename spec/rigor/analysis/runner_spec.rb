@@ -404,6 +404,51 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    it "emits `rbs.coverage.synthesized-namespace` :info when project RBS omits its namespace" do
+      Dir.mktmpdir("rigor-synth-namespace-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+        File.write(File.join(tmpdir, "code.rb"), "x = 1\n")
+        # Qualified declaration with no `module Acme` — invalid upstream.
+        File.write(File.join(tmpdir, "sig", "widget.rbs"), "class Acme::Widget\n  def size: () -> Integer\nend\n")
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [File.join(tmpdir, "code.rb")],
+            "signature_paths" => [File.join(tmpdir, "sig")]
+          )
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.synthesized-namespace" }
+
+          expect(diags.length).to eq(1)
+          expect(diags.first.severity).to eq(:info)
+          expect(diags.first.message).to include("Acme")
+          expect(diags.first.message).to include("rbs validate")
+        end
+      end
+    end
+
+    it "suppresses `rbs.coverage.synthesized-namespace` for a well-formed sig set" do
+      Dir.mktmpdir("rigor-synth-namespace-clean-") do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+        File.write(File.join(tmpdir, "code.rb"), "x = 1\n")
+        File.write(
+          File.join(tmpdir, "sig", "widget.rbs"),
+          "module Acme\n  class Widget\n    def size: () -> Integer\n  end\nend\n"
+        )
+
+        Dir.chdir(tmpdir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => [File.join(tmpdir, "code.rb")],
+            "signature_paths" => [File.join(tmpdir, "sig")]
+          )
+          result = described_class.new(configuration: configuration, cache_store: nil).run
+          diags = result.diagnostics.select { |d| d.rule == "rbs.coverage.synthesized-namespace" }
+
+          expect(diags).to be_empty
+        end
+      end
+    end
+
     describe "pre_eval: file-existence validation (ADR-17 slice 1)" do
       it "surfaces `pre-eval.file-not-found` :error for each missing pre_eval entry" do
         Dir.mktmpdir("rigor-pre-eval-missing-") do |tmpdir|

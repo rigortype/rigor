@@ -33,35 +33,31 @@ module Rigor
           ::ActionCable.server
         ].freeze
 
-        Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
+        # One broadcast observation. Carries no path/location — the
+        # caller (the `node_rule` block) positions it via
+        # `Plugin::Base#diagnostic`.
+        Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
 
-        # @param path [String]
-        # @param root [Prism::Node]
+        # The broadcast violations for a single call node, or `[]` when
+        # the node is not a `broadcast_to` / `ActionCable.server.broadcast`
+        # call this plugin recognises. ADR-37: the engine owns the walk.
+        #
+        # @param call_node [Prism::Node]
         # @param channel_index [ChannelIndex]
-        # @return [Array<Diagnostic>]
-        def diagnose(path:, root:, channel_index:)
-          diagnostics = []
-          walk(root) do |call_node|
-            case call_node.name
-            when :broadcast_to
-              diagnostics.concat(analyse_broadcast_to(path, call_node, channel_index))
-            when :broadcast
-              diagnostics.concat(analyse_server_broadcast(path, call_node, channel_index))
-            end
+        # @return [Array<Violation>]
+        def violations_for(call_node:, channel_index:)
+          return [] unless call_node.is_a?(Prism::CallNode)
+
+          case call_node.name
+          when :broadcast_to then analyse_broadcast_to(call_node, channel_index)
+          when :broadcast then analyse_server_broadcast(call_node, channel_index)
+          else []
           end
-          diagnostics
         end
 
-        def walk(node, &)
-          return unless node.is_a?(Prism::Node)
-
-          yield node if node.is_a?(Prism::CallNode)
-          node.compact_child_nodes.each { |child| walk(child, &) }
-        end
-
-        def analyse_broadcast_to(path, call_node, channel_index)
+        def analyse_broadcast_to(call_node, channel_index)
           class_name = constant_receiver_name(call_node.receiver)
           return [] if class_name.nil?
 
@@ -72,12 +68,12 @@ module Rigor
           return [] unless class_name.end_with?("Channel")
 
           entry = channel_index.find(class_name) || channel_index.find("::#{class_name}")
-          return [unknown_channel_diagnostic(path, call_node, class_name, channel_index)] if entry.nil?
+          return [unknown_channel_violation(class_name, channel_index)] if entry.nil?
 
-          [broadcast_target_info(path, call_node, entry)]
+          [broadcast_target_info(entry)]
         end
 
-        def analyse_server_broadcast(path, call_node, channel_index)
+        def analyse_server_broadcast(call_node, channel_index)
           receiver_path = call_chain_string(call_node.receiver)
           return [] unless SERVER_BROADCAST_RECEIVER_NAMES.include?(receiver_path)
 
@@ -88,60 +84,42 @@ module Rigor
           return [] if channel_index.any_dynamic_streams?
 
           stream_name = stream_arg.unescaped
-          if channel_index.all_stream_names.include?(stream_name)
-            return [server_broadcast_info(path, call_node, stream_name)]
-          end
+          return [server_broadcast_info(stream_name)] if channel_index.all_stream_names.include?(stream_name)
 
-          [unknown_stream_diagnostic(path, call_node, stream_name, channel_index)]
+          [unknown_stream_violation(stream_name, channel_index)]
         end
 
-        def broadcast_target_info(path, call_node, entry)
-          location = call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+        def broadcast_target_info(entry)
+          Violation.new(
             severity: :info,
             rule: "broadcast-target",
             message: "`#{entry.class_name}.broadcast_to(...)` matches discovered channel"
           )
         end
 
-        def server_broadcast_info(path, call_node, stream_name)
-          location = call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+        def server_broadcast_info(stream_name)
+          Violation.new(
             severity: :info,
             rule: "broadcast-stream",
             message: "`broadcast(\"#{stream_name}\", ...)` matches a registered `stream_from`"
           )
         end
 
-        def unknown_channel_diagnostic(path, call_node, class_name, channel_index)
-          location = call_node.location
+        def unknown_channel_violation(class_name, channel_index)
           suggestions = DidYouMean::SpellChecker.new(dictionary: channel_index.names).correct(class_name)
           suggestion_part = suggestions.empty? ? "" : " (did you mean `#{suggestions.first}`?)"
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :error,
             rule: "unknown-channel",
             message: "no ActionCable channel `#{class_name}`#{suggestion_part}"
           )
         end
 
-        def unknown_stream_diagnostic(path, call_node, stream_name, channel_index)
-          location = call_node.location
+        def unknown_stream_violation(stream_name, channel_index)
           dictionary = channel_index.all_stream_names.to_a
           suggestions = DidYouMean::SpellChecker.new(dictionary: dictionary).correct(stream_name)
           suggestion_part = suggestions.empty? ? "" : " (did you mean `\"#{suggestions.first}\"`?)"
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :warning,
             rule: "unknown-stream",
             message: "no `stream_from \"#{stream_name}\"` registration in any discovered " \

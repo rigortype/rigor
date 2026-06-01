@@ -31,35 +31,34 @@ module Rigor
 
         ENTRY_METHODS = (DIRECT_ENTRY_METHODS + SCHEDULED_ENTRY_METHODS).freeze
 
-        Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
+        # One worker-call observation: the kebab-case `rule`, `severity`,
+        # and human-readable `message`. Carries no path/location — the
+        # caller (the `node_rule` block) positions it via
+        # `Plugin::Base#diagnostic`.
+        Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
 
-        # @param path [String]
-        # @param root [Prism::Node]
+        # The worker-call violations for a single call node (0..2), or
+        # `[]` when the node is not a `<Worker>.perform_*` entry call on a
+        # known worker. ADR-37: the engine owns the walk.
+        #
+        # @param call_node [Prism::Node]
         # @param worker_index [WorkerIndex]
-        # @return [Array<Diagnostic>]
-        def diagnose(path:, root:, worker_index:)
-          diagnostics = []
-          walk(root) do |call_node|
-            class_name = constant_receiver_name(call_node.receiver)
-            next if class_name.nil?
+        # @return [Array<Violation>]
+        def violations_for(call_node:, worker_index:)
+          return [] unless call_node.is_a?(Prism::CallNode) && entry_call?(call_node)
 
-            entry = worker_index.find(class_name) || worker_index.find("::#{class_name}")
-            next if entry.nil?
+          class_name = constant_receiver_name(call_node.receiver)
+          return [] if class_name.nil?
 
-            diagnostics << info_diagnostic(path, call_node, entry)
-            arity_diag = arity_check(path, call_node, entry)
-            diagnostics << arity_diag if arity_diag
-          end
-          diagnostics
-        end
+          entry = worker_index.find(class_name) || worker_index.find("::#{class_name}")
+          return [] if entry.nil?
 
-        def walk(node, &)
-          return unless node.is_a?(Prism::Node)
-
-          yield node if node.is_a?(Prism::CallNode) && entry_call?(node)
-          node.compact_child_nodes.each { |child| walk(child, &) }
+          violations = [info_violation(call_node, entry)]
+          arity = arity_violation(call_node, entry)
+          violations << arity if arity
+          violations
         end
 
         def entry_call?(node)
@@ -67,12 +66,8 @@ module Rigor
             (node.receiver.is_a?(Prism::ConstantReadNode) || node.receiver.is_a?(Prism::ConstantPathNode))
         end
 
-        def info_diagnostic(path, call_node, entry)
-          location = call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+        def info_violation(call_node, entry)
+          Violation.new(
             severity: :info,
             rule: "worker-call",
             message: "`#{entry.class_name}.#{call_node.name}` matches `#perform` " \
@@ -80,24 +75,20 @@ module Rigor
           )
         end
 
-        def arity_check(path, call_node, entry)
+        def arity_violation(call_node, entry)
           all_args = (call_node.arguments&.arguments || []).size
           # Scheduled entries consume the first arg as the
           # schedule; the rest are forwarded.
           forwarded_count = SCHEDULED_ENTRY_METHODS.include?(call_node.name) ? all_args - 1 : all_args
 
           if SCHEDULED_ENTRY_METHODS.include?(call_node.name) && all_args.zero?
-            return missing_schedule_diagnostic(path, call_node, entry)
+            return missing_schedule_violation(call_node, entry)
           end
 
           return nil if forwarded_count.negative?
           return nil if entry.accepts?(forwarded_count)
 
-          location = call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :error,
             rule: "wrong-arity",
             message: "`#{entry.class_name}.#{call_node.name}` expects " \
@@ -106,12 +97,8 @@ module Rigor
           )
         end
 
-        def missing_schedule_diagnostic(path, call_node, entry)
-          location = call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+        def missing_schedule_violation(call_node, entry)
+          Violation.new(
             severity: :error,
             rule: "missing-schedule",
             message: "`#{entry.class_name}.#{call_node.name}` requires a schedule " \

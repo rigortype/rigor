@@ -184,6 +184,48 @@ RSpec.describe Rigor::CLI::PluginsCommand do
     end
   end
 
+  context "with --capabilities (ADR-37 extension-protocol catalogue)" do
+    before do
+      require "rigor-actionpack"
+      Rigor::Plugin.register(Rigor::Plugin::Actionpack) unless Rigor::Plugin.registered_for("actionpack")
+      File.write(".rigor.yml", <<~YAML)
+        paths: [.]
+        plugins:
+          - gem: rigor-actionpack
+            id: actionpack
+      YAML
+    end
+
+    it "lists the plugin's node_rule node types and consumed facts in text" do
+      status, out, = run(["--capabilities"])
+      expect(status).to eq(0)
+      expect(out).to include("Plugin capability catalogue")
+      expect(out).to include("node_rule: Prism::CallNode")
+      # Each Prism::CallNode rule is listed once, not per-rule.
+      expect(out.scan("Prism::CallNode").size).to eq(1)
+      expect(out).to include("consumes:")
+    end
+
+    it "emits a focused capability object in JSON" do
+      status, out, = run(["--capabilities", "--format", "json"])
+      expect(status).to eq(0)
+      parsed = JSON.parse(out)
+      expect(parsed.keys).to contain_exactly("configuration", "capabilities")
+      plugin = parsed["capabilities"].first
+      expect(plugin.keys).to contain_exactly(
+        "id", "gem", "version", "node_rule_types",
+        "dynamic_return_receivers", "type_specifier_methods", "produces", "consumes"
+      )
+      expect(plugin["node_rule_types"]).to eq(["Prism::CallNode"])
+    end
+
+    it "also surfaces the narrow protocols in the full report" do
+      _, out, = run(["--format", "json"])
+      plugin = JSON.parse(out)["plugins"].first
+      expect(plugin["node_rule_types"]).to eq(["Prism::CallNode"])
+    end
+  end
+
   it "rejects an unsupported --format" do
     File.write(".rigor.yml", "paths: [.]\nplugins: []\n")
     expect { run(["--format", "xml"]) }.to raise_error(OptionParser::InvalidArgument)

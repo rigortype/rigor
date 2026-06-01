@@ -13,7 +13,7 @@ module Rigor
     # tooling (SKILLs, CI, editor integrations) while text is
     # for interactive inspection. Rows are printed in the order
     # the loader resolved them.
-    class PluginsRenderer
+    class PluginsRenderer # rubocop:disable Metrics/ClassLength
       def initialize(rows:, configuration_path:)
         @rows = rows
         @configuration_path = configuration_path
@@ -42,7 +42,73 @@ module Rigor
         )
       end
 
+      # ADR-37 § "Machine-readable capability catalogue" — the focused
+      # per-plugin extension-protocol dump. Only loaded plugins appear
+      # (a plugin that failed to load contributes no capabilities), and
+      # each carries only the gate values an agent enumerates to learn
+      # what the plugin does: node-rule node types, dynamic-return
+      # receivers, type-specifier methods, and produced / consumed facts.
+      def capabilities_json
+        JSON.pretty_generate(
+          {
+            "configuration" => @configuration_path,
+            "capabilities" => loaded_rows.map { |row| capabilities_json_for(row) }
+          }
+        )
+      end
+
+      def capabilities_text
+        lines = ["Plugin capability catalogue (ADR-37 narrow extension protocols)", ""]
+        loaded = loaded_rows
+        if loaded.empty?
+          lines << "  (no plugins loaded)"
+        else
+          loaded.each_with_index do |row, index|
+            lines.concat(capability_lines(row))
+            lines << "" unless index == loaded.size - 1
+          end
+        end
+        lines.join("\n")
+      end
+
       private
+
+      def loaded_rows
+        @rows.select { |r| r[:status] == :loaded }
+      end
+
+      def capability_lines(row)
+        lines = ["  #{row[:id]}  v#{row[:version]}  (#{row[:gem]})"]
+        capability_surfaces(row).each { |surface| lines << "        #{surface}" }
+        lines << "        (no narrow extension protocols declared)" if lines.size == 1
+        lines
+      end
+
+      # The non-empty capability surfaces for a plugin, each as a
+      # `label: a, b, c` string. Data-driven so the catalogue stays a
+      # single source of truth shared between the text and JSON views.
+      def capability_surfaces(row)
+        [
+          ["node_rule", row[:node_rule_types]],
+          ["dynamic_return receivers", row[:dynamic_return_receivers]],
+          ["type_specifier methods", row[:type_specifier_methods]],
+          ["produces", row[:produces]],
+          ["consumes", row[:consumes]]
+        ].filter_map { |label, values| "#{label}: #{values.join(', ')}" if values.any? }
+      end
+
+      def capabilities_json_for(row)
+        {
+          "id" => row[:id],
+          "gem" => row[:gem],
+          "version" => row[:version],
+          "node_rule_types" => row[:node_rule_types],
+          "dynamic_return_receivers" => row[:dynamic_return_receivers],
+          "type_specifier_methods" => row[:type_specifier_methods],
+          "produces" => row[:produces],
+          "consumes" => row[:consumes]
+        }
+      end
 
       def header
         loaded = @rows.count { |r| r[:status] == :loaded }
@@ -99,6 +165,22 @@ module Rigor
         lines << "        owns_receivers: #{row[:owns_receivers].join(', ')}" if row[:owns_receivers].any?
         lines << "        produces: #{row[:produces].join(', ')}" if row[:produces].any?
         lines << "        consumes: #{row[:consumes].join(', ')}" if row[:consumes].any?
+        lines.concat(narrow_protocol_lines(row))
+        lines
+      end
+
+      # ADR-37 narrow extension protocols (node_rule / dynamic_return /
+      # type_specifier). Surfaced in the full report alongside the
+      # declarative surfaces; `--capabilities` is the focused view.
+      def narrow_protocol_lines(row)
+        lines = []
+        lines << "        node_rule: #{row[:node_rule_types].join(', ')}" if row[:node_rule_types].any?
+        if row[:dynamic_return_receivers].any?
+          lines << "        dynamic_return receivers: #{row[:dynamic_return_receivers].join(', ')}"
+        end
+        if row[:type_specifier_methods].any?
+          lines << "        type_specifier methods: #{row[:type_specifier_methods].join(', ')}"
+        end
         lines
       end
 
@@ -157,6 +239,9 @@ module Rigor
           "hkt_definitions" => row[:hkt_definitions],
           "protocol_contracts" => row[:protocol_contracts],
           "source_rbs_synthesizer" => row[:source_rbs_synthesizer],
+          "node_rule_types" => row[:node_rule_types],
+          "dynamic_return_receivers" => row[:dynamic_return_receivers],
+          "type_specifier_methods" => row[:type_specifier_methods],
           "load_error" => row[:load_error]
         }
       end

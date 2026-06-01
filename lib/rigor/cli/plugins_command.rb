@@ -32,7 +32,15 @@ module Rigor
     #   `trait_registries:` / `external_files:` /
     #   `type_node_resolvers:` / `hkt_registrations:` /
     #   `hkt_definitions:` / `protocol_contracts:` /
-    #   `source_rbs_synthesizer:`).
+    #   `source_rbs_synthesizer:`);
+    # - the ADR-37 narrow extension protocols read off the plugin
+    #   class — `node_rule` node types, `dynamic_return` receivers,
+    #   `type_specifier` methods.
+    #
+    # `--capabilities` switches to a focused catalogue of just the
+    # narrow-protocol gate values + produced/consumed facts (ADR-37
+    # § "Machine-readable capability catalogue") — the AI-legibility
+    # surface that lets an agent enumerate what every plugin does.
     #
     # Output formats: `text` (default, human-readable table) and
     # `json` (for tooling — SKILLs, CI gates, editor integrations).
@@ -52,7 +60,7 @@ module Rigor
     #   the RBS environment without conflict (requires constructing
     #   the Environment, which is heavier than the loader-only
     #   pass this slice does).
-    class PluginsCommand
+    class PluginsCommand # rubocop:disable Metrics/ClassLength
       USAGE = "Usage: rigor plugins [options]"
 
       def initialize(argv:, out: $stdout, err: $stderr)
@@ -69,7 +77,7 @@ module Rigor
         rows = build_rows(configuration)
 
         renderer = PluginsRenderer.new(rows: rows, configuration_path: config_path)
-        @out.puts(options.fetch(:format) == "json" ? renderer.json : renderer.text)
+        @out.puts(render(renderer, options))
 
         any_load_errors = rows.any? { |row| row.fetch(:status) == :load_error }
         return 1 if any_load_errors && options.fetch(:strict)
@@ -79,13 +87,32 @@ module Rigor
 
       private
 
+      # Picks the renderer view. `--capabilities` switches to the
+      # focused extension-protocol catalogue (ADR-37 § "Machine-readable
+      # capability catalogue") — per plugin, only the gate values that
+      # tell a reader (or an AI agent) exactly what the plugin
+      # contributes: the node-rule node types, the dynamic-return
+      # receivers, the type-specifier methods, and the produced /
+      # consumed facts. The default view stays the full activation report.
+      def render(renderer, options)
+        json = options.fetch(:format) == "json"
+        if options.fetch(:capabilities)
+          json ? renderer.capabilities_json : renderer.capabilities_text
+        else
+          json ? renderer.json : renderer.text
+        end
+      end
+
       def parse_options
-        options = { config: nil, format: "text", strict: false }
+        options = { config: nil, format: "text", strict: false, capabilities: false }
         OptionParser.new do |opts|
           opts.banner = USAGE
           opts.on("--config=PATH", "Path to the Rigor configuration file") { |v| options[:config] = v }
           opts.on("--format=FORMAT", "Output format: text (default) or json") { |v| options[:format] = v }
           opts.on("--strict", "Exit 1 if any plugin failed to load (CI gate)") { options[:strict] = true }
+          opts.on("--capabilities", "Emit the per-plugin extension-protocol catalogue (ADR-37)") do
+            options[:capabilities] = true
+          end
         end.parse!(@argv)
         validate!(options)
         options
@@ -165,7 +192,23 @@ module Rigor
         manifest = plugin.manifest
         identity_fields(gem_name, manifest, config)
           .merge(extension_fields(plugin, manifest))
+          .merge(narrow_protocol_fields(plugin))
           .merge(load_error: nil)
+      end
+
+      # ADR-37 narrow extension protocols. Unlike the 10 declarative
+      # manifest fields, these are class-level DSLs (`node_rule` /
+      # `dynamic_return` / `type_specifier`), so they are read off the
+      # plugin class rather than the manifest. The gate values — node
+      # types, receiver class names, specified method names — are the
+      # greppable, enumerable surface the capability catalogue exposes.
+      def narrow_protocol_fields(plugin)
+        klass = plugin.class
+        {
+          node_rule_types: klass.node_rules.map { |r| r[:node_type].name }.uniq,
+          dynamic_return_receivers: klass.dynamic_returns.flat_map { |r| r[:receivers] }.uniq,
+          type_specifier_methods: klass.type_specifiers.flat_map { |r| r[:methods] }.map(&:to_s).uniq
+        }
       end
 
       def identity_fields(gem_name, manifest, config)
@@ -225,6 +268,9 @@ module Rigor
           hkt_definitions: 0,
           protocol_contracts: 0,
           source_rbs_synthesizer: false,
+          node_rule_types: [],
+          dynamic_return_receivers: [],
+          type_specifier_methods: [],
           load_error: error&.message || "plugin did not register or could not be matched to a registered class"
         }
       end
@@ -299,6 +345,7 @@ module Rigor
             external_files: 0, type_node_resolvers: 0,
             hkt_registrations: 0, hkt_definitions: 0,
             protocol_contracts: 0, source_rbs_synthesizer: false,
+            node_rule_types: [], dynamic_return_receivers: [], type_specifier_methods: [],
             load_error: error.message
           }
         end

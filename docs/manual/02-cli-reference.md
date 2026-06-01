@@ -236,12 +236,24 @@ Report the activation status of every plugin configured in
 plugin's declared extension surfaces. See [Plugins](07-plugins.md).
 
 ```sh
-rigor plugins [--format=text|json] [--strict] [--config=PATH]
+rigor plugins [--format=text|json] [--strict] [--capabilities] [--config=PATH]
 ```
 
 Without `--strict` the command always exits `0`; with
 `--strict` it exits `1` when any plugin failed to load (a CI
-gate). Not to be confused with the singular `rigor plugin`.
+gate).
+
+`--capabilities` switches to the **extension-protocol
+catalogue** ([ADR-37](../adr/37-plugin-interface-segregation.md)):
+a focused, machine-readable map of what each loaded plugin
+contributes — the AST node types its `node_rule`s match, the
+receiver classes its `dynamic_return`s gate on, the methods its
+`type_specifier`s narrow, and the facts it `produces` /
+`consumes`. Combine with `--format=json` for tooling (an AI
+agent can enumerate every plugin's behaviour without reading a
+line of plugin source). The same narrow surfaces also appear in
+the default full report. Not to be confused with the singular
+`rigor plugin`.
 
 ## `rigor plugin`
 

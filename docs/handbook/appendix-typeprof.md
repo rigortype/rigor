@@ -304,10 +304,14 @@ mechanism, the same one Steep uses.
 
 ## What Rigor has and TypeProf does not
 
-- **Refinement carriers with automatic narrowing.**
-  `non-empty-string` from `unless s.empty?`, `positive-int`
-  from `n > 0` — Rigor tracks these; TypeProf widens them
-  away.
+- **Refinement carriers from value predicates.** Both tools do
+  flow-sensitive *occurrence typing* on type-identity predicates
+  (`is_a?`, `nil?`, `case`/`when`) — TypeProf included. What
+  Rigor adds is **refinement carriers**: a *value* predicate
+  like `unless s.empty?` or `n > 0` narrows into a named
+  refinement type (`non-empty-string`, `positive-int`). TypeProf
+  has no refinement-carrier concept, so those value-predicate
+  refinements widen back to `String` / `Integer`.
 - **Constant folding through method calls.** `"foo".upcase`
   resolves to `Constant<"FOO">`. TypeProf's output is
   `String`.

@@ -202,13 +202,13 @@ not a contract.
   vertices) and emits a `MethodCallBox`; the box's `@ret` is the call's value vertex.
 - **`def`** (`ast/method.rb`): registers a `MethodDefBox`; creates one vertex per formal
   param inside the body scope.
-- **`if`/branches** (`ast/control.rb`): **both arms' result vertices are unioned** into the
-  `if`'s result. **There is essentially no value/flow narrowing** — `if x.is_a?(String)`
-  does not retype `x` to `String` inside the arm the way Rigor's control-flow analysis
-  does. This is a real precision gap relative to Rigor refinements, and the appendix's
-  "Rigor has: refinement carriers with automatic narrowing; TypeProf widens them away" row
-  is grounded here. (Narrowing support has grown narrowly across versions; I did not find a
-  general occurrence-typing pass in v0.31.1 — flagged below.)
+- **`if`/branches** (`ast/control.rb`): **TypeProf DOES flow-sensitively narrow.**
+  `BranchNode#install0` calls `@cond.narrowings` (a `[then_narrowing, else_narrowing]`
+  pair), clones a fresh vertex per modified variable for each arm, and applies the
+  narrowing constraint inside the arm via `AST.with_narrowing` before unioning the arm
+  results into the `if`'s value. So `if x.is_a?(String)` **does** retype `x` to `String`
+  inside the then-arm. See §10a for the full mechanism — this corrects an earlier draft of
+  this note that wrongly claimed "no flow narrowing."
 
 ---
 
@@ -307,7 +307,7 @@ code, not judging it."*
 | "infers params from call sites: yes" | actual-arg vertex → formal-param vertex edges; param = union of all callers (§3) |
 | "re-interprets callee bodies" (vs Rigor's catalog lookup) | `MethodDefBox` re-runs as a graph node; no summary cache (§2, §3) |
 | "literal precision: widened to nominal" | `42`→`Integer` at `install0`; no `Constant` (§5) |
-| "no refinement/narrowing carriers" | `if` arms unioned; no general occurrence typing in v0.31.1 (§4) |
+| "no refinement *carriers*" (CORRECTED — TypeProf HAS occurrence-typing narrowing) | TypeProf narrows on `is_a?`/`nil?`/`!`/`case-when`/`&&`/`\|\|` (§10a); what it lacks vs Rigor is *refinement-type carriers* (value-predicate → named type like `non-empty-string`), not flow narrowing per se |
 | "RBS is the output product" | `Vertex#show` / `MethodDefBox#show` render RBS; errors are byproduct (§6, §8) |
 | "tests as mandatory fuel" | params only get types if a call site (or driver) supplies args (§3) |
 | Incremental / IDE-first (v2) | ChangeSet diff-rollback + ref-counted vertices + `update_rb_file` (§1) |
@@ -328,19 +328,14 @@ audit** remain partial because the working environment's tool output was degrade
 session (wrong Read offsets, truncated multi-match greps) and recording details off
 corrupted output would defeat the purpose of a normative note.
 
-- **Block/`yield` param fan-out — STILL PARTIAL.** Confirmed blocks are `Type::Proc`
-  vertices and that `builtin.rb` `proc_call` wires them via `ty.block.accept_args(...)` /
-  `ty.block.add_ret(...)`, but did NOT cleanly read the `accept_args` / `add_ret` bodies, so
-  the exact multi-param distribution (positional `a<-x, b<-y`), arity-mismatch handling, and
-  single-array auto-destructure (`yield [x,y]` into `{|a,b|}`) remain untraced line-by-line.
-- **Narrowing — RESOLVED (confirmed zero).** See §10. No flow-sensitive narrowing exists in
-  v0.31.1.
-- **Parser — RESOLVED (confirmed Prism).** See §10.
-- **Exact line numbers** drift between reads; cited mechanisms are verified, but treat
-  individual line numbers as ±a few and re-grep before quoting in normative docs. A full
-  line-number re-audit was deferred (degraded environment).
-- TypeProf requires **Ruby 3.3+** (README) and uses **Prism** — the latter now confirmed
-  from source (§10), the Ruby-version line not re-derived from the gemspec this pass.
+- **Block/`yield` param fan-out — RESOLVED.** See §10c. Positional `.zip` fan-out with a
+  single-arg/multi-param auto-destructure branch; return via escape boxes.
+- **Narrowing — RESOLVED (confirmed PRESENT, not absent).** See §10a. An earlier draft of
+  this note wrongly stated "zero narrowing"; TypeProf v0.31.1 has a full occurrence-typing
+  narrowing subsystem (`env/narrowing.rb`, `graph/filter.rb`, per-branch vertex cloning).
+- **Parser — RESOLVED (confirmed Prism ≥ 1.4.0, Ruby ≥ 3.3 from gemspec).** See §10b.
+- **Exact line numbers — RESOLVED.** Spot-audit found all cited entities within ±a few
+  lines (most exact). See §10e.
 
 ---
 
@@ -351,59 +346,116 @@ tool output was intermittently corrupted (Read returned wrong offsets; greps wit
 matches truncated to one line), so only findings backed by **coherent, repeated, internally
 consistent** code excerpts are recorded as confirmed; the rest stay explicitly partial.
 
-### 10a. Narrowing — CONFIRMED: zero flow-sensitive narrowing in v0.31.1
+> **Correction notice.** The first version of this §10 (committed earlier the same day)
+> stated "CONFIRMED: zero flow-sensitive narrowing." **That was wrong** — a verification
+> error caused by a degraded session in which a `grep narrow` returned empty (the command
+> had not actually run) and `ast/control.rb` was never read in full. A clean second pass
+> (direct full read of `control.rb` + two independent sub-agent traces, all agreeing) shows
+> TypeProf v0.31.1 has a **substantial occurrence-typing narrowing subsystem**. The text
+> below is the corrected finding. The lesson is recorded honestly because this note is meant
+> to be a normative reference.
 
-`ast/control.rb` (~444 lines) defines exactly the conditional nodes, and **every one folds
-its branches by plain union into a single result vertex, with no retyping of the condition
-subject**:
+### 10a. Narrowing — CONFIRMED PRESENT (occurrence typing on type-identity predicates)
 
-- `BranchNode#install0` (if / unless): installs `@cond` for its own type/effects, then
-  `then_val.add_edge(genv, ret)` and `else_val.add_edge(genv, ret)` (empty else →
-  `Source.new(genv.nil_type).add_edge(genv, ret)`). The condition result is never consulted
-  to narrow a variable in either arm.
-- `AndOrNode#install0` (and / or): `left.add_edge(genv, ret); right.add_edge(genv, ret)`.
-- `CaseNode#install0` (case/when, case/in): `@pivot.install(genv) if @pivot`; each `when`
-  condition is installed; each clause body's value is `.add_edge(genv, ret)`. **The pivot is
-  not narrowed inside any `when`/`in` clause.**
+`ast/control.rb` (737 lines) plus `env/narrowing.rb` and `graph/filter.rb` implement a real
+flow-sensitive narrowing pass. `grep -rin "narrow" lib/` returns **94** occurrences.
 
-Corroborating: `grep -rin "narrow" lib/` returns **0** occurrences across the whole tree.
-There is no per-branch local-environment cloning keyed on `is_a?` / `nil?` / `===`.
+**The engine** (`AST.with_narrowing`, `control.rb:17-50`): given a `Narrowing` (a
+`{var => Constraint}` map), it saves each variable's current vertex, derives a
+`narrowed_vtx = original_vtx.new_vertex(...)` then `constraint.narrow(...)` it, sets the
+narrowed vertex in the local env, runs the branch body via `yield`, then restores. Instance
+variables use a push/pop narrowing stack (`env.rb:403-416`).
 
-> This upgrades the appendix's "TypeProf widens refinements away / Rigor has narrowing,
-> TypeProf does not" row from "no general pass found" to **"confirmed: none, structurally"**.
-> The cause is the data model (one vertex per variable per scope, §4): flow-sensitivity would
-> require SSA-style vertex splitting that the monotone dataflow skeleton does not do.
+**Constraints** (`env/narrowing.rb`): `IsAConstraint`, `NilConstraint`, plus `AndConstraint`
+/ `OrConstraint` for composition. **Filters** (`graph/filter.rb`): `IsAFilter` (keep/exclude
+by class identity), `NilFilter` (keep/remove `nil`), `BotFilter` (prune unreachable arms).
 
-### 10b. Parser — CONFIRMED: Prism
+**Where narrowings come from** (`narrowings` returns a `[then, else]` pair):
+- `CallNode#narrowings` (`call.rb:266-305`): `recv.is_a?(Klass)` → `IsAConstraint` on the
+  receiver (then = is-a, else = is-not-a); `recv.nil?` → `NilConstraint`; `!e` swaps the
+  pair. **Only when the receiver is a local- or instance-variable read** — not an arbitrary
+  expression.
+- `LocalVariableReadNode#narrowings` / ivar / `it` (`variable.rb:21-24, 71-74, 107-110`):
+  bare truthiness `if x` → `NilConstraint(false)` on the then-arm (removes `nil`).
+- `AndNode`/`OrNode` (`control.rb:461-467, 506-512`): compose child narrowings via
+  `.and`/`.or`, and apply the left operand's narrowing to the right operand at install time
+  (`control.rb:446-453, 490-498`).
 
-`ast.rb` `AST.create_node` dispatches on **Prism** node-type symbols:
+**Consumers:**
+- `BranchNode#install0` (if/unless, `control.rb:70-124`): per-arm vertex cloning +
+  `with_narrowing`; arms then `BotFilter`-pruned and joined.
+- `CaseNode`/`WhenNode` (`control.rb:254-395`): **pivot narrowing** — `case x; when Konst`
+  narrows `x` inside the clause via `IsAFilter` (only for `ConstantReadNode` conditions with
+  a `static_ret`, and only when the pivot is a local variable); the `else` clause applies the
+  negated exclusion filters.
+- `LoopNode` (while/until, `control.rb:159-162`): truthiness `NilFilter` on a bare-variable
+  condition.
+
+**What this means for the Rigor comparison (the important correction):** TypeProf is NOT
+"no narrowing." It has occurrence typing on **type-identity predicates** (`is_a?`, `nil?`,
+class-match in `case/when`, `&&`/`||` propagation). What it lacks relative to Rigor is
+**refinement-type carriers** — narrowing a *value predicate* (`s.empty?`, `n > 0`) into a
+**named refinement type** (`non-empty-string`, `positive-int`). Rigor's distinctive surface
+is the refinement lattice, not "having narrowing at all." The appendix wording must reflect
+this subtler line (fixed in the appendix alongside this note).
+
+Known limits (honest): predicate narrowing requires the receiver/subject to be a bare
+variable read; `case/in` pattern matching (`CaseMatchNode`, `control.rb:397-425`) installs
+patterns and unions clause results but shows **no pivot narrowing**; refinement-style value
+predicates are not modeled.
+
+### 10b. Parser — CONFIRMED: Prism ≥ 1.4.0, Ruby ≥ 3.3
+
+`ast.rb` parses via `Prism.parse(src)` (`ast.rb:~4`) and `AST.create_node` dispatches on
+Prism node-type symbols — `:if_node`/`:unless_node` → `IfNode`/`UnlessNode`,
+`:and_node`/`:or_node` → `AndNode`/`OrNode`, `:case_node` → `CaseNode`,
+`:case_match_node` → `CaseMatchNode`, `:while_node`/`:until_node` → `WhileNode`/`UntilNode`
+(`ast.rb:85-92`). Gemspec: `required_ruby_version >= 3.3`, `add_runtime_dependency "prism",
+">= 1.4.0"` and `"rbs", ">= 3.6.0"` (`typeprof.gemspec:17, 31`).
+
+### 10c. yield / block param fan-out — CONFIRMED
+
+A block passed at a call site is parsed in `ast/call.rb`: block formal params become
+`blk_f_args` (one vertex each) plus a `blk_f_ary_arg` array vertex, wrapped as
+`Block.new(self, blk_f_ary_arg, blk_f_args, block_body.lenv.next_boxes)` and carried as
+`Source.new(Type::Proc.new(genv, block))` (`call.rb:191`). The `Block` class lives at
+`env/method.rb:254-280`.
+
+Fan-out (`Block#accept_args`, `env/method.rb:265-273`), driven by `builtin.rb` `proc_call`
+(`builtin.rb:28-29`) with `a_args.positionals`:
 
 ```ruby
-case raw_node.type
-when :if_node, :unless_node then BranchNode.new(raw_node, lenv)
-when :and_node, :or_node    then AndOrNode.new(raw_node, lenv)
-when :case_node             then CaseNode.new(raw_node, lenv)
-when :while_node, :until_node then WhileNode.new(raw_node, lenv)
-...
+def accept_args(genv, changes, caller_positionals)
+  if caller_positionals.size == 1 && @f_args.size >= 2
+    changes.add_edge(genv, caller_positionals[0], @f_ary_arg)   # yield [x,y] → |a,b| auto-destructure
+  else
+    caller_positionals.zip(@f_args) do |a_arg, f_arg|           # yield x,y → |a,b| : a<-x, b<-y
+      changes.add_edge(genv, a_arg, f_arg) if f_arg
+    end
+  end
+end
 ```
 
-`:if_node` / `:case_node` / `:while_node` are Prism's node taxonomy. (The README's "Ruby
-3.3+" requirement is consistent with Prism being the bundled parser; the exact gemspec
-`required_ruby_version` line was not re-read cleanly this pass.)
+So: positional 1-to-1 `.zip` in the normal case; a **single yielded arg into a ≥2-param
+block auto-destructures** through `@f_ary_arg` (which is wired to each `@f_args[i]` via a
+`SplatBox` at block-install time). Excess yielded args are dropped (the `if f_arg` guard);
+no explicit arity-mismatch diagnostic on this path. Block return flows back via
+`Block#add_ret` (`env/method.rb:275-279`), edging each block-body escape box's return
+(`box.a_ret`) into the `yield` expression's `ret` vertex.
 
-### 10c. yield param fan-out — STILL PARTIAL
+### 10d. Diagnostic note
 
-Confirmed: a passed block becomes a `Type::Proc` (`type.rb:196-210`) carrying its block
-code; `builtin.rb` `proc_call` (~25-30) drives it via `ty.block.accept_args(genv, changes,
-a_args.positionals)` and `ty.block.add_ret(genv, changes, ret)`. NOT confirmed this pass:
-the `accept_args` / `add_ret` bodies, hence the exact positional fan-out, arity-mismatch
-behavior, and single-array auto-destructure semantics. Flagged for a clean re-read.
+The block fan-out and narrowing findings do not change §8: diagnostics remain a byproduct of
+box runs.
 
-### 10d. Line-number audit — DEFERRED
+### 10e. Line-number audit — CONFIRMED accurate
 
-Re-verifying individual citations off corrupted reads would risk recording wrong numbers,
-the opposite of the goal. The existing ±-few caveat stands; a full audit awaits a stable
-session.
+Spot-check of the citations in §1-§8 against the source: all within ±a few lines, most
+exact. `env.rb` `add_run` 176 / `run_all` 183-194 ✓; `vertex.rb` `on_type_added` 145-166 ✓,
+`BasicVertex#show` 24-66 ✓; `box.rb` `MethodCallBox` 1006 / `run0` 1024-1083 / ctor edges
+1010-1015 ✓, `MethodDefBox` 669 ✓, `MethodDeclBox` 237 ✓; `type.rb` `Type::Symbol` 229-244
+✓, `Type::Array` 110-169 ✓; `value.rb` `IntegerNode#install0` → `Source.new(genv.int_type)`
+(~66) ✓, `SymbolNode#install0` keeps the literal symbol (~98) ✓.
 
 ---
 
@@ -506,14 +558,17 @@ TypeProf.
    is a change of *purpose*, not of mechanism. A TypeProf that gates CI by default is a
    different tool with a different name.
 
-3. **No-narrowing is structural, not just unimplemented.**
-   Rigor's refinement narrowing (`non-empty-string` from `unless s.empty?`,
-   flow-sensitive retyping per branch) is a first-class control-flow analysis. TypeProf
-   unions both `if` arms (§4, `control.rb`) because its graph is "one vertex per variable
-   per scope" — flow-sensitivity needs SSA-style vertex splitting layered onto a monotone
-   dataflow skeleton. This *is* addable (listed as a hard 9a-adjacent item in prior
-   analysis), but it is a structural retrofit, not a tuning knob — it sits on the boundary
-   between "portable with heavy investment" and "fights the existing graph model."
+3. **Refinement-type *carriers* — not flow narrowing per se (CORRECTED).**
+   An earlier draft put "no narrowing" here. That is wrong: TypeProf already does
+   flow-sensitive occurrence typing on type-identity predicates (`is_a?`/`nil?`/`case-when`/
+   `&&`/`||`; §10a) — it clones per-branch vertices and applies `IsAFilter`/`NilFilter`. The
+   genuine divergence is narrower: Rigor narrows **value predicates** (`s.empty?`, `n > 0`)
+   into **named refinement carriers** (`non-empty-string`, `positive-int`) drawn from a
+   refinement lattice, and threads those carriers through inference and RBS::Extended.
+   TypeProf has no refinement-carrier concept — its narrowing filters by class identity and
+   nil-ness, not by value-predicate-named subtypes. So this is "portable in principle but a
+   large addition" (a new constraint/filter family + carrier lattice), not the structural
+   impossibility the earlier draft implied.
 
 4. **Asymmetric authorship (strict returns / lenient params) as an analyzer-wide law.**
    For Rigor this is a pervasive principle (ADR-5) shaping *every* authored type and the
@@ -524,8 +579,9 @@ TypeProf.
 
 ### 9c. One-line synthesis
 
-TypeProf can move toward Rigor on **precision** (9a.1 literals/refinements, 9a.3 narrowing
-adjacent) and **output manners** (9a.2 diagnostics, 9a.3 robustness, 9a.4 plugins) — all
+TypeProf can move toward Rigor on **precision** (9a.1 literal carriers; refinement-carrier
+narrowing per 9b.3 — it already has type-identity occurrence typing, §10a) and **output
+manners** (9a.2 diagnostics, 9a.3 robustness, 9a.4 plugins) — all
 without surrendering its identity. It **cannot** move toward Rigor on **scale** (9b.1) or
 **judgment philosophy** (9b.2) without becoming a different tool, because those are exactly
 what Rigor purchased by betting on local-inference-plus-catalog instead of whole-program

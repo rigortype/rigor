@@ -33,9 +33,9 @@ assert_type("Integer", t.wday)
 assert_type("Integer", t.utc_offset)
 
 # Boolean predicates — RBS-declared `bool` (`false | true`).
-assert_type("false | true", t.utc?)
-assert_type("false | true", t.sunday?)
-assert_type("false | true", t.dst?)
+assert_type("bool", t.utc?)
+assert_type("bool", t.sunday?)
+assert_type("bool", t.dst?)
 
 # String-returning leaves. `strftime` and the `iso8601` alias
 # (registered as `xmlschema` in Init_Time) both return `String`.

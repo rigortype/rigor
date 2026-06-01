@@ -29,7 +29,7 @@ assert_type("0", mask)
 # `Union[true, false]` — the codomain caps the result tighter
 # than the input cardinality would suggest.
 parity = [1, 2, 3].sample
-assert_type("false | true", parity > 2)
+assert_type("bool", parity > 2)
 
 # When the cartesian fold exceeds the output cap and every
 # result is an Integer, the analyzer widens to the bounding

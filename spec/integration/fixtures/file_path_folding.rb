@@ -33,7 +33,7 @@ assert_type("non-empty-string", File.dirname("/foo/bar.rb"))
 assert_type("String", File.extname("hello.rb"))
 assert_type("String", File.join("a", "b", "c.rb"))
 assert_type("[String, String]", File.split("/foo/bar.rb"))
-assert_type("false | true", File.absolute_path?("/foo"))
+assert_type("bool", File.absolute_path?("/foo"))
 
 # Filesystem-touching methods stay outside the FileFolding tier
 # regardless of mode — they have side effects.

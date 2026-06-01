@@ -25,5 +25,5 @@ b = p.is_even(4)
 
 # `bool` in RBS is `true | false`; Type#describe(:short)
 # renders it as `false | true`.
-assert_type("false | true", a)
-assert_type("false | true", b)
+assert_type("bool", a)
+assert_type("bool", b)

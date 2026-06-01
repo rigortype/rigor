@@ -42,10 +42,10 @@ assert_type("Integer", d.cweek)
 assert_type("Integer", d.cwday)
 
 # Boolean predicates — RBS-declared `bool` (`false | true`).
-assert_type("false | true", d.leap?)
-assert_type("false | true", d.julian?)
-assert_type("false | true", d.gregorian?)
-assert_type("false | true", d.sunday?)
+assert_type("bool", d.leap?)
+assert_type("bool", d.julian?)
+assert_type("bool", d.gregorian?)
+assert_type("bool", d.sunday?)
 
 # String-returning leaves. `to_s`, `iso8601`, and `strftime` all
 # return `String` per RBS.

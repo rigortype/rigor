@@ -30,7 +30,7 @@ assert_type("Integer", prc.arity)
 # `#lambda?` returns true / false per RBS — the carrier widens
 # to the explicit `false | true` union (the analyzer keeps the
 # disjunction rather than collapsing to the `bool` alias).
-assert_type("false | true", prc.lambda?)
+assert_type("bool", prc.lambda?)
 
 # Method — `Integer#method(:+)` returns a `Method` instance
 # bound to the receiver. The RBS sig for `Object#method` is

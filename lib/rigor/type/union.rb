@@ -24,8 +24,31 @@ module Rigor
         freeze
       end
 
+      # Display-only adoption of two concise RBS spellings for the
+      # union (see docs/type-specification/normalization.md § "Interaction
+      # with display" and rbs-compatible-types.md § "Optionals"). Both are
+      # purely cosmetic: `@members` keeps every carrier verbatim, so the
+      # underlying type identity, RBS erasure, and round-trip are unchanged
+      # — only the human-facing rendering reads like the RBS the user wrote.
+      #
+      #   * `true | false`           → `bool`   (the RBS boolean alias). The
+      #     `bool` token leads the rendering, so `false | Foo | true` reads
+      #     as `bool | Foo` rather than burying the pair mid-list.
+      #   * `T | nil`                → `T?`     (the RBS optional sugar). Only
+      #     applied when exactly one *logical* member remains beside `nil`,
+      #     matching the rbs gem's own `to_s`: a multi-member union such as
+      #     `Integer | String | nil` stays explicit rather than gaining a
+      #     parenthesised `(Integer | String)?`. The two collapses compose,
+      #     so `false | true | nil` reads as `bool?`.
       def describe(verbosity = :short)
-        members.map { |m| m.describe(verbosity) }.join(" | ")
+        return "#{optional_inner(verbosity)}?" if optional?
+
+        if boolean_pair?
+          rest = members.reject { |m| boolean_literal?(m) }
+          ["bool", *rest.map { |m| m.describe(verbosity) }].join(" | ")
+        else
+          members.map { |m| m.describe(verbosity) }.join(" | ")
+        end
       end
 
       # ADR-1 § "RBS round-trip is lossless" + the value-lattice
@@ -78,6 +101,47 @@ module Rigor
 
       def inspect
         "#<Rigor::Type::Union #{describe(:short)}>"
+      end
+
+      private
+
+      # Both `true` and `false` literals are present, so the pair can
+      # render as `bool`. A union carrying only one of them stays a
+      # plain literal (`true` / `false`) — that asymmetry is meaningful.
+      def boolean_pair?
+        members.any? { |m| boolean_literal?(m, true) } &&
+          members.any? { |m| boolean_literal?(m, false) }
+      end
+
+      def boolean_literal?(member, which = :either)
+        return false unless member.is_a?(Constant)
+
+        case which
+        when :either then member.value.equal?(true) || member.value.equal?(false)
+        else member.value.equal?(which)
+        end
+      end
+
+      def nil_literal?(member)
+        member.is_a?(Constant) && member.value.nil?
+      end
+
+      # `nil` is present and, once the `bool` pair is treated as a
+      # single logical member, exactly one non-`nil` member remains —
+      # so the whole union renders as `T?`. Counting the bool pair as
+      # one is what lets `false | true | nil` reach `bool?`.
+      def optional?
+        return false unless members.any? { |m| nil_literal?(m) }
+
+        significant = members.reject { |m| nil_literal?(m) }
+        logical = significant.size - (boolean_pair? ? 1 : 0)
+        logical == 1
+      end
+
+      def optional_inner(verbosity)
+        return "bool" if boolean_pair?
+
+        members.find { |m| !nil_literal?(m) }.describe(verbosity)
       end
     end
   end

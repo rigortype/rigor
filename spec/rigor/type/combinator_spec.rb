@@ -238,6 +238,65 @@ RSpec.describe Rigor::Type::Combinator do
       expect(a).to eq(b)
     end
 
+    describe "#describe bool collapse" do
+      let(:true_) { described_class.constant_of(true) }
+      let(:false_) { described_class.constant_of(false) }
+
+      it "collapses the true | false pair to bool" do
+        expect(described_class.union(true_, false_).describe).to eq("bool")
+      end
+
+      it "leads with bool and keeps the remaining members" do
+        union = described_class.union(true_, false_, described_class.nominal_of("Foo"))
+        expect(union.describe).to eq("bool | Foo")
+      end
+
+      it "does not collapse when only one boolean literal is present" do
+        union = described_class.union(true_, described_class.nominal_of("Foo"))
+        expect(union.describe).to eq([true_, described_class.nominal_of("Foo")]
+          .map { |t| t.describe(:short) }.sort.join(" | "))
+      end
+
+      it "leaves the underlying members and RBS erasure unchanged" do
+        union = described_class.union(true_, false_)
+        expect(union.members.size).to eq(2)
+        expect(union.erase_to_rbs).to eq("false | true")
+      end
+    end
+
+    describe "#describe optional (T?) collapse" do
+      let(:nil_) { described_class.constant_of(nil) }
+      let(:true_) { described_class.constant_of(true) }
+      let(:false_) { described_class.constant_of(false) }
+
+      it "renders a single non-nil member plus nil as T?" do
+        union = described_class.union(described_class.nominal_of("String"), nil_)
+        expect(union.describe).to eq("String?")
+      end
+
+      it "applies to a literal member too" do
+        union = described_class.union(described_class.constant_of("hello"), nil_)
+        expect(union.describe).to eq('"hello"?')
+      end
+
+      it "composes with the bool collapse so true | false | nil reads as bool?" do
+        union = described_class.union(true_, false_, nil_)
+        expect(union.describe).to eq("bool?")
+      end
+
+      it "stays explicit for a multi-member optional union" do
+        union = described_class.union(
+          described_class.nominal_of("Integer"), described_class.nominal_of("String"), nil_
+        )
+        expect(union.describe).to eq("Integer | String | nil")
+      end
+
+      it "does not apply the optional sugar to RBS erasure" do
+        union = described_class.union(described_class.nominal_of("String"), nil_)
+        expect(union.erase_to_rbs).to eq("String | nil")
+      end
+    end
+
     describe "#erase_to_rbs" do
       it "absorbs every member when one erases to untyped" do
         union = described_class.union(described_class.untyped, described_class.nominal_of("Integer"))

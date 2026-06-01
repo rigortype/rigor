@@ -53,7 +53,7 @@ assert_type("[Complex, Complex]", Complex.polar(1, 0).coerce(Complex(1, 0)))
 # when the receiver is `Constant<Complex>` — their C bodies
 # route through user-redefinable `==` / `<=>` / `to_s`, so the
 # analyzer conservatively bails to the RBS-tier answer.
-assert_type("Integer | nil", c <=> Complex(1, 1))
+assert_type("Integer?", c <=> Complex(1, 1))
 assert_type("String", c.to_s)
 assert_type("String", c.inspect)
 

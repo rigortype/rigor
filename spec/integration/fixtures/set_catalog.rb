@@ -22,13 +22,13 @@ assert_type("non-negative-int", s.length)
 # wider type stays the bool union (`false | true`) until a
 # refinement carrier like the empty-removal projection is added
 # for Set in a follow-up slice.
-assert_type("false | true", s.empty?)
+assert_type("bool", s.empty?)
 
 # `Set#include?` and its `member?` alias both classify as `:leaf`
 # and route through the catalog. The result type is the
 # RBS-declared `bool`.
-assert_type("false | true", s.include?(2))
-assert_type("false | true", s.member?(4))
+assert_type("bool", s.include?(2))
+assert_type("bool", s.member?(4))
 
 # Mutating selectors are blocklisted — even though the C-body
 # classifier flagged `Set#initialize_copy`, `#compare_by_identity`,

@@ -1,5 +1,5 @@
 ---
 locals:
-  a: false | true
-  b: false | true
+  a: bool
+  b: bool
   p: Parity

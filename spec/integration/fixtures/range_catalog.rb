@@ -32,8 +32,8 @@ assert_type("false", (1..5).member?(6))
 # `rb_funcall(begin)` / `rb_funcall(end)` for user-redefinable
 # `==`), so the fold tier conservatively bails. The RBS tier
 # answers with `bool` (`false | true`) for both branches.
-assert_type("false | true", (1..5) == (1..5))
-assert_type("false | true", (1..5).eql?(1..5))
+assert_type("bool", (1..5) == (1..5))
+assert_type("bool", (1..5).eql?(1..5))
 
 # Range#size on a fully unbounded `Constant<Range>` literal
 # folds to `Constant[Float::INFINITY]` (Range#size returns

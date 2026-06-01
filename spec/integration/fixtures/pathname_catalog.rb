@@ -48,4 +48,4 @@ assert_type("true", p1 == Pathname.new("/usr/bin/ruby"))
 # `Constant<Pathname>` receiver. The `nominal_for_name`
 # fallback path resolves them to the RBS-declared return type.
 exists = p1.exist?
-assert_type("false | true", exists)
+assert_type("bool", exists)

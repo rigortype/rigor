@@ -45,7 +45,7 @@ assert_type("1", r <=> Rational(1, 2))
 # routes equality through `rb_funcall(:==)` on the operands,
 # `nurat_fdiv` calls back into `rb_Float()`. The fold tier bails
 # and the RBS tier answers with the declared return type.
-assert_type("false | true", r == Rational(3, 4))
+assert_type("bool", r == Rational(3, 4))
 # `fdiv` is now folded through RATIONAL_BINARY — returns the actual Float.
 assert_type("0.375", r.fdiv(2))
 

@@ -20,35 +20,34 @@ module Rigor
       module Analyzer
         ENTRY_METHODS = %i[create build build_stubbed attributes_for create_list build_list build_stubbed_list].freeze
 
-        Diagnostic = Data.define(:path, :line, :column, :message, :severity, :rule)
+        # One violation. Carries its own `location` because a single
+        # entry call yields diagnostics at different positions — the
+        # matcher/method name (`message_loc`) for factory-call /
+        # unknown-factory, and the attribute key node for
+        # unknown-attribute. The caller positions each via
+        # `Plugin::Base#diagnostic(node, location:)`.
+        Violation = Data.define(:location, :message, :severity, :rule)
 
         module_function
 
-        def diagnose(path:, root:, factory_index:, model_index: nil)
-          diagnostics = []
+        # The violations for a single entry call (`FactoryBot.create(...)`
+        # etc.), or `[]` when the node is not an entry call or its first
+        # argument is not a literal factory name. ADR-37: the engine owns
+        # the walk.
+        #
+        # @param call_node [Prism::Node]
+        # @param factory_index [FactoryIndex]
+        # @param model_index [Hash, nil]
+        # @return [Array<Violation>]
+        def violations_for(call_node:, factory_index:, model_index: nil)
+          return [] unless entry_call?(call_node)
+
+          factory_name = first_positional_symbol_or_string(call_node)
+          return [] if factory_name.nil?
+
           spell_checker = DidYouMean::SpellChecker.new(dictionary: factory_index.names)
-
-          walk_entry_calls(root) do |call_node|
-            factory_name = first_positional_symbol_or_string(call_node)
-            next if factory_name.nil?
-
-            entry = factory_index.find(factory_name)
-            diagnostics.concat(
-              diagnostics_for_call(path, call_node, factory_name, entry, spell_checker, model_index)
-            )
-          end
-
-          diagnostics
-        end
-
-        # Walk the AST yielding only call nodes whose receiver
-        # is `FactoryBot` (or the `FactoryGirl` legacy alias)
-        # and whose method name is in {ENTRY_METHODS}.
-        def walk_entry_calls(node, &)
-          return unless node.is_a?(Prism::Node)
-
-          yield node if entry_call?(node)
-          node.compact_child_nodes.each { |child| walk_entry_calls(child, &) }
+          entry = factory_index.find(factory_name)
+          violations_for_call(call_node, factory_name, entry, spell_checker, model_index)
         end
 
         def entry_call?(node)
@@ -77,11 +76,11 @@ module Rigor
           end
         end
 
-        def diagnostics_for_call(path, call_node, factory_name, entry, spell_checker, model_index)
-          return [unknown_factory_diagnostic(path, call_node, factory_name, spell_checker)] if entry.nil?
+        def violations_for_call(call_node, factory_name, entry, spell_checker, model_index)
+          return [unknown_factory_violation(call_node, factory_name, spell_checker)] if entry.nil?
 
-          unknown_attribute_diagnostics(path, call_node, entry, model_index) +
-            [factory_call_diagnostic(path, call_node, factory_name, entry)]
+          unknown_attribute_violations(call_node, entry, model_index) +
+            [factory_call_violation(call_node, factory_name, entry)]
         end
 
         # The keyword-argument attribute keys come from the
@@ -98,7 +97,7 @@ module Rigor
         # accepts any AR attribute regardless of whether the
         # factory declared it, so the cross-check broadens the
         # acceptance accordingly.
-        def unknown_attribute_diagnostics(path, call_node, entry, model_index)
+        def unknown_attribute_violations(call_node, entry, model_index)
           accepted_keys, suggestion_dictionary = effective_keys(entry, model_index)
           attr_spell_checker = DidYouMean::SpellChecker.new(dictionary: suggestion_dictionary)
           attribute_assoc_nodes(call_node).filter_map do |assoc|
@@ -107,7 +106,7 @@ module Rigor
             attr_name = assoc.key.value
             next if accepted_keys.include?(attr_name)
 
-            unknown_attribute_diagnostic(path, assoc, entry, attr_name, attr_spell_checker)
+            unknown_attribute_violation(assoc, entry, attr_name, attr_spell_checker)
           end
         end
 
@@ -139,35 +138,34 @@ module Rigor
           last.elements.grep(Prism::AssocNode)
         end
 
-        def factory_call_diagnostic(path, call_node, factory_name, entry)
+        def factory_call_violation(call_node, factory_name, entry)
           loc = call_node.message_loc || call_node.location
           attrs = entry.attribute_names.empty? ? "(no attributes)" : entry.attribute_names.join(", ")
-          Diagnostic.new(
-            path: path, line: loc.start_line, column: loc.start_column + 1,
+          Violation.new(
+            location: loc,
             message: "FactoryBot.#{call_node.name}(:#{factory_name}) — declared attributes: #{attrs}.",
             severity: :info, rule: "factory-call"
           )
         end
 
-        def unknown_factory_diagnostic(path, call_node, factory_name, spell_checker)
+        def unknown_factory_violation(call_node, factory_name, spell_checker)
           loc = call_node.message_loc || call_node.location
           base = "FactoryBot.#{call_node.name}(:#{factory_name}) — factory not declared in any " \
                  "factory_search_paths file."
           suggestion = spell_checker.correct(factory_name).first
           message = suggestion ? "#{base} Did you mean `:#{suggestion}`?" : base
-          Diagnostic.new(
-            path: path, line: loc.start_line, column: loc.start_column + 1,
+          Violation.new(
+            location: loc,
             message: message, severity: :error, rule: "unknown-factory"
           )
         end
 
-        def unknown_attribute_diagnostic(path, assoc, entry, attr_name, spell_checker)
-          loc = assoc.key.location
+        def unknown_attribute_violation(assoc, entry, attr_name, spell_checker)
           base = "FactoryBot factory `:#{entry.name}` has no declared attribute `:#{attr_name}`."
           suggestion = spell_checker.correct(attr_name).first
           message = suggestion ? "#{base} Did you mean `:#{suggestion}`?" : base
-          Diagnostic.new(
-            path: path, line: loc.start_line, column: loc.start_column + 1,
+          Violation.new(
+            location: assoc.key.location,
             message: message, severity: :error, rule: "unknown-attribute"
           )
         end

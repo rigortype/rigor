@@ -109,14 +109,23 @@ module Rigor
         @model_index_resolved = false
       end
 
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+      # ADR-37 — per-call factory/attribute validation over the
+      # engine-owned walk. Each violation carries its own location
+      # (the call's message_loc, or the offending attribute key), so it
+      # is positioned via `diagnostic(node, location:)`. No file-level
+      # diagnostic remains, so there is no `diagnostics_for_file`.
+      node_rule Prism::CallNode do |node, _scope, path|
         index = factory_index_or_nil
-        return [] if index.nil? || index.empty?
+        next [] if index.nil? || index.empty?
 
-        Analyzer.diagnose(
-          path: path, root: root,
-          factory_index: index, model_index: model_index_or_nil
-        ).map { |diag| build_diagnostic(diag) }
+        Analyzer.violations_for(
+          call_node: node, factory_index: index, model_index: model_index_or_nil
+        ).map do |violation|
+          diagnostic(
+            node, path: path, location: violation.location,
+                  message: violation.message, severity: violation.severity, rule: violation.rule
+          )
+        end
       end
 
       private
@@ -142,13 +151,6 @@ module Rigor
         @factory_index = cache_for(:factory_index, params: {}, descriptor: descriptor).call
       rescue StandardError
         nil
-      end
-
-      def build_diagnostic(diag)
-        Rigor::Analysis::Diagnostic.new(
-          path: diag.path, line: diag.line, column: diag.column,
-          message: diag.message, severity: diag.severity, rule: diag.rule
-        )
       end
     end
 

@@ -68,21 +68,17 @@ module Rigor
         end
       end
 
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        return [] if @entries.empty?
+      # ADR-37 — the engine owns the AST walk and hands us every
+      # CallNode; we emit one diagnostic per call site that matches a
+      # configured deprecation. No hand-rolled traversal, no manual
+      # Diagnostic construction.
+      node_rule Prism::CallNode do |node, _scope, path|
+        next [] if @entries.empty?
 
-        diagnostics = []
-        walk(root) do |node|
-          next unless node.is_a?(Prism::CallNode)
+        entry = @entries.find { |candidate| matches?(node, candidate) }
+        next [] unless entry
 
-          @entries.each do |entry|
-            next unless matches?(node, entry)
-
-            diagnostics << build_diagnostic(path, node, entry)
-            break # one diagnostic per call site
-          end
-        end
-        diagnostics
+        [deprecation_diagnostic(node, path, entry)]
       end
 
       private
@@ -100,28 +96,18 @@ module Rigor
         node.slice
       end
 
-      def build_diagnostic(path, node, entry)
+      def deprecation_diagnostic(node, path, entry)
         suffix = []
         suffix << "since #{entry.since}" if entry.since
         suffix << "use: #{entry.replacement}" if entry.replacement
         tail = suffix.empty? ? "" : " (#{suffix.join('; ')})"
         receiver_label = entry.receiver ? "#{entry.receiver}." : ""
-        location = node.location
-        Rigor::Analysis::Diagnostic.new(
-          path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
-          message: "`#{receiver_label}#{entry.method_name}` is deprecated#{tail}",
-          severity: :warning,
-          rule: "deprecated-call"
+        diagnostic(
+          node, path: path,
+                message: "`#{receiver_label}#{entry.method_name}` is deprecated#{tail}",
+                severity: :warning,
+                rule: "deprecated-call"
         )
-      end
-
-      def walk(node, &)
-        return if node.nil?
-
-        yield node
-        node.compact_child_nodes.each { |child| walk(child, &) }
       end
     end
 

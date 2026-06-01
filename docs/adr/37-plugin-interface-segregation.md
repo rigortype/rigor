@@ -1,6 +1,24 @@
 # ADR-37 — Plugin interface segregation (narrow extension protocols)
 
-Status: **Proposed, 2026-06-02; Slice 1 (NodeRule) implemented.**
+Status: **Accepted, 2026-06-02; Slices 1–3 implemented.** Validated
+against the full bundled-plugin set: every diagnostic-emitting plugin is
+migrated off the `diagnostics_for_file` walker onto `node_rule`
+(`rigor-actionpack`, the last and most complex — 4 phases,
+namespace-qualification-sensitive — landed via the `NodeContext`
+ancestors), the `flow_contribution_for` split (`dynamic_return` /
+`type_specifier`) carries its cleanly-fitting consumers, and the
+machine-readable capability catalogue (`rigor plugins --capabilities`)
+ships. The fat hooks remain as the supported deprecated escape valve.
+**Deferred (non-gating, demand-driven):** the `dynamic_return`
+generalisation that would let the four escape-valve consumers
+(rspec-`let` / sorbet / activerecord / activestorage) migrate off
+`flow_contribution_for`, and the author-helper boilerplate-reduction
+follow-ons (`Base#suggest`, `config_schema` defaults, `Plugin::Inflector`
+— [boilerplate plan](../design/20260602-plugin-boilerplate-reduction-plan.md)
+Phase 0c–0e). The per-interface test harnesses (`NodeRuleTest` /
+`DynamicReturnTest`) named below are likewise deferred until a plugin
+author needs them; per-node testability is already reachable through the
+`Analyzer.*_violations_for` split the migrations established.
 
 **Slice 1 implemented (2026-06-02):** the `node_rule` class DSL on
 `Plugin::Base` + `Base#node_rule_diagnostics` (the engine-owned walk) +
@@ -25,11 +43,16 @@ migrated every cleanly-fitting consumer (`rigor-mangrove` → `dynamic_return`;
 the rest legitimately stay on the deprecated `flow_contribution_for` escape
 valve (two contribution shapes the narrow DSLs do not express — `rigor-rspec`'s
 `let`-binding, `rigor-sorbet`, `rigor-activerecord`, `rigor-activestorage`; see
-the slice 2 § "Outcome"). **Not yet done:** the deferred `dynamic_return`
-generalisation that would let the escape-valve consumers migrate,
-`FactProvider` naming (slice 3), the remaining `node_rule` migration
-(`rigor-actionpack`), and the capability catalogue. Thirteen plugins are
-migrated onto `node_rule` so far.
+the slice 2 § "Outcome"). **Slice 3 (2026-06-02):** the `FactProvider`
+naming + the machine-readable capability catalogue
+(`rigor plugins --capabilities`, see § "Machine-readable capability
+catalogue") landed, and `rigor-actionpack` — the last and most complex
+`diagnostics_for_file` walker — migrated onto `node_rule`, so **every
+bundled diagnostic-emitting plugin is now off the legacy walker**
+(fourteen on `node_rule`). **Not yet done (non-gating, demand-driven):**
+the deferred `dynamic_return` generalisation that would let the four
+escape-valve consumers migrate, and the author-helper boilerplate-reduction
+follow-ons (Phase 0c–0e).
 
 Records the decision to finish the interface-segregation work that
 [ADR-2](2-extension-api.md) started: split the two remaining *imperative*

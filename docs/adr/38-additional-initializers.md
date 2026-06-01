@@ -1,6 +1,13 @@
 # ADR-38 — Plugin-declared additional initializers
 
-Status: **Proposed, 2026-06-02.**
+Status: **Accepted, 2026-06-02.** The def-form
+`additional_initializers:` field + the `ScopeIndexer` nil-soundness-gate
+wiring are implemented, with `rigor-minitest` shipping the first
+declarations (`Minitest::Test` / `ActiveSupport::TestCase` /
+`Test::Unit::TestCase` → `setup`). The block-form variant (RSpec
+`before { }` / `let { }`, whose ivar writes live in a call block rather
+than a `DefNode`) is deferred to a follow-on slice — it needs the ivar
+write-collector to descend declared call blocks.
 
 Records the decision to add a plugin `Manifest` field,
 `additional_initializers:`, that lets a plugin declare which non-`initialize`

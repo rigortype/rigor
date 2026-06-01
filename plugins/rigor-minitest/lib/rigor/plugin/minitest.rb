@@ -74,13 +74,12 @@ module Rigor
         ]
       )
 
-      # Pillar 2 Slice 1 (rigor-minitest sibling) — emits
-      # `post_return_facts` for every recognised assertion. The
-      # engine routes `:local`-kind facts through
-      # `StatementEvaluator#apply_local_post_return_fact` (added
-      # in v0.1.8 for the rigor-rspec slice).
-      def flow_contribution_for(call_node:, scope:)
-        AssertionAnalyzer.contribution_for(call_node, environment: scope&.environment)
+      # ADR-37 slice 2 — emits `post_return_facts` for every recognised
+      # assertion, method-gated by the engine. The engine routes
+      # `:local`-kind facts through
+      # `StatementEvaluator#apply_local_post_return_fact`.
+      type_specifier methods: AssertionAnalyzer::SUPPORTED_METHODS do |call_node, scope|
+        AssertionAnalyzer.contribution_for(call_node, environment: scope&.environment)&.post_return_facts
       end
     end
 

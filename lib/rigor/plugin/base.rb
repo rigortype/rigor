@@ -118,7 +118,10 @@ module Rigor
         # through `instance_exec` so `self` is the plugin instance —
         # `config`, `services`, `io_boundary`, `diagnostic`, and the
         # cross-plugin `services.fact_store` are all in scope. It
-        # receives `(node, scope, path)` and MUST return an Array of
+        # receives `(node, scope, path, file_context)` — the fourth
+        # argument is the value built by {.node_file_context} for a
+        # two-pass plugin, `nil` otherwise, and may be omitted from the
+        # block's parameter list — and MUST return an Array of
         # `Rigor::Analysis::Diagnostic` (an empty array to fire
         # nothing); the runner stamps `plugin.<id>` provenance.
         #
@@ -143,6 +146,43 @@ module Rigor
         # the loader instantiates one subclass per registration.
         def node_rules
           (@node_rules || []).dup.freeze
+        end
+
+        # ADR-37 slice 1c — declares a per-file context builder for a
+        # two-pass (collect-then-validate) plugin. The block runs once
+        # per analysed file (via `instance_exec`, so the plugin instance
+        # is `self`) BEFORE any node rule fires, receives `(root, scope)`,
+        # and returns an arbitrary file-local value that is threaded to
+        # every {.node_rule} block as its fourth argument:
+        #
+        #   node_file_context do |root, _scope|
+        #     collect_declared_states(root)        # the "collect" pass
+        #   end
+        #
+        #   node_rule Prism::CallNode do |node, _scope, path, states|
+        #     next [] unless transition_call?(node)
+        #     validate(node, path, states)         # the "validate" pass
+        #   end
+        #
+        # This is what lets a same-file two-pass plugin drop its
+        # hand-rolled validate walk: the collect pass computes the closed
+        # namespace once (it MUST complete before validation because a
+        # reference may precede its declaration), and the engine owns the
+        # validate walk. A cross-file collect belongs in `#prepare` +
+        # `services.fact_store` instead — a node rule reads the fact
+        # directly and needs no per-file context.
+        #
+        # Only one builder per plugin; a second declaration replaces the
+        # first. The block result is `nil` when none is declared.
+        def node_file_context(&block)
+          raise ArgumentError, "Plugin::Base.node_file_context requires a block body" if block.nil?
+
+          @node_file_context_block = block
+        end
+
+        # The declared per-file context builder block, or nil.
+        def node_file_context_block
+          defined?(@node_file_context_block) ? @node_file_context_block : nil
         end
       end
 
@@ -245,12 +285,18 @@ module Rigor
         rules = self.class.node_rules
         return [] if rules.empty? || root.nil?
 
+        # ADR-37 slice 1c — build the per-file context once (the
+        # "collect" pass) before the engine-owned validate walk, so a
+        # two-pass plugin sees the closed namespace at every node.
+        context_block = self.class.node_file_context_block
+        file_context = context_block ? instance_exec(root, scope, &context_block) : nil
+
         diagnostics = []
         Source::NodeWalker.each(root) do |node|
           rules.each do |rule|
             next unless node.is_a?(rule[:node_type])
 
-            diagnostics.concat(Array(instance_exec(node, scope, path, &rule[:block])))
+            diagnostics.concat(Array(instance_exec(node, scope, path, file_context, &rule[:block])))
           end
         end
         diagnostics

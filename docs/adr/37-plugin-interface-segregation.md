@@ -11,10 +11,13 @@ node to the rules whose `node_type` it satisfies, `instance_exec`'d on the
 plugin instance, so authors never hand-roll a traversal. It runs alongside
 the legacy `diagnostics_for_file` (now conceptually the `FileRule` escape
 valve), is a zero-cost no-op for plugins that declare no rules, and is
-isolated by the same per-plugin `rescue` boundary. The slice-1 working
-decisions are pinned below. **Not yet done:** the `flow_contribution_for`
-split (slice 2), `FactProvider` naming (slice 3), bundled-plugin migration
-(slice 4), and the capability catalogue.
+isolated by the same per-plugin `rescue` boundary. Slice 1c adds
+`node_file_context` for two-pass (collect-then-validate) plugins. The slice-1
+working decisions are pinned below. **Not yet done:** the
+`flow_contribution_for` split (slice 2), `FactProvider` naming (slice 3),
+full bundled-plugin migration (slice 4; `rigor-deprecations`,
+`rigor-rspec-rails`, and `rigor-statesman` migrated so far), and the
+capability catalogue.
 
 Records the decision to finish the interface-segregation work that
 [ADR-2](2-extension-api.md) started: split the two remaining *imperative*
@@ -270,11 +273,35 @@ incremental.
   (lexical class/method/visibility) ADR-2 promised but never delivered stays
   deferred — `scope` already carries `self_type` and the narrowing facts most
   rules need; `path` is supplied for `diagnostic(node, path:)`.
-- **Two-pass (collect-then-validate) plugins stay on `diagnostics_for_file`
-  for now.** A per-node `NodeRule` cannot express a file-local collect pass
-  (e.g. statesman gathering declared states before validating transitions); a
-  future enhancement (an optional per-file pre-pass hook, or expressing the
-  collect set as a `FactProvider`) is deferred until the migration needs it.
+- **Two-pass (collect-then-validate) plugins** — *resolved in slice 1c (see
+  below).* A per-node `NodeRule` cannot express a file-local collect pass in
+  the engine's single forward walk (a reference may precede its declaration),
+  so a `node_file_context` pre-pass hook supplies it.
+
+### Slice 1c — two-pass support (`node_file_context`, implemented)
+
+`node_file_context { |root, scope| … }` runs once per file (via `instance_exec`)
+before any node rule fires and returns an arbitrary file-local value threaded
+to every `node_rule` block as its **fourth argument**. This is what lets a
+*same-file* two-pass plugin drop its hand-rolled validate walk: the collect
+pass computes the closed namespace once (it must complete before validation),
+and the engine owns the validate walk. The fourth block arg is backward-
+compatible — existing three-parameter blocks ignore it.
+
+The split between the two two-pass shapes is deliberate:
+
+- **Same-file collect** (e.g. statesman gathering declared states) → use
+  `node_file_context`. The collect pass itself uses the shared
+  `Source::NodeWalker`, so no hand-rolled traversal remains.
+- **Cross-file collect** (e.g. activerecord's model index from `db/schema.rb`
+  + `app/models`) → already belongs in `#prepare` + `services.fact_store`
+  (the `FactProvider` surface). A node rule reads the published fact directly
+  and needs no per-file context.
+
+`rigor-statesman` is migrated as the first two-pass consumer: its `collect`
+becomes a `node_file_context`, its `validate` a `node_rule(Prism::CallNode)`,
+and both hand-rolled walks are gone (behaviour unchanged, integration spec
+green).
 
 ## Relationship to other ADRs
 

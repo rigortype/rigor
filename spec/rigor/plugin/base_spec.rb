@@ -237,6 +237,34 @@ RSpec.describe Rigor::Plugin::Base do
       root = Prism.parse("flagme").value
       expect(plugin.node_rule_diagnostics(path: "d.rb", scope: Rigor::Scope.empty, root: root)).to eq([])
     end
+
+    it "builds node_file_context per file and threads it as the rule's 4th argument" do
+      klass = Class.new(described_class) do
+        manifest(id: "twopass", version: "0.1.0")
+        node_file_context do |root, _scope|
+          root.statements.body.size
+        end
+        node_rule Prism::CallNode do |node, _scope, path, count|
+          [diagnostic(node, path: path, message: "count=#{count}", rule: "c")]
+        end
+      end
+
+      plugin = klass.new(services: services)
+      root = Prism.parse("foo\nbar").value
+      diags = plugin.node_rule_diagnostics(path: "d.rb", scope: Rigor::Scope.empty, root: root)
+      # Both CallNodes (foo, bar) see the same file context (statement
+      # count = 2), proving it was built before the walk and threaded.
+      expect(diags.map(&:message)).to eq(["count=2", "count=2"])
+    end
+
+    it "node_file_context requires a block" do
+      expect do
+        Class.new(described_class) do
+          manifest(id: "ctxless", version: "0.1.0")
+          node_file_context
+        end
+      end.to raise_error(ArgumentError, /requires a block/)
+    end
   end
 
   describe "#diagnostic" do

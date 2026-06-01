@@ -173,6 +173,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   PLUGIN_BASE_SINGLETON = %w[
     manifest(keyrest:fields)
+    node_file_context(block:block)
+    node_file_context_block()
     node_rule(req:node_type,block:block)
     node_rules()
     producer(req:id,key:serialize,key:deserialize,block:block)

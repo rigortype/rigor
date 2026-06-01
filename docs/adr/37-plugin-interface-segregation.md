@@ -20,12 +20,13 @@ surface is implemented** (the two DSLs + the two runner methods + the
 receiver-class / method-name gating, consulted at both dispatch sites
 alongside the deprecated `flow_contribution_for` fan-out — fully
 back-compatible, every existing consumer unchanged and green). Slice 2b
-migrated the two cleanly-fitting consumers (`rigor-mangrove` → `dynamic_return`,
-`rigor-minitest` → `type_specifier`); the rest legitimately stay on the
-deprecated `flow_contribution_for` escape valve (two contribution shapes the
-narrow DSLs do not express — see the slice 2 § "Outcome"). **Not yet done:**
-rspec matcher narrowing → `type_specifier` (fits), the deferred
-`dynamic_return` generalisation for the escape-valve consumers,
+migrated every cleanly-fitting consumer (`rigor-mangrove` → `dynamic_return`;
+`rigor-minitest` and `rigor-rspec`'s matcher narrowing → `type_specifier`);
+the rest legitimately stay on the deprecated `flow_contribution_for` escape
+valve (two contribution shapes the narrow DSLs do not express — `rigor-rspec`'s
+`let`-binding, `rigor-sorbet`, `rigor-activerecord`, `rigor-activestorage`; see
+the slice 2 § "Outcome"). **Not yet done:** the deferred `dynamic_return`
+generalisation that would let the escape-valve consumers migrate,
 `FactProvider` naming (slice 3), the remaining `node_rule` migration
 (`rigor-actionpack`), and the capability catalogue. Thirteen plugins are
 migrated onto `node_rule` so far.

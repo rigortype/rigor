@@ -322,15 +322,88 @@ one front-end over an LSP-shaped core.
 
 ## Could not fully confirm (honest flags)
 
-- **Block/`yield` param fan-out:** confirmed blocks are `Type::Proc` vertices and are wired,
-  but did not trace the exact multi-param yield distribution line-by-line.
-- **Narrowing:** found no general occurrence-typing/flow-narrowing pass in v0.31.1, but did
-  not exhaustively read `ast/control.rb`; some special-cased narrowing may exist.
-- **Exact line numbers** drift between my reads and the Explore sub-agent's; cited
-  mechanisms are verified, but treat individual line numbers as ±a few and re-grep before
-  quoting in normative docs.
-- TypeProf requires **Ruby 3.3+** and uses **Prism** as its parser (gemspec / README) — not
-  re-derived here.
+Status after the 2026-06-01 verification pass (see next section): **Narrowing** and
+**Parser** are now confirmed first-hand; **yield distribution** and the **line-number
+audit** remain partial because the working environment's tool output was degraded that
+session (wrong Read offsets, truncated multi-match greps) and recording details off
+corrupted output would defeat the purpose of a normative note.
+
+- **Block/`yield` param fan-out — STILL PARTIAL.** Confirmed blocks are `Type::Proc`
+  vertices and that `builtin.rb` `proc_call` wires them via `ty.block.accept_args(...)` /
+  `ty.block.add_ret(...)`, but did NOT cleanly read the `accept_args` / `add_ret` bodies, so
+  the exact multi-param distribution (positional `a<-x, b<-y`), arity-mismatch handling, and
+  single-array auto-destructure (`yield [x,y]` into `{|a,b|}`) remain untraced line-by-line.
+- **Narrowing — RESOLVED (confirmed zero).** See §10. No flow-sensitive narrowing exists in
+  v0.31.1.
+- **Parser — RESOLVED (confirmed Prism).** See §10.
+- **Exact line numbers** drift between reads; cited mechanisms are verified, but treat
+  individual line numbers as ±a few and re-grep before quoting in normative docs. A full
+  line-number re-audit was deferred (degraded environment).
+- TypeProf requires **Ruby 3.3+** (README) and uses **Prism** — the latter now confirmed
+  from source (§10), the Ruby-version line not re-derived from the gemspec this pass.
+
+---
+
+## 10. Verification pass (2026-06-01) — resolving the honest flags
+
+Re-examined the four flagged items directly against the vendored source. The session's
+tool output was intermittently corrupted (Read returned wrong offsets; greps with multiple
+matches truncated to one line), so only findings backed by **coherent, repeated, internally
+consistent** code excerpts are recorded as confirmed; the rest stay explicitly partial.
+
+### 10a. Narrowing — CONFIRMED: zero flow-sensitive narrowing in v0.31.1
+
+`ast/control.rb` (~444 lines) defines exactly the conditional nodes, and **every one folds
+its branches by plain union into a single result vertex, with no retyping of the condition
+subject**:
+
+- `BranchNode#install0` (if / unless): installs `@cond` for its own type/effects, then
+  `then_val.add_edge(genv, ret)` and `else_val.add_edge(genv, ret)` (empty else →
+  `Source.new(genv.nil_type).add_edge(genv, ret)`). The condition result is never consulted
+  to narrow a variable in either arm.
+- `AndOrNode#install0` (and / or): `left.add_edge(genv, ret); right.add_edge(genv, ret)`.
+- `CaseNode#install0` (case/when, case/in): `@pivot.install(genv) if @pivot`; each `when`
+  condition is installed; each clause body's value is `.add_edge(genv, ret)`. **The pivot is
+  not narrowed inside any `when`/`in` clause.**
+
+Corroborating: `grep -rin "narrow" lib/` returns **0** occurrences across the whole tree.
+There is no per-branch local-environment cloning keyed on `is_a?` / `nil?` / `===`.
+
+> This upgrades the appendix's "TypeProf widens refinements away / Rigor has narrowing,
+> TypeProf does not" row from "no general pass found" to **"confirmed: none, structurally"**.
+> The cause is the data model (one vertex per variable per scope, §4): flow-sensitivity would
+> require SSA-style vertex splitting that the monotone dataflow skeleton does not do.
+
+### 10b. Parser — CONFIRMED: Prism
+
+`ast.rb` `AST.create_node` dispatches on **Prism** node-type symbols:
+
+```ruby
+case raw_node.type
+when :if_node, :unless_node then BranchNode.new(raw_node, lenv)
+when :and_node, :or_node    then AndOrNode.new(raw_node, lenv)
+when :case_node             then CaseNode.new(raw_node, lenv)
+when :while_node, :until_node then WhileNode.new(raw_node, lenv)
+...
+```
+
+`:if_node` / `:case_node` / `:while_node` are Prism's node taxonomy. (The README's "Ruby
+3.3+" requirement is consistent with Prism being the bundled parser; the exact gemspec
+`required_ruby_version` line was not re-read cleanly this pass.)
+
+### 10c. yield param fan-out — STILL PARTIAL
+
+Confirmed: a passed block becomes a `Type::Proc` (`type.rb:196-210`) carrying its block
+code; `builtin.rb` `proc_call` (~25-30) drives it via `ty.block.accept_args(genv, changes,
+a_args.positionals)` and `ty.block.add_ret(genv, changes, ret)`. NOT confirmed this pass:
+the `accept_args` / `add_ret` bodies, hence the exact positional fan-out, arity-mismatch
+behavior, and single-array auto-destructure semantics. Flagged for a clean re-read.
+
+### 10d. Line-number audit — DEFERRED
+
+Re-verifying individual citations off corrupted reads would risk recording wrong numbers,
+the opposite of the goal. The existing ±-few caveat stands; a full audit awaits a stable
+session.
 
 ---
 

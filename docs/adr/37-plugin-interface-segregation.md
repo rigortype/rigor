@@ -1,6 +1,20 @@
 # ADR-37 — Plugin interface segregation (narrow extension protocols)
 
-Status: **Proposed, 2026-06-02.**
+Status: **Proposed, 2026-06-02; Slice 1 (NodeRule) implemented.**
+
+**Slice 1 implemented (2026-06-02):** the `node_rule` class DSL on
+`Plugin::Base` + `Base#node_rule_diagnostics` (the engine-owned walk) +
+runner / worker-session wiring. A plugin declares
+`node_rule(Prism::CallNode) { |node, scope, path| … }`; the engine walks each
+file's AST once (via `Source::NodeWalker`) and dispatches every reachable
+node to the rules whose `node_type` it satisfies, `instance_exec`'d on the
+plugin instance, so authors never hand-roll a traversal. It runs alongside
+the legacy `diagnostics_for_file` (now conceptually the `FileRule` escape
+valve), is a zero-cost no-op for plugins that declare no rules, and is
+isolated by the same per-plugin `rescue` boundary. The slice-1 working
+decisions are pinned below. **Not yet done:** the `flow_contribution_for`
+split (slice 2), `FactProvider` naming (slice 3), bundled-plugin migration
+(slice 4), and the capability catalogue.
 
 Records the decision to finish the interface-segregation work that
 [ADR-2](2-extension-api.md) started: split the two remaining *imperative*
@@ -234,6 +248,33 @@ The existing `run_plugin` end-to-end harness stays for integration coverage.
 
 Slices 1–3 are engine-side and back-compatible; slice 4 is mechanical and
 incremental.
+
+### Slice 1 working decisions (implemented)
+
+- **Registration is a class DSL, not a manifest field.** `node_rule` mirrors
+  the existing `producer` DSL: the block runs through `instance_exec` so the
+  plugin instance (`config`, `services`, `io_boundary`, `diagnostic`,
+  `services.fact_store`) is in scope. A rule carries *logic* that needs the
+  instance, so it cannot be a pure manifest value object built at class-load
+  time like `block_as_methods` et al.
+- **The engine owns the walk in `Base#node_rule_diagnostics`**, not the
+  runner. Putting it on `Base` (over `Source::NodeWalker`) means the single
+  dispatch point is shared by both the runner and the worker session with a
+  one-line call each, and the walk is testable in isolation.
+- **`node_type` matches by `node.is_a?(node_type)`** (not exact class), so a
+  rule may register `Prism::Node` to see everything, or a concrete class for
+  the common case.
+- **Additive to `diagnostics_for_file`.** Both run; the legacy hook is the
+  `FileRule` escape valve, unchanged. No plugin is forced to migrate.
+- **The block receives `(node, scope, path)`.** The rich `ContextInfo`
+  (lexical class/method/visibility) ADR-2 promised but never delivered stays
+  deferred — `scope` already carries `self_type` and the narrowing facts most
+  rules need; `path` is supplied for `diagnostic(node, path:)`.
+- **Two-pass (collect-then-validate) plugins stay on `diagnostics_for_file`
+  for now.** A per-node `NodeRule` cannot express a file-local collect pass
+  (e.g. statesman gathering declared states before validating transitions); a
+  future enhancement (an optional per-file pre-pass hook, or expressing the
+  collect set as a `FactProvider`) is deferred until the migration needs it.
 
 ## Relationship to other ADRs
 

@@ -189,6 +189,56 @@ RSpec.describe Rigor::Plugin::Base do
     end
   end
 
+  describe ".node_rule / #node_rule_diagnostics (ADR-37)" do
+    let(:rule_plugin) do
+      Class.new(described_class) do
+        manifest(id: "noderule-demo", version: "0.1.0")
+        node_rule Prism::CallNode do |node, _scope, path|
+          next [] unless node.name == :flagme
+
+          [diagnostic(node, path: path, message: "flagged #{node.name}", rule: "flagged")]
+        end
+      end
+    end
+
+    it "records declared node rules in declaration order" do
+      expect(rule_plugin.node_rules.map { |r| r[:node_type] }).to eq([Prism::CallNode])
+    end
+
+    it "rejects a node_type that is not a Prism::Node subclass" do
+      expect do
+        Class.new(described_class) do
+          manifest(id: "bad-noderule", version: "0.1.0")
+          node_rule(String) { [] }
+        end
+      end.to raise_error(ArgumentError, /Prism::Node subclass/)
+    end
+
+    it "requires a block" do
+      expect do
+        Class.new(described_class) do
+          manifest(id: "blockless-noderule", version: "0.1.0")
+          node_rule(Prism::CallNode)
+        end
+      end.to raise_error(ArgumentError, /requires a block/)
+    end
+
+    it "owns the walk and fires matching rules for every reachable node" do
+      plugin = rule_plugin.new(services: services)
+      root = Prism.parse("flagme\nother\nflagme").value
+      diags = plugin.node_rule_diagnostics(path: "demo.rb", scope: Rigor::Scope.empty, root: root)
+      expect(diags.map(&:message)).to eq(["flagged flagme", "flagged flagme"])
+      expect(diags.map(&:rule)).to all(eq("flagged"))
+      expect(diags.first.column).to be > 0
+    end
+
+    it "is a zero-cost no-op for a plugin that declares no node rules" do
+      plugin = Class.new(described_class) { manifest(id: "none", version: "0.1.0") }.new(services: services)
+      root = Prism.parse("flagme").value
+      expect(plugin.node_rule_diagnostics(path: "d.rb", scope: Rigor::Scope.empty, root: root)).to eq([])
+    end
+  end
+
   describe "#diagnostic" do
     let(:plugin) do
       Class.new(described_class) { manifest(id: "demo", version: "0.1.0") }.new(services: services)

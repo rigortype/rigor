@@ -2,9 +2,11 @@
 
 require "digest"
 require "json"
+require "prism"
 
 require_relative "manifest"
 require_relative "../analysis/diagnostic"
+require_relative "../source/node_walker"
 
 module Rigor
   module Plugin
@@ -95,6 +97,53 @@ module Rigor
         def producers
           (@producers || {}).dup.freeze
         end
+
+        # ADR-37 slice 1 — declares a node-scoped diagnostic rule.
+        # The engine owns a single AST walk per file (see
+        # {#node_rule_diagnostics}) and dispatches each node to the
+        # rules registered for its type, so a plugin author writes the
+        # check, never the traversal:
+        #
+        #   class MyPlugin < Rigor::Plugin::Base
+        #     manifest(id: "demo", version: "0.1.0")
+        #
+        #     node_rule Prism::CallNode do |node, scope, path|
+        #       next [] unless node.name == :transition_to
+        #       [diagnostic(node, path: path, message: "…", rule: "x")]
+        #     end
+        #   end
+        #
+        # `node_type` is a `Prism::Node` subclass; the rule fires for
+        # every node where `node.is_a?(node_type)`. The block runs
+        # through `instance_exec` so `self` is the plugin instance —
+        # `config`, `services`, `io_boundary`, `diagnostic`, and the
+        # cross-plugin `services.fact_store` are all in scope. It
+        # receives `(node, scope, path)` and MUST return an Array of
+        # `Rigor::Analysis::Diagnostic` (an empty array to fire
+        # nothing); the runner stamps `plugin.<id>` provenance.
+        #
+        # Multiple rules for the same `node_type` are allowed and run
+        # in declaration order. This is the {.producer}-style class DSL
+        # rather than a manifest field because a rule carries logic that
+        # needs the plugin instance, not pure data.
+        def node_rule(node_type, &block)
+          raise ArgumentError, "Plugin::Base.node_rule requires a block body" if block.nil?
+          unless node_type.is_a?(Class) && node_type <= Prism::Node
+            raise ArgumentError,
+                  "Plugin::Base.node_rule node_type must be a Prism::Node subclass, got #{node_type.inspect}"
+          end
+
+          @node_rules ||= []
+          @node_rules << { node_type: node_type, block: block }.freeze
+          node_type
+        end
+
+        # Frozen snapshot of the declared node rules, in declaration
+        # order. Not inherited from a superclass — like {.producers},
+        # the loader instantiates one subclass per registration.
+        def node_rules
+          (@node_rules || []).dup.freeze
+        end
       end
 
       attr_reader :services, :config
@@ -176,6 +225,35 @@ module Rigor
       # slice-6 cache producers) do not have to override.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         []
+      end
+
+      # ADR-37 slice 1 — runs the plugin's declared {.node_rule}s over
+      # one file and returns their diagnostics. The engine owns the
+      # single AST walk here so plugin authors never hand-roll a
+      # traversal: every node reachable from `root` is offered to each
+      # rule whose `node_type` it satisfies (`node.is_a?`), the rule's
+      # block is `instance_exec`'d on this plugin instance with
+      # `(node, scope, path)`, and the returned diagnostics are
+      # concatenated in (node, declaration) order.
+      #
+      # Returns `[]` immediately when the plugin declares no node rules,
+      # so it is a zero-cost no-op for every plugin that does not use
+      # the DSL. The runner calls it alongside `#diagnostics_for_file`
+      # and stamps `plugin.<id>` provenance on the result; a raise
+      # propagates to the runner's per-plugin isolation boundary.
+      def node_rule_diagnostics(path:, scope:, root:)
+        rules = self.class.node_rules
+        return [] if rules.empty? || root.nil?
+
+        diagnostics = []
+        Source::NodeWalker.each(root) do |node|
+          rules.each do |rule|
+            next unless node.is_a?(rule[:node_type])
+
+            diagnostics.concat(Array(instance_exec(node, scope, path, &rule[:block])))
+          end
+        end
+        diagnostics
       end
 
       # Builds a `Rigor::Analysis::Diagnostic` positioned at a Prism

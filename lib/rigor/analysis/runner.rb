@@ -1385,8 +1385,9 @@ module Rigor
       end
 
       def collect_plugin_diagnostics(plugin, path, root, scope)
-        raw = plugin.diagnostics_for_file(path: path, scope: scope, root: root)
-        Array(raw).map { |diagnostic| stamp_plugin_diagnostic(diagnostic, plugin.manifest.id) }
+        raw = Array(plugin.diagnostics_for_file(path: path, scope: scope, root: root))
+        raw += plugin.node_rule_diagnostics(path: path, scope: scope, root: root)
+        raw.map { |diagnostic| stamp_plugin_diagnostic(diagnostic, plugin.manifest.id) }
       rescue StandardError => e
         [plugin_runtime_error_diagnostic(path, plugin, e)]
       end

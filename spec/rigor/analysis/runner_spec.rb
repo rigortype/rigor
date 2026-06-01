@@ -3024,6 +3024,25 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.to_s).to include("[plugin.demo-emitter.saw-file]")
     end
 
+    it "runs a plugin's node_rule over each file and stamps provenance (ADR-37)" do
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "demo-emitter", version: "0.1.0")
+
+        node_rule Prism::CallNode do |node, _scope, path|
+          next [] unless node.name == :flagme
+
+          [diagnostic(node, path: path, message: "node rule saw flagme", rule: "saw-call")]
+        end
+      end
+      stub_const("FakeNodeRulePlugin", klass)
+
+      result = run_with_plugin(plugin_class: klass, source: "flagme\n")
+      diag = result.diagnostics.find { |d| d.rule == "saw-call" }
+      expect(diag).not_to be_nil
+      expect(diag.message).to eq("node rule saw flagme")
+      expect(diag.source_family).to eq("plugin.demo-emitter")
+    end
+
     it "isolates plugin exceptions as :plugin_loader runtime-error diagnostics" do
       bomb_class = Class.new(Rigor::Plugin::Base) do
         manifest(id: "bomb-emitter", version: "0.1.0")

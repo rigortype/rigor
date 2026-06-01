@@ -163,6 +163,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     init(req:services)
     io_boundary()
     manifest()
+    node_rule_diagnostics(keyreq:path,keyreq:scope,keyreq:root)
     plugin_entry()
     prepare(req:services)
     protocol_contracts()
@@ -172,6 +173,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   PLUGIN_BASE_SINGLETON = %w[
     manifest(keyrest:fields)
+    node_rule(req:node_type,block:block)
+    node_rules()
     producer(req:id,key:serialize,key:deserialize,block:block)
     producers()
   ].freeze

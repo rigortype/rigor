@@ -1,4 +1,4 @@
-# textbringer type-coverage survey — and why bundled `sig/` doesn't move `rigor coverage`
+# textbringer type-coverage survey — invalid bundled `sig/`, and the namespace-synthesis fix
 
 **Date:** 2026-06-01.
 **Subject:** [textbringer](https://github.com/shugo/textbringer) v26 (terminal
@@ -8,8 +8,13 @@ text editor by Shugo Maeda), shallow-cloned to
 corpus — a mature **plain-Ruby** application that *ships its own handwritten
 RBS* (`sig/lib/textbringer/**.rbs`, 52 files). That makes it the natural place
 to ask: does wiring a project's own `sig/` into `signature_paths:` lift the
-`rigor coverage` precision number? The answer turned out to be a clean
-"no — and here is exactly why," which corrects an intermediate wrong reading.
+`rigor coverage` precision number? The first answer was a clean "no" (§3) — but
+the deeper investigation (§4) found the real reason: textbringer's `sig/` is
+**invalid RBS** (`rbs validate` rejects it; missing namespace declarations), so
+it was inert for every consumer, and Rigor swallowed the build error silently.
+The fix — synthesizing the missing namespaces (commit `1529b54d`) — turns the
+"no" into **+9.6pt coverage** (40.3% → 49.9%). §3 is kept as the investigation
+record; its mechanistic conclusion is superseded by §4.
 
 All numbers below are from the rigor repo's Flake bundle, run with
 `cwd = the target` + `BUNDLE_GEMFILE=<rigor>/Gemfile` per
@@ -98,6 +103,14 @@ follow-up if the project wants them driven down.
 
 ## 3. The headline finding — bundled `sig/` lifts `rigor coverage` by **0**
 
+> **⚠️ Superseded by §4 (2026-06-01 resolution pass).** The *observation*
+> below (sig wiring lifted coverage by 0) is real, but the **mechanism this
+> section infers is wrong**. The true root cause was not "the scanner doesn't
+> seed `self`/ivar/param" — it was that textbringer's RBS *never built at all*
+> (missing-namespace `NoTypeFoundError`), so no project method resolved on any
+> receiver. Once that is fixed, `self`-receiver calls **do** resolve. Read §4
+> for the corrected account; §3 is kept as the investigation record.
+
 Re-running `rigor coverage lib` with `signature_paths: [sig]` active produced
 numbers **identical to the byte** (40.3% precise, every tier count unchanged).
 `rigor check` clearly *does* consume the RBS — stderr reports `project sig/:
@@ -166,6 +179,70 @@ class, so even `point_min` called bare inside `Buffer#demo` stays opaque.
    metric move when a project's RBS coverage grows — currently it does not.
    Filed here as an observation, not a change request; weigh against the cost
    of giving the lightweight scan a heavier inference path.
+
+---
+
+## 4. Resolution pass (2026-06-01) — the real root cause and the fix
+
+§3 stopped one layer too shallow. Pushing the probes down with `rigor type-of`
+and a direct `Reflection.instance_method_definition` query revealed the actual
+mechanism:
+
+- `self` inside `Buffer#demo` **does** type as `Textbringer::Buffer`
+  (`ScopeIndexer` seeds `self_type` correctly), and the dispatcher *does* route
+  `Nominal` receivers through `RbsDispatch` unconditionally. So §3's "the
+  scanner doesn't seed `self`" was wrong.
+- Yet `b.point_min` returned `Dynamic[top]` **even with `b` typed as
+  `Textbringer::Buffer`** — and so did the stdlib-on-nominal cases until I
+  isolated them. The discriminator was not self-vs-explicit receiver; it was
+  **stdlib-RBS vs project-RBS**.
+- `Reflection.instance_method_definition("Textbringer::Buffer", :point_min)`
+  returned `nil`. The cause: `RBS::DefinitionBuilder#build_instance` raised
+  **`RBS::NoTypeFoundError: Could not find ::Textbringer`**, which the loader's
+  fail-soft `rescue ::RBS::BaseError` swallowed to `nil`. textbringer's `sig/`
+  declares `class Textbringer::Buffer` (and 50 siblings) but **never declares
+  `module Textbringer`** — so the namespace is absent from `class_decls` and
+  every definition build fails. `rbs validate` rejects the same files with the
+  identical error: textbringer's committed RBS is **invalid upstream**, inert
+  for *any* RBS consumer (Steep included), not just Rigor.
+
+So the §3 probes were all measuring "no project RBS method resolves on any
+receiver." Probe A's +5 nominal came from `Buffer.new` → `Nominal[Buffer]` and
+the `b` reads (singleton/`.new` handling), **not** from `point_min`/
+`new_buffer_name` returns; probe B was identical because, again, nothing
+resolved. The receiver-kind framing was an artifact of the build failure.
+
+### The fix (landed)
+
+`RbsLoader.build_env_for` now **synthesizes an empty `module` for each
+undeclared enclosing namespace** before `resolve_type_names` (ADR-5 robustness —
+lenient on inputs; commit `1529b54d`). Only absent names are added, so it is a
+no-op for well-formed sig sets. With it:
+
+| run | precise | nominal tier |
+| --- | --- | --- |
+| cold (sig inert) | 40.3% | 8.1% |
+| **sig live (post-fix)** | **49.9%** (+9.6pt) | **15.0%** |
+
+`self.point_min` / bare `point_min` now resolve to `Integer`. A new
+`rbs.coverage.synthesized-namespace` `:info` diagnostic names the synthesized
+namespaces (`Textbringer`, `Textbringer::LSP`) so the user learns the RBS is
+malformed and can declare them at the source.
+
+### Corrected takeaways
+
+1. **The 40.3% cold number was a floor depressed by a build failure, not by a
+   scanner limitation.** Project RBS *does* flow into `rigor coverage` once it
+   builds; the metric is more RBS-sensitive than §3 concluded.
+2. **`self`/ivar/param framing, corrected:** `self` receivers resolve (seeded +
+   dispatched). Instance variables resolve only when the class-ivar index typed
+   them; **method parameters** remain the genuine opaque case (untyped unless
+   `--params=observed` or inline annotations give them a type) — that part of
+   §3 survives.
+3. **The durable lesson:** a silent `RBS::BaseError` rescue can hide a
+   *total* loss of project-RBS value behind a plausible-looking partial number.
+   When `signature_paths:` RBS seems to do nothing, check `rbs validate` and
+   whether `build_instance` raises before theorising about the scanner.
 
 ---
 

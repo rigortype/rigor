@@ -38,7 +38,7 @@ module Rigor
     #   end
     #
     #   Rigor::Plugin.register(MyRailsPlugin)
-    class Base
+    class Base # rubocop:disable Metrics/ClassLength
       class << self
         # Declares the plugin's manifest. Called once at class
         # definition time — the resulting {Manifest} is cached on
@@ -188,6 +188,71 @@ module Rigor
         def node_file_context_block
           defined?(@node_file_context_block) ? @node_file_context_block : nil
         end
+
+        # ADR-37 slice 2 — declares a per-call-site return-type
+        # contribution, receiver-gated. The narrow successor to the
+        # `return_type` slot of `flow_contribution_for`:
+        #
+        #   dynamic_return receivers: ["ActiveRecord::Base"] do |call_node, scope|
+        #     # self = plugin instance; return a Rigor::Type or nil
+        #   end
+        #
+        # `receivers:` is a non-empty Array of class names; the engine
+        # calls the block only when the call's receiver type's class
+        # equals or inherits from one of them (via
+        # `Environment#class_ordering`). Method-name and type-shape
+        # refinement stays in the block, which returns a `Rigor::Type`
+        # (or `nil` to decline). The block runs through `instance_exec`,
+        # so `config` / `services` are in scope. This is the
+        # {.producer}-style class DSL (it carries logic needing the
+        # instance, not pure data).
+        def dynamic_return(receivers:, &block)
+          raise ArgumentError, "Plugin::Base.dynamic_return requires a block body" if block.nil?
+          unless receivers.is_a?(Array) && !receivers.empty? && receivers.all? { |r| r.is_a?(String) && !r.empty? }
+            raise ArgumentError,
+                  "Plugin::Base.dynamic_return receivers: must be a non-empty Array of class-name Strings, " \
+                  "got #{receivers.inspect}"
+          end
+
+          @dynamic_returns ||= []
+          @dynamic_returns << { receivers: receivers.map { |r| r.dup.freeze }.freeze, block: block }.freeze
+          nil
+        end
+
+        # Frozen snapshot of the declared dynamic-return rules.
+        def dynamic_returns
+          (@dynamic_returns || []).dup.freeze
+        end
+
+        # ADR-37 slice 2 — declares a predicate/assertion narrowing
+        # contribution, method-gated. The narrow successor to the
+        # `post_return_facts` slot of `flow_contribution_for`:
+        #
+        #   type_specifier methods: [:assert_kind_of] do |call_node, scope|
+        #     # return an Array of post-return facts, or nil
+        #   end
+        #
+        # `methods:` is a non-empty Array of method names; the engine
+        # calls the block only when `call_node.name` is one of them. The
+        # block returns the same `post_return_facts` the merger applies.
+        def type_specifier(methods:, &block)
+          raise ArgumentError, "Plugin::Base.type_specifier requires a block body" if block.nil?
+          unless methods.is_a?(Array) && !methods.empty? &&
+                 methods.all? { |m| m.is_a?(Symbol) || (m.is_a?(String) && !m.empty?) }
+            raise ArgumentError,
+                  "Plugin::Base.type_specifier methods: must be a non-empty Array of Symbol/String, " \
+                  "got #{methods.inspect}"
+          end
+
+          @type_specifiers ||= []
+          @type_specifiers << { methods: methods.map(&:to_sym).freeze, block: block }.freeze
+          nil
+        end
+
+        # Frozen snapshot of the declared type-specifier rules.
+        def type_specifiers
+          (@type_specifiers || []).dup.freeze
+        end
       end
 
       attr_reader :services, :config
@@ -305,6 +370,53 @@ module Rigor
           end
         end
         diagnostics
+      end
+
+      # ADR-37 slice 2 — the return type contributed by this plugin's
+      # {.dynamic_return} rules for a call, or nil. The engine calls this
+      # from `MethodDispatcher` alongside (and ahead of) the legacy
+      # `flow_contribution_for`; a rule fires only when `receiver_type`'s
+      # class equals or inherits from one of its declared `receivers:`.
+      # First non-nil wins (declaration order). Failures isolate to nil.
+      def dynamic_return_type(call_node:, scope:, receiver_type:)
+        rules = self.class.dynamic_returns
+        return nil if rules.empty? || receiver_type.nil?
+
+        class_name = dynamic_return_receiver_class_name(receiver_type)
+        return nil if class_name.nil?
+
+        environment = scope&.environment
+        rules.each do |rule|
+          next unless rule[:receivers].any? { |c| class_matches_receiver?(class_name, c, environment) }
+
+          result = instance_exec(call_node, scope, &rule[:block])
+          return result if result
+        end
+        nil
+      rescue StandardError
+        nil
+      end
+
+      # ADR-37 slice 2 — the post-return narrowing facts contributed by
+      # this plugin's {.type_specifier} rules for a call. The engine
+      # calls this from `StatementEvaluator` alongside the legacy
+      # `flow_contribution_for`; a rule fires only when `call_node.name`
+      # is one of its declared `methods:`. Failures isolate to [].
+      def type_specifier_facts(call_node:, scope:)
+        rules = self.class.type_specifiers
+        return [] if rules.empty? || !call_node.respond_to?(:name)
+
+        name = call_node.name
+        facts = []
+        rules.each do |rule|
+          next unless rule[:methods].include?(name)
+
+          result = instance_exec(call_node, scope, &rule[:block])
+          facts.concat(Array(result)) if result
+        end
+        facts
+      rescue StandardError
+        []
       end
 
       # Builds a `Rigor::Analysis::Diagnostic` positioned at a Prism
@@ -490,6 +602,29 @@ module Rigor
       end
 
       private
+
+      # ADR-37 slice 2 — the class name to match a `dynamic_return`
+      # `receivers:` entry against, from a receiver `Type`. Covers the
+      # instance (`Nominal[X]`) and class (`Singleton[X]`) shapes; other
+      # carriers decline (nil → no match).
+      def dynamic_return_receiver_class_name(receiver_type)
+        case receiver_type
+        when Rigor::Type::Nominal, Rigor::Type::Singleton then receiver_type.class_name
+        end
+      end
+
+      # True when `class_name` equals or inherits from `constraint`,
+      # matched through `Environment#class_ordering` (the mechanism
+      # `MacroBlockSelfType` / `additional_initializers` use). Degrades to
+      # "no match" on any resolution failure (false-positive-safe).
+      def class_matches_receiver?(class_name, constraint, environment)
+        return true if class_name == constraint
+        return false if environment.nil?
+
+        %i[equal subclass].include?(environment.class_ordering(class_name, constraint))
+      rescue StandardError
+        false
+      end
 
       def collect_glob_files(roots, patterns)
         matched = roots.flat_map do |root|

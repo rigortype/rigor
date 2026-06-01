@@ -15,10 +15,15 @@ isolated by the same per-plugin `rescue` boundary. Slice 1c adds
 `node_file_context` for two-pass (collect-then-validate) plugins. The slice-1
 working decisions are pinned below. Slice 1d adds `NodeContext` (lexical
 context for node rules). The **slice 2 design** (`flow_contribution_for` →
-`dynamic_return` + `type_specifier`) is recorded below; implementation is in
-progress. **Not yet done:** slice 2 implementation, `FactProvider` naming
-(slice 3), the remaining `node_rule` migration (`rigor-actionpack`), and the
-capability catalogue. Thirteen plugins are migrated onto `node_rule` so far.
+`dynamic_return` + `type_specifier`) is recorded below, and its **engine
+surface is implemented** (the two DSLs + the two runner methods + the
+receiver-class / method-name gating, consulted at both dispatch sites
+alongside the deprecated `flow_contribution_for` fan-out — fully
+back-compatible, every existing consumer unchanged and green). **Not yet
+done:** migrating the six `flow_contribution_for` consumers onto the new DSLs
+(slice 2b), `FactProvider` naming (slice 3), the remaining `node_rule`
+migration (`rigor-actionpack`), and the capability catalogue. Thirteen plugins
+are migrated onto `node_rule` so far.
 
 Records the decision to finish the interface-segregation work that
 [ADR-2](2-extension-api.md) started: split the two remaining *imperative*

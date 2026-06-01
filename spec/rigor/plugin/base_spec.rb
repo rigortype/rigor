@@ -309,4 +309,83 @@ RSpec.describe Rigor::Plugin::Base do
       expect(diag.column).to eq(node.message_loc.start_column + 1)
     end
   end
+
+  describe ".dynamic_return / #dynamic_return_type (ADR-37 slice 2)" do
+    let(:plugin) do
+      Class.new(described_class) do
+        manifest(id: "dr", version: "0.1.0")
+        dynamic_return receivers: ["Foo"] do |call_node, _scope|
+          next nil unless call_node.name == :bar
+
+          Rigor::Type::Combinator.nominal_of("Baz")
+        end
+      end.new(services: services)
+    end
+
+    def call(source) = Prism.parse(source).value.statements.body.first
+
+    it "returns the contributed type for a matching receiver class + method" do
+      type = plugin.dynamic_return_type(
+        call_node: call("x.bar"), scope: Rigor::Scope.empty,
+        receiver_type: Rigor::Type::Combinator.nominal_of("Foo")
+      )
+      expect(type).to eq(Rigor::Type::Combinator.nominal_of("Baz"))
+    end
+
+    it "declines for a non-matching receiver class" do
+      type = plugin.dynamic_return_type(
+        call_node: call("x.bar"), scope: Rigor::Scope.empty,
+        receiver_type: Rigor::Type::Combinator.nominal_of("Other")
+      )
+      expect(type).to be_nil
+    end
+
+    it "declines when the block returns nil (in-block method gate)" do
+      type = plugin.dynamic_return_type(
+        call_node: call("x.other"), scope: Rigor::Scope.empty,
+        receiver_type: Rigor::Type::Combinator.nominal_of("Foo")
+      )
+      expect(type).to be_nil
+    end
+
+    it "rejects an empty receivers: list" do
+      expect do
+        Class.new(described_class) do
+          manifest(id: "bad-dr", version: "0.1.0")
+          dynamic_return(receivers: []) { nil }
+        end
+      end.to raise_error(ArgumentError, /non-empty Array/)
+    end
+  end
+
+  describe ".type_specifier / #type_specifier_facts (ADR-37 slice 2)" do
+    let(:plugin) do
+      Class.new(described_class) do
+        manifest(id: "ts", version: "0.1.0")
+        type_specifier methods: [:assert_thing] do |_call_node, _scope|
+          %i[fact_a fact_b]
+        end
+      end.new(services: services)
+    end
+
+    def call(source) = Prism.parse(source).value.statements.body.first
+
+    it "returns facts for a matching method name" do
+      facts = plugin.type_specifier_facts(call_node: call("assert_thing(x)"), scope: Rigor::Scope.empty)
+      expect(facts).to eq(%i[fact_a fact_b])
+    end
+
+    it "returns [] for a non-matching method name" do
+      expect(plugin.type_specifier_facts(call_node: call("other(x)"), scope: Rigor::Scope.empty)).to eq([])
+    end
+
+    it "rejects an empty methods: list" do
+      expect do
+        Class.new(described_class) do
+          manifest(id: "bad-ts", version: "0.1.0")
+          type_specifier(methods: []) { nil }
+        end
+      end.to raise_error(ArgumentError, /non-empty Array/)
+    end
+  end
 end

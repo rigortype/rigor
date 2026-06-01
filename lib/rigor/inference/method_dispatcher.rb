@@ -94,7 +94,7 @@ module Rigor
         # consults the registry when both `call_node` and `scope`
         # are supplied — the dispatcher's own internal callers
         # (per-element block fold, etc.) skip this tier.
-        plugin_result = try_plugin_contribution(call_node, scope)
+        plugin_result = try_plugin_contribution(call_node, scope, receiver_type)
         return plugin_result if plugin_result
 
         # ADR-20 slice 3 — Rigor-bundled HKT-builtin return-
@@ -378,13 +378,13 @@ module Rigor
         end
       end
 
-      def try_plugin_contribution(call_node, scope)
+      def try_plugin_contribution(call_node, scope, receiver_type)
         return nil if call_node.nil? || scope.nil?
 
         registry = scope.environment&.plugin_registry
         return nil if registry.nil? || registry.empty?
 
-        contributions = collect_plugin_contributions(registry, call_node, scope)
+        contributions = collect_plugin_contributions(registry, call_node, scope, receiver_type)
         return nil if contributions.empty?
 
         FlowContribution::Merger.merge(contributions).return_type
@@ -660,12 +660,21 @@ module Rigor
         end
       end
 
-      def collect_plugin_contributions(registry, call_node, scope)
-        registry.plugins.filter_map do |plugin|
-          contribution = plugin.flow_contribution_for(call_node: call_node, scope: scope)
-          contribution.is_a?(FlowContribution) ? contribution : nil
+      # ADR-37 slice 2 — gathers each plugin's return-type contribution
+      # from BOTH the narrow `dynamic_return` DSL (receiver-gated, wrapped
+      # as a return-only `FlowContribution`) and the legacy
+      # `flow_contribution_for` escape valve, so migrated and unmigrated
+      # plugins compose through the same merger.
+      def collect_plugin_contributions(registry, call_node, scope, receiver_type)
+        registry.plugins.flat_map do |plugin|
+          contributions = []
+          legacy = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+          contributions << legacy if legacy.is_a?(FlowContribution)
+          dynamic = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
+          contributions << FlowContribution.new(return_type: dynamic) if dynamic
+          contributions
         rescue StandardError
-          nil
+          []
         end
       end
 

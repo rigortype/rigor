@@ -158,6 +158,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     config()
     diagnostic(req:node,keyreq:path,keyreq:message,key:severity,key:rule,key:location)
     diagnostics_for_file(keyreq:path,keyreq:scope,keyreq:root)
+    dynamic_return_type(keyreq:call_node,keyreq:scope,keyreq:receiver_type)
     flow_contribution_for(keyreq:call_node,keyreq:scope)
     glob_descriptor(req:roots,rest:patterns)
     init(req:services)
@@ -169,9 +170,12 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     protocol_contracts()
     services()
     signature_paths()
+    type_specifier_facts(keyreq:call_node,keyreq:scope)
   ].freeze
 
   PLUGIN_BASE_SINGLETON = %w[
+    dynamic_return(keyreq:receivers,block:block)
+    dynamic_returns()
     manifest(keyrest:fields)
     node_file_context(block:block)
     node_file_context_block()
@@ -179,6 +183,8 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     node_rules()
     producer(req:id,key:serialize,key:deserialize,block:block)
     producers()
+    type_specifier(keyreq:methods,block:block)
+    type_specifiers()
   ].freeze
 
   PLUGIN_MANIFEST_INSTANCE = %w[

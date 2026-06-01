@@ -1371,16 +1371,21 @@ module Rigor
         end
       end
 
-      # Walks the registry and collects each plugin's
-      # `flow_contribution_for` result, swallowing per-plugin
-      # exceptions so a buggy plugin can't abort the assertion
-      # path. Mirrors `MethodDispatcher.collect_plugin_contributions`
-      # exactly — the two paths consume the same hook.
+      # ADR-37 slice 2 — gathers each plugin's post-return narrowing from
+      # BOTH the narrow `type_specifier` DSL (method-gated, wrapped as a
+      # facts-only `FlowContribution`) and the legacy
+      # `flow_contribution_for` escape valve, swallowing per-plugin
+      # exceptions so a buggy plugin can't abort the assertion path.
       def collect_plugin_contributions(registry, call_node, current_scope)
-        registry.plugins.filter_map do |plugin|
-          plugin.flow_contribution_for(call_node: call_node, scope: current_scope)
+        registry.plugins.flat_map do |plugin|
+          contributions = []
+          legacy = plugin.flow_contribution_for(call_node: call_node, scope: current_scope)
+          contributions << legacy if legacy.is_a?(Rigor::FlowContribution)
+          facts = plugin.type_specifier_facts(call_node: call_node, scope: current_scope)
+          contributions << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
+          contributions
         rescue StandardError
-          nil
+          []
         end
       end
 

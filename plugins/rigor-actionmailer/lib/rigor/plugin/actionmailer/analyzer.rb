@@ -45,53 +45,44 @@ module Rigor
           method instance_method methods
         ].freeze
 
-        Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
+        # One mailer-call observation. Carries no path/location — the
+        # caller (the `node_rule` block) positions it via
+        # `Plugin::Base#diagnostic`.
+        Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
 
-        # @param path [String]
-        # @param root [Prism::Node]
+        # The mailer-call violations for a single call node (0..2), or
+        # `[]` when it is not a `<Mailer>.action(...)` call on a known
+        # mailer. ADR-37: the engine owns the walk.
+        #
+        # @param call_node [Prism::Node]
         # @param mailer_index [MailerIndex]
-        # @return [Array<Diagnostic>]
-        def diagnose(path:, root:, mailer_index:)
-          diagnostics = []
-          walk(root) do |call_node|
-            class_name = mailer_class_for_call(call_node)
-            next if class_name.nil?
-            next if RESERVED_CLASS_METHODS.include?(call_node.name)
+        # @return [Array<Violation>]
+        def violations_for(call_node:, mailer_index:)
+          return [] unless call_node.is_a?(Prism::CallNode) && action_call_candidate?(call_node)
 
-            class_entry = mailer_index.find(class_name) || mailer_index.find("::#{class_name}")
-            next if class_entry.nil?
+          class_name = mailer_class_for_call(call_node)
+          return [] if class_name.nil?
+          return [] if RESERVED_CLASS_METHODS.include?(call_node.name)
 
-            action_entry = class_entry.find_action(call_node.name)
-            if action_entry.nil?
-              # Skip `unknown-action` when the mailer's include
-              # set has any unresolved module — the unresolved
-              # module may legitimately define the action
-              # (gem-shipped concern, dynamically loaded
-              # mailer extension). Mirrors the same predicate
-              # `rigor-actionpack` uses for unknown-filter-method.
-              next if class_entry.unresolved_includes?
+          class_entry = mailer_index.find(class_name) || mailer_index.find("::#{class_name}")
+          return [] if class_entry.nil?
 
-              diagnostics << unknown_action_diagnostic(path, call_node, class_entry)
-              next
-            end
+          action_entry = class_entry.find_action(call_node.name)
+          if action_entry.nil?
+            # Skip `unknown-action` when the mailer's include set has any
+            # unresolved module — it may legitimately define the action
+            # (gem-shipped concern, dynamically loaded extension).
+            return [] if class_entry.unresolved_includes?
 
-            diagnostics << action_call_info(path, call_node, class_entry, action_entry)
-            arity_diag = arity_check(path, call_node, class_entry, action_entry)
-            diagnostics << arity_diag if arity_diag
+            return [unknown_action_violation(call_node, class_entry)]
           end
-          diagnostics
-        end
 
-        # Walks the tree yielding every CallNode whose receiver
-        # resolves (directly or through `.with(...)`) to a
-        # constant.
-        def walk(node, &)
-          return unless node.is_a?(Prism::Node)
-
-          yield node if node.is_a?(Prism::CallNode) && action_call_candidate?(node)
-          node.compact_child_nodes.each { |child| walk(child, &) }
+          violations = [action_call_info(call_node, class_entry, action_entry)]
+          arity = arity_violation(call_node, class_entry, action_entry)
+          violations << arity if arity
+          violations
         end
 
         def action_call_candidate?(node)
@@ -120,12 +111,8 @@ module Rigor
           end
         end
 
-        def action_call_info(path, call_node, class_entry, action_entry)
-          location = call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+        def action_call_info(_call_node, class_entry, action_entry)
+          Violation.new(
             severity: :info,
             rule: "mailer-call",
             message: "`#{class_entry.class_name}.#{action_entry.method_name}` " \
@@ -133,7 +120,7 @@ module Rigor
           )
         end
 
-        def arity_check(path, call_node, class_entry, action_entry)
+        def arity_violation(call_node, class_entry, action_entry)
           args = call_node.arguments&.arguments || []
           actual = args.size
           return nil if action_entry.accepts?(actual)
@@ -147,11 +134,7 @@ module Rigor
           # carrying calls don't surface as wrong-arity.
           return nil if args.last.is_a?(Prism::KeywordHashNode) && action_entry.accepts?(actual - 1)
 
-          location = call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :error,
             rule: "wrong-arity",
             message: "`#{class_entry.class_name}.#{action_entry.method_name}` " \
@@ -159,14 +142,10 @@ module Rigor
           )
         end
 
-        def unknown_action_diagnostic(path, call_node, class_entry)
-          location = call_node.location
+        def unknown_action_violation(call_node, class_entry)
           known = class_entry.actions.keys.sort.join(", ")
           known_part = known.empty? ? "no actions defined" : "known actions: #{known}"
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :error,
             rule: "unknown-action",
             message: "`#{class_entry.class_name}.#{call_node.name}` is not a defined " \

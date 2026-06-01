@@ -86,15 +86,26 @@ module Rigor
         @load_error = nil
       end
 
+      # File-level: load-error + the missing-view check (anchored on the
+      # mailer's own source file, so it is genuinely per-file, not
+      # per-call). The per-call mailer validation (action existence /
+      # arity) runs over the engine-owned walk via the node_rule below
+      # (ADR-37). The mailer index is lazily loaded + memoised, shared.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = mailer_index_or_nil
         return [load_error_diagnostic(path)] if index.nil? && @load_error
         return [] if index.nil? || index.empty?
 
-        diagnostics = []
-        diagnostics.concat(call_site_diagnostics(path, root, index))
-        diagnostics.concat(missing_view_diagnostics(path, index))
-        diagnostics
+        missing_view_diagnostics(path, index)
+      end
+
+      node_rule Prism::CallNode do |node, _scope, path|
+        index = mailer_index_or_nil
+        next [] if index.nil? || index.empty?
+
+        Analyzer.violations_for(call_node: node, mailer_index: index).map do |violation|
+          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
+        end
       end
 
       private
@@ -119,10 +130,6 @@ module Rigor
       rescue StandardError => e
         @load_error = "rigor-actionmailer: failed to discover mailers: #{e.class}: #{e.message}"
         nil
-      end
-
-      def call_site_diagnostics(path, root, index)
-        Analyzer.diagnose(path: path, root: root, mailer_index: index).map { |diag| build_diagnostic(diag) }
       end
 
       # Anchors `missing-view` diagnostics on the mailer file
@@ -167,13 +174,6 @@ module Rigor
           message: @load_error,
           severity: :warning,
           rule: "load-error"
-        )
-      end
-
-      def build_diagnostic(diag)
-        Rigor::Analysis::Diagnostic.new(
-          path: diag.path, line: diag.line, column: diag.column,
-          message: diag.message, severity: diag.severity, rule: diag.rule
         )
       end
     end

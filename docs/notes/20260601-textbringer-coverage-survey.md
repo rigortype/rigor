@@ -274,10 +274,34 @@ overload (lever 4 — a general fix, not textbringer-specific).
 
 The remaining ~35% opaque is dominated by the **Dynamic cascade from untyped
 roots** — method parameters (no types without `--params=observed` or RBS param
-types) and untyped instance variables — plus genuine project-RBS gaps (25 of 77
-source files ship no RBS; covered classes miss getters like `Buffer#point` /
-`#file_name`) and RBS-less C-ext / FFI gem dependencies (`curses`, `fiddle`).
-Those are the next frontier; none is a quick metric fix.
+types) and untyped instance variables — plus RBS-less C-ext / FFI gem
+dependencies (`curses`, `fiddle`). Those are the next frontier; closing them
+needs parameter-type inference (deliberately deferred — measured-FP-risky) or
+project-side RBS authoring, not a Rigor metric/robustness fix.
+
+## 6. The FP twist — `attr_*` accessors with incomplete RBS
+
+Chasing "more coverage" past §5 ran straight into the false-positive ceiling.
+`Buffer#point` / `#file_name` / `#name` / `#mode` / `#keymap` are defined by
+`attr_reader` / `attr_accessor` in `buffer.rb`, but textbringer's `buffer.rbs`
+omits the getters (it declares only the `name=` / `file_name=` setters). Because
+the in-source method scanner recorded `def` / `define_method` / `alias_method`
+but **not** the `attr_*` macros — and because the discovered-method table was
+per-file — every `buffer.point` call read as `call.undefined-method`: **167
+false errors on textbringer's own types.** So any lever that types *more*
+receivers as `Buffer` (param inference, ivar seeding) would have *multiplied*
+these FPs, not produced clean coverage.
+
+The fix (commit `1329cca7`) is therefore an FP fix, not a coverage fix: record
+`attr_*` accessors as discovered methods and propagate the table project-wide
+(plain `def`s stay per-file so the ADR-17 monkey-patch diagnostic is unchanged).
+Textbringer-type `undefined-method` fell **167 → 30**, and the honest baseline
+shrank from 328 to 187 diagnostics. Coverage stayed at 65.0% (accessor calls
+resolve to `Dynamic[Top]` via the discovered-method tier — suppressing the FP,
+not adding precision), which is the correct trade: **the false-positive
+discipline outranks the coverage number.** The lesson for the corpus: once a
+project's own types are typed, its coverage ceiling is set by the completeness
+of its RBS, and pushing past it surfaces RBS-gap FPs rather than real precision.
 
 ---
 

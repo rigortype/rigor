@@ -458,4 +458,3 @@ without surrendering its identity. It **cannot** move toward Rigor on **scale** 
 what Rigor purchased by betting on local-inference-plus-catalog instead of whole-program
 type-level execution. The non-portability is *why the two coexist* (the appendix's
 side-by-side pattern) rather than one subsuming the other.
-</content>

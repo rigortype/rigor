@@ -5,6 +5,7 @@ require "json"
 require "prism"
 
 require_relative "manifest"
+require_relative "node_context"
 require_relative "../analysis/diagnostic"
 require_relative "../source/node_walker"
 
@@ -118,12 +119,15 @@ module Rigor
         # through `instance_exec` so `self` is the plugin instance —
         # `config`, `services`, `io_boundary`, `diagnostic`, and the
         # cross-plugin `services.fact_store` are all in scope. It
-        # receives `(node, scope, path, file_context)` — the fourth
-        # argument is the value built by {.node_file_context} for a
-        # two-pass plugin, `nil` otherwise, and may be omitted from the
-        # block's parameter list — and MUST return an Array of
-        # `Rigor::Analysis::Diagnostic` (an empty array to fire
-        # nothing); the runner stamps `plugin.<id>` provenance.
+        # receives `(node, scope, path, file_context, context)` — the
+        # fourth argument is the value built by {.node_file_context} for
+        # a two-pass plugin (`nil` otherwise); the fifth is a
+        # {Rigor::Plugin::NodeContext} carrying the node's lexical
+        # ancestors (enclosing class / method / block DSL). Trailing
+        # arguments may be omitted from the block's parameter list. The
+        # block MUST return an Array of `Rigor::Analysis::Diagnostic`
+        # (an empty array to fire nothing); the runner stamps
+        # `plugin.<id>` provenance.
         #
         # Multiple rules for the same `node_type` are allowed and run
         # in declaration order. This is the {.producer}-style class DSL
@@ -292,11 +296,12 @@ module Rigor
         file_context = context_block ? instance_exec(root, scope, &context_block) : nil
 
         diagnostics = []
-        Source::NodeWalker.each(root) do |node|
+        Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
           rules.each do |rule|
             next unless node.is_a?(rule[:node_type])
 
-            diagnostics.concat(Array(instance_exec(node, scope, path, file_context, &rule[:block])))
+            context = NodeContext.new(ancestors)
+            diagnostics.concat(Array(instance_exec(node, scope, path, file_context, context, &rule[:block])))
           end
         end
         diagnostics

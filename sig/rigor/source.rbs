@@ -15,6 +15,9 @@ module Rigor
       def self?.each: (untyped root) { (untyped) -> void } -> nil
                     | (untyped root) -> Enumerator[untyped, nil]
       def self?.walk: (untyped node) { (untyped) -> void } -> void
+      def self?.each_with_ancestors: (untyped root) { (untyped, Array[untyped]) -> void } -> nil
+                                   | (untyped root) -> Enumerator[untyped, nil]
+      def self?.walk_with_ancestors: (untyped node, Array[untyped] ancestors) { (untyped, Array[untyped]) -> void } -> void
     end
   end
 end

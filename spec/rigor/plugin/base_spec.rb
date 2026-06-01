@@ -265,6 +265,22 @@ RSpec.describe Rigor::Plugin::Base do
         end
       end.to raise_error(ArgumentError, /requires a block/)
     end
+
+    it "threads a NodeContext (5th arg) with the node's lexical ancestors" do
+      klass = Class.new(described_class) do
+        manifest(id: "ctx", version: "0.1.0")
+        node_rule Prism::CallNode do |node, _scope, path, _fc, context|
+          next [] unless node.name == :flagme
+
+          [diagnostic(node, path: path, message: "in=#{context.enclosing_def&.name}", rule: "c")]
+        end
+      end
+      plugin = klass.new(services: services)
+      root = Prism.parse("def outer\n  flagme\nend\nflagme").value
+      diags = plugin.node_rule_diagnostics(path: "d.rb", scope: Rigor::Scope.empty, root: root)
+      # First flagme is inside `outer`; second is top-level (no def).
+      expect(diags.map(&:message)).to eq(["in=outer", "in="])
+    end
   end
 
   describe "#diagnostic" do

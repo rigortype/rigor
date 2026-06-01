@@ -94,19 +94,20 @@ module Rigor
         Analyzer.diagnose(path: path, root: root).map { |diag| build_diagnostic(diag) }
       end
 
-      # Pillar 2 Slice 1 — spec-derived flow facts from RSpec
-      # matcher assertions (six-matcher floor: `be_a`,
-      # `be_kind_of`, `be_instance_of`, `be_nil`, `eq(literal)`,
-      # `eql(literal)`; `match(/regex/)`; `not_to` / `to_not`).
-      #
-      # Pillar 2 Slice 2 (v0.3.0) — additionally binds local
-      # reads in `it` / spec bodies to their `let(:name) { ... }`
-      # block's inferred return type. Composes with Slice 1:
-      # a matcher narrowing fires after the let binding.
-      def flow_contribution_for(call_node:, scope:)
-        matcher = MatcherAnalyzer.contribution_for(call_node, environment: scope&.environment)
-        return matcher if matcher
+      # ADR-37 slice 2 — Pillar 2 Slice 1 matcher narrowing
+      # (`expect(x).to be_a(T)` → `post_return_facts` on `x`),
+      # method-gated by the engine on the expectation verbs.
+      type_specifier methods: %i[to not_to to_not] do |call_node, scope|
+        MatcherAnalyzer.contribution_for(call_node, environment: scope&.environment)&.post_return_facts
+      end
 
+      # Pillar 2 Slice 2 — binds local reads in `it` / spec bodies to
+      # their `let(:name) { ... }` block's inferred return type. This is
+      # a *method-gated return type* (keyed on the let-bound name read),
+      # which the receiver-gated `dynamic_return` cannot express, so it
+      # stays on `flow_contribution_for` — the deprecated escape valve
+      # (ADR-37 slice 2 § "Outcome").
+      def flow_contribution_for(call_node:, scope:)
         let_binding_contribution(call_node, scope)
       end
 

@@ -33,7 +33,10 @@ against a small set of read-side surfaces:
 - **`Rigor::FlowContribution`** — the bundle plugins return (the
   v0.1.0 contribution merger consumes bundles directly).
 - **`Rigor::Analysis::Diagnostic`** — the diagnostic shape plugins
-  emit (with `source_family` provenance).
+  emit (with `source_family` provenance). The `Diagnostic.from_node`
+  / `.from_location` constructors (and the `Plugin::Base#diagnostic`
+  wrapper) internalise the 1-based `line` / `start_column + 1`
+  positioning convention (ADR-37).
 
 This document declares which methods on those namespaces are
 **public** (plugin authors may rely on them) versus **internal**
@@ -63,9 +66,13 @@ pins instance and singleton method sets for:
   `singleton_for_name`, `singleton_method_definition`.
 - `Rigor::Plugin` — `register`, `registered`, `registered_for`,
   `unregister!` (test helper). v0.1.0 slice 1.
-- `Rigor::Plugin::Base` — class-level `manifest(**fields)`,
+- `Rigor::Plugin::Base` — the class-level `manifest(**fields)`,
+  `producer`, `node_rule`, and `node_file_context` DSLs;
   instance-level `services` / `config` / `manifest`, the override
-  hook `#init(services)`. v0.1.0 slice 1.
+  hooks `#init` / `#prepare` / `#diagnostics_for_file` /
+  `#flow_contribution_for`, the engine-owned-walk dispatcher
+  `#node_rule_diagnostics`, and the `#diagnostic(node, …)` builder.
+  v0.1.0 slice 1 + ADR-37.
 - `Rigor::Plugin::Manifest` — `id`, `version`, `description`,
   `protocols`, `config_schema`, `validate_config(config)`.
 - `Rigor::Plugin::Services` — `reflection`, `type`, `configuration`,

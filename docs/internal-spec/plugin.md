@@ -66,15 +66,65 @@ override hook plugins use to wire up state from the service
 container; the default implementation is a no-op.
 
 `#diagnostics_for_file(path:, scope:, root:)` (slice 5) is the
-per-file diagnostic emission hook. The default returns an empty
-array. Plugin authors override it to walk `root` (the parsed
-`Prism::Node`) and return an array of
-`Rigor::Analysis::Diagnostic` rows; the runner re-stamps every
-returned diagnostic with `source_family: "plugin.<manifest.id>"`
-per ADR-7 § "Slice 5-B" so plugin authors cannot accidentally
-publish under another plugin's id. Plugin exceptions inside the
-hook isolate as a `:plugin_loader` `runtime-error` diagnostic
-rather than crashing `rigor check`.
+**whole-file** diagnostic hook. The default returns an empty array.
+Plugin authors MAY override it to walk `root` (the parsed
+`Prism::Node`) themselves and return an array of
+`Rigor::Analysis::Diagnostic` rows, but the preferred surface for
+node-scoped checks is `node_rule` (below), which lets the engine own
+the walk. `#diagnostics_for_file` is reserved for genuinely
+file-scoped diagnostics — a single load-error row, or a check that
+needs the whole parsed file at once. The runner re-stamps every
+returned diagnostic with `source_family: "plugin.<manifest.id>"` per
+ADR-7 § "Slice 5-B" so plugin authors cannot accidentally publish
+under another plugin's id. Plugin exceptions inside the hook isolate
+as a `:plugin_loader` `runtime-error` diagnostic rather than crashing
+`rigor check`.
+
+#### Node-scoped rules — `node_rule` / `#node_rule_diagnostics` (ADR-37)
+
+`node_rule(node_type) { |node, scope, path, file_context| … }` is a
+class-level DSL (the `producer`-style shape) declaring a node-scoped
+diagnostic rule. The engine walks each analysed file's AST **once**
+and dispatches every node where `node.is_a?(node_type)` to the rule,
+so the plugin author writes the check and never the traversal — this
+is what lets a plugin drop the hand-rolled `def walk` /
+`compact_child_nodes.each` recursion. The block runs through
+`instance_exec` (so `self` is the plugin instance — `config`,
+`services`, `services.fact_store`, `diagnostic` are all in scope),
+receives `(node, scope, path, file_context)`, and returns an
+`Array<Rigor::Analysis::Diagnostic>` (empty to fire nothing).
+`node_type` MUST be a `Prism::Node` subclass. Multiple rules per type
+run in declaration order. The engine invokes them through the
+instance method `#node_rule_diagnostics(path:, scope:, root:)`, which
+the runner calls alongside `#diagnostics_for_file` under the same
+`plugin.<id>` stamping and per-plugin exception isolation; a plugin
+that declares no rules pays zero cost.
+
+`node_file_context { |root, scope| … }` supports two-pass
+(collect-then-validate) plugins. It runs once per file (via
+`instance_exec`) before any node rule fires, and its return value is
+threaded to every rule as the **fourth** block argument (existing
+three-parameter blocks ignore it). A *same-file* collect — gathering
+declared names before validating references to them — belongs here,
+because the engine's single forward walk cannot complete the collect
+before a reference is reached. A *cross-file* collect belongs in
+`#prepare` + `services.fact_store` instead; a node rule reads the
+published fact directly and needs no per-file context.
+
+#### Positioning a diagnostic — `#diagnostic` (ADR-37 author helper)
+
+`#diagnostic(node, path:, message:, severity: :error, rule: nil,
+location: nil)` builds a `Rigor::Analysis::Diagnostic` positioned at
+`node`, internalising the 1-based `line` / `start_column + 1`
+convention every plugin otherwise re-derives by hand. Pass `location:`
+(a Prism location) to point at a sub-location — typically
+`node.message_loc`, so a matcher / method-name diagnostic points at
+the name rather than the receiver-spanning whole call; a `nil`
+`location:` falls back to `node.location`. Authors MUST NOT set
+`source_family` (the runner stamps it). The underlying constructors
+`Rigor::Analysis::Diagnostic.from_node(node, …)` and
+`.from_location(location, …)` are public for core rules and other
+producers.
 
 `#prepare(services)` (ADR-9) is the project-wide pre-pass hook,
 invoked once before per-file analysis begins. Plugins that publish
@@ -116,7 +166,9 @@ a plugin declaring none of them is a plain per-file analyzer:
 | `protocol_contracts` | `Array<ProtocolContract>` | Path-scoped behavioural contracts (`path_glob` + `method_name` + param/return types + severity); provide-and-check (ADR-28). |
 | `source_rbs_synthesizer` | `#call(path) -> String?` | A callable that synthesises RBS from a project source file at env-build time (e.g. rbs-inline ingestion) (ADR-32). |
 | `block_as_methods`, `heredoc_templates`, `trait_registries`, `external_files` | `Array` | The four ADR-16 macro / DSL expansion substrate tiers (A / C / B / D). |
+| `nested_class_templates` | `Array` | Nested-subclass emission from an enum-shaped block DSL (`variant <Const>, <Type>`); the macro-substrate tier that mints classes, not just methods (ADR-36). |
 | `hkt_registrations`, `hkt_definitions` | `Array` | Lightweight-HKT type-function registrations (ADR-20). |
+| `additional_initializers` | `Array<AdditionalInitializer>` | `{ receiver_constraint:, methods: }` pairs declaring which non-`initialize` `def`-form methods on a class (and its subclasses) also establish ivar state, feeding `ScopeIndexer`'s read-before-write nil soundness gate (ADR-38). |
 
 `#validate_config(config)` returns an array of error strings; the
 loader converts a non-empty result into a `LoadError`. Each extension
@@ -243,5 +295,21 @@ following are now in place and are documented in their own specs:
   `services.fact_store` + `manifest(produces:/consumes:)` shipped in
   v0.1.1 (ADR-9). The extension fields in the `Manifest` table above
   (`signature_paths:`, `open_receivers:`, `protocol_contracts:`,
-  `source_rbs_synthesizer:`, the macro substrate, HKT) accreted
-  across the `0.1.x` cycle.
+  `source_rbs_synthesizer:`, the macro substrate, HKT,
+  `additional_initializers:`) accreted across the `0.1.x` cycle.
+- **Interface segregation — node-scoped rules.** The `node_rule`
+  class DSL + `#node_rule_diagnostics` (the engine-owned walk) +
+  `node_file_context` (two-pass support) + the `#diagnostic` /
+  `Diagnostic.from_node` / `.from_location` author helpers shipped as
+  [ADR-37](../adr/37-plugin-interface-segregation.md) Slice 1. They
+  reframe `#diagnostics_for_file` as the whole-file escape valve and
+  are the first step of moving the imperative hooks onto narrow,
+  engine-gated surfaces; `#flow_contribution_for`'s split into
+  receiver-gated dynamic-return + method-gated type-specifying
+  extensions (Slice 2) is not yet shipped.
+- **Read-before-write nil gate.** `additional_initializers:`
+  ([ADR-38](../adr/38-additional-initializers.md)) lets a plugin
+  extend `ScopeIndexer`'s `initialize`-only ivar-seeding gate to
+  framework lifecycle methods (`setup`, `after_initialize`, DI
+  setters) so an ivar set there and read in a sibling method is not
+  widened with `nil`.

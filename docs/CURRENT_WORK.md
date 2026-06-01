@@ -22,9 +22,23 @@ Cumulative survey results (measured at the v0.1.12 OSS-realism cut; still the he
 
 The 6 remaining Mastodon errors are all unrelated to engine precision: 5 nil-receiver in test fixtures + 1 upstream `ruby/rbs` `Resolv::DNS#getresources` typeclass-narrowing gap (see [`docs/notes/20260528-rbs-upstream-pr-resolv-typeclass.md`](notes/20260528-rbs-upstream-pr-resolv-typeclass.md)).
 
+**In flight (post-v0.1.15, accumulating in `[Unreleased]`): plugin-contract interface segregation (ADR-37 / ADR-38).** A pre-1.0 plugin-mechanism review prompted a large refactor splitting the two fat plugin hooks (`flow_contribution_for`, `diagnostics_for_file`) into narrow, declaratively-gated, engine-indexed, per-interface-testable extension surfaces (PHPStan-style), with an author-helper layer cutting the cross-plugin boilerplate. Substantially landed (13 plugins migrated onto `node_rule`; Slice 2 `dynamic_return`/`type_specifier` surface + 3 consumers); **the next session was handed this off to finish — see Branch D below for the completion checklist.** This is the work to take to release-ready.
+
 ## Reading order for a returning implementer
 
-`make verify` is clean. `[Unreleased]` is empty (the v0.1.15 cut sealed everything that had accumulated). Three branches are queued; nothing forces a particular one.
+`make verify` is clean. **`[Unreleased]` now holds a large in-flight plugin-mechanism interface-segregation effort** (ADR-37 / ADR-38 — see § "Status" and Branch D below); it is substantially landed but not complete. Four branches are queued; **Branch D is the one the last session was mid-stream on and explicitly handed off.**
+
+### Branch D — complete the plugin interface segregation (ADR-37 / ADR-38), reach release-ready — RECOMMENDED / handed off
+
+This is the active in-flight work. The full landed-vs-remaining picture and the completion checklist live in [`docs/ROADMAP.md`](ROADMAP.md) § "Plugin contract — interface segregation + ergonomics (ADR-37 / ADR-38) — IN FLIGHT". One-screen summary:
+
+- **Landed** (`[Unreleased]`): ADR-38 `additional_initializers:`; the author-helper layer (`Source::Literals`, `Diagnostic.from_node`/`from_location`, `Base#diagnostic`); ADR-37 Slice 1/1c/1d (`node_rule` engine-owned walk + `node_file_context` + `NodeContext`) with **13 plugins migrated** off the `diagnostics_for_file` walker; Slice 2 (`dynamic_return` + `type_specifier`) engine surface + 3 consumers migrated (mangrove / minitest / rspec-matcher).
+- **Next action (the main remaining gate): `rigor-actionpack` → `node_rule`.** The single remaining walker plugin. It is the most complex (4 phases; controller **namespace-qualification** sensitive — do not regress the Mastodon `admin/domain_blocks` correctness; reads `:helper_table` + `:model_index`; uses `message_loc`). `NodeContext` already supplies the enclosing-controller context. Re-derive the qualified controller name from `context.ancestors`; the (large) `spec/integration/plugins/actionpack_plugin_spec.rb` is the golden master; the false-positive floor is binding. Migration template to follow: `rigor-shoulda-matchers` (context-dependent) + `rigor-rails-routes` (two-pass + facts).
+- **Then**: Slice 3 (`FactProvider` naming + `rigor plugins --capabilities` catalogue); boilerplate Phase 0c–0e (decisions pre-made — `Base#suggest`/SpellChecker, `config_schema` defaults, `Plugin::Inflector`, `Source::Literals` symbol-only variants); ratify ADR-37/38.
+- **Explicitly out of scope** (leave as-is): escape-valve consumers (sorbet/activerecord/activestorage/rspec-let — `flow_contribution_for` is the supported deprecated valve for their method-gated-return / dynamic-receiver shapes), pure-FactProvider plugins (dry-*/graphql), hanami/web (ADR-28 base, separate axis).
+- **Verification discipline**: each plugin migration is behaviour-preserving — run its `spec/integration/plugins/<id>_plugin_spec.rb` (golden master) then `make verify` (inside the Flake) before committing; the analyzer/main-plugin split is `Analyzer.diagnose` → `Analyzer.violations_for` (per-node, no walk) returning location-free `Violation`s, with the main plugin wrapping via `node_rule` + `Base#diagnostic`. Several integration specs are unit harnesses that call the old `Analyzer.diagnose` / `plugin.flow_contribution_for` directly and must be repointed at the new API (see the shoulda / minitest / rspec migration commits for the pattern).
+
+The pre-1.0 review that motivated all of this: [`docs/design/20260601-plugin-mechanism-pre-1.0-review.md`](design/20260601-plugin-mechanism-pre-1.0-review.md); the phased plan: [`docs/design/20260602-plugin-boilerplate-reduction-plan.md`](design/20260602-plugin-boilerplate-reduction-plan.md).
 
 ### Branch A — v0.2.0 evaluation release
 

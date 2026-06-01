@@ -96,8 +96,11 @@ the *declaration* level, because Rigor's
 discards exactly the extra precision (`Constant`, `Refined`,
 `IntegerRange`) that TypeProf never tracked. Inside the
 analyzer, Rigor is carrying more — which is what powers its
-narrowing and constant-folding diagnostics, the things
-TypeProf does not aim to produce.
+refinement-carrier narrowing and constant-folding diagnostics.
+(TypeProf does its own flow-sensitive narrowing on type-identity
+predicates like `is_a?` / `nil?`; what it does not carry is the
+*value-predicate refinement* layer or the curated diagnostics
+Rigor produces from it.)
 
 ## Analysis model — the largest conceptual difference
 

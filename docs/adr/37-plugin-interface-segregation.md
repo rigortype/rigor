@@ -19,11 +19,16 @@ context for node rules). The **slice 2 design** (`flow_contribution_for` →
 surface is implemented** (the two DSLs + the two runner methods + the
 receiver-class / method-name gating, consulted at both dispatch sites
 alongside the deprecated `flow_contribution_for` fan-out — fully
-back-compatible, every existing consumer unchanged and green). **Not yet
-done:** migrating the six `flow_contribution_for` consumers onto the new DSLs
-(slice 2b), `FactProvider` naming (slice 3), the remaining `node_rule`
-migration (`rigor-actionpack`), and the capability catalogue. Thirteen plugins
-are migrated onto `node_rule` so far.
+back-compatible, every existing consumer unchanged and green). Slice 2b
+migrated the two cleanly-fitting consumers (`rigor-mangrove` → `dynamic_return`,
+`rigor-minitest` → `type_specifier`); the rest legitimately stay on the
+deprecated `flow_contribution_for` escape valve (two contribution shapes the
+narrow DSLs do not express — see the slice 2 § "Outcome"). **Not yet done:**
+rspec matcher narrowing → `type_specifier` (fits), the deferred
+`dynamic_return` generalisation for the escape-valve consumers,
+`FactProvider` naming (slice 3), the remaining `node_rule` migration
+(`rigor-actionpack`), and the capability catalogue. Thirteen plugins are
+migrated onto `node_rule` so far.
 
 Records the decision to finish the interface-segregation work that
 [ADR-2](2-extension-api.md) started: split the two remaining *imperative*
@@ -379,13 +384,32 @@ golden-master integration spec. Because flow contributions feed type narrowing
 (and therefore diagnostics), every migration is verified behaviour-preserving
 before landing — the false-positive floor is the binding constraint.
 
-**Mapping of the unmigrated consumers** (which surface each will use):
+**Mapping of the consumers** (which surface each uses):
 
-- `dynamic_return`: sorbet (`sig`/`T.let`/`T.cast` return types),
-  activerecord (relation typing), activestorage (`Attached::One` / `::Many`),
-  mangrove (unwrap → carried type), dry-struct (attribute readers), and the
-  lisp-eval / units / pattern examples' return contributions.
-- `type_specifier`: rspec (matcher narrowing), minitest (assertion narrowing).
+- `dynamic_return`: **mangrove** (unwrap → carried `type_args[0]`) — *migrated*.
+- `type_specifier`: **minitest** (assertion narrowing) — *migrated*; rspec
+  matcher narrowing — fits, migration pending.
+
+**Outcome / the escape valve is load-bearing.** Migrating the consumers
+surfaced that two contribution shapes the narrow DSLs deliberately do *not*
+express are common, and those consumers legitimately stay on the deprecated
+`flow_contribution_for` (exactly the role PHPStan's discouraged
+`ExpressionTypeResolverExtension` catch-all plays):
+
+- **Method-gated return type.** rspec's `let(:x) { create(:x) }` / `subject`
+  binding sets the *return type* of a call gated by *method name* (`let` /
+  `subject`), not by receiver class. `dynamic_return` is receiver-gated and
+  `type_specifier` produces facts (not a return type), so neither fits.
+  sorbet's `sig`-driven returns are similar — keyed on the called method
+  having a sig, not on a fixed receiver class.
+- **Dynamic receivers.** activestorage contributes `Attached::One` / `::Many`
+  on the project's *discovered model* classes — a per-project set, not the
+  static `receivers:` list `dynamic_return` declares.
+
+These stay on the escape valve by design. A future `dynamic_return`
+generalisation (an optional `methods:` gate for method-gated returns, and/or
+a dynamic-receiver predicate) is the path to migrating them, deferred until
+demand justifies widening the narrow surface.
 
 ## Relationship to other ADRs
 

@@ -35,29 +35,27 @@ module Rigor
       # in shared-context bodies; the diagnostic is the same
       # regardless of the surrounding chain.
       module HaveHttpStatusAnalyzer
-        Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
+        # One matcher violation: the kebab-case `rule` and the
+        # human-readable `message`. Carries no location/path — the
+        # caller (the `node_rule` block) positions the diagnostic at the
+        # matcher's `message_loc` via `Plugin::Base#diagnostic`.
+        Violation = Struct.new(:rule, :message, keyword_init: true)
 
         MATCHER_NAME = :have_http_status
 
         module_function
 
-        # @param path [String]
-        # @param root [Prism::Node]
-        # @return [Array<Diagnostic>]
-        def diagnose(path:, root:)
-          diagnostics = []
-          walk(root) do |call_node|
-            diagnostic = diagnostic_for(call_node, path)
-            diagnostics << diagnostic if diagnostic
-          end
-          diagnostics
-        end
+        # The matcher violation for a single CallNode, or nil when the
+        # node is not a `have_http_status(<int|symbol>)` matcher or its
+        # argument is statically valid. ADR-37: the engine owns the
+        # walk, so this is per-node logic — no traversal here.
+        #
+        # @param call_node [Prism::Node]
+        # @return [Violation, nil]
+        def violation_for(call_node)
+          return nil unless call_to_matcher?(call_node)
 
-        def walk(node, &)
-          return unless node.is_a?(Prism::Node)
-
-          yield node if call_to_matcher?(node)
-          node.compact_child_nodes.each { |child| walk(child, &) }
+          diagnostic_for(call_node)
         end
 
         # `have_http_status` is a matcher — called either with
@@ -77,49 +75,35 @@ module Rigor
           args.size == 1
         end
 
-        def diagnostic_for(call_node, path)
+        def diagnostic_for(call_node)
           arg = call_node.arguments.arguments.first
           case arg
-          when Prism::IntegerNode then integer_diagnostic(call_node, path, arg)
-          when Prism::SymbolNode then symbol_diagnostic(call_node, path, arg)
+          when Prism::IntegerNode then integer_violation(arg)
+          when Prism::SymbolNode then symbol_violation(arg)
           end
         end
 
-        def integer_diagnostic(call_node, path, integer_node)
+        def integer_violation(integer_node)
           value = integer_node.value
           return nil if HttpStatusCodes::VALID_NUMERIC_RANGE.cover?(value)
 
-          build_diagnostic(
-            call_node, path,
+          Violation.new(
             rule: "have_http_status.out-of-range",
             message: "have_http_status(#{value}) is outside the valid HTTP status " \
                      "range #{HttpStatusCodes::VALID_NUMERIC_RANGE}"
           )
         end
 
-        def symbol_diagnostic(call_node, path, symbol_node)
+        def symbol_violation(symbol_node)
           sym = symbol_node.unescaped.to_sym
           return nil if HttpStatusCodes::KNOWN_SYMBOLS.include?(sym)
 
-          build_diagnostic(
-            call_node, path,
+          Violation.new(
             rule: "have_http_status.unknown-symbol",
             message: "have_http_status(:#{sym}) is not a recognised HTTP status symbol " \
                      "(see Rack::Utils::SYMBOL_TO_STATUS_CODE) or Rails status-group " \
                      "alias (:success / :successful / :missing / :redirect / :error / " \
                      ":client_error / :server_error / :informational)"
-          )
-        end
-
-        def build_diagnostic(call_node, path, rule:, message:)
-          location = call_node.message_loc || call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
-            severity: :warning,
-            rule: rule,
-            message: message
           )
         end
       end

@@ -72,7 +72,23 @@ module Rigor
       def self.from_node(node, path:, message:, severity: :error, rule: nil, # rubocop:disable Metrics/ParameterLists
                          source_family: DEFAULT_SOURCE_FAMILY,
                          receiver_type: nil, method_name: nil, project_definition_site: nil)
-        location = node.location
+        from_location(
+          node.location, path: path, message: message, severity: severity, rule: rule,
+                         source_family: source_family, receiver_type: receiver_type,
+                         method_name: method_name, project_definition_site: project_definition_site
+        )
+      end
+
+      # Builds a Diagnostic from an explicit Prism location, applying
+      # the same 1-based `line` / `start_column + 1` convention as
+      # {.from_node}. Use this when the diagnostic should point at a
+      # *sub-location* rather than the whole node — most often a call's
+      # `message_loc` (the matcher / method name) instead of the
+      # receiver-spanning `node.location`. {.from_node} is sugar for
+      # `from_location(node.location, …)`.
+      def self.from_location(location, path:, message:, severity: :error, rule: nil, # rubocop:disable Metrics/ParameterLists
+                             source_family: DEFAULT_SOURCE_FAMILY,
+                             receiver_type: nil, method_name: nil, project_definition_site: nil)
         new(
           path: path,
           line: location.start_line,

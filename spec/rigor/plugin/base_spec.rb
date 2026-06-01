@@ -258,5 +258,11 @@ RSpec.describe Rigor::Plugin::Base do
     it "defaults severity to :error" do
       expect(plugin.diagnostic(node, path: "demo.rb", message: "m").severity).to eq(:error)
     end
+
+    it "points at an explicit location override when given (message_loc idiom)" do
+      diag = plugin.diagnostic(node, path: "demo.rb", message: "m", location: node.message_loc)
+      expect(diag.line).to eq(node.message_loc.start_line)
+      expect(diag.column).to eq(node.message_loc.start_column + 1)
+    end
   end
 end

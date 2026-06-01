@@ -56,17 +56,18 @@ module Rigor
         description: "Validates rspec-rails behavioral matchers (have_http_status floor)."
       )
 
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        HaveHttpStatusAnalyzer.diagnose(path: path, root: root).map { |diag| build_diagnostic(diag) }
-      end
+      # ADR-37 — the engine walks each file and hands us every
+      # CallNode; the analyzer is now pure per-node logic. The
+      # diagnostic points at the matcher name (`message_loc`),
+      # reproducing the previous `message_loc || location` positioning.
+      node_rule Prism::CallNode do |node, _scope, path|
+        violation = HaveHttpStatusAnalyzer.violation_for(node)
+        next [] unless violation
 
-      private
-
-      def build_diagnostic(diag)
-        Rigor::Analysis::Diagnostic.new(
-          path: diag.path, line: diag.line, column: diag.column,
-          message: diag.message, severity: diag.severity, rule: diag.rule
-        )
+        [diagnostic(
+          node, path: path, location: node.message_loc,
+                message: violation.message, severity: :warning, rule: violation.rule
+        )]
       end
     end
 

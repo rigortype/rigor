@@ -146,4 +146,20 @@ RSpec.describe Rigor::Analysis::Diagnostic do
       expect(diagnostic.method_name).to eq("bar")
     end
   end
+
+  describe ".from_location" do
+    let(:node) { Prism.parse("  foo(:bar)").value.statements.body.first }
+
+    it "positions at an explicit sub-location (e.g. message_loc) with the 1-based column" do
+      diagnostic = described_class.from_location(node.message_loc, path: "demo.rb", message: "m", rule: "x")
+      expect(diagnostic.line).to eq(node.message_loc.start_line)
+      expect(diagnostic.column).to eq(node.message_loc.start_column + 1)
+    end
+
+    it "is what from_node delegates to (whole-node location)" do
+      via_node = described_class.from_node(node, path: "d.rb", message: "m")
+      via_loc = described_class.from_location(node.location, path: "d.rb", message: "m")
+      expect([via_node.line, via_node.column]).to eq([via_loc.line, via_loc.column])
+    end
+  end
 end

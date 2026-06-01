@@ -266,9 +266,17 @@ module Rigor
       # stamps `plugin.<manifest.id>` on every returned diagnostic
       # (ADR-7 § "Slice 5-B"), so any value set here would be
       # overwritten.
-      def diagnostic(node, path:, message:, severity: :error, rule: nil)
-        Analysis::Diagnostic.from_node(
-          node, path: path, message: message, severity: severity, rule: rule
+      # Pass `location:` (a Prism location) to point the diagnostic at a
+      # sub-location of `node` rather than `node.location` — typically
+      # `node.message_loc` so a matcher / method-name diagnostic points
+      # at the name, not the receiver-spanning whole call. A `nil`
+      # `location:` falls back to `node.location`, so
+      # `location: node.message_loc` reproduces the common
+      # `message_loc || location` idiom.
+      def diagnostic(node, path:, message:, severity: :error, rule: nil, location: nil)
+        Analysis::Diagnostic.from_location(
+          location || node.location,
+          path: path, message: message, severity: severity, rule: rule
         )
       end
 

@@ -543,7 +543,7 @@ exact. `env.rb` `add_run` 176 / `run_all` 183-194 ✓; `vertex.rb` `on_type_adde
 | "literal precision: widened to nominal" | `42`→`Integer` at `install0`; no `Constant` (§5) |
 | "no refinement *carriers*" (CORRECTED — TypeProf HAS occurrence-typing narrowing) | TypeProf narrows on `is_a?`/`nil?`/`!`/`case-when`/`&&`/`\|\|` (§10a); what it lacks vs Rigor is *refinement-type carriers* (value-predicate → named type like `non-empty-string`), not flow narrowing per se |
 | "RBS is the output product" | `Vertex#show` / `MethodDefBox#show` render RBS; errors are byproduct (§6, §8) |
-| "tests as mandatory fuel" | params only get types if a call site (or driver) supplies args (§3) |
+| "call sites fuel param inference (a test is just one kind of call site — TypeProf has no notion of 'test')" | params only get types if some call site supplies args; tests are an ordinary call-site source, not specially recognised (§3) |
 | Incremental / IDE-first (v2) | ChangeSet diff-rollback + ref-counted vertices + `update_rb_file` (§1) |
 
 No appendix claim was contradicted by the source. Two refinements worth folding in if the

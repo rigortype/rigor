@@ -186,14 +186,18 @@ Tests are a pile of concrete examples of how a method is
 called, so they are evidence for parameter types. This is
 where the analysis models show through most sharply.
 
-- **TypeProf treats tests as mandatory fuel.** Because it
+- **TypeProf fuels on call sites — and a test is just one
+  kind of call site.** TypeProf has no concept of "a test." It
   infers parameters by abstractly interpreting the whole
-  program, a spec that runs `Foo.new.bar(42)` *is* how
-  TypeProf learns `bar` takes an `Integer`. With no caller, the
-  parameter stays `untyped`. Writing the test and writing the
-  type-inference harness are the same act — which is why the
-  canonical TypeProf workflow points the tool at a file plus a
-  small driver.
+  program, so *any* call it can see feeds a parameter type:
+  top-level code, an example under `__END__`, a throwaway
+  driver, or a line in a spec are all the same to it. A call
+  that runs `Foo.new.bar(42)` — wherever it lives — is how
+  TypeProf learns `bar` takes an `Integer`; with no such call,
+  the parameter stays `untyped`. Tests happen to be a rich
+  *source* of call sites (so pointing TypeProf at exercising
+  code, including a suite, helps), but TypeProf neither
+  recognises nor privileges them as tests.
 - **Rigor does not read tests for `rigor check`.** Its local
   model leaves un-narrowed parameters at `Dynamic[Top]`; the
   bug-finding gate never consults `spec/` to tighten them.
@@ -202,10 +206,11 @@ where the analysis models show through most sharply.
   ([Chapter 11](11-sig-gen.md)), which unions the observed
   argument type per position across every call site.
 
-And where TypeProf interprets a spec as ordinary Ruby, Rigor's
-sig-gen collector models the RSpec DSL *structurally* —
-`described_class`, `subject`, and `let` are recognised as
-bindings, not just executed:
+So the contrast is sharp: TypeProf interprets a spec as
+ordinary Ruby (the `it` blocks are just more call sites),
+whereas Rigor's sig-gen collector models the RSpec DSL
+*structurally* — `described_class`, `subject`, and `let` are
+recognised as bindings, not just executed:
 
 ```ruby
 RSpec.describe Calc do
@@ -246,8 +251,8 @@ more. The tools split on what to do about that.
 
 | | TypeProf | Rigor |
 | --- | --- | --- |
-| Role of tests | Mandatory inference fuel | Opt-in fuel for `sig-gen` only (never the `check` gate) |
-| How a spec is read | Executed as ordinary Ruby | `subject` / `let` / `described_class` recognised structurally |
+| Role of tests | No special role — a test is just one more call site that fuels inference | Opt-in fuel for `sig-gen` only (never the `check` gate) |
+| How a spec is read | Executed as ordinary Ruby (not recognised as a test) | `subject` / `let` / `described_class` recognised structurally |
 | Observed-narrow params | Emitted as-is | Treated as a reviewable suggestion (ADR-5, opt-in, human gate) |
 | Bidirectional loop | arg ↔ return within one pass | spec → sig → spec-checking → sharper sig |
 

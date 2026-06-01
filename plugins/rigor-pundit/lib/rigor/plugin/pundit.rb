@@ -84,17 +84,24 @@ module Rigor
         @load_error = nil
       end
 
-      def diagnostics_for_file(path:, scope:, root:)
+      # File-level only: the load-error emission. The per-call policy
+      # validation runs over the engine-owned walk via the node_rule
+      # below (ADR-37). The index is lazily loaded + memoised by
+      # policy_index_or_nil, so both surfaces share one load.
+      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = policy_index_or_nil
         return [load_error_diagnostic(path)] if index.nil? && @load_error
-        return [] if index.nil? || index.empty?
 
-        Analyzer.diagnose(
-          path: path,
-          root: root,
-          policy_index: index,
-          scope: scope
-        ).map { |diag| build_diagnostic(diag) }
+        []
+      end
+
+      node_rule Prism::CallNode do |node, scope, path|
+        index = policy_index_or_nil
+        next [] if index.nil? || index.empty?
+
+        Analyzer.violations_for(call_node: node, policy_index: index, scope: scope).map do |violation|
+          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
+        end
       end
 
       private
@@ -115,13 +122,6 @@ module Rigor
           message: @load_error,
           severity: :warning,
           rule: "load-error"
-        )
-      end
-
-      def build_diagnostic(diag)
-        Rigor::Analysis::Diagnostic.new(
-          path: diag.path, line: diag.line, column: diag.column,
-          message: diag.message, severity: diag.severity, rule: diag.rule
         )
       end
     end

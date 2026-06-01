@@ -31,45 +31,40 @@ module Rigor
       module Analyzer
         ENTRY_METHODS = %i[authorize policy policy_scope].freeze
 
-        Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
+        # One policy violation: the kebab-case `rule`, `severity`, and
+        # human-readable `message`. Carries no path/location — the caller
+        # (the `node_rule` block) positions it via `Plugin::Base#diagnostic`.
+        Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
 
-        # @param path [String]
-        # @param root [Prism::Node]
+        # The policy violations for a single call node (0..2 of them), or
+        # `[]` when the node is not a Pundit entry call or its record type
+        # is not statically determinable. ADR-37: the engine owns the
+        # walk, so this is per-node logic.
+        #
+        # @param call_node [Prism::Node]
         # @param policy_index [PolicyIndex]
-        # @param scope [Rigor::Inference::Scope, nil]
-        # @return [Array<Diagnostic>]
-        def diagnose(path:, root:, policy_index:, scope:)
-          diagnostics = []
-          walk(root) do |call_node|
-            record_node = call_node.arguments&.arguments&.first
-            next if record_node.nil?
+        # @param scope [Rigor::Scope, nil]
+        # @return [Array<Violation>]
+        def violations_for(call_node:, policy_index:, scope:)
+          return [] unless call_node.is_a?(Prism::CallNode) && entry_call?(call_node)
 
-            policy_class_name = derive_policy_class_name(record_node, scope)
-            next if policy_class_name.nil?
+          record_node = call_node.arguments&.arguments&.first
+          return [] if record_node.nil?
 
-            policy_entry = policy_index.find(policy_class_name)
-            if policy_entry.nil?
-              diagnostics << unknown_policy_class_diagnostic(path, call_node, policy_class_name, policy_index)
-              next
-            end
+          policy_class_name = derive_policy_class_name(record_node, scope)
+          return [] if policy_class_name.nil?
 
-            diagnostics << policy_call_info(path, call_node, policy_class_name)
+          policy_entry = policy_index.find(policy_class_name)
+          return [unknown_policy_class_violation(call_node, policy_class_name, policy_index)] if policy_entry.nil?
 
-            next unless call_node.name == :authorize
-
-            action_diag = action_check(path, call_node, policy_entry)
-            diagnostics << action_diag if action_diag
+          violations = [policy_call_violation(call_node, policy_class_name)]
+          if call_node.name == :authorize
+            action = action_violation(call_node, policy_entry)
+            violations << action if action
           end
-          diagnostics
-        end
-
-        def walk(node, &)
-          return unless node.is_a?(Prism::Node)
-
-          yield node if node.is_a?(Prism::CallNode) && entry_call?(node)
-          node.compact_child_nodes.each { |child| walk(child, &) }
+          violations
         end
 
         def entry_call?(node)
@@ -105,26 +100,18 @@ module Rigor
           nil
         end
 
-        def policy_call_info(path, call_node, policy_class_name)
-          location = call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+        def policy_call_violation(call_node, policy_class_name)
+          Violation.new(
             severity: :info,
             rule: "policy-call",
             message: "`#{call_node.name}(...)` resolves to `#{policy_class_name}`"
           )
         end
 
-        def unknown_policy_class_diagnostic(path, call_node, policy_class_name, policy_index)
-          location = call_node.location
+        def unknown_policy_class_violation(call_node, policy_class_name, policy_index)
           suggestions = DidYouMean::SpellChecker.new(dictionary: policy_index.names).correct(policy_class_name)
           suggestion_part = suggestions.empty? ? "" : " (did you mean `#{suggestions.first}`?)"
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :error,
             rule: "unknown-policy-class",
             message: "no policy class `#{policy_class_name}` for `#{call_node.name}` call#{suggestion_part}"
@@ -136,7 +123,7 @@ module Rigor
         # (the runtime infers it from the controller — out
         # of scope here) or when the second argument isn't
         # a literal symbol / string.
-        def action_check(path, call_node, policy_entry)
+        def action_violation(call_node, policy_entry)
           args = call_node.arguments&.arguments || []
           return nil if args.size < 2
 
@@ -147,14 +134,10 @@ module Rigor
           predicate = policy_entry.normalize(action_name)
           return nil if policy_entry.includes_method?(predicate)
 
-          location = call_node.location
           dictionary = policy_entry.predicate_methods.map(&:to_s)
           suggestions = DidYouMean::SpellChecker.new(dictionary: dictionary).correct(predicate.to_s)
           suggestion_part = suggestions.empty? ? "" : " (did you mean `:#{suggestions.first.delete_suffix('?')}`?)"
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :error,
             rule: "unknown-policy-method",
             message: "`#{policy_entry.policy_class_name}##{predicate}` is not defined " \

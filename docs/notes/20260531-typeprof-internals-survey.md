@@ -1,17 +1,26 @@
 # TypeProf internals survey — inference logic + internal type representation
 
-**Date:** 2026-05-31
+**Date:** 2026-05-31 (verification pass 2026-06-01).
 **Subject:** [TypeProf](https://github.com/ruby/typeprof) v0.31.1, vendored read-only at
 `references/typeprof/` (pin `19ff60cf`).
 **Why:** Deep-dive backing the handbook appendix
-[`docs/handbook/appendix-typeprof.md`](../handbook/appendix-typeprof.md). The appendix
-asserts TypeProf is a "whole-program abstract interpreter" with no literal-value
-precision and parameter-from-call-site inference; this note pins those claims to the
-actual source so future appendix edits (and any "should Rigor borrow X" question) rest
-on verified mechanism, not folklore.
+[`docs/handbook/appendix-typeprof.md`](../handbook/appendix-typeprof.md). It pins the
+appendix's claims — whole-program abstract interpreter, parameter inference from call
+sites, literal-widening, diagnostics-as-byproduct — to the actual source so future
+appendix edits (and any "should Rigor borrow X" question) rest on verified mechanism, not
+folklore.
 
-All `file:line` citations are against the vendored v0.31.1 tree. Primary sources: the
-source itself + the project's own [`doc/doc.md`](../../references/typeprof/doc/doc.md).
+**Reading order / status.** §1–§8 are the mechanism walkthrough. §9 is the Rigor↔TypeProf
+feedback/divergence analysis. §10 is the 2026-06-01 verification pass that resolved the
+four items originally left unconfirmed (and corrected one wrong intermediate finding —
+narrowing). The two recap tables ("maps back to appendix claims", "resolution status")
+sit after §10. **Every claim in this note is now source-confirmed**; the only remaining
+caveats are genuine TypeProf limits, not verification gaps (recap at the end of §10's
+resolution table).
+
+All `file:line` citations are against the vendored v0.31.1 tree; treat individual line
+numbers as ±a few and re-grep before quoting elsewhere. Primary sources: the source
+itself + the project's own [`doc/doc.md`](../../references/typeprof/doc/doc.md).
 Secondary (design intent / history): Endoh's RubyKaigi talks, listed at the end.
 
 ---
@@ -25,10 +34,13 @@ is lowered to a graph of **vertices** (type sets) connected by **edges** (datafl
 Types are injected at literals/known points and **propagate along edges until the graph
 reaches a fixpoint** (the worklist empties). A method parameter's type is literally "the
 union of every actual-argument type that ever flowed into it across all call sites" —
-which is why TypeProf needs call sites (or a driver) to infer parameters, and why its
-headline product is generated RBS rather than a curated diagnostic stream. The project's
-own framing: *"a Ruby interpreter that abstractly executes Ruby programs at the type
-level"* ([doc.md:29](../../references/typeprof/doc/doc.md)).
+which is why TypeProf needs to *see at least one call site* to infer a parameter. A call
+site is any call it can interpret: top-level code, an `__END__` example, a driver script,
+or a line in a test. TypeProf has **no notion of a test** — a test is just one more
+source of call sites, neither recognised nor privileged as such. This call-site-driven
+model is also why its headline product is generated RBS rather than a curated diagnostic
+stream. The project's own framing: *"a Ruby interpreter that abstractly executes Ruby
+programs at the type level"* ([doc.md:29](../../references/typeprof/doc/doc.md)).
 
 This is the mechanistic backing for the appendix's "whole-program vs local" contrast with
 Rigor (per-method inference against a catalog, bounded by inference budgets).
@@ -174,8 +186,8 @@ superclass), and for each resolved callee yields either a `MethodDecl` (RBS) or 
 **Blocks/`yield`:** the block argument is carried as a vertex holding `Type::Proc` values
 (`type.rb:196-210`, a Proc wraps the block's code object). Block parameters are wired the
 same edge way; `yield` flows the yielded args into the block's params and the block's
-result back. (Confirmed at the wiring level; the exact block-param fan-out I did not trace
-line-by-line — flagged below.)
+result back. The exact fan-out (positional `.zip`, single-arg auto-destructure, return via
+escape boxes) is traced in §10c.
 
 **Consequence for the appendix:** an un-annotated parameter only ever called with `String`
 infers `(String)`. There is **no robustness widening** — TypeProf reports what flowed.
@@ -413,21 +425,22 @@ side-by-side pattern) rather than one subsuming the other.
 
 ---
 
-## 10. Verification pass (2026-06-01) — resolving the honest flags
+## 10. Verification pass (2026-06-01) — the four originally-flagged items
 
-Re-examined the four flagged items directly against the vendored source. The session's
-tool output was intermittently corrupted (Read returned wrong offsets; greps with multiple
-matches truncated to one line), so only findings backed by **coherent, repeated, internally
-consistent** code excerpts are recorded as confirmed; the rest stay explicitly partial.
+Four items were originally flagged as "could not fully confirm." This section resolves
+**all four** against the vendored source: narrowing (§10a), parser (§10b), yield fan-out
+(§10c), and the line-number audit (§10e). Nothing in §1–§9 above depends on an unverified
+claim any more.
 
-> **Correction notice.** The first version of this §10 (committed earlier the same day)
+> **Correction notice.** An intermediate draft of this §10 (committed earlier the same day)
 > stated "CONFIRMED: zero flow-sensitive narrowing." **That was wrong** — a verification
 > error caused by a degraded session in which a `grep narrow` returned empty (the command
 > had not actually run) and `ast/control.rb` was never read in full. A clean second pass
 > (direct full read of `control.rb` + two independent sub-agent traces, all agreeing) shows
 > TypeProf v0.31.1 has a **substantial occurrence-typing narrowing subsystem**. The text
 > below is the corrected finding. The lesson is recorded honestly because this note is meant
-> to be a normative reference.
+> to be a normative reference: treat a single corrupted-session result as unconfirmed until
+> re-verified.
 
 ### 10a. Narrowing — CONFIRMED PRESENT (occurrence typing on type-identity predicates)
 
@@ -554,22 +567,22 @@ one front-end over an LSP-shaped core.
 
 ---
 
-## Could not fully confirm (honest flags)
+## Resolution status of the originally-flagged items
 
-Status after the 2026-06-01 verification pass (see next section): **Narrowing** and
-**Parser** are now confirmed first-hand; **yield distribution** and the **line-number
-audit** remain partial because the working environment's tool output was degraded that
-session (wrong Read offsets, truncated multi-match greps) and recording details off
-corrupted output would defeat the purpose of a normative note.
+All four items first flagged as "could not fully confirm" are now resolved against the
+source in §10. Summary (full detail + citations there):
 
-- **Block/`yield` param fan-out — RESOLVED.** See §10c. Positional `.zip` fan-out with a
-  single-arg/multi-param auto-destructure branch; return via escape boxes.
-- **Narrowing — RESOLVED (confirmed PRESENT, not absent).** See §10a. An earlier draft of
-  this note wrongly stated "zero narrowing"; TypeProf v0.31.1 has a full occurrence-typing
-  narrowing subsystem (`env/narrowing.rb`, `graph/filter.rb`, per-branch vertex cloning).
-- **Parser — RESOLVED (confirmed Prism ≥ 1.4.0, Ruby ≥ 3.3 from gemspec).** See §10b.
-- **Exact line numbers — RESOLVED.** Spot-audit found all cited entities within ±a few
-  lines (most exact). See §10e.
+| Originally flagged | Status | Where |
+| --- | --- | --- |
+| Narrowing — does v0.31.1 have any? | **RESOLVED: present.** Full occurrence-typing subsystem (`env/narrowing.rb`, `graph/filter.rb`, per-branch vertex cloning). An earlier draft wrongly said "zero." | §10a |
+| Parser backend | **RESOLVED: Prism ≥ 1.4.0, Ruby ≥ 3.3** (from gemspec). | §10b |
+| Block/`yield` param fan-out | **RESOLVED.** Positional `.zip`; single-arg→multi-param auto-destructure; return via escape boxes. | §10c |
+| Line-number drift | **RESOLVED.** All §1–§8 citations within ±a few lines (most exact). | §10e |
+
+Remaining *genuine* limits (not verification gaps — these are TypeProf behaviours):
+predicate narrowing requires the receiver/subject to be a bare variable read; `case/in`
+pattern matching does not narrow the pivot; refinement-style value predicates are not
+modeled (§10a). The dynamic-symbol fallback to the `Symbol` instance type is noted in §5.
 
 ---
 

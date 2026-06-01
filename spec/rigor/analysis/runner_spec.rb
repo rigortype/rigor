@@ -480,6 +480,42 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    describe "attr_* accessors suppress cross-file undefined-method" do
+      # A class that defines `attr_reader :x` AND ships RBS that omits
+      # `x` (an incomplete `sig/`) must not fire a false
+      # `undefined-method` on `obj.x` from another file. attr-declared
+      # accessors are recorded as discovered methods and propagated
+      # project-wide.
+      it "does not flag an attr_reader method called from another file" do
+        Dir.mktmpdir("rigor-attr-xfile-") do |tmpdir|
+          FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+          # RBS knows Widget but omits the `size` reader.
+          File.write(File.join(tmpdir, "sig", "widget.rbs"), "class Widget\nend\n")
+          File.write(File.join(tmpdir, "widget.rb"), <<~RUBY)
+            class Widget
+              attr_reader :size
+            end
+          RUBY
+          # `Widget.new` types the receiver as Widget (RBS-known), so
+          # the undefined-method rule actually evaluates `size`.
+          File.write(File.join(tmpdir, "user.rb"), <<~RUBY)
+            w = Widget.new
+            w.size
+          RUBY
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.new(
+              "paths" => [tmpdir], "signature_paths" => [File.join(tmpdir, "sig")]
+            )
+            result = described_class.new(configuration: configuration, cache_store: nil).run
+            size_diags = result.diagnostics.select do |d|
+              d.rule == "call.undefined-method" && d.message.include?("size")
+            end
+            expect(size_diags).to be_empty
+          end
+        end
+      end
+    end
+
     describe "pre_eval: file-existence validation (ADR-17 slice 1)" do
       it "surfaces `pre-eval.file-not-found` :error for each missing pre_eval entry" do
         Dir.mktmpdir("rigor-pre-eval-missing-") do |tmpdir|

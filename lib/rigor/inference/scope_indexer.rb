@@ -107,7 +107,14 @@ module Rigor
         # introduced method names. `rigor check` consults the
         # table to suppress false positives for methods the
         # user has defined but no RBS sig describes.
-        discovered_methods = build_discovered_methods(root)
+        # Merged UNDER any cross-file pre-pass seed (like the def-node
+        # / include tables below) so a method `def`/`attr_reader`-
+        # declared in one file suppresses a false `undefined-method`
+        # for a call in another — `rigor check` seeds the project-wide
+        # table via `Runner#seed_project_scope`.
+        discovered_methods = deep_merge_class_methods(
+          default_scope.discovered_methods, build_discovered_methods(root)
+        )
         seeded_scope = seeded_scope.with_discovered_methods(discovered_methods)
 
         # v0.0.2 #5 + ADR-24 slice 2 — record per-instance-method
@@ -802,7 +809,19 @@ module Rigor
         accumulator.transform_values(&:freeze).freeze
       end
 
-      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength
+      # Merges two `class_name => { method => kind }` tables, unioning
+      # the per-class method maps (so a seeded cross-file table and the
+      # current file's table combine instead of clobbering).
+      def deep_merge_class_methods(base, overlay)
+        return overlay if base.nil? || base.empty?
+        return base if overlay.empty?
+
+        base.merge(overlay) do |_class_name, base_methods, overlay_methods|
+          base_methods.merge(overlay_methods)
+        end
+      end
+
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
       def walk_methods(node, qualified_prefix, in_singleton_class, accumulator)
         return unless node.is_a?(Prism::Node)
 
@@ -836,6 +855,10 @@ module Rigor
           return
         when Prism::CallNode
           record_define_method(node, qualified_prefix, in_singleton_class, accumulator) if node.name == :define_method
+          if ATTR_MACROS.include?(node.name)
+            record_attr_methods(node, qualified_prefix, in_singleton_class,
+                                accumulator)
+          end
         end
 
         node.compact_child_nodes.each do |child|
@@ -866,7 +889,7 @@ module Rigor
           end
         end
       end
-      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
 
       # v0.1.2 — when a `Const = Data.define(*sym) do ... end`
       # / `Const = Struct.new(*sym) do ... end` constant write
@@ -1307,6 +1330,35 @@ module Rigor
         accumulator[class_name][method_name] = in_singleton_class ? :singleton : :instance
       end
 
+      # The `attr_*` accessor macros that introduce methods Rigor must
+      # treat as source-declared. Without this, a class that defines an
+      # accessor with `attr_reader :x` AND carries RBS that omits `x`
+      # (a common gap — the project ships an incomplete `sig/`) fires a
+      # false `call.undefined-method` on `obj.x`, because the
+      # undefined-method rule only suppressed `def` / `define_method` /
+      # `alias_method`-discovered methods. `attr_reader` defines
+      # readers, `attr_writer` writers (`x=`), `attr_accessor` both.
+      ATTR_MACROS = %i[attr_reader attr_writer attr_accessor].freeze
+
+      def record_attr_methods(call_node, qualified_prefix, in_singleton_class, accumulator)
+        return if qualified_prefix.empty?
+        return unless call_node.receiver.nil? # only the implicit-self macro defines on the lexical class
+        return if call_node.arguments.nil?
+
+        kind = in_singleton_class ? :singleton : :instance
+        reader = call_node.name != :attr_writer
+        writer = call_node.name != :attr_reader
+        class_name = qualified_prefix.join("::")
+        call_node.arguments.arguments.each do |arg|
+          base = literal_method_name(arg)
+          next if base.nil?
+
+          accumulator[class_name] ||= {}
+          accumulator[class_name][base] = kind if reader
+          accumulator[class_name][:"#{base}="] = kind if writer
+        end
+      end
+
       def literal_method_name(node)
         return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
 
@@ -1386,7 +1438,7 @@ module Rigor
       # @return [Hash{Symbol => Hash}]
       #   `{ def_nodes:, def_sources:, superclasses:, includes: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
-        acc = { def_nodes: {}, def_sources: {}, superclasses: {}, includes: {}, method_visibilities: {} }
+        acc = { def_nodes: {}, def_sources: {}, superclasses: {}, includes: {}, method_visibilities: {}, methods: {} }
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
@@ -1396,8 +1448,28 @@ module Rigor
           # analyzer surfaces the parse error separately.
           next
         end
-        %i[def_nodes def_sources includes method_visibilities].each { |key| acc[key].each_value(&:freeze) }
+        # Cross-file method suppression is for the project's OWN
+        # accessors (attr_* / define_method / alias) — NOT for plain
+        # `def`s. A cross-file `def` on a class is exactly the ADR-17
+        # monkey-patch case the undefined-method rule deliberately
+        # surfaces (fire + def-site annotation, nudging `pre_eval:`),
+        # so dropping the `def`-declared names keeps that contract
+        # intact while still letting `attr_reader :x` in one file
+        # suppress a false undefined-method for `obj.x` in another.
+        acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
+        %i[def_nodes def_sources includes method_visibilities methods].each { |key| acc[key].each_value(&:freeze) }
         acc.transform_values(&:freeze)
+      end
+
+      # Removes, per class, the method names that have a project `def`
+      # node, leaving only accessor/alias/define_method-introduced
+      # methods in the cross-file suppression table.
+      def subtract_def_methods(methods, def_nodes)
+        methods.each_with_object({}) do |(class_name, table), out|
+          defs = def_nodes[class_name] || {}
+          kept = table.reject { |method_name, _kind| defs.key?(method_name) }
+          out[class_name] = kept unless kept.empty?
+        end
       end
 
       # Folds one file's class-keyed indexes into the cross-file
@@ -1412,6 +1484,9 @@ module Rigor
         end
         build_discovered_method_visibilities(root).each do |class_name, table|
           (acc[:method_visibilities][class_name] ||= {}).merge!(table)
+        end
+        build_discovered_methods(root).each do |class_name, table|
+          (acc[:methods][class_name] ||= {}).merge!(table)
         end
       end
 

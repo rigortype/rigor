@@ -114,6 +114,7 @@ module Rigor
         @project_discovered_superclasses = {}.freeze
         @project_discovered_includes = {}.freeze
         @project_discovered_method_visibilities = {}.freeze
+        @project_discovered_methods = {}.freeze
       end
 
       # ADR-pending editor mode — present when the runner is wired
@@ -266,6 +267,7 @@ module Rigor
         @project_discovered_superclasses = def_index.fetch(:superclasses)
         @project_discovered_includes = def_index.fetch(:includes)
         @project_discovered_method_visibilities = def_index.fetch(:method_visibilities)
+        @project_discovered_methods = def_index.fetch(:methods)
       end
 
       # Internal: adopts a frozen {ProjectScan} snapshot supplied
@@ -1518,6 +1520,7 @@ module Rigor
         unless @project_discovered_method_visibilities.empty?
           scope = scope.with_discovered_method_visibilities(@project_discovered_method_visibilities)
         end
+        scope = scope.with_discovered_methods(@project_discovered_methods) unless @project_discovered_methods.empty?
         scope
       end
 

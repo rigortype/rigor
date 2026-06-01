@@ -68,18 +68,18 @@ module Rigor
     class Actionpack < Rigor::Plugin::Base
       manifest(
         id: "actionpack",
-        # Bumped 2026-05-27 — analyzer-side nested-module
-        # qualification slice. `diagnose_filters` and
-        # `diagnose_renders` now thread the enclosing
-        # namespace through the AST walk so a
-        # `module Admin; class DomainBlocksController; end`
-        # file resolves as `Admin::DomainBlocksController`
-        # — matching the qualification the
-        # `ControllerDiscoverer` already records. Fixes render
-        # paths (`admin/domain_blocks/new` not bare
-        # `domain_blocks/new`) and filter-chain validation
-        # silently skipping nested controllers.
-        version: "0.7.0",
+        # Bumped 2026-06-02 — ADR-37 node_rule migration. The four
+        # phases (helper / filter / render / strong-params) now run
+        # per-call over the engine-owned walk instead of the
+        # hand-rolled `diagnostics_for_file` traversal; the enclosing
+        # controller is read from the node-rule `NodeContext` ancestors.
+        # Nested-module qualification is preserved — a
+        # `module Admin; class DomainBlocksController; end` file still
+        # resolves as `Admin::DomainBlocksController` (matching the
+        # `ControllerDiscoverer`), so render paths
+        # (`admin/domain_blocks/new`) and filter-chain validation on
+        # nested controllers are unchanged.
+        version: "0.8.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers.",
         config_schema: {
           "controller_search_paths" => :array,
@@ -121,62 +121,74 @@ module Rigor
         @model_index_resolved = false
       end
 
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        return [] unless controller_file?(path)
+      # ADR-37 — the four Action Pack phases run per-call over the
+      # engine-owned walk. Each rule gates on `controller_file?(path)` (the
+      # plugin only validates files under `controller_search_paths`,
+      # exactly as the former `diagnostics_for_file` top-level guard did),
+      # then delegates to a per-node `Analyzer.*_violations_for` and
+      # positions each location-free `Violation` with `Base#diagnostic`.
+      # The filter / render phases read the enclosing controller from the
+      # node-rule `NodeContext` ancestors (its fifth block argument).
 
-        helper_diagnostics(path, root) +
-          filter_diagnostics(path, root) +
-          render_diagnostics(path, root) +
-          permit_diagnostics(path, root)
+      # Phase 4 — route-helper consumption.
+      node_rule Prism::CallNode do |node, _scope, path|
+        next [] unless controller_file?(path)
+
+        table = helper_table
+        next [] if table.nil? || table.empty?
+
+        Analyzer.helper_violations_for(call_node: node, helper_table: table).map do |v|
+          diagnostic(node, path: path, location: v.location, message: v.message, severity: v.severity, rule: v.rule)
+        end
+      end
+
+      # Phase 2 — filter-chain validation. Skips silently when the
+      # controller index is absent or doesn't recognise the enclosing
+      # class.
+      node_rule Prism::CallNode do |node, _scope, path, _fc, context|
+        next [] unless controller_file?(path)
+
+        index = controller_index_or_nil
+        next [] if index.nil? || index.empty?
+
+        Analyzer.filter_violations_for(call_node: node, ancestors: context.ancestors, controller_index: index).map do |v|
+          diagnostic(node, path: path, location: v.location, message: v.message, severity: v.severity, rule: v.rule)
+        end
+      end
+
+      # Phase 3 — render-target validation against the configured
+      # `view_search_paths`. Recognised purely from the call site + the
+      # enclosing controller name, so no per-controller pre-discovery is
+      # needed; the controller index is consulted only to suppress
+      # gem-shipped-view false positives.
+      node_rule Prism::CallNode do |node, _scope, path, _fc, context|
+        next [] unless controller_file?(path)
+
+        Analyzer.render_violations_for(
+          call_node: node, ancestors: context.ancestors, path: path,
+          view_search_roots: @view_search_paths, controller_index: controller_index_or_nil
+        ).map do |v|
+          diagnostic(node, path: path, location: v.location, message: v.message, severity: v.severity, rule: v.rule)
+        end
+      end
+
+      # Phase 1 — strong-parameter validation. Reads the `:model_index`
+      # fact from the cross-plugin fact store (published by
+      # rigor-activerecord) and validates every
+      # `params.require(:user).permit(:name, :email)` chain against the
+      # User model's column list.
+      node_rule Prism::CallNode do |node, _scope, path|
+        next [] unless controller_file?(path)
+
+        index = model_index
+        next [] if index.nil? || index.empty?
+
+        Analyzer.permit_violations_for(call_node: node, model_index: index).map do |v|
+          diagnostic(node, path: path, location: v.location, message: v.message, severity: v.severity, rule: v.rule)
+        end
       end
 
       private
-
-      def helper_diagnostics(path, root)
-        table = helper_table
-        return [] if table.nil? || table.empty?
-
-        Analyzer.diagnose(path: path, root: root, helper_table: table)
-                .map { |diag| build_diagnostic(diag) }
-      end
-
-      # Phase 2 — runs the filter-chain validator over the
-      # controller's class body using the cached
-      # {ControllerIndex}. Skips silently when the index is
-      # absent or doesn't recognise the file's top-level class.
-      def filter_diagnostics(path, root)
-        index = controller_index_or_nil
-        return [] if index.nil? || index.empty?
-
-        Analyzer.diagnose_filters(path: path, root: root, controller_index: index)
-                .map { |diag| build_diagnostic(diag) }
-      end
-
-      # Phase 3 — runs the render-target validator against the
-      # configured `view_search_paths`. Always invoked
-      # regardless of whether the controller is in the index;
-      # render shapes are recognised purely from the call site
-      # + class name, no per-controller pre-discovery needed.
-      def render_diagnostics(path, root)
-        Analyzer.diagnose_renders(
-          path: path, root: root,
-          view_search_roots: @view_search_paths,
-          controller_index: controller_index_or_nil
-        ).map { |diag| build_diagnostic(diag) }
-      end
-
-      # Phase 1 — strong-parameter validation. Reads the
-      # `:model_index` fact from the cross-plugin fact store
-      # (published by rigor-activerecord) and validates every
-      # `params.require(:user).permit(:name, :email)` chain
-      # against the User model's column list.
-      def permit_diagnostics(path, root)
-        index = model_index
-        return [] if index.nil? || index.empty?
-
-        Analyzer.diagnose_permits(path: path, root: root, model_index: index)
-                .map { |diag| build_diagnostic(diag) }
-      end
 
       def controller_index_or_nil
         return @controller_index if @controller_index
@@ -246,13 +258,6 @@ module Rigor
           # /-bracketed substring so both shapes resolve.
           path.include?("/#{root}/") || path.start_with?("#{root}/") || path == root
         end
-      end
-
-      def build_diagnostic(diag)
-        Rigor::Analysis::Diagnostic.new(
-          path: diag.path, line: diag.line, column: diag.column,
-          message: diag.message, severity: diag.severity, rule: diag.rule
-        )
       end
     end
 

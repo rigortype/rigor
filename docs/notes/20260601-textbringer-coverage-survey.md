@@ -13,8 +13,9 @@ the deeper investigation (§4) found the real reason: textbringer's `sig/` is
 **invalid RBS** (`rbs validate` rejects it; missing namespace declarations), so
 it was inert for every consumer, and Rigor swallowed the build error silently.
 The fix — synthesizing the missing namespaces (commit `1529b54d`) — turns the
-"no" into **+9.6pt coverage** (40.3% → 49.9%). §3 is kept as the investigation
-record; its mechanistic conclusion is superseded by §4.
+"no" into **+9.6pt coverage** (40.3% → 49.9%), and three further levers (§5)
+carry it to **65.0%**. §3 is kept as the investigation record; its mechanistic
+conclusion is superseded by §4.
 
 All numbers below are from the rigor repo's Flake bundle, run with
 `cwd = the target` + `BUNDLE_GEMFILE=<rigor>/Gemfile` per
@@ -243,6 +244,40 @@ malformed and can declare them at the source.
    *total* loss of project-RBS value behind a plausible-looking partial number.
    When `signature_paths:` RBS seems to do nothing, check `rbs validate` and
    whether `build_instance` raises before theorising about the scanner.
+
+---
+
+## 5. Coverage-uplift arc (what raised the number, and why)
+
+After the namespace fix, "what blocks more coverage?" was answered by bucketing
+every remaining opaque node. Four levers, landed in order:
+
+| # | Lever | `rigor coverage` | Kind |
+| --- | --- | --- | --- |
+| 0 | baseline (sig inert) | 40.3% | — |
+| 1 | namespace synthesis (§4) | 49.9% | engine robustness |
+| 2 | **exclude non-expression nodes** from the metric | **62.9%** | metric correction |
+| 3 | referenced-type stub synthesis (`DRb::DRbServer`, …) | 64.3% | engine robustness |
+| 4 | block→block-less overload fallback | **65.0%** | engine bug fix |
+
+Lever 2 was the single biggest move and is **not** an inference change: the
+`PrecisionScanner` had been counting `ArgumentsNode` / `ParametersNode` /
+`StatementsNode` / `AssocNode` / parameter declarations — syntax with no
+runtime value — as "opaque", and they were ~49% of all opaque nodes. Excluding
+them makes the ratio measure expression precision, which is what it claims to.
+
+Levers 3 + 4 together unblocked the `Textbringer::Commands` cascade: a single
+unavailable `DRb::DRbServer` reference had been failing the whole module's
+build (lever 3 stubs it, FP-safely), and `define_command`'s 186 block-bearing
+self-sends had been degrading because the method's RBS declares no block
+overload (lever 4 — a general fix, not textbringer-specific).
+
+The remaining ~35% opaque is dominated by the **Dynamic cascade from untyped
+roots** — method parameters (no types without `--params=observed` or RBS param
+types) and untyped instance variables — plus genuine project-RBS gaps (25 of 77
+source files ship no RBS; covered classes miss getters like `Buffer#point` /
+`#file_name`) and RBS-less C-ext / FFI gem dependencies (`curses`, `fiddle`).
+Those are the next frontier; none is a quick metric fix.
 
 ---
 

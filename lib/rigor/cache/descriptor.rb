@@ -26,8 +26,12 @@ module Rigor
       # mixes this into the cache key, so a bump implicitly
       # invalidates every cached value. v2 added the
       # `dependencies` slot for ADR-10 per-gem-version cache slice
-      # invalidation.
-      SCHEMA_VERSION = 2
+      # invalidation. v3: `RbsLoader.build_env_for` now synthesizes
+      # `module`s for namespaces a project's `signature_paths:` RBS
+      # references but never declares, so the marshalled RBS env
+      # cached by an older Rigor (which would leave those signatures
+      # inert) MUST be rebuilt for the synthesis to take effect.
+      SCHEMA_VERSION = 3
 
       # Per-slot entry value objects. Constructors validate enums /
       # required fields and freeze the resulting struct so no caller

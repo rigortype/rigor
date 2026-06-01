@@ -1,10 +1,13 @@
 # Cache Layer — `Rigor::Cache`
 
-Status: **Stable (introduced v0.0.8; current descriptor schema v2).**
+Status: **Stable (introduced v0.0.8; current descriptor schema v3).**
 This document tracks the cache layer's public read shape. The
 slices below all landed and are stable across v0.1.x; the descriptor
 `SCHEMA_VERSION` was bumped to `2` for the ADR-10 per-gem-version
-`dependencies` slot. Slices 1–2 are in place:
+`dependencies` slot, and to `3` when `RbsLoader.build_env_for` began
+synthesizing missing `signature_paths:` namespaces (so an RBS env
+marshalled by an older Rigor — which would leave those signatures
+inert — is rebuilt). Slices 1–2 are in place:
 `Rigor::Cache::Descriptor` (the substrate every cached value
 attaches to) and `Rigor::Cache::Store` (the filesystem-backed
 storage that consumes a descriptor + producer + params and
@@ -70,8 +73,10 @@ choosing one contribution silently.
 Returns the canonical hex SHA-256 cache key for a producer +
 input + descriptor combination. The key incorporates:
 
-1. `Descriptor::SCHEMA_VERSION` (currently `2` — v2 added the
-   `dependencies` slot for the ADR-10 per-gem-version cache slice).
+1. `Descriptor::SCHEMA_VERSION` (currently `3` — v2 added the
+   `dependencies` slot for the ADR-10 per-gem-version cache slice;
+   v3 invalidates RBS envs marshalled before `build_env_for` began
+   synthesizing missing `signature_paths:` namespaces).
    Bumping this constant invalidates every cached value.
 2. `producer_id` (a stable string that namespaces the cache
    slice).

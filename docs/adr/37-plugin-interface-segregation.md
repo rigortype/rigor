@@ -13,11 +13,12 @@ the legacy `diagnostics_for_file` (now conceptually the `FileRule` escape
 valve), is a zero-cost no-op for plugins that declare no rules, and is
 isolated by the same per-plugin `rescue` boundary. Slice 1c adds
 `node_file_context` for two-pass (collect-then-validate) plugins. The slice-1
-working decisions are pinned below. **Not yet done:** the
-`flow_contribution_for` split (slice 2), `FactProvider` naming (slice 3),
-full bundled-plugin migration (slice 4; `rigor-deprecations`,
-`rigor-rspec-rails`, and `rigor-statesman` migrated so far), and the
-capability catalogue.
+working decisions are pinned below. Slice 1d adds `NodeContext` (lexical
+context for node rules). The **slice 2 design** (`flow_contribution_for` →
+`dynamic_return` + `type_specifier`) is recorded below; implementation is in
+progress. **Not yet done:** slice 2 implementation, `FactProvider` naming
+(slice 3), the remaining `node_rule` migration (`rigor-actionpack`), and the
+capability catalogue. Thirteen plugins are migrated onto `node_rule` so far.
 
 Records the decision to finish the interface-segregation work that
 [ADR-2](2-extension-api.md) started: split the two remaining *imperative*
@@ -302,6 +303,84 @@ The split between the two two-pass shapes is deliberate:
 becomes a `node_file_context`, its `validate` a `node_rule(Prism::CallNode)`,
 and both hand-rolled walks are gone (behaviour unchanged, integration spec
 green).
+
+### Slice 2 — `flow_contribution_for` split (design)
+
+The second imperative hook, `flow_contribution_for(call_node:, scope:)`, is
+split the same way slice 1 split `diagnostics_for_file`: narrow,
+declaratively-gated class DSLs the engine indexes, with the fat hook kept as a
+deprecated escape valve.
+
+**Grounding fact.** Although `FlowContribution` carries nine slots, the engine
+consults a plugin's `flow_contribution_for` at exactly two sites and reads
+exactly two slots:
+
+- `Inference::MethodDispatcher#try_plugin_contribution` merges all plugins'
+  contributions and uses only `.return_type` (the per-call-site return type,
+  ahead of `RbsDispatch`).
+- `Inference::StatementEvaluator#apply_plugin_assertions` merges all plugins'
+  contributions and uses only `.post_return_facts` (the assertion-edge
+  narrowing).
+
+So the split is clean and 1:1 with the two consumption sites:
+
+**`dynamic_return` (→ `return_type`, receiver-gated).** A class DSL mirroring
+`node_rule` / `producer`:
+
+```ruby
+dynamic_return receivers: ["ActiveRecord::Base"] do |call_node, scope|
+  # self = plugin instance; return a Rigor::Type or nil
+end
+```
+
+The engine calls the block only when the call's receiver type's class equals or
+inherits from a declared `receivers:` entry (matched via
+`Environment#class_ordering`, the now-standard mechanism); method-name and
+type-shape refinement (e.g. a Mangrove carrier's `type_args`) stays in the
+block. Returns a `Type` (or `nil` to decline). `receivers:` is the greppable,
+indexable gate — the engine can group extensions by class instead of asking
+every plugin about every call.
+
+**`type_specifier` (→ `post_return_facts`, method-gated).** 
+
+```ruby
+type_specifier methods: [:assert_kind_of, :assert_instance_of] do |call_node, scope|
+  # return an Array of post-return facts, or nil
+end
+```
+
+The engine calls the block only when `call_node.name` is in the declared
+`methods:`. Returns the same `post_return_facts` the merger already applies.
+(The `truthy_facts` / `falsey_facts` edge slots are part of the same surface
+for when condition-edge narrowing from plugins is wired; today only
+`post_return_facts` is consumed, so the floor targets it.)
+
+**Registration & gating.** Both are `producer`-style class DSLs (they carry
+logic needing the plugin instance, so not manifest value objects), stored on
+the class and aggregated by `Plugin::Registry` into a receiver-class index
+(`dynamic_return`) and a method-name index (`type_specifier`). The engine
+consults the matching subset at the two existing sites instead of the
+duplicated `collect_plugin_contributions` fan-out — which is then deleted from
+both `method_dispatcher.rb` and `statement_evaluator.rb` (the two copies the
+slice-1 review flagged).
+
+**Backward compatibility.** `flow_contribution_for` stays, deprecated, and the
+engine still consults it (fat fan-out) at both sites, merged with the indexed
+results. So the unmigrated consumers — `rigor-sorbet`, `rigor-activerecord`,
+`rigor-activestorage`, `rigor-mangrove`, `rigor-rspec`, `rigor-minitest`, and
+the example plugins — keep working untouched; migration to `dynamic_return` /
+`type_specifier` is incremental, plugin-family at a time, each guarded by its
+golden-master integration spec. Because flow contributions feed type narrowing
+(and therefore diagnostics), every migration is verified behaviour-preserving
+before landing — the false-positive floor is the binding constraint.
+
+**Mapping of the unmigrated consumers** (which surface each will use):
+
+- `dynamic_return`: sorbet (`sig`/`T.let`/`T.cast` return types),
+  activerecord (relation typing), activestorage (`Attached::One` / `::Many`),
+  mangrove (unwrap → carried type), dry-struct (attribute readers), and the
+  lisp-eval / units / pattern examples' return contributions.
+- `type_specifier`: rspec (matcher narrowing), minitest (assertion narrowing).
 
 ## Relationship to other ADRs
 

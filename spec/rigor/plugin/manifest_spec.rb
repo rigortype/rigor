@@ -216,6 +216,34 @@ RSpec.describe Rigor::Plugin::Manifest do
       expect(m.to_h["protocol_contracts"]).to eq([contract.to_h])
     end
 
+    it "accepts additional_initializers as an Array of AdditionalInitializer (ADR-38)" do
+      entry = Rigor::Plugin::AdditionalInitializer.new(
+        receiver_constraint: "Minitest::Test", methods: [:setup]
+      )
+      m = described_class.new(id: "minitest", version: "0.1.0", additional_initializers: [entry])
+      expect(m.additional_initializers).to eq([entry])
+      expect(m.additional_initializers).to be_frozen
+    end
+
+    it "defaults additional_initializers to an empty array" do
+      expect(described_class.new(id: "minitest", version: "0.1.0").additional_initializers).to eq([])
+    end
+
+    it "rejects additional_initializers entries that are not AdditionalInitializer instances" do
+      expect do
+        described_class.new(id: "minitest", version: "0.1.0",
+                            additional_initializers: [{ methods: [:setup] }])
+      end.to raise_error(ArgumentError, /additional_initializers/)
+    end
+
+    it "round-trips additional_initializers through #to_h" do
+      entry = Rigor::Plugin::AdditionalInitializer.new(
+        receiver_constraint: "Minitest::Test", methods: [:setup]
+      )
+      m = described_class.new(id: "minitest", version: "0.1.0", additional_initializers: [entry])
+      expect(m.to_h["additional_initializers"]).to eq([entry.to_h])
+    end
+
     it "accepts source_rbs_synthesizer as a callable (ADR-32 WD4)" do
       synth = ->(path) { "# from #{path}" }
       m = described_class.new(id: "ri", version: "0.1.0", source_rbs_synthesizer: synth)

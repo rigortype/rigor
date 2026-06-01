@@ -207,6 +207,31 @@ RSpec.describe Rigor::Plugin::Registry do
     end
   end
 
+  describe "#additional_initializers (ADR-38)" do
+    def build_init_plugin(id, entries, services)
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: id, version: "0.1.0", additional_initializers: entries)
+      end
+      klass.new(services: services)
+    end
+
+    it "is empty when no plugin declares additional_initializers" do
+      plugin = plugin_class.new(services: services)
+      registry = described_class.new(plugins: [plugin])
+      expect(registry.additional_initializers).to eq([])
+    end
+
+    it "aggregates entries across plugins in plugin-registration order" do
+      a = Rigor::Plugin::AdditionalInitializer.new(receiver_constraint: "Minitest::Test", methods: [:setup])
+      b = Rigor::Plugin::AdditionalInitializer.new(receiver_constraint: "RSpec::Core", methods: [:before])
+      p1 = build_init_plugin("minitest", [a], services)
+      p2 = build_init_plugin("rspec", [b], services)
+      registry = described_class.new(plugins: [p1, p2])
+
+      expect(registry.additional_initializers).to eq([a, b])
+    end
+  end
+
   describe "#source_rbs_synthesizers (ADR-32 WD4)" do
     let(:synth_plugin_class) do
       synth = ->(_path) { "# synthesised" }

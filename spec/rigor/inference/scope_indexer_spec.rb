@@ -827,6 +827,80 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           expect(values).to include(nil, true)
         end
 
+        # ADR-38 — a plugin-declared additional initializer is
+        # treated like `initialize` at the read-before-write gate.
+        context "with a plugin-declared additional initializer (ADR-38)" do
+          let(:setup_source) do
+            <<~RUBY
+              class FooTest
+                def setup
+                  @conn = 1
+                end
+
+                def test_it
+                  @conn
+                end
+              end
+            RUBY
+          end
+
+          def index_with_registry(source, registry)
+            env = Rigor::Environment.new(plugin_registry: registry)
+            scope = Rigor::Scope.empty(environment: env)
+            program = parse(source)
+            described_class.index(program, default_scope: scope)[program]
+          end
+
+          def stub_registry(entries)
+            services = Rigor::Plugin::Services.new(
+              reflection: Rigor::Reflection,
+              type: Rigor::Type::Combinator,
+              configuration: Rigor::Configuration.new
+            )
+            klass = Class.new(Rigor::Plugin::Base) do
+              manifest(id: "ai-spec", version: "0.1.0", additional_initializers: entries)
+            end
+            Rigor::Plugin::Registry.new(plugins: [klass.new(services: services)])
+          end
+
+          def conn_has_nil?(outer)
+            type = outer.class_ivars_for("FooTest")[:@conn]
+            members = type.is_a?(Rigor::Type::Union) ? type.members : [type]
+            members.any? { |m| m.is_a?(Rigor::Type::Constant) && m.value.nil? }
+          end
+
+          it "control: `setup` is not an initializer, so @conn is widened with nil" do
+            outer = parse(setup_source).then do |program|
+              described_class.index(program, default_scope: default_scope)[program]
+            end
+            expect(conn_has_nil?(outer)).to be(true)
+          end
+
+          it "suppresses the nil widening when `setup` is declared an initializer" do
+            entry = Rigor::Plugin::AdditionalInitializer.new(
+              receiver_constraint: "FooTest", methods: [:setup]
+            )
+            outer = index_with_registry(setup_source, stub_registry([entry]))
+            expect(conn_has_nil?(outer)).to be(false)
+          end
+
+          it "leaves the nil widening when the entry covers a different method" do
+            entry = Rigor::Plugin::AdditionalInitializer.new(
+              receiver_constraint: "FooTest", methods: [:other_setup]
+            )
+            outer = index_with_registry(setup_source, stub_registry([entry]))
+            expect(conn_has_nil?(outer)).to be(true)
+          end
+
+          it "leaves the nil widening when the receiver constraint does not match" do
+            entry = Rigor::Plugin::AdditionalInitializer.new(
+              receiver_constraint: "OtherClass", methods: [:setup]
+            )
+            outer = index_with_registry(setup_source, stub_registry([entry]))
+            expect(conn_has_nil?(outer)).to be(true)
+          end
+        end
+
         it "does NOT add nil when `initialize` writes the ivar (soundness gate)" do
           program = parse(<<~RUBY)
             class Builder

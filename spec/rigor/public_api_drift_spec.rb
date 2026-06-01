@@ -177,6 +177,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
 
   PLUGIN_MANIFEST_INSTANCE = %w[
     ==(req:other)
+    additional_initializers()
     block_as_methods()
     config_schema()
     consumes()
@@ -220,6 +221,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
   ].freeze
 
   PLUGIN_REGISTRY_INSTANCE = %w[
+    additional_initializers()
     any_load_errors?()
     blueprints()
     contracts_for_path(req:path)

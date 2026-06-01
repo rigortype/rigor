@@ -54,7 +54,24 @@ module Rigor
         id: "minitest",
         version: "0.1.0",
         description: "Narrows locals through Minitest / Test::Unit `assert_*` / `refute_*` " \
-                     "and Minitest/spec `_(x).must_*` / `.wont_*` matchers."
+                     "and Minitest/spec `_(x).must_*` / `.wont_*` matchers.",
+        # ADR-38 — `def setup` runs before every `def test_*`, so
+        # ivars it assigns are initialised by the time a test body
+        # reads them. Declaring it an additional initializer stops
+        # the read-before-write nil widening that would otherwise
+        # type `@conn` (set in `setup`, read in a test) as
+        # `T | nil` and surface a false nil-receiver diagnostic.
+        additional_initializers: [
+          Rigor::Plugin::AdditionalInitializer.new(
+            receiver_constraint: "Minitest::Test", methods: [:setup]
+          ),
+          Rigor::Plugin::AdditionalInitializer.new(
+            receiver_constraint: "ActiveSupport::TestCase", methods: [:setup]
+          ),
+          Rigor::Plugin::AdditionalInitializer.new(
+            receiver_constraint: "Test::Unit::TestCase", methods: [:setup]
+          )
+        ]
       )
 
       # Pillar 2 Slice 1 (rigor-minitest sibling) — emits

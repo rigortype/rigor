@@ -2,6 +2,7 @@
 
 require_relative "../inference/hkt_registry"
 require_relative "protocol_contract"
+require_relative "additional_initializer"
 
 module Rigor
   module Plugin
@@ -44,7 +45,7 @@ module Rigor
                   :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
                   :heredoc_templates, :nested_class_templates, :trait_registries, :external_files,
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
-                  :source_rbs_synthesizer
+                  :source_rbs_synthesizer, :additional_initializers
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
@@ -53,7 +54,7 @@ module Rigor
         block_as_methods: [], heredoc_templates: [], nested_class_templates: [],
         trait_registries: [], external_files: [],
         hkt_registrations: [], hkt_definitions: [], signature_paths: [], protocol_contracts: [],
-        source_rbs_synthesizer: nil
+        source_rbs_synthesizer: nil, additional_initializers: []
       )
         validate_id!(id)
         validate_version!(version)
@@ -73,12 +74,14 @@ module Rigor
         validate_signature_paths!(signature_paths)
         validate_protocol_contracts!(protocol_contracts)
         validate_source_rbs_synthesizer!(source_rbs_synthesizer)
+        validate_additional_initializers!(additional_initializers)
 
         assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
                       open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
                       external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
                       source_rbs_synthesizer)
         assign_nested_class_templates(nested_class_templates)
+        assign_additional_initializers(additional_initializers)
         freeze
       end
 
@@ -117,6 +120,14 @@ module Rigor
         @nested_class_templates = nested_class_templates.dup.freeze
       end
       private :assign_nested_class_templates
+
+      # ADR-38 — assigned outside assign_fields (which already carries
+      # the maximum positional arity), set in `initialize` before the
+      # final freeze.
+      def assign_additional_initializers(additional_initializers)
+        @additional_initializers = additional_initializers.dup.freeze
+      end
+      private :assign_additional_initializers
       # rubocop:enable Metrics/ParameterLists, Metrics/AbcSize
 
       public
@@ -165,7 +176,8 @@ module Rigor
           "hkt_definitions" => hkt_definitions.map { |d| { "uri" => d.uri, "params" => d.params } },
           "signature_paths" => signature_paths,
           "protocol_contracts" => protocol_contracts.map(&:to_h),
-          "source_rbs_synthesizer" => source_rbs_synthesizer&.class&.name
+          "source_rbs_synthesizer" => source_rbs_synthesizer&.class&.name,
+          "additional_initializers" => additional_initializers.map(&:to_h)
         }
       end
 
@@ -420,6 +432,22 @@ module Rigor
         raise ArgumentError,
               "plugin manifest protocol_contracts must be an Array of " \
               "Rigor::Plugin::ProtocolContract instances, got #{entries.inspect}"
+      end
+
+      # ADR-38 — `additional_initializers:` declares the
+      # (receiver_constraint, methods) pairs whose `def`-form methods
+      # the engine treats like `initialize` for the read-before-write
+      # nil soundness gate. Each entry MUST be a
+      # `Rigor::Plugin::AdditionalInitializer`. The registry
+      # aggregator on `Plugin::Registry` flattens entries across
+      # loaded plugins; `Inference::ScopeIndexer` consults the set at
+      # its single gate.
+      def validate_additional_initializers!(entries)
+        return if entries.is_a?(Array) && entries.all?(AdditionalInitializer)
+
+        raise ArgumentError,
+              "plugin manifest additional_initializers must be an Array of " \
+              "Rigor::Plugin::AdditionalInitializer instances, got #{entries.inspect}"
       end
 
       # ADR-32 WD4 — `source_rbs_synthesizer:` declares a callable

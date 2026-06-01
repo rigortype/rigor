@@ -143,6 +143,16 @@ module Rigor
         plugins.flat_map(&:protocol_contracts)
       end
 
+      # ADR-38 — flat, ordered list of every loaded plugin's
+      # manifest-declared `Rigor::Plugin::AdditionalInitializer`
+      # entries. `Inference::ScopeIndexer` consults the set at its
+      # read-before-write nil soundness gate: a `def` whose name an
+      # entry covers, on a class that equals or inherits from the
+      # entry's `receiver_constraint`, is treated like `initialize`.
+      def additional_initializers
+        plugins.flat_map { |plugin| plugin.manifest.additional_initializers }
+      end
+
       # ADR-28 — the subset of `protocol_contracts` whose
       # `path_glob` matches `path`. Contract globs are authored
       # project-root-relative (`lib/controller/**/*.rb`); the

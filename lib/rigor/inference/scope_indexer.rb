@@ -390,7 +390,7 @@ module Rigor
         # class body has been walked, using `init_writes` as
         # the soundness gate (an ivar written in `initialize`
         # is initialised before any other method body runs).
-        collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes)
+        collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes, default_scope)
       end
 
       # Walks the method body in AST (== execution) order
@@ -401,14 +401,21 @@ module Rigor
       # `init_writes` instead — used by the finalisation step
       # to suppress nil contribution for ivars the constructor
       # guarantees are initialised.
-      def collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes)
+      def collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes, default_scope = nil)
         return if read_before_write.nil? || init_writes.nil?
 
         seen_writes = Set.new
         read_first = Set.new
         detect_read_before_write(def_node.body, seen_writes, read_first)
 
-        if def_node.name == :initialize
+        # ADR-38 — `initialize` is the built-in initializer gate;
+        # a plugin may declare additional `def`-form initializer
+        # methods (minitest `setup`, Rails `after_initialize`, DI
+        # setters) on a constrained class. Both fold their writes
+        # into `init_writes`, suppressing the read-before-write nil
+        # contribution for sibling readers.
+        if def_node.name == :initialize ||
+           additional_initializer?(class_name, def_node.name, default_scope)
           init_set = (init_writes[class_name] ||= Set.new)
           seen_writes.each { |name| init_set << name }
           return
@@ -418,6 +425,43 @@ module Rigor
 
         rbw_set = (read_before_write[class_name] ||= Set.new)
         read_first.each { |name| rbw_set << name }
+      end
+
+      # ADR-38 — true when a loaded plugin declares `method_name` an
+      # additional initializer for `class_name` (or an ancestor).
+      # Reads the plugin registry off the pre-pass scope's
+      # environment; the receiver-constraint match reuses
+      # `Environment#class_ordering` (the same mechanism ADR-16
+      # Tier A's `MacroBlockSelfType` uses). The whole lookup is
+      # wrapped so any resolution failure degrades to "no match" —
+      # since the gate only ever SUPPRESSES a nil contribution, a
+      # missed match is false-positive-safe (it merely leaves the
+      # existing nil widening in place).
+      def additional_initializer?(class_name, method_name, default_scope)
+        return false if class_name.nil? || default_scope.nil?
+
+        environment = default_scope.environment
+        registry = environment&.plugin_registry
+        return false if registry.nil?
+        return false if registry.respond_to?(:empty?) && registry.empty?
+        return false unless registry.respond_to?(:additional_initializers)
+
+        registry.additional_initializers.any? do |entry|
+          entry.covers_method?(method_name) &&
+            class_matches_constraint?(class_name, entry.receiver_constraint, environment)
+        end
+      rescue StandardError
+        false
+      end
+
+      def class_matches_constraint?(class_name, constraint, environment)
+        return true if class_name == constraint
+        return false if environment.nil?
+
+        ordering = environment.class_ordering(class_name, constraint)
+        %i[equal subclass].include?(ordering)
+      rescue StandardError
+        false
       end
 
       IVAR_WRITE_NODES = [

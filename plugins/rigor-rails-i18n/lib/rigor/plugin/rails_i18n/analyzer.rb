@@ -75,7 +75,10 @@ module Rigor
           activerecord.errors.models.
         ].freeze
 
-        Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
+        # One translation-call observation. Carries no path/location —
+        # the caller (the `node_rule` block) positions it via
+        # `Plugin::Base#diagnostic`.
+        Violation = Struct.new(:rule, :severity, :message, keyword_init: true)
 
         module_function
 
@@ -89,60 +92,48 @@ module Rigor
         # @param locale_index [LocaleIndex]
         # @param configured_locales [Array<String>]
         # @return [Array<Diagnostic>]
-        def diagnose(path:, root:, locale_index:, configured_locales:)
-          controller_scope = controller_scope_from_path(path)
-          diagnostics = []
-          walk(root) do |call_node, action|
-            raw_key = literal_key_for(call_node)
-            next if raw_key.nil?
+        # The translation violations for a single call node, or `[]`
+        # when it is not a recognised `t` / `translate` call with a
+        # literal key. ADR-37: the engine owns the walk; `action` (the
+        # enclosing method, for lazy `t('.key')` expansion) comes from
+        # the node-rule `NodeContext`, and `controller_scope` from the
+        # file path.
+        #
+        # @param call_node [Prism::Node]
+        # @param locale_index [LocaleIndex]
+        # @param configured_locales [Array<String>]
+        # @param controller_scope [String, nil]
+        # @param action [String, nil]
+        # @return [Array<Violation>]
+        def violations_for(call_node:, locale_index:, configured_locales:, controller_scope:, action:)
+          return [] unless call_node.is_a?(Prism::CallNode) && translate_call_candidate?(call_node)
 
-            literal_key = expand_key(raw_key, controller_scope: controller_scope, action: action)
-            next if literal_key.nil?
+          raw_key = literal_key_for(call_node)
+          return [] if raw_key.nil?
 
-            options = options_hash(call_node)
-            entry = locale_index.find(literal_key)
-            if entry.nil?
-              # CLDR pluralization namespace: the parent key isn't
-              # a leaf, but at least one `.one` / `.other` / etc.
-              # child exists. `t('accounts.posts', count: n)`
-              # resolves through that branch — not a missing key.
-              # Accept silently; downstream interpolation checks
-              # don't apply (no single entry to read placeholders
-              # from).
-              next if locale_index.pluralization_namespace?(literal_key)
+          literal_key = expand_key(raw_key, controller_scope: controller_scope, action: action)
+          return [] if literal_key.nil?
 
-              # Rails / rails-i18n ship `date.order`, `time.am`,
-              # `support.array.words_connector`, etc. in every
-              # locale at runtime even when the project's own
-              # locale files don't repeat them. Accept silently
-              # — no leaf entry → no downstream interpolation
-              # check to run.
-              next if rails_shipped_key?(literal_key)
+          options = options_hash(call_node)
+          entry = locale_index.find(literal_key)
+          if entry.nil?
+            # CLDR pluralization namespace: `t('accounts.posts', count: n)`
+            # resolves through a `.one` / `.other` child — not missing.
+            return [] if locale_index.pluralization_namespace?(literal_key)
+            # Rails / rails-i18n ship `date.order`, `time.am`, etc. in
+            # every locale at runtime even when project files omit them.
+            return [] if rails_shipped_key?(literal_key)
 
-              diagnostics << unknown_key_diagnostic(path, call_node, literal_key, locale_index)
-              next
-            end
-
-            diagnostics << translation_call_info(path, call_node, literal_key, entry)
-            missing_in_locales = locale_index.missing_locales_for(literal_key, configured_locales: configured_locales)
-            diagnostics << missing_locale_diagnostic(path, call_node, literal_key, missing_in_locales) \
-              if !options[:has_default] && !missing_in_locales.empty?
-
-            interpolation_diags = interpolation_diagnostics(path, call_node, literal_key, entry, options)
-            diagnostics.concat(interpolation_diags)
+            return [unknown_key_violation(literal_key, locale_index)]
           end
-          diagnostics
-        end
 
-        # Walks the AST yielding `[call_node, action]` pairs where
-        # `action` is the name of the innermost enclosing `def`
-        # method (or `nil` when the call is at the top level).
-        def walk(node, action: nil, &)
-          return unless node.is_a?(Prism::Node)
-
-          current_action = node.is_a?(Prism::DefNode) ? node.name.to_s : action
-          yield node, current_action if node.is_a?(Prism::CallNode) && translate_call_candidate?(node)
-          node.compact_child_nodes.each { |child| walk(child, action: current_action, &) }
+          violations = [translation_call_info(literal_key, entry)]
+          missing_in_locales = locale_index.missing_locales_for(literal_key, configured_locales: configured_locales)
+          if !options[:has_default] && !missing_in_locales.empty?
+            violations << missing_locale_violation(literal_key, missing_in_locales)
+          end
+          violations.concat(interpolation_violations(literal_key, entry, options))
+          violations
         end
 
         # Derives the Rails controller scope from the file path,
@@ -247,60 +238,44 @@ module Rigor
           end
         end
 
-        def translation_call_info(path, call_node, literal_key, entry)
-          location = call_node.location
+        def translation_call_info(literal_key, entry)
           locales_text = entry.locales.sort.join(", ")
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :info,
             rule: "translation-call",
             message: "`t('#{literal_key}')` resolves in #{locales_text}"
           )
         end
 
-        def unknown_key_diagnostic(path, call_node, literal_key, locale_index)
-          location = call_node.location
+        def unknown_key_violation(literal_key, locale_index)
           suggestions = DidYouMean::SpellChecker.new(dictionary: locale_index.keys).correct(literal_key)
           suggestion_part = suggestions.empty? ? "" : " (did you mean `#{suggestions.first}`?)"
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :error,
             rule: "unknown-key",
             message: "missing translation key `#{literal_key}` in any locale#{suggestion_part}"
           )
         end
 
-        def missing_locale_diagnostic(path, call_node, literal_key, missing_locales)
-          location = call_node.location
+        def missing_locale_violation(literal_key, missing_locales)
           locales_text = missing_locales.to_a.sort.join(", ")
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
+          Violation.new(
             severity: :warning,
             rule: "missing-locale",
             message: "`t('#{literal_key}')` is missing from locale(s) #{locales_text}"
           )
         end
 
-        def interpolation_diagnostics(path, call_node, literal_key, entry, options)
+        def interpolation_violations(literal_key, entry, options)
           required = entry.all_placeholders
           all_provided = options[:all_keys].to_set(&:to_s)
           non_reserved_provided = options[:non_reserved].to_set(&:to_s)
           missing = required - all_provided
           extra = non_reserved_provided - required
-          location = call_node.location
 
-          [].tap do |diags|
+          [].tap do |violations|
             unless missing.empty?
-              diags << Diagnostic.new(
-                path: path,
-                line: location.start_line,
-                column: location.start_column + 1,
+              violations << Violation.new(
                 severity: :error,
                 rule: "wrong-interpolation",
                 message: "`t('#{literal_key}')` expects interpolation #{format_keys(missing)}, " \
@@ -309,10 +284,7 @@ module Rigor
             end
 
             unless extra.empty?
-              diags << Diagnostic.new(
-                path: path,
-                line: location.start_line,
-                column: location.start_column + 1,
+              violations << Violation.new(
                 severity: :warning,
                 rule: "extra-interpolation",
                 message: "`t('#{literal_key}')` does not use interpolation #{format_keys(extra)} " \

@@ -94,22 +94,32 @@ module Rigor
         @runtime_error = nil
       end
 
+      # File-level only: the once-per-run YAML load errors + the
+      # runtime (cache-load) error. Per-call `t('key')` validation runs
+      # over the engine-owned walk via the node_rule below (ADR-37). The
+      # locale index is lazily loaded + memoised by locale_index_or_nil.
       def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
         index = locale_index_or_nil
         diagnostics = []
         diagnostics.concat(consume_load_error_diagnostics(path)) unless @load_errors.empty?
-        return diagnostics + [runtime_error_diagnostic(path)] if index.nil? && @runtime_error
-        return diagnostics if index.nil? || index.empty?
-
-        diagnostics.concat(
-          Analyzer.diagnose(
-            path: path,
-            root: root,
-            locale_index: index,
-            configured_locales: @configured_locales
-          ).map { |diag| build_diagnostic(diag) }
-        )
+        diagnostics << runtime_error_diagnostic(path) if index.nil? && @runtime_error
         diagnostics
+      end
+
+      # The lazy-key (`t('.key')`) expansion needs the enclosing method
+      # (the controller action), supplied by the node-rule NodeContext;
+      # the controller scope comes from the file path.
+      node_rule Prism::CallNode do |node, _scope, path, _fc, context|
+        index = locale_index_or_nil
+        next [] if index.nil? || index.empty?
+
+        Analyzer.violations_for(
+          call_node: node, locale_index: index, configured_locales: @configured_locales,
+          controller_scope: Analyzer.controller_scope_from_path(path),
+          action: context.enclosing_def&.name
+        ).map do |violation|
+          diagnostic(node, path: path, message: violation.message, severity: violation.severity, rule: violation.rule)
+        end
       end
 
       private
@@ -159,13 +169,6 @@ module Rigor
           message: @runtime_error,
           severity: :warning,
           rule: "load-error"
-        )
-      end
-
-      def build_diagnostic(diag)
-        Rigor::Analysis::Diagnostic.new(
-          path: diag.path, line: diag.line, column: diag.column,
-          message: diag.message, severity: diag.severity, rule: diag.rule
         )
       end
     end

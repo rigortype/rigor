@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../plugin/macro/heredoc_template"
 require_relative "../plugin/macro/trait_registry"
+require_relative "../source/literals"
 require_relative "synthetic_method"
 require_relative "synthetic_method_index"
 
@@ -542,9 +543,7 @@ module Rigor
       end
 
       def literal_symbol_value(node)
-        case node
-        when Prism::SymbolNode, Prism::StringNode then node.unescaped.to_sym
-        end
+        Source::Literals.symbol_or_string(node)
       end
 
       def emit_trait_module_entries(entries, class_name, modules, registry, plugin_id, path, call_node, environment) # rubocop:disable Metrics/ParameterLists
@@ -727,15 +726,7 @@ module Rigor
       end
 
       def literal_symbol_arg(call_node, index)
-        args_node = call_node.arguments
-        return nil if args_node.nil?
-
-        arg = args_node.arguments[index]
-        return nil unless arg
-
-        case arg
-        when Prism::SymbolNode, Prism::StringNode then arg.unescaped.to_sym
-        end
+        Source::Literals.symbol_arg(call_node, index)
       end
     end
   end

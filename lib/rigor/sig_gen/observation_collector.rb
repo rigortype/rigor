@@ -5,6 +5,7 @@ require "prism"
 require_relative "../environment"
 require_relative "../scope"
 require_relative "../type"
+require_relative "../source/literals"
 require_relative "../inference/scope_indexer"
 
 module Rigor
@@ -307,9 +308,8 @@ module Rigor
       def binding_name_for(call_node)
         first_arg = call_node.arguments&.arguments&.first
         return call_node.name == :subject ? :subject : nil if first_arg.nil?
-        return first_arg.unescaped.to_sym if first_arg.is_a?(Prism::SymbolNode) || first_arg.is_a?(Prism::StringNode)
 
-        nil
+        Source::Literals.symbol_or_string(first_arg)
       end
 
       def type_block_body(block_node, scope_index)

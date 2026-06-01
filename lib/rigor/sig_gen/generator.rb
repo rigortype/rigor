@@ -7,6 +7,7 @@ require_relative "../environment"
 require_relative "../scope"
 require_relative "../reflection"
 require_relative "../type"
+require_relative "../source/literals"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "../inference/rbs_type_translator"
@@ -893,9 +894,7 @@ module Rigor
       end
 
       def extract_symbol_arguments(call_node)
-        (call_node.arguments&.arguments || []).filter_map do |arg|
-          arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) || arg.is_a?(Prism::StringNode)
-        end
+        Source::Literals.symbol_arguments(call_node)
       end
 
       # Returns a closure that looks up `:@<attr_name>` in the

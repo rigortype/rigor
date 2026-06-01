@@ -138,26 +138,9 @@ module Rigor
       def factory_index_or_nil
         return @factory_index if @factory_index
 
-        prime_io_boundary_for_index
-        @factory_index = cache_for(:factory_index, params: {}).call
+        descriptor = glob_descriptor(@factory_search_paths, "**/*.rb")
+        @factory_index = cache_for(:factory_index, params: {}, descriptor: descriptor).call
       rescue StandardError
-        nil
-      end
-
-      def prime_io_boundary_for_index
-        @factory_search_paths.each do |root|
-          absolute = File.expand_path(root)
-          if File.file?(absolute)
-            safely_read(absolute)
-          elsif File.directory?(absolute)
-            Dir.glob(File.join(absolute, "**", "*.rb")).each { |p| safely_read(p) }
-          end
-        end
-      end
-
-      def safely_read(path)
-        io_boundary.read_file(path)
-      rescue Plugin::AccessDeniedError, Errno::ENOENT
         nil
       end
 

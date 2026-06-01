@@ -96,7 +96,8 @@ module Rigor
       def worker_index_or_nil
         return @worker_index if @worker_index
 
-        @worker_index = cache_for(:worker_index, params: {}).call
+        descriptor = glob_descriptor(@worker_search_paths, "**/*.rb")
+        @worker_index = cache_for(:worker_index, params: {}, descriptor: descriptor).call
       rescue StandardError => e
         @load_error = "rigor-sidekiq: failed to discover workers: #{e.class}: #{e.message}"
         nil

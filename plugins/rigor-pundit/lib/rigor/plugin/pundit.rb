@@ -102,7 +102,8 @@ module Rigor
       def policy_index_or_nil
         return @policy_index if @policy_index
 
-        @policy_index = cache_for(:policy_index, params: {}).call
+        descriptor = glob_descriptor(@policy_search_paths, "**/*.rb")
+        @policy_index = cache_for(:policy_index, params: {}, descriptor: descriptor).call
       rescue StandardError => e
         @load_error = "rigor-pundit: failed to discover policies: #{e.class}: #{e.message}"
         nil

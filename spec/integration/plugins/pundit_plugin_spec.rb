@@ -41,6 +41,31 @@ DEFAULT_POLICIES = {
   RUBY
 }.freeze
 
+# Two revisions of the same policy file, used by the
+# cross-process cache-invalidation regression below. The second
+# adds an `archive?` predicate.
+POLICY_WITHOUT_ARCHIVE = <<~RUBY
+  class ApplicationPolicy; end
+  class PostPolicy < ApplicationPolicy
+    def show?
+      true
+    end
+  end
+RUBY
+
+POLICY_WITH_ARCHIVE = <<~RUBY
+  class ApplicationPolicy; end
+  class PostPolicy < ApplicationPolicy
+    def show?
+      true
+    end
+
+    def archive?
+      true
+    end
+  end
+RUBY
+
 RSpec.describe "plugins/rigor-pundit" do
   before { Rigor::Plugin.unregister! }
   after { Rigor::Plugin.unregister! }
@@ -202,6 +227,78 @@ RSpec.describe "plugins/rigor-pundit" do
       info = plugin_diagnostics(result).find { |d| d.rule == "policy-call" }
       expect(info).not_to be_nil
       expect(info.message).to include("WidgetPolicy")
+    end
+  end
+
+  # Regression: the `:policy_index` producer must pass an
+  # explicit `glob_descriptor(@policy_search_paths, "**/*.rb")`
+  # to `cache_for`. Without it the cache key only reflects files
+  # the `IoBoundary` happened to read in-process — empty at the
+  # producer's first call in a fresh process — so a persistent
+  # `Cache::Store` shared across `rigor check` runs served a
+  # STALE policy index when a policy file changed between
+  # processes (editing a policy returned the same cache key, a
+  # warm hit, and last session's predicates). See
+  # `docs/design/20260601-plugin-mechanism-pre-1.0-review.md`
+  # § 2.1.
+  describe "cross-process cache invalidation" do
+    # Runs the pundit analyzer against `dir` using a FRESH
+    # `Cache::Store` rooted at `cache_root`. A fresh store with
+    # an empty in-process memo is the faithful simulation of a
+    # second `rigor check` process reading the same on-disk
+    # cache — the only configuration in which the missing
+    # descriptor surfaces as stale output.
+    def run_pundit(dir:, cache_root:, source:)
+      Rigor::Plugin.unregister!
+      File.write(File.join(dir, "demo.rb"), source)
+      configuration = Rigor::Configuration.new(
+        Rigor::Configuration::DEFAULTS.merge(
+          "paths" => [File.join(dir, "demo.rb")],
+          "plugins" => %w[rigor-pundit]
+        )
+      )
+      Dir.chdir(dir) do
+        Rigor::Analysis::Runner.new(
+          configuration: configuration,
+          cache_store: Rigor::Cache::Store.new(root: cache_root),
+          plugin_requirer: lambda { |_name|
+            Rigor::Plugin.register(Rigor::Plugin::Pundit)
+            true
+          }
+        ).run
+      end
+    end
+
+    def unknown_policy_method(result)
+      result.diagnostics.find do |d|
+        d.source_family == "plugin.pundit" && d.rule == "unknown-policy-method"
+      end
+    end
+
+    it "recomputes the policy index when a policy file changes between processes" do
+      Dir.mktmpdir do |dir|
+        Dir.mktmpdir do |cache_root|
+          policy_path = File.join(dir, "app", "policies", "post_policy.rb")
+          FileUtils.mkdir_p(File.dirname(policy_path))
+          source = "authorize(Post, :archive)\n"
+
+          # Process 1: PostPolicy defines no `archive?`, so the
+          # call flags `unknown-policy-method`. This warms the
+          # on-disk cache.
+          File.write(policy_path, POLICY_WITHOUT_ARCHIVE)
+          first = run_pundit(dir: dir, cache_root: cache_root, source: source)
+          expect(unknown_policy_method(first)).not_to be_nil
+
+          # Add `archive?` to the policy, then run a fresh process
+          # against the same on-disk cache. With the
+          # `glob_descriptor` fix the changed digest invalidates
+          # the cached index and the call is now recognised;
+          # without it the stale index keeps flagging `archive`.
+          File.write(policy_path, POLICY_WITH_ARCHIVE)
+          second = run_pundit(dir: dir, cache_root: cache_root, source: source)
+          expect(unknown_policy_method(second)).to be_nil
+        end
+      end
     end
   end
 end

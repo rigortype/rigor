@@ -52,7 +52,10 @@ module Rigor
       # where `:posts` is `has_many`) fire
       # `shoulda-matchers.association-kind-mismatch`.
       module Analyzer
-        Diagnostic = Struct.new(:path, :line, :column, :severity, :rule, :message, keyword_init: true)
+        # One matcher violation (always `:warning`). Carries no
+        # path/location — the caller (the `node_rule` block) positions it
+        # at the matcher name (`message_loc`) via `Plugin::Base#diagnostic`.
+        Violation = Struct.new(:rule, :message, keyword_init: true)
 
         # `(matcher_name) => (:column | :association_singular | :association_collection)`
         # — the validation lane each matcher routes to.
@@ -85,68 +88,38 @@ module Rigor
         # @param model_index [Object, nil] the `:model_index`
         #   fact value. When nil the analyzer falls silent.
         # @return [Array<Diagnostic>]
-        def diagnose(path:, root:, model_index:)
-          return [] if model_index.nil?
-
-          diagnostics = []
-          walk_describe(root, anchor_model: nil) do |matcher_call, anchor|
-            entry = model_index.find(anchor)
-            next if entry.nil?
-
-            diagnostic = diagnostic_for(matcher_call, path, anchor, entry)
-            diagnostics << diagnostic if diagnostic
-          end
-          diagnostics
-        end
-
-        # Walks for `RSpec.describe(Const)` / `describe(Const)`
-        # blocks (the Const is the model anchor) and yields
-        # every matcher call found in their body.
+        # The matcher violations for a single call node (0..1), or `[]`
+        # when it is not a shoulda matcher, sits outside any
+        # `describe <ModelConst>` block, or the model is unknown.
+        # ADR-37: the engine owns the walk; the model anchor comes from
+        # the node-rule `NodeContext` ancestors (the innermost enclosing
+        # `describe`-with-constant — nested const describes override,
+        # `describe ".method"` string blocks inherit), exactly as the
+        # former recursive anchor propagation did.
         #
-        # The anchor stays the OUTERMOST describe-with-const
-        # — nested describes / contexts inherit it without
-        # overriding (a nested `describe ".active"` is not a
-        # model constant). When a nested describe DOES name a
-        # different model, the nested anchor wins inside that
-        # subtree (rare; we still honour it).
-        def walk_describe(node, anchor_model:, &)
-          return unless node.is_a?(Prism::Node)
+        # @param matcher_call [Prism::Node]
+        # @param ancestors [Array<Prism::Node>]
+        # @param model_index [Object, nil]
+        # @return [Array<Violation>]
+        def violations_for(matcher_call:, ancestors:, model_index:)
+          return [] if model_index.nil?
+          return [] unless matcher_invocation?(matcher_call)
 
-          if describe_with_constant?(node)
-            inner_anchor = describe_const_name(node) || anchor_model
-            collect_matchers(node.block.body, inner_anchor, &) if node.block&.body
-            return
-          end
+          anchor = anchor_for(ancestors)
+          return [] if anchor.nil?
 
-          node.compact_child_nodes.each do |child|
-            walk_describe(child, anchor_model: anchor_model, &)
-          end
+          entry = model_index.find(anchor)
+          return [] if entry.nil?
+
+          violation = diagnostic_for(matcher_call, anchor, entry)
+          violation ? [violation] : []
         end
 
-        # Walks the body of a describe block looking for:
-        #   (a) matcher calls — `should MATCHER` or
-        #       `expect(...).to MATCHER` chains; we yield the
-        #       inner MATCHER call.
-        #   (b) nested describe / context blocks — we recurse
-        #       so deeper matchers are reachable.
-        def collect_matchers(body, anchor, &)
-          return unless body.is_a?(Prism::Node)
-          return if anchor.nil?
-
-          if matcher_invocation?(body)
-            yield body, anchor
-            return
-          end
-
-          if describe_with_constant?(body)
-            inner_anchor = describe_const_name(body) || anchor
-            collect_matchers(body.block.body, inner_anchor, &) if body.block&.body
-            return
-          end
-
-          body.compact_child_nodes.each do |child|
-            collect_matchers(child, anchor, &)
-          end
+        # The model anchor in effect at a node: the constant named by the
+        # innermost enclosing `describe <Const> do … end`, or nil.
+        def anchor_for(ancestors)
+          describe = ancestors.rfind { |n| describe_with_constant?(n) }
+          describe && describe_const_name(describe)
         end
 
         # A direct matcher invocation is a `CallNode` whose
@@ -203,62 +176,47 @@ module Rigor
 
         # --- diagnostics ---
 
-        def diagnostic_for(matcher_call, path, anchor, entry)
+        def diagnostic_for(matcher_call, anchor, entry)
           lane = MATCHER_TABLE.fetch(matcher_call.name)
           target = matcher_call.arguments.arguments.first.unescaped.to_sym
 
           case lane
           when :column
-            column_diagnostic(matcher_call, path, anchor, entry, target)
+            column_violation(matcher_call, anchor, entry, target)
           when :association_singular
-            association_diagnostic(matcher_call, path, anchor, entry, target, expected_kind: :singular)
+            association_violation(matcher_call, anchor, entry, target, expected_kind: :singular)
           when :association_collection
-            association_diagnostic(matcher_call, path, anchor, entry, target, expected_kind: :collection)
+            association_violation(matcher_call, anchor, entry, target, expected_kind: :collection)
           end
         end
 
-        def column_diagnostic(matcher_call, path, anchor, entry, column_name)
+        def column_violation(matcher_call, anchor, entry, column_name)
           return nil if entry.column?(column_name)
 
-          build_diagnostic(
-            matcher_call, path,
+          Violation.new(
             rule: "shoulda-matchers.unknown-column",
             message: "#{matcher_call.name}(:#{column_name}) — no column `#{column_name}` on " \
                      "#{anchor} (columns: #{entry.column_names.sort.join(', ')})"
           )
         end
 
-        def association_diagnostic(matcher_call, path, anchor, entry, assoc_name, expected_kind:)
+        def association_violation(matcher_call, anchor, entry, assoc_name, expected_kind:)
           if entry.association?(assoc_name)
             actual = entry.association(assoc_name)[:kind]
             return nil if actual == expected_kind
 
-            build_diagnostic(
-              matcher_call, path,
+            Violation.new(
               rule: "shoulda-matchers.association-kind-mismatch",
               message: "#{matcher_call.name}(:#{assoc_name}) on #{anchor} — `#{assoc_name}` is " \
                        "a #{actual} association; #{matcher_call.name} expects #{expected_kind}"
             )
           else
-            build_diagnostic(
-              matcher_call, path,
+            Violation.new(
               rule: "shoulda-matchers.unknown-association",
               message: "#{matcher_call.name}(:#{assoc_name}) — no association `#{assoc_name}` on " \
                        "#{anchor} (associations: #{entry.association_names.sort.join(', ')})"
             )
           end
-        end
-
-        def build_diagnostic(call_node, path, rule:, message:)
-          location = call_node.message_loc || call_node.location
-          Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
-            severity: :warning,
-            rule: rule,
-            message: message
-          )
         end
       end
     end

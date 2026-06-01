@@ -57,11 +57,27 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
     end.new(entries)
   end
 
+  # Drives the plugin's per-node path (ADR-37): the engine walks with
+  # ancestors and the Analyzer's per-node `violations_for` validates each
+  # matcher against the (innermost enclosing) describe-model anchor. This
+  # mirrors exactly what `node_rule` + `Base#diagnostic` do, returning
+  # real `Diagnostic` rows so the assertions below are unchanged.
   def diagnose(source, index: model_index)
     root = Prism.parse(source).value
-    Rigor::Plugin::ShouldaMatchers::Analyzer.diagnose(
-      path: "spec/user_spec.rb", root: root, model_index: index
-    )
+    diagnostics = []
+    Rigor::Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
+      next unless node.is_a?(Prism::CallNode)
+
+      Rigor::Plugin::ShouldaMatchers::Analyzer.violations_for(
+        matcher_call: node, ancestors: ancestors, model_index: index
+      ).each do |violation|
+        diagnostics << Rigor::Analysis::Diagnostic.from_location(
+          node.message_loc || node.location, path: "spec/user_spec.rb",
+                                             message: violation.message, severity: :warning, rule: violation.rule
+        )
+      end
+    end
+    diagnostics
   end
 
   describe "column matchers" do

@@ -76,13 +76,19 @@ module Rigor
         @model_index_resolved = false
       end
 
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
+      # ADR-37 — per-matcher validation over the engine-owned walk. The
+      # model anchor (the enclosing `describe <Model>` const) comes from
+      # the node-rule NodeContext ancestors; the diagnostic points at the
+      # matcher name (message_loc). The :model_index fact (from
+      # rigor-activerecord) is read lazily; without it the rule is silent.
+      node_rule Prism::CallNode do |node, _scope, path, _fc, context|
         index = model_index_or_nil
-        return [] if index.nil?
+        next [] if index.nil?
 
-        Analyzer.diagnose(
-          path: path, root: root, model_index: index
-        ).map { |diag| build_diagnostic(diag) }
+        Analyzer.violations_for(matcher_call: node, ancestors: context.ancestors, model_index: index).map do |violation|
+          diagnostic(node, path: path, location: node.message_loc,
+                           message: violation.message, severity: :warning, rule: violation.rule)
+        end
       end
 
       private
@@ -98,13 +104,6 @@ module Rigor
         @model_index = @services.fact_store.read(plugin_id: "activerecord", name: :model_index)
         @model_index_resolved = true
         @model_index
-      end
-
-      def build_diagnostic(diag)
-        Rigor::Analysis::Diagnostic.new(
-          path: diag.path, line: diag.line, column: diag.column,
-          message: diag.message, severity: diag.severity, rule: diag.rule
-        )
       end
     end
 

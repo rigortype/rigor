@@ -51,6 +51,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-35 | [Override Signature Compatibility (Liskov signature rule)](35-override-signature-compatibility.md) | Accepted (slices 1–4 done; slice 5 deferred) |
 | ADR-36 | [Macro-substrate Nested-class Emission Tier (Mangrove `Enum`)](36-mangrove-enum-nested-class-emission.md) | Accepted (Slice A implemented; `is_a?` exhaustiveness deferred) |
 | ADR-37 | [Plugin Interface Segregation (narrow extension protocols)](37-plugin-interface-segregation.md) | Proposed |
+| ADR-38 | [Plugin-declared Additional Initializers](38-additional-initializers.md) | Proposed |
 
 ## Adding a New ADR
 

@@ -94,6 +94,7 @@ ADRs record design rationale and rejected / deferred alternatives. **The canonic
 - [ADR-35](docs/adr/35-override-signature-compatibility.md) — Override signature compatibility (Liskov signature rule)
 - [ADR-36](docs/adr/36-mangrove-enum-nested-class-emission.md) — Macro-substrate nested-class emission tier (Mangrove `Enum`; Slice A implemented)
 - [ADR-37](docs/adr/37-plugin-interface-segregation.md) — Plugin interface segregation (narrow extension protocols; proposed)
+- [ADR-38](docs/adr/38-additional-initializers.md) — Plugin-declared additional initializers (`additional_initializers:`; proposed)
 
 ## Skills available in this repository
 

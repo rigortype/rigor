@@ -348,4 +348,114 @@ Secondary (design intent / history — corroborating, not authoritative):
 - Yusuke Endoh, [TypeProf for IDE, RubyKaigi Takeout 2021](https://rubykaigi.org/2021-takeout/presentations/mametter.html)
 - Yusuke Endoh, [Good first issues of TypeProf, RubyKaigi 2024](https://speakerdeck.com/mame/good-first-issues-of-typeprof) — Source/Vertex/Box architecture slides
 - [Ruby News: TypeProf — Abductive Reasoning for Abstract Interpretation](https://ruby.news/2021/08/23/TypeProf-Abductive-Reasoning-for-Abstract-Interpretation.html)
+
+---
+
+## 9. Rigor ↔ TypeProf: feedback vs. fundamental divergence
+
+This section reframes the comparison from Rigor's side: *what could Rigor's design
+teach TypeProf*, and *where is Rigor's design so foundationally different that the gap is
+not a bug to fix but a consequence of a different bet*. The split matters because the two
+are not competitors with the same goal — TypeProf is *understanding code* (infer & emit
+RBS, IDE-first, tolerant), Rigor is *judging code* (prove bugs, FP-disciplined, scale
+across a whole repo). Every row below is anchored to a mechanism established in §1–§8.
+
+### 9a. Elements Rigor could feed back to TypeProf (portable — no identity loss)
+
+These are precision/ergonomics ideas Rigor proved out that TypeProf could adopt **without
+abandoning whole-program type-level execution**. They strengthen TypeProf at what it
+already is.
+
+1. **Literal / refinement carriers with output-time widening.**
+   TypeProf discards literal values at `install0` (`42`→`Integer`, `value.rb`), yet it
+   *already* keeps concrete Symbols (`Type::Symbol(:foo)`) and structural Array `@elems` /
+   Record fields (§5). So the "a Type subclass that carries a concrete value" precedent
+   exists internally. Rigor's contribution is the *discipline around it*: a `Constant`/
+   `Refined`/`IntegerRange` carrier that is kept internally but **erased to nominal RBS at
+   the boundary** (Rigor's RBS-erasure contract, §6 is the natural erase point —
+   `Vertex#show`). TypeProf could add `IntegerLiteral`/`StringLiteral` purely for hover
+   precision and constant-fold builtins, widening in `show`. **Caveat:** the type multiset
+   blows up (`42` and `43` are distinct types) — TypeProf's whole-program graph is far more
+   blow-up-sensitive than Rigor's budgeted per-method engine, so this *requires* an
+   explicit "widen after N literals" strategy that Rigor can largely skip.
+
+2. **An opt-in curated diagnostic layer + severity model.**
+   TypeProf's errors are byproducts emitted mid-`run0` (§8) with no curation, no severity
+   profile, no suppression grammar. Rigor's `diagnostic-policy` (dotted-identifier taxonomy,
+   `severity_profile`, `# rigor:disable`) is a **pure layer over the same signal** — it
+   touches no inference internals. TypeProf could ship this as an *optional lint mode*
+   without becoming a judge by default (see 9b.2 for why "by default" would break it).
+
+3. **Robustness-principle output policy (ADR-5) for parameters.**
+   TypeProf emits observed-narrow parameters as-is: a method only ever called with `String`
+   becomes `(String)` (§3 — params are the union of actual-arg vertices). Rigor's stance is
+   that this observation is a *reviewable suggestion*, not a contract, and it widens toward
+   capability roles. TypeProf's RBS output (`MethodDefBox#show`, §6) is the exact place to
+   apply a "lenient parameters, strict returns" rewrite — fully compatible with its
+   record-what-flowed model.
+
+4. **A public plugin surface for return-type contributions.**
+   TypeProf has the *seed* — builtin hooks dispatched via `me.builtin[...]`
+   (`box.rb:1037`). Rigor promoted this idea into a first-class plugin API
+   (`flow_contribution_for`, return overrides keyed on a literal argument). TypeProf could
+   graduate its hardcoded `builtin.rb` dispatch into a registered, third-party-extensible
+   API. No conflict with the core model.
+
+5. **Reference-counted incrementality is already shared DNA — Rigor validates the bet.**
+   Not a feedback *to* TypeProf so much as a convergent confirmation: TypeProf's
+   ref-counted type multisets + ChangeSet diff-rollback (§1) and Rigor's per-file cache
+   (ADR-6) independently arrived at "retract one source's contribution without recomputing
+   the world." Worth recording that both ecosystems landed here.
+
+### 9b. Where Rigor diverges fundamentally (NOT portable — different bet)
+
+These are not improvements TypeProf is "missing." They are properties Rigor *bought* by
+making a different foundational wager, and TypeProf cannot adopt them without ceasing to be
+TypeProf.
+
+1. **Scale: local inference + boundary catalog + budgets vs. whole-program re-interpretation.**
+   Rigor infers one method at a time and looks callees up in a *catalog* (core/stdlib/gem
+   RBS, plugin contributions), bounded by inference budgets, cached per file. TypeProf's
+   inter-procedural flow *is* edges that re-interpret the callee's `MethodDefBox` as a live
+   graph node (§3) — there is no method summary, the body re-runs. This is the root of
+   TypeProf's "designed for small programs / a prototyping pass" positioning. **The
+   load-bearing point:** TypeProf's headline ability to *infer parameter types from call
+   sites* is a direct consequence of whole-program edge-wiring. Replacing that with
+   local+catalog to gain Rigor's scale would **delete the very feature that defines
+   TypeProf**. This is the one divergence that is structurally irreconcilable, not merely
+   expensive.
+
+2. **Judging vs. understanding — the false-positive-discipline core.**
+   Rigor's top value is "the program works outranks a worst-case static reading; never
+   frighten working code." It stays silent unless a bug is *provable*. TypeProf's core is
+   "when uncertain, infer `untyped`" (§5, `doc.md:122`) — tolerant, and explicitly *not a
+   gate*. Making FP-discipline the **default** posture (vs. the opt-in lint layer of 9a.2)
+   is a change of *purpose*, not of mechanism. A TypeProf that gates CI by default is a
+   different tool with a different name.
+
+3. **No-narrowing is structural, not just unimplemented.**
+   Rigor's refinement narrowing (`non-empty-string` from `unless s.empty?`,
+   flow-sensitive retyping per branch) is a first-class control-flow analysis. TypeProf
+   unions both `if` arms (§4, `control.rb`) because its graph is "one vertex per variable
+   per scope" — flow-sensitivity needs SSA-style vertex splitting layered onto a monotone
+   dataflow skeleton. This *is* addable (listed as a hard 9a-adjacent item in prior
+   analysis), but it is a structural retrofit, not a tuning knob — it sits on the boundary
+   between "portable with heavy investment" and "fights the existing graph model."
+
+4. **Asymmetric authorship (strict returns / lenient params) as an analyzer-wide law.**
+   For Rigor this is a pervasive principle (ADR-5) shaping *every* authored type and the
+   whole acceptance predicate, not just an output formatter. TypeProf has no notion of
+   authorship asymmetry — it records flow symmetrically (args in, returns out, both
+   observed). 9a.3 can bolt the *output half* on, but the principle as an internal
+   acceptance discipline has no home in a record-what-flowed interpreter.
+
+### 9c. One-line synthesis
+
+TypeProf can move toward Rigor on **precision** (9a.1 literals/refinements, 9a.3 narrowing
+adjacent) and **output manners** (9a.2 diagnostics, 9a.3 robustness, 9a.4 plugins) — all
+without surrendering its identity. It **cannot** move toward Rigor on **scale** (9b.1) or
+**judgment philosophy** (9b.2) without becoming a different tool, because those are exactly
+what Rigor purchased by betting on local-inference-plus-catalog instead of whole-program
+type-level execution. The non-portability is *why the two coexist* (the appendix's
+side-by-side pattern) rather than one subsuming the other.
 </content>

@@ -1,6 +1,8 @@
 # ADR-32 — Inline-RBS comment ingestion as an opt-in plugin
 
-Status: **accepted, 2026-05-25; implemented in v0.1.10.** The
+Status: **Accepted, 2026-05-25; implemented in v0.1.10.**
+
+The
 bundled `rigor-rbs-inline` plugin, the `source_rbs_synthesizer:`
 manifest field, the env-build synthesis hook, magic-comment gating,
 the `require_magic_comment:` config knob, and the per-file cache /

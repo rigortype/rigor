@@ -1,7 +1,9 @@
 # Matsumoto & Minamide 2008 (多相レコード型 Ruby 型推論) — Rigor 観点考察
 
 Date: 2026-05-18.
-Status: research note, no design commitments.
+
+Status: **research note, no design commitments.**
+
 種別: 外部文献の Rigor 観点レビュー。
 
 ## 対象論文

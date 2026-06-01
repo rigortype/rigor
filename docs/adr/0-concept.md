@@ -1,8 +1,6 @@
 # ADR-0: Foundation and Core Architecture of Rigor
 
-## Status
-
-Accepted
+Status: **Accepted**
 
 ## Context
 

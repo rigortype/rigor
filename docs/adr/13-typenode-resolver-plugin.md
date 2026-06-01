@@ -1,6 +1,7 @@
 # ADR-13 — `TypeNode` resolver plugin hook + TypeScript-utility-type adapter
 
-Status: **accepted, 2026-05-11; implemented in v0.1.4.**
+Status: **Accepted, 2026-05-11; implemented in v0.1.4.**
+
 `lib/rigor/type_node/` carries the resolver infrastructure;
 `plugins/rigor-typescript-utility-types/` is the production
 plugin. ADR-16 follow-up (resolver-chain wiring for the

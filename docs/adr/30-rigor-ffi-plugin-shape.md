@@ -1,6 +1,8 @@
 # ADR-30 — `rigor-ffi` plugin shape
 
-Status: **proposed, 2026-05-25.** Records the decision to ship a
+Status: **Proposed, 2026-05-25.**
+
+Records the decision to ship a
 core `rigor-ffi` plugin covering the common `ffi` gem machinery
 plus a family of per-library sub-plugins (`rigor-rbnacl`,
 `rigor-ethon`, `rigor-ffi-rzmq`, `rigor-sassc`), and the

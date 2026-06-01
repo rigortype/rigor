@@ -1,8 +1,9 @@
 # ADR-24 — Implicit-self method-call resolution
 
-Status: **accepted, 2026-05-20 (slice 4 gated — separate FP evaluation
+Status: **Accepted, 2026-05-20 (slice 4 gated — separate FP evaluation
 required). Slices 1+3 implemented 2026-05-20, slice 2 implemented
 2026-05-21.**
+
 Records the project's decision to resolve implicit-self method calls
 (a call written with no explicit receiver, inside a method body)
 against the enclosing class/module's method set — its own

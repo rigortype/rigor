@@ -1,6 +1,8 @@
 # ADR-19 — Language Server packaging
 
-Status: **accepted, 2026-05-17.** Decides the packaging shape for
+Status: **Accepted, 2026-05-17.**
+
+Decides the packaging shape for
 Rigor's Language Server implementation so future LSP work
 (refactoring features, additional capabilities, ecosystem
 integration) starts from a written premise instead of re-litigating

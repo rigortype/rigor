@@ -1,8 +1,8 @@
 # ADR-6: Cache Persistence Backend
 
-## Status
+Status: **Accepted.**
 
-Accepted. Working decision recorded for v0.0.8 implementation;
+Working decision recorded for v0.0.8 implementation;
 ratified when the RBS environment cache, per-process memo, and
 Monitor-safe thread layer landed in v0.1.4.
 

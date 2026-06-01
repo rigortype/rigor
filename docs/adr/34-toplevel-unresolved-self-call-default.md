@@ -1,6 +1,8 @@
 # ADR-34 — Toplevel unresolved implicit-self calls warn by default
 
-Status: **accepted, 2026-05-29; implemented in v0.1.13.** Records the
+Status: **Accepted, 2026-05-29; implemented in v0.1.13.**
+
+Records the
 decision to flip the current silent-`Dynamic[top]` behaviour on
 toplevel implicit-self call sites that fail to resolve against any
 visible method contributor, emitting a dedicated

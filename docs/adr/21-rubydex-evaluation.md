@@ -1,6 +1,8 @@
 # ADR-21 — Rubydex evaluation (foundation, backend, or tool?)
 
-Status: **proposed (evaluation), 2026-05-19.** Records the
+Status: **Proposed (evaluation), 2026-05-19.**
+
+Records the
 project's stance on Shopify's [`rubydex`][rubydex] across three
 candidate roles — implementation foundation, swappable backend,
 and supplementary tool — so future "should we just use rubydex?"

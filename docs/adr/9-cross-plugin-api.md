@@ -1,6 +1,8 @@
 # ADR-9 — Cross-plugin API
 
-Status: **accepted, 2026-05-08; implemented in v0.1.1.** Track 2
+Status: **Accepted, 2026-05-08; implemented in v0.1.1.**
+
+Track 2
 of v0.1.1 shipped `Plugin::FactStore`, `Plugin::Base#prepare(services)`,
 `manifest(produces:/consumes:)`, topologically-sorted plugin loading,
 and the `#flow_contribution_for` return-type tier (slices 1 → 5 +

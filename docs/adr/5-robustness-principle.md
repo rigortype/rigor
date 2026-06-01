@@ -1,8 +1,8 @@
 # ADR-5: Robustness Principle for Rigor Types
 
-## Status
+Status: **Accepted; implemented and shipped.**
 
-Accepted; implemented and shipped. The robustness principle (strict
+The robustness principle (strict
 on returns, lenient on parameters) governs Rigor-authored signatures
 and inference; its normative companion is
 [`docs/type-specification/robustness-principle.md`](../type-specification/robustness-principle.md).

@@ -1,6 +1,7 @@
 # ADR-36 — Macro-substrate nested-class emission tier (Mangrove `Enum`)
 
-Status: **accepted, 2026-05-30; Slice A implemented.**
+Status: **Accepted, 2026-05-30; Slice A implemented.**
+
 Records the decision to extend the [ADR-16](16-macro-expansion.md)
 macro-expansion substrate with a new tier that mints **nested
 subclasses** (not just methods) from a class-level DSL block, motivated

@@ -1,6 +1,8 @@
 # FFI library usage survey — feeding `rigor-ffi` design (2026-05-25)
 
-Status: research note, no design commitments. Prerequisite for a future
+Status: **research note, no design commitments.**
+
+Prerequisite for a future
 `rigor-ffi` plugin that should make FFI-binding gems statically analysable
 to the level required by [ADR-0](../adr/0-concept.md) /
 [ADR-1](../adr/1-types.md) and the [robustness

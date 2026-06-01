@@ -1,6 +1,8 @@
 # ADR-31 — Contribution and supply-chain policy
 
-Status: **accepted, 2026-05-25; in force.** The policy is reflected
+Status: **Accepted, 2026-05-25; in force.**
+
+The policy is reflected
 in [`CONTRIBUTING.md`](../../CONTRIBUTING.md), `AGENTS.md`, and the
 `rigor-plugin-author` / `rigor-ffi-plugin-author` SKILLs (Phase 0.5
 routing). Records the project-wide contribution policy, organised by

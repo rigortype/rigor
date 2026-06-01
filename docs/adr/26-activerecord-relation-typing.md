@@ -1,6 +1,8 @@
 # ADR-26 — ActiveRecord relation typing
 
-Status: **accepted, 2026-05-22 — implemented.** Records the design
+Status: **Accepted, 2026-05-22 — implemented.**
+
+Records the design
 for typing `ActiveRecord::Relation`-returning call sites in
 `rigor-activerecord` (`has_many` accessors, `Model.where`, `scope`s)
 after a first implementation attempt regressed the project's

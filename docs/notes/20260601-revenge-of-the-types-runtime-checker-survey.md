@@ -1,7 +1,9 @@
 # 「Revenge of the Types」(Armin Ronacher) — ランタイム × 型チェッカー横断考察
 
 Date: 2026-06-01.
-Status: research note, no design commitments.
+
+Status: **research note, no design commitments.**
+
 種別: 外部論説の横断レビュー(Ruby/PHP/Python/JavaScript ランタイム ×
 Rigor/PHPStan/TypeScript/Python 型チェッカー)。
 三部作(外部論説 × 既存言語への型後付け):

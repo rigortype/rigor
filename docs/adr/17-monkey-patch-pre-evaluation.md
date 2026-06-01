@@ -1,6 +1,8 @@
 # ADR-17 — Project-side monkey-patch pre-evaluation
 
-Status: **accepted, 2026-05-16; implemented in v0.1.13.** The
+Status: **Accepted, 2026-05-16; implemented in v0.1.13.**
+
+The
 `pre_eval:` config axis and the project-wide
 `Inference::ProjectPatchedMethods` registry ship, populated by a
 bounded pre-pass and consulted at the dispatcher tier between

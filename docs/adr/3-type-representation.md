@@ -1,8 +1,8 @@
 # ADR-3: Internal Type Representation
 
-## Status
+Status: **Accepted; implemented and shipped.**
 
-Accepted; implemented and shipped. The internal type-object layout
+The internal type-object layout
 (including the OQ1–OQ3 working decisions) is live; the
 `Rigor::Type::*` carriers and the
 [`docs/internal-spec/internal-type-api.md`](../internal-spec/internal-type-api.md)

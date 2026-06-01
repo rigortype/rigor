@@ -1,6 +1,7 @@
 # ADR-22 — Baseline mechanism + project-onboarding SKILLs
 
-Status: **accepted, 2026-05-19; fully implemented across v0.1.7–v0.1.9.**
+Status: **Accepted, 2026-05-19; fully implemented across v0.1.7–v0.1.9.**
+
 Slices 1–5 landed; Slice 6 (IDE/LSP gutter integration) deferred.
 Records the project's stance on **per-project error-level pragmatism**:
 a baseline file (PHPStan-shaped) plus two companion agent SKILLs

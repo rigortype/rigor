@@ -1,7 +1,9 @@
 # 「型システムポエム」(myuon) — Rigor 観点考察
 
 Date: 2026-06-01.
-Status: research note, no design commitments.
+
+Status: **research note, no design commitments.**
+
 種別: 外部論説の Rigor 観点レビュー。
 三部作(外部論説 × 既存言語への型後付け):
 - 本ノート(myuon「型システムポエム」)

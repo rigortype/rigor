@@ -1,14 +1,16 @@
 # ADR-20: Lightweight Higher-Kinded Polymorphism (Lightweight HKT)
 
-## Status
+Status: **Accepted (partial implementation, 2026-05-18).**
 
-**Accepted (partial implementation, 2026-05-18).** Originally
+Originally
 proposed 2026-05-18; promoted to accepted the same day after slices
 1, 2a, 2c, 2d, and 3 landed end-to-end with `JSON.parse` returning
 the recursive `json::value` union instead of `untyped` (verified
 via `rigor type-of`). The remaining open slices (§ Implementation
 slicing slices 2b, 4, 5, 6) carry no scheduling commitment and
 ship demand-driven.
+
+## Implementation status
 
 ### What landed (v0.1.6)
 

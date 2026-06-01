@@ -1,8 +1,8 @@
 # ADR-4: Type Inference Engine and the `Scope#type_of` Query
 
-## Status
+Status: **Accepted; implemented and shipped.**
 
-Accepted; implemented and shipped. The inference engine (`Scope`,
+The inference engine (`Scope`,
 fact store, effect model, capability-role inference, normalization,
 RBS erasure routing) is live; the
 [`docs/internal-spec/inference-engine.md`](../internal-spec/inference-engine.md)

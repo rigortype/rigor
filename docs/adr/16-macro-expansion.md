@@ -1,6 +1,7 @@
 # ADR-16 — Macro / DSL expansion substrate
 
-Status: **accepted — floor + precision promotion landed (slices 1–7 + 6a/6b), slice 5b + ADR-13 resolver-chain wiring for utility-type returns deferred to demand**, 2026-05-15.
+Status: **Accepted — floor + precision promotion landed (slices 1–7 + 6a/6b), slice 5b + ADR-13 resolver-chain wiring for utility-type returns deferred to demand**, 2026-05-15.
+
 Triggered by the per-library survey
 [`docs/notes/20260515-macro-expansion-library-survey.md`](../notes/20260515-macro-expansion-library-survey.md)
 covering Rails (`ActiveSupport::Concern`, ActiveStorage attached macros),

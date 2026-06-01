@@ -1,6 +1,8 @@
 # ADR-27 — Tool distribution and installation model
 
-Status: **accepted, 2026-05-22; partially implemented.** Records how
+Status: **Accepted, 2026-05-22; partially implemented.**
+
+Records how
 Rigor is distributed to and installed by end users. The core
 principle — **Rigor is not added to the target project's `Gemfile`**
 — is ratified, as is the latest-Ruby-only stance it rests on (WD7).

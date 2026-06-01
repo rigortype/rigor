@@ -1,6 +1,7 @@
 # ADR-29 — Browser playground
 
-Status: **accepted, 2026-05-23; implemented in v0.1.10–0.1.11.**
+Status: **Accepted, 2026-05-23; implemented in v0.1.10–0.1.11.**
+
 Records the decision to build a browser-based Rigor playground — a
 text editor that shows real-time diagnostics and `annotate`-style
 type comments — and how it should be hosted. Two approaches were

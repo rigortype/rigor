@@ -1,7 +1,9 @@
 # 「漸進的型付け言語の時代に必要なもの」(mizchi) — Rigor / TypeScript 観点考察
 
 Date: 2026-06-01.
-Status: research note, no design commitments.
+
+Status: **research note, no design commitments.**
+
 種別: 外部論説の Rigor / TypeScript 観点レビュー。
 三部作(外部論説 × 既存言語への型後付け):
 - [20260601-type-system-poem-rigor-review.md](20260601-type-system-poem-rigor-review.md)(myuon「型システムポエム」)

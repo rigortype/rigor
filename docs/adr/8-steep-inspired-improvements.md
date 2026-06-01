@@ -1,8 +1,8 @@
 # ADR-8: Steep-inspired Improvements
 
-## Status
+Status: **Accepted (working decisions).**
 
-Accepted (working decisions). Companion to the Rigor self-analysis
+Companion to the Rigor self-analysis
 report (informal) and the v0.0.5 Steep cross-check triage at
 [`docs/notes/20260503-steep-cross-check-triage.md`](../notes/20260503-steep-cross-check-triage.md).
 Captures the implementation choices for three Steep-inspired

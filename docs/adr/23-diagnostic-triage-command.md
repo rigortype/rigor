@@ -1,6 +1,7 @@
 # ADR-23 — Diagnostic triage command (`rigor triage`)
 
-Status: **accepted, 2026-05-20; slices 1+2+3+4 implemented in v0.1.9.**
+Status: **Accepted, 2026-05-20; slices 1+2+3+4 implemented in v0.1.9.**
+
 `lib/rigor/triage/` carries the catalogue; `rigor triage` is a
 production subcommand. Plugin-contributed recognisers (WD2 extension
 point) remain deferred. Records the design of a `check`-derived

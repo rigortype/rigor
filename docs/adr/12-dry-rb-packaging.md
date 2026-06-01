@@ -1,6 +1,8 @@
 # ADR-12 — dry-rb plugin packaging
 
-Status: **accepted, 2026-05-16.** Decides the packaging shape for
+Status: **Accepted, 2026-05-16.**
+
+Decides the packaging shape for
 Rigor's dry-rb adapter plugins so individual `rigor-dry-*` work can
 start without re-litigating fundamentals.
 

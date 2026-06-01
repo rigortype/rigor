@@ -1,6 +1,7 @@
 # ADR-35 — Override signature compatibility (Liskov signature rule)
 
-Status: **accepted, 2026-05-29 (slices 1–4 done; slice 5 deferred).**
+Status: **Accepted, 2026-05-29 (slices 1–4 done; slice 5 deferred).**
+
 Records the decision to add a new family of diagnostics that check a
 method override against the contract it inherits — the **Liskov Substitution Principle (LSP)
 signature rule** applied across a class/module hierarchy:

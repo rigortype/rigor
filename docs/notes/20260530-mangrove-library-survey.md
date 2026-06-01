@@ -1,7 +1,10 @@
 # Mangrove (Result / Option / Enum) — library survey + `rigor-mangrove` shape
 
 Date: 2026-05-30.
-Status: research note, no design commitments. Feeds a prospective
+
+Status: **research note, no design commitments.**
+
+Feeds a prospective
 `plugins/rigor-mangrove` and clarifies its relationship to the already-shipped
 [`rigor-sorbet`](../../plugins/rigor-sorbet/README.md) ([ADR-11](../adr/11-sorbet-input-adapter.md)).
 

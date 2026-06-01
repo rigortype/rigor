@@ -1,7 +1,9 @@
 # ADR-28 — Path-scoped method-protocol contracts
 
-Status: **accepted, 2026-05-23; implemented in the same commit
-cluster (commits 481d810, a54cd2d).** Records the decision to add a
+Status: **Accepted, 2026-05-23; implemented in the same commit
+cluster (commits 481d810, a54cd2d).**
+
+Records the decision to add a
 plugin extension point that lets a plugin make a *behavioural*
 protocol — "every class in this directory must define a method
 of this shape" — statically enforceable, without the class

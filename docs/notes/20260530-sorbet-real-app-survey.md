@@ -1,7 +1,10 @@
 # Real Sorbet/Tapioca app survey — strap + dependabot-core
 
 Date: 2026-05-30.
-Status: research note. Drove one shipped rigor-sorbet fix (attr-accessor
+
+Status: **research note.**
+
+Drove one shipped rigor-sorbet fix (attr-accessor
 sigs, commit b1fe2aaf) and validated the user-generic translation change
 (48f0719b) for false-positive safety on real code.
 

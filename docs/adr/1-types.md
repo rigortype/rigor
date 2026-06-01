@@ -1,8 +1,8 @@
 # ADR-1: Type Model and RBS Superset Strategy
 
-## Status
+Status: **Accepted; implemented and shipped.**
 
-Accepted; implemented and shipped. The type model is live across the
+The type model is live across the
 analyzer; `docs/type-specification/` and `docs/types.md` are
 authoritative for *what* the analyzer does, this ADR for *why*.
 

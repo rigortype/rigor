@@ -1,6 +1,8 @@
 # ADR-10 — Opt-in dependency-source inference
 
-Status: **accepted, 2026-05-09; implemented in v0.1.4.** All five
+Status: **Accepted, 2026-05-09; implemented in v0.1.4.**
+
+All five
 implementation slices landed; `lib/rigor/analysis/dependency_source_inference/`
 is the production namespace. Per-call return-type precision follow-ups
 remain demand-driven.

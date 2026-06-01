@@ -1,6 +1,6 @@
 # ADR-11 — Sorbet input as a plugin adapter
 
-Status: **accepted, 2026-05-09; implemented in v0.1.4** as
+Status: **Accepted, 2026-05-09; implemented in v0.1.4** as
 `plugins/rigor-sorbet/` (production plugin, not under `examples/`).
 
 ## Context

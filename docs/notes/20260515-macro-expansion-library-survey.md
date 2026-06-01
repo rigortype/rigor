@@ -2,7 +2,10 @@
 
 Date: 2026-05-15. Revised 2026-05-15 to add the dry-rb trio (dry-types,
 dry-schema, dry-struct).
-Status: research note, no design commitments. Prerequisite for the
+
+Status: **research note, no design commitments.**
+
+Prerequisite for the
 [ROADMAP](../ROADMAP.md) O2 work item ("macro-template + heredoc-Ruby
 expansion") and the grounding evidence for
 [ADR-16](../adr/16-macro-expansion.md) (macro expansion substrate).

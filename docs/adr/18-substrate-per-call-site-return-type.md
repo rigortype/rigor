@@ -1,6 +1,8 @@
 # ADR-18 — Substrate per-call-site return-type DSL
 
-Status: **accepted, 2026-05-16; implemented in v0.1.6.** Amends
+Status: **Accepted, 2026-05-16; implemented in v0.1.6.**
+
+Amends
 [ADR-16](16-macro-expansion.md)'s macro-expansion substrate to
 support per-call-site return types on synthesised methods. The
 `returns_from_arg:` / `lookup_via:` DSL on

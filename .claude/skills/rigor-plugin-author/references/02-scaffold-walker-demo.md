@@ -10,7 +10,10 @@ Create the directory tree (replacing `<id>` and `ClassName` with the chosen id a
 ```text
 plugins/rigor-<id>/   # or examples/rigor-<id>/ for a walkthrough
 ├── README.md
-├── rigor-<id>.gemspec
+│                      # NOTE: a bundled plugin has NO gemspec — it ships
+│                      # inside the single `rigortype` gem (ADR-31). Add a
+│                      # `rigor-<id>.gemspec` ONLY for a third-party plugin
+│                      # in its own repo (see "Gemspec template" below).
 ├── lib/
 │   ├── rigor-<id>.rb              ← gem entry; require_relative "rigor/plugin/<id>"
 │   └── rigor/plugin/
@@ -27,7 +30,13 @@ plugins/rigor-<id>/   # or examples/rigor-<id>/ for a walkthrough
     └── sig/...rbs                 ← only if the demo references typed method calls
 ```
 
-## Gemspec template
+## Gemspec template (third-party plugins only)
+
+**Skip this for a bundled plugin** (under `plugins/` or `examples/` in
+this repo) — bundled plugins have no gemspec; they ship inside the single
+`rigortype` gem (ADR-31, per-plugin gemspecs dropped in commit
+`9769f5fa`). This template is for a **third-party** plugin authored in
+its own repo (ADR-31 WD4), depending on `gem "rigortype"`:
 
 ```ruby
 # rigor-<id>.gemspec
@@ -169,7 +178,7 @@ The demo project under `plugins/rigor-<id>/demo/` (or `examples/rigor-<id>/demo/
 - `demo.rb` — only the recognised / valid call sites. Runs cleanly under MRI.
 - `errors_demo.rb` — intentionally ill-typed code that exercises the `:error` paths. Add a header comment: "DO NOT run via `ruby errors_demo.rb` — analyse with `rigor check`."
 
-The `.rigor.yml` `paths:` lists both, so `rigor check` analyses both. Set `cache.path` to a `tmp/`-anchored directory so the cache is strictly per-demo and survives the eventual `git subtree split`:
+The `.rigor.yml` `paths:` lists both, so `rigor check` analyses both. Set `cache.path` to a `tmp/`-anchored directory so the cache is strictly per-demo (and travels with the demo if the plugin is ever copied out to a third-party repo):
 
 ```yaml
 paths:

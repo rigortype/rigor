@@ -5,11 +5,27 @@ planned `rigor-*` plugin family for Rails apps. It is informational;
 the binding sources for individual plugin contracts remain the
 `README.md` and integration spec under each plugin's directory.
 
+> **Superseded premise (2026-06-02): the subtree-split distribution
+> model is retired.** This roadmap was written assuming each plugin
+> would eventually be `git subtree split` into its own separately-
+> published gem. That model was **dropped** — bundled plugins now ship
+> inside the single `rigortype` gem (per-plugin gemspecs removed in
+> commit `9769f5fa`), and [ADR-31](../adr/31-contribution-and-supply-chain-policy.md)
+> made third-party plugins live in their authors' own repos (WD4)
+> with subtree *merge* kept only as a rare reserved import option
+> (WD5), never the planned outbound flow. Read the "Working
+> principles" subtree-split language, the "Subtree-split readiness
+> checklist", and the per-plugin "extract" steps below as **historical
+> context**, not current plan. The tier table, dependency graph, and
+> per-plugin behaviour sketches remain accurate and useful; only the
+> *distribution* premise changed.
+
 The first plugin in this family — [`rigor-activerecord`](../../plugins/rigor-activerecord/) —
 landed on `master` (commit `e8fda84`) and is staged in the
 monorepo per [`skills/rigor-plugin-author/SKILL.md`](../../skills/rigor-plugin-author/SKILL.md)'s
-"start in monorepo, extract via `git subtree split` once stable"
-discipline.
+"start in monorepo" discipline. (The original "extract via
+`git subtree split` once stable" half of that discipline is retired —
+see the superseded-premise note above.)
 
 ## Working principles
 

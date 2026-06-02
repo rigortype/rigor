@@ -31,7 +31,7 @@ Only non-gating ergonomics follow-ons remain — see Branch D below.
 
 ## Reading order for a returning implementer
 
-`make verify` is clean. **`[Unreleased]` holds the now-substantially-complete plugin-mechanism interface-segregation + ergonomics effort** (ADR-37 / ADR-38 / ADR-39 — see § "Status"); the release gates are met and all three ADRs are Accepted. Branch D below is the residual (non-gating) ergonomics — the two largest boilerplate items are now done: **0a (`Source::Literals`) LANDED** (grid completed + ten plugins + one example migrated) and **0d (`config_schema` defaults, [ADR-40](adr/40-config-schema-defaults.md)) LANDED** (mechanism + thirteen plugins migrated off `DEFAULT_*`). What remains in Branch D is smaller and demand-driven (ADR-39 inflection follow-ons, `dynamic_return` generalisation, ADR-38 block-form, per-interface test harnesses). Branches A–C are the other queued tracks. **Next-session entry point: the remaining Branch-D items are independent demand-driven slices; the bigger strategic lever is Branch A (v0.2.0 gates 1+2 — plugin-contract stabilisation + subtree-split/publish flow), which needs explicit planning rather than another incremental slice.**
+`make verify` is clean. **`[Unreleased]` holds the now-substantially-complete plugin-mechanism interface-segregation + ergonomics effort** (ADR-37 / ADR-38 / ADR-39 — see § "Status"); the release gates are met and all three ADRs are Accepted. Branch D below is the residual (non-gating) ergonomics — the two largest boilerplate items are now done: **0a (`Source::Literals`) LANDED** (grid completed + ten plugins + one example migrated) and **0d (`config_schema` defaults, [ADR-40](adr/40-config-schema-defaults.md)) LANDED** (mechanism + thirteen plugins migrated off `DEFAULT_*`). What remains in Branch D is smaller and demand-driven (ADR-39 inflection follow-ons, `dynamic_return` generalisation, ADR-38 block-form, per-interface test harnesses). Branches A–C are the other queued tracks. **Next-session entry point: the remaining Branch-D items are independent demand-driven slices; the bigger strategic lever is Branch A's single remaining gate — v0.2.0 gate 1, plugin-contract stabilisation for *external* third-party `rigor-*` gems (the subtree-split/publish gate is superseded by the single-bundled-gem model). That needs explicit planning rather than another incremental slice.**
 
 ### Branch D — plugin interface segregation (ADR-37 / ADR-38): release gates DONE; only ergonomics remain
 
@@ -58,13 +58,13 @@ The pre-1.0 review that motivated all of this: [`docs/design/20260601-plugin-mec
 
 ### Branch A — v0.2.0 evaluation release
 
-v0.1.12 leaves the preview line in a strong RC posture for v0.2.0. The remaining gates are the three documented in [`docs/ROADMAP.md`](ROADMAP.md) § "v0.2.0 — first evaluation release":
+v0.1.12 leaves the preview line in a strong RC posture for v0.2.0. The gates are documented in [`docs/ROADMAP.md`](ROADMAP.md) § "v0.2.0 — first evaluation release" and have been **reduced from three to two**:
 
-1. ADR-2 plugin-contract surface stabilised enough to support external `rigor-*` gems outside this monorepo.
-2. Subtree-split / RubyGems publishing flow exercised for at least the `rigor-rails` family.
+1. **ADR-2 plugin-contract surface stabilised enough to support external `rigor-*` gems** (a third-party gem in its own repo, depending on `gem "rigortype"`, per [ADR-31](adr/31-contribution-and-supply-chain-policy.md) WD4) — with an external-author onboarding path and a test that an out-of-tree plugin loads and runs.
+2. ~~Subtree-split / RubyGems publishing flow for the `rigor-rails` family.~~ **Superseded** — the distribution model is now a single bundled `rigortype` gem (per-plugin gemspecs dropped in commit `9769f5fa`; [ADR-31](adr/31-contribution-and-supply-chain-policy.md) retracted subtree-split as a default, keeping subtree *merge* only as a rare reserved option). No per-plugin publish flow to exercise; what remains folds into gate 1 (the external third-party path).
 3. SKILL trio shipped (v0.1.9, ✓).
 
-Gate 3 is met. Gates 1 and 2 need explicit planning — not just any slice will count. The 99.2% Mastodon error reduction + the all-three-G2-cases-closed story is a defensible publicity moment for the cut.
+Gates 2 and 3 are settled. **The one substantive remaining gate is gate 1** — it needs explicit planning, not just any slice. The 99.2% Mastodon error reduction + the all-three-G2-cases-closed story is a defensible publicity moment for the cut.
 
 ### Branch B — continue closing residual errors
 

@@ -93,7 +93,7 @@ The plugin is shippable when **all** of these hold:
 - `CHANGELOG.md` `[Unreleased]` carries one new bullet naming the plugin; `Rigor::VERSION` is **not** bumped (the project user drives release cuts per `AGENTS.md` § "Release Cadence").
 - One commit, subject following `AGENTS.md` style (`Add rigor-<id> plugin (<facet>)` or `Add rigor-<id> walkthrough (<facet>)`).
 
-Publishing to RubyGems is **out of scope** for this skill — the plugin lives in this repo until a maintainer runs the `git subtree split` + `bundle exec rake release` flow ([`.claude/skills/rigor-release-prep/SKILL.md`](../rigor-release-prep/SKILL.md)).
+Publishing to RubyGems is **out of scope** for this skill. A bundled plugin ships **inside the single `rigortype` gem** (per ADR-31's single-bundled-gem distribution model — there are no per-plugin gemspecs and no `git subtree split`); it reaches users when a maintainer cuts the next `rigortype` release ([`.claude/skills/rigor-release-prep/SKILL.md`](../rigor-release-prep/SKILL.md)). A *third-party* plugin (ADR-31 WD4) instead lives in the author's own repo with its own gemspec depending on `gem "rigortype"`.
 
 ## Example walkthrough
 

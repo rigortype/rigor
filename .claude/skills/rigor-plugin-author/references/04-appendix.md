@@ -18,7 +18,7 @@
 When authoring a Rails-side plugin (`rigor-rails-routes`, `rigor-actionpack`, `rigor-actionmailer`, `rigor-activejob`, the `rigor-activerecord` extensions, …), the plugin's behaviour MUST match what real Rails generates / accepts for the same input. Concretely:
 
 - **Plugin source code never `require`s `rails` / `active_record` / `action_pack`.** It analyses Ruby source files, the same way the other examples do. Rigor stays decoupled from Rails.
-- **Per-plugin `demo/` directories are self-contained.** No shared Rails-app skeleton across plugins — after `git subtree split` each `demo/` travels with its plugin. Some duplication of Rails-shaped tree (e.g. `app/models/application_record.rb`) is accepted in exchange for clean extraction.
+- **Per-plugin `demo/` directories are self-contained.** No shared Rails-app skeleton across plugins — each `demo/` is self-contained so it documents its plugin in isolation (and a third-party plugin copied out to its own repo carries its demo with it). Some duplication of Rails-shaped tree (e.g. `app/models/application_record.rb`) is accepted in exchange for that self-containment.
 - **Integration specs may exec real Rails to verify alignment.** Compare the plugin's parsed output against `rails routes -E` / `db:schema:dump` / similar real-Rails commands run against a small sample app in a tmpdir. The Rails sample app is a TEST-time tool, not a demo-time fixture.
 - **The roadmap lives in [`docs/design/20260508-rails-plugins-roadmap.md`](../../../../docs/design/20260508-rails-plugins-roadmap.md).** Tier 1 plugins are unblocked on the current API. Tier 2 needs the cross-plugin API ([ADR-9](../../../../docs/adr/9-cross-plugin-api.md)) and lands after that ships.
 
@@ -81,7 +81,7 @@ Before declaring "the plugin is done":
 - [ ] Phase 0 placement decided (`plugins/` for production, `examples/` for walkthrough) and confirmed with the user if ambiguous.
 - [ ] Phase 1 questions answered explicitly by the user (not assumed).
 - [ ] Template selected from Phase 2's table; no inventing.
-- [ ] `plugins/rigor-<id>/` (or `examples/rigor-<id>/`) directory tree complete (gemspec, lib, demo).
+- [ ] `plugins/rigor-<id>/` (or `examples/rigor-<id>/`) directory tree complete (lib, demo, README — no gemspec; bundled plugins ship inside `rigortype`. A third-party plugin in its own repo adds a gemspec).
 - [ ] Demo runs cleanly under `rigor check`; diagnostics match the README's "What the plugin recognises" section verbatim.
 - [ ] Integration spec at `spec/integration/plugins/<id>_plugin_spec.rb` (or `spec/integration/examples/<id>_plugin_spec.rb` for a walkthrough) passes; covers every diagnostic shape the plugin emits.
 - [ ] README follows the structure in Phase 7.

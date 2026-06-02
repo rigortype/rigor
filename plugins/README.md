@@ -1,13 +1,17 @@
 # Rigor production plugins
 
 Thirty entries targeting real Ruby gems, frameworks, and DSLs.
-Each keeps a standalone-gem layout (`lib/` + `<id>.gemspec` +
-README + demo + integration spec), but the set now **ships
-bundled inside the `rigortype` gem** (v0.1.11) — you do not add
-them to your project's `Gemfile`; you activate the ones you want
-through `.rigor.yml`'s `plugins:` list. The standalone gemspecs
-remain so any plugin can be subtree-split and published
-independently later.
+Each keeps a self-contained layout (`lib/` + README + demo +
+integration spec), and the set **ships bundled inside the single
+`rigortype` gem** (v0.1.11) — you do not add them to your
+project's `Gemfile`; you activate the ones you want through
+`.rigor.yml`'s `plugins:` list. Bundled plugins are **not**
+separately installable gems: the per-plugin gemspecs were dropped
+(commit `9769f5fa`) and [ADR-31](../docs/adr/31-contribution-and-supply-chain-policy.md)
+settled the distribution model on the single bundled gem (with
+third-party plugins living in their authors' own repos, WD4). The
+self-contained layout is what lets a third-party author lift a
+plugin's shape into their own `rigor-*` gem.
 
 > **Authoring a new plugin?** Read the
 > [walkthroughs](../examples/README.md) under `examples/`

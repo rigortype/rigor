@@ -59,7 +59,7 @@ The v0.1.9 "last preview cut" intent has been met (SKILL trio, ADR-22 slice 5, e
 - Onboarding is self-serve: `rigor skill` + `docs/install.md` let an AI agent install and configure Rigor from a single prompt (v0.1.13 / v0.1.14).
 - The `pre_eval:` mechanism (ADR-17) and the Liskov `def.override-*` family (ADR-35) shipped (v0.1.13 / v0.1.15), closing two of the larger remaining ADR queues.
 
-The remaining v0.2.0 gates are the same three listed below — they have not changed.
+The v0.2.0 gates below have since been **reduced from three to two**: the SKILL trio (gate 3) shipped, and the subtree-split / per-plugin-publish gate was **superseded** by the single-bundled-`rigortype`-gem distribution model ([ADR-31](adr/31-contribution-and-supply-chain-policy.md) + commit `9769f5fa`). The one substantive gate left is plugin-contract stabilisation for *external* third-party `rigor-*` gems (the author's own repo, depending on `gem "rigortype"`).
 
 ### v0.2.0 — first evaluation release
 
@@ -70,9 +70,22 @@ solicits outside feedback. Gating conditions (the v0.1.x
 "out of scope today" list this release absorbs):
 
 - The ADR-2 plugin-contract surface stabilised enough to support
-  external `rigor-*` gems outside this monorepo.
-- The subtree-split / RubyGems publishing flow exercised for at
-  least the `rigor-rails` family.
+  external `rigor-*` gems outside this monorepo (a third-party
+  gem depending on `gem "rigortype"` per [ADR-31](adr/31-contribution-and-supply-chain-policy.md)
+  WD4), with an external-author onboarding path and a test that an
+  out-of-tree plugin loads and runs.
+- ~~The subtree-split / RubyGems publishing flow exercised for at
+  least the `rigor-rails` family.~~ **Superseded.** The
+  distribution model changed to a **single bundled `rigortype`
+  gem** — all bundled plugins ship inside it (per-plugin gemspecs
+  dropped, commit `9769f5fa`), and [ADR-31](adr/31-contribution-and-supply-chain-policy.md)
+  retracted subtree-split as a default path (WD5 keeps subtree
+  *merge* only as a rare reserved option, never the planned flow).
+  So there is no per-plugin publish flow to exercise; the only
+  published artefact is `rigortype` itself (already on the release
+  cadence). What remains of this gate folds into the first bullet:
+  the *external* third-party `rigor-*` path (the author's own repo
+  + gemspec, depending on `gem "rigortype"`).
 - The SKILL trio shipped (v0.1.9) so newcomers have an onboarding
   path.
 
@@ -222,7 +235,7 @@ The full roadmap is in [`docs/design/20260508-rails-plugins-roadmap.md`](design/
 - `rigor-dry-schema` slice 2+ (typed `result.to_h` synthesis via ADR-16 Tier C / per-row diagnostics), `rigor-dry-validation` slice 2+3 (params-block typing via `:dry_schema_table` consumption + `json` parity), `rigor-dry-monads` (needs ADR-3 amendment for `Result[T, E]` / `Maybe[T]` carrier — slicing options in [the slicing plan](design/20260517-dry-validation-slicing.md) § "Open observation").
 - `rigor-actioncable` `#receive(data)` parameter-type provision enhancement (see ADR-28 ecosystem entry above; demand-driven).
 
-Each plugin is staged in `plugins/rigor-<id>/` per the [`rigor-plugin-author`](../skills/rigor-plugin-author/SKILL.md) SKILL discipline and extracted via `git subtree split` once its contract is stable. The `rigor-rails` meta-gem scaffold (v0.1.6) is the publication-ready template for the Tier 1+2 umbrella — gemspec + `add_dependency` declarations all in place; activation in the wild waits on the sub-plugins' subtree-split + RubyGems publish.
+Each plugin is staged in `plugins/rigor-<id>/` per the [`rigor-plugin-author`](../skills/rigor-plugin-author/SKILL.md) SKILL discipline and **ships inside the single bundled `rigortype` gem** — the distribution model settled on in [ADR-31](adr/31-contribution-and-supply-chain-policy.md) (single gem, per-plugin gemspecs dropped in commit `9769f5fa`). The earlier `git subtree split` + per-plugin-publish plan is **retired**; bundled plugins are not separately installable gems, and `git subtree merge` survives only as ADR-31 WD5's rare reserved option for absorbing a proven *third-party* plugin, not as the rigor-rails publication path. The `rigor-rails` meta-gem scaffold (v0.1.6) now serves as the activation-grouping template (its `add_dependency` declarations document the Tier 1+2 umbrella) rather than a separate-publish manifest.
 
 [ADR-9](adr/9-cross-plugin-api.md) (cross-plugin API) landed in v0.1.1 (Track 2 — `Plugin::FactStore` + `prepare(services)` + `manifest(produces:/consumes:)` + topo-sorted loading + `#flow_contribution_for`, slices 1 → 5 + 7); the first publish-and-consume cycles (`:helper_table` rails-routes → actionpack, `:model_index` activerecord → actionpack + factorybot) were exercised end-to-end in v0.1.4. Slicing per ADR-9 § "Implementation slicing" allows partial landings.
 

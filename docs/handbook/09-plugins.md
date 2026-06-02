@@ -166,15 +166,18 @@ for Tier B traits (Devise modules included via Concerns).
 
 ### Floor / ceiling
 
-Per ADR-16 § WD13, the v0.1.x deliverable is the **floor**:
-synthetic methods emit by NAME so cross-file dispatch resolves
-(no more `call.undefined-method`). Return types degrade to
-`Dynamic[T]` (Tier C) or `untyped` (Tier B). Precise
-return-type promotion via the
+Per ADR-16 § WD13, the **floor** is that synthetic methods emit
+by NAME so cross-file dispatch resolves (no more
+`call.undefined-method`). The common cases also recover precise
+return types: **Tier B** redispatches on the origin module's
+authored RBS (a Devise `valid_password?` resolves to `bool`,
+not `Dynamic[T]`), and **Tier C** resolves a plain class-name
+return to its `Nominal`. What still degrades to `Dynamic[T]` is
+the parameterised / utility-type-shaped Tier C return
+(`Array[String]`, `Pick<T, K>`); routing those through the
 [ADR-13](../adr/13-typenode-resolver-plugin.md) resolver chain
-is the **ceiling**, reserved for a later iteration when concrete
-plugin authors need it. The substrate never *fabricates*
-precision per ADR-5 robustness.
+is the **ceiling**, demand-driven. The substrate never
+*fabricates* precision per ADR-5 robustness.
 
 ### Choosing between the substrate and a hand-rolled walker
 

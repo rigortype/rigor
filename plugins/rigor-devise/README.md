@@ -1,9 +1,14 @@
 # rigor-devise
 
-ADR-16 **Tier B** worked target: recognises Devise's model-side
+ADR-16 **Tier B** substrate consumer: recognises Devise's model-side
 `devise :strategy_a, :strategy_b` DSL on `ActiveRecord::Base`
 subclasses and explodes each strategy's RBS instance methods onto
 the calling model class.
+
+> **Using this plugin?** The user guide — recognised strategies,
+> what it contributes, and limitations — lives in the manual at
+> [docs/manual/plugins/rigor-devise.md](../../docs/manual/plugins/rigor-devise.md).
+> This README covers the plugin's internals.
 
 This plugin is the **first worked consumer of `Plugin::Macro::TraitRegistry`**
 (ADR-16 slice 3c). Like `rigor-sinatra` (Tier A) and
@@ -34,9 +39,9 @@ end
 
 No `diagnostics_for_file`, no AST walker, no plugin-side state.
 The substrate's slice-3b scanner walks `<X>.devise(:a, :b)` call
-sites; the existing `SyntheticMethodIndex` (slice 2b primitive)
-stores the per-method explosion; the slice-2b dispatcher tier
-`try_synthetic_method` surfaces them below RBS dispatch.
+sites; the `SyntheticMethodIndex` stores the per-method explosion;
+the dispatcher tier `try_synthetic_method` surfaces them below RBS
+dispatch.
 
 ## What the plugin does
 
@@ -64,26 +69,23 @@ the substrate's pre-pass:
    recorded in the provenance.
 
 Cross-file calls like `user.valid_password?(...)`,
-`user.send_reset_password_instructions`, `user.email` now
-resolve through the substrate tier and return `Dynamic[T]` —
-no more `call.undefined-method`.
+`user.send_reset_password_instructions`, `user.email` now resolve
+through the substrate tier — no more `call.undefined-method`.
 
-## Floor / ceiling per ADR-16 WD13
+## Return-type precision (slice 6a, landed)
 
-The v0.1.x deliverable is the **floor**: synthesised method
-**names** emit and are visible to cross-file dispatch.
-**Return types degrade to `Dynamic[T]`** at the dispatcher's
-slice-2b `try_synthetic_method` tier. The `origin_module:`
-provenance field is recorded so a future slice (slice 6 —
-precision promotion) can dispatch through the module's RBS to
-recover the authored return type without rescanning. That's
-the **ceiling**, NOT a slice-3c commitment.
+Tier B synthesis delivers both method-name resolution AND precise
+return-type recovery. The dispatcher's `try_synthetic_method` tier
+redispatches on `Nominal[origin_module]` via `RbsDispatch.try_dispatch`
+to recover the module's **authored RBS return** — so
+`user.valid_password?("pw")` is `bool`, not `Dynamic[T]`. The
+`origin_module:` provenance recorded at synthesis time is what makes
+this lookup possible without rescanning.
 
 ## Trait set covered
 
 Mirrors the modules Devise registers via `Devise.add_module`
-at `lib/devise/modules.rb` (see the per-library survey § Devise
-for the canonical list):
+at `lib/devise/modules.rb`:
 
 | Symbol | Module |
 | --- | --- |
@@ -102,38 +104,18 @@ for the canonical list):
 Always-included regardless of selection:
 `Devise::Models::Authenticatable`.
 
-## What the plugin does NOT do (yet)
+## Not yet synthesised
 
-- **Return-type precision.** Per WD13 — module methods are
-  `Dynamic[T]` at the floor. Ceiling is the slice-6 promotion
-  via `origin_module` provenance.
-- **`extend ClassMethods` (per-strategy class methods).**
-  Devise's per-module `ClassMethods` pattern (`Recoverable.reset_password_by_token`
-  etc.) needs a separate sub-primitive; slice 3 covers
-  instance methods only.
-- **Controller-side helpers** (`current_user`,
-  `authenticate_user!`, `user_signed_in?`, `user_session`).
-  These are Tier C work parameterised by the `devise_for :resource`
-  route declaration; deferred to a future slice that consumes
-  ADR-9 fact-store entries from a `rigor-rails-routes`-style
-  walker.
-- **User-side `Devise.add_module :my_strategy`.** Third-party
-  Devise extensions registering new strategies in
-  `config/initializers/devise.rb` aren't scanned. Adding that
-  path needs an initializer-scanner not yet in the substrate.
-- **`included do` blocks** (Devise's per-module `attr_reader
-  :password` etc.). Those are ActiveSupport::Concern body
-  facts; slice 4 (Concern re-targeting walker) handles them.
-
-## Configuration
-
-```yaml
-plugins:
-  - rigor-devise
-```
-
-No plugin-specific config keys. The bundled module table is
-fixed at the manifest level.
+- **Per-strategy `ClassMethods`.** Devise's per-module `ClassMethods`
+  pattern (`Recoverable.reset_password_by_token` etc.) needs a
+  separate sub-primitive; the registry covers instance methods only.
+- **Controller-side helpers** (`current_user`, `authenticate_user!`,
+  `user_signed_in?`, `user_session`) — Tier C work parameterised by
+  the `devise_for :resource` route declaration; deferred to a future
+  slice that consumes the route fact.
+- **User-side `Devise.add_module :my_strategy`** in
+  `config/initializers/devise.rb` — needs an initializer-scanner not
+  yet in the substrate.
 
 ## Running the demo
 
@@ -151,10 +133,8 @@ RUBYLIB=$PWD/../lib bundle exec rigor check
 The demo's `consumer.rb` calls `user.valid_password?`,
 `user.update_with_password`, `user.send_reset_password_instructions`,
 `user.remember_me!`, `admin.lock_access!`, `admin.failed_attempts`
-across the file boundary from `demo.rb`. With the plugin enabled
-these calls resolve through the synthetic-method tier; without
-it they would all degrade to undefined-method or `Dynamic[T]`
-via the user-class fallback.
+across the file boundary from `demo.rb`; the calls resolve through
+the synthetic-method tier with their authored return types.
 
 ## Related
 

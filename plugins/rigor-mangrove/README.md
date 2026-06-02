@@ -7,6 +7,12 @@ carrier's generic type-member at the **unwrap call site**, so
 resolve to the carried value type instead of degrading to
 `untyped`.
 
+> **Using this plugin?** The user guide — what it infers and its
+> limitations — lives in the manual at
+> [docs/manual/plugins/rigor-mangrove.md](../../docs/manual/plugins/rigor-mangrove.md).
+> This README covers the mechanism (generic instantiation, ADR-36
+> variant synthesis) in depth.
+
 ## This is NOT a type-source plugin
 
 Mangrove is Sorbet-first: every carrier method carries an inline

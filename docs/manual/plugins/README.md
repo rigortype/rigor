@@ -46,6 +46,14 @@ The full catalogue, with a one-line scope for every plugin, is
 - [rigor-sorbet](rigor-sorbet.md) — read an existing Sorbet
   codebase (`sig` blocks, RBI, `T.*` assertions) as a type
   source (full guide: [handbook ch. 10](../../handbook/10-sorbet.md)).
+- [rigor-devise](rigor-devise.md) — synthesises the methods a
+  `devise :strategy` declaration mixes into a model (no diagnostics).
+- [rigor-statesman](rigor-statesman.md) — validates `transition_to(:state)`
+  against the states declared in a `state_machine` block.
+- [rigor-mangrove](rigor-mangrove.md) — sharpens Mangrove
+  `Result` / `Option` unwrap types and synthesises `Enum` variants.
+- [rigor-pundit](rigor-pundit.md) — policy-class existence and
+  `authorize(record, :action)` predicate validation.
 
 _Per-plugin pages are being migrated here from each plugin's
 in-tree `README.md`. Until a plugin has a page above, its

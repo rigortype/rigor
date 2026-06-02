@@ -84,8 +84,12 @@ never surfaces a false `call.undefined-method`.
   column *reads* (`user.name`, `user.admin?`) and singular
   associations, but not the `name=` setter or the dirty-tracking
   family (`name_changed?`, `name_was`, …).
-- **Regular plurals only.** `Person → people`, `Mouse → mice`,
-  etc. require `self.table_name = "..."`.
+- **Project-custom inflections aren't read yet.** Model↔table
+  pluralization goes through the real ActiveSupport inflector
+  (so `Person → people`, `Mouse → mice` resolve), but rules you
+  declare in `config/initializers/inflections.rb` are not yet
+  ingested — a model relying on one needs `self.table_name`
+  (ADR-39 slice 3).
 
 ## Plugin internals
 

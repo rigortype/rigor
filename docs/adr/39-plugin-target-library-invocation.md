@@ -23,8 +23,11 @@ otherwise approximate. **Deferred (follow-on):** slice
 3 (static ingestion of `config/initializers/inflections.rb` for
 project-custom inflections — the default ActiveSupport ruleset already
 covers the common cases; custom-rule isolation across projects in a
-long-lived LSP process is the open design point), and the exact-version
-provisioning fallback (only if a cross-version behavioural difference is
+long-lived LSP process is the open design point), the `Ruby::Box`
+isolation layer (slice 5 — the **chosen first-priority** isolation for
+target-library invocation; see § "Isolation of target-library
+invocation"), and the exact-version provisioning fallback (only if a
+cross-version behavioural difference is
 observed).
 
 Records the decision to let a Rigor plugin **load and invoke the pure,
@@ -194,6 +197,58 @@ behavioural difference across versions is ever observed. It carries the
 provisioning cost (first-run install, cache, offline-CI / hermetic-Flake
 tension) and is therefore deferred until demanded.
 
+### Isolation of target-library invocation — `Ruby::Box` (first-priority)
+
+Loading a target library into Rigor's process risks contaminating Rigor
+itself — chiefly through **monkey-patches to core classes** (a gem that
+reopens `String` / `Hash` changes the Ruby that Rigor's own code runs
+under) and **gem-version clashes** (Ruby allows one version of a gem per
+process, so the target's version can collide with Rigor's own). The
+**chosen first-priority mitigation is `Ruby::Box`** (Ruby 4.0's namespace
+isolation, enabled by `RUBY_BOX=1`): target-library invocation runs
+inside a `Ruby::Box`, whose boundary isolates class/method/constant
+definitions and core-class monkey-patches per box, and lets multiple
+versions of the same gem coexist.
+
+Validated in the Flake Ruby (4.0.5): `Ruby::Box.new` + `box.require` +
+`box.eval` load and call into a gem, returned data crosses the boundary,
+and a monkey-patch defined inside a box does **not** leak to the main
+space. So a box is a sufficient **contamination boundary** to keep a
+target library from destructively polluting Rigor. (Reference:
+[`Ruby::Box`](https://docs.ruby-lang.org/en/4.0/Ruby/Box.html), the link
+the interpreter's own experimental warning points to.)
+
+**What the box does and does not buy** (its scope is deliberately
+limited, matching this ADR's trust model):
+
+- **Does:** prevents core-class monkey-patch leakage into Rigor, allows
+  the target's version to coexist with Rigor's own (so the
+  maximal-fidelity "use the project's exact version" path becomes
+  feasible without a process-wide version clash), and contains
+  constant/name collisions. This is the destructive-contamination
+  boundary the rule needs.
+- **Does NOT:** `Ruby::Box` is **explicitly not a security sandbox** —
+  the gem's code still executes in the same OS process with full
+  privileges (it cannot make running *untrusted* code safe), it does not
+  cross the same-Ruby-version / native-extension (ABI) boundary, and a C
+  extension crash still takes the process down. These are acceptable
+  here precisely because the rule only ever invokes a **declared,
+  trusted, pure** target library (no untrusted-code or native-load
+  requirement); for stronger isolation a **separate OS process** is the
+  documented secondary option.
+
+**Status / plan.** `Ruby::Box` is experimental (the interpreter prints a
+"behavior may change" warning) and is a process-start flag (`RUBY_BOX=1`,
+not toggleable at runtime), so adopting it touches the launcher (re-exec
+with the flag set, or document the invocation) before the target-library
+invocations can be wrapped in a box. It is therefore the **chosen
+direction, implemented as a follow-on slice** rather than retrofitted
+onto the current pinned-dependency path (which works and needs no box
+for correctness — inflection rules are version-stable). The current
+consumers (`Plugin::Inflector`, the Rack catalogue) keep using Rigor's
+own pinned dependency until the box layer + exact-version loading land
+together.
+
 ### Engine support
 
 The pattern is small enough that no new engine surface is strictly
@@ -232,6 +287,16 @@ and deferred until the second consumer.
 Slices 2–4 are the concrete landing of boilerplate plan § 0e, now
 reframed from "unify the approximations" to "use the real library."
 
+5. **`Ruby::Box` isolation layer** (chosen first-priority isolation; see
+   § "Isolation of target-library invocation"). Re-exec / launch Rigor
+   with `RUBY_BOX=1`, add a `Plugin::Box`-style wrapper that runs a
+   target-library invocation inside a box (isolating monkey-patches +
+   versions from Rigor's main space), and route the existing consumers
+   through it. Unlocks the maximal-fidelity "load the project's exact
+   gem version" path (a box per resolved version, no process-wide
+   clash). Follow-on; the current pinned-dependency path stays until this
+   lands. Tracks the experimental status of `Ruby::Box`.
+
 ## Relationship to other ADRs
 
 - **ADR-2** — clarifies its "Plugins must not execute application code"
@@ -263,7 +328,9 @@ reframed from "unify the approximations" to "use the real library."
 | Keep hand-rolling inflection (boilerplate § 0e as a dedup only) | Rejected | Picks one approximation; the FP-divergence from Rails' real rules — the actual problem — remains. |
 | Keep a built-in approximation as a fallback when the target library is absent | Rejected | An approximation that diverges from the library's real rules emits a wrong fact (a wrong inflected name → a bogus `unknown-helper`), the exact false positive this ADR removes. Absence must degrade to **silence** (raise → isolation boundary), never a guess. The library is a declared dependency, so absence is a misconfiguration, not a routine path. |
 | Execute the project's `inflections.rb` to learn custom rules | Rejected | That is application code; ADR-2 forbids running it. Static Prism parse of its DSL gets the same rules without executing project code. |
-| Provision the project's exact target version per run (isolated install) | Deferred | Maximal fidelity, but brings install/cache/offline-CI/hermetic-Flake cost; default range-dependency + static custom-rule ingestion covers the real fidelity need. Revisit only if a cross-version behavioural difference is observed. |
+| Provision the project's exact target version per run (isolated install) | Deferred | Maximal fidelity, but brings install/cache/offline-CI/hermetic-Flake cost; default range-dependency + static custom-rule ingestion covers the real fidelity need. The chosen vehicle when pursued is the `Ruby::Box` isolation layer (slice 5), which lets the exact version coexist with Rigor's own without a process-wide clash. |
+| Run target-library invocation with no isolation (current pinned-dependency path) | Accepted (interim) | Works and needs no box for correctness (the invoked libraries are trusted + pure; inflection rules are version-stable). Superseded by the `Ruby::Box` layer (slice 5) once that lands, which adds the contamination boundary + exact-version coexistence. |
+| Isolate via `Ruby::Box` (namespace isolation) | **Chosen (slice 5)** | Contains core-class monkey-patch leakage + lets the target's version coexist with Rigor's own — the destructive-contamination boundary the rule needs. Not a security sandbox and does not cross the Ruby-version / native-extension boundary, but the rule only invokes declared, trusted, pure libraries, so that is acceptable; a separate OS process is the secondary option for stronger isolation. Experimental (`RUBY_BOX=1`). |
 | Add `activesupport` to Rigor core's own dependencies | Rejected | Couples the whole toolchain to a heavy gem for one plugin's need; the dependency belongs on the plugin's gemspec so non-users pay nothing. |
 | A general "call any target method" escape (no allow-list) | Rejected | Reintroduces the un-auditable, possibly-impure surface the harness exists to prevent; dynamic `public_send(arbitrary)` is never permitted. |
 

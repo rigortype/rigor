@@ -55,7 +55,7 @@ rigor-lisp-eval/
 ├── lib/
 │   ├── rigor-lisp-eval.rb              ← gem entry; requires + registers
 │   └── rigor/plugin/
-│       ├── lisp_eval.rb                ← the plugin (manifest, hooks, walker)
+│       ├── lisp_eval.rb                ← the plugin (manifest, node_rule, interpreter)
 │       └── lisp_eval/interpreter.rb    ← the static type interpreter
 └── demo/
     ├── .rigor.yml                      ← `plugins: [rigor-lisp-eval]`
@@ -87,7 +87,7 @@ in-repo source.
 | `Rigor::Plugin.register(...)` | bottom of `lib/rigor/plugin/lisp_eval.rb` |
 | `#init(services)` config plumbing | `LispEval#init` reads `@config` defaults |
 | `config_schema` enforcement | manifest declares `module_name` / `method_name` / `severity` |
-| `#diagnostics_for_file(path:, scope:, root:)` | walks Prism AST under `root`, emits per-call diagnostics |
+| `node_rule(Prism::CallNode) { ... }` | the engine owns the AST walk; the rule fires per `Lisp.eval(...)` call and emits the trace diagnostic (ADR-37) |
 | `Rigor::Analysis::Diagnostic` construction | `#diagnostic_for_inferred_type` / `#diagnostic_for_error` |
 | `source_family` auto-stamping | runner stamps `plugin.lisp-eval` automatically — the plugin never sets it |
 

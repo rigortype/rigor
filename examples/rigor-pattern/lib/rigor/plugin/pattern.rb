@@ -67,15 +67,16 @@ module Rigor
         raise "rigor-pattern: invalid regex in config: #{e.message}"
       end
 
-      def diagnostics_for_file(path:, scope:, root:)
-        return [] if @patterns.empty?
+      # ADR-37 — per-call validation over the engine-owned walk. The
+      # `validate_call?` gate matches what the old hand-rolled walker
+      # filtered (the configured `method_name` with ≥2 args), so the
+      # plugin no longer ships its own traversal.
+      node_rule Prism::CallNode do |node, scope, path|
+        next [] if @patterns.empty?
+        next [] unless validate_call?(node)
 
-        diagnostics = []
-        Walker.each_validate_call(root, method_name: @method_name) do |call|
-          diagnostic = analyse_call(path, scope, call)
-          diagnostics << diagnostic if diagnostic
-        end
-        diagnostics
+        found = analyse_call(path, scope, node)
+        found ? [found] : []
       end
 
       # v0.1.2 — return-type contribution. Runtime `validate`
@@ -214,29 +215,6 @@ module Rigor
           severity: severity,
           rule: rule
         )
-      end
-
-      module Walker
-        module_function
-
-        def each_validate_call(root, method_name:, &block)
-          return enum_for(__method__, root, method_name: method_name) unless block
-
-          walk(root) do |node|
-            next unless node.is_a?(Prism::CallNode)
-            next unless node.name == method_name
-            next if node.arguments.nil? || node.arguments.arguments.size < 2
-
-            yield node
-          end
-        end
-
-        def walk(node, &)
-          return if node.nil?
-
-          yield node
-          node.compact_child_nodes.each { |child| walk(child, &) }
-        end
       end
     end
 

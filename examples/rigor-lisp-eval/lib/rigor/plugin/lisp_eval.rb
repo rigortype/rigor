@@ -58,13 +58,16 @@ module Rigor
         @interpreter = Interpreter.new
       end
 
-      def diagnostics_for_file(path:, scope:, root:) # rubocop:disable Lint/UnusedMethodArgument
-        diagnostics = []
-        Walker.each_eval_call(root, module_name: @module_name, method_name: @method_name) do |call_node|
-          diagnostic = analyse_call(path, call_node)
-          diagnostics << diagnostic if diagnostic
-        end
-        diagnostics
+      # ADR-37 — per-call trace over the engine-owned walk. `eval_call?`
+      # (receiver + method-name match) is the gate the old hand-rolled
+      # walker applied, so the plugin no longer ships its own traversal;
+      # the `Walker` retains only the receiver-matching helper that this
+      # gate and `#flow_contribution_for` share.
+      node_rule Prism::CallNode do |node, _scope, path|
+        next [] unless eval_call?(node)
+
+        found = analyse_call(path, node)
+        found ? [found] : []
       end
 
       # v0.1.2 — return-type contribution. The same Interpreter
@@ -211,32 +214,11 @@ module Rigor
       # pair. Public class on the plugin so the integration
       # spec can drive it directly without spinning up an
       # analyser run.
+      # Receiver-matching helper shared by `#eval_call?` and
+      # `#flow_contribution_for` (the AST walk itself is now engine-owned
+      # via `node_rule`, so the traversal that used to live here is gone).
       module Walker
         module_function
-
-        # Yields every `<module_name>.<method_name>(...)` /
-        # `<module_name>::<method_name>(...)` call node found
-        # under `root`. The receiver match is name-based and
-        # tolerates a single optional outer `::` qualifier
-        # (`::Lisp.eval(...)`).
-        def each_eval_call(root, module_name:, method_name:, &block)
-          return enum_for(__method__, root, module_name: module_name, method_name: method_name) unless block
-
-          walk(root) do |node|
-            next unless node.is_a?(Prism::CallNode)
-            next unless node.name == method_name
-            next unless receiver_matches?(node.receiver, module_name)
-
-            yield node
-          end
-        end
-
-        def walk(node, &)
-          return if node.nil?
-
-          yield node
-          node.compact_child_nodes.each { |child| walk(child, &) }
-        end
 
         def receiver_matches?(receiver, module_name)
           case receiver

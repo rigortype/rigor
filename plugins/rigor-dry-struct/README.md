@@ -1,4 +1,4 @@
-# rigor-dry-struct — example Rigor plugin
+# rigor-dry-struct
 
 ADR-16 **Tier C** worked target: recognises dry-struct's class-
 level `attribute :name, T` DSL and synthesises a reader method on

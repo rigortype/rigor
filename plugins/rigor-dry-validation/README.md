@@ -1,4 +1,4 @@
-# rigor-dry-validation — example Rigor plugin
+# rigor-dry-validation
 
 [ADR-12](../../docs/adr/12-dry-rb-packaging.md) Tier A plugin per
 the slicing plan in

@@ -1,4 +1,4 @@
-# rigor-statesman — example Rigor plugin
+# rigor-statesman
 
 Reference example for the **two-pass DSL analysis** pattern.
 Many DSL plugins (state machines, GraphQL types, ActiveModel

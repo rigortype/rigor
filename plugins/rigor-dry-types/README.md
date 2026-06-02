@@ -1,4 +1,4 @@
-# rigor-dry-types — example Rigor plugin
+# rigor-dry-types
 
 [ADR-12](../../docs/adr/12-dry-rb-packaging.md) **Tier A foundation**:
 recognises the canonical dry-types alias-module declaration

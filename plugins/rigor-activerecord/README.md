@@ -1,4 +1,4 @@
-# rigor-activerecord — example Rigor plugin
+# rigor-activerecord
 
 Types ActiveRecord finder + relation calls against the project's
 `db/schema.rb` and discovered AR model classes. The seventh
@@ -171,15 +171,7 @@ digest and the cache would never invalidate.
 | Two-pass cross-file analysis | discoverer walks the project, analyzer walks per file |
 | `did_you_mean`-style UX | `Analyzer#closest_column` (Levenshtein ≤ 3) |
 
-## Future direction (post-extraction)
-
-This plugin will be extracted to its own repository
-(`rigortype/rigor-activerecord`) once the v0.1.0 plugin API
-shape stabilises against this real consumer — see
-[`docs/ROADMAP.md`](../../docs/ROADMAP.md) and the
-relevant CHANGELOG `[Unreleased]` entry. The extraction process
-is recorded in
-[`skills/rigor-plugin-author/SKILL.md`](../../skills/rigor-plugin-author/SKILL.md).
+## Type contributions
 
 The plugin emits `FlowContribution` bundles through
 `#flow_contribution_for`. Class-side: `User.find(1)` →

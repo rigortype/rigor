@@ -1,4 +1,4 @@
-# rigor-sinatra — example Rigor plugin
+# rigor-sinatra
 
 ADR-16 **Tier A** worked target: recognises Sinatra's class-level
 route DSL (`get`, `post`, `put`, `delete`, `head`, `options`,

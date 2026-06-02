@@ -1,4 +1,4 @@
-# rigor-devise — example Rigor plugin
+# rigor-devise
 
 ADR-16 **Tier B** worked target: recognises Devise's model-side
 `devise :strategy_a, :strategy_b` DSL on `ActiveRecord::Base`

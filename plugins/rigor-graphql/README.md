@@ -1,4 +1,4 @@
-# rigor-graphql — example Rigor plugin
+# rigor-graphql
 
 Tier 3D per the
 [Rails plugins roadmap](../../docs/design/20260508-rails-plugins-roadmap.md):

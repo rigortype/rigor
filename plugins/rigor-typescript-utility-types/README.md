@@ -1,4 +1,4 @@
-# rigor-typescript-utility-types — example Rigor plugin
+# rigor-typescript-utility-types
 
 Reference example for **type-language vocabulary extension via
 `Plugin::TypeNodeResolver`**. Maps the TypeScript-canonical

@@ -100,11 +100,36 @@ module Rigor
       # Delegates an allow-listed method to the real
       # `ActiveSupport::Inflector`. Raises {Unavailable} (never
       # approximates) when the gem is absent.
+      #
+      # When `Ruby::Box` isolation is active (ADR-39 slice 5; opt-in via
+      # `RUBY_BOX=1`), the call runs inside the shared box so ActiveSupport
+      # never loads into Rigor's main space; `name` is a fixed allow-listed
+      # method and `arg` is interpolated through `String#inspect` (a safe
+      # Ruby literal), so the `eval` carries no free input. Otherwise the
+      # library loads into the main space (slices 2/4 behaviour).
       def invoke(name, arg)
         raise ArgumentError, "method not allow-listed: #{name}" unless ALLOWED_METHODS.include?(name)
 
+        return invoke_in_box(name, arg) if Box.enabled?
+
         ensure_loaded!
         ActiveSupport::Inflector.public_send(name, arg.to_s)
+      end
+
+      def invoke_in_box(name, arg)
+        unless Box.require_feature("active_support/inflector")
+          raise Unavailable,
+                "ActiveSupport::Inflector could not be loaded into the Ruby::Box isolation space."
+        end
+
+        # The evaluated string is fully constrained: `name` is one of the
+        # fixed {ALLOWED_METHODS} symbols and the argument is rendered via
+        # `String#inspect` (a safe, round-tripping Ruby literal), so the
+        # built expression is e.g. `ActiveSupport::Inflector.pluralize("person")`
+        # — no free input ever reaches the box's `eval` (`Ruby::Box#eval`,
+        # not `Kernel#eval`).
+        expression = format("ActiveSupport::Inflector.%<method>s(%<arg>s)", method: name, arg: arg.to_s.inspect)
+        Box.eval(expression)
       end
 
       # Loads `active_support/inflector` once. Core Rigor carries no

@@ -239,15 +239,37 @@ limited, matching this ADR's trust model):
 
 **Status / plan.** `Ruby::Box` is experimental (the interpreter prints a
 "behavior may change" warning) and is a process-start flag (`RUBY_BOX=1`,
-not toggleable at runtime), so adopting it touches the launcher (re-exec
-with the flag set, or document the invocation) before the target-library
-invocations can be wrapped in a box. It is therefore the **chosen
-direction, implemented as a follow-on slice** rather than retrofitted
-onto the current pinned-dependency path (which works and needs no box
-for correctness — inflection rules are version-stable). The current
-consumers (`Plugin::Inflector`, the Rack catalogue) keep using Rigor's
-own pinned dependency until the box layer + exact-version loading land
-together.
+not toggleable at runtime). Because the flag is process-wide, isolating
+just the target library means **the whole Rigor process runs in box
+mode** — there is no "box only the inflector" without enabling boxes
+process-wide. Adopting it therefore touches the launcher.
+
+The **scaffolding is landed as an opt-in, off by default**:
+`Rigor::Plugin::Box` (the wrapper), the `Plugin::Inflector` box-routing,
+and an `exe/rigor` opt-in that re-execs under `RUBY_BOX=1` only when the
+`RIGOR_BOX` env is set. With the opt-in off, every target-library
+invocation keeps its main-space path and behaviour is unchanged
+(`make verify` green).
+
+**Empirical status of the box path (Ruby 4.0.5):** mixed.
+- The isolation mechanism is validated — a target library loads + answers
+  inside a box and does not leak into the main space; `Plugin::Inflector`
+  routes through the box under `RUBY_BOX=1` (unit-tested).
+- A trivial `rigor check` runs fine under `RUBY_BOX=1`.
+- BUT a **full real-world analysis can segfault**: `rigor check` over
+  Redmine `app` under `RUBY_BOX=1` crashed (`SIGSEGV`), apparently on the
+  error path for that project's own malformed `sig/`
+  (`RBS::DuplicatedDeclarationError`) which the non-box run handles
+  gracefully. This is the experimental feature interacting badly with the
+  C-extension-backed RBS/Prism machinery — the "may change / known
+  issues" the interpreter warns about.
+
+So the box path is **landed but gated as experimental and not yet
+production-usable**: the chosen first-priority direction, blocked on
+upstream `Ruby::Box` stabilisation. The current consumers
+(`Plugin::Inflector`, the Rack catalogue) keep using Rigor's own pinned
+dependency by default; the box + exact-version loading become the
+recommended path once `Ruby::Box` is stable for Rigor's full pipeline.
 
 ### Engine support
 

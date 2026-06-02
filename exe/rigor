@@ -1,6 +1,21 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
+# ADR-39 slice 5 — opt-in Ruby::Box isolation for plugin target-library
+# invocation. `Ruby::Box` (experimental) is a process-start flag
+# (`RUBY_BOX=1`, not toggleable at runtime), so when a project opts in
+# via the `RIGOR_BOX` env var we re-exec the same command with the flag
+# set before anything else loads. The `RUBY_BOX` guard prevents an
+# infinite re-exec, and the inherited environment (RUBYOPT / BUNDLE_*)
+# preserves the Bundler context across the exec. Disabled by default:
+# without `RIGOR_BOX` this is a no-op and every target-library
+# invocation keeps its main-space path.
+if !ENV["RIGOR_BOX"].to_s.empty? && ENV["RUBY_BOX"].to_s.empty?
+  require "rbconfig"
+  ENV["RUBY_BOX"] = "1"
+  exec(RbConfig.ruby, __FILE__, *ARGV)
+end
+
 lib = File.expand_path("../lib", __dir__)
 $LOAD_PATH.unshift(lib) if File.directory?(lib) && !$LOAD_PATH.include?(lib)
 

@@ -21,6 +21,8 @@ The full catalogue, with a one-line scope for every plugin, is
   key, per-locale coverage, and interpolation validation.
 - [rigor-actionpack](rigor-actionpack.md) — controller route
   helpers, filter chains, render targets, strong-params keys.
+- [rigor-activestorage](rigor-activestorage.md) — `has_*_attached`
+  attachment-accessor typing on AR models.
 - [rigor-rspec](rigor-rspec.md) — RSpec `let` / `subject`
   duplicate and self-reference checks.
 - [rigor-sorbet](rigor-sorbet.md) — read an existing Sorbet

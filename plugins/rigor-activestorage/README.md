@@ -8,19 +8,11 @@ macros, records the generated attachment accessor surface,
 and contributes return types when downstream code navigates
 the attachment.
 
-```ruby
-# app/models/user.rb
-class User < ApplicationRecord
-  has_one_attached :avatar
-  has_many_attached :photos
-end
-
-# Elsewhere
-user = User.find(1)
-user.avatar          # => Nominal[ActiveStorage::Attached::One]
-user.avatar.attached? # routes through ActiveStorage's RBS surface
-user.photos          # => Nominal[ActiveStorage::Attached::Many]
-```
+> **Using this plugin?** The user guide — what it infers, its
+> diagnostics, configuration, and how it relates to
+> `rigor-activerecord` — lives in the manual at
+> [docs/manual/plugins/rigor-activestorage.md](../../docs/manual/plugins/rigor-activestorage.md).
+> This README covers the plugin's internals.
 
 ## Architecture
 
@@ -34,43 +26,12 @@ The walker is stand-alone (mirrors `rigor-activerecord`'s
 two plugins agree on what counts as a model because they
 read the same source files.
 
-### Contributed return types
-
-| Macro | Receiver | Method | Contributed type |
-|---|---|---|---|
-| `has_one_attached :avatar` | `Nominal[User]` | `:avatar` | `Nominal[ActiveStorage::Attached::One]` |
-| `has_many_attached :photos` | `Nominal[User]` | `:photos` | `Nominal[ActiveStorage::Attached::Many]` |
-
-Attachment setters (`user.avatar=`) decline — they take
-side-effecting argument types that the RBS surface already
-covers. Calls with arguments (rare for attachment readers)
-also decline.
-
-## Configuration
-
-```yaml
-plugins:
-  - gem: rigor-activerecord    # producer of :model_index
-  - gem: rigor-activestorage
-    config:
-      model_search_paths: ["app/models"]
-```
-
-`model_search_paths` defaults to `["app/models"]`.
-
-## Diagnostic rules
-
-| Rule | Severity | When |
-|---|---|---|
-| `attachment-call` | `:info` | A `Model.attachment_name` call on a known class surfaces; the message confirms the recognised attachment + kind. |
-| `load-error` | `:warning` | Discovery failed (e.g., model directory inaccessible via the `IoBoundary`'s trust policy). |
-
-The plugin intentionally does NOT emit `:error` diagnostics
-in this slice — the `flow_contribution_for` return-type
-narrowing carries the type-checking value, and a coupled
-"unknown attachment name" rule belongs in a follow-up slice
-that pairs with `rigor-activerecord`'s `:model_index`
-consumer pattern.
+The per-call return type is contributed through
+`flow_contribution_for` (the supported escape valve for
+method-name-gated dynamic returns); it declines on
+non-`Nominal` receivers, unknown class names, attachment-name
+calls with arguments (setters), and method names that don't
+match a discovered attachment.
 
 ## Stand-alone vs. with `rigor-activerecord`
 
@@ -87,4 +48,4 @@ to discovered AR classes only.
 ## No Rails runtime
 
 Rigor stays decoupled from Rails. This plugin only reads
-project source the same way the other examples do.
+project source the same way the other plugins do.

@@ -82,11 +82,9 @@ module Rigor
           req_count = def_node.parameters ? def_node.parameters.requireds.size : 0
           return nil if req_count == 2
 
-          location = def_node.location
-          Rigor::Analysis::Diagnostic.new(
+          Rigor::Analysis::Diagnostic.from_location(
+            def_node.location,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "`#{class_name(class_node)}#handle` must accept exactly 2 parameters " \
                      "(request, response), got #{req_count}",
             severity: contract.severity,
@@ -95,11 +93,9 @@ module Rigor
         end
 
         def missing_handle_diagnostic(contract, path, class_node)
-          location = (class_node.constant_path || class_node).location
-          Rigor::Analysis::Diagnostic.new(
+          Rigor::Analysis::Diagnostic.from_location(
+            (class_node.constant_path || class_node).location,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "`#{class_name(class_node)}` must define `#handle(request, response)` — " \
                      "required of every Hanami action under `#{contract.path_glob}`",
             severity: contract.severity,

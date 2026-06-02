@@ -503,11 +503,9 @@ module Rigor
       end
 
       def absurd_diagnostic(path, call_node)
-        location = call_node.location
-        Rigor::Analysis::Diagnostic.new(
+        Rigor::Analysis::Diagnostic.from_node(
+          call_node,
           path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
           message: "`T.absurd` is reachable: the discriminant did not narrow to `T.noreturn`. " \
                    "Either add the missing case branch above the `else`, or remove the " \
                    "`T.absurd(...)` call.",
@@ -558,11 +556,9 @@ module Rigor
       end
 
       def reveal_type_diagnostic(path, call_node, display)
-        location = call_node.location
-        Rigor::Analysis::Diagnostic.new(
+        Rigor::Analysis::Diagnostic.from_node(
+          call_node,
           path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
           message: "`T.reveal_type` inferred type: #{display}",
           severity: :info,
           rule: "reveal-type"
@@ -616,11 +612,9 @@ module Rigor
       end
 
       def assert_type_mismatch_diagnostic(path, call_node, inferred_display, asserted_display)
-        location = call_node.location
-        Rigor::Analysis::Diagnostic.new(
+        Rigor::Analysis::Diagnostic.from_node(
+          call_node,
           path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
           message: "`T.assert_type!` failed: inferred type #{inferred_display} is not " \
                    "compatible with asserted type #{asserted_display}.",
           severity: :error,
@@ -629,11 +623,9 @@ module Rigor
       end
 
       def parse_error_diagnostic(path, error)
-        location = error.node.location
-        Rigor::Analysis::Diagnostic.new(
+        Rigor::Analysis::Diagnostic.from_node(
+          error.node,
           path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
           message: parse_error_message(error.kind),
           severity: :warning,
           rule: "parse-error"

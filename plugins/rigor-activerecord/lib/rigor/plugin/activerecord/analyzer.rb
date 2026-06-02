@@ -231,14 +231,8 @@ module Rigor
         end
 
         def push_diagnostic(node, severity:, rule:, message:)
-          location = node.location
-          @diagnostics << Rigor::Analysis::Diagnostic.new(
-            path: @path,
-            line: location.start_line,
-            column: location.start_column + 1,
-            message: message,
-            severity: severity,
-            rule: rule
+          @diagnostics << Rigor::Analysis::Diagnostic.from_node(
+            node, path: @path, message: message, severity: severity, rule: rule
           )
         end
       end

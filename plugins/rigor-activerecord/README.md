@@ -20,53 +20,18 @@ architecturally complete:
 Runtime-wise, the plugin does NOT require `active_record`. It
 only reads source — Rigor stays decoupled from Rails.
 
-## What the plugin recognises
-
-```text
-demo.rb:20:1: info: `User.find` returns User (table: `users`) [plugin.activerecord.model-call]
-demo.rb:21:1: info: `User.find_by` (:email) on table `users` [plugin.activerecord.model-call]
-demo.rb:23:1: info: `User.where` (:admin) on table `users` [plugin.activerecord.model-call]
-demo.rb:27:1: info: `Post.where` (:user_id, :published) on table `posts` [plugin.activerecord.model-call]
-
-errors_demo.rb:13:1: error: `User.where(emial: ...)` references unknown column `emial` on table `users` (did you mean `:email`?) [plugin.activerecord.unknown-column]
-errors_demo.rb:25:1: error: `User.find` expects at least 1 argument, got 0 [plugin.activerecord.wrong-arity]
-```
-
-| Diagnostic | Severity | Rule |
-| --- | --- | --- |
-| Recognised `Model.find` / `Model.find_by` / `Model.where` call | `:info` | `model-call` |
-| `Model.find_by(unknown: ...)` / `Model.where(unknown: ...)` | `:error` | `unknown-column` |
-| `Model.find` with 0 args | `:error` | `wrong-arity` |
-| `db/schema.rb` not readable | `:warning` | `load-error` |
-
-Did-you-mean suggestions use Levenshtein distance ≤ 3 against
-the resolved table's column names.
-
-## Configuration
-
-```yaml
-plugins:
-  - gem: rigor-activerecord
-    config:
-      schema_file: "db/schema.rb"                                  # default
-      model_search_paths: ["app/models"]                           # default
-      model_base_classes: ["ApplicationRecord", "ActiveRecord::Base"]  # default
-```
-
-All three keys are optional. Tweak them when:
-
-- the schema lives elsewhere (`schema_file: "shared/db/schema.rb"`);
-- models are in a non-standard directory
-  (`model_search_paths: ["domain/models", "engines/billing/app/models"]`);
-- the base class is custom
-  (`model_base_classes: ["DbRecord", "ApplicationRecord"]`).
+> **Using this plugin?** The user guide — what it checks, its
+> configuration keys, what it infers, and its limitations — lives
+> in the manual at
+> [docs/manual/plugins/rigor-activerecord.md](../../docs/manual/plugins/rigor-activerecord.md).
+> This README covers the plugin's internals and the contract
+> surfaces it exercises.
 
 ## Layout
 
 ```
 rigor-activerecord/
 ├── README.md
-├── rigor-activerecord.gemspec
 ├── lib/
 │   ├── rigor-activerecord.rb
 │   └── rigor/plugin/
@@ -136,28 +101,6 @@ pattern documented at the top of
 AFTER `cache_for` would leave the descriptor without a file
 digest and the cache would never invalidate.
 
-## Limitations (intentional for v0.1.0 of the plugin)
-
-- **Direct-superclass match only.** `class Admin < User` where
-  `User < ApplicationRecord` is NOT discovered. Either add `User`
-  to `model_base_classes` config or list every concrete model
-  explicitly.
-- **`db/schema.rb` only.** `db/structure.sql` (PostgreSQL-style
-  raw SQL dumps) is not supported in this iteration. `schema.rb`
-  is the standard for most Rails apps.
-- **No instance-method *setter* / dirty-tracking typing.** The
-  plugin types instance-side column *reads* (`user.name` →
-  `String`, `user.admin?` → `bool`) and singular-association
-  reads, but not the `name=` setter or the dirty-tracking method
-  family (`name_changed?`, `name_was`, …). `rbs_rails` generates
-  ~20 methods per column; Rigor contributes only the accessor
-  return type the call-site analysis actually consumes.
-- **No associations / scopes / strong parameters.** Those belong
-  in a future `rigor-rails` meta-gem that depends on this one
-  plus future siblings (`rigor-actionpack`, etc.).
-- **Inflector handles regular plurals only.** `Person → people`,
-  `Mouse → mice` etc. require `self.table_name = "..."`.
-
 ## Plugin authoring surface this exercises
 
 | Surface | Where in this plugin |
@@ -171,31 +114,9 @@ digest and the cache would never invalidate.
 | Two-pass cross-file analysis | discoverer walks the project, analyzer walks per file |
 | `did_you_mean`-style UX | `Analyzer#closest_column` (Levenshtein ≤ 3) |
 
-## Type contributions
-
-The plugin emits `FlowContribution` bundles through
-`#flow_contribution_for`. Class-side: `User.find(1)` →
-`Nominal[User]`, `User.find_by(...)` → `Nominal[User] | nil`,
-`User.find_by!(...)` → non-nullable `Nominal[User]`.
-Instance-side: a column read (`user.name`) narrows to the
-column's value type, `user.admin?` to `bool`, a singular
-association (`post.user`) to the target model.
-
-Relation-returning call sites — `User.where(...)`, `User.all`,
-`User.order(...)`, a `has_many` / `has_and_belongs_to_many`
-accessor (`user.posts`), and user-declared `scope`s
-(`Post.published`) — narrow to `ActiveRecord::Relation[Model]`,
-described by the RBS the plugin bundles under `sig/` and
-contributes through `signature_paths:` (ADR-25). Chained query
-methods keep the element type and iteration
-(`user.posts.each { |p| ... }`) yields the model. Per ADR-26
-the plugin's manifest declares `ActiveRecord::Relation` an
-`open_receivers` class, so a user-defined scope invoked on a
-typed relation (`User.where(...).published`) — a method no
-static RBS can enumerate — never surfaces as a false
-`call.undefined-method`; `flow_contribution_for` additionally
-re-contributes the relation type for discovered-scope calls so
-chain precision survives through scopes.
+The end-user view of what these surfaces produce — diagnostics,
+config, inferred types — is in the
+[user guide](../../docs/manual/plugins/rigor-activerecord.md).
 
 ## License
 

@@ -1,0 +1,22 @@
+# Plugin reference
+
+User-facing documentation for each bundled Rigor plugin — what
+it checks, its configuration keys, what it infers, and its
+limitations. For *activating* plugins in general, see
+[Using plugins](../07-plugins.md); to *write* one, see the
+[examples/](../../../examples/README.md) walkthroughs and the
+[`rigor-plugin-author` skill](../08-skills.md).
+
+All plugins ship bundled in `rigortype` — no separate install.
+The full catalogue, with a one-line scope for every plugin, is
+[plugins/README.md](../../../plugins/README.md).
+
+## Available pages
+
+- [rigor-activerecord](rigor-activerecord.md) — ActiveRecord
+  finder / relation typing and schema-checked columns.
+
+_Per-plugin pages are being migrated here from each plugin's
+in-tree `README.md`. Until a plugin has a page above, its
+user-facing docs live in its
+[`plugins/<name>/README.md`](../../../plugins/README.md)._

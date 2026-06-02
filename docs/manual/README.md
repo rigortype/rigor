@@ -42,7 +42,8 @@ flag, key, or command that *acts* on it.
 6. [Baselines](06-baseline.md) — `.rigor-baseline.yml`, the
    `rigor baseline` subcommands, and `rigor triage`.
 7. [Using plugins](07-plugins.md) — activating framework and
-   gem plugins through the `plugins:` config key.
+   gem plugins through the `plugins:` config key. Per-plugin
+   user docs live under [Plugin reference](plugins/README.md).
 8. [Provided skills](08-skills.md) — the bundled Agent Skills
    for onboarding and baseline reduction.
 

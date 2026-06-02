@@ -33,6 +33,21 @@ This page is descriptive, not normative. When the language here
 disagrees with the [type
 specification](../type-specification/README.md), the spec binds.
 
+> **In this appendix**
+> [Five-second pitch](#five-second-pitch) ·
+> [What LSP actually says](#what-lsp-actually-says) ·
+> [LSP is about behaviour](#lsp-is-about-behaviour-not-static-types) ·
+> [Signature rule = robustness principle](#the-signature-rule-is-rigors-robustness-principle) ·
+> [Variance and the signature rule](#variance-and-the-signature-rule) ·
+> [Preconditions (contravariant params)](#preconditions-contravariant-parameters-and-duck-typing) ·
+> [Postconditions (covariant returns)](#postconditions-covariant-returns-and-self-types) ·
+> [Invariants and the history constraint](#invariants-and-the-history-constraint) ·
+> [Behavioral vs nominal subtyping](#behavioral-vs-nominal-subtyping-in-ruby) ·
+> [Where Ruby lets you violate LSP](#where-ruby-lets-you-violate-lsp--and-what-rigor-does) ·
+> [Cross-hierarchy override compatibility](#cross-hierarchy-override-compatibility) ·
+> [What Rigor does NOT check](#what-rigor-does-not-check-lsp-wise) ·
+> [Reading list](#a-short-reading-list)
+
 ## Five-second pitch
 
 | LSP obligation | Ruby idiom that already honours it | Rigor surface |

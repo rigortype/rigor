@@ -30,6 +30,7 @@ ID; `rigor explain` with no argument lists them all.
 | `call.wrong-arity` | The positional-argument count matches no signature. |
 | `call.argument-type-mismatch` | An argument's type provably violates the parameter contract. |
 | `call.possible-nil-receiver` | The receiver is `T \| nil` and the method is not defined on `NilClass`. |
+| `call.unresolved-toplevel` | A top-level implicit-self call resolves against no same-file `def`, `pre_eval:` patch, or `Kernel` / `Object` method. |
 | `flow.always-raises` | The expression provably raises on every reachable path. |
 | `flow.unreachable-branch` | An `if` / `unless` / ternary branch is statically dead. |
 | `flow.always-truthy-condition` | A condition is provably always truthy or always falsey. |
@@ -37,6 +38,9 @@ ID; `rigor explain` with no argument lists them all.
 | `def.return-type-mismatch` | The method body's result violates its declared RBS return type. |
 | `def.ivar-write-mismatch` | An instance variable is written with a type disagreeing with its first write. |
 | `def.method-visibility-mismatch` | An explicit-receiver call reaches a private method. |
+| `def.override-visibility-reduced` | An override reduces the visibility it inherits from a project-defined ancestor. |
+| `def.override-return-widened` | An override's declared return type widens the inherited return (covariance). |
+| `def.override-param-narrowed` | An override narrows an inherited parameter type (contravariance). |
 | `assert.type-mismatch` | An `assert_type` expectation does not match the inferred type. |
 | `dump.type` | A `dump_type` call — informational, prints the inferred type. |
 

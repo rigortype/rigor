@@ -112,6 +112,10 @@ hand-roll a `Diagnostic.new` constructor or set `source_family`.
 
 The rule body — recognising the DSL's call shapes — is the part that varies most by template. Don't invent a walker (the engine owns it now); keep non-trivial logic in a `lib/rigor/plugin/<id>/analyzer.rb` that takes the call node and returns location-free `Violation`s the rule positions with `diagnostic` (the `Analyzer.violations_for` split every bundled plugin uses — it also makes the logic unit-testable).
 
+## Don't reimplement the target library (ADR-39)
+
+When the DSL's analysis needs a *fact* the target library computes — an inflection (`users` → `User`), a status-code table, a name convention — **call the real library, don't reimplement it** ([ADR-39](../../../../docs/adr/39-plugin-target-library-invocation.md)). A hand-rolled approximation that diverges from the library's real behaviour produces a wrong derived fact = a false positive (this is why `rigor-rails-routes` / `rigor-activerecord` / `rigor-actionpack` / `rigor-actionmailer` / `rigor-factorybot` dropped their hand-rolled inflectors onto the shared `Rigor::Plugin::Inflector`, which calls the real `ActiveSupport::Inflector`). Declare the target gem on the plugin's gemspec; call only a **fixed allow-list of pure methods**; and **decline (emit nothing) when the library is unavailable — never approximate**. The isolation of the call (in-process / forked worker / `Ruby::Box`) is the user-selectable `plugins_isolation:` strategy (`process` by default) handled by `Plugin::Isolation` — you just call the method. For "did you mean …?" use `Rigor::Plugin::Base.suggest(name, candidates)` (DidYouMean-backed), not a hand-rolled Levenshtein.
+
 ## Template-specific reference points
 
 These bundled plugins are all migrated onto `node_rule` — read one as a worked example of the shape you need:

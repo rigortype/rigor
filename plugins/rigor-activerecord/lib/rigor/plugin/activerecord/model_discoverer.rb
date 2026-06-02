@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "rigor/source/literals"
 
 module Rigor
   module Plugin
@@ -312,10 +313,9 @@ module Rigor
           args = node.arguments&.arguments
           return nil if args.nil? || args.empty?
 
-          name_node = args.first
-          return nil unless name_node.is_a?(Prism::SymbolNode)
+          name = Rigor::Source::Literals.symbol_name(args.first)
+          return nil if name.nil?
 
-          name = name_node.unescaped
           polymorphic = POLYMORPHIC_BY_DEFAULT.include?(node.name) ||
                         association_option(args, "polymorphic") == true
 

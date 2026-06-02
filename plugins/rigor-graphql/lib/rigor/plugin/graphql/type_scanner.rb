@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "rigor/source/literals"
 
 module Rigor
   module Plugin
@@ -255,13 +256,14 @@ module Rigor
 
           name_node = args[0]
           type_node = args[1]
-          return nil unless name_node.is_a?(Prism::SymbolNode)
+          name = Rigor::Source::Literals.symbol_name(name_node)
+          return nil if name.nil?
 
           type_info = resolve_field_type(type_node)
           return nil if type_info.nil?
 
           {
-            name: name_node.unescaped,
+            name: name,
             type: type_info[:type],
             list: type_info[:list],
             required: extract_required_flag(args)
@@ -304,13 +306,14 @@ module Rigor
 
           name_node = args[0]
           type_node = args[1]
-          return nil unless name_node.is_a?(Prism::SymbolNode)
+          name = Rigor::Source::Literals.symbol_name(name_node)
+          return nil if name.nil?
 
           type_info = resolve_field_type(type_node)
           return nil if type_info.nil?
 
           {
-            name: name_node.unescaped,
+            name: name,
             type: type_info[:type],
             list: type_info[:list],
             nullable: extract_nullability(args)

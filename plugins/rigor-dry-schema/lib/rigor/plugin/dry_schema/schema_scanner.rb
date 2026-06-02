@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "rigor/source/literals"
 
 module Rigor
   module Plugin
@@ -187,10 +188,10 @@ module Rigor
           current = node
           while current.is_a?(Prism::CallNode)
             if %i[required optional].include?(current.name)
-              key_node = current.arguments&.arguments&.first
-              return [nil, nil] unless key_node.is_a?(Prism::SymbolNode)
+              key = Rigor::Source::Literals.symbol(current.arguments&.arguments&.first)
+              return [nil, nil] if key.nil?
 
-              return [key_node.unescaped.to_sym, current.name]
+              return [key, current.name]
             end
             current = current.receiver
           end

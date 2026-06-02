@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "rigor/source/literals"
 
 require_relative "mailer_index"
 
@@ -264,7 +265,7 @@ module Rigor
             next unless node.is_a?(Prism::CallNode) && node.receiver.nil?
 
             args = (node.arguments&.arguments || []).filter_map do |arg|
-              arg.is_a?(Prism::SymbolNode) ? arg.unescaped.to_sym : nil
+              Rigor::Source::Literals.symbol(arg)
             end
             next if args.empty?
 

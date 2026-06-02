@@ -11,6 +11,20 @@ cross-plugin fact. Ships an RBS overlay typing
 `Contract#call` / `Result#success?` / `Result#failure?` /
 `Result#to_h` / `Result#errors` / `Result#[]`.
 
+> **Using this plugin?** The user guide lives in the manual at
+> [docs/manual/plugins/rigor-dry-validation.md](../../docs/manual/plugins/rigor-dry-validation.md).
+> This README covers the plugin's internals.
+>
+> **RBS-overlay wiring is stale.** The `signature_paths:` snippets
+> below point at a `vendor/bundle/.../rigor-dry-validation-0.1.0/sig`
+> path, which assumes a separately-installed gem — but plugins now
+> ship bundled in `rigortype` (no per-plugin gem). The clean fix is
+> for this plugin to declare `signature_paths: ["sig"]` in its
+> manifest so the overlay auto-loads (as `rigor-activerecord` does,
+> per [ADR-25](../../docs/adr/25-plugin-contributed-rbs.md)); it has
+> not adopted that yet. Contract recognition + the
+> `:dry_validation_contracts` fact work regardless of the overlay.
+
 ## What the plugin does
 
 For source like

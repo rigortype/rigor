@@ -4,6 +4,13 @@ ADR-16 **Tier C** worked target: recognises dry-struct's class-
 level `attribute :name, T` DSL and synthesises a reader method on
 the enclosing `Dry::Struct` subclass.
 
+> **Using this plugin?** The user guide — what it makes resolve,
+> the rigor-dry-types precision pairing, and the (no-diagnostics /
+> no-config) usage note — lives in the manual at
+> [docs/manual/plugins/rigor-dry-struct.md](../../docs/manual/plugins/rigor-dry-struct.md).
+> This README covers the plugin's internals (the declarative
+> manifest + the synthetic-method substrate it rides on).
+
 This plugin is the **first worked consumer of `Plugin::Macro::HeredocTemplate`**
 (ADR-16 slice 2c) — the textbook Tier C target per the
 [per-library survey](../../docs/notes/20260515-macro-expansion-library-survey.md).
@@ -94,9 +101,6 @@ pre-ADR-18 floor). The fallback is silent — no diagnostic.
 
 ## What the plugin does NOT do (yet)
 
-- **Reader return-type precision.** Per WD13 — `address.city`
-  is `Dynamic[T]` at the floor. Ceiling is `String` when the
-  type argument resolves through ADR-13.
 - **`schema` / `to_h` / `[:key]` / `.new(name:)` keyword arg.**
   The per-library survey lists five emit rows for dry-struct;
   slice 2c stops at the reader. The other four rows need either
@@ -106,11 +110,6 @@ pre-ADR-18 floor). The fallback is silent — no diagnostic.
   mints `Address::Details` as a sibling `Dry::Struct` subclass.
   Needs Tier A + Tier C composition + const_set emission;
   deferred.
-- **dry-types `Types::String` etc.** A separate `rigor-dry-types`
-  plugin (not yet authored) covers the constant-emit side of the
-  `include Dry.Types()` DSL. Its absence is why the demo's
-  `Types::String` is currently typed as `untyped` in the demo
-  RBS stub.
 
 ## Configuration
 

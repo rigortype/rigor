@@ -18,6 +18,13 @@ and publishes the per-schema typed-key table as the
 cross-plugin fact. Downstream `rigor-dry-validation` will consume
 the fact for typed-payload synthesis on `Contract#call` results.
 
+> **Using this plugin?** The user guide — what it recognises and
+> the (no-diagnostics / no-config) usage note — lives in the manual
+> at
+> [docs/manual/plugins/rigor-dry-schema.md](../../docs/manual/plugins/rigor-dry-schema.md).
+> This README covers the plugin's internals (the scan, the
+> published `:dry_schema_table`, and the slice floor/ceiling).
+
 ## What the plugin does
 
 For source like

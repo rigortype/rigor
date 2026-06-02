@@ -33,6 +33,12 @@ The full catalogue, with a one-line scope for every plugin, is
   Tier 1+2 Rails plugins (not a checker itself).
 - [rigor-dry-types](rigor-dry-types.md) — `Types::*` alias
   resolution; the dry-rb foundation (no diagnostics of its own).
+- [rigor-dry-struct](rigor-dry-struct.md) — synthesises
+  `Dry::Struct` `attribute` readers (precise with dry-types).
+- [rigor-dry-schema](rigor-dry-schema.md) — recognises dry-schema
+  declarations; publishes the typed-key table (fact-only).
+- [rigor-dry-validation](rigor-dry-validation.md) — recognises
+  `Dry::Validation::Contract` subclasses; result-API RBS overlay.
 - [rigor-rspec](rigor-rspec.md) — RSpec `let` / `subject`
   duplicate and self-reference checks.
 - [rigor-sorbet](rigor-sorbet.md) — read an existing Sorbet

@@ -407,83 +407,24 @@ module Rigor
             end
           end
 
-          # Tiny English inflector. Sufficient for the standard
-          # `posts` ↔ `post`, `users` ↔ `user` rename Rails
-          # generates by default; users with custom
-          # inflections need to author RBS by hand for the
-          # affected helpers (out of scope for v0.1.0).
-          #
-          # The canonical English uncountable noun set from
-          # ActiveSupport::Inflector::Inflections (Rails 8.x).
-          # `singularize("news")` returns `"news"` rather than
-          # `"new"`. Pre-fix the parser stripped the trailing
-          # 's' from `news`, so `resources :news` registered
-          # `new_path` / `news_path` / `new_news_path` (broken
-          # — Rails actually generates `news_path` for both
-          # index and show, with the show form taking `:id`).
-          # Redmine hit this 81× across `news_path(id)` calls.
-          UNCOUNTABLE = %w[
-            equipment information rice money species series fish
-            sheep jeans police news settings
-          ].to_set.freeze
-          private_constant :UNCOUNTABLE
-
-          # Latin / Greek irregular plurals Rails ships in its
-          # default inflector. `media` → `medium` is the
-          # dominant Rails-app case (Mastodon's `resources
-          # :media, only: [:show]` generates `medium_path(id)`,
-          # not `media_path`). Pre-fix `media` was in
-          # UNCOUNTABLE which produced `media_path` for both
-          # index and show — incorrect.
-          IRREGULAR_SINGULARS = {
-            "media" => "medium",
-            "data" => "datum",
-            "criteria" => "criterion",
-            "phenomena" => "phenomenon"
-          }.freeze
-          private_constant :IRREGULAR_SINGULARS
-
+          # ADR-39: inflection delegates to the shared
+          # `Rigor::Plugin::Inflector`, which calls the real
+          # `ActiveSupport::Inflector` (the authority Rails itself uses to
+          # generate helper names) when available, falling back to a
+          # built-in approximation otherwise. This replaces the hand-tuned
+          # AS-replica these methods used to carry — every special case
+          # they accreted (`news` uncountable, `media`→`medium`,
+          # `databases`→`database`, `custom_css` ss-preservation,
+          # `async_refresh`→`async_refreshes`) was reverse-engineered
+          # `ActiveSupport::Inflector` behaviour, so the real inflector
+          # produces the same result for those and the correct one for the
+          # words the replica never covered.
           def singularize(word)
-            return IRREGULAR_SINGULARS[word] if IRREGULAR_SINGULARS.key?(word)
-            return word if UNCOUNTABLE.include?(word)
-            return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
-            # Rails ships specific `*es$` → `*` rules for
-            # `(alias|status)es` and `(bus)es` (these have
-            # singular endings that the generic-chomp rules
-            # would mis-singularise to `aliase` / `statuse` /
-            # `buse`).
-            return word.chomp("es") if /(?:alias|status|bus)es\z/.match?(word)
-            # Rails only chomps `es` after `x|ch|ss|sh|z` for
-            # the generic case (`inflect.singular(/(x|ch|ss|sh)
-            # es$/i, '\1')`). A generic `ses` suffix removed
-            # `es` and broke `databases` → `databas` (correct:
-            # `database`). Restrict to the explicit suffix set.
-            return word.chomp("es") if word.end_with?("ches", "shes", "sses", "xes", "zes")
-            # Words ending in `ss` are their own singular —
-            # Rails' default inflector ships
-            # `inflect.singular(/(ss)$/i, '\1')` that preserves
-            # the double-s. Mastodon's `resources :custom_css`
-            # was singularising to `custom_cs` and producing a
-            # bogus `custom_cs_path(id)`.
-            return word if word.end_with?("ss")
-            return word.chomp("s") if word.end_with?("s")
-
-            word
+            Rigor::Plugin::Inflector.singularize(word)
           end
 
           def pluralize(word)
-            return IRREGULAR_SINGULARS.key(word) if IRREGULAR_SINGULARS.value?(word)
-            return word if UNCOUNTABLE.include?(word)
-            return word if word.end_with?("s") && !word.end_with?("ss")
-            return "#{word.chomp('y')}ies" if word.end_with?("y") && word.length > 1
-            # Words ending in s/sh/ch/x/z take "es" in plural,
-            # matching Rails' default inflector. Without this
-            # `async_refresh` (singular) pluralised to
-            # `async_refreshs`, mismatching the actual
-            # `/async_refreshes` URL.
-            return "#{word}es" if word.end_with?("ss", "sh", "ch", "x", "z")
-
-            "#{word}s"
+            Rigor::Plugin::Inflector.pluralize(word)
           end
         end
 
@@ -1495,42 +1436,12 @@ module Rigor
           path.scan(/\([^)]*\)/).sum { |group| group.scan(/[:*][a-z_][a-z0-9_]*/).size }
         end
 
-        # Shared with `Context::Inflector#singularize` — kept in
-        # sync until one of the two call sites can adopt the
-        # other.
-        UNCOUNTABLE = %w[
-          equipment information rice money species series fish
-          sheep jeans police news settings
-        ].to_set.freeze
-
-        # Same `IRREGULAR_SINGULARS` map as `Context#singularize`.
-        IRREGULAR_SINGULARS = {
-          "media" => "medium",
-          "data" => "datum",
-          "criteria" => "criterion",
-          "phenomena" => "phenomenon"
-        }.freeze
-
+        # ADR-39 — delegates to the shared inflector (real
+        # `ActiveSupport::Inflector` when available). Previously a
+        # hand-tuned AS-replica kept in sync with `Context#singularize`;
+        # both now share the one authoritative implementation.
         def singularize_word(word)
-          return IRREGULAR_SINGULARS[word] if IRREGULAR_SINGULARS.key?(word)
-          return word if UNCOUNTABLE.include?(word)
-          return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
-          # Rails-shipped `(alias|status|bus)es$` → `$1`
-          # specifics — without these the generic chomp rules
-          # mis-singularise `statuses` → `statuse` and
-          # `aliases` → `aliase`.
-          return word.chomp("es") if /(?:alias|status|bus)es\z/.match?(word)
-          # Match the Rails default-inflector rule:
-          # `(x|ch|ss|sh)es$` → strip "es". A generic `ses`
-          # suffix would over-strip (`databases` → `databas`).
-          return word.chomp("es") if word.end_with?("ches", "shes", "sses", "xes", "zes")
-          # Preserve trailing `ss` — Rails ships
-          # `inflect.singular(/(ss)$/i, '\1')` so `custom_css`
-          # singularises as `custom_css`, not `custom_cs`.
-          return word if word.end_with?("ss")
-          return word.chomp("s") if word.end_with?("s")
-
-          word
+          Rigor::Plugin::Inflector.singularize(word)
         end
       end
     end

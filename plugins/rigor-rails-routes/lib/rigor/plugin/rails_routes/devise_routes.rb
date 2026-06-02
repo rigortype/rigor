@@ -198,24 +198,11 @@ module Rigor
           OMNIAUTH_SUFFIXES
         end
 
-        # The same tiny singularizer used by `RoutesParser`.
-        # We duplicate the catalogue here so this module does
-        # not need to reach into `Context`'s private state.
-        UNCOUNTABLE = %w[
-          equipment information rice money species series fish
-          sheep jeans police news media settings
-        ].to_set.freeze
-        private_constant :UNCOUNTABLE
-
+        # ADR-39 — delegates to the shared inflector (real
+        # `ActiveSupport::Inflector` when available), replacing the tiny
+        # AS-replica this module used to duplicate from `RoutesParser`.
         def singularize(word)
-          return word if UNCOUNTABLE.include?(word)
-          return "#{word.chomp('ies')}y" if word.end_with?("ies") && word.length > 3
-          return word.chomp("es") if word.end_with?("ses") || word.end_with?("xes")
-          # `ss` preserved — Rails default inflector behaviour.
-          return word if word.end_with?("ss")
-          return word.chomp("s") if word.end_with?("s")
-
-          word
+          Rigor::Plugin::Inflector.singularize(word)
         end
 
         # Approximate path generation. We don't honour the

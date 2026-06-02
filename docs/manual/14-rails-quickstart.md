@@ -14,6 +14,13 @@ There are two ways through this setup:
 
 Both produce the same result. **If you are unsure, follow Path A.**
 
+> **In this guide**
+> [Before you start](#before-you-start) ·
+> [Step 1 · install Ruby 4.0 + Rigor](#step-1--install-ruby-40-and-rigor-common-to-both-paths) ·
+> [Path A — project-init skill](#path-a--the-rigor-project-init-skill-recommended) ·
+> Path B — [adoption mode](#step-2--choose-an-adoption-mode) · [write config](#step-3--write-rigordistyml) · [first run](#step-4--first-run) · [read output](#step-5--understand-the-output) · [baseline](#step-6--generate-a-baseline-acknowledge-mode) · [commit](#step-7--commit) ·
+> [What's next](#whats-next)
+
 ---
 
 ## Before you start
@@ -357,7 +364,7 @@ plugins:
 
 severity_profile: lenient   # "strict" for strict mode; omit for "balanced"
 
-# baseline: .rigor-baseline.yml   # uncomment after Step 5 (acknowledge mode only)
+# baseline: .rigor-baseline.yml   # uncomment after Step 6 (acknowledge mode only)
 ```
 
 Adjust `target_ruby:` to match your project's Ruby version (the

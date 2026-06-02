@@ -12,6 +12,18 @@ project. If you have never used Sorbet, you can skip it; the
 core handbook material in chapters 1–9 covers Rigor's native
 RBS-based path.
 
+> **In this chapter**
+> [What gets translated](#what-gets-translated) ·
+> [Sorbet type vocabulary](#the-sorbet-type-vocabulary) ·
+> [Inline assertions (`T.let` / `T.must` / …)](#inline-type-assertions) ·
+> [RBI files](#rbi-files) ·
+> [`# typed:` sigils](#sorbet--typed-sigils) ·
+> [Tapioca DSL mixins](#tapioca-dsl--the-mixin-pattern) ·
+> [`T.absurd` exhaustiveness](#tabsurd-exhaustiveness) ·
+> [Tier ordering on conflict](#tier-ordering--what-wins-on-conflict) ·
+> [Migration patterns](#migration-patterns) ·
+> [What it doesn't replace](#what-the-plugin-doesnt-replace)
+
 ## What gets translated
 
 Given a method preceded by a `sig` block:
@@ -118,7 +130,7 @@ check. The call returns the asserted type so chained calls
 resolve through it; if the inferred type is provably
 incompatible (`Inference::Acceptance.accepts(...)` returns
 `:no`), the plugin emits `plugin.sorbet.assert-type-mismatch`
-as `:error`. Gradual consistency rules apply — `Dynamic[top]`
+as `:error`. Gradual consistency rules apply — `Dynamic[Top]`
 inferred types and `:maybe`-compatible shapes are silenced
 because the runtime check covers them.
 
@@ -167,7 +179,7 @@ Project sigs (`.rb` files under `paths:`) and RBI sigs
 catalog, so a method declared in either source resolves the
 same way at the call site.
 
-## `# typed:` sigils
+## Sorbet `# typed:` sigils
 
 The plugin reads Sorbet's `# typed:` magic comment from the
 top of each file. Behaviour depends on the `enforce_sigil`

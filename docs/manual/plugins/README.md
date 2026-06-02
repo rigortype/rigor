@@ -54,6 +54,14 @@ The full catalogue, with a one-line scope for every plugin, is
   `Result` / `Option` unwrap types and synthesises `Enum` variants.
 - [rigor-pundit](rigor-pundit.md) — policy-class existence and
   `authorize(record, :action)` predicate validation.
+- [rigor-sidekiq](rigor-sidekiq.md) — Sidekiq `Worker.perform_*`
+  argument arity against the discovered `#perform`.
+- [rigor-actioncable](rigor-actioncable.md) — `broadcast_to` channel
+  existence and `ActionCable.server.broadcast` stream-name validation.
+- [rigor-minitest](rigor-minitest.md) — local-variable narrowing
+  through Minitest / Test::Unit assertions and spec matchers.
+- [rigor-graphql](rigor-graphql.md) — GraphQL-Ruby type / enum / input
+  / mutation table publication (cross-plugin facts, no diagnostics).
 
 _Per-plugin pages are being migrated here from each plugin's
 in-tree `README.md`. Until a plugin has a page above, its

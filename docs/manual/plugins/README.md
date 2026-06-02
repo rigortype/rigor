@@ -19,6 +19,8 @@ The full catalogue, with a one-line scope for every plugin, is
   helper validation against a parsed `config/routes.rb`.
 - [rigor-rails-i18n](rigor-rails-i18n.md) — `t(...)` / `I18n.t(...)`
   key, per-locale coverage, and interpolation validation.
+- [rigor-actionpack](rigor-actionpack.md) — controller route
+  helpers, filter chains, render targets, strong-params keys.
 - [rigor-rspec](rigor-rspec.md) — RSpec `let` / `subject`
   duplicate and self-reference checks.
 - [rigor-sorbet](rigor-sorbet.md) — read an existing Sorbet

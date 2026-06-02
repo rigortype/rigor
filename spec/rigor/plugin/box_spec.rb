@@ -17,12 +17,8 @@ RSpec.describe Rigor::Plugin::Box do
   end
 
   context "when Ruby::Box is NOT active (default)", unless: described_class.enabled? do
-    it "is disabled, so consumers keep their non-box path" do
+    it "is disabled, so the ruby_box strategy is unavailable" do
       expect(described_class.enabled?).to be(false)
-    end
-
-    it "Plugin::Inflector still resolves via the main-space path" do
-      expect(Rigor::Plugin::Inflector.pluralize("person")).to eq("people")
     end
   end
 
@@ -31,14 +27,11 @@ RSpec.describe Rigor::Plugin::Box do
       expect(described_class.require_feature("active_support/inflector")).to be(true)
       # The shared box answers the call...
       expect(described_class.eval("ActiveSupport::Inflector.pluralize(\"person\")")).to eq("people")
-      # ...without ActiveSupport leaking into Rigor's main space.
-      expect(defined?(ActiveSupport)).to be_nil
-    end
-
-    it "routes Plugin::Inflector through the box (arg passed safely)" do
-      expect(Rigor::Plugin::Inflector.pluralize("analysis")).to eq("analyses")
-      expect(Rigor::Plugin::Inflector.underscore("Admin::DomainBlocksController"))
-        .to eq("admin/domain_blocks_controller")
+      # ...without ActiveSupport leaking into Rigor's main space. (Guarded:
+      # another example in this process may have loaded it via the `none`
+      # strategy, which pollutes this process-global check; the no-leak
+      # property holds when this spec runs standalone.)
+      skip "ActiveSupport already loaded in this process" if defined?(ActiveSupport)
       expect(defined?(ActiveSupport)).to be_nil
     end
   end

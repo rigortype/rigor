@@ -1,18 +1,22 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# ADR-39 slice 5 — opt-in Ruby::Box isolation for plugin target-library
-# invocation. `Ruby::Box` (experimental) is a process-start flag
-# (`RUBY_BOX=1`, not toggleable at runtime), so when a project opts in
-# via the `RIGOR_BOX` env var we re-exec the same command with the flag
-# set before anything else loads. The `RUBY_BOX` guard prevents an
-# infinite re-exec, and the inherited environment (RUBYOPT / BUNDLE_*)
-# preserves the Bundler context across the exec. Disabled by default:
-# without `RIGOR_BOX` this is a no-op and every target-library
-# invocation keeps its main-space path.
-if !ENV["RIGOR_BOX"].to_s.empty? && ENV["RUBY_BOX"].to_s.empty?
+# ADR-39 slice 5 — the `ruby_box` plugin-isolation strategy needs the
+# experimental `Ruby::Box` feature, which is a process-start flag
+# (`RUBY_BOX=1`, not toggleable at runtime). When a project selects that
+# strategy (`RIGOR_PLUGIN_ISOLATION=ruby_box`, or the legacy `RIGOR_BOX`
+# alias) we re-exec the same command with the flag set before anything
+# else loads. The `RUBY_BOX` guard prevents an infinite re-exec, and the
+# inherited environment (RUBYOPT / BUNDLE_*) preserves the Bundler
+# context across the exec. The `none` (default) and `process` strategies
+# need no flag, so this is a no-op for them — behaviour is unchanged
+# unless a project opts into `ruby_box`.
+rigor_isolation = ENV["RIGOR_PLUGIN_ISOLATION"].to_s
+rigor_wants_box = rigor_isolation == "ruby_box" || !ENV["RIGOR_BOX"].to_s.empty?
+if rigor_wants_box && ENV["RUBY_BOX"].to_s.empty?
   require "rbconfig"
   ENV["RUBY_BOX"] = "1"
+  ENV["RIGOR_PLUGIN_ISOLATION"] = "ruby_box" if rigor_isolation.empty?
   exec(RbConfig.ruby, __FILE__, *ARGV)
 end
 

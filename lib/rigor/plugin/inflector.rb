@@ -44,6 +44,12 @@ module Rigor
       # `pluralize` with the `::`→`_` flattening AR really uses.
       ALLOWED_METHODS = %i[underscore camelize singularize pluralize classify].freeze
 
+      # The target library + the constant the allow-listed methods are
+      # called on. Passed to {Isolation} so the call runs under the
+      # configured isolation strategy (none / ruby_box / process).
+      FEATURE = "active_support/inflector"
+      RECEIVER = "ActiveSupport::Inflector"
+
       # Raised when `ActiveSupport::Inflector` is required for an
       # inflection but cannot be loaded. Caught by the per-plugin isolation
       # boundary, so it surfaces as "this plugin produced no diagnostics"
@@ -86,64 +92,29 @@ module Rigor
         pluralize(underscored)
       end
 
-      # Whether the real `ActiveSupport::Inflector` can be loaded. A
-      # consumer can gate inflection-dependent work on this to emit a
-      # single clean load-error instead of letting the first inflection
-      # raise. Memoised via {ensure_loaded!}.
+      # Whether inflection is available under the configured isolation
+      # strategy. A consumer can gate inflection-dependent work on this to
+      # emit a single clean load-error instead of letting the first
+      # inflection raise. Probes with a trivial pluralization.
       def available?
-        ensure_loaded!
+        invoke(:pluralize, "rigor_inflector_probe")
         true
       rescue Unavailable
         false
       end
 
       # Delegates an allow-listed method to the real
-      # `ActiveSupport::Inflector`. Raises {Unavailable} (never
-      # approximates) when the gem is absent.
-      #
-      # When `Ruby::Box` isolation is active (ADR-39 slice 5; opt-in via
-      # `RUBY_BOX=1`), the call runs inside the shared box so ActiveSupport
-      # never loads into Rigor's main space; `name` is a fixed allow-listed
-      # method and `arg` is interpolated through `String#inspect` (a safe
-      # Ruby literal), so the `eval` carries no free input. Otherwise the
-      # library loads into the main space (slices 2/4 behaviour).
+      # `ActiveSupport::Inflector` through the configured isolation
+      # strategy ({Isolation}: none / ruby_box / process). Raises
+      # {Unavailable} (never approximates) when the library cannot be
+      # reached in that strategy — the caller's per-plugin rescue turns
+      # that into silence, never a wrong inflection.
       def invoke(name, arg)
         raise ArgumentError, "method not allow-listed: #{name}" unless ALLOWED_METHODS.include?(name)
 
-        return invoke_in_box(name, arg) if Box.enabled?
-
-        ensure_loaded!
-        ActiveSupport::Inflector.public_send(name, arg.to_s)
-      end
-
-      def invoke_in_box(name, arg)
-        unless Box.require_feature("active_support/inflector")
-          raise Unavailable,
-                "ActiveSupport::Inflector could not be loaded into the Ruby::Box isolation space."
-        end
-
-        # The evaluated string is fully constrained: `name` is one of the
-        # fixed {ALLOWED_METHODS} symbols and the argument is rendered via
-        # `String#inspect` (a safe, round-tripping Ruby literal), so the
-        # built expression is e.g. `ActiveSupport::Inflector.pluralize("person")`
-        # — no free input ever reaches the box's `eval` (`Ruby::Box#eval`,
-        # not `Kernel#eval`).
-        expression = format("ActiveSupport::Inflector.%<method>s(%<arg>s)", method: name, arg: arg.to_s.inspect)
-        Box.eval(expression)
-      end
-
-      # Loads `active_support/inflector` once. Core Rigor carries no
-      # ActiveSupport dependency, so the require is lazy (the consuming
-      # plugins bring the gem); a failure becomes {Unavailable}.
-      def ensure_loaded!
-        return if defined?(@loaded) && @loaded
-
-        require "active_support/inflector"
-        @loaded = true
-      rescue LoadError => e
-        raise Unavailable,
-              "ActiveSupport::Inflector is required for inflection but could not be loaded " \
-              "(#{e.message}). Add `activesupport` to the plugin's dependencies."
+        Isolation.call(feature: FEATURE, receiver: RECEIVER, method: name, args: [arg.to_s])
+      rescue Isolation::Unavailable => e
+        raise Unavailable, e.message
       end
     end
   end

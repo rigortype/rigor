@@ -12,6 +12,7 @@ require_relative "plugin/base"
 require_relative "plugin/registry"
 require_relative "plugin/load_error"
 require_relative "plugin/box"
+require_relative "plugin/isolation"
 require_relative "plugin/inflector"
 
 module Rigor

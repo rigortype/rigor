@@ -264,12 +264,13 @@ just the target library means **the whole Rigor process runs in box
 mode** — there is no "box only the inflector" without enabling boxes
 process-wide. Adopting it therefore touches the launcher.
 
-The **scaffolding is landed as an opt-in, off by default**:
-`Rigor::Plugin::Box` (the wrapper), the `Plugin::Inflector` box-routing,
-and an `exe/rigor` opt-in that re-execs under `RUBY_BOX=1` only when the
-`RIGOR_BOX` env is set. With the opt-in off, every target-library
-invocation keeps its main-space path and behaviour is unchanged
-(`make verify` green).
+The **selectable strategy is landed, `none` by default**:
+`Plugin::Isolation` (the `none` / `ruby_box` / `process` selector +
+backends), `Rigor::Plugin::Box` (the `ruby_box` wrapper), `Plugin::Inflector`
+routing through `Isolation`, and an `exe/rigor` re-exec under `RUBY_BOX=1`
+when `RIGOR_PLUGIN_ISOLATION=ruby_box` (or the legacy `RIGOR_BOX`). With
+the default `none`, every target-library invocation keeps its main-space
+path and behaviour is unchanged (`make verify` green).
 
 **Empirical status of the box path (Ruby 4.0.5):** mixed.
 - The isolation mechanism is validated — a target library loads + answers
@@ -286,12 +287,16 @@ invocation keeps its main-space path and behaviour is unchanged
   Rigor's `Plugin::Box`. A Ruby bug-report draft is in
   [`docs/notes/20260602-ruby-box-segfault-bug-report.md`](../notes/20260602-ruby-box-segfault-bug-report.md).
 
-So the box path is **landed but gated as experimental and not yet
-production-usable**: the chosen first-priority direction, blocked on
-upstream `Ruby::Box` stabilisation. The current consumers
-(`Plugin::Inflector`, the Rack catalogue) keep using Rigor's own pinned
-dependency by default; the box + exact-version loading become the
-recommended path once `Ruby::Box` is stable for Rigor's full pipeline.
+So the `ruby_box` strategy is **landed but gated as experimental and not
+yet production-usable**: the chosen first-priority *in-process* direction,
+blocked on the upstream `Ruby::Box` VM bug above. The **`process`
+(fork) strategy is the production-ready isolation today** — validated on a
+full Redmine `app` run (byte-identical diagnostics, no segfault), because
+the fork boundary contains exactly the crash that breaks `ruby_box`. The
+default stays `none` (the trusted, pure libraries need no isolation for
+correctness); a project that wants real isolation today selects
+`process`, and `ruby_box` becomes attractive (lighter, in-process, +
+exact-version coexistence) once the VM bug is fixed.
 
 ### Engine support
 
@@ -332,20 +337,28 @@ Slices 2–4 are the concrete landing of boilerplate plan § 0e, now
 reframed from "unify the approximations" to "use the real library."
 
 5. **Selectable isolation strategy** (see § "Isolation of target-library
-   invocation"). A `plugins_isolation:` config (`none` / `ruby_box` /
-   `process`; `RIGOR_PLUGIN_ISOLATION` env) selecting one of three
-   backends behind a common interface, with `none` (direct, main-space)
-   the default. **Landed:** `none` + `ruby_box` (the `Plugin::Box`
-   wrapper + `exe/rigor` `RUBY_BOX=1` re-exec; `Plugin::Inflector` routes
-   through it). **Planned:** `process` (fork) — forks a worker that loads
-   + calls the library and returns data over a pipe, giving **crash
-   containment** (a child `SIGSEGV` is contained, the parent declines) —
-   the robust answer to the box path's segfault, reusing Rigor's fork
-   model (ADR-15). `ruby_box` also unlocks the maximal-fidelity "load the
-   project's exact gem version" path (a box per resolved version, no
-   process-wide clash). The default (`none`) keeps the current
-   pinned-dependency path, so behaviour is unchanged unless a project
-   opts into a stronger strategy.
+   invocation"). `Plugin::Isolation` selects one of three backends behind
+   a common `call(feature:, receiver:, method:, args:)` interface by the
+   `RIGOR_PLUGIN_ISOLATION` env (which `exe/rigor` maps from
+   `.rigor.yml`'s `plugins_isolation:`), with `none` (direct, main-space)
+   the default. **All three landed:**
+   - `none` — `require` + `public_send` in the main space (default path).
+   - `ruby_box` — call inside the `Plugin::Box` (`exe/rigor` re-execs under
+     `RUBY_BOX=1` when selected). Isolates monkey-patches + versions; also
+     unlocks the maximal-fidelity "exact gem version" path. Experimental,
+     and can segfault on a full analysis (below) — so usable but gated.
+   - `process` — forks a **persistent worker** that loads + calls the
+     library and returns data over a Marshal pipe; a worker crash (even
+     `SIGSEGV`) is contained (the parent gets EOF / `EPIPE`, declines, and
+     respawns on the next call). Reuses Rigor's fork model (ADR-15).
+     **Validated:** a full `rigor check` over Redmine `app` under
+     `RIGOR_PLUGIN_ISOLATION=process` runs to completion with rails-routes
+     diagnostics **byte-identical** to the non-isolated run and **no
+     segfault** — the robust answer to the box path's crash.
+
+   `Plugin::Inflector` routes through `Isolation`; the default (`none`)
+   keeps the current pinned-dependency path, so behaviour is unchanged
+   unless a project opts into a stronger strategy.
 
 ## Relationship to other ADRs
 

@@ -43,12 +43,13 @@ RSpec.describe Rigor::Plugin::Inflector do
     end
   end
 
-  describe "when ActiveSupport::Inflector cannot be loaded" do
-    # Simulate the gem being absent: the lazy loader raises Unavailable
-    # (this is what `ensure_loaded!` does on a real LoadError).
+  describe "when ActiveSupport::Inflector cannot be reached" do
+    # Simulate the library being unreachable under the configured isolation
+    # strategy: Isolation.call raises Unavailable, which Inflector re-raises
+    # as its own Unavailable (never approximating).
     before do
-      allow(described_class).to receive(:ensure_loaded!)
-        .and_raise(Rigor::Plugin::Inflector::Unavailable, "...add `activesupport`...")
+      allow(Rigor::Plugin::Isolation).to receive(:call)
+        .and_raise(Rigor::Plugin::Isolation::Unavailable, "...add `activesupport`...")
     end
 
     it "reports unavailable rather than guessing" do

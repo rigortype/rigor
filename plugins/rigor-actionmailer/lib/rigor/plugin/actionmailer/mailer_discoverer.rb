@@ -371,7 +371,11 @@ module Rigor
         # denied) are swallowed.
         def view_exists?(class_name, action_name)
           views_root_absolute = File.expand_path(@views_root)
-          underscore_path = underscore(class_name.delete_prefix("::"))
+          # ADR-39: the real ActiveSupport::Inflector resolves the mailer's
+          # view directory (`Foo::BarMailer` → `foo/bar_mailer`), so a
+          # divergence from Rails' real underscore can't point the
+          # missing-view check at the wrong directory.
+          underscore_path = Rigor::Plugin::Inflector.underscore(class_name.delete_prefix("::"))
           mailer_dir = File.join(views_root_absolute, underscore_path)
 
           VIEW_FORMATS.any? do |format|
@@ -380,17 +384,6 @@ module Rigor
               read_safely(candidate)
             end
           end
-        end
-
-        # Convert `Foo::BarMailer` → `foo/bar_mailer`. Mirrors
-        # ActiveSupport's String#underscore for ASCII-only
-        # constant names; we don't try to be inflector-perfect
-        # here.
-        def underscore(name)
-          name.gsub("::", "/")
-              .gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
-              .gsub(/([a-z\d])([A-Z])/, '\1_\2')
-              .downcase
         end
       end
     end

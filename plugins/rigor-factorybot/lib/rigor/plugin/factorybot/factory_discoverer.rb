@@ -136,7 +136,11 @@ module Rigor
           explicit = explicit_class_option(call_node)
           return explicit if explicit
 
-          camelize(factory_name)
+          # ADR-39: the real ActiveSupport::Inflector camelizes the factory
+          # name to its class (`admin_user` → `AdminUser`,
+          # `admin/user` → `Admin::User`), so the model-class fallback
+          # matches Rails' real convention rather than an approximation.
+          Rigor::Plugin::Inflector.camelize(factory_name)
         end
 
         def explicit_class_option(call_node)
@@ -178,17 +182,6 @@ module Rigor
           when nil then "::#{parts.join('::')}"
           when Prism::ConstantReadNode then "#{current.name}::#{parts.join('::')}"
           end
-        end
-
-        # Pure-Ruby camelize for the factory-name fallback.
-        # `user` → `User`, `blog_post` → `BlogPost`, `admin_user`
-        # → `AdminUser`. Factory names with `/` separators
-        # (`admin/user`) camelize per-segment and join with `::`
-        # (`Admin::User`), mirroring Rails inflection.
-        def camelize(snake)
-          snake.to_s.split("/").map do |segment|
-            segment.split("_").map { |part| part.empty? ? part : part[0].upcase + part[1..] }.join
-          end.join("::")
         end
 
         def collect_attribute_names(block_node)

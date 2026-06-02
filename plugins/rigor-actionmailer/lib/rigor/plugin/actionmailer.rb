@@ -150,7 +150,7 @@ module Rigor
             severity: :warning,
             rule: "missing-view",
             message: "`#{class_entry.class_name}##{action_name}` has no view template " \
-                     "under `#{@views_root}/#{underscore(class_entry.class_name.delete_prefix('::'))}/`"
+                     "under `#{@views_root}/#{Rigor::Plugin::Inflector.underscore(class_entry.class_name.delete_prefix('::'))}/`"
           )
         end
       end
@@ -159,13 +159,6 @@ module Rigor
         File.realpath(path)
       rescue StandardError
         File.expand_path(path)
-      end
-
-      def underscore(name)
-        name.gsub("::", "/")
-            .gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
-            .gsub(/([a-z\d])([A-Z])/, '\1_\2')
-            .downcase
       end
 
       def load_error_diagnostic(path)

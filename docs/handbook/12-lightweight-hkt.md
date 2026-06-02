@@ -26,6 +26,22 @@ defunctionalised encoding of higher-kinded types in the
 style. This chapter walks through what it does, when to reach
 for it, and how to author your own overlay.
 
+This is the most advanced chapter in the handbook. Most
+readers only need the first two sections — what the carrier
+looks like and which stdlib methods are wired out of the box.
+Everything after "Authoring your own overlay" is for the rare
+case where you want to model a recursive sum type of your own.
+
+> **In this chapter**
+> [Five-second pitch](#the-five-second-pitch) ·
+> [What's bundled today](#whats-bundled-today) ·
+> [Call-site discrimination](#two-kinds-of-call-site-discrimination) ·
+> [Authoring your own overlay](#authoring-your-own-overlay) ·
+> [The body grammar](#the-body-grammar) ·
+> [Reduction semantics](#reduction-semantics--lazy-tying-the-knot) ·
+> [What it doesn't do yet](#what-it-doesnt-do-yet) ·
+> [Where to look in the code](#where-to-look-in-the-code)
+
 ## The five-second pitch
 
 | Concept | Rigor spelling | Where you see it |
@@ -40,8 +56,10 @@ The next sections show each of these in action.
 
 ## What's bundled today
 
-Rigor ships one HKT registration out of the box: **`json::value[K]`**,
-the recursive JSON-value sum. Two parts:
+Rigor ships two HKT registrations out of the box. The main
+one is **`json::value[K]`**, the recursive JSON-value sum (the
+second, `csv::parsed[K]`, is covered at the end of this
+section). `json::value` has two parts:
 
 ```rbs
 # Registration — names the tag, declares its arity, variance,
@@ -59,9 +77,9 @@ params=K body=
   | Hash[K, App[json::value, K]]
 ```
 
-Eight stdlib methods route through this:
+Nine stdlib methods route through this:
 
-- `JSON.parse` / `JSON.parse!` / `JSON.load`
+- `JSON.parse` / `JSON.parse!` / `JSON.load` / `JSON.load_file` / `JSON.load_file!`
 - `YAML.safe_load` / `YAML.safe_load_file`
 - `Psych.safe_load` / `Psych.safe_load_file`
 
@@ -71,6 +89,12 @@ dispatch, so even though upstream RBS declares
 the reduced Union. `YAML.load` / `YAML.unsafe_load` deliberately
 stay out — they can return any Ruby object and have no useful
 HKT envelope.
+
+The second bundled registration, **`csv::parsed[K]`**, models
+`CSV.parse` / `CSV.read` as `Array[Array[K | nil]]` — the
+no-headers shape. Calls passing `headers: true` (which return
+a `CSV::Table`) and `CSV.foreach` (which yields rather than
+returns) fall through to the upstream RBS type.
 
 ## Two kinds of call-site discrimination
 

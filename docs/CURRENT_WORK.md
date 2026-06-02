@@ -29,6 +29,8 @@ The 6 remaining Mastodon errors are all unrelated to engine precision: 5 nil-rec
 
 Only non-gating ergonomics follow-ons remain — see Branch D below.
 
+**Also in flight (doc-only, parallel track):** a user-friendliness overhaul of the user-facing docs (handbook + manual + `docs/types.md`, now flowing into per-plugin docs). It is independent of the engine/plugin-contract work above and has its own resume section at the end of this file — see [§ "Documentation overhaul"](#documentation-overhaul-parallel-track--in-flight-doc-only).
+
 ## Reading order for a returning implementer
 
 `make verify` is clean. **`[Unreleased]` holds the now-substantially-complete plugin-mechanism interface-segregation + ergonomics effort** (ADR-37 / ADR-38 / ADR-39 — see § "Status"); the release gates are met and all three ADRs are Accepted. Branch D below is the residual (non-gating) ergonomics — the two largest boilerplate items are now done: **0a (`Source::Literals`) LANDED** (grid completed + ten plugins + one example migrated) and **0d (`config_schema` defaults, [ADR-40](adr/40-config-schema-defaults.md)) LANDED** (mechanism + thirteen plugins migrated off `DEFAULT_*`). What remains in Branch D is smaller and demand-driven (ADR-39 inflection follow-ons, `dynamic_return` generalisation, ADR-38 block-form, per-interface test harnesses). Branches A–C are the other queued tracks. **Next-session entry point: the remaining Branch-D items are independent demand-driven slices; the bigger strategic lever is Branch A's single remaining gate — v0.2.0 gate 1, plugin-contract stabilisation for *external* third-party `rigor-*` gems (the subtree-split/publish gate is superseded by the single-bundled-gem model). That needs explicit planning rather than another incremental slice.**
@@ -136,3 +138,52 @@ Phases 1–4 landed (String / Integer / Float / Comparable / Math / HashShape / 
 ## Post-release follow-ups
 
 - **`data/oss-sweep/mastodon-thresholds.json`** — refresh the stored thresholds against v0.1.12's baseline so the weekly OSS sweep gate reflects the new ~6 baseline. The current file is uncalibrated (`max_diagnostics: 999999`).
+
+## Documentation overhaul (parallel track — in flight, doc-only)
+
+A user-friendliness pass over the **user-facing** docs, run with the `doc-coauthoring` workflow. Doc-only; touches no engine/spec code. ~36 commits since `824d5a30`, all on `master`, **not pushed**. `make verify` is unaffected (no code changed); the discipline here is per-file Markdown + a cold-read verification subagent, not the test suite.
+
+### Done (committed)
+
+- **Handbook — all 19 files** (`docs/handbook/`): 12 chapters + 7 appendices. Each got a chapter orientation + an "In this chapter" mini-TOC; every anchor was cold-read-verified (github-slugger rules — all resolve, no leading/trailing hyphens, no collisions).
+- **Manual — all 14 chapters** (`docs/manual/`): mini-TOCs on the long chapters (cli-reference, mcp-server, rails-quickstart, editor-integration, troubleshooting symptom-index); short chapters verified-and-left where already good (skills / plugins / inspecting-types / ci / baseline).
+- **`docs/types.md`**: added a "Carriers at a glance" example block (the page promised the carrier zoo but showed none) + the angle-vs-square bracket convention.
+
+### House style established (reuse for any further doc work)
+
+Orientation block + an "In this chapter" inline mini-TOC on long/multi-section pages (skip on short single-topic pages — proportional); skill-first onboarding; show real command output; defer edge cases to the spec/manual; **every page's anchors verified by a cold-read subagent** (give it ONLY the file, no other context; have it compute github-slugger anchors and flag non-resolving links + factual errors). Short, already-correct pages are left unchanged rather than padded.
+
+### Code-verified factual fixes landed along the way (these are real doc bugs, not style)
+
+Each was checked against source before editing:
+- **`assert_type` argument order** — engine requires `assert_type("type-string", expr)` (string FIRST; `check_rules.rb` requires arg0 be a `StringNode`). The handbook used value-first in all **41** calls → every example silently no-op'd. Flipped all 41 to string-first (commit `a3dabfeb`); the manual / `rule_catalog` / `Rigor::Testing` were already correct.
+- **`disable` config key** — docs showed `disabled_rules:` but the loader only reads `data.fetch("disable")`; a copied `disabled_rules:` block is silently ignored. Fixed across handbook + manual.
+- **Worker backend** — `--workers=N` / `parallel.workers` are **fork**-based (ADR-15; Ractor pool deferred), not "Ractor workers". Fixed in caching / troubleshooting / configuration / cli-reference. (Env var `RIGOR_RACTOR_WORKERS` is genuinely the name — left as-is.)
+- **Diagnostics catalogue** — manual was missing 4 shipped rules (`call.unresolved-toplevel`, `def.override-*`); added.
+- **HKT chapter** — bundled registrations were stated as "one / eight methods"; actually **two** (`json::value` + `csv::parsed`) / **nine** methods. Refreshed from `hkt_builtins.rb`.
+- **RBS chapter** — "Use `target self`" → the real `self is T` form (spec-verified).
+- **Stray tags** — `</content>`/`</invoke>` had leaked into `appendix-typeprof.md`; removed.
+- **Misc** — VS Code wrong marketplace link (editor-integration); rails-quickstart baseline activation said "after Step 5" but it's generated in Step 6; mypy appendix `object` gloss.
+
+### In progress — per-plugin doc restructure (the "(ii)" split)
+
+Decision (with the user): user-facing plugin docs move to the published manual; in-tree READMEs keep developer/contract material — single-sourced, no duplication.
+
+- **Layout**: user-facing → `docs/manual/plugins/<id>.md` (what it checks / config / what it infers / limitations); dev/internals stay in `plugins/<id>/README.md` (layout / architecture / authoring surface / demo) with a top pointer up to the user page; `docs/manual/plugins/README.md` is the index (wired into `docs/manual/README.md` item 7).
+- **When a handbook chapter already covers a plugin deeply** (Sorbet = handbook ch. 10), the manual page stays thin and points to the chapter instead of duplicating it.
+- **Migrated so far (3 of 30):** `rigor-activerecord` (rich template, commit `22900dac`), `rigor-rspec` (`66226ee1`), `rigor-sorbet` (handbook-pointer style, `7d64f493`).
+- **Cleanup already done (commit `85e27336`):** dropped the stale "— example Rigor plugin" title from 10 production plugins; removed the retired "post-extraction / subtree-split" wording (subtree-split was retired 2026-06-02 — plugins ship bundled in `rigortype`, per-plugin gemspecs gone). Each migration also strips the now-removed `.gemspec` line from that plugin's README layout.
+
+### Next-session entry point (doc track)
+
+Continue the (ii) migration, **high-traffic first, incrementally** (the user's chosen pace). Order: the rest of the **Rails core set** (`rigor-actionpack`, `rigor-rails-routes`, `rigor-rails-i18n`, `rigor-actionmailer`, `rigor-activejob`, `rigor-activestorage`, `rigor-factorybot`) → **`rigor-rails`** → **dry-rb set** → the tail. Per-plugin recipe: read the README; split user↔dev; write `docs/manual/plugins/<id>.md`; slim the README to internals + add the user-guide pointer; strip any stale `.gemspec`/subtree-split lines; add an index entry; verify links (the established cold-read check). 28 remain.
+
+Resolved decisions for the remaining work:
+- **`rigor-rails`** is a **`require`-convenience aggregator only** — verified in `plugins/rigor-rails/lib/rigor-rails.rb` (it requires the seven sub-plugins; it does **not** auto-activate them, and `- rigor-rails` in `plugins:` does not enable the set — activation stays per-plugin in `.rigor.yml`). Document it accurately as that; do **not** frame it as a config group that activates the set. Its README + the manual's `07-plugins.md` "meta-gem" mention both predate the bundled model and need this correction.
+- **`rigor-playground`** is the browser-playground backend, not a checker plugin (and still has the only remaining per-plugin gemspec) — decide whether it warrants a user page at all (likely just a README pointer).
+
+### Open items (doc track)
+
+- **CHANGELOG?** The doc-accuracy fixes above (esp. `assert_type` order, `disable` key) affect users who follow the docs; consider an `[Unreleased]` doc-fix entry. Deferred to the user — this pass touched only `docs/` + `plugins/*/README.md`.
+- **Not pushed.** All ~36 commits are local on `master`.
+- The forward-looking one-liner for this track lives in [`docs/ROADMAP.md`](ROADMAP.md) § "Future cycles" → "Documentation".

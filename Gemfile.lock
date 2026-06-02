@@ -46,6 +46,7 @@ GEM
       racc
     prism (1.9.0)
     racc (1.8.1)
+    rack (3.2.6)
     rainbow (3.1.1)
     rake (13.4.2)
     rbs (4.0.2)
@@ -106,6 +107,7 @@ PLATFORMS
 DEPENDENCIES
   activesupport (>= 7.0, < 9.0)
   parallel_tests (>= 4.0, < 6.0)
+  rack (>= 2.0, < 4.0)
   rake (>= 13.0, < 15.0)
   rbs-inline (>= 0.5, < 1.0)
   rigortype!
@@ -135,6 +137,7 @@ CHECKSUMS
   parser (3.3.11.1) sha256=d17ace7aabe3e72c3cc94043714be27cc6f852f104d81aa284c2281aecc65d54
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
   racc (1.8.1) sha256=4a7f6929691dbec8b5209a0b373bc2614882b55fc5d2e447a21aaa691303d62f
+  rack (3.2.6) sha256=5ed78e1f73b2e25679bec7d45ee2d4483cc4146eb1be0264fc4d94cb5ef212c2
   rainbow (3.1.1) sha256=039491aa3a89f42efa1d6dec2fc4e62ede96eb6acd95e52f1ad581182b79bc6a
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
   rbs (4.0.2) sha256=af75671e66cd03434cc546622741ebf83f6197ec4328375805306330bf78ef25

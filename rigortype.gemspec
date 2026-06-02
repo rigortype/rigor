@@ -53,6 +53,13 @@ Gem::Specification.new do |spec|
   # end-to-end without users of `rigortype` paying the cost
   # (ADR-0 zero-runtime-dep; same pattern as `rbs-inline` below).
   spec.add_development_dependency "activesupport", ">= 7.0", "< 9.0"
+  # ADR-39 — rigor-rspec-rails validates `have_http_status(:symbol)`
+  # against the real `Rack::Utils::SYMBOL_TO_STATUS_CODE` rather than a
+  # vendored snapshot that could go stale (a newly-added Rack symbol
+  # flagged as a false `unknown-symbol`). Development dep so the suite
+  # exercises the real catalogue; the production dep belongs on the
+  # plugin gem (rspec-rails apps already pull rack via actionpack).
+  spec.add_development_dependency "rack", ">= 2.0", "< 4.0"
   spec.add_development_dependency "parallel_tests", ">= 4.0", "< 6.0"
   spec.add_development_dependency "rake", ">= 13.0", "< 15.0"
   # ADR-32 — the `rigor-rbs-inline` plugin under `plugins/`

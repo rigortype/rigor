@@ -33,14 +33,22 @@ Rules fired:
 
 ### What's accepted as a status symbol
 
-The plugin vendors a frozen snapshot of `Rack::Utils::SYMBOL_TO_STATUS_CODE`
-(Rack 3.x) plus Rails' eight status-group aliases —
+The HTTP status symbols come from the **real**
+`Rack::Utils::SYMBOL_TO_STATUS_CODE` (the same authority
+`have_http_status` resolves through `Rack::Utils.status_code`),
+read at analysis time rather than vendored — so a newly-added
+Rack status symbol is never mistaken for a typo
+([ADR-39](../../docs/adr/39-plugin-target-library-invocation.md):
+depend on the target library's real facts, never an
+approximation). When Rack cannot be loaded the plugin
+**declines** to flag any symbol (reduced coverage, never a
+false `unknown-symbol`). Rails' eight status-group aliases —
 `:success`, `:successful`, `:missing`, `:redirect`, `:error`,
-`:client_error`, `:server_error`, `:informational`. There's
-no runtime dependency on `rack` or `actionpack`; the catalogue
-lives in `lib/rigor/plugin/rspec_rails/http_status_codes.rb`
-and can be extended in-place when a Rack release adds a new
-alias (or a project's status-symbol vocabulary differs).
+`:client_error`, `:server_error`, `:informational` — are a
+small, stable Rails convention set, kept as a constant in
+`lib/rigor/plugin/rspec_rails/http_status_codes.rb`. The gem
+declares `rack` as a dependency (an rspec-rails project already
+pulls it via `actionpack`).
 
 ## Why this is a separate plugin from rigor-rspec
 

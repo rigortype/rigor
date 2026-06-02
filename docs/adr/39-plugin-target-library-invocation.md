@@ -11,7 +11,15 @@ consumers — `rigor-actionpack`,
 it, deleting their hand-rolled inflection. Validated behaviour-preserving
 against every plugin's golden-master integration spec **and** both
 headline OSS corpora (Redmine and Mastodon `app + lib` rails-routes
-diagnostics byte-identical before/after). **Deferred (follow-on):** slice
+diagnostics byte-identical before/after). A follow-up audit applied the
+same rule to two more inflection reimplementations (`rigor-actionmailer`
+view-path `underscore`, `rigor-factorybot` factory `camelize`) and to a
+non-inflection case — `rigor-rspec-rails` now validates
+`have_http_status(:symbol)` against the **real
+`Rack::Utils::SYMBOL_TO_STATUS_CODE`** instead of a vendored snapshot
+(declining when Rack is absent), confirming the rule generalises beyond
+inflection to any target-library *fact* (data table) a plugin would
+otherwise approximate. **Deferred (follow-on):** slice
 3 (static ingestion of `config/initializers/inflections.rb` for
 project-custom inflections — the default ActiveSupport ruleset already
 covers the common cases; custom-rule isolation across projects in a

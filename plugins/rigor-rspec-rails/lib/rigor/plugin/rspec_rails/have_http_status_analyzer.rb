@@ -96,7 +96,11 @@ module Rigor
 
         def symbol_violation(symbol_node)
           sym = symbol_node.unescaped.to_sym
-          return nil if HttpStatusCodes::KNOWN_SYMBOLS.include?(sym)
+          known = HttpStatusCodes.known_symbols
+          # ADR-39: Rack unavailable → the accepted symbol set is
+          # unknowable, so decline rather than flag from a guess.
+          return nil if known.nil?
+          return nil if known.include?(sym)
 
           Violation.new(
             rule: "have_http_status.unknown-symbol",

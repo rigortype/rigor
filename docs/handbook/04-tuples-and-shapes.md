@@ -7,6 +7,18 @@ nominal types when crossing an RBS boundary), but inside Rigor
 they carry the per-position / per-key types that ordinary
 `Array[T]` / `Hash[K, V]` would lose.
 
+> **In this chapter**
+> [Tuples](#tuples--heterogeneous-arrays) ·
+> [Tuples through `map` / `select`](#tuples-through-map-select-and-friends) ·
+> [When tuples widen](#tuples-widen--when-and-why) ·
+> [Hash shapes](#hash-shapes--known-key-hashes) ·
+> [Hash shapes through methods](#hash-shapes-through-method-calls) ·
+> [Keyword-argument hashes](#keyword-argument-hashes) ·
+> [Splat composition](#splat-composition) ·
+> [Pattern matching](#pattern-matching-destructuring) ·
+> [When layout is not provable](#when-the-layout-is-not-provable) ·
+> [Deriving new shapes (Pick / Omit / …)](#deriving-new-shapes--pick_of--omit_of--partial_of--required_of--readonly_of)
+
 ## Tuples — heterogeneous arrays
 
 When the analyzer can prove the layout of an array literal, it
@@ -137,7 +149,7 @@ config.size                # Constant<2>
 ## Keyword-argument hashes
 
 When you call a method with keyword arguments, the implicit
-hash shape is what Rigor types-checks against:
+hash shape is what Rigor type-checks against:
 
 ```ruby
 def connect(host:, port: 80)
@@ -204,7 +216,7 @@ in { name:, age: }
 end
 ```
 
-`AlternationPatternNode` (`Integer | String => x`) produces a
+An alternation pattern (`Integer | String => x`) produces a
 union for the captured local — see
 [Chapter 3](03-narrowing.md) for the underlying narrowing
 rule.

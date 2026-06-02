@@ -11,6 +11,21 @@ This appendix is for users who already think in Steep
 vocabulary and want to know which Rigor concept matches which
 Steep concept.
 
+> **In this appendix**
+> [Five-second pitch](#the-five-second-pitch) ·
+> [Both consume RBS](#both-consume-rbs--that-is-the-common-ground) ·
+> [Type vocabulary mapping](#type-vocabulary--the-rbs-level-mapping-is-identity) ·
+> [`.rb` annotations](#annotations-in-rb-source) ·
+> [Steepfile vs `.rigor.yml`](#steepfile-vs-rigoryml) ·
+> [Severity model](#severity-model) ·
+> [Diagnostic vocabulary](#diagnostic-vocabulary) ·
+> [Suppression](#suppression) ·
+> ["No annotations needed"](#no-annotations-needed--the-largest-practical-difference) ·
+> [What Steep has, Rigor doesn't](#what-steep-has-and-rigor-does-not) ·
+> [What Rigor has, Steep doesn't](#what-rigor-has-and-steep-does-not) ·
+> [Coexistence pattern](#a-coexistence-pattern) ·
+> [Migration vignette](#a-migration-vignette)
+
 ## The five-second pitch
 
 | Question | Steep | Rigor |
@@ -175,7 +190,7 @@ the same project and the diagnostic streams categorised.
 | `# steep:ignore` | `# rigor:disable all` |
 | `# steep:ignore Ruby::NoMethod` | `# rigor:disable call.undefined-method` |
 | (no file-scope syntax) | `# rigor:disable-file <rule>` |
-| `Steepfile`: per-target `ignore_paths:` | `.rigor.yml`: `disable:` (rule-scoped) |
+| `Steepfile`: per-target `ignore_paths:` (path-scoped) | `.rigor.yml`: `exclude:` (path-scoped); `disable:` is the rule-scoped axis |
 
 Rigor's suppression vocabulary is closer to PHPStan's and
 RuboCop's than to Steep's, but the intent matches.

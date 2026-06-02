@@ -96,6 +96,7 @@ ADRs record design rationale and rejected / deferred alternatives. **The canonic
 - [ADR-37](docs/adr/37-plugin-interface-segregation.md) — Plugin interface segregation (narrow extension protocols; accepted, Slices 1–3)
 - [ADR-38](docs/adr/38-additional-initializers.md) — Plugin-declared additional initializers (`additional_initializers:`; accepted, def-form)
 - [ADR-39](docs/adr/39-plugin-target-library-invocation.md) — Plugins may invoke their target library's safe methods directly (PHPStan-style; allow-list + rescue harness; accepted — `Plugin::Inflector` over real `ActiveSupport::Inflector` + 3 consumers migrated)
+- [ADR-40](docs/adr/40-config-schema-defaults.md) — `config_schema` declared defaults (`{kind:, default:}`; accepted — `Base#config` merges manifest defaults; 13 plugins migrated off the `DEFAULT_*` idiom)
 
 ## Skills available in this repository
 

@@ -53,6 +53,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-37 | [Plugin Interface Segregation (narrow extension protocols)](37-plugin-interface-segregation.md) | Accepted (Slices 1–3 implemented; all bundled walker plugins migrated) |
 | ADR-38 | [Plugin-declared Additional Initializers](38-additional-initializers.md) | Accepted (def-form implemented; block-form deferred) |
 | ADR-39 | [Plugins may invoke their target library's safe methods directly](39-plugin-target-library-invocation.md) | Accepted (Plugin::Inflector + 3 consumers migrated; slice 3 deferred) |
+| ADR-40 | [`config_schema` declared defaults (`{kind:, default:}`)](40-config-schema-defaults.md) | Accepted (mechanism + 13 plugins migrated off the `DEFAULT_*` idiom) |
 
 ## Adding a New ADR
 

@@ -51,6 +51,21 @@ RSpec.describe Rigor::Plugin::Isolation do
       end
     end
 
+    # The worker is forked ONCE and reused — never one fork per call.
+    it "forks a single persistent worker across many calls" do
+      with_strategy("process") do
+        described_class.call(feature: feature, receiver: inflector, method: :pluralize, args: ["post"])
+        first_pid = described_class::Process.instance_variable_get(:@worker).fetch(:pid)
+
+        10.times do |i|
+          described_class.call(feature: feature, receiver: inflector, method: :pluralize, args: ["word#{i}"])
+        end
+
+        later_pid = described_class::Process.instance_variable_get(:@worker).fetch(:pid)
+        expect(later_pid).to eq(first_pid) # same worker — no per-call fork
+      end
+    end
+
     it "raises Unavailable when the worker call errors (no crash)" do
       with_strategy("process") do
         expect { described_class.call(feature: feature, receiver: "Nonexistent::Const", method: :x, args: []) }

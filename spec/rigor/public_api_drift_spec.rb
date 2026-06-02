@@ -509,6 +509,20 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     uppercase_string()
     value_of(req:type)
   ].freeze
+
+  # `Rigor::Source::Literals` — the literal Symbol/String extraction
+  # helpers ADR-2 exposes to plugins so the
+  # `is_a?(Prism::SymbolNode)` extraction is written once. A
+  # `module_function` module, so its public surface is the
+  # singleton method set.
+  SOURCE_LITERALS_SINGLETON = %w[
+    symbol(req:node)
+    symbol_arg(req:call_node,req:index)
+    symbol_arguments(req:call_node)
+    symbol_name(req:node)
+    symbol_or_string(req:node)
+    symbol_or_string_name(req:node)
+  ].freeze
 end
 
 RSpec.describe "Public API drift", :public_api_drift do
@@ -569,6 +583,12 @@ RSpec.describe "Public API drift", :public_api_drift do
   describe "Rigor::Reflection" do
     it "exposes the expected read-side facade surface" do
       expect(singleton_signatures(Rigor::Reflection)).to eq(PublicApiDriftSnapshots::REFLECTION_SINGLETON)
+    end
+  end
+
+  describe "Rigor::Source::Literals" do
+    it "exposes the expected literal-extraction surface" do
+      expect(singleton_signatures(Rigor::Source::Literals)).to eq(PublicApiDriftSnapshots::SOURCE_LITERALS_SINGLETON)
     end
   end
 
@@ -911,6 +931,11 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "covers Rigor::Reflection singleton methods" do
       expect_sig_covers(class_name: "Rigor::Reflection", kind: :singleton,
                         snapshot: PublicApiDriftSnapshots::REFLECTION_SINGLETON)
+    end
+
+    it "covers Rigor::Source::Literals singleton methods" do
+      expect_sig_covers(class_name: "Rigor::Source::Literals", kind: :singleton,
+                        snapshot: PublicApiDriftSnapshots::SOURCE_LITERALS_SINGLETON)
     end
 
     # Namespaces without an RBS sig today — recorded so the

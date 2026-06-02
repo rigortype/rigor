@@ -29,6 +29,69 @@ RSpec.describe Rigor::Source::Literals do
     end
   end
 
+  describe ".symbol_or_string_name" do
+    it "returns the String named by a literal SymbolNode" do
+      node = call("foo(:bar)").arguments.arguments.first
+      expect(described_class.symbol_or_string_name(node)).to eq("bar")
+    end
+
+    it "returns the String named by a literal StringNode" do
+      node = call('foo("bar")').arguments.arguments.first
+      expect(described_class.symbol_or_string_name(node)).to eq("bar")
+    end
+
+    it "returns nil for a non-literal node" do
+      node = call("foo(bar)").arguments.arguments.first
+      expect(described_class.symbol_or_string_name(node)).to be_nil
+    end
+
+    it "returns nil for nil" do
+      expect(described_class.symbol_or_string_name(nil)).to be_nil
+    end
+  end
+
+  describe ".symbol" do
+    it "returns the Symbol named by a literal SymbolNode" do
+      node = call("foo(:bar)").arguments.arguments.first
+      expect(described_class.symbol(node)).to eq(:bar)
+    end
+
+    it "returns nil for a literal StringNode (SymbolNode only)" do
+      node = call('foo("bar")').arguments.arguments.first
+      expect(described_class.symbol(node)).to be_nil
+    end
+
+    it "returns nil for a non-literal node" do
+      node = call("foo(bar)").arguments.arguments.first
+      expect(described_class.symbol(node)).to be_nil
+    end
+
+    it "returns nil for nil" do
+      expect(described_class.symbol(nil)).to be_nil
+    end
+  end
+
+  describe ".symbol_name" do
+    it "returns the String named by a literal SymbolNode" do
+      node = call("foo(:bar)").arguments.arguments.first
+      expect(described_class.symbol_name(node)).to eq("bar")
+    end
+
+    it "returns nil for a literal StringNode (SymbolNode only)" do
+      node = call('foo("bar")').arguments.arguments.first
+      expect(described_class.symbol_name(node)).to be_nil
+    end
+
+    it "returns nil for a non-literal node" do
+      node = call("foo(bar)").arguments.arguments.first
+      expect(described_class.symbol_name(node)).to be_nil
+    end
+
+    it "returns nil for nil" do
+      expect(described_class.symbol_name(nil)).to be_nil
+    end
+  end
+
   describe ".symbol_arguments" do
     it "collects every literal Symbol/String argument in order" do
       node = call('foo(:a, "b", bar, :c)')

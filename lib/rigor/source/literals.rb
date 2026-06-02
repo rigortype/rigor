@@ -18,6 +18,19 @@ module Rigor
     # `#unescaped` (not `#value`) is used deliberately so an interpolation-
     # free `"foo"` / `:foo` round-trips to `:foo` consistently for both
     # node kinds.
+    #
+    # The surface is a small grid over two axes — which node kinds are
+    # accepted (`SymbolNode` only, or `SymbolNode`/`StringNode`) and what
+    # the caller wants back (the interned `Symbol`, or the raw `String`
+    # name). The SymbolNode-only forms ({.symbol} / {.symbol_name}) exist
+    # so a DSL that distinguishes `state :draft` from `state "draft"`
+    # keeps that distinction instead of silently widening to accept the
+    # string literal.
+    #
+    # | accepts            | → Symbol            | → String                 |
+    # | ------------------ | ------------------- | ------------------------ |
+    # | `:sym` only        | {.symbol}           | {.symbol_name}           |
+    # | `:sym` or `"str"`  | {.symbol_or_string} | {.symbol_or_string_name} |
     module Literals
       module_function
 
@@ -30,6 +43,48 @@ module Rigor
         return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
 
         node.unescaped.to_sym
+      end
+
+      # The String a literal `Prism::SymbolNode` / `Prism::StringNode`
+      # names, or `nil` for any other node (including `nil`). The
+      # String-returning sibling of {.symbol_or_string} — for callers
+      # that key on the raw name rather than the interned Symbol (route
+      # helpers, factory names, filter targets). `#unescaped` round-trips
+      # an interpolation-free `:foo` / `"foo"` to `"foo"` for both kinds.
+      #
+      # @param node [Prism::Node, nil]
+      # @return [String, nil]
+      def symbol_or_string_name(node)
+        return nil unless node.is_a?(Prism::SymbolNode) || node.is_a?(Prism::StringNode)
+
+        node.unescaped
+      end
+
+      # The Symbol a literal `Prism::SymbolNode` names, or `nil` for any
+      # other node (including a `Prism::StringNode` and `nil`). Stricter
+      # than {.symbol_or_string}: a DSL that accepts only `:draft` and
+      # not `"draft"` keeps that distinction by reaching for this rather
+      # than the Symbol-or-String form.
+      #
+      # @param node [Prism::Node, nil]
+      # @return [Symbol, nil]
+      def symbol(node)
+        return nil unless node.is_a?(Prism::SymbolNode)
+
+        node.unescaped.to_sym
+      end
+
+      # The String a literal `Prism::SymbolNode` names, or `nil` for any
+      # other node (including a `Prism::StringNode` and `nil`). The
+      # String-returning sibling of {.symbol} — SymbolNode-only, but the
+      # caller wants the raw name rather than the interned Symbol.
+      #
+      # @param node [Prism::Node, nil]
+      # @return [String, nil]
+      def symbol_name(node)
+        return nil unless node.is_a?(Prism::SymbolNode)
+
+        node.unescaped
       end
 
       # Every literal Symbol/String positional argument of a call, in

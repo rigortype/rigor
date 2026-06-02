@@ -14,6 +14,19 @@ project — its source, its `Gemfile.lock`, its gems' `.rbs` files —
 as data; it never loads your project's gems into its own process,
 so nothing is lost by installing it separately.
 
+> **Using an AI coding agent?** It can install Rigor and configure
+> the project for you — see Path A of the
+> [Rails quickstart](14-rails-quickstart.md). The channels below are
+> the manual route.
+
+> **Install channels** —
+> [mise (recommended)](#recommended--a-runtime-version-manager) ·
+> [asdf](#asdf) ·
+> [gem install](#simple-alternative--gem-install) ·
+> [Nix](#nix) ·
+> [dev container](#developing-inside-a-container) ·
+> [CI](#continuous-integration)
+
 ## Recommended — a runtime version manager
 
 [`mise`](https://mise.jdx.dev/) is a runtime / tool version manager

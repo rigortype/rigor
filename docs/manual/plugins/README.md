@@ -17,6 +17,8 @@ The full catalogue, with a one-line scope for every plugin, is
   finder / relation typing and schema-checked columns.
 - [rigor-rails-routes](rigor-rails-routes.md) — `*_path` / `*_url`
   helper validation against a parsed `config/routes.rb`.
+- [rigor-rails-i18n](rigor-rails-i18n.md) — `t(...)` / `I18n.t(...)`
+  key, per-locale coverage, and interpolation validation.
 - [rigor-rspec](rigor-rspec.md) — RSpec `let` / `subject`
   duplicate and self-reference checks.
 - [rigor-sorbet](rigor-sorbet.md) — read an existing Sorbet

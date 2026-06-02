@@ -14,6 +14,18 @@ classification model, the three output modes, and the
 [ADR-5](../adr/5-robustness-principle.md)'s asymmetric
 "strict on returns, lenient on parameters" rule.
 
+> **In this chapter**
+> [When to reach for it](#when-to-reach-for-it) ·
+> [A first run](#a-first-run) ·
+> [Output modes](#the-three-output-modes) ·
+> [Classification model](#the-classification-model) ·
+> [Method shapes covered](#what-method-shapes-the-generator-covers) ·
+> [`--params` policy & ADR-5](#the---params-policy-and-adr-5) ·
+> [RSpec-aware observations](#rspec-aware-observations) ·
+> [What `--write` does](#safety-what---write-will-and-will-not-do) ·
+> [Putting it together](#putting-it-together) ·
+> [Limits today](#limits-today)
+
 ## When to reach for it
 
 - You inherited a Ruby project with zero RBS coverage and
@@ -31,7 +43,8 @@ that captures intent the source code does not. If a public
 method should accept `_ToStr` because the contract is
 "anything that responds to `to_s`" but the current callers
 only happen to pass `String`, `sig-gen` will not invent
-`_ToStr` for you — clauses 1 and 2 below explain why.
+`_ToStr` for you — the [`--params` policy](#the---params-policy-and-adr-5)
+section below and ADR-5 explain why.
 
 ## A first run
 
@@ -89,7 +102,7 @@ states:
 | `new-file` | No RBS file declares the receiver class at all. |
 | `new-method` | RBS file declares the class but not this method. |
 | `tighter-return` | RBS file declares the method, but the inferred return is a strict subtype of the declared return. |
-| `equivalent` | The inferred and declared returns are identical (or the inferred return is not a strict subtype). Silently skipped. |
+| `equivalent` | The inferred return is not a strict subtype of the declared one — identical, wider, or unrelated — so there is nothing to tighten. Silently skipped. |
 | `skipped` | Disqualified for one of the reasons below. |
 
 The three `sig.skipped.*` reasons are:

@@ -124,6 +124,39 @@ Match with `case`/`when` on the carrier class. Treat any carrier you
 do not recognise as "decline to act" — never crash on an unexpected
 type.
 
+## Use the target library, don't reimplement it (ADR-39)
+
+A plugin may **call the pure methods of the library it targets
+directly** instead of reimplementing them — the Ruby analogue of a
+PHPStan extension calling into the real framework. Reimplementing a
+library's rules (an inflector, a status-code table, …) risks diverging
+from the real behaviour, and a wrong *derived* fact (a wrong class /
+helper / column name) is a false positive on working code. So declare
+the target gem as your plugin's dependency and call its safe methods.
+
+The bundled `Rigor::Plugin::Inflector` is the worked example — it calls
+the real `ActiveSupport::Inflector` rather than a hand-rolled
+approximation. If your plugin needs inflection, use it:
+
+```ruby
+Rigor::Plugin::Inflector.classify("users")     # => "User"
+Rigor::Plugin::Inflector.tableize("BlogPost")  # => "blog_posts"
+```
+
+For your own target library, follow the same harness: a **fixed
+allow-list** of pure methods, inputs derived from source, and **decline
+(return nil / emit nothing) when the library is unavailable — never
+approximate**. How the call is isolated from Rigor (in-process, a forked
+worker, or a `Ruby::Box`) is a configurable strategy the user picks
+(`plugins_isolation:`); you just call the method.
+
+For the common "did you mean …?" suggestion, use the shared helper
+rather than hand-rolling Levenshtein:
+
+```ruby
+Rigor::Plugin::Base.suggest(typo, known_names)  # nearest match, or nil
+```
+
 ## Optional — contribute a return type with `dynamic_return` / `type_specifier`
 
 > **Critical — these hooks do NOT make a method "defined", so they do

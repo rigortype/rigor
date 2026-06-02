@@ -139,6 +139,15 @@ the name rather than the receiver-spanning whole call; a `nil`
 `.from_location(location, …)` are public for core rules and other
 producers.
 
+`Rigor::Plugin::Base.suggest(name, candidates)` (boilerplate-reduction
+plan § 0c) is the shared "did you mean …?" helper: it returns the closest
+of `candidates` to `name` via `DidYouMean::SpellChecker` (the engine
+Ruby's own `NoMethodError` hints use), or `nil`. It is a **class** method
+so it is callable from both a plugin instance and an `Analyzer` module
+function, and replaces the hand-rolled Levenshtein copies plugins used to
+carry. It only affects suggestion *text* on an already-emitted
+diagnostic, never whether one fires.
+
 `#prepare(services)` (ADR-9) is the project-wide pre-pass hook,
 invoked once before per-file analysis begins. Plugins that publish
 cross-plugin facts (`manifest(produces:)`) override it to walk the
@@ -188,6 +197,53 @@ sig-driven returns) and a dynamic per-project receiver set
 classes). New plugins should prefer `dynamic_return` / `type_specifier`;
 `flow_contribution_for` is the documented last resort (the role
 PHPStan's `ExpressionTypeResolverExtension` plays).
+
+### Target-library invocation — `Plugin::Inflector` / `Plugin::Isolation` / `Plugin::Box` (ADR-39)
+
+[ADR-39](../adr/39-plugin-target-library-invocation.md) lets a plugin
+**invoke the pure, allow-listed methods of the library it targets**
+directly (the Ruby analogue of a PHPStan extension calling into the real
+framework), rather than reimplementing them — a reimplementation that
+diverges from the library's real behaviour is a wrong fact, i.e. a false
+positive. The rule is bounded by the same harness the engine's
+constant-folding tier uses: an explicit pure-method allow-list,
+Rigor-derived inputs, a checked data result, and **decline (never
+approximate)** when the library is unreachable. It does **not** relax
+ADR-2's prohibition on executing the analyzed *application's* own code —
+the target library is a trusted, declared dependency, distinct from the
+project's source.
+
+- `Rigor::Plugin::Inflector` — the worked consumer + the shared
+  inflection helper for the Rails-family plugins. `underscore` /
+  `camelize` / `singularize` / `pluralize` / `classify` / `tableize`
+  delegate to the real `ActiveSupport::Inflector`; it carries **no
+  approximation** (raises when the gem is unreachable, so the caller
+  declines to silence). `rigor-rails-routes` / `rigor-activerecord` /
+  `rigor-actionpack` / `rigor-actionmailer` / `rigor-factorybot` use it.
+- `Rigor::Plugin::Isolation` — the **selectable isolation strategy** for
+  the invocation, chosen by `RIGOR_PLUGIN_ISOLATION` (the `exe/rigor`
+  launcher maps `.rigor.yml`'s `plugins_isolation:` onto it). One
+  `call(feature:, receiver:, method:, args:)` interface over three
+  backends, **`process` the default**:
+  - `process` (default) — a single forked **persistent worker** (forked
+    once and reused, not per call) loads + calls the library and returns
+    data over a Marshal pipe; a worker crash (even `SIGSEGV`) is
+    contained — the parent declines and respawns. Falls back to `none`
+    where `fork` is unavailable.
+  - `none` — load into the main space and call directly (no isolation;
+    the fork-less fallback + explicit opt-out).
+  - `ruby_box` — call inside a `Ruby::Box` (`Rigor::Plugin::Box`;
+    `exe/rigor` re-execs under `RUBY_BOX=1`). Isolates monkey-patches +
+    versions in-process. Experimental; gated on an upstream `Ruby::Box`
+    VM bug.
+- `Rigor::Plugin::Box` — the `Ruby::Box` wrapper backing the `ruby_box`
+  strategy (`enabled?` / `require_feature` / `eval`).
+
+A plugin that needs a target-library fact calls
+`Plugin::Inflector` (or, for a new library, `Isolation.call` with its own
+allow-list); it never `require`s the target into the main space directly
+when isolation matters. The production dependency on the target gem
+belongs on the plugin's own gemspec.
 
 ### `Rigor::Plugin::Manifest`
 
@@ -372,3 +428,12 @@ following are now in place and are documented in their own specs:
   framework lifecycle methods (`setup`, `after_initialize`, DI
   setters) so an ivar set there and read in a sibling method is not
   widened with `nil`.
+- **Target-library invocation** ([ADR-39](../adr/39-plugin-target-library-invocation.md), Accepted).
+  Plugins may invoke a trusted target library's pure, allow-listed
+  methods directly (`Plugin::Inflector` over the real
+  `ActiveSupport::Inflector`; the Rails-family + factorybot consumers
+  migrated off their hand-rolled inflection), under a selectable
+  isolation strategy (`Plugin::Isolation`: `process` default / `none` /
+  `ruby_box`; documented above). The boilerplate-plan author helpers
+  `Base.suggest` (§ 0c) and the inflector close the remaining
+  hand-rolled-duplication items.

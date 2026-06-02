@@ -107,7 +107,7 @@ deprecated escape valves — see Phase 2.)
 | Phase | What | Reference |
 | --- | --- | --- |
 | 1 | Package and scaffold — gem vs project-private layout, gemspec / Gemfile, the plugin class skeleton, `.rigor.yml` activation. | [`references/01-plan-and-scaffold.md`](references/01-plan-and-scaffold.md) |
-| 2 | Node rules — `node_rule` (engine-owned walk), building `Diagnostic`s via `Base#diagnostic`, querying `scope.type_of`, optional `dynamic_return` / `type_specifier`, RBS for the DSL. | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) |
+| 2 | Node rules — `node_rule` (engine-owned walk), building `Diagnostic`s via `Base#diagnostic`, querying `scope.type_of`, calling the target library directly instead of reimplementing it (ADR-39: `Plugin::Inflector`, `Base.suggest`), optional `dynamic_return` / `type_specifier`, RBS for the DSL. | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) |
 | 3 | Test and ship — fixture-based tests (RSpec / Minitest, no rigor internals), version pinning, README, publish or keep private. | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) |
 
 ## Reading order — modules
@@ -115,5 +115,5 @@ deprecated escape valves — see Phase 2.)
 | Module | Read | Covers |
 | --- | --- | --- |
 | 1 | [`references/01-plan-and-scaffold.md`](references/01-plan-and-scaffold.md) | **Phase 1.** The gem vs project-private packaging split, directory trees for both, gemspec template, project-private path-gem / `RUBYLIB` activation, the `Rigor::Plugin::Base` skeleton, `.rigor.yml` `plugins:` wiring. |
-| 2 | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) | **Phase 2.** The `node_rule` engine-owned AST walk over Prism nodes, the `Base#diagnostic` helper, asking the analyzer for inferred types via `scope.type_of`, two-pass / lexical context (`node_file_context` / `NodeContext`), the optional `dynamic_return` / `type_specifier` return-type hooks (and the deprecated `flow_contribution_for` escape valve), and shipping `sig/*.rbs` so the DSL's types are visible. |
+| 2 | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) | **Phase 2.** The `node_rule` engine-owned AST walk over Prism nodes, the `Base#diagnostic` helper, asking the analyzer for inferred types via `scope.type_of`, two-pass / lexical context (`node_file_context` / `NodeContext`), the optional `dynamic_return` / `type_specifier` return-type hooks (and the deprecated `flow_contribution_for` escape valve), calling the target library's pure methods directly rather than reimplementing them (ADR-39: `Plugin::Inflector` over the real `ActiveSupport::Inflector`; `Base.suggest` for did-you-mean), and shipping `sig/*.rbs` so the DSL's types are visible. |
 | 3 | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) | **Phase 3.** Testing a plugin from outside the monorepo — fixture projects driven through `rigor check --format json`, plus pure unit tests of dispatch tables — with RSpec or Minitest. Version pinning against the pre-1.0 contract. README. Publishing to RubyGems or keeping the plugin private. |

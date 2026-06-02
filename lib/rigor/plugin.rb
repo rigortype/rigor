@@ -11,6 +11,7 @@ require_relative "plugin/services"
 require_relative "plugin/base"
 require_relative "plugin/registry"
 require_relative "plugin/load_error"
+require_relative "plugin/inflector"
 
 module Rigor
   module Plugin

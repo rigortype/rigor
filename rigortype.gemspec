@@ -44,6 +44,15 @@ Gem::Specification.new do |spec|
   spec.add_dependency "prism", ">= 1.0", "< 2.0"
   spec.add_dependency "rbs", ">= 3.0", "< 5.0"
 
+  # ADR-39 — the bundled Rails plugins (`rigor-activerecord`,
+  # `rigor-rails-routes`, `rigor-actionpack`) invoke the real
+  # `ActiveSupport::Inflector` for authoritative inflection rather than
+  # reimplementing them. The production dependency lives on each
+  # plugin's own gemspec; listed here as a development dep so the repo's
+  # integration spec suite can exercise the shared `Plugin::Inflector`
+  # end-to-end without users of `rigortype` paying the cost
+  # (ADR-0 zero-runtime-dep; same pattern as `rbs-inline` below).
+  spec.add_development_dependency "activesupport", ">= 7.0", "< 9.0"
   spec.add_development_dependency "parallel_tests", ">= 4.0", "< 6.0"
   spec.add_development_dependency "rake", ">= 13.0", "< 15.0"
   # ADR-32 — the `rigor-rbs-inline` plugin under `plugins/`

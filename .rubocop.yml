@@ -96,6 +96,10 @@ Naming/FileName:
   Exclude:
     - "examples/**/*"
     - "plugins/**/*"
+    # Out-of-tree plugin fixture: its `lib/rigor-external-demo.rb`
+    # gem entry deliberately mirrors the kebab gem name a real
+    # third-party `rigor-*` gem ships (see external_plugin_spec).
+    - "spec/fixtures/external_plugin/**/*"
 
 # Demo entry points (`demo.rb`, `errors_demo.rb`) deliberately call
 # into the plugin's discovery surface as top-level scripts rather

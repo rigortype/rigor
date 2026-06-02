@@ -11,6 +11,18 @@ rigor <command> [options] [arguments]
 the installed version. An unknown command, or a malformed
 option, exits `64` — the conventional "usage error" code.
 
+> **Commands**
+> [check](#rigor-check) · [init](#rigor-init) ·
+> [annotate](#rigor-annotate) · [type-of](#rigor-type-of) ·
+> [type-scan](#rigor-type-scan) · [explain](#rigor-explain) ·
+> [diff](#rigor-diff) · [sig-gen](#rigor-sig-gen) ·
+> [lsp](#rigor-lsp) · [baseline](#rigor-baseline) ·
+> [triage](#rigor-triage) · [coverage](#rigor-coverage) ·
+> [mcp](#rigor-mcp) · [plugins](#rigor-plugins) ·
+> [plugin](#rigor-plugin) · [playground](#rigor-playground) ·
+> [skill](#rigor-skill) · [lsp vs mcp](#rigor-lsp-vs-rigor-mcp) ·
+> [exit codes](#exit-codes)
+
 ## `rigor check`
 
 Analyse Ruby source for type errors and report diagnostics.
@@ -32,7 +44,7 @@ the `paths:` list from the configuration file.
 | `--clear-cache` | Delete the cache directory before running. |
 | `--cache-stats` | Print the on-disk cache inventory when finished. |
 | `--[no-]stats` | Print a run summary (files, classes, memory, wall time) to stderr. Default on. |
-| `--workers=N` | Dispatch analysis across `N` Ractor workers. Default `0` (sequential). |
+| `--workers=N` | Dispatch analysis across `N` parallel worker processes (fork-based pool today; ADR-15). Default `0` (sequential). |
 | `--baseline=PATH` | Load a baseline file, overriding config. |
 | `--no-baseline` | Ignore any configured baseline. |
 | `--baseline-strict` | Fail the run on any baseline drift — a CI gate. |
@@ -61,7 +73,7 @@ expression it evaluates to, as a trailing `#=> dump_type:`
 comment. See [Inspecting inferred types](05-inspecting-types.md).
 
 ```sh
-rigor annotate [--no-color] [--config=PATH] FILE
+rigor annotate [--[no-]color] [--config=PATH] FILE
 ```
 
 `FILE` is required. Colour is auto-detected for a tty and

@@ -141,7 +141,9 @@ Phases 1–4 landed (String / Integer / Float / Comparable / Math / HashShape / 
 
 ## Documentation overhaul (parallel track — in flight, doc-only)
 
-A user-friendliness pass over the **user-facing** docs, run with the `doc-coauthoring` workflow. Doc-only; touches no engine/spec code. ~36 commits since `824d5a30`, all on `master`, **not pushed**. `make verify` is unaffected (no code changed); the discipline here is per-file Markdown + a cold-read verification subagent, not the test suite.
+A user-friendliness pass over the **user-facing** docs, run with the `doc-coauthoring` workflow. Doc-only; touches no engine/spec code. All commits on `master`, **not pushed**. `make verify` is unaffected (no code changed); the discipline here is per-file Markdown + a cold-read verification subagent, not the test suite.
+
+> **Continuing the plugin migration?** The complete, self-contained method — the (ii) layout, the **reconcile-don't-copy rule + the catalog of recurring stale patterns**, the house style, link-path conventions, verification, and the recommended (hybrid scout) execution shape — is in [`docs/notes/20260603-plugin-doc-migration-playbook.md`](notes/20260603-plugin-doc-migration-playbook.md). Read it + the checklist below; together they replace the originating session's accumulated context so a fresh / rewound session continues at the same quality.
 
 ### Done (committed)
 

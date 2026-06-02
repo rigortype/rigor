@@ -52,7 +52,7 @@ habitually, point `cache.path` at a disposable directory.
 
 ## Concurrency
 
-The cache is safe to share. Parallel Ractor workers
+The cache is safe to share. Parallel worker processes
 (`--workers=N`) and multiple editor LSP sessions against the
 same project coordinate through atomic, locked writes; the LSP
 opens the cache read-only, so it never races a `rigor check`

@@ -11,6 +11,32 @@ This page is descriptive, not normative. When the formal language
 here disagrees with the [type
 specification](../type-specification/README.md), the spec binds.
 
+> **In this appendix**
+> [Five-second pitch](#five-second-pitch) ·
+> [The type lattice](#the-type-lattice) ·
+> [Set-theoretic foundations](#set-theoretic-foundations-of-the-lattice) ·
+> [Subtyping and gradual consistency](#subtyping-and-gradual-consistency) ·
+> [Nominal vs structural](#nominal-vs-structural-typing) ·
+> [Polymorphism](#polymorphism) ·
+> [F-bounded polymorphism and self types](#f-bounded-polymorphism-and-self-types) ·
+> [Object shapes / row polymorphism](#object-shapes--row-polymorphism-hack-and-hashshapes-lineage) ·
+> [Variance](#variance) ·
+> [Refinement types and predicate subtyping](#refinement-types-and-predicate-subtyping) ·
+> [Occurrence typing](#occurrence-typing-flow-sensitive-narrowing) ·
+> [Pattern matching and exhaustiveness](#pattern-matching-and-exhaustiveness) ·
+> [Gradual typing](#gradual-typing) ·
+> [Blame and trust boundaries](#blame-the-gradual-guarantee-and-trust-boundaries) ·
+> [Effect systems](#effect-systems) ·
+> [Soundness vs completeness](#soundness-completeness-and-the-no-false-positives-stance) ·
+> [Decidability of inference](#decidability-of-inference) ·
+> [Hindley–Milner and principal types](#hindleymilner-principal-types-and-rigors-inference-architecture) ·
+> [Bidirectional type checking](#bidirectional-type-checking) ·
+> [Beyond pure inference](#beyond-pure-inference-reach-and-precision) ·
+> [The expression problem](#the-expression-problem-and-rigors-plugin-contract) ·
+> [Smaller connections, in brief](#smaller-connections-in-brief) ·
+> [What Rigor does NOT model](#what-rigor-does-not-model) ·
+> [Reading list](#a-short-reading-list)
+
 ## Five-second pitch
 
 | Question | Type-theory term | Rigor surface |

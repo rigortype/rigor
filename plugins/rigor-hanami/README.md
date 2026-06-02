@@ -1,76 +1,18 @@
 # rigor-hanami
 
 Tier 3 of Rigor's ecosystem plugin family. Enforces the
-**Hanami::Action protocol** — every class under `app/actions/`
-must define `#handle(request, response)` — and provides
-`Hanami::Action::Request` / `Hanami::Action::Response` type
-information into action bodies via the
+**Hanami::Action protocol** — every class under `app/actions/` must
+define `#handle(request, response)` — and provides
+`Hanami::Action::Request` / `Hanami::Action::Response` type information
+into action bodies via the
 [ADR-28 path-scoped method-protocol contract](../../docs/adr/28-path-scoped-protocol-contracts.md)
-extension point. No `hanami` runtime dependency.
+extension point. No `hanami` runtime dependency (it ships RBS stubs).
 
-## What it checks
-
-Given an action class:
-
-```ruby
-# app/actions/books/index.rb
-module Bookshelf
-  module Actions
-    module Books
-      class Index < Bookshelf::Action
-        def handle(request, response)
-          response.status = 200
-          response.body = "ok"
-        end
-      end
-    end
-  end
-end
-```
-
-The plugin validates:
-
-1. **Method presence** — every class under `app/actions/**/*.rb`
-   must define `#handle`. Missing definitions emit
-   `missing-handle-method`.
-
-2. **Parameter type provision** — inside the `#handle` body,
-   `request` is typed `Hanami::Action::Request` and `response`
-   is typed `Hanami::Action::Response`. Misuse (e.g.
-   `request.no_such_method`) surfaces as a standard engine
-   `call.undefined-method` diagnostic — the same as if the
-   types had been declared explicitly in RBS.
-
-Return-type conformance is **not** checked — `#handle` is void
-by contract (the response is mutated in-place), so checking the
-return value would generate false positives on every conditional
-branch.
-
-## Diagnostics
-
-| Event | Severity | Rule |
-| --- | --- | --- |
-| action class defines no `#handle` | `:error` | `missing-handle-method` |
-| `request` / `response` misuse in body | core engine diagnostic | (e.g. `call.undefined-method`) |
-
-## Configuration
-
-```yaml
-plugins:
-  - gem: rigor-hanami
-    config:
-      action_path: "app/actions/**/*.rb"   # default; optional
-```
-
-Override `action_path` if your project places actions elsewhere
-(e.g. a custom slice layout):
-
-```yaml
-plugins:
-  - gem: rigor-hanami
-    config:
-      action_path: "slices/main/actions/**/*.rb"
-```
+> **Using this plugin?** The user guide — what it checks, the
+> diagnostic catalogue, configuration, and limitations — lives in the
+> manual at
+> [docs/manual/plugins/rigor-hanami.md](../../docs/manual/plugins/rigor-hanami.md).
+> This README covers the plugin's internals.
 
 ## How it works (ADR-28 provide-and-check)
 
@@ -89,12 +31,39 @@ ProtocolContract.new(
 ```
 
 **Provide half (engine-side):** when Rigor's
-`Inference::MethodParameterBinder` encounters a `#handle`
-definition inside a file matching `app/actions/**/*.rb`, it
-substitutes `Hanami::Action::Request` for the first parameter
-and `Hanami::Action::Response` for the second, instead of the
-usual `Dynamic[Top]` fallback. This means type errors inside
-action bodies are caught precisely.
+`Inference::MethodParameterBinder` encounters a `#handle` definition
+inside a file matching the glob, it substitutes
+`Hanami::Action::Request` for the first parameter and
+`Hanami::Action::Response` for the second, instead of the usual
+`Dynamic[Top]` fallback — so type errors inside action bodies are
+caught precisely as core `call.undefined-method` diagnostics.
 
-**Check half (plugin-side):** this plugin's
-`#diagnostics_for_file` hook confirms that `#handle` is defined.
+**Check half (plugin-side):** the plugin's `#diagnostics_for_file` hook
+confirms each class in a matching file defines `#handle` with exactly
+two parameters, emitting `missing-handle-method` / `handle-arity-mismatch`.
+
+The `action_path` config key is folded into the contract set at `init`
+(via `with_path_glob`) and surfaced through the `#protocol_contracts`
+override, so an override reaches both the provide and check halves
+(ADR-28 WD5).
+
+## Plugin authoring surface this exercises
+
+| Surface | Used for |
+| --- | --- |
+| `manifest(... protocol_contracts:)` (ADR-28) | The load-bearing surface — declares the `#handle` parameter-type contract scoped to `app/actions/**/*.rb`. |
+| `manifest(... config_schema:)` | The `action_path` glob override (static fallback to the manifest glob in `init`). |
+| `manifest(... signature_paths: ["sig"])` (ADR-25) | Loads the bundled `sig/hanami_action.rbs` stubs for Request / Response / Params. |
+| `#protocol_contracts` override | Folds the per-project `action_path` into the contract set so the override reaches the engine's provide tier. |
+| `#diagnostics_for_file` | The ADR-28 check half — delegates to `ActionChecker`. |
+
+## RBS stubs
+
+`sig/hanami_action.rbs` covers the documented `Hanami::Action::Request`
+/ `Response` / `Params` surface, self-contained (no `Rack::Request` /
+`Rack::Response` inheritance), so the plugin works whether or not Rack
+RBS is present in the analysed project.
+
+## License
+
+MPL-2.0, matching the parent Rigor project.

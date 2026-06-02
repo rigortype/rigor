@@ -1,116 +1,77 @@
 # rigor-rspec-rails
 
 Rigor plugin that validates [rspec-rails](https://github.com/rspec/rspec-rails)
-**behavioral** matchers whose arguments are statically
-checkable. Sibling to `rigor-rspec` (Pillar 2 Slice 1) and
-`rigor-minitest`, but covers a different shape: instead of
-narrowing a local's static type, it emits domain-specific
+**behavioral** matchers whose arguments are statically checkable.
+Sibling to `rigor-rspec` and `rigor-minitest`, but a different shape:
+instead of narrowing a local's static type, it emits domain-specific
 diagnostics on matcher argument typos / out-of-range values.
 
-## What the plugin recognises (v0.1.0)
-
-### `have_http_status(int_or_symbol)`
-
-```ruby
-RSpec.describe HomeController do
-  it "returns 200" do
-    get :index
-    expect(response).to have_http_status(200)          # OK
-    expect(response).to have_http_status(:ok)          # OK
-    expect(response).to have_http_status(:success)     # OK (Rails alias for 2xx)
-    expect(response).to have_http_status(99)           # warning: out-of-range
-    expect(response).to have_http_status(:succes)      # warning: typo
-  end
-end
-```
-
-Rules fired:
-
-| Rule                                | Trigger                                                                                    |
-|-------------------------------------|--------------------------------------------------------------------------------------------|
-| `have_http_status.out-of-range`     | `IntegerNode` arg outside `100..599`                                                       |
-| `have_http_status.unknown-symbol`   | `SymbolNode` arg not in Rack's status-code keys nor a Rails status-group alias             |
-
-### What's accepted as a status symbol
-
-The HTTP status symbols come from the **real**
-`Rack::Utils::SYMBOL_TO_STATUS_CODE` (the same authority
-`have_http_status` resolves through `Rack::Utils.status_code`),
-read at analysis time rather than vendored — so a newly-added
-Rack status symbol is never mistaken for a typo
-([ADR-39](../../docs/adr/39-plugin-target-library-invocation.md):
-depend on the target library's real facts, never an
-approximation). When Rack cannot be loaded the plugin
-**declines** to flag any symbol (reduced coverage, never a
-false `unknown-symbol`). Rails' eight status-group aliases —
-`:success`, `:successful`, `:missing`, `:redirect`, `:error`,
-`:client_error`, `:server_error`, `:informational` — are a
-small, stable Rails convention set, kept as a constant in
-`lib/rigor/plugin/rspec_rails/http_status_codes.rb`. The gem
-declares `rack` as a dependency (an rspec-rails project already
-pulls it via `actionpack`).
+> **Using this plugin?** The user guide — the recognised matcher, the
+> diagnostic catalogue, and limitations — lives in the manual at
+> [docs/manual/plugins/rigor-rspec-rails.md](../../docs/manual/plugins/rigor-rspec-rails.md).
+> This README covers the plugin's internals.
 
 ## Why this is a separate plugin from rigor-rspec
 
-`rigor-rspec` (Pillar 2 Slice 1) handles the **type-narrowing**
-matchers — `be_a` / `be_kind_of` / `be_nil` / `eq(literal)` etc.
-— ones that refine a local's static type so downstream calls
-in the same `it` body resolve at the narrowed type.
+`rigor-rspec` handles the **type-narrowing** matchers — `be_a` /
+`be_kind_of` / `be_nil` / `eq(literal)` — that refine a local's static
+type so downstream calls in the same `it` body resolve at the narrowed
+type.
 
-`rigor-rspec-rails` handles the **behavioral** matchers — ones
-that assert runtime state (HTTP status, rendered template,
-route shape) without narrowing a type. The two plugins are
-activated independently in `.rigor.yml`.
+`rigor-rspec-rails` handles the **behavioral** matchers — ones that
+assert runtime state (HTTP status, rendered template, route shape)
+without narrowing a type. The two plugins activate independently in
+`.rigor.yml` and compose.
 
-## Configuration
+## The status-symbol authority (ADR-39)
 
-No knobs in v0.1.0. Activate via:
+The accepted HTTP status symbols come from the **real**
+`Rack::Utils::SYMBOL_TO_STATUS_CODE` (the same authority
+`have_http_status` resolves through), read at analysis time rather than
+vendored — so a newly-added Rack status symbol is never mistaken for a
+typo ([ADR-39](../../docs/adr/39-plugin-target-library-invocation.md):
+depend on the target library's real facts, never an approximation).
+When Rack cannot be loaded the plugin **declines** to flag any symbol
+(reduced coverage, never a false `unknown-symbol`). Rails' eight
+status-group aliases are a small, stable constant set kept in
+`lib/rigor/plugin/rspec_rails/http_status_codes.rb`.
 
-```yaml
-# .rigor.yml
-plugins:
-  - rigor-rspec
-  - rigor-rspec-rails
-```
+## Plugin authoring surface this exercises
 
-The two plugins compose: `rigor-rspec` provides matcher
-narrowing on the type-narrowing matchers, `rigor-rspec-rails`
-provides the diagnostic on `have_http_status` typos.
+| Surface | Used for |
+| --- | --- |
+| `node_rule(Prism::CallNode)` (ADR-37) | Per-call validation of every `have_http_status(...)` over the engine-owned walk. |
+| `Plugin::Base#diagnostic` (`location: node.message_loc`) | Points the diagnostic at the matcher name, not the receiver-spanning whole call. |
+| Target-library invocation (ADR-39) | Lazy `require "rack/utils"` with a graceful no-flag fallback when Rack is absent. |
+| `Plugin::Base.suggest` | Did-you-mean suggestion for the `unknown-symbol` diagnostic. |
 
 ## Deferred matchers (rspec-rails surface)
 
-Queued for follow-up slices — each needs cross-plugin
-coordination or overlaps with an existing rigor diagnostic:
+Queued for follow-up slices — each needs cross-plugin coordination or
+overlaps with an existing rigor diagnostic:
 
-- **`render_template(...)`** — overlaps with `rigor-actionpack`'s
-  render-target validation (`render :show` against the view
-  tree). A future slice would coordinate to avoid double-firing.
-- **`route_to(...)` / `redirect_to(...)`** — needs the routes
-  table from `rigor-rails-routes` (`:helper_table` cross-plugin
-  fact, ADR-9). Future slice.
+- **`render_template(...)`** — overlaps `rigor-actionpack`'s
+  render-target validation. A future slice would coordinate to avoid
+  double-firing.
+- **`route_to(...)` / `redirect_to(...)` / `be_routable`** — need the
+  routes table from `rigor-rails-routes` (`:helper_table`, ADR-9).
 - **`have_enqueued_job(JobClass)` / `have_enqueued_mail(MailerClass)`** —
-  class-existence overlaps with engine's
-  `inference.unresolved-constant`. Queued behind a decision
-  on which surface owns the diagnostic.
-- **`have_received(:method)`** — overlaps with engine's
-  `call.undefined-method`. Same coordination question.
-- **`be_routable`** — needs routes table.
-- **`match_response_schema(...)`** (rswag / OpenAPI) — out of
-  scope; a separate plugin would consume the project's
-  OpenAPI definitions.
+  class-existence overlaps with the engine's `inference.unresolved-constant`.
+- **`have_received(:method)`** — overlaps `call.undefined-method`.
+- **`match_response_schema(...)`** (rswag / OpenAPI) — a separate plugin
+  consuming the project's OpenAPI definitions.
 
 ## Layout
 
 ```text
 plugins/rigor-rspec-rails/
 ├── README.md
-├── rigor-rspec-rails.gemspec
 ├── lib/
 │   ├── rigor-rspec-rails.rb
 │   └── rigor/plugin/
 │       ├── rspec_rails.rb                       ← Plugin::RspecRails class
 │       └── rspec_rails/
-│           ├── http_status_codes.rb             ← vendored Rack/Rails symbol catalogue
+│           ├── http_status_codes.rb             ← Rack lookup + Rails alias constant
 │           └── have_http_status_analyzer.rb     ← recognizer + diagnostic builder
 └── demo/
     ├── .rigor.yml

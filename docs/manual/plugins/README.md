@@ -62,6 +62,23 @@ The full catalogue, with a one-line scope for every plugin, is
   through Minitest / Test::Unit assertions and spec matchers.
 - [rigor-graphql](rigor-graphql.md) — GraphQL-Ruby type / enum / input
   / mutation table publication (cross-plugin facts, no diagnostics).
+- [rigor-rspec-rails](rigor-rspec-rails.md) — `have_http_status`
+  argument validation (out-of-range codes, unknown status symbols).
+- [rigor-shoulda-matchers](rigor-shoulda-matchers.md) — shoulda matcher
+  column / association validation against the AR model index.
+- [rigor-hanami](rigor-hanami.md) — Hanami::Action `#handle` protocol
+  enforcement + request/response parameter typing (ADR-28).
+- [rigor-typescript-utility-types](rigor-typescript-utility-types.md) —
+  `Pick` / `Omit` / `Partial` / … mapped onto Rigor shape projections.
+- [rigor-rbs-inline](rigor-rbs-inline.md) — ingests `# @rbs` inline
+  comments as enforced RBS contracts (ADR-32).
+- [rigor-activesupport-core-ext](rigor-activesupport-core-ext.md) —
+  opt-in RBS bundle for ActiveSupport core_ext (the biggest Rails FP source).
+
+The browser **playground** (`rigor playground`) is infrastructure, not
+a checker plugin — it has no page here; see the
+[CLI reference](../02-cli-reference.md) and
+[ADR-29](../../adr/29-browser-playground.md).
 
 _Per-plugin pages are being migrated here from each plugin's
 in-tree `README.md`. Until a plugin has a page above, its

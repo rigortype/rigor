@@ -229,7 +229,7 @@ end
 # receiver, so #dup returns `self` (Array[Integer]), not the
 # widened Object. Returning Object would *weaken* the postcondition.
 copy = [1, 2, 3].dup
-assert_type(copy, "Array[Integer]")
+assert_type("Array[Integer]", copy)
 ```
 
 The connection to the type-theory appendix's **gradual guarantee**

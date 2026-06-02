@@ -147,7 +147,7 @@ def classify(n)
 end
 
 result = classify(7)
-assert_type(result, "Constant<:zero> | Constant<:positive> | Constant<:negative>")
+assert_type("Constant<:zero> | Constant<:positive> | Constant<:negative>", result)
 ```
 
 Both checkers infer the same precise union. The TypeScript

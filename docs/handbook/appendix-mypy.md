@@ -135,7 +135,7 @@ inline.
 | `mypy_path` config | `signature_paths:` in `.rigor.yml` |
 | `py.typed` marker | (no analogue — Rigor checks any file under `paths:`) |
 | `from __future__ import annotations` | (no analogue — RBS is always lazy by virtue of file separation) |
-| Reveal type: `reveal_type(x)` | `dump_type(x)` (info diagnostic) / `assert_type(x, "...")` |
+| Reveal type: `reveal_type(x)` | `dump_type(x)` (info diagnostic) / `assert_type("...", x)` |
 
 `reveal_type` and `dump_type` are the same tool with different
 names — both emit the inferred type at the call site as a
@@ -211,7 +211,7 @@ def classify(n)
 end
 
 result = classify(7)
-assert_type(result, "Constant<:zero> | Constant<:positive> | Constant<:negative>")
+assert_type("Constant<:zero> | Constant<:positive> | Constant<:negative>", result)
 ```
 
 Same precision; one writes the parameter and return

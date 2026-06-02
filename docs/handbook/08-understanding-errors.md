@@ -99,7 +99,7 @@ modules, resolved cross-file). They are the conceptual subject of
 
 | Rule | Fires when | Default severity |
 | --- | --- | --- |
-| `assert.type-mismatch` | An `assert_type(value, "expected")` call's actual inferred type does not match the expected string. | error |
+| `assert.type-mismatch` | An `assert_type("expected", value)` call's actual inferred type does not match the expected string. | error |
 
 ### `dump.*` — debug helpers
 

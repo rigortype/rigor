@@ -11,10 +11,11 @@ Rigor models it precisely:
 
 ```ruby
 parsed = JSON.parse('{"name": "Alice"}')
-assert_type(parsed,
+assert_type(
   "Array[json::value[String]] | Float | " \
   "Hash[String, json::value[String]] | Integer | " \
-  "String | false | nil | true")
+  "String | false | nil | true",
+  parsed)
 ```
 
 The mechanism behind this — and the one that lets you wire the

@@ -303,7 +303,7 @@ harness uses) and emits a `dump.type` diagnostic naming the
 inferred type. Use it during debugging to confirm a narrowing
 fired.
 
-`assert_type(value, "expected-string")` is the stricter
+`assert_type("expected-string", value)` is the stricter
 sibling: it emits a diagnostic when the inferred type does
 NOT match the string. It is what the handbook examples use to
 pin behaviour.

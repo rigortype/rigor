@@ -174,7 +174,7 @@ Snippet conventions:
 
 ```ruby
 n = 1 + 2
-assert_type(n, "Constant<3>")  # Rigor folds the literal sum
+assert_type("Constant<3>", n)  # Rigor folds the literal sum
 ```
 
 means: at the `assert_type` call, Rigor's inference for `n` is

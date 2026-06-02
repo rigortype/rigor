@@ -185,7 +185,7 @@ examples:
 ```ruby
 n = 100
 m = n + 1
-assert_type(m, "Constant<101>")     # arithmetic folds
+assert_type("Constant<101>", m)     # arithmetic folds
 ```
 
 ```ruby
@@ -195,7 +195,7 @@ def kind(x)
   when String  then :str
   end
 end
-assert_type(kind(7), "Constant<:int>")  # narrowing folds the case
+assert_type("Constant<:int>", kind(7))  # narrowing folds the case
 ```
 
 ```ruby

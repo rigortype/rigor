@@ -13,6 +13,13 @@ and publishes the resulting `{aliased_name => underlying_class_name}`
 table as the `:dry_type_aliases` [ADR-9](../../docs/adr/9-cross-plugin-api.md)
 cross-plugin fact. Foundation gem for the `rigor-dry-*` family.
 
+> **Using this plugin?** The user guide — what it makes resolvable,
+> and the (no-diagnostics / no-config) usage note — lives in the
+> manual at
+> [docs/manual/plugins/rigor-dry-types.md](../../docs/manual/plugins/rigor-dry-types.md).
+> This README covers the plugin's internals (the scan, the
+> published table, and the slice floor/ceiling).
+
 ## What the plugin does
 
 For source like
@@ -108,8 +115,11 @@ The **ceiling** (future slices):
 
 ## What the plugin does NOT do (yet)
 
-- Recognise user-authored compositions or `.constrained(...)` /
-  `.optional` / `.default(...)` chaining (deferred to slice 2+).
+- Resolve unions (`String | Integer`), intersections, or
+  transitive composition references (`ManagerEmail = Email`) —
+  there is no single underlying class to publish. (Single-head
+  compositions like `Email = String.constrained(...)` ARE
+  recognised as of slice 3.)
 - Emit `dry-types.*` diagnostics (deferred to demand).
 - Round-trip the alias table through the cache descriptor —
   `prepare(services)` re-scans on every run. A descriptor entry

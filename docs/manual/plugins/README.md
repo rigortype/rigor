@@ -25,6 +25,14 @@ The full catalogue, with a one-line scope for every plugin, is
   attachment-accessor typing on AR models.
 - [rigor-activejob](rigor-activejob.md) — `Job.perform_*` argument
   arity against the discovered `#perform`.
+- [rigor-actionmailer](rigor-actionmailer.md) — mailer action
+  existence / arity and missing-view-template detection.
+- [rigor-factorybot](rigor-factorybot.md) — factory + attribute
+  (+ AR column) validation for `FactoryBot.create` / `build` / ….
+- [rigor-rails](rigor-rails.md) — convenience grouping of the seven
+  Tier 1+2 Rails plugins (not a checker itself).
+- [rigor-dry-types](rigor-dry-types.md) — `Types::*` alias
+  resolution; the dry-rb foundation (no diagnostics of its own).
 - [rigor-rspec](rigor-rspec.md) — RSpec `let` / `subject`
   duplicate and self-reference checks.
 - [rigor-sorbet](rigor-sorbet.md) — read an existing Sorbet

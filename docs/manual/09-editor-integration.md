@@ -14,6 +14,15 @@ design + capability matrix lives in
 (v2). Packaging rationale is in
 [`docs/adr/19-language-server-packaging.md`](../adr/19-language-server-packaging.md).
 
+> **In this chapter**
+> [Features](#features-at-a-glance) ·
+> [Prerequisites](#prerequisites) ·
+> [CLI](#cli) ·
+> Editor wiring — [Neovim](#neovim--nvim-lspconfig) · [VS Code](#vs-code--generic-lsp-client) · [Helix](#helix) · [Emacs / Eglot](#emacs--eglot) · [Emacs / lsp-mode](#emacs--lsp-mode) ·
+> [Troubleshooting](#troubleshooting) ·
+> [Performance](#performance-expectations) ·
+> [Status & roadmap](#status--roadmap)
+
 ## Features at a glance
 
 | LSP method | Behaviour |
@@ -97,10 +106,9 @@ legacy bundler-based install, set `cmd = { 'bundle', 'exec', 'rigor', 'lsp' }`.
 
 ### VS Code — generic LSP client
 
-There's no first-party VS Code extension yet. Use a generic LSP
-client wrapper such as
-[`vscode-languageclient-generic`](https://marketplace.visualstudio.com/items?itemName=mads-hartmann.bash-ide-vscode-tooltips)
-or write a minimal extension that registers the server:
+There's no first-party VS Code extension yet. Use a generic
+LSP-client wrapper extension, or write a minimal extension that
+registers the server:
 
 ```ts
 // extension.ts (minimal example)

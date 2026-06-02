@@ -172,13 +172,13 @@ jobs:
     if: always() && needs.self-check.result != 'cancelled'
     steps:
       - name: Download warm diagnostics
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: rigor-diagnostics-warm
           path: .
 
       - name: Download cold diagnostics
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: rigor-diagnostics-cold
           path: .

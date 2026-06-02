@@ -80,7 +80,7 @@ a checker plugin — it has no page here; see the
 [CLI reference](../02-cli-reference.md) and
 [ADR-29](../../adr/29-browser-playground.md).
 
-_Per-plugin pages are being migrated here from each plugin's
-in-tree `README.md`. Until a plugin has a page above, its
-user-facing docs live in its
-[`plugins/<name>/README.md`](../../../plugins/README.md)._
+_Every bundled checker plugin has a page above; each plugin's in-tree
+[`README.md`](../../../plugins/README.md) now covers its internals
+(layout, architecture, the contract surfaces it exercises) and links
+back up to its page here._

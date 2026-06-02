@@ -2,6 +2,7 @@
 
 require "did_you_mean"
 require "prism"
+require "rigor/source/literals"
 
 module Rigor
   module Plugin
@@ -349,10 +350,7 @@ module Rigor
         end
 
         def literal_symbol_or_string(node)
-          case node
-          when Prism::SymbolNode then node.value
-          when Prism::StringNode then node.unescaped
-          end
+          Rigor::Source::Literals.symbol_or_string_name(node)
         end
 
         def filter_lookup_violation(call_node, arg_node, filter_name, methods, spell_checker, ambiguous_filters:)

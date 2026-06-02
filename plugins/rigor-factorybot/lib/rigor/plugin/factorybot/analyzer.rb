@@ -2,6 +2,7 @@
 
 require "did_you_mean"
 require "prism"
+require "rigor/source/literals"
 
 module Rigor
   module Plugin
@@ -69,11 +70,7 @@ module Rigor
         end
 
         def first_positional_symbol_or_string(call_node)
-          first_arg = call_node.arguments&.arguments&.first
-          case first_arg
-          when Prism::SymbolNode then first_arg.value
-          when Prism::StringNode then first_arg.unescaped
-          end
+          Rigor::Source::Literals.symbol_or_string_name(call_node.arguments&.arguments&.first)
         end
 
         def violations_for_call(call_node, factory_name, entry, spell_checker, model_index)

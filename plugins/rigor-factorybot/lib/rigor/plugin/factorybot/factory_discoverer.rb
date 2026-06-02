@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "rigor/source/literals"
 
 require_relative "factory_index"
 
@@ -112,11 +113,7 @@ module Rigor
         end
 
         def literal_name_arg(call_node)
-          first_arg = call_node.arguments&.arguments&.first
-          case first_arg
-          when Prism::SymbolNode then first_arg.value
-          when Prism::StringNode then first_arg.unescaped
-          end
+          Rigor::Source::Literals.symbol_or_string_name(call_node.arguments&.arguments&.first)
         end
 
         # Pillar 2 Slice 3 — resolve the model class name for

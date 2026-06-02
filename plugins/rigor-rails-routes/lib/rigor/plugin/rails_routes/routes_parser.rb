@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "rigor/source/literals"
 
 require_relative "helper_table"
 
@@ -527,11 +528,7 @@ module Rigor
         # auto-pairing in `parse` adds `name_url`). Only handled
         # for literal Symbol or String first-arg.
         def handle_direct(node, context)
-          first = node.arguments&.arguments&.first
-          name = case first
-                 when Prism::SymbolNode then first.unescaped
-                 when Prism::StringNode then first.unescaped
-                 end
+          name = Rigor::Source::Literals.symbol_or_string_name(node.arguments&.arguments&.first)
           return if name.nil? || name.empty?
 
           block = node.block
@@ -739,7 +736,8 @@ module Rigor
             next if child.receiver
 
             (child.arguments&.arguments || []).each do |arg|
-              skips << arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode)
+              sym = Rigor::Source::Literals.symbol(arg)
+              skips << sym if sym
             end
           end
           skips

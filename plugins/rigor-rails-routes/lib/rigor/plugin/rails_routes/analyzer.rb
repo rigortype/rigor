@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "rigor/source/literals"
 
 module Rigor
   module Plugin
@@ -150,8 +151,9 @@ module Rigor
           return unless SHADOWING_DSL.include?(call_node.name)
 
           arg = call_node.arguments&.arguments&.first
-          if arg.is_a?(Prism::SymbolNode)
-            names << arg.unescaped
+          name = Rigor::Source::Literals.symbol_name(arg)
+          if name
+            names << name
           elsif call_node.name == :subject && call_node.arguments.nil?
             # Bare `subject { ... }` defines `:subject` itself.
             names << "subject"

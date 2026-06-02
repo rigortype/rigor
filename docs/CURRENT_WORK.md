@@ -29,7 +29,7 @@ The 6 remaining Mastodon errors are all unrelated to engine precision: 5 nil-rec
 
 Only non-gating ergonomics follow-ons remain — see Branch D below.
 
-**Also in flight (doc-only, parallel track):** a user-friendliness overhaul of the user-facing docs (handbook + manual + `docs/types.md`, now flowing into per-plugin docs). It is independent of the engine/plugin-contract work above and has its own resume section at the end of this file — see [§ "Documentation overhaul"](#documentation-overhaul-parallel-track--in-flight-doc-only).
+**Also done (doc-only, parallel track):** a user-friendliness overhaul of the user-facing docs (handbook + manual + `docs/types.md` + all 30 per-plugin pages — complete). Independent of the engine/plugin-contract work above; its resume section at the end of this file has the full record and two flagged plugin-code review items — see [§ "Documentation overhaul"](#documentation-overhaul-parallel-track--in-flight-doc-only).
 
 ## Reading order for a returning implementer
 

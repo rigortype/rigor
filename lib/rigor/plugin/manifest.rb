@@ -41,7 +41,7 @@ module Rigor
         end
       end
 
-      attr_reader :id, :version, :description, :protocols, :config_schema, :produces, :consumes,
+      attr_reader :id, :version, :description, :protocols, :config_schema, :config_defaults, :produces, :consumes,
                   :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
                   :heredoc_templates, :nested_class_templates, :trait_registries, :external_files,
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
@@ -96,7 +96,8 @@ module Rigor
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
         @protocols = protocols.map(&:to_sym).freeze
-        @config_schema = config_schema.to_h { |k, v| [k.to_s.dup.freeze, v.to_sym] }.freeze
+        @config_schema = config_schema.to_h { |k, v| [k.to_s.dup.freeze, schema_kind(v)] }.freeze
+        @config_defaults = extract_config_defaults(config_schema)
         @produces = produces.map(&:to_sym).freeze
         @consumes = coerce_consumes(consumes)
         @owns_receivers = owns_receivers.map { |c| c.to_s.dup.freeze }.freeze
@@ -162,6 +163,7 @@ module Rigor
           "description" => description,
           "protocols" => protocols.map(&:to_s),
           "config_schema" => config_schema.to_h { |k, v| [k, v.to_s] },
+          "config_defaults" => config_defaults,
           "produces" => produces.map(&:to_s),
           "consumes" => consumes.map { |c| consumption_hash(c) },
           "owns_receivers" => owns_receivers,
@@ -217,13 +219,62 @@ module Rigor
                 "plugin manifest config_schema must be a Hash, got #{schema.inspect}"
         end
 
-        schema.each_value do |kind|
-          next if VALID_VALUE_KINDS.include?(kind.to_sym)
+        schema.each do |key, value|
+          kind = schema_kind(value)
+          unless VALID_VALUE_KINDS.include?(kind)
+            raise ArgumentError,
+                  "plugin manifest config_schema value kind must be one of " \
+                  "#{VALID_VALUE_KINDS.inspect}, got #{value.inspect}"
+          end
+
+          next unless schema_default?(value)
+
+          default = schema_default(value)
+          next if value_matches?(default, kind)
 
           raise ArgumentError,
-                "plugin manifest config_schema value kind must be one of " \
-                "#{VALID_VALUE_KINDS.inspect}, got #{kind.inspect}"
+                "plugin manifest config_schema default for #{key.to_s.inspect} expected " \
+                "#{kind}, got #{default.class}"
         end
+      end
+
+      # ADR-40 — a `config_schema` value is either a bare kind
+      # (`Symbol`/`String`, the original form) or a `{kind:, default:}`
+      # Hash. These three helpers read whichever shape was given.
+      def schema_kind(value)
+        if value.is_a?(Hash)
+          kind = value[:kind] || value["kind"]
+          if kind.nil?
+            raise ArgumentError,
+                  "plugin manifest config_schema entry Hash must declare :kind, got #{value.inspect}"
+          end
+
+          kind.to_sym
+        elsif value.is_a?(Symbol) || value.is_a?(String)
+          value.to_sym
+        else
+          raise ArgumentError,
+                "plugin manifest config_schema value must be a kind Symbol/String or a " \
+                "{kind:, default:} Hash, got #{value.inspect}"
+        end
+      end
+
+      def schema_default?(value)
+        value.is_a?(Hash) && (value.key?(:default) || value.key?("default"))
+      end
+
+      def schema_default(value)
+        value.key?(:default) ? value[:default] : value["default"]
+      end
+
+      def extract_config_defaults(schema)
+        schema.each_with_object({}) do |(key, value), acc|
+          acc[key.to_s.dup.freeze] = value_default_frozen(schema_default(value)) if schema_default?(value)
+        end.freeze
+      end
+
+      def value_default_frozen(default)
+        default.frozen? ? default : default.dup.freeze
       end
 
       def value_matches?(value, kind)

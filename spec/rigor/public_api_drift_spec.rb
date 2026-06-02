@@ -192,6 +192,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     ==(req:other)
     additional_initializers()
     block_as_methods()
+    config_defaults()
     config_schema()
     consumes()
     description()

@@ -46,6 +46,68 @@ RSpec.describe Rigor::Plugin::Manifest do
     end
   end
 
+  describe "config_schema defaults (ADR-40)" do
+    it "accepts the extended {kind:, default:} value form" do
+      manifest = described_class.new(
+        id: "states", version: "0.1.0",
+        config_schema: {
+          "dsl_method" => { kind: :string, default: "state_machine" },
+          "paths" => { kind: :array, default: ["app"] }
+        }
+      )
+
+      expect(manifest.config_schema).to eq({ "dsl_method" => :string, "paths" => :array })
+      expect(manifest.config_defaults).to eq({ "dsl_method" => "state_machine", "paths" => ["app"] })
+    end
+
+    it "leaves config_defaults empty for the bare-kind form" do
+      manifest = described_class.new(
+        id: "states", version: "0.1.0",
+        config_schema: { "dsl_method" => :string }
+      )
+
+      expect(manifest.config_defaults).to eq({})
+      expect(manifest.config_defaults).to be_frozen
+    end
+
+    it "omits a key that declares a kind but no default" do
+      manifest = described_class.new(
+        id: "states", version: "0.1.0",
+        config_schema: { "a" => { kind: :string, default: "x" }, "b" => { kind: :string } }
+      )
+
+      expect(manifest.config_defaults).to eq({ "a" => "x" })
+      expect(manifest.config_schema).to eq({ "a" => :string, "b" => :string })
+    end
+
+    it "validates the declared default against the declared kind" do
+      expect do
+        described_class.new(
+          id: "states", version: "0.1.0",
+          config_schema: { "dsl_method" => { kind: :string, default: 5 } }
+        )
+      end.to raise_error(ArgumentError, /default for "dsl_method" expected string/)
+    end
+
+    it "rejects a {kind:, default:} Hash that omits :kind" do
+      expect do
+        described_class.new(
+          id: "states", version: "0.1.0",
+          config_schema: { "dsl_method" => { default: "x" } }
+        )
+      end.to raise_error(ArgumentError, /must declare :kind/)
+    end
+
+    it "freezes default values" do
+      manifest = described_class.new(
+        id: "states", version: "0.1.0",
+        config_schema: { "name" => { kind: :string, default: "x" } }
+      )
+
+      expect(manifest.config_defaults["name"]).to be_frozen
+    end
+  end
+
   describe "#validate_config" do
     let(:manifest) do
       described_class.new(

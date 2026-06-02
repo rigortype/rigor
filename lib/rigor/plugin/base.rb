@@ -260,7 +260,7 @@ module Rigor
 
       def initialize(services:, config: {})
         @services = services
-        @config = config.freeze
+        @config = merge_config_defaults(config).freeze
       end
 
       # Override in subclasses to wire any state the plugin needs
@@ -619,6 +619,19 @@ module Rigor
       end
 
       private
+
+      # ADR-40 — merge the manifest's declared `config_schema`
+      # `default:` values *under* the user-supplied config (user wins),
+      # so a plugin reads `config.fetch("key")` and gets the declared
+      # default with no `DEFAULT_*` constant. A class declared without a
+      # manifest (test doubles) keeps the raw config unchanged.
+      def merge_config_defaults(config)
+        unless self.class.instance_variable_defined?(:@manifest) && self.class.instance_variable_get(:@manifest)
+          return config
+        end
+
+        self.class.manifest.config_defaults.merge(config)
+      end
 
       # ADR-37 slice 2 — the class name to match a `dynamic_return`
       # `receivers:` entry against, from a receiver `Type`. Covers the

@@ -55,6 +55,22 @@ RSpec.describe Rigor::Plugin::Base do
       plugin = klass.new(services: services)
       expect(plugin.manifest).to eq(klass.manifest)
     end
+
+    it "merges manifest config_schema defaults under the user config (ADR-40)" do
+      klass = Class.new(described_class) do
+        manifest(
+          id: "demo", version: "0.1.0",
+          config_schema: {
+            "dsl_method" => { kind: :string, default: "state_machine" },
+            "state_method" => { kind: :string, default: "state" }
+          }
+        )
+      end
+
+      plugin = klass.new(services: services, config: { "state_method" => "phase" })
+      expect(plugin.config).to eq({ "dsl_method" => "state_machine", "state_method" => "phase" })
+      expect(plugin.config).to be_frozen
+    end
   end
 
   describe "#signature_paths (ADR-25)" do

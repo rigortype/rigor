@@ -1,5 +1,26 @@
 # Getting started
 
+By the end of this chapter you will be able to:
+
+- get `rigor` onto your `PATH` (the fast AI-assisted way, or
+  by hand);
+- run `rigor check` and read the diagnostics it prints;
+- understand the "no annotations needed" stance that sets
+  Rigor apart from most checkers — and the escape hatches for
+  when inference falls short.
+
+It is the only chapter you must read top to bottom. The rest
+of the handbook is reference you can dip into later.
+
+> **In this chapter**
+> [Installing Rigor](#installing-rigor) ·
+> [What `rigor check` looks at](#what-does-rigor-check-look-at) ·
+> [The smallest working session](#the-smallest-working-session) ·
+> [Reading a diagnostic](#reading-a-diagnostic) ·
+> [The "no annotations" stance](#the-no-annotations-stance) ·
+> [When inference is not enough](#when-inference-is-not-enough) ·
+> [The config file](#the-config-file)
+
 ## Installing Rigor
 
 Rigor is a tool, not a library — like a linter or a compiler, it
@@ -8,22 +29,50 @@ it to your application's `Gemfile`.** Install it on its own and
 point it at your project.
 
 Rigor itself runs on Ruby 4.0, independently of the Ruby your own
-code targets — the `target_ruby:` config key (see below) tells
-Rigor which Ruby *your* project runs.
+code targets — the [`target_ruby:` config key](#the-config-file)
+tells Rigor which Ruby *your* project runs.
 
-The recommended setup is the [`mise`](https://mise.jdx.dev/) runtime
-version manager, which provisions both Ruby 4.0 and Rigor:
+### The fast path: let an AI agent set it up
+
+If you work with an AI coding agent (Claude Code or any assistant
+that supports [Agent Skills](https://agentskills.io/)), hand it
+this prompt:
+
+```
+Install Rigor in this project by following the instructions at
+https://raw.githubusercontent.com/rigortype/rigor/refs/heads/master/docs/install.md
+```
+
+The agent detects your environment, installs Rigor, then runs the
+**`rigor-project-init` skill** — which walks your `Gemfile`,
+proposes a plugin set matched to your framework, picks an adoption
+mode, and writes `.rigor.dist.yml` for you. No manual YAML editing.
+This is the recommended path; the [config file](#the-config-file)
+section below shows what the skill produces so you can read and
+tweak it afterwards.
+
+The same prompt is available in sixteen languages in the
+[Rails quickstart](../manual/14-rails-quickstart.md#step-1--install-ruby-40-and-rigor-common-to-both-paths).
+
+### The manual path: mise
+
+If you prefer to drive the setup yourself, the recommended runtime
+version manager is [`mise`](https://mise.jdx.dev/), which
+provisions both Ruby 4.0 and Rigor:
 
 ```sh
 mise use ruby@4.0
 mise use gem:rigortype
 ```
 
-With mise activated in your shell, `rigor` is on your `PATH`. For
-shell activation and shims, `asdf`, `gem install`, and developing
-inside a container, see
-[Installing Rigor](../manual/01-installation.md); for
-continuous integration, see
+With mise activated in your shell, `rigor` is on your `PATH`. The
+gem is named `rigortype` (the name `rigor` was taken on RubyGems);
+the executable it installs is `rigor`. If you already have Ruby
+4.0, `gem install rigortype` works too.
+
+For shell activation and shims, `asdf`, and developing inside a
+container, see [Installing Rigor](../manual/01-installation.md);
+for continuous integration, see
 [Running Rigor in CI](../manual/11-ci.md).
 
 ## What does `rigor check` look at?
@@ -55,17 +104,37 @@ Drop into your project root and run:
 rigor check lib
 ```
 
-That walks every `.rb` under `lib/` and prints diagnostics —
-or `No diagnostics` when the analyzer found nothing to
-complain about.
+That walks every `.rb` under `lib/`. When the analyzer finds
+nothing to complain about, it prints `No diagnostics` and
+exits `0`:
 
-If you want to run on a single file:
+```text
+No diagnostics
+```
+
+When it does find something, each diagnostic is one line. Given
+this file:
+
+```ruby
+# lib/demo.rb
+"hello".no_such_method        # typo'd method name
+[1, 2, 3].rotate(1, 2)        # too many arguments
+```
+
+`rigor check lib/demo.rb` prints:
+
+```text
+lib/demo.rb:1:9: error: undefined method `no_such_method' for "hello" [call.undefined-method]
+lib/demo.rb:2:11: error: wrong number of arguments to `rotate' on Array (given 2, expected 0..1) [call.wrong-arity]
+```
+
+To run on a single file, pass the file instead of a directory:
 
 ```sh
 rigor check path/to/file.rb
 ```
 
-If you want to see what Rigor inferred at a precise position:
+And to ask what Rigor inferred at one precise position:
 
 ```sh
 rigor type-of lib/foo.rb:10:5
@@ -78,31 +147,33 @@ produces?"
 
 ## Reading a diagnostic
 
-Rigor diagnostics look like this:
+Take the first line from the run above:
 
 ```text
-lib/user.rb:42:7: error: undefined method `upcas' for "alice" [call.undefined-method]
+lib/demo.rb:1:9: error: undefined method `no_such_method' for "hello" [call.undefined-method]
 ```
 
 | Slice | Meaning |
 | --- | --- |
-| `lib/user.rb:42:7` | File, 1-indexed line, 1-indexed column |
+| `lib/demo.rb:1:9` | File, 1-indexed line, 1-indexed column |
 | `error` | Severity (`error` / `warning` / `info`) |
 | `undefined method ...` | Human-readable message |
 | `[call.undefined-method]` | The qualified rule identifier |
 
-The qualified rule identifier is what you use in:
+The qualified rule identifier is the handle you use to silence,
+demote, or look up a rule. The quickest is an in-source comment
+on the offending line:
 
-- `# rigor:disable call.undefined-method` (in-source
-  suppression at end of line);
-- the `disabled_rules:` key in `.rigor.yml`;
-- the `severity_overrides:` map (to demote a rule to
-  `:warning` or `:info`, or drop it entirely with `:off`).
+```ruby
+"hello".no_such_method  # rigor:disable call.undefined-method
+```
 
-Family wildcards work: `# rigor:disable call` suppresses every
-`call.*` rule on that line. The full list of families and
-rules is in [Chapter 8 — Understanding
-errors](08-understanding-errors.md).
+The same identifier also drives the `disabled_rules:` and
+`severity_overrides:` config keys, and family wildcards work
+(`# rigor:disable call` suppresses every `call.*` rule on that
+line). The full list of families and rules, and when to reach
+for each suppression mechanism, is in
+[Chapter 8 — Understanding errors](08-understanding-errors.md).
 
 ## The "no annotations" stance
 
@@ -140,6 +211,12 @@ hello    = "#{greeting}#{name}!"     # literal-string carrier:
 You did not write a single annotation. Rigor reasons about the
 values directly.
 
+> The `assert_type(...)` line is Rigor's introspection helper,
+> not a runtime check — it pins the inferred type at that point
+> so you can compare the prose to the analyzer's actual output.
+> See [How to read this handbook](README.md#how-to-read-this-handbook)
+> for the full snippet convention.
+
 When inference cannot prove a narrower type, the engine
 returns `Dynamic[Top]` (the gradual carrier — "could be any
 Ruby value") and stays silent. Rigor never invents
@@ -147,7 +224,14 @@ diagnostics it cannot prove.
 
 ## When inference is not enough
 
-There are three escape hatches, in order of how often you
+*First read? Skip this section.* Out of the box, inference plus
+any RBS your gems already ship covers most code, and the next
+chapters teach you to read what it produces. Come back here when
+Rigor resolves something to `Dynamic[Top]` that you wish it knew
+more about. For most projects only escape hatches (1) and (2)
+ever come up.
+
+There are five escape hatches, in rough order of how often you
 will need them:
 
 1. **Add an `.rbs` file.** Drop a signature into `sig/` and
@@ -167,7 +251,7 @@ will need them:
 4. **Opt in to gem-source inference.** When a no-RBS gem's
    methods would otherwise resolve to `Dynamic[Top]`, list
    the gem under `dependencies.source_inference:` in
-   `.rigor.yml` and Rigor will walk its `lib/` the same way
+   `.rigor.dist.yml` and Rigor will walk its `lib/` the same way
    it walks project source. Returns are wrapped in
    `Dynamic[T]` so the call site retains the provenance.
    See [ADR-10](../adr/10-dependency-source-inference.md)
@@ -183,17 +267,22 @@ will need them:
    and the translation table.
 
 Chapters 7 and 9 cover (1)–(3) in detail; chapter 10 covers
-(5). Most projects only need (1) and (2); (4) is for the long
-tail of utility gems that ship no signatures, and (5) is for
-projects arriving from Sorbet.
+(5).
 
-## A first walk through Rigor's config file
+## The config file
 
-`rigor init` writes a starter configuration to `.rigor.dist.yml`
+The minimum useful run needs no config file at all —
+`rigor check lib` works out of the box. A config file is for
+non-default behaviours: extra `paths`, an alternative
+`severity_profile`, project-wide rule disables, plugins.
+
+If you used the [AI-assisted setup](#the-fast-path-let-an-ai-agent-set-it-up),
+the `rigor-project-init` skill already wrote one for you. To
+write a starter by hand, `rigor init` emits `.rigor.dist.yml`
 — the project default that gets committed:
 
 ```yaml
-target_ruby: "3.4"
+target_ruby: "3.4"   # your project's Ruby — not Rigor's own 4.0
 
 paths:
   - lib
@@ -210,73 +299,16 @@ severity_profile: balanced
 # plugins: []
 ```
 
-The minimum useful run does not require any config file at all
-— `rigor check lib` works out of the box. The file is for
-non-default behaviours: extra `paths`, alternative
-`severity_profile`, project-wide rule disables, plugins.
-
-### Editor autocomplete
-
-The shipped file starts with a `# yaml-language-server: $schema=...`
-magic comment that points at
-[`schemas/rigor-config.schema.json`](../../schemas/rigor-config.schema.json).
-Editors that recognise the convention — VS Code's YAML
-extension, IntelliJ-family IDEs, Helix, Neovim with `yaml-ls`,
-others that follow [redhat-developer/yaml-language-server's
-spec](https://github.com/redhat-developer/yaml-language-server)
-— pick up the schema automatically and surface autocomplete,
-hover docs, and validation while you edit. `rigor init`-generated
-files carry an absolute GitHub URL so the schema works without a
-checked-out copy of Rigor's source.
-
-### Two file names, no implicit merge
-
-Rigor auto-discovers config in this order, reading the FIRST
-file found:
-
-| Priority | File | Purpose |
-| --- | --- | --- |
-| 1 | `.rigor.yml` | Developer-local override (typically gitignored). |
-| 2 | `.rigor.dist.yml` | Project default (committed to the repo). |
-
-**Both files are never merged automatically** — when a developer
-maintains a `.rigor.yml`, that file is the sole source of config
-for that developer's runs. To extend the project default
-explicitly, the override lists the dist file (and any others)
-under `includes:`:
-
-```yaml
-# .rigor.yml
-includes:
-  - .rigor.dist.yml
-
-# my own developer-local additions:
-disable:
-  - call.undefined-method   # I'm WIP, ignore this rule for now
-```
-
-`includes:` is processed in declaration order; later content
-overrides earlier. The CURRENT file's keys override every
-included file. This is the same shape PHPStan uses for its
-`.neon` config files.
-
-### Path resolution rules
-
-Every path-bearing key (`paths:`, `signature_paths:`,
-`plugins_io.allowed_paths:`, `includes:`) is resolved
-**relative to the directory of the config file that declares
-it**. So `paths: [lib]` in `<project>/.rigor.dist.yml` means
-`<project>/lib`; the same line in `<project>/sub/extra.yml`
-means `<project>/sub/lib`. Moving a config file to a different
-directory therefore changes only its own relative paths, not
-those declared by the file that includes it. This mirrors
-[PHPStan's path-resolution
-rule](https://phpstan.org/config-reference#paths).
-
-`cache.path:` is the one exception — it stays as the literal
-string the user wrote, because the value surfaces back to the
-user in `--cache-stats` / `--clear-cache` messages and a
-project-relative form reads better there.
+That is all most projects need. The remaining mechanics —
+editor autocomplete from the bundled JSON schema, the
+`.rigor.yml` vs `.rigor.dist.yml` precedence rule, `includes:`
+composition, and how path-bearing keys resolve relative to the
+declaring file — are covered in
+[Configuration](../manual/03-configuration.md). The one rule
+worth knowing up front: when a developer keeps a local
+`.rigor.yml`, it is the *sole* source of config for their runs
+(the two files are never merged automatically), so to extend
+the shared default it must list it under `includes:`.
 
 ## What's next
 

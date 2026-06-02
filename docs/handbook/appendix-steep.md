@@ -175,7 +175,7 @@ the same project and the diagnostic streams categorised.
 | `# steep:ignore` | `# rigor:disable all` |
 | `# steep:ignore Ruby::NoMethod` | `# rigor:disable call.undefined-method` |
 | (no file-scope syntax) | `# rigor:disable-file <rule>` |
-| `Steepfile`: per-target `ignore_paths:` | `.rigor.yml`: `disabled_rules:` (rule-scoped) |
+| `Steepfile`: per-target `ignore_paths:` | `.rigor.yml`: `disable:` (rule-scoped) |
 
 Rigor's suppression vocabulary is closer to PHPStan's and
 RuboCop's than to Steep's, but the intent matches.

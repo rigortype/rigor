@@ -168,7 +168,7 @@ on the offending line:
 "hello".no_such_method  # rigor:disable call.undefined-method
 ```
 
-The same identifier also drives the `disabled_rules:` and
+The same identifier also drives the `disable:` and
 `severity_overrides:` config keys, and family wildcards work
 (`# rigor:disable call` suppresses every `call.*` rule on that
 line). The full list of families and rules, and when to reach
@@ -294,7 +294,7 @@ severity_profile: balanced
 # severity_overrides:
 #   call.argument-type-mismatch: warning
 
-# disabled_rules: []
+# disable: []
 
 # plugins: []
 ```

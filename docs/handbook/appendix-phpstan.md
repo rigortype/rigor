@@ -19,7 +19,7 @@ unchanged. This appendix maps the vocabulary.
 | Where do annotations live? | PHPDoc `/** ... */` blocks | `.rbs` files alongside `.rb` |
 | Default behaviour | Inference, fall back silent | Inference, fall back silent |
 | "Levels" | 0 – 10 (numeric) | `lenient` / `balanced` / `strict` (named) |
-| Per-rule control | `ignoreErrors:` regex, level demotion | `disabled_rules:`, `severity_overrides:` |
+| Per-rule control | `ignoreErrors:` regex, level demotion | `disable:`, `severity_overrides:` |
 | Baseline | `phpstan-baseline.neon` | `rigor.baseline.json` |
 | Stub format | PHP stub files | RBS files |
 | Custom narrowing | Type-Specifying Extensions | Plugins (Chapter 9) |
@@ -135,7 +135,7 @@ severity controls, and includes.
 | `paths:` | `paths:` |
 | `level:` | `severity_profile:` |
 | `excludePaths:` | (no analogue today — paths are explicitly listed) |
-| `ignoreErrors:` (regex / pattern) | `disabled_rules:` (rule identifier or wildcard) |
+| `ignoreErrors:` (regex / pattern) | `disable:` (rule identifier or wildcard) |
 | `parameters: ignoreErrors:` per-path | `# rigor:disable-file <rule>` at the file head |
 | `includes:` | `includes:` |
 | `phpstan-baseline.neon` | `rigor.baseline.json` |

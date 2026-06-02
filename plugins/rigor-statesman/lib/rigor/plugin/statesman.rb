@@ -2,6 +2,7 @@
 
 require "prism"
 require "rigor/plugin"
+require "rigor/source/literals"
 
 module Rigor
   module Plugin
@@ -143,10 +144,7 @@ module Rigor
       end
 
       def literal_symbol_arg(call, index)
-        node = call.arguments.arguments[index]
-        return nil unless node.is_a?(Prism::SymbolNode)
-
-        node.unescaped.to_sym
+        Rigor::Source::Literals.symbol(call.arguments.arguments[index])
       end
     end
 

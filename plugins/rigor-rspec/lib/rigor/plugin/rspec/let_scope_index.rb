@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "rigor/source/literals"
 
 require_relative "scope_walker"
 
@@ -190,9 +191,8 @@ module Rigor
 
             return nil
           end
-          return nil unless first_arg.is_a?(Prism::SymbolNode)
 
-          first_arg.unescaped.to_sym
+          Rigor::Source::Literals.symbol(first_arg)
         end
       end
     end

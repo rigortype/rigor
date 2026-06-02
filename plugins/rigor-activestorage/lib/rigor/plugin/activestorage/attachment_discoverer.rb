@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require "rigor/source/literals"
 
 module Rigor
   module Plugin
@@ -126,13 +127,7 @@ module Rigor
         end
 
         def symbol_literal_arg(node)
-          args = node.arguments&.arguments
-          return nil if args.nil? || args.empty?
-
-          first = args.first
-          return nil unless first.is_a?(Prism::SymbolNode)
-
-          first.unescaped
+          Rigor::Source::Literals.symbol_name(node.arguments&.arguments&.first)
         end
 
         def constant_path_name(node)

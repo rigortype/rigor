@@ -90,20 +90,24 @@ Do NOT use this skill for:
 A Rigor plugin is a Ruby class that subclasses `Rigor::Plugin::Base`,
 declares a `manifest(id:, version:, …)`, and calls
 `Rigor::Plugin.register(self)` at load time. When `.rigor.yml` lists
-the plugin under `plugins:`, Rigor `require`s it and, for every
-analysed file, calls the plugin's `#diagnostics_for_file(path:,
-scope:, root:)` — handing it the file's Prism AST (`root`) and a
-`scope` it can query for inferred types. The plugin walks the AST and
-returns an array of `Rigor::Analysis::Diagnostic`. Optionally it also
-implements `#flow_contribution_for(call_node:, scope:)` to *supply* a
-return type for call sites the core analyzer types as `Dynamic`.
+the plugin under `plugins:`, Rigor `require`s it and runs its
+**node rules**: the plugin declares `node_rule(Prism::CallNode) { |node,
+scope, path, _fc, context| … }`, and the engine — which owns the single
+AST walk per file — hands every matching node to the block along with a
+`scope` it can query for inferred types. The block returns an array of
+`Rigor::Analysis::Diagnostic` (built via the `diagnostic` helper).
+Optionally the plugin also declares `dynamic_return(receivers:)` /
+`type_specifier(methods:)` to *supply* a return type or narrowing facts
+for call sites the core analyzer types as `Dynamic`. (The older
+`#diagnostics_for_file` / `#flow_contribution_for` fat hooks remain as
+deprecated escape valves — see Phase 2.)
 
 ## Phase outline
 
 | Phase | What | Reference |
 | --- | --- | --- |
 | 1 | Package and scaffold — gem vs project-private layout, gemspec / Gemfile, the plugin class skeleton, `.rigor.yml` activation. | [`references/01-plan-and-scaffold.md`](references/01-plan-and-scaffold.md) |
-| 2 | The walker — `diagnostics_for_file`, building `Diagnostic`s, querying `scope.type_of`, optional `flow_contribution_for`, RBS for the DSL. | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) |
+| 2 | Node rules — `node_rule` (engine-owned walk), building `Diagnostic`s via `Base#diagnostic`, querying `scope.type_of`, optional `dynamic_return` / `type_specifier`, RBS for the DSL. | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) |
 | 3 | Test and ship — fixture-based tests (RSpec / Minitest, no rigor internals), version pinning, README, publish or keep private. | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) |
 
 ## Reading order — modules
@@ -111,5 +115,5 @@ return type for call sites the core analyzer types as `Dynamic`.
 | Module | Read | Covers |
 | --- | --- | --- |
 | 1 | [`references/01-plan-and-scaffold.md`](references/01-plan-and-scaffold.md) | **Phase 1.** The gem vs project-private packaging split, directory trees for both, gemspec template, project-private path-gem / `RUBYLIB` activation, the `Rigor::Plugin::Base` skeleton, `.rigor.yml` `plugins:` wiring. |
-| 2 | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) | **Phase 2.** The `diagnostics_for_file` AST walk over Prism nodes, the `Diagnostic` constructor shape, asking the analyzer for inferred types via `scope.type_of`, the optional `flow_contribution_for` return-type hook, and shipping `sig/*.rbs` so the DSL's types are visible. |
+| 2 | [`references/02-walker-and-types.md`](references/02-walker-and-types.md) | **Phase 2.** The `node_rule` engine-owned AST walk over Prism nodes, the `Base#diagnostic` helper, asking the analyzer for inferred types via `scope.type_of`, two-pass / lexical context (`node_file_context` / `NodeContext`), the optional `dynamic_return` / `type_specifier` return-type hooks (and the deprecated `flow_contribution_for` escape valve), and shipping `sig/*.rbs` so the DSL's types are visible. |
 | 3 | [`references/03-test-and-ship.md`](references/03-test-and-ship.md) | **Phase 3.** Testing a plugin from outside the monorepo — fixture projects driven through `rigor check --format json`, plus pure unit tests of dispatch tables — with RSpec or Minitest. Version pinning against the pre-1.0 contract. README. Publishing to RubyGems or keeping the plugin private. |

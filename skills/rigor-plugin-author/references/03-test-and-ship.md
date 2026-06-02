@@ -114,9 +114,9 @@ SKILL.md). Concretely:
 - Your plugin's own version is normal semver, independent of
   `rigortype`'s.
 - When you bump the `rigortype` pin to a new minor, **re-run the
-  full test suite** — the walker hook signature or the `Diagnostic` /
-  type-carrier shapes may have changed. The fixture CLI tests are
-  what catch a contract drift.
+  full test suite** — the `node_rule` / contribution hook signatures
+  or the `Diagnostic` / type-carrier shapes may have changed. The
+  fixture CLI tests are what catch a contract drift.
 - State the supported `rigortype` range in the README so users do
   not pair the plugin with an incompatible Rigor.
 

@@ -184,10 +184,11 @@ module Rigor
         @module_name = config.fetch("module_name", "Default")
       end
 
-      # Called per analysed file. `root` is the file's Prism AST,
-      # `scope` answers inferred-type queries. Return an Array of
-      # Rigor::Analysis::Diagnostic. See 02-walker-and-types.md.
-      def diagnostics_for_file(path:, scope:, root:)
+      # The engine owns the AST walk and hands every matching node to
+      # this rule. `scope` answers inferred-type queries; return an
+      # Array of Rigor::Analysis::Diagnostic (built via `diagnostic`).
+      # See 02-walker-and-types.md.
+      node_rule Prism::CallNode do |node, scope, path, _file_context, _context|
         []
       end
     end
@@ -227,7 +228,7 @@ inert.
 
 ## Output of this module
 
-A scaffolded plugin that loads (even if `diagnostics_for_file` still
+A scaffolded plugin that loads (even if its `node_rule` still
 returns `[]`) and is activated in `.rigor.yml`. Proceed to Phase 2
 ([`02-walker-and-types.md`](02-walker-and-types.md)) to make it
 actually analyse.

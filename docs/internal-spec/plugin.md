@@ -82,16 +82,16 @@ as a `:plugin_loader` `runtime-error` diagnostic rather than crashing
 
 #### Node-scoped rules — `node_rule` / `#node_rule_diagnostics` (ADR-37)
 
-`node_rule(node_type) { |node, scope, path, file_context| … }` is a
-class-level DSL (the `producer`-style shape) declaring a node-scoped
-diagnostic rule. The engine walks each analysed file's AST **once**
-and dispatches every node where `node.is_a?(node_type)` to the rule,
-so the plugin author writes the check and never the traversal — this
-is what lets a plugin drop the hand-rolled `def walk` /
+`node_rule(node_type) { |node, scope, path, file_context, context| … }`
+is a class-level DSL (the `producer`-style shape) declaring a
+node-scoped diagnostic rule. The engine walks each analysed file's AST
+**once** and dispatches every node where `node.is_a?(node_type)` to the
+rule, so the plugin author writes the check and never the traversal —
+this is what lets a plugin drop the hand-rolled `def walk` /
 `compact_child_nodes.each` recursion. The block runs through
 `instance_exec` (so `self` is the plugin instance — `config`,
 `services`, `services.fact_store`, `diagnostic` are all in scope),
-receives `(node, scope, path, file_context)`, and returns an
+receives `(node, scope, path, file_context, context)`, and returns an
 `Array<Rigor::Analysis::Diagnostic>` (empty to fire nothing).
 `node_type` MUST be a `Prism::Node` subclass. Multiple rules per type
 run in declaration order. The engine invokes them through the
@@ -99,6 +99,19 @@ instance method `#node_rule_diagnostics(path:, scope:, root:)`, which
 the runner calls alongside `#diagnostics_for_file` under the same
 `plugin.<id>` stamping and per-plugin exception isolation; a plugin
 that declares no rules pays zero cost.
+
+The **fifth** block argument, `context` (ADR-37 Slice 1d), is a
+`Rigor::Plugin::NodeContext` carrying the node's lexical ancestor chain
+— the `ContextInfo` ADR-2 promised. It exposes `#ancestors` (the full
+chain, outermost first, excluding the node) plus the conveniences
+`#enclosing_def`, `#enclosing_module`, and `#enclosing_block(name)`. A
+rule reads it when the check depends on *where* the node sits: the
+enclosing controller a `before_action` / `render` belongs to
+(`rigor-actionpack` re-derives the namespace-qualified controller name
+from `context.ancestors`), the `describe <Model>` a matcher is under
+(`rigor-shoulda-matchers`), or the action a lazy `t('.key')` expands
+against (`rigor-rails-i18n`). Blocks that take fewer parameters simply
+ignore the trailing arguments (back-compat).
 
 `node_file_context { |root, scope| … }` supports two-pass
 (collect-then-validate) plugins. It runs once per file (via
@@ -133,11 +146,48 @@ project and call `services.fact_store.publish(...)`; the loader's
 topological ordering guarantees a producer's `prepare` runs before
 any consumer's. The default is a no-op.
 
+#### Return-type and narrowing contributions — `dynamic_return` / `type_specifier` (ADR-37 Slice 2)
+
+`flow_contribution_for` was consulted at exactly two engine sites, each
+reading exactly one slot of the returned bundle: `MethodDispatcher`
+reads `.return_type` (the per-call-site return type) and
+`StatementEvaluator` reads `.post_return_facts` (assertion-edge
+narrowing). ADR-37 Slice 2 splits those two consumption sites into two
+narrow, declaratively-gated class DSLs — the `producer`-style shape, so
+the block carries logic and runs through `instance_exec`:
+
+- `dynamic_return(receivers:) { |call_node, scope| Type | nil }` — the
+  per-call-site **return type**, gated on the receiver's class. The
+  engine calls the block only when the call's receiver type's class
+  equals or inherits from a declared `receivers:` entry (matched via
+  `Environment#class_ordering`); first non-`nil` wins. The engine
+  invokes it through `#dynamic_return_type(call_node:, scope:,
+  receiver_type:)`. `rigor-mangrove` (unwrap → carried `type_args[0]`)
+  is the worked consumer.
+- `type_specifier(methods:) { |call_node, scope| facts | nil }` —
+  **post-return narrowing facts**, gated on `call_node.name` being in
+  the declared `methods:`. The engine invokes it through
+  `#type_specifier_facts(call_node:, scope:)`. `rigor-minitest`
+  (assertion narrowing) and `rigor-rspec`'s matcher narrowing are the
+  worked consumers.
+
+`receivers:` / `methods:` are the greppable, indexable gates the
+`rigor plugins --capabilities` catalogue (ADR-37 § "Machine-readable
+capability catalogue") enumerates.
+
 `#flow_contribution_for(call_node:, scope:)` (ADR-9 / ADR-2) is the
-return-type contribution hook, consulted at the dispatcher's plugin
-tier. It returns a `Rigor::FlowContribution` (carrying a precise
-`return_type` and/or narrowing facts) for a recognised call edge, or
-`nil` to decline. The default returns `nil`.
+original fat return-type contribution hook, consulted at the same two
+sites **alongside** the narrow DSLs. It returns a
+`Rigor::FlowContribution` (carrying a precise `return_type` and/or
+narrowing facts), or `nil` to decline (the default). It is **the
+deprecated escape valve**, retained for the two contribution shapes the
+narrow DSLs deliberately do not express — a method-gated return type
+(`rigor-rspec`'s `let` / `subject` binding; `rigor-sorbet`'s
+sig-driven returns) and a dynamic per-project receiver set
+(`rigor-activestorage`'s `Attached::One` / `::Many` on discovered model
+classes). New plugins should prefer `dynamic_return` / `type_specifier`;
+`flow_contribution_for` is the documented last resort (the role
+PHPStan's `ExpressionTypeResolverExtension` plays).
 
 ### `Rigor::Plugin::Manifest`
 
@@ -297,16 +347,25 @@ following are now in place and are documented in their own specs:
   (`signature_paths:`, `open_receivers:`, `protocol_contracts:`,
   `source_rbs_synthesizer:`, the macro substrate, HKT,
   `additional_initializers:`) accreted across the `0.1.x` cycle.
-- **Interface segregation — node-scoped rules.** The `node_rule`
-  class DSL + `#node_rule_diagnostics` (the engine-owned walk) +
-  `node_file_context` (two-pass support) + the `#diagnostic` /
-  `Diagnostic.from_node` / `.from_location` author helpers shipped as
-  [ADR-37](../adr/37-plugin-interface-segregation.md) Slice 1. They
-  reframe `#diagnostics_for_file` as the whole-file escape valve and
-  are the first step of moving the imperative hooks onto narrow,
-  engine-gated surfaces; `#flow_contribution_for`'s split into
-  receiver-gated dynamic-return + method-gated type-specifying
-  extensions (Slice 2) is not yet shipped.
+- **Interface segregation** ([ADR-37](../adr/37-plugin-interface-segregation.md), Accepted).
+  - *Slice 1 / 1c / 1d* — the `node_rule` class DSL +
+    `#node_rule_diagnostics` (the engine-owned walk) + `node_file_context`
+    (two-pass support) + `NodeContext` (lexical ancestors) + the
+    `#diagnostic` / `Diagnostic.from_node` / `.from_location` author
+    helpers. These reframe `#diagnostics_for_file` as the whole-file
+    escape valve; **every bundled diagnostic-emitting plugin is migrated
+    onto `node_rule`** — `rigor-actionpack` (4 phases,
+    namespace-qualification-sensitive) was the last.
+  - *Slice 2* — `#flow_contribution_for`'s split into the receiver-gated
+    `dynamic_return` + method-gated `type_specifier` DSLs (documented
+    above), consulted alongside the now-deprecated fat hook; the
+    cleanly-fitting consumers (mangrove / minitest / rspec-matcher) are
+    migrated, the method-gated-return / dynamic-receiver consumers stay
+    on the escape valve by design.
+  - *Slice 3* — the `FactProvider` naming + the machine-readable
+    `rigor plugins --capabilities` catalogue (per plugin: node_rule node
+    types, dynamic_return receivers, type_specifier methods,
+    produced/consumed facts).
 - **Read-before-write nil gate.** `additional_initializers:`
   ([ADR-38](../adr/38-additional-initializers.md)) lets a plugin
   extend `ScopeIndexer`'s `initialize`-only ivar-seeding gate to

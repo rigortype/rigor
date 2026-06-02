@@ -39,6 +39,8 @@ The full catalogue, with a one-line scope for every plugin, is
   declarations; publishes the typed-key table (fact-only).
 - [rigor-dry-validation](rigor-dry-validation.md) — recognises
   `Dry::Validation::Contract` subclasses; result-API RBS overlay.
+- [rigor-sinatra](rigor-sinatra.md) — narrows the route-block
+  `self` so `params` / `redirect` / `halt` / … resolve.
 - [rigor-rspec](rigor-rspec.md) — RSpec `let` / `subject`
   duplicate and self-reference checks.
 - [rigor-sorbet](rigor-sorbet.md) — read an existing Sorbet

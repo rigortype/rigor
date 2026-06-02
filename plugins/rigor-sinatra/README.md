@@ -7,6 +7,11 @@ its bare identifiers (`params`, `redirect`, `halt`, `session`,
 `headers`, `content_type`, `body`, `status`, `erb`, …) resolve
 through `Sinatra::Base`'s RBS via rigor's normal inference path.
 
+> **Using this plugin?** The user guide lives in the manual at
+> [docs/manual/plugins/rigor-sinatra.md](../../docs/manual/plugins/rigor-sinatra.md).
+> This README covers the plugin's internals (the declarative
+> `BlockAsMethod` manifest + the macro substrate it rides on).
+
 This plugin is the **first worked consumer of the macro expansion
 substrate** (ADR-16 slice 1c). Its body is purely declarative —
 the entire manifest is a `Plugin::Macro::BlockAsMethod` entry:

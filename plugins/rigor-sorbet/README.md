@@ -1,5 +1,12 @@
 # rigor-sorbet (slices 1–8)
 
+> **Using this plugin?** The operational quick reference is
+> [docs/manual/plugins/rigor-sorbet.md](../../docs/manual/plugins/rigor-sorbet.md),
+> and the full walkthrough is
+> [handbook chapter 10 — Coexisting with Sorbet](../../docs/handbook/10-sorbet.md).
+> This README covers the plugin's internals (the slice-by-slice
+> implementation).
+
 The eighth worked example. Reads inline Sorbet `sig { ... }`
 blocks on first-party Ruby code and contributes the parsed
 return type at every call site, so chained calls
@@ -359,7 +366,6 @@ signal-to-noise ratio high during the early adoption period.
 ```text
 plugins/rigor-sorbet/
 ├── README.md
-├── rigor-sorbet.gemspec
 ├── lib/
 │   ├── rigor-sorbet.rb
 │   └── rigor/plugin/

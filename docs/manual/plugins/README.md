@@ -17,6 +17,9 @@ The full catalogue, with a one-line scope for every plugin, is
   finder / relation typing and schema-checked columns.
 - [rigor-rspec](rigor-rspec.md) — RSpec `let` / `subject`
   duplicate and self-reference checks.
+- [rigor-sorbet](rigor-sorbet.md) — read an existing Sorbet
+  codebase (`sig` blocks, RBI, `T.*` assertions) as a type
+  source (full guide: [handbook ch. 10](../../handbook/10-sorbet.md)).
 
 _Per-plugin pages are being migrated here from each plugin's
 in-tree `README.md`. Until a plugin has a page above, its

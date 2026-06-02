@@ -2,7 +2,19 @@
 
 This chapter is the catalogue of diagnostics Rigor ships, the
 families they belong to, and how to suppress one when it is
-wrong (or move its severity around).
+wrong (or move its severity around). It is the page to land on
+when a diagnostic surprises you — in either direction.
+
+> **In this chapter**
+> [Anatomy of a diagnostic](#anatomy-of-a-diagnostic) ·
+> [Rule catalogue](#the-rule-catalogue) — [`call.*`](#call--call-site-rules) · [`flow.*`](#flow--flow-analysis-rules) · [`def.*`](#def--method-definition-rules) · [`assert.*`](#assert--runtime-assertion-rules) · [`dump.*`](#dump--debug-helpers) ·
+> [Severity profiles](#severity-profiles) ·
+> [Per-rule overrides](#per-rule-overrides) ·
+> Suppression — [in source](#in-source-suppression) · [whole file](#file-scope-suppression) · [project-wide](#project-wide-suppression) ·
+> [Baseline diffing for CI](#baseline-diffing-for-ci) ·
+> [Didn't fire when expected?](#why-a-diagnostic-might-not-fire-when-you-expected-one) ·
+> [Fired unexpectedly?](#why-a-diagnostic-is-firing-when-you-think-it-should-not) ·
+> [Adoption workflow](#a-helpful-workflow)
 
 ## Anatomy of a diagnostic
 
@@ -21,7 +33,7 @@ stable identifier for the rule. Use it in:
 - `# rigor:disable <rule>` end-of-line suppressions in source
 - `# rigor:disable-file <rule>` file-scope suppressions
 - `severity_overrides:` in `.rigor.yml`
-- `disabled_rules:` in `.rigor.yml`
+- `disable:` in `.rigor.yml`
 
 Wildcards work — `# rigor:disable call` suppresses every
 `call.*` rule on that line.
@@ -191,7 +203,7 @@ work — the two compose, and any project-wide
 
 ```yaml
 # .rigor.yml
-disabled_rules:
+disable:
   - call.possible-nil-receiver
 ```
 
@@ -300,7 +312,7 @@ The pragmatic loop on a project that just adopted Rigor:
    b. **Missing / wrong RBS.** Update the sig or add a new
       one.
    c. **Genuine noise.** Add `# rigor:disable <rule>` on the
-      line, or `disabled_rules:` to `.rigor.yml`.
+      line, or `disable:` to `.rigor.yml`.
 3. Re-run. Repeat until the diagnostic stream is clean.
 4. Add `rigor check lib` to CI under the
    `balanced` profile (or stricter).

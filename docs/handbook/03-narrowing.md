@@ -11,6 +11,21 @@ edge, the variable's carrier is sharpened to whatever the
 predicate proved. If the predicate is unrecognised, both
 edges share the entry scope unchanged.
 
+> **In this chapter**
+> [Truthiness](#truthiness-narrowing) ·
+> [`nil?`](#nil-and-the-inverse) ·
+> [`is_a?` / `kind_of?` / `instance_of?`](#is_a-kind_of-instance_of) ·
+> [Literal equality](#equality-with-literal-values) ·
+> [`case` / `when`](#case--when) ·
+> [Boolean composition](#boolean-composition) ·
+> [Integer comparisons](#integer-comparisons) ·
+> [Predicate methods](#predicate-methods-on-refinements) ·
+> [Named-capture regex](#named-capture-regex-narrowing) ·
+> [Negation and `unless`](#negation-and-unless) ·
+> [Local rebinding](#local-rebinding-flips-the-narrowing) ·
+> [What's not narrowed yet](#whats-not-narrowed-yet) ·
+> [Reading a narrowing trace](#reading-a-narrowing-trace)
+
 ## Truthiness narrowing
 
 The simplest form. `if x` separates "x is truthy" from "x is
@@ -28,7 +43,7 @@ def shout(name)
 end
 ```
 
-This form is what makes `if value` so common in Ruby useful at
+This is what makes the ubiquitous `if value` idiom useful at
 lint time: inside the `if` body, Rigor knows `value` is
 non-nil.
 
@@ -121,7 +136,7 @@ unreachable when every member is matched.
 same way for the patterns Rigor understands — class checks,
 literal equality, array / hash structural patterns.
 
-## Boolean composition (`&&`, `||`, `!`)
+## Boolean composition
 
 ```ruby
 def safe_size(s)
@@ -198,7 +213,7 @@ def first_word(s)
 end
 ```
 
-## Named-capture regex narrowing (`if /(?<x>...)/ =~ str`)
+## Named-capture regex narrowing
 
 When a regex with named captures matches in the predicate
 position of `if` / `unless`, the captured locals are bound to
@@ -221,7 +236,7 @@ carriers — so `\d{4}` would produce `decimal-int-string` — is a
 demand-driven follow-up on the regex-pattern → refinement-name
 recogniser track; see [`docs/ROADMAP.md`](../ROADMAP.md).)
 
-## `!=` and `unless`
+## Negation and `unless`
 
 Both are mechanical mirrors of their non-negated forms.
 `unless x` is `if !x` for narrowing purposes; `x != y` is
@@ -264,8 +279,7 @@ today:
 - Method-chain receivers in `self`-targeted directives
   (`get_user.admin?`) — there is no scope binding to narrow
   against. Local, instance-variable, explicit-`self`, and
-  implicit-self receivers are all supported (v0.1.1 Track 1
-  slice 3).
+  implicit-self receivers are all supported.
 
 When narrowing is not recognised, both edges share the entry
 scope unchanged — Rigor stays conservative rather than

@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout Rigor
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: false
 
@@ -68,7 +68,7 @@ jobs:
       # Restore the Rigor analysis cache to skip re-analysing unchanged files
       # across weekly runs (ADR-6). Key encodes Rigor source + Mastodon tag.
       - name: Restore Rigor analysis cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/mastodon/.rigor/cache
           key: rigor-oss-mastodon-${{ steps.mastodon_tag.outputs.tag }}-${{ hashFiles('lib/**/*.rb', 'data/builtins/**/*.yml', 'Gemfile.lock') }}
@@ -127,7 +127,7 @@ jobs:
       # weekly runs even when no gate fires.
       - name: Upload sweep artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oss-sweep-mastodon-${{ steps.mastodon_tag.outputs.tag }}-${{ github.run_id }}
           retention-days: 90

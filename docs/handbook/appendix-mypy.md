@@ -8,6 +8,21 @@ type-stub files (`.pyi` / `.rbs`) — but they make different
 choices about where annotations live and how aggressive
 inference is.
 
+> **In this appendix**
+> [Five-second pitch](#the-five-second-pitch) ·
+> [Type vocabulary mapping](#type-vocabulary-mapping) ·
+> [Refinement carriers](#refinement-carriers-vs-python-annotation-idioms) ·
+> [Narrowing](#narrowing--the-part-that-feels-familiar) ·
+> [Stubs ↔ RBS](#stubs--rbs) ·
+> [Severity & strict mode](#severity-suppression-and-strict-mode) ·
+> [Pyright vs Rigor](#pyright-vs-rigor) ·
+> ["No annotations needed"](#no-annotations-needed--true-here-too) ·
+> [Generics](#generics) ·
+> [Protocols ↔ RBS interfaces](#protocols--rbs-interfaces) ·
+> [What mypy/Pyright have, Rigor doesn't](#what-mypy--pyright-have-and-rigor-does-not) ·
+> [What Rigor has, mypy/Pyright don't](#what-rigor-has-and-mypy--pyright-do-not) ·
+> [Migration vignette](#a-migration-vignette)
+
 ## The five-second pitch
 
 | Question | mypy / Pyright | Rigor |
@@ -38,7 +53,7 @@ mypy got right.
 | `bytes` | `String` (with binary encoding) | Ruby has no separate `bytes` type. |
 | `None` | `Constant<nil>` | `nil` is Ruby's sole no-value. |
 | `Any` | `Dynamic[Top]` | "Stay silent" carrier. |
-| `object` | `Object` (or `Top`) | `object` in Python is "any non-None"; Rigor's nearest match is `Top`. |
+| `object` | `Object` (or `Top`) | `object` is Python's universal supertype (everything, `None` included); Rigor's nearest match is `Top`. |
 | `Never` / `NoReturn` | `Bot` | Empty type. |
 | `Optional[T]` / `T \| None` | `T?` (i.e., `T \| nil`) | |
 | `Union[A, B]` / `A \| B` | `A \| B` | Same display. |

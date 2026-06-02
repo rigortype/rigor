@@ -10,6 +10,19 @@ short discussion of the places where the two systems make
 genuinely different choices — those are the places where your
 TypeScript reflexes will mislead you.
 
+> **In this appendix**
+> [Five-second pitch](#the-five-second-pitch) ·
+> [Type vocabulary mapping](#type-vocabulary-mapping) ·
+> [Narrowing](#narrowing--the-part-that-feels-familiar) ·
+> [Refinement carriers](#refinement-carriers--the-part-that-does-not-exist-in-typescript) ·
+> ["No annotations needed"](#no-annotations-needed-in-practice) ·
+> [Generics](#generics) ·
+> [Nullability](#nullability) ·
+> [Severity & strict mode](#severity-suppression-and-strict-mode) ·
+> [What TS has, Rigor doesn't](#what-typescript-has-and-rigor-does-not) ·
+> [What Rigor has, TS doesn't](#what-rigor-has-and-typescript-does-not) ·
+> [Migration vignette](#a-migration-vignette)
+
 ## The five-second pitch
 
 | Question | TypeScript | Rigor |

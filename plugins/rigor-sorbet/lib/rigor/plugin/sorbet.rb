@@ -76,29 +76,29 @@ module Rigor
         version: "0.1.0",
         description: "Ingests Sorbet `sig` blocks as method-signature contributions.",
         config_schema: {
+          # `paths` keeps a `fetch`-with-default in `init` because its
+          # default is dynamic (the project's configured `paths`), not a
+          # static literal the manifest can declare.
           "paths" => :array,
-          "rbi_paths" => :array,
-          "enforce_sigil" => :boolean
+          # Default RBI directory tree. Matches the layout `tapioca init`
+          # generates — see Sorbet's `rbi.md`. Slice 4 walks every `.rbi`
+          # file under these roots recursively; the four standard Tapioca
+          # subdirectories (`gems` / `annotations` / `dsl` / `shims`) are
+          # picked up as a side effect of recursing into the parent root.
+          "rbi_paths" => { kind: :array, default: ["sorbet/rbi"] },
+          "enforce_sigil" => { kind: :boolean, default: true }
         }
       )
-
-      # Default RBI directory tree. Matches the layout
-      # `tapioca init` generates — see Sorbet's `rbi.md`. Slice 4
-      # walks every `.rbi` file under these roots recursively;
-      # the four standard Tapioca subdirectories
-      # (`gems` / `annotations` / `dsl` / `shims`) are picked
-      # up as a side effect of recursing into the parent root.
-      DEFAULT_RBI_PATHS = ["sorbet/rbi"].freeze
 
       def init(services)
         @services = services
         @configured_paths = Array(config.fetch("paths", services.configuration.paths)).map(&:to_s)
-        @rbi_paths = Array(config.fetch("rbi_paths", DEFAULT_RBI_PATHS)).map(&:to_s)
-        # Default `true` — only files marked `# typed: true` /
+        @rbi_paths = Array(config.fetch("rbi_paths")).map(&:to_s)
+        # Schema default `true` — only files marked `# typed: true` /
         # `:strict` / `:strong` contribute their sigs. Set to
         # `false` to record every file's sigs regardless of
         # sigil (current behaviour pre-this-config).
-        @enforce_sigil = config.fetch("enforce_sigil", true)
+        @enforce_sigil = config.fetch("enforce_sigil")
         # ADR-11 deferred follow-up — per-call-site assertion
         # gating. Catalog harvest's `@sigil_by_path` cache is
         # consulted at every `flow_contribution_for` call so

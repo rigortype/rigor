@@ -68,9 +68,9 @@ module Rigor
         version: "0.5.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
-          "schema_file" => :string,
-          "model_search_paths" => :array,
-          "model_base_classes" => :array
+          "schema_file" => { kind: :string, default: "db/schema.rb" },
+          "model_search_paths" => { kind: :array, default: ["app/models"] },
+          "model_base_classes" => { kind: :array, default: %w[ApplicationRecord ActiveRecord::Base] }
         },
         produces: [:model_index],
         # ADR-25 — the bundled `ActiveRecord::Relation` RBS, the
@@ -85,10 +85,6 @@ module Rigor
         # field and skips the rule for the class.
         open_receivers: ["ActiveRecord::Relation"]
       )
-
-      DEFAULT_SCHEMA_FILE = "db/schema.rb"
-      DEFAULT_MODEL_SEARCH_PATHS = ["app/models"].freeze
-      DEFAULT_MODEL_BASE_CLASSES = %w[ApplicationRecord ActiveRecord::Base].freeze
 
       # The class the bundled `sig/active_record/relation.rbs`
       # describes; `flow_contribution_for` contributes
@@ -116,9 +112,9 @@ module Rigor
       end
 
       def init(_services)
-        @schema_file = config.fetch("schema_file", DEFAULT_SCHEMA_FILE)
-        @model_search_paths = Array(config.fetch("model_search_paths", DEFAULT_MODEL_SEARCH_PATHS)).map(&:to_s)
-        @model_base_classes = Array(config.fetch("model_base_classes", DEFAULT_MODEL_BASE_CLASSES)).map(&:to_s)
+        @schema_file = config.fetch("schema_file")
+        @model_search_paths = Array(config.fetch("model_search_paths")).map(&:to_s)
+        @model_base_classes = Array(config.fetch("model_base_classes")).map(&:to_s)
         @schema_table = nil
         @model_index = nil
         @load_errors = []

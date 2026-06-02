@@ -59,15 +59,11 @@ module Rigor
         version: "0.4.0",
         description: "Validates ActionMailer call shape and view template existence.",
         config_schema: {
-          "mailer_search_paths" => :array,
-          "mailer_base_classes" => :array,
-          "views_root" => :string
+          "mailer_search_paths" => { kind: :array, default: ["app/mailers"] },
+          "mailer_base_classes" => { kind: :array, default: %w[ApplicationMailer ActionMailer::Base] },
+          "views_root" => { kind: :string, default: "app/views" }
         }
       )
-
-      DEFAULT_MAILER_SEARCH_PATHS = ["app/mailers"].freeze
-      DEFAULT_MAILER_BASE_CLASSES = %w[ApplicationMailer ActionMailer::Base].freeze
-      DEFAULT_VIEWS_ROOT = "app/views"
 
       producer :mailer_index do |_params|
         MailerDiscoverer.new(
@@ -79,9 +75,9 @@ module Rigor
       end
 
       def init(_services)
-        @mailer_search_paths = Array(config.fetch("mailer_search_paths", DEFAULT_MAILER_SEARCH_PATHS)).map(&:to_s)
-        @mailer_base_classes = Array(config.fetch("mailer_base_classes", DEFAULT_MAILER_BASE_CLASSES)).map(&:to_s)
-        @views_root = config.fetch("views_root", DEFAULT_VIEWS_ROOT).to_s
+        @mailer_search_paths = Array(config.fetch("mailer_search_paths")).map(&:to_s)
+        @mailer_base_classes = Array(config.fetch("mailer_base_classes")).map(&:to_s)
+        @views_root = config.fetch("views_root").to_s
         @mailer_index = nil
         @load_error = nil
       end

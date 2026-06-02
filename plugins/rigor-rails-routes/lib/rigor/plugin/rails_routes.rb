@@ -66,28 +66,25 @@ module Rigor
         version: "0.27.0",
         description: "Validates Rails route-helper calls against `config/routes.rb`.",
         config_schema: {
-          "routes_file" => :string,
-          "helper_paths" => :array
+          "routes_file" => { kind: :string, default: "config/routes.rb" },
+          # `helper_paths` — the directories `HelperDiscoverer` walks
+          # for project-defined `*_path` / `*_url` methods. Default to
+          # the whole `app/` tree — the suffix filter inside the
+          # discoverer keeps the registered set tight, and real-world
+          # Rails apps routinely keep URL builders under
+          # `app/controllers` (private `def page_url`, `def callback_url`
+          # shapes), `app/lib` (Mastodon's
+          # `TranslationService::DeepL#base_url`), `app/services`
+          # (`SoftwareUpdateCheckService#api_url`), `app/serializers`,
+          # `app/presenters`, `app/decorators`, not only `app/helpers/`.
+          # Walking the whole tree is the honest answer to "does this
+          # `_path` / `_url` name exist anywhere in the project?"; the
+          # cost is a one-time Prism parse per file at startup, which is
+          # bounded.
+          "helper_paths" => { kind: :array, default: ["app"] }
         },
         produces: [:helper_table]
       )
-
-      DEFAULT_ROUTES_FILE = "config/routes.rb"
-
-      # The directories `HelperDiscoverer` walks for project-
-      # defined `*_path` / `*_url` methods. Default to the whole
-      # `app/` tree — the suffix filter inside the discoverer
-      # keeps the registered set tight, and real-world Rails
-      # apps routinely keep URL builders under `app/controllers`
-      # (private `def page_url`, `def callback_url` shapes),
-      # `app/lib` (Mastodon's `TranslationService::DeepL#base_url`),
-      # `app/services` (`SoftwareUpdateCheckService#api_url`),
-      # `app/serializers`, `app/presenters`, `app/decorators`,
-      # not only `app/helpers/`. Walking the whole tree is the
-      # honest answer to "does this `_path` / `_url` name exist
-      # anywhere in the project?"; the cost is a one-time Prism
-      # parse per file at startup, which is bounded.
-      DEFAULT_HELPER_PATHS = ["app"].freeze
 
       # Cached producer — reads `config/routes.rb` through
       # the trusted `IoBoundary` and parses through
@@ -110,8 +107,8 @@ module Rigor
       end
 
       def init(_services)
-        @routes_file = config.fetch("routes_file", DEFAULT_ROUTES_FILE)
-        @helper_paths = Array(config.fetch("helper_paths", DEFAULT_HELPER_PATHS)).map(&:to_s)
+        @routes_file = config.fetch("routes_file")
+        @helper_paths = Array(config.fetch("helper_paths")).map(&:to_s)
         @helper_table = nil
         @load_error = nil
       end

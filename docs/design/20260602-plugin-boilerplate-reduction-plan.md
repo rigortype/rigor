@@ -63,6 +63,14 @@ core's own copies, so it pays off on both sides of the plugin boundary.
   merges declared defaults so the `DEFAULT_*`-constant idiom retires.
 - **0e `Rigor::Plugin::Inflector`** — one inflection module; retires the
   routes (×2), activerecord, actionmailer / actionpack `underscore` copies.
+  **Reframed by [ADR-39](../adr/39-plugin-target-library-invocation.md):**
+  the `singularize`/`pluralize` copies are FP-sensitive (they feed
+  route-helper / model name resolution), so rather than unify the
+  approximations the module calls the **real `ActiveSupport::Inflector`**
+  through an allow-list + rescue harness, ingesting project-custom rules
+  by statically parsing `config/initializers/inflections.rb`. The pure
+  `underscore` casing transform is the safe subset that can land
+  independently of the ADR-39 work.
 
 ### Phase 1 — bridge (minimal investment)
 

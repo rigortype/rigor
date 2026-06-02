@@ -93,8 +93,9 @@ ADRs record design rationale and rejected / deferred alternatives. **The canonic
 - [ADR-34](docs/adr/34-toplevel-unresolved-self-call-default.md) — Toplevel unresolved-self-call diagnostic
 - [ADR-35](docs/adr/35-override-signature-compatibility.md) — Override signature compatibility (Liskov signature rule)
 - [ADR-36](docs/adr/36-mangrove-enum-nested-class-emission.md) — Macro-substrate nested-class emission tier (Mangrove `Enum`; Slice A implemented)
-- [ADR-37](docs/adr/37-plugin-interface-segregation.md) — Plugin interface segregation (narrow extension protocols; proposed)
-- [ADR-38](docs/adr/38-additional-initializers.md) — Plugin-declared additional initializers (`additional_initializers:`; proposed)
+- [ADR-37](docs/adr/37-plugin-interface-segregation.md) — Plugin interface segregation (narrow extension protocols; accepted, Slices 1–3)
+- [ADR-38](docs/adr/38-additional-initializers.md) — Plugin-declared additional initializers (`additional_initializers:`; accepted, def-form)
+- [ADR-39](docs/adr/39-plugin-target-library-invocation.md) — Plugins may invoke their target library's safe methods directly (PHPStan-style; allow-list + rescue harness; proposed)
 
 ## Skills available in this repository
 

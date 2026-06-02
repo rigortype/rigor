@@ -38,7 +38,7 @@ Rigor should model the architecture, not the PHP names, PHPDoc syntax, or PHP ru
 
 Rigor's extension API should be PHPStan-like: a set of small, typed extension protocols registered by configuration or plugin manifests. Each extension receives immutable analysis context objects such as AST nodes, `Scope`, reflection objects, and `Type` values, then returns either a precise contribution or `nil`/empty results to let the core analyzer continue with default behavior.
 
-Plugins must not execute application code. They may inspect parsed Ruby, RBS, generated signatures, configuration, dependency metadata, and cached plugin metadata.
+Plugins must not execute application code. They may inspect parsed Ruby, RBS, generated signatures, configuration, dependency metadata, and cached plugin metadata. ([ADR-39](39-plugin-target-library-invocation.md) clarifies the boundary: a plugin MAY invoke the *pure, allow-listed methods of its declared **target library*** — a trusted gem dependency, the way the engine's constant-folding tier already calls core/stdlib methods and the way PHPStan extensions call into the real framework — but the analyzed *application's own* code is still never executed.)
 
 The core API should start with the extension points that improve type inference and metaprogramming support:
 

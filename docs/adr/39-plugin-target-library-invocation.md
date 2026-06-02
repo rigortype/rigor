@@ -1,6 +1,20 @@
 # ADR-39 — Plugins may invoke their target library's safe methods directly
 
-Status: **Proposed, 2026-06-02.**
+Status: **Accepted, 2026-06-02.** The rule + harness are implemented and
+validated: `Rigor::Plugin::Inflector` (slice 2) invokes the real
+`ActiveSupport::Inflector` through the allow-list + rescue harness with a
+built-in fallback, and the three consumers — `rigor-actionpack`,
+`rigor-activerecord`, `rigor-rails-routes` (slice 4) — are migrated onto
+it, deleting their hand-rolled inflection. Validated behaviour-preserving
+against every plugin's golden-master integration spec **and** both
+headline OSS corpora (Redmine and Mastodon `app + lib` rails-routes
+diagnostics byte-identical before/after). **Deferred (follow-on):** slice
+3 (static ingestion of `config/initializers/inflections.rb` for
+project-custom inflections — the default ActiveSupport ruleset already
+covers the common cases; custom-rule isolation across projects in a
+long-lived LSP process is the open design point), and the exact-version
+provisioning fallback (only if a cross-version behavioural difference is
+observed).
 
 Records the decision to let a Rigor plugin **load and invoke the pure,
 allow-listed methods of the library it targets**, through the same

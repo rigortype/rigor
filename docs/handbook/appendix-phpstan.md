@@ -12,6 +12,19 @@ PHPStan.
 If you have used PHPStan, the mental model carries over almost
 unchanged. This appendix maps the vocabulary.
 
+> **In this appendix**
+> [Five-second pitch](#the-five-second-pitch) ·
+> [Type vocabulary mapping](#type-vocabulary-mapping) ·
+> [`@phpstan-assert` family](#the-phpstan-assert-family) ·
+> [Type-Specifying Extensions ↔ Plugins](#type-specifying-extensions--plugins) ·
+> [Configuration](#configuration) ·
+> [Stubs ↔ RBS](#stubs--rbs) ·
+> [Severity profiles vs levels](#severity-profiles-vs-phpstan-levels) ·
+> ["No annotations needed"](#no-annotations-needed--yes-but-with-stubs) ·
+> [What PHPStan has, Rigor doesn't](#what-phpstan-has-and-rigor-does-not) ·
+> [What Rigor has, PHPStan doesn't](#what-rigor-has-and-phpstan-does-not) ·
+> [Migration vignette](#a-migration-vignette)
+
 ## The five-second pitch
 
 | Question | PHPStan | Rigor |

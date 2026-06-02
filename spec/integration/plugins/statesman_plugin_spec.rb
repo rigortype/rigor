@@ -84,7 +84,7 @@ RSpec.describe "plugins/rigor-statesman" do
         end
 
         order.advance_to(:ready)
-        order.advance_to(:rdy)
+        order.advance_to(:redy)
       RUBY
 
       diags = plugin_diagnostics(run_statesman(
@@ -99,7 +99,7 @@ RSpec.describe "plugins/rigor-statesman" do
       expect(diags.find { |d| d.rule == "known-state" }.message)
         .to eq("advance_to(:ready) — declared state")
       expect(diags.find { |d| d.rule == "unknown-state" }.message)
-        .to eq("unknown state :rdy (did you mean :ready?)")
+        .to eq("unknown state :redy (did you mean :ready?)")
     end
   end
 

@@ -59,7 +59,6 @@ module Rigor
       DEFAULT_DSL_METHOD = "state_machine"
       DEFAULT_STATE_METHOD = "state"
       DEFAULT_TRANSITION_METHOD = "transition_to"
-      DID_YOU_MEAN_DISTANCE = 3
 
       def init(_services)
         @dsl_method = config.fetch("dsl_method", DEFAULT_DSL_METHOD).to_sym
@@ -118,7 +117,7 @@ module Rigor
                   message: "#{@transition_method}(:#{sym}) — declared state"
           )
         else
-          hint = did_you_mean(sym, states)
+          hint = Rigor::Plugin::Base.suggest(sym, states)
           message = "unknown state :#{sym}"
           message += " (did you mean :#{hint}?)" if hint
           diagnostic(node, path: path, severity: :error, rule: "unknown-state", message: message)
@@ -148,41 +147,6 @@ module Rigor
         return nil unless node.is_a?(Prism::SymbolNode)
 
         node.unescaped.to_sym
-      end
-
-      def did_you_mean(name, states)
-        target = name.to_s
-        best = nil
-        best_distance = DID_YOU_MEAN_DISTANCE + 1
-        states.each do |state|
-          distance = levenshtein(target, state.to_s)
-          if distance < best_distance
-            best = state
-            best_distance = distance
-          end
-        end
-        best
-      end
-
-      def levenshtein(a, b) # rubocop:disable Naming/MethodParameterName
-        return b.length if a.empty?
-        return a.length if b.empty?
-
-        rows = Array.new(a.length + 1) { |_i| Array.new(b.length + 1, 0) }
-        (0..a.length).each { |i| rows[i][0] = i }
-        (0..b.length).each { |j| rows[0][j] = j }
-
-        (1..a.length).each do |i|
-          (1..b.length).each do |j|
-            cost = a[i - 1] == b[j - 1] ? 0 : 1
-            rows[i][j] = [
-              rows[i - 1][j] + 1,
-              rows[i][j - 1] + 1,
-              rows[i - 1][j - 1] + cost
-            ].min
-          end
-        end
-        rows[a.length][b.length]
       end
     end
 

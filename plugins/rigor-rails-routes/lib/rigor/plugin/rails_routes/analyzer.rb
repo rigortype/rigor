@@ -11,8 +11,6 @@ module Rigor
       # recognised helpers and error diagnostics for typos /
       # arity mismatches.
       module Analyzer
-        DID_YOU_MEAN_DISTANCE = 3
-
         # Built-in Rails helpers we don't want to flag as
         # unknown. The plugin's HelperTable describes
         # user-declared routes; Rails (and a small set of
@@ -248,7 +246,9 @@ module Rigor
         end
 
         def unknown_helper_violation(name, helper_table)
-          suggestion = did_you_mean(name, helper_table.names)
+          # ADR-39 / boilerplate 0c — the shared DidYouMean-backed suggester
+          # replaces the hand-rolled Levenshtein this module used to carry.
+          suggestion = Rigor::Plugin::Base.suggest(name, helper_table.names)
           message = "no route helper `#{name}`"
           message += " (did you mean `#{suggestion}`?)" if suggestion
 
@@ -257,45 +257,6 @@ module Rigor
             rule: "unknown-helper",
             message: message
           )
-        end
-
-        # Levenshtein-style nearest neighbour. Returns the
-        # closest known helper within {DID_YOU_MEAN_DISTANCE}
-        # edits, or nil.
-        def did_you_mean(name, candidates)
-          best = nil
-          best_distance = DID_YOU_MEAN_DISTANCE + 1
-          candidates.each do |candidate|
-            d = levenshtein(name, candidate)
-            if d < best_distance
-              best = candidate
-              best_distance = d
-            end
-          end
-          best
-        end
-
-        # Standard iterative Levenshtein. Lifted from
-        # rigor-routes' equivalent helper for parity.
-        def levenshtein(left, right)
-          return right.length if left.empty?
-          return left.length if right.empty?
-
-          rows = Array.new(left.length + 1) { Array.new(right.length + 1, 0) }
-          (0..left.length).each { |i| rows[i][0] = i }
-          (0..right.length).each { |j| rows[0][j] = j }
-
-          (1..left.length).each do |i|
-            (1..right.length).each do |j|
-              cost = left[i - 1] == right[j - 1] ? 0 : 1
-              rows[i][j] = [
-                rows[i - 1][j] + 1,
-                rows[i][j - 1] + 1,
-                rows[i - 1][j - 1] + cost
-              ].min
-            end
-          end
-          rows[left.length][right.length]
         end
       end
     end

@@ -183,6 +183,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     node_rules()
     producer(req:id,key:serialize,key:deserialize,block:block)
     producers()
+    suggest(req:name,req:candidates)
     type_specifier(keyreq:methods,block:block)
     type_specifiers()
   ].freeze

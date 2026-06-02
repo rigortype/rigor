@@ -36,8 +36,6 @@ module Rigor
           create_or_find_by create_or_find_by!
         ].freeze
 
-        DID_YOU_MEAN_DISTANCE = 3
-
         attr_reader :diagnostics
 
         def initialize(path:, model_index:)
@@ -107,7 +105,7 @@ module Rigor
           else
             unknown.each do |pair|
               key = pair[:key]
-              suggestion = closest_column(key, entry.column_names)
+              suggestion = Rigor::Plugin::Base.suggest(key, entry.column_names)
               hint = suggestion ? " (did you mean `:#{suggestion}`?)" : ""
               push_error(node, "unknown-column",
                          "`#{entry.class_name}.#{node.name}(#{key}: ...)` references " \
@@ -157,7 +155,7 @@ module Rigor
           values = entry.enum_values(pair[:key])
           return if values.include?(value)
 
-          suggestion = closest_column(value, values)
+          suggestion = Rigor::Plugin::Base.suggest(value, values)
           hint = suggestion ? " (did you mean `:#{suggestion}`?)" : ""
           push_error(node, "unknown-enum-value",
                      "`#{entry.class_name}.#{node.name}(#{pair[:key]}: :#{value})` references " \
@@ -222,40 +220,6 @@ module Rigor
             end
           end
           pairs
-        end
-
-        def closest_column(name, candidates)
-          best = nil
-          best_distance = DID_YOU_MEAN_DISTANCE + 1
-          candidates.each do |candidate|
-            distance = levenshtein(name, candidate)
-            if distance < best_distance
-              best = candidate
-              best_distance = distance
-            end
-          end
-          best
-        end
-
-        def levenshtein(a, b) # rubocop:disable Naming/MethodParameterName
-          return b.length if a.empty?
-          return a.length if b.empty?
-
-          rows = Array.new(a.length + 1) { |_i| Array.new(b.length + 1, 0) }
-          (0..a.length).each { |i| rows[i][0] = i }
-          (0..b.length).each { |j| rows[0][j] = j }
-
-          (1..a.length).each do |i|
-            (1..b.length).each do |j|
-              cost = a[i - 1] == b[j - 1] ? 0 : 1
-              rows[i][j] = [
-                rows[i - 1][j] + 1,
-                rows[i][j - 1] + 1,
-                rows[i - 1][j - 1] + cost
-              ].min
-            end
-          end
-          rows[a.length][b.length]
         end
 
         def push_info(node, rule, message)

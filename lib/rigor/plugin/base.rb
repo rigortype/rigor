@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "did_you_mean"
 require "digest"
 require "json"
 require "prism"
@@ -441,6 +442,22 @@ module Rigor
           location || node.location,
           path: path, message: message, severity: severity, rule: rule
         )
+      end
+
+      # Boilerplate-reduction helper (review §1.3): the "did you mean …?"
+      # suggestion every diagnostic-emitting plugin otherwise hand-rolls.
+      # Returns the closest of `candidates` to `name` via
+      # `DidYouMean::SpellChecker` (the same engine Ruby's own
+      # `NoMethodError` hints use), or `nil` when there is no good match /
+      # no candidates — replacing the per-plugin Levenshtein copies. A
+      # **class** method so it is callable both from a plugin instance
+      # (`Rigor::Plugin::Base.suggest(...)`) and from an `Analyzer` module
+      # function that has no instance.
+      def self.suggest(name, candidates)
+        dictionary = Array(candidates).map(&:to_s)
+        return nil if dictionary.empty?
+
+        DidYouMean::SpellChecker.new(dictionary: dictionary).correct(name.to_s).first
       end
 
       # Convenience accessor — `manifest` on the instance returns

@@ -15,6 +15,8 @@ The full catalogue, with a one-line scope for every plugin, is
 
 - [rigor-activerecord](rigor-activerecord.md) — ActiveRecord
   finder / relation typing and schema-checked columns.
+- [rigor-rails-routes](rigor-rails-routes.md) — `*_path` / `*_url`
+  helper validation against a parsed `config/routes.rb`.
 - [rigor-rspec](rigor-rspec.md) — RSpec `let` / `subject`
   duplicate and self-reference checks.
 - [rigor-sorbet](rigor-sorbet.md) — read an existing Sorbet

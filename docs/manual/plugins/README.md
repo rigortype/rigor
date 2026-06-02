@@ -15,6 +15,8 @@ The full catalogue, with a one-line scope for every plugin, is
 
 - [rigor-activerecord](rigor-activerecord.md) — ActiveRecord
   finder / relation typing and schema-checked columns.
+- [rigor-rspec](rigor-rspec.md) — RSpec `let` / `subject`
+  duplicate and self-reference checks.
 
 _Per-plugin pages are being migrated here from each plugin's
 in-tree `README.md`. Until a plugin has a page above, its

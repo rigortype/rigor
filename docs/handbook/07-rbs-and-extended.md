@@ -8,6 +8,20 @@ small annotation surface on top.
 This chapter covers both, in the order you usually reach for
 them.
 
+> **In this chapter**
+> [When you need RBS](#when-you-need-rbs) ·
+> [A first sig](#a-first-sig) ·
+> [When the RBS shape is too wide](#when-the-rbs-shape-is-too-wide) ·
+> [The directive grammar](#the-directive-grammar) ·
+> [Refinement names](#refinement-names) ·
+> Worked examples — [assertion gate](#worked-example-an-assertion-gate) · [type predicate](#worked-example-a-type-predicate) · [parameter override](#worked-example-parameter-override) ·
+> [Overrides the runtime can't enforce](#when-you-need-a-parameter-override-the-runtime-cannot-enforce) ·
+> [Where annotations belong](#where-annotations-belong) ·
+> [Inline RBS (`rigor-rbs-inline`)](#inline-rbs-in-ruby-source--the-rigor-rbs-inline-plugin) ·
+> [Falling back to `untyped`](#falling-back-to-untyped) ·
+> [Coming from PHPStan](#coming-from-phpstan-the-phpstan-assert-family) ·
+> [The plugin escape hatch](#when-rbs-cannot-help--the-plugin-escape-hatch)
+
 ## When you need RBS
 
 You probably need to add an RBS file when:
@@ -232,8 +246,9 @@ class Slug
 end
 ```
 
-You **cannot** put them inside a `.rb` file. The directives
-only fire when read from RBS — that is a design choice (see
+You **cannot** put these `%a{rigor:v1:…}` directives inside a
+`.rb` file. The directives only fire when read from RBS —
+that is a design choice (see
 ADR-5, the robustness principle: strict on returns, lenient
 on parameters).
 
@@ -361,7 +376,7 @@ end
 
 Self-targeted forms are supported too — the PHPStan
 analogue would be a method on `$this` that narrows
-`$this`. Use `target self`:
+`$this`. Name the receiver with `self`:
 
 ```rbs
 class Connection

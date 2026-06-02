@@ -167,13 +167,13 @@ Each was checked against source before editing:
 - **Stray tags** — `</content>`/`</invoke>` had leaked into `appendix-typeprof.md`; removed.
 - **Misc** — VS Code wrong marketplace link (editor-integration); rails-quickstart baseline activation said "after Step 5" but it's generated in Step 6; mypy appendix `object` gloss.
 
-### In progress — per-plugin doc restructure (the "(ii)" split)
+### Complete — per-plugin doc restructure (the "(ii)" split)
 
 Decision (with the user): user-facing plugin docs move to the published manual; in-tree READMEs keep developer/contract material — single-sourced, no duplication.
 
 - **Layout**: user-facing → `docs/manual/plugins/<id>.md` (what it checks / config / what it infers / limitations); dev/internals stay in `plugins/<id>/README.md` (layout / architecture / authoring surface / demo) with a top pointer up to the user page; `docs/manual/plugins/README.md` is the index (wired into `docs/manual/README.md` item 7).
 - **When a handbook chapter already covers a plugin deeply** (Sorbet = handbook ch. 10), the manual page stays thin and points to the chapter instead of duplicating it.
-- **Migration checklist — 24 of 31 plugins.** `[x]` = user page exists under `docs/manual/plugins/<id>.md` (+ README slimmed/de-staled); `[ ]` = not yet. (Commit shown for migrated.)
+- **Migration checklist — COMPLETE (31 of 31).** `[x]` = user page exists under `docs/manual/plugins/<id>.md` (+ README slimmed/de-staled); the lone non-page is `rigor-playground` (infrastructure, deliberately page-less — see its row). (Commit shown for migrated.)
 
   _Rails core + meta:_
   - [x] `rigor-activerecord` — `22900dac` (+ stale-fix `5ace10bd`)
@@ -197,7 +197,7 @@ Decision (with the user): user-facing plugin docs move to the published manual; 
   - [x] `rigor-sorbet` — `7d64f493` (handbook-pointer style)
   - [x] `rigor-sinatra` — `a6825064`
 
-  _Not yet migrated (15) — framework / Tier-3 tail:_
+  _Framework / Tier-3 tail (all migrated):_
   - [x] `rigor-devise` — `43ca0366`
   - [x] `rigor-statesman` — `43ca0366`
   - [x] `rigor-mangrove` — `43ca0366`
@@ -206,25 +206,29 @@ Decision (with the user): user-facing plugin docs move to the published manual; 
   - [x] `rigor-actioncable` — `650822a0`
   - [x] `rigor-minitest` — `650822a0`
   - [x] `rigor-graphql` — `650822a0`
-  - [ ] `rigor-rspec-rails`
-  - [ ] `rigor-shoulda-matchers`
-  - [ ] `rigor-hanami`
-  - [ ] `rigor-typescript-utility-types`
-  - [ ] `rigor-rbs-inline`
-  - [ ] `rigor-activesupport-core-ext`
-  - [ ] `rigor-playground` — browser-playground backend, **not a checker plugin** (still has the only per-plugin gemspec); likely a short README pointer, not a full user page. Decide when reached.
+  - [x] `rigor-rspec-rails` — `39153f13`
+  - [x] `rigor-shoulda-matchers` — `39153f13`
+  - [x] `rigor-hanami` — `39153f13`
+  - [x] `rigor-typescript-utility-types` — `39153f13` (thin handbook-pointer page)
+  - [x] `rigor-rbs-inline` — `39153f13` (thin handbook-pointer page)
+  - [x] `rigor-activesupport-core-ext` — `39153f13` (RBS-bundle page)
+  - [x] `rigor-playground` — `39153f13` (**decided: no page** — infrastructure, not a checker plugin; the index points to the CLI reference + ADR-29 instead)
 - **CRITICAL — reconcile, don't copy.** The Rails-family READMEs are **frozen at their v0.1.0 landing** and are materially stale vs shipped behaviour (the v0.1.11/v0.1.12 OSS surveys + ADR-39 added a lot the README never mentions; some READMEs even list now-supported features under "Out of scope"). Copying a README into the manual **publishes stale claims** — already happened once (activerecord's "regular plurals only", since fixed). The user chose **reconcile-while-migrating**: for each plugin, check current behaviour against `CHANGELOG.md` (grep the plugin id) + the plugin source (manifest `config_schema`, what the parser/analyzer actually handles) and write the *current* capability/limitation set, discarding the frozen `(v0.1.0)` scope lists. De-stale the README's own dev sections in the same pass (drop done "Future direction" items, fix `diagnostics_for_file`→`node_rule` where ADR-37-migrated, remove the `.gemspec` line).
 - **Cleanup already done (commit `85e27336`):** dropped the stale "— example Rigor plugin" title from 10 production plugins; removed the retired "post-extraction / subtree-split" wording (subtree-split was retired 2026-06-02 — plugins ship bundled in `rigortype`, per-plugin gemspecs gone). Each migration also strips the now-removed `.gemspec` line from that plugin's README layout.
 
 ### Next-session entry point (doc track)
 
-Work the unchecked `[ ]` boxes in the migration checklist above — **7 remain**, all the framework / Tier-3 tail (rspec-rails, shoulda-matchers, hanami, typescript-utility-types, rbs-inline, activesupport-core-ext, playground). Per-plugin recipe: read the README; **reconcile against `CHANGELOG.md` (grep the plugin id) + plugin source** (the CRITICAL note above — do not trust the README's scope lists); split user↔dev; write an accurate `docs/manual/plugins/<id>.md`; slim + de-stale the README to internals + add the user-guide pointer; strip any `.gemspec` line; add an index entry to `docs/manual/plugins/README.md`; verify links (the cold-read check). Many of the remaining Tier-3 plugins are simpler than the Rails core (fact-providers or macro-substrate consumers with **no diagnostics / no config**), so their pages are short — but still reconcile, since some READMEs predate later slices.
+**The per-plugin migration is complete** — every checker plugin now has a `docs/manual/plugins/<id>.md` page (with its README slimmed to internals + a user-guide pointer), and `rigor-playground` is deliberately page-less. No `[ ]` boxes remain. What's left on the doc track is the two flagged plugin-code gaps below (review calls, not doc work) and the global open items further down (a possible CHANGELOG doc-fix entry; nothing is pushed). The migration *method* (reconcile-don't-copy, the recurring-stale catalog, house style, link conventions, verification, hybrid-scout shape) is preserved in [`docs/notes/20260603-plugin-doc-migration-playbook.md`](notes/20260603-plugin-doc-migration-playbook.md) for any future plugin additions.
 
-**Open code/doc gap flagged during migration (next session's call):** `rigor-dry-validation` ships an RBS overlay but its README/usage tells the user to wire `signature_paths: vendor/bundle/.../rigor-dry-validation-0.1.0/sig` — a path that doesn't exist under the bundled model. Unlike `rigor-activerecord` (which declares `signature_paths: ["sig"]` in its manifest, auto-loading its RBS per [ADR-25](adr/25-plugin-contributed-rbs.md)), dry-validation hasn't adopted that. The one-line fix is to add `signature_paths: ["sig"]` to its manifest (then drop the manual-wiring docs); recognition + the `:dry_validation_contracts` fact already work without it. Flagged in both its user page and README; not changed (a plugin-code edit, deliberately left for review).
+**Open code/doc gaps flagged during migration (review calls — plugin-code edits, deliberately left unchanged):**
+
+1. `rigor-dry-validation` ships an RBS overlay but its README/usage tells the user to wire `signature_paths: vendor/bundle/.../rigor-dry-validation-0.1.0/sig` — a path that doesn't exist under the bundled model. Unlike `rigor-activerecord` (which declares `signature_paths: ["sig"]` in its manifest, auto-loading its RBS per [ADR-25](adr/25-plugin-contributed-rbs.md)), dry-validation hasn't adopted that. The one-line fix is to add `signature_paths: ["sig"]` to its manifest (then drop the manual-wiring docs); recognition + the `:dry_validation_contracts` fact already work without it. Flagged in both its user page and README.
+
+2. `rigor-shoulda-matchers` double-prefixes its rule ids. Its analyzer rule strings already embed the plugin name (`shoulda-matchers.unknown-column` in `analyzer.rb`), and the runner additionally stamps the `plugin.shoulda-matchers` provenance, so `Diagnostic#qualified_rule` renders as `plugin.shoulda-matchers.shoulda-matchers.unknown-column` in `rigor check` output (and baseline keys). Suppression still works on the bare rule (`# rigor:disable shoulda-matchers.unknown-column`). The one-line fix is to drop the redundant `shoulda-matchers.` from the three rule strings. Flagged on its user page and README.
 
 Resolved decisions for the remaining work:
 - **`rigor-rails`** is a **`require`-convenience aggregator only** — verified in `plugins/rigor-rails/lib/rigor-rails.rb` (it requires the seven sub-plugins; it does **not** auto-activate them, and `- rigor-rails` in `plugins:` does not enable the set — activation stays per-plugin in `.rigor.yml`). Document it accurately as that; do **not** frame it as a config group that activates the set. Its README + the manual's `07-plugins.md` "meta-gem" mention both predate the bundled model and need this correction.
-- **`rigor-playground`** is the browser-playground backend, not a checker plugin (and still has the only remaining per-plugin gemspec) — decide whether it warrants a user page at all (likely just a README pointer).
+- **`rigor-playground`** is the browser-playground backend, not a checker plugin (and still has the only remaining per-plugin gemspec) — **resolved: no manual page.** It has no `lib/rigor-playground.rb` entry and registers no `Plugin::Base` (the `all_plugins_load_spec` skips it as a standalone Rack app), so it doesn't belong in the plugin catalogue. The index now points to the [CLI reference](manual/02-cli-reference.md) + [ADR-29](adr/29-browser-playground.md) for it; its README is already accurate and was left untouched.
 
 ### Open items (doc track)
 

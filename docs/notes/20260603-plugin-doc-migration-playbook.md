@@ -23,8 +23,10 @@ duplication.**
 - **Index** → `docs/manual/plugins/README.md` (one line per
   plugin), already wired into `docs/manual/README.md` item 7.
 
-24 of 31 done; 7 remain (the Tier-3 tail) — see the CURRENT_WORK
-checklist for the exact `[x]`/`[ ]` list.
+**COMPLETE — 31 of 31** (every checker plugin has a page;
+`rigor-playground` is deliberately page-less infrastructure). This
+playbook is retained as the method reference for any future plugin
+additions — see the CURRENT_WORK checklist for the per-plugin commits.
 
 ## CRITICAL: reconcile, don't copy
 

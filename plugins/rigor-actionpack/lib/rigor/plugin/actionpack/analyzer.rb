@@ -381,11 +381,12 @@ module Rigor
         def model_class_for_permit(permit_call)
           require_call = permit_call.receiver
           symbol_node = require_call.arguments.arguments.first
-          # Phase 1 convention: `:user` → `User`; namespaced mapping
-          # deferred. The capitalize call is sufficient for the typical
-          # single-word model names; users with multi-word camelcase shape
-          # (`:order_item` → `OrderItem`) need the inflector follow-up.
-          symbol_node.value.to_s.split("_").map(&:capitalize).join
+          # `:user` → `User`, `:order_item` → `OrderItem`. ADR-39: the
+          # shared inflector camelizes through the real
+          # `ActiveSupport::Inflector` when present (so the multi-word
+          # case the former `split("_").map(&:capitalize)` only
+          # approximated is authoritative), falling back otherwise.
+          Rigor::Plugin::Inflector.camelize(symbol_node.value.to_s)
         end
 
         def literal_permit_keys(permit_call)
@@ -501,17 +502,11 @@ module Rigor
           return nil unless class_name.end_with?("Controller")
 
           stripped = class_name.delete_suffix("Controller")
-          stripped.split("::").map { |segment| underscore(segment) }.join("/")
-        end
-
-        # Tiny inflector — sufficient for the typical `WordWord` →
-        # `word_word` mapping. Doesn't try to handle acronyms
-        # (`HTTPController` would inflect to `h_t_t_p`); users with that
-        # need can ship a configured override in a follow-up slice.
-        def underscore(camel)
-          camel.gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
-               .gsub(/([a-z\d])([A-Z])/, '\1_\2')
-               .downcase
+          # ADR-39: the shared inflector flattens `::` → `/` and applies
+          # Rails' real underscore (the per-segment hand-rolled version
+          # produced the same result for the common case but missed
+          # acronym handling). `Admin::Widgets` → `admin/widgets`.
+          Rigor::Plugin::Inflector.underscore(stripped)
         end
 
         def render_violation(call_node, target, view_search_roots)

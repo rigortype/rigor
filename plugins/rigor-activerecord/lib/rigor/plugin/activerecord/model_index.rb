@@ -153,7 +153,7 @@ module Rigor
             override = row[:table_name_override]
             return override if override
           end
-          Inflector.tableize(strip_leading_namespace(chain.first.fetch(:class_name)))
+          Rigor::Plugin::Inflector.tableize(strip_leading_namespace(chain.first.fetch(:class_name)))
         end
 
         # Dedups association-style rows by `:name`, keeping the

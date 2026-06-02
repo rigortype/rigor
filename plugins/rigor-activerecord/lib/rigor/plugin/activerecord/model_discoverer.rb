@@ -326,7 +326,7 @@ module Rigor
           if polymorphic
             target = nil
           else
-            target = explicit_class_name(args) || Inflector.classify(name)
+            target = explicit_class_name(args) || Rigor::Plugin::Inflector.classify(name)
             return nil if target.nil? || target.empty?
           end
 

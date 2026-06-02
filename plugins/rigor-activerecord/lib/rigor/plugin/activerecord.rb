@@ -2,7 +2,6 @@
 
 require "rigor/plugin"
 
-require_relative "activerecord/inflector"
 require_relative "activerecord/schema_table"
 require_relative "activerecord/schema_parser"
 require_relative "activerecord/model_index"

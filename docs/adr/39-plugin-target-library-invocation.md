@@ -2,8 +2,11 @@
 
 Status: **Accepted, 2026-06-02.** The rule + harness are implemented and
 validated: `Rigor::Plugin::Inflector` (slice 2) invokes the real
-`ActiveSupport::Inflector` through the allow-list + rescue harness with a
-built-in fallback, and the three consumers — `rigor-actionpack`,
+`ActiveSupport::Inflector` through the allow-list + rescue harness and
+carries **no built-in approximation** (an approximation would emit wrong
+facts → false positives; when the gem is absent it raises and the
+caller's isolation boundary degrades to silence), and the three
+consumers — `rigor-actionpack`,
 `rigor-activerecord`, `rigor-rails-routes` (slice 4) — are migrated onto
 it, deleting their hand-rolled inflection. Validated behaviour-preserving
 against every plugin's golden-master integration spec **and** both
@@ -132,13 +135,18 @@ A plugin invoking a target-library method MUST satisfy all of:
 3. **Result is data, checked.** The return value is plain data the plugin
    converts to a type / fact (a String, an Array of Strings); the plugin
    validates the shape before use.
-4. **Total recovery.** The whole invocation is wrapped so any
-   failure (load error, unexpected version, raised exception) degrades to
-   "no contribution" (`nil` / `[]`), never a crash. Same `rescue
-   StandardError` discipline as folding, under the existing per-plugin
-   isolation boundary.
+4. **Decline, never approximate.** When the target library cannot be
+   loaded the invocation **raises** (or the caller gates on an
+   `available?` check) — it does **not** fall back to a hand-rolled
+   approximation. An approximation that diverges from the library's real
+   behaviour is precisely the wrong fact this whole ADR exists to avoid;
+   "no contribution" must mean **silence**, not a guess. The raise
+   propagates to the existing per-plugin `rescue` / isolation boundary,
+   so the inflection-dependent check degrades to no diagnostics (reduced
+   coverage), never a wrong one and never a crash.
 
-A method that fails any clause stays reimplemented or unsupported.
+A method that fails any clause stays unsupported (the check degrades to
+silence) — it is never answered by an approximation.
 
 ### The hard line: application code is still never executed
 
@@ -197,8 +205,9 @@ and deferred until the second consumer.
    *application-code* prohibition is unchanged.)
 2. **`Plugin::Inflector` over the real `ActiveSupport::Inflector`** — the
    first consumer. A bundled helper that calls the real inflector through
-   the harness, with the hand-rolled regular-form algorithm kept only as
-   the rescue-path fallback when the gem is absent. This is the
+   the harness and carries **no approximation**: when the gem is absent it
+   raises `Inflector::Unavailable` (caught by the caller's isolation
+   boundary → silence), never a guessed inflection. This is the
    FP-reducing replacement for boilerplate plan § 0e.
 3. **Static ingestion of `config/initializers/inflections.rb`** — parse
    the custom-inflection DSL with Prism and feed it into the inflector,
@@ -244,6 +253,7 @@ reframed from "unify the approximations" to "use the real library."
 | Candidate | Status | Reason |
 | --- | --- | --- |
 | Keep hand-rolling inflection (boilerplate § 0e as a dedup only) | Rejected | Picks one approximation; the FP-divergence from Rails' real rules — the actual problem — remains. |
+| Keep a built-in approximation as a fallback when the target library is absent | Rejected | An approximation that diverges from the library's real rules emits a wrong fact (a wrong inflected name → a bogus `unknown-helper`), the exact false positive this ADR removes. Absence must degrade to **silence** (raise → isolation boundary), never a guess. The library is a declared dependency, so absence is a misconfiguration, not a routine path. |
 | Execute the project's `inflections.rb` to learn custom rules | Rejected | That is application code; ADR-2 forbids running it. Static Prism parse of its DSL gets the same rules without executing project code. |
 | Provision the project's exact target version per run (isolated install) | Deferred | Maximal fidelity, but brings install/cache/offline-CI/hermetic-Flake cost; default range-dependency + static custom-rule ingestion covers the real fidelity need. Revisit only if a cross-version behavioural difference is observed. |
 | Add `activesupport` to Rigor core's own dependencies | Rejected | Couples the whole toolchain to a heavy gem for one plugin's need; the dependency belongs on the plugin's gemspec so non-users pay nothing. |

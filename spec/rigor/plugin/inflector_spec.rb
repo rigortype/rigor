@@ -2,14 +2,16 @@
 
 require "spec_helper"
 
-# ADR-39 — the shared inflection helper. The repo bundle carries
+# ADR-39 — the shared inflection helper. It inflects ONLY with the real
+# `ActiveSupport::Inflector` (no built-in approximation, which would be a
+# source of wrong facts → false positives). The repo bundle carries
 # `activesupport` as a development dependency (see rigortype.gemspec), so
-# in the suite the real `ActiveSupport::Inflector` path is exercised; the
-# `Fallback` module is tested directly for the gem-absent degradation.
+# the suite exercises the real path; absence is covered by stubbing the
+# loader to confirm it raises rather than guesses.
 RSpec.describe Rigor::Plugin::Inflector do
   describe "with the real ActiveSupport::Inflector (bundled in dev)" do
     it "is available in the repo bundle" do
-      expect(described_class.active_support_available?).to be(true)
+      expect(described_class.available?).to be(true)
     end
 
     it "resolves regular inflections" do
@@ -21,9 +23,10 @@ RSpec.describe Rigor::Plugin::Inflector do
       expect(described_class.classify("blog_posts")).to eq("BlogPost")
     end
 
-    # The whole point of ADR-39: the irregulars the former hand-rolled
-    # copies got wrong are now authoritative.
-    it "resolves irregular inflections the hand-rolled copies missed" do
+    # The whole point of ADR-39: the irregulars a hand-rolled
+    # approximation gets wrong are authoritative because the real
+    # inflector answers.
+    it "resolves irregular inflections an approximation would miss" do
       expect(described_class.pluralize("person")).to eq("people")
       expect(described_class.pluralize("child")).to eq("children")
       expect(described_class.pluralize("analysis")).to eq("analyses")
@@ -34,41 +37,37 @@ RSpec.describe Rigor::Plugin::Inflector do
     it "flattens namespaced names like Rails" do
       expect(described_class.underscore("Admin::DomainBlocksController"))
         .to eq("admin/domain_blocks_controller")
+      # tableize composes underscore + pluralize with ::->_ flattening,
+      # matching AR's real table name (NOT Inflector.tableize's admin/users).
       expect(described_class.tableize("Admin::User")).to eq("admin_users")
     end
   end
 
-  describe Rigor::Plugin::Inflector::Fallback do
-    it "covers the regular cases without ActiveSupport" do
-      expect(described_class.pluralize("post")).to eq("posts")
-      expect(described_class.pluralize("category")).to eq("categories")
-      expect(described_class.pluralize("box")).to eq("boxes")
-      expect(described_class.pluralize("wolf")).to eq("wolves")
-      expect(described_class.singularize("categories")).to eq("category")
-      expect(described_class.singularize("wolves")).to eq("wolf")
-      expect(described_class.underscore("BlogPost")).to eq("blog_post")
-      expect(described_class.classify("blog_posts")).to eq("BlogPost")
+  describe "when ActiveSupport::Inflector cannot be loaded" do
+    # Simulate the gem being absent: the lazy loader raises Unavailable
+    # (this is what `ensure_loaded!` does on a real LoadError).
+    before do
+      allow(described_class).to receive(:ensure_loaded!)
+        .and_raise(Rigor::Plugin::Inflector::Unavailable, "...add `activesupport`...")
     end
 
-    it "covers the small irregular table it ships" do
-      expect(described_class.pluralize("person")).to eq("people")
-      expect(described_class.singularize("children")).to eq("child")
+    it "reports unavailable rather than guessing" do
+      expect(described_class.available?).to be(false)
+    end
+
+    # No approximation: every inflection raises a clear Unavailable error
+    # (the caller's per-plugin rescue turns this into silence — reduced
+    # coverage, never a wrong inflection / false positive).
+    it "raises Unavailable instead of returning an approximation" do
+      expect { described_class.pluralize("person") }
+        .to raise_error(Rigor::Plugin::Inflector::Unavailable)
+      expect { described_class.tableize("BlogPost") }
+        .to raise_error(Rigor::Plugin::Inflector::Unavailable)
     end
   end
 
-  describe "degradation when ActiveSupport is unavailable" do
-    it "uses the fallback when the availability check is false" do
-      allow(described_class).to receive(:active_support_available?).and_return(false)
-      # `analysis` is beyond the fallback table, so it degrades to the
-      # regular rule (`analyses`) rather than the AS-authoritative form —
-      # acceptable for the gem-absent path, and never a crash.
-      expect(described_class.pluralize("post")).to eq("posts")
-      expect(described_class.underscore("BlogPost")).to eq("blog_post")
-    end
-
-    it "never raises, even on odd input" do
-      expect { described_class.pluralize("") }.not_to raise_error
-      expect { described_class.underscore("") }.not_to raise_error
-    end
+  it "rejects a non-allow-listed method" do
+    expect { described_class.invoke(:constantize, "Foo") }
+      .to raise_error(ArgumentError, /allow-listed/)
   end
 end

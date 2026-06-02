@@ -48,12 +48,10 @@ module Rigor
         version: "0.1.0",
         description: "Types ActiveStorage attachment macros (has_one_attached / has_many_attached) on AR models.",
         config_schema: {
-          "model_search_paths" => :array
+          "model_search_paths" => { kind: :array, default: ["app/models"] }
         },
         consumes: [{ plugin_id: "activerecord", name: :model_index, optional: true }]
       )
-
-      DEFAULT_MODEL_SEARCH_PATHS = ["app/models"].freeze
 
       # Cached: attachment index. Walks every `.rb` file under
       # `model_search_paths` for `has_*_attached` macros.
@@ -66,9 +64,7 @@ module Rigor
       end
 
       def init(_services)
-        @model_search_paths = Array(
-          config.fetch("model_search_paths", DEFAULT_MODEL_SEARCH_PATHS)
-        ).map(&:to_s)
+        @model_search_paths = Array(config.fetch("model_search_paths")).map(&:to_s)
         @attachment_index = nil
         @load_errors = []
       end

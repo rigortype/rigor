@@ -82,17 +82,14 @@ module Rigor
         version: "0.8.0",
         description: "Validates Action Pack route-helper calls and filter chains inside controllers.",
         config_schema: {
-          "controller_search_paths" => :array,
-          "view_search_paths" => :array
+          "controller_search_paths" => { kind: :array, default: ["app/controllers"] },
+          "view_search_paths" => { kind: :array, default: ["app/views"] }
         },
         consumes: [
           { plugin_id: "rails-routes", name: :helper_table, optional: true },
           { plugin_id: "activerecord", name: :model_index, optional: true }
         ]
       )
-
-      DEFAULT_CONTROLLER_SEARCH_PATHS = ["app/controllers"].freeze
-      DEFAULT_VIEW_SEARCH_PATHS = ["app/views"].freeze
 
       # Phase 2 cached producer — the controller index built
       # from `controller_search_paths`. The IoBoundary records
@@ -108,12 +105,8 @@ module Rigor
 
       def init(services)
         @services = services
-        @controller_search_paths = Array(
-          config.fetch("controller_search_paths", DEFAULT_CONTROLLER_SEARCH_PATHS)
-        ).map(&:to_s)
-        @view_search_paths = Array(
-          config.fetch("view_search_paths", DEFAULT_VIEW_SEARCH_PATHS)
-        ).map(&:to_s)
+        @controller_search_paths = Array(config.fetch("controller_search_paths")).map(&:to_s)
+        @view_search_paths = Array(config.fetch("view_search_paths")).map(&:to_s)
         @helper_table = nil
         @helper_table_resolved = false
         @controller_index = nil

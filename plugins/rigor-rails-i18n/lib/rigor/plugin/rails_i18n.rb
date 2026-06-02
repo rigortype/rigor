@@ -67,13 +67,10 @@ module Rigor
         version: "0.2.0",
         description: "Validates I18n `t(key)` calls against `config/locales/*.yml`.",
         config_schema: {
-          "locale_search_paths" => :array,
-          "configured_locales" => :array
+          "locale_search_paths" => { kind: :array, default: ["config/locales"] },
+          "configured_locales" => { kind: :array, default: ["en"] }
         }
       )
-
-      DEFAULT_LOCALE_SEARCH_PATHS = ["config/locales"].freeze
-      DEFAULT_CONFIGURED_LOCALES = ["en"].freeze
 
       producer :locale_index do |_params|
         loader = LocaleLoader.new(
@@ -86,8 +83,8 @@ module Rigor
       end
 
       def init(_services)
-        @locale_search_paths = Array(config.fetch("locale_search_paths", DEFAULT_LOCALE_SEARCH_PATHS)).map(&:to_s)
-        @configured_locales = Array(config.fetch("configured_locales", DEFAULT_CONFIGURED_LOCALES)).map(&:to_s)
+        @locale_search_paths = Array(config.fetch("locale_search_paths")).map(&:to_s)
+        @configured_locales = Array(config.fetch("configured_locales")).map(&:to_s)
         @locale_index = nil
         @load_errors = []
         @load_errors_emitted = false

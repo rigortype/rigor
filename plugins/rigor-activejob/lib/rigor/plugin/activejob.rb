@@ -43,13 +43,10 @@ module Rigor
         version: "0.1.0",
         description: "Validates ActiveJob `Job.perform_later` argument arity.",
         config_schema: {
-          "job_search_paths" => :array,
-          "job_base_classes" => :array
+          "job_search_paths" => { kind: :array, default: ["app/jobs"] },
+          "job_base_classes" => { kind: :array, default: %w[ApplicationJob ActiveJob::Base] }
         }
       )
-
-      DEFAULT_JOB_SEARCH_PATHS = ["app/jobs"].freeze
-      DEFAULT_JOB_BASE_CLASSES = %w[ApplicationJob ActiveJob::Base].freeze
 
       # Cached: discovered job index. The producer reads every
       # file under `job_search_paths` via the trusted
@@ -65,8 +62,8 @@ module Rigor
       end
 
       def init(_services)
-        @job_search_paths = Array(config.fetch("job_search_paths", DEFAULT_JOB_SEARCH_PATHS)).map(&:to_s)
-        @job_base_classes = Array(config.fetch("job_base_classes", DEFAULT_JOB_BASE_CLASSES)).map(&:to_s)
+        @job_search_paths = Array(config.fetch("job_search_paths")).map(&:to_s)
+        @job_base_classes = Array(config.fetch("job_base_classes")).map(&:to_s)
         @job_index = nil
         @load_error = nil
       end

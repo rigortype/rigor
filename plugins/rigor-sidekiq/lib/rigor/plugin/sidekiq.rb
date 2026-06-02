@@ -58,13 +58,10 @@ module Rigor
         version: "0.1.0",
         description: "Validates Sidekiq `Worker.perform_async` argument arity.",
         config_schema: {
-          "worker_search_paths" => :array,
-          "worker_marker_modules" => :array
+          "worker_search_paths" => { kind: :array, default: ["app/workers", "app/sidekiq"] },
+          "worker_marker_modules" => { kind: :array, default: %w[Sidekiq::Job Sidekiq::Worker] }
         }
       )
-
-      DEFAULT_WORKER_SEARCH_PATHS = ["app/workers", "app/sidekiq"].freeze
-      DEFAULT_WORKER_MARKER_MODULES = %w[Sidekiq::Job Sidekiq::Worker].freeze
 
       producer :worker_index do |_params|
         WorkerDiscoverer.new(
@@ -75,10 +72,8 @@ module Rigor
       end
 
       def init(_services)
-        @worker_search_paths = Array(config.fetch("worker_search_paths", DEFAULT_WORKER_SEARCH_PATHS)).map(&:to_s)
-        @worker_marker_modules = Array(
-          config.fetch("worker_marker_modules", DEFAULT_WORKER_MARKER_MODULES)
-        ).map(&:to_s)
+        @worker_search_paths = Array(config.fetch("worker_search_paths")).map(&:to_s)
+        @worker_marker_modules = Array(config.fetch("worker_marker_modules")).map(&:to_s)
         @worker_index = nil
         @load_error = nil
       end

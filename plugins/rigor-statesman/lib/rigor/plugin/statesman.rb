@@ -51,20 +51,16 @@ module Rigor
         version: "0.1.0",
         description: "Validates state-machine transition references against declared states.",
         config_schema: {
-          "dsl_method" => :string,
-          "state_method" => :string,
-          "transition_method" => :string
+          "dsl_method" => { kind: :string, default: "state_machine" },
+          "state_method" => { kind: :string, default: "state" },
+          "transition_method" => { kind: :string, default: "transition_to" }
         }
       )
 
-      DEFAULT_DSL_METHOD = "state_machine"
-      DEFAULT_STATE_METHOD = "state"
-      DEFAULT_TRANSITION_METHOD = "transition_to"
-
       def init(_services)
-        @dsl_method = config.fetch("dsl_method", DEFAULT_DSL_METHOD).to_sym
-        @state_method = config.fetch("state_method", DEFAULT_STATE_METHOD).to_sym
-        @transition_method = config.fetch("transition_method", DEFAULT_TRANSITION_METHOD).to_sym
+        @dsl_method = config.fetch("dsl_method").to_sym
+        @state_method = config.fetch("state_method").to_sym
+        @transition_method = config.fetch("transition_method").to_sym
       end
 
       # ADR-37 — the two-pass shape made explicit. The collect pass

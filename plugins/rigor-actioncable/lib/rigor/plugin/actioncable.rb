@@ -62,16 +62,13 @@ module Rigor
         version: "0.1.0",
         description: "Validates ActionCable broadcast call shape against discovered channels.",
         config_schema: {
-          "channel_search_paths" => :array,
-          "channel_base_classes" => :array
+          "channel_search_paths" => { kind: :array, default: ["app/channels"] },
+          "channel_base_classes" => {
+            kind: :array,
+            default: ["ApplicationCable::Channel", "ActionCable::Channel::Base"]
+          }
         }
       )
-
-      DEFAULT_CHANNEL_SEARCH_PATHS = ["app/channels"].freeze
-      DEFAULT_CHANNEL_BASE_CLASSES = [
-        "ApplicationCable::Channel",
-        "ActionCable::Channel::Base"
-      ].freeze
 
       producer :channel_index do |_params|
         ChannelDiscoverer.new(
@@ -82,12 +79,8 @@ module Rigor
       end
 
       def init(_services)
-        @channel_search_paths = Array(
-          config.fetch("channel_search_paths", DEFAULT_CHANNEL_SEARCH_PATHS)
-        ).map(&:to_s)
-        @channel_base_classes = Array(
-          config.fetch("channel_base_classes", DEFAULT_CHANNEL_BASE_CLASSES)
-        ).map(&:to_s)
+        @channel_search_paths = Array(config.fetch("channel_search_paths")).map(&:to_s)
+        @channel_base_classes = Array(config.fetch("channel_base_classes")).map(&:to_s)
         @channel_index = nil
         @load_error = nil
       end

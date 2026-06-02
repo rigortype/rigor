@@ -80,17 +80,12 @@ module Rigor
                      "publishes per-factory attribute set + inferred model class as the " \
                      ":factory_index ADR-9 fact (Pillar 2 Slice 3).",
         config_schema: {
-          "factory_search_paths" => :array
+          "factory_search_paths" => { kind: :array, default: ["spec/factories", "spec/factories.rb"] }
         },
         consumes: [
           { plugin_id: "activerecord", name: :model_index, optional: true }
         ]
       )
-
-      DEFAULT_FACTORY_SEARCH_PATHS = [
-        "spec/factories",
-        "spec/factories.rb"
-      ].freeze
 
       producer :factory_index do |_params|
         FactoryDiscoverer.new(
@@ -101,9 +96,7 @@ module Rigor
 
       def init(services)
         @services = services
-        @factory_search_paths = Array(
-          config.fetch("factory_search_paths", DEFAULT_FACTORY_SEARCH_PATHS)
-        ).map(&:to_s)
+        @factory_search_paths = Array(config.fetch("factory_search_paths")).map(&:to_s)
         @factory_index = nil
         @model_index = nil
         @model_index_resolved = false

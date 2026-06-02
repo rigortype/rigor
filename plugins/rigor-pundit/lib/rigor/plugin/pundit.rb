@@ -61,13 +61,10 @@ module Rigor
         version: "0.1.0",
         description: "Validates Pundit policy / authorize calls.",
         config_schema: {
-          "policy_search_paths" => :array,
-          "policy_base_classes" => :array
+          "policy_search_paths" => { kind: :array, default: ["app/policies"] },
+          "policy_base_classes" => { kind: :array, default: %w[ApplicationPolicy] }
         }
       )
-
-      DEFAULT_POLICY_SEARCH_PATHS = ["app/policies"].freeze
-      DEFAULT_POLICY_BASE_CLASSES = %w[ApplicationPolicy].freeze
 
       producer :policy_index do |_params|
         PolicyDiscoverer.new(
@@ -78,8 +75,8 @@ module Rigor
       end
 
       def init(_services)
-        @policy_search_paths = Array(config.fetch("policy_search_paths", DEFAULT_POLICY_SEARCH_PATHS)).map(&:to_s)
-        @policy_base_classes = Array(config.fetch("policy_base_classes", DEFAULT_POLICY_BASE_CLASSES)).map(&:to_s)
+        @policy_search_paths = Array(config.fetch("policy_search_paths")).map(&:to_s)
+        @policy_base_classes = Array(config.fetch("policy_base_classes")).map(&:to_s)
         @policy_index = nil
         @load_error = nil
       end

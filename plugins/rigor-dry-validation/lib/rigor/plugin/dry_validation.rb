@@ -47,7 +47,11 @@ module Rigor
         version: "0.1.0",
         description: "Recognises `class T < Dry::Validation::Contract` subclasses and " \
                      "publishes the contract FQN set.",
-        produces: [:dry_validation_contracts]
+        produces: [:dry_validation_contracts],
+        # Auto-contribute the bundled RBS overlay (Contract#call -> Result,
+        # Result#success?/#to_h/...) per ADR-25, so no project-side
+        # signature_paths wiring is needed.
+        signature_paths: ["sig"]
       )
 
       def prepare(services)

@@ -34,9 +34,9 @@ end
 
 | Rule | Severity | Fires when |
 | --- | --- | --- |
-| `shoulda-matchers.unknown-column` | warning | a column matcher names a column absent from the model |
-| `shoulda-matchers.unknown-association` | warning | an association matcher names an association absent from the model |
-| `shoulda-matchers.association-kind-mismatch` | warning | the matcher's expected kind (singular / collection) disagrees with the association's actual kind |
+| `plugin.shoulda-matchers.unknown-column` | warning | a column matcher names a column absent from the model |
+| `plugin.shoulda-matchers.unknown-association` | warning | an association matcher names an association absent from the model |
+| `plugin.shoulda-matchers.association-kind-mismatch` | warning | the matcher's expected kind (singular / collection) disagrees with the association's actual kind |
 
 Column matchers: `validate_presence_of` / `_uniqueness_of` /
 `_length_of` / `_numericality_of` / `_acceptance_of` / `_inclusion_of`
@@ -46,12 +46,9 @@ expected kind: `belong_to` / `have_one` (singular), `have_many` /
 `have_and_belong_to_many` (collection). The enclosing
 `describe <Constant>` (innermost wins) anchors which model is checked.
 
-> The rule ids above are the identifiers for `# rigor:disable
-> shoulda-matchers.unknown-column` and the `disable:` config. In
-> `rigor check` output they currently render with a doubled provenance
-> prefix (`plugin.shoulda-matchers.shoulda-matchers.unknown-column`)
-> because the rule strings already embed the plugin name — a cosmetic
-> quirk flagged for a one-line plugin fix.
+Suppress with the qualified rule, e.g.
+`# rigor:disable plugin.shoulda-matchers.unknown-column`, or silence
+the whole family with `# rigor:disable plugin.shoulda-matchers`.
 
 ## No configuration
 

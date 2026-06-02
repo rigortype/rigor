@@ -36,15 +36,10 @@ plugins:
 | `@services.fact_store.read` | Lazily reads `:model_index`; returns `nil` (silent) when the producer isn't loaded. |
 | `Plugin::Base#diagnostic` | Emits the warning at the matcher's message location. |
 
-> **Known issue (flagged):** the analyzer's rule strings embed the
-> plugin name (`shoulda-matchers.unknown-column`), and the runner also
-> stamps the `plugin.shoulda-matchers` provenance, so diagnostics
-> render with a doubled prefix
-> (`plugin.shoulda-matchers.shoulda-matchers.unknown-column`).
-> Suppression via `# rigor:disable shoulda-matchers.unknown-column`
-> works on the bare rule. The one-line fix is to drop the redundant
-> `shoulda-matchers.` from the three rule strings in `analyzer.rb`;
-> left for review (a plugin-code change).
+The analyzer's rule strings are bare (`unknown-column` /
+`unknown-association` / `association-kind-mismatch`); the runner
+stamps the `plugin.shoulda-matchers` provenance, so the qualified
+rule ids are `plugin.shoulda-matchers.<rule>`.
 
 ## Layout
 

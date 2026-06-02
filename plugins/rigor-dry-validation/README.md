@@ -15,15 +15,10 @@ cross-plugin fact. Ships an RBS overlay typing
 > [docs/manual/plugins/rigor-dry-validation.md](../../docs/manual/plugins/rigor-dry-validation.md).
 > This README covers the plugin's internals.
 >
-> **RBS-overlay wiring is stale.** The `signature_paths:` snippets
-> below point at a `vendor/bundle/.../rigor-dry-validation-0.1.0/sig`
-> path, which assumes a separately-installed gem — but plugins now
-> ship bundled in `rigortype` (no per-plugin gem). The clean fix is
-> for this plugin to declare `signature_paths: ["sig"]` in its
-> manifest so the overlay auto-loads (as `rigor-activerecord` does,
-> per [ADR-25](../../docs/adr/25-plugin-contributed-rbs.md)); it has
-> not adopted that yet. Contract recognition + the
-> `:dry_validation_contracts` fact work regardless of the overlay.
+> **RBS overlay auto-loads.** The manifest declares
+> `signature_paths: ["sig"]` ([ADR-25](../../docs/adr/25-plugin-contributed-rbs.md)),
+> so the bundled overlay is contributed automatically when the plugin
+> is active — no project-side `signature_paths:` wiring needed.
 
 ## What the plugin does
 
@@ -61,19 +56,15 @@ via the `:dry_validation_contracts` fact.
 ## RBS overlay
 
 A small RBS file ships under
-[`sig/dry_validation.rbs`](sig/dry_validation.rbs). Add it to
-your `.rigor.yml`:
+[`sig/dry_validation.rbs`](sig/dry_validation.rbs). The manifest
+declares `signature_paths: ["sig"]`, so it is contributed
+automatically (ADR-25) whenever the plugin is active — just list
+the plugin:
 
 ```yaml
 plugins:
   - rigor-dry-validation
-
-signature_paths:
-  - vendor/bundle/ruby/4.0.0/gems/rigor-dry-validation-0.1.0/sig
 ```
-
-(Adjust the path to wherever Bundler installs the gem; the
-sig directory is under the gem root.)
 
 With the overlay loaded:
 
@@ -126,12 +117,11 @@ The **ceiling** (deferred to demand):
 ```yaml
 plugins:
   - rigor-dry-validation
-
-signature_paths:
-  - <gem-root>/sig    # ship the bundled RBS overlay
 ```
 
-No plugin-specific config keys. The plugin walks every `paths:`
+No plugin-specific config keys, and no `signature_paths:` wiring —
+the manifest's `signature_paths: ["sig"]` auto-contributes the RBS
+overlay (ADR-25). The plugin walks every `paths:`
 entry's `.rb` files looking for the Contract subclass shape.
 
 ## Related

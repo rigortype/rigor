@@ -96,7 +96,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { should validate_presence_of(:nme) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.unknown-column" }
+      err = diags.find { |d| d.rule == "unknown-column" }
       expect(err).not_to be_nil
       expect(err.severity).to eq(:warning)
       expect(err.message).to include("nme")
@@ -109,7 +109,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { should validate_uniqueness_of(:emial) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.unknown-column" }
+      err = diags.find { |d| d.rule == "unknown-column" }
       expect(err).not_to be_nil
       expect(err.message).to include("validate_uniqueness_of")
       expect(err.message).to include("emial")
@@ -121,7 +121,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { should have_db_column(:nonexistent) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.unknown-column" }
+      err = diags.find { |d| d.rule == "unknown-column" }
       expect(err).not_to be_nil
     end
 
@@ -131,7 +131,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { should validate_presence_of(:typo) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.unknown-column" }
+      err = diags.find { |d| d.rule == "unknown-column" }
       expect(err.message).to include("created_at")
       expect(err.message).to include("email")
     end
@@ -153,7 +153,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { should belong_to(:nonexistent) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.unknown-association" }
+      err = diags.find { |d| d.rule == "unknown-association" }
       expect(err).not_to be_nil
       expect(err.message).to include("nonexistent")
     end
@@ -166,7 +166,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { should belong_to(:posts) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.association-kind-mismatch" }
+      err = diags.find { |d| d.rule == "association-kind-mismatch" }
       expect(err).not_to be_nil
       expect(err.message).to include("collection")
       expect(err.message).to include("singular")
@@ -178,7 +178,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { should have_many(:author) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.association-kind-mismatch" }
+      err = diags.find { |d| d.rule == "association-kind-mismatch" }
       expect(err).not_to be_nil
       expect(err.message).to include("singular")
       expect(err.message).to include("collection")
@@ -214,7 +214,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           end
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.unknown-column" }
+      err = diags.find { |d| d.rule == "unknown-column" }
       expect(err).not_to be_nil
       expect(err.message).to include("User")
     end
@@ -271,7 +271,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { expect(subject).to validate_presence_of(:nme) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.unknown-column" }
+      err = diags.find { |d| d.rule == "unknown-column" }
       expect(err).not_to be_nil
     end
 
@@ -281,7 +281,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { is_expected.to belong_to(:nonexistent) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.unknown-association" }
+      err = diags.find { |d| d.rule == "unknown-association" }
       expect(err).not_to be_nil
     end
 
@@ -291,7 +291,7 @@ RSpec.describe "plugins/rigor-shoulda-matchers" do
           it { subject.should validate_presence_of(:nme) }
         end
       RUBY
-      err = diags.find { |d| d.rule == "shoulda-matchers.unknown-column" }
+      err = diags.find { |d| d.rule == "unknown-column" }
       expect(err).not_to be_nil
     end
   end

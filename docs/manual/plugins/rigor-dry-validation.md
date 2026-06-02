@@ -40,17 +40,11 @@ result.to_h                                # Hash[Symbol, untyped]
 ## RBS overlay
 
 The plugin bundles an RBS overlay (`sig/dry_validation.rbs`) that
-types the result API above. Loading it requires the overlay's
-`sig/` directory to be on `signature_paths:`.
-
-> **Note (current gap).** Sibling plugins such as
-> [`rigor-activerecord`](rigor-activerecord.md) auto-contribute
-> their bundled RBS through a manifest `signature_paths:`
-> declaration ([ADR-25](../../adr/25-plugin-contributed-rbs.md));
-> `rigor-dry-validation` has not yet adopted that, so its overlay
-> is not loaded automatically. Until it does, the `Result` API
-> types fall back to `untyped` — the contract recognition and the
-> `:dry_validation_contracts` fact work regardless.
+types the result API above, and **contributes it automatically** —
+the plugin's manifest declares `signature_paths: ["sig"]`
+([ADR-25](../../adr/25-plugin-contributed-rbs.md)), so activating
+`rigor-dry-validation` is enough; no project-side `signature_paths:`
+wiring is required.
 
 ## No diagnostics, no config
 

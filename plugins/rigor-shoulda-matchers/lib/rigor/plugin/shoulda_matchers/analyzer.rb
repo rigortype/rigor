@@ -37,7 +37,7 @@ module Rigor
       #
       # All look up `:col` against the model's columns
       # (`Entry#column?`). Unknown columns fire
-      # `shoulda-matchers.unknown-column`.
+      # `unknown-column`.
       #
       # ### Association matchers
       #
@@ -47,10 +47,10 @@ module Rigor
       #   have_and_belong_to_many(:assoc) ← expects :collection
       #
       # Unknown associations fire
-      # `shoulda-matchers.unknown-association`. Known
+      # `unknown-association`. Known
       # associations with mismatched kind (`should belong_to(:posts)`
       # where `:posts` is `has_many`) fire
-      # `shoulda-matchers.association-kind-mismatch`.
+      # `association-kind-mismatch`.
       module Analyzer
         # One matcher violation (always `:warning`). Carries no
         # path/location — the caller (the `node_rule` block) positions it
@@ -194,7 +194,7 @@ module Rigor
           return nil if entry.column?(column_name)
 
           Violation.new(
-            rule: "shoulda-matchers.unknown-column",
+            rule: "unknown-column",
             message: "#{matcher_call.name}(:#{column_name}) — no column `#{column_name}` on " \
                      "#{anchor} (columns: #{entry.column_names.sort.join(', ')})"
           )
@@ -206,13 +206,13 @@ module Rigor
             return nil if actual == expected_kind
 
             Violation.new(
-              rule: "shoulda-matchers.association-kind-mismatch",
+              rule: "association-kind-mismatch",
               message: "#{matcher_call.name}(:#{assoc_name}) on #{anchor} — `#{assoc_name}` is " \
                        "a #{actual} association; #{matcher_call.name} expects #{expected_kind}"
             )
           else
             Violation.new(
-              rule: "shoulda-matchers.unknown-association",
+              rule: "unknown-association",
               message: "#{matcher_call.name}(:#{assoc_name}) — no association `#{assoc_name}` on " \
                        "#{anchor} (associations: #{entry.association_names.sort.join(', ')})"
             )

@@ -84,27 +84,16 @@ module Rigor
       )
 
       def init(_services)
-        # Read config defaults. See Phase 4 (references/04-walker-patterns.md).
+        # Read config defaults. See the analyser-body notes below.
       end
 
-      def diagnostics_for_file(path:, scope:, root:)
-        # Walk `root` (Prism::Node), return Array<Rigor::Analysis::Diagnostic>.
-        # See Phase 4 (references/04-walker-patterns.md) for the per-template body.
-      end
-
-      private
-
-      # Diagnostic constructor helper — every plugin uses this shape.
-      def diagnostic(path, node, severity:, rule:, message:)
-        location = node.location
-        Rigor::Analysis::Diagnostic.new(
-          path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
-          message: message,
-          severity: severity,
-          rule: rule
-        )
+      # ADR-37: the engine owns the AST walk and dispatches every
+      # matching node to this rule. Return Array<Rigor::Analysis::Diagnostic>,
+      # positioned with the inherited `diagnostic(node, …)` helper (no
+      # hand-rolled constructor). `context` (NodeContext) carries the
+      # lexical ancestors when the check is context-dependent.
+      node_rule Prism::CallNode do |node, scope, path, _file_context, _context|
+        []
       end
     end
 
@@ -113,18 +102,26 @@ module Rigor
 end
 ```
 
+The inherited `Base#diagnostic(node, path:, message:, severity:, rule:,
+location:)` builds the `Rigor::Analysis::Diagnostic` (1-based `line` /
+`start_column + 1`, `plugin.<id>` stamped by the runner) — pass
+`location: node.message_loc` to point at the method name. Do not
+hand-roll a `Diagnostic.new` constructor or set `source_family`.
+
 ---
 
-The analyser body inside `#diagnostics_for_file` is the part that varies most by template. Don't invent a new walker — copy the matching example's `lib/rigor/plugin/<id>/analyzer.rb` (or the inline walker in the small plugins) and adapt the dispatch table.
+The rule body — recognising the DSL's call shapes — is the part that varies most by template. Don't invent a walker (the engine owns it now); keep non-trivial logic in a `lib/rigor/plugin/<id>/analyzer.rb` that takes the call node and returns location-free `Violation`s the rule positions with `diagnostic` (the `Analyzer.violations_for` split every bundled plugin uses — it also makes the logic unit-testable).
 
 ## Template-specific reference points
 
-- **rigor-deprecations** — single-pass walk, match `CallNode` against config rules. See `lib/rigor/plugin/deprecations.rb` `each_call` helper.
-- **rigor-lisp-eval** — recursive evaluation of a literal AST argument. See `lib/rigor/plugin/lisp_eval/interpreter.rb#evaluate` for the recursion pattern; arrives at a tag (`:integer` / `:float` / `:bool`) bottom-up.
-- **rigor-units** — `evaluate(node)` returns a dimension tag while threading `@bindings` (a Hash<Symbol, Symbol> of local-variable name → dimension tag). On `LocalVariableWriteNode`, evaluate the RHS and store the result. See `lib/rigor/plugin/units/analyzer.rb#evaluate`.
-- **rigor-statesman** — two passes: `collect_states(root)` produces a Set; `validate_transitions(root, states)` consults it. See `lib/rigor/plugin/statesman.rb` `collect_states` / `validate_transitions`.
-- **rigor-pattern** — the walker calls `scope.type_of(arg_node)` to ASK the analyser for the inferred type, then `literal_string_compatible?` to gate further checks. See `lib/rigor/plugin/pattern.rb` `analyse_call` and `literal_value_of`.
-- **rigor-routes** — single-pass walk for `*_path` / `*_url` calls, but the route table is loaded via `cache_for(:route_table)` (see Phase 4.5 below).
+These bundled plugins are all migrated onto `node_rule` — read one as a worked example of the shape you need:
+
+- **rigor-deprecations** — `node_rule(Prism::CallNode)` matching against config rules; the simplest single-rule plugin. See `lib/rigor/plugin/deprecations.rb`.
+- **rigor-statesman** — two-pass via `node_file_context` (collect declared states once) + `node_rule` (validate transitions against them). See `lib/rigor/plugin/statesman.rb`.
+- **rigor-shoulda-matchers** / **rigor-actionpack** — context-dependent rules that read the enclosing `describe <Model>` / controller from the `NodeContext` ancestors. See `lib/rigor/plugin/shoulda_matchers.rb` and `plugins/rigor-actionpack/lib/rigor/plugin/actionpack.rb` (its `Analyzer.*_violations_for` split + `enclosing_controller_name`).
+- **rigor-rails-routes** — `node_file_context` (same-file shadowing set) + `node_rule` + a `produces:` fact (`:helper_table`) published in `#prepare`. See `lib/rigor/plugin/rails_routes.rb`.
+- **rigor-lisp-eval** / **rigor-units** (examples/) — recursive evaluation of a literal AST argument inside the rule; `rigor-units` threads `@bindings` and consults `scope.type_of`. See their `analyzer.rb` / `interpreter.rb`.
+- **rigor-routes** (examples/) — `node_rule` for `*_path` / `*_url` calls, with the route table loaded via `cache_for(:route_table)` (see Phase 4.5 below).
 
 ## Phase 4.5 — IoBoundary + cache producer (rigor-routes only)
 
@@ -136,9 +133,10 @@ producer :route_table do |_params|
   RouteTable.parse(contents)
 end
 
-def diagnostics_for_file(path:, scope:, root:)
+node_rule Prism::CallNode do |node, _scope, path|
   table = route_table  # see below
-  # ... walker
+  next [] if table.nil?
+  # ... per-call check against `table`, positioned with `diagnostic(node, …)`
 end
 
 private

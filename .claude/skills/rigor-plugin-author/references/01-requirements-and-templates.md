@@ -46,7 +46,7 @@ Before any code, get the user to commit to answers for **all five** questions be
 Two authoring paths exist as of v0.1.x:
 
 1. **Macro expansion substrate** (ADR-16) — declarative `manifest` entries; substrate handles AST walking, name-interpolation, and synthesis. Use this when the plugin's job fits one of the four ADR-16 tiers below.
-2. **Hand-rolled walker** — `diagnostics_for_file` + `flow_contribution_for`. Use this when the requirement falls outside the substrate's tier shapes (domain DSLs with argument-shape-dependent return types, cross-file collect-then-validate analyses, external-file parsing, etc.).
+2. **Node rules + narrow contribution DSLs** (ADR-37) — `node_rule` for diagnostics (the engine owns the walk), `node_file_context` for same-file two-pass, `dynamic_return(receivers:)` / `type_specifier(methods:)` for return-type / narrowing contributions. Use this when the requirement falls outside the substrate's tier shapes (domain DSLs with argument-shape-dependent return types, cross-file collect-then-validate analyses, external-file parsing, etc.). The legacy `diagnostics_for_file` / `flow_contribution_for` fat hooks remain only as deprecated escape valves for whole-file rules and the method-gated-return / dynamic-receiver contribution shapes the narrow DSLs do not express.
 
 ## Step 2A — Try the macro substrate first
 

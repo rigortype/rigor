@@ -45,9 +45,10 @@ class Actionpack < Plugin::Base
     consumes: [{ plugin_id: "activerecord", name: :model_index }]
   )
 
-  def diagnostics_for_file(path:, scope:, root:)
+  node_rule Prism::CallNode do |node, _scope, path|
     ar_index = services.fact_store.read(plugin_id: "activerecord", name: :model_index)
-    # ... use ar_index
+    next [] if ar_index.nil?
+    # ... use ar_index, positioned with diagnostic(node, …)
   end
 end
 ```

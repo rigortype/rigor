@@ -135,10 +135,10 @@ module Rigor
 
       def recognised_diagnostic(path, node, base, kind, entry)
         diagnostic(
-          path, node,
-          severity: :info,
-          rule: "path-helper",
-          message: "#{base}_#{kind} → #{entry.method} #{entry.path}"
+          node, path: path,
+                severity: :info,
+                rule: "path-helper",
+                message: "#{base}_#{kind} → #{entry.method} #{entry.path}"
         )
       end
 
@@ -146,10 +146,10 @@ module Rigor
         suggestion = closest_route(base, table.names)
         hint = suggestion ? " (did you mean `#{suggestion}_#{kind}`?)" : ""
         diagnostic(
-          path, node,
-          severity: :error,
-          rule: "unknown-route",
-          message: "no route helper `#{base}_#{kind}`#{hint}"
+          node, path: path,
+                severity: :error,
+                rule: "unknown-route",
+                message: "no route helper `#{base}_#{kind}`#{hint}"
         )
       end
 
@@ -158,10 +158,10 @@ module Rigor
         plural = entry.arity == 1 ? "argument" : "arguments"
         params_clause = entry.arity.zero? ? "no arguments" : "#{entry.arity} #{plural} (#{params})"
         diagnostic(
-          path, node,
-          severity: :error,
-          rule: "wrong-arity",
-          message: "`#{base}_#{kind}` expects #{params_clause}, got #{actual}"
+          node, path: path,
+                severity: :error,
+                rule: "wrong-arity",
+                message: "`#{base}_#{kind}` expects #{params_clause}, got #{actual}"
         )
       end
 
@@ -173,18 +173,6 @@ module Rigor
           message: @load_error,
           severity: :warning,
           rule: "load-error"
-        )
-      end
-
-      def diagnostic(path, node, severity:, rule:, message:)
-        location = node.location
-        Rigor::Analysis::Diagnostic.new(
-          path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
-          message: message,
-          severity: severity,
-          rule: rule
         )
       end
 

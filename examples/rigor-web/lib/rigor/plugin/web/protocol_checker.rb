@@ -101,9 +101,9 @@ module Rigor
         def missing_method_diagnostic(contract, path, class_node)
           kind = contract.singleton ? "singleton method" : "instance method"
           location = (class_node.constant_path || class_node).location
-          diagnostic(
+          Rigor::Analysis::Diagnostic.from_location(
+            location,
             path: path,
-            location: location,
             severity: contract.severity,
             rule: "missing-protocol-method",
             message: "`#{class_name(class_node)}` must define #{kind} `#{contract.method_name}` — " \
@@ -131,9 +131,9 @@ module Rigor
           return nil unless return_type.accepts(inferred).no?
 
           location = def_node.name_loc || def_node.location
-          diagnostic(
+          Rigor::Analysis::Diagnostic.from_location(
+            location,
             path: path,
-            location: location,
             severity: contract.severity,
             rule: "protocol-return-mismatch",
             message: "`#{def_node.name}` must return a #{contract.return_type_name} — " \
@@ -190,17 +190,6 @@ module Rigor
         def class_name(class_node)
           path = class_node.constant_path
           path.respond_to?(:slice) ? path.slice : class_node.name.to_s
-        end
-
-        def diagnostic(path:, location:, severity:, rule:, message:)
-          Rigor::Analysis::Diagnostic.new(
-            path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
-            message: message,
-            severity: severity,
-            rule: rule
-          )
         end
 
         def walk(node, &)

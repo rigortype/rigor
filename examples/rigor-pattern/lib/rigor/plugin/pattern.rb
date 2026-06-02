@@ -141,10 +141,10 @@ module Rigor
         unless pattern
           known = @patterns.keys.sort.map { |k| ":#{k}" }.join(", ")
           return diagnostic(
-            path, call,
-            severity: :error,
-            rule: "unknown-pattern",
-            message: "no pattern named :#{pattern_name} in plugin config (declared: #{known.empty? ? '(none)' : known})"
+            call, path: path,
+                  severity: :error,
+                  rule: "unknown-pattern",
+                  message: "no pattern named :#{pattern_name} in plugin config (declared: #{known.empty? ? '(none)' : known})"
           )
         end
 
@@ -167,17 +167,17 @@ module Rigor
           value = value_type.value
           if pattern.match?(value)
             diagnostic(
-              path, value_node,
-              severity: :info,
-              rule: "literal-match",
-              message: "literal #{value.inspect} matches :#{pattern_name}"
+              value_node, path: path,
+                          severity: :info,
+                          rule: "literal-match",
+                          message: "literal #{value.inspect} matches :#{pattern_name}"
             )
           else
             diagnostic(
-              path, value_node,
-              severity: :error,
-              rule: "literal-mismatch",
-              message: "literal #{value.inspect} does not match :#{pattern_name} (#{pattern.source})"
+              value_node, path: path,
+                          severity: :error,
+                          rule: "literal-mismatch",
+                          message: "literal #{value.inspect} does not match :#{pattern_name} (#{pattern.source})"
             )
           end
         else
@@ -188,10 +188,10 @@ module Rigor
           # info note so the user sees the engine collaboration
           # without false-positive errors.
           diagnostic(
-            path, value_node,
-            severity: :info,
-            rule: "literal-unknown",
-            message: "argument is literal-string-compatible but exact value is not statically known; :#{pattern_name} pattern check skipped"
+            value_node, path: path,
+                        severity: :info,
+                        rule: "literal-unknown",
+                        message: "argument is literal-string-compatible but exact value is not statically known; :#{pattern_name} pattern check skipped"
           )
         end
       end
@@ -203,18 +203,6 @@ module Rigor
         return nil unless node.is_a?(Prism::SymbolNode)
 
         node.unescaped
-      end
-
-      def diagnostic(path, node, severity:, rule:, message:)
-        location = node.location
-        Rigor::Analysis::Diagnostic.new(
-          path: path,
-          line: location.start_line,
-          column: location.start_column + 1,
-          message: message,
-          severity: severity,
-          rule: rule
-        )
       end
     end
 

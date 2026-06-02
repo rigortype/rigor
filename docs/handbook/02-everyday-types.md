@@ -2,7 +2,22 @@
 
 This is the most important chapter. Once you have a feel for
 the carriers below, the rest of the handbook is just rules
-operating on them.
+operating on them. This is also the page to come back to as a
+glossary — the table below is the whole carrier zoo at a
+glance.
+
+> **In this chapter**
+> [Why "type" is too coarse](#why-type-is-too-coarse-a-word) ·
+> [Seeing carriers (`rigor annotate`)](#seeing-carriers-yourself--rigor-annotate) ·
+> [Nominal](#nominal-types--the-familiar-starting-point) ·
+> [Constant](#constants--single-ruby-values) ·
+> [Integer ranges](#integer-ranges--bounded-intervals) ·
+> [Refinements](#refinements--values-restricted-by-a-predicate) ·
+> [Difference](#difference--a-base-minus-a-single-value) ·
+> [`Dynamic[Top]`](#dynamictop--the-gradual-carrier) ·
+> [Tuples & hash shapes](#tuples-and-hash-shapes--heterogeneous-structures) ·
+> [Unions](#unions--one-of-these) ·
+> [Worked example](#a-worked-example)
 
 ## Why "type" is too coarse a word
 
@@ -36,6 +51,11 @@ So: every value at every program point is described by a
 **carrier**. Carriers can be wide (`Integer`, `Dynamic[Top]`)
 or narrow (`Constant<3>`, `non-empty-string`). The rest of
 this chapter is the carrier zoo.
+
+One note on notation before the zoo: angle brackets hold a
+concrete value or bound — `Constant<3>`, `int<0, max>` —
+while square brackets hold type parameters, exactly as in RBS
+— `Nominal[String]`, `Hash[K, V]`, `Dynamic[Top]`.
 
 ## Seeing carriers yourself — `rigor annotate`
 
@@ -123,8 +143,9 @@ double = n * 2              #=> dump_type: int<0, max>
 ```
 
 `max` here means "positive infinity" — the upper bound is
-unbounded. Multiplication preserves the floor, so `n * 2`
-stays `int<0, max>`.
+unbounded; `min`, which appears in the table below, is its
+mirror, "negative infinity." Multiplication preserves the
+floor, so `n * 2` stays `int<0, max>`.
 
 A handful of common ranges have shorter names:
 

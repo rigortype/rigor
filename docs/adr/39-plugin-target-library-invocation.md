@@ -260,9 +260,11 @@ invocation keeps its main-space path and behaviour is unchanged
   Redmine `app` under `RUBY_BOX=1` crashed (`SIGSEGV`), apparently on the
   error path for that project's own malformed `sig/`
   (`RBS::DuplicatedDeclarationError`) which the non-box run handles
-  gracefully. This is the experimental feature interacting badly with the
-  C-extension-backed RBS/Prism machinery — the "may change / known
-  issues" the interpreter warns about.
+  gracefully. The crash is a NULL deref in the VM method-lookup path
+  (`prepare_callable_method_entry`), reproducible with no user sub-boxes
+  (only the process-wide `RUBY_BOX=1`) — it is **not** triggered by
+  Rigor's `Plugin::Box`. A Ruby bug-report draft is in
+  [`docs/notes/20260602-ruby-box-segfault-bug-report.md`](../notes/20260602-ruby-box-segfault-bug-report.md).
 
 So the box path is **landed but gated as experimental and not yet
 production-usable**: the chosen first-priority direction, blocked on

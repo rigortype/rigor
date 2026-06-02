@@ -242,6 +242,18 @@ the project tightens monotonically over time. The
 `--format=json` form of `rigor diff` itself is also
 available for editor / dashboard integrations.
 
+`rigor diff` is the lightweight, ad-hoc form — a JSON file you
+diff by hand in a CI script. Most projects instead adopt the
+**managed baseline**: `rigor baseline generate` writes a
+`.rigor-baseline.yml`, you point at it with the `baseline:`
+config key, and from then on `rigor check` itself exits clean
+on recorded diagnostics and surfaces only new ones — no
+separate diff step. That is the path the
+[`rigor-project-init` skill](../manual/14-rails-quickstart.md)
+sets up for you; see [Baselines](../manual/06-baseline.md) for
+the full workflow ([ADR-22](../adr/22-baseline-and-project-onboarding.md)
+for the design).
+
 ## Why a diagnostic might NOT fire when you expected one
 
 The most common reasons:

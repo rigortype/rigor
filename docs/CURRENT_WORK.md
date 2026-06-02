@@ -173,7 +173,7 @@ Decision (with the user): user-facing plugin docs move to the published manual; 
 
 - **Layout**: user-facing → `docs/manual/plugins/<id>.md` (what it checks / config / what it infers / limitations); dev/internals stay in `plugins/<id>/README.md` (layout / architecture / authoring surface / demo) with a top pointer up to the user page; `docs/manual/plugins/README.md` is the index (wired into `docs/manual/README.md` item 7).
 - **When a handbook chapter already covers a plugin deeply** (Sorbet = handbook ch. 10), the manual page stays thin and points to the chapter instead of duplicating it.
-- **Migration checklist — 16 of 31 plugins.** `[x]` = user page exists under `docs/manual/plugins/<id>.md` (+ README slimmed/de-staled); `[ ]` = not yet. (Commit shown for migrated.)
+- **Migration checklist — 20 of 31 plugins.** `[x]` = user page exists under `docs/manual/plugins/<id>.md` (+ README slimmed/de-staled); `[ ]` = not yet. (Commit shown for migrated.)
 
   _Rails core + meta:_
   - [x] `rigor-activerecord` — `22900dac` (+ stale-fix `5ace10bd`)
@@ -198,10 +198,10 @@ Decision (with the user): user-facing plugin docs move to the published manual; 
   - [x] `rigor-sinatra` — `a6825064`
 
   _Not yet migrated (15) — framework / Tier-3 tail:_
-  - [ ] `rigor-devise`
-  - [ ] `rigor-statesman`
-  - [ ] `rigor-mangrove`
-  - [ ] `rigor-pundit`
+  - [x] `rigor-devise` — `43ca0366`
+  - [x] `rigor-statesman` — `43ca0366`
+  - [x] `rigor-mangrove` — `43ca0366`
+  - [x] `rigor-pundit` — `43ca0366`
   - [ ] `rigor-sidekiq`
   - [ ] `rigor-actioncable`
   - [ ] `rigor-minitest`
@@ -218,7 +218,7 @@ Decision (with the user): user-facing plugin docs move to the published manual; 
 
 ### Next-session entry point (doc track)
 
-Work the unchecked `[ ]` boxes in the migration checklist above — **15 remain**, all the framework / Tier-3 tail. Per-plugin recipe: read the README; **reconcile against `CHANGELOG.md` (grep the plugin id) + plugin source** (the CRITICAL note above — do not trust the README's scope lists); split user↔dev; write an accurate `docs/manual/plugins/<id>.md`; slim + de-stale the README to internals + add the user-guide pointer; strip any `.gemspec` line; add an index entry to `docs/manual/plugins/README.md`; verify links (the cold-read check). Many of the remaining Tier-3 plugins are simpler than the Rails core (fact-providers or macro-substrate consumers with **no diagnostics / no config**), so their pages are short — but still reconcile, since some READMEs predate later slices.
+Work the unchecked `[ ]` boxes in the migration checklist above — **11 remain**, all the framework / Tier-3 tail. Per-plugin recipe: read the README; **reconcile against `CHANGELOG.md` (grep the plugin id) + plugin source** (the CRITICAL note above — do not trust the README's scope lists); split user↔dev; write an accurate `docs/manual/plugins/<id>.md`; slim + de-stale the README to internals + add the user-guide pointer; strip any `.gemspec` line; add an index entry to `docs/manual/plugins/README.md`; verify links (the cold-read check). Many of the remaining Tier-3 plugins are simpler than the Rails core (fact-providers or macro-substrate consumers with **no diagnostics / no config**), so their pages are short — but still reconcile, since some READMEs predate later slices.
 
 **Open code/doc gap flagged during migration (next session's call):** `rigor-dry-validation` ships an RBS overlay but its README/usage tells the user to wire `signature_paths: vendor/bundle/.../rigor-dry-validation-0.1.0/sig` — a path that doesn't exist under the bundled model. Unlike `rigor-activerecord` (which declares `signature_paths: ["sig"]` in its manifest, auto-loading its RBS per [ADR-25](adr/25-plugin-contributed-rbs.md)), dry-validation hasn't adopted that. The one-line fix is to add `signature_paths: ["sig"]` to its manifest (then drop the manual-wiring docs); recognition + the `:dry_validation_contracts` fact already work without it. Flagged in both its user page and README; not changed (a plugin-code edit, deliberately left for review).
 

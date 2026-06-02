@@ -23,7 +23,7 @@ duplication.**
 - **Index** → `docs/manual/plugins/README.md` (one line per
   plugin), already wired into `docs/manual/README.md` item 7.
 
-16 of 31 done; 15 remain (the Tier-3 tail) — see the CURRENT_WORK
+20 of 31 done; 11 remain (the Tier-3 tail) — see the CURRENT_WORK
 checklist for the exact `[x]`/`[ ]` list.
 
 ## CRITICAL: reconcile, don't copy

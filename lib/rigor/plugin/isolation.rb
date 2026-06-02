@@ -34,11 +34,18 @@ module Rigor
 
       module_function
 
+      # The default strategy. `process` (a crash-contained forked worker)
+      # is the default: it isolates the target library's monkey-patches +
+      # crashes from Rigor with no in-process contamination, and forks a
+      # single persistent worker (not one per call). It falls back to
+      # `none` where fork is unavailable (see {#backend}).
+      DEFAULT = "process"
+
       # The configured strategy name (`RIGOR_PLUGIN_ISOLATION`), defaulting
-      # to `none` for any unset / unrecognised value.
+      # to {DEFAULT} for any unset / unrecognised value.
       def strategy_name
         name = ENV["RIGOR_PLUGIN_ISOLATION"].to_s
-        STRATEGIES.include?(name) ? name : "none"
+        STRATEGIES.include?(name) ? name : DEFAULT
       end
 
       # Invokes `receiver.method(*args)` on a target library, requiring
@@ -51,11 +58,17 @@ module Rigor
         backend.call(feature: feature, receiver: receiver, method: method, args: args)
       end
 
+      # The backend module for the configured strategy. `process`
+      # (including the default) falls back to `Direct` where `fork` is
+      # unavailable (Windows / JRuby) so inflection still works rather than
+      # silently degrading — the libraries are trusted + pure, so the
+      # main-space fallback is acceptable when no fork-based isolation can
+      # be had.
       def backend
         case strategy_name
         when "ruby_box" then RubyBox
-        when "process" then Process
-        else Direct
+        when "none" then Direct
+        else Process.available? ? Process : Direct
         end
       end
 
@@ -100,8 +113,13 @@ module Rigor
       module Process
         module_function
 
+        # Whether fork-based isolation can run on this platform.
+        def available?
+          ::Process.respond_to?(:fork)
+        end
+
         def call(feature:, receiver:, method:, args:)
-          raise Unavailable, "process isolation unavailable: fork is not supported" unless ::Process.respond_to?(:fork)
+          raise Unavailable, "process isolation unavailable: fork is not supported" unless available?
 
           status, value = exchange([feature, receiver, method, args])
           raise Unavailable, "process isolation worker error: #{value}" if status == :error

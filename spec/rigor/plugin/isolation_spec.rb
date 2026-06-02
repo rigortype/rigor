@@ -26,12 +26,24 @@ RSpec.describe Rigor::Plugin::Isolation do
     yield
   end
 
-  describe "none (default, direct)" do
-    it "defaults to none for unset/unknown values" do
+  describe "strategy selection" do
+    it "defaults to process for unset / unrecognised values" do
       ENV.delete("RIGOR_PLUGIN_ISOLATION")
-      expect(described_class.strategy_name).to eq("none")
+      expect(described_class.strategy_name).to eq("process")
     end
 
+    it "falls back to Direct when fork is unavailable", unless: Process.respond_to?(:fork) do
+      ENV.delete("RIGOR_PLUGIN_ISOLATION")
+      expect(described_class.backend).to eq(described_class::Direct)
+    end
+
+    it "uses the Process backend by default where fork is available", if: Process.respond_to?(:fork) do
+      ENV.delete("RIGOR_PLUGIN_ISOLATION")
+      expect(described_class.backend).to eq(described_class::Process)
+    end
+  end
+
+  describe "none (explicit, direct)" do
     it "calls the real library directly in the main space" do
       with_strategy("none") do
         expect(described_class.call(feature: feature, receiver: inflector, method: :pluralize, args: ["person"]))

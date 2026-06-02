@@ -210,19 +210,21 @@ is a **configurable strategy** (`.rigor.yml` `plugins_isolation:` /
 
 | Strategy | Isolation | Crash containment | Cost | Notes |
 | --- | --- | --- | --- | --- |
-| `none` (direct) — **default** | none (loads into main space) | none | lowest | The library is trusted + pure, so for the common case this is fine; current slices 2/4 path. |
-| `ruby_box` | monkey-patch + version (per-box) | **no** (a native crash still kills the process) | low (in-process) | Ruby 4.0 `Ruby::Box`, `RUBY_BOX=1` (re-exec). Experimental. |
-| `process` (fork) | **full** (separate OS process) | **yes** (a child crash is contained; the parent declines) | higher (fork + IPC) | Forks a worker, loads + calls the library there, returns data (Marshal) over a pipe. Reuses Rigor's fork model (ADR-15). |
+| `process` (fork) — **default** | **full** (separate OS process) | **yes** (a child crash is contained; the parent declines) | one fork + IPC | Forks a **single persistent worker** (not one per call), which loads + calls the library and returns data (Marshal) over a pipe. Reuses Rigor's fork model (ADR-15). Falls back to `none` where `fork` is unavailable. |
+| `none` (direct) | none (loads into main space) | none | lowest | No isolation; the trusted, pure library loads into the main space. The fork-less-platform fallback, and an explicit opt-out. |
+| `ruby_box` | monkey-patch + version (per-box) | **no** (a native crash still kills the process) | low (in-process) | Ruby 4.0 `Ruby::Box`, `RUBY_BOX=1` (re-exec). Experimental; blocked on an upstream VM segfault (below). |
 
 The key contrast: `ruby_box` isolates *correctness* contamination but a
 native crash in the boxed work still takes the whole process down (as
 observed — see below); `process` gives **true crash containment** because
 the work runs in a child whose `SIGSEGV` the parent survives and turns
-into a decline. So `process` is the most robust (and the natural answer
-to the segfault that blocks the box path), at the cost of fork + IPC per
-invocation (mitigable with a persistent worker). `none` stays the default
-because the invoked libraries are trusted + pure and the contamination
-risk is low for the common case.
+into a decline. So `process` is the **default**: the most robust isolation
+that works today, at the cost of one fork + per-call IPC over a persistent
+worker (the worker is forked once and reused — never one fork per call).
+Where `fork` is unavailable (Windows / JRuby) `process` falls back to
+`none` so inflection still works rather than silently degrading — the
+libraries are trusted + pure, so the main-space fallback is acceptable
+when no fork-based isolation can be had.
 
 The first-priority *in-process* option remains `ruby_box` (namespace
 isolation, enabled by `RUBY_BOX=1`): target-library invocation runs
@@ -264,13 +266,16 @@ just the target library means **the whole Rigor process runs in box
 mode** — there is no "box only the inflector" without enabling boxes
 process-wide. Adopting it therefore touches the launcher.
 
-The **selectable strategy is landed, `none` by default**:
+The **selectable strategy is landed, `process` by default**:
 `Plugin::Isolation` (the `none` / `ruby_box` / `process` selector +
 backends), `Rigor::Plugin::Box` (the `ruby_box` wrapper), `Plugin::Inflector`
 routing through `Isolation`, and an `exe/rigor` re-exec under `RUBY_BOX=1`
-when `RIGOR_PLUGIN_ISOLATION=ruby_box` (or the legacy `RIGOR_BOX`). With
-the default `none`, every target-library invocation keeps its main-space
-path and behaviour is unchanged (`make verify` green).
+when `RIGOR_PLUGIN_ISOLATION=ruby_box` (or the legacy `RIGOR_BOX`). Under
+the default `process` strategy, target-library invocation runs in the
+persistent forked worker — diagnostics are **identical** to the
+main-space path (verified across the whole spec suite and a full Redmine
+run with no env set; `make verify` green), with the worker forked once
+and reused. `process` falls back to `none` where `fork` is unavailable.
 
 **Empirical status of the box path (Ruby 4.0.5):** mixed.
 - The isolation mechanism is validated — a target library loads + answers
@@ -287,16 +292,15 @@ path and behaviour is unchanged (`make verify` green).
   Rigor's `Plugin::Box`. A Ruby bug-report draft is in
   [`docs/notes/20260602-ruby-box-segfault-bug-report.md`](../notes/20260602-ruby-box-segfault-bug-report.md).
 
-So the `ruby_box` strategy is **landed but gated as experimental and not
-yet production-usable**: the chosen first-priority *in-process* direction,
-blocked on the upstream `Ruby::Box` VM bug above. The **`process`
-(fork) strategy is the production-ready isolation today** — validated on a
-full Redmine `app` run (byte-identical diagnostics, no segfault), because
-the fork boundary contains exactly the crash that breaks `ruby_box`. The
-default stays `none` (the trusted, pure libraries need no isolation for
-correctness); a project that wants real isolation today selects
-`process`, and `ruby_box` becomes attractive (lighter, in-process, +
-exact-version coexistence) once the VM bug is fixed.
+So **`process` (fork) is the default** — the production-ready isolation
+that works today: validated on a full Redmine `app` run (byte-identical
+diagnostics, no segfault) and across the whole spec suite with no env set,
+because the fork boundary contains exactly the crash that breaks
+`ruby_box`. It falls back to `none` where `fork` is unavailable.
+`ruby_box` is **landed but gated as experimental** (selectable, but
+blocked on the upstream `Ruby::Box` VM bug above); it becomes attractive
+(lighter, in-process, + exact-version coexistence) once that bug is fixed.
+`none` is the explicit opt-out + the fork-less fallback.
 
 ### Engine support
 
@@ -340,8 +344,9 @@ reframed from "unify the approximations" to "use the real library."
    invocation"). `Plugin::Isolation` selects one of three backends behind
    a common `call(feature:, receiver:, method:, args:)` interface by the
    `RIGOR_PLUGIN_ISOLATION` env (which `exe/rigor` maps from
-   `.rigor.yml`'s `plugins_isolation:`), with `none` (direct, main-space)
-   the default. **All three landed:**
+   `.rigor.yml`'s `plugins_isolation:`), with `process` the **default**
+   (falling back to `none` where `fork` is unavailable). **All three
+   landed:**
    - `none` — `require` + `public_send` in the main space (default path).
    - `ruby_box` — call inside the `Plugin::Box` (`exe/rigor` re-execs under
      `RUBY_BOX=1` when selected). Isolates monkey-patches + versions; also
@@ -356,9 +361,10 @@ reframed from "unify the approximations" to "use the real library."
      diagnostics **byte-identical** to the non-isolated run and **no
      segfault** — the robust answer to the box path's crash.
 
-   `Plugin::Inflector` routes through `Isolation`; the default (`none`)
-   keeps the current pinned-dependency path, so behaviour is unchanged
-   unless a project opts into a stronger strategy.
+   `Plugin::Inflector` routes through `Isolation`. The default
+   (`process`, falling back to `none` without `fork`) produces identical
+   diagnostics to the in-process path; `none` is the explicit opt-out for
+   projects that prefer the lowest-cost in-process call.
 
 ## Relationship to other ADRs
 

@@ -12,6 +12,22 @@ This file is the one-page entry point. The full normative specification lives in
 - **Two relations, kept separate.** Subtyping (`A <: B`, value-set inclusion) and gradual consistency (`consistent(A, B)`, dynamic-boundary compatibility) are not unified. `untyped` is the dynamic type, distinct from `top`.
 - **Robustness principle (Postel's law).** Rigor-authored types are *strict on returns* and *lenient on parameters*. A precise return propagates useful facts through the inference engine; a permissive parameter prevents coercion workarounds at call sites. Hand-written RBS authorship binds — the principle directs Rigor's defaults, not user-supplied signatures. See [robustness-principle.md](type-specification/robustness-principle.md) for the normative rule and [adr/5-robustness-principle.md](adr/5-robustness-principle.md) for the design rationale.
 
+## Carriers at a glance
+
+A vanilla checker asks "what class is this?"; Rigor asks "what subset of values can this expression produce?" and records the answer in a **carrier**. The everyday ones, with the type Rigor infers in the trailing comment:
+
+```ruby
+n   = 1 + 2        # Constant<3>            — a single proven value
+len = ARGV.size    # int<0, max>            — a bounded range (a.k.a. non-negative-int)
+s   = id.downcase  # lowercase-string       — a refinement: String restricted by a predicate
+row = [1, "a"]     # Tuple[Constant<1>, Constant<"a">]    — per-position array shape
+cfg = {port: 8080} # HashShape{port: Constant<8080>}      — per-key hash shape
+tag = choose_color # Constant<:red> | Constant<:blue>     — a finite union
+x   = gets         # String | nil; Dynamic[Top] when nothing can be proved
+```
+
+Angle brackets hold a concrete value or bound (`Constant<3>`, `int<0, max>`); square brackets hold type parameters, as in RBS (`Tuple[…]`, `Dynamic[Top]`). Every carrier **erases to its base RBS class** at the boundary (`Constant<3>` → `Integer`), so adopting Rigor is strictly additive. The full walkthrough is [handbook chapter 2 — Everyday types](handbook/02-everyday-types.md).
+
 ## Main features
 
 | Feature | Where to read more |

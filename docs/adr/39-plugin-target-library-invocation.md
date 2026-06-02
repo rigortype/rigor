@@ -197,14 +197,34 @@ behavioural difference across versions is ever observed. It carries the
 provisioning cost (first-run install, cache, offline-CI / hermetic-Flake
 tension) and is therefore deferred until demanded.
 
-### Isolation of target-library invocation — `Ruby::Box` (first-priority)
+### Isolation of target-library invocation — selectable strategy (`none` / `ruby_box` / `process`)
 
 Loading a target library into Rigor's process risks contaminating Rigor
 itself — chiefly through **monkey-patches to core classes** (a gem that
 reopens `String` / `Hash` changes the Ruby that Rigor's own code runs
 under) and **gem-version clashes** (Ruby allows one version of a gem per
-process, so the target's version can collide with Rigor's own). The
-**chosen first-priority mitigation is `Ruby::Box`** (Ruby 4.0's namespace
+process, so the target's version can collide with Rigor's own). How much
+isolation is worth its cost depends on the deployment, so the isolation
+is a **configurable strategy** (`.rigor.yml` `plugins_isolation:` /
+`RIGOR_PLUGIN_ISOLATION` env), with three backends behind one interface:
+
+| Strategy | Isolation | Crash containment | Cost | Notes |
+| --- | --- | --- | --- | --- |
+| `none` (direct) — **default** | none (loads into main space) | none | lowest | The library is trusted + pure, so for the common case this is fine; current slices 2/4 path. |
+| `ruby_box` | monkey-patch + version (per-box) | **no** (a native crash still kills the process) | low (in-process) | Ruby 4.0 `Ruby::Box`, `RUBY_BOX=1` (re-exec). Experimental. |
+| `process` (fork) | **full** (separate OS process) | **yes** (a child crash is contained; the parent declines) | higher (fork + IPC) | Forks a worker, loads + calls the library there, returns data (Marshal) over a pipe. Reuses Rigor's fork model (ADR-15). |
+
+The key contrast: `ruby_box` isolates *correctness* contamination but a
+native crash in the boxed work still takes the whole process down (as
+observed — see below); `process` gives **true crash containment** because
+the work runs in a child whose `SIGSEGV` the parent survives and turns
+into a decline. So `process` is the most robust (and the natural answer
+to the segfault that blocks the box path), at the cost of fork + IPC per
+invocation (mitigable with a persistent worker). `none` stays the default
+because the invoked libraries are trusted + pure and the contamination
+risk is low for the common case.
+
+The first-priority *in-process* option remains `ruby_box` (namespace
 isolation, enabled by `RUBY_BOX=1`): target-library invocation runs
 inside a `Ruby::Box`, whose boundary isolates class/method/constant
 definitions and core-class monkey-patches per box, and lets multiple
@@ -311,15 +331,21 @@ and deferred until the second consumer.
 Slices 2–4 are the concrete landing of boilerplate plan § 0e, now
 reframed from "unify the approximations" to "use the real library."
 
-5. **`Ruby::Box` isolation layer** (chosen first-priority isolation; see
-   § "Isolation of target-library invocation"). Re-exec / launch Rigor
-   with `RUBY_BOX=1`, add a `Plugin::Box`-style wrapper that runs a
-   target-library invocation inside a box (isolating monkey-patches +
-   versions from Rigor's main space), and route the existing consumers
-   through it. Unlocks the maximal-fidelity "load the project's exact
-   gem version" path (a box per resolved version, no process-wide
-   clash). Follow-on; the current pinned-dependency path stays until this
-   lands. Tracks the experimental status of `Ruby::Box`.
+5. **Selectable isolation strategy** (see § "Isolation of target-library
+   invocation"). A `plugins_isolation:` config (`none` / `ruby_box` /
+   `process`; `RIGOR_PLUGIN_ISOLATION` env) selecting one of three
+   backends behind a common interface, with `none` (direct, main-space)
+   the default. **Landed:** `none` + `ruby_box` (the `Plugin::Box`
+   wrapper + `exe/rigor` `RUBY_BOX=1` re-exec; `Plugin::Inflector` routes
+   through it). **Planned:** `process` (fork) — forks a worker that loads
+   + calls the library and returns data over a pipe, giving **crash
+   containment** (a child `SIGSEGV` is contained, the parent declines) —
+   the robust answer to the box path's segfault, reusing Rigor's fork
+   model (ADR-15). `ruby_box` also unlocks the maximal-fidelity "load the
+   project's exact gem version" path (a box per resolved version, no
+   process-wide clash). The default (`none`) keeps the current
+   pinned-dependency path, so behaviour is unchanged unless a project
+   opts into a stronger strategy.
 
 ## Relationship to other ADRs
 

@@ -116,6 +116,7 @@ module Rigor
         @model_search_paths = Array(config.fetch("model_search_paths")).map(&:to_s)
         @model_base_classes = Array(config.fetch("model_base_classes")).map(&:to_s)
         @schema_table = nil
+        @schema_load_attempted = false
         @model_index = nil
         @load_errors = []
       end
@@ -550,7 +551,16 @@ module Rigor
 
       def schema_table_or_nil
         return @schema_table if @schema_table
+        # Memoize the *failure*, not just the success: `model_index`
+        # (and thus this method) is invoked per AR call site, so a
+        # missing / unreadable schema file would otherwise re-attempt
+        # the read and append a fresh interpolated error string to
+        # `@load_errors` on every call. On a large Rails app that grew
+        # `@load_errors` to millions of retained strings (measured: 4.2 M
+        # strings / ~1.5 GB on Redmine). One attempt is enough.
+        return nil if @schema_load_attempted
 
+        @schema_load_attempted = true
         # Same pattern: read schema file via boundary, then call
         # cache_for so the descriptor includes the file digest.
         io_boundary.read_file(@schema_file)

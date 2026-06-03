@@ -328,6 +328,31 @@ RSpec.describe "plugins/rigor-activerecord" do
       load_errors = result.diagnostics.select { |d| d.rule == "load-error" }
       expect(load_errors.size).to eq(1)
     end
+
+    it "attempts the missing-schema read only once across many AR call sites" do
+      # Regression: `schema_table_or_nil` is invoked per AR call site via
+      # `model_index`; before memoizing the *failure* it re-read the
+      # missing schema and appended a fresh interpolated error string to
+      # `@load_errors` on every call, growing it without bound (measured:
+      # 4.2 M retained strings / ~1.5 GB on Redmine). The internal error
+      # list must stay at one entry no matter how many call sites run.
+      source = (1..40).map { |i| "User.where(id: #{i})\n" }.join
+      Dir.mktmpdir do |dir|
+        materialize_files(dir, { "demo.rb" => source }) # no db/schema.rb
+        Dir.chdir(dir) do
+          configuration = Rigor::Configuration.new(
+            "paths" => ["demo.rb"], "plugins" => ["rigor-activerecord"]
+          )
+          runner = Rigor::Analysis::Runner.new(
+            configuration: configuration, cache_store: nil, collect_stats: false,
+            plugin_requirer: build_plugin_requirer
+          )
+          runner.run
+          plugin = runner.plugin_registry.find("activerecord")
+          expect(plugin.instance_variable_get(:@load_errors).size).to eq(1)
+        end
+      end
+    end
   end
 
   describe "#flow_contribution_for return-type contribution (v0.1.2)" do

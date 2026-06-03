@@ -114,9 +114,9 @@ GMP / BCMath / Money など**演算子をオーバーロード（あるいは演
 
 PHPStan「同水準」に向けた不足を、影響度順に。
 
-### G1（要検証→**スパイク済み・解決**）— 二項演算プラグインフック
+### G1（要検証→**スパイク済み・統合スペックで確定**）— 二項演算プラグインフック
 
-当初「Rigor にはプラグインの二項演算フックがない」と仮説したが、**2026-06-03 のコード・スパイクで反証された**。Ruby の `a + b` は Prism では `name: :+` の `Prism::CallNode` であり、通常の呼び出しと同じく `call_type_for` → `MethodDispatcher.dispatch` に `call_node: node` / `method_name: :+` / `scope:` 付きで流れる（[`expression_typer.rb:1233`](../../lib/rigor/inference/expression_typer.rb)）。dispatch の優先順位は **`ConstantFolding`（precise tiers）→ `try_plugin_contribution`（`dynamic_return`）→ RBS**（[`method_dispatcher.rb:74-97`](../../lib/rigor/inference/method_dispatcher.rb)）。プラグイン所有のレシーバは `Nominal[CustomType]` であって `Constant` / `IntegerRange` ではないため ConstantFolding は `nil` を返し、**dispatch は plugin tier に落ちる**。`dynamic_return_type` は receiver クラスのみでゲートし method 名は一切問わない（[`base.rb:382`](../../lib/rigor/plugin/base.rb)）。
+当初「Rigor にはプラグインの二項演算フックがない」と仮説したが、**2026-06-03 のコード・スパイク＋統合スペックで反証・確定した**（[`spec/integration/plugin_operator_dynamic_return_spec.rb`](../../spec/integration/plugin_operator_dynamic_return_spec.rb)、4 例 green）。Ruby の `a + b` は Prism では `name: :+` の `Prism::CallNode` であり、通常の呼び出しと同じく `call_type_for` → `MethodDispatcher.dispatch` に `call_node: node` / `method_name: :+` / `scope:` 付きで流れる（[`expression_typer.rb:1233`](../../lib/rigor/inference/expression_typer.rb)）。dispatch の優先順位は **`ConstantFolding`（precise tiers）→ `try_plugin_contribution`（`dynamic_return`）→ RBS**（[`method_dispatcher.rb:74-97`](../../lib/rigor/inference/method_dispatcher.rb)）。プラグイン所有のレシーバは `Nominal[CustomType]` であって `Constant` / `IntegerRange` ではないため ConstantFolding は `nil` を返し、**dispatch は plugin tier に落ちる**。`dynamic_return_type` は receiver クラスのみでゲートし method 名は一切問わない（[`base.rb:382`](../../lib/rigor/plugin/base.rb)）。スペックは `:+ :- :* :/` すべてでブロックが発火し、寄与した型が `(a <op> b)` の結果型として確定することを確認済み。
 
 結論：**PHPStan の `OperatorTypeSpecifyingExtension` 相当はすでに既存契約で実現できる**。
 
@@ -133,7 +133,7 @@ end
 
 - **G1a（ドキュメント）**：`dynamic_return` が演算子糖衣も捕捉できることがどこにも明記されていない。ADR-37 / examples いずれも演算子ユースケースを示していない。
 - **G1b（エルゴノミクス）**：receiver-only ゲートのため、ブロックが手動で `call_node.name` を分岐し、`scope.type_of` で右辺型を取り出す必要がある。PHPStan の `specifyType(sigil, left, right)` のような (演算子記号, 左型, 右型) を直接渡す糖衣がない。`operator_return operators: %i[+ -], receivers: [...]` のような薄い宣言糖衣は検討余地。
-- **G1c（coerce 方向、設計上の真のギャップ）**：Ruby は `a + b` を `a` に対してディスパッチする。`1 + money` のように**左辺が組み込み型**のケースは Integer がレシーバになり、`coerce` を経由する。プラグインが Integer を所有しないと左辺起点の演算に介入できない。PHPStan は `isOperatorSupported($left, $right)` が**双方向**で左右どちらの型からでも判定できる点で構造的に勝る。Rigor で coerce 方向を扱うには、(i) `coerce` 呼び出し自体を `dynamic_return receivers: ["Integer"]` …は所有衝突で不可、(ii) エンジン側で「右辺がプラグイン所有型なら左辺組み込み型の算術をプラグインに委譲」する新経路、のいずれかが要る。**ここだけは ADR 級の設計判断が残る**。
+- **G1c（coerce 方向、設計上の真のギャップ）**：Ruby は `a + b` を `a` に対してディスパッチする。`1 + money` のように**左辺が組み込み型**のケースは Integer がレシーバになり、ランタイムでは `money.coerce(1)` を経由する。プラグインが Integer を所有しないと左辺起点の演算に介入できない。**スペックで確定した実挙動**（上記スペックの coerce 例）：`1 + money` は Dynamic に fail-soft するのではなく、**左オペランドの組み込み型（Integer）として型付けされる**。したがって下流 `(1 + money).custom_method` は Integer 上で未定義判定され、ランタイムで `coerce` 経由で動くコードに対し**狭いが偽陽性が出うる**（scalar-first coerce ＋ 結果への独自メソッド呼び出しという少数派条件が重なったとき）。PHPStan は `isOperatorSupported($left, $right)` が**双方向**で左右どちらの型からでも判定できる点で構造的に勝る。Rigor で coerce 方向を扱う選択肢：(i) `coerce` 呼び出しを `dynamic_return receivers: ["Integer"]` …は所有衝突で不可、(ii) エンジン側で「引数がプラグイン所有型なら左辺組み込み算術をプラグインに委譲」する新経路、(iii) **より単純な FP 緩和** — 引数が非 Numeric の未知/独自型のとき結果を Integer 左偏重ではなく Dynamic に倒す（プラグインフック不要のエンジン小改修で偽陽性だけ消える）。**ここだけは ADR 級の設計判断が残る**。
 
 ユースケース（Ruby 生態系での実需）：
 
@@ -178,7 +178,7 @@ PHPStan は `isSuperTypeOf` を `TypeCombinator` 経由で網羅テストする�
 3. **accepts の gradual 非推移性**：`relations-and-certainty.md` の「consistent は推移的でない」を突くケース表。
 4. **差分演算子の正規化**：`String - "" - "x"` の平坦化、`Refined` との相互作用、診断表示の `D - (U|V)` 形。
 5. **プラグイン facade の正規化保証**：`services.type.union(...)` が直接 `Union.new` を許さず常に正規化を通すことの契約テスト（PHPStan の「`new` 回避」方針の Rigor 版）。
-6. **演算子糖衣 → dynamic_return** の回帰スペック（スパイクで動作確認済み・テストは未整備）：`Nominal[Custom] + Custom` が `dynamic_return receivers: ["Custom"]` のブロックに `:+` の `call_node` として届き、結果型が plugin tier で確定すること。`examples/rigor-units` あたりに演算子ケースを追加して契約を固定するのが自然。
+6. **演算子糖衣 → dynamic_return**（**LANDED** 2026-06-03 — [`spec/integration/plugin_operator_dynamic_return_spec.rb`](../../spec/integration/plugin_operator_dynamic_return_spec.rb)）：`Nominal[Custom] <op> Custom` が `dynamic_return receivers: ["Custom"]` のブロックに `call_node` として届き、結果型が plugin tier で確定すること（`:+ :- :* :/` 全数 + 宣言外演算子の辞退 + coerce 方向の左偏重型付けの 4 例）。観測には core 型センチネルが必要（ユーザー定義クラスは偽陽性回避のため未定義メソッド診断が出ない）。
 
 ---
 
@@ -187,11 +187,11 @@ PHPStan は `isSuperTypeOf` を `TypeCombinator` 経由で網羅テストする�
 スパイク（§3 G1）で前提が一つ崩れた：**自型／同型レシーバの二項演算は新フックなしで既に対応できる**。これにより ADR の必要範囲は当初想定より小さい。
 
 - **G1a/G1b（ドキュメント + エルゴノミクス）は ADR 不要**。`dynamic_return` の演算子捕捉を examples（`rigor-units`）と manual に明記し、回帰スペックで固定すれば足りる。薄い宣言糖衣 `operator_return` は欲しければ後続の小改善（ADR 不要、CHANGELOG レベル）。
-- **G1c（coerce 方向）— ADR-42 として起票済みだが、2026-06-03 の需要再評価で低優先に格下げ**。当初「ADR 級・実需あり（BigDecimal-coerce survey）」としたが、これは誤りだった：(1) 現状 `1 + custom` / `2 * distance` は**偽陽性を出さず Dynamic に fail-soft**（無害）で、欠落が効くのは精度とプラグイン自身のチェック網羅性（false-negative）のみ。Rigor 最上位価値「動くコードを脅かさない」には抵触しない。(2) survey の BigDecimal-coerce FP は overload 順序問題で `acc9882`（ReceiverAffinity）により**解決済み**、本件と無関係。(3) `examples/rigor-units` 自身が「真の解は ADR-20 lightweight HKT + RBS 型関数」と明記しており、新フックは ADR-20 と競合しうる。→ **ADR-42 は Proposed のまま据え置き、HKT 経路を優先**。実消費者が HKT で表現できないと判明したときのみ新フックを検討。
+- **G1c（coerce 方向）— ADR-42 として起票済み・低優先 demand-gated**。2 回の訂正を経た現在地：(1) 当初「実需あり（BigDecimal-coerce survey）」は誤り。survey の FP は overload 順序問題で `acc9882`（ReceiverAffinity）により**解決済み**、本件と無関係。(2) 次に「無害な fail-soft（Dynamic・無診断）」としたが、これも**スペックで反証された**：`1 + money` は Dynamic ではなく**左偏重で Integer 型**になり、結果への独自メソッド呼び出しは**狭いが偽陽性を生みうる**（§3 G1c）。よって「精度のみ・安全性に無関係」ではなく、少数派条件下で FP が出る。(3) ただし最安の解は ADR-42 の新フックではなく、**§3 G1c の選択肢 (iii)：引数が非 Numeric の独自型のとき結果を Integer 左偏重ではなく Dynamic に倒すエンジン小改修**で、プラグインフックなしに FP だけを消せる。さらに精度まで欲しければ `examples/rigor-units` 自身が示す **ADR-20 lightweight HKT + RBS 型関数**が本筋。→ **ADR-42 は Proposed のまま。まず (iii) の FP 緩和を検討し、精度は HKT 経路を優先。新フックは両者で足りないと実消費者で判明したときのみ**。
 - **G2/G3/G5 — 2026-06-03 評価で却下／保留**（§3 各項参照）。G2（`to_*`）= 需要なし・narrowing が等価機構で却下。G3（`generalize`）= プラグイン facade ではなく ADR-41 budget の領分、却下。G5（offset facade）= カスタムコンテナ消費者が出るまで保留。いずれも ADR 不要。
 - **G4** は ADR 不要。`Type::Combinator` に便宜メソッドを足すだけの DX 改善で、CHANGELOG レベル。
 
-**総括（再評価後）**：PHPStan 同水準を目指して**今すぐ実装する価値のある未実装はゼロ**。自型/左辺の演算子は既存 `dynamic_return` で対応済み、coerce 方向（G1c）は無害かつ HKT で代替可能なため demand-gated、`to_*`/`generalize`/offset facade は需要なし。残る価値ある作業は §4 のテスト整備と G1a/G1b のドキュメント化のみ（いずれも ADR 不要）。
+**総括（再評価後）**：PHPStan 同水準を目指す未実装で**新しいプラグイン拡張点を要するものはゼロ**。自型/左辺の演算子は既存 `dynamic_return` で対応済み（スペックで確定）、coerce 方向（G1c）は少数派 FP が出うるが最安の緩和はエンジン小改修（§3 G1c (iii)）で精度は HKT 経路、`to_*`/`generalize`/offset facade は需要なし。価値ある残作業は §4 のテスト整備と G1a/G1b のドキュメント化、そして必要なら G1c (iii) の FP 緩和（いずれも新フック ADR 不要）。
 
 **推奨**：
 

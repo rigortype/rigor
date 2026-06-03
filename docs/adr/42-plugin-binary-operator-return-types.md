@@ -4,14 +4,17 @@ Status: **Proposed (low priority, demand-gated), 2026-06-03.** Records the
 design space for letting a plugin contribute the result type of a Ruby binary
 operation when the plugin-owned type is the **right-hand (coerced) operand** —
 the one case a PHPStan-parity audit of Rigor's type algebra found genuinely
-unsupported. **A 2026-06-03 demand re-evaluation lowered this ADR's priority**
-(see "Demand re-evaluation" below): the gap is *not* a false-positive — the
-current behaviour is harmless fail-soft — so it buys precision, not safety,
-and the more idiomatic fix is the ADR-20 lightweight-HKT / RBS-type-function
-route that `examples/rigor-units` already points to. Nothing here is
-implemented; this ADR captures the decision and its rejected alternatives so
-the work stays demand-gated rather than speculative, and **prefers the HKT
-route over a new operator hook unless a real consumer proves otherwise**.
+unsupported. **A 2026-06-03 demand re-evaluation — backed by an integration
+spec — lowered this ADR's priority** (see "Demand re-evaluation" below): the
+self/left case already works via `dynamic_return`, and the coerce direction
+produces only a **narrow false positive** (the `scalar <op> custom` minority
+pattern, where `1 + money` types left-biased as `Integer`). The cheapest fix
+is an engine mitigation (WD-D, type that case as `Dynamic` — no plugin hook);
+precision is best served by the ADR-20 lightweight-HKT / RBS route that
+`examples/rigor-units` already points to. Nothing here is implemented; this ADR
+captures the decision and its rejected alternatives so the work stays
+demand-gated, and **prefers WD-D / the HKT route over a new operator hook
+unless a real consumer proves otherwise**.
 
 Grounding:
 [`docs/notes/20260603-phpstan-type-algebra-comparison.md`](../notes/20260603-phpstan-type-algebra-comparison.md)
@@ -79,37 +82,50 @@ capability Rigor lacks.
 
 ### Demand re-evaluation (2026-06-03)
 
-An evidence pass after the initial draft corrected two over-statements that
-had inflated this gap's priority:
+An evidence pass — backed by the integration spec
+[`spec/integration/plugin_operator_dynamic_return_spec.rb`](../../spec/integration/plugin_operator_dynamic_return_spec.rb)
+— corrected the over-statements that had distorted this gap's priority. The
+spec confirms the self/left case works and pins the coerce-direction
+behaviour exactly:
 
-- **The current behaviour is harmless, not a false positive.** When the
-  receiver is a built-in and the argument is a plugin-owned `Nominal`,
-  dispatch falls through to `Dynamic[top]` with **no diagnostic** (fail-soft).
-  Downstream calls on that `Dynamic` also fail soft. So the gap costs
-  *precision* (and completeness of a plugin's *own* checks — a false
-  *negative* in e.g. dimensional-safety), never a false positive on working
-  code. Against Rigor's top-tier "the program works" value, that is a weak
-  motivator.
+- **The self/left case already works (no new hook needed).** A
+  `dynamic_return receivers: ["Money"]` rule fires for `:+`/`:-`/`:*`/`:/` and
+  the contributed type becomes the result of `Money <op> Money`. Confirmed
+  green for all four operators.
+- **The coerce direction is NOT silent fail-soft — and carries a narrow
+  false-positive surface.** The first draft claimed `1 + money` falls through
+  to `Dynamic[top]` with no diagnostic. The spec disproves that: `1 + money`
+  dispatches on `Integer`, the `Money` rule cannot fire, and the result types
+  **left-biased as `Integer`** (not `Dynamic`). Downstream method resolution
+  then runs against `Integer`, so `(1 + money).some_money_method` is flagged
+  `undefined-method` for `Integer` **even though it works at runtime via
+  `money.coerce(1)`** — a genuine, if narrow, false positive (it needs the
+  minority `scalar <op> custom` form *and* a custom method on the result).
+  This is a stronger motivator than "precision only," though still narrow.
 - **The BigDecimal-coerce survey item is not evidence for this ADR.** That
   false positive (`docs/notes/20260519-oss-library-survey.md`) was an
   *overload-ordering* problem — stdlib `bigdecimal` reopening `Integer#+` at
-  the front of the overload list — and it was **already fixed** by the
-  ReceiverAffinity pre-sort (`acc9882`,
+  the front of the overload list — already fixed by the ReceiverAffinity
+  pre-sort (`acc9882`,
   [`receiver_affinity.rb`](../../lib/rigor/inference/method_dispatcher/receiver_affinity.rb)).
-  It is unrelated to plugin-contributed coerce-direction types.
-- **The idiomatic fix may be ADR-20, not a new hook.**
+  Unrelated to plugin-contributed coerce-direction types.
+- **The cheapest fix is an engine mitigation, not this hook.** Because the FP
+  comes from the left-bias returning `Integer` for a non-`Numeric` argument,
+  typing that result as `Dynamic` instead (WD-D below) removes the false
+  positive with **no plugin surface at all**. Precision (the actual coerced
+  type) is then a separate, ADR-20-shaped concern;
   [`examples/rigor-units/README.md`](../../examples/rigor-units/README.md)
-  itself documents that the declarative answer to operator typing is a
-  lightweight-HKT / RBS type function (`def *: [T] (T) -> ...`), not a runtime
-  dispatch table. A new operator extension point would overlap with that
-  direction and risk a competing mechanism.
+  itself points to lightweight-HKT / RBS type functions (`def *: [T] (T) ->
+  ...`) as the declarative answer, which a new operator hook would compete
+  with.
 
 Net: the residual demand is the **minority `scalar <op> custom` pattern**
-(`2 * distance`, `0.5 * mass`), where a precise type would let a units/Money
-plugin keep checking dimensional safety. Real but narrow, precision-only, and
-plausibly subsumed by ADR-20. The canonical motivating libraries
+(`2 * distance`, `0.5 * mass`, `1 + money`). It can produce a narrow false
+positive (best addressed by WD-D, no hook) and otherwise costs precision (best
+addressed by ADR-20). The canonical motivating libraries
 (`BigDecimal`, units/`Money`, vectors) rely on `coerce` for
-`builtin <op> custom`, so the pattern exists — it is the *value* that is
+`builtin <op> custom`, so the pattern exists — it is the *value of a dedicated
+operator hook* that is
 modest, not the pattern's existence.
 
 ## Decision
@@ -134,7 +150,16 @@ that this ADR stays Proposed indefinitely and the HKT route is tried first.
   RBS/HKT tiers without any new plugin extension point. Only fall back to
   WD-A/WD-B if a concrete consumer cannot be expressed this way.
 
-- **WD-A (leading) — bidirectional narrow extension `operator_return`.** A
+- **WD-D (cheapest false-positive mitigation, no hook) — type
+  `builtin <op> non-Numeric` as `Dynamic` instead of left-biased.** The narrow
+  FP (above) exists only because `1 + money` currently resolves to `Integer`
+  when the argument matches no `Integer#+` overload. Making that case fail soft
+  to `Dynamic` removes the false positive entirely without any plugin surface,
+  at the cost of *precision* (the result is `Dynamic`, not the coerced type).
+  This is the recommended first step if the FP is ever observed in real code;
+  WD-0/WD-A then layer precision back on top only where a consumer needs it.
+
+- **WD-A (leading, if a hook is needed) — bidirectional narrow extension `operator_return`.** A
   new ADR-37-style segregated protocol:
 
   ```ruby
@@ -192,12 +217,14 @@ that this ADR stays Proposed indefinitely and the HKT route is tried first.
 
 ## Consequences
 
-- **False-positive discipline first.** The motivating cases are existing
-  *false positives / over-widenings* on working code (`1 + money` typed too
-  loosely), not missing strictness. Any implementation must only ever
-  *tighten or correct* the coerce-direction result, never introduce a new
-  diagnostic that frightens working coerce-based code. This bounds the risk
-  and aligns with the project's top-tier "the program works" value.
+- **False-positive discipline first.** The motivating case is an existing
+  *narrow false positive* on working code: `1 + money` types left-biased as
+  `Integer` (spec-confirmed), so a custom method on the result is flagged
+  `undefined-method` despite working via `coerce`. The FP-safe first step is
+  WD-D (type that case as `Dynamic`), which only ever *relaxes* — it removes a
+  diagnostic, never adds one. Any precision layer (WD-0/WD-A) must likewise
+  only *tighten or correct* the result, never frighten working coerce-based
+  code. This aligns with the project's top-tier "the program works" value.
 - **Demand-gated.** No engine work lands without a real consumer in the same
   change set; until then this ADR stays Proposed and the comparison note is
   the operative record.

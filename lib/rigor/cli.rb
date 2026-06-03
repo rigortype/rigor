@@ -78,11 +78,7 @@ module Rigor
     end
 
     def run_check
-      require_relative "analysis/runner"
-      require_relative "analysis/buffer_binding"
-      require_relative "analysis/baseline"
-      require_relative "cache/store"
-
+      load_check_dependencies
       options = parse_check_options
       buffer = resolve_buffer_binding(options)
       return EXIT_USAGE if buffer == :usage_error
@@ -461,6 +457,49 @@ module Rigor
       @err.puts("  total tracked: #{heap_mb(total)} across #{by_class.size} classes")
       by_class.sort_by { |_, (_, bytes)| -bytes }.first(30).each do |name, (count, bytes)|
         @err.puts("  #{heap_mb(bytes).rjust(10)}  #{count.to_s.rjust(9)} obj  #{name}")
+      end
+      write_string_allocation_sites
+    end
+
+    # Loads the analysis-path dependencies lazily (so non-check commands
+    # stay light) and starts heap-allocation tracing if requested, before
+    # any analysis object is allocated.
+    def load_check_dependencies
+      require_relative "analysis/runner"
+      require_relative "analysis/buffer_binding"
+      require_relative "analysis/baseline"
+      require_relative "cache/store"
+      start_heap_trace_if_requested
+    end
+
+    # Starts allocation tracing (RIGOR_HEAP_TRACE) as early as possible so
+    # the heap profile can attribute retained Strings to their allocation
+    # `file:line`. Very high overhead — run on a small file subset only.
+    def start_heap_trace_if_requested
+      return if ENV["RIGOR_HEAP_TRACE"].to_s.empty?
+
+      require "objspace"
+      ObjectSpace.trace_object_allocations_start
+    end
+
+    # When RIGOR_HEAP_TRACE is on, groups the live String objects by their
+    # allocation site (`sourcefile:sourceline`) and prints the top sites by
+    # count — pinpointing which engine code retains the millions of strings
+    # that dominate the large-app heap (ADR-41 Slice 2b). Strings allocated
+    # before tracing started report `(pre-trace)`.
+    def write_string_allocation_sites
+      return if ENV["RIGOR_HEAP_TRACE"].to_s.empty?
+
+      by_site = Hash.new(0)
+      ObjectSpace.each_object(String) do |str|
+        file = ObjectSpace.allocation_sourcefile(str)
+        line = ObjectSpace.allocation_sourceline(str)
+        by_site[file ? "#{file}:#{line}" : "(pre-trace)"] += 1
+      end
+      @err.puts("")
+      @err.puts("  String allocation sites (top 25 by live count)")
+      by_site.sort_by { |_, n| -n }.first(25).each do |site, n|
+        @err.puts("  #{n.to_s.rjust(9)}  #{site}")
       end
     end
 

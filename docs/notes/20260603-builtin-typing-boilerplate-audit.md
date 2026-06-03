@@ -194,8 +194,48 @@ with folded results unchanged.
   `dispatch_precise_tiers` ladder (697-705) still mixes `try_fold` /
   `try_dispatch` / `try_forward` / block_folding and **does** need
   Finding 3 first — not started.
-- **Finding 3 — NOT STARTED.** Broad alias migration (`try_fold` →
-  `try_dispatch`, context object for the param-list-heavy tiers).
-  Medium risk; the highest-churn remaining item.
+- **Finding 3 — DONE (full interface-ization).** Every dispatch tier now
+  takes a single immutable `CallContext` (`Data.define`) and conforms to
+  one protocol, `try_dispatch(CallContext) -> Type::t?`:
+  - **Slice A** — `CallContext` value object (9 fields: the call quartet
+    + block_type/environment/call_node/scope/self_type_override/public_only)
+    with a `.build` keyword factory carrying the single
+    `Metrics/ParameterLists` disable that retires the per-tier ones.
+  - **Slice B1** — precise tiers (ConstantFolding `try_fold`→`try_dispatch`,
+    BlockFolding `try_fold`→`try_dispatch`, MethodFolding forward
+    `try_forward`→`try_dispatch`, LiteralString/Shape/Kernel + the eight
+    singleton folders). `dispatch_precise_tiers` builds the context once
+    and drives a single `PRECISE_TIERS` list, absorbing the
+    `STDLIB_MODULE_FOLDERS` sub-list from Finding 2.
+  - **Slice B2** — context-heavy tiers (RbsDispatch `try_dispatch` —
+    ParameterLists disable removed — + `block_param_types`,
+    MethodFolding `try_backward`, IteratorDispatch `block_param_types`).
+    `dispatch` builds the context once at the top; the two derived RBS
+    sites use `CallContext.build`.
+  - **Slice B3** — `interface _DispatchTier` + `CallContext` class
+    declared in `sig/rigor/inference.rbs` (typed with `Type::t`).
+    `make steep-check` green. Declarative only — no forced per-tier
+    conformance, matching the engine's partial-signature idiom.
+  - Tier entry points are called only from `method_dispatcher.rb` + the
+    tier unit specs; specs migrated via a new `cc(...)` support helper
+    (Slice B's 102 call sites). Public `dispatch` /
+    `expected_block_param_types` keep their keyword signatures (external
+    callers unaffected).
+  - **Performance: neutral.** Interleaved A/B of `rigor check --no-cache
+    lib` (pre-Finding-3 d153403d vs post 4545dc63, 4 pairs) — pre mean
+    7.58s, post mean 7.70s (~1.6%), well inside the run-to-run variance
+    (6.93–8.40s, ±15%; one pair shows post faster). The per-dispatch
+    `CallContext` allocation does not move the needle.
+  - **Caught in the full suite, not the unit/inference specs:**
+    `ShapeDispatch.dispatch_intersection` re-enters `try_dispatch` once
+    per Intersection member; that *intra-tier recursion* still passed the
+    old keyword Hash and raised `NoMethodError` post-migration. The
+    tier-caller survey excluded `method_dispatcher/` itself, so it was
+    missed — only the `intersection_refinement` integration fixture
+    exercises the path. **Lesson: when changing a tier-entry signature,
+    grep the tier directory itself for recursive self-calls, and always
+    run the full `rspec` (not just the unit + `spec/rigor/inference`
+    subset) before claiming behaviour-neutral.** Fixed; 5406 examples,
+    0 failures.
 - **Finding 5 — NOT STARTED.** Fixture-escaping helper + cap/rescue
   absorption.

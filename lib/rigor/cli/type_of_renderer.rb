@@ -3,6 +3,8 @@
 require "json"
 require "optionparser"
 
+require_relative "renderable"
+
 module Rigor
   class CLI
     # Renders a `TypeOfCommand::Result` as either human-readable text or a
@@ -12,17 +14,10 @@ module Rigor
     # output formats (sexp, lsp-style hover payloads, color decoration) can
     # plug in without disturbing argument parsing or the inference call site.
     class TypeOfRenderer
+      include Renderable
+
       def initialize(out:)
         @out = out
-      end
-
-      def render(result, format:)
-        case format
-        when "text" then render_text(result)
-        when "json" then render_json(result)
-        else
-          raise OptionParser::InvalidArgument, "unsupported format: #{format}"
-        end
       end
 
       private

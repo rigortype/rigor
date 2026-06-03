@@ -6,6 +6,8 @@ module Rigor
   class CLI
     # Renders a `CoverageReport` as terminal-friendly text or JSON.
     class CoverageRenderer
+      include Renderable
+
       TIER_LABELS = {
         constant: "constant",
         nominal: "nominal",
@@ -19,14 +21,6 @@ module Rigor
 
       def initialize(out:)
         @out = out
-      end
-
-      def render(report, format:)
-        case format
-        when "text" then render_text(report)
-        when "json" then render_json(report)
-        else raise OptionParser::InvalidArgument, "unsupported format: #{format}"
-        end
       end
 
       private

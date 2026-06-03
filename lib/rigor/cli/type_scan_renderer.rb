@@ -3,6 +3,8 @@
 require "json"
 require "optionparser"
 
+require_relative "renderable"
+
 module Rigor
   class CLI
     # Renders a `TypeScanCommand::Report` as either a terminal-friendly text
@@ -11,17 +13,10 @@ module Rigor
     # the two formats stay in lockstep; that pairing is why this class is a
     # bit longer than the default class-length budget.
     class TypeScanRenderer
+      include Renderable
+
       def initialize(out:)
         @out = out
-      end
-
-      def render(report, format:)
-        case format
-        when "text" then render_text(report)
-        when "json" then render_json(report)
-        else
-          raise OptionParser::InvalidArgument, "unsupported format: #{format}"
-        end
       end
 
       private

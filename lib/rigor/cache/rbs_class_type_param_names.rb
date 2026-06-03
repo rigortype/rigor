@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "rbs_descriptor"
+require_relative "rbs_cache_producer"
 
 module Rigor
   module Cache
@@ -22,19 +23,12 @@ module Rigor
     # Cache descriptor shape is shared with every other cache
     # producer that depends on the RBS environment — see
     # {RbsDescriptor.build}.
-    class RbsClassTypeParamNames
+    class RbsClassTypeParamNames < RbsCacheProducer
       PRODUCER_ID = "rbs.class_type_param_names"
 
       # @param loader [Rigor::Environment::RbsLoader]
       # @param store [Rigor::Cache::Store]
       # @return [Hash{String => Array<Symbol>}]
-      def self.fetch(loader:, store:)
-        descriptor = RbsDescriptor.build(loader)
-        store.fetch_or_compute(producer_id: PRODUCER_ID, params: {}, descriptor: descriptor) do
-          compute(loader)
-        end
-      end
-
       def self.compute(loader)
         table = {}
         loader.each_known_class_name do |name|

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "rbs_descriptor"
+require_relative "rbs_cache_producer"
 require_relative "rbs_environment_marshal_patch"
 
 module Rigor
@@ -26,19 +27,12 @@ module Rigor
     # Cache descriptor shape is shared with every other cache
     # producer that depends on the RBS environment — see
     # {RbsDescriptor.build}.
-    class RbsEnvironment
+    class RbsEnvironment < RbsCacheProducer
       PRODUCER_ID = "rbs.environment"
 
       # @param loader [Rigor::Environment::RbsLoader]
       # @param store [Rigor::Cache::Store]
       # @return [::RBS::Environment]
-      def self.fetch(loader:, store:)
-        descriptor = RbsDescriptor.build(loader)
-        store.fetch_or_compute(producer_id: PRODUCER_ID, params: {}, descriptor: descriptor) do
-          compute(loader)
-        end
-      end
-
       def self.compute(loader)
         Rigor::Environment::RbsLoader.build_env_for(
           libraries: loader.libraries,

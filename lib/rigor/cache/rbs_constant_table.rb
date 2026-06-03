@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "rbs_descriptor"
+require_relative "rbs_cache_producer"
 
 module Rigor
   module Cache
@@ -15,19 +16,12 @@ module Rigor
     # Cache descriptor shape is shared with every other cache
     # producer that depends on the RBS environment — see
     # {RbsDescriptor.build} for the slot definitions.
-    class RbsConstantTable
+    class RbsConstantTable < RbsCacheProducer
       PRODUCER_ID = "rbs.constant_type_table"
 
       # @param loader [Rigor::Environment::RbsLoader]
       # @param store [Rigor::Cache::Store]
       # @return [Hash{String => Rigor::Type}]
-      def self.fetch(loader:, store:)
-        descriptor = RbsDescriptor.build(loader)
-        store.fetch_or_compute(producer_id: PRODUCER_ID, params: {}, descriptor: descriptor) do
-          compute(loader)
-        end
-      end
-
       def self.compute(loader)
         table = {}
         loader.each_constant_decl do |name, entry|

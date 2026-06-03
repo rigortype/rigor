@@ -1,0 +1,19 @@
+module Rigor
+  module Cache
+    # Structural interface for the RBS-derived cache producers: a class
+    # object that responds to `.fetch(loader:, store:)` and yields the
+    # cached (or freshly computed) value. A structural *interface*
+    # (duck-typed), not a "protocol" (reserved for ADR-28). Satisfied by
+    # `RbsCacheProducer` and every subclass; matches the _Type and
+    # _DispatchTier interfaces declared elsewhere in sig/.
+    interface _CacheProducer
+      def fetch: (loader: untyped, store: untyped) -> untyped
+    end
+
+    # Base owning the shared producer `fetch` wiring; subclasses add a
+    # PRODUCER_ID constant and a private `self.compute(loader)`.
+    class RbsCacheProducer
+      def self.fetch: (loader: untyped, store: untyped) -> untyped
+    end
+  end
+end

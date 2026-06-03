@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "rbs_descriptor"
+require_relative "rbs_cache_producer"
 require_relative "rbs_environment_marshal_patch"
 
 module Rigor
@@ -23,19 +24,12 @@ module Rigor
     #
     # Marshal-cleanness of `RBS::Definition` is enabled by the
     # v0.0.9 C2 `RBS::Location` patch.
-    class RbsInstanceDefinitions
+    class RbsInstanceDefinitions < RbsCacheProducer
       PRODUCER_ID = "rbs.instance_definitions"
 
       # @param loader [Rigor::Environment::RbsLoader]
       # @param store [Rigor::Cache::Store]
       # @return [Hash{String => RBS::Definition}]
-      def self.fetch(loader:, store:)
-        descriptor = RbsDescriptor.build(loader)
-        store.fetch_or_compute(producer_id: PRODUCER_ID, params: {}, descriptor: descriptor) do
-          compute(loader)
-        end
-      end
-
       def self.compute(loader)
         table = {}
         loader.each_known_class_name do |name|
@@ -51,19 +45,12 @@ module Rigor
     # Singleton-side equivalent of {RbsInstanceDefinitions}.
     # Caches the full `Hash<String, RBS::Definition>` for the
     # singleton class of every RBS-known class.
-    class RbsSingletonDefinitions
+    class RbsSingletonDefinitions < RbsCacheProducer
       PRODUCER_ID = "rbs.singleton_definitions"
 
       # @param loader [Rigor::Environment::RbsLoader]
       # @param store [Rigor::Cache::Store]
       # @return [Hash{String => RBS::Definition}]
-      def self.fetch(loader:, store:)
-        descriptor = RbsDescriptor.build(loader)
-        store.fetch_or_compute(producer_id: PRODUCER_ID, params: {}, descriptor: descriptor) do
-          compute(loader)
-        end
-      end
-
       def self.compute(loader)
         table = {}
         loader.each_known_class_name do |name|

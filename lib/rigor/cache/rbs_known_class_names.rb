@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "rbs_descriptor"
+require_relative "rbs_cache_producer"
 
 module Rigor
   module Cache
@@ -18,19 +19,12 @@ module Rigor
     # Cache descriptor shape is shared with {RbsConstantTable} via
     # {RbsDescriptor.build}; a single signature change or rbs gem
     # bump invalidates both producers in lockstep.
-    class RbsKnownClassNames
+    class RbsKnownClassNames < RbsCacheProducer
       PRODUCER_ID = "rbs.known_class_names"
 
       # @param loader [Rigor::Environment::RbsLoader]
       # @param store [Rigor::Cache::Store]
       # @return [Set<String>]
-      def self.fetch(loader:, store:)
-        descriptor = RbsDescriptor.build(loader)
-        store.fetch_or_compute(producer_id: PRODUCER_ID, params: {}, descriptor: descriptor) do
-          compute(loader)
-        end
-      end
-
       def self.compute(loader)
         names = Set.new
         loader.each_known_class_name { |name| names << name }

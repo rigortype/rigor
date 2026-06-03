@@ -38,6 +38,9 @@ Ruby identifiers (`Rigor::Type`, `Rigor::Trinary`, `Rigor::Type::Combinator`, �
 | [plugin-cache-producers.md](plugin-cache-producers.md) | Plugin-side cache producers — the `Plugin::Base.producer` DSL, `#cache_for` callable, descriptor auto-prefixing, and `glob_descriptor` discovery helper. |
 | [macro-substrate.md](macro-substrate.md) | Macro / DSL expansion substrate — the `Plugin::Macro::*` value-object shapes (Tiers A/B/C/D + nested-class emission) a plugin declares to teach Rigor a metaprogramming library's call shapes (ADR-16 / ADR-18 / ADR-36). |
 | [public-api.md](public-api.md) | Public-API stability boundary — which namespaces (`Rigor::Scope`, `Type`, `Environment`, `Reflection`, `FlowContribution`, `Diagnostic`) the plugin contract is designed against, and which surfaces stay internal. |
+| [diagnostic-shape.md](diagnostic-shape.md) | `Rigor::Analysis::Diagnostic` field shape — fields, the `from_node` / `from_location` position convention, `qualified_rule` derivation + provenance. Descriptive, not yet locked (see `public-api.md`). |
+| [baseline.md](baseline.md) | Baseline bucket-key derivation — the `[file, rule, message_regex]` tuple, path relativization, and the `:rule` / `:message` match modes (ADR-22). |
+| [worker-session.md](worker-session.md) | Worker-session protocol — `WorkerSession`'s shareable inputs, per-worker ownership boundary, and the sequential-equivalence contract behind parallel analysis (ADR-15). |
 | [dependency-source-inference.md](dependency-source-inference.md) | Opt-in dependency-source inference (ADR-10) — `dependencies.source_inference:` configuration, walker / dispatcher tier, `DependencyEntry` cache slice, `dynamic.dependency-source.*` diagnostic family. |
 
 This list grows as further internal contracts stabilize.

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "call_context"
 
 module Rigor
   module Inference
@@ -548,7 +549,9 @@ module Rigor
           # falls through to the next dispatcher tier.
           def dispatch_intersection(intersection, method_name, args)
             results = intersection.members.filter_map do |member|
-              ShapeDispatch.try_dispatch(receiver: member, method_name: method_name, args: args)
+              ShapeDispatch.try_dispatch(
+                CallContext.build(receiver: member, method_name: method_name, args: args)
+              )
             end
 
             case results.size

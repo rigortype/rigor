@@ -223,6 +223,13 @@ wired, becomes a low-priority high-cap valve. This is Slice 2a doing its
 job: one read-only measurement stopped us from wiring the wrong budget at
 a harmful default.
 
+*Update — Slice 2b then resolved the cliff entirely (see § Slices, 2b):
+the 1.5 GB was 4.2 M retained Strings from one unmemoized failure in
+`rigor-activerecord`, not a budget at all. Fixed; Redmine dropped to
+217 MB / 84 s. The memory cliff and the budget table are decoupled, and
+Layer 2 budget wiring is now demand-deferred — no corpus project
+demonstrates a budget-shaped cost.*
+
 ## Slices
 
 - **Layer 1 — doc/spec hygiene (cheap, high-confidence, no new
@@ -241,17 +248,29 @@ a harmful default.
     width is *not* the memory lever (see "Slice 2a outcome" above) —
     `union_size` demoted. Shape-member-growth instrumentation still
     pending (a follow-on once the structural-growth site is located).
-  - 2b (revised). **Memory-profile Redmine** (heap-allocation
-    attribution) to find what actually scales to 1.5 GB — the structural
-    / fact-store / RBS-env / retained-scope candidates — *before*
-    choosing any cap to wire. This replaces the assumed "wire
-    `union_size`" entry point.
-  - 2c. Wire the budget the profile implicates with widening + the
-    `static.*` diagnostic (WD2), default from its observed distribution.
-  - 2d. Make the precision budgets user-configurable under `budgets:`
-    with range validation + the Psalm-style caveat (WD4).
-  - `union_size`, if wired at all, is a low-priority high-cap (~40–64)
-    display/pathology valve, not part of the memory fix.
+  - 2b (revised). **Done (2026-06-03).** Heap-profiled Redmine
+    (`RIGOR_HEAP_PROFILE` / `RIGOR_HEAP_TRACE`). Outcome: **the 1.5 GB was
+    not a budget problem at all** — 89 % of the live heap was String, and
+    98.5 % of those traced to a single line in `rigor-activerecord`
+    (`schema_table_or_nil` memoized only success, so a missing schema file
+    re-appended an error string per AR call site → 4.2 M retained
+    strings). Fixed by memoizing the failure; Redmine dropped to 217 MB /
+    84 s (−86 % / −51 %), Mastodon was never affected because it ships
+    `schema.rb`. See Survey 5 in the survey note.
+  - **Net effect on Layer 2:** the large-app cost cliff that motivated
+    wiring a memory budget is *resolved and was orthogonal to the budget
+    table*. No corpus project currently demonstrates a budget-shaped
+    memory cost. So `structural_growth` / `union_size` wiring is **demand-
+    deferred** — there is no measured cost to wire against. If a future
+    project shows a genuinely type-structural blow-up, re-run the 2a-style
+    distribution probe first (WD3).
+  - 2c (if revived). Wire the budget a future profile implicates with
+    widening + the `static.*` diagnostic (WD2), default from its observed
+    distribution.
+  - 2d (if revived). Make the precision budgets user-configurable under
+    `budgets:` with range validation + the Psalm-style caveat (WD4).
+  - `union_size`, if ever wired, is a low-priority high-cap (~40–64)
+    display/pathology valve, not a memory fix.
 - **Deferred:** the remaining unwired rows (`call_graph_width`,
   `overload_candidates`, `operator_ambiguity`, `interface_candidates`)
   never bound a corpus project; wire on demand. Precision-unroll depth

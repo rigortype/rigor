@@ -203,6 +203,52 @@ find what actually allocates**, not to wire a union cap. Slice 2a did its
 job: it spent one read-only measurement to stop us wiring the wrong
 budget.
 
+## Survey 5 — heap attribution: the cliff was a plugin bug, not a budget
+
+Slice 2a refuted `union_size`, so Slice 2b asked the blunt question: *what
+actually allocates Redmine's 1.5 GB?* Two read-only probes
+(`RIGOR_HEAP_PROFILE` — live objects by class after GC;
+`RIGOR_HEAP_TRACE` — live Strings by allocation `file:line`) answered it
+in one run.
+
+**Class breakdown (Redmine, end of run):** of 756.7 MB tracked live heap,
+**671 MB was String — 4,435,826 String objects (89%)**. `Rigor::Type::*`
+carriers did not appear in the top 30; the type universe is cheap. So the
+cliff is raw String retention, not any type-level structure.
+
+**Allocation site:** `4,176,047` of those strings (98.5%) traced to a
+**single line** —
+`plugins/rigor-activerecord/lib/rigor/plugin/activerecord.rb:562`, the
+`rescue Errno::ENOENT` that appends `"… schema file not found …"` to the
+plugin's `@load_errors`.
+
+**Root cause:** `schema_table_or_nil` is called once per AR call site (via
+`model_index`, which also did not memoize its nil result), and it memoized
+only *success*. With Redmine's schema file missing (it ships migrations,
+no `db/schema.rb`), every call re-attempted the read, hit `ENOENT`, and
+appended a fresh interpolated string. The list grew without bound. This
+also explains the Survey-1 anomaly — **Mastodon stayed at 277 MB because
+it ships `schema.rb`** and never triggered the bug; the budget framing
+mistook one plugin's missing-file handling for a scaling law.
+
+**Fix + verification:** memoize the failure (`@schema_load_attempted`, one
+attempt). Re-measured Redmine:
+
+| metric | before | after | Δ |
+|---|--:|--:|--:|
+| peak RSS | 1518 MB | **217 MB** | −86 % |
+| wall | 172.75 s | **84.33 s** | −51 % |
+| live Strings | 4,435,826 | **79,973** | −98 % |
+| tracked heap | 756.7 MB | **47.6 MB** | −94 % |
+
+Diagnostics are unchanged (the single `load-error` warning was already
+correct; only the internal retention was the bug). The whole "large-app
+cost cliff" that motivated wiring `union_size` / `structural_growth` was
+**not an inference-budget problem at all** — it was one unmemoized failure
+in a plugin, fully orthogonal to the budget table. Measurement-first (WD3)
+paid for itself twice: it stopped us wiring `union_size` at a harmful
+default *and* led the heap probe straight to the real cause.
+
 ## Spec defaults vs. wired reality (and a documentation bug)
 
 The spec's budget table, the engine, and the user-facing manual disagree

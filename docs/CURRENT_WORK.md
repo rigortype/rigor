@@ -127,27 +127,31 @@ hits). Two layers of follow-up:
   depth"). Add `ancestor_walk` (100) + `hkt_fuel` (64) to the documented
   table. Author the missing user-facing explanation of inference budgets
   (placement TBD — handbook appendix vs manual section).
-- **Layer 2 — find and wire the actual cost lever (measurement-gated).**
-  Slice 2a measured the union-arity distribution and **refuted** the
-  assumption that `union_size` is the lever: Redmine's 1.5 GB has a widest
-  union of only 37 members (20 of 254k unions ≥24), while kramdown's
-  932-member union costs 124 MB — memory is *uncorrelated* with union
-  width. So `union_size` is demoted (if wired, a high-cap ~40–64
-  display valve, not a memory fix). **Revised next step: heap-profile
-  Redmine** to find what actually scales to 1.5 GB (structural-growth /
-  fact-store / RBS-env / retained-scope candidates), *then* wire the
-  budget the profile implicates with widening + `static.*` diagnostics.
+- **Layer 2 — RESOLVED, and it was not a budget.** Slice 2a refuted
+  `union_size` (memory uncorrelated with union width); Slice 2b
+  heap-profiled Redmine and found the 1.5 GB was **4.2 M retained Strings
+  from one unmemoized failure in `rigor-activerecord`** (`schema_table_or_nil`
+  re-appended an error string per AR call site when `db/schema.rb` is
+  missing). Fixed (commit `b1fbcba3`): Redmine 1518 MB / 173 s → **217 MB
+  / 84 s** (−86 % / −51 %), diagnostics unchanged; Mastodon was never
+  affected (it ships `schema.rb`). The large-app cost cliff and the budget
+  table are **decoupled**. Budget wiring (`union_size` / `structural_growth`)
+  is now **demand-deferred** — no corpus project demonstrates a
+  budget-shaped cost; if one ever does, re-run the 2a-style distribution
+  probe first (ADR-41 WD3).
 
-Sequencing: (1) survey note + record — **done**; (2) prior-art note —
-**done** ([`docs/notes/20260603-inference-cutoff-prior-art.md`](notes/20260603-inference-cutoff-prior-art.md));
-(3) ideal-design ADR — **done** ([ADR-41](adr/41-inference-budget-design.md),
-Proposed, with Evaluation verdict); (4) Layer 1 safe doc fixes (manual
-`budget_per_gem` bug + spec implementation-status note) — **done**;
-(5) Slice 2a union-arity distribution — **done** (Survey 4 in the survey
-note; refuted `union_size`). **Next: Slice 2b — heap-profile Redmine** to
-locate the real allocation, per ADR-41 § Slices (revised). Remaining
-Layer 1 (normative spec-value changes 5→1 + table rows; user-facing
-budget doc) waits on ADR-41 acceptance.
+Sequencing (all **done**): (1) survey note + record; (2) prior-art note
+([`docs/notes/20260603-inference-cutoff-prior-art.md`](notes/20260603-inference-cutoff-prior-art.md));
+(3) ideal-design ADR ([ADR-41](adr/41-inference-budget-design.md),
+Proposed, with Evaluation verdict + Slice 2a/2b outcomes); (4) Layer 1
+safe doc fixes (manual `budget_per_gem` bug + spec implementation-status
+note); (5) Slice 2a union-arity distribution (Survey 4 — refuted
+`union_size`); (6) Slice 2b heap profile + the `rigor-activerecord` fix
+(Survey 5). **Remaining, all demand-gated:** normative spec-value changes
+(`recursion_depth` 5→1 + `ancestor_walk`/`hkt_fuel` rows) + user-facing
+budget doc wait on ADR-41 acceptance; budget wiring waits on a project
+that demonstrates the cost. The `RIGOR_BUDGET_TRACE` / `RIGOR_HEAP_PROFILE`
+/ `RIGOR_HEAP_TRACE` probes are landed and reusable.
 
 ### Flow-folding — all G1 / G2 cases now closed (v0.1.12)
 

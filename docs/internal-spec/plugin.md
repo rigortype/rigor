@@ -236,6 +236,40 @@ classes). New plugins should prefer `dynamic_return` / `type_specifier`;
 `flow_contribution_for` is the documented last resort (the role
 PHPStan's `ExpressionTypeResolverExtension` plays).
 
+#### Machine-readable capability catalogue — `rigor plugins --capabilities` (ADR-37 Slice 3)
+
+`rigor plugins --capabilities` emits the per-plugin extension-protocol
+gates an agent enumerates to learn what each plugin does. Only
+**loaded** plugins appear (a plugin that failed to load contributes no
+capabilities). With `--format json` the output is:
+
+```json
+{
+  "configuration": "<path to .rigor.yml, or null>",
+  "capabilities": [
+    {
+      "id": "<plugin id>",
+      "gem": "<gem name>",
+      "version": "<plugin version>",
+      "node_rule_types": ["<Prism node class name>", "..."],
+      "dynamic_return_receivers": ["<receiver class name>", "..."],
+      "type_specifier_methods": ["<method name>", "..."],
+      "produces": ["<fact id>", "..."],
+      "consumes": ["<plugin_id/fact_name>", "..."]
+    }
+  ]
+}
+```
+
+The five capability arrays are exactly the declarative gates of the
+narrow protocols above: `node_rule_types` from each `node_rule` node
+type, `dynamic_return_receivers` from `dynamic_return(receivers:)`,
+`type_specifier_methods` from `type_specifier(methods:)`, and
+`produces` / `consumes` from the ADR-9 manifest fields. An array is
+empty when the plugin declares nothing for that surface; the text view
+omits empty surfaces entirely. This is the contract that keeps the
+gates greppable and indexable without loading plugin code.
+
 ### Target-library invocation — `Plugin::Inflector` / `Plugin::Isolation` / `Plugin::Box` (ADR-39)
 
 [ADR-39](../adr/39-plugin-target-library-invocation.md) lets a plugin

@@ -74,7 +74,7 @@ module Rigor
         def with: (**untyped) -> CallContext
       end
 
-      # The protocol every dispatch tier observes: fold one call site,
+      # The interface every dispatch tier observes: fold one call site,
       # returning a `Type::t` or nil to defer to the next tier.
       interface _DispatchTier
         def try_dispatch: (CallContext) -> Type::t?

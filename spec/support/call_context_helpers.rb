@@ -3,7 +3,7 @@
 require "rigor/inference/method_dispatcher/call_context"
 
 # Shared helper for the dispatch-tier unit specs. Every tier entry point
-# takes a `CallContext` (Finding 3 protocol unification); `cc` builds one
+# takes a `CallContext` (Finding 3 interface unification); `cc` builds one
 # from the call quartet so specs need not spell out the wider context
 # fields they do not exercise.
 module CallContextHelpers

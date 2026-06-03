@@ -84,7 +84,7 @@ scope:` (`rbs_dispatch.rb:121` carries
 `# rubocop:disable Metrics/ParameterLists`).
 
 **Pain.** This is the root blocker for Finding 2's generic iteration;
-the tier protocol is implicit.
+the tier interface is implicit.
 
 **Direction.** Unify the pure tiers on `try_dispatch(receiver:,
 method_name:, args:)` (alias-migrate). Context-hungry tiers take one
@@ -147,15 +147,15 @@ string from a Ruby value.
 | 5 | Fixture escaping / cap / rescue re-implementation | small–med | low |
 
 Biggest lever is folding 1+2+3 together: pure singleton folders behind
-one protocol, a declaration table, and array-driven dispatch.
+one interface, a declaration table, and array-driven dispatch.
 
 ## Execution order (ease-of-implementation)
 
-1. **Finding 4** — smallest, safest, no protocol change. Path helper +
+1. **Finding 4** — smallest, safest, no interface change. Path helper +
    self-registration.
 2. **Finding 1** — `SingletonFunctionFolder` harness; migrate URI / CGI /
    Shellwords first as the proof, then Math / Regexp / Set / Time / File.
-3. **Finding 3** — unify entry-point protocol (unblocks 2).
+3. **Finding 3** — unify entry-point interface (unblocks 2).
 4. **Finding 2** — array-driven dispatch once entry points are uniform.
 5. **Finding 5** — fixture-helper + cap/rescue absorption, opportunistic
    alongside 1.
@@ -196,7 +196,7 @@ with folded results unchanged.
   Finding 3 first — not started.
 - **Finding 3 — DONE (full interface-ization).** Every dispatch tier now
   takes a single immutable `CallContext` (`Data.define`) and conforms to
-  one protocol, `try_dispatch(CallContext) -> Type::t?`:
+  one interface, `try_dispatch(CallContext) -> Type::t?`:
   - **Slice A** — `CallContext` value object (9 fields: the call quartet
     + block_type/environment/call_node/scope/self_type_override/public_only)
     with a `.build` keyword factory carrying the single

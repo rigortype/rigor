@@ -111,7 +111,7 @@ module Rigor
         Prism::GlobalVariableOperatorWriteNode => :type_of_assignment_write,
         Prism::GlobalVariableOrWriteNode => :type_of_assignment_write,
         Prism::GlobalVariableAndWriteNode => :type_of_assignment_write,
-        # Compound writes that share the .value rvalue protocol
+        # Compound writes that share the `.value` rvalue accessor
         Prism::LocalVariableOperatorWriteNode => :type_of_assignment_write,
         Prism::LocalVariableOrWriteNode => :type_of_assignment_write,
         Prism::LocalVariableAndWriteNode => :type_of_assignment_write,

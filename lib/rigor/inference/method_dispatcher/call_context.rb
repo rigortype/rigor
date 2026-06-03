@@ -10,8 +10,8 @@ module Rigor
       # tier used to redeclare (several with `# rubocop:disable
       # Metrics/ParameterLists`).
       #
-      # The protocol every tier observes is `try_dispatch(CallContext) ->
-      # Rigor::Type?` (see the `_DispatchTier` RBS interface). Pure tiers
+      # Every tier satisfies one interface — `try_dispatch(CallContext) ->
+      # Rigor::Type?` (the `_DispatchTier` RBS interface). Pure tiers
       # (the singleton folders, ConstantFolding, ShapeDispatch, …) read
       # only `receiver` / `method_name` / `args` and ignore the rest;
       # the RBS / backward / block-param tiers consult the wider context.

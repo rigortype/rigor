@@ -698,7 +698,7 @@ module Rigor
       # arity-based fold tiers above it filter out the common
       # cases first. When `block_type` is nil the tier is a no-op.
       # The precise-tier folders, consulted in order via the uniform
-      # `_DispatchTier` protocol (`try_dispatch(CallContext) -> Type?`).
+      # `_DispatchTier` interface (`try_dispatch(CallContext) -> Type?`).
       # Order is significant: ConstantFolding's exact-value folds win
       # first, the eight stdlib singleton folders sit in the middle (each
       # gates on a distinct `Singleton` receiver, so their relative order

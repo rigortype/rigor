@@ -532,6 +532,44 @@ entry does not abort the others. Each failure is collected as a
 `rigor check` continues with the analysis; plugins that loaded
 successfully still participate in later v0.1.0 slices.
 
+## Concurrency and value-object shareability (ADR-15)
+
+Rigor analyses files across parallel workers. The shipped backend is a
+**forked persistent worker** pool (the [ADR-15](../adr/15-ractor-concurrency.md)
+amendment; the Ractor pool is the deferred target), but the contract is
+authored against the stricter Ractor boundary so that target stays
+reachable. The durable requirement on plugin code is therefore:
+
+- **Every manifest-borne value object MUST be deeply frozen at
+  construction and `Ractor.shareable?`.** This covers `Manifest` itself
+  and every nested carrier it holds — the `Macro::*` substrate tiers
+  ([`macro-substrate.md`](macro-substrate.md)), `ProtocolContract`,
+  `AdditionalInitializer`, `Consumption`, and any `TypeNodeResolver` /
+  `source_rbs_synthesizer` callable the author supplies (the author owns
+  the thread-safety of a callable's captured state). The per-class
+  "`Ractor.shareable?` returns true after `#initialize`" notes throughout
+  this spec are instances of this one rule, not separate guarantees.
+- **A plugin *instance* is built per worker, never shared.** The
+  `Rigor::Plugin::Blueprint` carrier (frozen, `Ractor.shareable?`) is
+  what crosses the boundary: it holds the plugin class's **constant path
+  String** (not the class object — gems are `require`d on the main
+  Ractor before any worker spawns, so each worker resolves the same
+  constant via `Object.const_get`) plus a deep-copied, made-shareable
+  `config` Hash. Each worker calls `Blueprint#materialize(services:)`
+  once at startup — `const_get` → `klass.new(services:, config:)` →
+  `#init(services)`, mirroring `Loader#instantiate` — then owns its
+  plugin instances and their mutable per-run accumulators for the
+  worker's lifetime. Mutable plugin state therefore never crosses a
+  boundary; only the frozen Blueprint does.
+- **Documented exception:** `Environment::Reflection` (the internal
+  read-side carrier backing the public `Rigor::Reflection` facade) is
+  frozen but **not** `Ractor.shareable?` — its backing tables transit
+  `RBS::Location` objects that are not shareable ([ADR-15](../adr/15-ractor-concurrency.md)
+  WD6). It is consequently rebuilt per worker from the shared
+  `Cache::Store` rather than shared across the boundary. This is an
+  engine-internal carrier, not a plugin surface (see
+  [`public-api.md`](public-api.md)).
+
 ## Where each capability landed (historical slice map)
 
 The v0.1.0 plugin contract shipped in six slices; all of the

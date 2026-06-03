@@ -2,6 +2,7 @@
 
 require "digest"
 require "json"
+require_relative "../value_semantics"
 
 module Rigor
   module Cache
@@ -38,9 +39,13 @@ module Rigor
       # can mutate after the entry is in a Descriptor.
 
       class FileEntry
+        include Rigor::ValueSemantics
+
         VALID_COMPARATORS = %i[digest mtime exists].freeze
 
         attr_reader :path, :comparator, :value
+
+        value_fields :path, :comparator, :value
 
         def initialize(path:, comparator:, value:)
           unless VALID_COMPARATORS.include?(comparator)
@@ -57,19 +62,14 @@ module Rigor
         def to_h
           { "path" => path, "comparator" => comparator.to_s, "value" => value }
         end
-
-        def ==(other)
-          other.is_a?(FileEntry) && other.path == path && other.comparator == comparator && other.value == value
-        end
-        alias eql? ==
-
-        def hash
-          [self.class, path, comparator, value].hash
-        end
       end
 
       class GemEntry
+        include Rigor::ValueSemantics
+
         attr_reader :name, :requirement, :locked
+
+        value_fields :name, :requirement, :locked
 
         def initialize(name:, requirement:, locked: nil)
           @name = name.to_s.dup.freeze
@@ -81,19 +81,14 @@ module Rigor
         def to_h
           { "name" => name, "requirement" => requirement, "locked" => locked }
         end
-
-        def ==(other)
-          other.is_a?(GemEntry) && other.name == name && other.requirement == requirement && other.locked == locked
-        end
-        alias eql? ==
-
-        def hash
-          [self.class, name, requirement, locked].hash
-        end
       end
 
       class PluginEntry
+        include Rigor::ValueSemantics
+
         attr_reader :id, :version, :config_hash
+
+        value_fields :id, :version, :config_hash
 
         def initialize(id:, version:, config_hash: nil)
           @id = id.to_s.dup.freeze
@@ -105,20 +100,14 @@ module Rigor
         def to_h
           { "id" => id, "version" => version, "config_hash" => config_hash }
         end
-
-        def ==(other)
-          other.is_a?(PluginEntry) &&
-            other.id == id && other.version == version && other.config_hash == config_hash
-        end
-        alias eql? ==
-
-        def hash
-          [self.class, id, version, config_hash].hash
-        end
       end
 
       class ConfigEntry
+        include Rigor::ValueSemantics
+
         attr_reader :key, :value_hash
+
+        value_fields :key, :value_hash
 
         def initialize(key:, value_hash:)
           @key = key.to_s.dup.freeze
@@ -128,15 +117,6 @@ module Rigor
 
         def to_h
           { "key" => key, "value_hash" => value_hash }
-        end
-
-        def ==(other)
-          other.is_a?(ConfigEntry) && other.key == key && other.value_hash == value_hash
-        end
-        alias eql? ==
-
-        def hash
-          [self.class, key, value_hash].hash
         end
       end
 
@@ -155,9 +135,13 @@ module Rigor
       # the inferred shapes depend on whether RBS overrides the
       # walk.
       class DependencyEntry
+        include Rigor::ValueSemantics
+
         VALID_MODES = %i[disabled when_missing full].freeze
 
         attr_reader :gem_name, :gem_version, :mode
+
+        value_fields :gem_name, :gem_version, :mode
 
         def initialize(gem_name:, gem_version:, mode:)
           unless VALID_MODES.include?(mode)
@@ -173,18 +157,6 @@ module Rigor
 
         def to_h
           { "gem_name" => gem_name, "gem_version" => gem_version, "mode" => mode.to_s }
-        end
-
-        def ==(other)
-          other.is_a?(DependencyEntry) &&
-            other.gem_name == gem_name &&
-            other.gem_version == gem_version &&
-            other.mode == mode
-        end
-        alias eql? ==
-
-        def hash
-          [self.class, gem_name, gem_version, mode].hash
         end
       end
 

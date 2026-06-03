@@ -287,6 +287,16 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     to_h()
   ].freeze
 
+  PLUGIN_MACRO_HEREDOC_TEMPLATE_RETURNS_FROM_ARG_INSTANCE = %w[
+    ==(req:other)
+    eql?(req:other)
+    fact()
+    hash()
+    plugin_id()
+    position()
+    to_h()
+  ].freeze
+
   PLUGIN_MACRO_TRAIT_REGISTRY_INSTANCE = %w[
     ==(req:other)
     always_included()
@@ -308,6 +318,19 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     hash()
     receiver_type()
     to_h()
+  ].freeze
+
+  PLUGIN_MACRO_NESTED_CLASS_TEMPLATE_INSTANCE = %w[
+    ==(req:other)
+    block_method()
+    eql?(req:other)
+    hash()
+    inner_arg_position()
+    inner_reader()
+    name_arg_position()
+    receiver_constraint()
+    to_h()
+    variant_method()
   ].freeze
 
   PLUGIN_BLUEPRINT_INSTANCE = %w[
@@ -809,6 +832,14 @@ RSpec.describe "Public API drift", :public_api_drift do
     end
   end
 
+  describe "Rigor::Plugin::Macro::HeredocTemplate::ReturnsFromArg" do
+    it "exposes the expected ADR-18 per-call-site return-type surface" do
+      expect(instance_signatures(Rigor::Plugin::Macro::HeredocTemplate::ReturnsFromArg)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_MACRO_HEREDOC_TEMPLATE_RETURNS_FROM_ARG_INSTANCE
+      )
+    end
+  end
+
   describe "Rigor::Plugin::Macro::TraitRegistry" do
     it "exposes the expected ADR-16 slice-3a value-class surface" do
       expect(instance_signatures(Rigor::Plugin::Macro::TraitRegistry)).to eq(
@@ -821,6 +852,14 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "exposes the expected ADR-16 slice-5a value-class surface" do
       expect(instance_signatures(Rigor::Plugin::Macro::ExternalFile)).to eq(
         PublicApiDriftSnapshots::PLUGIN_MACRO_EXTERNAL_FILE_INSTANCE
+      )
+    end
+  end
+
+  describe "Rigor::Plugin::Macro::NestedClassTemplate" do
+    it "exposes the expected ADR-36 slice-A value-class surface" do
+      expect(instance_signatures(Rigor::Plugin::Macro::NestedClassTemplate)).to eq(
+        PublicApiDriftSnapshots::PLUGIN_MACRO_NESTED_CLASS_TEMPLATE_INSTANCE
       )
     end
   end

@@ -200,8 +200,13 @@ forms).
 The public-API drift spec
 ([`spec/rigor/public_api_drift_spec.rb`](../../spec/rigor/public_api_drift_spec.rb))
 pins the instance method sets of `BlockAsMethod`, `HeredocTemplate`,
-`HeredocTemplate::Emit`, `TraitRegistry`, and `ExternalFile`. As of this
-writing **`NestedClassTemplate` and `HeredocTemplate::Emit::ReturnsFromArg`
-are not yet drift-pinned**, though they are shipped value objects on the
-public manifest surface; pinning them is a follow-up so their shapes carry
-the same accidental-change guard as their siblings.
+`HeredocTemplate::Emit`, `HeredocTemplate::ReturnsFromArg`, `TraitRegistry`,
+`ExternalFile`, and `NestedClassTemplate` — **every shipped value object on
+the public manifest surface now carries the same accidental-change guard.**
+The two formerly-unpinned objects (`NestedClassTemplate` per ADR-36 and
+`HeredocTemplate::ReturnsFromArg` per ADR-18) were pinned via the
+`PLUGIN_MACRO_NESTED_CLASS_TEMPLATE_INSTANCE` and
+`PLUGIN_MACRO_HEREDOC_TEMPLATE_RETURNS_FROM_ARG_INSTANCE` snapshot constants.
+None of these objects carry an `sig/rigor/*.rbs` signature yet, so they are
+guarded by the runtime instance-method snapshot only, not the RBS sig-drift
+dual.

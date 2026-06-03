@@ -1349,7 +1349,44 @@ module Rigor
       ANCESTOR_WALK_LIMIT = 100
       private_constant :ANCESTOR_WALK_LIMIT
 
+      CLASS_GRAPH_CACHE_KEY = :__rigor_class_graph_cache__
+      private_constant :CLASS_GRAPH_CACHE_KEY
+
+      # Run-scoped memo for the static class-graph resolvers below. They
+      # are pure functions of the *frozen* project index trio
+      # (`discovered_def_nodes` / `discovered_superclasses` /
+      # `discovered_includes`) — `user_def_for` / `superclass_of` /
+      # `includes_of` read nothing else, and never touch the current
+      # scope's locals or narrowings — so a result computed for one
+      # `(class, method)` is valid for every `Scope` that shares those
+      # tables. `ExpressionTyper` is rebuilt per `Scope#type_of`, so the
+      # memo lives on `Thread.current` rather than on `self`. It is keyed
+      # by the *identity* of the three frozen tables (nested
+      # `compare_by_identity` stores): a new analysis generation, or any
+      # `Scope` that swaps an index via `with_discovered_*`, transparently
+      # lands in a fresh bucket while everything sharing the tables shares
+      # the memo. Steady-state cost is three identity-keyed hash reads and
+      # zero allocation — the `||=` chains only allocate on the first miss
+      # of a generation. (Pool mode forks per worker, so the
+      # `Thread.current` store is process-local and never crosses a
+      # project boundary.)
+      def class_graph_buckets
+        store = (Thread.current[CLASS_GRAPH_CACHE_KEY] ||= {}.compare_by_identity)
+        by_def = (store[scope.discovered_def_nodes] ||= {}.compare_by_identity)
+        by_super = (by_def[scope.discovered_superclasses] ||= {}.compare_by_identity)
+        by_super[scope.discovered_includes] ||= { name: {}, user_def: {} }
+      end
+
       def resolve_user_def_through_ancestors(class_name, method_name)
+        cache = class_graph_buckets[:user_def]
+        table = (cache[class_name.to_s] ||= {})
+        key = method_name.to_sym
+        return table[key] if table.key?(key)
+
+        table[key] = compute_user_def_through_ancestors(class_name, method_name)
+      end
+
+      def compute_user_def_through_ancestors(class_name, method_name)
         queue = [class_name.to_s]
         seen = {}
         visited = 0
@@ -1398,6 +1435,14 @@ module Rigor
       # no candidate names a discovered user class (e.g. the
       # superclass is an RBS-known or third-party class).
       def resolve_ancestor_class_name(subclass_qualified, raw_superclass)
+        by_subclass = (class_graph_buckets[:name][subclass_qualified] ||= {})
+        return by_subclass[raw_superclass] if by_subclass.key?(raw_superclass)
+
+        by_subclass[raw_superclass] =
+          compute_ancestor_class_name(subclass_qualified, raw_superclass)
+      end
+
+      def compute_ancestor_class_name(subclass_qualified, raw_superclass)
         segments = subclass_qualified.split("::")
         (segments.length - 1).downto(0) do |i|
           candidate = (segments[0, i] + [raw_superclass]).join("::")

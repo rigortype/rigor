@@ -150,10 +150,11 @@ value object that `rebuild`s in full on every narrowing/binding change
 
 1. **Memoise the ancestor/name resolution** —
    `resolve_ancestor_class_name`, `resolve_user_def_through_ancestors`,
-   `enqueue_ancestors`, keyed on the frozen project indexes. Pure
-   functions of immutable state; **no behaviour change**, and it targets
-   the single largest fixable allocator (~10–15 % of all allocations).
-   Highest leverage, lowest risk.
+   keyed on the frozen project indexes. Pure functions of immutable
+   state; **no behaviour change**, and it targets the single largest
+   fixable allocator (~10–15 % of all allocations). Highest leverage,
+   lowest risk. **→ Landed; see "Landed" section below (−27 % allocations,
+   −9 % wall, diagnostics byte-identical).**
 2. **Intern `RBS::TypeName.parse` / `RbsLoader#parse_type_name`** results
    — the same type-name strings are re-parsed repeatedly (3.4 % + 0.9 %).
 3. **Cut `Scope#rebuild` / `CallContext` allocation** — broader but more
@@ -167,6 +168,35 @@ value object that `rebuild`s in full on every narrowing/binding change
 `ancestor_walk_limit` 0, `hkt_fuel_exhausted` 0 — the silent cutoffs are
 not what is costing time here (see
 [`20260603-inference-budget-reality-survey.md`](20260603-inference-budget-reality-survey.md)).
+
+## Landed: memoising the ancestor/name resolution (recommendation 1)
+
+Recommendation 1 was prototyped and landed. `resolve_user_def_through_
+ancestors` and `resolve_ancestor_class_name` now share a run-scoped memo
+keyed by the *identity* of the frozen project index trio
+(`compare_by_identity` nested stores on `Thread.current`; the top-level
+BFS result and each `(subclass, raw_superclass)` resolution are cached).
+The compute paths are split out unchanged behind the memo.
+
+Re-measured on the same target:
+
+| metric | before | after | Δ |
+|---|--:|--:|--:|
+| objects allocated | 87.8 M | **64.0 M** | **−27 %** |
+| objects / file | 67,370 | 49,093 | −27 % |
+| wall | ~30.2 s | **~27 s** | **−9 %** |
+| `GC.stat[:time]` | 2.93 s | 2.19 s | −25 % |
+| GC CPU share (stackprof) | ~57 % | **~40 %** | −17 pt |
+| `resolve_ancestor_class_name` alloc | 9.8 % | **0** | gone |
+| `String#split` alloc | 10.9 % | 4.7 % | −57 % |
+| diagnostics | 457 / 419 err | **457 / 419 err** | byte-identical |
+
+Diagnostics are byte-identical (correctness gate: the memoised methods
+read only frozen tables). `make verify` is green (5,418 examples, self-
+check + plugin-contract check clean). The next allocators are now
+`RBS::TypeName.parse` (4.7 %, recommendation 2), `Scope#rebuild` /
+`CallContext` (recommendation 3), and a residual `String#split` /
+`rpartition` / `delete_prefix` cluster.
 
 ## Reproduction
 

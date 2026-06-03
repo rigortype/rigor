@@ -705,19 +705,30 @@ module Rigor
           )
       end
 
-      # Stdlib module singleton-folding tiers: File, Shellwords, Math,
-      # Time, Regexp, CGI, URI, Set. Extracted from
-      # `dispatch_precise_tiers` to keep the parent method within the
-      # cyclomatic-complexity limit.
+      # Stdlib module singleton-folding tiers, consulted in order. Each
+      # folds a pure module-/class-function call on `Constant` receivers
+      # and returns nil to defer. Order is not significant for
+      # correctness — every tier gates on a distinct `Singleton`
+      # receiver (File / Shellwords / Math / …) via
+      # `SingletonFolding.receiver?`, so at most one matches a given
+      # call; the list order is just the consultation sequence. Adding a
+      # new pure singleton folder is a one-line append here rather than
+      # another link in a hand-written `||` chain.
+      STDLIB_MODULE_FOLDERS = Ractor.make_shareable([
+        FileFolding, ShellwordsFolding, MathFolding,
+        TimeFolding, RegexpFolding, CGIFolding,
+        URIFolding, SetFolding
+      ].freeze)
+      private_constant :STDLIB_MODULE_FOLDERS
+
+      # Extracted from `dispatch_precise_tiers` to keep the parent
+      # method within the cyclomatic-complexity limit.
       def dispatch_stdlib_module_tiers(receiver_type, method_name, arg_types)
-        FileFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          ShellwordsFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          MathFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          TimeFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          RegexpFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          CGIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          URIFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          SetFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types)
+        STDLIB_MODULE_FOLDERS.each do |folder|
+          result = folder.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types)
+          return result if result
+        end
+        nil
       end
 
       def try_user_class_fallback(receiver_type, method_name, arg_types, environment, block_type, call_node = nil)

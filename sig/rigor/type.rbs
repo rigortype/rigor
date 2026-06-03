@@ -4,6 +4,29 @@ module Rigor
 
     type accepts_mode = :strict | :gradual | :loose
 
+    # The structural interface every `Type::*` carrier satisfies — the
+    # internal type-object API (see
+    # docs/internal-spec/internal-type-api.md). A structural *interface*
+    # (duck-typed: satisfied by having the methods, no `implements`
+    # clause), not a "protocol" — that word is reserved for ADR-28
+    # path-scoped protocol contracts. The closed `type t` union above is
+    # what the engine threads day-to-day; this records the shared
+    # per-carrier method contract in one place. Carriers supply the
+    # identity trio via `Rigor::ValueSemantics` and `accepts` via
+    # `Rigor::Type::AcceptanceRouter`.
+    interface _Type
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def eql?: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
     class Top
       def self.instance: () -> Top
       def describe: (?Symbol verbosity) -> String

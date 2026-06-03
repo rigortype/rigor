@@ -24,6 +24,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-05-30 | [Mangrove (Result / Option / Enum) — library survey + `rigor-mangrove` shape](20260530-mangrove-library-survey.md) |
 | 2026-05-30 | [Real Sorbet/Tapioca app survey — strap + dependabot-core](20260530-sorbet-real-app-survey.md) |
 | 2026-05-31 | [TypeProf internals survey — inference logic + internal type representation](20260531-typeprof-internals-survey.md) |
+| 2026-06-03 | [PHPStan 内部型演算（TypeCombinator / TypeUtils / 二項演算評価）と Rigor の比較](20260603-phpstan-type-algebra-comparison.md) |
 
 ## Type-coverage audits
 

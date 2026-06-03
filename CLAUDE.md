@@ -98,6 +98,7 @@ ADRs record design rationale and rejected / deferred alternatives. **The canonic
 - [ADR-39](docs/adr/39-plugin-target-library-invocation.md) — Plugins may invoke their target library's safe methods directly (PHPStan-style; allow-list + rescue harness; accepted — `Plugin::Inflector` over real `ActiveSupport::Inflector` + 3 consumers migrated)
 - [ADR-40](docs/adr/40-config-schema-defaults.md) — `config_schema` declared defaults (`{kind:, default:}`; accepted — `Base#config` merges manifest defaults; 13 plugins migrated off the `DEFAULT_*` idiom)
 - [ADR-41](docs/adr/41-inference-budget-design.md) — Inference budget design (proposed — spec `budgets:` table unwired; widen-and-diagnose on-hit policy; measurement-gated defaults; Layer 1 doc hygiene + Layer 2 wiring queued)
+- [ADR-42](docs/adr/42-plugin-binary-operator-return-types.md) — Plugin-contributed binary-operator return types (proposed — self/left-operand operators already work via `dynamic_return`; coerce-direction `builtin <op> custom` needs an engine path; demand-gated)
 
 ## Skills available in this repository
 

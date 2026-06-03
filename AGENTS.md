@@ -181,13 +181,17 @@ Treat any tightening that **loses union members** compared to the declared RBS a
 
 ## Release Cadence
 
-- **No autonomous version bumps.** `Rigor::VERSION` (in `lib/rigor/version.rb`), `CHANGELOG.md` released-version sections, and `Gemfile.lock` MUST only be bumped on explicit user request. Land feature commits with their `## [Unreleased]` CHANGELOG entries and stop there; the user drives the cut-over to a numbered release. Adding entries under `## [Unreleased]` does NOT count as a version bump.
+- **No autonomous version bumps.** `Rigor::VERSION` (in `lib/rigor/version.rb`), `CHANGELOG.md` released-version sections, and `Gemfile.lock` MUST only be bumped on explicit user request. Land feature commits with their `## [Unreleased]` CHANGELOG entries — written user-facing at landing per § "CHANGELOG Style" — and stop there; the user drives the cut-over to a numbered release. Adding entries under `## [Unreleased]` does NOT count as a version bump.
 - **Single-digit version components.** Each `x.y.z` component stays single-digit. `0.0.9`'s successor is `0.1.0` — never `0.0.10`. `0.9.x`'s successor is `1.0.0`. Same rule applies recursively at every position.
 - The `bundle exec rake release` task (which tags `vx.y.z`, pushes to origin, and publishes to RubyGems) is gated separately — never run it without explicit user authorisation, even when the version is already bumped.
 
 ## CHANGELOG Style
 
 `CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). The goal is for users to scan changes quickly, so every entry is written from the user's perspective, not the implementer's.
+
+**When to write — at landing, in release-style.** Write each `## [Unreleased]` entry from the user's perspective at the moment the change lands, as if release notes were cut that day. The commit message and the CHANGELOG entry have different audiences and are written differently in the **same** landing: the commit body stays a detailed engineering record (file paths, method names, rationale, soundness gates) for `git log` archaeology, while the CHANGELOG entry is user-facing release notes. Do not defer the user-facing version to release-prep — a `[Unreleased]` section that already reads like release notes at any moment keeps release-prep mechanical (the v0.1.12 cut spent ≥3× longer than necessary rewriting drift that should never have accumulated).
+
+**Why a release-time pass still exists — and what it is not.** Keep a Changelog organises by **user-recognisable change**, a unit that does not line up with **commits**: one user-facing change may land across several commits, and several small commits may each fold into a single entry. That misalignment can only be reconciled with cycle-wide context, so release-prep **consolidates, reorders, and dedupes** entries — it is *not* a licence to skip landing-time quality and rewrite commit prose wholesale at the end. The verbose `[Unreleased]` drafts an implementation agent tends to produce are not waste: when an entry has drifted detail-heavy, mine the detail down into child items rather than discarding it.
 
 **Entry shape:**
 
@@ -196,7 +200,7 @@ Treat any tightening that **loses union members** compared to the declared RBS a
   - End with a GitHub issue / PR link and `thank you @handle!` when applicable.
 - Child items (`  - …`) add supplementary detail: one topic per item, two to three sentences max. Use further nesting only to enumerate a short list.
 - **Do not document internal changes.** Implementation detail (class renames, gemspec deletions, internal refactors, test coverage counts) is omitted unless it directly affects what users can do or observe. Ask: "Would a user care about this if they weren't reading the source?"
-- A changelog entry is **not** a commit message. Many commits may collapse into one entry; one entry may span many commits. Rewrite `[Unreleased]` commit-style lines into user-meaningful descriptions at release time.
+- A changelog entry is **not** a commit message, and its unit is the user-recognisable change, not the commit: many commits may collapse into one entry, and one change may span many commits. Write each entry user-facing from the start (see "When to write" above); cross-entry consolidation is the release-time job, not a deferred rewrite.
 
 **Correct shape:**
 

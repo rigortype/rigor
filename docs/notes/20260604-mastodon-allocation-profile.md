@@ -218,6 +218,41 @@ Those are recommendation 3's architectural half and are left for a
 dedicated change: they need a design call (mutable scratch scope,
 or a lighter call-context carrier), not a local rewrite.
 
+## Runtime characteristics: plugins and cache
+
+A follow-up wall-time matrix isolated two operational variables —
+plugins on/off and cache cold/warm — on the same target (here a slightly
+later Mastodon checkout, `fe885d57`, still 1,303 files; diagnostic counts
+differ from the `d20d049` runs above but every cell below uses the *same*
+checkout, so the comparisons are internally valid). `--workers 0`, post
+the four allocation cuts.
+
+| | plugins ON (6) | plugins OFF |
+|---|--:|--:|
+| cold (build + write cache) | 37.9 s | 29.7 s |
+| warm-1 | 35.2 s | 28.0 s |
+| warm-2 | 35.7 s | 28.1 s |
+| `--no-cache` | 35.2 s | 27.4 s |
+| diagnostics | **85** | **422** |
+
+**Plugins are a precision/speed trade, ~+7.5 s (~27 %).** The six Rails
+plugins add ~7.5 s of wall (their node rules, `dynamic_return`s, and
+contributed RBS applied across 1,303 files) and in exchange suppress
+**337 Rails-DSL false positives** (422 → 85). Consistent with the
+project's false-positive discipline: the cost buys correctness on valid
+Rails code, not extra findings.
+
+**The cache is a *minor* lever here, ~2–3 s (~6–7 %).** Cold→warm saves
+only ~2.7 s (ON) / ~1.7 s (OFF), and `--no-cache` ≈ warm. The reason is
+structural: the persistent cache stores the **RBS environment + plugin
+lookup tables** (built once per run), **not per-file analysis results**.
+So a warm run still re-runs the full per-file inference — the ~28–35 s
+that dominates — and the cache only removes the one-time RBS/plugin
+build. This corroborates the CPU profile: the hot path is per-file
+inference (the allocation-bound work cut above), not RBS-environment
+construction or IO. The cache pays off most on cold/CI full scans and
+barely on warm re-runs; it is not where this target's wall time lives.
+
 ## Reproduction
 
 Inside the Flake dev shell, from the rigor checkout:

@@ -99,6 +99,24 @@ module Rigor
         )
       end
 
+      # Builds a Diagnostic at a call node's `message_loc` (the
+      # method-name / matcher span), falling back to the receiver-
+      # spanning `node.location` when no message location is available.
+      # Absorbs the `node.message_loc || node.location` idiom the
+      # call-related rules otherwise repeat; all other fields forward to
+      # {.from_location}.
+      def self.from_message_loc(node, **)
+        from_location(node.message_loc || node.location, **)
+      end
+
+      # Builds a Diagnostic at a definition / assignment node's
+      # `name_loc` (the declared name span), falling back to
+      # `node.location`. Absorbs the `node.name_loc || node.location`
+      # idiom the def / write rules otherwise repeat.
+      def self.from_name_loc(node, **)
+        from_location(node.name_loc || node.location, **)
+      end
+
       def error?
         severity == :error
       end

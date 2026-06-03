@@ -527,11 +527,9 @@ module Rigor
         end
 
         def build_unresolved_toplevel_diagnostic(path, call_node)
-          location = call_node.message_loc || call_node.location
-          Diagnostic.new(
+          Diagnostic.from_message_loc(
+            call_node,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "unresolved toplevel call to `#{call_node.name}`. " \
                      "If a project file defines `#{call_node.name}` via a toplevel " \
                      "`def` or a monkey-patch on Object/Kernel, list that file in " \
@@ -832,11 +830,9 @@ module Rigor
           return nil if inside_rigor_testing?(scope)
 
           type = scope.type_of(arg)
-          location = call_node.message_loc || call_node.location
-          Diagnostic.new(
+          Diagnostic.from_message_loc(
+            call_node,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "dump_type: #{type.describe(:short)}",
             severity: :info,
             rule: RULE_DUMP_TYPE
@@ -929,24 +925,20 @@ module Rigor
         end
 
         def build_assert_type_diagnostic(path, call_node, expected, actual)
-          location = call_node.message_loc || call_node.location
-          Diagnostic.new(
+          Diagnostic.from_message_loc(
+            call_node,
             rule: RULE_ASSERT_TYPE,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "assert_type mismatch: expected #{expected.inspect}, got #{actual.inspect}",
             severity: :error
           )
         end
 
         def build_nil_receiver_diagnostic(path, call_node)
-          location = call_node.message_loc || call_node.location
-          Diagnostic.new(
+          Diagnostic.from_message_loc(
+            call_node,
             rule: RULE_NIL_RECEIVER,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "possible nil receiver: `#{call_node.name}' is undefined on NilClass",
             severity: :error
           )
@@ -1009,12 +1001,10 @@ module Rigor
         end
 
         def build_always_raises_diagnostic(path, call_node)
-          location = call_node.message_loc || call_node.location
-          Diagnostic.new(
+          Diagnostic.from_message_loc(
+            call_node,
             rule: RULE_ALWAYS_RAISES,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "always raises ZeroDivisionError: `#{call_node.name}' by zero on Integer receiver",
             severity: :error
           )
@@ -1133,12 +1123,10 @@ module Rigor
         end
 
         def build_visibility_mismatch_diagnostic(path, call_node, receiver_type)
-          location = call_node.message_loc || call_node.location
-          Diagnostic.new(
+          Diagnostic.from_message_loc(
+            call_node,
             rule: RULE_VISIBILITY_MISMATCH,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "private method `#{call_node.name}' called on #{receiver_type.class_name} receiver",
             severity: :error
           )
@@ -1166,36 +1154,30 @@ module Rigor
         end
 
         def build_always_truthy_condition_diagnostic(path, predicate_node, polarity)
-          location = predicate_node.location
-          Diagnostic.new(
+          Diagnostic.from_node(
+            predicate_node,
             rule: RULE_ALWAYS_TRUTHY_CONDITION,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "condition is always #{polarity} (the surrounding flow proves it folds to a constant)",
             severity: :warning
           )
         end
 
         def build_dead_assignment_diagnostic(path, write_node, def_node)
-          location = write_node.name_loc || write_node.location
-          Diagnostic.new(
+          Diagnostic.from_name_loc(
+            write_node,
             rule: RULE_DEAD_ASSIGNMENT,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "local `#{write_node.name}' assigned in `#{def_node.name}' but never read",
             severity: :warning
           )
         end
 
         def build_ivar_write_mismatch_diagnostic(path, node, class_name, ivar_name, first_class, other_class)
-          location = node.name_loc || node.location
-          Diagnostic.new(
+          Diagnostic.from_name_loc(
+            node,
             rule: RULE_IVAR_WRITE_MISMATCH,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "instance variable `#{ivar_name}' on #{class_name} was previously assigned " \
                      "#{first_class}; this write assigns #{other_class}",
             severity: :error
@@ -1214,12 +1196,10 @@ module Rigor
         end
 
         def build_unreachable_branch_diagnostic(path, dead_branch, polarity)
-          location = dead_branch.location
-          Diagnostic.new(
+          Diagnostic.from_node(
+            dead_branch,
             rule: RULE_UNREACHABLE_BRANCH,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "unreachable branch: literal predicate is always #{polarity}",
             severity: :warning
           )
@@ -1348,39 +1328,34 @@ module Rigor
         end
 
         def build_argument_type_diagnostic(path, call_node, class_name, mismatch)
-          location = mismatch[:node].location
           method_label = "`#{call_node.name}' on #{class_name}"
           parameter_label = mismatch[:name] ? "parameter `#{mismatch[:name]}' of #{method_label}" : method_label
           message = "argument type mismatch at #{parameter_label}: " \
                     "expected #{mismatch[:expected].describe(:short)}, " \
                     "got #{mismatch[:actual].describe(:short)}"
-          Diagnostic.new(
+          Diagnostic.from_node(
+            mismatch[:node],
             rule: RULE_ARGUMENT_TYPE,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: message,
             severity: :error
           )
         end
 
         def build_arity_diagnostic(path, call_node, class_name, min, max, actual)
-          location = call_node.message_loc || call_node.location
           range = min == max ? min.to_s : "#{min}..#{max}"
           method_label = "`#{call_node.name}' on #{class_name}"
           message = "wrong number of arguments to #{method_label} (given #{actual}, expected #{range})"
-          Diagnostic.new(
+          Diagnostic.from_message_loc(
+            call_node,
             rule: RULE_WRONG_ARITY,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: message,
             severity: :error
           )
         end
 
         def build_undefined_method_diagnostic(path, call_node, receiver_type, definition_site = nil, class_name = nil)
-          location = call_node.message_loc || call_node.location
           rendered_receiver = receiver_type.describe
           message = "undefined method `#{call_node.name}' for #{rendered_receiver}"
           # ADR-17 — when the project itself defines this method on the
@@ -1396,11 +1371,10 @@ module Rigor
                        "#{definition_site} — Rigor does not apply project monkey-patches " \
                        "cross-file; list that file in `.rigor.yml`'s `pre_eval:` (ADR-17)"
           end
-          Diagnostic.new(
+          Diagnostic.from_message_loc(
+            call_node,
             rule: RULE_UNDEFINED_METHOD,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: message,
             severity: :error,
             receiver_type: rendered_receiver,
@@ -1544,12 +1518,10 @@ module Rigor
         end
 
         def build_return_type_mismatch_diagnostic(path, def_node, declared, inferred, severity)
-          location = def_node.name_loc || def_node.location
-          Diagnostic.new(
+          Diagnostic.from_name_loc(
+            def_node,
             rule: RULE_RETURN_TYPE,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "return-type mismatch on `#{def_node.name}': " \
                      "declared #{declared.describe(:short)}, inferred #{inferred.describe(:short)}",
             severity: severity
@@ -1689,12 +1661,10 @@ module Rigor
         end
 
         def build_override_visibility_diagnostic(path, def_node, parent_class, parent_visibility, override_visibility)
-          location = def_node.name_loc || def_node.location
-          Diagnostic.new(
+          Diagnostic.from_name_loc(
+            def_node,
             rule: RULE_OVERRIDE_VISIBILITY_REDUCED,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "visibility of `#{def_node.name}' reduced from #{parent_visibility} to " \
                      "#{override_visibility} (overrides #{parent_class}##{def_node.name}); " \
                      "breaks substitutability",
@@ -1784,12 +1754,10 @@ module Rigor
         end
 
         def build_override_return_widened_diagnostic(path, def_node, parent_class, parent_return, override_return)
-          location = def_node.name_loc || def_node.location
-          Diagnostic.new(
+          Diagnostic.from_name_loc(
+            def_node,
             rule: RULE_OVERRIDE_RETURN_WIDENED,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "return type of `#{def_node.name}' widened from #{parent_return.describe(:short)} " \
                      "to #{override_return.describe(:short)} (overrides #{parent_class}##{def_node.name}); " \
                      "breaks substitutability",
@@ -1890,12 +1858,10 @@ module Rigor
         end
 
         def build_override_param_narrowed_diagnostic(path, def_node, parent_class, index, parent_param, override_param)
-          location = def_node.name_loc || def_node.location
-          Diagnostic.new(
+          Diagnostic.from_name_loc(
+            def_node,
             rule: RULE_OVERRIDE_PARAM_NARROWED,
             path: path,
-            line: location.start_line,
-            column: location.start_column + 1,
             message: "parameter #{index + 1} of `#{def_node.name}' narrowed from " \
                      "#{parent_param.describe(:short)} to #{override_param.describe(:short)} " \
                      "(overrides #{parent_class}##{def_node.name}); breaks substitutability",

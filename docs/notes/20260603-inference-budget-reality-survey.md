@@ -153,6 +153,56 @@ Reading:
   "Mastodon opts in its own activesupport" run needs Mastodon's bundle;
   the walk measured here is bundle-, not cwd-, determined.
 
+## Survey 4 — union-arity distribution (Slice 2a) refutes the union_size hypothesis
+
+ADR-41 Slice 2a added a **read-only** union-arity histogram: the member
+count of every `Type::Union` `Combinator.union` produces, recorded with
+no cap enforced (`RIGOR_BUDGET_TRACE`, `--workers 0`). The point was to
+choose the `union_size` default from an observed distribution rather than
+a guess. The result instead **refuted the premise that `union_size` is
+the lever for the large-app memory cliff.**
+
+| project | union calls | max arity | p50 | p90 | p99 | ≥10 | ≥24 | ≥40 | wall | peak RSS |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| liquid | 3,514 | 20 | 2 | 3 | 4 | 4 | 0 | 0 | 0.69 s | 129 MB |
+| kramdown | 9,685 | **932** | 2 | 2 | 9 | 95 | 38 | 30 | 1.25 s | 124 MB |
+| haml | 15,528 | 23 | 2 | 3 | 3 | 5 | 0 | 0 | 1.07 s | 126 MB |
+| **redmine** | 254,584 | **37** | 2 | 2 | 3 | 115 | 20 | 0 | 172.75 s | **1518 MB** |
+| mastodon | 873,862 | 184 | 2 | 3 | 4 | 117 | 6 | 4 | 173.01 s | 277 MB |
+
+Reading — three findings, all decision-changing:
+
+1. **Memory does not correlate with union width — if anything it
+   anti-correlates.** kramdown produces a **932-member** union yet peaks
+   at 124 MB / 1.25 s; Redmine's widest union is **37** members yet it
+   peaks at **1.5 GB**. A few giant unions are cheap; Redmine's blow-up
+   is not wide unions.
+2. **`union_size` would barely touch Redmine.** Of Redmine's 254,584
+   unions, only **20** are ≥24 and **none** ≥40. Capping at 24 would clip
+   20 unions for ~0 memory benefit — and those 20 are presumably
+   *legitimate* (Redmine's real branch joins), so the cap would *add* a
+   false-positive surface (collapse-to-`top`) while fixing nothing. This
+   is exactly the asymmetric-cost failure WD3 warned about, caught
+   *before* wiring.
+3. **The spec's `union_size = 24` is, if anything, too low, not too
+   high.** The earlier prior-art reasoning ("TypeProf runs 10, so 24 may
+   be loose") is overturned by data: TypeProf's 10 would clip 95–117
+   unions per large project — a large FP surface under Rigor's discipline.
+   The p99 is 3–9 everywhere; the only genuinely pathological tail is
+   kramdown's 932 and mastodon's 184. If `union_size` is wired at all, it
+   is a **display / pathology valve at ~40–64**, not a memory fix and not
+   24.
+
+**Consequence:** the load-bearing Layer 2 question is *no longer*
+"wire `union_size`." Redmine's 1.5 GB is driven by something that scales
+with the project's type universe but not with union width — candidates:
+`structural_growth` (object-shape accumulation), fact-store / narrowing
+accumulation, the RBS environment for a 67k-LOC Rails app, or retained
+per-method scopes. **The real next step is to memory-profile Redmine to
+find what actually allocates**, not to wire a union cap. Slice 2a did its
+job: it spent one read-only measurement to stop us wiring the wrong
+budget.
+
 ## Spec defaults vs. wired reality (and a documentation bug)
 
 The spec's budget table, the engine, and the user-facing manual disagree

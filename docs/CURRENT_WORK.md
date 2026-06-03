@@ -127,23 +127,27 @@ hits). Two layers of follow-up:
   depth"). Add `ancestor_walk` (100) + `hkt_fuel` (64) to the documented
   table. Author the missing user-facing explanation of inference budgets
   (placement TBD — handbook appendix vs manual section).
-- **Layer 2 — wire the load-bearing budgets (consequential,
-  measurement-gated).** `union_size` + `structural_growth` are the
-  categories the Redmine memory profile implicates and are unwired.
-  **Measure first** (instrument join-arity + shape-member-growth
-  distributions on Redmine/Mastodon, `BudgetTrace`-style) before picking
-  defaults — guessing risks collapsing genuine unions to `top` (FP-discipline
-  violation). Then wire + emit `static.*` incomplete-inference diagnostics
-  so users see where a `Dynamic[top]` originated.
+- **Layer 2 — find and wire the actual cost lever (measurement-gated).**
+  Slice 2a measured the union-arity distribution and **refuted** the
+  assumption that `union_size` is the lever: Redmine's 1.5 GB has a widest
+  union of only 37 members (20 of 254k unions ≥24), while kramdown's
+  932-member union costs 124 MB — memory is *uncorrelated* with union
+  width. So `union_size` is demoted (if wired, a high-cap ~40–64
+  display valve, not a memory fix). **Revised next step: heap-profile
+  Redmine** to find what actually scales to 1.5 GB (structural-growth /
+  fact-store / RBS-env / retained-scope candidates), *then* wire the
+  budget the profile implicates with widening + `static.*` diagnostics.
 
-Planned sequencing before implementing either layer: (1) survey note +
-record — **done**; (2) comparative prior-art note on how PHPStan /
-TypeScript / mypy / Steep / Sorbet / TypeProf bound inference — **done**
-([`docs/notes/20260603-inference-cutoff-prior-art.md`](notes/20260603-inference-cutoff-prior-art.md));
-(3) ideal-design ADR — **done**
-([ADR-41](adr/41-inference-budget-design.md), Proposed). **Next: Layer 1
-doc/spec hygiene, then Layer 2a measurement → 2b/2c wiring**, per ADR-41
-§ Slices.
+Sequencing: (1) survey note + record — **done**; (2) prior-art note —
+**done** ([`docs/notes/20260603-inference-cutoff-prior-art.md`](notes/20260603-inference-cutoff-prior-art.md));
+(3) ideal-design ADR — **done** ([ADR-41](adr/41-inference-budget-design.md),
+Proposed, with Evaluation verdict); (4) Layer 1 safe doc fixes (manual
+`budget_per_gem` bug + spec implementation-status note) — **done**;
+(5) Slice 2a union-arity distribution — **done** (Survey 4 in the survey
+note; refuted `union_size`). **Next: Slice 2b — heap-profile Redmine** to
+locate the real allocation, per ADR-41 § Slices (revised). Remaining
+Layer 1 (normative spec-value changes 5→1 + table rows; user-facing
+budget doc) waits on ADR-41 acceptance.
 
 ### Flow-folding — all G1 / G2 cases now closed (v0.1.12)
 

@@ -194,6 +194,35 @@ was not measured (only firing *counts* were). If the guards are ever
 revisited, that too needs a distribution-of-impact measurement, not a
 guess — the same discipline as Layer 2.
 
+### Slice 2a outcome (2026-06-03) — the union_size hypothesis is refuted
+
+Slice 2a ran (union-arity histogram, read-only). It **overturned the
+verdict's working assumption that `union_size` is the Layer 2 lever**
+(Survey 4 in the survey note):
+
+- **Memory does not correlate with union width.** kramdown produces a
+  932-member union at 124 MB; Redmine's widest union is **37** members at
+  **1.5 GB**. Redmine's blow-up is not wide unions.
+- **Capping at 24 would touch 20 of Redmine's 254,584 unions** for ~0
+  memory benefit, while adding a false-positive surface on those 20
+  presumably-legitimate joins — the exact asymmetric-cost failure WD3
+  guards against, caught before wiring.
+- **The prior-art reasoning is inverted by data:** TypeProf's 10 would
+  clip 95–117 unions per large project; `union_size = 24` is if anything
+  *too low*. If wired at all it is a display/pathology valve at **~40–64**
+  (above Redmine's max 37, clipping only the kramdown-932 / mastodon-184
+  tail), not a memory fix.
+
+**Revised Layer 2.** Drop "wire `union_size`" as the entry point. The
+load-bearing question is now: *what actually allocates Redmine's 1.5 GB?*
+— something that scales with the type universe but not union width
+(`structural_growth`, fact-store / narrowing accumulation, the RBS env, or
+retained per-method scopes). The next step is a **memory profile of
+Redmine** (heap-allocation attribution), not a cap. `union_size`, if
+wired, becomes a low-priority high-cap valve. This is Slice 2a doing its
+job: one read-only measurement stopped us from wiring the wrong budget at
+a harmful default.
+
 ## Slices
 
 - **Layer 1 — doc/spec hygiene (cheap, high-confidence, no new
@@ -205,15 +234,24 @@ guess — the same discipline as Layer 2.
   - Add `ancestor_walk` / `hkt_fuel` to the table (WD6).
   - Author the missing user-facing budget explanation (placement TBD —
     handbook appendix vs. manual section).
-- **Layer 2 — wire the load-bearing budgets (consequential,
+- **Layer 2 — find and wire the actual cost lever (consequential,
   measurement-gated).**
-  - 2a. Extend `BudgetTrace` from counters to **distributions** (record
-    join-arity and shape-member growth per site); run on Redmine +
-    Mastodon to get the observed tails (WD3).
-  - 2b. Wire `union_size` + `structural_growth` enforcement with
-    widening + the `static.*` diagnostic (WD2), defaults chosen from 2a.
-  - 2c. Make the precision budgets user-configurable under `budgets:`
+  - 2a. **Done (2026-06-03).** Extended `BudgetTrace` to a read-only
+    union-arity distribution; ran Redmine + Mastodon. Outcome: union
+    width is *not* the memory lever (see "Slice 2a outcome" above) —
+    `union_size` demoted. Shape-member-growth instrumentation still
+    pending (a follow-on once the structural-growth site is located).
+  - 2b (revised). **Memory-profile Redmine** (heap-allocation
+    attribution) to find what actually scales to 1.5 GB — the structural
+    / fact-store / RBS-env / retained-scope candidates — *before*
+    choosing any cap to wire. This replaces the assumed "wire
+    `union_size`" entry point.
+  - 2c. Wire the budget the profile implicates with widening + the
+    `static.*` diagnostic (WD2), default from its observed distribution.
+  - 2d. Make the precision budgets user-configurable under `budgets:`
     with range validation + the Psalm-style caveat (WD4).
+  - `union_size`, if wired at all, is a low-priority high-cap (~40–64)
+    display/pathology valve, not part of the memory fix.
 - **Deferred:** the remaining unwired rows (`call_graph_width`,
   `overload_candidates`, `operator_ambiguity`, `interface_candidates`)
   never bound a corpus project; wire on demand. Precision-unroll depth

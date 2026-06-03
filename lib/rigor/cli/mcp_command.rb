@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "command"
+
 require "optionparser"
 
 module Rigor
@@ -13,14 +15,8 @@ module Rigor
     # Slice 1 ships the stdio transport with seven read-only tools:
     # rigor_check, rigor_type_of, rigor_triage, rigor_annotate,
     # rigor_sig_gen, rigor_explain, rigor_coverage.
-    class McpCommand
+    class McpCommand < Command
       USAGE = "Usage: rigor mcp [options]"
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

@@ -9,6 +9,7 @@ require_relative "../inference/coverage_scanner"
 require_relative "../scope"
 require_relative "type_scan_renderer"
 require_relative "type_scan_report"
+require_relative "command"
 
 module Rigor
   class CLI
@@ -19,16 +20,10 @@ module Rigor
     # the inference engine's directly recognized classes. It is the project's
     # primary CI gate for tracking how much of an input source the engine can
     # name without falling back to `Dynamic[Top]`.
-    class TypeScanCommand
+    class TypeScanCommand < Command
       USAGE = "Usage: rigor type-scan [options] PATH..."
 
       LocatedEvent = Data.define(:file, :event)
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

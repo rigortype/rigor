@@ -7,6 +7,7 @@ require_relative "../analysis/runner"
 require_relative "../cache/store"
 require_relative "../triage"
 require_relative "triage_renderer"
+require_relative "command"
 
 module Rigor
   class CLI
@@ -18,15 +19,9 @@ module Rigor
     # Read-only and advisory (WD4): never edits config, never
     # writes a baseline. Always exits 0 — it is an inspection
     # command, not a gate (`rigor check` remains the gate).
-    class TriageCommand
+    class TriageCommand < Command
       USAGE = "Usage: rigor triage [options] [paths]"
       DEFAULT_SECTIONS = %i[distribution hotspots hints].freeze
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status (always 0).
       def run

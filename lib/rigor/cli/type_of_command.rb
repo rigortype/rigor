@@ -11,6 +11,7 @@ require_relative "../source/node_locator"
 require_relative "../inference/fallback_tracer"
 require_relative "../inference/scope_indexer"
 require_relative "type_of_renderer"
+require_relative "command"
 
 module Rigor
   class CLI
@@ -25,16 +26,10 @@ module Rigor
     # dispatching and lets us evolve the type-of UX (extra flags, watch mode,
     # streaming output) without bloating the CLI shell. Output formatting is
     # delegated to {TypeOfRenderer}.
-    class TypeOfCommand
+    class TypeOfCommand < Command
       USAGE = "Usage: rigor type-of [options] FILE:LINE:COL"
 
       Result = Data.define(:file, :line, :column, :node, :type, :tracer)
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

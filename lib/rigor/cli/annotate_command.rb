@@ -9,6 +9,7 @@ require_relative "../scope"
 require_relative "../inference/def_return_typer"
 require_relative "../inference/scope_indexer"
 require_relative "prism_colorizer"
+require_relative "command"
 
 module Rigor
   class CLI
@@ -25,18 +26,12 @@ module Rigor
     # since the appended text is always a comment — and printed to
     # stdout with IRB-style syntax highlighting via
     # {PrismColorizer}.
-    class AnnotateCommand
+    class AnnotateCommand < Command
       USAGE = "Usage: rigor annotate [options] FILE"
 
       # Appended ` #=> dump_type: <type>` suffix. Matched and
       # stripped before re-annotating so re-running is idempotent.
       ANNOTATION_PATTERN = /\s*#=>\s*dump_type:.*\z/
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

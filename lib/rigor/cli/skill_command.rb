@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "command"
+
 require "optparse"
 
 module Rigor
@@ -29,7 +31,7 @@ module Rigor
     #                                as input to a Read tool.
     #
     # `rigor skill` with no subcommand is an alias for `list`.
-    class SkillCommand
+    class SkillCommand < Command
       USAGE = <<~USAGE
         Usage: rigor skill <subcommand> [args]
 
@@ -47,12 +49,6 @@ module Rigor
       # The bundled skills live at `<gem_root>/skills/`. From
       # `lib/rigor/cli/skill_command.rb` that is three directories up.
       SKILLS_ROOT = File.expand_path("../../../skills", __dir__)
-
-      def initialize(argv:, out: $stdout, err: $stderr)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

@@ -9,6 +9,7 @@ require_relative "../inference/precision_scanner"
 require_relative "../scope"
 require_relative "coverage_report"
 require_relative "coverage_renderer"
+require_relative "command"
 
 module Rigor
   class CLI
@@ -25,14 +26,8 @@ module Rigor
     #   0  — scan complete, precision ratio ≥ threshold (or no threshold given)
     #   1  — precision ratio < threshold, or parse errors encountered
     #   64 — usage error
-    class CoverageCommand
+    class CoverageCommand < Command
       USAGE = "Usage: rigor coverage [options] PATH..."
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

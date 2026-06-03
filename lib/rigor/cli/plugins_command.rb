@@ -9,6 +9,7 @@ require_relative "../plugin/services"
 require_relative "../reflection"
 require_relative "../type/combinator"
 require_relative "plugins_renderer"
+require_relative "command"
 
 module Rigor
   class CLI
@@ -60,14 +61,8 @@ module Rigor
     #   the RBS environment without conflict (requires constructing
     #   the Environment, which is heavier than the loader-only
     #   pass this slice does).
-    class PluginsCommand # rubocop:disable Metrics/ClassLength
+    class PluginsCommand < Command # rubocop:disable Metrics/ClassLength
       USAGE = "Usage: rigor plugins [options]"
-
-      def initialize(argv:, out: $stdout, err: $stderr)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "command"
+
 require "optionparser"
 
 module Rigor
@@ -11,14 +13,8 @@ module Rigor
     # The actual stdio JSON-RPC reader / writer is queued for slice 2;
     # invoking `rigor lsp` at slice 1 returns immediately after
     # validating the transport flag.
-    class LspCommand
+    class LspCommand < Command
       USAGE = "Usage: rigor lsp [options]"
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

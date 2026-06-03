@@ -4,6 +4,7 @@ require "optionparser"
 
 require_relative "../configuration"
 require_relative "../sig_gen"
+require_relative "command"
 
 module Rigor
   class CLI
@@ -34,18 +35,12 @@ module Rigor
     # `--params=observed-strict` stays reserved-but-inert until
     # the capability-role catalog ships (rejected with a usage
     # error so the surface stays stable).
-    class SigGenCommand
+    class SigGenCommand < Command
       USAGE = "Usage: rigor sig-gen [options] [paths]"
 
       VALID_MODES = %w[print diff write].freeze
       VALID_PARAM_POLICIES = %w[untyped observed observed-strict].freeze
       VALID_FORMATS = %w[text json].freeze
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

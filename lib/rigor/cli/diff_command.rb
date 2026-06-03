@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "command"
+
 require "json"
 require "optionparser"
 
@@ -29,14 +31,8 @@ module Rigor
     # is `1` when any new diagnostic appears, `0` otherwise —
     # so adding new errors fails CI but legacy errors recorded
     # in the baseline don't.
-    class DiffCommand
+    class DiffCommand < Command
       USAGE = "Usage: rigor diff [options] <baseline.json> [paths...]"
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

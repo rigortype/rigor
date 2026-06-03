@@ -4,6 +4,7 @@ require "json"
 require "optionparser"
 
 require_relative "../analysis/rule_catalog"
+require_relative "command"
 
 module Rigor
   class CLI
@@ -17,14 +18,8 @@ module Rigor
     # beyond the rendered catalog. Useful when a user sees a
     # diagnostic in the editor and wants to know what the rule
     # means without leaving the terminal.
-    class ExplainCommand
+    class ExplainCommand < Command
       USAGE = "Usage: rigor explain [options] [<rule>]"
-
-      def initialize(argv:, out:, err:)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

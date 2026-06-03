@@ -6,6 +6,7 @@ require_relative "../analysis/baseline"
 require_relative "../analysis/runner"
 require_relative "../cache/store"
 require_relative "../configuration"
+require_relative "command"
 
 module Rigor
   class CLI
@@ -20,17 +21,11 @@ module Rigor
     #   rigor baseline dump
     #   rigor baseline drift
     #   rigor baseline prune
-    class BaselineCommand # rubocop:disable Metrics/ClassLength
+    class BaselineCommand < Command # rubocop:disable Metrics/ClassLength
       EXIT_USAGE = 64
       DEFAULT_BASELINE_PATH = ".rigor-baseline.yml"
 
       SUBCOMMANDS = %w[generate regenerate dump drift prune].freeze
-
-      def initialize(argv:, out: $stdout, err: $stderr)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       def run
         subcommand = @argv.shift

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "command"
+
 module Rigor
   class CLI
     # `rigor plugin` (singular) — discover and read the plugin source
@@ -44,7 +46,7 @@ module Rigor
     # will not resolve — read them from the same environment that ran
     # the command (`rigor plugin print` inlines the body for exactly
     # this case: it works with no file-reading tool at all).
-    class PluginCommand
+    class PluginCommand < Command
       USAGE = <<~USAGE
         Usage: rigor plugin <subcommand> [args]
 
@@ -71,12 +73,6 @@ module Rigor
       GEM_ROOT     = File.expand_path("../../..", __dir__)
       PLUGINS_ROOT = File.join(GEM_ROOT, "plugins")
       EXAMPLES_ROOT = File.join(GEM_ROOT, "examples")
-
-      def initialize(argv:, out: $stdout, err: $stderr)
-        @argv = argv
-        @out = out
-        @err = err
-      end
 
       # @return [Integer] CLI exit status.
       def run

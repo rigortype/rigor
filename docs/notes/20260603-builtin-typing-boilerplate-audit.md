@@ -162,3 +162,40 @@ one protocol, a declaration table, and array-driven dispatch.
 
 Every step gated by `make verify` (test / lint / check / check-plugins)
 with folded results unchanged.
+
+## Progress log (2026-06-03 → 2026-06-04)
+
+- **Finding 4 — DONE (path helper).** Added
+  `MethodCatalog.for_topic(topic, mutating_selectors:)` resolving under a
+  single `DATA_ROOT`; migrated all 18 instance loaders off the copied
+  `File.expand_path("../../../../…", __dir__)`. Blocklists untouched.
+  - **Self-registration sub-part — WON'T DO (decision).** Merging the
+    `require_relative` list with `CATALOG_BY_CLASS` via load-order
+    self-registration is *not* a clean win: `CATALOG_BY_CLASS` is walked
+    in declaration order for subclass disambiguation (`DateTime` before
+    `Date`, `MatchData`/`Regexp` sharing one catalog), and that order
+    does **not** match `require` order. Self-registration would still
+    need explicit ordering hints, so it trades one table for another
+    plus a load-order coupling. Left as the explicit 3-site edit.
+  - `NumericCatalog` is still a standalone module (duplicates
+    `safe_for_folding?` / `load_catalog` that `MethodCatalog` provides) —
+    a separate consolidation, not started.
+- **Finding 1 — DONE.** Extracted `MethodDispatcher::SingletonFolding`
+  (`receiver?` + `constant_string`); migrated all 9 receiver predicates
+  (CGI/URI/Shellwords/Math/Time/Regexp/Set/File + iterator_dispatch's
+  `Class` check) and the 4 string-folding `Constant[String]` unwraps onto
+  it. Concluded a full declaration-table harness is **over-engineering** —
+  the fold bodies (Math numeric, File platform gate, Set constructor,
+  Time arity, Shellwords cap) are too varied to table-drive without
+  burying domain logic. Extracted only the genuinely-identical gate.
+- **Finding 2 — DONE (singleton chain).** `dispatch_stdlib_module_tiers`
+  is now `STDLIB_MODULE_FOLDERS.each`-driven (8 folders already shared
+  `try_dispatch`, so no Finding 3 dependency for *this* chain). The
+  `dispatch_precise_tiers` ladder (697-705) still mixes `try_fold` /
+  `try_dispatch` / `try_forward` / block_folding and **does** need
+  Finding 3 first — not started.
+- **Finding 3 — NOT STARTED.** Broad alias migration (`try_fold` →
+  `try_dispatch`, context object for the param-list-heavy tiers).
+  Medium risk; the highest-churn remaining item.
+- **Finding 5 — NOT STARTED.** Fixture-escaping helper + cap/rescue
+  absorption.

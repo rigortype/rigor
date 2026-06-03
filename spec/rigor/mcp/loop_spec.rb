@@ -39,7 +39,7 @@ RSpec.describe Rigor::MCP::Loop do
     end
 
     it "dispatches multiple requests in order" do
-      reqs = [1, 2, 3].map { |i| JSON.generate({ "jsonrpc" => "2.0", "id" => i, "method" => "m#{i}" }) + "\n" }
+      reqs = [1, 2, 3].map { |i| "#{JSON.generate({ 'jsonrpc' => '2.0', 'id' => i, 'method' => "m#{i}" })}\n" }
       instance, output = make_loop(reqs, server)
       instance.run
 

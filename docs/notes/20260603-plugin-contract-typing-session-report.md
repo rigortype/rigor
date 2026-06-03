@@ -101,6 +101,18 @@ caller is unchanged. It is the dual of ADR-26 `open_receivers:`
   draws the distinction sharply (side-by-side table + "which one do I want?"
   guide), cross-linked from the mypy appendix. Only ADR-43 WD4 (allow-list
   sourcing) remains deferred.
+- **Terminology follow-up: the bare word "interface" is itself ambiguous.** Two
+  independent Sonnet sub-agents, run on neutral prompts (no session context),
+  concurred with high confidence: because Ruby has no `interface` keyword and
+  the Ruby population skews Java/PHP, a bare "interface" reads as the *nominal*
+  (explicit-`implements`) kind, not the *structural* RBS/Go/Protocol kind RBS
+  actually implements (RBS conformance is structural — verified against
+  ruby/rbs `docs/syntax.md`, Steep, and community sources; `include _Foo` in RBS
+  is optional convenience, not required). **Decision: qualify "interface" on
+  first use** as "structural interface" / "RBS interface." Actioned: a top-of
+  -appendix one-line callout + a wording convention noted in the handbook README
+  conventions. The appendix is the canonical explainer. A broad first-use sweep
+  of the rest of the handbook was *not* done (deferred — low priority).
 
 ## Pointers
 

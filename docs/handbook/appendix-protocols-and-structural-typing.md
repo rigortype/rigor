@@ -13,6 +13,16 @@ a **different** feature: a framework's path-scoped *behavioural
 contract* ([ADR-28](../adr/28-path-scoped-protocol-contracts.md)).
 This appendix untangles the two so you reach for the right one.
 
+> **The one-line version.** Rigor's `interface` is **structural** —
+> like Go's `interface` and Python's `Protocol`. A class fits by
+> *having the methods*; there is **no `implements`** clause (Ruby has
+> none). It is *not* the Java / PHP nominal `interface`, where a class
+> declares conformance by name. Because the bare word "interface"
+> reads as the Java / PHP kind to many Ruby developers (Ruby has no
+> `interface` keyword, so the intuition is imported), Rigor's docs
+> qualify it on first use — **"structural interface"** or **"RBS
+> interface"** — and so should you when writing about it.
+
 > **In this appendix**
 > [Two things called "protocol"](#two-things-called-protocol) ·
 > [Structural typing: RBS interfaces](#structural-typing-rbs-interfaces) ·

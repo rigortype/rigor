@@ -199,6 +199,17 @@ means: at the `assert_type` call, Rigor's inference for `n` is
 `Constant<3>` — the `Type::Constant` carrier with the literal
 value `3`.
 
+Wording convention — **"interface"**: Ruby has no `interface`
+keyword, so most readers import the word's meaning from another
+language, and the Java / PHP *nominal* sense (a class declares
+`implements`) dominates. Rigor's RBS `interface` is the opposite —
+*structural*, like Go's `interface` or Python's `Protocol`, satisfied
+by having the methods with no declaration. To avoid the misread,
+qualify the word on first use in any chapter as **"structural
+interface"** or **"RBS interface,"** never the bare "interface." The
+[Protocols and structural typing appendix](appendix-protocols-and-structural-typing.md)
+is the canonical explainer.
+
 When a chapter references a more formal document, the link
 takes you out of the handbook into the binding spec corpus or
 ADRs:

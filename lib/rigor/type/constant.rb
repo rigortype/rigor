@@ -2,6 +2,7 @@
 
 require "date"
 require_relative "../trinary"
+require_relative "acceptance_router"
 
 module Rigor
   module Type
@@ -111,9 +112,7 @@ module Rigor
         Trinary.no
       end
 
-      def accepts(other, mode: :gradual)
-        Inference::Acceptance.accepts(self, other, mode: mode)
-      end
+      include Rigor::Type::AcceptanceRouter
 
       def ==(other)
         other.is_a?(Constant) && value.class == other.value.class && value == other.value

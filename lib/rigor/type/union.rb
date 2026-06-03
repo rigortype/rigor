@@ -2,6 +2,7 @@
 
 require_relative "../trinary"
 require_relative "../value_semantics"
+require_relative "acceptance_router"
 
 module Rigor
   module Type
@@ -87,9 +88,7 @@ module Rigor
         members.any? { |m| m.respond_to?(:dynamic) && m.dynamic.yes? } ? Trinary.maybe : Trinary.no
       end
 
-      def accepts(other, mode: :gradual)
-        Inference::Acceptance.accepts(self, other, mode: mode)
-      end
+      include Rigor::Type::AcceptanceRouter
 
       include Rigor::ValueSemantics
 

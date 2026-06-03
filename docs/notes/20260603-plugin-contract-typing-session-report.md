@@ -96,9 +96,11 @@ caller is unchanged. It is the dual of ADR-26 `open_receivers:`
   Smalltalk/Swift sense, kept). **(B) is retired** (removed from the `Manifest`
   surface — it carried the bare, collision-prone "protocol" word for no
   behaviour). **(C) is kept** under its accurate name; (A)/(D) unchanged.
-  Remaining: a **user-facing document** that draws the interface-vs-protocol
-  -contract distinction sharply (the next step), so a Ruby/Python reader does
-  not conflate the two.
+  The **user-facing document** is landed too: the handbook appendix
+  [Protocols, interfaces, and structural typing](../handbook/appendix-protocols-and-structural-typing.md)
+  draws the distinction sharply (side-by-side table + "which one do I want?"
+  guide), cross-linked from the mypy appendix. Only ADR-43 WD4 (allow-list
+  sourcing) remains deferred.
 
 ## Pointers
 

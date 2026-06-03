@@ -182,6 +182,13 @@ partial-signature idiom.
   and `Descriptor#==` (canonical-bytes equality). Per-carrier `==`
   semantics were audited before migrating. No behaviour change; full
   suite (5406) / inference (1870) / cache (87) / steep all green.
+- **Theme D — Diagnostic factory — DONE.** Added
+  `Diagnostic.from_message_loc` / `.from_name_loc` (keyword-forwarding
+  wrappers over the existing `from_location`) and migrated all 17
+  `check_rules.rb` construction sites off raw `Diagnostic.new` + inline
+  `location = … || ….location` / `start_column + 1`. The 0-to-1 column
+  convention now lives only in `from_location`. Byte-identical
+  diagnostics; full suite 5406 green.
 
 ## Execution order (high-value + easy-to-start first)
 

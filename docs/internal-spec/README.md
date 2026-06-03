@@ -36,6 +36,7 @@ Ruby identifiers (`Rigor::Type`, `Rigor::Trinary`, `Rigor::Type::Combinator`, �
 | [plugin.md](plugin.md) | Plugin contract — `Rigor::Plugin::Base`, `Manifest` (all extension fields), `Loader` / `Registry` registration + topological ordering, and `Services` injection. |
 | [plugin-trust.md](plugin-trust.md) | Plugin trust & I/O policy — `TrustPolicy` (`trusted_gems`, `allowed_read_roots`, `network_policy`), the `IoBoundary` mediated file/network surface, and the `Services` additions. |
 | [plugin-cache-producers.md](plugin-cache-producers.md) | Plugin-side cache producers — the `Plugin::Base.producer` DSL, `#cache_for` callable, descriptor auto-prefixing, and `glob_descriptor` discovery helper. |
+| [macro-substrate.md](macro-substrate.md) | Macro / DSL expansion substrate — the `Plugin::Macro::*` value-object shapes (Tiers A/B/C/D + nested-class emission) a plugin declares to teach Rigor a metaprogramming library's call shapes (ADR-16 / ADR-18 / ADR-36). |
 | [public-api.md](public-api.md) | Public-API stability boundary — which namespaces (`Rigor::Scope`, `Type`, `Environment`, `Reflection`, `FlowContribution`, `Diagnostic`) the plugin contract is designed against, and which surfaces stay internal. |
 | [dependency-source-inference.md](dependency-source-inference.md) | Opt-in dependency-source inference (ADR-10) — `dependencies.source_inference:` configuration, walker / dispatcher tier, `DependencyEntry` cache slice, `dynamic.dependency-source.*` diagnostic family. |
 

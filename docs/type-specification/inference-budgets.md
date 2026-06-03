@@ -70,6 +70,17 @@ The `hash_erasure_values` default is intentionally smaller than `hash_erasure_ke
 
 The `negative_fact_display` budget controls the omission contract documented in [type-operators.md](type-operators.md).
 
+## Implementation status (2026-06-03)
+
+The budget table above is **normative-for-v1 intent. As of this writing the configurable `budgets:` surface is not yet wired** — no `budgets:` key is parsed and the table's rows are not enforced. The cutoffs the engine actually applies today are:
+
+- the **recursion** cutoff, as a `(receiver, method)` re-entry guard (effective depth 1, returns `Dynamic[top]`) rather than the configurable `recursion_depth`;
+- an **ancestor-walk** cap (100 nodes) on implicit-self method resolution, not listed in the table above;
+- the **HKT reducer fuel** budget (64 steps, [ADR-20](../adr/20-lightweight-hkt.md)), not listed above;
+- `dependencies.budget_per_gem` ([ADR-10](../adr/10-dependency-source-inference.md)) — the one configurable budget, opt-in via `dependencies.source_inference:`.
+
+The remaining rows — including the cost-bearing `union_size` and `structural_growth` — are not yet enforced. The target design, the wiring plan (Layer 1 doc/spec hygiene, Layer 2 measurement-gated wiring), and the on-hit `static.*`-diagnostic policy are recorded in [ADR-41](../adr/41-inference-budget-design.md); the supporting survey is [`docs/notes/20260603-inference-budget-reality-survey.md`](../notes/20260603-inference-budget-reality-survey.md). `RIGOR_BUDGET_TRACE` exposes per-run counts of the three wired guards.
+
 ## Cutoff categories
 
 The initial budget categories are explicit so cutoffs are predictable:

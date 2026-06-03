@@ -160,6 +160,40 @@ enforced set. Neither fired anywhere in the corpus, so the values are
 generous; keep them hard-coded (not configurable) until a project shows
 they bind.
 
+## Evaluation verdict (2026-06-03)
+
+Asked "maintain the current thresholds vs. search for better defaults vs.
+can't even evaluate until the unwired mechanisms are wired" — the honest
+answer is that this is **not one global choice; it partitions by budget
+category**, and applying any single verdict to the whole table is wrong.
+
+| budget group | wired? | verdict | why |
+|---|---|---|---|
+| termination guards (recursion depth-1, ancestor 100, HKT fuel 64) | yes | **maintain** | zero corpus evidence they misbehave: the recursion guard keeps parsers fast and is FP-safe (widens to `Dynamic[top]`), ancestor + fuel never fired. Tuning has no observed benefit. |
+| `budget_per_gem` | yes | **maintain value, fix the doc** | the per-gem demo showed 5000 fully covers the tested gem (plateau at 5000 = 20000); the default is sound, only the manual is wrong. |
+| **`union_size` / `structural_growth`** | **no** | **un-evaluable until measured** | nothing enforces them, so there is no observable effect to judge 24 / 16 against, and "searching for a better default" is searching over a disconnected knob. |
+| `call_graph_width`, `overload_candidates`, `operator_ambiguity`, `interface_candidates` | no | defer | never bound any corpus project. |
+
+**Dominant conclusion.** For the only budgets that matter to the problem
+that motivated this work (the large-app cost cliff — Redmine 1.5 GB), the
+"better-defaults" question is **currently unanswerable**, and maintaining
+the status quo leaves the cliff unaddressed. So the gating action is
+**neither threshold tuning nor status-quo acceptance** — it is the
+read-only distribution measurement (Slice 2a): instrument the *actual*
+join-arity and shape-growth distributions on Redmine / Mastodon **without
+yet enforcing a cap**. That is the cheapest step that converts
+"un-evaluable" into "evaluable", validates whether 24 is even in the
+right range (the TypeProf prior is 10), and supplies the observed tail
+that WD3 requires before any default is chosen. Picking a value before
+2a would repeat PHPStan's cap-removal-OOM mistake in reverse.
+
+**Caveat.** "Maintain" for the termination guards means "no evidence to
+change", not "proven optimal": the recursion guard fired 421× on haml,
+but whether those `Dynamic[top]` widenings cost real *precision / FPs*
+was not measured (only firing *counts* were). If the guards are ever
+revisited, that too needs a distribution-of-impact measurement, not a
+guess — the same discipline as Layer 2.
+
 ## Slices
 
 - **Layer 1 — doc/spec hygiene (cheap, high-confidence, no new

@@ -95,12 +95,13 @@ One row of an emit table.
 | `returns` | non-empty `String` or `nil` | The declared return type name, resolved via `Environment#nominal_for_name`. When both `returns` and `returns_from_arg` are `nil`, the synthesised method's return falls back to `Dynamic[Top]` per the ADR-16 WD13 floor. |
 | `returns_from_arg` | `ReturnsFromArg` or `nil` | A per-call-site return type (ADR-18), coerced from a `Hash`. |
 
-### `HeredocTemplate::Emit::ReturnsFromArg` (ADR-18)
+### `HeredocTemplate::ReturnsFromArg` (ADR-18)
 
-Declares that the synthesised method's return type comes from a
-**call-site argument's source representation**, looked up in a
-cross-plugin fact channel ([ADR-9](../adr/9-cross-plugin-api.md)
-`FactStore`). Authoring shape:
+A sibling class of `Emit` under `HeredocTemplate` (not nested inside
+`Emit`), referenced by `Emit#returns_from_arg`. Declares that the
+synthesised method's return type comes from a **call-site argument's
+source representation**, looked up in a cross-plugin fact channel
+([ADR-9](../adr/9-cross-plugin-api.md) `FactStore`). Authoring shape:
 
 ```ruby
 returns_from_arg: { position: 1, lookup_via: { plugin_id: "dry-types", fact: :dry_type_aliases } }

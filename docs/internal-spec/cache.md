@@ -28,19 +28,24 @@ slots, every slot an array of typed entries.
 ### Slot entries
 
 ```
-FileEntry   :: { path: String, comparator: :digest|:mtime|:exists, value: String }
-GemEntry    :: { name: String, requirement: String, locked: String? }
-PluginEntry :: { id: String, version: String, config_hash: String? }
-ConfigEntry :: { key: String, value_hash: String }
+FileEntry       :: { path: String, comparator: :digest|:mtime|:exists, value: String }
+GemEntry        :: { name: String, requirement: String, locked: String? }
+PluginEntry     :: { id: String, version: String, config_hash: String? }
+ConfigEntry     :: { key: String, value_hash: String }
+DependencyEntry :: { gem_name: String, gem_version: String, mode: :disabled|:when_missing|:full }
 ```
 
 Each entry is constructed via keyword arguments and frozen
 immediately. `FileEntry#new` validates the comparator enum and
-raises `ArgumentError` on unknown values; the other entries
-accept any string content (their values are already-canonical
-hashes by convention).
+`DependencyEntry#new` validates the `mode` enum, each raising
+`ArgumentError` on an unknown value; the other entries accept any
+string content (their values are already-canonical hashes by
+convention). `DependencyEntry` is the ADR-10 per-gem-version slot:
+its `(gem_name, gem_version, mode)` triple keys the opt-in
+dependency-source-inference cache slice so a `Gemfile.lock` bump or a
+`source_inference:` mode change ([`dependency-source-inference.md`](dependency-source-inference.md)) invalidates exactly the affected gems.
 
-### `Descriptor.new(files: [], gems: [], plugins: [], configs: [])`
+### `Descriptor.new(files: [], gems: [], plugins: [], configs: [], dependencies: [])`
 
 Constructs a descriptor. Every slot defaults to an empty array;
 slots are duped and frozen so callers cannot mutate after

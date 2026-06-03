@@ -63,10 +63,31 @@ registration and producer tables stay flat.
 ### `Rigor::Plugin::Base#io_boundary`
 
 Memoised per-plugin `Rigor::Plugin::IoBoundary` (slice 2). The
-boundary's accumulated `FileEntry` rows feed cache invalidation
-for `cache_for` round-trips: file reads through `io_boundary`
-that happen **before** `cache_for` is called include the file
-digest in the descriptor. See "Invalidation contract" below.
+boundary's accumulated entries feed cache invalidation for
+`cache_for` round-trips: reads through `io_boundary` that happen
+**before** `cache_for` is called are folded into the descriptor.
+`#read_file(path)` records a `:digest` `FileEntry`; `#open_url(url)`
+records a `ConfigEntry` keyed `"url:#{url}"` whose `value_hash` is the
+response body's SHA-256, so a changed remote payload invalidates the
+slice the same way a changed file does. See "Invalidation contract"
+below.
+
+### `Rigor::Plugin::Base#glob_descriptor(roots, *patterns)`
+
+Discovery-glob helper that returns a `Cache::Descriptor` whose `files:`
+slot carries one `:digest` `FileEntry` per file found under `roots`
+matching any of `patterns` (joined `File.join(root, pattern)`; multiple
+patterns union). Pass the result as `cache_for`'s `descriptor:` so a
+producer that scans a *set* of discovered files (every factory, every
+`app/policies/**/*.rb`) invalidates on any file's content change,
+addition, or removal — the case the `IoBoundary` alone misses because
+the producer has not read the files yet on a cold call. `roots` are
+relative to the project root or absolute. The helper pays one SHA-256
+read per matched file at call time; for discovery globs in the 10–100
+file range this is negligible against the producer's parse-and-walk on
+a miss. This is the supported alternative to a hand-rolled
+discovery-digest descriptor (which `rigor-factorybot` previously
+re-invented before migrating onto the helper).
 
 ### `Rigor::Plugin::Base#cache_for(producer_id, params: {}, descriptor: nil)`
 

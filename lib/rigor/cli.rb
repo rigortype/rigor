@@ -100,7 +100,7 @@ module Rigor
 
       write_result(result, options.fetch(:format))
       write_run_stats(result.stats) if result.stats
-      write_budget_trace
+      write_trace_appendices
       write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
 
       exit_code = result.success? ? 0 : 1
@@ -403,6 +403,15 @@ module Rigor
       stats.format(@err)
     end
 
+    # Opt-in developer diagnostics printed after the run: the
+    # inference-cutoff trace (RIGOR_BUDGET_TRACE) and the heap-attribution
+    # profile (RIGOR_HEAP_PROFILE). Each gates itself, so this is a no-op
+    # on a normal run.
+    def write_trace_appendices
+      write_budget_trace
+      write_heap_profile
+    end
+
     # Dumps the opt-in inference-cutoff counters (RIGOR_BUDGET_TRACE).
     # These are the hard-coded "budget" guards that silently degrade
     # to `Dynamic[top]` / a fallback bound — counting them shows where
@@ -433,6 +442,55 @@ module Rigor
                 "p50=#{pct[:p50]} p90=#{pct[:p90]} p99=#{pct[:p99]}")
       over = summary[:over]
       @err.puts("    unions ≥10: #{over[10]}  ≥24: #{over[24]}  ≥40: #{over[40]}")
+    end
+
+    # Dumps a live-heap class breakdown (RIGOR_HEAP_PROFILE) — retained
+    # objects by class after a forced GC, ranked by total memsize. The
+    # tool for attributing where the analyzer's resident memory goes
+    # (ADR-41 Slice 2b): it answers whether the heap is type carriers,
+    # RBS objects, Prism nodes, or fact-store Hashes/Strings. Walking the
+    # whole heap is slow — a dev probe, not a normal diagnostic. Run
+    # single-process (`--workers 0`) so the parent heap is the analysis
+    # heap; the gem is required lazily so a normal run never loads it.
+    def write_heap_profile
+      return if ENV["RIGOR_HEAP_PROFILE"].to_s.empty?
+
+      by_class, total = tally_live_heap
+      @err.puts("")
+      @err.puts("Heap profile (RIGOR_HEAP_PROFILE; live objects after GC, by class)")
+      @err.puts("  total tracked: #{heap_mb(total)} across #{by_class.size} classes")
+      by_class.sort_by { |_, (_, bytes)| -bytes }.first(30).each do |name, (count, bytes)|
+        @err.puts("  #{heap_mb(bytes).rjust(10)}  #{count.to_s.rjust(9)} obj  #{name}")
+      end
+    end
+
+    # Walks the whole live heap (after a forced GC) and tallies
+    # `{class_name => [count, memsize]}` plus the grand total. Returns
+    # `[by_class, total]`. Slow — a dev probe only.
+    def tally_live_heap
+      require "objspace"
+      GC.start
+      by_class = Hash.new { |h, k| h[k] = [0, 0] }
+      total = 0
+      ObjectSpace.each_object do |obj|
+        size = ObjectSpace.memsize_of(obj)
+        entry = by_class[heap_class_name(obj)]
+        entry[0] += 1
+        entry[1] += size
+        total += size
+      end
+      [by_class, total]
+    end
+
+    def heap_class_name(obj)
+      klass = Object.instance_method(:class).bind_call(obj)
+      klass.name || klass.inspect
+    rescue StandardError
+      "(unknown)"
+    end
+
+    def heap_mb(bytes)
+      Kernel.format("%.1f MB", bytes / 1_048_576.0)
     end
 
     def write_cache_stats(cache_root, runtime_store)

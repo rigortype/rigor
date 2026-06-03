@@ -6,6 +6,7 @@
 # (no implicit merge).
 /.rigor.yml
 /coverage/
+/coverage_report.txt
 /pkg/
 /tmp/
 /vendor/bundle/

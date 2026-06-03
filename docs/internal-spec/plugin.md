@@ -365,6 +365,44 @@ is part of the plugin's *code* (its `version`), which the
 `Cache::Descriptor::PluginEntry` key already captures; `config_defaults`
 participates in `Manifest#to_h`/`#==`/`#hash` but never in a cache key.
 
+### `Rigor::Plugin::TypeNodeResolver` (ADR-13)
+
+Base class for a plugin-supplied resolver of custom **named / generic
+type vocabulary** appearing in an RBS::Extended `%a{rigor:v1:…}` payload
+— the surface that lets a plugin teach Rigor a TypeScript-utility-style
+type function (`Pick[T, K]`, `Omit[T, K]`) the RBS grammar has no built-in
+for. Resolvers are registered through the manifest `type_node_resolvers:`
+slot (an `Array` of instances).
+
+A subclass overrides one method:
+
+```
+#resolve(node, scope) -> Rigor::Type::Base | nil
+```
+
+- `node` is a parser-emitted `Rigor::TypeNode::Identifier` or
+  `Rigor::TypeNode::Generic` — the named- or generic-type head the chain
+  is asking about.
+- `scope` is the companion `Rigor::TypeNode::NameScope` (carrying the
+  resolver chain, the class context, and the type-alias table) the
+  RBS::Extended directive parser threads down.
+- The method MUST return a `Rigor::Type::Base` when the node matches the
+  vocabulary this resolver covers, or **`nil` to fall through** to the
+  next resolver (and finally to the built-in / RBS fallback). The base
+  implementation returns `nil`, so an unimplemented subclass is a safe
+  no-op.
+
+The engine aggregates every loaded plugin's resolvers — in
+**plugin-registration order** (`Registry#type_node_resolvers` flat-maps
+across plugins) — into a single `Rigor::TypeNode::ResolverChain`, which
+consults them in order and returns the **first non-`nil`** answer. The
+chain is composed once per `Analysis::Runner.run`; when no plugin
+contributes a resolver the engine short-circuits (no `NameScope` is
+built) so the parser behaves bit-for-bit like the resolver-less default.
+Resolvers SHOULD be stateless and re-entrant — the chain MAY consult a
+resolver multiple times for the same node. The worked consumer is
+`rigor-typescript-utility-types` (`Pick` / `Omit`).
+
 ### `Rigor::Plugin::Services`
 
 Frozen DI container handed to every plugin's `#initialize`,

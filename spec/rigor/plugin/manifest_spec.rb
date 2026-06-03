@@ -4,26 +4,23 @@ require "spec_helper"
 
 RSpec.describe Rigor::Plugin::Manifest do
   describe "construction" do
-    it "stores the declared id, version, description, protocols, and config_schema" do
+    it "stores the declared id, version, description, and config_schema" do
       manifest = described_class.new(
         id: "rails",
         version: "0.1.0",
         description: "Rails support",
-        protocols: %i[dynamic_return],
         config_schema: { "eager_load" => :boolean }
       )
 
       expect(manifest.id).to eq("rails")
       expect(manifest.version).to eq("0.1.0")
       expect(manifest.description).to eq("Rails support")
-      expect(manifest.protocols).to eq(%i[dynamic_return])
       expect(manifest.config_schema).to eq({ "eager_load" => :boolean })
     end
 
     it "freezes the manifest after construction" do
       manifest = described_class.new(id: "rails", version: "0.1.0")
       expect(manifest).to be_frozen
-      expect(manifest.protocols).to be_frozen
       expect(manifest.config_schema).to be_frozen
     end
 

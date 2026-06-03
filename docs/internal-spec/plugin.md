@@ -45,7 +45,6 @@ class MyPlugin < Rigor::Plugin::Base
     id: "my-plugin",
     version: "0.1.0",
     description: "...",
-    protocols: [],
     config_schema: { "flag" => :boolean }
   )
 
@@ -353,7 +352,6 @@ Frozen value object describing one plugin's identity. Fields:
 | `id` | `String` matching `/\A[a-z][a-z0-9._-]*\z/` | Stable identifier; used as the `PluginEntry#id` and the `plugin.<id>.<rule>` diagnostic prefix. |
 | `version` | non-empty `String` | Plugin version; lands in `PluginEntry#version` for cache invalidation. |
 | `description` | `String?` | Human-readable summary. |
-| `protocols` | `Array<Symbol>` | Protocol names this plugin implements. |
 | `config_schema` | `{ String => Symbol \| { kind:, default: } }` | Accepted config keys mapped to a value **kind** (`:string`, `:boolean`, `:integer`, `:array`, `:hash`, `:any`), optionally carrying a declared **default** (ADR-40; see _Declared config defaults_ below). |
 
 The following **extension fields** were added across the `0.1.x`

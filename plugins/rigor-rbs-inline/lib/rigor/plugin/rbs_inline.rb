@@ -138,7 +138,6 @@ module Rigor
           id: base.id,
           version: base.version,
           description: base.description,
-          protocols: base.protocols,
           config_schema: base.config_schema,
           produces: base.produces,
           consumes: base.consumes,

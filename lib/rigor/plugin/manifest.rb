@@ -41,7 +41,7 @@ module Rigor
         end
       end
 
-      attr_reader :id, :version, :description, :protocols, :config_schema, :config_defaults, :produces, :consumes,
+      attr_reader :id, :version, :description, :config_schema, :config_defaults, :produces, :consumes,
                   :owns_receivers, :open_receivers, :type_node_resolvers, :block_as_methods,
                   :heredoc_templates, :nested_class_templates, :trait_registries, :external_files,
                   :hkt_registrations, :hkt_definitions, :signature_paths, :protocol_contracts,
@@ -49,7 +49,7 @@ module Rigor
 
       def initialize( # rubocop:disable Metrics/ParameterLists
         id:, version:,
-        description: nil, protocols: [], config_schema: {},
+        description: nil, config_schema: {},
         produces: [], consumes: [], owns_receivers: [], open_receivers: [], type_node_resolvers: [],
         block_as_methods: [], heredoc_templates: [], nested_class_templates: [],
         trait_registries: [], external_files: [],
@@ -58,7 +58,6 @@ module Rigor
       )
         validate_id!(id)
         validate_version!(version)
-        validate_protocols!(protocols)
         validate_config_schema!(config_schema)
         validate_produces!(produces)
         validate_owns_receivers!(owns_receivers)
@@ -76,7 +75,7 @@ module Rigor
         validate_source_rbs_synthesizer!(source_rbs_synthesizer)
         validate_additional_initializers!(additional_initializers)
 
-        assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
+        assign_fields(id, version, description, config_schema, produces, consumes, owns_receivers,
                       open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
                       external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
                       source_rbs_synthesizer)
@@ -88,14 +87,13 @@ module Rigor
       private
 
       # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
-      def assign_fields(id, version, description, protocols, config_schema, produces, consumes, owns_receivers,
+      def assign_fields(id, version, description, config_schema, produces, consumes, owns_receivers,
                         open_receivers, type_node_resolvers, block_as_methods, heredoc_templates, trait_registries,
                         external_files, hkt_registrations, hkt_definitions, signature_paths, protocol_contracts,
                         source_rbs_synthesizer)
         @id = id.dup.freeze
         @version = version.dup.freeze
         @description = description.nil? ? nil : description.to_s.dup.freeze
-        @protocols = protocols.map(&:to_sym).freeze
         @config_schema = config_schema.to_h { |k, v| [k.to_s.dup.freeze, schema_kind(v)] }.freeze
         @config_defaults = extract_config_defaults(config_schema)
         @produces = produces.map(&:to_sym).freeze
@@ -161,7 +159,6 @@ module Rigor
           "id" => id,
           "version" => version,
           "description" => description,
-          "protocols" => protocols.map(&:to_s),
           "config_schema" => config_schema.to_h { |k, v| [k, v.to_s] },
           "config_defaults" => config_defaults,
           "produces" => produces.map(&:to_s),
@@ -205,12 +202,6 @@ module Rigor
         return if version.is_a?(String) && !version.empty?
 
         raise ArgumentError, "plugin manifest version must be a non-empty String, got #{version.inspect}"
-      end
-
-      def validate_protocols!(protocols)
-        return if protocols.is_a?(Array) && protocols.all? { |p| p.is_a?(Symbol) || p.is_a?(String) }
-
-        raise ArgumentError, "plugin manifest protocols must be an Array of Symbol/String, got #{protocols.inspect}"
       end
 
       def validate_config_schema!(schema)

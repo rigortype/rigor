@@ -84,17 +84,21 @@ caller is unchanged. It is the dual of ADR-26 `open_receivers:`
   seeded with `Rigor::Plugin::Base`. Opening it to a third-party plugin's own
   `Base`-like class via a manifest declaration (the ADR-37 / ADR-40 declarative
   route) is deferred until a consumer needs it.
-- **Terminology: `protocol`.** Rigor overloads the word. Its *structural-typing*
-  concept (the Python `typing.Protocol` / RBS `interface` analog) is correctly
-  named **interface** — no collision there. But "protocol" also names: (B) the
-  inert `protocols:` manifest field (declared, **not consumed** anywhere in
-  `lib/` — vestigial ADR-2 metadata), (C) ADR-28 `protocol_contracts:`
-  (path-scoped behavioural method contracts — a real, consumed feature), and
-  (D) ADR-37's prose "extension protocols" (the narrow plugin hooks). Deciding
-  the axis ("interface" = structural type; "protocol contract" = behavioural
-  method-requirement contract) and whether to rename/retire the collision-prone
-  `protocols:` field is the next step. User-facing documentation of structural
-  typing + protocol contracts follows that decision.
+- **Terminology: `protocol` (axis decided; partly actioned).** Rigor overloaded
+  the word across four things: (A) RBS `interface` — the structural-typing
+  concept (Python `typing.Protocol` analog), correctly named **interface**, no
+  collision; (B) the inert `protocols:` manifest field (declared, **not
+  consumed** anywhere — vestigial ADR-2 metadata); (C) ADR-28
+  `protocol_contracts:` (path-scoped behavioural method contracts — a real,
+  consumed feature); (D) ADR-37's prose "extension protocols" (the narrow plugin
+  hooks). **Decision:** the axis is **interface = structural type**;
+  **protocol contract = behavioural method-requirement contract** (the
+  Smalltalk/Swift sense, kept). **(B) is retired** (removed from the `Manifest`
+  surface — it carried the bare, collision-prone "protocol" word for no
+  behaviour). **(C) is kept** under its accurate name; (A)/(D) unchanged.
+  Remaining: a **user-facing document** that draws the interface-vs-protocol
+  -contract distinction sharply (the next step), so a Ruby/Python reader does
+  not conflate the two.
 
 ## Pointers
 

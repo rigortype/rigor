@@ -208,7 +208,6 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     owns_receivers()
     produces()
     protocol_contracts()
-    protocols()
     signature_paths()
     source_rbs_synthesizer()
     to_h()

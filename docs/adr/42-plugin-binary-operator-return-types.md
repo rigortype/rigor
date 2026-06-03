@@ -1,19 +1,22 @@
 # ADR-42 — Plugin-contributed binary-operator return types (coerce-direction)
 
-Status: **Proposed, 2026-06-03.** Records the design space for letting a
-plugin contribute the result type of a Ruby binary operation when the
-plugin-owned type is the **right-hand (coerced) operand** — the one case a
-PHPStan-parity audit of Rigor's type algebra found genuinely unsupported.
-Nothing here is implemented yet; this ADR exists to capture the decision and
-its rejected alternatives so the work is demand-gated rather than
-speculative.
+Status: **Proposed (low priority, demand-gated), 2026-06-03.** Records the
+design space for letting a plugin contribute the result type of a Ruby binary
+operation when the plugin-owned type is the **right-hand (coerced) operand** —
+the one case a PHPStan-parity audit of Rigor's type algebra found genuinely
+unsupported. **A 2026-06-03 demand re-evaluation lowered this ADR's priority**
+(see "Demand re-evaluation" below): the gap is *not* a false-positive — the
+current behaviour is harmless fail-soft — so it buys precision, not safety,
+and the more idiomatic fix is the ADR-20 lightweight-HKT / RBS-type-function
+route that `examples/rigor-units` already points to. Nothing here is
+implemented; this ADR captures the decision and its rejected alternatives so
+the work stays demand-gated rather than speculative, and **prefers the HKT
+route over a new operator hook unless a real consumer proves otherwise**.
 
 Grounding:
 [`docs/notes/20260603-phpstan-type-algebra-comparison.md`](../notes/20260603-phpstan-type-algebra-comparison.md)
-(the full PHPStan ↔ Rigor type-algebra comparison and the code spike that
-narrowed the gap to the coerce direction). Related:
-[`docs/notes/20260519-oss-library-survey.md`](../notes/20260519-oss-library-survey.md)
-(the BigDecimal-coerce false-positive that motivates the demand).
+(the full PHPStan ↔ Rigor type-algebra comparison, the code spike that
+narrowed the gap to the coerce direction, and the §3/§5 demand re-evaluation).
 
 ## Context
 
@@ -74,23 +77,62 @@ PHPStan does not have this asymmetry: `isOperatorSupported($left, $right)` is
 carries the interesting type. That bidirectionality is the structural
 capability Rigor lacks.
 
-Demand is real, not hypothetical: the BigDecimal-coerce false positive
-already surfaced in the OSS survey, and the canonical motivating libraries
-(`BigDecimal`, units/`Money`, vectors) all rely on `coerce` for
-`builtin <op> custom`.
+### Demand re-evaluation (2026-06-03)
+
+An evidence pass after the initial draft corrected two over-statements that
+had inflated this gap's priority:
+
+- **The current behaviour is harmless, not a false positive.** When the
+  receiver is a built-in and the argument is a plugin-owned `Nominal`,
+  dispatch falls through to `Dynamic[top]` with **no diagnostic** (fail-soft).
+  Downstream calls on that `Dynamic` also fail soft. So the gap costs
+  *precision* (and completeness of a plugin's *own* checks — a false
+  *negative* in e.g. dimensional-safety), never a false positive on working
+  code. Against Rigor's top-tier "the program works" value, that is a weak
+  motivator.
+- **The BigDecimal-coerce survey item is not evidence for this ADR.** That
+  false positive (`docs/notes/20260519-oss-library-survey.md`) was an
+  *overload-ordering* problem — stdlib `bigdecimal` reopening `Integer#+` at
+  the front of the overload list — and it was **already fixed** by the
+  ReceiverAffinity pre-sort (`acc9882`,
+  [`receiver_affinity.rb`](../../lib/rigor/inference/method_dispatcher/receiver_affinity.rb)).
+  It is unrelated to plugin-contributed coerce-direction types.
+- **The idiomatic fix may be ADR-20, not a new hook.**
+  [`examples/rigor-units/README.md`](../../examples/rigor-units/README.md)
+  itself documents that the declarative answer to operator typing is a
+  lightweight-HKT / RBS type function (`def *: [T] (T) -> ...`), not a runtime
+  dispatch table. A new operator extension point would overlap with that
+  direction and risk a competing mechanism.
+
+Net: the residual demand is the **minority `scalar <op> custom` pattern**
+(`2 * distance`, `0.5 * mass`), where a precise type would let a units/Money
+plugin keep checking dimensional safety. Real but narrow, precision-only, and
+plausibly subsumed by ADR-20. The canonical motivating libraries
+(`BigDecimal`, units/`Money`, vectors) rely on `coerce` for
+`builtin <op> custom`, so the pattern exists — it is the *value* that is
+modest, not the pattern's existence.
 
 ## Decision
 
-**Proposed.** Add an engine dispatch path so that, for a binary-operator
-`CallNode` whose **receiver type is a core built-in** but whose **argument
-type is a plugin-owned `Nominal`**, the owning plugin is consulted for the
-result type before RBS widening. The plugin-facing shape is one of the
-working decisions below; **WD-A is the leading candidate**. Implementation is
-gated on at least one real bundled consumer (BigDecimal or `examples/`
-units) landing in the same change set, per the false-positive-discipline and
-demand-driven norms.
+**Proposed, low priority.** If and when the coerce-direction gap is closed,
+add an engine dispatch path so that, for a binary-operator `CallNode` whose
+**receiver type is a core built-in** but whose **argument type is a
+plugin-owned `Nominal`**, the owning plugin is consulted for the result type
+before RBS widening. The plugin-facing shape is one of the working decisions
+below. **Implementation is gated on (a) at least one real bundled consumer
+(BigDecimal or `examples/` units) and (b) a finding that the ADR-20 HKT / RBS
+route below cannot serve that consumer** — per the false-positive-discipline
+and demand-driven norms. Given the re-evaluation, the default expectation is
+that this ADR stays Proposed indefinitely and the HKT route is tried first.
 
 ### Working decisions (shape of the hook)
+
+- **WD-0 (preferred default) — solve it via ADR-20 lightweight HKT + RBS type
+  functions, not a new hook.** Let the consuming library express coerce-aware
+  operator results as RBS type functions (the `examples/rigor-units` README's
+  own stated direction), so `builtin <op> custom` is resolved by the existing
+  RBS/HKT tiers without any new plugin extension point. Only fall back to
+  WD-A/WD-B if a concrete consumer cannot be expressed this way.
 
 - **WD-A (leading) — bidirectional narrow extension `operator_return`.** A
   new ADR-37-style segregated protocol:
@@ -132,8 +174,19 @@ demand-driven norms.
   `dynamic_return`; needs only docs (`docs/manual/`, an `examples/rigor-units`
   operator case) and an optional thin sugar. CHANGELOG-level, no ADR.
 - **G2/G3/G5 (plugin type-algebra facade — `to_*` coercion, `generalize`,
-  offset facade):** demand-driven facade additions in the ADR-37 lineage; a
-  separate ADR if/when a real plugin needs them.
+  offset facade): evaluated 2026-06-03, declined for now** (evidence in the
+  note's §3). None has a consumer:
+  - **G2 (`to_*` coercion)** — *declined.* Ruby casts are method calls
+    (`x.to_i`, `Integer(x)`) already resolved by dispatch; truthiness is
+    handled by engine narrowing extensible via `type_specifier`. No type→type
+    coercion facade is wanted.
+  - **G3 (`generalize`)** — *declined as a plugin facade.* Intentional
+    precision loss belongs to the ADR-41 inference-budget machinery, not a
+    plugin surface. Folded there if ever.
+  - **G5 (offset facade)** — *deferred, conditional.* The cleanest future
+    extension (plugin-defined containers computing element-access types), but
+    zero current consumers — `ShapeDispatch` is a closed Tuple/HashShape tier
+    by design. Revisit only when a plugin ships a custom container type.
 - **G4 (null convenience combinators — `remove_null` / `add_null`):** pure DX
   on `Type::Combinator`, CHANGELOG-level.
 

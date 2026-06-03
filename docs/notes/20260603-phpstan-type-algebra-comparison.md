@@ -145,9 +145,13 @@ end
 
 PHPStan の `toNumber`/`toString`/`toBoolean`/`toArray` は**型→型の純関数**としてプラグインから呼べる。Rigor では同等のロジックが `ConstantFolding` の内部に閉じ、プラグインが「この型を boolish/integer に coerce したら何になるか」を型代数として問えない。`boolish` の扱い（[special-types.md](../type-specification/special-types.md)）はあるが、汎用 coercion facade ではない。
 
+**評価 2026-06-03 — 却下（需要なし）。** Ruby のキャストは `x.to_i` / `Integer(x)` 等のメソッド呼び出しで、既に dispatch 経由で精密化される。真偽値の扱いは `narrow_truthy`/`narrow_falsey`（[`narrowing.rb:67`](../../lib/rigor/inference/narrowing.rb)、エンジン内蔵）＋ プラグイン拡張可能な `type_specifier` が等価機構。型→型の coercion facade を欲する消費者は examples/plugins に皆無。
+
 ### G3 — `generalize` の不在
 
-PHPStan は精度を意図的に落とす `generalize` を持つ。Rigor は `normalize`（冪等・情報保存）＋ fold 出力上限による暗黙 widen のみで、プラグインが「複雑になりすぎたので定数情報を捨てて `Integer` に上げる」を明示要求できない。ADR-41（inference budget）の widen-and-diagnose 方針と隣接するため、**budget 側に寄せるか型代数側に出すかは設計判断**。
+PHPStan は精度を意図的に落とす `generalize` を持つ。Rigor は `normalize`（冪等・情報保存）＋ fold 出力上限による暗黙 widen のみで、プラグインが「複雑になりすぎたので定数情報を捨てて `Integer` に上げる」を明示要求できない。
+
+**評価 2026-06-03 — プラグイン facade としては却下。** 意図的精度低下は ADR-41（inference budget）の領分であり、プラグイン公開面ではない。union/出力上限による暗黙 widen で実害なく回っており、プラグインから明示 generalize を要求する消費者はゼロ。必要が生じれば ADR-41 に吸収する。
 
 ### G4 — null/truthy 便宜メソッドの不在
 
@@ -156,6 +160,8 @@ PHPStan は精度を意図的に落とす `generalize` を持つ。Rigor は `no
 ### G5 — offset アクセス facade の限定
 
 ShapeDispatch はエンジン内部で Tuple/HashShape の offset を精密に解くが、プラグインに公開された型代数 API は `indexed_access` 型関数程度。PHPStan の `getOffsetValueType` / `setOffsetValueType` のような**型レベル offset 操作の純関数群**は plugin facade に揃っていない。
+
+**評価 2026-06-03 — 保留（条件付き）。** `ShapeDispatch` は Tuple/HashShape 限定の closed tier（[`shape_dispatch.rb`](../../lib/rigor/inference/method_dispatcher/shape_dispatch.rb)）で、独自コンテナ型を持つプラグインは現状ゼロ。将来カスタムコレクション型を定義するプラグインが現れたときの最有力拡張候補ではあるが、消費者が出るまでは着手しない。
 
 ### 同等で問題ない領域（移植不要）
 
@@ -181,9 +187,11 @@ PHPStan は `isSuperTypeOf` を `TypeCombinator` 経由で網羅テストする�
 スパイク（§3 G1）で前提が一つ崩れた：**自型／同型レシーバの二項演算は新フックなしで既に対応できる**。これにより ADR の必要範囲は当初想定より小さい。
 
 - **G1a/G1b（ドキュメント + エルゴノミクス）は ADR 不要**。`dynamic_return` の演算子捕捉を examples（`rigor-units`）と manual に明記し、回帰スペックで固定すれば足りる。薄い宣言糖衣 `operator_return` は欲しければ後続の小改善（ADR 不要、CHANGELOG レベル）。
-- **G1c（coerce 方向）だけが ADR 級**。`1 + money` のように左辺が組み込み型のケースでプラグインが介入する経路は現契約に存在せず、エンジン dispatch への新経路（右辺がプラグイン所有型のとき左辺組み込み算術を委譲）か `coerce` 対応の設計判断を要する。PHPStan の双方向 `isOperatorSupported(left, right)` との構造差はここに集約される。**rejected/deferred 代替を記録する価値があるのはこの一点**。ただし実需（BigDecimal-coerce 系）は既に survey で出ているので、ADR を起こす意義はある。
-- **G2/G3/G5** は型代数 facade の拡張で、ADR-37 の延長として**まとめて 1 つの「plugin type-algebra facade 拡充」ADR**にできる。ただし需要ドリブン（実プラグインが詰まってから）でよい。ADR-41 の budget 方針と G3 の調停は要メモ。
+- **G1c（coerce 方向）— ADR-42 として起票済みだが、2026-06-03 の需要再評価で低優先に格下げ**。当初「ADR 級・実需あり（BigDecimal-coerce survey）」としたが、これは誤りだった：(1) 現状 `1 + custom` / `2 * distance` は**偽陽性を出さず Dynamic に fail-soft**（無害）で、欠落が効くのは精度とプラグイン自身のチェック網羅性（false-negative）のみ。Rigor 最上位価値「動くコードを脅かさない」には抵触しない。(2) survey の BigDecimal-coerce FP は overload 順序問題で `acc9882`（ReceiverAffinity）により**解決済み**、本件と無関係。(3) `examples/rigor-units` 自身が「真の解は ADR-20 lightweight HKT + RBS 型関数」と明記しており、新フックは ADR-20 と競合しうる。→ **ADR-42 は Proposed のまま据え置き、HKT 経路を優先**。実消費者が HKT で表現できないと判明したときのみ新フックを検討。
+- **G2/G3/G5 — 2026-06-03 評価で却下／保留**（§3 各項参照）。G2（`to_*`）= 需要なし・narrowing が等価機構で却下。G3（`generalize`）= プラグイン facade ではなく ADR-41 budget の領分、却下。G5（offset facade）= カスタムコンテナ消費者が出るまで保留。いずれも ADR 不要。
 - **G4** は ADR 不要。`Type::Combinator` に便宜メソッドを足すだけの DX 改善で、CHANGELOG レベル。
+
+**総括（再評価後）**：PHPStan 同水準を目指して**今すぐ実装する価値のある未実装はゼロ**。自型/左辺の演算子は既存 `dynamic_return` で対応済み、coerce 方向（G1c）は無害かつ HKT で代替可能なため demand-gated、`to_*`/`generalize`/offset facade は需要なし。残る価値ある作業は §4 のテスト整備と G1a/G1b のドキュメント化のみ（いずれも ADR 不要）。
 
 **推奨**：
 

@@ -55,7 +55,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-39 | [Plugins may invoke their target library's safe methods directly](39-plugin-target-library-invocation.md) | Accepted (Plugin::Inflector + 3 consumers migrated; slice 3 deferred) |
 | ADR-40 | [`config_schema` declared defaults (`{kind:, default:}`)](40-config-schema-defaults.md) | Accepted (mechanism + 13 plugins migrated off the `DEFAULT_*` idiom) |
 | ADR-41 | [Inference budget design (wiring, on-hit policy, measurement-gated defaults)](41-inference-budget-design.md) | Proposed (spec table unwired; Layer 1 doc hygiene + Layer 2 measurement-gated wiring queued) |
-| ADR-42 | [Plugin-contributed binary-operator return types (coerce-direction)](42-plugin-binary-operator-return-types.md) | Proposed (self/left-operand case already works via `dynamic_return`; only the coerce direction `builtin <op> custom` needs an engine path — demand-gated) |
+| ADR-42 | [Plugin-contributed binary-operator return types (coerce-direction)](42-plugin-binary-operator-return-types.md) | Proposed, low priority (self/left-operand case already works via `dynamic_return`; coerce direction is harmless fail-soft, not a false positive — precision-only, prefer the ADR-20 HKT route; demand-gated) |
 
 ## Adding a New ADR
 

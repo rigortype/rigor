@@ -195,6 +195,54 @@ RSpec.describe Rigor::MCP::Server do
   end
 
   # ------------------------------------------------------------------ #
+  # tools/call — rigor_triage                                             #
+  # ------------------------------------------------------------------ #
+
+  describe "rigor_triage" do
+    it "returns a JSON triage report for a known path" do
+      resp = tool_call("rigor_triage", { "paths" => ["lib/rigor/version.rb"] })
+
+      expect(resp["error"]).to be_nil
+      result = resp["result"]
+      expect(result["isError"]).to be(false)
+      parsed = JSON.parse(result.dig("content", 0, "text"))
+      expect(parsed).to have_key("distribution")
+    end
+
+    it "threads --top= into argv when a top argument is provided" do
+      argv = server.send(:build_argv, "rigor_triage", { "top" => 5 })
+      expect(argv).to include("--top=5")
+    end
+  end
+
+  # ------------------------------------------------------------------ #
+  # tools/call — rigor_coverage                                           #
+  # ------------------------------------------------------------------ #
+
+  describe "rigor_coverage" do
+    it "returns a JSON precision-coverage report for a known path" do
+      resp = tool_call("rigor_coverage", { "paths" => ["lib/rigor/version.rb"] })
+
+      expect(resp["error"]).to be_nil
+      result = resp["result"]
+      expect(result["isError"]).to be(false)
+      parsed = JSON.parse(result.dig("content", 0, "text"))
+      expect(parsed).to have_key("by_file")
+    end
+  end
+
+  # ------------------------------------------------------------------ #
+  # tools/call — rigor_sig_gen                                            #
+  # ------------------------------------------------------------------ #
+
+  describe "rigor_sig_gen" do
+    it "threads --params= into argv when a params argument is provided" do
+      argv = server.send(:build_argv, "rigor_sig_gen", { "params" => "observed" })
+      expect(argv).to include("--params=observed")
+    end
+  end
+
+  # ------------------------------------------------------------------ #
   # Session-level --config default propagation                            #
   # ------------------------------------------------------------------ #
 

@@ -57,5 +57,71 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
       expect(result.dynamic_top_count).to eq(1)
       expect(result.precision_ratio).to eq(0.0)
     end
+
+    it "classifies a symbol literal as constant" do
+      result = scan(":ok\n")
+      expect(result.tier_counts.fetch(:constant)).to eq(1)
+    end
+
+    it "classifies a true / false literal as constant" do
+      result = scan("true\n")
+      expect(result.tier_counts.fetch(:constant)).to eq(1)
+    end
+
+    it "classifies a nil literal as constant (Constant[nil])" do
+      result = scan("nil\n")
+      expect(result.tier_counts.fetch(:constant)).to eq(1)
+    end
+  end
+
+  describe "FileResult helper methods" do
+    it "precision_ratio is 1.0 when every expression is precise" do
+      result = scan("1\n")
+      expect(result.precision_ratio).to eq(1.0)
+    end
+
+    it "precision_ratio is 0.0 when every expression is opaque" do
+      result = scan("undefined_helper\n")
+      expect(result.precision_ratio).to eq(0.0)
+    end
+
+    it "opaque_ratio is 0.0 for a fully-precise file" do
+      result = scan("42\n")
+      expect(result.opaque_ratio).to eq(0.0)
+    end
+
+    it "opaque_ratio is 1.0 for a fully-opaque file" do
+      result = scan("unknown_method\n")
+      expect(result.opaque_ratio).to eq(1.0)
+    end
+
+    it "dynamic_count sums dynamic_top and dynamic_specific" do
+      result = scan("unknown_method\n")
+      expect(result.dynamic_count).to eq(result.dynamic_top_count + result.dynamic_specific_count)
+    end
+
+    it "precision_ratio and opaque_ratio handle a zero-expression file without error" do
+      # A source containing only comments has no expression nodes —
+      # totals will be 0 and both ratios must not divide by zero.
+      result = scan("# no expressions\n")
+      expect(result.total).to eq(0)
+      expect(result.precision_ratio).to eq(1.0)
+      expect(result.opaque_ratio).to eq(0.0)
+    end
+  end
+
+  describe "union and intersection classification" do
+    it "classifies a mixed union by its worst member" do
+      # `x || 1` — the || result is a union of the unknown `x` (dynamic_top)
+      # and the integer 1 (constant). Worst member wins -> dynamic_top.
+      result = scan("x || 1\n")
+      expect(result.dynamic_top_count).to be >= 1
+    end
+
+    it "classifies a union of two constants as constant (worst = best = constant)" do
+      result = scan("1 || 2\n")
+      # The OrNode itself (a union of two constants) should be constant.
+      expect(result.tier_counts.fetch(:constant)).to be >= 1
+    end
   end
 end

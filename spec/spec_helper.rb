@@ -1,5 +1,34 @@
 # frozen_string_literal: true
 
+if ENV["COVERAGE"]
+  require "coverage"
+  Coverage.start(lines: true)
+  at_exit do
+    result = Coverage.result
+    lib_root = File.expand_path("../lib", __dir__)
+    report = result
+             .select { |path, _| path.start_with?(lib_root) }
+             .map do |path, data|
+               lines = data[:lines]
+               total = lines.compact.size
+               hit   = lines.count { |n| n&.> 0 }
+               [path.delete_prefix("#{lib_root}/"), total, hit]
+             end
+             .sort_by { |_, total, hit| hit.to_f / [total, 1].max }
+
+    out = File.expand_path("../coverage_report.txt", __dir__)
+    File.open(out, "w") do |f|
+      f.puts "# Coverage report — #{Time.now.strftime('%Y-%m-%d %H:%M')}"
+      f.puts "# file | total_lines | covered | pct"
+      report.each do |path, total, hit|
+        pct = total.zero? ? 0 : (hit * 100.0 / total).round(1)
+        f.printf("%-80s  %4d  %4d  %5.1f%%\n", path, total, hit, pct)
+      end
+    end
+    warn "\nCoverage report written to coverage_report.txt"
+  end
+end
+
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 
 # Silence MRI's once-per-process "Ractor API is experimental" warning

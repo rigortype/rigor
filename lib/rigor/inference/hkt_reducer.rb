@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "hkt_body"
+require_relative "budget_trace"
 
 module Rigor
   module Inference
@@ -71,6 +72,7 @@ module Rigor
             walk(definition.body_tree, bindings: bindings_for(definition, app.args), state: state) || app.bound
           end
         rescue FuelExhausted
+          BudgetTrace.hit(BudgetTrace::HKT_FUEL_EXHAUSTED)
           app.bound
         end
       end

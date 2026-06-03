@@ -5,6 +5,7 @@ require "prism"
 require_relative "../type"
 require_relative "../ast"
 require_relative "block_parameter_binder"
+require_relative "budget_trace"
 require_relative "fallback"
 require_relative "indexed_narrowing"
 require_relative "macro_block_self_type"
@@ -1358,7 +1359,10 @@ module Rigor
 
           seen[current] = true
           visited += 1
-          return nil if visited > ANCESTOR_WALK_LIMIT
+          if visited > ANCESTOR_WALK_LIMIT
+            BudgetTrace.hit(BudgetTrace::ANCESTOR_WALK_LIMIT)
+            return nil
+          end
 
           found = scope.user_def_for(current, method_name)
           return found if found
@@ -1432,7 +1436,10 @@ module Rigor
         # carrier for top-level / DSL-block defs) printable.
         signature = [receiver.describe(:short), def_node.name]
         stack = (Thread.current[INFERENCE_GUARD_KEY] ||= [])
-        return Type::Combinator.untyped if stack.include?(signature)
+        if stack.include?(signature)
+          BudgetTrace.hit(BudgetTrace::RECURSION_GUARD)
+          return Type::Combinator.untyped
+        end
 
         stack.push(signature)
         begin

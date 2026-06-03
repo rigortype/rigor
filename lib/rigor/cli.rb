@@ -100,6 +100,7 @@ module Rigor
 
       write_result(result, options.fetch(:format))
       write_run_stats(result.stats) if result.stats
+      write_budget_trace
       write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
 
       exit_code = result.success? ? 0 : 1
@@ -400,6 +401,23 @@ module Rigor
     def write_run_stats(stats)
       @err.puts("")
       stats.format(@err)
+    end
+
+    # Dumps the opt-in inference-cutoff counters (RIGOR_BUDGET_TRACE).
+    # These are the hard-coded "budget" guards that silently degrade
+    # to `Dynamic[top]` / a fallback bound — counting them shows where
+    # inference actually stopped. Process-global counters: meaningful
+    # only on a single-process run (`--workers 0`), since they do not
+    # cross fork boundaries.
+    def write_budget_trace
+      return unless Inference::BudgetTrace.enabled?
+
+      counts = Inference::BudgetTrace.snapshot
+      @err.puts("")
+      @err.puts("Inference cutoffs (RIGOR_BUDGET_TRACE; --workers 0 for an exact count)")
+      @err.puts("  recursion-guard hits:      #{counts[Inference::BudgetTrace::RECURSION_GUARD]}")
+      @err.puts("  ancestor-walk-limit hits:  #{counts[Inference::BudgetTrace::ANCESTOR_WALK_LIMIT]}")
+      @err.puts("  hkt-fuel-exhausted hits:   #{counts[Inference::BudgetTrace::HKT_FUEL_EXHAUSTED]}")
     end
 
     def write_cache_stats(cache_root, runtime_store)

@@ -153,6 +153,68 @@ Reading:
   "Mastodon opts in its own activesupport" run needs Mastodon's bundle;
   the walk measured here is bundle-, not cwd-, determined.
 
+## Spec defaults vs. wired reality (and a documentation bug)
+
+The spec's budget table, the engine, and the user-facing manual disagree
+on three points:
+
+| budget | spec default | wired value | note |
+|---|---|---|---|
+| `recursion_depth` | 5 | **effective 1** (re-entry guard) | the guard returns `Dynamic[top]` on *any* `(receiver, method)` re-entry; it never unrolls 5 levels |
+| `ancestor_walk` | _(absent from table)_ | **100** | a real, load-bearing guard the spec table does not list |
+| `hkt_fuel` | _(absent from table)_ | **64** (ADR-20) | likewise unlisted |
+| `budget_per_gem` | — | **5000** (method-def count) | **manual bug** ↓ |
+| `union_size`, `structural_growth`, `call_graph_width`, `overload_candidates`, `operator_ambiguity`, `interface_candidates`, `hash_erasure_*` | various | **unwired** | normative-for-v1 only |
+
+**Documentation bug:** [`docs/manual/03-configuration.md`](../manual/03-configuration.md)
+documents `dependencies.budget_per_gem` as *"Per-gem inference **time**
+budget, in **ms**"*, default **`1000`**. Both are wrong: the implemented
+budget is a **method-definition count** (`Walker` stops when
+`catalog.size` reaches it), default **5000**
+(`Dependencies::DEFAULT_BUDGET_PER_GEM`). There is also no user-facing
+documentation of the `budgets:` table at all. Fix queued (Layer 1 below).
+
+## Re-examination of the defaults — two layers
+
+"Reconsider the default thresholds" splits cleanly, because the survey
+showed the numbers that *bind in practice* are not the numbers tuned for
+the large-app cost (that cost is unbudgeted).
+
+**Layer 1 — cheap doc/spec hygiene (high confidence, no new measurement
+needed):**
+
+- Fix the `budget_per_gem` manual bug (unit = method-def count, default 5000).
+- Reconcile `recursion_depth`: the spec's "5" implies unrolling; the
+  engine enforces depth-1 re-entry detection as a *termination guarantee*
+  (it was added to stop a mutual-recursion `SystemStackError`). Separate
+  the two meanings — a hard termination floor (≥1) vs. an optional
+  precision-unroll depth (default 1, i.e. off) — and align the spec
+  default to the implemented reality.
+- Add `ancestor_walk` (100) and `hkt_fuel` (64) to the documented table;
+  both are real guards. Neither fired anywhere in the corpus, so the
+  values are generous and can stay.
+- Keep `operator_ambiguity` low (4): the tarai motivator wants Rigor to
+  ask for an annotation *early* rather than enumerate receiver types —
+  FP-safe.
+
+**Layer 2 — the consequential, measurement-gated defaults:**
+
+- `union_size` (spec 24) and `structural_growth` (spec 16) are the
+  categories the Redmine 1.5 GB profile implicates, and they are unwired.
+  Picking their defaults by reasoning is unsafe: set them too low and a
+  genuine `A | B | … | 30 types` union collapses to `top`, trading the
+  memory win for lost checking or a false positive — a direct violation
+  of the false-positive-discipline value. **Decision: instrument actual
+  union / object-shape sizes on Redmine + Mastodon first** (the same
+  `BudgetTrace`-style approach used for the guards — record the
+  *distribution* of join-arity and shape-member growth), then choose a
+  default from the observed tail, not from a guess. The spec's 24 / 16
+  are placeholders until that measurement exists.
+- The remaining unwired rows (`call_graph_width` 16, `overload_candidates`
+  8, `interface_candidates` 8, `hash_erasure_*`) never bound any corpus
+  project; leave their spec values and defer wiring until a project
+  demonstrates the cost.
+
 ## Implications for wiring priority
 
 1. **`union_size` + `structural_growth` first.** Redmine's 1.5 GB /
@@ -178,3 +240,18 @@ Reading:
   counters are process-global and do not cross fork boundaries).
 - Paths: `app lib` for the Rails apps, `lib` otherwise (matches the
   survey-init convention).
+
+## Follow-up sequence
+
+This note is step 1. Before wiring anything (Layers 1–2 above):
+
+2. A comparative note — how PHPStan, TypeScript, mypy, Steep, Sorbet,
+   and TypeProf bound / terminate inference (signature-boundary vs
+   whole-program-with-widening; the specific recursion / union-size /
+   instantiation limits each uses).
+3. A new ADR proposing Rigor's ideal budget design, synthesising (2)
+   with this survey: which categories to wire, the boundary-contract
+   escape hatch, and the measurement-driven default-selection rule.
+
+Tracked in [`docs/CURRENT_WORK.md`](../CURRENT_WORK.md) § "Inference
+budgets — spec table is unwired".

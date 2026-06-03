@@ -106,6 +106,41 @@ Engine-internal items the next implementer benefits from seeing directly. The fu
 
 Remaining: a `Plugin` hook letting plugins contribute their own recognisers (deferred). (`receiver_type` / `method_name` structured fields on `Analysis::Diagnostic` shipped in v0.1.8; the SKILL integration shipped with the v0.1.9 trio.)
 
+### Inference budgets — spec table is unwired; two-layer follow-up
+
+Survey + new `RIGOR_BUDGET_TRACE` instrumentation landed 2026-06-03
+(commit `42df2481`; note [`docs/notes/20260603-inference-budget-reality-survey.md`](notes/20260603-inference-budget-reality-survey.md)).
+Finding: the spec's configurable `budgets:` table
+([`docs/type-specification/inference-budgets.md`](type-specification/inference-budgets.md))
+is normative-for-v1 but **not wired** — the only operative cutoffs are
+three hard-coded silent guards (recursion re-entry ≈ depth 1, ancestor
+walk 100, HKT fuel 64) plus ADR-10 `budget_per_gem`. The guards fire on
+small recursive-descent parsers and are *orthogonal* to the real cost
+cliff (Redmine: 331 files / 172 s / 1.5 GB, only 71 recursion-guard
+hits). Two layers of follow-up:
+
+- **Layer 1 — doc/spec hygiene (cheap, high-confidence).** Fix the
+  `docs/manual/03-configuration.md` `budget_per_gem` bug (it says "time
+  budget in ms, default 1000"; really a method-def **count**, default
+  **5000**). Reconcile `recursion_depth` (spec 5 vs wired depth-1
+  termination guard — split "termination floor" from "precision-unroll
+  depth"). Add `ancestor_walk` (100) + `hkt_fuel` (64) to the documented
+  table. Author the missing user-facing explanation of inference budgets
+  (placement TBD — handbook appendix vs manual section).
+- **Layer 2 — wire the load-bearing budgets (consequential,
+  measurement-gated).** `union_size` + `structural_growth` are the
+  categories the Redmine memory profile implicates and are unwired.
+  **Measure first** (instrument join-arity + shape-member-growth
+  distributions on Redmine/Mastodon, `BudgetTrace`-style) before picking
+  defaults — guessing risks collapsing genuine unions to `top` (FP-discipline
+  violation). Then wire + emit `static.*` incomplete-inference diagnostics
+  so users see where a `Dynamic[top]` originated.
+
+Planned sequencing before implementing either layer: (1) this survey
+note + record (done); (2) comparative note on how PHPStan / TypeScript /
+mypy / Steep / Sorbet / TypeProf bound inference; (3) a new ADR on the
+ideal budget design; *then* Layer 1 + 2. Items (2)–(3) in flight.
+
 ### Flow-folding — all G1 / G2 cases now closed (v0.1.12)
 
 **Status: closed.** v0.1.12 sealed the three remaining G2 cases:

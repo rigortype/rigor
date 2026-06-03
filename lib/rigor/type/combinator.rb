@@ -14,6 +14,7 @@ require_relative "difference"
 require_relative "refined"
 require_relative "intersection"
 require_relative "bound_method"
+require_relative "../inference/budget_trace"
 
 module Rigor
   module Type
@@ -360,7 +361,11 @@ module Rigor
       # Normalized union. Flattens nested Unions, deduplicates structurally
       # equal members, drops Bot, and collapses 0/1-member results.
       def union(*types)
-        collapse_union(normalized_union_members(types))
+        result = collapse_union(normalized_union_members(types))
+        if Inference::BudgetTrace.enabled? && result.is_a?(Union)
+          Inference::BudgetTrace.observe(Inference::BudgetTrace::UNION_ARITY, result.members.size)
+        end
+        result
       end
 
       # `key_of[T]` type function — projects the type-level

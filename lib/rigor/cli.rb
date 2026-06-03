@@ -418,6 +418,21 @@ module Rigor
       @err.puts("  recursion-guard hits:      #{counts[Inference::BudgetTrace::RECURSION_GUARD]}")
       @err.puts("  ancestor-walk-limit hits:  #{counts[Inference::BudgetTrace::ANCESTOR_WALK_LIMIT]}")
       @err.puts("  hkt-fuel-exhausted hits:   #{counts[Inference::BudgetTrace::HKT_FUEL_EXHAUSTED]}")
+      write_budget_distributions
+    end
+
+    # Dumps the read-only size distributions (ADR-41 Slice 2a). These
+    # observe how large unions actually get, with no cap enforced — the
+    # data the `union_size` budget default should be chosen from. The
+    # `over` thresholds bracket the TypeProf prior (10) and Rigor's spec
+    # default (24).
+    def write_budget_distributions
+      summary = Inference::BudgetTrace.summarize(Inference::BudgetTrace::UNION_ARITY, over: [10, 24, 40])
+      pct = summary[:percentiles]
+      @err.puts("  union arity:  n=#{summary[:count]} max=#{summary[:max]} " \
+                "p50=#{pct[:p50]} p90=#{pct[:p90]} p99=#{pct[:p99]}")
+      over = summary[:over]
+      @err.puts("    unions ≥10: #{over[10]}  ≥24: #{over[24]}  ≥40: #{over[40]}")
     end
 
     def write_cache_stats(cache_root, runtime_store)

@@ -37,9 +37,20 @@ module Rigor
 
       CATEGORIES = [RECURSION_GUARD, ANCESTOR_WALK_LIMIT, HKT_FUEL_EXHAUSTED].freeze
 
+      # Distribution (histogram) categories — read-only observations of
+      # a value's size at a site, used to choose budget defaults from an
+      # observed tail rather than a guess (ADR-41 WD3 / Slice 2a). No cap
+      # is enforced; these only record. `UNION_ARITY` is the member count
+      # of every `Type::Union` that `Combinator.union` produces — the
+      # distribution the `union_size` budget default should be set from.
+      UNION_ARITY = :union_arity
+
+      DISTRIBUTION_CATEGORIES = [UNION_ARITY].freeze
+
       @enabled = !ENV["RIGOR_BUDGET_TRACE"].to_s.empty?
       @mutex = Mutex.new
       @counts = Hash.new(0)
+      @distributions = Hash.new { |h, k| h[k] = Hash.new(0) }
 
       module_function
 
@@ -73,8 +84,53 @@ module Rigor
         end
       end
 
+      # Records one observation of `value` (an Integer size) into
+      # `category`'s histogram. No-op (one boolean check) when disabled.
+      def observe(category, value)
+        return unless @enabled
+
+        @mutex.synchronize { @distributions[category][value] += 1 }
+      end
+
+      # Frozen `{value => count}` histogram for a distribution category.
+      def distribution(category)
+        @mutex.synchronize { @distributions[category].dup.freeze }
+      end
+
+      # Summary of a distribution category: total observation count, max
+      # observed value, selected percentiles, and how many observations
+      # met or exceeded each threshold in `over`. Percentiles use the
+      # nearest-rank method over the expanded sample.
+      def summarize(category, over: [])
+        hist = distribution(category)
+        total = hist.values.sum
+        return { count: 0, max: 0, percentiles: {}, over: over.to_h { |t| [t, 0] } } if total.zero?
+
+        sorted = hist.keys.sort
+        { count: total,
+          max: sorted.last,
+          percentiles: { p50: percentile(hist, total, 0.50), p90: percentile(hist, total, 0.90),
+                         p99: percentile(hist, total, 0.99) },
+          over: over.to_h { |t| [t, hist.sum { |value, n| value >= t ? n : 0 }] } }
+      end
+
+      # Nearest-rank percentile over a `{value => count}` histogram
+      # without materialising the full sample.
+      def percentile(hist, total, fraction)
+        rank = (fraction * total).ceil
+        cumulative = 0
+        hist.keys.sort.each do |value|
+          cumulative += hist[value]
+          return value if cumulative >= rank
+        end
+        hist.keys.max
+      end
+
       def reset
-        @mutex.synchronize { @counts.clear }
+        @mutex.synchronize do
+          @counts.clear
+          @distributions.clear
+        end
       end
     end
   end

@@ -50,6 +50,57 @@ RSpec.describe Rigor::Inference::BudgetTrace do
     end
   end
 
+  describe "distributions (Slice 2a)" do
+    before { described_class.enable! }
+
+    it "is a no-op when disabled" do
+      described_class.disable!
+      described_class.observe(described_class::UNION_ARITY, 99)
+      expect(described_class.distribution(described_class::UNION_ARITY)).to be_empty
+    end
+
+    it "accumulates a {value => count} histogram" do
+      [3, 3, 5, 12].each { |v| described_class.observe(described_class::UNION_ARITY, v) }
+      expect(described_class.distribution(described_class::UNION_ARITY)).to eq({ 3 => 2, 5 => 1, 12 => 1 })
+    end
+
+    it "summarises count / max / percentiles / over-thresholds" do
+      # 90 unions of arity 2, 9 of arity 12, 1 of arity 50.
+      90.times { described_class.observe(described_class::UNION_ARITY, 2) }
+      9.times { described_class.observe(described_class::UNION_ARITY, 12) }
+      described_class.observe(described_class::UNION_ARITY, 50)
+
+      s = described_class.summarize(described_class::UNION_ARITY, over: [10, 24, 40])
+      expect(s[:count]).to eq(100)
+      expect(s[:max]).to eq(50)
+      expect(s[:percentiles][:p50]).to eq(2)
+      expect(s[:percentiles][:p90]).to eq(2)
+      expect(s[:percentiles][:p99]).to eq(12)
+      expect(s[:over]).to eq({ 10 => 10, 24 => 1, 40 => 1 })
+    end
+
+    it "summarises an empty distribution without dividing by zero" do
+      s = described_class.summarize(described_class::UNION_ARITY, over: [10])
+      expect(s).to eq({ count: 0, max: 0, percentiles: {}, over: { 10 => 0 } })
+    end
+
+    it "reset clears distributions too" do
+      described_class.observe(described_class::UNION_ARITY, 7)
+      described_class.reset
+      expect(described_class.distribution(described_class::UNION_ARITY)).to be_empty
+    end
+
+    it "is fed by Combinator.union with the produced union's arity" do
+      int = Rigor::Type::Combinator.nominal_of(Integer)
+      str = Rigor::Type::Combinator.nominal_of(String)
+      sym = Rigor::Type::Combinator.nominal_of(Symbol)
+      Rigor::Type::Combinator.union(int, str, sym)
+
+      hist = described_class.distribution(described_class::UNION_ARITY)
+      expect(hist[3]).to be >= 1
+    end
+  end
+
   describe "integration with the guard sites" do
     before { described_class.enable! }
 

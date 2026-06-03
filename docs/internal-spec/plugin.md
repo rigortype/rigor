@@ -155,6 +155,44 @@ project and call `services.fact_store.publish(...)`; the loader's
 topological ordering guarantees a producer's `prepare` runs before
 any consumer's. The default is a no-op.
 
+#### Extracting argument literals — `Source::Literals` (boilerplate plan § 0a)
+
+`Rigor::Source::Literals` is the shared answer to "is this Prism
+argument node a literal `:sym` / `"str"`, and if so what does it
+name?" — the question nearly every DSL walker asks (`state :draft`,
+`has_one_attached :avatar`, `validate_presence_of(:name)`). It is the
+recommended extractor over a hand-rolled `node.unescaped.to_sym if
+SymbolNode || StringNode`, pinned in the public-API drift spec
+(`SOURCE_LITERALS_SINGLETON`) and exempt from the
+"`Rigor::Source::*` is internal" rule in
+[`public-api.md`](public-api.md). The methods are `module_function`s,
+so each is callable as `Rigor::Source::Literals.symbol(node)`.
+
+The single-node surface is a grid over two axes — which node kinds are
+accepted, and what the caller wants back — each returning `nil` for any
+other node (including `nil`):
+
+| accepts | → `Symbol` | → `String` |
+| --- | --- | --- |
+| `:sym` only | `.symbol(node)` | `.symbol_name(node)` |
+| `:sym` or `"str"` | `.symbol_or_string(node)` | `.symbol_or_string_name(node)` |
+
+The `SymbolNode`-only forms exist so a DSL that distinguishes `state
+:draft` from `state "draft"` keeps that distinction instead of
+silently widening. `#unescaped` (not `#value`) is used so an
+interpolation-free `"foo"` / `:foo` round-trips to `:foo` / `"foo"`
+consistently for both node kinds.
+
+Two call-argument helpers sit on top of the grid:
+
+- `.symbol_arguments(call_node)` → `Array[Symbol]` — every literal
+  Symbol/String positional argument in source order; non-literal
+  arguments are dropped; `[]` when the call has no argument list.
+- `.symbol_arg(call_node, index)` → `Symbol?` — the literal at
+  positional `index`, or `nil` when the call has no argument list, the
+  index is out of range, or that argument is not a literal
+  Symbol/String.
+
 #### Return-type and narrowing contributions — `dynamic_return` / `type_specifier` (ADR-37 Slice 2)
 
 `flow_contribution_for` was consulted at exactly two engine sites, each

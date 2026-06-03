@@ -85,6 +85,12 @@ pins instance and singleton method sets for:
 - `Rigor::Plugin::IoBoundary` — `policy`, `plugin_id`,
   `read_file(path)`, `open_url(url)`, `cache_descriptor`. v0.1.0
   slice 2.
+- `Rigor::Source::Literals` — the argument-literal extraction grid
+  `symbol`, `symbol_name`, `symbol_or_string`, `symbol_or_string_name`,
+  `symbol_arguments`, `symbol_arg`. The one deliberately-public member
+  of the otherwise-internal `Rigor::Source::*` namespace (see below):
+  the shared DSL-walker helper plugin authors are pointed at
+  (boilerplate-reduction plan § 0a). v0.1.x.
 
 Any signature change on these methods has to update the matching
 `PublicApiDriftSnapshots::*` constant in the same commit.
@@ -141,8 +147,10 @@ Plugin authors must NOT rely on:
   protocol, not by adding rows to `CheckRules`.
 - `Rigor::AST::*` virtual nodes. The synthetic AST nodes the
   engine uses internally are not a stable plugin surface.
-- Any `Rigor::Source::*`, `Rigor::CLI::*`, `Rigor::Configuration`
-  helper. These are CLI / loader plumbing.
+- Any `Rigor::Source::*` (**except `Rigor::Source::Literals`**, locked
+  above), `Rigor::CLI::*`, `Rigor::Configuration` helper. These are
+  CLI / loader plumbing. `Source::Literals` is the one carve-out: it is
+  drift-pinned and the recommended plugin-author argument extractor.
 
 ## Promotion path
 

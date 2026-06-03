@@ -17,6 +17,7 @@ This appendix untangles the two so you reach for the right one.
 > [Two things called "protocol"](#two-things-called-protocol) ·
 > [Structural typing: RBS interfaces](#structural-typing-rbs-interfaces) ·
 > [Object shapes and capability roles](#object-shapes-and-capability-roles) ·
+> [The word vs the semantics, across languages](#the-word-vs-the-semantics-across-languages) ·
 > [Protocol contracts (ADR-28)](#protocol-contracts-adr-28) ·
 > [Interface vs protocol contract](#interface-vs-protocol-contract) ·
 > [Which one do I want?](#which-one-do-i-want) ·
@@ -109,6 +110,66 @@ If you came looking for "Rigor's Protocol," **this section is it**:
 RBS interfaces + object shapes + capability roles are Rigor's
 structural-typing surface. None of it is spelled "protocol."
 
+## The word vs the semantics, across languages
+
+Why does Rigor spell its structural type `interface` and reserve
+`protocol` for something else? Because the *word* "protocol" and the
+*semantics* "structural typing" have drifted apart across languages —
+and Rigor picks the spelling that least surprises a Ruby reader (RBS
+already says `interface`).
+
+The term itself is old. **Smalltalk** (1970s) called the set of
+messages an object understands its *protocol* — grouped into "message
+protocols" in the class browser. It was never a static-checking
+construct; it just named "what you can send this object," the direct
+ancestor of Ruby's duck typing. Every later use inherits that core
+idea — "a set of methods a conforming object provides" — and then
+adds its own rules about *how conformance is established*.
+
+Two such rules matter, and they are independent of the spelling:
+
+- **Structural / implicit** — you conform by *having the methods*. No
+  declaration. (Python `Protocol`, Go `interface`, **RBS `interface`**,
+  Smalltalk's original sense.)
+- **Nominal / explicit** — you conform by *declaring that you do*.
+  (Java / PHP `interface ... implements`, Swift / Objective-C
+  `protocol` with explicit adoption.)
+
+The spelling does **not** track the rule — the two crossed long ago:
+
+| Language | Spelling | Conformance | Same as Rigor? |
+| --- | --- | --- | --- |
+| Smalltalk | "protocol" | (dynamic; duck typing) | ancestor of the idea |
+| **Rigor / RBS** | **`interface`** | **structural / implicit** | — |
+| Python (PEP 544) | `Protocol` | structural / implicit | ✅ same model, different word |
+| Go | `interface` | structural / implicit | ✅ same model, same word |
+| Java / PHP | `interface` | nominal / explicit `implements` | ❌ same word, opposite model |
+| Swift / Objective-C | `protocol` | nominal / explicit adoption | ❌ different word *and* model |
+
+So a reader's intuition depends entirely on where they came from:
+
+- **From Swift / Objective-C:** "protocol" means a type you *declare*
+  conformance to (`struct Resource: Closable`). Rigor's `interface`
+  needs no such declaration — just define `close`. (Objective-C's
+  `respondsToSelector:` and informal protocols are the runtime
+  duck-typing escape hatch; Swift allows *retroactive* conformance via
+  extensions, but adoption is still explicit.) And the one Rigor
+  surface that reuses the *word* — the **protocol contract** below — is
+  not Swift's protocol either: it binds classes by file path, not by an
+  adoption clause.
+- **From Java / PHP:** "interface" means a contract a class must
+  `implement` by name. Rigor reuses the *word* but not the rule: a
+  Ruby class satisfies an RBS `interface` structurally, never by an
+  `implements` clause (Ruby has none).
+- **From Python or Go:** you are already home. RBS `interface` is your
+  `Protocol` / `interface` — structural, implicit, checked where it is
+  named.
+
+And the Smalltalk sense — "a named set of messages a conforming type
+must provide" — is exactly what Rigor revives under the name **protocol
+contract** in the next section. Fittingly, that is the one Rigor *does*
+spell "protocol."
+
 ## Protocol contracts (ADR-28)
 
 Now the other axis. A Rack-shaped web framework expects a
@@ -176,7 +237,7 @@ author):
 | | RBS `interface` (structural type) | ADR-28 protocol contract |
 | --- | --- | --- |
 | **What it is** | A type in the lattice | A tooling-enforced convention; *not* a type |
-| **Python analogue** | `typing.Protocol` | (none — closer to Smalltalk/Swift "protocol") |
+| **Cross-language analogue** | Python `Protocol`, Go `interface` | the Smalltalk "required message set" sense — but bound by **file path**, a mechanism no mainstream `protocol`/`interface` has |
 | **How a class opts in** | Structurally — just have the methods | Implicitly — be defined under the path glob |
 | **Where it's referenced** | Named in a signature (`(_Closable) -> void`) | Named *nowhere*; bound by file path |
 | **Where the check fires** | At the use site that names the interface | At the contracted `def` (provide) + per class (check) |
@@ -184,12 +245,12 @@ author):
 | **Provides parameter types?** | No (it's a type, used where named) | **Yes** — into an un-annotated `def` |
 | **Diagnostics** | Core type errors at the use site | `missing-protocol-method`, `protocol-return-mismatch` (plugin) |
 
-The naming overlap is historical: "protocol" in the
-Smalltalk / Objective-C / Swift tradition means exactly "a named
-set of methods a conforming type must implement," which is what a
-protocol contract is. Python's `typing.Protocol` borrowed the word
-for the *structural-type* idea, and Ruby/RBS settled on `interface`
-for that — so in Rigor, "protocol" never means the structural type.
+The naming overlap is historical (see [the cross-language
+detour](#the-word-vs-the-semantics-across-languages) above): the
+Smalltalk "set of required messages" sense survives in the *protocol
+contract*, while Python's `typing.Protocol` reused the word for the
+*structural-type* idea that Ruby/RBS spell `interface`. So in Rigor,
+"protocol" never means the structural type.
 
 ## Which one do I want?
 

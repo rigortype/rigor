@@ -6,12 +6,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
   let(:environment) { Rigor::Environment.default }
 
   def dispatch(receiver, method_name, args = [])
-    described_class.try_dispatch(
-      receiver: receiver,
-      method_name: method_name,
-      args: args,
-      environment: environment
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: receiver,
+                                   method_name: method_name,
+                                   args: args,
+                                   environment: environment
+                                 ))
   end
 
   describe ".try_dispatch" do
@@ -203,12 +203,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RbsDispatch do
       blank_env = Rigor::Environment.new
       expect(blank_env.rbs_loader).to be_nil
 
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.constant_of(1),
-        method_name: :succ,
-        args: [],
-        environment: blank_env
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.constant_of(1),
+                                              method_name: :succ,
+                                              args: [],
+                                              environment: blank_env
+                                            ))
       expect(result).to be_nil
     end
   end

@@ -75,7 +75,9 @@ module Rigor
         # well-defined type (the gradual-safety net mirrors
         # the engine's "BoundMethod erases to `Method`,
         # `Method#call: (*untyped) -> untyped`" RBS fallback).
-        def try_backward(receiver:, method_name:, args:, block_type:, environment:, call_node:, scope:)
+        def try_backward(context)
+          receiver = context.receiver
+          method_name = context.method_name
           return nil unless receiver.is_a?(Type::BoundMethod)
           return nil unless backward_method?(method_name)
 
@@ -97,11 +99,11 @@ module Rigor
           MethodDispatcher.dispatch(
             receiver_type: receiver.receiver_type,
             method_name: receiver.method_name,
-            arg_types: args,
-            block_type: block_type,
-            environment: environment,
-            call_node: call_node,
-            scope: scope
+            arg_types: context.args,
+            block_type: context.block_type,
+            environment: context.environment,
+            call_node: context.call_node,
+            scope: context.scope
           ) || Type::Combinator.untyped
         end
         # `Method#call` / `Method#()` and `Method#[]` are the

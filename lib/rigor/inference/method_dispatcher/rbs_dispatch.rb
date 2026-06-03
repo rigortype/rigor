@@ -118,20 +118,20 @@ module Rigor
         #   `Dynamic[Top]`, which is the false-positive-safe default
         #   for the open hierarchies (`< ActionController::Base`, …)
         #   the allow-list deliberately excludes.
-        def try_dispatch(receiver:, method_name:, args:, environment:, block_type: nil, self_type_override: nil, # rubocop:disable Metrics/ParameterLists
-                         public_only: false, scope: nil)
+        def try_dispatch(context)
+          environment = context.environment
           return nil if environment.nil?
           return nil unless environment.rbs_loader
 
           dispatch_for(
-            receiver: receiver,
-            method_name: method_name,
-            args: args,
+            receiver: context.receiver,
+            method_name: context.method_name,
+            args: context.args,
             environment: environment,
-            block_type: block_type,
-            self_type_override: self_type_override,
-            public_only: public_only,
-            scope: scope
+            block_type: context.block_type,
+            self_type_override: context.self_type_override,
+            public_only: context.public_only,
+            scope: context.scope
           )
         end
 
@@ -157,14 +157,15 @@ module Rigor
         # block" from "the block is untyped"; the binder treats both
         # the same way (every parameter defaults to `Dynamic[Top]`).
         # @return [Array<Rigor::Type>] positional block parameter types.
-        def block_param_types(receiver:, method_name:, args:, environment:)
+        def block_param_types(context)
+          environment = context.environment
           return [] if environment.nil?
           return [] unless environment.rbs_loader
 
           probe_block_param_types(
-            receiver: receiver,
-            method_name: method_name,
-            args: args,
+            receiver: context.receiver,
+            method_name: context.method_name,
+            args: context.args,
             environment: environment
           )
         end

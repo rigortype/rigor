@@ -77,14 +77,21 @@ module Rigor
                    call_node: nil, scope: nil)
         return nil if receiver_type.nil?
 
-        bound_method_result = MethodFolding.try_backward(
+        # Build the call context once and thread it — unchanged —
+        # through every tier (`_DispatchTier#try_dispatch`). The
+        # dispatcher's own private fallback tiers still read the
+        # positional locals below; only the tier modules consume the
+        # context object.
+        context = CallContext.build(
           receiver: receiver_type, method_name: method_name, args: arg_types,
           block_type: block_type, environment: environment,
           call_node: call_node, scope: scope
         )
+
+        bound_method_result = MethodFolding.try_backward(context)
         return bound_method_result if bound_method_result
 
-        precise = dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type)
+        precise = dispatch_precise_tiers(context)
         return precise if precise
 
         # v0.1.1 Track 2 slice 7 — plugin return-type contribution
@@ -124,10 +131,7 @@ module Rigor
         static_refinement = try_static_refinement(receiver_type, method_name, arg_types)
         return static_refinement if static_refinement
 
-        rbs_result = RbsDispatch.try_dispatch(
-          receiver: receiver_type, method_name: method_name, args: arg_types,
-          environment: environment, block_type: block_type, scope: scope
-        )
+        rbs_result = RbsDispatch.try_dispatch(context)
         if rbs_result
           record_boundary_cross_if_applicable(receiver_type, method_name, rbs_result, environment)
           return rbs_result
@@ -468,8 +472,10 @@ module Rigor
 
         module_type = Type::Combinator.nominal_of(module_name)
         RbsDispatch.try_dispatch(
-          receiver: module_type, method_name: method_name, args: arg_types,
-          environment: environment, block_type: block_type
+          CallContext.build(
+            receiver: module_type, method_name: method_name, args: arg_types,
+            environment: environment, block_type: block_type
+          )
         )
       end
 
@@ -709,14 +715,10 @@ module Rigor
       ].freeze)
       private_constant :PRECISE_TIERS
 
-      def dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type = nil)
-        meta_result = try_meta_introspection(receiver_type, method_name, arg_types)
+      def dispatch_precise_tiers(context)
+        meta_result = try_meta_introspection(context.receiver, context.method_name, context.args)
         return meta_result if meta_result
 
-        context = CallContext.build(
-          receiver: receiver_type, method_name: method_name,
-          args: arg_types, block_type: block_type
-        )
         PRECISE_TIERS.each do |tier|
           result = tier.try_dispatch(context)
           return result if result
@@ -749,13 +751,15 @@ module Rigor
         # self / `self.`-receiver calls (`puts`, `raise`, `require`)
         # keep resolving — those are the fallback's intended targets.
         RbsDispatch.try_dispatch(
-          receiver: fallback_receiver,
-          method_name: method_name,
-          args: arg_types,
-          environment: environment,
-          block_type: block_type,
-          self_type_override: receiver_type,
-          public_only: explicit_non_self_receiver?(call_node)
+          CallContext.build(
+            receiver: fallback_receiver,
+            method_name: method_name,
+            args: arg_types,
+            environment: environment,
+            block_type: block_type,
+            self_type_override: receiver_type,
+            public_only: explicit_non_self_receiver?(call_node)
+          )
         )
       end
 
@@ -1097,19 +1101,14 @@ module Rigor
       def expected_block_param_types(receiver_type:, method_name:, arg_types:, environment: nil)
         return [] if receiver_type.nil?
 
-        iterator_result = IteratorDispatch.block_param_types(
-          receiver: receiver_type,
-          method_name: method_name,
-          args: arg_types
+        context = CallContext.build(
+          receiver: receiver_type, method_name: method_name,
+          args: arg_types, environment: environment
         )
+        iterator_result = IteratorDispatch.block_param_types(context)
         return iterator_result if iterator_result
 
-        RbsDispatch.block_param_types(
-          receiver: receiver_type,
-          method_name: method_name,
-          args: arg_types,
-          environment: environment
-        )
+        RbsDispatch.block_param_types(context)
       end
     end
   end

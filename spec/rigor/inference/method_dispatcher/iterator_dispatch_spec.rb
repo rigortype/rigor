@@ -10,9 +10,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::IteratorDispatch do
   def non_negative_int = Rigor::Type::Combinator.non_negative_int
 
   def block_params(receiver, method_name, args = [])
-    described_class.block_param_types(
-      receiver: receiver, method_name: method_name, args: args
-    )
+    described_class.block_param_types(cc(
+                                        receiver: receiver, method_name: method_name, args: args
+                                      ))
   end
 
   describe ".times" do

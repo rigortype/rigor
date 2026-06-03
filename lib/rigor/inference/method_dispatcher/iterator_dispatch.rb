@@ -33,7 +33,10 @@ module Rigor
 
         # @return [Array<Rigor::Type>, nil] block-param types, or
         #   nil to fall through to the next tier.
-        def block_param_types(receiver:, method_name:, args:)
+        def block_param_types(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
           case method_name
           when :times then times_block_params(receiver)
           when :upto  then upto_block_params(receiver, args.first)

@@ -275,6 +275,16 @@ Slice 7 phase 2 lifts the method-local boundary for ivars: `Scope` carries a `cl
 
 The pre-pass types rvalues with no local bindings, so `@x = 1` records `Constant[1]` but `@x = some_local + 1` records `Dynamic[Top]`. Cvars and globals remain method-local; the equivalent class-level / process-level accumulators are a follow-up slice.
 
+#### Read-before-write nil gate and additional initializers (ADR-38)
+
+A companion pre-pass walks each instance method body in AST (execution) order and tracks the ivar names whose **first** reference is a read (a read-before-write). Those names are unioned into a class-wide `read_before_write` accumulator, and at finalisation the class contributes `Constant[nil]` for each — soundness for the "method reads `@x` before any write to `@x`" shape, where Ruby yields `nil`.
+
+`initialize` is the built-in exemption: for an `initialize` body, every ivar write target is folded into the class's `init_writes` set **instead** of contributing read-before-write evidence, so an ivar the constructor guarantees is assigned does not get the `nil` widening in sibling readers.
+
+ADR-38 generalises that exemption to **plugin-declared additional initializers**. `Inference::ScopeIndexer` consults the aggregated `Plugin::Registry#additional_initializers` set at this single gate: for a `def` whose name is `covers_method?` by an entry **and** whose enclosing class equals or inherits from the entry's `receiver_constraint` (matched via `Environment#class_ordering`, the same mechanism ADR-16 Tier A uses), the method's ivar writes fold into `init_writes` exactly as `initialize`'s do. This is the Ruby analogue of PHPStan's `AdditionalConstructorsExtension` — `Minitest::Test#setup`, a Rails `after_initialize`, or a DI setter that establishes ivar state the framework calls before the body runs. The value-object shape is specified in [`plugin.md`](plugin.md#rigorpluginmanifest) (`additional_initializers:`).
+
+The lookup reads the plugin registry off the pre-pass scope's `Environment`; the engine MUST treat the whole resolution as fail-soft (any error, or an absent / empty registry, degrades to "no match"). This is sound by construction: the gate can only ever **suppress** a `nil` contribution, never add one, so a missed or over-broad match is false-positive-safe — it merely leaves an existing nil widening in place rather than ever making the analyzer stricter (ADR-38 § "Why this is FP-safe").
+
 Slice 7 phase 3 extends `StatementEvaluator` with **compound writes** for every variable kind. The handlers cover `Prism::{Local,InstanceVariable,ClassVariable,GlobalVariable}{Or,And,Operator}WriteNode` and apply uniform semantics:
 
 - The current type is read from the appropriate scope binding map (`local`/`ivar`/`cvar`/`global`); unbound variables read as `Dynamic[Top]`.

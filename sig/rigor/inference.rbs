@@ -57,6 +57,28 @@ module Rigor
     module MethodDispatcher
       def self?.dispatch: (receiver_type: Type::t?, method_name: Symbol, arg_types: Array[Type::t], ?block_type: Type::t?, ?environment: Environment?) -> Type::t?
       def self?.expected_block_param_types: (receiver_type: Type::t?, method_name: Symbol, arg_types: Array[Type::t], ?environment: Environment?) -> Array[Type::t]
+
+      # Immutable value object threaded through every dispatch tier.
+      class CallContext
+        attr_reader receiver: Type::t?
+        attr_reader method_name: Symbol
+        attr_reader args: Array[Type::t]
+        attr_reader block_type: Type::t?
+        attr_reader environment: Environment?
+        attr_reader call_node: untyped
+        attr_reader scope: untyped
+        attr_reader self_type_override: Type::t?
+        attr_reader public_only: bool
+
+        def self.build: (receiver: Type::t?, method_name: Symbol, args: Array[Type::t], ?block_type: Type::t?, ?environment: Environment?, ?call_node: untyped, ?scope: untyped, ?self_type_override: Type::t?, ?public_only: bool) -> CallContext
+        def with: (**untyped) -> CallContext
+      end
+
+      # The protocol every dispatch tier observes: fold one call site,
+      # returning a `Type::t` or nil to defer to the next tier.
+      interface _DispatchTier
+        def try_dispatch: (CallContext) -> Type::t?
+      end
     end
 
     class MethodParameterBinder

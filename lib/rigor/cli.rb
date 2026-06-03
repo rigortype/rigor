@@ -9,6 +9,7 @@ require_relative "configuration"
 require_relative "version"
 require_relative "analysis/diagnostic"
 require_relative "analysis/result"
+require_relative "cli/options"
 
 module Rigor
   # The CLI class is a dispatcher: each `run_*` method delegates to a
@@ -80,7 +81,7 @@ module Rigor
     def run_check
       load_check_dependencies
       options = parse_check_options
-      buffer = resolve_buffer_binding(options)
+      buffer = Options.resolve_buffer_binding(options, err: @err)
       return EXIT_USAGE if buffer == :usage_error
 
       configuration = load_check_configuration(options)
@@ -201,37 +202,6 @@ module Rigor
       )
     end
 
-    # Editor-mode CLI envelope. The `--tmp-file=PATH` /
-    # `--instead-of=PATH` pair binds an in-flight buffer file to
-    # the logical project path it represents (see
-    # `docs/design/20260516-editor-mode.md`). Both flags must
-    # appear together; either alone is a usage error. The
-    # physical file must be readable; missing-file is a usage
-    # error too so editors get one consistent failure shape.
-    #
-    # Returns:
-    # - `nil` when neither flag was supplied (legacy path).
-    # - `Rigor::Analysis::BufferBinding` when the pair is valid.
-    # - `:usage_error` after writing one diagnostic to stderr;
-    #   the caller MUST translate this to `EXIT_USAGE`.
-    def resolve_buffer_binding(options)
-      tmp = options[:tmp_file]
-      instead = options[:instead_of]
-      return nil if tmp.nil? && instead.nil?
-
-      if tmp.nil? || instead.nil?
-        @err.puts("--tmp-file and --instead-of must appear together")
-        return :usage_error
-      end
-
-      unless File.file?(tmp)
-        @err.puts("--tmp-file #{tmp.inspect}: no such file or not readable")
-        return :usage_error
-      end
-
-      Analysis::BufferBinding.new(logical_path: instead, physical_path: tmp)
-    end
-
     # ADR-15 Phase 4c — resolves the worker count by
     # precedence: CLI `--workers=N` (most explicit) > env
     # `RIGOR_RACTOR_WORKERS` > config `.rigor.yml`
@@ -311,14 +281,7 @@ module Rigor
                 "Dispatch per-file analysis across N Ractor workers (default: 0; sequential)") do |value|
           options[:workers] = value
         end
-        opts.on("--tmp-file=PATH",
-                "Editor mode: read source bytes from PATH instead of --instead-of (paired)") do |value|
-          options[:tmp_file] = value
-        end
-        opts.on("--instead-of=PATH",
-                "Editor mode: the logical project path the buffer represents (paired with --tmp-file)") do |value|
-          options[:instead_of] = value
-        end
+        Options.add_editor_mode(opts, options)
         opts.on("--baseline=PATH",
                 "ADR-22: load baseline from PATH (overrides .rigor.yml `baseline:`)") do |value|
           options[:baseline] = value

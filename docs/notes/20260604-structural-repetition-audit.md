@@ -204,6 +204,18 @@ partial-signature idiom.
     `--format` (7) `opts.on` blocks could move to `Options.add_config` /
     `add_format` builders, but flag definitions rarely drift — low-value
     churn, left for a future pass.
+- **Theme D — handler skeletons — DONE.**
+  - `Cache::RbsCacheProducer` base: the seven RBS cache producers each
+    repeated a byte-identical `self.fetch` (build descriptor →
+    `fetch_or_compute` under `PRODUCER_ID` → `compute`); now subclasses
+    that declare only `PRODUCER_ID` + `compute`. `self::PRODUCER_ID`
+    resolves the concrete subclass constant. Structural contract declared
+    as `interface _CacheProducer` in a new `sig/rigor/cache.rbs`.
+  - `LanguageServer::BufferResolution` mixin: all six LSP providers
+    opened `provide` with the same URI→path + buffer-entry lookup;
+    extracted to `buffer_for(uri)`. The per-provider parse step (strict /
+    tolerant / cursor-recovery) stays put.
+  Full suite green; steep green.
 
 ## Execution order (high-value + easy-to-start first)
 

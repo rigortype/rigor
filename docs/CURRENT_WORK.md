@@ -136,10 +136,14 @@ hits). Two layers of follow-up:
   violation). Then wire + emit `static.*` incomplete-inference diagnostics
   so users see where a `Dynamic[top]` originated.
 
-Planned sequencing before implementing either layer: (1) this survey
-note + record (done); (2) comparative note on how PHPStan / TypeScript /
-mypy / Steep / Sorbet / TypeProf bound inference; (3) a new ADR on the
-ideal budget design; *then* Layer 1 + 2. Items (2)–(3) in flight.
+Planned sequencing before implementing either layer: (1) survey note +
+record — **done**; (2) comparative prior-art note on how PHPStan /
+TypeScript / mypy / Steep / Sorbet / TypeProf bound inference — **done**
+([`docs/notes/20260603-inference-cutoff-prior-art.md`](notes/20260603-inference-cutoff-prior-art.md));
+(3) ideal-design ADR — **done**
+([ADR-41](adr/41-inference-budget-design.md), Proposed). **Next: Layer 1
+doc/spec hygiene, then Layer 2a measurement → 2b/2c wiring**, per ADR-41
+§ Slices.
 
 ### Flow-folding — all G1 / G2 cases now closed (v0.1.12)
 

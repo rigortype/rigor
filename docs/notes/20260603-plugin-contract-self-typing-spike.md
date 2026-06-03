@@ -3,8 +3,9 @@
 **Date:** 2026-06-03
 **Status:** Spike complete. Layer 1 (RBS) + Option B (structural spec) landed;
 Option A (strict Steep over the plugin tree) measured **not viable** and shelved;
-the "can Rigor warn standalone?" follow-up traced to a scoped inference gap and
-written up as **ADR-43** (proposed, measurement-gated).
+the "can Rigor warn standalone?" follow-up traced to a scoped inference gap,
+written up as **ADR-43**, and the engine + `manifest.rbs` half (WD1–WD5) landed
+with zero net FP on the plugin lib tree (WD6 `make check` wiring pending).
 
 ## Question
 

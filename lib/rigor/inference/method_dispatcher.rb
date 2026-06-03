@@ -125,7 +125,7 @@ module Rigor
 
         rbs_result = RbsDispatch.try_dispatch(
           receiver: receiver_type, method_name: method_name, args: arg_types,
-          environment: environment, block_type: block_type
+          environment: environment, block_type: block_type, scope: scope
         )
         if rbs_result
           record_boundary_cross_if_applicable(receiver_type, method_name, rbs_result, environment)

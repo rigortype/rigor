@@ -3,8 +3,38 @@ class Rigor::Plugin::Manifest::Consumption
 end
 
 class Rigor::Plugin::Manifest
-  def initialize: (id: untyped, version: untyped, ?description: untyped, ?protocols: untyped, ?config_schema: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?trait_registries: untyped, ?external_files: untyped) -> void
+  def initialize: (id: untyped, version: untyped, ?description: untyped, ?protocols: untyped, ?config_schema: untyped, ?produces: untyped, ?consumes: untyped, ?owns_receivers: untyped, ?open_receivers: untyped, ?type_node_resolvers: untyped, ?block_as_methods: untyped, ?heredoc_templates: untyped, ?nested_class_templates: untyped, ?trait_registries: untyped, ?external_files: untyped, ?hkt_registrations: untyped, ?hkt_definitions: untyped, ?signature_paths: untyped, ?protocol_contracts: untyped, ?source_rbs_synthesizer: untyped, ?additional_initializers: untyped) -> void
+
+  # Public attribute readers (the full `attr_reader` surface). Plugins
+  # read `manifest.id` / `manifest.protocol_contracts` etc.; declaring
+  # them keeps the contract surface resolvable so ADR-43 ancestor
+  # resolution does not surface a false `call.undefined-method` on a
+  # real reader. Identity fields are typed; the structured slots stay
+  # `untyped` per the sparse `sig/` tree.
+  def id: () -> String
+  def version: () -> String
+  def description: () -> String?
+  def protocols: () -> untyped
+  def config_schema: () -> untyped
   def config_defaults: () -> Hash[String, untyped]
+  def produces: () -> untyped
+  def consumes: () -> untyped
+  def owns_receivers: () -> untyped
+  def open_receivers: () -> untyped
+  def type_node_resolvers: () -> untyped
+  def block_as_methods: () -> untyped
+  def heredoc_templates: () -> untyped
+  def nested_class_templates: () -> untyped
+  def trait_registries: () -> untyped
+  def external_files: () -> untyped
+  def hkt_registrations: () -> untyped
+  def hkt_definitions: () -> untyped
+  def signature_paths: () -> untyped
+  def protocol_contracts: () -> untyped
+  def source_rbs_synthesizer: () -> untyped
+  def additional_initializers: () -> untyped
+
   def validate_config: (untyped) -> Array[String]
   def to_h: () -> Hash[String, untyped]
+  def hash: () -> Integer
 end

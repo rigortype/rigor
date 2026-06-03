@@ -1,12 +1,21 @@
 # ADR-43 — RBS-complete ancestor resolution (allow-list inherited-method dispatch)
 
-Status: **Proposed (measurement-gated), 2026-06-03.** Records the design space
-for letting `rigor check` resolve a Ruby-source subclass's *inherited* method
-calls against an **allow-listed** RBS-only ancestor, so the engine can warn on
-misuse of that ancestor's contract surface — the motivating case being the
-`Rigor::Plugin::Base` plugin contract itself. Nothing here is implemented; this
-ADR captures the decision, the false-positive boundary that makes it viable,
-and the rejected alternatives, so the work stays measurement-gated.
+Status: **Accepted — engine + `manifest.rbs` landed (WD1–WD5), 2026-06-03.**
+Lets `rigor check` resolve a Ruby-source subclass's *inherited* method calls
+against an **allow-listed** RBS-only ancestor, so the engine warns on misuse of
+that ancestor's contract surface — the motivating case being the
+`Rigor::Plugin::Base` plugin contract itself. The allow-list resolution
+(WD1–WD3), its `scope` threading (WD2), and the FP measurement (WD5) are
+implemented and verified: on the bundled plugin **lib** tree the change adds
+**zero net diagnostics** once `manifest.rbs` is completed (the 26 FPs the
+resolution first surfaced were all `Manifest#id` / `#protocol_contracts` — a
+real gap in `Manifest`'s own RBS, now closed, the same pattern Layer 1 hit with
+`IoBoundary`). **WD6 (wiring `make check` to the plugin tree) remains open**: the
+plugin lib tree still carries 16 *pre-existing* diagnostics unrelated to this
+ADR (incomplete RBS for `Analysis::Diagnostic` singleton factories,
+`Plugin::AccessDeniedError#message`, `Prism::Node#block`) that must be cleaned
+before the tree can be a green CI gate. The decision, the false-positive
+boundary, and the rejected alternatives are recorded below.
 
 Grounding:
 [`docs/notes/20260603-plugin-contract-self-typing-spike.md`](../notes/20260603-plugin-contract-self-typing-spike.md)

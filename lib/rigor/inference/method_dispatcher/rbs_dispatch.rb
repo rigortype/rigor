@@ -64,6 +64,19 @@ module Rigor
       module RbsDispatch
         module_function
 
+        # ADR-43 — ancestor classes whose RBS is authoritative and
+        # COMPLETE, so a call a subclass makes that the ancestor's RBS
+        # does not declare is a genuine mistake rather than a gap.
+        # Membership unlocks inherited-method resolution (and thus
+        # `call.undefined-method`) for Ruby-source subclasses of these
+        # classes; every other RBS ancestor stays on the Dynamic
+        # fallback. Seeded with the plugin contract base — this repo
+        # owns both the class and `sig/rigor/plugin/base.rbs`, and the
+        # `lib` self-check keeps them in lock-step. NOT a place for
+        # third-party/core classes whose objects answer to methods
+        # their RBS omits (`ActionController::Base`, `Hash`, …).
+        ALLOWED_RBS_COMPLETE_ANCESTORS = ["Rigor::Plugin::Base"].freeze
+
         # @param receiver [Rigor::Type]
         # @param method_name [Symbol]
         # @param args [Array<Rigor::Type>]
@@ -94,8 +107,19 @@ module Rigor
         # @return [Rigor::Type, nil] inferred return type, or `nil`
         #   when no rule resolves (no class name, no method, dispatch
         #   on a Top/Dynamic[Top] receiver, etc.).
-        def try_dispatch(receiver:, method_name:, args:, environment:, block_type: nil, self_type_override: nil,
-                         public_only: false)
+        # @param scope [Rigor::Scope, nil] when supplied, enables
+        #   ADR-43 RBS-complete-ancestor resolution: a call on a
+        #   Ruby-source subclass not known to RBS, whose discovered
+        #   superclass chain reaches an allow-listed RBS-complete
+        #   ancestor (e.g. `Rigor::Plugin::Base`), resolves against
+        #   that ancestor's RBS. `nil` (the default for every caller
+        #   that does not thread a scope) keeps the legacy behaviour —
+        #   such an inherited call stays unresolved and degrades to
+        #   `Dynamic[Top]`, which is the false-positive-safe default
+        #   for the open hierarchies (`< ActionController::Base`, …)
+        #   the allow-list deliberately excludes.
+        def try_dispatch(receiver:, method_name:, args:, environment:, block_type: nil, self_type_override: nil, # rubocop:disable Metrics/ParameterLists
+                         public_only: false, scope: nil)
           return nil if environment.nil?
           return nil unless environment.rbs_loader
 
@@ -106,7 +130,8 @@ module Rigor
             environment: environment,
             block_type: block_type,
             self_type_override: self_type_override,
-            public_only: public_only
+            public_only: public_only,
+            scope: scope
           )
         end
 
@@ -148,37 +173,37 @@ module Rigor
         class << self
           private
 
-          def dispatch_for(receiver:, method_name:, args:, environment:, block_type:, self_type_override: nil,
-                           public_only: false)
+          def dispatch_for(receiver:, method_name:, args:, environment:, block_type:, self_type_override: nil, # rubocop:disable Metrics/ParameterLists
+                           public_only: false, scope: nil)
             args ||= []
             case receiver
             when Type::Union
               dispatch_union(receiver, method_name, args, environment, block_type, self_type_override,
-                             public_only: public_only)
+                             public_only: public_only, scope: scope)
             else
               dispatch_one(receiver, method_name, args, environment, block_type, self_type_override,
-                           public_only: public_only)
+                           public_only: public_only, scope: scope)
             end
           end
 
-          def dispatch_union(receiver, method_name, args, environment, block_type, self_type_override = nil,
-                             public_only: false)
+          def dispatch_union(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
+                             public_only: false, scope: nil)
             results = receiver.members.map do |member|
               dispatch_one(member, method_name, args, environment, block_type, self_type_override,
-                           public_only: public_only)
+                           public_only: public_only, scope: scope)
             end
             return nil if results.any?(&:nil?)
 
             Type::Combinator.union(*results)
           end
 
-          def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil,
-                           public_only: false)
+          def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
+                           public_only: false, scope: nil)
             descriptor = receiver_descriptor(receiver)
             return nil unless descriptor
 
             class_name, kind, receiver_args = descriptor
-            method_definition = lookup_method(environment, class_name, kind, method_name)
+            method_definition = lookup_method(environment, class_name, kind, method_name, scope)
             return nil unless method_definition
             return nil if public_only && method_private?(method_definition)
 
@@ -267,13 +292,55 @@ module Rigor
               method_definition.accessibility == :private
           end
 
-          def lookup_method(environment, class_name, kind, method_name)
+          def lookup_method(environment, class_name, kind, method_name, scope = nil)
+            direct = lookup_method_on(environment, class_name, kind, method_name)
+            return direct if direct
+
+            # ADR-43 — scoped inherited-method resolution. The direct
+            # lookup misses when `class_name` is a Ruby-source subclass
+            # absent from RBS (so no ancestor walk runs). If its
+            # discovered superclass chain reaches an allow-listed
+            # RBS-complete ancestor, resolve the method there so
+            # inherited contract calls (`self.manifest` on a plugin)
+            # resolve and the normal call rules apply. Bounded to the
+            # allow-list, so open hierarchies stay on the Dynamic
+            # fallback (no false positive on `< ActionController::Base`).
+            ancestor = allowed_rbs_complete_ancestor(environment, class_name, scope)
+            return nil unless ancestor
+
+            lookup_method_on(environment, ancestor, kind, method_name)
+          end
+
+          def lookup_method_on(environment, class_name, kind, method_name)
             case kind
             when :instance
               Rigor::Reflection.instance_method_definition(class_name, method_name, environment: environment)
             when :singleton
               Rigor::Reflection.singleton_method_definition(class_name, method_name, environment: environment)
             end
+          end
+
+          # The first allow-listed, RBS-complete ancestor reachable from
+          # `class_name` through `scope.discovered_superclasses`, or nil.
+          # Returns nil when no scope is threaded, when `class_name` is
+          # itself RBS-known (the direct lookup already had authority),
+          # or when the discovered chain reaches no allow-listed class.
+          # The walk carries a visited set so a malformed cyclic
+          # `A < B < A` source cannot loop.
+          def allowed_rbs_complete_ancestor(environment, class_name, scope)
+            return nil if scope.nil?
+            return nil if Rigor::Reflection.rbs_class_known?(class_name, environment: environment)
+
+            supers = scope.discovered_superclasses
+            seen = {}
+            current = supers[class_name.to_s]
+            until current.nil? || seen[current]
+              return current if ALLOWED_RBS_COMPLETE_ANCESTORS.include?(current)
+
+              seen[current] = true
+              current = supers[current]
+            end
+            nil
           end
 
           # Slice 4 phase 2d substitution map. Zips the class's

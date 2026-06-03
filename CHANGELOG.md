@@ -16,8 +16,9 @@ cycles live in dedicated archives:
 
 ### Changed
 
-- **[performance]** Cross-file ancestor / superclass-name resolution is now memoised across the run, cutting analysis allocations on a large Rails app by ~27% (Mastodon `app`+`lib`, 1,303 files: 87.8M → 64.0M objects; wall ~30s → ~27s; GC's CPU share ~57% → ~40%) with byte-identical diagnostics.
-  - `ExpressionTyper#resolve_user_def_through_ancestors` and `#resolve_ancestor_class_name` are pure functions of the frozen project class-graph index, but were re-`split`/`join`-ing qualified constant names — and re-walking the whole ancestor BFS — once per method-call-site dispatch. They now share a generation-keyed memo (identity of the frozen index trio), so the former single largest allocation site (9.8% of all objects) drops to zero. Profiling write-up: [`docs/notes/20260604-mastodon-allocation-profile.md`](docs/notes/20260604-mastodon-allocation-profile.md).
+- **[performance]** Static cross-file lookups are now memoised across the run, cutting analysis allocations on a large Rails app by ~36% (Mastodon `app`+`lib`, 1,303 files: 87.8M → 56.1M objects; wall ~30s → ~26.5s; GC runs 248 → 126) with byte-identical diagnostics. Profiling write-up: [`docs/notes/20260604-mastodon-allocation-profile.md`](docs/notes/20260604-mastodon-allocation-profile.md).
+  - **Ancestor / superclass-name resolution** — `ExpressionTyper#resolve_user_def_through_ancestors` and `#resolve_ancestor_class_name` are pure functions of the frozen project class-graph index, but were re-`split`/`join`-ing qualified constant names — and re-walking the whole ancestor BFS — once per method-call-site dispatch. They now share a generation-keyed memo (identity of the frozen index trio), so the former single largest allocation site (9.8% of all objects) drops to zero.
+  - **RBS type-name parsing** — `Environment::RbsLoader#parse_type_name` memoises `RBS::TypeName.parse` (a deterministic function of the normalised string, returning a shareable frozen value object) on the per-loader store, removing what had become the top allocation site (~4.7%).
 
 ## [0.1.16] - 2026-06-03
 

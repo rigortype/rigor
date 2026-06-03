@@ -983,14 +983,28 @@ module Rigor
         nil
       end
 
+      # Memoised on `@state` (the per-loader store also holding `:env` /
+      # `:builder`): `RBS::TypeName.parse` is a pure, deterministic
+      # function of the normalised string, and the `RBS::TypeName` it
+      # returns is a frozen value object safe to share across callers
+      # (every consumer only reads it — `env.class_decls.key?` /
+      # `builder.build_*`). The same handful of class names are parsed
+      # on nearly every call-site dispatch, so this was a top allocation
+      # site; caching the immutable result (nil included) removes it.
       def parse_type_name(name)
         s = name.to_s
         return nil if s.empty?
 
         s = "::#{s}" unless s.start_with?("::")
-        RBS::TypeName.parse(s)
-      rescue ::RBS::BaseError
-        nil
+        cache = (@state[:type_name_cache] ||= {})
+        return cache[s] if cache.key?(s)
+
+        cache[s] =
+          begin
+            RBS::TypeName.parse(s)
+          rescue ::RBS::BaseError
+            nil
+          end
       end
 
       def compute_class_known(name)

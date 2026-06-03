@@ -157,6 +157,7 @@ value object that `rebuild`s in full on every narrowing/binding change
    −9 % wall, diagnostics byte-identical).**
 2. **Intern `RBS::TypeName.parse` / `RbsLoader#parse_type_name`** results
    — the same type-name strings are re-parsed repeatedly (3.4 % + 0.9 %).
+   **→ Landed; see "Landed" section (cumulative −36 % allocations).**
 3. **Cut `Scope#rebuild` / `CallContext` allocation** — broader but more
    architectural (per-dispatch `Data`, full value-object rebuild on every
    narrow). Smaller per-fix, wide reach.
@@ -169,34 +170,42 @@ value object that `rebuild`s in full on every narrowing/binding change
 not what is costing time here (see
 [`20260603-inference-budget-reality-survey.md`](20260603-inference-budget-reality-survey.md)).
 
-## Landed: memoising the ancestor/name resolution (recommendation 1)
+## Landed: memoising the static lookups (recommendations 1 & 2)
 
-Recommendation 1 was prototyped and landed. `resolve_user_def_through_
-ancestors` and `resolve_ancestor_class_name` now share a run-scoped memo
-keyed by the *identity* of the frozen project index trio
-(`compare_by_identity` nested stores on `Thread.current`; the top-level
-BFS result and each `(subclass, raw_superclass)` resolution are cached).
-The compute paths are split out unchanged behind the memo.
+Two memoisations landed, both pure functions of frozen / deterministic
+state with byte-identical diagnostics:
 
-Re-measured on the same target:
+- **Rec 1 — ancestor/name resolution.** `resolve_user_def_through_
+  ancestors` and `resolve_ancestor_class_name` share a run-scoped memo
+  keyed by the *identity* of the frozen project index trio
+  (`compare_by_identity` nested stores on `Thread.current`; the BFS
+  result and each `(subclass, raw_superclass)` resolution are cached).
+- **Rec 2 — RBS type-name parsing.** `RbsLoader#parse_type_name` memoises
+  `RBS::TypeName.parse` on the per-loader `@state` store. The parse is a
+  deterministic function of the normalised string and returns a frozen
+  value object safe to share; the same handful of class names are parsed
+  on nearly every dispatch.
 
-| metric | before | after | Δ |
-|---|--:|--:|--:|
-| objects allocated | 87.8 M | **64.0 M** | **−27 %** |
-| objects / file | 67,370 | 49,093 | −27 % |
-| wall | ~30.2 s | **~27 s** | **−9 %** |
-| `GC.stat[:time]` | 2.93 s | 2.19 s | −25 % |
-| GC CPU share (stackprof) | ~57 % | **~40 %** | −17 pt |
-| `resolve_ancestor_class_name` alloc | 9.8 % | **0** | gone |
-| `String#split` alloc | 10.9 % | 4.7 % | −57 % |
-| diagnostics | 457 / 419 err | **457 / 419 err** | byte-identical |
+Cumulative on the same target (Mastodon `app`+`lib`, 1,303 files):
 
-Diagnostics are byte-identical (correctness gate: the memoised methods
-read only frozen tables). `make verify` is green (5,418 examples, self-
-check + plugin-contract check clean). The next allocators are now
-`RBS::TypeName.parse` (4.7 %, recommendation 2), `Scope#rebuild` /
-`CallContext` (recommendation 3), and a residual `String#split` /
-`rpartition` / `delete_prefix` cluster.
+| metric | baseline | after rec 1 | after rec 1+2 | Δ total |
+|---|--:|--:|--:|--:|
+| objects allocated | 87.8 M | 64.0 M | **56.1 M** | **−36 %** |
+| objects / file | 67,370 | 49,093 | **43,078** | −36 % |
+| wall | ~30.2 s | ~27.4 s | **~26.5 s** | −12 % |
+| `GC.stat[:time]` | 2.93 s | 2.19 s | **2.08 s** | −29 % |
+| GC runs | 248 | 165 | **126** | −49 % |
+| GC CPU share (stackprof) | ~57 % | ~40 % | **~38 %** | −19 pt |
+| diagnostics | 457 / 419 err | identical | **identical** | byte-identical |
+
+`resolve_ancestor_class_name` (was 9.8 % of allocations) and
+`RBS::TypeName.parse` (was 4.7 %, the #1 site after rec 1) are both gone
+from the profile; `String#split` fell from 10.9 % to out-of-top.
+`make verify` is green after each step (5,418 examples, self-check +
+plugin-contract check clean). The next allocators are now `Scope#rebuild`
+(4.8 %), `Data#initialize` / `CallContext.new`+`build` (~10 % combined),
+`Hash#keys` (4.4 %), and `String#rpartition` (3.9 %) — recommendation 3
+territory (per-dispatch / per-narrow object churn).
 
 ## Reproduction
 

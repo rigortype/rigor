@@ -53,6 +53,11 @@ module Rigor
       def error?: () -> bool
       def to_h: () -> Hash[String, untyped]
       def to_s: () -> String
+
+      # Singleton factories plugins build diagnostics through (the
+      # `node` / `location` are Prism values, received as `untyped`).
+      def self.from_node: (untyped node, path: String, message: String, ?severity: Symbol, ?rule: String?, ?source_family: String, ?receiver_type: untyped, ?method_name: untyped, ?project_definition_site: untyped) -> Rigor::Analysis::Diagnostic
+      def self.from_location: (untyped location, path: String, message: String, ?severity: Symbol, ?rule: String?, ?source_family: String, ?receiver_type: untyped, ?method_name: untyped, ?project_definition_site: untyped) -> Rigor::Analysis::Diagnostic
     end
 
     class Result

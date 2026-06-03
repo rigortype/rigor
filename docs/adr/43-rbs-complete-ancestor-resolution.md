@@ -1,6 +1,6 @@
 # ADR-43 — RBS-complete ancestor resolution (allow-list inherited-method dispatch)
 
-Status: **Accepted — engine + `manifest.rbs` landed (WD1–WD5), 2026-06-03.**
+Status: **Accepted — fully landed (WD1–WD6), 2026-06-03.**
 Lets `rigor check` resolve a Ruby-source subclass's *inherited* method calls
 against an **allow-listed** RBS-only ancestor, so the engine warns on misuse of
 that ancestor's contract surface — the motivating case being the
@@ -10,12 +10,16 @@ implemented and verified: on the bundled plugin **lib** tree the change adds
 **zero net diagnostics** once `manifest.rbs` is completed (the 26 FPs the
 resolution first surfaced were all `Manifest#id` / `#protocol_contracts` — a
 real gap in `Manifest`'s own RBS, now closed, the same pattern Layer 1 hit with
-`IoBoundary`). **WD6 (wiring `make check` to the plugin tree) remains open**: the
-plugin lib tree still carries 16 *pre-existing* diagnostics unrelated to this
-ADR (incomplete RBS for `Analysis::Diagnostic` singleton factories,
-`Plugin::AccessDeniedError#message`, `Prism::Node#block`) that must be cleaned
-before the tree can be a green CI gate. The decision, the false-positive
-boundary, and the rejected alternatives are recorded below.
+`IoBoundary`). **WD6 is done**: the 16 *pre-existing* diagnostics the plugin lib
+tree carried — unrelated to this ADR (incomplete RBS for `Analysis::Diagnostic`
+singleton factories and `Plugin::AccessDeniedError`'s `< StandardError`, plus one
+`Prism::Node#block` flow-narrowing gap in `rigor-rspec` fixed by an explicit
+`is_a?(Prism::CallNode)` narrow) — are cleaned, and a `make check-plugins` target
+(chained into `make verify` and gated in CI on the cold self-check variant) keeps
+the plugin lib tree clean. A contract misuse in any bundled plugin now fails the
+build with `call.undefined-method`, verified end-to-end (injected
+`manifest.bogus` → non-zero exit). The decision, the false-positive boundary, and
+the rejected alternatives are recorded below.
 
 Grounding:
 [`docs/notes/20260603-plugin-contract-self-typing-spike.md`](../notes/20260603-plugin-contract-self-typing-spike.md)
@@ -162,11 +166,23 @@ RBS omits.
   confirming the allow-list scoping leaves open hierarchies untouched. Any FP
   on (b)/(c) blocks the merge — false-positive discipline outranks the feature.
 
-- **WD6 — Wire `make check` to the plugin tree only after WD5 is clean.** The
-  payoff is `bundle exec exe/rigor check lib plugins examples` (or a dedicated
-  target) self-enforcing the contract on every plugin file — delivering what a
+- **WD6 — Wire the plugin tree into the check gate (DONE).** A dedicated
+  `make check-plugins` runs `rigor check plugins/*/lib examples/*/lib` (lib dirs
+  only — the `demo/` trees deliberately exercise un-modelled framework DSLs and
+  are not a clean target). It is chained into `make verify` and gated in CI as a
+  "Run plugin-contract check" step on the cold self-check variant. This
+  self-enforces the contract on every bundled plugin file — delivering what a
   strict Steep target could not (note § "Option A"), without Steep's FP wall.
-  Until WD5 is green this stays a manual spike, not a CI gate.
+  Reaching a green tree required clearing 16 pre-existing diagnostics unrelated
+  to the resolution itself: completing `Analysis::Diagnostic`'s singleton
+  factories (`from_node` / `from_location`) and `Plugin::AccessDeniedError`'s
+  `< StandardError` in RBS, and one `Prism::Node#block` flow-narrowing gap in
+  `rigor-rspec`'s `let_scope_index` (a custom `describe_call?` predicate
+  guarantees a `CallNode` at runtime but does not narrow the analyzer's
+  `Prism::Node` view — fixed with an explicit `is_a?(Prism::CallNode)` re-state,
+  not a `# rigor:disable`, so the narrow is real). Teeth verified: an injected
+  `manifest.bogus` in a plugin makes `make check-plugins` exit non-zero with
+  `call.undefined-method`.
 
 ## Rejected / deferred alternatives
 

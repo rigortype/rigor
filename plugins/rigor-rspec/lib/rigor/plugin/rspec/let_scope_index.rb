@@ -83,7 +83,10 @@ module Rigor
           if describe_call?(node)
             record = build_record(node, anchor)
             accumulator << record
-            if node.block&.body
+            # `describe_call?` already guarantees a `Prism::CallNode`; the
+            # explicit `is_a?` re-states it so the analyzer narrows `node`
+            # from `Prism::Node` and resolves `#block` (a CallNode method).
+            if node.is_a?(Prism::CallNode) && node.block&.body
               collect(node.block.body, anchor: record.describe_const || anchor, accumulator: accumulator)
             end
             return

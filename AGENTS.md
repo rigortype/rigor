@@ -64,8 +64,9 @@ make lint
 make check
 ```
 
-- `make verify` runs `test-parallel` (the spec suite across `PARALLEL_TEST_PROCESSORS` workers — defaults to CPU count via `parallel_tests`), `lint`, and `check`. Total wall time on a 12-core laptop ≈ 60s vs ≈ 220s for the sequential variant. Use `make verify-sequential` when chasing parallel-only flakes; `make verify-parallel` is a backward-compatible alias for the default.
+- `make verify` runs `test-parallel` (the spec suite across `PARALLEL_TEST_PROCESSORS` workers — defaults to CPU count via `parallel_tests`), `lint`, `check`, and `check-plugins`. Total wall time on a 12-core laptop ≈ 60s vs ≈ 220s for the sequential variant. Use `make verify-sequential` when chasing parallel-only flakes; `make verify-parallel` is a backward-compatible alias for the default.
 - `make check-json` runs `rigor check --format=json lib` (machine-readable diagnostics).
+- `make check-plugins` runs `rigor check plugins/*/lib examples/*/lib` — the plugin-contract self-check ([ADR-43](docs/adr/43-rbs-complete-ancestor-resolution.md)). A bundled plugin that misuses the `Plugin::Base` contract surface (e.g. calls a method the contract's RBS does not declare) fails here with `call.undefined-method`. Lib dirs only — the `demo/` trees deliberately exercise un-modelled framework DSLs. MUST stay clean.
 - Submodule maintenance: `make init-submodules`, `make pull-submodules`.
 - Cross-checker pass: `make steep-install` once, then `make steep-check`. Steep runs under an isolated `tool/steep/Gemfile` so its dependency tree (rbs, prism, …) cannot bleed into Rigor's own `Gemfile.lock`. `make steep ARGS="check --severity-level=error"` is the pass-through escape hatch.
 - Cache maintenance: `bundle exec exe/rigor check --cache-stats lib` inventories the per-slot footprint of `.rigor/cache`; `make cache-clean` wipes the directory. Per [ADR-6](docs/adr/6-cache-persistence-backend.md) the store is sharded "no eviction" — config / dependency churn over a long-lived clone accumulates stale slots that only `cache-clean` releases.

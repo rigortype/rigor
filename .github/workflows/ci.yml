@@ -160,6 +160,17 @@ jobs:
         if: matrix.cache == 'cold'
         run: make coverage
 
+      # Plugin-contract gate (ADR-43): the bundled plugin / example LIB
+      # trees must stay clean under `rigor check`. ADR-43 ancestor
+      # resolution makes a plugin's inherited contract calls
+      # (`manifest.…`, `io_boundary.…`) resolve against `Plugin::Base`'s
+      # RBS, so misuse of the contract surface surfaces here as
+      # `call.undefined-method`. Cold variant only — the result is
+      # deterministic and needs no warm/cold cross-check.
+      - name: Run plugin-contract check
+        if: matrix.cache == 'cold'
+        run: make check-plugins
+
   # ── 4. Warm-vs-cold diagnostic diff ─────────────────────────────
   # The two self-check variants must agree on every diagnostic.  Any
   # difference means the cache is altering analysis results — a bug.

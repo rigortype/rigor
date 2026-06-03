@@ -99,7 +99,7 @@ ADRs record design rationale and rejected / deferred alternatives. **The canonic
 - [ADR-40](docs/adr/40-config-schema-defaults.md) — `config_schema` declared defaults (`{kind:, default:}`; accepted — `Base#config` merges manifest defaults; 13 plugins migrated off the `DEFAULT_*` idiom)
 - [ADR-41](docs/adr/41-inference-budget-design.md) — Inference budget design (proposed — spec `budgets:` table unwired; widen-and-diagnose on-hit policy; measurement-gated defaults; Layer 1 doc hygiene + Layer 2 wiring queued)
 - [ADR-42](docs/adr/42-plugin-binary-operator-return-types.md) — Plugin-contributed binary-operator return types (proposed, low priority — self/left-operand operators already work via `dynamic_return` (spec-confirmed); coerce-direction is a narrow false positive, cheapest fix is the WD-D engine mitigation, precision via the ADR-20 HKT route; demand-gated)
-- [ADR-43](docs/adr/43-rbs-complete-ancestor-resolution.md) — RBS-complete ancestor resolution (accepted — engine + `manifest.rbs` landed, WD1–WD5; allow-list inherited-method dispatch so `rigor check` resolves a Ruby subclass's inherited calls against an RBS-complete ancestor (seed `Plugin::Base`) and warns on contract misuse standalone, without Steep's own-helper FP wall; zero net FP on the plugin lib tree; blanket resolution rejected on Rails-controller FP grounds; WD6 `make check` wiring pending 16 pre-existing RBS gaps)
+- [ADR-43](docs/adr/43-rbs-complete-ancestor-resolution.md) — RBS-complete ancestor resolution (accepted — fully landed, WD1–WD6; allow-list inherited-method dispatch so `rigor check` resolves a Ruby subclass's inherited calls against an RBS-complete ancestor (seed `Plugin::Base`) and warns on contract misuse standalone, without Steep's own-helper FP wall; zero net FP on the plugin lib tree; blanket resolution rejected on Rails-controller FP grounds; `make check-plugins` gate wired into `verify` + CI)
 
 ## Skills available in this repository
 
@@ -124,7 +124,7 @@ Skills follow the [Anthropic Agent Skills](https://agentskills.io/) shape — a 
 These mirror [`AGENTS.md`](AGENTS.md) — it is authoritative; the essentials:
 
 - **Commits**: plain imperative subject in sentence case, no `type:` / `area:` prefixes; why-not-diff body wrapped at ~72 cols. Version bumps use `Bump up version to x.y.z`. See AGENTS.md §§ "Commit Messages", "Release Cadence", "CHANGELOG Style".
-- **Verification**: after non-trivial changes run, inside the Flake, `make verify` then `git diff --check`. `make verify` chains `test` / `lint` / `check`; the `check` target (`bundle exec exe/rigor check lib`) is Rigor's own self-check and MUST stay clean — fix the cause (engine regression or a missing per-class blocklist entry), never disable the rule. Mention any skipped verification when the Flake shell is unavailable.
+- **Verification**: after non-trivial changes run, inside the Flake, `make verify` then `git diff --check`. `make verify` chains `test` / `lint` / `check` / `check-plugins`; the `check` target (`bundle exec exe/rigor check lib`) is Rigor's own self-check and `check-plugins` (`rigor check plugins/*/lib examples/*/lib`, ADR-43) is the plugin-contract self-check — both MUST stay clean. Fix the cause (engine regression, a missing per-class blocklist entry, or a genuine plugin contract misuse), never disable the rule. Mention any skipped verification when the Flake shell is unavailable.
 
 ## Notes for delegated agents
 

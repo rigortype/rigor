@@ -1,3 +1,5 @@
-class Rigor::Plugin::AccessDeniedError
+# `< StandardError` so inherited `Exception` methods (`message`,
+# `backtrace`, …) resolve on a rescued instance.
+class Rigor::Plugin::AccessDeniedError < StandardError
   def initialize: (untyped, reason: untyped, ?resource: untyped) -> void
 end

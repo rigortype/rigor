@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel lint check verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel lint check check-plugins verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -94,6 +94,17 @@ lint:
 check:
 	bundle exec exe/rigor check lib
 
+# Self-check the bundled plugin / example LIB trees against the
+# `Plugin::Base` contract. ADR-43 ancestor resolution makes a plugin's
+# inherited contract calls (`manifest.…`, `io_boundary.…`) resolve, so
+# `rigor check` warns on contract misuse here — this target is what
+# turns that into a gate. Lib dirs only (the `demo/` trees deliberately
+# exercise un-modelled framework DSLs and are not a clean target). MUST
+# stay clean for the same reason `check` does: fix the cause, never
+# disable the rule.
+check-plugins:
+	bundle exec exe/rigor check plugins/*/lib examples/*/lib
+
 check-json:
 	bundle exec exe/rigor check --format=json lib
 
@@ -104,22 +115,23 @@ check-json:
 coverage:
 	bundle exec exe/rigor coverage --threshold 0.43 lib
 
-# `verify` chains the spec suite, rubocop, and `rigor check lib`.
-# The spec phase runs in parallel by default (3-4× faster on
-# multi-core hosts than the sequential rspec invocation). `lint`
-# is already process-parallel via rubocop's built-in worker pool;
-# `check` is a single short rigor invocation.
+# `verify` chains the spec suite, rubocop, `rigor check lib`, and the
+# plugin-tree contract check. The spec phase runs in parallel by
+# default (3-4× faster on multi-core hosts than the sequential rspec
+# invocation). `lint` is already process-parallel via rubocop's
+# built-in worker pool; `check` / `check-plugins` are short rigor
+# invocations.
 #
 # Total wall time on a 12-core laptop: ~60s (vs ~200s for the
 # sequential variant below). Use `verify-sequential` when chasing
 # parallel-only flakes — the worker isolation hides certain
 # ordering bugs that surface only in a single-process run.
-verify: test-parallel lint check
+verify: test-parallel lint check check-plugins
 
 # Sequential variant. Identical phases as `verify` but `test`
 # runs single-process. Slower but bit-for-bit reproducible
 # without inter-worker scheduling effects.
-verify-sequential: test lint check
+verify-sequential: test lint check check-plugins
 
 # Backward-compatible alias for the previous `verify-parallel`
 # target name. Identical to `verify` now that parallel is the

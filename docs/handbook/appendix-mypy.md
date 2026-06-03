@@ -266,6 +266,13 @@ parameter is `_SupportsClose`, Rigor checks the call site's
 argument structurally, the same way mypy / Pyright check
 against a `Protocol`.
 
+One word of warning carried over from Python: in Rigor "protocol"
+does **not** mean this. The structural-type concept is the RBS
+`interface`; "protocol" is reserved for a different,
+plugin-declared feature (path-scoped behavioural contracts). The
+[Protocols and structural typing appendix](appendix-protocols-and-structural-typing.md)
+draws the distinction in full.
+
 ## What mypy / Pyright have and Rigor does not
 
 - **Variance annotations on TypeVars.** `TypeVar('T',

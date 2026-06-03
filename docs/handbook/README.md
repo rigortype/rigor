@@ -123,6 +123,24 @@ different choices.
   to the `typeprof` CLI, and the diagnostics-vs-RBS-output
   split.
 
+### Appendix — Protocols and structural typing
+
+A standalone concept page for the question this handbook gets
+from Python and Swift readers alike: *"where is Rigor's
+`Protocol`?"* It untangles the one word that means two
+unrelated things in Rigor — the **interface** (RBS structural
+type, the Python `typing.Protocol` analogue) and the
+**protocol contract** (ADR-28's path-scoped behavioural
+contract) — so you reach for the right one.
+
+- [**Protocols, interfaces, and structural typing**](appendix-protocols-and-structural-typing.md)
+  — RBS `interface` ↔ `typing.Protocol`, inferred object
+  shapes and capability roles, and how all of that differs
+  from the plugin-declared, path-scoped protocol contracts of
+  [ADR-28](../adr/28-path-scoped-protocol-contracts.md).
+  Includes the side-by-side "interface vs protocol contract"
+  table and a "which one do I want?" guide.
+
 ### Appendix — Connections to type theory
 
 A short bridge between Rigor's vocabulary and the formal

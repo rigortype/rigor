@@ -220,10 +220,22 @@ module Rigor
           nil
         end
 
-        # Frozen snapshot of the declared dynamic-return rules.
+        # Frozen snapshot of the declared dynamic-return rules. Memoised:
+        # `@dynamic_returns` is built once at class-definition time (via
+        # `dynamic_return`) and never mutated during analysis, and every
+        # element is already frozen, so a fresh `dup.freeze` per call was
+        # pure waste — the engine calls this for every plugin on every
+        # dispatch (`collect_plugin_contributions`), making it a top
+        # allocation site on plugin-heavy projects. The cached frozen
+        # array is immutable, so sharing one instance across callers is
+        # safe.
+        # rubocop:disable Naming/MemoizedInstanceVariableName -- the
+        # natural name `@dynamic_returns` is the canonical (mutable-at-
+        # definition) store this snapshots; the memo must be distinct.
         def dynamic_returns
-          (@dynamic_returns || []).dup.freeze
+          @dynamic_returns_snapshot ||= (@dynamic_returns || []).dup.freeze
         end
+        # rubocop:enable Naming/MemoizedInstanceVariableName
 
         # ADR-37 slice 2 — declares a predicate/assertion narrowing
         # contribution, method-gated. The narrow successor to the
@@ -250,10 +262,14 @@ module Rigor
           nil
         end
 
-        # Frozen snapshot of the declared type-specifier rules.
+        # Frozen snapshot of the declared type-specifier rules. Memoised
+        # for the same reason as {dynamic_returns} — consulted per plugin
+        # per dispatch, over an array fixed at class-definition time.
+        # rubocop:disable Naming/MemoizedInstanceVariableName -- see dynamic_returns
         def type_specifiers
-          (@type_specifiers || []).dup.freeze
+          @type_specifiers_snapshot ||= (@type_specifiers || []).dup.freeze
         end
+        # rubocop:enable Naming/MemoizedInstanceVariableName
       end
 
       attr_reader :services, :config

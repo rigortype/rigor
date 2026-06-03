@@ -21,6 +21,7 @@ cycles live in dedicated archives:
   - **RBS type-name parsing** — `Environment::RbsLoader#parse_type_name` memoises `RBS::TypeName.parse` (a deterministic function of the normalised string, returning a shareable frozen value object) on the per-loader store, removing what had become the top allocation site (~4.7%).
   - **Control-flow join** — `Scope#join_bindings`, run at every branch merge, replaced `left.keys & right.keys` (two key arrays + the intersection) with a single-pass `left.each` / `right.key?` probe, the same keys in the same order; it was ~75% of the analysis's `Hash#keys` allocations.
   - **Lexical constant candidates** — `lexical_constant_candidates` swapped `String#rpartition` (a throwaway 3-element array per nesting level) for `rindex` + slice.
+- **[performance]** Plugin contribution readers `Plugin::Base.dynamic_returns` / `.type_specifiers` now memoise their frozen snapshot instead of re-`dup`-ing it on every read. The engine consults them for every plugin on every dispatch (`collect_plugin_contributions`), so on a plugin-heavy project this was ~36% of all allocations. Cutting it drops allocations ~33% (GitLab subset, 2,630 files, 11 plugins, warm cache: 522M → 352M objects; wall 163s → 151s; GC runs 379 → 263) with byte-identical diagnostics. Profiling write-up: [`docs/notes/20260604-gitlab-plugin-contribution-allocation.md`](docs/notes/20260604-gitlab-plugin-contribution-allocation.md).
 
 ## [0.1.16] - 2026-06-03
 

@@ -136,6 +136,19 @@ bundles via `#flow_contribution_for`: dimensional results
 `Float`) override the demo's `untyped` RBS at every call site,
 so chained calls resolve through Rigor's normal dispatch.
 
+> **Operators reach the modern `dynamic_return` hook too.** A
+> Ruby `a + b` is a `Prism::CallNode` named `:+`, so it flows
+> through the same dispatch path as any call. A migrated plugin
+> could contribute these operator return types declaratively with
+> `dynamic_return(receivers: ["Distance"]) { |call_node, _| ... }`
+> branching on `call_node.name` — no operator-specific extension
+> point is needed (Rigor's analogue of PHPStan's
+> `OperatorTypeSpecifyingExtension` for the self / left-operand
+> direction; see ADR-42 and
+> `spec/integration/plugin_operator_dynamic_return_spec.rb`). The
+> one direction this cannot reach is `scalar <op> quantity`
+> (`2 * distance`), where Ruby dispatches on the built-in receiver.
+
 The remaining open surface is **lightweight HKT** — the
 type-level computation that lets the dispatch table live on
 the RBS sig instead of in the plugin:

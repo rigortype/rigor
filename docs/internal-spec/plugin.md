@@ -211,6 +211,17 @@ the block carries logic and runs through `instance_exec`:
   invokes it through `#dynamic_return_type(call_node:, scope:,
   receiver_type:)`. `rigor-mangrove` (unwrap → carried `type_args[0]`)
   is the worked consumer.
+  - **Binary operators are ordinary calls here.** Ruby's `a + b` parses
+    to a `Prism::CallNode` named `:+`, so it reaches this hook like any
+    other call: a `dynamic_return(receivers: ["Money"])` rule can branch
+    on `call_node.name ∈ {:+, :-, :*, :/, :<=>, …}` and return the
+    operator's result type — Rigor's equivalent of PHPStan's
+    `OperatorTypeSpecifyingExtension` for the self / left-operand case,
+    with no operator-specific extension point. Confirmed by
+    `spec/integration/plugin_operator_dynamic_return_spec.rb`. **Caveat
+    (coerce direction):** the gate is on the *receiver* class, and Ruby
+    dispatches `1 + money` on `Integer`, so a `["Money"]` rule does not
+    fire there; that result types left-biased as `Integer` (see ADR-42).
 - `type_specifier(methods:) { |call_node, scope| facts | nil }` —
   **post-return narrowing facts**, gated on `call_node.name` being in
   the declared `methods:`. The engine invokes it through

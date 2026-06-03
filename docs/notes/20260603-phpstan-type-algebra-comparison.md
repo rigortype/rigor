@@ -186,20 +186,21 @@ PHPStan は `isSuperTypeOf` を `TypeCombinator` 経由で網羅テストする�
 
 スパイク（§3 G1）で前提が一つ崩れた：**自型／同型レシーバの二項演算は新フックなしで既に対応できる**。これにより ADR の必要範囲は当初想定より小さい。
 
-- **G1a/G1b（ドキュメント + エルゴノミクス）は ADR 不要**。`dynamic_return` の演算子捕捉を examples（`rigor-units`）と manual に明記し、回帰スペックで固定すれば足りる。薄い宣言糖衣 `operator_return` は欲しければ後続の小改善（ADR 不要、CHANGELOG レベル）。
+- **G1a/G1b（ドキュメント + エルゴノミクス）は ADR 不要・LANDED**。`dynamic_return` の演算子捕捉を [`docs/internal-spec/plugin.md`] の `dynamic_return` 節 + [`examples/rigor-units/README.md`] に明記し、回帰スペック [`plugin_operator_dynamic_return_spec.rb`] で固定済み。薄い宣言糖衣 `operator_return` は欲しければ後続の小改善（ADR 不要、CHANGELOG レベル）。
 - **G1c（coerce 方向）— ADR-42 として起票済み・低優先 demand-gated**。2 回の訂正を経た現在地：(1) 当初「実需あり（BigDecimal-coerce survey）」は誤り。survey の FP は overload 順序問題で `acc9882`（ReceiverAffinity）により**解決済み**、本件と無関係。(2) 次に「無害な fail-soft（Dynamic・無診断）」としたが、これも**スペックで反証された**：`1 + money` は Dynamic ではなく**左偏重で Integer 型**になり、結果への独自メソッド呼び出しは**狭いが偽陽性を生みうる**（§3 G1c）。よって「精度のみ・安全性に無関係」ではなく、少数派条件下で FP が出る。(3) ただし最安の解は ADR-42 の新フックではなく、**§3 G1c の選択肢 (iii)：引数が非 Numeric の独自型のとき結果を Integer 左偏重ではなく Dynamic に倒すエンジン小改修**で、プラグインフックなしに FP だけを消せる。さらに精度まで欲しければ `examples/rigor-units` 自身が示す **ADR-20 lightweight HKT + RBS 型関数**が本筋。→ **ADR-42 は Proposed のまま。まず (iii) の FP 緩和を検討し、精度は HKT 経路を優先。新フックは両者で足りないと実消費者で判明したときのみ**。
 - **G2/G3/G5 — 2026-06-03 評価で却下／保留**（§3 各項参照）。G2（`to_*`）= 需要なし・narrowing が等価機構で却下。G3（`generalize`）= プラグイン facade ではなく ADR-41 budget の領分、却下。G5（offset facade）= カスタムコンテナ消費者が出るまで保留。いずれも ADR 不要。
 - **G4** は ADR 不要。`Type::Combinator` に便宜メソッドを足すだけの DX 改善で、CHANGELOG レベル。
 
 **総括（再評価後）**：PHPStan 同水準を目指す未実装で**新しいプラグイン拡張点を要するものはゼロ**。自型/左辺の演算子は既存 `dynamic_return` で対応済み（スペックで確定）、coerce 方向（G1c）は少数派 FP が出うるが最安の緩和はエンジン小改修（§3 G1c (iii)）で精度は HKT 経路、`to_*`/`generalize`/offset facade は需要なし。価値ある残作業は §4 のテスト整備と G1a/G1b のドキュメント化、そして必要なら G1c (iii) の FP 緩和（いずれも新フック ADR 不要）。
 
-**推奨**：
+**推奨と着手状況**：
 
-1. **即時・ADR 不要**：G1a/G1b（演算子糖衣の文書化 + `rigor-units` への演算子ケース追加 + 回帰スペック、§4-6）と G4（null 便宜メソッド）。これで「自型同士の演算子型演算」は PHPStan と同水準に並ぶ。
-2. **ADR 起票推奨**：G1c（coerce 方向／左辺組み込み型からの演算子委譲）。タイトル案「Plugin-contributed binary-operator return types（coerce-direction）」。主題は coerce 経路、従属節で G1a/G1b の既存契約活用と facade 拡充（G2/G3/G5）を将来作業として言及。ADR-2 / ADR-37 / ADR-39（プラグインがターゲットライブラリを叩く）の系譜。
-3. **テスト軸（§4）**は ADR と独立に着手可能。
+1. **LANDED（ADR 不要）**：G1a/G1b（§4-6 の演算子↔`dynamic_return` 回帰スペック [`plugin_operator_dynamic_return_spec.rb`] + [`docs/internal-spec/plugin.md`] の `dynamic_return` 節への演算子注記 + [`examples/rigor-units/README.md`] への演算子ポインタ）。これで「自型/左辺の演算子型演算」は PHPStan と同水準に並んだ。
+2. **LANDED（ADR 不要）**：§4 テスト軸のうち実在ギャップ 3 本（`STRING_FOLD_BYTE_LIMIT`、IntegerRange 符号付き無限大、Difference 連続減算）を既存スペックに追加。残り（accepts 非推移性の明示ケース等）は既存カバレッジが厚く優先度低。
+3. **ADR-42 起票済み（Proposed・低優先・demand-gated）**：G1c（coerce 方向）。スペックで「狭い FP」と確定。最安の緩和は WD-D（エンジン小改修、フック不要）、精度は ADR-20 HKT。実消費者が出るまで未実装。
+4. **却下/保留（ADR 不要）**：G2/G3/G5（§3 各項）、G4（CHANGELOG レベル）。
 
-→ ADR を起こすとすれば**範囲は G1c に絞った 1 本**が妥当。G1 全体を ADR にする当初案は過大だった。
+→ 当初の「G1 全体を ADR」案は過大で、実際に残った ADR は G1c に絞った 1 本（ADR-42）のみ。それ以外は文書・テストで決着済み。
 
 ---
 

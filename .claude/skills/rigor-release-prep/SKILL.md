@@ -26,16 +26,24 @@ Update these files:
 ### Seal the `[Unreleased]` entries — the mandatory rewrite step
 
 **Do this first, before the mechanical version-heading move below, and treat
-the rewrite — not the version bump — as the deliverable of this skill.** This
-is the highest-value, most-skipped step in a release. The `[Unreleased]`
-section accumulates **commit-style** lines as work lands (detailed,
-implementer-facing, multi-sentence, em-dash run-ons); at release time they MUST
-be rewritten into **release-style** entries before the version is sealed. A
-release whose CHANGELOG still reads like commit messages is **not done**, even
-if every versioned file agrees and `make verify` is green — prose quality is
-invisible to `make verify`, so nothing downstream will catch a skipped rewrite.
-This is the one step that is silently lost when the mechanical steps around it
-get done; do not let "the entries are already there" stand in for the rewrite.
+the entries — not the version bump — as the deliverable of this skill.** The
+intended state is that every `[Unreleased]` entry was already written
+release-style **at landing** (per `AGENTS.md` § "CHANGELOG Style"), so this step
+is mostly **cross-entry consolidation**: fold several commits' entries into one
+user-recognisable change, reorder, dedupe, and split any merge artefacts —
+work that needs the cycle-wide context only release time has. In practice the
+section also accumulates **commit-style** drift (detailed, implementer-facing,
+multi-sentence, em-dash run-ons) that landing-time discipline missed, so this
+step is also the **safety net** that rewrites that drift into release-style
+before the version is sealed — it is not, however, a licence to skip
+landing-time quality and rewrite commit prose wholesale at the cut.
+
+This is the highest-value, most-skipped step in a release. A release whose
+CHANGELOG still reads like commit messages is **not done**, even if every
+versioned file agrees and `make verify` is green — prose quality is invisible
+to `make verify`, so nothing downstream will catch a skipped rewrite. It is the
+one step silently lost when the mechanical steps around it get done; do not let
+"the entries are already there" stand in for reviewing and consolidating them.
 
 The canonical rules live in `AGENTS.md` § "CHANGELOG Style". The load-bearing
 ones are inlined here so this step never depends on a skipped hop:

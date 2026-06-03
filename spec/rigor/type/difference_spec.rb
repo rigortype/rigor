@@ -54,6 +54,29 @@ RSpec.describe Rigor::Type::Difference do
     end
   end
 
+  # Subtracting a second value from an existing Difference layers rather
+  # than flattening into one multi-removal carrier: the outer Difference
+  # keeps the inner one as its base. Display composes — the inner renders
+  # by its canonical refinement name, the outer appends the new exclusion.
+  describe "repeated subtraction (layering)" do
+    it "wraps `(String - \"\") - \"x\"` as a Difference whose base is the inner Difference" do
+      inner = Rigor::Type::Combinator.difference(nominal_of("String"), constant_of(""))
+      outer = Rigor::Type::Combinator.difference(inner, constant_of("x"))
+
+      expect(outer).to be_a(described_class)
+      expect(outer.base).to eq(inner)
+      expect(outer.removed).to eq(constant_of("x"))
+    end
+
+    it "composes display: inner canonical name minus the outer exclusion" do
+      inner = Rigor::Type::Combinator.difference(nominal_of("String"), constant_of(""))
+      outer = Rigor::Type::Combinator.difference(inner, constant_of("x"))
+
+      expect(inner.describe).to eq("non-empty-string")
+      expect(outer.describe).to eq('non-empty-string - "x"')
+    end
+  end
+
   describe "RBS erasure" do
     it "erases to the base nominal" do
       expect(Rigor::Type::Combinator.non_empty_string.erase_to_rbs).to eq("String")

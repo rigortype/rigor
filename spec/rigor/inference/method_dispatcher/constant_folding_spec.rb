@@ -258,6 +258,42 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
   end
 
+  # STRING_FOLD_BYTE_LIMIT (4096) keeps a literal-string fold from
+  # materialising an unbounded result in the analyzer. The three guarded
+  # paths are `*` by a count (count > limit), `*` by bytesize
+  # (receiver.bytesize * count > limit), and `+` concat
+  # (left.bytesize + right.bytesize > limit). A declined fold returns
+  # nil so dispatch falls through to the RBS `String` envelope — the
+  # value is still typed, just not as a literal.
+  describe "STRING_FOLD_BYTE_LIMIT enforcement" do
+    it "folds a small String#* within the byte budget" do
+      type = fold("x", :*, [10])
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq("x" * 10)
+    end
+
+    it "declines String#* when the repeat count alone exceeds the limit" do
+      expect(fold("x", :*, [5000])).to be_nil
+    end
+
+    it "declines String#* when bytesize * count exceeds the limit" do
+      # 100-byte receiver * 50 = 5000 bytes > 4096, even though the
+      # count (50) is itself under the limit.
+      expect(fold("y" * 100, :*, [50])).to be_nil
+    end
+
+    it "folds String#+ within the byte budget" do
+      type = fold("a", :+, ["b"])
+      expect(type).to be_a(Rigor::Type::Constant)
+      expect(type.value).to eq("ab")
+    end
+
+    it "declines String#+ when the concatenated bytesize exceeds the limit" do
+      big = "x" * 3000
+      expect(fold(big, :+, [big])).to be_nil
+    end
+  end
+
   # Union[Constant…] folding. Each Constant in a union represents a
   # possible runtime value; a binary op over two unions is the
   # cartesian fold, deduplicated. Bounded by the input/output
@@ -600,6 +636,33 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
 
       it "bails on non-point divisor (conservative)" do
         expect(fold_types(positive_int, :%, [integer_range(2, 5)])).to be_nil
+      end
+    end
+
+    # Signed-infinity edges: arithmetic where one or both endpoints are
+    # ±∞. The corner computations (with safe_mul's `0 × ∞ = 0`) must
+    # produce algebraically correct bounded/half-bounded results rather
+    # than NaN-corrupted ranges.
+    describe "signed-infinity arithmetic edges" do
+      it "negative-int * positive-int is negative-int" do
+        # (-∞, -1] × [1, +∞): max corner is (-1)(1) = -1, min is -∞.
+        expect(fold_types(negative_int, :*, [positive_int])).to eq(negative_int)
+      end
+
+      it "negative-int * negative-int is positive-int" do
+        # (-∞, -1] × (-∞, -1]: all products positive, min (-1)(-1)=1.
+        expect(fold_types(negative_int, :*, [negative_int])).to eq(positive_int)
+      end
+
+      it "negative-int + positive-int widens to the universal int (mixed infinities)" do
+        # (-∞, -1] + [1, +∞) = (-∞, +∞).
+        expect(fold_types(negative_int, :+, [positive_int])).to eq(universal_int)
+      end
+
+      it "negative-int / positive-int is the non-positive int (-∞, 0]" do
+        # -∞ / 1 = -∞; -1 / +∞ rounds toward 0.
+        expect(fold_types(negative_int, :/, [positive_int]))
+          .to eq(integer_range(Rigor::Type::IntegerRange::NEG_INFINITY, 0))
       end
     end
 

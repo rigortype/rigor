@@ -177,9 +177,16 @@ with folded results unchanged.
     does **not** match `require` order. Self-registration would still
     need explicit ordering hints, so it trades one table for another
     plus a load-order coupling. Left as the explicit 3-site edit.
-  - `NumericCatalog` is still a standalone module (duplicates
-    `safe_for_folding?` / `load_catalog` that `MethodCatalog` provides) —
-    a separate consolidation, not started.
+  - **`NumericCatalog` consolidation — DONE.** It was the last per-class
+    catalog with its own hand-rolled `safe_for_folding?` / `method_entry`
+    / `load_catalog` copy of `MethodCatalog` (it predated the generic
+    loader). Replaced with `NUMERIC_CATALOG = MethodCatalog.for_topic(
+    "numeric")`; `CATALOG_BY_CLASS` Integer/Float rows repointed. Bang
+    gate is a no-op (no foldable numeric bang methods); MethodCatalog's
+    alias resolution adds five sound folds (`magnitude`→`abs`,
+    `inspect`→`to_s`, …) with no snapshot movement. ractor-readiness
+    check now asserts the instance is shareable via the
+    `CATALOG_BY_CLASS` deep-freeze.
 - **Finding 1 — DONE.** Extracted `MethodDispatcher::SingletonFolding`
   (`receiver?` + `constant_string`); migrated all 9 receiver predicates
   (CGI/URI/Shellwords/Math/Time/Regexp/Set/File + iterator_dispatch's

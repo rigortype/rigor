@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "uri"
+require_relative "buffer_resolution"
 
 module Rigor
   module LanguageServer
@@ -13,6 +14,8 @@ module Rigor
     # one keystroke moves up the chain, another moves further out,
     # all the way to the root.
     class SelectionRangeProvider
+      include BufferResolution
+
       def initialize(buffer_table:, project_context:)
         @buffer_table = buffer_table
         @project_context = project_context
@@ -23,10 +26,7 @@ module Rigor
       # @return [Array<Hash>, nil] one `SelectionRange` per
       #   position, or nil when the URI / buffer isn't resolvable.
       def provide(uri, positions)
-        path = Uri.to_path(uri)
-        return nil if path.nil?
-
-        entry = @buffer_table[uri]
+        path, entry = buffer_for(uri)
         return nil if entry.nil?
 
         parse_result = Prism.parse(entry.bytes, filepath: path,

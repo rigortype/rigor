@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "uri"
+require_relative "buffer_resolution"
 
 module Rigor
   module LanguageServer
@@ -18,6 +19,8 @@ module Rigor
     # - Method      (6)  — `def m` inside a class / module
     # - Function    (12) — `def m` at top-level (no enclosing class)
     class DocumentSymbolProvider
+      include BufferResolution
+
       KIND_MODULE   = 2
       KIND_CLASS    = 5
       KIND_METHOD   = 6
@@ -33,10 +36,7 @@ module Rigor
       #   doesn't parse cleanly enough to surface symbols — LSP
       #   clients fall back to no-outline in that case.
       def provide(uri)
-        path = Uri.to_path(uri)
-        return nil if path.nil?
-
-        entry = @buffer_table[uri]
+        path, entry = buffer_for(uri)
         return nil if entry.nil?
 
         parse_result = Prism.parse(entry.bytes, filepath: path,

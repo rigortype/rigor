@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "uri"
+require_relative "buffer_resolution"
 require_relative "../environment"
 require_relative "../reflection"
 require_relative "../scope"
@@ -35,6 +36,8 @@ module Rigor
     # active-parameter override per overload land in follow-up
     # slices (queued in the design doc § "Out of scope for v2").
     class SignatureHelpProvider
+      include BufferResolution
+
       ARG_SENTINEL = "__rigor_lsp_arg_sentinel__"
       private_constant :ARG_SENTINEL
 
@@ -47,10 +50,7 @@ module Rigor
       #   when the cursor isn't inside a resolvable method call.
       def provide(uri:, line:, character:, context: nil)
         _ = context # Trigger info accepted but not routed in v1.
-        path = Uri.to_path(uri)
-        return nil if path.nil?
-
-        entry = @buffer_table[uri]
+        path, entry = buffer_for(uri)
         return nil if entry.nil?
 
         bytes, locate_at = parse_attempt_bytes(entry.bytes, line, character)

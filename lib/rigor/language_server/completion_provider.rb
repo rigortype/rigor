@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "uri"
+require_relative "buffer_resolution"
 require_relative "../environment"
 require_relative "../reflection"
 require_relative "../scope"
@@ -35,6 +36,8 @@ module Rigor
     #
     # Slice 6 will add 7 (Class), 9 (Module), 21 (Constant).
     class CompletionProvider # rubocop:disable Metrics/ClassLength
+      include BufferResolution
+
       KIND_METHOD   = 2
       KIND_FIELD    = 5
       KIND_CLASS    = 7
@@ -54,10 +57,7 @@ module Rigor
       #   means "we tried and got nothing".
       def provide(uri:, line:, character:, trigger_character: nil)
         _ = trigger_character # Trigger info logged-not-routed in v1.
-        path = Uri.to_path(uri)
-        return nil if path.nil?
-
-        entry = @buffer_table[uri]
+        path, entry = buffer_for(uri)
         return nil if entry.nil?
 
         # Slice B4 — parse recovery. The common mid-edit buffer

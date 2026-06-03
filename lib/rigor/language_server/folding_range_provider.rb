@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "uri"
+require_relative "buffer_resolution"
 
 module Rigor
   module LanguageServer
@@ -18,6 +19,8 @@ module Rigor
     # collapsed view shows the opener intact and hides the body
     # only.
     class FoldingRangeProvider
+      include BufferResolution
+
       def initialize(buffer_table:, project_context:)
         @buffer_table = buffer_table
         @project_context = project_context
@@ -26,10 +29,7 @@ module Rigor
       # @return [Array<Hash>, nil] LSP `FoldingRange[]` for the
       #   buffer, or nil when the URI isn't open / parseable.
       def provide(uri)
-        path = Uri.to_path(uri)
-        return nil if path.nil?
-
-        entry = @buffer_table[uri]
+        path, entry = buffer_for(uri)
         return nil if entry.nil?
 
         parse_result = Prism.parse(entry.bytes, filepath: path,

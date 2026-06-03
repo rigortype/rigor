@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "uri"
+require_relative "buffer_resolution"
 require_relative "hover_renderer"
 require_relative "../environment"
 require_relative "../scope"
@@ -22,6 +23,8 @@ module Rigor
     #   for ASCII source (UTF-16 conversion is queued, see design
     #   doc § "Open questions").
     class HoverProvider
+      include BufferResolution
+
       def initialize(buffer_table:, project_context:, renderer: HoverRenderer.new)
         @buffer_table = buffer_table
         @project_context = project_context
@@ -33,10 +36,7 @@ module Rigor
       #   maps to `result: null` per the LSP spec — clients
       #   suppress the hover popup in that case.
       def provide(uri:, line:, character:)
-        path = Uri.to_path(uri)
-        return nil if path.nil?
-
-        entry = @buffer_table[uri]
+        path, entry = buffer_for(uri)
         return nil if entry.nil?
 
         parse_result = Prism.parse(entry.bytes, filepath: path, version: @project_context.configuration.target_ruby)

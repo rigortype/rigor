@@ -232,6 +232,6 @@ Resolved decisions for the remaining work:
 
 ### Open items (doc track)
 
-- **CHANGELOG?** The doc-accuracy fixes above (esp. `assert_type` order, `disable` key) affect users who follow the docs; consider an `[Unreleased]` doc-fix entry. Deferred to the user — this pass touched only `docs/` + `plugins/*/README.md`.
-- **Not pushed.** All ~36 commits are local on `master`.
+- ✅ **CHANGELOG — DONE.** The doc-accuracy fixes (`assert_type` order, `disable` key, fork-not-Ractor workers, missing diagnostic rules, HKT/RBS corrections) are recorded as a `**[docs]**` entry under `[Unreleased]` § Fixed.
+- **Pushed.** `master` is in sync with `origin/master` (0 ahead / 0 behind) — the doc-overhaul commits are no longer local-only.
 - The forward-looking one-liner for this track lives in [`docs/ROADMAP.md`](ROADMAP.md) § "Future cycles" → "Documentation".

@@ -1153,7 +1153,7 @@ module Rigor
         #
         # Resolution order:
         #
-        # 1. Primary class catalog (e.g. NumericCatalog for an
+        # 1. Primary class catalog (e.g. NUMERIC_CATALOG for an
         #    Integer receiver). When the catalog has an entry —
         #    even one classified `:dispatch` — that answer wins.
         #    The class's direct `rb_define_method` registration is
@@ -1213,8 +1213,8 @@ module Rigor
         # arm first and the catalog would consult the Date entry
         # in `DATE_CATALOG` for the wrong class.
         CATALOG_BY_CLASS = Ractor.make_shareable([
-                                                   [Integer, [Builtins::NumericCatalog, "Integer"]],
-                                                   [Float,    [Builtins::NumericCatalog, "Float"]],
+                                                   [Integer, [Builtins::NUMERIC_CATALOG, "Integer"]],
+                                                   [Float,    [Builtins::NUMERIC_CATALOG, "Float"]],
                                                    [String,   [Builtins::STRING_CATALOG, "String"]],
                                                    [Symbol,   [Builtins::STRING_CATALOG, "Symbol"]],
                                                    [Array,    [Builtins::ARRAY_CATALOG,  "Array"]],

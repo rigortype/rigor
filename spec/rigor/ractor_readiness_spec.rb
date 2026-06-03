@@ -333,9 +333,13 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
   # projects as `Ractor::IsolationError` while reading the
   # singleton-class ivar or constant from a non-main Ractor.
   describe "Phase 4b.x — module catalog shareability" do
-    it "NumericCatalog @catalog (singleton-class ivar) is Ractor.shareable?" do
-      catalog = Rigor::Inference::Builtins::NumericCatalog.instance_variable_get(:@catalog)
-      expect(shareable?(catalog)).to be(true)
+    it "NUMERIC_CATALOG (MethodCatalog instance + its @catalog graph) is Ractor.shareable?" do
+      # NUMERIC_CATALOG is now an ordinary MethodCatalog instance (folded
+      # off its former bespoke module); like the other per-class catalogs
+      # it is deep-frozen via `Ractor.make_shareable(CATALOG_BY_CLASS)` in
+      # ConstantFolding, so the instance and its parsed-YAML @catalog must
+      # both be shareable.
+      expect(shareable?(Rigor::Inference::Builtins::NUMERIC_CATALOG)).to be(true)
     end
 
     it "Type::Refined::CANONICAL_NAMES is Ractor.shareable?" do

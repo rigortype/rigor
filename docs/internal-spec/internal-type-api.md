@@ -28,6 +28,9 @@ This document does **not** bind:
 - `hash` MUST be derived from the same structural data so that `eql?`-equal instances produce identical `hash` values.
 - Equality MUST NOT depend on object identity. Two type instances with equal structure MUST compare equal even when they are not the same Ruby object.
 - A type instance MAY be reused as a hash key. Implementations MAY flyweight common instances when caching is observably useful, but flyweighting MUST NOT be relied on for correctness.
+- "Structurally equivalent data" includes any discriminator the carrier folds into its identity. In particular a `Constant` MUST distinguish the Ruby class of its wrapped value, so `Constant[1]` (Integer) and `Constant[1.0]` (Float) are unequal even though `1 == 1.0`; field-wise comparison alone would conflate them.
+
+This identity contract is codified as the structural interface `_Type` in [`sig/rigor/type.rbs`](../../sig/rigor/type.rbs) — a structural interface (the RBS/Go sense), not an ADR-28 protocol contract. Carriers whose identity is a plain field-wise comparison MAY generate the `==` / `eql?` / `hash` trio from their field list (the `Rigor::ValueSemantics` `value_fields` macro), which keeps the three methods in agreement by construction; carriers with a refined identity (the `Constant` class-discriminator above, the field-free `Top` / `Bot` singletons) hand-write the trio. The generation mechanism is implementation; the binding contract is the three rules above.
 
 ## Trinary Result Value
 

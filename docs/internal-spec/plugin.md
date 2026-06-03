@@ -255,7 +255,7 @@ Frozen value object describing one plugin's identity. Fields:
 | `version` | non-empty `String` | Plugin version; lands in `PluginEntry#version` for cache invalidation. |
 | `description` | `String?` | Human-readable summary. |
 | `protocols` | `Array<Symbol>` | Protocol names this plugin implements. |
-| `config_schema` | `{ String => Symbol }` | Accepted config keys mapped to value kinds (`:string`, `:boolean`, `:integer`, `:array`, `:hash`, `:any`). |
+| `config_schema` | `{ String => Symbol \| { kind:, default: } }` | Accepted config keys mapped to a value **kind** (`:string`, `:boolean`, `:integer`, `:array`, `:hash`, `:any`), optionally carrying a declared **default** (ADR-40; see _Declared config defaults_ below). |
 
 The following **extension fields** were added across the `0.1.x`
 cycle. All are optional and additive to the pre-1.0 plugin contract;
@@ -279,6 +279,53 @@ a plugin declaring none of them is a plain per-file analyzer:
 `#validate_config(config)` returns an array of error strings; the
 loader converts a non-empty result into a `LoadError`. Each extension
 field carries its own validation in `Manifest#initialize`.
+
+#### Declared config defaults — `config_schema` `{ kind:, default: }` (ADR-40)
+
+A `config_schema` value MAY be either the original **bare kind**
+(`Symbol`/`String` — `"flag" => :boolean`) **or** a `Hash` carrying
+`kind:` (required) and an optional `default:`:
+
+```ruby
+config_schema: {
+  "dsl_method"   => :string,                                  # bare kind, no default
+  "state_method" => { kind: :string, default: "state" },      # kind + declared default
+  "events"       => { kind: :array,  default: [] }
+}
+```
+
+The two forms are a pure superset of one grammar; the engine MUST
+honour the following contract:
+
+- **Kind map is unchanged in shape.** `Manifest#config_schema` MUST
+  remain `{ String => Symbol }` (the kind only), so `#validate_config`,
+  `#to_h`, `#==`, and `#hash` are unaffected by which form a key used.
+  A `{ kind:, default: }` entry contributes its `kind:` to this map
+  exactly as a bare kind would.
+- **`Manifest#config_defaults`** MUST expose a frozen
+  `{ String => value }` map holding **only** the keys that declared a
+  `default:`. It is a public reader (pinned in the public-API drift
+  spec + RBS sig). Keys with no declared default do not appear.
+- **A declared `default:` MUST be validated against its `kind:` at
+  manifest-construction time** (the same `value_matches?` check
+  `#validate_config` applies to user values). A wrong-typed default
+  (`default: 5` under `kind: :string`) MUST raise an `ArgumentError`
+  at load, not fail silently at use.
+- **`Plugin::Base#config` merges defaults under the user config**:
+  `#initialize` stores `manifest.config_defaults.merge(user_config)`
+  (frozen) as `#config`, so **the user config wins** on any key it
+  sets. A plugin therefore reads `config.fetch("state_method")` (or
+  `config["state_method"]`) and gets the declared default with no
+  `DEFAULT_*` constant and no second `fetch` argument; coercions the
+  plugin still wants (`.to_sym`, `Array(...)`) stay at the read site. A
+  class declared with no manifest (test doubles) keeps the raw config
+  unchanged.
+
+This form is config ergonomics only: it changes no rule and no type,
+so it cannot introduce a diagnostic. It is also cache-safe — a default
+is part of the plugin's *code* (its `version`), which the
+`Cache::Descriptor::PluginEntry` key already captures; `config_defaults`
+participates in `Manifest#to_h`/`#==`/`#hash` but never in a cache key.
 
 ### `Rigor::Plugin::Services`
 

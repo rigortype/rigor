@@ -27,6 +27,21 @@ module Rigor
         FOLDABLE_PURITIES = Set["leaf", "trivial", "leaf_when_numeric"].freeze
         EMPTY_CATALOG = { "classes" => {} }.freeze
 
+        # Shared root for the offline-generated catalogues. Resolving it
+        # here keeps the repo-relative `../../../../` hop in one place
+        # instead of copying it into every per-topic loader.
+        DATA_ROOT = File.expand_path("../../../../data/builtins/ruby_core", __dir__)
+        private_constant :DATA_ROOT
+
+        # Build a catalog for a named topic, resolving its YAML path
+        # under {DATA_ROOT}. Equivalent to `new(path: …)` for the common
+        # case where the file is `<topic>.yml`; prefer this over passing
+        # an explicit `File.expand_path` so the data-root hop stays
+        # centralised.
+        def self.for_topic(topic, mutating_selectors: {})
+          new(path: File.join(DATA_ROOT, "#{topic}.yml"), mutating_selectors: mutating_selectors)
+        end
+
         def initialize(path:, mutating_selectors: {})
           @path = path
           @mutating_selectors = mutating_selectors.transform_values(&:freeze).freeze

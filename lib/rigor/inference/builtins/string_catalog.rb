@@ -15,11 +15,8 @@ module Rigor
       # mutation primitives). Adding to the blocklist is the
       # corrective surface for false positives until the
       # classifier learns the helper functions.
-      STRING_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/string.yml",
-          __dir__
-        ),
+      STRING_CATALOG = MethodCatalog.for_topic(
+        "string",
         mutating_selectors: {
           "String" => Set[
             :replace, :initialize, :initialize_copy, :clear, :<<, :concat, :insert,

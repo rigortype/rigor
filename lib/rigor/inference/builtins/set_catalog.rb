@@ -19,11 +19,8 @@ module Rigor
       # (`set_iter`, `RETURN_SIZED_ENUMERATOR`) and its identity-
       # mode and reset paths drive into helpers the regex classifier
       # does not yet recognise as block-yielding or mutating.
-      SET_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/set.yml",
-          __dir__
-        ),
+      SET_CATALOG = MethodCatalog.for_topic(
+        "set",
         mutating_selectors: {
           "Set" => Set[
             # Indirect mutators classified `:leaf` because the C

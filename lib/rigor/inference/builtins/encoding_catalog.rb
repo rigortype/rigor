@@ -22,11 +22,8 @@ module Rigor
       # against the analyzer process's registry — what UTF-8's
       # alias list is in the analyzer is not necessarily what it
       # is in the analysed program.
-      ENCODING_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/encoding.yml",
-          __dir__
-        ),
+      ENCODING_CATALOG = MethodCatalog.for_topic(
+        "encoding",
         mutating_selectors: {
           "Encoding" => Set[
             # Defence-in-depth: mirrors range_catalog.rb /

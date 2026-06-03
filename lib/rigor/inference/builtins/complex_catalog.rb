@@ -21,11 +21,8 @@ module Rigor
       # so a hypothetical future `Constant<Complex>` carrier cannot
       # fold an aliasing copy through the catalog (mirrors
       # `range_catalog.rb`, `time_catalog.rb`, `date_catalog.rb`).
-      COMPLEX_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/complex.yml",
-          __dir__
-        ),
+      COMPLEX_CATALOG = MethodCatalog.for_topic(
+        "complex",
         mutating_selectors: {
           "Complex" => Set[
             # Defence in depth: `Complex` does not currently expose

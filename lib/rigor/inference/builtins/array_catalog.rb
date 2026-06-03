@@ -13,11 +13,8 @@ module Rigor
       # `ary_push_internal`, …) that the classifier does not yet
       # recognise. The blocklist captures the methods we have
       # specifically observed flowing as `:leaf` despite mutating.
-      ARRAY_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/array.yml",
-          __dir__
-        ),
+      ARRAY_CATALOG = MethodCatalog.for_topic(
+        "array",
         mutating_selectors: {
           "Array" => Set[
             # Mutators classified `:leaf` by the C-body heuristic

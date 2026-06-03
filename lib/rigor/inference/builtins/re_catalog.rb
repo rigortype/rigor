@@ -38,11 +38,8 @@ module Rigor
       # signatures already widen the answer enough to keep the
       # behaviour sound; revisit if the dispatcher ever grows a
       # singleton-aware catalog path.
-      REGEXP_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/re.yml",
-          __dir__
-        ),
+      REGEXP_CATALOG = MethodCatalog.for_topic(
+        "re",
         mutating_selectors: {
           "Regexp" => Set[
             # Defensive: aliasing-copy semantics already covered

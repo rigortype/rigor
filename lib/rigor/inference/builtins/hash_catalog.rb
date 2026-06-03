@@ -15,11 +15,8 @@ module Rigor
       # captures every false-positive `:leaf` we have spotted in the
       # generated YAML — bias toward conservatism so a missed fold is
       # acceptable but a folded mutator/yielder is not.
-      HASH_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/hash.yml",
-          __dir__
-        ),
+      HASH_CATALOG = MethodCatalog.for_topic(
+        "hash",
         mutating_selectors: {
           "Hash" => Set[
             # Block-dependent iteration — yields via `rb_hash_foreach`

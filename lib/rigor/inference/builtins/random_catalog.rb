@@ -21,11 +21,8 @@ module Rigor
       # functionally pure they would produce a misleading constant
       # at fold time. The whole class is conservative-by-default
       # at the catalog tier; precision flows through the RBS layer.
-      RANDOM_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/random.yml",
-          __dir__
-        ),
+      RANDOM_CATALOG = MethodCatalog.for_topic(
+        "random",
         mutating_selectors: {
           "Random" => Set[
             # `rand_random` -> `random_real` / `random_ulong_limited`

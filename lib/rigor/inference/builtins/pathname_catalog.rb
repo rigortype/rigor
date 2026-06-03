@@ -16,11 +16,8 @@ module Rigor
       # helper that triggered the false positive (see
       # `string_catalog.rb`, `array_catalog.rb`, `time_catalog.rb`
       # for the canonical shape).
-      PATHNAME_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/pathname.yml",
-          __dir__
-        ),
+      PATHNAME_CATALOG = MethodCatalog.for_topic(
+        "pathname",
         mutating_selectors: {
           "Pathname" => Set[
           # initialize_copy is blocklisted by convention so a

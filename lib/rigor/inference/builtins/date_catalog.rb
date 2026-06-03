@@ -54,11 +54,8 @@ module Rigor
       # blocklist entry; the entries below are defense-in-depth
       # against indirect mutators the regex might miss in a future
       # CRuby bump.
-      DATE_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/date.yml",
-          __dir__
-        ),
+      DATE_CATALOG = MethodCatalog.for_topic(
+        "date",
         mutating_selectors: {
           "Date" => Set[
             # `d_lite_initialize_copy` is already classed

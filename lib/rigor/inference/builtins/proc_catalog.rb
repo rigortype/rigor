@@ -31,11 +31,8 @@ module Rigor
       # `#source_location`, `#name`, `#owner`, `#receiver`) remain
       # foldable; the RBS tier still resolves return types for
       # the blocklisted methods so callers do not lose precision.
-      PROC_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/proc.yml",
-          __dir__
-        ),
+      PROC_CATALOG = MethodCatalog.for_topic(
+        "proc",
         mutating_selectors: {
           "Proc" => Set[
             # `#call` / `#[]` / `#===` / `#yield` invoke the proc

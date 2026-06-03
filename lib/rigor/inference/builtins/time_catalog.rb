@@ -29,11 +29,8 @@ module Rigor
       # The blocklist captures the false-positive `:leaf` entries
       # whose helper functions the regex classifier did not
       # recognise as mutators.
-      TIME_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/time.yml",
-          __dir__
-        ),
+      TIME_CATALOG = MethodCatalog.for_topic(
+        "time",
         mutating_selectors: {
           "Time" => Set[
             # `time_init_copy` writes the `timew` and `vtm` slots on

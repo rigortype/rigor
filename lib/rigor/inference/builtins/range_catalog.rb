@@ -15,11 +15,8 @@ module Rigor
       # routes through a helper the block/yield regex does not
       # recognise, so the classifier mis-flags them as `:leaf`
       # despite yielding to a block.
-      RANGE_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/range.yml",
-          __dir__
-        ),
+      RANGE_CATALOG = MethodCatalog.for_topic(
+        "range",
         mutating_selectors: {
           "Range" => Set[
             # `range_initialize` / `range_initialize_copy` write

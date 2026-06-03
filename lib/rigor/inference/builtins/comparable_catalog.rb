@@ -13,11 +13,8 @@ module Rigor
       # (which dispatches on the receiver's concrete class).
       # The data is consumed by future include-aware lookup —
       # see `docs/CURRENT_WORK.md` for the planned slice.
-      COMPARABLE_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/comparable.yml",
-          __dir__
-        ),
+      COMPARABLE_CATALOG = MethodCatalog.for_topic(
+        "comparable",
         mutating_selectors: {
           "Comparable" => Set[]
         }

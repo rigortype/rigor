@@ -13,11 +13,8 @@ module Rigor
       # (which dispatches on the receiver's concrete class).
       # The data is consumed by future include-aware lookup —
       # see `docs/CURRENT_WORK.md` for the planned slice.
-      ENUMERABLE_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/enumerable.yml",
-          __dir__
-        ),
+      ENUMERABLE_CATALOG = MethodCatalog.for_topic(
+        "enumerable",
         mutating_selectors: {
           "Enumerable" => Set[]
         }

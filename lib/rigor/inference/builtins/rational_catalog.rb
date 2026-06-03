@@ -22,11 +22,8 @@ module Rigor
       # hypothetical future `Constant<Rational>` carrier cannot
       # fold an aliasing copy through the catalog and surface a
       # shared mutable handle.
-      RATIONAL_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/rational.yml",
-          __dir__
-        ),
+      RATIONAL_CATALOG = MethodCatalog.for_topic(
+        "rational",
         mutating_selectors: {
           "Rational" => Set[
             :initialize_copy

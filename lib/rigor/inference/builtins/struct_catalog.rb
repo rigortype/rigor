@@ -23,11 +23,8 @@ module Rigor
       # member but the answer depends on the subclass's member
       # definition, which the catalog does not see, so we blocklist
       # it defensively.
-      STRUCT_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/struct.yml",
-          __dir__
-        ),
+      STRUCT_CATALOG = MethodCatalog.for_topic(
+        "struct",
         mutating_selectors: {
           "Struct" => Set[
             # Defensive: aliasing-copy semantics on a hypothetical

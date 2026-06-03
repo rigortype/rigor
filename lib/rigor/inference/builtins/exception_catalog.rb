@@ -26,11 +26,8 @@ module Rigor
       # already declines) or blocklisted because the static classifier
       # missed an indirect side effect. The remaining `:leaf` method
       # that DOES fold is `#cause`, a pure accessor.
-      EXCEPTION_CATALOG = MethodCatalog.new(
-        path: File.expand_path(
-          "../../../../data/builtins/ruby_core/exception.yml",
-          __dir__
-        ),
+      EXCEPTION_CATALOG = MethodCatalog.for_topic(
+        "exception",
         mutating_selectors: {
           "Exception" => Set[
             # `exc_initialize` writes `mesg` / `backtrace` ivars on

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -66,14 +67,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(Nominal) && class_name == other.class_name && type_args == other.type_args
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [Nominal, class_name, type_args].hash
-      end
+      value_fields :class_name, :type_args
 
       def inspect
         "#<Rigor::Type::Nominal #{describe(:short)}>"

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -76,14 +77,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(Intersection) && members == other.members
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [Intersection, members].hash
-      end
+      value_fields :members
 
       def inspect
         "#<Rigor::Type::Intersection #{describe(:short)}>"

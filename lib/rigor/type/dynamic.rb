@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -43,14 +44,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(Dynamic) && static_facet == other.static_facet
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [Dynamic, static_facet].hash
-      end
+      value_fields :static_facet
 
       def inspect
         "#<Rigor::Type::Dynamic #{describe(:short)}>"

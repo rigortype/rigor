@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -110,19 +111,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(HashShape) &&
-          pairs == other.pairs &&
-          required_keys == other.required_keys &&
-          optional_keys == other.optional_keys &&
-          read_only_keys == other.read_only_keys &&
-          extra_keys == other.extra_keys
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [HashShape, pairs, required_keys, optional_keys, read_only_keys, extra_keys].hash
-      end
+      value_fields :pairs, :required_keys, :optional_keys, :read_only_keys, :extra_keys
 
       def inspect
         "#<Rigor::Type::HashShape #{describe(:short)}>"

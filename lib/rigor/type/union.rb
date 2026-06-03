@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -90,14 +91,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(Union) && members == other.members
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [Union, members].hash
-      end
+      value_fields :members
 
       def inspect
         "#<Rigor::Type::Union #{describe(:short)}>"

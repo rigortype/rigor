@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -79,17 +80,9 @@ module Rigor
         self.class.new(trinary, mode: mode, reasons: reasons + [reason])
       end
 
-      def ==(other)
-        other.is_a?(AcceptsResult) &&
-          trinary == other.trinary &&
-          mode == other.mode &&
-          reasons == other.reasons
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [AcceptsResult, trinary, mode, reasons].hash
-      end
+      value_fields :trinary, :mode, :reasons
 
       def inspect
         "#<Rigor::Type::AcceptsResult #{trinary.inspect} mode=#{mode}>"

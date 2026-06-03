@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -60,16 +61,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(BoundMethod) &&
-          receiver_type == other.receiver_type &&
-          method_name == other.method_name
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [BoundMethod, receiver_type, method_name].hash
-      end
+      value_fields :receiver_type, :method_name
 
       def inspect
         "#<Rigor::Type::BoundMethod #{describe(:short)}>"

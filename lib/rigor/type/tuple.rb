@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -67,14 +68,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(Tuple) && elements == other.elements
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [Tuple, elements].hash
-      end
+      value_fields :elements
 
       def inspect
         "#<Rigor::Type::Tuple #{describe(:short)}>"

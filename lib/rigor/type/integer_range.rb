@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -117,14 +118,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(IntegerRange) && min == other.min && max == other.max
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [IntegerRange, min, max].hash
-      end
+      value_fields :min, :max
 
       def inspect
         "#<Rigor::Type::IntegerRange #{describe(:short)}>"

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -71,14 +72,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(Difference) && base == other.base && removed == other.removed
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [Difference, base, removed].hash
-      end
+      value_fields :base, :removed
 
       def inspect
         "#<Rigor::Type::Difference #{describe(:short)}>"

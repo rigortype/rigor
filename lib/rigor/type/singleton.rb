@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -48,14 +49,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(Singleton) && class_name == other.class_name
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [Singleton, class_name].hash
-      end
+      value_fields :class_name
 
       def inspect
         "#<Rigor::Type::Singleton #{class_name}>"

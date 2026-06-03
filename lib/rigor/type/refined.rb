@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -73,14 +74,9 @@ module Rigor
         Inference::Acceptance.accepts(self, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(Refined) && base == other.base && predicate_id == other.predicate_id
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [Refined, base, predicate_id].hash
-      end
+      value_fields :base, :predicate_id
 
       def inspect
         "#<Rigor::Type::Refined #{describe(:short)}>"

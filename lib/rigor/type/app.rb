@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../trinary"
+require_relative "../value_semantics"
 
 module Rigor
   module Type
@@ -82,14 +83,9 @@ module Rigor
         Inference::Acceptance.accepts(bound, other, mode: mode)
       end
 
-      def ==(other)
-        other.is_a?(App) && uri == other.uri && args == other.args && bound == other.bound
-      end
-      alias eql? ==
+      include Rigor::ValueSemantics
 
-      def hash
-        [App, uri, args, bound].hash
-      end
+      value_fields :uri, :args, :bound
 
       def inspect
         "#<Rigor::Type::App #{describe(:short)} (bound=#{bound.describe(:short)})>"

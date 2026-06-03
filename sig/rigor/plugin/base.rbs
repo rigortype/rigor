@@ -1,6 +1,61 @@
+# The plugin contract every Rigor plugin subclasses. The signatures
+# below are the RBS face of `lib/rigor/plugin/base.rb`; they let the
+# `lib` Steep target check Base's own implementation against the
+# declared surface and give plugin subclasses (once they enter a check
+# target) method resolution for the DSL + hook surface.
+#
+# Collaborators that have no RBS yet (Diagnostic, Cache::Descriptor,
+# FlowContribution, NodeContext, Prism nodes) are typed `untyped`; the
+# precision ceiling is the sparse `sig/` tree, not this file.
 class Rigor::Plugin::Base
-  def self.manifest: () -> Rigor::Plugin::Manifest
+  # --- class-level declaration DSLs ---------------------------------
+
+  # Dual-purpose: `manifest(id:, version:, ...)` declares + caches,
+  # the no-arg `manifest` reads the cached value back.
+  def self.manifest: (**untyped fields) -> Rigor::Plugin::Manifest
+
+  def self.producer: (untyped id, ?serialize: untyped, ?deserialize: untyped) { (untyped params) -> untyped } -> Symbol
+  def self.producers: () -> Hash[Symbol, untyped]
+
+  def self.node_rule: (untyped node_type) { (*untyped) -> untyped } -> untyped
+  def self.node_rules: () -> Array[untyped]
+
+  def self.node_file_context: () { (untyped root, untyped scope) -> untyped } -> untyped
+  def self.node_file_context_block: () -> untyped
+
+  def self.dynamic_return: (receivers: Array[String]) { (untyped call_node, untyped scope) -> untyped } -> nil
+  def self.dynamic_returns: () -> Array[untyped]
+
+  def self.type_specifier: (methods: Array[untyped]) { (untyped call_node, untyped scope) -> untyped } -> nil
+  def self.type_specifiers: () -> Array[untyped]
+
+  def self.suggest: (untyped name, untyped candidates) -> String?
+
+  # --- instance surface --------------------------------------------
+
+  attr_reader services: untyped
+  attr_reader config: untyped
+
   def initialize: (services: untyped, ?config: untyped) -> void
-  def init: (untyped) -> nil
-  def prepare: (untyped) -> nil
+
+  # Overridable lifecycle / extension hooks (default no-ops).
+  def init: (untyped services) -> nil
+  def prepare: (untyped services) -> nil
+  def flow_contribution_for: (call_node: untyped, scope: untyped) -> untyped
+  def diagnostics_for_file: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]
+
+  # Engine-executed dispatch over the declared DSLs.
+  def node_rule_diagnostics: (path: untyped, scope: untyped, root: untyped) -> Array[untyped]
+  def dynamic_return_type: (call_node: untyped, scope: untyped, receiver_type: untyped) -> untyped
+  def type_specifier_facts: (call_node: untyped, scope: untyped) -> Array[untyped]
+
+  # Authoring helpers.
+  def diagnostic: (untyped node, path: untyped, message: untyped, ?severity: untyped, ?rule: untyped, ?location: untyped) -> untyped
+  def manifest: () -> Rigor::Plugin::Manifest
+  def signature_paths: () -> Array[String]
+  def protocol_contracts: () -> untyped
+  def io_boundary: () -> Rigor::Plugin::IoBoundary
+  def cache_for: (untyped producer_id, ?params: untyped, ?descriptor: untyped) -> untyped
+  def glob_descriptor: (untyped roots, *untyped patterns) -> untyped
+  def plugin_entry: () -> untyped
 end

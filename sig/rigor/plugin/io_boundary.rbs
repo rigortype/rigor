@@ -1,4 +1,7 @@
 class Rigor::Plugin::IoBoundary
   def initialize: (policy: untyped, plugin_id: untyped, ?http_client: untyped) -> void
   def read_file: (untyped) -> String
+  def open_url: (untyped url) -> String
+  # Returns a frozen `Rigor::Cache::Descriptor` (no RBS yet -> untyped).
+  def cache_descriptor: () -> untyped
 end

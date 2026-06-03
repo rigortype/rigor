@@ -142,7 +142,12 @@ Rigor::Inference::MethodDispatcher.dispatch(
                          #   return type references is bound to `block_type`
                          #   so a return like `Array[U]` resolves to
                          #   `Array[block_type]`.
-  environment: nil       # Rigor::Environment; required for RBS-backed dispatch
+  environment: nil,      # Rigor::Environment; required for RBS-backed dispatch
+  scope: nil             # Rigor::Scope or nil; when present, enables the
+                         #   ADR-43 RBS-complete-ancestor resolution described
+                         #   in the RBS-backed tier below. Defaults to nil, in
+                         #   which case that resolution is inert and every other
+                         #   tier behaves identically.
 ) #=> Rigor::Type, or nil when no rule matches
 ```
 
@@ -159,6 +164,8 @@ The RBS-backed tier MUST resolve receiver types to a `(class_name, kind)` pair w
 - `Type::Top` and `Type::Bot` produce no descriptor; the dispatcher MUST return `nil`.
 
 `Union` receivers MUST dispatch each member individually — when every member resolves, the per-member return types are unioned and that union is returned; when any member returns `nil`, the whole dispatch MUST return `nil`. Mixing instance and singleton members within a single union MUST NOT be a special case; each member is dispatched against its own descriptor.
+
+**RBS-complete-ancestor resolution ([ADR-43](../adr/43-rbs-complete-ancestor-resolution.md)).** When the resolved `(class_name, kind)` descriptor's class is NOT RBS-known (a Ruby-source subclass discovered by `ScopeIndexer`, absent from the RBS environment's class declarations), the direct method lookup misses and — because the class is unknown to RBS — no ancestor walk runs, so the call would degrade to `Dynamic[Top]`. This is the false-positive-safe default: a Ruby class subclassing an RBS-only class (`class MyController < ActionController::Base`) routinely answers to methods a *partial* gem RBS omits, so resolving its inherited calls against that RBS and firing `call.undefined-method` would frighten working code. The dispatcher MUST therefore keep that fallback for the general case. As a bounded exception, when (a) a `scope:` is threaded into `dispatch`, (b) `class_name` is not RBS-known, and (c) `class_name`'s discovered superclass chain (`Scope#superclass_of`, ADR-24) reaches a class on the engine's frozen `ALLOWED_RBS_COMPLETE_ANCESTORS` allow-list, the dispatcher MUST resolve the method against that allow-listed ancestor's RBS definition (instance or singleton per `kind`). The allow-list's membership criterion is "this class's RBS is authoritative and complete — a call it does not declare is genuinely a mistake"; it is seeded with `Rigor::Plugin::Base` (this repository owns both the class and `sig/rigor/plugin/base.rbs`, kept in lock-step by the `lib` self-check) and MUST NOT include core / stdlib / third-party classes whose objects answer to methods their RBS omits. The chain walk MUST carry a visited set so a malformed cyclic `class A < B` / `class B < A` source cannot loop. Resolution that reaches an allow-listed ancestor MUST be observationally identical to dispatching directly against that ancestor's RBS — so the normal `call.undefined-method` / `call.wrong-arity` rules apply to inherited contract calls, and the precision the ancestor's RBS carries (e.g. a `Manifest` return type) flows to the call site.
 
 When the resolved RBS method has multiple overloads, Slice 4 phase 2c selects one of them through `Rigor::Inference::MethodDispatcher::OverloadSelector`. The selector MUST:
 
@@ -570,6 +577,7 @@ The following are explicitly out of the stability contract until later slices pr
 - [`docs/internal-spec/implementation-expectations.md`](implementation-expectations.md) — engine-surface contract that surrounds the typer (Scope joins, fact store, effect model, capability-role inference).
 - [`docs/adr/4-type-inference-engine.md`](../adr/4-type-inference-engine.md) — design rationale, slice roadmap, tentative answers to ADR-3's open questions.
 - [`docs/adr/3-type-representation.md`](../adr/3-type-representation.md) — type-object representation and the open questions whose tentative answers ADR-4 commits.
+- [`docs/adr/43-rbs-complete-ancestor-resolution.md`](../adr/43-rbs-complete-ancestor-resolution.md) — the allow-listed inherited-method resolution the RBS-backed dispatch tier performs for Ruby subclasses of RBS-complete ancestors.
 - [`docs/type-specification/relations-and-certainty.md`](../type-specification/relations-and-certainty.md) — subtyping, gradual consistency, trinary semantics.
 - [`docs/type-specification/value-lattice.md`](../type-specification/value-lattice.md) — `Dynamic[T]` algebra used by the fail-soft path.
 - [`docs/type-specification/control-flow-analysis.md`](../type-specification/control-flow-analysis.md) — Slice 6 narrowing target.

@@ -65,6 +65,22 @@ and a frozen copy of the user's config. `#init(services)` is the
 override hook plugins use to wire up state from the service
 container; the default implementation is a no-op.
 
+The full `Base` surface is declared in RBS
+([`sig/rigor/plugin/base.rbs`](../../sig/rigor/plugin/base.rbs)) and is
+**self-checked**: the bundled plugin / example lib trees run through
+`rigor check` (the `make check-plugins` gate, chained into `make verify`
+and CI). Combined with [ADR-43](../adr/43-rbs-complete-ancestor-resolution.md)
+RBS-complete-ancestor resolution — which resolves a plugin subclass's
+inherited contract calls (`manifest.…`, `io_boundary.…`) against the
+`Base` RBS — a plugin that misuses the contract surface (calls a method
+the contract does not declare, or a renamed helper) fails the build with
+`call.undefined-method`. A complementary structural spec
+([`spec/integration/plugin_contract_conformance_spec.rb`](../../spec/integration/plugin_contract_conformance_spec.rb))
+covers the other half: every hook override (`init` / `prepare` /
+`flow_contribution_for` / `diagnostics_for_file`) MUST stay callable with
+the engine's invocation — a narrowing override that drops a parameter the
+engine supplies fails (param/arity Liskov-compatibility, ADR-5).
+
 `#diagnostics_for_file(path:, scope:, root:)` (slice 5) is the
 **whole-file** diagnostic hook. The default returns an empty array.
 Plugin authors MAY override it to walk `root` (the parsed

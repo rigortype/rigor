@@ -189,6 +189,21 @@ partial-signature idiom.
   `location = … || ….location` / `start_column + 1`. The 0-to-1 column
   convention now lives only in `from_location`. Byte-identical
   diagnostics; full suite 5406 green.
+- **Theme C — DONE (CLI).** Four slices, each with added unit specs
+  (CLI previously had no base/option coverage):
+  - `CLI::Command` base — one `initialize(argv:, out:, err:)` with
+    consistent `$stdout`/`$stderr` defaults; 14 subcommands inherit it.
+  - `CLI::Options` — `add_editor_mode` + `resolve_buffer_binding`,
+    consolidating the character-for-character duplicate that lived in
+    both `Rigor::CLI` (`check`) and `TypeOfCommand` (`type-of`).
+  - `collect_paths(args, command_name:)` moved onto `CLI::Command` (was a
+    verbatim copy in type_scan / coverage).
+  - `CLI::Renderable` — the `render(data, format:)` text/json dispatch
+    shared by the type-of / type-scan / coverage renderers.
+  - **Remaining (optional, deferred):** the `--config` (11 sites) /
+    `--format` (7) `opts.on` blocks could move to `Options.add_config` /
+    `add_format` builders, but flag definitions rarely drift — low-value
+    churn, left for a future pass.
 
 ## Execution order (high-value + easy-to-start first)
 

@@ -20,6 +20,28 @@ module Rigor
         @out = out
         @err = err
       end
+
+      private
+
+      # Expands `args` (a mix of files and directories) into a unique
+      # list of `.rb` paths, recursing into directories. Returns nil —
+      # after writing `<command_name>: not a file or directory: <arg>` to
+      # `@err` — on the first arg that is neither. Shared by the
+      # path-walking commands (`type-scan`, `coverage`).
+      def collect_paths(args, command_name:)
+        paths = []
+        args.each do |arg|
+          if File.directory?(arg)
+            paths.concat(Dir.glob(File.join(arg, "**/*.rb")))
+          elsif File.file?(arg)
+            paths << arg
+          else
+            @err.puts("#{command_name}: not a file or directory: #{arg}")
+            return nil
+          end
+        end
+        paths.uniq
+      end
     end
   end
 end

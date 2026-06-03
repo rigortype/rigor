@@ -32,7 +32,7 @@ module Rigor
       # @return [Integer] CLI exit status.
       def run
         options = parse_options
-        paths = collect_paths(@argv)
+        paths = collect_paths(@argv, command_name: "coverage")
         return CLI::EXIT_USAGE if paths.nil?
         return usage_error if paths.empty?
 
@@ -57,21 +57,6 @@ module Rigor
         end.parse!(@argv)
 
         options
-      end
-
-      def collect_paths(args)
-        paths = []
-        args.each do |arg|
-          if File.directory?(arg)
-            paths.concat(Dir.glob(File.join(arg, "**/*.rb")))
-          elsif File.file?(arg)
-            paths << arg
-          else
-            @err.puts("coverage: not a file or directory: #{arg}")
-            return nil
-          end
-        end
-        paths.uniq
       end
 
       def usage_error

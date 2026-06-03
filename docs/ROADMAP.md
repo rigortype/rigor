@@ -35,6 +35,7 @@ that shaped each cut are preserved in git history (see
 | v0.1.13 | 2026-05-29 | AI-assisted onboarding + single-file script analysis: new `rigor skill` subcommand (bundled Agent Skills discoverable from a `mise use gem:rigortype` install); `call.unresolved-toplevel` diagnostic ([ADR-34](adr/34-toplevel-unresolved-self-call-default.md)) + `pre_eval:` project monkey-patch pre-evaluation ([ADR-17](adr/17-monkey-patch-pre-evaluation.md)). See `CHANGELOG.md` § `[0.1.13]`. |
 | v0.1.14 | 2026-05-29 | Machine-readable install guide (`docs/install.md`) for AI-agent-driven setup ([ADR-27](adr/27-tool-distribution-model.md)); fixes the `RBS::DuplicatedDeclarationError` that silently broke the environment after `rbs collection install`. See `CHANGELOG.md` § `[0.1.14]`. |
 | v0.1.15 | 2026-05-29 | Liskov override-compatibility diagnostic family (`def.override-*`, [ADR-35](adr/35-override-signature-compatibility.md)); `rigor plugin` source-browsing command; sharper reporting + `rigor triage` recognisers + onboarding-skill routing for undefined-method diagnostics that are really uninstalled project monkey-patches or generated DSLs. See `CHANGELOG.md` § `[0.1.15]`. |
+| v0.1.16 | 2026-06-03 | Plugin architecture overhaul and internal mechanism re-documentation. ADR-37/38/39/40 fully landed: all 14 bundled diagnostic-emitting plugins migrated onto `node_rule` (engine-owned walk, PHPStan-style); `dynamic_return` / `type_specifier` Slice 2; `rigor plugins --capabilities` AI-legible catalogue (Slice 3); `additional_initializers:` (ADR-38 def-form); `config_schema` declared defaults (ADR-40, 13 plugins migrated); `Source::Literals` grid complete + 10 plugins migrated; `Plugin::Inflector` over real `ActiveSupport::Inflector` + selectable isolation strategy (`process` default, `Plugin::Isolation`). ADR-43 RBS-complete ancestor resolution (`Plugin::Base` allow-list) + `make check-plugins` gate in `verify` + CI. Plugin contract structural guards: conformance spec, all-plugins-load spec, demos-run spec, external-plugin fixture (v0.2.0 gate 1 executable evidence). `Plugin::Base` + `Manifest` RBS surface completed. RBS robustness: synthesised namespaces + stub types for malformed/stale project `signature_paths:` sigs. `rigor-activerecord` missing-schema memoization fix (Redmine −86% memory, −51% wall time). Inference-budget survey + `RIGOR_BUDGET_TRACE` instrumentation. See `CHANGELOG.md` § `[Unreleased]`. |
 
 ## Release strategy — the road to v0.2.0
 
@@ -45,21 +46,24 @@ real products.
 
 | Line | Role |
 | --- | --- |
-| `0.1.x` | Preview. v0.1.9 was the originally-designated "last preview cut", but trial work against Mastodon / Redmine / tdiary / GitLab FOSS extended the line through v0.1.10 – v0.1.15 with substantial false-positive-reduction, onboarding, and feature cycles. v0.1.12 left Mastodon `app + lib` at 6 unrelated errors (5 nil-receiver in test fixtures + 1 stdlib RBS gap); v0.1.13 – v0.1.15 added AI-assisted onboarding (`rigor skill`, `docs/install.md`), the `pre_eval:` / `call.unresolved-toplevel` pairing, and the Liskov `def.override-*` family. |
+| `0.1.x` | Preview. v0.1.9 was the originally-designated "last preview cut", but trial work against Mastodon / Redmine / tdiary / GitLab FOSS extended the line through v0.1.16 with substantial false-positive-reduction, onboarding, feature, and architecture cycles. v0.1.12 left Mastodon `app + lib` at 6 unrelated errors; v0.1.13 – v0.1.15 added AI-assisted onboarding + Liskov `def.override-*`; v0.1.16 landed the full plugin interface-segregation + ergonomics suite (ADR-37/38/39/40/43) and the v0.2.0 gate-1 executable evidence. v0.1.17 (planned) completes internal-structure review + performance tuning before the v0.2.0 cut. |
 | `v0.2.0` | **First evaluation release.** Publicly announced as the first version intended for real-product trial deployment; opens the evaluation period and invites outside feedback. |
 | `0.2.x` | Evaluation line. Not yet a formal version, but the goal is to bring **every planned feature except the Ractor concurrency track** to high completion / production quality. |
 
-### Where we stand after v0.1.15
+### Where we stand after v0.1.16
 
-The v0.1.9 "last preview cut" intent has been met (SKILL trio, ADR-22 slice 5, empirical-defaults tightening shipped) and the line has been *extended* through six additional trial-driven patch cuts (v0.1.10 – v0.1.15) with the Mastodon / Redmine / GitLab FOSS realism story plus an AI-assisted-onboarding push. The preview line is now in a strong RC posture for v0.2.0:
+The v0.1.9 "last preview cut" intent has been met (SKILL trio, ADR-22 slice 5, empirical-defaults tightening shipped) and the line has been *extended* through seven additional trial-driven and architecture-driven patch cuts (v0.1.10 – v0.1.16). The preview line is now in a strong RC posture for v0.2.0:
 
-- 99.2% Mastodon FP reduction empirically demonstrated; Redmine 51%, GitLab FOSS ~80% on the surveyed scopes.
+- 99.2% Mastodon FP reduction empirically demonstrated; Redmine 51%, GitLab FOSS ~80% on the surveyed scopes; Redmine memory footprint reduced −86% after the v0.1.16 `rigor-activerecord` memoization fix.
 - All three flow-folding G2 follow-ups (`retry`, intervening call, read-before-write nil) are closed (v0.1.12).
-- The `rigor plugins` (activation readiness, v0.1.12) and `rigor plugin` (bundled-source browsing, v0.1.15) subcommands close the plugin-configuration and worked-example discovery gaps.
+- The `rigor plugins` (activation readiness, v0.1.12), `rigor plugin` (bundled-source browsing, v0.1.15), and `rigor plugins --capabilities` (AI-legible extension-protocol catalogue, v0.1.16) subcommands close the plugin-configuration and discovery gaps.
 - Onboarding is self-serve: `rigor skill` + `docs/install.md` let an AI agent install and configure Rigor from a single prompt (v0.1.13 / v0.1.14).
-- The `pre_eval:` mechanism (ADR-17) and the Liskov `def.override-*` family (ADR-35) shipped (v0.1.13 / v0.1.15), closing two of the larger remaining ADR queues.
+- The `pre_eval:` mechanism (ADR-17), the Liskov `def.override-*` family (ADR-35), and the plugin interface-segregation + ergonomics suite (ADR-37/38/39/40/43) all shipped, closing the major remaining ADR queues through v0.1.16.
+- **v0.2.0 gate 1 executable evidence landed** (v0.1.16): the external-plugin fixture + conformance spec + all-plugins-load spec + demos-run spec prove the public plugin contract supports out-of-tree `rigor-*` gems. The remaining step is the *documented stability commitment* (the "won't break within 0.2.x" statement for pinned namespaces).
 
-The v0.2.0 gates below have since been **reduced from three to two**: the SKILL trio (gate 3) shipped, and the subtree-split / per-plugin-publish gate was **superseded** by the single-bundled-`rigortype`-gem distribution model ([ADR-31](adr/31-contribution-and-supply-chain-policy.md) + commit `9769f5fa`). The one substantive gate left is plugin-contract stabilisation for *external* third-party `rigor-*` gems (the author's own repo, depending on `gem "rigortype"`).
+The v0.2.0 gates have been **reduced from three to one**: the SKILL trio (gate 3) shipped, and the subtree-split / per-plugin-publish gate was **superseded** by the single-bundled-`rigortype`-gem distribution model ([ADR-31](adr/31-contribution-and-supply-chain-policy.md) + commit `9769f5fa`). The one substantive gate left is the documented stability commitment for the external plugin contract.
+
+**v0.1.17 is planned** as a further internal-structure review and performance-tuning cycle before the v0.2.0 cut. Targets: ADR-24 slice 4 (gated `undefined-method` on resolved closed-class self-calls), further engine-internal precision uplifts surfaced by the v0.1.16 infrastructure work, and any performance follow-ups from the inference-budget survey and `RIGOR_BUDGET_TRACE` findings.
 
 ### v0.2.0 — first evaluation release
 
@@ -73,7 +77,11 @@ solicits outside feedback. Gating conditions (the v0.1.x
   external `rigor-*` gems outside this monorepo (a third-party
   gem depending on `gem "rigortype"` per [ADR-31](adr/31-contribution-and-supply-chain-policy.md)
   WD4), with an external-author onboarding path and a test that an
-  out-of-tree plugin loads and runs.
+  out-of-tree plugin loads and runs. **Executable evidence landed** (v0.1.16):
+  external-plugin fixture, conformance spec, all-plugins-load spec, and
+  demos-run spec are all in CI. The remaining step is the documented
+  stability commitment — a "won't break within 0.2.x" statement for the
+  pinned plugin-contract namespaces (the drift spec already pins them).
 - ~~The subtree-split / RubyGems publishing flow exercised for at
   least the `rigor-rails` family.~~ **Superseded.** The
   distribution model changed to a **single bundled `rigortype`

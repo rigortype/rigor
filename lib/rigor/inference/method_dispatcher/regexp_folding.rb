@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "singleton_folding"
 
 module Rigor
   module Inference
@@ -31,25 +32,21 @@ module Rigor
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
         def try_dispatch(receiver:, method_name:, args:)
-          return nil unless dispatch_target?(receiver)
+          return nil unless SingletonFolding.receiver?(receiver, "Regexp")
           return fold_escape(args) if REGEXP_ESCAPE_METHODS.include?(method_name)
           return fold_new(args) if method_name == :new
 
           nil
         end
 
-        def dispatch_target?(receiver)
-          receiver.is_a?(Type::Singleton) && receiver.class_name == "Regexp"
-        end
-
         # `Regexp.escape(str)` / `.quote(str)` — one String arg.
         def fold_escape(args)
           return nil unless args.size == 1
 
-          arg = args.first
-          return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(String)
+          str = SingletonFolding.constant_string(args.first)
+          return nil if str.nil?
 
-          Type::Combinator.constant_of(Regexp.escape(arg.value))
+          Type::Combinator.constant_of(Regexp.escape(str))
         end
 
         # `Regexp.new(pattern)` / `Regexp.new(pattern, opts)` — constructs

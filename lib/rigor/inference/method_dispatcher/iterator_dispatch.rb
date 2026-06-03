@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "singleton_folding"
 
 module Rigor
   module Inference
@@ -66,7 +67,7 @@ module Rigor
         end
 
         def class_metaclass_receiver?(type)
-          type.is_a?(Type::Singleton) && type.class_name == "Class"
+          SingletonFolding.receiver?(type, "Class")
         end
 
         def times_block_params(receiver)

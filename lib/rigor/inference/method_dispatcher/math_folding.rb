@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "singleton_folding"
 
 module Rigor
   module Inference
@@ -58,7 +59,7 @@ module Rigor
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
         def try_dispatch(receiver:, method_name:, args:)
-          return nil unless dispatch_target?(receiver)
+          return nil unless SingletonFolding.receiver?(receiver, "Math")
 
           # `log` is variadic (1 or 2 args), so it cannot live in the
           # fixed-arity sets above.
@@ -68,10 +69,6 @@ module Rigor
           return fold_tuple_unary(method_name, args) if MATH_TUPLE_UNARY.include?(method_name)
 
           nil
-        end
-
-        def dispatch_target?(receiver)
-          receiver.is_a?(Type::Singleton) && receiver.class_name == "Math"
         end
 
         # Unwraps a numeric `Constant` argument to its Ruby value.

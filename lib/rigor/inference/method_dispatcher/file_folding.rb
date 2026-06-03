@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "singleton_folding"
 
 module Rigor
   module Inference
@@ -107,7 +108,7 @@ module Rigor
         end
 
         def dispatch_target?(receiver)
-          receiver.is_a?(Type::Singleton) && receiver.class_name == "File"
+          SingletonFolding.receiver?(receiver, "File")
         end
 
         def constant_string_args(args)

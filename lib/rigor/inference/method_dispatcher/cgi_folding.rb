@@ -2,6 +2,7 @@
 
 require "cgi/util"
 require_relative "../../type"
+require_relative "singleton_folding"
 
 module Rigor
   module Inference
@@ -64,21 +65,17 @@ module Rigor
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
         def try_dispatch(receiver:, method_name:, args:)
-          return nil unless dispatch_target?(receiver)
+          return nil unless SingletonFolding.receiver?(receiver, "CGI")
           return nil unless CGI_ALL_ESCAPE_METHODS.include?(method_name)
 
           fold_cgi_call(method_name, args)
         end
 
-        def dispatch_target?(receiver)
-          receiver.is_a?(Type::Singleton) && receiver.class_name == "CGI"
-        end
-
         def fold_cgi_call(method_name, args)
           return nil if args.empty?
-          return nil unless args.first.is_a?(Type::Constant) && args.first.value.is_a?(String)
 
-          str = args.first.value
+          str = SingletonFolding.constant_string(args.first)
+          return nil if str.nil?
 
           if CGI_ELEMENT_ESCAPE_METHODS.include?(method_name)
             fold_cgi_element(method_name, str, args.drop(1))
@@ -94,9 +91,10 @@ module Rigor
         # must be `Constant[String]` element names.
         def fold_cgi_element(method_name, str, element_args)
           elements = element_args.map do |arg|
-            return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(String)
+            value = SingletonFolding.constant_string(arg)
+            return nil if value.nil?
 
-            arg.value
+            value
           end
 
           Type::Combinator.constant_of(CGI.public_send(method_name, str, *elements))

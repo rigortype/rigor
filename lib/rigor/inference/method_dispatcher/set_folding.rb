@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "singleton_folding"
 
 module Rigor
   module Inference
@@ -31,16 +32,12 @@ module Rigor
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
         def try_dispatch(receiver:, method_name:, args:)
-          return nil unless dispatch_target?(receiver)
+          return nil unless SingletonFolding.receiver?(receiver, "Set")
 
           case method_name
           when :[] then fold_bracket(args)
           when :new then fold_new(args)
           end
-        end
-
-        def dispatch_target?(receiver)
-          receiver.is_a?(Type::Singleton) && receiver.class_name == "Set"
         end
 
         # `Set["a", "b", "c"]` — all positional args must be Constant.

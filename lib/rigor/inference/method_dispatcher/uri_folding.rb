@@ -2,6 +2,7 @@
 
 require "uri"
 require_relative "../../type"
+require_relative "singleton_folding"
 
 module Rigor
   module Inference
@@ -41,23 +42,19 @@ module Rigor
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
         def try_dispatch(receiver:, method_name:, args:)
-          return nil unless dispatch_target?(receiver)
+          return nil unless SingletonFolding.receiver?(receiver, "URI")
           return nil unless URI_COMPONENT_METHODS.include?(method_name)
 
           fold_uri_call(method_name, args)
         end
 
-        def dispatch_target?(receiver)
-          receiver.is_a?(Type::Singleton) && receiver.class_name == "URI"
-        end
-
         def fold_uri_call(method_name, args)
           return nil unless args.size == 1
 
-          arg = args.first
-          return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(String)
+          str = SingletonFolding.constant_string(args.first)
+          return nil if str.nil?
 
-          Type::Combinator.constant_of(URI.public_send(method_name, arg.value))
+          Type::Combinator.constant_of(URI.public_send(method_name, str))
         rescue StandardError
           nil
         end

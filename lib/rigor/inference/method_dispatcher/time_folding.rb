@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../../type"
+require_relative "singleton_folding"
 
 module Rigor
   module Inference
@@ -34,7 +35,7 @@ module Rigor
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
         def try_dispatch(receiver:, method_name:, args:)
-          return nil unless dispatch_target?(receiver)
+          return nil unless SingletonFolding.receiver?(receiver, "Time")
           return nil unless TIME_UTC_METHODS.include?(method_name)
           return nil unless args.size.between?(1, MAX_TIME_ARITY)
           return nil unless args.all?(Type::Constant)
@@ -45,10 +46,6 @@ module Rigor
           Type::Combinator.constant_of(Time.utc(*values))
         rescue StandardError
           nil
-        end
-
-        def dispatch_target?(receiver)
-          receiver.is_a?(Type::Singleton) && receiver.class_name == "Time"
         end
       end
     end

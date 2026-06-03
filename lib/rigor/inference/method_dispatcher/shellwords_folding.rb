@@ -2,6 +2,7 @@
 
 require "shellwords"
 require_relative "../../type"
+require_relative "singleton_folding"
 
 module Rigor
   module Inference
@@ -65,7 +66,7 @@ module Rigor
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
         def try_dispatch(receiver:, method_name:, args:)
-          return nil unless dispatch_target?(receiver)
+          return nil unless SingletonFolding.receiver?(receiver, "Shellwords")
           return nil unless SHELLWORDS_ALL_METHODS.include?(method_name)
 
           if SHELLWORDS_ESCAPE_METHODS.include?(method_name)
@@ -77,18 +78,14 @@ module Rigor
           end
         end
 
-        def dispatch_target?(receiver)
-          receiver.is_a?(Type::Singleton) && receiver.class_name == "Shellwords"
-        end
-
         # `Shellwords.escape(str)` / `.shellescape(str)` — one String arg.
         def fold_escape(args)
           return nil unless args.size == 1
 
-          arg = args.first
-          return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(String)
+          str = SingletonFolding.constant_string(args.first)
+          return nil if str.nil?
 
-          Type::Combinator.constant_of(Shellwords.escape(arg.value))
+          Type::Combinator.constant_of(Shellwords.escape(str))
         end
 
         # `Shellwords.split(line)` / `.shellsplit` / `.shellwords` —
@@ -96,10 +93,10 @@ module Rigor
         def fold_split(args)
           return nil unless args.size == 1
 
-          arg = args.first
-          return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(String)
+          str = SingletonFolding.constant_string(args.first)
+          return nil if str.nil?
 
-          tokens = Shellwords.split(arg.value)
+          tokens = Shellwords.split(str)
           return nil if tokens.size > SHELLWORDS_SPLIT_LIMIT
 
           Type::Combinator.tuple_of(*tokens.map { |t| Type::Combinator.constant_of(t) })

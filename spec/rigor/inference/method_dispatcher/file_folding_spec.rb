@@ -7,11 +7,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::FileFolding do
   def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
 
   def fold(method_name, *args)
-    described_class.try_dispatch(
-      receiver: file_singleton,
-      method_name: method_name,
-      args: args.map { |a| constant_of(a) }
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: file_singleton,
+                                   method_name: method_name,
+                                   args: args.map { |a| constant_of(a) }
+                                 ))
   end
 
   # Toggle the module-global flag for the duration of a single
@@ -79,29 +79,29 @@ RSpec.describe Rigor::Inference::MethodDispatcher::FileFolding do
     end
 
     it "declines for non-Constant arguments" do
-      result = described_class.try_dispatch(
-        receiver: file_singleton,
-        method_name: :basename,
-        args: [Rigor::Type::Combinator.nominal_of("String")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: file_singleton,
+                                              method_name: :basename,
+                                              args: [Rigor::Type::Combinator.nominal_of("String")]
+                                            ))
       expect(result).to be_nil
     end
 
     it "declines for non-File receivers" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.singleton_of("IO"),
-        method_name: :basename,
-        args: [constant_of("x")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.singleton_of("IO"),
+                                              method_name: :basename,
+                                              args: [constant_of("x")]
+                                            ))
       expect(result).to be_nil
     end
 
     it "declines for instance receivers (not Singleton[File])" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.nominal_of("File"),
-        method_name: :basename,
-        args: [constant_of("x")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.nominal_of("File"),
+                                              method_name: :basename,
+                                              args: [constant_of("x")]
+                                            ))
       expect(result).to be_nil
     end
   end

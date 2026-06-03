@@ -15,9 +15,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
   def bool_union = Rigor::Type::Combinator.union(true_const, false_const)
 
   def fold(receiver:, method:, block:, args: [])
-    described_class.try_fold(
-      receiver: receiver, method_name: method, args: args, block_type: block
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: receiver, method_name: method, args: args, block_type: block
+                                 ))
   end
 
   describe "filter-shaped folds (block returns Constant[false] → empty)" do

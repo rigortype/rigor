@@ -51,7 +51,10 @@ module Rigor
         # @param args [Array<Rigor::Type>] caller's argument
         #   types in order. Only the single-argument case
         #   matches; other arities decline.
-        def try_forward(receiver:, method_name:, args:)
+        def try_dispatch(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
           return nil unless method_name == :method
           return nil if args.size != 1
 

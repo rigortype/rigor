@@ -7,11 +7,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::TimeFolding do
   def c(value)       = Rigor::Type::Combinator.constant_of(value)
 
   def fold(method_name, *arg_types)
-    described_class.try_dispatch(
-      receiver: time_singleton,
-      method_name: method_name,
-      args: arg_types
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: time_singleton,
+                                   method_name: method_name,
+                                   args: arg_types
+                                 ))
   end
 
   describe "Time.utc / Time.gm" do
@@ -48,11 +48,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::TimeFolding do
 
   describe "dispatch gating" do
     it "declines when the receiver is not the Time singleton" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.singleton_of("Math"),
-        method_name: :utc,
-        args: [c(2026), c(1), c(1)]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.singleton_of("Math"),
+                                              method_name: :utc,
+                                              args: [c(2026), c(1), c(1)]
+                                            ))
       expect(result).to be_nil
     end
 

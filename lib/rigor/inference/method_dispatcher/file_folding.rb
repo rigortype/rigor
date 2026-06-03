@@ -91,7 +91,10 @@ module Rigor
 
         # @return [Rigor::Type, nil] folded result, or nil to defer
         #   to the next dispatcher tier.
-        def try_dispatch(receiver:, method_name:, args:)
+        def try_dispatch(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
           return nil unless dispatch_target?(receiver)
           return nil unless FILE_PURE_CLASS_METHODS.include?(method_name)
           return nil if platform_specific_skip?(method_name)

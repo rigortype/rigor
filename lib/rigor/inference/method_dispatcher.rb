@@ -691,42 +691,34 @@ module Rigor
       # its rules apply only to block-taking calls, so the cheaper
       # arity-based fold tiers above it filter out the common
       # cases first. When `block_type` is nil the tier is a no-op.
+      # The precise-tier folders, consulted in order via the uniform
+      # `_DispatchTier` protocol (`try_dispatch(CallContext) -> Type?`).
+      # Order is significant: ConstantFolding's exact-value folds win
+      # first, the eight stdlib singleton folders sit in the middle (each
+      # gates on a distinct `Singleton` receiver, so their relative order
+      # is immaterial), and BlockFolding runs last because its rules only
+      # apply to block-taking calls — the cheaper arity folds above it
+      # filter the common cases first. Adding a precise tier is a
+      # one-line append here rather than another link in a hand-written
+      # `||` ladder.
+      PRECISE_TIERS = Ractor.make_shareable([
+        ConstantFolding, LiteralStringFolding, ShapeDispatch,
+        FileFolding, ShellwordsFolding, MathFolding, TimeFolding,
+        RegexpFolding, CGIFolding, URIFolding, SetFolding,
+        KernelDispatch, MethodFolding, BlockFolding
+      ].freeze)
+      private_constant :PRECISE_TIERS
+
       def dispatch_precise_tiers(receiver_type, method_name, arg_types, block_type = nil)
         meta_result = try_meta_introspection(receiver_type, method_name, arg_types)
         return meta_result if meta_result
 
-        ConstantFolding.try_fold(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          LiteralStringFolding.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          ShapeDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          dispatch_stdlib_module_tiers(receiver_type, method_name, arg_types) ||
-          KernelDispatch.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          MethodFolding.try_forward(receiver: receiver_type, method_name: method_name, args: arg_types) ||
-          BlockFolding.try_fold(
-            receiver: receiver_type, method_name: method_name, args: arg_types, block_type: block_type
-          )
-      end
-
-      # Stdlib module singleton-folding tiers, consulted in order. Each
-      # folds a pure module-/class-function call on `Constant` receivers
-      # and returns nil to defer. Order is not significant for
-      # correctness — every tier gates on a distinct `Singleton`
-      # receiver (File / Shellwords / Math / …) via
-      # `SingletonFolding.receiver?`, so at most one matches a given
-      # call; the list order is just the consultation sequence. Adding a
-      # new pure singleton folder is a one-line append here rather than
-      # another link in a hand-written `||` chain.
-      STDLIB_MODULE_FOLDERS = Ractor.make_shareable([
-        FileFolding, ShellwordsFolding, MathFolding,
-        TimeFolding, RegexpFolding, CGIFolding,
-        URIFolding, SetFolding
-      ].freeze)
-      private_constant :STDLIB_MODULE_FOLDERS
-
-      # Extracted from `dispatch_precise_tiers` to keep the parent
-      # method within the cyclomatic-complexity limit.
-      def dispatch_stdlib_module_tiers(receiver_type, method_name, arg_types)
-        STDLIB_MODULE_FOLDERS.each do |folder|
-          result = folder.try_dispatch(receiver: receiver_type, method_name: method_name, args: arg_types)
+        context = CallContext.build(
+          receiver: receiver_type, method_name: method_name,
+          args: arg_types, block_type: block_type
+        )
+        PRECISE_TIERS.each do |tier|
+          result = tier.try_dispatch(context)
           return result if result
         end
         nil

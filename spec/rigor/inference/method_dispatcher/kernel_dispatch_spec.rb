@@ -11,7 +11,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
   def union_of(*members) = Rigor::Type::Combinator.union(*members)
 
   def dispatch(arg)
-    described_class.try_dispatch(receiver: receiver, method_name: :Array, args: [arg])
+    described_class.try_dispatch(cc(receiver: receiver, method_name: :Array, args: [arg]))
   end
 
   describe ".try_dispatch on Kernel#Array" do
@@ -48,14 +48,14 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
     end
 
     it "declines methods other than :Array (Integer with non-refined arg falls through to RBS)" do
-      result = described_class.try_dispatch(receiver: receiver, method_name: :Integer, args: [nominal("String")])
+      result = described_class.try_dispatch(cc(receiver: receiver, method_name: :Integer, args: [nominal("String")]))
       expect(result).to be_nil
     end
 
     it "declines arities other than 1" do
       two_args = [nominal("String"), nominal("Integer")]
-      expect(described_class.try_dispatch(receiver: receiver, method_name: :Array, args: [])).to be_nil
-      expect(described_class.try_dispatch(receiver: receiver, method_name: :Array, args: two_args)).to be_nil
+      expect(described_class.try_dispatch(cc(receiver: receiver, method_name: :Array, args: []))).to be_nil
+      expect(described_class.try_dispatch(cc(receiver: receiver, method_name: :Array, args: two_args))).to be_nil
     end
   end
 
@@ -63,7 +63,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
     def non_negative_int = Rigor::Type::Combinator.non_negative_int
 
     def integer_dispatch(arg)
-      described_class.try_dispatch(receiver: receiver, method_name: :Integer, args: [arg])
+      described_class.try_dispatch(cc(receiver: receiver, method_name: :Integer, args: [arg]))
     end
 
     it "narrows Integer(decimal-int-string) to non-negative-int" do
@@ -90,18 +90,18 @@ RSpec.describe Rigor::Inference::MethodDispatcher::KernelDispatch do
     end
 
     it "declines on `Integer(refined-string, base)` (refinement path is no-base only)" do
-      result = described_class.try_dispatch(
-        receiver: receiver,
-        method_name: :Integer,
-        args: [Rigor::Type::Combinator.decimal_int_string, constant_of(10)]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: receiver,
+                                              method_name: :Integer,
+                                              args: [Rigor::Type::Combinator.decimal_int_string, constant_of(10)]
+                                            ))
       expect(result).to be_nil
     end
   end
 
   describe ".try_dispatch on Kernel#Integer / Kernel#Float (constant folding)" do
     def kernel_dispatch(method_name, *args)
-      described_class.try_dispatch(receiver: receiver, method_name: method_name, args: args)
+      described_class.try_dispatch(cc(receiver: receiver, method_name: method_name, args: args))
     end
 
     it "folds Integer() on a constant string" do

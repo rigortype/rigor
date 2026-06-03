@@ -11,11 +11,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
   end
 
   def fold(method_name, *arg_types)
-    described_class.try_dispatch(
-      receiver: set_singleton,
-      method_name: method_name,
-      args: arg_types
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: set_singleton,
+                                   method_name: method_name,
+                                   args: arg_types
+                                 ))
   end
 
   # ── Set[] — variadic bracket constructor ──────────────────────────────
@@ -89,20 +89,20 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SetFolding do
 
   describe "dispatch guards" do
     it "declines for a non-Singleton receiver" do
-      result = described_class.try_dispatch(
-        receiver: c("Set"),
-        method_name: :[],
-        args: []
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: c("Set"),
+                                              method_name: :[],
+                                              args: []
+                                            ))
       expect(result).to be_nil
     end
 
     it "declines for a wrong singleton class" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.singleton_of("Array"),
-        method_name: :[],
-        args: [c(:a)]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.singleton_of("Array"),
+                                              method_name: :[],
+                                              args: [c(:a)]
+                                            ))
       expect(result).to be_nil
     end
 

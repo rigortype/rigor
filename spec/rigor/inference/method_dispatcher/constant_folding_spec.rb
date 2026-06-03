@@ -4,11 +4,11 @@ require "spec_helper"
 
 RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
   def fold(value, method_name, args = [])
-    described_class.try_fold(
-      receiver: Rigor::Type::Combinator.constant_of(value),
-      method_name: method_name,
-      args: args.map { |v| Rigor::Type::Combinator.constant_of(v) }
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: Rigor::Type::Combinator.constant_of(value),
+                                   method_name: method_name,
+                                   args: args.map { |v| Rigor::Type::Combinator.constant_of(v) }
+                                 ))
   end
 
   describe "binary fold (existing surface)" do
@@ -306,11 +306,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     def fold_types(receiver, method_name, args = [])
-      described_class.try_fold(
-        receiver: receiver,
-        method_name: method_name,
-        args: args
-      )
+      described_class.try_dispatch(cc(
+                                     receiver: receiver,
+                                     method_name: method_name,
+                                     args: args
+                                   ))
     end
 
     it "folds Constant[1] + Union[2, 3] to Union[3, 4]" do
@@ -451,9 +451,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     end
 
     def fold_types(receiver, method_name, args = [])
-      described_class.try_fold(
-        receiver: receiver, method_name: method_name, args: args
-      )
+      described_class.try_dispatch(cc(
+                                     receiver: receiver, method_name: method_name, args: args
+                                   ))
     end
 
     describe "binary arithmetic" do
@@ -832,11 +832,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
 
     def fold_types(receiver, method_name, args = [])
-      described_class.try_fold(
-        receiver: receiver,
-        method_name: method_name,
-        args: args
-      )
+      described_class.try_dispatch(cc(
+                                     receiver: receiver,
+                                     method_name: method_name,
+                                     args: args
+                                   ))
     end
 
     it "folds Integer#clamp through Comparable's catalog when Numeric has no entry" do
@@ -862,11 +862,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
     def constant_of(value) = Rigor::Type::Combinator.constant_of(value)
 
     def fold_types(receiver, method_name, args = [])
-      described_class.try_fold(
-        receiver: receiver,
-        method_name: method_name,
-        args: args
-      )
+      described_class.try_dispatch(cc(
+                                     receiver: receiver,
+                                     method_name: method_name,
+                                     args: args
+                                   ))
     end
 
     it "folds Comparable#between? to Constant[true] when receiver is in range" do

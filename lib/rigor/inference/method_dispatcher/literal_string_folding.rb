@@ -80,7 +80,10 @@ module Rigor
                          :LITERAL_PRESERVING_METHODS, :NON_EMPTY_LITERAL_PRESERVING_METHODS,
                          :WIDTH_PADDING_METHODS
 
-        def try_dispatch(receiver:, method_name:, args:, **)
+        def try_dispatch(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
           return fold_array_join(receiver, args) if method_name == :join
           return fold_format(args) if FORMAT_METHODS.include?(method_name)
           return nil unless Type::Combinator.literal_string_compatible?(receiver)

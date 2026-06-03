@@ -8,11 +8,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShellwordsFolding do
   def tuple(*elems) = Rigor::Type::Combinator.tuple_of(*elems)
 
   def fold(method_name, *arg_types)
-    described_class.try_dispatch(
-      receiver: sw_singleton,
-      method_name: method_name,
-      args: arg_types
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: sw_singleton,
+                                   method_name: method_name,
+                                   args: arg_types
+                                 ))
   end
 
   # ── escape / shellescape ─────────────────────────────────────────────
@@ -137,20 +137,20 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShellwordsFolding do
 
   describe "receiver identity guard" do
     it "declines for a non-Shellwords singleton" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.singleton_of("File"),
-        method_name: :escape,
-        args: [c("x")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.singleton_of("File"),
+                                              method_name: :escape,
+                                              args: [c("x")]
+                                            ))
       expect(result).to be_nil
     end
 
     it "declines for a Nominal[Shellwords] instance receiver" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.nominal_of("Shellwords"),
-        method_name: :escape,
-        args: [c("x")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.nominal_of("Shellwords"),
+                                              method_name: :escape,
+                                              args: [c("x")]
+                                            ))
       expect(result).to be_nil
     end
 

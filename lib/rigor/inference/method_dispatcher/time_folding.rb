@@ -34,7 +34,10 @@ module Rigor
         module_function
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
-        def try_dispatch(receiver:, method_name:, args:)
+        def try_dispatch(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
           return nil unless SingletonFolding.receiver?(receiver, "Time")
           return nil unless TIME_UTC_METHODS.include?(method_name)
           return nil unless args.size.between?(1, MAX_TIME_ARITY)

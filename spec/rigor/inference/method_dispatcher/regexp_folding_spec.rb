@@ -7,11 +7,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RegexpFolding do
   def c(value)         = Rigor::Type::Combinator.constant_of(value)
 
   def fold(method_name, *arg_types)
-    described_class.try_dispatch(
-      receiver: regexp_singleton,
-      method_name: method_name,
-      args: arg_types
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: regexp_singleton,
+                                   method_name: method_name,
+                                   args: arg_types
+                                 ))
   end
 
   describe "escape / quote" do
@@ -44,20 +44,20 @@ RSpec.describe Rigor::Inference::MethodDispatcher::RegexpFolding do
     end
 
     it "declines for a non-Singleton receiver" do
-      result = described_class.try_dispatch(
-        receiver: c("Regexp"),
-        method_name: :escape,
-        args: [c("hello")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: c("Regexp"),
+                                              method_name: :escape,
+                                              args: [c("hello")]
+                                            ))
       expect(result).to be_nil
     end
 
     it "declines for a wrong singleton class" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.singleton_of("String"),
-        method_name: :escape,
-        args: [c("hello")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.singleton_of("String"),
+                                              method_name: :escape,
+                                              args: [c("hello")]
+                                            ))
       expect(result).to be_nil
     end
 

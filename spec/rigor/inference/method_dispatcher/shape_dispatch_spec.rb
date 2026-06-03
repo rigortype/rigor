@@ -14,7 +14,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
   end
 
   def dispatch(receiver:, method_name:, args: [])
-    described_class.try_dispatch(receiver: receiver, method_name: method_name, args: args)
+    described_class.try_dispatch(cc(receiver: receiver, method_name: method_name, args: args))
   end
 
   describe "Tuple element access" do

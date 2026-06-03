@@ -7,11 +7,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MathFolding do
   def c(value)       = Rigor::Type::Combinator.constant_of(value)
 
   def fold(method_name, *arg_types)
-    described_class.try_dispatch(
-      receiver: math_singleton,
-      method_name: method_name,
-      args: arg_types
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: math_singleton,
+                                   method_name: method_name,
+                                   args: arg_types
+                                 ))
   end
 
   describe "single-argument transcendental functions" do
@@ -108,11 +108,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MathFolding do
 
   describe "dispatch gating" do
     it "declines when the receiver is not the Math singleton" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.singleton_of("Shellwords"),
-        method_name: :sqrt,
-        args: [c(4.0)]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.singleton_of("Shellwords"),
+                                              method_name: :sqrt,
+                                              args: [c(4.0)]
+                                            ))
       expect(result).to be_nil
     end
 

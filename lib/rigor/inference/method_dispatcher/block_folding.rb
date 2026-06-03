@@ -69,7 +69,11 @@ module Rigor
         #   the call's block. `nil` means "no block at the call site"
         #   and disqualifies every rule here.
         # @return [Rigor::Type, nil]
-        def try_fold(receiver:, method_name:, args:, block_type:)
+        def try_dispatch(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
+          block_type = context.block_type
           return nil if receiver.nil? || block_type.nil?
 
           truthiness = constant_truthiness(block_type)

@@ -31,7 +31,10 @@ module Rigor
         module_function
 
         # @return [Rigor::Type, nil] folded result, or nil to defer.
-        def try_dispatch(receiver:, method_name:, args:)
+        def try_dispatch(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
           return nil unless SingletonFolding.receiver?(receiver, "Regexp")
           return fold_escape(args) if REGEXP_ESCAPE_METHODS.include?(method_name)
           return fold_new(args) if method_name == :new

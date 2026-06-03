@@ -7,11 +7,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
   def c(value)      = Rigor::Type::Combinator.constant_of(value)
 
   def fold(method_name, *arg_types)
-    described_class.try_dispatch(
-      receiver: uri_singleton,
-      method_name: method_name,
-      args: arg_types
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: uri_singleton,
+                                   method_name: method_name,
+                                   args: arg_types
+                                 ))
   end
 
   # ── encode_www_form_component ─────────────────────────────────────────
@@ -79,20 +79,20 @@ RSpec.describe Rigor::Inference::MethodDispatcher::URIFolding do
     end
 
     it "declines for a non-Singleton receiver" do
-      result = described_class.try_dispatch(
-        receiver: c("URI"),
-        method_name: :encode_www_form_component,
-        args: [c("hello")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: c("URI"),
+                                              method_name: :encode_www_form_component,
+                                              args: [c("hello")]
+                                            ))
       expect(result).to be_nil
     end
 
     it "declines for a wrong singleton class" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.singleton_of("String"),
-        method_name: :encode_www_form_component,
-        args: [c("hello")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.singleton_of("String"),
+                                              method_name: :encode_www_form_component,
+                                              args: [c("hello")]
+                                            ))
       expect(result).to be_nil
     end
 

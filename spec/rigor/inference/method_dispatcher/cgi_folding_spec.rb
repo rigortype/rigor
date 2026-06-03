@@ -7,11 +7,11 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CGIFolding do
   def c(value)      = Rigor::Type::Combinator.constant_of(value)
 
   def fold(method_name, *arg_types)
-    described_class.try_dispatch(
-      receiver: cgi_singleton,
-      method_name: method_name,
-      args: arg_types
-    )
+    described_class.try_dispatch(cc(
+                                   receiver: cgi_singleton,
+                                   method_name: method_name,
+                                   args: arg_types
+                                 ))
   end
 
   # ── escapeHTML / escape_html / h ──────────────────────────────────────
@@ -115,20 +115,20 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CGIFolding do
     end
 
     it "declines for a non-Singleton receiver" do
-      result = described_class.try_dispatch(
-        receiver: c("CGI"),
-        method_name: :escapeHTML,
-        args: [c("hello")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: c("CGI"),
+                                              method_name: :escapeHTML,
+                                              args: [c("hello")]
+                                            ))
       expect(result).to be_nil
     end
 
     it "declines for a wrong singleton class" do
-      result = described_class.try_dispatch(
-        receiver: Rigor::Type::Combinator.singleton_of("String"),
-        method_name: :escapeHTML,
-        args: [c("hello")]
-      )
+      result = described_class.try_dispatch(cc(
+                                              receiver: Rigor::Type::Combinator.singleton_of("String"),
+                                              method_name: :escapeHTML,
+                                              args: [c("hello")]
+                                            ))
       expect(result).to be_nil
     end
 

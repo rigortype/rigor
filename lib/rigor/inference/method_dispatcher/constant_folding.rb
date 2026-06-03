@@ -132,7 +132,10 @@ module Rigor
         UNION_FOLD_OUTPUT_LIMIT = 8
 
         # @return [Rigor::Type::Constant, Rigor::Type::Union, Rigor::Type::IntegerRange, nil]
-        def try_fold(receiver:, method_name:, args:)
+        def try_dispatch(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
           # v0.0.7 — `String#%` against a `Tuple` / `HashShape`
           # argument runs Ruby's format-string engine when both
           # sides are statically constant. The standard

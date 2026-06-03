@@ -53,7 +53,10 @@ module Rigor
         INTEGER_REFINEMENT_PREDICATES = Set[:decimal_int, :numeric].freeze
         private_constant :INTEGER_REFINEMENT_PREDICATES
 
-        def try_dispatch(receiver:, method_name:, args:)
+        def try_dispatch(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
           return nil if receiver.nil?
           return try_array(args) if method_name == :Array
           return try_numeric_constructor(method_name, args) if NUMERIC_CONSTRUCTORS.key?(method_name)

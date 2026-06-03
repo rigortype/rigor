@@ -167,7 +167,10 @@ module Rigor
         }.freeze
         private_constant :TO_S_BASE_REFINEMENTS
 
-        def try_dispatch(receiver:, method_name:, args:)
+        def try_dispatch(context)
+          receiver = context.receiver
+          method_name = context.method_name
+          args = context.args
           args ||= []
           handler = RECEIVER_HANDLERS[receiver.class]
           return nil unless handler

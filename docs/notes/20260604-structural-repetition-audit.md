@@ -216,6 +216,23 @@ partial-signature idiom.
     extracted to `buffer_for(uri)`. The per-provider parse step (strict /
     tolerant / cursor-recovery) stays put.
   Full suite green; steep green.
+- **Theme #5 quick wins — WON'T DO (judgment).** Re-examined after the
+  big themes landed, the remaining items are micro-duplications in the
+  correctness-critical inference hot path: the ExpressionTyper
+  variable-read "trio" is three trivial one-liners
+  (`scope.ivar(name) || dynamic_top`), and the scope_indexer
+  union-accumulate is a 3-line `existing ? union(...) : type` ×4. Unlike
+  Themes A/C/D, the structural benefit is tiny while any edit to the
+  narrowing / scope-indexer / typer hot path carries non-zero risk — the
+  churn-vs-reward calculus inverts. The compound-write twelve and the
+  narrowing polarity-branch five are dispatch-table candidates but
+  medium-risk for the same reason. Left as-is unless a concrete need
+  (a new variable kind, a new narrowing type) makes the table pay for
+  itself.
+- **Theme B — NOT STARTED (deferred, high-risk).** The scope_indexer
+  generic-walker unification needs a traversal-equivalence harness
+  (shadow-run old vs new over a corpus) before it is safe; out of scope
+  for a behaviour-preserving cleanup pass.
 
 ## Execution order (high-value + easy-to-start first)
 

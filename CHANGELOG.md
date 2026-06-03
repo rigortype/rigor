@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Fixed
+
+- **[rigor-rails-routes]** A `nil` / unbuilt route-helper table is now memoised, not rebuilt on every dispatch. When `config/routes.rb` is missing or fails to parse, `helper_table_or_nil` returned nil and its `return @helper_table if @helper_table` guard never cached that result, so the engine re-read (and, for a present-but-unparseable file, re-parsed) the routes file once per route-helper call site — 105,724 `IoBoundary#read_file` calls in a cold GitLab run, now 2. Diagnostics are unchanged; the win is avoided pathological re-reads on projects whose routes file is absent or large-and-unparseable.
+
 ### Changed
 
 - **[performance]** Hot static lookups and two allocation-heavy idioms in the analysis core are reworked, cutting allocations on a large Rails app by ~42% (Mastodon `app`+`lib`, 1,303 files: 87.8M → 51.3M objects; wall ~30s → ~26s; GC runs 248 → 127) with byte-identical diagnostics. Profiling write-up: [`docs/notes/20260604-mastodon-allocation-profile.md`](docs/notes/20260604-mastodon-allocation-profile.md).

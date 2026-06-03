@@ -110,6 +110,7 @@ module Rigor
         @routes_file = config.fetch("routes_file")
         @helper_paths = Array(config.fetch("helper_paths")).map(&:to_s)
         @helper_table = nil
+        @helper_table_built = false
         @load_error = nil
       end
 
@@ -202,8 +203,17 @@ module Rigor
       # report it once per run.
 
       def helper_table_or_nil
-        return @helper_table if @helper_table
+        # Memoise the build *attempt*, not just a truthy result: when the
+        # routes file is missing or unparseable the table is nil, and the
+        # old `return @helper_table if @helper_table` re-ran the whole
+        # read-and-parse on every call. The engine consults this per
+        # route-helper dispatch, so a nil table meant re-reading (and, on
+        # a real project, re-parsing) `config/routes.rb` tens of thousands
+        # of times per run. The result — nil included — is stable for the
+        # run, so one attempt is correct.
+        return @helper_table if @helper_table_built
 
+        @helper_table_built = true
         # Read first so the IoBoundary's FileEntry digest
         # captures into the descriptor before `cache_for`
         # snapshots it (the same pattern documented in

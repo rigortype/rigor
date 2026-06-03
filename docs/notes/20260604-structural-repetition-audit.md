@@ -169,11 +169,25 @@ Declarative, Steep-green, no forced conformance — consistent with the
 `_DispatchTier` interface added in the Finding 3 work and the engine's
 partial-signature idiom.
 
+## Progress log (2026-06-04)
+
+- **Theme A — DONE.** `Rigor::ValueSemantics` macro (`value_fields`,
+  class_eval codegen so the generated `==`/`eql?`/`hash` run at
+  hand-written speed on the hot path) applied to the 13 field-wise Type
+  carriers and the 5 cache descriptor entries; `Rigor::Type::
+  AcceptanceRouter` mixin for the 14 carriers' `accepts` delegation; and
+  `interface _Type` declared in `sig/rigor/type.rbs`. Left hand-written
+  by design: `Type::Constant` (distinguishes `value.class`), `Top`/`Bot`
+  (field-free singletons), `Type::App#accepts` (delegates on `bound`),
+  and `Descriptor#==` (canonical-bytes equality). Per-carrier `==`
+  semantics were audited before migrating. No behaviour change; full
+  suite (5406) / inference (1870) / cache (87) / steep all green.
+
 ## Execution order (high-value + easy-to-start first)
 
 1. **Theme A** — `ValueSemantics` + `AcceptanceRouter` mixins across the
    carriers and cache entries, `interface _Type` in `sig/`. Per-carrier
-   `==` audit first.
+   `==` audit first. **(done — see progress log)**
 2. **Theme D builder factory** — `Diagnostic.from_call_node` /
    `.from_node_name_loc`; sweep the 15+ sites.
 3. **Theme C** — CLI base + option-builder + renderer mixin (+ tests).

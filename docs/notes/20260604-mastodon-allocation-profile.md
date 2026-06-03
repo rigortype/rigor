@@ -160,7 +160,9 @@ value object that `rebuild`s in full on every narrowing/binding change
    **→ Landed; see "Landed" section (cumulative −36 % allocations).**
 3. **Cut `Scope#rebuild` / `CallContext` allocation** — broader but more
    architectural (per-dispatch `Data`, full value-object rebuild on every
-   narrow). Smaller per-fix, wide reach.
+   narrow). Smaller per-fix, wide reach. **→ Surgical sub-wins landed
+   (`join_bindings`, `lexical_constant_candidates`); the structural
+   `Scope#rebuild` / `CallContext` rewrite remains open.**
 4. **Union construction** — 199,995 `Type::Union` builds, p99 arity 5,
    max 184 (6 unions ≥40). Minor for time; the fat tail is a precision
    smell worth a separate look.
@@ -170,10 +172,9 @@ value object that `rebuild`s in full on every narrowing/binding change
 not what is costing time here (see
 [`20260603-inference-budget-reality-survey.md`](20260603-inference-budget-reality-survey.md)).
 
-## Landed: memoising the static lookups (recommendations 1 & 2)
+## Landed: four allocation cuts (recommendations 1, 2, and surgical 3)
 
-Two memoisations landed, both pure functions of frozen / deterministic
-state with byte-identical diagnostics:
+Four changes landed, each preserving byte-identical diagnostics:
 
 - **Rec 1 — ancestor/name resolution.** `resolve_user_def_through_
   ancestors` and `resolve_ancestor_class_name` share a run-scoped memo
@@ -185,27 +186,37 @@ state with byte-identical diagnostics:
   deterministic function of the normalised string and returns a frozen
   value object safe to share; the same handful of class names are parsed
   on nearly every dispatch.
+- **Rec 3a — control-flow join.** `Scope#join_bindings` (run at every
+  branch merge, 75 % of the `Hash#keys` allocations) replaced
+  `left.keys & right.keys` — two key arrays plus the intersection — with
+  a direct `left.each` / `right.key?` probe that builds the result hash
+  in one pass, same keys in the same order.
+- **Rec 3b — lexical constant candidates.** `lexical_constant_candidates`
+  (the sole caller of the profiled `String#rpartition`) swapped
+  `prefix.rpartition("::").first` — a throwaway 3-element array + extra
+  substrings per nesting level — for `rindex` + a single slice.
 
 Cumulative on the same target (Mastodon `app`+`lib`, 1,303 files):
 
-| metric | baseline | after rec 1 | after rec 1+2 | Δ total |
-|---|--:|--:|--:|--:|
-| objects allocated | 87.8 M | 64.0 M | **56.1 M** | **−36 %** |
-| objects / file | 67,370 | 49,093 | **43,078** | −36 % |
-| wall | ~30.2 s | ~27.4 s | **~26.5 s** | −12 % |
-| `GC.stat[:time]` | 2.93 s | 2.19 s | **2.08 s** | −29 % |
-| GC runs | 248 | 165 | **126** | −49 % |
-| GC CPU share (stackprof) | ~57 % | ~40 % | **~38 %** | −19 pt |
-| diagnostics | 457 / 419 err | identical | **identical** | byte-identical |
+| metric | baseline | +rec 1 | +rec 2 | +rec 3a/3b | Δ total |
+|---|--:|--:|--:|--:|--:|
+| objects allocated | 87.8 M | 64.0 M | 56.1 M | **51.3 M** | **−42 %** |
+| objects / file | 67,370 | 49,093 | 43,078 | **39,358** | −42 % |
+| wall | ~30.2 s | ~27.4 s | ~26.5 s | **~26.1 s** | −14 % |
+| `GC.stat[:time]` | 2.93 s | 2.19 s | 2.08 s | **2.01 s** | −31 % |
+| GC runs | 248 | 165 | 126 | **127** | −49 % |
+| diagnostics | 457 / 419 err | identical | identical | **identical** | byte-identical |
 
-`resolve_ancestor_class_name` (was 9.8 % of allocations) and
-`RBS::TypeName.parse` (was 4.7 %, the #1 site after rec 1) are both gone
-from the profile; `String#split` fell from 10.9 % to out-of-top.
-`make verify` is green after each step (5,418 examples, self-check +
-plugin-contract check clean). The next allocators are now `Scope#rebuild`
-(4.8 %), `Data#initialize` / `CallContext.new`+`build` (~10 % combined),
-`Hash#keys` (4.4 %), and `String#rpartition` (3.9 %) — recommendation 3
-territory (per-dispatch / per-narrow object churn).
+`resolve_ancestor_class_name` (was 9.8 % of allocations),
+`RBS::TypeName.parse` (4.7 %), and `String#rpartition` (3.9 %) are gone
+from the profile; `Hash#keys` fell from 4.4 % to a fraction. `make verify`
+is green after each step (5,418 examples, self-check + plugin-contract
+check clean). What remains is the structural core — `Scope#rebuild`
+(4.8 %; the immutable ~20-field value object rebuilt on every `with_*`)
+and `CallContext` / `Data` (~10 % combined; one `Data` per dispatch).
+Those are recommendation 3's architectural half and are left for a
+dedicated change: they need a design call (mutable scratch scope,
+or a lighter call-context carrier), not a local rewrite.
 
 ## Reproduction
 

@@ -443,8 +443,12 @@ module Rigor
         candidates = []
         while prefix && !prefix.empty?
           candidates << "#{prefix}::#{name}"
-          prefix = prefix.rpartition("::").first
-          prefix = nil if prefix.empty?
+          # Strip the last `::` segment without `rpartition`'s throwaway
+          # 3-element array + extra substrings (this loop is the sole
+          # caller of the `String#rpartition` allocation seen in the
+          # profile): `rindex` + slice gives the same prefix, or nil.
+          idx = prefix.rindex("::")
+          prefix = idx ? prefix[0, idx] : nil
         end
         candidates << name
         candidates

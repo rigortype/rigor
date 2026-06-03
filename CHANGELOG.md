@@ -16,9 +16,11 @@ cycles live in dedicated archives:
 
 ### Changed
 
-- **[performance]** Static cross-file lookups are now memoised across the run, cutting analysis allocations on a large Rails app by ~36% (Mastodon `app`+`lib`, 1,303 files: 87.8M → 56.1M objects; wall ~30s → ~26.5s; GC runs 248 → 126) with byte-identical diagnostics. Profiling write-up: [`docs/notes/20260604-mastodon-allocation-profile.md`](docs/notes/20260604-mastodon-allocation-profile.md).
+- **[performance]** Hot static lookups and two allocation-heavy idioms in the analysis core are reworked, cutting allocations on a large Rails app by ~42% (Mastodon `app`+`lib`, 1,303 files: 87.8M → 51.3M objects; wall ~30s → ~26s; GC runs 248 → 127) with byte-identical diagnostics. Profiling write-up: [`docs/notes/20260604-mastodon-allocation-profile.md`](docs/notes/20260604-mastodon-allocation-profile.md).
   - **Ancestor / superclass-name resolution** — `ExpressionTyper#resolve_user_def_through_ancestors` and `#resolve_ancestor_class_name` are pure functions of the frozen project class-graph index, but were re-`split`/`join`-ing qualified constant names — and re-walking the whole ancestor BFS — once per method-call-site dispatch. They now share a generation-keyed memo (identity of the frozen index trio), so the former single largest allocation site (9.8% of all objects) drops to zero.
   - **RBS type-name parsing** — `Environment::RbsLoader#parse_type_name` memoises `RBS::TypeName.parse` (a deterministic function of the normalised string, returning a shareable frozen value object) on the per-loader store, removing what had become the top allocation site (~4.7%).
+  - **Control-flow join** — `Scope#join_bindings`, run at every branch merge, replaced `left.keys & right.keys` (two key arrays + the intersection) with a single-pass `left.each` / `right.key?` probe, the same keys in the same order; it was ~75% of the analysis's `Hash#keys` allocations.
+  - **Lexical constant candidates** — `lexical_constant_candidates` swapped `String#rpartition` (a throwaway 3-element array per nesting level) for `rindex` + slice.
 
 ## [0.1.16] - 2026-06-03
 

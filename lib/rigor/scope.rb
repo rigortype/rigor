@@ -611,8 +611,19 @@ module Rigor
     end
 
     def join_bindings(left, right)
-      shared = left.keys & right.keys
-      shared.to_h { |name| [name, Type::Combinator.union(left[name], right[name])] }.freeze
+      # Keys present in both, unioned. Iterating `left` and probing
+      # `right.key?` yields the same keys in the same order as the prior
+      # `(left.keys & right.keys)` while avoiding the two key arrays and
+      # the intersection array — this is the control-flow join, run at
+      # every branch merge, and was a top allocation site (~75% of
+      # `Hash#keys`).
+      result = {}
+      left.each do |name, ltype|
+        next unless right.key?(name)
+
+        result[name] = Type::Combinator.union(ltype, right[name])
+      end
+      result.freeze
     end
 
     def build_joined_scope(joined_locals, joined_ivars, joined_cvars, joined_globals, other)

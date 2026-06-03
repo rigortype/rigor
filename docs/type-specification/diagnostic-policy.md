@@ -50,6 +50,25 @@ Diagnostic identifiers are hierarchical so plugin authors, RBS metadata, and use
 - Diagnostics in `dynamic.*`, and explanations requested through `rigor explain` or `--explain`, show the full `Dynamic[T]` form, because that is exactly the information they exist to surface.
 - Internal traces, cache keys, and plugin `Scope` queries always retain the full `Dynamic[T]` form regardless of how the message renders. Plugins that need the dynamic facet to compose a higher-tier diagnostic do not need to reconstruct it.
 
+## Severity resolution
+
+A rule emits each diagnostic with an *authored* severity (the rule's own default). Before the diagnostic reaches the result, the active severity profile and any per-rule overrides **re-stamp** that severity. In the suppression pipeline this sits between the inline markers and the baseline: inline `# rigor:disable` → **severity resolution** → project baseline ([ADR-22](../adr/22-baseline-and-project-onboarding.md)).
+
+Two `.rigor.yml` keys drive it ([ADR-8](../adr/8-steep-inspired-improvements.md)):
+
+- `severity_profile:` — one of `lenient` / `balanced` (default) / `strict`. Each profile is a per-rule table mapping a canonical rule id to a severity; the profiles trade breadth of `:error` for adoption-friendliness (`lenient` drops uncertain rules to `:warning`/`:off`, `strict` raises every rule to `:error`). A rule absent from the active profile's table keeps its authored severity.
+- `severity_overrides:` — a `{ rule_id => severity }` map. A key is either an exact canonical rule id (`call.undefined-method`) or a **family wildcard** (`call`) matching every rule whose first dotted segment equals the key.
+
+The resolved severity is one of `:error` / `:warning` / `:info` / `:off`; **`:off` drops the diagnostic entirely**. `Configuration::SeverityProfile.resolve` MUST apply this precedence (highest first):
+
+1. A `nil` rule id keeps the authored severity (there is nothing to look up).
+2. An exact `severity_overrides` entry for the rule id.
+3. Otherwise a family-wildcard `severity_overrides` entry (the rule id's first segment).
+4. Otherwise the active profile table's entry for the rule id.
+5. Otherwise the authored severity.
+
+An unknown `severity_profile:` value falls back to `balanced`. This resolution is what the `def.override-*` and `protocol_contracts:` ([ADR-28](../adr/28-path-scoped-protocol-contracts.md)) rules mean by "severity maps through `severity_profile:`": the rule emits at a fixed authored severity and the profile decides whether it surfaces as an error, a warning, or is suppressed.
+
 ## Suppression markers
 
 Rigor recognizes an in-source comment grammar for suppressing specific diagnostics on a single line or across a whole file. The Rigor-native markers below are the shipped surface; recognizing other ecosystems' markers is a designed-but-unshipped compatibility extension.
@@ -64,6 +83,17 @@ Rigor-native markers use a Ruby comment grammar that mirrors PHPStan's annotatio
 The rule list is comma- and/or whitespace-separated and uses the rule-ID prefixes above (`call.undefined-method`); the literal `all` keyword and short legacy aliases resolve through the same expansion `rigor explain` uses. There is no block-scoped (`start` / `end`) form.
 
 Inline markers are applied before the configured `severity_profile:` and before the project baseline (ADR-22), which is the last suppression layer. See the User Manual § "Diagnostics" for the operational guide.
+
+### Token resolution
+
+A rule token — in a `# rigor:disable[-file]` marker or in the `.rigor.yml` `disable:` list — is **expanded to a set of canonical rule ids at parse time** (`resolve_rule_token`); the per-line / per-file suppression match is then an exact membership test of the diagnostic's canonical `rule` against that set. Four token shapes are recognised:
+
+- `all` — the literal wildcard; suppresses every rule in scope. It is kept as the sentinel `all` rather than expanded to the rule list.
+- A **legacy unprefixed alias** (`undefined-method`) — mapped to its single canonical id (`call.undefined-method`).
+- A **family wildcard** — one of the diagnostic families `call` / `flow` / `assert` / `dump` / `def` — expands to every canonical id under `<family>.`.
+- An **exact canonical id** (`call.undefined-method`) — kept as itself.
+
+An unrecognised token is kept verbatim, so it only ever matches a diagnostic whose `rule` is literally that string (effectively a no-op — see _Validity rules_). A diagnostic whose `rule` is `nil` is never suppressed. Because family expansion happens at token time, the match itself never does prefix matching — it is always exact equality against the expanded canonical-id set.
 
 ### Ecosystem-compat markers (planned, not yet implemented)
 

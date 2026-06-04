@@ -49,11 +49,14 @@ module Rigor
         def self.build(receiver:, method_name:, args:, # rubocop:disable Metrics/ParameterLists
                        block_type: nil, environment: nil, call_node: nil,
                        scope: nil, self_type_override: nil, public_only: false)
+          # Positional `new` (field-definition order) avoids the keyword
+          # hash a `new(receiver:, …)` call allocates — this runs once per
+          # dispatch and was a top allocation site. Order MUST track the
+          # `Data.define` field list above.
           new(
-            receiver: receiver, method_name: method_name, args: args,
-            block_type: block_type, environment: environment,
-            call_node: call_node, scope: scope,
-            self_type_override: self_type_override, public_only: public_only
+            receiver, method_name, args,
+            block_type, environment, call_node, scope,
+            self_type_override, public_only
           )
         end
       end

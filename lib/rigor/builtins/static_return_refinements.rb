@@ -134,8 +134,14 @@ module Rigor
       # @return [Array<String>] the candidate owner class names
       #   for a bare method-name lookup. Empty when no override
       #   names this method.
+      NO_OWNERS = [].freeze
+      private_constant :NO_OWNERS
+
+      # Consulted on every dispatch (`try_static_refinement`); the miss
+      # case is overwhelmingly common, so share one frozen empty array
+      # instead of allocating a fresh `[]` per non-refined method.
       def self.owners_for(method_name)
-        OWNERS_BY_METHOD[method_name.to_sym] || []
+        OWNERS_BY_METHOD[method_name.to_sym] || NO_OWNERS
       end
     end
   end

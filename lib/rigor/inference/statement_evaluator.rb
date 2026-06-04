@@ -1379,18 +1379,28 @@ module Rigor
       EMPTY_CONTRIBUTIONS = [].freeze
       private_constant :EMPTY_CONTRIBUTIONS
 
-      # Per-dispatch collection of plugin narrowing contributions. Same
-      # allocation shape as `MethodDispatcher#collect_plugin_contributions`
-      # (a top allocation site on plugin-heavy projects): accumulate lazily
-      # so the common no-contribution case allocates nothing and shares one
-      # frozen empty array. The caller treats the result as read-only.
+      # Per-dispatch collection of plugin narrowing contributions. Mirrors
+      # `MethodDispatcher#collect_plugin_contributions`: visit only the
+      # registry-ordered subset of plugins that implement a per-call path
+      # (`for_statement` = overrides `flow_contribution_for` or declares a
+      # `type_specifier`), gate each path by membership, and accumulate
+      # lazily (shared frozen empty array otherwise). Same contributions in
+      # the same order as visiting every plugin; the caller is read-only.
       def collect_plugin_contributions(registry, call_node, current_scope)
+        index = registry.contribution_index
+        relevant = index.for_statement
+        return EMPTY_CONTRIBUTIONS if relevant.empty?
+
         result = nil
-        registry.plugins.each do |plugin|
-          legacy = plugin.flow_contribution_for(call_node: call_node, scope: current_scope)
-          (result ||= []) << legacy if legacy.is_a?(Rigor::FlowContribution)
-          facts = plugin.type_specifier_facts(call_node: call_node, scope: current_scope)
-          (result ||= []) << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
+        relevant.each do |plugin|
+          if index.flow?(plugin)
+            legacy = plugin.flow_contribution_for(call_node: call_node, scope: current_scope)
+            (result ||= []) << legacy if legacy.is_a?(Rigor::FlowContribution)
+          end
+          if index.type_specifier?(plugin)
+            facts = plugin.type_specifier_facts(call_node: call_node, scope: current_scope)
+            (result ||= []) << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
+          end
         rescue StandardError
           next
         end

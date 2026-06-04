@@ -676,22 +676,36 @@ module Rigor
       private_constant :EMPTY_CONTRIBUTIONS
 
       # Collects every plugin's flow / dynamic-return contribution for one
-      # call site. Runs per dispatch over the whole plugin set, and on a
-      # plugin-heavy project (GitLab: 11 plugins) it was the single largest
-      # allocation site — the old `flat_map` allocated a fresh per-plugin
-      # `contributions = []` plus the flattened result array on every
-      # dispatch, even though almost every plugin contributes nothing for a
-      # given receiver. Accumulate lazily instead: allocate only when a
-      # contribution actually appears, and share one frozen empty array for
-      # the common no-contribution case. The caller treats the result as
-      # read-only (`.empty?` / `Merger.merge`).
+      # call site. Two prunings keep this off the hot path on plugin-heavy
+      # projects (it was the #1 allocation site and a top CPU cost):
+      #
+      # 1. Only the plugins that *structurally* implement a per-call path
+      #    are visited — `registry.contribution_index.for_method_dispatch`
+      #    is the registry-ordered subset overriding `flow_contribution_for`
+      #    or declaring a `dynamic_return` (GitLab: 2 of 11). Iterating the
+      #    subset in registry order, and gating each path by membership,
+      #    yields the exact same contributions in the same order as
+      #    visiting every plugin would (a skipped plugin's call returns
+      #    nil/[] anyway). The receiver-class ancestry match still happens
+      #    per dispatch inside `dynamic_return_type`.
+      # 2. Contributions accumulate lazily — allocate only when one
+      #    actually appears, and share a frozen empty array otherwise. The
+      #    caller treats the result as read-only (`.empty?` / `Merger.merge`).
       def collect_plugin_contributions(registry, call_node, scope, receiver_type)
+        index = registry.contribution_index
+        relevant = index.for_method_dispatch
+        return EMPTY_CONTRIBUTIONS if relevant.empty?
+
         result = nil
-        registry.plugins.each do |plugin|
-          legacy = plugin.flow_contribution_for(call_node: call_node, scope: scope)
-          (result ||= []) << legacy if legacy.is_a?(FlowContribution)
-          dynamic = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
-          (result ||= []) << FlowContribution.new(return_type: dynamic) if dynamic
+        relevant.each do |plugin|
+          if index.flow?(plugin)
+            legacy = plugin.flow_contribution_for(call_node: call_node, scope: scope)
+            (result ||= []) << legacy if legacy.is_a?(FlowContribution)
+          end
+          if index.dynamic?(plugin)
+            dynamic = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
+            (result ||= []) << FlowContribution.new(return_type: dynamic) if dynamic
+          end
         rescue StandardError
           next
         end

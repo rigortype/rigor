@@ -132,15 +132,50 @@ The wall gain is modest relative to the allocation drop: the eliminated
 objects are short-lived empty arrays, cheap to allocate and sweep. Still
 a real −29 % allocation cut with `make verify` green.
 
+### Landed: plugin applicability index
+
+The next lever — stop visiting every plugin on every dispatch — landed.
+A survey of GitLab's 11 plugins showed **only 2** (`rigor-activerecord`,
+`rigor-activestorage`) implement *any* per-call path: 0 declare
+`dynamic_return`, 0 declare `type_specifier`, 2 override the legacy
+`flow_contribution_for`. The other 9 were called (and returned nil) on
+every call site.
+
+`Plugin::Registry` now builds a `ContributionIndex` once: the
+registry-ordered subset of plugins that override `flow_contribution_for`
+or declare a `dynamic_return` / `type_specifier`, plus membership sets to
+gate each path. Both `collect_plugin_contributions` methods iterate that
+subset (in registry order) and gate each path by membership — the exact
+same contributions in the same order as visiting every plugin, since a
+skipped plugin's call returns nil/[] anyway. The receiver-class **ancestry
+match for `dynamic_return` still happens per dispatch** inside
+`dynamic_return_type`; the index only prunes plugins that *structurally*
+cannot contribute, so it is precision-neutral.
+
+Faithful A/B (cwd = gitlab, plugins on, `--no-cache`, on top of the lazy
+accumulation above):
+
+| metric | before | after | Δ |
+|---|--:|--:|--:|
+| wall | 142.6 s | **122.5 s** | **−14.1 %** (−20 s) |
+| objects allocated | 246.8 M | **228.5 M** | −7.4 % |
+| GC runs | 330 | 314 | −5 % |
+| diagnostics | 2,323 / 38 err | **2,323 / 38 err** | byte-identical |
+
+This is the largest wall-time win of the sweep: visiting 2 plugins per
+dispatch instead of 11 removes ~9 nil-returning `dynamic_return_type` /
+`flow_contribution_for` calls per call site, across millions of
+dispatches. `make verify` green (the new `Registry#contribution_index`
+public method is recorded in the API-drift snapshot).
+
 ## Still open
 
-`collect_plugin_contributions` still **iterates all 11 plugins on every
-dispatch** (the allocation is gone, but the iteration CPU — ~3.7 % self —
-remains). Indexing plugins by their `dynamic_return(receivers:)` /
-`type_specifier(methods:)` applicability — so only relevant plugins are
-consulted per call — is the next lever, but it is a dispatch-path
-redesign, not a local rewrite. The structural `Scope#rebuild` /
-`CallContext` churn (carried over from the Mastodon note) also remains.
+The structural `Scope#rebuild` / `CallContext` churn (carried over from
+the Mastodon note) remains the next allocation frontier. For
+`dynamic_return`-heavy plugin sets (unlike GitLab's), a further lever is a
+per-receiver-class memo of applicable rules so the ancestry match inside
+`dynamic_return_type` is amortised — demand-gated, since no bundled plugin
+set exercises it yet.
 
 ## Reproduction
 

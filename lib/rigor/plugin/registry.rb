@@ -4,6 +4,43 @@ require_relative "blueprint"
 
 module Rigor
   module Plugin
+    # Categorises a loaded plugin set by which per-call contribution
+    # paths each plugin actually implements, so the engine's per-dispatch
+    # `collect_plugin_contributions` can iterate only the relevant
+    # plugins instead of calling into every plugin on every call site (a
+    # top hotspot on plugin-heavy projects — GitLab's 11 plugins, of which
+    # only 2 implement any per-call path). Built once per {Registry}; the
+    # receiver-class ancestry match for `dynamic_return` still happens
+    # per-dispatch inside `Plugin::Base#dynamic_return_type`, so this only
+    # prunes plugins that *structurally* cannot contribute, preserving the
+    # exact contribution order and result.
+    class ContributionIndex
+      # Ordered (registry-order) subsets relevant to each collector, and
+      # the membership sets used to gate the two paths within a plugin.
+      attr_reader :for_method_dispatch, :for_statement
+
+      def initialize(plugins)
+        @flow = plugins.select { |p| flow_overridden?(p) }.to_set
+        @dynamic = plugins.reject { |p| p.class.dynamic_returns.empty? }.to_set
+        @type_specifier = plugins.reject { |p| p.class.type_specifiers.empty? }.to_set
+        @for_method_dispatch = plugins.select { |p| @flow.include?(p) || @dynamic.include?(p) }.freeze
+        @for_statement = plugins.select { |p| @flow.include?(p) || @type_specifier.include?(p) }.freeze
+        freeze
+      end
+
+      def flow?(plugin) = @flow.include?(plugin)
+      def dynamic?(plugin) = @dynamic.include?(plugin)
+      def type_specifier?(plugin) = @type_specifier.include?(plugin)
+
+      private
+
+      # A plugin contributes via the legacy `flow_contribution_for` slot
+      # only when it overrides the no-op base implementation.
+      def flow_overridden?(plugin)
+        plugin.method(:flow_contribution_for).owner != Rigor::Plugin::Base
+      end
+    end
+
     # Read-side query API over the plugins loaded for a single
     # `Analysis::Runner.run`. Constructed by
     # {Rigor::Plugin::Loader.load} and exposed downstream so the
@@ -24,7 +61,7 @@ module Rigor
     # {.materialize} per-Ractor; the live `plugins` carriage on
     # the coordinator registry stays unchanged.
     class Registry
-      attr_reader :plugins, :load_errors, :blueprints
+      attr_reader :plugins, :load_errors, :blueprints, :contribution_index
 
       # @param plugins [Array<Rigor::Plugin::Base>] instantiated
       #   plugin instances in deterministic order.
@@ -40,6 +77,7 @@ module Rigor
         @plugins = plugins.dup.freeze
         @load_errors = load_errors.dup.freeze
         @blueprints = blueprints.dup.freeze
+        @contribution_index = ContributionIndex.new(@plugins)
         freeze
       end
 

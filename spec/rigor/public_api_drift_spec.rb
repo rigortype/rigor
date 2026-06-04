@@ -238,6 +238,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     any_load_errors?()
     blueprints()
     contracts_for_path(req:path)
+    contribution_index()
     empty?()
     find(req:id)
     hkt_overlay_registry()

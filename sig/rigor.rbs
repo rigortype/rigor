@@ -117,6 +117,7 @@ module Rigor
       attr_reader analyzed_files: Array[String]
       def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped, ?workers: Integer, ?collect_stats: bool, ?buffer: untyped, ?prebuilt: untyped, ?environment: untyped, ?record_dependencies: bool, ?analyze_only: untyped) -> void
       def run: (?Array[String] paths) -> Result
+      def run_source: (source: String, ?path: String) -> Result
       def analysis_file_set: (?Array[String] paths) -> Array[String]
       def file_dependents: () -> Hash[String, untyped]
       def prepare_project_scan: (?paths: Array[String]) -> untyped

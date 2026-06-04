@@ -88,7 +88,7 @@ module Rigor
       #   (bundler / lockfile / collection discovery, RbsLoader
       #   construction). Pool mode ignores the override — each
       #   worker continues to build its own Environment.
-      def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize
+      def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize,Metrics/MethodLength
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
                      buffer: nil, prebuilt: nil, environment: nil,
@@ -108,6 +108,11 @@ module Rigor
         # cache, a later slice, consumes them).
         @record_dependencies = record_dependencies
         @analyzed_files = [].freeze
+        # In-memory source map for `#run_source` — `{ logical_path => source
+        # String }`. When set, `parse_source` reads bytes from here instead
+        # of disk and `expand_paths` accepts the (possibly non-existent)
+        # logical path. nil on a normal disk-backed run.
+        @in_memory_sources = nil
         # ADR-46 slice 2 — the subset-analysis hook. When set (a collection
         # of paths), the whole-project pre-pass still runs over every file
         # (so the cross-file index is complete), but only files in this set
@@ -180,6 +185,26 @@ module Rigor
           diagnostics: apply_severity_profile(diagnostics),
           stats: stats_for_run(wall_started_at: wall_started_at, expansion: expansion)
         )
+      end
+
+      # Analyze a single source String in memory, without writing it to
+      # disk — a clean entry point for embedders (LSP / editor mode) and a
+      # faster spec path than the per-call tmpdir + chdir. The source is
+      # bound to `path` (purely a logical identity carried in diagnostic
+      # locations; it need not exist on disk). The full run machinery still
+      # runs — environment build, plugin `prepare`, severity profile — so
+      # the result matches a one-file disk run; only the cross-file project
+      # pre-pass is empty (there is one file, and the per-file indexer
+      # self-discovers its own classes / defs).
+      #
+      # @param source [String] Ruby source to analyze.
+      # @param path [String] logical path for diagnostic locations.
+      # @return [Result]
+      def run_source(source:, path: "(source).rb")
+        @in_memory_sources = { path => source }
+        run([path])
+      ensure
+        @in_memory_sources = nil
       end
 
       # ADR-46 — the project file set that a run over `paths` would
@@ -1620,7 +1645,8 @@ module Rigor
 
       def accept_as_ruby_file?(path)
         (File.file?(path) && path.end_with?(".rb")) ||
-          (@buffer && path == @buffer.logical_path)
+          (@buffer && path == @buffer.logical_path) ||
+          @in_memory_sources&.key?(path)
       end
 
       # `Configuration#exclude_patterns` is a list of glob patterns
@@ -1659,6 +1685,10 @@ module Rigor
       # LOGICAL path. Non-binding paths go through the cheaper
       # `Prism.parse_file` codepath unchanged.
       def parse_source(path)
+        if @in_memory_sources&.key?(path)
+          return Prism.parse(@in_memory_sources[path], filepath: path, version: @configuration.target_ruby)
+        end
+
         physical = @buffer ? @buffer.resolve(path) : path
         return Prism.parse_file(physical, version: @configuration.target_ruby) if physical == path
 

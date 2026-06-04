@@ -139,6 +139,23 @@ module RunnerHelpers
   def analyze(source = nil, files: {}, sig: {}, config: {}, explain: false, cache_store: :shared, &)
     effective_cache = cache_store == :shared ? RunnerHelpers.shared_cache_store : cache_store
 
+    # Fastest path: a bare `analyze(source)` with no sig / config / files /
+    # block analyses the source IN MEMORY (no workspace file write, no
+    # chdir) via `Runner#run_source`, which is diagnostic-equivalent to the
+    # workspace run for a single file. This is the dominant call shape.
+    if !source.nil? && files.empty? && sig.empty? && config.empty? && !block_given?
+      # Disable bundler / rbs-collection auto-detection: the workspace path
+      # `chdir`s into an empty dir with no Gemfile.lock, so matching its
+      # diagnostics means NOT picking up the repo's lockfiles from the spec
+      # process's cwd.
+      memory_config = Rigor::Configuration.new(
+        "bundler" => { "auto_detect" => false }, "rbs_collection" => { "auto_detect" => false }
+      )
+      return Rigor::Analysis::Runner.new(
+        configuration: memory_config, cache_store: effective_cache, explain: explain
+      ).run_source(source: source, path: "code.rb")
+    end
+
     if shared_workspace_safe?(files: files, config: config)
       analyze_in_shared_workspace(
         source: source, sig: sig, config: config, explain: explain, cache_store: effective_cache, &

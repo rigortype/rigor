@@ -20,6 +20,7 @@ require_relative "../inference/project_patched_scanner"
 require_relative "../inference/method_dispatcher/file_folding"
 require_relative "buffer_binding"
 require_relative "check_rules"
+require_relative "dependency_recorder"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
 require_relative "erb_template_detector"
@@ -35,7 +36,7 @@ module Rigor
       DEFAULT_CACHE_ROOT = ".rigor/cache"
 
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
-                  :rbs_extended_reporter, :boundary_cross_reporter
+                  :rbs_extended_reporter, :boundary_cross_reporter, :file_dependencies
 
       # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events
@@ -84,10 +85,11 @@ module Rigor
       #   (bundler / lockfile / collection discovery, RbsLoader
       #   construction). Pool mode ignores the override — each
       #   worker continues to build its own Environment.
-      def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists
+      def initialize(configuration:, explain: false, # rubocop:disable Metrics/ParameterLists,Metrics/AbcSize
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
-                     buffer: nil, prebuilt: nil, environment: nil)
+                     buffer: nil, prebuilt: nil, environment: nil,
+                     record_dependencies: false)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -97,6 +99,12 @@ module Rigor
         @buffer = buffer
         @prebuilt = prebuilt
         @environment_override = environment
+        # ADR-46 slice 1 — opt-in cross-file dependency recording. Off by
+        # default; when true, `analyze_file` records each file's
+        # cross-file reads into `file_dependencies` (the incremental
+        # cache, a later slice, consumes them).
+        @record_dependencies = record_dependencies
+        @file_dependencies = {}
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
         @rbs_extended_reporter = RbsExtended::Reporter.new
@@ -105,7 +113,8 @@ module Rigor
         # `#run` resets these for each invocation; pre-seed them to
         # empty containers so `build_run_stats` / `pre_file_diagnostics`
         # (private, called only from `#run`) can read them without
-        # nil-guards.
+        # nil-guards. Kept inline (not a helper) so the engine's own
+        # flow analysis sees the ivars established in the constructor.
         @class_decl_paths_snapshot = {}.freeze
         @signature_paths_snapshot = [].freeze
         @synthesized_namespaces_snapshot = [].freeze
@@ -1633,7 +1642,24 @@ module Rigor
         scope
       end
 
-      def analyze_file(path, environment) # rubocop:disable Metrics/MethodLength
+      # ADR-46 slice 1 — when dependency recording is enabled, wrap the
+      # per-file analysis so the cross-file reads its inference makes are
+      # captured into `file_dependencies[path]`. Off by default: a normal
+      # run calls the body directly and the instrumented `Scope` accessors
+      # short-circuit on `DependencyRecorder.active? == false`. Recording
+      # is observational, so diagnostics are byte-identical either way.
+      def analyze_file(path, environment)
+        return analyze_file_body(path, environment) unless @record_dependencies
+
+        diagnostics = nil
+        record = DependencyRecorder.record_for(path) do
+          diagnostics = analyze_file_body(path, environment)
+        end
+        @file_dependencies[path] = record
+        diagnostics
+      end
+
+      def analyze_file_body(path, environment) # rubocop:disable Metrics/MethodLength
         parse_result = parse_source(path)
         unless parse_result.errors.empty?
           return [] if ErbTemplateDetector.template?(parse_result)

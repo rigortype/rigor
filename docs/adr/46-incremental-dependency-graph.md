@@ -162,6 +162,18 @@ trade for speed. Defenses:
    thread the dependency recorder through the `Scope` accessors; persist
    `deps` / `dependents` and per-file diagnostic entries. Land behind a
    default-off flag with `--verify-incremental` green on Mastodon + GitLab.
+   - **Slice 1a landed** — `Analysis::DependencyRecorder` (thread-local
+     accumulator + a module-level activation count so the disabled fast
+     path is a plain integer read, since the instrumented accessor is on
+     the per-dispatch hot path) records, per file, the source files its
+     analysis read methods/bodies from plus the unresolved (negative)
+     cross-class method lookups. `Scope#user_def_for` — the method
+     resolution / `infer_user_method_return` choke point — is instrumented
+     and attributes via the existing `discovered_def_sources`. Opt-in via
+     `Runner.new(record_dependencies: true)`, exposed as
+     `runner.file_dependencies`; off by default (diagnostics byte-identical,
+     `make verify` green). Remaining in this slice: class/superclass/include
+     source maps + their accessors, persistence, and `--verify-incremental`.
 2. **Body tier.** Wire the declaration-fingerprint-unchanged path
    (re-analyze ΔF ∪ dependents). This already delivers the MVC win.
 3. **Structural tier.** Negative-dependency tracking so adding a symbol

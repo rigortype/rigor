@@ -3,6 +3,7 @@
 require_relative "type"
 require_relative "environment"
 require_relative "analysis/fact_store"
+require_relative "analysis/dependency_recorder"
 require_relative "inference/expression_typer"
 require_relative "inference/statement_evaluator"
 
@@ -340,10 +341,24 @@ module Rigor
     # has no RBS sig.
     def user_def_for(class_name, method_name)
       table = @discovered_def_nodes[class_name.to_s]
-      return nil unless table
-
-      table[method_name.to_sym]
+      node = table && table[method_name.to_sym]
+      record_cross_file_method(class_name, method_name, node) if Analysis::DependencyRecorder.active?
+      node
     end
+
+    # ADR-46 slice 1 — note the cross-file dependency this resolution
+    # creates: the file defining `class_name#method_name` (the consumer's
+    # analysis reads its body via `infer_user_method_return`), or, when
+    # unresolved, a negative edge so a later definition re-checks the
+    # consumer. Gated on the recorder being active — no-op on a normal run.
+    def record_cross_file_method(class_name, method_name, node)
+      if node
+        Analysis::DependencyRecorder.read_site(@discovered_def_sources.dig(class_name.to_s, method_name.to_sym))
+      else
+        Analysis::DependencyRecorder.read_missing(:method, "#{class_name}##{method_name}")
+      end
+    end
+    private :record_cross_file_method
 
     # v0.0.3 A — top-level def lookup for implicit-self
     # calls. Returns the `Prism::DefNode` for a top-level

@@ -255,12 +255,23 @@ trade for speed. Defenses:
      analyzed set the merge subtracts the affected closure from. Run-level
      diagnostic streams (the gem-RBS `info`, keyed on `.rigor.yml`) are
      recomputed fresh each run and excluded from the per-file cache.
+   - **`--verify-incremental` CLI gate landed** — `rigor check
+     --verify-incremental [paths]` runs a baseline (recording), re-analyzes
+     every-other file as a subset and serves the rest from the per-file
+     cache, and asserts the merged diagnostics are byte-identical to a full
+     `--no-cache` run; it prints a one-line PASS or the differing
+     diagnostics and exits 0/1. This exercises BOTH the subset-analysis and
+     cache-serving paths against the full-run oracle on the real project
+     (no source edit needed). Verified on Rigor's own `lib` (131/261 files
+     re-analyzed, matches full). `IncrementalSession` is its engine; the
+     edit-driven *dependents soundness* (a real edit confining its
+     diagnostic change to the affected closure) is covered by the spec
+     suite, which can fabricate edits the CLI gate can't on a user's tree.
    - **Remaining in this slice:** lift the in-process cache to disk
      (ADR-45's `Cache::Store#fetch_or_validate`, so the session survives
-     across processes / CI) + the `--verify-incremental` CLI flag that runs
-     incremental vs full `--no-cache` and asserts byte-identical on
-     Mastodon + GitLab (the acceptance gate, of which `IncrementalSession`
-     is the in-memory engine).
+     across processes / CI) + wire a user-facing `--incremental` *speedup*
+     flag (the gate proves the machinery sound; the speedup flag is the
+     payoff) + run `--verify-incremental` on Mastodon + GitLab in CI.
 3. **Structural tier.** Negative-dependency tracking so adding a symbol
    re-checks only its would-be resolvers instead of falling back to full.
 4. **Symbol granularity (optional).** Refine file-level deps to

@@ -31,8 +31,11 @@ module Rigor
       # re-analyzed versus served from cache.
       Recheck = Data.define(:diagnostics, :changed, :affected, :reused)
 
-      def initialize(configuration:)
+      # @param paths [Array<String>, nil] explicit analysis roots; nil
+      #   (the default) uses the configuration's `paths:`.
+      def initialize(configuration:, paths: nil)
         @configuration = configuration
+        @paths = paths
         @cache = {}        # analyzed path => [Diagnostic] (its per-file diagnostics)
         @sources = {}      # analyzed path => Set<source path it read from>
         @digests = {}      # analyzed path => content digest at last analysis
@@ -40,11 +43,18 @@ module Rigor
         @dependents = {}   # inverted @sources
       end
 
+      # The project files analyzed at the last baseline / recheck — the set
+      # a verify pass partitions and the merge subtracts the affected
+      # closure from.
+      def analyzed_files
+        @analyzed
+      end
+
       # Full baseline analysis with recording. Returns the run's
       # diagnostics; populates the in-process cache + dependency state.
       def baseline
         runner = build_runner(record_dependencies: true)
-        diagnostics = runner.run.diagnostics
+        diagnostics = run_runner(runner).diagnostics
         @analyzed = runner.analyzed_files
         @sources = runner.file_dependencies.transform_values { |record| record.sources.dup }
         @dependents = Incremental.invert(@sources)
@@ -60,11 +70,27 @@ module Rigor
         changed = @analyzed.reject { |path| digest(path) == @digests[path] }
         affected = Incremental.affected(changed, @dependents)
         runner = build_runner(analyze_only: affected, record_dependencies: true)
-        fresh = runner.run.diagnostics
+        fresh = run_runner(runner).diagnostics
         reused = @analyzed - affected.to_a
         merged = fresh + reused.flat_map { |path| @cache[path] || [] }
         absorb(runner, fresh, affected, changed)
         Recheck.new(diagnostics: merged, changed: changed.to_set, affected: affected, reused: reused.to_set)
+      end
+
+      # Verification engine (the `--verify-incremental` gate): with NO
+      # source edit, re-analyze `subset` fresh and serve every other
+      # analyzed file from the baseline cache. Because nothing on disk
+      # changed, the merged result MUST equal a full analysis — so this
+      # exercises the subset-analysis and cache-merge paths against a
+      # known-good oracle (a full `--no-cache` run) for an arbitrary
+      # partition, without mutating session state. Returns the merged
+      # diagnostics.
+      def reanalyze_subset(subset)
+        affected = subset.to_set
+        runner = build_runner(analyze_only: affected)
+        fresh = run_runner(runner).diagnostics
+        reused = @analyzed - affected.to_a
+        fresh + reused.flat_map { |path| @cache[path] || [] }
       end
 
       private
@@ -83,6 +109,12 @@ module Rigor
 
       def build_runner(**)
         Runner.new(configuration: @configuration, cache_store: nil, **)
+      end
+
+      # Run the runner over the session's explicit paths (or, when none were
+      # given, the configuration's `paths:` via `Runner#run`'s default).
+      def run_runner(runner)
+        @paths ? runner.run(@paths) : runner.run
       end
 
       # Group diagnostics by their file path, keeping only those whose path

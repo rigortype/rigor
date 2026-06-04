@@ -36,6 +36,41 @@ RSpec.describe Rigor::CLI do
     expect(err).to include("Unknown command: nope")
   end
 
+  # ADR-46 — the incremental-analysis acceptance gate.
+  describe "check --verify-incremental" do
+    it "reports OK and exits 0 when incremental matches a full run" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, ".rigor.yml"), "severity_profile: balanced\n")
+        # One file carries a diagnostic so the merge moves real data; the
+        # other is plain, so the cache-serving path is exercised too.
+        File.write(File.join(dir, "a.rb"), <<~RUBY)
+          class Base
+            def greet
+              "hi"
+            end
+          end
+
+          class Sub < Base
+            private
+
+            def greet
+              "hello"
+            end
+          end
+        RUBY
+        File.write(File.join(dir, "b.rb"), "class Plain\n  def ok\n    1\n  end\nend\n")
+
+        status, out, _err = run_cli(
+          "check", "--verify-incremental", "--no-stats",
+          "--config", File.join(dir, ".rigor.yml"), dir
+        )
+
+        expect(status).to eq(0)
+        expect(out).to include("--verify-incremental OK")
+      end
+    end
+  end
+
   describe "type-of" do
     let(:tmpdir) { Dir.mktmpdir }
 

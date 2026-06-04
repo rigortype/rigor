@@ -88,6 +88,8 @@ module Rigor
       cache_root = configuration.cache_path
       handle_clear_cache(cache_root) if options.fetch(:clear_cache)
 
+      return run_verify_incremental(configuration) if options.fetch(:verify_incremental)
+
       runner = build_check_runner(
         configuration: configuration, options: options,
         buffer: buffer, cache_root: cache_root
@@ -103,6 +105,58 @@ module Rigor
       exit_code = result.success? ? 0 : 1
       exit_code = 1 if baseline_strict_violation?(raw_result.diagnostics, configuration, options)
       exit_code
+    end
+
+    # ADR-46 — the incremental-analysis acceptance gate. Runs a baseline
+    # analysis (recording cross-file dependencies), then re-analyzes a
+    # representative subset of files and serves the rest from the per-file
+    # cache (the body tier), and asserts the merged diagnostics are
+    # byte-identical to a full `--no-cache` analysis. A mismatch means the
+    # incremental machinery would serve a stale — manufactured —
+    # diagnostic, the soundness failure this gate exists to catch. Prints a
+    # one-line PASS (exit 0) or the differing diagnostics (exit 1).
+    def run_verify_incremental(configuration)
+      paths = @argv.empty? ? nil : @argv
+      session = Analysis::IncrementalSession.new(configuration: configuration, paths: paths)
+      session.baseline
+      analyzed = session.analyzed_files
+
+      # Every other file forms the re-analyzed subset, so the run exercises
+      # BOTH the subset-analysis path and the cache-serving path.
+      subset = analyzed.each_with_index.select { |_, index| index.even? }.map(&:first)
+      incremental = normalize_diagnostics(session.reanalyze_subset(subset))
+      full = normalize_diagnostics(verify_full_diagnostics(configuration, paths))
+
+      report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size)
+    end
+
+    def verify_full_diagnostics(configuration, paths)
+      runner = Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      (paths ? runner.run(paths) : runner.run).diagnostics
+    end
+
+    def normalize_diagnostics(diagnostics)
+      diagnostics.map(&:to_h).sort_by do |hash|
+        [hash["path"].to_s, hash["line"].to_i, hash["column"].to_i, hash["rule"].to_s, hash["message"].to_s]
+      end
+    end
+
+    def report_verify_incremental(incremental, full, subset_size:, total:)
+      if incremental == full
+        @out.puts("rigor: --verify-incremental OK — incremental " \
+                  "(#{subset_size}/#{total} files re-analyzed, rest from cache) " \
+                  "matches full (#{full.size} diagnostics)")
+        return 0
+      end
+
+      only_incremental = incremental - full
+      only_full = full - incremental
+      @err.puts("rigor: --verify-incremental FAILED — incremental and full diagnostics differ.")
+      @err.puts("  incremental-only: #{only_incremental.size}, full-only: #{only_full.size}")
+      (only_incremental + only_full).first(10).each do |hash|
+        @err.puts("    #{hash['path']}:#{hash['line']}:#{hash['column']}: [#{hash['rule']}] #{hash['message']}")
+      end
+      1
     end
 
     # ADR-22 slice 5 — the `--baseline-strict` CI gate. When the
@@ -263,7 +317,13 @@ module Rigor
         # `.rigor.yml`. Intended for single-file / ad-hoc CI use;
         # ordinary projects should configure the plugin in
         # `.rigor.yml`.
-        treat_all_as_inline_rbs: false
+        treat_all_as_inline_rbs: false,
+        # ADR-46 — the incremental-analysis acceptance gate. Runs a
+        # baseline analysis, re-analyzes a subset and serves the rest from
+        # the per-file cache, and asserts the merged diagnostics are
+        # byte-identical to a full `--no-cache` run. Exits non-zero on any
+        # mismatch. Off by default.
+        verify_incremental: false
       }
       parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
         opts.banner = "Usage: rigor check [options] [paths]"
@@ -297,6 +357,10 @@ module Rigor
         opts.on("--treat-all-as-inline-rbs",
                 "ADR-32: force-load rigor-rbs-inline with require_magic_comment: false") do
           options[:treat_all_as_inline_rbs] = true
+        end
+        opts.on("--verify-incremental",
+                "ADR-46: assert incremental analysis matches a full run, then exit") do
+          options[:verify_incremental] = true
         end
       end
       parser.parse!(@argv)

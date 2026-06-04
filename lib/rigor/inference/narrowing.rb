@@ -960,7 +960,7 @@ module Rigor
         end
 
         def simple_dispatch_name?(name)
-          %i[nil? ! is_a? kind_of? instance_of? == != === =~ key? has_key?].include?(name)
+          %i[nil? ! is_a? kind_of? instance_of? == != === =~ key? has_key? empty? any? none?].include?(name)
         end
 
         def dispatch_call_simple(node, scope, name)
@@ -972,6 +972,65 @@ module Rigor
           when :=== then analyse_case_equality_predicate(node, scope)
           when :=~ then analyse_regex_match_predicate(node, scope)
           when :key?, :has_key? then analyse_key_presence_predicate(node, scope)
+          when :empty?, :any?, :none? then analyse_array_emptiness_predicate(node, scope, name)
+          end
+        end
+
+        # ADR-47 §4-4 (Elixir `tuple_size`/non-empty analogue) — a bare
+        # `arr.empty?` / `arr.any?` / `arr.none?` (no block, no args)
+        # narrows an Array-typed receiver to `non-empty-array[T]` on the
+        # edge that implies "at least one element":
+        #
+        #   - `empty?` → false edge   (the array is NOT empty)
+        #   - `any?`   → true  edge   (a truthy element exists ⇒ non-empty)
+        #   - `none?`  → false edge   (a truthy element exists ⇒ non-empty)
+        #
+        # The opposite edge is the conservative no-op (`any?`/`none?`
+        # falseness does not imply emptiness — the array may hold only
+        # falsey elements; `empty?` truth could narrow to an empty array
+        # but that carrier move is deferred). Only `Nominal[Array, [T]]`
+        # receivers narrow — `Tuple` is already known-length, `Dynamic`
+        # is left alone (gradual guarantee), and a non-Array receiver
+        # (`String#empty?`, `Range#any?`, …) bails so the existing string
+        # / predicate paths still run.
+        def analyse_array_emptiness_predicate(node, scope, name)
+          return nil if node.block
+          return nil unless node.arguments.nil? || node.arguments.arguments.empty?
+
+          reader, writer = emptiness_receiver_accessors(node.receiver)
+          return nil if reader.nil?
+
+          current = scope.public_send(reader, node.receiver.name)
+          return nil if current.nil?
+
+          non_empty = narrow_to_non_empty_array(current)
+          return nil if non_empty.equal?(current) # receiver is not an Array shape → opaque
+
+          non_empty_scope = scope.public_send(writer, node.receiver.name, non_empty)
+          name == :any? ? [non_empty_scope, scope] : [scope, non_empty_scope]
+        end
+
+        def emptiness_receiver_accessors(receiver)
+          case receiver
+          when Prism::LocalVariableReadNode then %i[local with_local]
+          when Prism::InstanceVariableReadNode then %i[ivar with_ivar]
+          else [nil, nil]
+          end
+        end
+
+        # Refines `Array[T]` (and every Array member of a Union) to
+        # `non-empty-array[T]`; returns the input unchanged when nothing
+        # applies, so the caller can detect "no narrowing".
+        def narrow_to_non_empty_array(type)
+          case type
+          when Type::Nominal
+            return type unless type.class_name == "Array"
+
+            Type::Combinator.non_empty_array(type.type_args.first || Type::Combinator.top)
+          when Type::Union
+            Type::Combinator.union(*type.members.map { |member| narrow_to_non_empty_array(member) })
+          else
+            type
           end
         end
 

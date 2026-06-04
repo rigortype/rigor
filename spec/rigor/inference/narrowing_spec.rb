@@ -330,6 +330,56 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey.local(:h)).to eq(integer_nominal)
     end
 
+    # §4-4 — Elixir non-empty / tuple_size analogue.
+    def array_int
+      Rigor::Type::Combinator.nominal_of("Array", type_args: [integer_nominal])
+    end
+
+    def non_empty_int
+      Rigor::Type::Combinator.non_empty_array(integer_nominal)
+    end
+
+    it "narrows Array[T] to non-empty-array[T] on the false edge of empty?" do
+      bound = scope.with_local(:arr, array_int)
+      pred = parse_predicate("arr.empty?", locals: %i[arr])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:arr)).to eq(array_int)        # truthy(empty): conservative no-op
+      expect(falsey.local(:arr)).to eq(non_empty_int)    # falsey: non-empty
+    end
+
+    it "narrows to non-empty-array[T] on the true edge of any?" do
+      bound = scope.with_local(:arr, array_int)
+      pred = parse_predicate("arr.any?", locals: %i[arr])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:arr)).to eq(non_empty_int)
+      expect(falsey.local(:arr)).to eq(array_int)
+    end
+
+    it "narrows to non-empty-array[T] on the false edge of none?" do
+      bound = scope.with_local(:arr, array_int)
+      pred = parse_predicate("arr.none?", locals: %i[arr])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:arr)).to eq(array_int)
+      expect(falsey.local(:arr)).to eq(non_empty_int)
+    end
+
+    it "does not narrow when any? is given a block (semantics differ)" do
+      bound = scope.with_local(:arr, array_int)
+      pred = parse_predicate("arr.any? { |x| x > 0 }", locals: %i[arr])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:arr)).to eq(array_int)
+      expect(falsey.local(:arr)).to eq(array_int)
+    end
+
+    it "does not narrow a non-Array receiver (gradual)" do
+      object_nominal = Rigor::Type::Combinator.nominal_of("Object")
+      bound = scope.with_local(:o, object_nominal)
+      pred = parse_predicate("o.any?", locals: %i[o])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:o)).to eq(object_nominal)
+      expect(falsey.local(:o)).to eq(object_nominal)
+    end
+
     it "leaves the scope unchanged when the local is unbound" do
       pred = parse_predicate("y")
       truthy, falsey = described_class.predicate_scopes(pred, scope)

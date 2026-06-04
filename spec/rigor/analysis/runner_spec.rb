@@ -2212,6 +2212,52 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    describe "Array non-empty narrowing (ADR-47 §4-4)" do
+      def dump_messages(result)
+        result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+      end
+
+      # Inside an `unless arr.empty?` / `if arr.any?` guard the array is
+      # `non-empty-array[T]`, so `size`/`length`/`count` refine from
+      # `non-negative-int` to `positive-int` (Elixir `tuple_size`-style).
+      it "refines arr.size to positive-int inside a non-empty guard" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Box
+            def head(arr)
+              Rigor.dump_type(arr.size)
+              unless arr.empty?
+                Rigor.dump_type(arr)
+                Rigor.dump_type(arr.size)
+              end
+            end
+          end
+        RUBY
+          class Box
+            def head: (Array[Integer]) -> void
+          end
+        RBS
+        dumps = dump_messages(result)
+        expect(dumps).to include("dump_type: non-negative-int") # unguarded
+        expect(dumps).to include("dump_type: non-empty-array[Integer]") # narrowed receiver
+        expect(dumps).to include("dump_type: positive-int") # guarded size
+      end
+
+      it "narrows on the true edge of `arr.any?`" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Box
+            def head(arr)
+              Rigor.dump_type(arr.size) if arr.any?
+            end
+          end
+        RUBY
+          class Box
+            def head: (Array[Integer]) -> void
+          end
+        RBS
+        expect(dump_messages(result)).to include("dump_type: positive-int")
+      end
+    end
+
     describe "method-visibility-mismatch rule (v0.1.2)" do
       def visibility_mismatch_diags(result)
         result.diagnostics.select { |d| d.rule == "def.method-visibility-mismatch" }

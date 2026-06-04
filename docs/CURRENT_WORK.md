@@ -6,6 +6,8 @@ A transient bookmark for the next implementer: the immediate next-session entry 
 
 **v0.1.15 released (2026-05-29). v0.1.16 prepared (2026-06-03) — version bumped + `CHANGELOG.md` § `[0.1.16]` sealed; `bundle exec rake release` is gated on explicit user authorisation and has not been run.**
 
+**An unreleased performance / caching / incremental cycle (the planned v0.1.17 "internal-structure review + performance tuning") is in flight on top of v0.1.16 — see `CHANGELOG.md` § `[Unreleased]` for the shipped entries; do not re-summarise them here.** Landed: allocation profiling of `rigor check` on Mastodon + GitLab (notes `docs/notes/20260604-mastodon-allocation-profile.md` + `…-gitlab-plugin-contribution-allocation.md`) → ~−42% allocations on Mastodon + ~−14% wall on GitLab via ADR-44 (per-dispatch / per-narrow allocation churn) and the plugin-contribution de-churn; **ADR-45** the unchanged-project fast path (record-and-validate whole-run cache — unchanged GitLab 2,630 files 113 s → ~2.7 s, ~42×); **ADR-46 design + slice 1a** the per-file incremental successor (cross-file dependency recorder). The cycle has NOT been version-bumped or released.
+
 v0.1.16 lands the full plugin-contract interface-segregation + ergonomics suite (ADR-37/38/39/40), ADR-43 RBS-complete ancestor resolution + the `make check-plugins` gate, the v0.2.0 gate-1 executable evidence (external-plugin fixture + conformance / all-plugins-load / demos-run guards), RBS-robustness synthesis for malformed project `signature_paths:`, and the `rigor-activerecord` missing-schema memoization fix (Redmine −86% memory). Full detail is in `CHANGELOG.md` § `[0.1.16]`; do not re-summarise it here.
 
 Headline realism numbers (measured at the v0.1.12 OSS-realism cut; still current — later cuts added onboarding / `def.override-*` / the plugin-contract suite rather than new full surveys):
@@ -20,12 +22,22 @@ The 6 remaining Mastodon errors are unrelated to engine precision: 5 nil-receive
 
 ## Next-session entry point
 
-`make verify` is clean. The plugin-contract effort is released in v0.1.16; the two strategic levers left before the v0.2.0 cut are:
+`make verify` is clean. The **active in-flight work is the ADR-46 incremental-analysis track** (the v0.1.17 perf cycle's headline). Resume there:
 
-1. **v0.2.0 gate 1 — the documented stability commitment for the external plugin contract.** The executable evidence (external-plugin fixture + conformance / load / demo guards, all in CI) landed in v0.1.16; what remains is the *documented* "won't break within 0.2.x" statement for the pinned plugin-contract namespaces (the drift spec already pins them). **This needs explicit planning, not another incremental slice.** See [`docs/ROADMAP.md`](ROADMAP.md) § "v0.2.0 — first evaluation release".
-2. **v0.1.17 — internal-structure review + performance tuning** before the v0.2.0 cut: ADR-24 slice 4 (gated `undefined-method` on resolved closed-class self-calls), engine-internal precision uplifts surfaced by the v0.1.16 work, and perf follow-ups from the inference-budget survey / `RIGOR_BUDGET_TRACE`.
+**ADR-46 — incremental analysis via a cross-file dependency graph** ([`docs/adr/46-incremental-dependency-graph.md`](adr/46-incremental-dependency-graph.md), § "Staging"). The per-file incremental successor to ADR-45's coarse whole-run cache: edit a leaf controller → re-check 1 file; edit a model → re-check the model + its callers. **Slice 1a landed** (commit `4eccc390`): `Analysis::DependencyRecorder` + the instrumented `Scope#user_def_for` choke point, opt-in via `Runner.new(record_dependencies: true)` → `runner.file_dependencies`, off by default. **Next, in order:**
 
-Everything else is demand-driven and lives in [`docs/ROADMAP.md`](ROADMAP.md) § "Future cycles" (plugin-contract ergonomics follow-ons, dry-rb continuations, LSP capabilities, performance levers) — pull from there when a concrete need surfaces.
+1. **Finish slice 1** — add class / superclass / include source maps to the `ScopeIndexer` pre-pass (the pre-pass already holds the `path` — mirror `merge_discovered_defs`'s method attribution) and instrument the remaining `Scope` accessors (`superclass_of`, `includes_of`, the discovered-class lookups); persist `deps` / `dependents` + per-file diagnostic entries (reuse ADR-45's `Cache::Store#fetch_or_validate`); add the **mandatory** `--verify-incremental` cross-check mode (incremental vs full `--no-cache` must be byte-identical — the acceptance gate).
+2. **Slice 2 — the body tier** (re-analyse `ΔF ∪ dependents` when the declaration-structure fingerprint is unchanged). This is the slice that delivers the MVC win.
+3. Slices 3 (structural-tier negative-dependency tracking) + 4 (symbol granularity) per ADR-46 § "Staging".
+
+**Gotcha (recorded in the ADR-46 memory note):** do NOT extract the `Runner#initialize` ivar pre-seeds into a helper — moving `@class_decl_paths_snapshot = {}` etc. out of the constructor hides them from the engine's OWN flow analysis and `make check` self-flags `snapshot.size` as a nil-receiver false positive. Keep them inline; the constructor carries an `AbcSize` disable.
+
+The two strategic levers before the v0.2.0 cut remain (pull when ready, both need their own planning):
+
+1. **v0.2.0 gate 1 — the documented stability commitment for the external plugin contract** (executable evidence landed v0.1.16; the "won't break within 0.2.x" statement remains). See [`docs/ROADMAP.md`](ROADMAP.md) § "v0.2.0 — first evaluation release".
+2. **v0.1.17 remainder** — ADR-24 slice 4 (gated `undefined-method` on resolved closed-class self-calls) + further engine-internal precision uplifts; the perf/cache half (ADR-44/45/46) is the cycle's other half and is underway.
+
+Everything else is demand-driven and lives in [`docs/ROADMAP.md`](ROADMAP.md) § "Future cycles" — pull from there when a concrete need surfaces.
 
 ### Reference reading
 
@@ -66,6 +78,15 @@ The spec's configurable `budgets:` table ([`docs/type-specification/inference-bu
 **Layer 2 resolved, and it was not a budget.** The large-app cost cliff was traced to 4.2 M retained Strings from one unmemoized failure in `rigor-activerecord` (`schema_table_or_nil` when `db/schema.rb` is missing) — fixed in v0.1.16 (Redmine 1518 MB / 173 s → 217 MB / 84 s). `union_size` was refuted as uncorrelated with memory. Budget wiring is now **demand-deferred** — no corpus project demonstrates a budget-shaped cost; if one ever does, re-run the 2a-style distribution probe first ([ADR-41 WD3](adr/41-inference-budget-design.md)).
 
 **Layer 1 (demand-gated doc/spec hygiene, awaits ADR-41 acceptance):** fix the `docs/manual/03-configuration.md` `budget_per_gem` description (it says "time budget in ms, default 1000"; really a method-def **count**, default **5000**); reconcile `recursion_depth` (spec 5 vs the wired depth-1 termination guard — split "termination floor" from "precision-unroll depth"); add `ancestor_walk` (100) + `hkt_fuel` (64) rows to the documented table; author the missing user-facing budget explanation (placement TBD).
+
+### Performance / caching / incremental (ADR-44 / 45 / 46) — in flight
+
+The unreleased v0.1.17 perf cycle. Shipped entries are in `CHANGELOG.md` § `[Unreleased]`; this is the engine-internal resume detail.
+
+- **ADR-44 — per-dispatch / per-narrow allocation churn (LANDED).** `rigor check` is allocation-bound. Body-scope `with_*` chains collapsed into one `Scope.new` (GC runs −29%); `owners_for` / `CallContext` hygiene. **Rejected:** mutable pooled `Scope` / `CallContext` (re-entrant dispatch → silent narrowing corruption → false positives). **Downgraded:** the `ProjectScope` field-regrouping — a Ruby 4.0 object-shape micro-benchmark proved 3–24 ivars all allocate ONE object, so regrouping cuts heap-slot *size*, not allocation *count*; it is a memory-footprint lever only, measure-before-invest. See [ADR-44](adr/44-dispatch-allocation-churn.md).
+- **ADR-45 — unchanged-project fast path (LANDED).** Record-and-validate whole-run diagnostic cache (`Cache::Store#fetch_or_validate` + `Descriptor#fresh?`): key on inputs known up front, store the result with the dependency set the run actually read (incl. files plugins read mid-analysis — the Pundit policy hazard), re-digest on the next run. **Coarse by design** — any analyzed-file change → full re-run (this is what ADR-46 refines). `make check` / `check-plugins` run `--no-cache` so the gate never trusts a cached result. Gotchas in the memory note: `@collect_stats` is true by default (can't gate the cache on it; hit → nil stats); lazy `@io_boundary ||=` on a frozen plugin → `FrozenError` (use `instance_variable_get`); cache write/serialize failure is swallowed (never breaks a run). See [ADR-45](adr/45-unchanged-project-fast-path.md).
+- **ADR-46 — incremental dependency graph (DESIGN + slice 1a).** The next-session entry point above. Per-file deps recorded at the `Scope` accessor choke point → `dependents` index → per-file cache; soundness gated by a mandatory `--verify-incremental` cross-check. See [ADR-46](adr/46-incremental-dependency-graph.md) + its memory note.
+- **CI caching is a near-no-op (measured).** On a code change (the typical CI case) ADR-45's whole-run cache misses, and the intermediate RBS/plugin caches save <1 s on a ~113 s GitLab run; restore/save overhead likely exceeds that. The cache's real win is local dev / editor / re-runs of the same SHA / doc-only PRs. ADR-46 is what makes *CI* fast (re-analyse only changed files + dependents).
 
 ### Stdlib RBS coverage-gap pattern
 

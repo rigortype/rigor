@@ -278,6 +278,42 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       it "falls through when called with no arguments" do
         expect(dispatch(receiver: t, method_name: :take, args: [])).to be_nil
       end
+
+      it "falls through on a negative count (Array#take raises)" do
+        expect(dispatch(receiver: t, method_name: :take, args: [constant(-1)])).to be_nil
+      end
+    end
+
+    describe "Tuple#drop" do
+      let(:t) { tuple(constant(1), constant(2), constant(3)) }
+
+      it "drops the first n elements" do
+        expect(dispatch(receiver: t, method_name: :drop, args: [constant(1)]).elements.map(&:value)).to eq([2, 3])
+      end
+
+      it "returns the empty Tuple when n >= size" do
+        expect(dispatch(receiver: t, method_name: :drop, args: [constant(9)]).elements).to be_empty
+      end
+
+      it "falls through on a negative count (Array#drop raises)" do
+        expect(dispatch(receiver: t, method_name: :drop, args: [constant(-1)])).to be_nil
+      end
+    end
+
+    describe "Tuple#rotate" do
+      let(:t) { tuple(constant(1), constant(2), constant(3)) }
+
+      it "rotates left by one with no argument" do
+        expect(dispatch(receiver: t, method_name: :rotate, args: []).elements.map(&:value)).to eq([2, 3, 1])
+      end
+
+      it "rotates left by n" do
+        expect(dispatch(receiver: t, method_name: :rotate, args: [constant(2)]).elements.map(&:value)).to eq([3, 1, 2])
+      end
+
+      it "rotates right on a negative n (Array#rotate modulo)" do
+        expect(dispatch(receiver: t, method_name: :rotate, args: [constant(-1)]).elements.map(&:value)).to eq([3, 1, 2])
+      end
     end
 
     describe "Tuple#zip per-position fold (v0.0.7)" do

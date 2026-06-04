@@ -92,7 +92,9 @@ module Rigor
           values_at: :tuple_values_at,
           :+ => :tuple_concat,
           compact: :tuple_compact,
-          take: :tuple_take
+          take: :tuple_take,
+          drop: :tuple_drop,
+          rotate: :tuple_rotate
         }.freeze
 
         HASH_SHAPE_HANDLERS = {
@@ -587,6 +589,10 @@ module Rigor
             Type::Combinator.integer_range(min, max)
           end
 
+          # `first` (no arg) → the first element (or `Constant[nil]` when
+          # empty). The `first(n)` arg-form is deliberately left to RBS
+          # overload selection (see the overload-selection specs) — folding
+          # it here would change that documented `Array[Elem]` contract.
           def tuple_first(tuple, _method_name, args)
             return nil unless args.empty?
             return Type::Combinator.constant_of(nil) if tuple.elements.empty?
@@ -844,16 +850,49 @@ module Rigor
           # n <= 0 returns the empty Tuple; n >= size returns the
           # full receiver.
           def tuple_take(tuple, _method_name, args)
+            n = non_negative_count_arg(args)
+            return nil if n.nil?
+
+            Type::Combinator.tuple_of(*tuple.elements.take(n))
+          end
+
+          # `drop(n)` → `Tuple` of every element after the first `n`
+          # (mirror of `take`; `n >= size` → empty Tuple).
+          def tuple_drop(tuple, _method_name, args)
+            n = non_negative_count_arg(args)
+            return nil if n.nil?
+
+            Type::Combinator.tuple_of(*tuple.elements.drop(n))
+          end
+
+          # `rotate` (no arg → 1) / `rotate(n)` → `Tuple` of the elements
+          # cyclically shifted left by `n` (`Array#rotate` handles negative
+          # and out-of-range `n` by modulo, so any Integer arg folds).
+          def tuple_rotate(tuple, _method_name, args)
+            count =
+              if args.empty?
+                1
+              else
+                arg = args.size == 1 ? args.first : nil
+                return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Integer)
+
+                arg.value
+              end
+            Type::Combinator.tuple_of(*tuple.elements.rotate(count))
+          end
+
+          # Unwraps a single non-negative `Constant[Integer]` count argument
+          # (the `take` / `drop` / `first(n)` / `last(n)` shape). Returns the
+          # Integer, or nil to defer (wrong arity, non-constant, non-Integer,
+          # or negative — `Array#take`/`#drop` raise on negative counts).
+          def non_negative_count_arg(args)
             return nil unless args.size == 1
 
             arg = args.first
-            return nil unless arg.is_a?(Type::Constant)
-            return nil unless arg.value.is_a?(Integer)
+            return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Integer)
+            return nil if arg.value.negative?
 
-            n = arg.value
-            return Type::Combinator.tuple_of if n <= 0
-
-            Type::Combinator.tuple_of(*tuple.elements.take(n))
+            arg.value
           end
 
           # Returns `true` / `false` if every element's truthiness

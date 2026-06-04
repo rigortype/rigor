@@ -672,17 +672,30 @@ module Rigor
       # as a return-only `FlowContribution`) and the legacy
       # `flow_contribution_for` escape valve, so migrated and unmigrated
       # plugins compose through the same merger.
+      EMPTY_CONTRIBUTIONS = [].freeze
+      private_constant :EMPTY_CONTRIBUTIONS
+
+      # Collects every plugin's flow / dynamic-return contribution for one
+      # call site. Runs per dispatch over the whole plugin set, and on a
+      # plugin-heavy project (GitLab: 11 plugins) it was the single largest
+      # allocation site — the old `flat_map` allocated a fresh per-plugin
+      # `contributions = []` plus the flattened result array on every
+      # dispatch, even though almost every plugin contributes nothing for a
+      # given receiver. Accumulate lazily instead: allocate only when a
+      # contribution actually appears, and share one frozen empty array for
+      # the common no-contribution case. The caller treats the result as
+      # read-only (`.empty?` / `Merger.merge`).
       def collect_plugin_contributions(registry, call_node, scope, receiver_type)
-        registry.plugins.flat_map do |plugin|
-          contributions = []
+        result = nil
+        registry.plugins.each do |plugin|
           legacy = plugin.flow_contribution_for(call_node: call_node, scope: scope)
-          contributions << legacy if legacy.is_a?(FlowContribution)
+          (result ||= []) << legacy if legacy.is_a?(FlowContribution)
           dynamic = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
-          contributions << FlowContribution.new(return_type: dynamic) if dynamic
-          contributions
+          (result ||= []) << FlowContribution.new(return_type: dynamic) if dynamic
         rescue StandardError
-          []
+          next
         end
+        result || EMPTY_CONTRIBUTIONS
       end
 
       # Runs the precision tiers (constant fold, shape dispatch,

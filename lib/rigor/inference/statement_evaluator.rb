@@ -1376,17 +1376,25 @@ module Rigor
       # facts-only `FlowContribution`) and the legacy
       # `flow_contribution_for` escape valve, swallowing per-plugin
       # exceptions so a buggy plugin can't abort the assertion path.
+      EMPTY_CONTRIBUTIONS = [].freeze
+      private_constant :EMPTY_CONTRIBUTIONS
+
+      # Per-dispatch collection of plugin narrowing contributions. Same
+      # allocation shape as `MethodDispatcher#collect_plugin_contributions`
+      # (a top allocation site on plugin-heavy projects): accumulate lazily
+      # so the common no-contribution case allocates nothing and shares one
+      # frozen empty array. The caller treats the result as read-only.
       def collect_plugin_contributions(registry, call_node, current_scope)
-        registry.plugins.flat_map do |plugin|
-          contributions = []
+        result = nil
+        registry.plugins.each do |plugin|
           legacy = plugin.flow_contribution_for(call_node: call_node, scope: current_scope)
-          contributions << legacy if legacy.is_a?(Rigor::FlowContribution)
+          (result ||= []) << legacy if legacy.is_a?(Rigor::FlowContribution)
           facts = plugin.type_specifier_facts(call_node: call_node, scope: current_scope)
-          contributions << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
-          contributions
+          (result ||= []) << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
         rescue StandardError
-          []
+          next
         end
+        result || EMPTY_CONTRIBUTIONS
       end
 
       def resolve_call_method(call_node, current_scope)

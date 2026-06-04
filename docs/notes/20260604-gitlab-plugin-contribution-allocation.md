@@ -84,11 +84,59 @@ Clean A/B on the same target (warm, plugins on, `--workers 0`):
 clean). `Kernel#dup` and the two readers leave the allocation top-table
 entirely.
 
+## Faithful re-profile (cwd = gitlab, real `.rigor.yml`)
+
+The runs above were taken from `cwd = rigor` with an absolute-path config,
+which left the plugins' *relative* paths (`routes_file`, `helper_paths`)
+unresolved, so plugin file-discovery was mostly a no-op. Re-profiled the
+real way — `cd gitlab-foss && rigor check` against the project's own
+`.rigor.yml` (relative paths resolve to GitLab's tree), `--workers 0`
+(the sequential default), `--no-cache`, profiling the only addition.
+Faithful diagnostics: **2,323** (38 errors / 20 warnings / 2,265 info),
+~146 s.
+
+Two corrections fell out:
+
+- **The routes-read hotspot was a cwd artifact.** With routes resolving,
+  `IoBoundary#read_file` is **17,003 calls over 6,901 unique paths = 0.47 s
+  (0.3 % of wall)** — not a bottleneck. (The 105,724-read explosion that
+  motivated the `rigor-rails-routes` nil-table memo fix only happens when
+  the routes file is *absent/unparseable*; that fix is a real robustness
+  win but not a GitLab hot path.)
+- **`collect_plugin_contributions` is the true #1 allocator.** Post the
+  `dynamic_returns` dup fix, the faithful `:object` profile puts it at
+  **19.2 % of all allocations** alone (≈34 % with `type_specifier_facts`,
+  the sibling `StatementEvaluator` collector, and `flat_map`). `Kernel#dup`
+  fell from 17 % → 1.2 %, confirming the dup fix held.
+
+### Landed: lazy contribution accumulation
+
+Both `collect_plugin_contributions` methods (MethodDispatcher +
+StatementEvaluator) ran a `flat_map` that allocated a per-plugin
+`contributions = []` *and* the flattened result on every dispatch, even
+though almost every plugin contributes nothing for a given receiver. They
+now accumulate lazily — allocate only when a contribution actually
+appears, and share one frozen empty array otherwise. The callers treat
+the result as read-only (`.empty?` / `Merger.merge`).
+
+Clean faithful A/B (cwd = gitlab, plugins on, `--no-cache`):
+
+| metric | before | after | Δ |
+|---|--:|--:|--:|
+| objects allocated | 347.3 M | **246.8 M** | **−29 %** |
+| wall | 146.6 s | **143.2 s** | −2.4 % |
+| GC runs | 402 | 385 | −4 % |
+| diagnostics | 2,323 / 38 err | **2,323 / 38 err** | byte-identical |
+
+The wall gain is modest relative to the allocation drop: the eliminated
+objects are short-lived empty arrays, cheap to allocate and sweep. Still
+a real −29 % allocation cut with `make verify` green.
+
 ## Still open
 
 `collect_plugin_contributions` still **iterates all 11 plugins on every
-dispatch** (40.7 % inclusive); most contribute nothing for a given
-receiver. Indexing plugins by their `dynamic_return(receivers:)` /
+dispatch** (the allocation is gone, but the iteration CPU — ~3.7 % self —
+remains). Indexing plugins by their `dynamic_return(receivers:)` /
 `type_specifier(methods:)` applicability — so only relevant plugins are
 consulted per call — is the next lever, but it is a dispatch-path
 redesign, not a local rewrite. The structural `Scope#rebuild` /

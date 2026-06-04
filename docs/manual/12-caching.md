@@ -45,10 +45,42 @@ first writable run.
 | `rigor check --no-cache` | Run without reading or writing the persistent cache. |
 | `rigor check --clear-cache` | Delete the cache directory, then run. |
 | `rigor check --cache-stats` | Print the on-disk cache inventory when the run finishes. |
+| `rigor check --incremental` | Re-analyse only what changed; serve the rest from the incremental snapshot (see below). |
 
 There is no config key to disable caching permanently — the
 flags are per-run toggles. To run without a persistent cache
 habitually, point `cache.path` at a disposable directory.
+
+## Incremental analysis
+
+The cache above makes an *unchanged* project fast — a second
+run over the same files reuses the whole result. `rigor check
+--incremental` goes further: when you have edited a few files,
+it re-analyses **only those files plus the files that depend on
+them**, and serves every other file's diagnostics from a
+snapshot of the previous run. Editing a leaf controller
+re-checks one file; editing a model re-checks the model and its
+callers — not the whole project.
+
+The diagnostics are identical to a full run. Rigor records, per
+file, which other files its analysis read from, so it knows
+exactly which files an edit can affect. A continuous-integration
+gate, `rigor check --verify-incremental`, asserts this on every
+build: it runs the incremental analyzer and a full analysis and
+fails if they disagree on a single diagnostic.
+
+The snapshot lives under the cache directory (`.rigor/cache`)
+and is keyed by a fingerprint of your configuration, your locked
+gems, your project's own `sig/` RBS, and the Rigor version.
+Change any of those — or add or remove a file — and the snapshot
+is dropped and the next run is a full one, so an incremental run
+can never serve a stale result. As with the rest of the cache, a
+missing or corrupt snapshot is simply a full run; it can never
+wedge analysis.
+
+`--incremental` is most useful for fast local re-checks and CI
+on a changed branch. For a one-shot run on an unchanged project,
+the ordinary cache already serves the whole result in one step.
 
 ## Concurrency
 

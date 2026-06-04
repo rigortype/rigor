@@ -41,6 +41,8 @@ the `paths:` list from the configuration file.
 | `--format=text\|json` | Output format. Default `text`. |
 | `--explain` | Surface fail-soft fallback events as `info` diagnostics. |
 | `--no-cache` | Skip the persistent cache for this run. |
+| `--incremental` | Re-analyse only the files changed since the last run plus the files that depend on them, serving the rest from a cross-process disk snapshot (ADR-46). Diagnostics are identical to a full run; a config / gem / version change (or a file added or removed) transparently forces a full re-analysis. See [Caching](12-caching.md). |
+| `--verify-incremental` | Acceptance gate: run the incremental analyzer against a full `--no-cache` run and assert the diagnostics are byte-identical, then exit (0 on match, 1 with the differing diagnostics on mismatch). Used in CI to guarantee `--incremental` never serves a stale result. |
 | `--clear-cache` | Delete the cache directory before running. |
 | `--cache-stats` | Print the on-disk cache inventory when finished. |
 | `--[no-]stats` | Print a run summary (files, classes, memory, wall time) to stderr. Default on. |

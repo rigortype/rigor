@@ -103,7 +103,7 @@ Phases 1–4 landed (String / Integer / Float / Comparable / Math / HashShape / 
 
 - **Struct / Data value folding** — ADR-worthy (needs two new carriers); `Data.define` is the likely better first target. `Encoding` value folding is a *permanent exclusion*.
 - **`MathFolding` result refinements** — attaching range refinements (`Math.exp` → `positive-float`, `Math.sqrt` / `hypot` → `non-negative-float`) to the value-precise 28-function fold. Demand-driven.
-- **Hash `rassoc` shape handler** — the one open low-priority Hash handler; value → `[k, v]` reverse lookup, foldable when every value is a `Constant`. Demand-driven.
+- ~~**Hash `rassoc` shape handler**~~ — LANDED (v0.1.17). `ShapeDispatch#hash_rassoc` folds `shape.rassoc(value)` → `Tuple[Constant[k], V]` for the first matching value (or `Constant[nil]`) when every value is a `Constant`; the reverse of `hash_assoc`, mirroring `hash_key`. Unit + integration fixture coverage.
 
 ## Post-release follow-ups
 

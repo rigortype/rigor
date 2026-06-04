@@ -123,6 +123,7 @@ module Rigor
           values_at: :hash_values_at,
           fetch_values: :hash_fetch_values,
           assoc: :hash_assoc,
+          rassoc: :hash_rassoc,
           key: :hash_key,
           has_key?: :hash_has_key?,
           key?: :hash_has_key?,
@@ -1087,6 +1088,26 @@ module Rigor
             return Type::Combinator.constant_of(nil) unless shape.pairs.key?(key)
 
             Type::Combinator.tuple_of(Type::Combinator.constant_of(key), shape.pairs[key])
+          end
+
+          # `shape.rassoc(value)` — reverse of `assoc`: returns
+          # `Tuple[Constant[k], V]` for the first key whose VALUE equals
+          # the argument, `Constant[nil]` when none match. Folds when every
+          # value is a `Constant` so equality is decidable (mirrors
+          # `hash_key`, which returns only the key).
+          def hash_rassoc(shape, _method_name, args)
+            return nil unless args.size == 1
+            return nil unless shape.closed?
+            return nil unless shape.optional_keys.empty?
+            return nil unless shape.pairs.values.all?(Type::Constant)
+
+            arg = args.first
+            return nil unless arg.is_a?(Type::Constant)
+
+            pair = shape.pairs.find { |_k, v| v.value == arg.value }
+            return Type::Combinator.constant_of(nil) if pair.nil?
+
+            Type::Combinator.tuple_of(Type::Combinator.constant_of(pair.first), pair.last)
           end
 
           # `shape.key(value)` — reverse lookup. Folds when every

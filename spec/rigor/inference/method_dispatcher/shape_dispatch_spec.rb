@@ -976,6 +976,18 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       end
     end
 
+    describe "rassoc (reverse of assoc)" do
+      it "returns Tuple[key, value] for the first matching value" do
+        expect(dispatch(receiver: two, method_name: :rassoc, args: [constant(2)]))
+          .to eq(tuple(constant(:b), constant(2)))
+      end
+
+      it "returns Constant[nil] when no value matches" do
+        expect(dispatch(receiver: two, method_name: :rassoc, args: [constant(99)]))
+          .to eq(constant(nil))
+      end
+    end
+
     describe "has_value? / value?" do
       it "folds to true when a value is present" do
         expect(dispatch(receiver: two, method_name: :has_value?, args: [constant(1)])).to eq(constant(true))

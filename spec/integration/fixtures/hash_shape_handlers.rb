@@ -18,6 +18,10 @@ assert_type("nil", { a: 1, b: 2 }.assoc(:z))
 assert_type(":b", { a: 1, b: 2 }.key(2))
 assert_type("nil", { a: 1, b: 2 }.key(99))
 
+# rassoc — reverse of assoc: Tuple[key, value] for the first matching value.
+assert_type("[:b, 2]", { a: 1, b: 2 }.rassoc(2))
+assert_type("nil", { a: 1, b: 2 }.rassoc(99))
+
 # has_value? / value? — decidable membership over Constant values.
 assert_type("true", { a: 1, b: 2 }.has_value?(1))
 assert_type("false", { a: 1, b: 2 }.value?(9))

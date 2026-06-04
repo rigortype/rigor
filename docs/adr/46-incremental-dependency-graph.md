@@ -1,6 +1,6 @@
 # ADR-46 — Incremental analysis via a cross-file dependency graph
 
-Status: **Proposed — design. The whole-run cache ([ADR-45](45-unchanged-project-fast-path.md)) is coarse (any analyzed-file change → full re-run); this ADR designs the per-file incremental successor: edit a leaf controller → re-check that one file; edit a model → re-check the model plus the files that actually depend on it.**
+Status: **Accepted — implemented (body tier). The whole-run cache ([ADR-45](45-unchanged-project-fast-path.md)) is coarse (any analyzed-file change → full re-run); this is the per-file incremental successor: edit a leaf controller → re-check that one file; edit a model → re-check the model plus the files that actually depend on it. `rigor check --incremental` ships the cross-process body tier (slices 1+2): record per-file cross-file deps → invert to `dependents` → on a run, re-analyze only `ΔF ∪ dependents[ΔF]` and serve the rest from a disk snapshot. Soundness is enforced by the mandatory `--verify-incremental` gate (incremental == full `--no-cache`, byte-identical), wired into CI. Measured on Rigor's own `lib` (262 files): warm no-change 0.75s vs 7.2s full (~9.6×), one-file leaf edit 1.15s (~6.3×), diagnostics identical. Slices 3 (structural-tier negative-dependency tracking — a structural edit currently falls back to a full rebuild via the fingerprint) and 4 (symbol granularity) remain demand-driven refinements.**
 
 ADR-45 made an *unchanged* project fast (record-and-validate whole-run
 cache, ~42× on GitLab). It is deliberately coarse: a single changed file

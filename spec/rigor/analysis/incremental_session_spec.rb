@@ -104,4 +104,55 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       expect(sorted(r2.diagnostics)).to eq(sorted(full_run(dir)))
     end
   end
+
+  describe "#run_incremental (cross-process persistence)" do
+    def fingerprint(config, dir)
+      files = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil).analysis_file_set([dir])
+      Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: config, files: files)
+    end
+
+    it "is cold on first run and warm (snapshot-reusing) afterwards, matching a full run" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        write_unit(a, prefix: "A")
+        write_unit(b, prefix: "B")
+
+        config = configuration(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, dir)
+
+        # Process 1 — cold: no snapshot yet, full analysis, persists.
+        _diags, warm1 = described_class.new(configuration: config, paths: [dir])
+                                       .run_incremental(snapshot: snapshot, fingerprint: fp)
+        expect(warm1).to be(false)
+
+        # An edit between "processes" — erase a.rb's diagnostic. Content is
+        # not part of the fingerprint, so the snapshot still loads.
+        write_unit(a, prefix: "A", reduced: false)
+
+        # Process 2 — warm: a fresh session restores the snapshot and
+        # re-analyzes only the changed closure.
+        diags2, warm2 = described_class.new(configuration: config, paths: [dir])
+                                       .run_incremental(snapshot: snapshot, fingerprint: fp)
+        expect(warm2).to be(true)
+        expect(sorted(diags2)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "falls back to a cold full run when the fingerprint does not match" do
+      Dir.mktmpdir do |dir|
+        write_unit(File.join(dir, "a.rb"), prefix: "A")
+        config = configuration(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+
+        described_class.new(configuration: config, paths: [dir])
+                       .run_incremental(snapshot: snapshot, fingerprint: "fp-original")
+        # A different fingerprint (config / gem / version drift) → cold.
+        _diags, warm = described_class.new(configuration: config, paths: [dir])
+                                      .run_incremental(snapshot: snapshot, fingerprint: "fp-changed")
+        expect(warm).to be(false)
+      end
+    end
+  end
 end

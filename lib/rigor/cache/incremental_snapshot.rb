@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "digest"
 
 module Rigor
   module Cache
@@ -35,6 +36,51 @@ module Rigor
       # `digests` to its content digest at analysis time, and `analyzed` is
       # the ordered analyzed-file list.
       Payload = Data.define(:cache, :sources, :digests, :analyzed)
+
+      # The global fingerprint that gates a snapshot load: a digest of the
+      # inputs whose change requires a full rebuild — the engine version +
+      # schema, the resolved configuration, the analyzed-file SET (adding /
+      # removing a file is a structural change handled by a full rebuild
+      # here), the resolved gem set (`Gemfile.lock` / `rbs_collection`), and
+      # the project's own RBS (`signature_paths` file contents). Built
+      # WITHOUT constructing the RBS environment so the warm path can gate
+      # the load cheaply, before the costly env build. The
+      # `--verify-incremental` gate is the safety net for any under-capture
+      # (it would surface as an incremental-vs-full mismatch). Returns nil
+      # on any error → the caller falls back to a non-persisted run.
+      def self.fingerprint(configuration:, files:)
+        parts = [
+          "engine:#{Rigor::VERSION}:#{SCHEMA}",
+          "config:#{Digest::SHA256.hexdigest(Marshal.dump(configuration.to_h))}",
+          "paths:#{files.map(&:to_s).sort.join("\n")}",
+          "gems:#{digest_file_if_present('Gemfile.lock')}",
+          "rbs_collection:#{digest_file_if_present('rbs_collection.lock.yaml')}",
+          "sig:#{digest_signature_paths(configuration.signature_paths)}"
+        ]
+        Digest::SHA256.hexdigest(parts.join("\x00"))
+      rescue StandardError
+        nil
+      end
+
+      def self.digest_file_if_present(path)
+        File.file?(path) ? Digest::SHA256.file(path).hexdigest : "absent"
+      end
+      private_class_method :digest_file_if_present
+
+      # Content-digest every `.rbs` under the configured signature paths
+      # (sorted for determinism) so a project RBS edit invalidates the
+      # snapshot. Sig trees are small; content (not mtime) keeps it stable
+      # across checkouts.
+      def self.digest_signature_paths(signature_paths)
+        globbed = Array(signature_paths).flat_map do |entry|
+          File.directory?(entry) ? Dir.glob(File.join(entry, "**", "*.rbs")) : [entry]
+        end
+        files = globbed.select { |path| File.file?(path) }.sort
+        digest = Digest::SHA256.new
+        files.each { |path| digest << path << "\0" << Digest::SHA256.file(path).hexdigest << "\0" }
+        digest.hexdigest
+      end
+      private_class_method :digest_signature_paths
 
       def initialize(root:)
         @path = File.join(root.to_s, "incremental", "snapshot.bin")

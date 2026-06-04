@@ -2,6 +2,7 @@
 
 require "digest"
 require_relative "incremental"
+require_relative "../cache/incremental_snapshot"
 
 module Rigor
   module Analysis
@@ -93,7 +94,45 @@ module Rigor
         fresh + reused.flat_map { |path| @cache[path] || [] }
       end
 
+      # Cross-process incremental run (the `--incremental` flag's engine).
+      # With a disk `snapshot` whose `fingerprint` matches, restore the
+      # prior per-file state and `#recheck` (re-analyze only the changed
+      # closure, serve the rest from the restored cache); otherwise run a
+      # full `#baseline`. Either way, persist the updated snapshot for the
+      # next process. Returns `[diagnostics, warm]` — `warm` is true when a
+      # snapshot was restored. A nil `fingerprint` (uncomputable inputs)
+      # disables persistence: a plain full run.
+      def run_incremental(snapshot:, fingerprint:)
+        restored = fingerprint && snapshot.load(fingerprint: fingerprint)
+        if restored
+          restore(restored)
+          diagnostics = recheck.diagnostics
+          warm = true
+        else
+          diagnostics = baseline
+          warm = false
+        end
+        snapshot.save(fingerprint: fingerprint, payload: to_payload) if fingerprint
+        [diagnostics, warm]
+      end
+
       private
+
+      # Adopt a persisted snapshot's per-file state as this session's
+      # baseline (the warm-start path).
+      def restore(payload)
+        @analyzed = payload.analyzed
+        @cache = payload.cache
+        @sources = payload.sources
+        @digests = payload.digests
+        @dependents = Incremental.invert(@sources)
+      end
+
+      def to_payload
+        Cache::IncrementalSnapshot::Payload.new(
+          cache: @cache, sources: @sources, digests: @digests, analyzed: @analyzed
+        )
+      end
 
       # Fold a #recheck's fresh results back into the cache + graph so the
       # session is correct across multiple edits: the re-analyzed files get

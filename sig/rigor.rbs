@@ -113,8 +113,12 @@ module Rigor
       attr_reader cache_store: untyped
       attr_reader plugin_registry: untyped
       attr_reader buffer: untyped
-      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped, ?workers: Integer, ?collect_stats: bool, ?buffer: untyped, ?prebuilt: untyped, ?environment: untyped) -> void
+      attr_reader file_dependencies: Hash[String, untyped]
+      attr_reader analyzed_files: Array[String]
+      def initialize: (configuration: Configuration, ?explain: bool, ?cache_store: untyped, ?plugin_requirer: untyped, ?workers: Integer, ?collect_stats: bool, ?buffer: untyped, ?prebuilt: untyped, ?environment: untyped, ?record_dependencies: bool, ?analyze_only: untyped) -> void
       def run: (?Array[String] paths) -> Result
+      def analysis_file_set: (?Array[String] paths) -> Array[String]
+      def file_dependents: () -> Hash[String, untyped]
       def prepare_project_scan: (?paths: Array[String]) -> untyped
     end
   end

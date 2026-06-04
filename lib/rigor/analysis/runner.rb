@@ -182,6 +182,14 @@ module Rigor
         )
       end
 
+      # ADR-46 — the project file set that a run over `paths` would
+      # analyze, computed by globbing only (no RBS environment build), so
+      # the incremental fingerprint can be derived cheaply on the warm path
+      # before deciding whether to build the env at all.
+      def analysis_file_set(paths = @configuration.paths)
+        expand_paths(paths).fetch(:files)
+      end
+
       # ADR-46 §2 — inverts {#file_dependencies} into the reverse edge the
       # incremental step walks: `dependents[X] = { A : A read a
       # declaration / body from X }`. On an edit to X, the body tier

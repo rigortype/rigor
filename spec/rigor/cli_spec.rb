@@ -71,6 +71,41 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  describe "check --incremental" do
+    it "is cold on the first run and warm on the second, with identical diagnostics" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, ".rigor.yml"),
+                   "severity_profile: balanced\ncache_path: #{File.join(dir, '.cache')}\n")
+        File.write(File.join(dir, "a.rb"), <<~RUBY)
+          class Base
+            def greet
+              "hi"
+            end
+          end
+
+          class Sub < Base
+            private
+
+            def greet
+              "hello"
+            end
+          end
+        RUBY
+
+        args = ["check", "--incremental", "--no-stats", "--config", File.join(dir, ".rigor.yml"), dir]
+        status1, out1, err1 = run_cli(*args)
+        status2, out2, err2 = run_cli(*args)
+
+        expect([status1, status2]).to eq([0, 0]) # warnings-only run still succeeds
+        expect(err1).to include("--incremental cold")
+        expect(err2).to include("--incremental warm")
+        # The diagnostic is reported identically cold and warm.
+        expect(out1).to include("visibility of `greet'")
+        expect(out2).to eq(out1)
+      end
+    end
+  end
+
   describe "type-of" do
     let(:tmpdir) { Dir.mktmpdir }
 

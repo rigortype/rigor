@@ -88,7 +88,8 @@ module Rigor
       cache_root = configuration.cache_path
       handle_clear_cache(cache_root) if options.fetch(:clear_cache)
 
-      return run_verify_incremental(configuration) if options.fetch(:verify_incremental)
+      special = dispatch_special_check_mode(configuration, options, cache_root)
+      return special unless special.nil?
 
       runner = build_check_runner(
         configuration: configuration, options: options,
@@ -105,6 +106,16 @@ module Rigor
       exit_code = result.success? ? 0 : 1
       exit_code = 1 if baseline_strict_violation?(raw_result.diagnostics, configuration, options)
       exit_code
+    end
+
+    # ADR-46 — the two incremental-analysis check modes both fully handle
+    # the run and return an exit code (so `run_check` short-circuits);
+    # returns nil for an ordinary check.
+    def dispatch_special_check_mode(configuration, options, cache_root)
+      return run_verify_incremental(configuration) if options.fetch(:verify_incremental)
+      return run_incremental_check(configuration, options, cache_root) if options.fetch(:incremental)
+
+      nil
     end
 
     # ADR-46 — the incremental-analysis acceptance gate. Runs a baseline
@@ -128,6 +139,31 @@ module Rigor
       full = normalize_diagnostics(verify_full_diagnostics(configuration, paths))
 
       report_verify_incremental(incremental, full, subset_size: subset.size, total: analyzed.size)
+    end
+
+    # ADR-46 — cross-process incremental analysis (`--incremental`). Derives
+    # the global fingerprint cheaply (no RBS env build), loads the disk
+    # snapshot, and on a fingerprint hit re-analyzes only the files changed
+    # since the last run (plus their dependents), serving the rest from the
+    # snapshot; on a miss runs a full baseline. Persists the updated
+    # snapshot for the next invocation. Diagnostics are identical to a full
+    # run (the `--verify-incremental` gate enforces this); the win is
+    # skipping per-file inference for unchanged files.
+    def run_incremental_check(configuration, options, cache_root)
+      paths = @argv.empty? ? nil : @argv
+      probe = Analysis::Runner.new(configuration: configuration, cache_store: nil)
+      files = paths ? probe.analysis_file_set(paths) : probe.analysis_file_set
+      fingerprint = Cache::IncrementalSnapshot.fingerprint(configuration: configuration, files: files)
+      snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
+      session = Analysis::IncrementalSession.new(configuration: configuration, paths: paths)
+
+      diagnostics, warm = session.run_incremental(snapshot: snapshot, fingerprint: fingerprint)
+      @err.puts("rigor: --incremental #{warm ? 'warm — reused cached diagnostics' : 'cold — full analysis'} " \
+                "(#{files.size} files)")
+
+      result = apply_baseline_filter(Analysis::Result.new(diagnostics: diagnostics, stats: nil), configuration, options)
+      write_result(result, options.fetch(:format))
+      result.success? ? 0 : 1
     end
 
     def verify_full_diagnostics(configuration, paths)
@@ -323,7 +359,12 @@ module Rigor
         # the per-file cache, and asserts the merged diagnostics are
         # byte-identical to a full `--no-cache` run. Exits non-zero on any
         # mismatch. Off by default.
-        verify_incremental: false
+        verify_incremental: false,
+        # ADR-46 — cross-process incremental analysis. With a disk snapshot
+        # of the prior run's per-file diagnostics + dependency graph,
+        # re-analyzes only the changed closure and serves the rest from the
+        # snapshot. Off by default.
+        incremental: false
       }
       parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
         opts.banner = "Usage: rigor check [options] [paths]"
@@ -361,6 +402,10 @@ module Rigor
         opts.on("--verify-incremental",
                 "ADR-46: assert incremental analysis matches a full run, then exit") do
           options[:verify_incremental] = true
+        end
+        opts.on("--incremental",
+                "ADR-46: re-analyze only files changed since the last run (cross-process cache)") do
+          options[:incremental] = true
         end
       end
       parser.parse!(@argv)

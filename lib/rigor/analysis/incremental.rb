@@ -25,6 +25,21 @@ module Rigor
     module Incremental
       module_function
 
+      # Inverts a per-consumer source map (`consumer → enumerable of source
+      # files it read from`) into the `dependents` index (`source → Set of
+      # consumers that read from it`). The reverse edge the incremental step
+      # walks. Returns a frozen hash of frozen Sets; a missing key reads as
+      # nil (the default proc is dropped before freezing).
+      def invert(sources_by_consumer)
+        index = Hash.new { |hash, key| hash[key] = Set.new }
+        sources_by_consumer.each do |consumer, sources|
+          sources.each { |source| index[source] << consumer }
+        end
+        index.default_proc = nil
+        index.each_value(&:freeze)
+        index.freeze
+      end
+
       # The closure the body tier re-analyses. `changed` is any Enumerable
       # of paths; `dependents` maps a source path to the Set of files that
       # read from it (missing key → no dependents). Returns a frozen Set.

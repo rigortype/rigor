@@ -22,6 +22,7 @@ require_relative "buffer_binding"
 require_relative "check_rules"
 require_relative "dependency_recorder"
 require_relative "incremental"
+require_relative "incremental_session"
 require_relative "dependency_source_inference"
 require_relative "diagnostic"
 require_relative "erb_template_detector"
@@ -37,7 +38,8 @@ module Rigor
       DEFAULT_CACHE_ROOT = ".rigor/cache"
 
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
-                  :rbs_extended_reporter, :boundary_cross_reporter, :file_dependencies
+                  :rbs_extended_reporter, :boundary_cross_reporter, :file_dependencies,
+                  :analyzed_files
 
       # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events
@@ -105,6 +107,7 @@ module Rigor
         # cross-file reads into `file_dependencies` (the incremental
         # cache, a later slice, consumes them).
         @record_dependencies = record_dependencies
+        @analyzed_files = [].freeze
         # ADR-46 slice 2 — the subset-analysis hook. When set (a collection
         # of paths), the whole-project pre-pass still runs over every file
         # (so the cross-file index is complete), but only files in this set
@@ -191,15 +194,7 @@ module Rigor
       # re-checks a consumer when a name it looked up and did not resolve
       # later appears.
       def file_dependents
-        index = Hash.new { |hash, key| hash[key] = Set.new }
-        @file_dependencies.each do |consumer, record|
-          record.sources.each { |source| index[source] << consumer }
-        end
-        # Drop the default proc before freezing — otherwise a missing-key
-        # read on the frozen hash would re-enter the proc and raise.
-        index.default_proc = nil
-        index.each_value(&:freeze)
-        index.freeze
+        Incremental.invert(@file_dependencies.transform_values(&:sources))
       end
 
       # ADR-45 — unchanged-project fast path. Serves the whole run's
@@ -238,7 +233,14 @@ module Rigor
 
       def assemble_run_diagnostics(expansion, environment: nil)
         diagnostics = pre_file_diagnostics(expansion)
-        diagnostics += analyze_files(target_files(expansion), environment: environment)
+        # ADR-46 — record which project files this run actually analyzed
+        # (the `analyze_only` subset, or all of them). The incremental
+        # orchestrator serves every analyzed-but-not-affected file from the
+        # per-file cache, so it needs the full analyzed set to subtract the
+        # affected closure from.
+        targets = target_files(expansion)
+        @analyzed_files = targets
+        diagnostics += analyze_files(targets, environment: environment)
         diagnostics += rbs_synthesized_namespace_diagnostics
         diagnostics += rbs_extended_reporter_diagnostics
         diagnostics += boundary_cross_diagnostics

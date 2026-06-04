@@ -240,12 +240,27 @@ trade for speed. Defenses:
      `runner_subset_analysis_spec.rb`), so the body tier can re-analyze the
      affected closure and trust the result matches a full analysis. Pool
      mode inherits the filter for free (it dispatches `target_files`).
-   - **Remaining in this slice:** per-file diagnostic cache serving for the
-     non-affected rest (reuse ADR-45's `Cache::Store#fetch_or_validate`) +
-     the `--verify-incremental` CLI flag that runs incremental vs full
-     `--no-cache` and asserts byte-identical on Mastodon + GitLab (the
-     acceptance gate). The set-algebra core, the property test, and the
-     subset hook are the pieces those compose.
+   - **In-memory orchestrator landed** — `Analysis::IncrementalSession`
+     composes all the pieces: `#baseline` runs a full analysis with
+     recording and keeps, per analyzed file, its diagnostics (the cache),
+     content digest, and source set; `#recheck` digests the files again,
+     computes ΔF, re-analyzes only `ΔF ∪ dependents[ΔF]` via `analyze_only:`,
+     and serves the rest from cache. The spec asserts the acceptance
+     property end-to-end: after a real on-disk leaf edit, `#recheck`'s
+     merged diagnostics are byte-identical (sorted) to a full re-analysis
+     of the edited tree, while re-checking only the one changed file — and
+     it stays correct across successive edits (the cache + dependents
+     index are refreshed each round via `Incremental.invert`, now shared
+     with `Runner#file_dependents`). `Runner#analyzed_files` exposes the
+     analyzed set the merge subtracts the affected closure from. Run-level
+     diagnostic streams (the gem-RBS `info`, keyed on `.rigor.yml`) are
+     recomputed fresh each run and excluded from the per-file cache.
+   - **Remaining in this slice:** lift the in-process cache to disk
+     (ADR-45's `Cache::Store#fetch_or_validate`, so the session survives
+     across processes / CI) + the `--verify-incremental` CLI flag that runs
+     incremental vs full `--no-cache` and asserts byte-identical on
+     Mastodon + GitLab (the acceptance gate, of which `IncrementalSession`
+     is the in-memory engine).
 3. **Structural tier.** Negative-dependency tracking so adding a symbol
    re-checks only its would-be resolvers instead of falling back to full.
 4. **Symbol granularity (optional).** Refine file-level deps to

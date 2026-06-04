@@ -2164,6 +2164,54 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    describe "Hash key-presence narrowing (ADR-47 §4-3)" do
+      def dump_messages(result)
+        result.diagnostics.select { |d| d.rule == "dump.type" }.map(&:message)
+      end
+
+      # `h[:foo]` on an optional key reads `Integer?`; inside a
+      # `h.key?(:foo)` guard the optionality nil is gone → `Integer`.
+      it "narrows h[:foo] from Integer? to Integer after a `h.key?(:foo)` guard" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Config
+            def lookup(h)
+              a = h[:foo]
+              Rigor.dump_type(a)
+              if h.key?(:foo)
+                b = h[:foo]
+                Rigor.dump_type(b)
+              end
+            end
+          end
+        RUBY
+          class Config
+            def lookup: ({ ?foo: Integer }) -> void
+          end
+        RBS
+        dumps = dump_messages(result)
+        expect(dumps.first).to include("Integer?")          # unguarded: optionality nil present
+        expect(dumps.last).to eq("dump_type: Integer")      # guarded: nil removed
+      end
+
+      it "leaves h[:foo] as Integer? in the falsey edge (key absent — conservative)" do
+        result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
+          class Config
+            def lookup(h)
+              unless h.key?(:foo)
+                c = h[:foo]
+                Rigor.dump_type(c)
+              end
+            end
+          end
+        RUBY
+          class Config
+            def lookup: ({ ?foo: Integer }) -> void
+          end
+        RBS
+        expect(dump_messages(result).first).to include("Integer?")
+      end
+    end
+
     describe "method-visibility-mismatch rule (v0.1.2)" do
       def visibility_mismatch_diags(result)
         result.diagnostics.select { |d| d.rule == "def.method-visibility-mismatch" }

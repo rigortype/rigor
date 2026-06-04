@@ -291,6 +291,45 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(falsey.local(:x)).to eq(union_int_nil)
     end
 
+    # §4-3 — Elixir `is_map_key/2` analogue.
+    def optional_foo_shape
+      Rigor::Type::HashShape.new({ foo: integer_nominal }, optional_keys: [:foo])
+    end
+
+    it "promotes an optional Hash key to required on h.key?(:foo) truthy edge" do
+      bound = scope.with_local(:h, optional_foo_shape)
+      pred = parse_predicate("h.key?(:foo)", locals: %i[h])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:h).required_key?(:foo)).to be(true)
+      expect(truthy.local(:h).optional_key?(:foo)).to be(false)
+      # Falsey edge is the conservative no-op: key stays optional.
+      expect(falsey.local(:h).optional_key?(:foo)).to be(true)
+    end
+
+    it "narrows the same way for has_key? and an ivar receiver" do
+      bound = scope.with_ivar(:@h, optional_foo_shape)
+      pred = parse_predicate("@h.has_key?(:foo)")
+      truthy, = described_class.predicate_scopes(pred, bound)
+      expect(truthy.ivar(:@h).required_key?(:foo)).to be(true)
+    end
+
+    it "leaves the scope unchanged when the key is unknown to the shape" do
+      bound = scope.with_local(:h, optional_foo_shape)
+      pred = parse_predicate("h.key?(:bar)", locals: %i[h])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      # :bar is not in pairs → no value type to assert → no narrowing.
+      expect(truthy.local(:h)).to eq(optional_foo_shape)
+      expect(falsey.local(:h)).to eq(optional_foo_shape)
+    end
+
+    it "does not narrow a non-HashShape receiver (gradual / array include?)" do
+      bound = scope.with_local(:h, integer_nominal)
+      pred = parse_predicate("h.key?(:foo)", locals: %i[h])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      expect(truthy.local(:h)).to eq(integer_nominal)
+      expect(falsey.local(:h)).to eq(integer_nominal)
+    end
+
     it "leaves the scope unchanged when the local is unbound" do
       pred = parse_predicate("y")
       truthy, falsey = described_class.predicate_scopes(pred, scope)

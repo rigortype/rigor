@@ -960,7 +960,7 @@ module Rigor
         end
 
         def simple_dispatch_name?(name)
-          %i[nil? ! is_a? kind_of? instance_of? == != === =~].include?(name)
+          %i[nil? ! is_a? kind_of? instance_of? == != === =~ key? has_key?].include?(name)
         end
 
         def dispatch_call_simple(node, scope, name)
@@ -971,7 +971,79 @@ module Rigor
           when :==, :!= then analyse_equality_predicate(node, scope, equality: name)
           when :=== then analyse_case_equality_predicate(node, scope)
           when :=~ then analyse_regex_match_predicate(node, scope)
+          when :key?, :has_key? then analyse_key_presence_predicate(node, scope)
           end
+        end
+
+        # ADR-47 §4-3 (Elixir `is_map_key/2` analogue) — `h.key?(:foo)`
+        # narrows the receiver on the truthy edge: a `HashShape` whose
+        # `:foo` is an OPTIONAL key has it promoted to REQUIRED, so a
+        # subsequent `h[:foo]` reads the declared value type instead of
+        # `value | nil` (the optionality nil is gone). Sound because key
+        # presence removes only the optionality-injected nil, never the
+        # value's own intrinsic nil (`h = {foo: nil}` keeps `h[:foo]`
+        # nil-typed). The falsey edge is left unchanged — "key absent"
+        # is the conservative no-op. Only literal `Symbol`/`String`
+        # arguments and `LocalVariableReadNode`/`InstanceVariableReadNode`
+        # receivers narrow; everything else (Dynamic, `Nominal[Hash]`,
+        # method-chain receivers, dynamic keys) bails to no narrowing.
+        def analyse_key_presence_predicate(node, scope)
+          return nil if node.arguments.nil?
+          return nil unless node.arguments.arguments.size == 1
+
+          key = static_hash_key(node.arguments.arguments.first)
+          return nil if key.nil?
+
+          case node.receiver
+          when Prism::LocalVariableReadNode
+            key_presence_scopes(node.receiver.name, key, scope, reader: :local, writer: :with_local)
+          when Prism::InstanceVariableReadNode
+            key_presence_scopes(node.receiver.name, key, scope, reader: :ivar, writer: :with_ivar)
+          end
+        end
+
+        def key_presence_scopes(name, key, scope, reader:, writer:)
+          current = scope.public_send(reader, name)
+          return nil if current.nil?
+
+          truthy = narrow_hash_key_present(current, key)
+          return nil if truthy.equal?(current) # no optional key promoted → predicate is opaque
+
+          [scope.public_send(writer, name, truthy), scope]
+        end
+
+        def static_hash_key(node)
+          case node
+          when Prism::SymbolNode then node.unescaped.to_sym
+          when Prism::StringNode then node.unescaped
+          end
+        end
+
+        # Promotes `key` from optional to required across a HashShape (or
+        # every HashShape member of a Union). Returns the input unchanged
+        # when nothing applies, so the caller can detect "no narrowing".
+        def narrow_hash_key_present(type, key)
+          case type
+          when Type::HashShape
+            promote_hash_key(type, key)
+          when Type::Union
+            Type::Combinator.union(*type.members.map { |member| narrow_hash_key_present(member, key) })
+          else
+            type
+          end
+        end
+
+        def promote_hash_key(shape, key)
+          return shape unless shape.pairs.key?(key) # unknown key → no value type to assert
+          return shape unless shape.optional_key?(key) # already required → nothing to promote
+
+          Type::HashShape.new(
+            shape.pairs,
+            required_keys: shape.required_keys + [key],
+            optional_keys: shape.optional_keys - [key],
+            read_only_keys: shape.read_only_keys,
+            extra_keys: shape.extra_keys
+          )
         end
 
         # Survey item (b): `/regex/ =~ str` and `str =~ /regex/`

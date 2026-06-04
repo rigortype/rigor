@@ -65,6 +65,7 @@ Supported narrowing sources include:
 - Truthiness checks, where `nil` and `false` narrow the false branch.
 - `is_a?`, `kind_of?`, `instance_of?`, and class/module comparisons.
 - `respond_to?` checks when the method name is statically known. See [structural-interfaces-and-object-shapes.md](structural-interfaces-and-object-shapes.md) for the visibility rules.
+- `Hash#key?` / `#has_key?` against a literal Symbol/String key, when the receiver is a hash shape carrying that key as optional. The true branch promotes the key to required so a subsequent index read drops the optionality `nil` (the value's own intrinsic `nil` is preserved — key presence does not imply a non-nil stored value). The false branch is the conservative no-op. This is the Ruby analogue of a set-theoretic `is_map_key`-style key-presence refinement.
 - Pattern matching and case analysis.
 - Predicate methods registered by Rigor plugins.
 - Assertions and guards described in `RBS::Extended` annotations (see [rbs-extended.md](rbs-extended.md)).

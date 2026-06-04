@@ -171,6 +171,16 @@ jobs:
         if: matrix.cache == 'cold'
         run: make check-plugins
 
+      # Incremental-analysis acceptance gate (ADR-46): the incremental
+      # analyzer must produce diagnostics byte-identical to a full run.
+      # `--verify-incremental` re-analyzes a subset and serves the rest
+      # from the per-file cache, then asserts the merge equals a full
+      # `--no-cache` analysis — a mismatch would mean a stale, manufactured
+      # diagnostic. Cold variant only; the result is deterministic.
+      - name: Run incremental-analysis gate
+        if: matrix.cache == 'cold'
+        run: make check-incremental
+
   # ── 4. Warm-vs-cold diagnostic diff ─────────────────────────────
   # The two self-check variants must agree on every diagnostic.  Any
   # difference means the cache is altering analysis results — a bug.

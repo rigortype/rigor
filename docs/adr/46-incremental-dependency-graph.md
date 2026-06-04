@@ -267,11 +267,19 @@ trade for speed. Defenses:
      edit-driven *dependents soundness* (a real edit confining its
      diagnostic change to the affected closure) is covered by the spec
      suite, which can fabricate edits the CLI gate can't on a user's tree.
+   - **CI gate wired** — `make check-incremental` runs
+     `--verify-incremental` on Rigor's own `lib` (131/261 re-analyzed) and
+     the `plugins/*/lib` + `examples/*/lib` trees (71/141), and the CI
+     self-check job runs it (cold variant) alongside `check` /
+     `check-plugins`. It is deliberately NOT in the local `make verify`
+     fast path — it runs ~3 analyses per target (~39s on lib + plugins),
+     too slow for every local verify. So the soundness gate stands on every
+     CI run as the machinery is built out.
    - **Remaining in this slice:** lift the in-process cache to disk
      (ADR-45's `Cache::Store#fetch_or_validate`, so the session survives
      across processes / CI) + wire a user-facing `--incremental` *speedup*
      flag (the gate proves the machinery sound; the speedup flag is the
-     payoff) + run `--verify-incremental` on Mastodon + GitLab in CI.
+     payoff) + extend the CI gate to the Mastodon + GitLab survey trees.
 3. **Structural tier.** Negative-dependency tracking so adding a symbol
    re-checks only its would-be resolvers instead of falling back to full.
 4. **Symbol granularity (optional).** Refine file-level deps to

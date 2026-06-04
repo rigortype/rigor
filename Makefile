@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel lint check check-plugins verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-parallel lint check check-plugins check-incremental verify verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -109,6 +109,18 @@ check:
 # disable the rule.
 check-plugins:
 	bundle exec exe/rigor check --no-cache plugins/*/lib examples/*/lib
+
+# ADR-46 incremental-analysis acceptance gate. `--verify-incremental`
+# runs a baseline analysis, re-analyzes a subset of files and serves the
+# rest from the per-file cache, and asserts the merged diagnostics are
+# byte-identical to a full `--no-cache` run. A mismatch means the
+# incremental machinery would serve a stale — manufactured — diagnostic,
+# the soundness failure the gate exists to catch. Deliberately NOT in
+# `verify`: it runs ~3 analyses per target (baseline + subset + full), too
+# slow for the local fast path. CI runs it (cold variant).
+check-incremental:
+	bundle exec exe/rigor check --verify-incremental --no-stats lib
+	bundle exec exe/rigor check --verify-incremental --no-stats plugins/*/lib examples/*/lib
 
 check-json:
 	bundle exec exe/rigor check --format=json lib

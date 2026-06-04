@@ -2,7 +2,9 @@
 
 Status: **Accepted, 2026-05-20 (slice 4 gated — separate FP evaluation
 required). Slices 1+3 implemented 2026-05-20, slice 2 implemented
-2026-05-21.**
+2026-05-21. Slice 4 attempt 1 (check-rules reimplementation) prototyped
+and reverted 2026-06-05 — 135 false positives on Rigor's own `lib`; the
+correct route is an evaluation-time recorder, see slice 4 below.**
 
 Records the project's decision to resolve implicit-self method calls
 (a call written with no explicit receiver, inside a method body)
@@ -354,6 +356,56 @@ surviving edge. Fixture: `spec/integration/fixtures/or_guard_narrowing.rb`.
 self-call when the receiver class is confidently closed (WD4). Gated
 behind its own false-positive evaluation on metaprogramming-dense
 codebases.
+
+**Attempt 1 (2026-06-05) — prototyped and reverted; the check-rules
+reimplementation route is unsound.** A `call.self-undefined-method`
+rule was implemented entirely in `CheckRules`: for an implicit-self
+call inside an instance-method body, fire when the enclosing class is
+"confidently closed" and the name resolves to nothing. The closedness
+gate was deliberately ultra-conservative — a project class with **no
+project superclass, no includes**, no `method_missing` /
+`respond_to_missing?`, and not plugin-`open_receivers:` (ADR-26) — and
+resolution checked the class's own `def`s, its `discovered_methods`
+table, its own RBS surface (`Reflection.instance_method_definition`),
+and the `Object` / `Kernel` surface. Targeted specs (8) all passed.
+
+**Then the mandatory mini-corpus gate (run the rule over Rigor's own
+`lib`) produced 135 false positives on clean code.** The leak classes,
+all real methods the rule could not see from `CheckRules`:
+
+- **`module_function` modules** — `Inference::Narrowing` (31),
+  `Type::Combinator` (24): sibling self-calls (`case_when_scopes`
+  calling `analyse`) where `self` types to `Nominal[Module]` but the
+  module's `module_function` defs are not where the check-rules
+  resolution looked.
+- **`Data.define` / `Struct.new` classes** — `GemResolver::Resolved`,
+  `RuleCatalog::Entry`, `CoverageReport`, …: the synthesized member
+  accessors (`gem_name`, `id`, `total`) are real methods that the
+  ad-hoc `Reflection` probe did not resolve.
+- **Template-method modules / value-semantics** — `CLI::Renderable`
+  (`render_text` is abstract, implemented by includers),
+  `ValueSemantics::ClassMethods`: methods that exist only through a
+  mixin contract the closedness gate's "no includes" check does not
+  capture from the *callee* side.
+
+**Conclusion: do NOT reimplement self-call resolution in `CheckRules`.**
+The engine *already* resolves every one of these correctly for
+precision (ADR-24 slices 1–2: `module_function`, synthesized accessors,
+ancestor walks) — the FPs came purely from a second, weaker resolution
+path in the rule diverging from the engine's real one. The correct
+design (the ADR-46 / ADR-47 lesson, "collect at evaluation time, never
+recompute") is an **evaluation-time recorder**: at the single point
+where the engine's own self-call resolution falls through to
+`Dynamic[top]` (`ExpressionTyper#try_user_method_inference` miss + the
+dispatcher RBS-tier miss), record the unresolved call node; then
+`CheckRules` only applies the closedness gate + corpus FP triage. That
+reuses the engine's actual method set, so `module_function` /
+`Data.define` / mixin methods never reach the rule as "unresolved."
+This is more surgery (a recorder threaded through the dispatch
+choke-point, like `DependencyRecorder`), and still needs the WD4 corpus
+gate before any default-on — but it is the only route that respects the
+false-positive discipline. The reverted prototype's specs + the 135-FP
+breakdown are the evidence for the next attempt.
 
 ## Re-evaluation triggers
 

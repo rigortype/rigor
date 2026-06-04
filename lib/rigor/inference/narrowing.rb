@@ -1554,13 +1554,42 @@ module Rigor
           return nil if node.arguments.nil?
           return nil unless node.arguments.arguments.size == 1
 
-          local_arg = node.arguments.arguments.first
-          return nil unless local_arg.is_a?(Prism::LocalVariableReadNode)
+          arg = node.arguments.arguments.first
+          case arg
+          when Prism::LocalVariableReadNode
+            current = scope.local(arg.name)
+            return nil if current.nil?
 
-          current = scope.local(local_arg.name)
+            analyse_case_equality_receiver(node.receiver, scope, arg.name, current)
+          when Prism::CallNode
+            analyse_case_equality_on_chain(node.receiver, arg, scope)
+          end
+        end
+
+        # `Class === <local/ivar>.<method>` — the case-equality counterpart
+        # of {.analyse_class_predicate_on_chain}. The `open3` idiom
+        # `if Hash === cmd.last` narrows `cmd.last` to the class inside the
+        # branch, recorded as a single-hop method-chain narrowing keyed on
+        # the chain address (same stability rules as `is_a?` on a chain).
+        # Only static class/module receivers narrow here — the Range /
+        # Regexp literal receivers (`(1..10) === x.foo`) are not a common
+        # method-chain shape and stay deferred.
+        def analyse_case_equality_on_chain(receiver, chain_arg, scope)
+          class_name = static_class_name(receiver)
+          return nil if class_name.nil?
+
+          address = stable_chain_address(chain_arg)
+          return nil if address.nil?
+
+          current = scope.type_of(chain_arg)
           return nil if current.nil?
 
-          analyse_case_equality_receiver(node.receiver, scope, local_arg.name, current)
+          truthy_type = narrow_class(current, class_name, exact: false, environment: scope.environment)
+          falsey_type = narrow_not_class(current, class_name, exact: false, environment: scope.environment)
+          [
+            scope.with_method_chain_narrowing(*address, truthy_type),
+            scope.with_method_chain_narrowing(*address, falsey_type)
+          ]
         end
 
         def analyse_case_equality_receiver(receiver, scope, local_name, current)

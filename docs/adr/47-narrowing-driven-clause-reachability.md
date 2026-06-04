@@ -6,7 +6,7 @@ Status: **Accepted — WD1 + WD2 + WD3a implemented. Extends Rigor's two existin
 
 **WD2 landed (v0.1.17).** Message precision + a dead trailing `else`. A dead `when` is now worded `:prior_exhaustion` ("already covered by an earlier `when'") vs `:disjoint` (the WD1 wording), told apart by the scope ENTERING the clause: `eval_case_when_branches` records that entry `falsey_scope` on the clause's first condition node (`on_enter`-only, no new typing; `propagate` preserves it) and the collector classifies on whether the subject was already `bot` there. A trailing `else` whose final falsey scope narrows the subject to `bot` is flagged as `:exhausted_else` — EXCEPT a defensive `else` body (a bare `raise`/`fail`/`throw`/`abort`/`exit`), skipped because it is a deliberate guard, not removable dead code. Still clean on Rigor's own corpus; same `:info`/`:warning` severity posture.
 
-**WD3a landed (v0.1.17).** `case`/`in` (a `CaseMatchNode`) for **bare class patterns** only — `in C` / `in C => x`, whose match is exactly `C === subject` (pure `is_a?`, no deconstruction). Those narrow soundly like `when C`, so `eval_case_when_branches` now routes a bare-class `in` through `Narrowing.case_when_scopes` (body narrowed to `C`, falsey with `C` removed); every other pattern (value, array / hash / find, capture-with-deconstruction, bare variable) keeps the conservative "body = entry + bindings, falsey unchanged" shape, because deconstruction can fail even when the class test passes (removing anything from the falsey scope would be unsound). The collector flags a dead `in` clause on the same `body_scope == bot` signal, classifying disjoint vs prior-exhaustion exactly as for `when`; a non-class `in` clause can therefore only fire under prior-exhaustion (an earlier covering set), never a spurious disjoint. Clean on Rigor's own corpus. **Remaining:** WD3b (deconstructing / value / variable-catch-all pattern exhaustiveness — the genuinely larger, ADR-36-`is_a?`-exhaustiveness-neighbour project; do NOT infer it ad hoc), WD4 (the Mastodon/GitLab/Redmine corpus triage to promote balanced to `:warning`).
+**WD3a landed (v0.1.17).** `case`/`in` (a `CaseMatchNode`) for **bare class patterns** only — `in C` / `in C => x`, whose match is exactly `C === subject` (pure `is_a?`, no deconstruction). Those narrow soundly like `when C`, so `eval_case_when_branches` now routes a bare-class `in` through `Narrowing.case_when_scopes` (body narrowed to `C`, falsey with `C` removed); every other pattern (value, array / hash / find, capture-with-deconstruction, bare variable) keeps the conservative "body = entry + bindings, falsey unchanged" shape, because deconstruction can fail even when the class test passes (removing anything from the falsey scope would be unsound). The collector flags a dead `in` clause on the same `body_scope == bot` signal, classifying disjoint vs prior-exhaustion exactly as for `when`; a non-class `in` clause can therefore only fire under prior-exhaustion (an earlier covering set), never a spurious disjoint. Clean on Rigor's own corpus. **WD4 run (v0.1.17).** Swept 16 OSS corpora (see [`docs/notes/20260605-adr47-unreachable-clause-corpus-sweep.md`](../notes/20260605-adr47-unreachable-clause-corpus-sweep.md)) — zero firings, zero false positives. A vacuous pass (no hits to triage) is not positive evidence for a louder default, so **balanced stays `:info`** (strict keeps `:warning`); promotion waits for a real firing. **Remaining:** WD3b (deconstructing / value / variable-catch-all pattern exhaustiveness — the genuinely larger, ADR-36-`is_a?`-exhaustiveness-neighbour project; do NOT infer it ad hoc; lowered priority by the zero-firing sweep).
 
 ## Motivation
 
@@ -163,11 +163,20 @@ the same risk class:
   is the neighbour). Do **not** ship it by inferring exhaustiveness ad
   hoc; today these keep the conservative falsey-unchanged shape, so they
   fire only when a prior bare-class clause already exhausted the subject.
-- **WD4 — corpus FP gate.** Before default-on, run the rule across the
-  regression corpus (Mastodon / GitLab / Redmine per
-  [`reference_survey_external_projects`]) at `--no-cache` and triage every
-  hit to zero net false positives, exactly as ADR-43 gated `check-plugins`.
-  Ship `info` (or behind a flag) until that gate is green.
+- **WD4 — corpus FP gate (run, v0.1.17; balanced stays `:info`).** Swept
+  16 OSS corpora (Mastodon + Redmine `app lib`; parser, rubocop-ast,
+  kramdown, mail, liquid, haml, hamlit, herb, slim, oj, ox, protobuf,
+  textbringer, rgl `lib`) at `--no-cache` —
+  [`docs/notes/20260605-adr47-unreachable-clause-corpus-sweep.md`](../notes/20260605-adr47-unreachable-clause-corpus-sweep.md).
+  **Zero firings everywhere** (GitLab FOSS aborted as too slow at the
+  full-`lib` scope, not counted). Zero hits ⇒ zero false positives, but a
+  *vacuous* pass is absence-of-evidence, not evidence-of-safety: with no
+  real firing to triage there is no signal that a louder default is
+  warranted, so balanced **stays `:info`** (strict keeps `:warning`).
+  Promotion waits for a real corpus firing to inspect. The conservative
+  envelope is doing its job — the catchable shape (a concrete-typed local
+  matched against a disjoint / already-covered class) is one programmers
+  rarely write because it is obviously redundant.
 
 ## Rejected / deferred alternatives
 

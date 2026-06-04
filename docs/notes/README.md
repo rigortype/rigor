@@ -51,6 +51,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-05-23 | [Mastodon regression sweeps — re-run on Rigor v0.1.9](20260523-mastodon-v4.5-regression-sweep-v0.1.9.md) |
 | 2026-05-29 | [ADR-35 override-rules — Mastodon false-positive verification](20260529-adr35-mastodon-fp-verification.md) |
 | 2026-05-29 | [rigor-survey project-init baseline sweep](20260529-rigor-survey-project-init-baseline.md) |
+| 2026-06-05 | [ADR-47 `flow.unreachable-clause` — corpus FP sweep (WD4)](20260605-adr47-unreachable-clause-corpus-sweep.md) |
 
 ## Outside research & essay reviews
 

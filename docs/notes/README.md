@@ -61,7 +61,7 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-06-01 | [「漸進的型付け言語の時代に必要なもの」(mizchi) — Rigor / TypeScript 観点考察](20260601-gradual-typing-era-mizchi-rigor-ts-review.md) |
 | 2026-06-01 | [「Revenge of the Types」(Armin Ronacher) — ランタイム × 型チェッカー横断考察](20260601-revenge-of-the-types-runtime-checker-survey.md) |
 | 2026-06-01 | [「型システムポエム」(myuon) — Rigor 観点考察](20260601-type-system-poem-rigor-review.md) |
-| 2026-06-04 | [Elixir v1.20 の勾配的集合論型システム — Rigor 観点考察](20260604-elixir-v1.20-type-system-rigor-review.md) |
+| 2026-06-04 | [Elixir v1.20 の漸進的集合論型システム — Rigor 観点考察](20260604-elixir-v1.20-type-system-rigor-review.md) |
 
 ## Infrastructure & upstream
 

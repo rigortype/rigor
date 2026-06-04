@@ -214,6 +214,30 @@ trade for speed. Defenses:
      `--verify-incremental` cross-check.
 2. **Body tier.** Wire the declaration-fingerprint-unchanged path
    (re-analyze ΔF ∪ dependents). This already delivers the MVC win.
+   - **Soundness core landed** — `Analysis::Incremental` carries the
+     side-effect-free set algebra: `affected(changed, dependents)` (the
+     closure the body tier re-analyses = changed ∪ their dependents) and
+     `changed_files(before, after)` (structural per-file diagnostic diff
+     via `Diagnostic#to_h`). The spec drives real runs to assert the
+     soundness *property* end-to-end: a leaf body edit whose declaration
+     fingerprint is unchanged confines every diagnostic change to
+     `affected`, and leaves an unrelated file's cached diagnostics
+     untouched (the leaf-edit win). Runner-independent, so the invariant
+     is unit-testable without the cache/subset machinery.
+   - **Empirical finding (informs the tier).** Rigor's false-positive
+     discipline makes inferred cross-file return types nearly never drive
+     a *dependent's* diagnostic: `String#+ Integer`, `Integer#upcase` on an
+     inferred receiver, and `if <inferred-bool>` all stay silent across a
+     file boundary. So in practice `changed ≈ ΔF` for a body edit — the
+     dependents re-analysis is conservative *insurance* (re-check to stay
+     sound), not a frequent source of new diagnostics. This is what makes
+     the leaf-controller → 1-file win the common case.
+   - **Remaining in this slice:** the subset-analysis Runner hook
+     (pre-pass all files, analyze only `affected`) + per-file diagnostic
+     cache serving for the rest + the `--verify-incremental` CLI flag that
+     runs incremental vs full `--no-cache` and asserts byte-identical on
+     Mastodon + GitLab (the acceptance gate). The set-algebra core and its
+     property test are the foundation those build on.
 3. **Structural tier.** Negative-dependency tracking so adding a symbol
    re-checks only its would-be resolvers instead of falling back to full.
 4. **Symbol granularity (optional).** Refine file-level deps to

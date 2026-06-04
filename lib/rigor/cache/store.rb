@@ -197,6 +197,52 @@ module Rigor
         value
       end
 
+      # ADR-45 — record-and-validate variant. Unlike {fetch_or_compute},
+      # which keys the entry on its descriptor (so the inputs MUST be
+      # known before running), this keys on `key_descriptor` (the stable
+      # inputs known up front) and stores, alongside the value, a
+      # `dependency_descriptor` of the files the value actually read —
+      # including inputs discovered DURING the computation (e.g. a plugin
+      # reading a file mid-analysis). On the next run the stored
+      # dependencies are re-validated against the filesystem
+      # ({Descriptor#fresh?}); a stale dependency forces a recompute.
+      #
+      # The block MUST return `[value, dependency_descriptor]`. Disk reads
+      # are not in-process-memoised — validation always re-checks the
+      # filesystem — but a single run only looks up once.
+      def fetch_or_validate(producer_id:, key_descriptor:, params: {}, serialize: nil, deserialize: nil)
+        validate_producer_id!(producer_id)
+        ensure_schema_version!
+
+        key = key_descriptor.cache_key_for(producer_id: producer_id, params: params)
+        path = entry_path(producer_id, key)
+        cached = read_entry(path, deserialize: deserialize)
+        if cached && (pair = cached.value).is_a?(Array) && pair.size == 2 &&
+           pair[1].is_a?(Descriptor) && pair[1].fresh?
+          @monitor.synchronize { record(:hits, producer_id) }
+          return pair[0]
+        end
+
+        value, dependency_descriptor = block_given? ? yield : [nil, Descriptor.new]
+        wrote = false
+        unless @read_only
+          # A cache write must never break the run. If the value is not
+          # Marshal-clean (or any disk error occurs) skip caching and
+          # return the freshly-computed value — the next run recomputes.
+          begin
+            write_entry(path, key_descriptor, [value, dependency_descriptor], serialize: serialize)
+            wrote = true
+          rescue StandardError
+            wrote = false
+          end
+        end
+        @monitor.synchronize do
+          record(:misses, producer_id)
+          record(:writes, producer_id) if wrote
+        end
+        value
+      end
+
       private
 
       Entry = Data.define(:descriptor_bytes, :value)

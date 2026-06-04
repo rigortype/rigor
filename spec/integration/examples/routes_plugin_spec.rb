@@ -135,11 +135,16 @@ RSpec.describe "examples/rigor-routes" do
     # lifecycle explicitly.
     def run_routes_in_dir_twice(dir, source:, routes_yaml: DEFAULT_ROUTES_YAML)
       results = []
-      2.times do
+      2.times do |i|
         Rigor::Plugin.unregister!
         results << run_plugin_in_dir(
           dir: dir,
-          source: source,
+          # Vary the analyzed source on the second run so the ADR-45
+          # whole-run result cache misses (a content change) and the
+          # per-producer `route_table` cache is actually re-consulted —
+          # otherwise the run-level hit shadows it. `routes.yml` is
+          # identical across runs, so the producer itself still hits.
+          source: i.zero? ? source : "#{source}# run #{i}\n",
           cache_store: cache_store,
           files: { "config/routes.yml" => routes_yaml }
         )

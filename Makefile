@@ -91,8 +91,13 @@ test-parallel:
 lint:
 	bundle exec rubocop lib/ spec/ plugins/ examples/
 
+# `--no-cache`: the self-check is a verification gate and must never trust
+# a cached result. The ADR-45 record-and-validate run cache serves an
+# unchanged tree's previous result; the fingerprint excludes engine code
+# (only `Rigor::VERSION`), so an engine edit at the same version could be
+# masked by a stale hit. The gate always re-runs the analysis fresh.
 check:
-	bundle exec exe/rigor check lib
+	bundle exec exe/rigor check --no-cache lib
 
 # Self-check the bundled plugin / example LIB trees against the
 # `Plugin::Base` contract. ADR-43 ancestor resolution makes a plugin's
@@ -103,7 +108,7 @@ check:
 # stay clean for the same reason `check` does: fix the cause, never
 # disable the rule.
 check-plugins:
-	bundle exec exe/rigor check plugins/*/lib examples/*/lib
+	bundle exec exe/rigor check --no-cache plugins/*/lib examples/*/lib
 
 check-json:
 	bundle exec exe/rigor check --format=json lib

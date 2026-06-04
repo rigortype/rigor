@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
+require "digest"
 require "prism"
 require "tmpdir"
 
 require_relative "../environment"
 require_relative "../scope"
 require_relative "../cache/store"
+require_relative "../cache/rbs_descriptor"
 require_relative "../plugin"
 require_relative "../plugin/source_rbs_synthesis_reporter"
 require_relative "../rbs_extended/reporter"
@@ -151,17 +153,123 @@ module Rigor
           run_project_pre_passes(expansion: expansion)
         end
 
-        diagnostics = pre_file_diagnostics(expansion)
-        diagnostics += analyze_files(target_files(expansion))
-        diagnostics += rbs_synthesized_namespace_diagnostics
-        diagnostics += rbs_extended_reporter_diagnostics
-        diagnostics += boundary_cross_diagnostics
-        diagnostics += source_rbs_synthesis_diagnostics
+        diagnostics = compute_run_diagnostics(expansion)
 
         Result.new(
           diagnostics: apply_severity_profile(diagnostics),
-          stats: @collect_stats ? build_run_stats(wall_started_at: wall_started_at, expansion: expansion) : nil
+          stats: stats_for_run(wall_started_at: wall_started_at, expansion: expansion)
         )
+      end
+
+      # ADR-45 — unchanged-project fast path. Serves the whole run's
+      # (pre-severity-profile) diagnostics from one record-and-validate
+      # cache entry when every file the previous run read is unchanged,
+      # skipping the dominant per-file inference. The dependency set is
+      # collected AFTER the run (so it captures files the plugins read
+      # mid-analysis, e.g. a Pundit policy) and re-validated on the next
+      # run; the entry is keyed on the inputs known up front (config, gem
+      # / engine versions, analyzed-path set).
+      def compute_run_diagnostics(expansion)
+        @run_served_from_cache = false
+        return assemble_run_diagnostics(expansion) unless run_result_cacheable?
+
+        environment = resolve_sequential_environment(source_files: target_files(expansion))
+        rbs_descriptor = environment&.rbs_loader ? Cache::RbsDescriptor.build(environment.rbs_loader) : Cache::Descriptor.new
+        key_descriptor = run_key_descriptor(expansion, rbs_descriptor)
+        return assemble_run_diagnostics(expansion, environment: environment) if key_descriptor.nil?
+
+        computed = false
+        diagnostics = @cache_store.fetch_or_validate(
+          producer_id: "analysis.run-diagnostics", key_descriptor: key_descriptor
+        ) do
+          computed = true
+          diags = assemble_run_diagnostics(expansion, environment: environment)
+          [diags, run_dependency_descriptor(expansion, rbs_descriptor)]
+        end
+        @run_served_from_cache = !computed
+        diagnostics
+      rescue StandardError
+        # The result cache must never break a run. If anything in the
+        # cache path fails, fall back to a direct, uncached analysis.
+        @run_served_from_cache = false
+        assemble_run_diagnostics(expansion)
+      end
+
+      def assemble_run_diagnostics(expansion, environment: nil)
+        diagnostics = pre_file_diagnostics(expansion)
+        diagnostics += analyze_files(target_files(expansion), environment: environment)
+        diagnostics += rbs_synthesized_namespace_diagnostics
+        diagnostics += rbs_extended_reporter_diagnostics
+        diagnostics += boundary_cross_diagnostics
+        diagnostics + source_rbs_synthesis_diagnostics
+      end
+
+      # A cache hit skipped the analysis, so the per-run stats (wall
+      # split, RBS-class counts, …) were never gathered — report none
+      # rather than the stale snapshot defaults.
+      def stats_for_run(wall_started_at:, expansion:)
+        return nil unless @collect_stats
+        return nil if @run_served_from_cache
+
+        build_run_stats(wall_started_at: wall_started_at, expansion: expansion)
+      end
+
+      # Cacheable only for a full sequential project run with a writable
+      # cache and no per-buffer / prebuilt override — every other mode has
+      # a different result identity (pool workers read in separate
+      # processes; editor mode is per-buffer; prebuilt is the LSP path).
+      def run_result_cacheable?
+        !@cache_store.nil? && !@cache_store.read_only? &&
+          @buffer.nil? && @prebuilt.nil? && !pool_mode?
+      end
+
+      # Stable cache key inputs — known before the run: a digest of the
+      # resolved configuration, the engine + rbs versions + `--explain`,
+      # and the analyzed-path SET (adding/removing a file changes the
+      # key; editing one is caught by dependency validation). nil disables
+      # the cache for this run rather than risking a malformed key.
+      def run_key_descriptor(expansion, rbs_descriptor)
+        Cache::Descriptor.new(
+          gems: rbs_descriptor.gems,
+          configs: rbs_descriptor.configs + [
+            config_hash_entry("configuration", Marshal.dump(@configuration.to_h)),
+            config_hash_entry("engine", "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{@explain}"),
+            config_hash_entry("paths", expansion.fetch(:files).sort.join("\n"))
+          ]
+        )
+      rescue StandardError
+        nil
+      end
+
+      # Files the run actually depended on, collected AFTER it ran:
+      # every analyzed file, every RBS `sig` file (`rbs_descriptor.files`),
+      # and every file each plugin read (complete post-run, so reads made
+      # mid-analysis are included). Re-digested on the next run by
+      # {Descriptor#fresh?}.
+      def run_dependency_descriptor(expansion, rbs_descriptor)
+        entries = analyzed_file_entries(expansion) + rbs_descriptor.files
+        @plugin_registry.plugins.each do |plugin|
+          # Read the boundary WITHOUT triggering its lazy `@io_boundary ||=`
+          # initializer: plugin instances are frozen after the run, and a
+          # plugin that never built a boundary read no files through it, so
+          # it contributes no dependencies.
+          boundary = plugin.instance_variable_get(:@io_boundary)
+          entries.concat(boundary.cache_descriptor.files) if boundary
+        end
+        Cache::Descriptor.new(files: entries)
+      end
+
+      def analyzed_file_entries(expansion)
+        expansion.fetch(:files).map do |path|
+          physical = @buffer ? @buffer.resolve(path) : path
+          Cache::Descriptor::FileEntry.new(
+            path: physical, comparator: :digest, value: Digest::SHA256.file(physical).hexdigest
+          )
+        end
+      end
+
+      def config_hash_entry(key, payload)
+        Cache::Descriptor::ConfigEntry.new(key: key, value_hash: Digest::SHA256.hexdigest(payload))
       end
 
       # Runs every project-wide pre-pass (`load_plugins` +
@@ -301,31 +409,31 @@ module Rigor
       # method returns — holding it as long-lived state added
       # memory pressure that surfaced as a Bus Error during the
       # spec suite under Ruby 4.0 + rbs 4.0.2.
-      def analyze_files(files)
+      def analyze_files(files, environment: nil)
         return [] if files.empty?
+        return dispatch_pool(files) if pool_mode?
 
-        if pool_mode?
-          dispatch_pool(files)
-        else
-          environment = resolve_sequential_environment(source_files: files)
-          # Snapshot the small synthesized-namespace name list (NOT the
-          # env — see the method comment) so #run can surface the
-          # malformed-RBS `:info` diagnostic without rebuilding the env.
-          # Gated on the project actually declaring `signature_paths:`:
-          # synthesis only matters for the project's own RBS, and
-          # `#synthesized_namespaces` forces the (otherwise-lazy) RBS env
-          # to build — doing so when there is no project sig set would
-          # warm `.rigor/cache` on a bare `--no-stats` run.
-          @synthesized_namespaces_snapshot =
-            project_signature_paths? ? (environment.rbs_loader&.synthesized_namespaces || []) : []
-          result = files.flat_map { |path| analyze_file(path, environment) }
-          if @collect_stats
-            loader = environment.rbs_loader
-            @class_decl_paths_snapshot = loader&.class_decl_paths || {}.freeze
-            @signature_paths_snapshot = loader&.signature_paths || [].freeze
-          end
-          result
+        analyze_files_sequentially(files, environment || resolve_sequential_environment(source_files: files))
+      end
+
+      def analyze_files_sequentially(files, environment)
+        # Snapshot the small synthesized-namespace name list (NOT the
+        # env — see the method comment) so #run can surface the
+        # malformed-RBS `:info` diagnostic without rebuilding the env.
+        # Gated on the project actually declaring `signature_paths:`:
+        # synthesis only matters for the project's own RBS, and
+        # `#synthesized_namespaces` forces the (otherwise-lazy) RBS env
+        # to build — doing so when there is no project sig set would
+        # warm `.rigor/cache` on a bare `--no-stats` run.
+        @synthesized_namespaces_snapshot =
+          project_signature_paths? ? (environment.rbs_loader&.synthesized_namespaces || []) : []
+        result = files.flat_map { |path| analyze_file(path, environment) }
+        if @collect_stats
+          loader = environment.rbs_loader
+          @class_decl_paths_snapshot = loader&.class_decl_paths || {}.freeze
+          @signature_paths_snapshot = loader&.signature_paths || [].freeze
         end
+        result
       end
 
       # Sequential-mode environment resolver. Returns the supplied

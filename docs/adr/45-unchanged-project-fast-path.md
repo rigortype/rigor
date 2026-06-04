@@ -1,6 +1,6 @@
 # ADR-45 — Unchanged-project fast path (run-result cache)
 
-Status: **Proposed — design + soundness analysis; the naive pre-analysis fingerprint is rejected (proven unsound by an existing regression test), and the sound record-and-validate implementation is staged, not landed.**
+Status: **Accepted — record-and-validate run cache landed. The naive pre-analysis fingerprint was rejected (proven unsound by the `pundit_plugin_spec` cross-process regression); the sound record-and-validate design is implemented and verified — an unchanged Mastodon `app/models` (248 files) drops 11.6 s → 1.8 s (~6×), diagnostics byte-identical, `make verify` green.**
 
 `rigor check` re-runs the **entire per-file inference** on every
 invocation, even when nothing in the project has changed. The persistent
@@ -69,42 +69,54 @@ analysis itself discovers.** Shipping it would manufacture false
 positives across edits — the worst failure mode for a correctness tool —
 so it is rejected.
 
-### Accepted design (staged) — record-and-validate dependencies
+### Accepted (landed) — record-and-validate dependencies
 
 The sound model inverts the order: **run, recording every input actually
 read; cache the result alongside that dependency set; on the next run,
 validate the recorded dependencies by re-reading them.**
 
 - **Key:** stable, known before the run — the analyzed-path *set* +
-  config digest + gems + `Rigor::VERSION`. (Adding/removing a file changes
-  the path set → new key; editing a file keeps the key and is caught by
-  validation.)
-- **Stored value:** `{ diagnostics, file_deps: {path => digest} }` where
-  `file_deps` is collected **after** the run — analyzed files + every
-  plugin's `io_boundary.cache_descriptor` (now complete, including
-  analysis-time reads like the Pundit policy) + the RBS `sig` files.
-- **Lookup:** read the entry at the stable key; re-digest each
-  `file_deps` path; **hit** only if all match (else miss → re-run →
-  rewrite). This is the standard build-system "validate recorded inputs"
-  model, and it captures the Pundit policy because the policy is in
-  `file_deps` after the first run.
+  config digest (`Configuration#to_h`) + gems (`RbsDescriptor` gem/config
+  entries) + `Rigor::VERSION` + `--explain`. Adding/removing a file
+  changes the path set → new key; editing a file keeps the key and is
+  caught by validation (so content edits reuse the same slot — no cache
+  growth).
+- **Stored value:** `[diagnostics, dependency_descriptor]` where the
+  descriptor's `files` are collected **after** the run — analyzed files +
+  the RBS `sig` files + every plugin's `io_boundary.cache_descriptor`
+  (complete post-run, including analysis-time reads like the Pundit
+  policy). `Diagnostic` is a flat value object, so the pair is
+  `Marshal`-clean.
+- **Lookup:** `Cache::Store#fetch_or_validate` reads the entry at the
+  stable key and calls `Descriptor#fresh?`, which re-digests every
+  recorded `FileEntry`; **hit** only if all match (else miss → re-run →
+  rewrite the same slot). It captures the Pundit policy because the policy
+  is in the dependency set after the first run.
 
-This needs a cache primitive the store does not have today —
-`fetch_or_compute` derives its key *from* the descriptor, so it cannot
-express "stable key, validate a recorded dependency set." A small
-`Cache::Store` addition (read raw value + stored dependency descriptor at
-a key; validate; recompute on mismatch) is the unit of work, plus the
-post-run dependency collection in the runner. Staged behind this ADR.
+Two robustness rules the implementation enforces: **the cache must never
+break a run** — a serialization/disk failure on write is swallowed (skip
+caching), and any cache-path error falls back to a direct uncached
+analysis; and the post-run dependency collection reads each plugin's
+`@io_boundary` *without* triggering its lazy `||=` initializer (plugin
+instances are frozen after the run, and a plugin that built no boundary
+read no files through it). The fast path is gated to a sequential,
+writable-cache, non-editor, non-prebuilt run; a cache hit returns `nil`
+stats (the analysis it would summarise did not run).
 
-### Required companion — make the verification gate cache-proof
+Verified: an unchanged Mastodon `app/models` (248 files) drops **11.6 s →
+1.8 s (~6×)**; `fix-an-error → 0 errors` (no stale); the
+`pundit_plugin_spec` cross-process regression and the per-producer cache
+tests (rigor-routes, rigor-rbs-inline) pass; `make verify` green.
+
+### Companion (landed) — the verification gate is cache-proof
 
 The result cache must never let the project's own gate read a stale
-result: `make check` / `check-plugins` run `rigor check lib` with no
-`--no-cache`, and the fingerprint deliberately excludes engine code (only
+result, and the fingerprint deliberately excludes engine code (only
 `Rigor::VERSION`), so an engine edit that leaves the version unchanged
-could be masked by a hit. When the cache lands, those targets MUST switch
-to `--no-cache` (the gate always re-runs the analysis). Until then the
-cache is not wired, so the gate is unaffected.
+could be masked by a hit. `make check` / `check-plugins` therefore run
+`rigor check --no-cache` — the gate always re-runs the analysis. A
+developer running `rigor check` on a real project after editing `lib/`
+should `--clear-cache` (or `--no-cache`) the same way.
 
 ## Consequences
 

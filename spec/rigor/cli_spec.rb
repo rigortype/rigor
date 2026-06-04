@@ -298,11 +298,12 @@ RSpec.describe Rigor::CLI do
     it "prints '(empty)' under --cache-stats when no cache directory exists" do
       write_check_fixture("a.rb", "1\n")
       Dir.chdir(tmpdir) do
-        # `--no-stats` is required because the default stats
-        # summary forces `class_decl_paths` to build the RBS
-        # env, which warms `.rigor/cache` and would defeat
-        # the "no cache directory exists" assertion.
-        status, out, _err = run_cli("check", "--cache-stats", "--no-stats", "a.rb")
+        # `--no-cache` keeps the run from writing anything: both the
+        # default stats summary (which forces `class_decl_paths` to build
+        # the RBS env) and the ADR-45 whole-run result cache would warm
+        # `.rigor/cache` and defeat the "no cache directory exists"
+        # assertion.
+        status, out, _err = run_cli("check", "--cache-stats", "--no-cache", "a.rb")
         expect(status).to eq(0)
         expect(out).to include("Cache (root: .rigor/cache)")
         expect(out).to include("schema_version: absent")
@@ -352,10 +353,11 @@ RSpec.describe Rigor::CLI do
         FileUtils.mkdir_p(cache_root)
         File.write(File.join(cache_root, "schema_version.txt"), "1\n")
 
-        # `--no-stats` (see the sibling spec): the stats
-        # summary would re-warm the cache and re-create the
-        # directory we're asserting got deleted.
-        status, out, _err = run_cli("check", "--clear-cache", "--no-stats", "a.rb")
+        # `--no-cache` (see the sibling spec): otherwise the run re-warms
+        # the cache after the clear — both the stats summary and the
+        # ADR-45 whole-run result cache write — re-creating the directory
+        # we're asserting got deleted. `--clear-cache` still runs first.
+        status, out, _err = run_cli("check", "--clear-cache", "--no-cache", "a.rb")
         expect(status).to eq(0)
         expect(out).to include("Cleared cache: .rigor/cache")
         expect(File.directory?(cache_root)).to be false

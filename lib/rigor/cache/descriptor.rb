@@ -178,6 +178,20 @@ module Rigor
         freeze
       end
 
+      # ADR-45 — re-validates this descriptor's recorded {FileEntry}s
+      # against the current filesystem. Used by the record-and-validate
+      # run-result cache: a value cached alongside its dependency
+      # descriptor is fresh iff every recorded file still matches. Only
+      # `files` are checked — non-file inputs (config / gems / version)
+      # belong in the cache *key*, not the validated dependency set — so
+      # a descriptor carrying any non-file slot is never considered fresh
+      # (it was built wrong for this use).
+      def fresh?
+        return false unless gems.empty? && plugins.empty? && configs.empty? && dependencies.empty?
+
+        files.all? { |entry| file_entry_fresh?(entry) }
+      end
+
       # File-comparator strictness ordering. `:digest` is strictest
       # (deterministic across machines); `:mtime` is cheaper but
       # local; `:exists` is the weakest signal. When two
@@ -261,6 +275,21 @@ module Rigor
       end
 
       private
+
+      def file_entry_fresh?(entry)
+        case entry.comparator
+        when :digest
+          File.file?(entry.path) && Digest::SHA256.file(entry.path).hexdigest == entry.value
+        when :mtime
+          File.exist?(entry.path) && File.mtime(entry.path).to_i.to_s == entry.value
+        when :exists
+          File.exist?(entry.path).to_s == entry.value
+        else
+          false
+        end
+      rescue StandardError
+        false
+      end
 
       def sort_entries(entries, key)
         entries.sort_by { |e| e.to_h.fetch(key).to_s }

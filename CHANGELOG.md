@@ -14,6 +14,10 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **[performance]** Unchanged-project fast path ([ADR-45](docs/adr/45-unchanged-project-fast-path.md)): when nothing a run depends on has changed, `rigor check` serves the whole result from a record-and-validate cache instead of re-running the per-file inference. An unchanged Mastodon `app/models` (248 files) drops from ~11.6s to ~1.8s (~6×). The cache records every file the run actually read — analyzed files, RBS `sig`, and each plugin's reads (including files read mid-analysis, e.g. a Pundit policy) — and on the next run re-digests them; any change misses and re-runs, so diagnostics are always identical to a fresh run. It is sequential-mode only, never breaks a run on a cache error, and `make check` / `check-plugins` use `--no-cache` so the verification gate never trusts a cached result.
+
 ### Fixed
 
 - **[rigor-rails-routes]** A `nil` / unbuilt route-helper table is now memoised, not rebuilt on every dispatch. When `config/routes.rb` is missing or fails to parse, `helper_table_or_nil` returned nil and its `return @helper_table if @helper_table` guard never cached that result, so the engine re-read (and, for a present-but-unparseable file, re-parsed) the routes file once per route-helper call site — 105,724 `IoBoundary#read_file` calls in a cold GitLab run, now 2. Diagnostics are unchanged; the win is avoided pathological re-reads on projects whose routes file is absent or large-and-unparseable.

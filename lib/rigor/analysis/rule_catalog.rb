@@ -226,6 +226,31 @@ module Rigor
           since: "0.1.2"
         ),
 
+        CheckRules::RULE_UNREACHABLE_CLAUSE => Entry.new(
+          id: CheckRules::RULE_UNREACHABLE_CLAUSE,
+          summary: "A `case` / `when` clause the flow engine's narrowing proves can never match.",
+          fires_when: [
+            "The subject is a `case <local>` (`LocalVariableReadNode`), the only shape the engine narrows.",
+            "Every `when` condition is a class / module constant (`when String` / `when MyClass`).",
+            "The clause's narrowed body subject is `Type::Bot` — disjoint from the subject (`when String` " \
+            "over an `Integer`) or already exhausted by an earlier clause (prior-exhaustion)."
+          ],
+          does_not_fire_when: [
+            "The subject's type at case entry is `Dynamic` (disjointness is never provable under gradual " \
+            "`Dynamic`, preserving the gradual guarantee) or already `Bot` (dead code, not a clause error).",
+            "A `when` condition is not a class / module constant — `when nil`, ranges, regexps, and " \
+            "arbitrary expressions are out of the WD1 scope.",
+            "The clause sits inside a `WhileNode` / `UntilNode` / `ForNode` / `BlockNode` (mutation tracking " \
+            "through those is incomplete), or its body is empty (no useful location)."
+          ],
+          suppression: "`# rigor:disable unreachable-clause` on the dead-clause body line.",
+          severity_authored: :warning,
+          # ADR-47 WD4: balanced stays :info (one notch below its `flow.*`
+          # siblings' :warning) until the regression-corpus FP gate is green.
+          severity_by_profile: { lenient: :info, balanced: :info, strict: :warning },
+          since: "0.1.17"
+        ),
+
         CheckRules::RULE_DEAD_ASSIGNMENT => Entry.new(
           id: CheckRules::RULE_DEAD_ASSIGNMENT,
           summary: "Local variable assigned in a method body but never read.",

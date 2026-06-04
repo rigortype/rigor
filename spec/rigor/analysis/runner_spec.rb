@@ -1868,6 +1868,110 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # ADR-47 — narrowing-driven `case`/`when` clause reachability (WD1).
+    describe "unreachable-clause rule (ADR-47)" do
+      def clause_diags(result)
+        result.diagnostics.select { |d| d.rule == "flow.unreachable-clause" }
+      end
+
+      it "flags a `when` clause disjoint from the narrowed subject" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          when String
+            "s"
+          when Integer
+            "i"
+          end
+        RUBY
+        diag = clause_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("when String")
+        expect(clause_diags(result).size).to eq(1) # only the disjoint clause
+      end
+
+      it "does not fire on a reachable clause (subject not disjoint)" do
+        result = analyze(<<~RUBY)
+          x = [1, "a"].sample
+          case x
+          when Integer
+            "i"
+          when String
+            "s"
+          end
+        RUBY
+        # x is Integer | String — both clauses are reachable.
+        expect(clause_diags(result)).to be_empty
+      end
+
+      it "fires on a clause made dead by an earlier clause (prior-exhaustion)" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          when Integer
+            "i"
+          when Float
+            "f"
+          end
+        RUBY
+        # x is Integer here, so `when Float` after `when Integer` is dead.
+        expect(clause_diags(result).map(&:message)).to all(include("when Float"))
+        expect(clause_diags(result).size).to eq(1)
+      end
+
+      it "never fires on a `Dynamic` subject (the gradual guarantee)" do
+        result = analyze(<<~RUBY)
+          def f(x)
+            case x
+            when String then 1
+            when Integer then 2
+            end
+          end
+        RUBY
+        expect(clause_diags(result)).to be_empty
+      end
+
+      it "does not fire on non-constant clauses (`when nil` / ranges are out of WD1 scope)" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          when nil
+            "z"
+          when 100..200
+            "r"
+          end
+        RUBY
+        expect(clause_diags(result)).to be_empty
+      end
+
+      it "skips clauses inside a loop/block (incomplete mutation tracking)" do
+        result = analyze(<<~RUBY)
+          [1, 2].each do |x|
+            case x
+            when String
+              "s"
+            when Integer
+              "i"
+            end
+          end
+        RUBY
+        expect(clause_diags(result)).to be_empty
+      end
+
+      it "is suppressible via `# rigor:disable unreachable-clause`" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          when String
+            "s" # rigor:disable unreachable-clause
+          when Integer
+            "i"
+          end
+        RUBY
+        expect(clause_diags(result)).to be_empty
+      end
+    end
+
     describe "method-visibility-mismatch rule (v0.1.2)" do
       def visibility_mismatch_diags(result)
         result.diagnostics.select { |d| d.rule == "def.method-visibility-mismatch" }

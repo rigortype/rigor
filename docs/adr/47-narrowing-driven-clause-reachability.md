@@ -1,6 +1,8 @@
 # ADR-47 — Narrowing-driven clause reachability (`flow.unreachable-clause`)
 
-Status: **Proposed — design. Extends Rigor's two existing `if`/`unless` reachability rules to `case`/`when` (and, conditionally, `case`/`in`) clauses, using the narrowing the flow engine already computes. Inspired by Elixir v1.20's redundant-`case`-clause reporting; scoped to stay inside Rigor's false-positive envelope.**
+Status: **Accepted — WD1 implemented. Extends Rigor's two existing `if`/`unless` reachability rules to `case`/`when` clauses, using the narrowing the flow engine already computes. Inspired by Elixir v1.20's redundant-`case`-clause reporting; scoped to stay inside Rigor's false-positive envelope.**
+
+**WD1 landed (v0.1.17).** `flow.unreachable-clause` fires when a `case <local>` clause's class/module-constant condition (`when String` / `when MyClass`) narrows the subject to `Type::Bot` — read back from `scope_index` (the evaluator's own per-clause `body_scope`), so the rule and the body typing cannot diverge. The single `body_scope == bot` signal covers both shapes the design names (per-clause disjointness AND prior-exhaustion) since an exhausted entry scope narrows to `bot` too. FP envelope enforced: subject must be a narrowing local, never `Dynamic` (gradual guarantee) nor already-`Bot` (dead code), class/module-constant conditions only (`when nil` / ranges / regexps / expressions excluded), clauses inside loops/blocks skipped. Per **WD4**, it ships at `:info` in lenient + balanced (the default) and `:warning` only in strict, pending the regression-corpus FP gate before any balanced→`:warning` promotion; clean (zero firings) on Rigor's own `lib` + `plugins` + `examples`. **Remaining:** WD2 message precision (distinguish prior-exhaustion in the diagnostic text + flag a dead trailing `else`), WD3 (`in`/pattern clauses, gated behind `InNode` exhaustiveness), WD4 (the Mastodon/GitLab/Redmine corpus triage to promote to `:warning`).
 
 ## Motivation
 

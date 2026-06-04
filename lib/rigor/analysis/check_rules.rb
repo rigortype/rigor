@@ -7,6 +7,7 @@ require_relative "../source/node_walker"
 require_relative "../type"
 require_relative "diagnostic"
 require_relative "check_rules/always_truthy_condition_collector"
+require_relative "check_rules/unreachable_clause_collector"
 require_relative "check_rules/dead_assignment_collector"
 require_relative "check_rules/ivar_write_collector"
 
@@ -73,6 +74,7 @@ module Rigor
       RULE_IVAR_WRITE_MISMATCH = "def.ivar-write-mismatch"
       RULE_DEAD_ASSIGNMENT = "flow.dead-assignment"
       RULE_ALWAYS_TRUTHY_CONDITION = "flow.always-truthy-condition"
+      RULE_UNREACHABLE_CLAUSE = "flow.unreachable-clause"
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
@@ -86,6 +88,7 @@ module Rigor
         RULE_UNREACHABLE_BRANCH,
         RULE_DEAD_ASSIGNMENT,
         RULE_ALWAYS_TRUTHY_CONDITION,
+        RULE_UNREACHABLE_CLAUSE,
         RULE_RETURN_TYPE,
         RULE_VISIBILITY_MISMATCH,
         RULE_OVERRIDE_VISIBILITY_REDUCED,
@@ -114,7 +117,8 @@ module Rigor
         "method-visibility-mismatch" => RULE_VISIBILITY_MISMATCH,
         "ivar-write-mismatch" => RULE_IVAR_WRITE_MISMATCH,
         "dead-assignment" => RULE_DEAD_ASSIGNMENT,
-        "always-truthy-condition" => RULE_ALWAYS_TRUTHY_CONDITION
+        "always-truthy-condition" => RULE_ALWAYS_TRUTHY_CONDITION,
+        "unreachable-clause" => RULE_UNREACHABLE_CLAUSE
       }.freeze
 
       # Family wildcard — a `<family>` token in a suppression
@@ -174,6 +178,7 @@ module Rigor
           end
         end
         diagnostics.concat(always_truthy_condition_diagnostics(path, root, scope_index))
+        diagnostics.concat(unreachable_clause_diagnostics(path, root, scope_index))
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, root, scope_index))
         diagnostics.concat(dead_assignment_diagnostics(path, root, scope_index))
         filter_suppressed(diagnostics, comments: comments, disabled_rules: disabled_rules)
@@ -243,6 +248,17 @@ module Rigor
       def always_truthy_condition_diagnostics(path, root, scope_index)
         AlwaysTruthyConditionCollector.new(scope_index).collect(root).map do |result|
           build_always_truthy_condition_diagnostic(path, result.node, result.polarity)
+        end
+      end
+
+      # ADR-47 — `flow.unreachable-clause`. One diagnostic per `when` clause
+      # the flow engine's narrowing proves can never match (its narrowed
+      # subject is `bot`). The squiggle lands on the dead clause's body,
+      # mirroring `flow.unreachable-branch`.
+      def unreachable_clause_diagnostics(path, root, scope_index)
+        UnreachableClauseCollector.new(scope_index).collect(root).map do |result|
+          build_unreachable_clause_diagnostic(path, result.clause.statements, result.subject_name,
+                                              result.condition_source)
         end
       end
 
@@ -1159,6 +1175,17 @@ module Rigor
             rule: RULE_ALWAYS_TRUTHY_CONDITION,
             path: path,
             message: "condition is always #{polarity} (the surrounding flow proves it folds to a constant)",
+            severity: :warning
+          )
+        end
+
+        def build_unreachable_clause_diagnostic(path, body_node, subject_name, condition_source)
+          Diagnostic.from_node(
+            body_node,
+            rule: RULE_UNREACHABLE_CLAUSE,
+            path: path,
+            message: "unreachable `when #{condition_source}': `#{subject_name}' can never be " \
+                     "#{condition_source} here (the flow proves the subject disjoint)",
             severity: :warning
           )
         end

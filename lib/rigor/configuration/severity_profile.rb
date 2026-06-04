@@ -47,6 +47,7 @@ module Rigor
           "flow.unreachable-branch" => :info,
           "flow.dead-assignment" => :info,
           "flow.always-truthy-condition" => :info,
+          "flow.unreachable-clause" => :info,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
@@ -66,6 +67,11 @@ module Rigor
           "flow.unreachable-branch" => :warning,
           "flow.dead-assignment" => :warning,
           "flow.always-truthy-condition" => :warning,
+          # ADR-47 WD4: stays :info (not :warning like its siblings) in the
+          # default balanced profile until the regression-corpus FP gate is
+          # green; promote to :warning once Mastodon/GitLab/Redmine triage
+          # to zero net false positives.
+          "flow.unreachable-clause" => :info,
           "assert.type-mismatch" => :error,
           "dump.type" => :info,
           "def.return-type-mismatch" => :warning,
@@ -85,6 +91,10 @@ module Rigor
           "flow.unreachable-branch" => :error,
           "flow.dead-assignment" => :error,
           "flow.always-truthy-condition" => :error,
+          # ADR-47: strict opts into the new rule at :warning (one notch
+          # below its :error siblings) while it proves out — see the
+          # balanced-profile note above.
+          "flow.unreachable-clause" => :warning,
           "assert.type-mismatch" => :error,
           "dump.type" => :error,
           "def.return-type-mismatch" => :error,

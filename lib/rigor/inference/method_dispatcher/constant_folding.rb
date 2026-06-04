@@ -57,7 +57,10 @@ module Rigor
           :+, :*, :==, :!=, :<, :<=, :>, :>=, :<=>,
           :start_with?, :end_with?, :include?,
           :delete_prefix, :delete_suffix,
-          :match?, :index, :rindex, :center, :ljust, :rjust
+          :match?, :index, :rindex, :center, :ljust, :rjust,
+          # 1-arg pure transforms/queries whose output never exceeds the
+          # input: `delete`/`squeeze` shrink the string, `count` → Integer.
+          :delete, :count, :squeeze
         ].freeze
         SYMBOL_BINARY  = Set[:==, :!=, :<=>, :<, :<=, :>, :>=].freeze
         BOOL_BINARY    = Set[:&, :|, :^, :==, :!=, :===].freeze
@@ -98,7 +101,7 @@ module Rigor
         STRING_UNARY = Set[
           :upcase, :downcase, :capitalize, :swapcase,
           :reverse, :length, :size, :bytesize,
-          :empty?, :strip, :lstrip, :rstrip, :chomp, :chop,
+          :empty?, :strip, :lstrip, :rstrip, :chomp, :chop, :squeeze,
           :to_s, :to_str, :to_sym, :intern,
           :to_i, :to_f, :ord, :chr, :hex, :oct, :succ, :next,
           :inspect, :hash

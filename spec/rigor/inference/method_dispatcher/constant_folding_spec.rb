@@ -219,6 +219,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold("hello", :delete_suffix, ["lo"]).value).to eq("hel")
       expect(fold("hello", :delete_suffix, ["x"]).value).to eq("hello")
     end
+
+    it "folds String#delete / #count / #squeeze(arg)" do
+      expect(fold("aabbccdaa", :delete, ["a"]).value).to eq("bbccd")
+      expect(fold("aabbccdaa", :count, ["a"]).value).to eq(4)
+      expect(fold("aabbccdaa", :squeeze, ["a"]).value).to eq("abbccda")
+    end
   end
 
   describe "String mid-priority folds (coverage uplift)" do
@@ -227,6 +233,10 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ConstantFolding do
       expect(fold("az", :succ).value).to eq("ba")
       expect(fold("az", :next).value).to eq("ba")
       expect(fold("hello", :chop).value).to eq("hell")
+    end
+
+    it "folds the no-argument String#squeeze" do
+      expect(fold("aaabbbcca", :squeeze).value).to eq("abca")
     end
 
     it "folds String#hex / #oct" do

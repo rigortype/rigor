@@ -316,6 +316,39 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       end
     end
 
+    describe "Tuple#uniq" do
+      it "keeps the first occurrence of each distinct value" do
+        t = tuple(constant(1), constant(2), constant(2), constant(3), constant(1))
+        expect(dispatch(receiver: t, method_name: :uniq).elements.map(&:value)).to eq([1, 2, 3])
+      end
+
+      it "falls through with a block (args present) or mixed non-constant elements" do
+        dyn = tuple(constant(1), Rigor::Type::Combinator.untyped)
+        expect(dispatch(receiver: dyn, method_name: :uniq)).to be_nil
+      end
+    end
+
+    describe "Tuple#index / #find_index / #rindex" do
+      let(:t) { tuple(constant(:a), constant(:b), constant(:a)) }
+
+      it "index / find_index return the first matching index" do
+        expect(dispatch(receiver: t, method_name: :index, args: [constant(:a)])).to eq(constant(0))
+        expect(dispatch(receiver: t, method_name: :find_index, args: [constant(:b)])).to eq(constant(1))
+      end
+
+      it "rindex returns the last matching index" do
+        expect(dispatch(receiver: t, method_name: :rindex, args: [constant(:a)])).to eq(constant(2))
+      end
+
+      it "returns Constant[nil] when nothing matches" do
+        expect(dispatch(receiver: t, method_name: :index, args: [constant(:z)])).to eq(constant(nil))
+      end
+
+      it "falls through for the block form (no argument)" do
+        expect(dispatch(receiver: t, method_name: :index, args: [])).to be_nil
+      end
+    end
+
     describe "Tuple#zip per-position fold (v0.0.7)" do
       it "pairs receiver and other-Tuple per position" do
         a = tuple(constant(1), constant(2), constant(3))

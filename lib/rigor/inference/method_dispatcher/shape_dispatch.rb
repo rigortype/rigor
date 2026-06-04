@@ -94,7 +94,11 @@ module Rigor
           compact: :tuple_compact,
           take: :tuple_take,
           drop: :tuple_drop,
-          rotate: :tuple_rotate
+          rotate: :tuple_rotate,
+          uniq: :tuple_uniq,
+          index: :tuple_find_index,
+          find_index: :tuple_find_index,
+          rindex: :tuple_rindex
         }.freeze
 
         HASH_SHAPE_HANDLERS = {
@@ -843,6 +847,47 @@ module Rigor
 
             kept = tuple.elements.reject { |e| e.is_a?(Type::Constant) && e.value.nil? }
             Type::Combinator.tuple_of(*kept)
+          end
+
+          # `uniq` (no block) → `Tuple` of the first occurrence of each
+          # distinct value. Folds only when every element is a `Constant`
+          # so value equality is decidable; the block form defers.
+          def tuple_uniq(tuple, _method_name, args)
+            return nil unless args.empty?
+            return nil unless tuple.elements.all?(Type::Constant)
+
+            seen = []
+            kept = tuple.elements.each_with_object([]) do |element, acc|
+              next if seen.include?(element.value)
+
+              seen << element.value
+              acc << element
+            end
+            Type::Combinator.tuple_of(*kept)
+          end
+
+          # `index(obj)` / `find_index(obj)` → `Constant[Integer]` of the
+          # first element equal to `obj`, `Constant[nil]` when none match.
+          # Folds only for the argument form (the block form defers) when
+          # every element AND the argument are `Constant` (decidable
+          # equality).
+          def tuple_find_index(tuple, _method_name, args)
+            constant_index(tuple, args) { |elements, value| elements.index { |e| e.value == value } }
+          end
+
+          # `rindex(obj)` → the LAST matching index, same decidability gate.
+          def tuple_rindex(tuple, _method_name, args)
+            constant_index(tuple, args) { |elements, value| elements.rindex { |e| e.value == value } }
+          end
+
+          def constant_index(tuple, args)
+            return nil unless args.size == 1
+
+            needle = args.first
+            return nil unless needle.is_a?(Type::Constant)
+            return nil unless tuple.elements.all?(Type::Constant)
+
+            Type::Combinator.constant_of(yield(tuple.elements, needle.value))
           end
 
           # `tuple.take(n)` — returns the first n elements as a

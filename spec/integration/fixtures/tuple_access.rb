@@ -18,3 +18,9 @@ assert_type("30", last)
 assert_type("[20, 30]", xs.drop(1))
 assert_type("[20, 30, 10]", xs.rotate)
 assert_type("[30, 10, 20]", xs.rotate(2))
+
+# Over all-Constant elements, equality is decidable: `uniq` folds to the
+# distinct sub-Tuple and `index` / `rindex` to the precise position.
+assert_type("[1, 2, 3]", [1, 2, 2, 3].uniq)
+assert_type("1", [1, 2, 2, 3].index(2))
+assert_type("2", [1, 2, 2, 3].rindex(2))

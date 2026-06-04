@@ -171,6 +171,29 @@ module Rigor
         )
       end
 
+      # ADR-46 §2 — inverts {#file_dependencies} into the reverse edge the
+      # incremental step walks: `dependents[X] = { A : A read a
+      # declaration / body from X }`. On an edit to X, the body tier
+      # (slice 2) re-analyses `{X} ∪ dependents[X]` and serves every other
+      # file from the per-file cache. Built on demand from the recorded
+      # `sources` sets (so it reflects whatever `analyze_file` captured —
+      # empty unless the runner was constructed with
+      # `record_dependencies: true`). The negative (`missing`) edges are
+      # NOT inverted here: they feed the structural tier (slice 3), which
+      # re-checks a consumer when a name it looked up and did not resolve
+      # later appears.
+      def file_dependents
+        index = Hash.new { |hash, key| hash[key] = Set.new }
+        @file_dependencies.each do |consumer, record|
+          record.sources.each { |source| index[source] << consumer }
+        end
+        # Drop the default proc before freezing — otherwise a missing-key
+        # read on the frozen hash would re-enter the proc and raise.
+        index.default_proc = nil
+        index.each_value(&:freeze)
+        index.freeze
+      end
+
       # ADR-45 — unchanged-project fast path. Serves the whole run's
       # (pre-severity-profile) diagnostics from one record-and-validate
       # cache entry when every file the previous run read is unchanged,

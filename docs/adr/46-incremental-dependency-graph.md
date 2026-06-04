@@ -190,8 +190,28 @@ trade for speed. Defenses:
      ancestor-resolved calls (slice 1a's spec only covered explicit
      receivers). Both body scopes now carry `def_sources` + the new
      `class_sources`; off by default, `make verify` green, diagnostics
-     byte-identical. Remaining in this slice: persistence (`deps` /
-     `dependents` + per-file diagnostic entries) and `--verify-incremental`.
+     byte-identical.
+   - **Slice 1c landed** — the §2 inversion. `Runner#file_dependents`
+     builds `dependents[X] = { A : A read a declaration / body from X }`
+     on demand from the recorded `sources` sets (frozen, default-proc
+     dropped so a missing-key read returns nil rather than re-entering the
+     builder on the frozen hash). This is the reverse edge slice 2 walks to
+     re-analyse `{X} ∪ dependents[X]` on an edit. The negative (`missing`)
+     edges are deliberately *not* inverted here — they feed the structural
+     tier (slice 3). The positive **class-existence** lookup edge
+     (resolving a bare constant to a project class) is also deliberately
+     left un-instrumented: a class appearing / disappearing / moving is a
+     *structural* change caught by the declaration fingerprint tier (§4),
+     and a file that merely references `Post` depends on `Post`'s
+     *methods* (already recorded via `user_def_for`), not on the bare
+     class existence — so the class-lookup edge is redundant for the body
+     tier and its diffuse read sites (`discovered_classes` is read
+     directly, not through one accessor) are not worth a choke-point
+     refactor here.
+   - **Remaining in this slice:** persistence (`deps` / `dependents` +
+     per-file diagnostic entries, reusing ADR-45's
+     `Cache::Store#fetch_or_validate`) and the mandatory
+     `--verify-incremental` cross-check.
 2. **Body tier.** Wire the declaration-fingerprint-unchanged path
    (re-analyze ΔF ∪ dependents). This already delivers the MVC win.
 3. **Structural tier.** Negative-dependency tracking so adding a symbol

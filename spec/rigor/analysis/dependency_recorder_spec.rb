@@ -129,6 +129,29 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
     end
   end
 
+  it "inverts recorded sources into a dependents index (ADR-46 §2)" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "model.rb"), <<~RUBY)
+        class Widget
+          def price
+            100
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "caller.rb"), "Widget.new.price\n")
+
+      runner = run_recording(dir)
+      dependents = runner.file_dependents
+
+      # An edit to model.rb must re-check caller.rb (it read Widget#price's
+      # body from there), so caller.rb is a dependent of model.rb.
+      expect(dependents[File.join(dir, "model.rb")]).to include(File.join(dir, "caller.rb"))
+      # A file no one reads from has no dependents entry (nil, not a
+      # mutable default — the frozen index dropped its default proc).
+      expect(dependents[File.join(dir, "caller.rb")]).to be_nil
+    end
+  end
+
   it "records a negative edge for an unresolved cross-class method call" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "model.rb"), "class Widget\nend\n")

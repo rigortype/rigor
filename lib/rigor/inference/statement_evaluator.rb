@@ -1784,20 +1784,29 @@ module Rigor
       # ScopeIndexer-populated declaration overrides
       # (`Prism::ConstantReadNode` for `module Foo` headers, etc.)
       # remain reachable from inside nested bodies.
-      def build_fresh_body_scope # rubocop:disable Metrics/AbcSize
-        Scope.empty(environment: scope.environment)
-             .with_source_path(scope.source_path)
-             .with_declared_types(scope.declared_types)
-             .with_discovered_classes(scope.discovered_classes)
-             .with_in_source_constants(scope.in_source_constants)
-             .with_class_ivars(scope.class_ivars)
-             .with_class_cvars(scope.class_cvars)
-             .with_program_globals(scope.program_globals)
-             .with_discovered_methods(scope.discovered_methods)
-             .with_discovered_def_nodes(scope.discovered_def_nodes)
-             .with_discovered_superclasses(scope.discovered_superclasses)
-             .with_discovered_includes(scope.discovered_includes)
-             .with_discovered_method_visibilities(scope.discovered_method_visibilities)
+      def build_fresh_body_scope
+        # Single allocation instead of a 13-deep `with_*` chain — this runs
+        # per class/method body on the main walk, so the chain's dozen
+        # throwaway intermediate Scopes were a top `Scope#rebuild` source.
+        # Local-empty by design; every field is a plain inherited reference
+        # and the unset fields default to the same empty bindings the chain
+        # (from `Scope.empty`) left them at, so the scope is identical (ADR-44).
+        Scope.new(
+          environment: scope.environment,
+          locals: {}.freeze,
+          source_path: scope.source_path,
+          declared_types: scope.declared_types,
+          discovered_classes: scope.discovered_classes,
+          in_source_constants: scope.in_source_constants,
+          class_ivars: scope.class_ivars,
+          class_cvars: scope.class_cvars,
+          program_globals: scope.program_globals,
+          discovered_methods: scope.discovered_methods,
+          discovered_def_nodes: scope.discovered_def_nodes,
+          discovered_superclasses: scope.discovered_superclasses,
+          discovered_includes: scope.discovered_includes,
+          discovered_method_visibilities: scope.discovered_method_visibilities
+        )
       end
 
       def singleton_def?(def_node)

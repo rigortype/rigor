@@ -1,6 +1,6 @@
 # ADR-44 — Per-dispatch / per-narrow allocation churn (Scope, CallContext)
 
-Status: **Accepted — incremental slice landed; mutable pooling rejected; field-regrouping sanctioned but staged.**
+Status: **Accepted — body-scope chain collapse + allocation hygiene landed; mutable pooling rejected; field-regrouping downgraded (object-shape benchmark shows it cuts size, not allocation count).**
 
 After the plugin-contribution path was de-churned (ADR-37 collectors:
 `dynamic_returns` snapshot memo, lazy accumulation, and the
@@ -84,23 +84,43 @@ objects (−2.7 %), wall 122.5 s → 120.5 s, diagnostics byte-identical
 same shared-empty / positional-construction hygiene applies wherever a
 hot path allocates a throwaway empty collection or keyword hash.
 
-### Sanctioned, staged — regroup `Scope`'s immutable project fields
+### Accepted (landed) — collapse the body-scope `with_*` chains
 
-`Scope` carries 22 ivars, of which ~15 (`discovered_classes`,
-`discovered_methods`, `discovered_def_nodes`, `discovered_superclasses`,
-`discovered_includes`, … — the project-wide indexes built once in
-`run_project_pre_passes`) are **identical across every `Scope` in a
-run**. Grouping them behind one shared frozen `ProjectScope` value object
-shrinks `Scope` from ~22 to ~8 fields, so each per-narrow rebuild copies
-8 references and allocates a smaller object. This is **precision-neutral**
-(pure field regrouping — same data, same immutability) and the right
-structural lever for the `Scope#rebuild` 4.3 %.
+The `Scope#rebuild` caller breakdown was the surprise: it is **not**
+dominated by control-flow narrowing but by *body-scope construction*.
+`ExpressionTyper#build_user_method_body_scope` (per user-method-call
+inference) and `StatementEvaluator#build_fresh_body_scope` (per
+class/method body) each built a fresh scope by **chaining ~12–13
+`with_*` calls**, every one allocating an intermediate frozen `Scope` and
+re-running `rebuild`'s field copy — a dozen throwaway scopes to build one.
 
-It is **deferred**, not done: it touches every `scope.discovered_*`
-reader (~dozens of call sites) and warrants its own focused change with a
-byte-identical-diagnostics gate on Mastodon + GitLab, not a tail-end edit
-to this ADR's slice. This ADR sanctions the direction so the next
-implementer does not re-litigate it.
+Both now construct the scope in a **single `Scope.new`** with every field
+set at once. The body scope starts from an empty fact store / narrowing
+set, so the chained `with_local` invalidations were no-ops and the
+project/`self_type` setters were plain field writes — so one `new` is
+byte-identical to the chain. Faithful A/B: 222.4 M → 213.3 M objects
+(−4 %), **GC runs 362 → 256 (−29 %)**, diagnostics byte-identical
+(2,323 / 38). The wall win exceeds the allocation drop because collapsing
+the chain also removes ~12 `rebuild` method calls (and their keyword
+processing) per body scope.
+
+### Investigated, low priority — regroup `Scope`'s immutable project fields
+
+The originally-sanctioned idea was to group `Scope`'s ~15 immutable
+project-wide fields (`discovered_*`, built once in
+`run_project_pre_passes`) behind one shared `ProjectScope`, shrinking
+`Scope` from ~22 to ~8 fields. **A micro-benchmark on the target Ruby
+(4.0.5) refuted the premise that this cuts allocations:** with object
+shapes / variable-width allocation, a frozen object with 3, 8, 16, 22, or
+24 ivars all allocate **exactly one** object — there is no spill to a
+second ivar buffer. Regrouping therefore reduces only the per-`Scope`
+heap-slot *size*, not the allocation *count* that drives the lazy-sweep
+cost; the `Scope#rebuild` sample share would be unchanged. The real
+count-reducing win was collapsing the construction chains above. The
+regrouping remains a *memory-footprint* lever (smaller slots → heap fills
+slower → fewer GC cycles), but it is large (touches every
+`scope.discovered_*` reader), its payoff is now known to be modest, and it
+must be measured-before-invested rather than assumed.
 
 ## Consequences
 

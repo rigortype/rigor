@@ -232,12 +232,20 @@ trade for speed. Defenses:
      dependents re-analysis is conservative *insurance* (re-check to stay
      sound), not a frequent source of new diagnostics. This is what makes
      the leaf-controller → 1-file win the common case.
-   - **Remaining in this slice:** the subset-analysis Runner hook
-     (pre-pass all files, analyze only `affected`) + per-file diagnostic
-     cache serving for the rest + the `--verify-incremental` CLI flag that
-     runs incremental vs full `--no-cache` and asserts byte-identical on
-     Mastodon + GitLab (the acceptance gate). The set-algebra core and its
-     property test are the foundation those build on.
+   - **Subset-analysis hook landed** — `Runner.new(analyze_only:)` takes a
+     collection of paths; the whole-project pre-pass still runs over every
+     file (the cross-file index stays complete), but `target_files` filters
+     the analyzed set to the supplied paths. A subset run's diagnostics for
+     a given file are byte-identical to the full run's for that file (spec
+     `runner_subset_analysis_spec.rb`), so the body tier can re-analyze the
+     affected closure and trust the result matches a full analysis. Pool
+     mode inherits the filter for free (it dispatches `target_files`).
+   - **Remaining in this slice:** per-file diagnostic cache serving for the
+     non-affected rest (reuse ADR-45's `Cache::Store#fetch_or_validate`) +
+     the `--verify-incremental` CLI flag that runs incremental vs full
+     `--no-cache` and asserts byte-identical on Mastodon + GitLab (the
+     acceptance gate). The set-algebra core, the property test, and the
+     subset hook are the pieces those compose.
 3. **Structural tier.** Negative-dependency tracking so adding a symbol
    re-checks only its would-be resolvers instead of falling back to full.
 4. **Symbol granularity (optional).** Refine file-level deps to

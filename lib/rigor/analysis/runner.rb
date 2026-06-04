@@ -90,7 +90,7 @@ module Rigor
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
                      buffer: nil, prebuilt: nil, environment: nil,
-                     record_dependencies: false)
+                     record_dependencies: false, analyze_only: nil)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -105,6 +105,13 @@ module Rigor
         # cross-file reads into `file_dependencies` (the incremental
         # cache, a later slice, consumes them).
         @record_dependencies = record_dependencies
+        # ADR-46 slice 2 — the subset-analysis hook. When set (a collection
+        # of paths), the whole-project pre-pass still runs over every file
+        # (so the cross-file index is complete), but only files in this set
+        # are analyzed for diagnostics — the body tier re-analyses the
+        # affected closure and serves the rest from the per-file cache.
+        # `nil` (the default) analyzes everything.
+        @analyze_only = analyze_only && Set.new(analyze_only)
         @file_dependencies = {}
         @plugin_registry = Plugin::Registry::EMPTY
         @dependency_source_index = DependencySourceInference::Index::EMPTY
@@ -606,6 +613,11 @@ module Rigor
       # buffer".
       def target_files(expansion)
         files = expansion.fetch(:files)
+        # ADR-46 slice 2 — restrict the analyzed set to the affected
+        # closure while the pre-pass (run separately over `expansion`'s
+        # full file list) keeps the cross-file index complete. Buffer mode
+        # takes precedence — its single logical path is the analyzed set.
+        files = files.select { |path| @analyze_only.include?(path) } if @analyze_only
         return files if @buffer.nil?
 
         [@buffer.logical_path]

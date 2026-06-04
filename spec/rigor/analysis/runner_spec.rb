@@ -2054,6 +2054,114 @@ RSpec.describe Rigor::Analysis::Runner do
         # only String reaches the else — it is live.
         expect(clause_diags(result)).to be_empty
       end
+
+      # --- WD3a: case/in bare class patterns ---
+
+      it "WD3a: flags a `in C` clause disjoint from the narrowed subject" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          in String
+            "s"
+          in Integer
+            "i"
+          end
+        RUBY
+        diag = clause_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("in String")
+        expect(diag.message).to include("disjoint")
+        expect(clause_diags(result).size).to eq(1)
+      end
+
+      it "WD3a: words a prior-exhausted `in` clause as `already covered`" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          in Integer
+            "i"
+          in Float
+            "f"
+          end
+        RUBY
+        diag = clause_diags(result).first
+        expect(diag.message).to include("in Float")
+        expect(diag.message).to include("already covered by an earlier `in'")
+      end
+
+      it "WD3a: handles `in C => y` capture of a bare class" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          in String => s
+            s
+          in Integer => i
+            i
+          end
+        RUBY
+        diag = clause_diags(result).first
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("in String")
+      end
+
+      it "WD3a: does NOT fire on non-class patterns (array/hash/value out of WD3a scope)" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          in [a, b]
+            a
+          in {k:}
+            k
+          in 0
+            "zero"
+          end
+        RUBY
+        expect(clause_diags(result)).to be_empty
+      end
+
+      it "WD3a: a prior-exhausting `in C` kills ANY later clause, even non-class" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          in Integer
+            "i"
+          in [a, b]
+            a
+          end
+        RUBY
+        diag = clause_diags(result).find { |d| d.message.include?("[a, b]") }
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("already covered")
+      end
+
+      it "WD3a: never fires on a `Dynamic` subject (gradual guarantee)" do
+        result = analyze(<<~RUBY)
+          def f(x)
+            case x
+            in String then 1
+            in Integer then 2
+            end
+          end
+        RUBY
+        expect(clause_diags(result)).to be_empty
+      end
+
+      it "WD3a: flags a dead `else` once the `in` clauses exhaust the subject" do
+        result = analyze(<<~RUBY)
+          x = [1, "a"].sample
+          case x
+          in Integer
+            "i"
+          in String
+            "s"
+          else
+            "never"
+          end
+        RUBY
+        diag = clause_diags(result).find { |d| d.message.include?("else") }
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("`in' clauses")
+      end
     end
 
     describe "method-visibility-mismatch rule (v0.1.2)" do

@@ -1190,14 +1190,15 @@ module Rigor
 
         def unreachable_clause_message(result)
           subject = result.subject_name
+          kw = result.keyword
           case result.kind
           when :prior_exhaustion
-            "unreachable `when #{result.condition_source}': `#{subject}' is already covered " \
-            "by an earlier `when' clause"
+            "unreachable `#{kw} #{result.condition_source}': `#{subject}' is already covered " \
+            "by an earlier `#{kw}' clause"
           when :exhausted_else
-            "unreachable `else': the `when' clauses already cover every value `#{subject}' can take here"
+            "unreachable `else': the `#{kw}' clauses already cover every value `#{subject}' can take here"
           else # :disjoint
-            "unreachable `when #{result.condition_source}': `#{subject}' can never be " \
+            "unreachable `#{kw} #{result.condition_source}': `#{subject}' can never be " \
             "#{result.condition_source} here (the flow proves the subject disjoint)"
           end
         end

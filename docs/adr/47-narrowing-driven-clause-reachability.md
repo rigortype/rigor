@@ -1,10 +1,12 @@
 # ADR-47 — Narrowing-driven clause reachability (`flow.unreachable-clause`)
 
-Status: **Accepted — WD1 + WD2 implemented. Extends Rigor's two existing `if`/`unless` reachability rules to `case`/`when` clauses, using the narrowing the flow engine already computes. Inspired by Elixir v1.20's redundant-`case`-clause reporting; scoped to stay inside Rigor's false-positive envelope.**
+Status: **Accepted — WD1 + WD2 + WD3a implemented. Extends Rigor's two existing `if`/`unless` reachability rules to `case`/`when` AND `case`/`in` clauses, using the narrowing the flow engine already computes. Inspired by Elixir v1.20's redundant-`case`-clause reporting; scoped to stay inside Rigor's false-positive envelope.**
 
 **WD1 landed (v0.1.17).** `flow.unreachable-clause` fires when a `case <local>` clause's class/module-constant condition (`when String` / `when MyClass`) narrows the subject to `Type::Bot` — read back from `scope_index` (the evaluator's own per-clause `body_scope`), so the rule and the body typing cannot diverge. The single `body_scope == bot` signal covers both shapes the design names (per-clause disjointness AND prior-exhaustion) since an exhausted entry scope narrows to `bot` too. FP envelope enforced: subject must be a narrowing local, never `Dynamic` (gradual guarantee) nor already-`Bot` (dead code), class/module-constant conditions only (`when nil` / ranges / regexps / expressions excluded), clauses inside loops/blocks skipped. Per **WD4**, it ships at `:info` in lenient + balanced (the default) and `:warning` only in strict, pending the regression-corpus FP gate before any balanced→`:warning` promotion; clean (zero firings) on Rigor's own `lib` + `plugins` + `examples`.
 
-**WD2 landed (v0.1.17).** Message precision + a dead trailing `else`. A dead `when` is now worded `:prior_exhaustion` ("already covered by an earlier `when'") vs `:disjoint` (the WD1 wording), told apart by the scope ENTERING the clause: `eval_case_when_branches` records that entry `falsey_scope` on the clause's first condition node (`on_enter`-only, no new typing; `propagate` preserves it) and the collector classifies on whether the subject was already `bot` there. A trailing `else` whose final falsey scope narrows the subject to `bot` is flagged as `:exhausted_else` — EXCEPT a defensive `else` body (a bare `raise`/`fail`/`throw`/`abort`/`exit`), skipped because it is a deliberate guard, not removable dead code. Still clean on Rigor's own corpus; same `:info`/`:warning` severity posture. **Remaining:** WD3 (`in`/pattern clauses, gated behind `InNode` exhaustiveness), WD4 (the Mastodon/GitLab/Redmine corpus triage to promote balanced to `:warning`).
+**WD2 landed (v0.1.17).** Message precision + a dead trailing `else`. A dead `when` is now worded `:prior_exhaustion` ("already covered by an earlier `when'") vs `:disjoint` (the WD1 wording), told apart by the scope ENTERING the clause: `eval_case_when_branches` records that entry `falsey_scope` on the clause's first condition node (`on_enter`-only, no new typing; `propagate` preserves it) and the collector classifies on whether the subject was already `bot` there. A trailing `else` whose final falsey scope narrows the subject to `bot` is flagged as `:exhausted_else` — EXCEPT a defensive `else` body (a bare `raise`/`fail`/`throw`/`abort`/`exit`), skipped because it is a deliberate guard, not removable dead code. Still clean on Rigor's own corpus; same `:info`/`:warning` severity posture.
+
+**WD3a landed (v0.1.17).** `case`/`in` (a `CaseMatchNode`) for **bare class patterns** only — `in C` / `in C => x`, whose match is exactly `C === subject` (pure `is_a?`, no deconstruction). Those narrow soundly like `when C`, so `eval_case_when_branches` now routes a bare-class `in` through `Narrowing.case_when_scopes` (body narrowed to `C`, falsey with `C` removed); every other pattern (value, array / hash / find, capture-with-deconstruction, bare variable) keeps the conservative "body = entry + bindings, falsey unchanged" shape, because deconstruction can fail even when the class test passes (removing anything from the falsey scope would be unsound). The collector flags a dead `in` clause on the same `body_scope == bot` signal, classifying disjoint vs prior-exhaustion exactly as for `when`; a non-class `in` clause can therefore only fire under prior-exhaustion (an earlier covering set), never a spurious disjoint. Clean on Rigor's own corpus. **Remaining:** WD3b (deconstructing / value / variable-catch-all pattern exhaustiveness — the genuinely larger, ADR-36-`is_a?`-exhaustiveness-neighbour project; do NOT infer it ad hoc), WD4 (the Mastodon/GitLab/Redmine corpus triage to promote balanced to `:warning`).
 
 ## Motivation
 
@@ -144,12 +146,23 @@ the same risk class:
   `else` body (a bare `raise` / `fail` / `throw` / `abort` / `exit`),
   which is a deliberate guard, not removable dead code (the FP-discipline
   carve-out). No new narrowing; reads the engine's own scopes.
-- **WD3 — `in` clauses (gated).** Extend only after
-  `branch_body_and_falsey_scopes` learns pattern-exhaustiveness for
-  `InNode`. Deferred behind that work; pattern disjointness is a larger,
+- **WD3a — `in` bare class patterns (landed, v0.1.17).** `in C` / `in C
+  => x` match on `C === subject` (pure `is_a?`, no deconstruction), so
+  they narrow soundly exactly like `when C`. `branch_body_and_falsey_scopes`
+  routes a bare-class `in` through `Narrowing.case_when_scopes`
+  (`bare_class_pattern_node` recognises `ConstantReadNode` /
+  `ConstantPathNode` and a `CapturePatternNode` wrapping one); the
+  collector handles `CaseMatchNode` + `InNode` on the same `body_scope ==
+  bot` signal. This is NOT ad-hoc exhaustiveness — it reuses the existing
+  sound `when` class narrowing, restricted to the one pattern shape where
+  truthy AND falsey narrowing are both sound.
+- **WD3b — deconstructing / value / variable-catch-all patterns
+  (deferred).** Array / hash / find patterns, value patterns, and the
+  `in x` catch-all need real `InNode` pattern-exhaustiveness — a larger,
   separate precision project (the deferred ADR-36 `is_a?` exhaustiveness
-  is the neighbour). Do **not** ship WD3 by inferring exhaustiveness ad
-  hoc.
+  is the neighbour). Do **not** ship it by inferring exhaustiveness ad
+  hoc; today these keep the conservative falsey-unchanged shape, so they
+  fire only when a prior bare-class clause already exhausted the subject.
 - **WD4 — corpus FP gate.** Before default-on, run the rule across the
   regression corpus (Mastodon / GitLab / Redmine per
   [`reference_survey_external_projects`]) at `--no-cache` and triage every

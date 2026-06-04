@@ -53,7 +53,7 @@ module Rigor
         #     earlier clause already covered the subject), or
         #     `:exhausted_else` (every subject value is covered, so the
         #     `else` never runs).
-        Result = Data.define(:clause, :body, :subject_name, :condition_source, :kind)
+        Result = Data.define(:clause, :body, :subject_name, :condition_source, :kind, :keyword)
 
         def initialize(scope_index)
           @scope_index = scope_index
@@ -71,10 +71,17 @@ module Rigor
         def walk(node, in_loop_or_block:)
           return unless node.is_a?(Prism::Node)
 
-          collect_case(node) if node.is_a?(Prism::CaseNode) && !in_loop_or_block
+          collect_case(node) if case_like?(node) && !in_loop_or_block
 
           child_in_loop_or_block = in_loop_or_block || enters_loop_or_block?(node)
           node.compact_child_nodes.each { |child| walk(child, in_loop_or_block: child_in_loop_or_block) }
+        end
+
+        # `case/when` is a `CaseNode`; `case/in` is a `CaseMatchNode`. Both
+        # carry `predicate` + `conditions` + `else_clause` and the engine
+        # narrows both through `eval_case_when_branches`.
+        def case_like?(node)
+          node.is_a?(Prism::CaseNode) || node.is_a?(Prism::CaseMatchNode)
         end
 
         def enters_loop_or_block?(node)
@@ -91,10 +98,14 @@ module Rigor
           # already-`Bot` subject is dead code, not a clause-ordering error.
           return if entry_type.nil? || entry_type.is_a?(Type::Bot) || entry_type.is_a?(Type::Dynamic)
 
+          keyword = node.is_a?(Prism::CaseMatchNode) ? "in" : "when"
           node.conditions.each do |clause|
-            collect_when(clause, subject.name) if clause.is_a?(Prism::WhenNode)
+            case clause
+            when Prism::WhenNode then collect_when(clause, subject.name)
+            when Prism::InNode then collect_in(clause, subject.name)
+            end
           end
-          collect_else(node.else_clause, subject.name)
+          collect_else(node.else_clause, subject.name, keyword)
         end
 
         def entry_subject_type(case_node, subject_name)
@@ -113,7 +124,7 @@ module Rigor
           @results << Result.new(
             clause: clause, body: clause.statements, subject_name: subject_name,
             condition_source: clause.conditions.map(&:slice).join(", "),
-            kind: when_clause_kind(clause, subject_name)
+            kind: when_clause_kind(clause, subject_name), keyword: "when"
           )
         end
 
@@ -130,12 +141,41 @@ module Rigor
           :disjoint
         end
 
+        # ADR-47 WD3a — a dead `case/in` clause. The body scope reaches
+        # `bot` either because a bare class pattern (`in C` / `in C => x`)
+        # is disjoint from the still-possible subject (the engine narrows
+        # those soundly, like `when C`), or because an earlier clause
+        # already exhausted the subject (prior-exhaustion — true for ANY
+        # pattern downstream of a covering set). Non-bare patterns are not
+        # narrowed, so their body is `bot` ONLY under prior-exhaustion;
+        # they never produce a spurious `:disjoint`.
+        def collect_in(clause, subject_name)
+          return if clause.statements.nil?
+
+          scope = @scope_index[clause]
+          return if scope.nil?
+          return unless scope.local(subject_name).is_a?(Type::Bot)
+
+          @results << Result.new(
+            clause: clause, body: clause.statements, subject_name: subject_name,
+            condition_source: clause.pattern.slice,
+            kind: in_clause_kind(clause, subject_name), keyword: "in"
+          )
+        end
+
+        def in_clause_kind(clause, subject_name)
+          entry = @scope_index[clause.pattern]
+          return :prior_exhaustion if entry && entry.local(subject_name).is_a?(Type::Bot)
+
+          :disjoint
+        end
+
         # The trailing `else` is dead when every subject value is covered
         # by the `when` clauses — the final falsey scope (recorded on the
         # `else` node) narrows the subject to `bot`. Defensive `else`
         # bodies (a bare `raise` / `fail` / `throw`) are deliberate
         # guards, not removable dead code, so they are skipped.
-        def collect_else(else_clause, subject_name)
+        def collect_else(else_clause, subject_name, keyword)
           return if else_clause.nil? || else_clause.statements.nil?
           return if defensive_else?(else_clause)
 
@@ -145,7 +185,7 @@ module Rigor
 
           @results << Result.new(
             clause: else_clause, body: else_clause.statements, subject_name: subject_name,
-            condition_source: nil, kind: :exhausted_else
+            condition_source: nil, kind: :exhausted_else, keyword: keyword
           )
         end
 

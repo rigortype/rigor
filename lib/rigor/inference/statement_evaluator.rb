@@ -543,24 +543,58 @@ module Rigor
         [results, falsey_scope]
       end
 
+      # ADR-47 WD2/WD3 — record the scope ENTERING a `when`/`in` clause on
+      # the node `flow.unreachable-clause` reads to classify a dead clause
+      # (`when`: first condition; `in`: the pattern). `on_enter`-only so no
+      # sub-expression is newly typed; `propagate` preserves it.
       def record_clause_entry_scope(branch, entry_scope)
-        return unless branch.is_a?(Prism::WhenNode)
-
-        condition = branch.conditions.first
-        @on_enter&.call(condition, entry_scope) if condition
+        node =
+          case branch
+          when Prism::WhenNode then branch.conditions.first
+          when Prism::InNode then branch.pattern
+          end
+        @on_enter&.call(node, entry_scope) if node
       end
 
       # Returns `[body_scope, updated_falsey_scope]` for a single branch.
-      # `InNode` branches apply pattern bindings; `WhenNode` branches
-      # narrow through `Narrowing.case_when_scopes`. The falsey scope is
-      # unchanged for `in` branches (conservative: no exhaustiveness
-      # tracking yet).
+      # `WhenNode` branches narrow through `Narrowing.case_when_scopes`.
+      # `InNode` branches narrow soundly only for a bare class pattern
+      # (`in C` / `in C => x`, pure `is_a?`); every other pattern keeps
+      # the conservative "body = entry + bindings, falsey unchanged" shape.
       def branch_body_and_falsey_scopes(subject, branch, falsey_scope)
         if branch.is_a?(Prism::InNode)
-          [apply_in_pattern_bindings(subject, branch.pattern, falsey_scope), falsey_scope]
+          in_branch_body_and_falsey_scopes(subject, branch, falsey_scope)
         else
           when_conditions = branch.respond_to?(:conditions) ? branch.conditions : []
           Narrowing.case_when_scopes(subject, when_conditions, falsey_scope)
+        end
+      end
+
+      # ADR-47 WD3a — a bare class pattern matches on `C === subject`, i.e.
+      # exactly `subject.is_a?(C)` with no deconstruction, so it narrows
+      # like `when C`: the body sees the subject narrowed to `C` and the
+      # next clause's falsey scope has `C` removed. Other patterns can fail
+      # to match even when a class test would pass (deconstruction arity,
+      # hash keys, ...), so removing anything from the falsey scope would
+      # be unsound — they keep the conservative shape.
+      def in_branch_body_and_falsey_scopes(subject, branch, falsey_scope)
+        class_node = bare_class_pattern_node(branch.pattern)
+        return [apply_in_pattern_bindings(subject, branch.pattern, falsey_scope), falsey_scope] unless class_node
+
+        truthy_scope, narrowed_falsey = Narrowing.case_when_scopes(subject, [class_node], falsey_scope)
+        [apply_in_pattern_bindings(subject, branch.pattern, truthy_scope), narrowed_falsey]
+      end
+
+      # The class-constant node of a `in C` / `in C => x` pattern (the only
+      # `in` shapes whose match is pure `is_a?`), or nil for any pattern
+      # that deconstructs, binds, or matches a value.
+      def bare_class_pattern_node(pattern)
+        case pattern
+        when Prism::ConstantReadNode, Prism::ConstantPathNode
+          pattern
+        when Prism::CapturePatternNode
+          value = pattern.value
+          value if value.is_a?(Prism::ConstantReadNode) || value.is_a?(Prism::ConstantPathNode)
         end
       end
 

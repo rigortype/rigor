@@ -172,8 +172,26 @@ trade for speed. Defenses:
      and attributes via the existing `discovered_def_sources`. Opt-in via
      `Runner.new(record_dependencies: true)`, exposed as
      `runner.file_dependencies`; off by default (diagnostics byte-identical,
-     `make verify` green). Remaining in this slice: class/superclass/include
-     source maps + their accessors, persistence, and `--verify-incremental`.
+     `make verify` green).
+   - **Slice 1b landed** — the ancestry edge. A per-file `class_sources`
+     map (`class_name → Set<declaring file>`, built in
+     `accumulate_project_index` from every file that contributes a `def` /
+     superclass / `include` / bare declaration for a name) is seeded onto
+     the recording scope, and `Scope#superclass_of` / `#includes_of` record
+     the full declaring-file set when they resolve an ancestry edge — so a
+     class reopened across files makes a consumer that reads its ancestry
+     depend on *every* reopening (over-records by design, the conservative
+     direction). Fixing this surfaced a latent slice-1a gap: the ADR-44
+     single-allocation body scopes
+     (`ExpressionTyper#build_user_method_body_scope`,
+     `StatementEvaluator#build_fresh_body_scope`) dropped
+     `discovered_def_sources`, so the method-body edge (`user_def_for` →
+     `def_sources`) was silently *not* recorded for implicit-self
+     ancestor-resolved calls (slice 1a's spec only covered explicit
+     receivers). Both body scopes now carry `def_sources` + the new
+     `class_sources`; off by default, `make verify` green, diagnostics
+     byte-identical. Remaining in this slice: persistence (`deps` /
+     `dependents` + per-file diagnostic entries) and `--verify-incremental`.
 2. **Body tier.** Wire the declaration-fingerprint-unchanged path
    (re-analyze ΔF ∪ dependents). This already delivers the MVC win.
 3. **Structural tier.** Negative-dependency tracking so adding a symbol

@@ -124,6 +124,7 @@ module Rigor
         @project_discovered_def_sources = {}.freeze
         @project_discovered_superclasses = {}.freeze
         @project_discovered_includes = {}.freeze
+        @project_discovered_class_sources = {}.freeze
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
       end
@@ -321,7 +322,7 @@ module Rigor
       # downstream `#run` body expects. Extracted so
       # `#prepare_project_scan` and the prebuilt-less `#run` path
       # share one implementation.
-      def run_project_pre_passes(expansion:)
+      def run_project_pre_passes(expansion:) # rubocop:disable Metrics/AbcSize
         @plugin_registry = load_plugins
         @dependency_source_index = DependencySourceInference::Builder.build(@configuration.dependencies)
         # ADR-18 slice 3 — plugin prepare MUST run before the
@@ -383,6 +384,7 @@ module Rigor
         @project_discovered_def_sources = def_index.fetch(:def_sources)
         @project_discovered_superclasses = def_index.fetch(:superclasses)
         @project_discovered_includes = def_index.fetch(:includes)
+        @project_discovered_class_sources = def_index.fetch(:class_sources)
         @project_discovered_method_visibilities = def_index.fetch(:method_visibilities)
         @project_discovered_methods = def_index.fetch(:methods)
       end
@@ -1639,6 +1641,12 @@ module Rigor
           scope = scope.with_discovered_method_visibilities(@project_discovered_method_visibilities)
         end
         scope = scope.with_discovered_methods(@project_discovered_methods) unless @project_discovered_methods.empty?
+        # ADR-46 slice 1 — the class-declaration source map is read only by
+        # the ancestry accessors during dependency recording, so seed it
+        # only when recording is on; a normal run never carries it.
+        if @record_dependencies && !@project_discovered_class_sources.empty?
+          scope = scope.with_discovered_class_sources(@project_discovered_class_sources)
+        end
         scope
       end
 

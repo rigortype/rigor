@@ -22,7 +22,7 @@ module Rigor
                 :class_ivars, :class_cvars, :program_globals,
                 :discovered_classes, :in_source_constants, :discovered_methods,
                 :discovered_def_nodes, :discovered_def_sources, :discovered_method_visibilities,
-                :discovered_superclasses, :discovered_includes,
+                :discovered_superclasses, :discovered_includes, :discovered_class_sources,
                 :indexed_narrowings, :method_chain_narrowings,
                 :source_path
 
@@ -94,6 +94,7 @@ module Rigor
       discovered_method_visibilities: EMPTY_CLASS_BINDINGS,
       discovered_superclasses: EMPTY_CLASS_BINDINGS,
       discovered_includes: EMPTY_CLASS_BINDINGS,
+      discovered_class_sources: EMPTY_CLASS_BINDINGS,
       indexed_narrowings: EMPTY_INDEXED_NARROWINGS,
       method_chain_narrowings: EMPTY_CHAIN_NARROWINGS,
       source_path: nil
@@ -117,6 +118,7 @@ module Rigor
       @discovered_method_visibilities = discovered_method_visibilities
       @discovered_superclasses = discovered_superclasses
       @discovered_includes = discovered_includes
+      @discovered_class_sources = discovered_class_sources
       @indexed_narrowings = indexed_narrowings
       @method_chain_narrowings = method_chain_narrowings
       @source_path = source_path
@@ -410,6 +412,7 @@ module Rigor
     # The as-written name is resolved to a qualified class at
     # walk time against the call's lexical nesting.
     def superclass_of(class_name)
+      record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
       @discovered_superclasses[class_name.to_s]
     end
 
@@ -427,12 +430,41 @@ module Rigor
     # `def`s, not just the superclass chain. As-written names
     # are resolved to qualified classes at walk time.
     def includes_of(class_name)
+      record_class_dependency(class_name) if Analysis::DependencyRecorder.active?
       @discovered_includes[class_name.to_s] || []
     end
 
     def with_discovered_includes(table)
       rebuild(discovered_includes: table)
     end
+
+    # ADR-46 slice 1 — per-class table mapping a fully qualified user
+    # class/module name to the set of `"path:line"` sites that declare,
+    # reopen, set the superclass of, or `include` into it. Populated only
+    # by the cross-file project pre-pass
+    # ({Inference::ScopeIndexer.discovered_def_index_for_paths}) and
+    # consumed by {#superclass_of} / {#includes_of} when dependency
+    # recording is active: resolving a class's ancestry edge records every
+    # file that contributes to that class's declaration shape, so a later
+    # edit to any of them re-checks the consumer. Over-records by design
+    # (a superclass read also pulls in the include-declaring files) — the
+    # conservative direction ADR-46 mandates.
+    def with_discovered_class_sources(table)
+      rebuild(discovered_class_sources: table)
+    end
+
+    # Records, for a resolved cross-class ancestry read, every file that
+    # declares `class_name` (its declaration / reopening / superclass /
+    # include sites). No-op when the class is not a project class (core /
+    # stdlib / gem names never appear in the source map). Gated by the
+    # caller on the recorder being active.
+    def record_class_dependency(class_name)
+      sites = @discovered_class_sources[class_name.to_s]
+      return if sites.nil?
+
+      sites.each { |site| Analysis::DependencyRecorder.read_site(site) }
+    end
+    private :record_class_dependency
 
     # v0.1.2 — per-class table mapping `method_name (Symbol) →
     # :public | :private | :protected`. Populated by
@@ -600,6 +632,7 @@ module Rigor
       discovered_method_visibilities: @discovered_method_visibilities,
       discovered_superclasses: @discovered_superclasses,
       discovered_includes: @discovered_includes,
+      discovered_class_sources: @discovered_class_sources,
       indexed_narrowings: @indexed_narrowings,
       method_chain_narrowings: @method_chain_narrowings,
       source_path: @source_path
@@ -619,6 +652,7 @@ module Rigor
         discovered_method_visibilities: discovered_method_visibilities,
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,
+        discovered_class_sources: discovered_class_sources,
         indexed_narrowings: indexed_narrowings,
         method_chain_narrowings: method_chain_narrowings,
         source_path: source_path
@@ -662,6 +696,7 @@ module Rigor
         discovered_method_visibilities: discovered_method_visibilities,
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,
+        discovered_class_sources: discovered_class_sources,
         indexed_narrowings: join_bindings(@indexed_narrowings, other.indexed_narrowings),
         method_chain_narrowings: join_bindings(@method_chain_narrowings, other.method_chain_narrowings),
         source_path: source_path

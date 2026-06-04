@@ -19,6 +19,7 @@ module Rigor
     attr_reader discovered_method_visibilities: Hash[String, Hash[Symbol, Symbol]]
     attr_reader discovered_superclasses: Hash[String, String]
     attr_reader discovered_includes: Hash[String, Array[String]]
+    attr_reader discovered_class_sources: Hash[String, Set[String]]
     attr_reader indexed_narrowings: Hash[IndexedKey, Type::t]
     attr_reader method_chain_narrowings: Hash[ChainKey, Type::t]
     attr_reader source_path: String?
@@ -68,6 +69,7 @@ module Rigor
     def with_discovered_superclasses: (Hash[String, String] table) -> Scope
     def includes_of: (String | Symbol class_name) -> Array[String]
     def with_discovered_includes: (Hash[String, Array[String]] table) -> Scope
+    def with_discovered_class_sources: (Hash[String, Set[String]] table) -> Scope
     def indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key) -> Type::t?
     def with_indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key, Type::t type) -> Scope
     def without_indexed_narrowing: (Symbol receiver_kind, String | Symbol receiver_name, untyped key) -> Scope

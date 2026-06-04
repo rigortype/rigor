@@ -1480,9 +1480,10 @@ module Rigor
       # @param paths  [Array<String>] project file paths.
       # @param buffer [Rigor::Analysis::BufferBinding, nil]
       # @return [Hash{Symbol => Hash}]
-      #   `{ def_nodes:, def_sources:, superclasses:, includes: }`
+      #   `{ def_nodes:, def_sources:, superclasses:, includes:, class_sources: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
-        acc = { def_nodes: {}, def_sources: {}, superclasses: {}, includes: {}, method_visibilities: {}, methods: {} }
+        acc = { def_nodes: {}, def_sources: {}, superclasses: {}, includes: {}, method_visibilities: {}, methods: {},
+                class_sources: {} }
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
@@ -1501,7 +1502,9 @@ module Rigor
         # intact while still letting `attr_reader :x` in one file
         # suppress a false undefined-method for `obj.x` in another.
         acc[:methods] = subtract_def_methods(acc[:methods], acc[:def_nodes])
-        %i[def_nodes def_sources includes method_visibilities methods].each { |key| acc[key].each_value(&:freeze) }
+        %i[def_nodes def_sources includes method_visibilities methods class_sources].each do |key|
+          acc[key].each_value(&:freeze)
+        end
         acc.transform_values(&:freeze)
       end
 
@@ -1522,16 +1525,39 @@ module Rigor
       # visibility declared in a sibling file.
       def accumulate_project_index(acc, path, root)
         merge_discovered_defs(acc[:def_nodes], acc[:def_sources], path, root)
-        acc[:superclasses].merge!(build_discovered_superclasses(root))
-        build_discovered_includes(root).each do |class_name, mods|
+        superclasses = build_discovered_superclasses(root)
+        includes = build_discovered_includes(root)
+        acc[:superclasses].merge!(superclasses)
+        includes.each do |class_name, mods|
           acc[:includes][class_name] = ((acc[:includes][class_name] || []) + mods).uniq
         end
+        record_class_sources(acc[:class_sources], path, root, superclasses, includes)
         build_discovered_method_visibilities(root).each do |class_name, table|
           (acc[:method_visibilities][class_name] ||= {}).merge!(table)
         end
         build_discovered_methods(root).each do |class_name, table|
           (acc[:methods][class_name] ||= {}).merge!(table)
         end
+      end
+
+      # ADR-46 slice 1 — accumulates, per qualified user class/module
+      # name, the set of files that declare it. A class's declaration
+      # shape (its body `def`s, its `class Foo < Bar` superclass, its
+      # `include`s) lives wherever the class is opened, so every file that
+      # contributes a def / superclass / include for a name is a source of
+      # that name's ancestry edges. {Scope#superclass_of} /
+      # {Scope#includes_of} record this set when resolving the edge during
+      # dependency recording (ADR-46). The class-declaration walk
+      # (`collect_class_decls`) catches bodyless / def-less reopenings the
+      # other three builders miss.
+      def record_class_sources(class_sources, path, root, superclasses, includes)
+        names = Set.new
+        collect_class_decls(root, [], decls = {})
+        names.merge(decls.keys)
+        names.merge(superclasses.keys)
+        names.merge(includes.keys)
+        names.merge(build_discovered_def_nodes(root).keys)
+        names.each { |name| (class_sources[name] ||= Set.new) << path }
       end
 
       # Merges one file's `class → method → DefNode` map into the

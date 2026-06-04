@@ -1542,8 +1542,10 @@ module Rigor
           program_globals: scope.program_globals,
           discovered_methods: scope.discovered_methods,
           discovered_def_nodes: scope.discovered_def_nodes,
+          discovered_def_sources: scope.discovered_def_sources,
           discovered_superclasses: scope.discovered_superclasses,
-          discovered_includes: scope.discovered_includes
+          discovered_includes: scope.discovered_includes,
+          discovered_class_sources: scope.discovered_class_sources
         )
       end
 

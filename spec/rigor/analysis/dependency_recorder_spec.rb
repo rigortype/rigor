@@ -40,6 +40,95 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
     end
   end
 
+  it "records the superclass-defining file as a dependency (ADR-46 slice 1)" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "base.rb"), <<~RUBY)
+        class Base
+          def greet
+            "hi"
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "child.rb"), <<~RUBY)
+        class Child < Base
+          def call_greet
+            greet
+          end
+        end
+      RUBY
+
+      runner = run_recording(dir)
+      record = runner.file_dependencies[File.join(dir, "child.rb")]
+
+      # Resolving Child's `greet` walks the superclass chain through
+      # `superclass_of(Child)` and reads Base#greet's body — both edges
+      # attribute to base.rb.
+      expect(record.sources).to include(File.join(dir, "base.rb"))
+    end
+  end
+
+  it "records a mixed-in module's file as a dependency (ADR-46 slice 1)" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "mixin.rb"), <<~RUBY)
+        module Greeter
+          def greet
+            "hi"
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "host.rb"), <<~RUBY)
+        class Host
+          include Greeter
+          def call_greet
+            greet
+          end
+        end
+      RUBY
+
+      runner = run_recording(dir)
+      record = runner.file_dependencies[File.join(dir, "host.rb")]
+
+      # Resolving `greet` against the include chain reads `includes_of(Host)`
+      # and Greeter#greet's body — both attribute to mixin.rb.
+      expect(record.sources).to include(File.join(dir, "mixin.rb"))
+    end
+  end
+
+  it "records every reopening file of a class whose ancestry is read (ADR-46 slice 1)" do
+    Dir.mktmpdir do |dir|
+      # `Account` is declared empty in one file and reopened with its
+      # superclass in another. A consumer that resolves an inherited method
+      # depends on BOTH files — removing the superclass in the reopening
+      # must re-check the consumer, so `superclass_of(Account)` records the
+      # full declaring-file set, not just the first declaration.
+      File.write(File.join(dir, "account_decl.rb"), "class Account\nend\n")
+      File.write(File.join(dir, "account_super.rb"), <<~RUBY)
+        class Base
+          def role
+            "member"
+          end
+        end
+        class Account < Base
+        end
+      RUBY
+      File.write(File.join(dir, "consumer.rb"), <<~RUBY)
+        class Account
+          def whoami
+            role
+          end
+        end
+      RUBY
+
+      runner = run_recording(dir)
+      record = runner.file_dependencies[File.join(dir, "consumer.rb")]
+
+      # The reopening that carries the superclass edge is a recorded source.
+      expect(record.sources).to include(File.join(dir, "account_super.rb"))
+      # And the empty earlier declaration, surfaced by the class-source set.
+      expect(record.sources).to include(File.join(dir, "account_decl.rb"))
+    end
+  end
+
   it "records a negative edge for an unresolved cross-class method call" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "model.rb"), "class Widget\nend\n")

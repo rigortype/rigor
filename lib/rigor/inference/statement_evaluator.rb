@@ -1784,7 +1784,7 @@ module Rigor
       # ScopeIndexer-populated declaration overrides
       # (`Prism::ConstantReadNode` for `module Foo` headers, etc.)
       # remain reachable from inside nested bodies.
-      def build_fresh_body_scope
+      def build_fresh_body_scope # rubocop:disable Metrics/AbcSize
         # Single allocation instead of a 13-deep `with_*` chain — this runs
         # per class/method body on the main walk, so the chain's dozen
         # throwaway intermediate Scopes were a top `Scope#rebuild` source.
@@ -1803,8 +1803,10 @@ module Rigor
           program_globals: scope.program_globals,
           discovered_methods: scope.discovered_methods,
           discovered_def_nodes: scope.discovered_def_nodes,
+          discovered_def_sources: scope.discovered_def_sources,
           discovered_superclasses: scope.discovered_superclasses,
           discovered_includes: scope.discovered_includes,
+          discovered_class_sources: scope.discovered_class_sources,
           discovered_method_visibilities: scope.discovered_method_visibilities
         )
       end

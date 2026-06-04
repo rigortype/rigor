@@ -528,10 +528,26 @@ module Rigor
         results = []
         falsey_scope = entry_scope
         conditions.each do |branch|
+          # ADR-47 WD2 — record the scope ENTERING this clause (the
+          # subject narrowed by every earlier clause's negation) on the
+          # clause's first condition node, so `flow.unreachable-clause`
+          # can tell a prior-exhausted subject (entry already `bot`)
+          # from a per-clause-disjoint one (entry concrete, this clause
+          # disjoint). `on_enter`-only (no recursion) so no condition
+          # sub-expression is newly typed; `propagate` preserves the
+          # entry because it already keys the node.
+          record_clause_entry_scope(branch, falsey_scope)
           body_scope, falsey_scope = branch_body_and_falsey_scopes(subject, branch, falsey_scope)
           results << sub_eval(branch, body_scope)
         end
         [results, falsey_scope]
+      end
+
+      def record_clause_entry_scope(branch, entry_scope)
+        return unless branch.is_a?(Prism::WhenNode)
+
+        condition = branch.conditions.first
+        @on_enter&.call(condition, entry_scope) if condition
       end
 
       # Returns `[body_scope, updated_falsey_scope]` for a single branch.

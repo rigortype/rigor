@@ -1970,6 +1970,90 @@ RSpec.describe Rigor::Analysis::Runner do
         RUBY
         expect(clause_diags(result)).to be_empty
       end
+
+      # --- WD2: message precision + dead trailing else ---
+
+      it "WD2: words a per-clause-disjoint dead clause as `disjoint`" do
+        result = analyze(<<~RUBY)
+          x = [1, "a"].sample
+          case x
+          when Float
+            "f"
+          when Integer
+            "i"
+          when String
+            "s"
+          end
+        RUBY
+        # x is Integer|String; `when Float` is disjoint, both later clauses live.
+        diag = clause_diags(result).first
+        expect(diag.message).to include("when Float")
+        expect(diag.message).to include("disjoint")
+        expect(clause_diags(result).size).to eq(1)
+      end
+
+      it "WD2: words a prior-exhausted dead clause as `already covered`" do
+        result = analyze(<<~RUBY)
+          x = 1
+          case x
+          when Integer
+            "i"
+          when Float
+            "f"
+          end
+        RUBY
+        # x is Integer; `when Float` is dead because `when Integer` exhausted it.
+        diag = clause_diags(result).first
+        expect(diag.message).to include("when Float")
+        expect(diag.message).to include("already covered by an earlier")
+        expect(diag.message).not_to include("disjoint")
+      end
+
+      it "WD2: flags a dead trailing `else` when the whens exhaust the subject" do
+        result = analyze(<<~RUBY)
+          x = [1, "a"].sample
+          case x
+          when Integer
+            "i"
+          when String
+            "s"
+          else
+            "never"
+          end
+        RUBY
+        diag = clause_diags(result).find { |d| d.message.include?("else") }
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("unreachable `else'")
+      end
+
+      it "WD2: does NOT flag a defensive `else raise` (deliberate guard)" do
+        result = analyze(<<~RUBY)
+          x = [1, "a"].sample
+          case x
+          when Integer
+            "i"
+          when String
+            "s"
+          else
+            raise "unexpected type"
+          end
+        RUBY
+        expect(clause_diags(result)).to be_empty
+      end
+
+      it "WD2: does not flag a live `else` (subject not exhausted)" do
+        result = analyze(<<~RUBY)
+          x = [1, "a"].sample
+          case x
+          when Integer
+            "i"
+          else
+            "fallthrough"
+          end
+        RUBY
+        # only String reaches the else — it is live.
+        expect(clause_diags(result)).to be_empty
+      end
     end
 
     describe "method-visibility-mismatch rule (v0.1.2)" do

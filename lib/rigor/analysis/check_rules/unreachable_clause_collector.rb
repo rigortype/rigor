@@ -38,7 +38,22 @@ module Rigor
           Prism::WhileNode, Prism::UntilNode, Prism::ForNode, Prism::BlockNode
         ].freeze
 
-        Result = Data.define(:clause, :subject_name, :condition_source)
+        # A trailing `else` whose body only re-raises / aborts is a
+        # deliberate defensive guard ("this should be unreachable — shout
+        # if it ever isn't"), NOT dead code the author wants removed.
+        # Flagging it would push the author to delete a safety net, which
+        # the false-positive discipline forbids. WD1's `when` shapes don't
+        # carry this idiom (a stale `when` is a real redundancy), so the
+        # skip is `else`-only.
+        DEFENSIVE_EXIT_CALLS = %i[raise fail throw abort exit].freeze
+
+        # @!attribute kind
+        #   @return [Symbol] `:disjoint` (this clause's type is disjoint
+        #     from the still-possible subject), `:prior_exhaustion` (an
+        #     earlier clause already covered the subject), or
+        #     `:exhausted_else` (every subject value is covered, so the
+        #     `else` never runs).
+        Result = Data.define(:clause, :body, :subject_name, :condition_source, :kind)
 
         def initialize(scope_index)
           @scope_index = scope_index
@@ -79,6 +94,7 @@ module Rigor
           node.conditions.each do |clause|
             collect_when(clause, subject.name) if clause.is_a?(Prism::WhenNode)
           end
+          collect_else(node.else_clause, subject.name)
         end
 
         def entry_subject_type(case_node, subject_name)
@@ -95,9 +111,51 @@ module Rigor
           return unless scope.local(subject_name).is_a?(Type::Bot)
 
           @results << Result.new(
-            clause: clause, subject_name: subject_name,
-            condition_source: clause.conditions.map(&:slice).join(", ")
+            clause: clause, body: clause.statements, subject_name: subject_name,
+            condition_source: clause.conditions.map(&:slice).join(", "),
+            kind: when_clause_kind(clause, subject_name)
           )
+        end
+
+        # A dead `when` is `:prior_exhaustion` when the subject was
+        # already narrowed to `bot` BEFORE this clause (an earlier clause
+        # covered it) — read from the entry scope the engine recorded on
+        # the clause's first condition node (ADR-47 WD2). Otherwise the
+        # subject was still concrete entering the clause and THIS clause's
+        # type is disjoint from it.
+        def when_clause_kind(clause, subject_name)
+          entry = @scope_index[clause.conditions.first]
+          return :prior_exhaustion if entry && entry.local(subject_name).is_a?(Type::Bot)
+
+          :disjoint
+        end
+
+        # The trailing `else` is dead when every subject value is covered
+        # by the `when` clauses — the final falsey scope (recorded on the
+        # `else` node) narrows the subject to `bot`. Defensive `else`
+        # bodies (a bare `raise` / `fail` / `throw`) are deliberate
+        # guards, not removable dead code, so they are skipped.
+        def collect_else(else_clause, subject_name)
+          return if else_clause.nil? || else_clause.statements.nil?
+          return if defensive_else?(else_clause)
+
+          scope = @scope_index[else_clause]
+          return if scope.nil?
+          return unless scope.local(subject_name).is_a?(Type::Bot)
+
+          @results << Result.new(
+            clause: else_clause, body: else_clause.statements, subject_name: subject_name,
+            condition_source: nil, kind: :exhausted_else
+          )
+        end
+
+        def defensive_else?(else_clause)
+          body = else_clause.statements.body
+          return false unless body.size == 1
+
+          stmt = body.first
+          stmt.is_a?(Prism::CallNode) && stmt.receiver.nil? &&
+            DEFENSIVE_EXIT_CALLS.include?(stmt.name)
         end
 
         def all_constant_conditions?(clause)

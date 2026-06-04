@@ -257,8 +257,7 @@ module Rigor
       # mirroring `flow.unreachable-branch`.
       def unreachable_clause_diagnostics(path, root, scope_index)
         UnreachableClauseCollector.new(scope_index).collect(root).map do |result|
-          build_unreachable_clause_diagnostic(path, result.clause.statements, result.subject_name,
-                                              result.condition_source)
+          build_unreachable_clause_diagnostic(path, result)
         end
       end
 
@@ -1179,15 +1178,28 @@ module Rigor
           )
         end
 
-        def build_unreachable_clause_diagnostic(path, body_node, subject_name, condition_source)
+        def build_unreachable_clause_diagnostic(path, result)
           Diagnostic.from_node(
-            body_node,
+            result.body,
             rule: RULE_UNREACHABLE_CLAUSE,
             path: path,
-            message: "unreachable `when #{condition_source}': `#{subject_name}' can never be " \
-                     "#{condition_source} here (the flow proves the subject disjoint)",
+            message: unreachable_clause_message(result),
             severity: :warning
           )
+        end
+
+        def unreachable_clause_message(result)
+          subject = result.subject_name
+          case result.kind
+          when :prior_exhaustion
+            "unreachable `when #{result.condition_source}': `#{subject}' is already covered " \
+            "by an earlier `when' clause"
+          when :exhausted_else
+            "unreachable `else': the `when' clauses already cover every value `#{subject}' can take here"
+          else # :disjoint
+            "unreachable `when #{result.condition_source}': `#{subject}' can never be " \
+            "#{result.condition_source} here (the flow proves the subject disjoint)"
+          end
         end
 
         def build_dead_assignment_diagnostic(path, write_node, def_node)

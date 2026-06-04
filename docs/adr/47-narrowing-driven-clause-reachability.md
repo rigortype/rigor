@@ -1,8 +1,10 @@
 # ADR-47 — Narrowing-driven clause reachability (`flow.unreachable-clause`)
 
-Status: **Accepted — WD1 implemented. Extends Rigor's two existing `if`/`unless` reachability rules to `case`/`when` clauses, using the narrowing the flow engine already computes. Inspired by Elixir v1.20's redundant-`case`-clause reporting; scoped to stay inside Rigor's false-positive envelope.**
+Status: **Accepted — WD1 + WD2 implemented. Extends Rigor's two existing `if`/`unless` reachability rules to `case`/`when` clauses, using the narrowing the flow engine already computes. Inspired by Elixir v1.20's redundant-`case`-clause reporting; scoped to stay inside Rigor's false-positive envelope.**
 
-**WD1 landed (v0.1.17).** `flow.unreachable-clause` fires when a `case <local>` clause's class/module-constant condition (`when String` / `when MyClass`) narrows the subject to `Type::Bot` — read back from `scope_index` (the evaluator's own per-clause `body_scope`), so the rule and the body typing cannot diverge. The single `body_scope == bot` signal covers both shapes the design names (per-clause disjointness AND prior-exhaustion) since an exhausted entry scope narrows to `bot` too. FP envelope enforced: subject must be a narrowing local, never `Dynamic` (gradual guarantee) nor already-`Bot` (dead code), class/module-constant conditions only (`when nil` / ranges / regexps / expressions excluded), clauses inside loops/blocks skipped. Per **WD4**, it ships at `:info` in lenient + balanced (the default) and `:warning` only in strict, pending the regression-corpus FP gate before any balanced→`:warning` promotion; clean (zero firings) on Rigor's own `lib` + `plugins` + `examples`. **Remaining:** WD2 message precision (distinguish prior-exhaustion in the diagnostic text + flag a dead trailing `else`), WD3 (`in`/pattern clauses, gated behind `InNode` exhaustiveness), WD4 (the Mastodon/GitLab/Redmine corpus triage to promote to `:warning`).
+**WD1 landed (v0.1.17).** `flow.unreachable-clause` fires when a `case <local>` clause's class/module-constant condition (`when String` / `when MyClass`) narrows the subject to `Type::Bot` — read back from `scope_index` (the evaluator's own per-clause `body_scope`), so the rule and the body typing cannot diverge. The single `body_scope == bot` signal covers both shapes the design names (per-clause disjointness AND prior-exhaustion) since an exhausted entry scope narrows to `bot` too. FP envelope enforced: subject must be a narrowing local, never `Dynamic` (gradual guarantee) nor already-`Bot` (dead code), class/module-constant conditions only (`when nil` / ranges / regexps / expressions excluded), clauses inside loops/blocks skipped. Per **WD4**, it ships at `:info` in lenient + balanced (the default) and `:warning` only in strict, pending the regression-corpus FP gate before any balanced→`:warning` promotion; clean (zero firings) on Rigor's own `lib` + `plugins` + `examples`.
+
+**WD2 landed (v0.1.17).** Message precision + a dead trailing `else`. A dead `when` is now worded `:prior_exhaustion` ("already covered by an earlier `when'") vs `:disjoint` (the WD1 wording), told apart by the scope ENTERING the clause: `eval_case_when_branches` records that entry `falsey_scope` on the clause's first condition node (`on_enter`-only, no new typing; `propagate` preserves it) and the collector classifies on whether the subject was already `bot` there. A trailing `else` whose final falsey scope narrows the subject to `bot` is flagged as `:exhausted_else` — EXCEPT a defensive `else` body (a bare `raise`/`fail`/`throw`/`abort`/`exit`), skipped because it is a deliberate guard, not removable dead code. Still clean on Rigor's own corpus; same `:info`/`:warning` severity posture. **Remaining:** WD3 (`in`/pattern clauses, gated behind `InNode` exhaustiveness), WD4 (the Mastodon/GitLab/Redmine corpus triage to promote balanced to `:warning`).
 
 ## Motivation
 
@@ -129,9 +131,19 @@ the same risk class:
   `when C` whose `body_scope` subject is `bot`. Literal-class `when` first
   (`when String` / `when MyClass`), the shape `case_when_scopes` already
   recognises.
-- **WD2 — prior-exhaustion.** Flag a `when` (and trailing `else`) made
-  dead by the union of earlier clauses. Needs the `falsey_scope` `bot`
-  check; same accumulator, no new narrowing.
+- **WD2 — prior-exhaustion message precision + dead `else` (landed,
+  v0.1.17).** A dead `when` now reads as `:prior_exhaustion` ("already
+  covered by an earlier `when'") vs `:disjoint` (the WD1 wording), told
+  apart by the scope ENTERING the clause: `eval_case_when_branches`
+  records that entry `falsey_scope` on the clause's first condition node
+  (`record_clause_entry_scope`, `on_enter`-only so no sub-expression is
+  newly typed; `propagate` preserves it), and the collector classifies by
+  whether that entry already narrowed the subject to `bot`. A trailing
+  `else` whose final `falsey_scope` (already recorded on the `else` node)
+  narrows the subject to `bot` is flagged too — EXCEPT a defensive
+  `else` body (a bare `raise` / `fail` / `throw` / `abort` / `exit`),
+  which is a deliberate guard, not removable dead code (the FP-discipline
+  carve-out). No new narrowing; reads the engine's own scopes.
 - **WD3 — `in` clauses (gated).** Extend only after
   `branch_body_and_falsey_scopes` learns pattern-exhaustiveness for
   `InNode`. Deferred behind that work; pattern disjointness is a larger,

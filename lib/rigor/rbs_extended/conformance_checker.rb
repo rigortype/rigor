@@ -118,12 +118,17 @@ module Rigor
       # nil. Mirrors the ADR-35 override checks: covariant return,
       # contravariant params, single method type only, `Dynamic[Top]`
       # positions skipped (fires only on a proven `accepts(...).no?`).
+      # Also checks arity divergence and keyword-requiredness divergence
+      # (positional-type comparison only was the initial scope; these
+      # extend it to the cases that cause runtime ArgumentError).
       def signature_mismatch(required_method, provided_method)
         return nil unless required_method.method_types.size == 1
         return nil unless provided_method.method_types.size == 1
 
         return_detail(required_method, provided_method) ||
-          param_detail(required_method, provided_method)
+          param_detail(required_method, provided_method) ||
+          arity_detail(required_method, provided_method) ||
+          keyword_detail(required_method, provided_method)
       end
 
       def return_detail(required_method, provided_method)
@@ -150,6 +155,76 @@ module Rigor
           return "parameter #{i + 1} type #{pp.describe(:short)} does not accept the " \
                  "required #{rp.describe(:short)}"
         end
+        nil
+      end
+
+      # Checks positional-count divergence — cases that would cause a
+      # runtime `ArgumentError` even when every declared type matches.
+      # Skipped when either side has a rest parameter (`*args`) since
+      # that makes the arity range unbounded. Two violation shapes:
+      # (a) provided requires MORE positionals than the interface allows
+      #     (caller passes ≤ interface total → provided raises);
+      # (b) provided accepts FEWER positionals than the interface requires
+      #     (caller passes ≥ interface required → provided raises).
+      def arity_detail(required_method, provided_method)
+        req_func = required_method.method_types.first.type
+        prov_func = provided_method.method_types.first.type
+        return nil unless req_func.respond_to?(:required_positionals)
+        return nil unless prov_func.respond_to?(:required_positionals)
+
+        req_req  = req_func.required_positionals.size
+        req_opt  = req_func.optional_positionals.size
+        prov_req = prov_func.required_positionals.size
+        prov_opt = prov_func.required_positionals.size + prov_func.optional_positionals.size
+
+        # (a) provided requires too many — callers may not pass enough
+        if req_func.rest_positionals.nil? && prov_req > req_req + req_opt
+          return "requires #{prov_req} positional argument#{'s' if prov_req != 1} " \
+                 "but the interface allows at most #{req_req + req_opt}"
+        end
+
+        # (b) provided accepts too few — callers will pass more than provided can handle
+        if prov_func.rest_positionals.nil? && req_req > prov_opt
+          return "accepts at most #{prov_opt} positional argument#{'s' if prov_opt != 1} " \
+                 "but the interface requires at least #{req_req}"
+        end
+
+        nil
+      end
+
+      # Checks keyword-requiredness divergence.
+      # (a) A keyword the interface requires that the provided method does
+      #     not accept at all → callers will pass it, provided will raise.
+      # (b) A keyword the provided method requires that the interface does
+      #     not mention → callers following the interface won't pass it,
+      #     provided will raise.
+      # Skipped when either side has a keyword rest (`**kwargs`).
+      def keyword_detail(required_method, provided_method)
+        req_func  = required_method.method_types.first.type
+        prov_func = provided_method.method_types.first.type
+        return nil unless req_func.respond_to?(:required_keywords)
+        return nil unless prov_func.respond_to?(:required_keywords)
+        return nil unless req_func.rest_keywords.nil? && prov_func.rest_keywords.nil?
+
+        prov_accepted = prov_func.required_keywords.keys + prov_func.optional_keywords.keys
+        req_accepted  = req_func.required_keywords.keys  + req_func.optional_keywords.keys
+
+        # (a) interface-required keyword not accepted by provided
+        not_accepted = req_func.required_keywords.keys - prov_accepted
+        if not_accepted.any?
+          listed = not_accepted.sort.map { |k| "`#{k}:`" }.join(", ")
+          noun = not_accepted.size == 1 ? "keyword" : "keywords"
+          return "does not accept required #{noun} #{listed}"
+        end
+
+        # (b) provided requires keyword not in interface contract
+        extra_required = prov_func.required_keywords.keys - req_accepted
+        if extra_required.any?
+          listed = extra_required.sort.map { |k| "`#{k}:`" }.join(", ")
+          noun = extra_required.size == 1 ? "keyword" : "keywords"
+          return "requires #{noun} #{listed} not declared by the interface"
+        end
+
         nil
       end
 

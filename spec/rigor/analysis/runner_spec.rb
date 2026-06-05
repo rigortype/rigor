@@ -3821,6 +3821,103 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(result.diagnostics.find { |d| d.rule == "rbs_extended.unsatisfied-conformance" }).to be_nil
     end
 
+    describe "arity divergence" do
+      it "flags a provided method that requires more positionals than the interface allows" do
+        result = analyze_conforms_to(
+          interface_body: "def rewind: () -> void\n  def read: (String s) -> String",
+          class_body: "def rewind: () -> void\n  def read: (String s, Integer n) -> String"
+        )
+        diag = result.diagnostics.find do |d|
+          d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+        end
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("requires 2 positional arguments")
+        expect(diag.message).to include("allows at most 1")
+      end
+
+      it "flags a provided method that accepts fewer positionals than the interface requires" do
+        result = analyze_conforms_to(
+          interface_body: "def rewind: () -> void\n  def read: (String s, Integer n) -> String",
+          class_body: "def rewind: () -> void\n  def read: (String s) -> String"
+        )
+        diag = result.diagnostics.find do |d|
+          d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+        end
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("accepts at most 1")
+        expect(diag.message).to include("requires at least 2")
+      end
+
+      it "stays silent when provided has a rest parameter covering extra required positionals" do
+        result = analyze_conforms_to(
+          interface_body: "def rewind: () -> void\n  def read: (String s, Integer n) -> String",
+          class_body: "def rewind: () -> void\n  def read: (String s, *untyped rest) -> String"
+        )
+        expect(result.diagnostics.find do |d|
+          d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+        end).to be_nil
+      end
+
+      it "stays silent when the interface has a rest parameter" do
+        result = analyze_conforms_to(
+          interface_body: "def rewind: () -> void\n  def read: (String s, *untyped rest) -> String",
+          class_body: "def rewind: () -> void\n  def read: (String s, Integer n) -> String"
+        )
+        expect(result.diagnostics.find do |d|
+          d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+        end).to be_nil
+      end
+    end
+
+    describe "keyword-requiredness divergence" do
+      it "flags a provided method missing a required interface keyword" do
+        result = analyze_conforms_to(
+          interface_body: "def rewind: () -> void\n  def read: (encoding: String) -> String",
+          class_body: "def rewind: () -> void\n  def read: () -> String"
+        )
+        diag = result.diagnostics.find do |d|
+          d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+        end
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("does not accept required keyword")
+        expect(diag.message).to include("`encoding:`")
+      end
+
+      it "flags a provided method requiring a keyword the interface does not declare" do
+        result = analyze_conforms_to(
+          interface_body: "def rewind: () -> void\n  def read: () -> String",
+          class_body: "def rewind: () -> void\n  def read: (encoding: String) -> String"
+        )
+        diag = result.diagnostics.find do |d|
+          d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+        end
+        expect(diag).not_to be_nil
+        expect(diag.message).to include("requires keyword")
+        expect(diag.message).to include("`encoding:`")
+        expect(diag.message).to include("not declared by the interface")
+      end
+
+      it "stays silent when the provided method accepts the required keyword (as optional)" do
+        result = analyze_conforms_to(
+          interface_body: "def rewind: () -> void\n  def read: (encoding: String) -> String",
+          class_body: "def rewind: () -> void\n  def read: (?encoding: String) -> String"
+        )
+        expect(result.diagnostics.find do |d|
+          d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+        end).to be_nil
+      end
+
+      it "stays silent when provided has a keyword rest (**kwargs)" do
+        result = analyze_conforms_to(
+          interface_body: "def rewind: () -> void\n  def read: (encoding: String) -> String",
+          class_body: "def rewind: () -> void\n  def read: (**untyped opts) -> String"
+        )
+        expect(result.diagnostics.find do |d|
+          d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+        end).to be_nil
+      end
+    end
+
     it "resolves an interface name relative to the declaring class's namespace" do
       sig = { "buffers.rbs" => <<~RBS }
         module Buffers

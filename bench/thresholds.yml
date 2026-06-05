@@ -1,0 +1,13 @@
+# Tolerance band for `make bench` (ADR-50 WD4 perf-regression gate).
+#
+# This file is the committed, reviewed knob — the band is deliberately NOT
+# hard-coded in scripts/bench.rb so it can be tuned to runner / corpus
+# reality as it shifts (changing it is a reviewed commit, like a baseline
+# refresh). Each value is the percent regression over the committed
+# baseline that fails the gate.
+#
+# Rationale (ADR-50 WD4): wall is widest (runner noise), allocations is
+# tightest (the deterministic signal), RSS sits between (Linux CI only).
+wall_pct: 10
+allocations_pct: 5
+rss_pct: 10

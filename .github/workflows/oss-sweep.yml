@@ -24,6 +24,10 @@ on:
         description: "Recalibrate thresholds from this run (deletes stored values)"
         type: boolean
         default: false
+  # Callable as the OSS-corpus stage of the release gate
+  # (.github/workflows/release-gate.yml). The release gate calls it
+  # advisory-only during the v0.2.0 trial (ADR-50).
+  workflow_call:
 
 permissions:
   contents: read

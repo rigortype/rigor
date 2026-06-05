@@ -13,3 +13,6 @@
 /tool/*/vendor/bundle/
 /result
 /playground/backend/Gemfile.lock
+# `make bench` writes the suggested baseline here (ADR-50 WD4); the
+# committed, calibrated baseline is bench/baseline.json.
+/bench/baseline.updated.json

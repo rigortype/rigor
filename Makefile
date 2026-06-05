@@ -136,6 +136,18 @@ check-json:
 coverage:
 	bundle exec exe/rigor coverage --threshold 0.43 lib
 
+# ADR-50 WD4 perf-regression gate. Runs `rigor check --no-cache` over `lib`
+# in-process, measures wall / allocations / peak-RSS, and gates against
+# bench/baseline.json within bench/thresholds.yml. The committed baseline
+# ships uncalibrated, so the first run writes a suggested baseline
+# (bench/baseline.updated.json, gitignored) and passes — commit a
+# CI-measured baseline to activate. Deliberately NOT in `verify` (a full
+# analysis under measurement is slow); the release gate runs it (advisory).
+# `.PHONY` because the target name collides with the `bench/` directory.
+.PHONY: bench
+bench:
+	bundle exec ruby scripts/bench.rb --target lib
+
 # `verify` chains the spec suite, rubocop, `rigor check lib`, and the
 # plugin-tree contract check. The spec phase runs in parallel by
 # default (3-4× faster on multi-core hosts than the sequential rspec

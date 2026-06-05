@@ -12,6 +12,24 @@ include the full `nix ... develop --command` prefix so each line is directly
 runnable from outside the Flake shell. Inside the Flake shell, drop the
 prefix.
 
+## Branch: `release/x.y.z`
+
+Release work happens on a dedicated `release/x.y.z` branch, not directly on
+`master` ([ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)).
+Cut it from an up-to-date `master`:
+
+```sh
+git switch master && git pull
+git switch -c release/x.y.z
+```
+
+Every step below — the metadata edits, the local verify, the version-bump
+commit — lands on this branch. Pushing it runs the **comprehensive release
+gate** the normal master/PR CI does not (see "Push and watch the release
+gate" below): the base CI gate (`ci.yml` also triggers on `release/**`) plus
+`release-gate.yml` (perf benchmark, gem-build validation, OSS-corpus sweep —
+advisory during the v0.2.0 trial).
+
 ## Update Release Metadata
 
 Decide the next semantic version first, then update all versioned files
@@ -206,6 +224,27 @@ Bump up version to x.y.z
 If the user asks for separate commits, keep the release version bump as the
 final commit.
 
+## Push and watch the release gate
+
+Push the version-bump commit on the release branch:
+
+```sh
+git push -u origin release/x.y.z
+```
+
+This triggers two workflows:
+
+- **`ci.yml`** (base gate, required) — test / lint / self-check warm+cold /
+  warm==cold diff. MUST be green before publishing.
+- **`release-gate.yml`** (comprehensive, advisory during the v0.2.0 trial) —
+  the perf benchmark (`make bench`, [ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)
+  WD4), gem-build validation, and the OSS-corpus sweep. It reports but does
+  not block while the baselines calibrate; a perf or sweep regression here
+  is still a release-quality signal worth investigating before publishing.
+
+Do not publish until the base gate is green and the advisory gate has been
+reviewed.
+
 ## Publish
 
 After the version-bump commit lands on the release branch, publish via the
@@ -255,6 +294,20 @@ In the split-publish case, push the `vx.y.z` tag manually after the gem is
 accepted by RubyGems, then run `rake release:github` once the tag is on
 `origin` to create the GitHub Release.
 
+## Merge back to `master`
+
+After the tag is pushed and the gem is published, bring the version bump +
+CHANGELOG back onto the mainline:
+
+```sh
+git switch master && git pull
+git merge --ff-only release/x.y.z   # or a PR / merge commit if master moved
+git push
+```
+
+If `master` advanced during the release, rebase the release branch (or merge
+with a merge commit) and keep the `Bump up version to x.y.z` commit intact.
+
 ## Quick Checklist
 
 - Working tree starts clean or every pending change is understood.
@@ -270,3 +323,8 @@ accepted by RubyGems, then run `rake release:github` once the tag is on
 - `gem build rigortype.gemspec` succeeded and the produced `.gem` is not
   committed.
 - The final commit message follows `Bump up version to x.y.z`.
+- Release work happened on a `release/x.y.z` branch (not directly on
+  `master`).
+- After push: `ci.yml` base gate is green; `release-gate.yml` (advisory) was
+  reviewed — no unexplained perf or sweep regression.
+- After publish: the release branch is merged back into `master`.

@@ -259,6 +259,17 @@ This composes with [`rigor-release-prep`](../../.claude/skills/rigor-release-pre
 that runs this gate. The version-bump discipline (no autonomous bumps,
 single-digit components, release-style CHANGELOG at landing) is unchanged.
 
+**Mechanism (landed, advisory).** The gate is operationalized as a
+`release/x.y.z` branch + a `release-gate.yml` workflow: pushing the branch
+runs the base CI gate (`ci.yml`, which now also triggers on `release/**`)
+plus the comprehensive extras — the `make bench` perf gate (WD4), a
+gem-build validation, and the OSS-corpus sweep (Mastodon today;
+data-driven, so Redmine / GitLab are a threshold-file addition away). Per
+the trial-then-freeze spine, the comprehensive gate ships **advisory**
+(reports, does not block — no required-check wiring, perf/sweep stages run
+`continue-on-error`) and hardens to required once its baselines
+(`bench/baseline.json`, the sweep thresholds) calibrate against CI numbers.
+
 ### WD7 — Deprecation + graduation cadence
 
 A bleeding-edge feature (WD2) graduates to default-on — by being removed

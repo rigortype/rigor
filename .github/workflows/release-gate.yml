@@ -1,0 +1,118 @@
+name: Release gate
+
+# Comprehensive, release-only gate that runs on every push to a
+# `release/x.y.z` branch (ADR-50 WD6). It runs the heavier checks the
+# normal master/PR `ci.yml` does not — the perf-regression benchmark
+# (ADR-50 WD4), a gem-build validation, and the OSS-corpus sweep (today
+# Mastodon; data-driven, so Redmine / GitLab are a threshold-file
+# addition away).
+#
+# ADVISORY during the v0.2.0 release-engineering trial (ADR-50): every
+# job here reports but does NOT block — none is wired into branch
+# protection as a required check, and the perf / sweep stages run
+# continue-on-error so a not-yet-calibrated baseline cannot fail a
+# release. Harden to required once the baselines (bench/baseline.json,
+# data/oss-sweep/*-thresholds.json) are calibrated against CI numbers —
+# the trial-then-freeze spine of ADR-50.
+#
+# The base gate (test / lint / self-check warm+cold / diff) also runs on
+# release/** via ci.yml's push trigger; this workflow is the *extra*
+# depth on top of it.
+
+on:
+  push:
+    branches: ["release/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Perf-regression benchmark (ADR-50 WD4) ──────────────────────
+  perf-bench:
+    name: Perf benchmark (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      # Advisory: a regression past the band (once calibrated) prints FAIL
+      # but does not fail the release during the trial. The uncalibrated
+      # committed baseline always passes and emits a suggestion.
+      - name: Run make bench
+        continue-on-error: true
+        run: make bench
+
+      - name: Upload suggested baseline (for calibration)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-baseline-${{ github.run_id }}
+          path: bench/baseline.updated.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ── Gem build validation ────────────────────────────────────────
+  gem-build:
+    name: Gem build (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      # Confirms the gemspec still builds for the (bumped) version. The
+      # built .gem is discarded — it must never be committed.
+      - name: Build gem
+        continue-on-error: true
+        run: |
+          gem build rigortype.gemspec
+          rm -f rigortype-*.gem
+
+  # ── OSS-corpus sweep (reuses oss-sweep.yml) ─────────────────────
+  # Advisory: the sweep gate is uncalibrated today (max_diagnostics
+  # 999999), so it passes and uploads results; continue-on-error keeps
+  # it non-blocking once it calibrates, until it is promoted to required.
+  oss-sweep:
+    name: OSS corpus sweep (advisory)
+    continue-on-error: true
+    uses: ./.github/workflows/oss-sweep.yml
+
+  # ── Advisory summary (never fails) ──────────────────────────────
+  release-gate-summary:
+    name: Release gate (advisory summary)
+    needs: [perf-bench, gem-build, oss-sweep]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarise
+        env:
+          PERF: ${{ needs.perf-bench.result }}
+          GEM: ${{ needs.gem-build.result }}
+          SWEEP: ${{ needs.oss-sweep.result }}
+        run: |
+          echo "Release gate is ADVISORY during the v0.2.0 trial (ADR-50)."
+          echo "  perf-bench: $PERF"
+          echo "  gem-build:  $GEM"
+          echo "  oss-sweep:  $SWEEP"
+          echo "Review the results above; this gate is not yet a required check."
+          echo "Harden to required once the baselines are calibrated (ADR-50 WD6)."

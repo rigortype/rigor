@@ -10,7 +10,9 @@ REFERENCE_SUBMODULES := \
 	references/typeprof \
 	references/sorbet \
 	references/tapioca \
-	references/hanakai-rb
+	references/hanakai-rb \
+	references/ex_doc \
+	references/elixir-lang.github.com
 
 setup: install init-git-config init-submodules
 
@@ -51,6 +53,8 @@ init-submodules:
 	git submodule update --init --filter=blob:none references/sorbet
 	git submodule update --init --filter=blob:none references/tapioca
 	git submodule update --init --filter=blob:none references/hanakai-rb
+	git submodule update --init --filter=blob:none references/ex_doc
+	git submodule update --init --filter=blob:none references/elixir-lang.github.com
 	@if [ ! -e references/TypeScript-Website/.git ]; then \
 		url="$$(git config -f .gitmodules submodule.references/TypeScript-Website.url)"; \
 		sha="$$(git rev-parse HEAD:references/TypeScript-Website)"; \

@@ -34,3 +34,9 @@
 [submodule "references/hanakai-rb"]
 	path = references/hanakai-rb
 	url = https://github.com/hanakai-rb/site.git
+[submodule "references/ex_doc"]
+	path = references/ex_doc
+	url = https://github.com/elixir-lang/ex_doc.git
+[submodule "references/elixir-lang.github.com"]
+	path = references/elixir-lang.github.com
+	url = https://github.com/elixir-lang/elixir-lang.github.com.git

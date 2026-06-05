@@ -331,10 +331,21 @@ trade for speed. Defenses:
    caller that loses a top-level method or a subclass that loses its
    superclass re-fires correctly. Verified byte-identical against a full run
    on added-toplevel / added-superclass / removed-toplevel / removed-superclass
-   / added-unrelated edits (in-process and cross-process). **Remaining
-   (demand-gated):** none for the body + structural tiers; the larger
-   open item is return-type *summaries* to bound inferred-return fan-out
-   (§ Risks).
+   / added-unrelated edits (in-process and cross-process), and **validated at
+   scale on real OSS libs** (`liquid/lib` 64 files, `mail/lib` 111) — every
+   remove + re-add stayed byte-identical, with the leaf-vs-hub precision the
+   design targets (removing `Liquid::Block` re-checked its 9 dependents;
+   removing a leaf filter re-checked 0). Note:
+   [`docs/notes/20260605-adr46-file-add-remove-scale-validation.md`](../notes/20260605-adr46-file-add-remove-scale-validation.md).
+
+   **Remaining (demand-gated):** none for the body + structural tiers; the one
+   open lever is return-type *summaries* to bound inferred-return fan-out
+   (§ Risks) — **low ROI**: the empirical finding above is that inferred
+   cross-file returns nearly never drive a dependent's diagnostic, so the
+   slice-4 body-fingerprint trigger is already cheap insurance; and it is
+   unsound if done naively (a body edit can affect a consumer through
+   cross-file class state, not only the return type). Deferred pending a
+   measured case that demonstrates the fan-out actually matters.
 4. **Symbol granularity (optional).** Refine file-level deps to
    `(file, symbol)` so editing one model method re-checks only callers of
    *that* method, not every caller of the model.

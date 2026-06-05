@@ -1,17 +1,33 @@
 # ADR-48 — Struct / Data value folding (member-shape carriers)
 
-Status: **Proposed — `Data.define` first.** Introduces two new type
-carriers — a **member-class carrier** (`Type::DataClass`) and a
+Status: **Accepted — `Data.define` slices 1–4 implemented (v0.1.17).** Two new
+type carriers — a **member-class carrier** (`Type::DataClass`) and a
 **member-instance carrier** (`Type::DataInstance`) — so that a
 `Data.define`-defined value object folds member reads to precise types
-(`Point = Data.define(:x, :y); Point.new(1, 2).x` → `Constant[1]`). The
-`Struct` sibling is deferred behind its mutation-soundness story (§
-"Struct follow-up"). Folding is **precision-additive only** — no new
-diagnostic family, no false-positive surface (per the project's
-false-positive-discipline value). Grounded in the Phase-5 coverage audit
+(`Point = Data.define(:x, :y); Point.new(1, 2).x` → `Constant[1]`). Shipped
+for all three definition forms (constant-assigned, `class X < Data.define(...)`
+subclass, bare local), both positional + keyword construction, and the
+`[]` / `to_h` / `deconstruct` / `deconstruct_keys` / `members` / `with`
+projections. A `DataFolding` dispatch tier reads a cross-file
+`Scope#data_member_layouts` side-table the scope indexer populates for the
+named forms. **Slice 4 (block-body hardening) landed:** a named class whose
+body redefines a member's synthesised reader (`def x`) no longer folds that
+member's *read* (it would run the redefined method) — the value accessors
+(`[:x]` / `to_h`) still fold because they bypass the reader — gated on a real
+`def` node in the project def-node table; the bare-local block form stays
+conservatively unfolded. The `Struct` sibling is deferred behind its
+mutation-soundness story (§ "Struct follow-up"). Folding is
+**precision-additive only** — no new diagnostic family, no false-positive
+surface (per the project's false-positive-discipline value). Grounded in the
+Phase-5 coverage audit
 [`docs/notes/20260523-struct-encoding-coverage.md`](../notes/20260523-struct-encoding-coverage.md),
 which deferred this as ADR-worthy and named `Data.define` the better
 first target.
+
+**Remaining (demand-gated):** bare-local block-form parity
+(`c = Data.define(:x) do … end`, where the block's defs aren't registered
+under a resolvable name so the reader-redefinition guard can't consult them —
+no corpus demand, conservative bail is FP-safe) and the **`Struct` follow-up**.
 
 ## Motivation
 
@@ -160,17 +176,23 @@ uncertain. Each degradation is a *precision floor*, never a wrong answer:
 
 1. **Block body present** (`Data.define(:x) do … end` /
    `class Point < Data.define(:x); def m; end; end`) — the block may
-   define extra methods, redefine a reader, or add constants. **Slice 1:
-   still model the member layout for value folding, but mark the
-   `DataClass`/`DataInstance` method-set *open*** so the instance never
-   drives an undefined-method decision and a custom-method call resolves
-   through the normal user-method path. Rationale: the block almost never
-   *redefines a reader* (pathological), and the existence layer already
-   registers block-defined methods. *Conservative fallback if open-set
-   modelling proves leaky in review:* drop to no carrier when a block is
-   present (zero risk, current behaviour). The choice is settled in
-   implementation against Rigor's own `lib` (which is dense with the
-   block-and-subclass form).
+   define extra methods, redefine a reader, or add constants. **As shipped
+   (slice 4):** for the **named forms** (`class Point < Data.define(...)` and
+   `Const = Data.define(...) do … end`) the member layout still folds — the
+   block typically only adds helper methods, and `.x` / `to_h` / `[]` keep
+   their precision. The one read refused is a member whose synthesised reader
+   the body *redefines* with a real `def x`: that read would run the
+   redefined method, not return the member, so folding it would be unsound.
+   Both named forms register the override as a `def` node under the class
+   name, so an entry in the project def-node table (`Scope#user_def_for`) is
+   the discriminator — the synthesised reader has no def node. The value
+   accessors `[]` / `to_h` / `deconstruct` bypass the reader and stay
+   foldable, so the gate is on the bare member read only. The **bare-local**
+   block form (`c = Data.define(:x) do … end`) has no resolvable class name,
+   so its block defs cannot be consulted for the guard — it stays
+   conservatively unfolded (current behaviour, FP-safe). Validated against
+   Rigor's own `lib` (dense with the block-and-subclass form): no self-check
+   regression.
 2. **Non-literal / non-Symbol members** (`Data.define(*names)`,
    `Data.define(dynamic_expr)`) — member set unknown → no carrier
    (`Nominal[Data]` / current behaviour).
@@ -284,12 +306,19 @@ For each of `DataClass` and `DataInstance`:
    existence side already exists via `record_meta_superclass_members`).
    This is the integration-heavy slice (a class → member-layout
    side-table read at the `.new` choke point).
-4. **Slice 4 — block-body degradation hardening.** Settle the open-method-
-   set vs no-carrier choice (§ degradation 1) against Rigor's own `lib`,
-   which is the densest available corpus of the block-and-subclass form.
+4. **Slice 4 — block-body degradation hardening (LANDED).** The
+   reader-redefinition guard for the named forms (§ degradation 1): a member
+   whose reader the class body redefines no longer folds on read, gated on a
+   real `def` node via `Scope#user_def_for`. Settled the open-set-vs-bail
+   choice against Rigor's own `lib` (the densest block-and-subclass corpus):
+   the named forms fold with the guard; the bare-local block form stays
+   conservatively unfolded (no resolvable class name to consult the guard,
+   no corpus demand). Bare-local block-form parity is a demand-gated remnant.
 
 Slices 1–2 are the value; 3 is what makes it pay off on real code (most
-`Data` value objects are defined via the subclass form to attach methods).
+`Data` value objects are defined via the subclass form to attach methods);
+4 is the false-positive guard that keeps the subclass form sound when the
+body redefines a reader.
 
 ## Struct follow-up (deferred, separate slice with its own soundness story)
 

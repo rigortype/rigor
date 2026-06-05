@@ -40,7 +40,7 @@ module Rigor
           when Type::DataClass
             materialize_instance(receiver.members, receiver.class_name, context)
           when Type::DataInstance
-            fold_instance(receiver, context.method_name, context.args)
+            fold_instance(receiver, context)
           when Type::Singleton
             fold_named_new(receiver, context)
           end
@@ -150,10 +150,14 @@ module Rigor
 
         # --- 3. inst.x / inst[...] / inst.to_h / ... --------------------
 
-        def fold_instance(instance, method_name, args)
+        def fold_instance(instance, context)
+          method_name = context.method_name
+          args = context.args
           members = instance.members
 
-          return members.fetch(method_name) if members.key?(method_name) && args.empty?
+          if members.key?(method_name) && args.empty? && !reader_overridden?(instance, method_name, context.scope)
+            return members.fetch(method_name)
+          end
 
           case method_name
           when :[] then instance_index(instance, args)
@@ -163,6 +167,23 @@ module Rigor
           when :members then instance_members(instance)
           when :with then instance_with(instance, args)
           end
+        end
+
+        # A `Data.define` class body (the `class Point < Data.define(:x);
+        # def x; …; end; end` subclass body, or a `Const = Data.define(:x) do
+        # def x; …; end; end` block) can redefine a member's synthesised
+        # reader. When it does, `inst.x` runs that `def`, NOT the member, so
+        # folding the read to the member type would be unsound (a downstream
+        # FP). Both named forms register the override as a real `def` node
+        # under the class name, so an entry in the project def-node table is
+        # the discriminator (the synthesised reader has no def node). The
+        # value accessors `[]` / `to_h` / `deconstruct` bypass the reader and
+        # stay foldable, so this gate is on the bare member read only.
+        def reader_overridden?(instance, method_name, scope)
+          class_name = instance.class_name
+          return false if class_name.nil? || scope.nil?
+
+          !scope.user_def_for(class_name, method_name).nil?
         end
 
         def instance_index(instance, args)

@@ -109,9 +109,11 @@ RSpec.describe "Data.define value folding", type: :runner do
       RUBY
     end
 
-    it "does not fold a Data.define carrying a block (slice-4 territory)" do
-      # The block-form defers: the result is not a precise member class, so
-      # `.new` does not materialise a precise instance.
+    it "does not fold a bare-local Data.define carrying a block" do
+      # The local block form has no resolvable class name, so its block
+      # method definitions cannot be consulted to guard a redefined reader;
+      # it stays conservatively unfolded (the named forms below do fold,
+      # guarded).
       types = dumped_types(<<~RUBY)
         c = Data.define(:x) do
           def double = x * 2
@@ -128,6 +130,48 @@ RSpec.describe "Data.define value folding", type: :runner do
         dump_type(c.new(1, 2))
       RUBY
       expect(types.first).not_to start_with("Data(")
+    end
+  end
+
+  describe "block-body hardening (ADR-48 slice 4)" do
+    it "still folds members when a subclass body adds non-reader helpers" do
+      expect(dumped_types(<<~RUBY)).to eq(%w[1 2])
+        class Point < Data.define(:x, :y)
+          def magnitude = x + y
+        end
+        p = Point.new(1, 2)
+        dump_type(p.x)
+        dump_type(p.y)
+      RUBY
+    end
+
+    it "does not fold a member read whose reader the subclass body redefines" do
+      # `def x` shadows the synthesised reader, so `p.x` runs that method, not
+      # the member — folding it to the member value would be unsound.
+      types = dumped_types(<<~RUBY)
+        class Point < Data.define(:x, :y)
+          def x = "overridden"
+        end
+        p = Point.new(1, 2)
+        dump_type(p.x)
+        dump_type(p.y)
+        dump_type(p[:x])
+      RUBY
+      expect(types[0]).not_to eq("1")  # redefined reader: not the member
+      expect(types[1]).to eq("2")      # untouched reader still folds
+      expect(types[2]).to eq("1")      # value access bypasses the reader
+    end
+
+    it "does not fold a redefined reader in the constant-block form" do
+      types = dumped_types(<<~RUBY)
+        Q = Data.define(:a) do
+          def a = "overridden"
+        end
+        dump_type(Q.new(7).a)
+        dump_type(Q.new(7)[:a])
+      RUBY
+      expect(types[0]).not_to eq("7")  # redefined reader
+      expect(types[1]).to eq("7")      # value access still folds
     end
   end
 

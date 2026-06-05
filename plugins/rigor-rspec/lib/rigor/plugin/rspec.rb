@@ -72,6 +72,17 @@ module Rigor
                      "`subject { described_class.new(...) }`.",
         consumes: [
           { plugin_id: "factorybot", name: :factory_index, optional: true }
+        ],
+        additional_initializers: [
+          # ADR-38 block-form: `before { @ivar = … }`, `let(:x) { @ivar = … }`,
+          # and `subject { @ivar = … }` establish ivar state before `it` bodies
+          # run. Declaring them here suppresses the read-before-write nil
+          # widening that would otherwise appear on those ivars in `it` / `specify`
+          # sibling blocks.
+          Rigor::Plugin::AdditionalInitializer.new(
+            receiver_constraint: "RSpec::ExampleGroup",
+            block_methods: %i[before let subject]
+          )
         ]
       )
 

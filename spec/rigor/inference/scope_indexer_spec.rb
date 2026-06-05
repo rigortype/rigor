@@ -929,6 +929,119 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
           end
         end
 
+        context "with a plugin-declared block-form additional initializer (ADR-38 slice 2)" do
+          let(:before_source) do
+            <<~RUBY
+              class FooSpec
+                def before
+                  @user = "alice"
+                end
+
+                def it_has_a_user
+                  @user
+                end
+              end
+            RUBY
+          end
+
+          let(:before_block_source) do
+            <<~RUBY
+              class FooSpec
+                before do
+                  @user = "alice"
+                end
+
+                def it_has_a_user
+                  @user
+                end
+              end
+            RUBY
+          end
+
+          def index_with_registry(source, registry)
+            env = Rigor::Environment.new(plugin_registry: registry)
+            scope = Rigor::Scope.empty(environment: env)
+            program = parse(source)
+            described_class.index(program, default_scope: scope)[program]
+          end
+
+          def stub_registry(entries)
+            services = Rigor::Plugin::Services.new(
+              reflection: Rigor::Reflection,
+              type: Rigor::Type::Combinator,
+              configuration: Rigor::Configuration.new
+            )
+            klass = Class.new(Rigor::Plugin::Base) do
+              manifest(id: "ai-spec-block", version: "0.1.0", additional_initializers: entries)
+            end
+            Rigor::Plugin::Registry.new(plugins: [klass.new(services: services)])
+          end
+
+          def user_type(outer, class_name = "FooSpec")
+            outer.class_ivars_for(class_name)[:@user]
+          end
+
+          def user_type_has_nil?(outer, class_name = "FooSpec")
+            type = user_type(outer, class_name)
+            return false if type.nil?
+
+            members = type.is_a?(Rigor::Type::Union) ? type.members : [type]
+            members.any? { |m| m.is_a?(Rigor::Type::Constant) && m.value.nil? }
+          end
+
+          # Without a declaration the block body is never descended, so the
+          # ivar is simply absent from the accumulator (no type at all — a
+          # different problem than nil-widening, but equally undesirable).
+          it "control: without declaration, @user is not collected from a block body" do
+            outer = parse(before_block_source).then do |program|
+              described_class.index(program, default_scope: default_scope)[program]
+            end
+            expect(user_type(outer)).to be_nil
+          end
+
+          # With declaration: block body descended → type collected → init_writes
+          # suppresses the read-before-write nil contribution.
+          it "collects @user and suppresses nil widening when `before` is a declared block_method" do
+            entry = Rigor::Plugin::AdditionalInitializer.new(
+              receiver_constraint: "FooSpec", block_methods: [:before]
+            )
+            outer = index_with_registry(before_block_source, stub_registry([entry]))
+            type = user_type(outer)
+            expect(type).not_to be_nil
+            expect(user_type_has_nil?(outer)).to be(false)
+            expect(type).to be_a(Rigor::Type::Constant)
+            expect(type.value).to eq("alice")
+          end
+
+          it "does not collect @user when the block_method name does not match" do
+            entry = Rigor::Plugin::AdditionalInitializer.new(
+              receiver_constraint: "FooSpec", block_methods: [:after]
+            )
+            outer = index_with_registry(before_block_source, stub_registry([entry]))
+            expect(user_type(outer)).to be_nil
+          end
+
+          it "does not collect @user when the receiver constraint does not match" do
+            entry = Rigor::Plugin::AdditionalInitializer.new(
+              receiver_constraint: "OtherSpec", block_methods: [:before]
+            )
+            outer = index_with_registry(before_block_source, stub_registry([entry]))
+            expect(user_type(outer)).to be_nil
+          end
+
+          # A def-form `before` method is walked by collect_def_ivar_writes as
+          # usual. It is NOT in init_writes (block_methods: [:before] only covers
+          # block-form calls, not defs), so the read-before-write nil contribution
+          # fires — the nil-widening IS the expected result here.
+          it "nil-widens a def-form `before` method even when block_methods: [:before] is declared" do
+            entry = Rigor::Plugin::AdditionalInitializer.new(
+              receiver_constraint: "FooSpec", block_methods: [:before]
+            )
+            outer = index_with_registry(before_source, stub_registry([entry]))
+            expect(user_type_has_nil?(outer)).to be(true)
+          end
+        end
+
         it "does NOT add nil when `initialize` writes the ivar (soundness gate)" do
           program = parse(<<~RUBY)
             class Builder

@@ -3,32 +3,40 @@
 module Rigor
   module Plugin
     # ADR-38 declaration: "on `receiver_constraint` (and its
-    # subclasses), every method named in `methods` also establishes
-    # instance-variable state — treat it like `initialize` for the
-    # read-before-write nil soundness gate."
+    # subclasses), every method named in `methods` (def-form) or
+    # `block_methods` (block-form) also establishes instance-variable
+    # state — treat it like `initialize` for the read-before-write nil
+    # soundness gate."
+    #
+    # **Def-form** (`methods:`) — applies when the ivar write lives in a
+    # named `def` body. Example: Minitest `def setup; @conn = …; end`.
+    #
+    # **Block-form** (`block_methods:`) — applies when the ivar write
+    # lives in a block passed to a method call. Example: RSpec
+    # `before { @user = create(:user) }` / `let(:x) { @y = … }`.
+    # `ScopeIndexer` descends the block body of any `CallNode` whose
+    # method name is in `block_methods`, collecting ivar writes exactly
+    # as it would for a def-form initializer.
+    #
+    # At least one of `methods:` or `block_methods:` must be non-empty.
     #
     # Authored on a plugin manifest:
     #
-    #   manifest(
-    #     id: "minitest",
-    #     version: "0.1.0",
-    #     additional_initializers: [
-    #       Rigor::Plugin::AdditionalInitializer.new(
-    #         receiver_constraint: "Minitest::Test",
-    #         methods: [:setup]
-    #       )
-    #     ]
+    #   # def-form (Minitest):
+    #   AdditionalInitializer.new(
+    #     receiver_constraint: "Minitest::Test",
+    #     methods: [:setup]
+    #   )
+    #
+    #   # block-form (RSpec):
+    #   AdditionalInitializer.new(
+    #     receiver_constraint: "RSpec::ExampleGroup",
+    #     block_methods: [:before, :let, :subject]
     #   )
     #
     # The Ruby analogue of PHPStan's `AdditionalConstructorsExtension`.
     # `Rigor::Inference::ScopeIndexer` consults the aggregated set at
-    # its single read-before-write gate: for a `def` whose name is in
-    # `methods` on a class that equals or inherits from
-    # `receiver_constraint` (matched via `Environment#class_ordering`,
-    # the same mechanism ADR-16 Tier A uses), the method's ivar writes
-    # are folded into the class's `init_writes` set, so a sibling
-    # method reading those ivars no longer gets a `Constant[nil]`
-    # widening.
+    # its read-before-write gate.
     #
     # The contribution can only ever *suppress* a nil widening — it
     # never makes the analyzer stricter — so a missed or over-broad
@@ -39,38 +47,47 @@ module Rigor
     #
     # - `receiver_constraint` — fully-qualified class name (String).
     #   The entry applies to that class and its subclasses.
-    # - `methods` — Array of Symbol method names treated as
-    #   initializers on a matching class.
+    # - `methods` — Array of Symbol `def`-form method names (may be
+    #   empty when only block_methods is used).
+    # - `block_methods` — Array of Symbol call-with-block method names
+    #   (may be empty when only methods is used).
     #
     # ## Ractor-shareability
     #
-    # Both fields are frozen at construction (ADR-15 Phase 1);
-    # `Ractor.shareable?` returns true after `#initialize`, so the
-    # value object survives `Plugin::Registry.materialize` into a
-    # worker Ractor.
+    # All fields are frozen at construction (ADR-15 Phase 1);
+    # `Ractor.shareable?` returns true after `#initialize`.
     class AdditionalInitializer
-      attr_reader :receiver_constraint, :methods
+      attr_reader :receiver_constraint, :methods, :block_methods
 
-      def initialize(receiver_constraint:, methods:)
+      def initialize(receiver_constraint:, methods: [], block_methods: [])
         validate_receiver_constraint!(receiver_constraint)
-        validate_methods!(methods)
+        validate_method_list!(methods, :methods)
+        validate_method_list!(block_methods, :block_methods)
+        validate_at_least_one!(methods, block_methods)
 
         @receiver_constraint = receiver_constraint.dup.freeze
         @methods = methods.map(&:to_sym).freeze
+        @block_methods = block_methods.map(&:to_sym).freeze
         freeze
       end
 
-      # True when `method_name` (a Symbol) is declared an initializer
-      # by this entry. The class-constraint match is the caller's
-      # responsibility (it needs the environment's class graph).
+      # True when `method_name` (a Symbol) is declared a def-form
+      # initializer by this entry.
       def covers_method?(method_name)
         methods.include?(method_name)
+      end
+
+      # True when `method_name` (a Symbol) is declared a block-form
+      # initializer by this entry.
+      def covers_block_method?(method_name)
+        block_methods.include?(method_name)
       end
 
       def to_h
         {
           "receiver_constraint" => receiver_constraint,
-          "methods" => methods.map(&:to_s)
+          "methods" => methods.map(&:to_s),
+          "block_methods" => block_methods.map(&:to_s)
         }
       end
 
@@ -93,15 +110,21 @@ module Rigor
               "got #{value.inspect}"
       end
 
-      def validate_methods!(value)
-        if value.is_a?(Array) && !value.empty? &&
-           value.all? { |m| m.is_a?(Symbol) || (m.is_a?(String) && !m.empty?) }
-          return
-        end
+      def validate_method_list!(value, field)
+        return if value.is_a?(Array) &&
+                  value.all? { |m| m.is_a?(Symbol) || (m.is_a?(String) && !m.empty?) }
 
         raise ArgumentError,
-              "Plugin::AdditionalInitializer#methods must be a non-empty Array of " \
+              "Plugin::AdditionalInitializer##{field} must be an Array of " \
               "Symbol/non-empty String, got #{value.inspect}"
+      end
+
+      def validate_at_least_one!(methods, block_methods)
+        return unless methods.empty? && block_methods.empty?
+
+        raise ArgumentError,
+              "Plugin::AdditionalInitializer requires at least one of methods: or block_methods: " \
+              "to be non-empty"
       end
     end
   end

@@ -363,6 +363,13 @@ module Rigor
           collect_def_ivar_writes(node, qualified_prefix, default_scope, accumulator,
                                   mutated_ivars, read_before_write, init_writes)
           return
+        when Prism::CallNode
+          if init_writes && !qualified_prefix.empty? &&
+             node.block.is_a?(Prism::BlockNode) &&
+             block_initializer?(qualified_prefix.join("::"), node.name, default_scope)
+            collect_block_ivar_writes(node.block, qualified_prefix, default_scope,
+                                      accumulator, mutated_ivars, init_writes)
+          end
         end
 
         node.compact_child_nodes.each do |child|
@@ -397,6 +404,53 @@ module Rigor
         # the soundness gate (an ivar written in `initialize`
         # is initialised before any other method body runs).
         collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes, default_scope)
+      end
+
+      # ADR-38 block-form: collects ivar writes from a CallNode's
+      # block body (e.g. RSpec `before { @x = … }` / `let(:x) { … }`)
+      # and folds them into `init_writes`, suppressing the
+      # read-before-write nil contribution the same way a def-form
+      # initializer does. The block body is always treated as an
+      # initializer (the caller has already verified the method name
+      # is declared as a block_method initializer), so there is no
+      # read-before-write evidence collection step here.
+      def collect_block_ivar_writes(block_node, qualified_prefix, default_scope, accumulator,
+                                    mutated_ivars, init_writes)
+        return if block_node.body.nil? || qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        self_type = Type::Combinator.nominal_of(class_name)
+        body_scope = default_scope.with_self_type(self_type)
+
+        gather_ivar_writes(block_node.body, body_scope, class_name, accumulator,
+                           EMPTY_GUARDED_IVARS, mutated_ivars)
+
+        seen_writes = Set.new
+        read_first = Set.new
+        detect_read_before_write(block_node.body, seen_writes, read_first)
+        init_set = (init_writes[class_name] ||= Set.new)
+        seen_writes.each { |name| init_set << name }
+      end
+
+      # ADR-38 block-form gate: true when a loaded plugin declares
+      # `method_name` a block-form initializer for `class_name` (or
+      # an ancestor). Mirrors `additional_initializer?` but queries
+      # `covers_block_method?` instead of `covers_method?`.
+      def block_initializer?(class_name, method_name, default_scope)
+        return false if class_name.nil? || default_scope.nil?
+
+        environment = default_scope.environment
+        registry = environment&.plugin_registry
+        return false if registry.nil?
+        return false if registry.respond_to?(:empty?) && registry.empty?
+        return false unless registry.respond_to?(:additional_initializers)
+
+        registry.additional_initializers.any? do |entry|
+          entry.covers_block_method?(method_name) &&
+            class_matches_constraint?(class_name, entry.receiver_constraint, environment)
+        end
+      rescue StandardError
+        false
       end
 
       # Walks the method body in AST (== execution) order

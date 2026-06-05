@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "renderable"
 
 module Rigor
   class CLI

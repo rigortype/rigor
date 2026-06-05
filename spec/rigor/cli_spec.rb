@@ -1301,6 +1301,86 @@ RSpec.describe Rigor::CLI do
     end
   end
 
+  # ADR-51 — CI-native diagnostic output formats.
+  describe "check --format=sarif|github|gitlab (ADR-51)" do
+    let(:tmpdir) { Dir.mktmpdir }
+
+    after { FileUtils.remove_entry(tmpdir) }
+
+    # A single reliable `call.undefined-method` (rule-bearing) diagnostic
+    # at line 2, column 3.
+    def run_format(format)
+      Dir.chdir(tmpdir) do
+        File.write("demo.rb", "x = \"hello\"\nx.no_such_method_here\n")
+        run_cli("check", "--no-cache", "--no-stats", "--format=#{format}", "demo.rb")
+      end
+    end
+
+    it "emits a valid SARIF 2.1.0 document with the diagnostic as a result" do
+      status, out, _err = run_format("sarif")
+
+      expect(status).to eq(1)
+      doc = JSON.parse(out)
+      expect(doc["version"]).to eq("2.1.0")
+      run = doc.fetch("runs").fetch(0)
+      expect(run.dig("tool", "driver", "name")).to eq("Rigor")
+      expect(run.dig("tool", "driver", "version")).to eq(Rigor::VERSION)
+      expect(run.dig("tool", "driver", "rules")).to include("id" => "call.undefined-method")
+
+      result = run.fetch("results").fetch(0)
+      expect(result["ruleId"]).to eq("call.undefined-method")
+      expect(result["level"]).to eq("error")
+      region = result.dig("locations", 0, "physicalLocation", "region")
+      expect(region).to eq("startLine" => 2, "startColumn" => 3)
+      uri = result.dig("locations", 0, "physicalLocation", "artifactLocation", "uri")
+      expect(uri).to eq("demo.rb")
+    end
+
+    it "emits a GitHub Actions workflow command per diagnostic" do
+      status, out, _err = run_format("github")
+
+      expect(status).to eq(1)
+      expect(out).to include(
+        "::error file=demo.rb,line=2,col=3,title=call.undefined-method::"
+      )
+      # Message data follows the `::`.
+      expect(out).to match(/::error .+::undefined method/)
+    end
+
+    it "emits a GitLab Code Quality report entry per diagnostic" do
+      status, out, _err = run_format("gitlab")
+
+      expect(status).to eq(1)
+      entries = JSON.parse(out)
+      entry = entries.fetch(0)
+      expect(entry["check_name"]).to eq("call.undefined-method")
+      expect(entry["severity"]).to eq("major")
+      expect(entry.dig("location", "path")).to eq("demo.rb")
+      expect(entry.dig("location", "lines", "begin")).to eq(2)
+      # Fingerprint is a stable hex digest, identical across two runs.
+      expect(entry["fingerprint"]).to match(/\A[0-9a-f]{64}\z/)
+      _s, second, = run_format("gitlab")
+      expect(JSON.parse(second).fetch(0)["fingerprint"]).to eq(entry["fingerprint"])
+    end
+
+    it "emits an empty GitHub stream and exits 0 for a clean file" do
+      Dir.chdir(tmpdir) do
+        File.write("clean.rb", "x = 1\n")
+        status, out, _err = run_cli("check", "--no-cache", "--no-stats", "--format=github", "clean.rb")
+
+        expect(status).to eq(0)
+        expect(out).to eq("")
+      end
+    end
+
+    it "rejects an unsupported format as a usage error" do
+      status, _out, err = run_format("csv")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to include("unsupported format: csv")
+    end
+  end
+
   describe "annotate" do
     let(:tmpdir) { Dir.mktmpdir }
 

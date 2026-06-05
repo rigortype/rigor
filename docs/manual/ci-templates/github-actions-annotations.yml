@@ -1,0 +1,25 @@
+# Rigor — GitHub Actions workflow (inline annotations, zero setup).
+#
+# Copy to .github/workflows/rigor.yml. Runs Rigor in its own isolated job
+# on Ruby 4.0 and emits workflow commands the runner turns into inline PR
+# annotations — no upload step, no code scanning to enable. The job still
+# fails (exit 1) when Rigor finds errors. See docs/manual/11-ci.md and ADR-51.
+name: rigor
+on: [push, pull_request]
+
+jobs:
+  rigor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Rigor needs Ruby 4.0; this is why it runs in its own job (a second
+      # setup-ruby would clobber your test job's Ruby). See ADR-27 / ch.11.
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+
+      # Installed standalone, never in your project's Gemfile (ADR-27).
+      - run: gem install rigortype
+
+      - run: rigor check --format github

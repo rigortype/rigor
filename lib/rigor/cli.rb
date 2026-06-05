@@ -10,6 +10,7 @@ require_relative "version"
 require_relative "analysis/diagnostic"
 require_relative "analysis/result"
 require_relative "cli/options"
+require_relative "cli/diagnostic_formats"
 
 module Rigor
   # The CLI class is a dispatcher: each `run_*` method delegates to a
@@ -379,7 +380,8 @@ module Rigor
       parser = OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
         opts.banner = "Usage: rigor check [options] [paths]"
         opts.on("--config=PATH", "Path to the Rigor configuration file") { |value| options[:config] = value }
-        opts.on("--format=FORMAT", "Output format: text or json") { |value| options[:format] = value }
+        opts.on("--format=FORMAT",
+                "Output format: text, json, sarif, github, gitlab") { |value| options[:format] = value }
         opts.on("--explain", "Surface fail-soft fallback events as :info diagnostics") { options[:explain] = true }
         opts.on("--cache-stats", "Print on-disk cache inventory at end of run") { options[:cache_stats] = true }
         opts.on("--clear-cache", "Remove the .rigor/cache directory before running") { options[:clear_cache] = true }
@@ -867,6 +869,12 @@ module Rigor
         @out.puts(JSON.pretty_generate(result.to_h))
       when "text"
         write_text_result(result)
+      when ->(fmt) { CLI::DiagnosticFormats.supports?(fmt) }
+        # ADR-51 — CI-native renderings (SARIF / GitHub Actions commands /
+        # GitLab Code Quality). The `github` form is empty when there are no
+        # diagnostics; the JSON forms always carry a document.
+        output = CLI::DiagnosticFormats.render(result, format)
+        @out.puts(output) unless output.empty?
       else
         raise OptionParser::InvalidArgument, "unsupported format: #{format}"
       end

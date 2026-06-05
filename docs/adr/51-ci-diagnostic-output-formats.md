@@ -1,0 +1,180 @@
+# ADR-51 — CI-native diagnostic output formats
+
+Status: **Accepted, 2026-06-06; partially implemented (v0.1.18).** Three
+CI-native renderings of the existing diagnostic stream land behind
+`rigor check --format`: **`sarif`** (SARIF 2.1.0, the cross-platform
+anchor), **`github`** (GitHub Actions workflow commands), and **`gitlab`**
+(GitLab Code Quality report JSON). Each is a presentation layer over the
+same `Analysis::Diagnostic` fields `--format json` already exposes — no new
+analysis, no new diagnostic information. The formatters live in
+[`lib/rigor/cli/diagnostic_formats.rb`](../../lib/rigor/cli/diagnostic_formats.rb);
+the copy-paste CI setup templates (ADR-27 § WD3) and the manual update ship
+in the same cut.
+
+Grounding: [ADR-27](27-tool-distribution-model.md) (distribution / CI
+channel — this ADR is its diagnostic-output sibling) and
+[ADR-50](50-release-engineering-and-stability-strategy.md) WD1 (a new
+output format is a public-contract surface).
+
+## Context
+
+Today `rigor check` renders to `text` (human) or `json` (the generic
+machine stream). In CI, both land **only in the job log** — a developer
+must open the failed job and read it. CI platforms can instead surface a
+finding *inline on the changed code* (a PR/MR annotation, a code-scanning
+alert, a Code Quality widget) — but each platform reads a *specific*
+format to do so, and `--format json` is none of them. The integration gap
+is the v0.1.18 cycle's headline (ROADMAP § "v0.1.18 — CI-environment
+support"): without a platform-native rendering, Rigor's CI value stops at
+the exit code.
+
+The three formats that cover the field:
+
+- **SARIF 2.1.0** — the OASIS interchange standard. GitHub's
+  `upload-sarif` ingests it for the PR diff and Security tab; many other
+  tools consume it too. It is the *cross-platform* option — one format,
+  multiple consumers.
+- **GitHub Actions workflow commands** — `::error file=…,line=…::` lines
+  the runner parses out of stdout into inline annotations, with **no
+  upload step**. Cheapest possible GitHub integration.
+- **GitLab Code Quality** — the CodeClimate-subset JSON GitLab reads from
+  a `codequality` artifact to populate the MR Code Quality widget; the
+  GitLab-native equivalent of SARIF-on-GitHub.
+
+A new output format is a **public-contract surface** under ADR-50 WD1
+(a consumer's CI pipeline parses it), which is why this is an ADR and not
+a CHANGELOG line — the format shapes are something we commit to.
+
+## Decision
+
+Add the three formats as `--format` values, dispatched from the existing
+`write_result` case in [`lib/rigor/cli.rb`](../../lib/rigor/cli.rb) (~L864)
+to small per-format renderer classes. The discriminating **criterion** for
+what belongs here: *a format earns a `--format` value when a CI platform
+renders the diagnostic stream inline from it.* That is the boundary — a
+format consumed by a platform's PR/MR surface is in scope; a format that is
+merely "another way to serialize" (CSV, a custom shape) is not, because
+`--format json` already serves generic machine consumption. SARIF is the
+**primary** target precisely because it satisfies the criterion for more
+than one platform at once.
+
+Each formatter is a pure function of an `Analysis::Result` — it reads
+`path` / `line` / `column` / `severity` / `qualified_rule` / `message` and
+adds nothing. Severity and identifier mapping is defined **once per format**
+(WD2). This keeps the surface additive: `text` / `json` are untouched, and
+a project that never sets `--format` sees no change.
+
+## Working decisions
+
+### WD1 — Three formats now; SARIF is the anchor, not the only one
+
+GitHub Actions commands and GitLab Code Quality both ship alongside SARIF
+rather than deferring to SARIF-only. Reason: each is the *zero-friction*
+path for its platform. SARIF-on-GitHub needs the separate `upload-sarif`
+step and code-scanning enabled; the `github` format needs neither (paste
+one `run:` line). GitLab does not consume SARIF for its MR widget at all —
+Code Quality is the only native MR surface. So SARIF being cross-platform
+does not make the other two redundant; it makes SARIF the *default
+recommendation* with two lighter platform-specific alternatives. JUnit XML
+and a `--output FILE` ergonomic are deferred (see Rejected/deferred).
+
+### WD2 — Severity + identifier mapping (the contract table)
+
+Each format maps Rigor's `:error` / `:warning` / `:info` and the qualified
+rule id into its own vocabulary. The mappings, fixed here as contract:
+
+| Rigor | SARIF `level` | GitHub command | GitLab `severity` |
+| --- | --- | --- | --- |
+| `:error` | `error` | `::error` | `major` |
+| `:warning` | `warning` | `::warning` | `minor` |
+| `:info` | `note` | `::notice` | `info` |
+
+Identifier: the **qualified rule** (`<source_family>.<rule>`, or the bare
+rule for the `:builtin` family — `Diagnostic#qualified_rule`) is the stable
+id. It carries into SARIF `ruleId` (+ a deduped `tool.driver.rules`),
+GitHub `title=`, and GitLab `check_name`. The ruleless producers (parse /
+internal errors, `qualified_rule == nil`) degrade per format: SARIF omits
+`ruleId` (valid), GitHub omits `title=`, GitLab uses `check_name: "rigor"`.
+GitLab's `critical` / `blocker` are left unused — a louder future tier, not
+mapped today, because Rigor has no severity above `:error`.
+
+### WD3 — GitLab fingerprint = hash of the locating tuple
+
+GitLab dedups and tracks findings across runs by a `fingerprint` it
+requires to be stable for an unchanged finding and unique per finding.
+We hash (`SHA256`) the tuple `(path, qualified_rule, line, column,
+message)`. This is stable (no run-volatile input — not the array index,
+which would churn on reordering) and unique enough in practice. A genuine
+collision (two findings identical on all five) drops one from the widget —
+an acceptable, rare loss versus an unstable index-based id that would make
+every finding look "new" on any reordering.
+
+### WD4 — Exit code unchanged; file output via shell redirect
+
+`--format sarif|github|gitlab` does **not** change the exit code — it stays
+`0` on no errors, `1` otherwise (and `1` on `--baseline-strict` drift), the
+same as `text` / `json`. SARIF/GitLab reports are written to a file with an
+ordinary `>` redirect (`rigor check --format sarif > rigor.sarif`); the
+upload step runs `if: always()` so the non-zero exit still publishes the
+report. A dedicated `--output FILE` flag is **deferred** (Rejected/deferred)
+— redirect covers the need, and the flag is a pure ergonomic addable later
+without a contract change. The `github` format prints nothing for a clean
+run (no empty annotation line); the JSON forms always emit a document.
+
+### WD5 — The setup-template half (ADR-27 § WD3)
+
+This ADR also ships the copy-paste CI templates ADR-27 § WD3 designed and
+left queued, now wired to the new formats: a `.github/workflows/rigor.yml`
+(Rigor in its own isolated Ruby-4.0 job, `--format sarif` + `upload-sarif`,
+with the `github` one-liner as the no-upload alternative) and a
+`.gitlab-ci.yml` (`--format gitlab` → a `codequality` report artifact). The
+templates and the manual's CI chapter ([`docs/manual/11-ci.md`](../manual/11-ci.md))
+are the onboarding face of this ADR; the formats are its engine.
+
+## Rejected / deferred alternatives
+
+| Option | Disposition | Reason |
+| --- | --- | --- |
+| Fold into ADR-27 as a new WD | Rejected | ADR-27 is *distribution* (how Rigor is installed); this is *output* (how it reports into CI). Distinct public-contract surface → its own ADR keeps each decision legible. |
+| SARIF only (defer GitHub/GitLab) | Rejected | SARIF leaves both zero-friction paths (GitHub annotations without upload; GitLab's only MR surface) on the table — WD1. |
+| `--output FILE` flag | Deferred | `>` redirect covers file output; the flag is an additive ergonomic with no contract impact, addable on demand. |
+| JUnit XML | Deferred | A test-report format several CI systems render; candidate "something else" for a follow-up, but no MR-inline surface the three chosen formats miss. Demand-gated. |
+| Rich SARIF rule metadata (`shortDescription`, `helpUri`) | Deferred | Id-only `tool.driver.rules` is valid SARIF and avoids coupling the formatter to the `CheckRule` registry; enrich when the GitHub Security-tab UX demands it. |
+| Exit-code mode (e.g. always 0 in report mode) | Rejected | A consumer wanting the gate green uses `continue-on-error` / `if: always()`; baking it into the format would couple presentation to gating policy. |
+
+## Consequences
+
+### Positive
+
+- Diagnostics surface **inline in the PR/MR** on the three dominant CI
+  platforms — Rigor's CI value no longer stops at the job log + exit code.
+- Additive and isolated: `text` / `json` unchanged, no `.rigor.yml` change,
+  no analysis change. A project not using `--format` sees nothing new.
+- SARIF is reusable beyond GitHub (any SARIF tool), so the cross-platform
+  investment is not GitHub-specific.
+
+### Negative
+
+- Three more output shapes are now **public contract** (ADR-50 WD1) — the
+  severity/identifier mappings (WD2) and the SARIF/GitLab JSON shapes must
+  stay stable within a line. The contract table here is the pin.
+- More to document and keep current as the platforms evolve their schemas
+  (SARIF revisions, GitLab Code Quality field changes).
+
+### Carry-over
+
+- `--output FILE`, JUnit XML, and richer SARIF rule metadata are
+  demand-gated follow-ups (Rejected/deferred).
+- The enumerated-public-surface document (ADR-50 WD1, drafted at v0.2.0)
+  should list these three `--format` values + their contract table.
+
+## Relationship to other ADRs
+
+- [ADR-27](27-tool-distribution-model.md) — distribution + the CI channel;
+  WD5 here ships its § WD3 setup templates. This ADR is the output sibling.
+- [ADR-50](50-release-engineering-and-stability-strategy.md) — WD1 makes a
+  new output format public contract; the WD2 table is what gets frozen.
+- [ADR-8](8-steep-inspired-improvements.md) — severity profiles, the source
+  of the `:error` / `:warning` / `:info` levels these formats map from.
+- [ADR-22](22-baseline-and-project-onboarding.md) — the baseline / strict
+  gate that shapes the exit code these formats leave unchanged (WD4).

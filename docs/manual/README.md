@@ -54,8 +54,10 @@ flag, key, or command that *acts* on it.
 10. [MCP server](10-mcp-server.md) — exposing Rigor's
     analysis tools to AI coding agents (Claude Code, Cursor,
     Cline, …) via `rigor mcp`.
-11. [Running Rigor in CI](11-ci.md) — a clean CI job, a
-    minimal GitHub Actions workflow, and version pinning.
+11. [Running Rigor in CI](11-ci.md) — a clean CI job, inline
+    PR/MR diagnostics (SARIF / GitHub Actions / GitLab Code
+    Quality), copy-paste [templates](ci-templates/), and
+    version pinning.
 12. [Caching](12-caching.md) — where the cache lives, what
     invalidates it, and how to clear it.
 13. [Troubleshooting](13-troubleshooting.md) — common

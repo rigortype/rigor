@@ -77,7 +77,23 @@ GitLab CI, and others — building on the distribution / CI channel of
 `ci.yml` / `release-gate.yml`, which test Rigor itself; this goal is about
 users running Rigor in *their* pipelines.)
 
-Concrete surface — scope to settle when the cycle opens:
+**Landed (the CI diagnostic-output + templates half — [ADR-51](adr/51-ci-diagnostic-output-formats.md)):**
+the integration half shipped. `rigor check --format` gained three CI-native
+renderings of the diagnostic stream — `sarif` (SARIF 2.1.0, the
+cross-platform anchor), `github` (GitHub Actions workflow commands → inline
+PR annotations), and `gitlab` (GitLab Code Quality → the MR widget) — each a
+pure presentation layer over the `--format json` fields
+(`lib/rigor/cli/diagnostic_formats.rb`). The copy-paste CI setup templates
+ADR-27 § WD3 left queued shipped under `docs/manual/ci-templates/`
+(SARIF + annotations `.github/workflows/rigor.yml`, `.gitlab-ci.yml`, generic
+recipe), documented in `docs/manual/11-ci.md`. The two open scoping
+decisions were resolved: a **new ADR** (ADR-51, not an ADR-27 amendment) and
+**all three formats now** (SARIF the recommended default). Demand-gated
+follow-ups recorded in ADR-51: `--output FILE`, JUnit XML, richer SARIF
+rule metadata.
+
+Concrete surface — original scope (the onboarding half below is partly
+absorbed; remaining items stand):
 
 - **Setup templates (the onboarding half).** Ship the copy-pasteable
   standalone CI templates [ADR-27 § WD3](adr/27-tool-distribution-model.md)
@@ -101,12 +117,18 @@ Concrete surface — scope to settle when the cycle opens:
   severity profiles ([ADR-8](adr/8-steep-inspired-improvements.md)), and
   `--no-cache` for gate determinism.
 
-**Open (decide when the cycle opens):** whether the output-format work is an
-ADR-27 amendment or its own ADR — a new diagnostic-output-format surface is
-a public contract under [ADR-50](adr/50-release-engineering-and-stability-strategy.md)
-WD1, so it wants ADR-level treatment; which formats are v0.1.18 vs deferred;
-and the GitLab Code Quality vs SARIF priority. CI support is *one* v0.1.18
-goal — the standing backlog (§ "Future cycles") may also contribute.
+**Resolved (v0.1.18 cycle):** the output-format work got its own ADR
+([ADR-51](adr/51-ci-diagnostic-output-formats.md), not an ADR-27 amendment —
+distribution vs output are distinct public-contract surfaces under
+[ADR-50](adr/50-release-engineering-and-stability-strategy.md) WD1); all
+three formats shipped together with SARIF as the recommended cross-platform
+default (it satisfies the inline-rendering criterion for more than one
+platform; the other two are each their platform's zero-friction path, so
+none is redundant). **Still open / standing backlog:** the GitHub Actions
+`setup-ruby` prebuilt-4.0 timing caveat ADR-27 § WD3 flags; the `--output
+FILE` ergonomic + JUnit XML if demand surfaces (ADR-51 carry-over). CI
+support is *one* v0.1.18 goal — the standing backlog (§ "Future cycles")
+may also contribute.
 
 ### v0.2.0 — first evaluation release
 

@@ -1,0 +1,16 @@
+# Rigor — GitLab CI job (Code Quality → merge-request widget).
+#
+# Copy into .gitlab-ci.yml, or `include:` this file. Runs Rigor on Ruby 4.0
+# and publishes a Code Quality report so findings appear in the MR widget.
+# The job fails (exit 1) when Rigor finds errors; `when: always` publishes
+# the report regardless. See docs/manual/11-ci.md and ADR-51.
+rigor:
+  image: ruby:4.0
+  script:
+    # Installed standalone, never in your project's Gemfile (ADR-27).
+    - gem install rigortype
+    - rigor check --format gitlab > gl-code-quality-report.json
+  artifacts:
+    reports:
+      codequality: gl-code-quality-report.json
+    when: always

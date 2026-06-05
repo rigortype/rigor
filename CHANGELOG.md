@@ -14,6 +14,15 @@ cycles live in dedicated archives:
 
 ## [Unreleased]
 
+### Added
+
+- **[cli]** `rigor check --format` gains three CI-native output formats so diagnostics surface inline in a pull / merge request instead of only in the job log ([ADR-51](docs/adr/51-ci-diagnostic-output-formats.md)):
+  - `--format sarif` writes a SARIF 2.1.0 report. GitHub's `upload-sarif` renders it on the PR diff and in the Security tab, and any other SARIF-aware tool consumes the same file — the cross-platform option.
+  - `--format github` emits GitHub Actions workflow commands (`::error file=…,line=…::`) that the runner turns into inline PR annotations, with no upload step.
+  - `--format gitlab` emits a GitLab Code Quality (CodeClimate-subset) report that GitLab reads from a `codequality` artifact to populate the merge-request widget.
+  - All three are a presentation layer over the same diagnostics as `--format json` — no new analysis. Severities map per format (error/warning/info → SARIF `error`/`warning`/`note`, GitHub `::error`/`::warning`/`::notice`, GitLab `major`/`minor`/`info`), and the exit code is unchanged (`0` clean, `1` on errors) so the job still gates the pipeline.
+- **[docs]** Copy-paste CI setup templates under [`docs/manual/ci-templates/`](docs/manual/ci-templates/) — a SARIF and an annotations `.github/workflows/rigor.yml`, a `.gitlab-ci.yml`, and a generic recipe — wiring the new formats into a Ruby-4.0 isolated job (the templates [ADR-27](docs/adr/27-tool-distribution-model.md) § WD3 left queued). The CI manual chapter ([docs/manual/11-ci.md](docs/manual/11-ci.md)) documents each.
+
 ## [0.1.17] - 2026-06-06
 
 v0.1.17 focuses on making analysis of real projects markedly faster — most visibly an incremental analysis cache that re-checks only the files an edit affects, an unchanged-project fast path, and a large allocation reduction on big Rails apps. Inspired by the [Elixir v1.20 type system](docs/notes/20260604-elixir-v1.20-type-system-rigor-review.md), control-flow narrowing is strengthened for several methods, so non-empty `Array` guards and `Hash` key-presence checks now refine reads precisely. It also folds `Data.define` value objects to precise member types and adds new clause-reachability and conformance diagnostics. Fixes include a block-parameter binding crash on the `|a, *b, c|` shape and a pathological route-helper re-read.

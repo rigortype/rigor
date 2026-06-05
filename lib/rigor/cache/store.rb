@@ -44,9 +44,10 @@ module Rigor
       #   invocations can read from the same cache concurrently
       #   without churning it. See
       #   `docs/design/20260516-editor-mode.md` § "Cache behaviour".
-      def initialize(root:, read_only: false)
+      def initialize(root:, read_only: false, max_bytes: nil)
         @root = root.to_s.dup.freeze
         @read_only = read_only
+        @max_bytes = max_bytes&.then { |n| Integer(n) }
         @hits = 0
         @misses = 0
         @writes = 0
@@ -243,6 +244,35 @@ module Rigor
         value
       end
 
+      # ADR-6 § "Eviction" — LRU pass over the on-disk cache. No-op when
+      # `max_bytes:` was not configured or the store is read-only.
+      # Walks all `.entry` files, sorts by mtime ascending (oldest = least
+      # recently used), and unlinks from the oldest until the total is at
+      # or below the cap. Touch-on-disk-read ({read_entry}) is the
+      # cross-process LRU signal: every disk hit (not in-process-memo hit)
+      # updates the mtime so recently-read entries survive the eviction pass.
+      # Any FS error is swallowed — eviction must never break a run.
+      def evict!
+        return if @max_bytes.nil? || @read_only
+
+        entries = collect_entry_stats
+        total   = entries.sum { |e| e[:bytes] }
+        return if total <= @max_bytes
+
+        entries.sort_by! { |e| e[:mtime] }
+        entries.each do |entry|
+          break if total <= @max_bytes
+
+          File.unlink(entry[:path])
+          total -= entry[:bytes]
+        rescue StandardError
+          next
+        end
+        nil
+      rescue StandardError
+        nil
+      end
+
       private
 
       Entry = Data.define(:descriptor_bytes, :value)
@@ -284,6 +314,7 @@ module Rigor
         value = safe_load(value_bytes, deserialize)
         return nil if value.equal?(LOAD_FAILED)
 
+        touch_for_lru(path) if @max_bytes
         Entry.new(descriptor_bytes, value)
       end
 
@@ -413,6 +444,27 @@ module Rigor
 
           bytes << [(value & 0x7F) | 0x80].pack("C")
           value >>= 7
+        end
+      end
+
+      # Updates both atime and mtime of `path` to the current time — the
+      # cross-process LRU signal used by {evict!}. Best-effort: any FS
+      # error (read-only mount, deleted file) is silently ignored.
+      def touch_for_lru(path)
+        now = Time.now
+        File.utime(now, now, path)
+      rescue StandardError
+        nil
+      end
+
+      # Returns an array of `{ path:, mtime:, bytes: }` hashes for every
+      # `.entry` file under the cache root, skipping unreadable entries.
+      def collect_entry_stats
+        Dir.glob(File.join(@root, "**", "*.entry")).filter_map do |path|
+          stat = File.stat(path)
+          { path: path, mtime: stat.mtime, bytes: stat.size }
+        rescue StandardError
+          nil
         end
       end
 

@@ -69,7 +69,13 @@ module Rigor
       "baseline" => nil,
       "fold_platform_specific_paths" => false,
       "cache" => {
-        "path" => ".rigor/cache"
+        "path" => ".rigor/cache",
+        # LRU eviction cap in bytes. nil (the default) disables eviction;
+        # the cache grows until the user runs `rigor check --clear-cache`.
+        # Set to a positive integer (e.g. 536870912 for 512 MB) to keep the
+        # cache bounded — the least-recently-used entries are removed at the
+        # end of each run when the total exceeds this limit.
+        "max_bytes" => nil
       },
       "plugins_io" => {
         "network" => "disabled",
@@ -166,7 +172,8 @@ module Rigor
     PATH_KEYS = %w[paths signature_paths pre_eval].freeze
     private_constant :PATH_KEYS
 
-    attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :disabled_rules,
+    attr_reader :target_ruby, :paths, :exclude_patterns, :plugins, :cache_path, :cache_max_bytes,
+                :disabled_rules,
                 :libraries, :signature_paths, :fold_platform_specific_paths,
                 :plugins_io_network, :plugins_io_allowed_paths,
                 :plugins_io_allowed_url_hosts,
@@ -334,6 +341,8 @@ module Rigor
         "fold_platform_specific_paths", DEFAULTS.fetch("fold_platform_specific_paths")
       ) == true
       @cache_path = cache.fetch("path").to_s
+      raw_max = cache.fetch("max_bytes")
+      @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
       @plugins_io_network = coerce_network_policy(plugins_io.fetch("network"))
       @plugins_io_allowed_paths = Array(plugins_io.fetch("allowed_paths")).map(&:to_s).freeze
       @plugins_io_allowed_url_hosts = Array(plugins_io.fetch("allowed_url_hosts")).map(&:to_s).freeze
@@ -383,7 +392,8 @@ module Rigor
         "pre_eval" => pre_eval,
         "fold_platform_specific_paths" => fold_platform_specific_paths,
         "cache" => {
-          "path" => cache_path
+          "path" => cache_path,
+          "max_bytes" => cache_max_bytes
         },
         "plugins_io" => {
           "network" => plugins_io_network.to_s,

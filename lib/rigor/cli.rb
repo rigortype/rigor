@@ -78,7 +78,7 @@ module Rigor
       EXIT_USAGE
     end
 
-    def run_check
+    def run_check # rubocop:disable Metrics/AbcSize
       load_check_dependencies
       options = parse_check_options
       buffer = Options.resolve_buffer_binding(options, err: @err)
@@ -101,6 +101,7 @@ module Rigor
       write_result(result, options.fetch(:format))
       write_run_stats(result.stats) if result.stats
       write_trace_appendices
+      runner.cache_store&.evict!
       write_cache_stats(cache_root, runner.cache_store) if options.fetch(:cache_stats)
 
       exit_code = result.success? ? 0 : 1
@@ -281,7 +282,14 @@ module Rigor
     end
 
     def build_check_runner(configuration:, options:, buffer:, cache_root:)
-      cache_store = options.fetch(:no_cache) ? nil : Cache::Store.new(root: cache_root)
+      cache_store = if options.fetch(:no_cache)
+                      nil
+                    else
+                      Cache::Store.new(
+                        root: cache_root,
+                        max_bytes: configuration.cache_max_bytes
+                      )
+                    end
       Analysis::Runner.new(
         configuration: configuration,
         explain: options.fetch(:explain),

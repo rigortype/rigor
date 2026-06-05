@@ -320,6 +320,76 @@ RSpec.describe Rigor::Cache::Store do
     end
   end
 
+  describe "#evict! (ADR-6 LRU eviction)" do
+    def write_entry(store, producer_id, key, value)
+      store.fetch_or_compute(
+        producer_id: producer_id, params: { k: key },
+        descriptor: Rigor::Cache::Descriptor.new
+      ) { value }
+    end
+
+    it "is a no-op when max_bytes is not configured" do
+      store_no_cap = described_class.new(root: cache_root)
+      write_entry(store_no_cap, "evict.test", "a", "x" * 1000)
+      expect { store_no_cap.evict! }.not_to raise_error
+      expect(Dir.glob(File.join(cache_root, "**", "*.entry")).size).to eq(1)
+    end
+
+    it "removes the oldest entry when total size exceeds the cap" do
+      capped = described_class.new(root: cache_root, max_bytes: 1)
+      write_entry(capped, "evict.test", "a", "content_a")
+      write_entry(capped, "evict.test", "b", "content_b")
+
+      entries_before = Dir.glob(File.join(cache_root, "**", "*.entry"))
+      expect(entries_before.size).to eq(2)
+
+      capped.evict!
+
+      entries_after = Dir.glob(File.join(cache_root, "**", "*.entry"))
+      expect(entries_after.size).to be < 2
+    end
+
+    it "keeps entries whose total is under the cap" do
+      # Cap large enough to hold both entries.
+      large_cap = described_class.new(root: cache_root, max_bytes: 10 * 1024 * 1024)
+      write_entry(large_cap, "evict.test", "a", "content_a")
+      write_entry(large_cap, "evict.test", "b", "content_b")
+
+      large_cap.evict!
+
+      expect(Dir.glob(File.join(cache_root, "**", "*.entry")).size).to eq(2)
+    end
+
+    it "is a no-op on a read-only store (never touches disk)" do
+      # Write entries with a writable store first.
+      write_entry(store, "evict.test", "a", "content_a")
+
+      ro = described_class.new(root: cache_root, read_only: true, max_bytes: 1)
+      ro.evict!
+
+      expect(Dir.glob(File.join(cache_root, "**", "*.entry")).size).to eq(1)
+    end
+
+    it "updates mtime on disk-read hits (the cross-process LRU signal)" do
+      capped = described_class.new(root: cache_root, max_bytes: 10 * 1024 * 1024)
+      write_entry(capped, "evict.test", "a", "content_a")
+
+      path = Dir.glob(File.join(cache_root, "**", "*.entry")).first
+      old_mtime = File.mtime(path)
+
+      # Wait a small amount so mtime can differ, then read via a fresh store
+      # (no in-process memo).
+      sleep(0.05)
+      fresh = described_class.new(root: cache_root, max_bytes: 10 * 1024 * 1024)
+      fresh.fetch_or_compute(
+        producer_id: "evict.test", params: { k: "a" },
+        descriptor: Rigor::Cache::Descriptor.new
+      ) { raise "should not be called" }
+
+      expect(File.mtime(path)).to be > old_mtime
+    end
+  end
+
   describe "read_only: true (editor mode — slice 3)" do
     let(:ro_store) { described_class.new(root: cache_root, read_only: true) }
 

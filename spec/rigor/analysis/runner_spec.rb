@@ -2193,7 +2193,9 @@ RSpec.describe Rigor::Analysis::Runner do
         expect(dumps.last).to eq("dump_type: Integer")      # guarded: nil removed
       end
 
-      it "leaves h[:foo] as Integer? in the falsey edge (key absent — conservative)" do
+      # §4-3 false edge: `unless h.key?(:foo)` proves `:foo` absent, so
+      # `h[:foo]` reads `nil` (the key is dropped from the shape).
+      it "narrows h[:foo] to nil in the falsey edge (key proven absent)" do
         result = analyze(<<~RUBY, sig: { "demo.rbs" => <<~RBS })
           class Config
             def lookup(h)
@@ -2208,7 +2210,7 @@ RSpec.describe Rigor::Analysis::Runner do
             def lookup: ({ ?foo: Integer }) -> void
           end
         RBS
-        expect(dump_messages(result).first).to include("Integer?")
+        expect(dump_messages(result).first).to eq("dump_type: nil")
       end
     end
 

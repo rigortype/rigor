@@ -302,15 +302,29 @@ RSpec.describe Rigor::Inference::Narrowing do
       truthy, falsey = described_class.predicate_scopes(pred, bound)
       expect(truthy.local(:h).required_key?(:foo)).to be(true)
       expect(truthy.local(:h).optional_key?(:foo)).to be(false)
-      # Falsey edge is the conservative no-op: key stays optional.
-      expect(falsey.local(:h).optional_key?(:foo)).to be(true)
+      # §4-3 falsey edge: `key?` false proves `:foo` absent, so it is
+      # dropped from the shape (a subsequent `h[:foo]` reads nil).
+      expect(falsey.local(:h).pairs).not_to have_key(:foo)
+      expect(falsey.local(:h).optional_key?(:foo)).to be(false)
     end
 
     it "narrows the same way for has_key? and an ivar receiver" do
       bound = scope.with_ivar(:@h, optional_foo_shape)
       pred = parse_predicate("@h.has_key?(:foo)")
-      truthy, = described_class.predicate_scopes(pred, bound)
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
       expect(truthy.ivar(:@h).required_key?(:foo)).to be(true)
+      expect(falsey.ivar(:@h).pairs).not_to have_key(:foo)
+    end
+
+    it "leaves a required key opaque on both edges (false edge is dead)" do
+      required_shape = Rigor::Type::HashShape.new({ foo: integer_nominal })
+      bound = scope.with_local(:h, required_shape)
+      pred = parse_predicate("h.key?(:foo)", locals: %i[h])
+      truthy, falsey = described_class.predicate_scopes(pred, bound)
+      # `key?` on a required key is always true → the predicate is opaque,
+      # both edges keep the shape unchanged (no false-edge key removal).
+      expect(truthy.local(:h)).to eq(required_shape)
+      expect(falsey.local(:h)).to eq(required_shape)
     end
 
     it "leaves the scope unchanged when the key is unknown to the shape" do

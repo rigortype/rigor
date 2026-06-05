@@ -1066,9 +1066,16 @@ module Rigor
           return nil if current.nil?
 
           truthy = narrow_hash_key_present(current, key)
-          return nil if truthy.equal?(current) # no optional key promoted → predicate is opaque
+          # §4-3 false edge — `h.key?(:foo)` being false proves `:foo` is
+          # absent, so on that edge `h[:foo]` reads `nil`. Remove the
+          # (optional) key from the shape; a required key makes the false
+          # edge dead and an unknown key is already nil, both no-ops.
+          falsey = narrow_hash_key_absent(current, key)
+          return nil if truthy.equal?(current) && falsey.equal?(current) # predicate is opaque
 
-          [scope.public_send(writer, name, truthy), scope]
+          truthy_scope = truthy.equal?(current) ? scope : scope.public_send(writer, name, truthy)
+          falsey_scope = falsey.equal?(current) ? scope : scope.public_send(writer, name, falsey)
+          [truthy_scope, falsey_scope]
         end
 
         def static_hash_key(node)
@@ -1101,6 +1108,36 @@ module Rigor
             required_keys: shape.required_keys + [key],
             optional_keys: shape.optional_keys - [key],
             read_only_keys: shape.read_only_keys,
+            extra_keys: shape.extra_keys
+          )
+        end
+
+        # §4-3 false edge — drops `key` from a HashShape (or every HashShape
+        # member of a Union) so the proven-absent key reads `nil`. Returns
+        # the input unchanged when nothing applies (caller detects "no
+        # narrowing"). Only an *optional* present key is removed: a required
+        # key makes `key?` always true (the false edge is dead, leave the
+        # shape opaque) and a key absent from `pairs` already reads `nil`.
+        def narrow_hash_key_absent(type, key)
+          case type
+          when Type::HashShape
+            remove_hash_key(type, key)
+          when Type::Union
+            Type::Combinator.union(*type.members.map { |member| narrow_hash_key_absent(member, key) })
+          else
+            type
+          end
+        end
+
+        def remove_hash_key(shape, key)
+          return shape unless shape.pairs.key?(key)
+          return shape unless shape.optional_key?(key)
+
+          Type::HashShape.new(
+            shape.pairs.except(key),
+            required_keys: shape.required_keys,
+            optional_keys: shape.optional_keys - [key],
+            read_only_keys: shape.read_only_keys - [key],
             extra_keys: shape.extra_keys
           )
         end

@@ -73,7 +73,7 @@ module Rigor
 
       # @return [Array] zero or more records for one (class, interface) pair.
       def check_one(rbs_loader, class_name, interface_name, location)
-        interface_def = rbs_loader.interface_definition(interface_name)
+        interface_def = resolve_interface(rbs_loader, class_name, interface_name)
         if interface_def.nil?
           return [UnresolvedInterface.new(
             class_name: normalize(class_name), interface_name: interface_name, location: location
@@ -158,6 +158,36 @@ module Rigor
         return nil unless func.respond_to?(:required_positionals)
 
         (func.required_positionals + func.optional_positionals).map { |param| translate(param.type) }
+      end
+
+      # Resolves the (possibly namespace-relative) `interface_name` against
+      # the declaring class's namespace chain, mirroring Ruby constant
+      # lookup: `conforms-to _Foo` inside `Bar::Baz` tries `Bar::Baz::_Foo`,
+      # `Bar::_Foo`, then top-level `_Foo` (longest prefix first). Returns
+      # the first interface definition that resolves, or nil. (A leading
+      # `::` is already stripped by the parser, so an intended-absolute name
+      # still resolves via the trailing top-level candidate.)
+      def resolve_interface(rbs_loader, class_name, interface_name)
+        candidate_interface_names(class_name, interface_name).each do |candidate|
+          defn = rbs_loader.interface_definition(candidate)
+          return defn if defn
+        end
+        nil
+      end
+
+      def candidate_interface_names(class_name, interface_name)
+        prefixes = namespace_prefixes(class_name)
+        prefixes.map { |prefix| "#{prefix}::#{interface_name}" } + [interface_name]
+      end
+
+      # Namespace prefixes of a qualified name, longest first:
+      # `"Bar::Baz"` → `["Bar::Baz", "Bar"]`. Covers both the
+      # `class Bar::Baz` and the `module Bar; class Baz` nesting shapes
+      # (a superset of `Module.nesting`, which the directive's resolved
+      # class name does not record).
+      def namespace_prefixes(class_name)
+        parts = normalize(class_name).split("::")
+        (1..parts.size).to_a.reverse.map { |count| parts.first(count).join("::") }
       end
 
       def translate(rbs_type)

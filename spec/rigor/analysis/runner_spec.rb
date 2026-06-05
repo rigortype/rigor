@@ -3818,6 +3818,29 @@ RSpec.describe Rigor::Analysis::Runner do
 
       expect(result.diagnostics.find { |d| d.rule == "rbs_extended.unsatisfied-conformance" }).to be_nil
     end
+
+    it "resolves an interface name relative to the declaring class's namespace" do
+      sig = { "buffers.rbs" => <<~RBS }
+        module Buffers
+          interface _Stream
+            def read: () -> String
+          end
+
+          %a{rigor:v1:conforms-to _Stream}
+          class MyBuffer
+          end
+        end
+      RBS
+      result = analyze("x = 1\n", sig: sig)
+
+      # `_Stream` is namespace-relative (only `Buffers::_Stream` exists), so
+      # resolution must find it under the class's namespace — and then flag
+      # the missing `read`, rather than reporting the interface unresolved.
+      conformance = result.diagnostics.find { |d| d.rule == "rbs_extended.unsatisfied-conformance" }
+      expect(conformance).not_to be_nil
+      expect(conformance.message).to include("`#read`")
+      expect(result.diagnostics.find { |d| d.rule == "dynamic.rbs-extended.unresolved" }).to be_nil
+    end
   end
 
   describe "editor mode degrades Ractor pool to sequential (slice 7)" do

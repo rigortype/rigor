@@ -146,8 +146,7 @@ module Rigor
 
           class_pair = kwargs.elements.find do |elem|
             elem.is_a?(Prism::AssocNode) &&
-              elem.key.is_a?(Prism::SymbolNode) &&
-              elem.key.value == "class"
+              Source::Literals.symbol_named?(elem.key, "class")
           end
           return nil if class_pair.nil?
 

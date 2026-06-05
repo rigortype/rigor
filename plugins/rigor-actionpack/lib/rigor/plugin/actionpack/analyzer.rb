@@ -478,8 +478,7 @@ module Rigor
         def partial_target_from_kwargs(hash_node, controller_path)
           partial_value = hash_node.elements.find do |elem|
             elem.is_a?(Prism::AssocNode) &&
-              elem.key.is_a?(Prism::SymbolNode) &&
-              elem.key.value == "partial"
+              Source::Literals.symbol_named?(elem.key, "partial")
           end&.value
           return nil unless partial_value.is_a?(Prism::StringNode)
 

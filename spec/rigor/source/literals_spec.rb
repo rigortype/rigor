@@ -92,6 +92,32 @@ RSpec.describe Rigor::Source::Literals do
     end
   end
 
+  describe ".symbol_named?" do
+    it "returns true when a SymbolNode matches the given name" do
+      node = call("foo(:bar)").arguments.arguments.first
+      expect(described_class.symbol_named?(node, "bar")).to be true
+    end
+
+    it "returns false when a SymbolNode does not match" do
+      node = call("foo(:bar)").arguments.arguments.first
+      expect(described_class.symbol_named?(node, "baz")).to be false
+    end
+
+    it "returns false for a StringNode even if the value matches" do
+      node = call('foo("bar")').arguments.arguments.first
+      expect(described_class.symbol_named?(node, "bar")).to be false
+    end
+
+    it "returns false for a non-literal node" do
+      node = call("foo(bar)").arguments.arguments.first
+      expect(described_class.symbol_named?(node, "bar")).to be false
+    end
+
+    it "returns false for nil" do
+      expect(described_class.symbol_named?(nil, "bar")).to be false
+    end
+  end
+
   describe ".symbol_arguments" do
     it "collects every literal Symbol/String argument in order" do
       node = call('foo(:a, "b", bar, :c)')

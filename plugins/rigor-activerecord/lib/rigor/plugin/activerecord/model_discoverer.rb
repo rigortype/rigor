@@ -365,8 +365,7 @@ module Rigor
             next unless arg.is_a?(Prism::KeywordHashNode)
 
             arg.elements.each do |pair|
-              next unless pair.is_a?(Prism::AssocNode) && pair.key.is_a?(Prism::SymbolNode)
-              next unless pair.key.unescaped == key
+              next unless pair.is_a?(Prism::AssocNode) && Source::Literals.symbol_named?(pair.key, key)
 
               return true if pair.value.is_a?(Prism::TrueNode)
               return false if pair.value.is_a?(Prism::FalseNode)
@@ -380,8 +379,7 @@ module Rigor
             next unless arg.is_a?(Prism::KeywordHashNode)
 
             arg.elements.each do |pair|
-              next unless pair.is_a?(Prism::AssocNode) && pair.key.is_a?(Prism::SymbolNode)
-              next unless pair.key.unescaped == "class_name"
+              next unless pair.is_a?(Prism::AssocNode) && Source::Literals.symbol_named?(pair.key, "class_name")
               next unless pair.value.is_a?(Prism::StringNode)
 
               return pair.value.unescaped

@@ -281,7 +281,7 @@ module Rigor
           return false unless kwargs.is_a?(Prism::KeywordHashNode)
 
           pair = kwargs.elements.find do |el|
-            el.is_a?(Prism::AssocNode) && el.key.is_a?(Prism::SymbolNode) && el.key.unescaped == "required"
+            el.is_a?(Prism::AssocNode) && Source::Literals.symbol_named?(el.key, "required")
           end
           return false if pair.nil?
 
@@ -364,7 +364,7 @@ module Rigor
           return true unless kwargs.is_a?(Prism::KeywordHashNode)
 
           null_pair = kwargs.elements.find do |el|
-            el.is_a?(Prism::AssocNode) && el.key.is_a?(Prism::SymbolNode) && el.key.unescaped == "null"
+            el.is_a?(Prism::AssocNode) && Source::Literals.symbol_named?(el.key, "null")
           end
           return true if null_pair.nil?
 

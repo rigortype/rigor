@@ -100,6 +100,20 @@ module Rigor
         args.filter_map { |arg| symbol_or_string(arg) }
       end
 
+      # Whether a node is a literal `Prism::SymbolNode` that names `name`.
+      # The key-comparison counterpart to {.symbol_name} — for callers
+      # that need a predicate rather than an extraction (hash-key matching
+      # in keyword or assoc argument positions, e.g.
+      # `el.is_a?(AssocNode) && symbol_named?(el.key, "required")`).
+      # Uses `#unescaped` (not `#value`) for round-trip consistency.
+      #
+      # @param node [Prism::Node, nil]
+      # @param name [String]
+      # @return [Boolean]
+      def symbol_named?(node, name)
+        node.is_a?(Prism::SymbolNode) && node.unescaped == name
+      end
+
       # The literal Symbol/String at positional `index`, or `nil` when the
       # call has no argument list, the index is out of range, or the
       # argument there is not a literal Symbol/String.

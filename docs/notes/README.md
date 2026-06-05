@@ -73,6 +73,12 @@ Filenames are `YYYYMMDD-<slug>.md`, dated to authorship.
 | 2026-06-03 | [Typing plugin files against the `Plugin::Base` contract — spike findings](20260603-plugin-contract-self-typing-spike.md) |
 | 2026-06-03 | [Session report — typing the plugin contract (the 6-commit landing)](20260603-plugin-contract-typing-session-report.md) |
 
+## Process & meta
+
+| Date | Note |
+| --- | --- |
+| 2026-06-05 | [ADR corpus rubric audit — scoring ADR-0…49 against ADR-49](20260605-adr-corpus-rubric-audit.md) |
+
 ## Adding a note
 
 1. Name the file `YYYYMMDD-<slug>.md` using the authorship date.

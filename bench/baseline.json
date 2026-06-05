@@ -1,5 +1,5 @@
 {
   "calibrated": false,
-  "note": "Uncalibrated placeholder. Run `make bench` on the CI Linux runner (or take the release-gate perf artifact), then commit its per-target metrics here as { \"calibrated\": true, \"targets\": { ... } } to activate the gate. The first run always passes and emits a suggested baseline (bench/baseline.updated.json).",
+  "note": "Uncalibrated placeholder. Run `make bench-perf` on the CI Linux runner (or take the release-gate perf artifact), then commit its per-target metrics here as { \"calibrated\": true, \"targets\": { ... } } to activate the gate. The first run always passes and emits a suggested baseline (bench/baseline.updated.json).",
   "targets": {}
 }

@@ -143,9 +143,10 @@ coverage:
 # (bench/baseline.updated.json, gitignored) and passes — commit a
 # CI-measured baseline to activate. Deliberately NOT in `verify` (a full
 # analysis under measurement is slow); the release gate runs it (advisory).
-# `.PHONY` because the target name collides with the `bench/` directory.
-.PHONY: bench
-bench:
+# Named `bench-perf` (not `bench`) so the target does not collide with the
+# `bench/` data directory — keeping the file's no-`.PHONY` convention and
+# its `check-*` / `test-*` hyphenated-target family.
+bench-perf:
 	bundle exec ruby scripts/bench.rb --target lib
 
 # `verify` chains the spec suite, rubocop, `rigor check lib`, and the

@@ -51,9 +51,9 @@ jobs:
       # Advisory: a regression past the band (once calibrated) prints FAIL
       # but does not fail the release during the trial. The uncalibrated
       # committed baseline always passes and emits a suggestion.
-      - name: Run make bench
+      - name: Run make bench-perf
         continue-on-error: true
-        run: make bench
+        run: make bench-perf
 
       - name: Upload suggested baseline (for calibration)
         if: always()

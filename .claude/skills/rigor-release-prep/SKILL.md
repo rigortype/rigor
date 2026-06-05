@@ -237,7 +237,7 @@ This triggers two workflows:
 - **`ci.yml`** (base gate, required) — test / lint / self-check warm+cold /
   warm==cold diff. MUST be green before publishing.
 - **`release-gate.yml`** (comprehensive, advisory during the v0.2.0 trial) —
-  the perf benchmark (`make bench`, [ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)
+  the perf benchmark (`make bench-perf`, [ADR-50](../../../docs/adr/50-release-engineering-and-stability-strategy.md)
   WD4), gem-build validation, and the OSS-corpus sweep. It reports but does
   not block while the baselines calibrate; a perf or sweep regression here
   is still a release-quality signal worth investigating before publishing.

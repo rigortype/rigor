@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# ADR-50 WD4 — perf-regression benchmark for `make bench` / the release gate.
+# ADR-50 WD4 — perf-regression benchmark for `make bench-perf` / the release gate.
 #
 # Runs `rigor check` in-process over one or more targets, measures wall time,
 # total allocated objects, and peak RSS (Linux only), then gates against a
@@ -41,7 +41,7 @@ options[:targets] = ["lib"] if options[:targets].empty?
 # Peak RSS is read from /proc on Linux (the CI runner, which is the
 # authoritative measurement host). On macOS / other hosts there is no
 # /proc/self/status, so RSS is reported nil and the gate skips it — local
-# `make bench` still measures wall + allocations, which are portable.
+# `make bench-perf` still measures wall + allocations, which are portable.
 def peak_rss_kb
   status = "/proc/self/status"
   return nil unless File.readable?(status)

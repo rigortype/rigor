@@ -206,7 +206,7 @@ idiomatic corpus → it is a strengthening, not a new discipline.
 
 ### WD4 — Performance gate (proposed shape)
 
-- **Harness:** a `make bench` target running the analyzer over fixed
+- **Harness:** a `make bench-perf` target running the analyzer over fixed
   subsets of the established corpora (Mastodon `app/models`, Redmine `app`,
   a GitLab `app/{controllers,services,…}` subset — the trees ADR-44/45/46
   already profile), `--no-cache`, fixed worker count.
@@ -262,7 +262,7 @@ single-digit components, release-style CHANGELOG at landing) is unchanged.
 **Mechanism (landed, advisory).** The gate is operationalized as a
 `release/x.y.z` branch + a `release-gate.yml` workflow: pushing the branch
 runs the base CI gate (`ci.yml`, which now also triggers on `release/**`)
-plus the comprehensive extras — the `make bench` perf gate (WD4), a
+plus the comprehensive extras — the `make bench-perf` perf gate (WD4), a
 gem-build validation, and the OSS-corpus sweep (Mastodon today;
 data-driven, so Redmine / GitLab are a threshold-file addition away). Per
 the trial-then-freeze spine, the comprehensive gate ships **advisory**

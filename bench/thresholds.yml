@@ -1,4 +1,4 @@
-# Tolerance band for `make bench` (ADR-50 WD4 perf-regression gate).
+# Tolerance band for `make bench-perf` (ADR-50 WD4 perf-regression gate).
 #
 # This file is the committed, reviewed knob — the band is deliberately NOT
 # hard-coded in scripts/bench.rb so it can be tuned to runner / corpus

@@ -8,17 +8,18 @@ CI-native output format ([ADR-51](../../adr/51-ci-diagnostic-output-formats.md))
 
 | File | Copy it to | What it does |
 | --- | --- | --- |
-| [`github-actions-sarif.yml`](github-actions-sarif.yml) | `.github/workflows/rigor.yml` | SARIF 2.1.0 → GitHub code scanning (Security tab + PR alerts). The cross-platform option. |
-| [`github-actions-annotations.yml`](github-actions-annotations.yml) | `.github/workflows/rigor.yml` | Workflow commands → inline PR annotations. No upload step, nothing to enable. |
+| [`github-actions-annotations.yml`](github-actions-annotations.yml) | `.github/workflows/rigor.yml` | **The default.** Workflow commands → inline PR annotations. No upload step, no permissions, works on every repo. |
+| [`github-actions-sarif.yml`](github-actions-sarif.yml) | `.github/workflows/rigor.yml` | SARIF 2.1.0 → GitHub code scanning (Security tab + PR alerts). Needs code scanning — public repo, or private with GitHub Advanced Security. |
 | [`github-actions-reviewdog.yml`](github-actions-reviewdog.yml) | `.github/workflows/rigor.yml` | reviewdog → inline PR **review comments**. Needs `pull-requests: write`. |
 | [`gitlab-ci.yml`](gitlab-ci.yml) | `.gitlab-ci.yml` (or `include:` it) | GitLab Code Quality report → the merge-request widget. |
 
-Pick **one** GitHub template. SARIF gives the Security tab and survives as a
-reusable artifact; annotations are the zero-setup path; reviewdog posts
-review comments (and works the same way against GitLab, Gerrit, Bitbucket,
-and Gitea — see the [`rigor-ci-setup`](../../../skills/rigor-ci-setup/SKILL.md)
-skill). All run Rigor the same way — only the output format and publish step
-differ.
+Pick **one** GitHub template. **Default to annotations** — it is the only
+one that works on every repository with zero setup. Use SARIF when code
+scanning is available (public repo, or private with GitHub Advanced
+Security) and you want the Security tab; use reviewdog for threaded review
+comments (it works the same way against GitLab, Gerrit, Bitbucket, and Gitea
+— see the [`rigor-ci-setup`](../../../skills/rigor-ci-setup/SKILL.md) skill).
+All run Rigor the same way — only the output format and publish step differ.
 
 ## Other runners (generic recipe)
 

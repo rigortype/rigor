@@ -69,22 +69,42 @@ unchanged (`0` clean, `1` on errors), so the job still gates.
 
 | Platform / goal | `--format` | How it surfaces |
 | --- | --- | --- |
-| GitHub — zero setup, inline annotations | `github` | `::error file=…::` workflow commands → PR diff annotations. No upload, no permissions. |
-| GitHub — Security tab + richer alerts | `sarif` | SARIF 2.1.0 uploaded via `upload-sarif`. Needs `security-events: write`. |
+| **GitHub — the default** | `github` | `::error file=…::` workflow commands → inline PR-diff annotations. No upload, no permissions, works on **every** repo. |
+| GitHub — Security tab + persistent/deduped alerts | `sarif` | SARIF 2.1.0 via `upload-sarif`. **Requires code scanning** (see note) + `security-events: write`. |
 | GitHub/GitLab/Gerrit/Bitbucket/Gitea — PR/MR **review comments** | `checkstyle` (or `sarif`) piped to **reviewdog** | reviewdog posts comments. See Phase 3. |
 | GitLab — MR Code Quality widget | `gitlab` | Code Quality JSON published as a `codequality` report artifact. |
 | Any test-report CI (CircleCI, Jenkins, …) | `junit` | JUnit XML; every diagnostic is a `testcase` failure. |
 
-Recommendation when unsure: **SARIF** on GitHub (cross-platform, reusable),
-**Code Quality** on GitLab, **reviewdog** when the team wants threaded review
-comments anywhere.
+**The GitHub default is `github` (annotations).** It is the one path that
+works on every repository with zero setup — no upload step, no extra
+permissions, no paid features — so lead with it unless the user asks for
+more. (It is also what PHPStan recommends for GitHub Actions.) Upgrade only
+when there is a concrete reason:
+
+- **`sarif`** *only when code scanning is available* — i.e. a **public**
+  repo (free) or a **private** repo with **GitHub Advanced Security /
+  Code Security** enabled. Without it, `upload-sarif` fails with
+  *"GitHub Advanced Security must be enabled for this repository"*. When
+  available it adds the Security tab, deduped + persistent alerts, and PR
+  alerts. If you cannot tell whether the repo is public or has GHAS, **do
+  not default to SARIF** — use `github`, and offer SARIF as an option to a
+  public-repo / GHAS user.
+- **reviewdog** when the team wants threaded **review comments** filtered to
+  the changed lines (works on private repos; needs a token, Phase 3).
+
+GitHub annotation caveat: the run UI shows only a limited number of
+annotations per type, so on a first adoption of a large codebase prefer the
+baseline gate (Phase 5) or SARIF/reviewdog, which page through everything.
+
+Other platforms: **Code Quality** (`gitlab`) on GitLab; `junit` on the
+test-report CIs.
 
 ## Phase 2 — Drop in the workflow
 
 Pick **one** template, copy it into the project, and adjust nothing but the
 trigger if asked. Pin the version later (Phase 4).
 
-### GitHub — inline annotations (no setup)
+### GitHub — inline annotations (no setup) — the default
 
 ```yaml
 # .github/workflows/rigor.yml
@@ -103,6 +123,10 @@ jobs:
 ```
 
 ### GitHub — SARIF → code scanning
+
+Use this **only if code scanning is available** for the repo — a public repo
+(free), or a private repo with GitHub Advanced Security / Code Security.
+Otherwise `upload-sarif` fails; use the annotations template above.
 
 ```yaml
 # .github/workflows/rigor.yml

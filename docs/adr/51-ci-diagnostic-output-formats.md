@@ -86,8 +86,18 @@ The format set is chosen by the criterion above plus *reach per unit cost*:
   enabled; the `github` format needs neither (one `run:` line). GitLab does
   not consume SARIF for its MR widget at all — Code Quality is its only
   native MR surface. So SARIF being cross-platform does not make these two
-  redundant; it makes SARIF the *default recommendation* with two lighter
-  platform-specific alternatives.
+  redundant.
+- *Default vs anchor.* SARIF is the cross-platform **anchor** (one report,
+  many consumers — GitHub code scanning, reviewdog, other tools), but it is
+  *not* the universal per-platform default. On GitHub specifically the
+  **default surface is `github` (annotations)**: SARIF upload to code
+  scanning requires GitHub Advanced Security / Code Security on **private**
+  repos (it is free only on public repos), so a private repo without GHAS
+  cannot use it — whereas `github` annotations work on every repo with no
+  upload, no permissions, no paid feature. The `rigor-ci-setup` skill and
+  the manual therefore lead GitHub users with `github` and present SARIF as
+  the "code scanning available" upgrade. (PHPStan likewise leads GitHub
+  Actions with its `github` format.)
 - **`checkstyle`** and **`junit`** are cheap XML formats with *broad*
   reach. `checkstyle` is the key to **reviewdog**: `rigor check --format
   checkstyle | reviewdog -f=checkstyle` posts to any reviewdog reporter

@@ -23,21 +23,36 @@ module Rigor
       # Mutable per-consumer accumulator. Frozen into a {Record} snapshot
       # when `record_for` returns.
       class Accumulator
-        attr_reader :consumer, :sources, :missing
+        attr_reader :consumer, :sources, :missing, :symbol_sources, :ancestry_sources
 
         def initialize(consumer)
           @consumer = consumer
           @sources = Set.new
           @missing = Set.new
+          # ADR-46 slice 4 — symbol-granularity tracking.
+          # `symbol_sources`: source_path → Set<"ClassName#method"> for method-call deps.
+          # `ancestry_sources`: Set<source_path> for class-ancestry (superclass / include)
+          # deps — file-granularity by nature (a superclass edge touches the whole class).
+          @symbol_sources = Hash.new { |h, k| h[k] = Set.new }
+          @ancestry_sources = Set.new
         end
 
         def snapshot
-          Record.new(consumer: consumer, sources: sources.dup.freeze, missing: missing.dup.freeze)
+          frozen_sym = @symbol_sources.transform_values(&:freeze).freeze
+          Record.new(
+            consumer: consumer,
+            sources: sources.dup.freeze,
+            missing: missing.dup.freeze,
+            symbol_sources: frozen_sym,
+            ancestry_sources: ancestry_sources.dup.freeze
+          )
         end
       end
 
       # Frozen record of one file's cross-file reads.
-      Record = Data.define(:consumer, :sources, :missing)
+      # `symbol_sources`: source_path → frozen Set<"ClassName#method"> (method-call edges).
+      # `ancestry_sources`: frozen Set<source_path> (class-ancestry edges, file-granularity).
+      Record = Data.define(:consumer, :sources, :missing, :symbol_sources, :ancestry_sources)
 
       # Module-level activation count so the disabled fast path
       # ({active?}) is a plain integer read rather than a `Thread.current`
@@ -75,13 +90,25 @@ module Rigor
 
       # Records that the current consumer read a declaration / body whose
       # definition site is `path_line` (a `"path:line"` String, or nil).
-      # Self-reads and nil sites are ignored.
-      def read_site(path_line)
+      # When `symbol` is given (a `"ClassName#method"` String), the read is
+      # a method-call edge and is recorded at symbol granularity in
+      # `symbol_sources` in addition to the coarse `sources` set.
+      # Without `symbol` the read is a class-ancestry edge (file-granularity)
+      # and is added to `ancestry_sources` only.
+      # Self-reads and nil sites are ignored in all cases.
+      def read_site(path_line, symbol = nil)
         accumulator = Thread.current[KEY]
         return if accumulator.nil? || path_line.nil?
 
         path = path_line.split(":", 2).first
-        accumulator.sources << path if path && path != accumulator.consumer
+        return unless path && path != accumulator.consumer
+
+        accumulator.sources << path
+        if symbol
+          accumulator.symbol_sources[path] << symbol
+        else
+          accumulator.ancestry_sources << path
+        end
       end
 
       # Records a cross-file lookup of `name` (kind `:method` / `:class` /

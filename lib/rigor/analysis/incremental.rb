@@ -49,6 +49,55 @@ module Rigor
         closure.freeze
       end
 
+      # ADR-46 slice 4 — inverts a per-consumer symbol-sources map
+      # (`consumer → { source_path → Set<"ClassName#method"> }`) into the
+      # symbol-level dependents index: `[source_path, symbol] → Set<consumer>`.
+      # Used by {affected_with_symbols} to limit fan-out to callers of
+      # symbols that actually changed rather than all callers of the file.
+      def invert_symbols(symbol_sources_by_consumer)
+        index = Hash.new { |h, k| h[k] = Set.new }
+        symbol_sources_by_consumer.each do |consumer, sources_by_file|
+          sources_by_file.each do |source, symbols|
+            symbols.each { |sym| index[[source, sym]] << consumer }
+          end
+        end
+        index.default_proc = nil
+        index.each_value(&:freeze)
+        index.freeze
+      end
+
+      # ADR-46 slice 4 — given a set of changed file paths and two per-file
+      # symbol fingerprint maps (before and after), returns the frozen Set of
+      # `[path, symbol]` pairs whose fingerprints differ (added, removed, or
+      # body-changed).
+      def changed_symbol_pairs(changed_files, fingerprints_before, fingerprints_after)
+        pairs = Set.new
+        changed_files.each do |path|
+          before = fingerprints_before[path] || {}
+          after  = fingerprints_after[path]  || {}
+          (before.keys | after.keys).each do |sym|
+            pairs << [path, sym] if before[sym] != after[sym]
+          end
+        end
+        pairs.freeze
+      end
+
+      # ADR-46 slice 4 — the symbol-granularity affected closure.
+      #
+      # A consumer is included when:
+      # (a) it is itself a changed file,
+      # (b) it has an ancestry dep on a changed file (always re-checked — file-level), or
+      # (c) it has a symbol dep on a `[file, symbol]` pair that changed.
+      #
+      # Consumers that only have symbol deps on a changed file, and none of
+      # their tracked symbols changed, are NOT included — the slice 4 precision win.
+      def affected_with_symbols(changed_files, changed_pairs, symbol_dependents, ancestry_dependents)
+        closure = changed_files.to_set
+        changed_files.each { |file| closure.merge(ancestry_dependents[file] || []) }
+        changed_pairs.each { |pair| closure.merge(symbol_dependents[pair] || []) }
+        closure.freeze
+      end
+
       # The files whose per-file diagnostics differ between two runs.
       # Each argument maps a path to its diagnostic list; diagnostics are
       # compared structurally via {Diagnostic#to_h} so identity / ordering

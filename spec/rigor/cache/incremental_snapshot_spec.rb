@@ -14,7 +14,10 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       cache: { "a.rb" => [diagnostic("a.rb")], "b.rb" => [] },
       sources: { "a.rb" => Set["b.rb"] },
       digests: { "a.rb" => "sha-a", "b.rb" => "sha-b" },
-      analyzed: ["a.rb", "b.rb"]
+      analyzed: ["a.rb", "b.rb"],
+      symbol_sources: { "a.rb" => { "b.rb" => Set["Foo#bar"] } },
+      ancestry_sources: { "a.rb" => Set.new },
+      symbol_fingerprints: { "b.rb" => { "Foo#bar" => "abc123" } }
     )
   end
 

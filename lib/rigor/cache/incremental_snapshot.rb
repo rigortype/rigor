@@ -29,13 +29,19 @@ module Rigor
     class IncrementalSnapshot
       # Bump when the on-disk shape changes so stale snapshots are ignored
       # rather than mis-deserialized.
-      SCHEMA = 1
+      SCHEMA = 2
 
-      # The persisted per-file state. `cache` maps an analyzed file to its
-      # diagnostics, `sources` to the set of files its analysis read from,
-      # `digests` to its content digest at analysis time, and `analyzed` is
-      # the ordered analyzed-file list.
-      Payload = Data.define(:cache, :sources, :digests, :analyzed)
+      # The persisted per-file state.
+      # `cache` maps an analyzed file to its diagnostics.
+      # `sources` maps a consumer to the Set of source files it read from.
+      # `digests` maps a file to its content digest at analysis time.
+      # `analyzed` is the ordered analyzed-file list.
+      # ADR-46 slice 4:
+      # `symbol_sources` maps a consumer to { source_path → Set<"ClassName#method"> }.
+      # `ancestry_sources` maps a consumer to Set<source_path> (class-ancestry deps).
+      # `symbol_fingerprints` maps a path to { "ClassName#method" => sha256_hex }.
+      Payload = Data.define(:cache, :sources, :digests, :analyzed,
+                            :symbol_sources, :ancestry_sources, :symbol_fingerprints)
 
       # The global fingerprint that gates a snapshot load: a digest of the
       # inputs whose change requires a full rebuild — the engine version +
@@ -96,7 +102,10 @@ module Rigor
 
         Payload.new(
           cache: data[:cache], sources: data[:sources],
-          digests: data[:digests], analyzed: data[:analyzed]
+          digests: data[:digests], analyzed: data[:analyzed],
+          symbol_sources: data[:symbol_sources] || {},
+          ancestry_sources: data[:ancestry_sources] || {},
+          symbol_fingerprints: data[:symbol_fingerprints] || {}
         )
       rescue StandardError
         nil
@@ -111,7 +120,10 @@ module Rigor
         blob = Marshal.dump(
           schema: SCHEMA, fingerprint: fingerprint,
           cache: payload.cache, sources: payload.sources,
-          digests: payload.digests, analyzed: payload.analyzed
+          digests: payload.digests, analyzed: payload.analyzed,
+          symbol_sources: payload.symbol_sources,
+          ancestry_sources: payload.ancestry_sources,
+          symbol_fingerprints: payload.symbol_fingerprints
         )
         tmp = "#{@path}.#{Process.pid}.tmp"
         File.binwrite(tmp, blob)

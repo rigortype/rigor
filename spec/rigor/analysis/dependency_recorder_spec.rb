@@ -164,6 +164,75 @@ RSpec.describe Rigor::Analysis::DependencyRecorder do
     end
   end
 
+  # ADR-46 slice 4 — symbol-granularity tracking.
+  it "records method-call deps in symbol_sources (not ancestry_sources)" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "model.rb"), <<~RUBY)
+        class Widget
+          def price
+            100
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "caller.rb"), "Widget.new.price\n")
+
+      runner = run_recording(dir)
+      record = runner.file_dependencies[File.join(dir, "caller.rb")]
+
+      model = File.join(dir, "model.rb")
+      expect(record.symbol_sources[model]).to include("Widget#price")
+      expect(record.ancestry_sources).not_to include(model)
+    end
+  end
+
+  it "records superclass-of reads in ancestry_sources (file-level)" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "base.rb"), <<~RUBY)
+        class Base
+          def greet
+            "hi"
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "child.rb"), <<~RUBY)
+        class Child < Base
+          def call_greet
+            greet
+          end
+        end
+      RUBY
+
+      runner = run_recording(dir)
+      record = runner.file_dependencies[File.join(dir, "child.rb")]
+
+      base = File.join(dir, "base.rb")
+      # The superclass ancestry read is file-level; the method body read is symbol-level.
+      expect(record.ancestry_sources).to include(base)
+      expect(record.symbol_sources[base]).to include("Base#greet")
+    end
+  end
+
+  it "records runner#symbol_fingerprints keyed by path and symbol" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "model.rb"), <<~RUBY)
+        class Widget
+          def price
+            100
+          end
+        end
+      RUBY
+      File.write(File.join(dir, "caller.rb"), "Widget.new.price\n")
+
+      runner = run_recording(dir)
+      fps = runner.symbol_fingerprints
+
+      model = File.join(dir, "model.rb")
+      expect(fps[model]).to be_a(Hash)
+      expect(fps[model].keys).to include("Widget#price")
+      expect(fps[model]["Widget#price"]).to be_a(String).and have_attributes(length: 64)
+    end
+  end
+
   it "records nothing when dependency recording is off (the default)" do
     Dir.mktmpdir do |dir|
       File.write(File.join(dir, "model.rb"), "class Widget\n  def price\n    1\n  end\nend\n")

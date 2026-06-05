@@ -42,6 +42,86 @@ RSpec.describe Rigor::Analysis::Incremental do
     end
   end
 
+  # ADR-46 slice 4 — symbol-granularity helpers.
+  describe ".invert_symbols" do
+    it "builds a [source, symbol] → Set<consumer> index" do
+      sym_sources = {
+        "a.rb" => { "model.rb" => Set["Model#foo", "Model#bar"] },
+        "b.rb" => { "model.rb" => Set["Model#foo"] }
+      }
+      index = described_class.invert_symbols(sym_sources)
+      expect(index[["model.rb", "Model#foo"]]).to eq(Set["a.rb", "b.rb"])
+      expect(index[["model.rb", "Model#bar"]]).to eq(Set["a.rb"])
+      expect(index[["model.rb", "Model#baz"]]).to be_nil
+    end
+
+    it "returns a frozen hash of frozen Sets" do
+      index = described_class.invert_symbols({ "a.rb" => { "b.rb" => Set["X#f"] } })
+      expect(index).to be_frozen
+      expect(index[["b.rb", "X#f"]]).to be_frozen
+    end
+  end
+
+  describe ".changed_symbol_pairs" do
+    it "returns pairs whose fingerprints differ" do
+      before = { "m.rb" => { "M#foo" => "hash1", "M#bar" => "hash2" } }
+      after  = { "m.rb" => { "M#foo" => "hash1", "M#bar" => "hash9" } }
+      pairs = described_class.changed_symbol_pairs(["m.rb"], before, after)
+      expect(pairs).to eq(Set[["m.rb", "M#bar"]])
+    end
+
+    it "includes newly added symbols" do
+      before = { "m.rb" => { "M#foo" => "h1" } }
+      after  = { "m.rb" => { "M#foo" => "h1", "M#baz" => "h2" } }
+      expect(described_class.changed_symbol_pairs(["m.rb"], before, after))
+        .to eq(Set[["m.rb", "M#baz"]])
+    end
+
+    it "includes removed symbols" do
+      before = { "m.rb" => { "M#foo" => "h1", "M#bar" => "h2" } }
+      after  = { "m.rb" => { "M#foo" => "h1" } }
+      expect(described_class.changed_symbol_pairs(["m.rb"], before, after))
+        .to eq(Set[["m.rb", "M#bar"]])
+    end
+
+    it "returns nothing when all fingerprints are identical" do
+      before = { "m.rb" => { "M#foo" => "h1" } }
+      after  = { "m.rb" => { "M#foo" => "h1" } }
+      expect(described_class.changed_symbol_pairs(["m.rb"], before, after)).to be_empty
+    end
+  end
+
+  describe ".affected_with_symbols" do
+    let(:sym_deps) do
+      { ["m.rb", "M#bar"] => Set["b.rb"], ["m.rb", "M#foo"] => Set["a.rb", "b.rb"] }
+    end
+    let(:ancestry_deps) { { "m.rb" => Set["c.rb"] } }
+
+    it "includes changed files themselves" do
+      result = described_class.affected_with_symbols(["m.rb"], Set.new, {}, {})
+      expect(result).to include("m.rb")
+    end
+
+    it "includes consumers of changed (file, symbol) pairs" do
+      changed_pairs = Set[["m.rb", "M#bar"]]
+      result = described_class.affected_with_symbols(["m.rb"], changed_pairs, sym_deps, {})
+      expect(result).to include("b.rb")
+      expect(result).not_to include("a.rb") # M#foo not changed
+    end
+
+    it "includes ancestry consumers unconditionally when their source file changed" do
+      result = described_class.affected_with_symbols(["m.rb"], Set.new, {}, ancestry_deps)
+      expect(result).to include("c.rb")
+    end
+
+    it "excludes callers of unchanged symbols (the slice 4 win)" do
+      # Only M#bar changed; a.rb only calls M#foo — should be pruned.
+      changed_pairs = Set[["m.rb", "M#bar"]]
+      result = described_class.affected_with_symbols(["m.rb"], changed_pairs, sym_deps, {})
+      expect(result).not_to include("a.rb")
+    end
+  end
+
   # End-to-end soundness: drive real runs, mutate one file, and confirm
   # the files whose diagnostics actually moved are a subset of the affected
   # closure the body tier would re-analyse.

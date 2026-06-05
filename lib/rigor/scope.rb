@@ -355,7 +355,12 @@ module Rigor
     # consumer. Gated on the recorder being active — no-op on a normal run.
     def record_cross_file_method(class_name, method_name, node)
       if node
-        Analysis::DependencyRecorder.read_site(@discovered_def_sources.dig(class_name.to_s, method_name.to_sym))
+        # ADR-46 slice 4 — pass the symbol so the recorder tracks this as a
+        # method-call (symbol-granularity) edge rather than a file-level edge.
+        Analysis::DependencyRecorder.read_site(
+          @discovered_def_sources.dig(class_name.to_s, method_name.to_sym),
+          "#{class_name}##{method_name}"
+        )
       else
         Analysis::DependencyRecorder.read_missing(:method, "#{class_name}##{method_name}")
       end

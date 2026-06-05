@@ -230,6 +230,29 @@ module Rigor
         Incremental.invert(@file_dependencies.transform_values(&:sources))
       end
 
+      # ADR-46 slice 4 — per-symbol body fingerprints, computed from the
+      # project pre-pass def index. Returns a frozen hash of the form:
+      #   { "path/to/file.rb" => { "ClassName#method" => sha256_hex, … }, … }
+      # Used by {Analysis::IncrementalSession} to detect which symbols in a
+      # changed file actually changed bodies, so only callers of those
+      # specific symbols are re-checked. Only meaningful after a run that
+      # populated `@project_discovered_def_nodes` (i.e. any full or subset
+      # analysis); returns an empty frozen hash before the first run.
+      def symbol_fingerprints
+        result = Hash.new { |h, k| h[k] = {} }
+        @project_discovered_def_sources.each do |class_name, methods|
+          methods.each do |method_sym, path_line|
+            path = path_line.split(":", 2).first
+            node = @project_discovered_def_nodes.dig(class_name, method_sym)
+            next unless node
+
+            result[path]["#{class_name}##{method_sym}"] =
+              Digest::SHA256.hexdigest(node.location.slice)
+          end
+        end
+        result.transform_values(&:freeze).freeze
+      end
+
       # ADR-45 — unchanged-project fast path. Serves the whole run's
       # (pre-severity-profile) diagnostics from one record-and-validate
       # cache entry when every file the previous run read is unchanged,

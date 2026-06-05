@@ -115,6 +115,24 @@ module Rigor
         appeared.freeze
       end
 
+      # ADR-46 slice 3 — the qualified class/module names *declared* in a
+      # changed file's after-state that were absent from its before-state: a
+      # class that appeared in this edit. (For an added file the before-set
+      # is empty, so every class it declares appears.) A class that merely
+      # moved files still appears here, but its negative-dependents are empty,
+      # so the over-report costs nothing. Returns a frozen Set of qualified
+      # class-name Strings. `decls_before` / `decls_after` map a path to its
+      # Set of declared class names.
+      def appeared_classes(changed_files, decls_before, decls_after)
+        appeared = Set.new
+        changed_files.each do |path|
+          before = decls_before[path] || Set.new
+          after  = decls_after[path]  || Set.new
+          appeared.merge(after - before)
+        end
+        appeared.freeze
+      end
+
       # ADR-46 slice 3 — the consumers to re-check because a name they
       # looked up and *missed* (a negative dependency) now resolves. `keys`
       # is the set of negative-dependency keys (`"toplevel:foo"` /

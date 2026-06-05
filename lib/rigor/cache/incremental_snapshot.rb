@@ -29,7 +29,7 @@ module Rigor
     class IncrementalSnapshot
       # Bump when the on-disk shape changes so stale snapshots are ignored
       # rather than mis-deserialized.
-      SCHEMA = 3
+      SCHEMA = 4
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -42,9 +42,10 @@ module Rigor
       # `symbol_fingerprints` maps a path to { "ClassName#method" => sha256_hex }.
       # ADR-46 slice 3:
       # `missing` maps a consumer to Set<"kind:name"> it looked up and missed.
+      # `class_decls` maps a path to Set<qualified class name> it declares.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
                             :symbol_sources, :ancestry_sources, :symbol_fingerprints,
-                            :missing)
+                            :missing, :class_decls)
 
       # The global fingerprint that gates a snapshot load: a digest of the
       # inputs whose change requires a full rebuild — the engine version +
@@ -109,7 +110,8 @@ module Rigor
           symbol_sources: data[:symbol_sources] || {},
           ancestry_sources: data[:ancestry_sources] || {},
           symbol_fingerprints: data[:symbol_fingerprints] || {},
-          missing: data[:missing] || {}
+          missing: data[:missing] || {},
+          class_decls: data[:class_decls] || {}
         )
       rescue StandardError
         nil
@@ -128,7 +130,8 @@ module Rigor
           symbol_sources: payload.symbol_sources,
           ancestry_sources: payload.ancestry_sources,
           symbol_fingerprints: payload.symbol_fingerprints,
-          missing: payload.missing
+          missing: payload.missing,
+          class_decls: payload.class_decls
         )
         tmp = "#{@path}.#{Process.pid}.tmp"
         File.binwrite(tmp, blob)

@@ -134,6 +134,30 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
       end
     end
 
+    it "re-checks a subclass when its previously-undefined superclass is added" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        # ASub overrides tag with reduced visibility, but NewBase does not yet
+        # exist, so no def.override-* fires at baseline.
+        File.write(a, "class ASub < NewBase\n  private\n\n  def tag\n    \"y\"\n  end\nend\n")
+        File.write(b, "class Placeholder\nend\n")
+
+        session = described_class.new(configuration: configuration(dir))
+        baseline = session.baseline
+        expect(baseline.map(&:rule)).not_to include("def.override-visibility-reduced")
+
+        # Define NewBase (with a public tag) in b.rb — ASub now reduces its
+        # visibility, so the override diagnostic must appear.
+        File.write(b, "class NewBase\n  def tag\n    \"x\"\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(sorted(recheck.diagnostics).map { |h| h["rule"] }).to include("def.override-visibility-reduced")
+      end
+    end
+
     it "does not re-check a caller when an unrelated symbol appears" do
       Dir.mktmpdir do |dir|
         a = File.join(dir, "a.rb")

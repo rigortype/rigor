@@ -6,6 +6,7 @@ require_relative "../reflection"
 require_relative "../source/node_walker"
 require_relative "../type"
 require_relative "diagnostic"
+require_relative "dependency_recorder"
 require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
 require_relative "check_rules/dead_assignment_collector"
@@ -1755,6 +1756,14 @@ module Rigor
             candidate = (segments[0, i] + [raw_ancestor]).join("::")
             return candidate if known_user_class?(scope, candidate)
           end
+          # ADR-46 slice 3 — the override checker reads the class graph
+          # directly (not through the recorder's `Scope` choke points), and
+          # short-circuits when the ancestor resolves to no project class, so
+          # an incremental re-check has no edge telling it to re-check this
+          # subclass when that ancestor is later defined. Record a negative
+          # class edge (keyed on the unqualified name) so the appeared-class
+          # widening picks it up.
+          DependencyRecorder.read_missing(:class, raw_ancestor.to_s.split("::").last) if DependencyRecorder.active?
           nil
         end
 

@@ -55,6 +55,7 @@ module Rigor
         # is defined by a later edit).
         @missing = {}              # consumer => Set<"kind:name"> it looked up and missed
         @negative_dependents = {}  # "kind:name" => Set<consumer> (inverted @missing)
+        @class_decls = {}          # path => Set<qualified class name declared in the file>
       end
 
       # The project files analyzed at the last baseline / recheck — the set
@@ -81,29 +82,32 @@ module Rigor
       # state so a subsequent #recheck sees the new world.
       def recheck
         changed = @analyzed.reject { |path| digest(path) == @digests[path] }
-        # ADR-46 slice 4 — compute symbol fingerprints for the changed files
-        # via a quick indexing re-pass, then use symbol-granularity affected
-        # computation so that callers of unchanged symbols are spared.
-        new_fps = symbol_fingerprints_for(changed)
-        changed_pairs = Incremental.changed_symbol_pairs(changed, @symbol_fingerprints, new_fps)
-        affected = if changed_pairs.any? || changed.any? { |f| @ancestry_dependents[f] }
-                     Incremental.affected_with_symbols(
-                       changed, changed_pairs, @symbol_dependents, @ancestry_dependents
-                     )
-                   else
-                     Incremental.affected(changed, @dependents)
-                   end
-        # ADR-46 slice 3 — widen for symbols that *appeared* in the changed
-        # files and resolve a prior negative (missing) lookup, so a consumer
-        # whose `call.unresolved-toplevel` (or analogous miss) is now defined
-        # gets re-checked rather than served a stale diagnostic.
-        affected = (affected | negative_affected(changed, new_fps)).freeze
+        affected = affected_closure(changed)
         runner = build_runner(analyze_only: affected, record_dependencies: true)
         fresh = run_runner(runner).diagnostics
         reused = @analyzed - affected.to_a
         merged = fresh + reused.flat_map { |path| @cache[path] || [] }
         absorb(runner, fresh, affected, changed)
         Recheck.new(diagnostics: merged, changed: changed.to_set, affected: affected, reused: reused.to_set)
+      end
+
+      # The frozen set of files a #recheck must re-analyse for `changed`:
+      # the symbol/ancestry-granularity closure of the changed files (slice 4)
+      # widened by the consumers of any symbol / class that *appeared* in the
+      # edit and resolves a prior negative lookup (slice 3) — so a
+      # `call.unresolved-toplevel` whose target is now defined, or a
+      # `def.override-*` whose ancestor now exists, is re-checked rather than
+      # served stale. Both use a quick indexing re-pass over the changed files.
+      def affected_closure(changed)
+        new_fps = symbol_fingerprints_for(changed)
+        new_class_decls = class_declarations_for(changed)
+        changed_pairs = Incremental.changed_symbol_pairs(changed, @symbol_fingerprints, new_fps)
+        base = if changed_pairs.any? || changed.any? { |f| @ancestry_dependents[f] }
+                 Incremental.affected_with_symbols(changed, changed_pairs, @symbol_dependents, @ancestry_dependents)
+               else
+                 Incremental.affected(changed, @dependents)
+               end
+        (base | negative_affected(changed, new_fps, new_class_decls)).freeze
       end
 
       # Verification engine (the `--verify-incremental` gate): with NO
@@ -165,6 +169,7 @@ module Rigor
         # re-check refinement; the fingerprint still drops the snapshot on a
         # file add/remove, so it is never unsound).
         @missing           = payload.missing || {}
+        @class_decls       = payload.class_decls || {}
         @symbol_dependents = Incremental.invert_symbols(@symbol_sources)
         @ancestry_dependents = Incremental.invert(@ancestry_sources)
         @negative_dependents = Incremental.invert(@missing)
@@ -174,7 +179,8 @@ module Rigor
         Cache::IncrementalSnapshot::Payload.new(
           cache: @cache, sources: @sources, digests: @digests, analyzed: @analyzed,
           symbol_sources: @symbol_sources, ancestry_sources: @ancestry_sources,
-          symbol_fingerprints: @symbol_fingerprints, missing: @missing
+          symbol_fingerprints: @symbol_fingerprints, missing: @missing,
+          class_decls: @class_decls
         )
       end
 
@@ -203,6 +209,10 @@ module Rigor
         @ancestry_dependents = Incremental.invert(@ancestry_sources)
         @negative_dependents = Incremental.invert(@missing)
         @symbol_fingerprints.merge!(runner.symbol_fingerprints)
+        # Wholesale replace (the subset runner's pre-pass is complete): a file
+        # that lost its last class must drop out of the map so a later re-add
+        # registers as an appearance.
+        @class_decls = runner.class_declarations
       end
 
       # Compute per-symbol body fingerprints for `paths` via a quick indexing
@@ -235,10 +245,26 @@ module Rigor
       # appeared `"ClassName#method"` to the negative-dependency key it would
       # satisfy (`toplevel:foo` for a top-level def, `method:C#m` otherwise),
       # then unions the recorded negative-dependents of those keys.
-      def negative_affected(changed, new_fingerprints)
-        appeared = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
-        keys = appeared.map { |symbol| negative_key_for(symbol) }
+      def negative_affected(changed, new_fingerprints, new_class_decls)
+        appeared_methods = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
+        appeared_classes = Incremental.appeared_classes(changed, @class_decls, new_class_decls)
+        keys = appeared_methods.map { |symbol| negative_key_for(symbol) }
+        keys.concat(appeared_classes.map { |klass| "class:#{klass.split('::').last}" })
         Incremental.negative_closure(keys, @negative_dependents)
+      end
+
+      # The qualified class/module names declared in `paths`, via the same
+      # quick indexing re-pass {#symbol_fingerprints_for} uses (Prism parse +
+      # declaration extraction, no inference). `{ path => Set<class name> }`.
+      def class_declarations_for(paths)
+        return {} if paths.empty?
+
+        index = Inference::ScopeIndexer.discovered_def_index_for_paths(paths)
+        result = Hash.new { |hash, key| hash[key] = Set.new }
+        index[:class_sources].each do |class_name, files|
+          files.each { |file| result[file] << class_name }
+        end
+        result.transform_values(&:freeze).freeze
       end
 
       TOP_LEVEL_KEY = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY

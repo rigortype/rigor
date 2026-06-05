@@ -299,11 +299,29 @@ trade for speed. Defenses:
    every symbol that *appeared* in a changed file
    (`Incremental.{appeared_symbols,negative_closure}`). Method negatives are
    matched class-qualified exact (`method:C#m`) as defence-in-depth; the
-   ancestry edge remains the primary cover. `--verify-incremental` stays
-   byte-identical; the `IncrementalSnapshot` payload carries `missing`
-   (SCHEMA 3). **Remaining (demand-gated):** incremental file *addition* (a
-   new file changes the `paths:` fingerprint → full rebuild today; making it
-   incremental would lean on the negative edges as the soundness enabler).
+   ancestry edge remains the primary cover.
+
+   A second gap surfaced: the **`def.override-*` checker reads the class graph
+   directly** (`CheckRules#known_user_class?`), not through the recorder's
+   `Scope` accessors, and *short-circuits* when the ancestor name resolves to
+   no project class — so a subclass `class ASub < NewBase` with `NewBase`
+   undefined records no edge, and defining `NewBase` (or a module it
+   `include`s) later left `ASub`'s missing override diagnostic stale. (This
+   bites both a same-file class-addition edit and the file-addition tier
+   below.) Closed by recording a **negative class edge** (`class:Name`,
+   unqualified) where `resolve_override_ancestor_name` fails, and widening the
+   re-check by the negative-dependents of every **class** that appeared in the
+   edit — `Incremental.appeared_classes` over per-file declared-class sets
+   (`Runner#class_declarations`), matched by simple name. An *empty* class that
+   bridges to an inherited method is covered, because the appeared class is the
+   missing link itself (the re-analysis then walks the rest). `--verify-incremental`
+   stays byte-identical; the `IncrementalSnapshot` payload carries `missing` +
+   `class_decls` (SCHEMA 4).
+
+   **Remaining (demand-gated):** incremental file *addition / removal* (a new
+   or deleted file changes the `paths:` fingerprint → full rebuild today). The
+   negative edges above are the soundness enabler for addition; removal is
+   covered by the positive symbol / ancestry dependents of the removed file.
 4. **Symbol granularity (optional).** Refine file-level deps to
    `(file, symbol)` so editing one model method re-checks only callers of
    *that* method, not every caller of the model.

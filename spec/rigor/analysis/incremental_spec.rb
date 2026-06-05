@@ -79,6 +79,19 @@ RSpec.describe Rigor::Analysis::Incremental do
     end
   end
 
+  describe ".appeared_classes" do
+    it "returns classes declared after but not before, for changed files" do
+      before = { "b.rb" => Set["Placeholder"] }
+      after  = { "b.rb" => Set["Placeholder", "NewBase"] }
+      expect(described_class.appeared_classes(["b.rb"], before, after)).to eq(Set["NewBase"])
+    end
+
+    it "treats every class in a file with no before-state as appeared (file add)" do
+      after = { "new.rb" => Set["Widget", "Widget::Inner"] }
+      expect(described_class.appeared_classes(["new.rb"], {}, after)).to eq(Set["Widget", "Widget::Inner"])
+    end
+  end
+
   describe ".negative_closure" do
     it "unions the negative-dependents of the satisfied keys" do
       negdeps = { "toplevel:helper" => Set["a.rb", "c.rb"], "method:Post#archive" => Set["d.rb"] }

@@ -273,6 +273,19 @@ module Rigor
         result.transform_values(&:freeze).freeze
       end
 
+      # ADR-46 slice 3 — per-file set of the qualified class/module names
+      # declared in that file. Used to detect a class that *appeared* in an
+      # edit so a subclass whose ancestor was previously undefined (and so
+      # recorded a negative class edge) is re-checked. Inverts the project
+      # class-source attribution (class → declaring files).
+      def class_declarations
+        result = Hash.new { |hash, key| hash[key] = Set.new }
+        @project_discovered_class_sources.each do |class_name, files|
+          files.each { |file| result[file] << class_name }
+        end
+        result.transform_values(&:freeze).freeze
+      end
+
       # ADR-45 — unchanged-project fast path. Serves the whole run's
       # (pre-severity-profile) diagnostics from one record-and-validate
       # cache entry when every file the previous run read is unchanged,

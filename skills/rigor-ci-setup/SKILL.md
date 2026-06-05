@@ -28,11 +28,44 @@ first. Always give Rigor a **separate job** (better: a separate workflow
 file, for its own triggers, concurrency, and status badge). Every template
 below does this.
 
+## Phase 0 — Detect the project's CI platform
+
+**Inspect the repository first; do not ask what you can detect.** Look for
+these markers from the project root and let them drive the platform choice:
+
+| Marker (check existence) | Platform → template |
+| --- | --- |
+| `.github/workflows/` directory exists | **GitHub Actions** (Phase 2 GitHub templates) |
+| `.gitlab-ci.yml` exists | **GitLab CI** (Phase 2 GitLab template) |
+| `.circleci/config.yml` exists | **CircleCI** (generic recipe, `junit`) |
+| `Jenkinsfile` exists | **Jenkins** (generic recipe, `junit` / `checkstyle`) |
+| `bitbucket-pipelines.yml` / `azure-pipelines.yml` / `.drone.yml` | that platform (generic recipe) |
+| none of the above | no CI yet — **ask** the user which platform they use |
+
+Concretely (the agent has file tools — use them):
+
+- List `.github/workflows/*.yml` and `.gitlab-ci.yml`. **If
+  `.github/workflows/rigor.yml` already exists, read it** — this is an
+  *update*, not a fresh add: preserve the user's triggers / pinning and only
+  change the format / steps that are wrong or missing. The same applies to
+  an existing `rigor` job inside `.gitlab-ci.yml`.
+- Check for an existing pin: `.github/rigor/Gemfile` (+ lockfile) means the
+  project already pins Rigor — keep it (Phase 4).
+- Check for `.rigor-baseline.yml` — if present, the project is in baseline
+  adoption mode, which changes the gate advice (Phase 5).
+- Grep existing CI files for `reviewdog` — if already used, prefer the
+  reviewdog path (Phase 3) for consistency.
+
+**Routing:** exactly one platform marker → use it, state what you found, and
+proceed. Multiple (e.g. both `.github/workflows/` and `.gitlab-ci.yml`) →
+tell the user both were found and ask which to wire (or do both). None → ask.
+
 ## Phase 1 — Pick the surface (what the reviewer should see)
 
-Ask the user which inline surface they want, then pick the matching
-`--format`. All formats are pure renderings of the same diagnostics; the
-exit code is unchanged (`0` clean, `1` on errors), so the job still gates.
+With the platform from Phase 0, pick the matching `--format` (confirm with
+the user only when the platform offers more than one good surface). All
+formats are pure renderings of the same diagnostics; the exit code is
+unchanged (`0` clean, `1` on errors), so the job still gates.
 
 | Platform / goal | `--format` | How it surfaces |
 | --- | --- | --- |
@@ -109,6 +142,20 @@ rigor:
       codequality: gl-code-quality-report.json
     when: always
 ```
+
+`--format gitlab` emits exactly the
+[Code Quality report format](https://docs.gitlab.com/ci/testing/code_quality/)
+GitLab requires: each finding carries `description`, `check_name`,
+`fingerprint` (a stable SHA-256, so a finding keeps its identity across
+runs), `severity` (`major`/`minor`/`info`), and `location.path` +
+`location.lines.begin`. Paths are repo-relative with no `./` prefix and the
+JSON has no BOM, both of which GitLab demands. For the MR widget to show a
+*diff* of new vs resolved findings, the report must exist on **both** the
+target (default) branch and the MR branch — the job above runs on each
+pipeline, which satisfies that automatically once it has run once on the
+default branch. (Note: a long-standing GitLab display bug can hide
+`check_name`; Rigor already folds the rule id into `description` as
+`… [rule]`, so the identifier shows regardless.)
 
 ### Other runners (generic)
 

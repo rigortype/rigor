@@ -187,16 +187,33 @@ Provision Ruby 4.0, `gem install rigortype`, then
 `rigor check --format junit > junit.xml` (or `checkstyle`, `json`) and
 publish the file with whatever artifact mechanism the platform offers.
 
-## Phase 3 — reviewdog (inline review comments, any platform)
+## Phase 3 — reviewdog (inline review comments)
 
 [reviewdog](https://github.com/reviewdog/reviewdog) turns Rigor's output
-into PR/MR review comments on GitHub, GitLab, Gerrit, Bitbucket, and Gitea.
-It reads Rigor's `checkstyle` or `sarif` output, so one format covers every
-reporter. Install it with
-[`reviewdog/action-setup`](https://github.com/reviewdog/action-setup):
+into PR/MR review comments. It reads Rigor's `checkstyle` (preferred — light,
+no code scanning) or `sarif`, so the format is the same everywhere — **but
+the `-reporter` is platform-specific, so it must match the platform you
+detected in Phase 0.** Pick the reporter first, then the token/env it needs:
+
+| Phase 0 platform | `-reporter` | Token / env | Other needs |
+| --- | --- | --- | --- |
+| GitHub | `github-pr-review` (threaded comments) · `github-pr-check` (Check run) · `github-pr-annotations` | `REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}` | `permissions: pull-requests: write` |
+| GitLab | `gitlab-mr-discussion` (threaded) · `gitlab-mr-commit` | `REVIEWDOG_GITLAB_API_TOKEN` (a project/personal token) + `CI_API_V4_URL` | runs on MR pipelines |
+| Gerrit / Bitbucket / Gitea | `gerrit-change-review` · `bitbucket-code-report` · `gitea-pr-review` | the platform's token var (see reviewdog README) | — |
+
+There is **no cross-platform reviewdog reporter** — `github-*` posts only to
+GitHub, `gitlab-*` only to GitLab. So a reviewdog setup is always tied to one
+platform; if a project targets two (e.g. a GitHub mirror of a GitLab repo),
+wire one reviewdog job per platform, or use the platform-native format
+(`sarif` / `gitlab`) on each.
+
+Install reviewdog with
+[`reviewdog/action-setup`](https://github.com/reviewdog/action-setup) (GitHub)
+or `go install` / the binary (GitLab and others).
+
+**GitHub** (`.github/workflows/rigor.yml`):
 
 ```yaml
-# .github/workflows/rigor.yml  (GitHub PR review comments)
 name: rigor
 on: [pull_request]
 permissions:
@@ -219,27 +236,32 @@ jobs:
           REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Knobs to set with the user:
+**GitLab** (`.gitlab-ci.yml`) — install the reviewdog binary, then pipe:
 
-- **`-reporter`** — `github-pr-review` (threaded review comments, the
-  default choice) · `github-pr-check` (a Check run) · `github-pr-annotations`
-  (annotations) on GitHub; `gitlab-mr-discussion` on GitLab (set
-  `REVIEWDOG_GITLAB_API_TOKEN` + `CI_API_V4_URL`); `gerrit-change-review`,
-  `bitbucket-code-report`, `gitea-pr-review` elsewhere.
-- **`-fail-level`** — `error` makes the step fail only on Rigor errors
-  (matches Rigor's exit code); `any` fails on warnings too; `none` never
-  fails (comment-only). Default to `error`.
+```yaml
+rigor:
+  image: ruby:4.0
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    REVIEWDOG_GITLAB_API_TOKEN: $RIGOR_REVIEWDOG_TOKEN   # a CI/CD variable you set
+  script:
+    - gem install rigortype
+    - wget -O - -q https://raw.githubusercontent.com/reviewdog/reviewdog/master/install.sh | sh -s -- -b /usr/local/bin
+    - rigor check --format checkstyle | reviewdog -f=checkstyle -reporter=gitlab-mr-discussion -fail-level=error
+```
+
+Knobs (both platforms):
+
+- **`-fail-level`** — `error` fails the step only on Rigor errors (matches
+  Rigor's exit code); `any` fails on warnings too; `none` is comment-only.
+  Default `error`.
 - **`-filter-mode`** — reviewdog's default `added` comments only on lines
-  the PR changed; `nofilter` comments on everything. Keep `added` for
-  adopt-on-an-existing-codebase, like Rigor's baseline.
-- **Token / permissions** — `github-pr-review` needs
-  `permissions: pull-requests: write` and `REVIEWDOG_GITHUB_API_TOKEN:
-  ${{ secrets.GITHUB_TOKEN }}`.
-
-`checkstyle` vs `sarif` into reviewdog: both work (`-f=checkstyle` /
-`-f=sarif`). Prefer `checkstyle` — it is lighter and needs no
-code-scanning. Use `sarif` if the project *also* uploads to the Security
-tab and wants one format.
+  the PR/MR changed; `nofilter` comments on everything. Keep `added` to adopt
+  on an existing codebase (the reviewdog analogue of Rigor's baseline).
+- **`checkstyle` vs `sarif`** — both work (`-f=checkstyle` / `-f=sarif`);
+  prefer `checkstyle` (lighter, no code scanning). Use `sarif` only if the
+  job *also* uploads to the GitHub Security tab and wants a single format.
 
 ## Phase 4 — Pin Rigor's version (reproducible CI)
 

@@ -17,6 +17,19 @@ RSpec.describe Rigor::Configuration::Dependencies do
       expect(deps.source_inference).to eq([])
     end
 
+    it "treats source_inference: false as disabled (empty), not a crash" do
+      # `Array(false) == [false]` in Ruby, so a plain "off" config must be
+      # handled explicitly rather than fed into the per-entry coercer.
+      deps = described_class.from_h("source_inference" => false)
+
+      expect(deps.source_inference).to eq([])
+    end
+
+    it "rejects a non-list, non-false source_inference: with a clear message" do
+      expect { described_class.from_h("source_inference" => true) }
+        .to raise_error(ArgumentError, /source_inference: must be a list/)
+    end
+
     it "rejects non-Hash inputs" do
       expect { described_class.from_h([]) }
         .to raise_error(ArgumentError, /must be a Hash/)

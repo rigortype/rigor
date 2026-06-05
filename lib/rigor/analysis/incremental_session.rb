@@ -49,6 +49,12 @@ module Rigor
         @symbol_fingerprints = {}  # path => { "ClassName#method" => sha256_hex }
         @symbol_dependents = {}    # [source, symbol] => Set<consumer>
         @ancestry_dependents = {}  # source => Set<consumer> (inverted ancestry_sources)
+        # ADR-46 slice 3 — negative (missing) dependencies: a consumer that
+        # looked up a name and resolved nothing must be re-checked when that
+        # name later appears (e.g. a `call.unresolved-toplevel` whose target
+        # is defined by a later edit).
+        @missing = {}              # consumer => Set<"kind:name"> it looked up and missed
+        @negative_dependents = {}  # "kind:name" => Set<consumer> (inverted @missing)
       end
 
       # The project files analyzed at the last baseline / recheck — the set
@@ -87,6 +93,11 @@ module Rigor
                    else
                      Incremental.affected(changed, @dependents)
                    end
+        # ADR-46 slice 3 — widen for symbols that *appeared* in the changed
+        # files and resolve a prior negative (missing) lookup, so a consumer
+        # whose `call.unresolved-toplevel` (or analogous miss) is now defined
+        # gets re-checked rather than served a stale diagnostic.
+        affected = (affected | negative_affected(changed, new_fps)).freeze
         runner = build_runner(analyze_only: affected, record_dependencies: true)
         fresh = run_runner(runner).diagnostics
         reused = @analyzed - affected.to_a
@@ -149,15 +160,21 @@ module Rigor
         @symbol_sources    = payload.symbol_sources    || {}
         @ancestry_sources  = payload.ancestry_sources  || {}
         @symbol_fingerprints = payload.symbol_fingerprints || {}
+        # ADR-46 slice 3 — restore negative edges if present (absent in
+        # pre-slice-3 snapshots → empty, which only loses the appeared-symbol
+        # re-check refinement; the fingerprint still drops the snapshot on a
+        # file add/remove, so it is never unsound).
+        @missing           = payload.missing || {}
         @symbol_dependents = Incremental.invert_symbols(@symbol_sources)
         @ancestry_dependents = Incremental.invert(@ancestry_sources)
+        @negative_dependents = Incremental.invert(@missing)
       end
 
       def to_payload
         Cache::IncrementalSnapshot::Payload.new(
           cache: @cache, sources: @sources, digests: @digests, analyzed: @analyzed,
           symbol_sources: @symbol_sources, ancestry_sources: @ancestry_sources,
-          symbol_fingerprints: @symbol_fingerprints
+          symbol_fingerprints: @symbol_fingerprints, missing: @missing
         )
       end
 
@@ -179,10 +196,12 @@ module Rigor
           @sources[path] = record.sources.dup
           @symbol_sources[path]   = record.symbol_sources.transform_values(&:dup)
           @ancestry_sources[path] = record.ancestry_sources.dup
+          @missing[path]          = record.missing.dup
         end
         @dependents          = Incremental.invert(@sources)
         @symbol_dependents   = Incremental.invert_symbols(@symbol_sources)
         @ancestry_dependents = Incremental.invert(@ancestry_sources)
+        @negative_dependents = Incremental.invert(@missing)
         @symbol_fingerprints.merge!(runner.symbol_fingerprints)
       end
 
@@ -209,6 +228,25 @@ module Rigor
           end
         end
         result.transform_values(&:freeze).freeze
+      end
+
+      # ADR-46 slice 3 — the consumers to re-check because a symbol that
+      # appeared in a changed file resolves a prior missed lookup. Maps each
+      # appeared `"ClassName#method"` to the negative-dependency key it would
+      # satisfy (`toplevel:foo` for a top-level def, `method:C#m` otherwise),
+      # then unions the recorded negative-dependents of those keys.
+      def negative_affected(changed, new_fingerprints)
+        appeared = Incremental.appeared_symbols(changed, @symbol_fingerprints, new_fingerprints)
+        keys = appeared.map { |symbol| negative_key_for(symbol) }
+        Incremental.negative_closure(keys, @negative_dependents)
+      end
+
+      TOP_LEVEL_KEY = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
+      private_constant :TOP_LEVEL_KEY
+
+      def negative_key_for(symbol)
+        class_name, method = symbol.split("#", 2)
+        class_name == TOP_LEVEL_KEY ? "toplevel:#{method}" : "method:#{symbol}"
       end
 
       def build_runner(**)

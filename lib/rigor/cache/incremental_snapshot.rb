@@ -29,7 +29,7 @@ module Rigor
     class IncrementalSnapshot
       # Bump when the on-disk shape changes so stale snapshots are ignored
       # rather than mis-deserialized.
-      SCHEMA = 2
+      SCHEMA = 3
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -40,8 +40,11 @@ module Rigor
       # `symbol_sources` maps a consumer to { source_path → Set<"ClassName#method"> }.
       # `ancestry_sources` maps a consumer to Set<source_path> (class-ancestry deps).
       # `symbol_fingerprints` maps a path to { "ClassName#method" => sha256_hex }.
+      # ADR-46 slice 3:
+      # `missing` maps a consumer to Set<"kind:name"> it looked up and missed.
       Payload = Data.define(:cache, :sources, :digests, :analyzed,
-                            :symbol_sources, :ancestry_sources, :symbol_fingerprints)
+                            :symbol_sources, :ancestry_sources, :symbol_fingerprints,
+                            :missing)
 
       # The global fingerprint that gates a snapshot load: a digest of the
       # inputs whose change requires a full rebuild — the engine version +
@@ -105,7 +108,8 @@ module Rigor
           digests: data[:digests], analyzed: data[:analyzed],
           symbol_sources: data[:symbol_sources] || {},
           ancestry_sources: data[:ancestry_sources] || {},
-          symbol_fingerprints: data[:symbol_fingerprints] || {}
+          symbol_fingerprints: data[:symbol_fingerprints] || {},
+          missing: data[:missing] || {}
         )
       rescue StandardError
         nil
@@ -123,7 +127,8 @@ module Rigor
           digests: payload.digests, analyzed: payload.analyzed,
           symbol_sources: payload.symbol_sources,
           ancestry_sources: payload.ancestry_sources,
-          symbol_fingerprints: payload.symbol_fingerprints
+          symbol_fingerprints: payload.symbol_fingerprints,
+          missing: payload.missing
         )
         tmp = "#{@path}.#{Process.pid}.tmp"
         File.binwrite(tmp, blob)

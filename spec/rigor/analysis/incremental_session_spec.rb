@@ -105,6 +105,55 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     end
   end
 
+  # ADR-46 slice 3 — negative-dependency tracking. A top-level call has no
+  # class ancestry to walk, so a miss records no positive edge; without the
+  # negative edge a caller's `call.unresolved-toplevel` would be served stale
+  # after the method is defined elsewhere.
+  describe "negative (appeared-symbol) dependencies" do
+    it "re-checks a caller whose missed top-level method is defined by an edit" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "helper()\n")
+        File.write(b, "class Placeholder\nend\n")
+
+        session = described_class.new(configuration: configuration(dir))
+        baseline = session.baseline
+        # Baseline: a.rb fires call.unresolved-toplevel for the undefined helper.
+        expect(baseline.map(&:rule)).to include("call.unresolved-toplevel")
+
+        # Define the top-level helper in b.rb — a.rb's diagnostic must clear.
+        File.write(b, "def helper\n  1\nend\n")
+        recheck = session.recheck
+
+        # a.rb is pulled into the affected closure by the appeared `helper`,
+        # so the merged result matches a full re-analysis (no stale FP).
+        expect(recheck.affected).to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(sorted(recheck.diagnostics).map { |h| h["rule"] }).not_to include("call.unresolved-toplevel")
+      end
+    end
+
+    it "does not re-check a caller when an unrelated symbol appears" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "missing_helper()\n")
+        File.write(b, "class Thing\n  def existing\n    1\n  end\nend\n")
+
+        session = described_class.new(configuration: configuration(dir))
+        session.baseline
+        # Add an unrelated top-level method — a.rb missed `missing_helper`,
+        # not `other`, so it must stay served from cache.
+        File.write(b, "class Thing\n  def existing\n    1\n  end\nend\n\ndef other\n  2\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).not_to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+  end
+
   describe "#run_incremental (cross-process persistence)" do
     def fingerprint(config, dir)
       files = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil).analysis_file_set([dir])

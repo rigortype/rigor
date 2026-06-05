@@ -379,10 +379,31 @@ module Rigor
     # implementation detail and go through this accessor.
     def top_level_def_for(method_name)
       table = @discovered_def_nodes[Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY]
-      return nil unless table
-
-      table[method_name.to_sym]
+      node = table && table[method_name.to_sym]
+      record_cross_file_toplevel(method_name, node) if Analysis::DependencyRecorder.active?
+      node
     end
+
+    # ADR-46 slice 3 — a top-level (`def helper` outside any class) call has
+    # NO class ancestry to walk, so unlike {#user_def_for} a miss here records
+    # no positive ancestry edge that would re-check the consumer when the
+    # method later appears. Record the cross-file edge explicitly: the file
+    # defining the top-level method (symbol-granularity, so a body / removal
+    # edit re-checks the caller), or, on a miss, a negative `toplevel:` edge
+    # so a later top-level definition re-checks this consumer (the
+    # `call.unresolved-toplevel` stale-diagnostic gap).
+    def record_cross_file_toplevel(method_name, node)
+      key = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
+      if node
+        Analysis::DependencyRecorder.read_site(
+          @discovered_def_sources.dig(key, method_name.to_sym),
+          "#{key}##{method_name}"
+        )
+      else
+        Analysis::DependencyRecorder.read_missing(:toplevel, method_name)
+      end
+    end
+    private :record_cross_file_toplevel
 
     def with_discovered_def_nodes(table)
       rebuild(discovered_def_nodes: table)

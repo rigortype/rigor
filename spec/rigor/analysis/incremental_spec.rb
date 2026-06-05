@@ -62,6 +62,35 @@ RSpec.describe Rigor::Analysis::Incremental do
     end
   end
 
+  # ADR-46 slice 3 — negative-dependency helpers.
+  describe ".appeared_symbols" do
+    it "returns symbols present after but absent before, for changed files" do
+      before = { "b.rb" => { "B#m" => "h1" } }
+      after  = { "b.rb" => { "B#m" => "h1", "<toplevel>#helper" => "h2", "B#n" => "h3" } }
+      appeared = described_class.appeared_symbols(["b.rb"], before, after)
+      expect(appeared).to eq(Set["<toplevel>#helper", "B#n"])
+    end
+
+    it "ignores files not in the changed set and modified (not appeared) symbols" do
+      before = { "b.rb" => { "B#m" => "h1" }, "c.rb" => { "C#z" => "old" } }
+      after  = { "b.rb" => { "B#m" => "h9" }, "c.rb" => { "C#z" => "new", "C#fresh" => "h" } }
+      # Only b.rb is "changed"; B#m is modified (not appeared); c.rb excluded.
+      expect(described_class.appeared_symbols(["b.rb"], before, after)).to eq(Set.new)
+    end
+  end
+
+  describe ".negative_closure" do
+    it "unions the negative-dependents of the satisfied keys" do
+      negdeps = { "toplevel:helper" => Set["a.rb", "c.rb"], "method:Post#archive" => Set["d.rb"] }
+      closure = described_class.negative_closure(["toplevel:helper", "method:Post#archive"], negdeps)
+      expect(closure).to eq(Set["a.rb", "c.rb", "d.rb"])
+    end
+
+    it "is empty for keys nobody missed" do
+      expect(described_class.negative_closure(["toplevel:unmissed"], {})).to eq(Set.new)
+    end
+  end
+
   describe ".changed_symbol_pairs" do
     it "returns pairs whose fingerprints differ" do
       before = { "m.rb" => { "M#foo" => "hash1", "M#bar" => "hash2" } }

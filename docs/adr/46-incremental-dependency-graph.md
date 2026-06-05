@@ -1,6 +1,6 @@
 # ADR-46 — Incremental analysis via a cross-file dependency graph
 
-Status: **Accepted — implemented (body tier). The whole-run cache ([ADR-45](45-unchanged-project-fast-path.md)) is coarse (any analyzed-file change → full re-run); this is the per-file incremental successor: edit a leaf controller → re-check that one file; edit a model → re-check the model plus the files that actually depend on it. `rigor check --incremental` ships the cross-process body tier (slices 1+2): record per-file cross-file deps → invert to `dependents` → on a run, re-analyze only `ΔF ∪ dependents[ΔF]` and serve the rest from a disk snapshot. Soundness is enforced by the mandatory `--verify-incremental` gate (incremental == full `--no-cache`, byte-identical), wired into CI. Measured on Rigor's own `lib` (262 files): warm no-change 0.75s vs 7.2s full (~9.6×), one-file leaf edit 1.15s (~6.3×), diagnostics identical. Slices 3 (structural-tier negative-dependency tracking — a structural edit currently falls back to a full rebuild via the fingerprint) and 4 (symbol granularity) remain demand-driven refinements.**
+Status: **Accepted — implemented (body tier). The whole-run cache ([ADR-45](45-unchanged-project-fast-path.md)) is coarse (any analyzed-file change → full re-run); this is the per-file incremental successor: edit a leaf controller → re-check that one file; edit a model → re-check the model plus the files that actually depend on it. `rigor check --incremental` ships the cross-process body tier (slices 1+2): record per-file cross-file deps → invert to `dependents` → on a run, re-analyze only `ΔF ∪ dependents[ΔF]` and serve the rest from a disk snapshot. Soundness is enforced by the mandatory `--verify-incremental` gate (incremental == full `--no-cache`, byte-identical), wired into CI. Measured on Rigor's own `lib` (262 files): warm no-change 0.75s vs 7.2s full (~9.6×), one-file leaf edit 1.15s (~6.3×), diagnostics identical. Slice 4 (symbol granularity) and slice 3 (structural-tier negative-dependency tracking) are both landed — slice 3 closed the top-level-call soundness gap (a missed `helper()` whose definition arrives in a later edit no longer serves a stale `call.unresolved-toplevel`); incremental file *addition* remains the demand-gated refinement.**
 
 ADR-45 made an *unchanged* project fast (record-and-validate whole-run
 cache, ~42× on GitLab). It is deliberately coarse: a single changed file
@@ -280,8 +280,30 @@ trade for speed. Defenses:
      across processes / CI) + wire a user-facing `--incremental` *speedup*
      flag (the gate proves the machinery sound; the speedup flag is the
      payoff) + extend the CI gate to the Mastodon + GitLab survey trees.
-3. **Structural tier.** Negative-dependency tracking so adding a symbol
-   re-checks only its would-be resolvers instead of falling back to full.
+3. **Structural tier — negative-dependency tracking (landed).** A symbol
+   that *appears* in an edit must re-check the consumers that looked it up
+   and missed. Most misses are already covered: a missed *class method*
+   resolution walks the receiver's ancestry (`superclass_of` / `includes_of`),
+   recording a positive ancestry edge to every class on the chain, so adding
+   the method to any of them re-checks the consumer; a missed *constant*
+   produces no diagnostic, so there is nothing to go stale. The gap was the
+   **top-level call** (`call.unresolved-toplevel`, ADR-34): `helper()` has no
+   class ancestry to walk, so a miss recorded no edge — defining `helper`
+   elsewhere left the caller's diagnostic stale (a manufactured false
+   positive, caught by a probe, not yet by the spec suite). Closed by
+   instrumenting `Scope#top_level_def_for` to record a **positive**
+   symbol-granularity edge on resolve (`<toplevel>#name`, so a body / removal
+   edit re-checks the caller) and a **negative** `toplevel:name` edge on a
+   miss; the session absorbs `missing`, inverts it to `negative_dependents`,
+   and on a re-check widens the affected closure by the negative-dependents of
+   every symbol that *appeared* in a changed file
+   (`Incremental.{appeared_symbols,negative_closure}`). Method negatives are
+   matched class-qualified exact (`method:C#m`) as defence-in-depth; the
+   ancestry edge remains the primary cover. `--verify-incremental` stays
+   byte-identical; the `IncrementalSnapshot` payload carries `missing`
+   (SCHEMA 3). **Remaining (demand-gated):** incremental file *addition* (a
+   new file changes the `paths:` fingerprint → full rebuild today; making it
+   incremental would lean on the negative edges as the soundness enabler).
 4. **Symbol granularity (optional).** Refine file-level deps to
    `(file, symbol)` so editing one model method re-checks only callers of
    *that* method, not every caller of the model.

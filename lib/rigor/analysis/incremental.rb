@@ -98,6 +98,35 @@ module Rigor
         closure.freeze
       end
 
+      # ADR-46 slice 3 — the symbol keys (`"ClassName#method"`) that are
+      # present in a changed file's after-fingerprints but were absent from
+      # its before-fingerprints: a symbol that *appeared* in this edit. A
+      # symbol that merely moved between files still appears here for the
+      # destination file, but its negative-dependents set is empty (nobody
+      # missed a name that already resolved elsewhere), so the over-report
+      # costs nothing. Returns a frozen Set of symbol-key Strings.
+      def appeared_symbols(changed_files, fingerprints_before, fingerprints_after)
+        appeared = Set.new
+        changed_files.each do |path|
+          before = fingerprints_before[path] || {}
+          after  = fingerprints_after[path]  || {}
+          (after.keys - before.keys).each { |sym| appeared << sym }
+        end
+        appeared.freeze
+      end
+
+      # ADR-46 slice 3 — the consumers to re-check because a name they
+      # looked up and *missed* (a negative dependency) now resolves. `keys`
+      # is the set of negative-dependency keys (`"toplevel:foo"` /
+      # `"method:C#m"`) the appeared symbols would satisfy; `negative_dependents`
+      # maps each key to the Set of consumers that recorded the miss. Returns
+      # a frozen Set of consumer paths.
+      def negative_closure(keys, negative_dependents)
+        closure = Set.new
+        keys.each { |key| closure.merge(negative_dependents[key] || []) }
+        closure.freeze
+      end
+
       # The files whose per-file diagnostics differ between two runs.
       # Each argument maps a path to its diagnostic list; diagnostics are
       # compared structurally via {Diagnostic#to_h} so identity / ordering

@@ -17,7 +17,8 @@ RSpec.describe Rigor::Cache::IncrementalSnapshot do
       analyzed: ["a.rb", "b.rb"],
       symbol_sources: { "a.rb" => { "b.rb" => Set["Foo#bar"] } },
       ancestry_sources: { "a.rb" => Set.new },
-      symbol_fingerprints: { "b.rb" => { "Foo#bar" => "abc123" } }
+      symbol_fingerprints: { "b.rb" => { "Foo#bar" => "abc123" } },
+      missing: { "a.rb" => Set["toplevel:helper"] }
     )
   end
 

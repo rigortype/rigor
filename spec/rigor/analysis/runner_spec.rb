@@ -3771,6 +3771,53 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(diag.message).to include("_NotDeclared")
       expect(diag.message).to include("not loaded")
     end
+
+    it "flags a provided method whose return type widens the interface contract" do
+      result = analyze_conforms_to(
+        interface_body: "def rewind: () -> void\n  def read: () -> String",
+        class_body: "def rewind: () -> void\n  def read: () -> (String | Integer)"
+      )
+      diag = result.diagnostics.find do |d|
+        d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+      end
+
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("return type")
+      expect(diag.message).to include("not a subtype")
+      expect(diag.severity).to eq(:warning)
+    end
+
+    it "flags a provided method whose parameter narrows the interface contract" do
+      result = analyze_conforms_to(
+        interface_body: "def rewind: () -> void\n  def read: (Object value) -> String",
+        class_body: "def rewind: () -> void\n  def read: (String value) -> String"
+      )
+      diag = result.diagnostics.find do |d|
+        d.rule == "rbs_extended.unsatisfied-conformance" && d.message.include?("#read")
+      end
+
+      expect(diag).not_to be_nil
+      expect(diag.message).to include("parameter 1")
+      expect(diag.message).to include("does not accept")
+    end
+
+    it "stays silent when a provided method's return type is a subtype (covariant)" do
+      result = analyze_conforms_to(
+        interface_body: "def rewind: () -> void\n  def read: () -> Numeric",
+        class_body: "def rewind: () -> void\n  def read: () -> Integer"
+      )
+
+      expect(result.diagnostics.find { |d| d.rule == "rbs_extended.unsatisfied-conformance" }).to be_nil
+    end
+
+    it "stays silent when a provided method widens a parameter (contravariant)" do
+      result = analyze_conforms_to(
+        interface_body: "def rewind: () -> void\n  def read: (Integer value) -> String",
+        class_body: "def rewind: () -> void\n  def read: (Numeric value) -> String"
+      )
+
+      expect(result.diagnostics.find { |d| d.rule == "rbs_extended.unsatisfied-conformance" }).to be_nil
+    end
   end
 
   describe "editor mode degrades Ractor pool to sequential (slice 7)" do

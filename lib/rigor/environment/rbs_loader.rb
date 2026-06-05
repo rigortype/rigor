@@ -606,23 +606,28 @@ module Rigor
         definition.methods.keys
       end
 
-      # @return [Array<Symbol>, nil] every method name required by
-      #   the RBS interface `interface_name` (`_RewindableStream`),
-      #   including methods inherited from interface ancestors.
-      #   Returns `nil` when the name does not resolve to a loaded
-      #   interface (a typo, or the defining library / sig set is
-      #   not on the load path) so the conformance checker can
-      #   surface that as an unresolved-directive notice rather than
-      #   a spurious non-conformance. Fail-soft on RBS build errors.
-      def interface_method_names(interface_name)
+      # @return [RBS::Definition, nil] the built definition for the RBS
+      #   interface `interface_name` (`_RewindableStream`), whose `.methods`
+      #   are the required members (including interface-ancestor members).
+      #   Returns `nil` when the name does not resolve to a loaded interface
+      #   (a typo, or the defining library / sig set is not on the load
+      #   path). Fail-soft on RBS build errors.
+      def interface_definition(interface_name)
         rbs_name = parse_type_name(interface_name)
         return nil unless rbs_name
         return nil if env.nil?
         return nil unless env.interface_decls.key?(rbs_name)
 
-        builder.build_interface(rbs_name).methods.keys
+        builder.build_interface(rbs_name)
       rescue ::RBS::BaseError
         nil
+      end
+
+      # @return [Array<Symbol>, nil] every method name required by the RBS
+      #   interface `interface_name`, or nil when it does not resolve. Thin
+      #   accessor over {#interface_definition} for the presence check.
+      def interface_method_names(interface_name)
+        interface_definition(interface_name)&.methods&.keys
       end
 
       # @return [RBS::Definition, nil] the resolved singleton (class

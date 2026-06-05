@@ -1404,17 +1404,9 @@ module Rigor
       def build_conformance_diagnostic(record)
         case record
         when RbsExtended::ConformanceChecker::Unsatisfied
-          path, line, column = location_fields(record.location)
-          Diagnostic.new(
-            path: path, line: line, column: column,
-            message: "`#{record.class_name}` declares `conforms-to #{record.interface_name}` " \
-                     "but does not provide #{pluralize_methods(record.missing_methods)}: " \
-                     "#{record.missing_methods.map { |m| "`##{m}`" }.join(', ')}. Implement the " \
-                     "missing method(s) or remove the directive.",
-            severity: :warning,
-            rule: "rbs_extended.unsatisfied-conformance",
-            source_family: :builtin
-          )
+          build_unsatisfied_conformance_diagnostic(record)
+        when RbsExtended::ConformanceChecker::IncompatibleSignature
+          build_incompatible_signature_diagnostic(record)
         else # UnresolvedInterface
           build_reporter_diagnostic(
             record.location,
@@ -1424,6 +1416,34 @@ module Rigor
                      "the `sig`/library that declares it to the RBS load path."
           )
         end
+      end
+
+      def build_unsatisfied_conformance_diagnostic(record)
+        path, line, column = location_fields(record.location)
+        Diagnostic.new(
+          path: path, line: line, column: column,
+          message: "`#{record.class_name}` declares `conforms-to #{record.interface_name}` " \
+                   "but does not provide #{pluralize_methods(record.missing_methods)}: " \
+                   "#{record.missing_methods.map { |m| "`##{m}`" }.join(', ')}. Implement the " \
+                   "missing method(s) or remove the directive.",
+          severity: :warning,
+          rule: "rbs_extended.unsatisfied-conformance",
+          source_family: :builtin
+        )
+      end
+
+      def build_incompatible_signature_diagnostic(record)
+        path, line, column = location_fields(record.location)
+        Diagnostic.new(
+          path: path, line: line, column: column,
+          message: "`#{record.class_name}##{record.method_name}` does not satisfy " \
+                   "`conforms-to #{record.interface_name}`: #{record.detail}. Adjust the " \
+                   "signature to a subtype of the interface contract.",
+          severity: :warning,
+          rule: "rbs_extended.unsatisfied-conformance",
+          source_family: :builtin,
+          method_name: record.method_name
+        )
       end
 
       def pluralize_methods(methods)

@@ -24,8 +24,10 @@ The 6 remaining Mastodon errors are unrelated to engine precision: 5 nil-receive
 
 > **Recommended next work (pick one — all bounded, no external corpus needed):**
 > 1. **`rigor:v1:conforms-to` directive** (open since v0.1.1; [ROADMAP](ROADMAP.md) § "Type-language / engine") — a structural-interface-conformance RBS::Extended directive. New directive grammar (`lib/rigor/rbs_extended.rb`) + structural conformance check at call sites. Moderate; needs design.
-> 2. **LRU eviction for `Cache::Store`** ([ADR-6](adr/6-cache-persistence-backend.md)) — the sharded cache never evicts. FP-risk-free (cache management, not diagnostics). Moderate; cross-process access tracking + an eviction pass.
-> 3. **ADR-24 slice 4** — gated `undefined-method` on resolved closed-class self-calls (see `docs/CURRENT_WORK.md` § "ADR-24" for the evaluation-time recorder approach; WD4 corpus gate required before default-on).
+> 2. **ADR-24 slice 4** — gated `undefined-method` on resolved closed-class self-calls (see § "ADR-24" below for the evaluation-time recorder approach; WD4 corpus gate required before default-on).
+> 3. **`rigor check --incremental` manual entry** — CLI reference + caching chapter for `--incremental` / `--verify-incremental`; extend `--verify-incremental` CI gate to Mastodon + GitLab survey trees.
+>
+> **LRU eviction for `Cache::Store` — COMPLETE** ([ADR-6](adr/6-cache-persistence-backend.md) § Eviction). `cache.max_bytes:` in `.rigor.yml` keeps the cache bounded; `Cache::Store#evict!` runs at end of each `rigor check`; cross-process LRU tracked via mtime touch-on-disk-read.
 >
 > **Do NOT** restart ADR-24 slice 4 via the check-rules route (reverted 2026-06-05, 135 FPs — see below). The shape-carrier value-folding tier is now comprehensive (Tuple/Hash/String gaps closed this cycle); further folds are diminishing returns or need new carriers (Struct/Data, Float-range — both ADR-worthy). The MathFolding range-refinement item needs a Float-range carrier first (see § "Type-coverage uplift").
 

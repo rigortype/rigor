@@ -300,8 +300,12 @@ The new `source_rbs_synthesizer:` manifest field is **optional**.
 Existing plugins that do not declare it are unaffected. The
 plugin contract (ADR-2) is still pre-1.0; this is the kind of
 additive extension WD6 of ADR-25 covers, and it is safe to land
-within the v0.1.x line. The contract surface v0.2.0 freezes
-should include this field.
+within the v0.1.x line. The public surface the v1.0.0 contract
+freezes should include this field. (Amended per
+[ADR-50](50-release-engineering-and-stability-strategy.md): the hard
+freeze is **v1.0.0**; **v0.2.0** begins enumerating the surface — it
+does not itself freeze. This supersedes the original "v0.2.0
+freezes" wording.)
 
 ### WD9 — Top-level `def` semantics depend on upstream behaviour
 

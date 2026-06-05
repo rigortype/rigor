@@ -155,11 +155,15 @@ separate, smaller follow-up (noted in § "Out of scope").
 
 ### WD6 — Additive to the pre-1.0 plugin contract
 
-The plugin contract (ADR-2) is pre-1.0 and stabilises at v0.2.0.
-This change is a **new optional manifest field** — a plugin that
-does not declare `signature_paths:` is unaffected, and no existing
-plugin breaks. It is safe to land within the v0.1.x line and should
-be part of the contract surface v0.2.0 freezes.
+The plugin contract (ADR-2) is pre-1.0. This change is a **new
+optional manifest field** — a plugin that does not declare
+`signature_paths:` is unaffected, and no existing plugin breaks. It
+is safe to land within the v0.1.x line and should be part of the
+public surface the v1.0.0 contract freezes. (Amended per
+[ADR-50](50-release-engineering-and-stability-strategy.md): the hard
+freeze is **v1.0.0**; **v0.2.0** begins enumerating the surface and
+pledges minor-non-break as the trajectory — it does not itself
+freeze. This supersedes the original "v0.2.0 freezes" wording.)
 
 ## Consequences
 

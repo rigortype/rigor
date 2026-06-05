@@ -78,6 +78,29 @@ module Rigor
           since: "0.0.1"
         ),
 
+        CheckRules::RULE_SELF_UNDEFINED_METHOD => Entry.new(
+          id: CheckRules::RULE_SELF_UNDEFINED_METHOD,
+          summary: "Implicit-self call resolves to no method on a confidently-closed class.",
+          fires_when: [
+            "The call is an implicit-self call (no explicit receiver) inside a class body.",
+            "The engine's own resolution (RBS dispatch + the user-class ancestor walk) found nothing.",
+            "The enclosing class is a STANDALONE project class: no superclass and no `include`/`prepend`.",
+            "It defines no `method_missing` and no dynamic `attr_*(*splat)` accessor.",
+            "It is not a plugin-declared open receiver (ADR-26)."
+          ],
+          does_not_fire_when: [
+            "The enclosing scope is a `module` (a mixin contract — methods may come from includers).",
+            "The class has a superclass or mixes in a module (surface extends beyond this file — a later slice).",
+            "`self` is `Dynamic` / top-level (the gradual guarantee), or the method exists via any project signal.",
+            "Off in every shipped profile pending the external corpus FP gate — opt in via `severity_overrides:`."
+          ],
+          suppression: "`# rigor:disable call.self-undefined-method`, or enable/disable via " \
+                       "`severity_overrides: { call.self-undefined-method: warning }` in `.rigor.yml`.",
+          severity_authored: :warning,
+          severity_by_profile: { lenient: :off, balanced: :off, strict: :off },
+          since: "0.1.17"
+        ),
+
         CheckRules::RULE_WRONG_ARITY => Entry.new(
           id: CheckRules::RULE_WRONG_ARITY,
           summary: "Call's positional argument count is outside the declared overloads' envelope.",

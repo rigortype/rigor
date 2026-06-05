@@ -174,8 +174,7 @@ module Rigor
 
       def bind_trailing_positionals(params_node, bindings, cursor)
         params_node.posts.each do |param|
-          name = required_name(param)
-          bindings[name] = positional_type_at(cursor) if name
+          bind_required_param(param, cursor, bindings)
           cursor += 1
         end
         cursor

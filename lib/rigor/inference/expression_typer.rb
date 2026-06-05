@@ -1291,6 +1291,7 @@ module Rigor
         Analysis::SelfCallResolutionRecorder.record(
           class_name: receiver.class_name,
           method_name: node.name,
+          node: node,
           path: scope.source_path,
           line: location&.start_line,
           column: location ? location.start_column + 1 : nil

@@ -4,10 +4,12 @@ Status: **Accepted, 2026-05-20 (slice 4 gated — separate FP evaluation
 required). Slices 1+3 implemented 2026-05-20, slice 2 implemented
 2026-05-21. Slice 4 attempt 1 (check-rules reimplementation) prototyped
 and reverted 2026-06-05 — 135 false positives on Rigor's own `lib`. Slice
-4a (the evaluation-time recorder) implemented 2026-06-05, off by default,
-no rule yet — mini-corpus 467→15 misses, attempt-1 FP classes to zero; see
-slice 4 below. The closed-class gate + rule + external WD4 corpus gate
-remain.**
+4a (the evaluation-time recorder) + the `call.self-undefined-method` rule
+(standalone-class gate, shipped `:off`) implemented 2026-06-05 — mini-corpus
+467→15 recorder misses, attempt-1 FP classes to zero, the rule FP-clean on
+Rigor's own `lib` (and it caught a real latent bug). The external WD4
+corpus FP gate (before default-on) + gate widening to superclass/include
+chains remain. See slice 4 below.**
 
 Records the project's decision to resolve implicit-self method calls
 (a call written with no explicit receiver, inside a method body)
@@ -451,9 +453,31 @@ engine does not rebind `self` to the constant for meta-block methods), so
 that over-capture lands under `Object` — never confidently closed — and
 the gate filters it for free.
 
-**Remaining for the rule slice:** the closed-class gate (consume the
-recorder, exclude the residual-15 shapes above) + the external WD4 corpus
-FP gate before any default-on.
+**Slice 4 rule (2026-06-05) — `call.self-undefined-method`, LANDED,
+shipped `:off`.** A `CheckRules` collector (`self_undefined_method_-
+diagnostics`) consumes the recorder snapshot (threaded per-file through
+`Runner#analyze_file_body` → `CheckRules.diagnose(self_call_misses:)`,
+recording active only when the rule resolves to a firing severity) and
+applies ONLY the closedness policy — it never recomputes resolution. The
+v1 gate is the most conservative confidently-closed shape: a **standalone
+project class** — no superclass and no `include`/`prepend`, so its in-file
+method surface is complete — that is not a `module` (mixin contract),
+defines no `method_missing`, has no dynamic `attr_*(*splat)` accessor
+(`SelfClosednessScanner`, a one-pass AST scan over the same file), and is
+not an ADR-26 open receiver. This subsumes the residual-15: modules and
+splat-attr / `Data`/`Struct` classes are all excluded, the latter also by
+the no-superclass clause.
+
+Validated on Rigor's own `lib`: the rule fires **zero** false positives —
+and caught one real latent bug (`BlockParameterBinder#bind_trailing_-
+positionals` called an undefined `required_name`, so `|a, *b, c|`-shaped
+block params raised `NoMethodError`; fixed). It is authored `:warning` but
+mapped to `:off` in every profile; `severity_overrides:` opts in.
+
+**Remaining:** the external WD4 corpus FP gate before any default-on, then
+widening the gate to superclass / include chains (each requires the
+engine to confirm the full ancestor chain resolved — record that
+completeness at the recorder, the same "collect, don't recompute" route).
 
 ## Re-evaluation triggers
 

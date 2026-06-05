@@ -10,6 +10,7 @@ require_relative "check_rules/always_truthy_condition_collector"
 require_relative "check_rules/unreachable_clause_collector"
 require_relative "check_rules/dead_assignment_collector"
 require_relative "check_rules/ivar_write_collector"
+require_relative "check_rules/self_closedness_scanner"
 
 module Rigor
   module Analysis
@@ -58,6 +59,7 @@ module Rigor
       # system; new rules MUST register here so user configuration
       # can refer to them.
       RULE_UNDEFINED_METHOD = "call.undefined-method"
+      RULE_SELF_UNDEFINED_METHOD = "call.self-undefined-method"
       RULE_UNRESOLVED_TOPLEVEL = "call.unresolved-toplevel"
       RULE_WRONG_ARITY = "call.wrong-arity"
       RULE_ARGUMENT_TYPE = "call.argument-type-mismatch"
@@ -78,6 +80,7 @@ module Rigor
 
       ALL_RULES = [
         RULE_UNDEFINED_METHOD,
+        RULE_SELF_UNDEFINED_METHOD,
         RULE_UNRESOLVED_TOPLEVEL,
         RULE_WRONG_ARITY,
         RULE_ARGUMENT_TYPE,
@@ -107,6 +110,7 @@ module Rigor
       # both spellings resolve identically.
       LEGACY_RULE_ALIASES = {
         "undefined-method" => RULE_UNDEFINED_METHOD,
+        "self-undefined-method" => RULE_SELF_UNDEFINED_METHOD,
         "wrong-arity" => RULE_WRONG_ARITY,
         "argument-type-mismatch" => RULE_ARGUMENT_TYPE,
         "possible-nil-receiver" => RULE_NIL_RECEIVER,
@@ -157,7 +161,7 @@ module Rigor
       # @param root [Prism::Node]
       # @param scope_index [Hash{Prism::Node => Rigor::Scope}]
       # @return [Array<Rigor::Analysis::Diagnostic>]
-      def diagnose(path:, root:, scope_index:, comments: [], disabled_rules: [])
+      def diagnose(path:, root:, scope_index:, self_call_misses: [], comments: [], disabled_rules: [])
         diagnostics = []
         Source::NodeWalker.each(root) do |node|
           case node
@@ -177,6 +181,7 @@ module Rigor
             diagnostics << unreachable if unreachable
           end
         end
+        diagnostics.concat(self_undefined_method_diagnostics(path, self_call_misses, root, scope_index))
         diagnostics.concat(always_truthy_condition_diagnostics(path, root, scope_index))
         diagnostics.concat(unreachable_clause_diagnostics(path, root, scope_index))
         diagnostics.concat(ivar_write_mismatch_diagnostics(path, root, scope_index))
@@ -616,6 +621,65 @@ module Rigor
           else
             !Rigor::Reflection.instance_definition(class_name, scope: scope).nil?
           end
+        end
+
+        # ADR-24 slice 4 — `call.self-undefined-method`. Consumes the engine's
+        # recorded unresolved implicit-self calls
+        # ({Analysis::SelfCallResolutionRecorder}) and adds only the
+        # closedness POLICY — it NEVER recomputes resolution (the reverted
+        # attempt-1 mistake that produced 135 FPs). A miss reaches here only
+        # because the engine's real resolution found the method nowhere.
+        #
+        # The v1 gate is deliberately the most conservative "confidently
+        # closed" shape: a STANDALONE project class — no superclass and no
+        # `include`/`prepend` (so its in-file method surface is complete) —
+        # that is not a module / mixin contract, defines no `method_missing`,
+        # has no dynamic `attr_*(*splat)` accessor, and is not an ADR-26 open
+        # receiver. Widening to superclass / include chains is a later slice,
+        # each behind the external corpus FP gate. Authored `:warning` but
+        # mapped to `:off` in every shipped profile until that gate is green
+        # (ADR-24 § "Slice 4"); a project opts in via `severity_overrides:`.
+        def self_undefined_method_diagnostics(path, self_call_misses, root, scope_index)
+          return [] if self_call_misses.empty?
+
+          open_names = SelfClosednessScanner.new(root).open_class_names
+          self_call_misses.filter_map do |miss|
+            next if open_names.include?(miss.class_name)
+
+            scope = scope_index[miss.node]
+            next if scope.nil?
+            next unless confidently_closed_self_class?(miss.class_name, scope)
+
+            build_self_undefined_method_diagnostic(path, miss)
+          end
+        end
+
+        def confidently_closed_self_class?(class_name, scope)
+          return false if unbounded_receiver_surface?(class_name, scope)
+          return false if scope.discovered_method?(class_name, :method_missing, :instance)
+          # A superclass or mixin extends the surface beyond what this file
+          # declares; the engine's ancestor walk may have hit an unresolvable
+          # ancestor, so a miss is not provably a typo. Defer to a later slice.
+          return false if scope.superclass_of(class_name)
+          return false unless scope.includes_of(class_name).empty?
+
+          true
+        end
+
+        def build_self_undefined_method_diagnostic(path, miss)
+          Diagnostic.new(
+            path: path,
+            line: miss.line || 1,
+            column: miss.column || 1,
+            message: "implicit-self call to `#{miss.method_name}` resolves to no method on " \
+                     "`#{miss.class_name}` (a standalone class with a complete, project-known " \
+                     "method surface). Likely a typo or a missing `def`.",
+            severity: :warning,
+            rule: RULE_SELF_UNDEFINED_METHOD,
+            source_family: :builtin,
+            receiver_type: miss.class_name,
+            method_name: miss.method_name
+          )
         end
 
         def lookup_method(receiver_type, class_name, method_name, scope)

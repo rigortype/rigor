@@ -116,6 +116,9 @@ module Rigor
         # them). Purely observational — diagnostics are byte-identical.
         @record_self_calls = record_self_calls
         @unresolved_self_calls = {}
+        # Memoised activation decision for the `call.self-undefined-method`
+        # rule (nil = not yet computed). See `self_undefined_rule_active?`.
+        @self_undefined_rule_active = nil
         @analyzed_files = [].freeze
         # In-memory source map for `#run_source` — `{ logical_path => source
         # String }`. When set, `parse_source` reads bytes from here instead
@@ -1824,27 +1827,13 @@ module Rigor
       # short-circuit on `DependencyRecorder.active? == false`. Recording
       # is observational, so diagnostics are byte-identical either way.
       def analyze_file(path, environment)
-        return analyze_file_with_self_calls(path, environment) unless @record_dependencies
+        return analyze_file_body(path, environment) unless @record_dependencies
 
         diagnostics = nil
         record = DependencyRecorder.record_for(path) do
-          diagnostics = analyze_file_with_self_calls(path, environment)
-        end
-        @file_dependencies[path] = record
-        diagnostics
-      end
-
-      # ADR-24 slice 4a — wraps the body in the self-call recorder when
-      # opted in, mirroring the dependency-recorder envelope. Off by
-      # default, so a normal run calls the body directly.
-      def analyze_file_with_self_calls(path, environment)
-        return analyze_file_body(path, environment) unless @record_self_calls
-
-        diagnostics = nil
-        record = SelfCallResolutionRecorder.record_for(path) do
           diagnostics = analyze_file_body(path, environment)
         end
-        @unresolved_self_calls[path] = record
+        @file_dependencies[path] = record
         diagnostics
       end
 
@@ -1857,11 +1846,20 @@ module Rigor
         end
 
         scope = seed_project_scope(Scope.empty(environment: environment, source_path: path))
-        index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
+        # ADR-24 slice 4a/4 — record unresolved implicit-self calls during the
+        # typing pass ONLY (not CheckRules, whose own `type_of` queries would
+        # otherwise re-trigger the choke-point). `self_call_misses` feeds the
+        # `call.self-undefined-method` collector; the recorder is inert unless
+        # the rule is active or `record_self_calls:` opted in.
+        index = nil
+        self_call_record = with_self_call_recording(path) do
+          index = Inference::ScopeIndexer.index(parse_result.value, default_scope: scope)
+        end
         diagnostics = CheckRules.diagnose(
           path: path,
           root: parse_result.value,
           scope_index: index,
+          self_call_misses: self_call_record ? self_call_record.calls : [],
           comments: parse_result.comments,
           disabled_rules: @configuration.disabled_rules
         )
@@ -1887,6 +1885,46 @@ module Rigor
             severity: :error
           )
         ]
+      end
+
+      # ADR-24 slice 4a — runs `block` (the typing pass) with the self-call
+      # recorder active when either the test-only `record_self_calls:` flag is
+      # set or the `call.self-undefined-method` rule resolves to a firing
+      # severity. Returns the frozen {SelfCallResolutionRecorder::Record}, or
+      # nil when recording is inactive (the common path — one integer read).
+      def with_self_call_recording(path, &)
+        unless self_call_recording_active?
+          yield
+          return nil
+        end
+
+        record = SelfCallResolutionRecorder.record_for(path, &)
+        @unresolved_self_calls[path] = record
+        record
+      end
+
+      def self_call_recording_active?
+        @record_self_calls || self_undefined_rule_active?
+      end
+
+      # Memoised: the rule fires only when its resolved severity is not `:off`
+      # and it is not in `disable:`. Default profiles map it to `:off`, so a
+      # normal run never activates the recorder (pending the external WD4
+      # corpus FP gate — see ADR-24 § "Slice 4"); a project opts in via
+      # `severity_overrides:`.
+      def self_undefined_rule_active?
+        return @self_undefined_rule_active unless @self_undefined_rule_active.nil?
+
+        rule = CheckRules::RULE_SELF_UNDEFINED_METHOD
+        @self_undefined_rule_active =
+          if @configuration.disabled_rules.include?(rule) || @configuration.disabled_rules.include?("call")
+            false
+          else
+            Configuration::SeverityProfile.resolve(
+              rule: rule, authored_severity: :warning,
+              profile: @configuration.severity_profile, overrides: @configuration.severity_overrides
+            ) != :off
+          end
       end
 
       # v0.0.2 #10 — fail-soft fallback explanation. When

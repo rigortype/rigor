@@ -63,6 +63,16 @@ RSpec.describe Rigor::Inference::BlockParameterBinder do
       expect(bindings).to eq(a: integer_nominal, b: string_nominal)
     end
 
+    it "binds a trailing required positional after a rest (the `|a, *b, c|` shape)" do
+      # Regression: `bind_trailing_positionals` previously called an
+      # undefined `required_name` helper, so a `post` parameter raised
+      # NoMethodError. It now routes through `bind_required_param`.
+      block = parse_block("foo { |a, *b, c| c }")
+      bindings = described_class.new(expected_param_types: [integer_nominal]).bind(block)
+      expect(bindings[:a]).to eq(integer_nominal)
+      expect(bindings).to have_key(:c)
+    end
+
     it "binds the rest parameter as Array[Dynamic[Top]] regardless of expected types" do
       block = parse_block("foo { |a, *rest| a }")
       bindings = described_class.new(

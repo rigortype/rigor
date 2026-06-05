@@ -27,6 +27,7 @@ ID; `rigor explain` with no argument lists them all.
 | Rule | Fires when |
 | --- | --- |
 | `call.undefined-method` | The method is not defined on the receiver's statically known class. |
+| `call.self-undefined-method` | An implicit-self call (no receiver) resolves to no method on a confidently-closed standalone class. Ships `:off`; opt in via `severity_overrides`. |
 | `call.wrong-arity` | The positional-argument count matches no signature. |
 | `call.argument-type-mismatch` | An argument's type provably violates the parameter contract. |
 | `call.possible-nil-receiver` | The receiver is `T \| nil` and the method is not defined on `NilClass`. |

@@ -37,8 +37,11 @@ module Rigor
 
       # One unresolved implicit-self call. `class_name` is the receiver's
       # statically known class (the enclosing `self` type); `method_name`
-      # the called name; `path` / `line` / `column` locate the call site.
-      UnresolvedSelfCall = Data.define(:class_name, :method_name, :path, :line, :column)
+      # the called name; `node` the Prism `CallNode` (held in-memory so the
+      # `call.self-undefined-method` collector can resolve its scope from the
+      # scope index and apply the closed-class gate); `path` / `line` /
+      # `column` locate the call site for the diagnostic.
+      UnresolvedSelfCall = Data.define(:class_name, :method_name, :node, :path, :line, :column)
 
       # Mutable per-consumer accumulator, frozen into a {Record} snapshot
       # when {record_for} returns. Dedupes by the full call tuple so a
@@ -98,7 +101,7 @@ module Rigor
 
       # Records one unresolved implicit-self call. No-op when no consumer is
       # active on this thread (another thread may have flipped {active?}).
-      def record(class_name:, method_name:, path:, line:, column:)
+      def record(class_name:, method_name:, node:, path:, line:, column:)
         accumulator = Thread.current[KEY]
         return if accumulator.nil?
 
@@ -106,6 +109,7 @@ module Rigor
           UnresolvedSelfCall.new(
             class_name: class_name.to_s,
             method_name: method_name.to_sym,
+            node: node,
             path: path,
             line: line,
             column: column

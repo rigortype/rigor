@@ -173,12 +173,18 @@ module Rigor
         method_visibilities = default_scope.discovered_method_visibilities.merge(
           build_discovered_method_visibilities(root)
         ) { |_class, cross_file, per_file| cross_file.merge(per_file) }
+        # ADR-48 — per-file Data member layouts merged OVER the cross-file
+        # seed (same-file declaration is authoritative for its own classes).
+        data_member_layouts = default_scope.data_member_layouts.merge(
+          build_data_member_layouts(root)
+        )
 
         seeded_scope
           .with_discovered_def_nodes(def_nodes)
           .with_discovered_superclasses(superclasses)
           .with_discovered_includes(includes)
           .with_discovered_method_visibilities(method_visibilities)
+          .with_data_member_layouts(data_member_layouts)
       end
 
       # Slice 7 phase 2. Builds the class-level ivar accumulator
@@ -1149,6 +1155,58 @@ module Rigor
         end
       end
 
+      # ADR-48 — per qualified class name -> ordered `Data.define`
+      # member-name list, for both the named-subclass form
+      # (`class Point < Data.define(:x, :y)`) and the constant-assigned
+      # form (`Point = Data.define(:x, :y)`). Only `Data.define` is
+      # recorded: `Struct.new` instances are mutable, so member-value
+      # folding would be unsound (the Struct follow-up is deferred — see
+      # ADR-48 § "Struct follow-up"). Consumed by
+      # {Inference::MethodDispatcher::DataFolding} via
+      # {Scope#data_member_layout}.
+      def build_data_member_layouts(root)
+        accumulator = {}
+        walk_data_member_layouts(root, [], accumulator)
+        accumulator.freeze
+      end
+
+      def walk_data_member_layouts(node, qualified_prefix, accumulator)
+        return unless node.is_a?(Prism::Node)
+
+        case node
+        when Prism::ClassNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            record_data_member_layout(accumulator, qualified_prefix + [name], node.superclass)
+            walk_data_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
+            return
+          end
+        when Prism::ModuleNode
+          name = qualified_name_for(node.constant_path)
+          if name
+            walk_data_member_layouts(node.body, qualified_prefix + [name], accumulator) if node.body
+            return
+          end
+        when Prism::ConstantWriteNode
+          record_data_member_layout(accumulator, qualified_prefix + [node.name.to_s], node.value)
+        end
+
+        node.compact_child_nodes.each do |child|
+          walk_data_member_layouts(child, qualified_prefix, accumulator)
+        end
+      end
+
+      # Records `qualified -> [members]` when `expr` is a
+      # `Data.define(*Symbol)` call with at least one literal-Symbol member.
+      def record_data_member_layout(accumulator, qualified_parts, expr)
+        return unless data_define_call?(expr)
+
+        members = meta_member_names(expr)
+        return if members.empty?
+
+        accumulator[qualified_parts.join("::")] = members.freeze
+      end
+
       MIXIN_CALL_NAMES = %i[include prepend].freeze
 
       # ADR-24 slice 2 — per-class/module table mapping a fully
@@ -1518,7 +1576,7 @@ module Rigor
       #   `{ def_nodes:, def_sources:, superclasses:, includes:, class_sources: }`
       def discovered_def_index_for_paths(paths, buffer: nil)
         acc = { def_nodes: {}, def_sources: {}, superclasses: {}, includes: {}, method_visibilities: {}, methods: {},
-                class_sources: {} }
+                class_sources: {}, data_member_layouts: {} }
         paths.each do |path|
           physical = buffer ? buffer.resolve(path) : path
           root = Prism.parse(File.read(physical), filepath: path).value
@@ -1567,6 +1625,14 @@ module Rigor
           acc[:includes][class_name] = ((acc[:includes][class_name] || []) + mods).uniq
         end
         record_class_sources(acc[:class_sources], path, root, superclasses, includes)
+        merge_class_keyed_index_tables(acc, root)
+        acc[:data_member_layouts].merge!(build_data_member_layouts(root))
+      end
+
+      # Folds the per-class method-visibility and method-existence tables of
+      # one file into the cross-file accumulator (kept out of
+      # {#accumulate_project_index} to hold its ABC budget).
+      def merge_class_keyed_index_tables(acc, root)
         build_discovered_method_visibilities(root).each do |class_name, table|
           (acc[:method_visibilities][class_name] ||= {}).merge!(table)
         end

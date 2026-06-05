@@ -10,6 +10,7 @@ require_relative "method_dispatcher/call_context"
 require_relative "method_dispatcher/constant_folding"
 require_relative "method_dispatcher/literal_string_folding"
 require_relative "method_dispatcher/shape_dispatch"
+require_relative "method_dispatcher/data_folding"
 require_relative "method_dispatcher/rbs_dispatch"
 require_relative "method_dispatcher/iterator_dispatch"
 require_relative "method_dispatcher/block_folding"
@@ -743,6 +744,15 @@ module Rigor
       private_constant :PRECISE_TIERS
 
       def dispatch_precise_tiers(context)
+        # ADR-48 — Data value folding runs ahead of meta-introspection:
+        # `meta_new` intercepts every `Singleton[*].new` (returning
+        # `Nominal`), which would mask a `Data` class's precise instance.
+        # The tier only fires on Data receivers (a `Data.define`, a
+        # `DataClass`/`DataInstance`, or a `Singleton` with a recorded
+        # member layout), so it never shadows meta's Array/Set/Range lifts.
+        data_result = DataFolding.try_dispatch(context)
+        return data_result if data_result
+
         meta_result = try_meta_introspection(context.receiver, context.method_name, context.args)
         return meta_result if meta_result
 

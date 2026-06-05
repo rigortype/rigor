@@ -161,6 +161,7 @@ module Rigor
         @project_discovered_class_sources = {}.freeze
         @project_discovered_method_visibilities = {}.freeze
         @project_discovered_methods = {}.freeze
+        @project_data_member_layouts = {}.freeze
       end
 
       # ADR-pending editor mode — present when the runner is wired
@@ -496,6 +497,7 @@ module Rigor
         @project_discovered_class_sources = def_index.fetch(:class_sources)
         @project_discovered_method_visibilities = def_index.fetch(:method_visibilities)
         @project_discovered_methods = def_index.fetch(:methods)
+        @project_data_member_layouts = def_index.fetch(:data_member_layouts)
       end
 
       # Internal: adopts a frozen {ProjectScan} snapshot supplied
@@ -1831,6 +1833,7 @@ module Rigor
           scope = scope.with_discovered_method_visibilities(@project_discovered_method_visibilities)
         end
         scope = scope.with_discovered_methods(@project_discovered_methods) unless @project_discovered_methods.empty?
+        scope = scope.with_data_member_layouts(@project_data_member_layouts) unless @project_data_member_layouts.empty?
         # ADR-46 slice 1 — the class-declaration source map is read only by
         # the ancestry accessors during dependency recording, so seed it
         # only when recording is on; a normal run never carries it.

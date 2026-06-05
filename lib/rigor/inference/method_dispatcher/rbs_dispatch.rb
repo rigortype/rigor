@@ -249,6 +249,15 @@ module Rigor
               ["Array", :instance, tuple_type_args(receiver)]
             when Type::HashShape
               ["Hash", :instance, hash_shape_type_args(receiver)]
+            when Type::DataInstance
+              # ADR-48 — project a member-instance carrier to its tagging
+              # class (or the `Data` supertype) so non-member calls
+              # (`inspect`, `==`, `frozen?`, ...) resolve through RBS
+              # rather than mis-firing undefined-method. Member reads were
+              # already folded by DataFolding above this tier.
+              [receiver.class_name || "Data", :instance, []]
+            when Type::DataClass
+              [receiver.class_name || "Data", :singleton, []]
             when Type::BoundMethod
               # `BoundMethod` is a precision-bearing alias for
               # `Nominal[Method]`: it carries the

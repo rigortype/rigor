@@ -1,6 +1,6 @@
 module Rigor
   module Type
-    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Difference | Tuple | HashShape
+    type t = Top | Bot | Dynamic | Constant | IntegerRange | Nominal | Singleton | Union | Difference | Tuple | HashShape | DataClass | DataInstance
 
     type accepts_mode = :strict | :gradual | :loose
 
@@ -245,6 +245,38 @@ module Rigor
       def inspect: () -> String
     end
 
+    class DataClass
+      attr_reader members: Array[Symbol]
+      attr_reader class_name: String?
+      def initialize: (Array[Symbol] members, ?String? class_name) -> void
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
+    class DataInstance
+      attr_reader members: Hash[Symbol, Type::t]
+      attr_reader class_name: String?
+      def initialize: (Hash[Symbol, Type::t] members, ?String? class_name) -> void
+      def member_names: () -> Array[Symbol]
+      def member_type: (Symbol name) -> Type::t?
+      def describe: (?Symbol verbosity) -> String
+      def erase_to_rbs: () -> String
+      def top: () -> Trinary
+      def bot: () -> Trinary
+      def dynamic: () -> Trinary
+      def accepts: (Type::t other, ?mode: accepts_mode) -> AcceptsResult
+      def ==: (untyped other) -> bool
+      def hash: () -> Integer
+      def inspect: () -> String
+    end
+
     class AcceptsResult
       attr_reader trinary: Trinary
       attr_reader mode: accepts_mode
@@ -305,6 +337,8 @@ module Rigor
       def self?.universal_int: () -> IntegerRange
       def self?.tuple_of: (*Type::t elements) -> Tuple
       def self?.hash_shape_of: (?Hash[untyped, Type::t]? pairs, **untyped options) -> HashShape
+      def self?.data_class_of: (members: Array[Symbol], ?class_name: String?) -> DataClass
+      def self?.data_instance_of: (members: Hash[Symbol, Type::t], ?class_name: String?) -> DataInstance
       def self?.union: (*Type::t types) -> Type::t
       def self?.key_of: (Type::t type) -> Type::t
       def self?.value_of: (Type::t type) -> Type::t

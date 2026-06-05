@@ -9,6 +9,8 @@ require_relative "constant"
 require_relative "integer_range"
 require_relative "tuple"
 require_relative "hash_shape"
+require_relative "data_class"
+require_relative "data_instance"
 require_relative "union"
 require_relative "difference"
 require_relative "refined"
@@ -356,6 +358,21 @@ module Rigor
         end
 
         HashShape.new(pairs, **options)
+      end
+
+      # ADR-48 — the class object produced by `Data.define(:x, :y)`.
+      # `members` is the ordered Symbol member-name list; `class_name`
+      # tags the class when known (the named-subclass form) and is nil
+      # for the anonymous `Data.define(...)` result.
+      def data_class_of(members:, class_name: nil)
+        DataClass.new(members, class_name)
+      end
+
+      # ADR-48 — a `Data.define` value instance. `members` is the ordered
+      # member-name -> value-type map; `class_name` tags the instance's
+      # class when known.
+      def data_instance_of(members:, class_name: nil)
+        DataInstance.new(members, class_name)
       end
 
       # Normalized union. Flattens nested Unions, deduplicates structurally

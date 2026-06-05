@@ -23,6 +23,7 @@ module Rigor
                 :discovered_classes, :in_source_constants, :discovered_methods,
                 :discovered_def_nodes, :discovered_def_sources, :discovered_method_visibilities,
                 :discovered_superclasses, :discovered_includes, :discovered_class_sources,
+                :data_member_layouts,
                 :indexed_narrowings, :method_chain_narrowings,
                 :source_path
 
@@ -95,6 +96,7 @@ module Rigor
       discovered_superclasses: EMPTY_CLASS_BINDINGS,
       discovered_includes: EMPTY_CLASS_BINDINGS,
       discovered_class_sources: EMPTY_CLASS_BINDINGS,
+      data_member_layouts: EMPTY_CLASS_BINDINGS,
       indexed_narrowings: EMPTY_INDEXED_NARROWINGS,
       method_chain_narrowings: EMPTY_CHAIN_NARROWINGS,
       source_path: nil
@@ -119,6 +121,7 @@ module Rigor
       @discovered_superclasses = discovered_superclasses
       @discovered_includes = discovered_includes
       @discovered_class_sources = discovered_class_sources
+      @data_member_layouts = data_member_layouts
       @indexed_narrowings = indexed_narrowings
       @method_chain_narrowings = method_chain_narrowings
       @source_path = source_path
@@ -425,6 +428,27 @@ module Rigor
       rebuild(discovered_superclasses: table)
     end
 
+    # ADR-48 — per-class table mapping a fully qualified class name to its
+    # ordered `Data.define` / `Struct.new` member-name list. Populated by
+    # `ScopeIndexer` for both the constant-assigned form
+    # (`Point = Data.define(:x, :y)`) and the named-subclass form
+    # (`class Point < Data.define(:x, :y)`). Consumed by
+    # {Inference::MethodDispatcher::DataFolding} so `Point.new(...)` on a
+    # `Singleton[Point]` receiver materialises a precise member instance.
+    # Returns nil when the class has no recorded layout.
+    def data_member_layout(class_name)
+      layout = @data_member_layouts[class_name.to_s]
+      # Record the ancestry dependency only on a hit — DataFolding consults
+      # this for every `Singleton[*].new`, and a miss (the common case: an
+      # ordinary class) must not manufacture a spurious cross-file edge.
+      record_class_dependency(class_name) if layout && Analysis::DependencyRecorder.active?
+      layout
+    end
+
+    def with_data_member_layouts(table)
+      rebuild(data_member_layouts: table)
+    end
+
     # ADR-24 slice 2 — per-class/module table mapping a fully
     # qualified user class or module to the list of module
     # names it `include`s / `prepend`s, AS WRITTEN at the
@@ -638,6 +662,7 @@ module Rigor
       discovered_superclasses: @discovered_superclasses,
       discovered_includes: @discovered_includes,
       discovered_class_sources: @discovered_class_sources,
+      data_member_layouts: @data_member_layouts,
       indexed_narrowings: @indexed_narrowings,
       method_chain_narrowings: @method_chain_narrowings,
       source_path: @source_path
@@ -658,6 +683,7 @@ module Rigor
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,
         discovered_class_sources: discovered_class_sources,
+        data_member_layouts: data_member_layouts,
         indexed_narrowings: indexed_narrowings,
         method_chain_narrowings: method_chain_narrowings,
         source_path: source_path
@@ -702,6 +728,7 @@ module Rigor
         discovered_superclasses: discovered_superclasses,
         discovered_includes: discovered_includes,
         discovered_class_sources: discovered_class_sources,
+        data_member_layouts: data_member_layouts,
         indexed_narrowings: join_bindings(@indexed_narrowings, other.indexed_narrowings),
         method_chain_narrowings: join_bindings(@method_chain_narrowings, other.method_chain_narrowings),
         source_path: source_path

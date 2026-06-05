@@ -1,6 +1,6 @@
 # ADR-46 — Incremental analysis via a cross-file dependency graph
 
-Status: **Accepted — implemented (body tier). The whole-run cache ([ADR-45](45-unchanged-project-fast-path.md)) is coarse (any analyzed-file change → full re-run); this is the per-file incremental successor: edit a leaf controller → re-check that one file; edit a model → re-check the model plus the files that actually depend on it. `rigor check --incremental` ships the cross-process body tier (slices 1+2): record per-file cross-file deps → invert to `dependents` → on a run, re-analyze only `ΔF ∪ dependents[ΔF]` and serve the rest from a disk snapshot. Soundness is enforced by the mandatory `--verify-incremental` gate (incremental == full `--no-cache`, byte-identical), wired into CI. Measured on Rigor's own `lib` (262 files): warm no-change 0.75s vs 7.2s full (~9.6×), one-file leaf edit 1.15s (~6.3×), diagnostics identical. Slice 4 (symbol granularity) and slice 3 (structural-tier negative-dependency tracking) are both landed — slice 3 closed the top-level-call soundness gap (a missed `helper()` whose definition arrives in a later edit no longer serves a stale `call.unresolved-toplevel`); incremental file *addition* remains the demand-gated refinement.**
+Status: **Accepted — implemented (body tier). The whole-run cache ([ADR-45](45-unchanged-project-fast-path.md)) is coarse (any analyzed-file change → full re-run); this is the per-file incremental successor: edit a leaf controller → re-check that one file; edit a model → re-check the model plus the files that actually depend on it. `rigor check --incremental` ships the cross-process body tier (slices 1+2): record per-file cross-file deps → invert to `dependents` → on a run, re-analyze only `ΔF ∪ dependents[ΔF]` and serve the rest from a disk snapshot. Soundness is enforced by the mandatory `--verify-incremental` gate (incremental == full `--no-cache`, byte-identical), wired into CI. Measured on Rigor's own `lib` (262 files): warm no-change 0.75s vs 7.2s full (~9.6×), one-file leaf edit 1.15s (~6.3×), diagnostics identical. Slices 3 (structural-tier negative-dependency tracking) and 4 (symbol granularity) are landed, and the structural tier now covers file *addition / removal* incrementally (the snapshot fingerprint is keyed on the analysis roots, not the file list; added files re-check the consumers of their now-defined names via the negative edges, removed files re-check their positive dependents). Slice 3 also closed two warm-session soundness gaps: a missed `helper()` whose definition arrives in a later edit (`call.unresolved-toplevel`), and a subclass whose superclass is defined later (`def.override-*`, whose checker reads the class graph outside the recorder's choke points).**
 
 ADR-45 made an *unchanged* project fast (record-and-validate whole-run
 cache, ~42× on GitLab). It is deliberately coarse: a single changed file
@@ -318,10 +318,23 @@ trade for speed. Defenses:
    stays byte-identical; the `IncrementalSnapshot` payload carries `missing` +
    `class_decls` (SCHEMA 4).
 
-   **Remaining (demand-gated):** incremental file *addition / removal* (a new
-   or deleted file changes the `paths:` fingerprint → full rebuild today). The
-   negative edges above are the soundness enabler for addition; removal is
-   covered by the positive symbol / ancestry dependents of the removed file.
+   **File addition / removal (landed).** The snapshot fingerprint is keyed on
+   the analysis *roots* (the path args, e.g. `["lib"]`) rather than the
+   expanded file list, so adding or deleting a file under the roots no longer
+   drops the snapshot. `#recheck` reconciles the current file set against the
+   last run's: an **added** file is analysed and — having no before-state —
+   contributes all its symbols / classes as *appeared*, so the negative edges
+   above re-check whatever depended on its now-defined names; a **removed**
+   file is evicted from every per-file map (cache, digests, sources,
+   fingerprints) and its positive dependents (`@dependents[removed]`,
+   capturing the union of symbol + ancestry consumers) are re-checked, so a
+   caller that loses a top-level method or a subclass that loses its
+   superclass re-fires correctly. Verified byte-identical against a full run
+   on added-toplevel / added-superclass / removed-toplevel / removed-superclass
+   / added-unrelated edits (in-process and cross-process). **Remaining
+   (demand-gated):** none for the body + structural tiers; the larger
+   open item is return-type *summaries* to bound inferred-return fan-out
+   (§ Risks).
 4. **Symbol granularity (optional).** Refine file-level deps to
    `(file, symbol)` so editing one model method re-checks only callers of
    *that* method, not every caller of the model.

@@ -77,37 +77,53 @@ module Rigor
         diagnostics
       end
 
-      # Re-check after on-disk edits. Re-analyzes only the affected closure
-      # and serves the rest from cache; refreshes the cache + dependency
-      # state so a subsequent #recheck sees the new world.
+      # Re-check after on-disk edits, including files added or removed since
+      # the last run (the structural tier). Re-analyzes only the affected
+      # closure and serves the rest from cache; refreshes the cache +
+      # dependency state so a subsequent #recheck sees the new world.
       def recheck
-        changed = @analyzed.reject { |path| digest(path) == @digests[path] }
-        affected = affected_closure(changed)
-        runner = build_runner(analyze_only: affected, record_dependencies: true)
+        previous = @analyzed
+        current = current_files
+        added = current - previous
+        removed = previous - current
+        changed = (current & previous).reject { |path| digest(path) == @digests[path] }
+        affected = affected_closure(changed, added, removed)
+        analyze_set = affected & current
+        runner = build_runner(analyze_only: analyze_set, record_dependencies: true)
         fresh = run_runner(runner).diagnostics
-        reused = @analyzed - affected.to_a
+        reused = (current & previous) - affected.to_a
         merged = fresh + reused.flat_map { |path| @cache[path] || [] }
-        absorb(runner, fresh, affected, changed)
+        absorb(runner, fresh, current, analyze_set, removed)
         Recheck.new(diagnostics: merged, changed: changed.to_set, affected: affected, reused: reused.to_set)
       end
 
-      # The frozen set of files a #recheck must re-analyse for `changed`:
-      # the symbol/ancestry-granularity closure of the changed files (slice 4)
-      # widened by the consumers of any symbol / class that *appeared* in the
-      # edit and resolves a prior negative lookup (slice 3) — so a
-      # `call.unresolved-toplevel` whose target is now defined, or a
-      # `def.override-*` whose ancestor now exists, is re-checked rather than
-      # served stale. Both use a quick indexing re-pass over the changed files.
-      def affected_closure(changed)
-        new_fps = symbol_fingerprints_for(changed)
-        new_class_decls = class_declarations_for(changed)
+      # The frozen set of files a #recheck must re-analyse: the
+      # symbol/ancestry-granularity closure of the changed files (slice 4),
+      # the added files themselves, the consumers of any symbol / class that
+      # *appeared* in a changed OR added file (slice 3 — a now-defined
+      # `call.unresolved-toplevel` target or `def.override-*` ancestor), and
+      # the consumers of every removed file (which now miss what it provided).
+      # An added file has no before-state, so all its symbols / classes appear.
+      def affected_closure(changed, added, removed)
+        scan = changed + added
+        new_fps = symbol_fingerprints_for(scan)
+        new_class_decls = class_declarations_for(scan)
         changed_pairs = Incremental.changed_symbol_pairs(changed, @symbol_fingerprints, new_fps)
         base = if changed_pairs.any? || changed.any? { |f| @ancestry_dependents[f] }
                  Incremental.affected_with_symbols(changed, changed_pairs, @symbol_dependents, @ancestry_dependents)
                else
                  Incremental.affected(changed, @dependents)
                end
-        (base | negative_affected(changed, new_fps, new_class_decls)).freeze
+        closure = base | added.to_set | negative_affected(scan, new_fps, new_class_decls)
+        removed.each { |path| closure |= @dependents[path] || Set.new }
+        closure.freeze
+      end
+
+      # The current project file set (cheap directory expansion, no analysis),
+      # used to detect files added / removed since the last run.
+      def current_files
+        runner = build_runner
+        @paths ? runner.analysis_file_set(@paths) : runner.analysis_file_set
       end
 
       # Verification engine (the `--verify-incremental` gate): with NO
@@ -185,14 +201,32 @@ module Rigor
       end
 
       # Fold a #recheck's fresh results back into the cache + graph so the
-      # session is correct across multiple edits: the re-analyzed files get
-      # fresh diagnostics, sources, and digests; every other file's state is
-      # carried over untouched.
-      def absorb(runner, fresh, affected, changed)
+      # session is correct across multiple edits: the analyzed set gets fresh
+      # diagnostics + digests + dependency edges, removed files are evicted
+      # from every map, and the analyzed-file list advances to `current`.
+      def absorb(runner, fresh, current, analyze_set, removed)
+        removed.each { |path| forget(path) }
+        @analyzed = current
         fresh_by_file = per_file(fresh)
-        affected.each { |path| @cache[path] = fresh_by_file[path] || [] }
+        analyze_set.each do |path|
+          @cache[path] = fresh_by_file[path] || []
+          @digests[path] = digest(path)
+        end
         absorb_dependency_graph(runner)
-        changed.each { |path| @digests[path] = digest(path) }
+      end
+
+      # Evict a removed file from every per-file map so its stale diagnostics
+      # are never served and it drops out of the inverted dependency indexes.
+      def forget(path)
+        @cache.delete(path)
+        @digests.delete(path)
+        @sources.delete(path)
+        @symbol_sources.delete(path)
+        @ancestry_sources.delete(path)
+        @missing.delete(path)
+        @symbol_fingerprints.delete(path)
+        # @class_decls is wholesale-replaced from the (removed-excluding)
+        # pre-pass in absorb_dependency_graph, and is frozen, so no delete.
       end
 
       # Fold a runner's dependency recording (file-level and symbol-level) back

@@ -154,7 +154,9 @@ module Rigor
       paths = @argv.empty? ? nil : @argv
       probe = Analysis::Runner.new(configuration: configuration, cache_store: nil)
       files = paths ? probe.analysis_file_set(paths) : probe.analysis_file_set
-      fingerprint = Cache::IncrementalSnapshot.fingerprint(configuration: configuration, files: files)
+      fingerprint = Cache::IncrementalSnapshot.fingerprint(
+        configuration: configuration, roots: paths || configuration.paths
+      )
       snapshot = Cache::IncrementalSnapshot.new(root: cache_root)
       session = Analysis::IncrementalSession.new(configuration: configuration, paths: paths)
 

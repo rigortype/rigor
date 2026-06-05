@@ -22,6 +22,10 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     diagnostics.map(&:to_h).sort_by { |hash| [hash["path"], hash["line"], hash["column"], hash["rule"]] }
   end
 
+  def fingerprint(config, dir)
+    Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: config, roots: [dir])
+  end
+
   # A self-contained `def.override-visibility-reduced` (balanced profile →
   # :warning) plus a referenceable class. `reduced:` toggles the diagnostic.
   def write_unit(path, prefix:, reduced: true)
@@ -178,12 +182,109 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
     end
   end
 
-  describe "#run_incremental (cross-process persistence)" do
-    def fingerprint(config, dir)
-      files = Rigor::Analysis::Runner.new(configuration: config, cache_store: nil).analysis_file_set([dir])
-      Rigor::Cache::IncrementalSnapshot.fingerprint(configuration: config, files: files)
+  # ADR-46 slice 3 (structural tier) — files added / removed between runs are
+  # reconciled incrementally (the `paths:` set is no longer in the snapshot
+  # fingerprint), leaning on the appeared-symbol/class negative edges for
+  # additions and the positive dependents of removed files for removals.
+  describe "file addition / removal" do
+    it "re-checks a caller when a new file defines its missing top-level method" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "helper()\n")
+
+        session = described_class.new(configuration: configuration(dir))
+        session.baseline
+
+        File.write(File.join(dir, "b.rb"), "def helper\n  1\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(sorted(recheck.diagnostics).map { |h| h["rule"] }).not_to include("call.unresolved-toplevel")
+      end
     end
 
+    it "re-checks a subclass when a new file defines its missing superclass" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "class ASub < NewBase\n  private\n\n  def tag\n    \"y\"\n  end\nend\n")
+
+        session = described_class.new(configuration: configuration(dir))
+        session.baseline
+
+        File.write(File.join(dir, "b.rb"), "class NewBase\n  def tag\n    \"x\"\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).to include(a)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "re-checks dependents and drops the cache entry when a file is removed" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        b = File.join(dir, "b.rb")
+        File.write(a, "helper()\n")
+        File.write(b, "def helper\n  1\nend\n")
+
+        session = described_class.new(configuration: configuration(dir))
+        session.baseline
+
+        File.delete(b)
+        recheck = session.recheck
+
+        # a.rb re-checked (now fires unresolved-toplevel); b.rb gone from the
+        # analyzed set and the merged diagnostics.
+        expect(recheck.affected).to include(a)
+        expect(session.analyzed_files).not_to include(b)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        expect(recheck.diagnostics.map { |d| d.path.to_s }).not_to include(b)
+      end
+    end
+
+    it "does not re-check unrelated files when a new file is added" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "x = 1\nputs x\n")
+
+        session = described_class.new(configuration: configuration(dir))
+        session.baseline
+
+        added = File.join(dir, "b.rb")
+        File.write(added, "class Wholly\n  def z\n    1\n  end\nend\n")
+        recheck = session.recheck
+
+        expect(recheck.affected).not_to include(a)
+        expect(recheck.affected).to include(added)
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
+
+    it "reconciles an added file across processes via the snapshot" do
+      Dir.mktmpdir do |dir|
+        a = File.join(dir, "a.rb")
+        File.write(a, "helper()\n")
+        config = configuration(dir)
+        snapshot = Rigor::Cache::IncrementalSnapshot.new(root: File.join(dir, ".cache"))
+        fp = fingerprint(config, dir)
+
+        # Process 1 — cold baseline.
+        _d1, warm1 = described_class.new(configuration: config, paths: [dir])
+                                    .run_incremental(snapshot: snapshot, fingerprint: fp)
+        expect(warm1).to be(false)
+
+        # A new file appears between processes; the roots-keyed fingerprint is
+        # unchanged, so the snapshot still loads.
+        File.write(File.join(dir, "b.rb"), "def helper\n  1\nend\n")
+        diags2, warm2 = described_class.new(configuration: config, paths: [dir])
+                                       .run_incremental(snapshot: snapshot, fingerprint: fp)
+        expect(warm2).to be(true)
+        expect(sorted(diags2)).to eq(sorted(full_run(dir)))
+      end
+    end
+  end
+
+  describe "#run_incremental (cross-process persistence)" do
     it "is cold on first run and warm (snapshot-reusing) afterwards, matching a full run" do
       Dir.mktmpdir do |dir|
         a = File.join(dir, "a.rb")

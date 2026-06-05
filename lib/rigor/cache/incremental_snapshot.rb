@@ -49,20 +49,22 @@ module Rigor
 
       # The global fingerprint that gates a snapshot load: a digest of the
       # inputs whose change requires a full rebuild — the engine version +
-      # schema, the resolved configuration, the analyzed-file SET (adding /
-      # removing a file is a structural change handled by a full rebuild
-      # here), the resolved gem set (`Gemfile.lock` / `rbs_collection`), and
-      # the project's own RBS (`signature_paths` file contents). Built
-      # WITHOUT constructing the RBS environment so the warm path can gate
-      # the load cheaply, before the costly env build. The
-      # `--verify-incremental` gate is the safety net for any under-capture
-      # (it would surface as an incremental-vs-full mismatch). Returns nil
-      # on any error → the caller falls back to a non-persisted run.
-      def self.fingerprint(configuration:, files:)
+      # schema, the resolved configuration, the analysis **roots** (the path
+      # arguments, e.g. `["lib"]`, NOT the expanded file list — so a snapshot
+      # is keyed to an invocation's roots but adding / removing a file under
+      # them is handled incrementally by the session, not a full rebuild), the
+      # resolved gem set (`Gemfile.lock` / `rbs_collection`), and the project's
+      # own RBS (`signature_paths` file contents). Built WITHOUT constructing
+      # the RBS environment so the warm path can gate the load cheaply, before
+      # the costly env build. The `--verify-incremental` gate is the safety net
+      # for any under-capture (it would surface as an incremental-vs-full
+      # mismatch). Returns nil on any error → the caller falls back to a
+      # non-persisted run.
+      def self.fingerprint(configuration:, roots:)
         parts = [
           "engine:#{Rigor::VERSION}:#{SCHEMA}",
           "config:#{Digest::SHA256.hexdigest(Marshal.dump(configuration.to_h))}",
-          "paths:#{files.map(&:to_s).sort.join("\n")}",
+          "roots:#{Array(roots).map(&:to_s).sort.join("\n")}",
           "gems:#{digest_file_if_present('Gemfile.lock')}",
           "rbs_collection:#{digest_file_if_present('rbs_collection.lock.yaml')}",
           "sig:#{digest_signature_paths(configuration.signature_paths)}"

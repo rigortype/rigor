@@ -651,145 +651,46 @@ matching `baseline: .rigor-baseline.yml` line into
 missing); the `rigor-project-init` SKILL takes care of this
 wiring as a single step.
 
-## SKILL: rigor-project-init
+## The two SKILLs (shipped — phase detail lives in the SKILL files)
 
-End-to-end agent workflow for onboarding a new project to
-Rigor. Triggered when the user says "set up Rigor in this
-project", "configure rigor for X", or starts running rigor in
-a Gemfile-bearing directory that has no `.rigor.yml`.
+Both are agent-facing workflows on the published `rigortype` gem surface
+(public CLI + config keys only), shipped under the external-author
+`skills/` tree (WD8). Their phase outlines and per-phase decision points
+live in the SKILL files and their `references/` modules; this ADR records
+only the design choices that are the ADR's to own.
 
-### Phase outline
+- **[`skills/rigor-project-init`](../../skills/rigor-project-init/SKILL.md)**
+  — onboarding: detect the stack from `Gemfile` / `Gemfile.lock`, propose
+  a plugin set + `severity_profile`, write `.rigor.dist.yml`, generate the
+  baseline (and wire `baseline:` into the config, per WD2(b)), then surface
+  the concentrated low-count rules as likely real bugs. It consumes `rigor
+  triage --format json` ([ADR-23 WD5](23-diagnostic-triage-command.md))
+  rather than counting the raw stream.
+- **[`skills/rigor-baseline-reduce`](../../skills/rigor-baseline-reduce/SKILL.md)**
+  — opportunistic reduction: walk the baseline smallest-rule-first,
+  sample-and-classify each cluster (real bug / stylistic-safe / FP), fix or
+  `# rigor:disable` or escalate, refreshing via `rigor baseline drift` /
+  `prune`.
 
-1. **Detect the project shape** — read `Gemfile` to detect the
-   framework family (Rails / Sinatra / dry-rb / plain Ruby /
-   …); read `Gemfile.lock` to detect the locked gem versions
-   and the absence-or-presence of `rbs_collection.lock.yaml`.
-2. **Plugin selection** — propose a plugin set matching the
-   detected stack. Defaults:
-   - Rails-shaped project → `rigor-actionpack`,
-     `rigor-activerecord`, `rigor-actionmailer`,
-     `rigor-rails-routes`, `rigor-rails-i18n`, plus per-gem
-     plugins for Devise / Pundit / Sidekiq / Sorbet etc.
-     present in `Gemfile`.
-   - dry-rb-shaped project → `rigor-dry-types` +
-     `rigor-dry-struct` (+ schema / validation when present).
-   - RSpec test suite → `rigor-rspec`.
-3. **Severity profile** — propose `lenient` for any project
-   with >100 errors on first run (matches the "incremental
-   adoption" use case); propose `balanced` otherwise. The
-   strict profile stays opt-in for CI-final-gating.
-4. **Write `.rigor.dist.yml`** (the convention is dist-file
-   committed, optional `.rigor.yml` local override) with the
-   detected configuration.
-5. **Run `rigor triage --format json`** to diagnose the
-   diagnostic stream (rule distribution, hotspots, heuristic
-   hints) — per [ADR-23 WD5](23-diagnostic-triage-command.md)
-   the SKILL consumes the triage JSON rather than counting the
-   raw `rigor check` stream itself.
-6. **Write `.rigor-baseline.yml`** via `rigor baseline
-   generate`. AND add `baseline: .rigor-baseline.yml` to
-   the `.rigor.dist.yml` written in step 4 — per WD2 (b)
-   the file's presence alone is dormant; the config has to
-   name it. The SKILL does both edits in one step so the
-   user doesn't end up with a generated baseline that
-   silently does nothing.
-   Print the suppression summary: "N diagnostics recorded
-   as baseline; M will surface on subsequent runs".
-7. **Surface real bugs**: in the baseline, count diagnostics
-   per rule. Suggest 2-3 rules where the count is small enough
-   to fix interactively (these are likely the genuine bugs
-   Rigor caught — concentrated rules with low counts often
-   indicate localised issues vs. systemic patterns).
+### Adoption mode — the load-bearing design choice
 
-### Adoption mode — the realised phase shape
+The realised shape (v0.1.9) folds the SKILL's severity + baseline steps
+into a single **adoption-mode** decision the user makes up front:
 
-As built (v0.1.9), the SKILL frames phases 3 + 6 as a single
-**adoption-mode** choice the user makes up front, rather than
-two independent knobs:
+- **Acknowledge mode** — `severity_profile: lenient` (or `balanced` for a
+  small project); the baseline snapshots today's diagnostics and the
+  project's test / spec suite is the evidence the worst-case `T | nil`
+  reading is not hit at runtime (Context observation 1).
+- **Strict mode** — `severity_profile: strict`, no baseline; every
+  diagnostic stays live and is fixed or `# rigor:disable`d with a reason.
 
-- **Acknowledge mode** (baseline adoption) — `severity_profile:
-  lenient` (or `balanced` for a small project), phase 6 runs:
-  today's diagnostics are snapshotted into the baseline and the
-  project leans on its **test / spec suite** to cover runtime
-  correctness for the parenthesised sites. The static `T | nil`
-  reading is worst-case-sound; the suite is the evidence the
-  worst case is not hit (the context § observation 1).
-- **Strict mode** (no compromise) — `severity_profile: strict`,
-  phase 6 is **skipped**: no baseline, every diagnostic stays
-  live, each is fixed or annotated `# rigor:disable` with an
-  author-intent reason.
-
-Both modes keep the regression guarantee — a *new* diagnostic
-surfaces in either. They differ only in the treatment of the
-diagnostics that exist on day one. The >100-errors heuristic of
-phase 3 becomes the recommendation for which mode to default to.
-
-The SKILL also surfaces two **escalation paths** for clusters
-that are neither a quick fix nor honest baseline material:
-application-specific metaprogramming → write a project-private
-plugin (hand off to `rigor-plugin-author`); an unsupported
-external gem → `rbs collection install` /
-`dependencies.source_inference:` / open a Rigor issue.
-
-### Decision points the SKILL escalates to the user
-
-- "Acknowledge mode or strict mode?" — the central choice, made
-  before any config is written (see above).
-- "This project uses HAML in places and ERB in others — should
-  I enable `rigor-actionpack`'s extended template extension
-  set, or restrict it?" (P3-style trade-off.)
-- "The baseline is very large (>2,000 entries). Consider
-  excluding `vendor/` / `spec/` / `test/` from `paths:` first."
-- "Locked gems X, Y, Z have no RBS coverage; consider
-  `dependencies.source_inference:` for them."
-
-## SKILL: rigor-baseline-reduce
-
-End-to-end agent workflow for opportunistic quality
-improvement. Triggered when the user says "reduce the rigor
-baseline" / "fix some baseline diagnostics" / "what should I
-fix next?".
-
-### Phase outline
-
-1. **Read `.rigor-baseline.yml`** — group by rule, sort by
-   ascending count (smallest rules first → likely real bugs
-   or contained patterns).
-2. **For each rule (in priority order)**:
-   a. Run `rigor check` filtered to the affected files; surface
-      the actual diagnostic stream so the user sees the
-      messages.
-   b. Sample 3-5 distinct sites; ask the user to classify each:
-      "real bug" / "stylistic / safe" / "FP — Rigor should
-      catch this".
-   c. If "real bug": propose a fix; offer to apply.
-   d. If "stylistic / safe": add `# rigor:disable <rule>`
-      comments at the sites (per-line, not per-file —
-      preserves visibility); decrement baseline count.
-   e. If "FP": leave in baseline AND open / flag a Rigor-side
-      issue (the rule itself should narrow further). For the
-      contributor-facing variant of this SKILL inside the
-      rigor repo, "flag a Rigor-side issue" means draft a
-      regression spec under `spec/rigor/...` and a survey
-      note under `docs/notes/`.
-3. **After each rule processed**: `rigor baseline drift`
-   to refresh the residuals; `rigor baseline prune` if the
-   rule is fully cleared from a file.
-4. **Stop conditions**: user signals halt; the next rule's
-   count exceeds a configurable session budget (default: 20
-   call sites); session reaches a configurable wall-time
-   budget (default: 60 minutes).
-
-### Decision points the SKILL escalates to the user
-
-- "This rule has 200 sites across 14 files — looks systemic.
-  Investigate whether a plugin / engine fix would clear them
-  in bulk, or pick a specific file and reduce there?"
-- "This file's diagnostic shape suggests the per-file
-  `# rigor:disable-file` form would be more maintainable than
-  per-line; switch?"
-- "The diagnostic message changed between Rigor versions; the
-  baseline doesn't match. Regenerate or prune-then-regenerate?"
+Both keep the regression guarantee — a *new* diagnostic surfaces either
+way; they differ only in the treatment of day-one diagnostics. The
+phase-3 >100-errors heuristic is the default-mode recommendation. The
+SKILL also escalates clusters that are neither quick-fix nor honest
+baseline material: app-specific metaprogramming → a project-private plugin
+(`rigor-plugin-author`); an unsupported gem → `rbs collection install` /
+`dependencies.source_inference:` / a Rigor issue.
 
 ## Consequences
 

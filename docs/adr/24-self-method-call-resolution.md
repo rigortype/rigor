@@ -3,8 +3,11 @@
 Status: **Accepted, 2026-05-20 (slice 4 gated — separate FP evaluation
 required). Slices 1+3 implemented 2026-05-20, slice 2 implemented
 2026-05-21. Slice 4 attempt 1 (check-rules reimplementation) prototyped
-and reverted 2026-06-05 — 135 false positives on Rigor's own `lib`; the
-correct route is an evaluation-time recorder, see slice 4 below.**
+and reverted 2026-06-05 — 135 false positives on Rigor's own `lib`. Slice
+4a (the evaluation-time recorder) implemented 2026-06-05, off by default,
+no rule yet — mini-corpus 467→15 misses, attempt-1 FP classes to zero; see
+slice 4 below. The closed-class gate + rule + external WD4 corpus gate
+remain.**
 
 Records the project's decision to resolve implicit-self method calls
 (a call written with no explicit receiver, inside a method body)
@@ -406,6 +409,51 @@ choke-point, like `DependencyRecorder`), and still needs the WD4 corpus
 gate before any default-on — but it is the only route that respects the
 false-positive discipline. The reverted prototype's specs + the 135-FP
 breakdown are the evidence for the next attempt.
+
+**Slice 4a (2026-06-05) — the evaluation-time recorder, LANDED, off by
+default, no rule yet.** `Analysis::SelfCallResolutionRecorder` records, at
+the single engine choke-point where an implicit-self call exhausts every
+resolution tier (`ExpressionTyper#call_type_for` → `fallback_for`), the
+calls that resolve to nothing. Opt-in via `Runner.new(record_self_calls:
+true)`; a normal run pays one integer read (`active?`) and records
+nothing. Purely observational — diagnostics are byte-identical.
+
+The decisive design correction over attempt 1: the choke-point fires on a
+*type* miss, which over-captures methods that **exist** but whose return
+the engine can't infer — the very `module_function` siblings
+(`Narrowing`, `Combinator`) that drove attempt-1's FPs. So the recorder
+gates on the engine's own **existence** signals before recording:
+`resolve_user_def_through_ancestors` (def existence, ancestor-aware) plus
+`Scope#discovered_method?` under **both** `:instance` and `:singleton`
+(`module_function` records its defs `:singleton`). Recording reuses the
+engine's real resolution — the "collect, don't recompute" lesson — so a
+name resolvable any way a project signal can see it never reaches the
+recorder.
+
+A companion `ScopeIndexer` fix registers `class X < Data.define(:a, …)` /
+`< Struct.new(:a, …)` synthesized member readers in the discovered-methods
+existence table (`record_meta_superclass_members`) — they have no `def` /
+`attr_*` declaration, so without this they read as unresolved.
+
+**Mini-corpus measurement (Rigor's own `lib`, 265 files):** raw recorder
+467 misses → **15** after the existence guard + member registration, and
+the attempt-1 FP classes go to **zero** (`Narrowing` 31→0, `Combinator`
+24→0). The residual 15 are exactly the predicted irreducibly-hard cases,
+none of them typos: `attr_reader(*CONSTANT)` splat accessors
+(`FlowContribution`, names not statically decidable), template-method
+modules whose method is implemented by includers (`CLI::Renderable`), and
+mixin-contract method sets (`ValueSemantics::ClassMethods`). These define
+the closed-class gate the rule slice still needs: exclude modules /
+mixin-contract receivers and classes with a splat-attr or
+`Data`/`Struct`-without-member-modelling shape. A block-form
+`Const = Data.define(:a) do … end` member reads `self` as `Object` (the
+engine does not rebind `self` to the constant for meta-block methods), so
+that over-capture lands under `Object` — never confidently closed — and
+the gate filters it for free.
+
+**Remaining for the rule slice:** the closed-class gate (consume the
+recorder, exclude the residual-15 shapes above) + the external WD4 corpus
+FP gate before any default-on.
 
 ## Re-evaluation triggers
 

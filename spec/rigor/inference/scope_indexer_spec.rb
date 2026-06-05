@@ -206,6 +206,34 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(scope.discovered_method?("Row", :to_pair, :instance)).to be(true)
     end
 
+    it "registers `class X < Data.define(...)` synthesized member readers" do
+      program = parse(<<~RUBY)
+        class Money < Data.define(:amount, :currency)
+          def describe
+            "x"
+          end
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.discovered_method?("Money", :amount, :instance)).to be(true)
+      expect(scope.discovered_method?("Money", :currency, :instance)).to be(true)
+      expect(scope.discovered_method?("Money", :describe, :instance)).to be(true)
+    end
+
+    it "registers `class X < Struct.new(...)` synthesized member readers" do
+      program = parse(<<~RUBY)
+        class Coord < Struct.new(:lat, :lng)
+        end
+      RUBY
+      idx = described_class.index(program, default_scope: default_scope)
+      scope = idx[program.statements.body.first]
+
+      expect(scope.discovered_method?("Coord", :lat, :instance)).to be(true)
+      expect(scope.discovered_method?("Coord", :lng, :instance)).to be(true)
+    end
+
     # Survey item (e) — `Const = Module.new do ... end` and
     # `Const = Class.new(?super) do ... end` are block-as-method
     # idioms that mirror the Data.define / Struct.new shape: the

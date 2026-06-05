@@ -4,6 +4,7 @@ require "prism"
 
 require_relative "../type"
 require_relative "../ast"
+require_relative "../analysis/self_call_resolution_recorder"
 require_relative "block_parameter_binder"
 require_relative "budget_trace"
 require_relative "fallback"
@@ -1264,7 +1265,61 @@ module Rigor
         # MUST NOT record a tracer event.
         return dynamic_top if receiver.is_a?(Type::Dynamic)
 
+        # ADR-24 slice 4a — this is the engine choke-point where an
+        # implicit-self call has exhausted every resolution tier (RBS
+        # dispatch + user-class ancestor walk) and falls through to
+        # `Dynamic[top]`. When the slice-4 recorder is active, capture the
+        # miss so a later slice's closed-class gate can flag it. Off by
+        # default: `active?` is a plain integer read.
+        record_unresolved_self_call(node, receiver) if Analysis::SelfCallResolutionRecorder.active?
+
         fallback_for(node, family: :prism)
+      end
+
+      # ADR-24 slice 4a — records an unresolved *implicit-self* call (no
+      # explicit receiver) whose `self` types to a concrete user class.
+      # Explicit-receiver misses are out of scope (the existing
+      # `call.undefined-method` rule already owns receiver-typed dispatch);
+      # a non-`Nominal` self (top-level / DSL-block `self`, or a `Dynamic`
+      # self) is skipped so the gradual guarantee is never touched here.
+      def record_unresolved_self_call(node, receiver)
+        return unless node.receiver.nil?
+        return unless receiver.is_a?(Type::Nominal)
+        return if self_call_method_known?(receiver.class_name, node.name)
+
+        location = node.message_loc || node.location
+        Analysis::SelfCallResolutionRecorder.record(
+          class_name: receiver.class_name,
+          method_name: node.name,
+          path: scope.source_path,
+          line: location&.start_line,
+          column: location ? location.start_column + 1 : nil
+        )
+      end
+
+      # The recorder must capture *existence* misses, not type misses.
+      # Reaching the choke-point means RBS dispatch produced no result, but
+      # a project method can still EXIST without an inferable return type —
+      # a `module_function` sibling whose body the engine can't fully type,
+      # an `attr_reader` / `define_method` / `Data.define` member. Recording
+      # those would reproduce the 135 false positives of slice-4 attempt 1.
+      # So skip any name the engine's own existence signals already know:
+      # a `def` resolvable through the ancestor walk, or an own-class entry
+      # in the discovered-methods table (`def` / `attr_*` / `define_method`
+      # / alias). This reuses the engine's real resolution — the
+      # "collect, don't recompute" lesson — so only a name that exists
+      # nowhere a project signal can see reaches the recorder.
+      # `module_function` records its defs as `:singleton` (an implicit-self
+      # call inside such a method dispatches to the module's singleton
+      # method), while ordinary instance methods record `:instance`. The
+      # recorder cannot tell the two contexts apart from the call node, so
+      # existence under EITHER kind suppresses recording — the FP-safe
+      # choice, since either means the method genuinely exists.
+      def self_call_method_known?(class_name, method_name)
+        return true if resolve_user_def_through_ancestors(class_name, method_name)
+
+        scope.discovered_method?(class_name, method_name, :instance) ||
+          scope.discovered_method?(class_name, method_name, :singleton)
       end
 
       # v0.0.2 #5 — re-types the body of a user-defined

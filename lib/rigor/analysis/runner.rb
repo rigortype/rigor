@@ -22,6 +22,7 @@ require_relative "../inference/method_dispatcher/file_folding"
 require_relative "buffer_binding"
 require_relative "check_rules"
 require_relative "dependency_recorder"
+require_relative "self_call_resolution_recorder"
 require_relative "incremental"
 require_relative "incremental_session"
 require_relative "dependency_source_inference"
@@ -40,7 +41,7 @@ module Rigor
 
       attr_reader :cache_store, :plugin_registry, :dependency_source_index,
                   :rbs_extended_reporter, :boundary_cross_reporter, :file_dependencies,
-                  :analyzed_files
+                  :analyzed_files, :unresolved_self_calls
 
       # @param configuration [Rigor::Configuration]
       # @param explain [Boolean] surface fail-soft fallback events
@@ -93,7 +94,7 @@ module Rigor
                      cache_store: Cache::Store.new(root: DEFAULT_CACHE_ROOT),
                      plugin_requirer: nil, workers: 0, collect_stats: true,
                      buffer: nil, prebuilt: nil, environment: nil,
-                     record_dependencies: false, analyze_only: nil)
+                     record_dependencies: false, record_self_calls: false, analyze_only: nil)
         @configuration = configuration
         @explain = explain
         @cache_store = enforce_read_only_cache(cache_store, buffer)
@@ -108,6 +109,13 @@ module Rigor
         # cross-file reads into `file_dependencies` (the incremental
         # cache, a later slice, consumes them).
         @record_dependencies = record_dependencies
+        # ADR-24 slice 4a — opt-in unresolved-implicit-self-call recording.
+        # Off by default; when true, `analyze_file` activates the engine
+        # choke-point recorder and collects each file's misses into
+        # `unresolved_self_calls` (a later closed-class-gated rule consumes
+        # them). Purely observational — diagnostics are byte-identical.
+        @record_self_calls = record_self_calls
+        @unresolved_self_calls = {}
         @analyzed_files = [].freeze
         # In-memory source map for `#run_source` — `{ logical_path => source
         # String }`. When set, `parse_source` reads bytes from here instead
@@ -1816,13 +1824,27 @@ module Rigor
       # short-circuit on `DependencyRecorder.active? == false`. Recording
       # is observational, so diagnostics are byte-identical either way.
       def analyze_file(path, environment)
-        return analyze_file_body(path, environment) unless @record_dependencies
+        return analyze_file_with_self_calls(path, environment) unless @record_dependencies
 
         diagnostics = nil
         record = DependencyRecorder.record_for(path) do
-          diagnostics = analyze_file_body(path, environment)
+          diagnostics = analyze_file_with_self_calls(path, environment)
         end
         @file_dependencies[path] = record
+        diagnostics
+      end
+
+      # ADR-24 slice 4a — wraps the body in the self-call recorder when
+      # opted in, mirroring the dependency-recorder envelope. Off by
+      # default, so a normal run calls the body directly.
+      def analyze_file_with_self_calls(path, environment)
+        return analyze_file_body(path, environment) unless @record_self_calls
+
+        diagnostics = nil
+        record = SelfCallResolutionRecorder.record_for(path) do
+          diagnostics = analyze_file_body(path, environment)
+        end
+        @unresolved_self_calls[path] = record
         diagnostics
       end
 

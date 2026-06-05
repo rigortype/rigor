@@ -865,7 +865,7 @@ module Rigor
         end
       end
 
-      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
+      # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize, Metrics/PerceivedComplexity
       def walk_methods(node, qualified_prefix, in_singleton_class, accumulator)
         return unless node.is_a?(Prism::Node)
 
@@ -874,6 +874,7 @@ module Rigor
           name = qualified_name_for(node.constant_path)
           if name
             child_prefix = qualified_prefix + [name]
+            record_meta_superclass_members(node, child_prefix, accumulator) if node.is_a?(Prism::ClassNode)
             walk_methods(node.body, child_prefix, false, accumulator) if node.body
             return
           end
@@ -933,7 +934,7 @@ module Rigor
           end
         end
       end
-      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize
+      # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/AbcSize, Metrics/PerceivedComplexity
 
       # v0.1.2 — when a `Const = Data.define(*sym) do ... end`
       # / `Const = Struct.new(*sym) do ... end` constant write
@@ -956,6 +957,40 @@ module Rigor
                           class_new_call?(rvalue)
 
         rvalue.block&.body
+      end
+
+      # `class Foo < Data.define(:a, :b)` / `class Bar < Struct.new(:x)`
+      # synthesizes reader methods (`a`, `b`, `x`) on the subclass that no
+      # `def` / `attr_*` declares. Register them in the discovered-methods
+      # existence table so an implicit-self read of a member inside the
+      # class body is known to exist — both for the existing
+      # undefined-method suppression and for the ADR-24 slice-4 self-call
+      # recorder, which must treat a synthesized member as an existing
+      # method, not an unresolved call. The block-form
+      # (`Const = Data.define(:a) do ... end`) is handled by the
+      # `ConstantWriteNode` branch's block recursion; its members type
+      # `self` as `Object`, out of scope here.
+      def record_meta_superclass_members(class_node, qualified_prefix, accumulator)
+        superclass = class_node.superclass
+        return unless data_define_call?(superclass) || struct_new_call?(superclass)
+
+        members = meta_member_names(superclass)
+        return if members.empty?
+
+        class_name = qualified_prefix.join("::")
+        table = (accumulator[class_name] ||= {})
+        members.each { |member| table[member] ||= :instance }
+      end
+
+      # The Symbol member names of a `Data.define(*Symbol)` /
+      # `Struct.new(*Symbol [, keyword_init:])` call. For `Struct.new` the
+      # optional leading String name and trailing `keyword_init:` hash are
+      # stripped by {#struct_new_positionals}; `Data.define` args are all
+      # Symbols already.
+      def meta_member_names(call_node)
+        raw = call_node.arguments&.arguments || []
+        symbols = struct_new_call?(call_node) ? (struct_new_positionals(raw) || []) : raw
+        symbols.filter_map { |arg| arg.unescaped.to_sym if arg.is_a?(Prism::SymbolNode) }
       end
 
       def record_def_method(def_node, qualified_prefix, in_singleton_class, accumulator)

@@ -259,6 +259,36 @@ This composes with [`rigor-release-prep`](../../.claude/skills/rigor-release-pre
 that runs this gate. The version-bump discipline (no autonomous bumps,
 single-digit components, release-style CHANGELOG at landing) is unchanged.
 
+### WD7 — Deprecation + graduation cadence
+
+A bleeding-edge feature (WD2) graduates to default-on — by being removed
+from the overlay — at a **semver major** release, after a **~4-week soak**
+as the guideline minimum. The soak is a floor, not a schedule: a feature
+that should become default quickly can trigger an earlier major, while one
+with no urgency simply rides the next major whenever it is cut. Graduation
+is **bundled, not solo-per-feature** — a major turns on *every* overlay
+feature that has cleared its soak, and a major is cut either to graduate an
+important discipline *or* because some other BC factor (a frozen-surface
+change, WD1) already forces one. Majors are therefore **BC-readiness-driven,
+not calendar-driven**; their cadence is whatever the queue of soaked
+disciplines + surface breaks warrants.
+
+This is close to PHPStan's model — PHPStan promotes its entire bleedingEdge
+set to default at each *minor* (`x.y → x.y+1`) — but tied to Rigor's
+**major**, because Rigor classes a newly-required discipline as a breaking
+change (§ Decision 3) and breaking changes are major-only post-1.0.
+
+**Pre-1.0 (the v0.2.0 trial) rehearses this at minor bumps:** a
+bleeding-edge feature may graduate at a `v0.2.x → v0.3.0` step, since the
+0.x line does not yet carry the freeze. The cadence hardens to major-only
+at v1.0.0 — the same trial-then-freeze spine as the rest of the ADR.
+
+**CHANGELOG.** Bleeding-edge changes get their **own dedicated CHANGELOG
+section** (PHPStan keeps `bleedingEdge` separate), so a reader sees the
+opt-in-now / default-next-major set at a glance, keyed on the WD2 feature
+ids. The exact format is deferred — recorded here as the direction, not the
+template.
+
 ## Rejected / deferred alternatives
 
 | Candidate | Status | Reason |
@@ -269,6 +299,7 @@ single-digit components, release-style CHANGELOG at landing) is unchanged.
 | Bleeding-edge as a fourth `severity_profile` value | Rejected (WD2) | Conflates loudness (profile) with discipline-set (bleeding-edge); loses PHPStan parity and the orthogonality that makes both knobs composable. |
 | LTS with long backport windows | Deferred | The two-line (latest + previous-minor) window is the bounded-cost start; a longer LTS is revisited if enterprise demand and maintainer capacity justify it post-1.0. |
 | A single fat `rigor check --strict-everything` enterprise mode | Rejected | The composition of `severity_profile` + `bleeding_edge` + baseline already expresses every enterprise posture; a monolithic mode would duplicate them. |
+| A `rigor upgrade` migration-assist command (detect deprecated config / stale baseline / queued graduations, guide the version step) | Deferred (planned) | Desirable, and the natural home for the upgrade UX; but best designed against a *concrete* first breaking change rather than speculatively. Planned as future work, specced when the first real BC arrives. |
 
 ## Consequences
 

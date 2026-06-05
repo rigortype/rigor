@@ -90,11 +90,13 @@ jobs:
 
   # ── OSS-corpus sweep (reuses oss-sweep.yml) ─────────────────────
   # Advisory: the sweep gate is uncalibrated today (max_diagnostics
-  # 999999), so it passes and uploads results; continue-on-error keeps
-  # it non-blocking once it calibrates, until it is promoted to required.
+  # 999999), so it passes and uploads results. A reusable-workflow caller
+  # job cannot carry `continue-on-error` (GitHub rejects the workflow
+  # file), so "advisory" here means this workflow is simply not a required
+  # check in branch protection — a red sweep is a visible signal, not a
+  # publish blocker. Promote to required once the thresholds calibrate.
   oss-sweep:
     name: OSS corpus sweep (advisory)
-    continue-on-error: true
     uses: ./.github/workflows/oss-sweep.yml
 
   # ── Advisory summary (never fails) ──────────────────────────────

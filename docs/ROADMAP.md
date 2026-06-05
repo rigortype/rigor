@@ -47,13 +47,13 @@ real products.
 
 | Line | Role |
 | --- | --- |
-| `0.1.x` | Preview. v0.1.9 was the originally-designated "last preview cut", but trial work against Mastodon / Redmine / tdiary / GitLab FOSS extended the line through v0.1.17 with substantial false-positive-reduction, onboarding, feature, architecture, and performance cycles. v0.1.12 left Mastodon `app + lib` at 6 unrelated errors; v0.1.13 – v0.1.15 added AI-assisted onboarding + Liskov `def.override-*`; v0.1.16 landed the full plugin interface-segregation + ergonomics suite (ADR-37/38/39/40/43) and the v0.2.0 gate-1 executable evidence; **v0.1.17 completed the internal-structure review + performance tuning (incremental analysis, fast path, allocation cuts) and stood up the release-engineering machinery (ADR-49/50, the `release/x.y.z` gate)**. **The preview line is complete; v0.2.0 is next.** |
+| `0.1.x` | Preview. v0.1.9 was the originally-designated "last preview cut", but trial work against Mastodon / Redmine / tdiary / GitLab FOSS extended the line through v0.1.17 with substantial false-positive-reduction, onboarding, feature, architecture, and performance cycles. v0.1.12 left Mastodon `app + lib` at 6 unrelated errors; v0.1.13 – v0.1.15 added AI-assisted onboarding + Liskov `def.override-*`; v0.1.16 landed the full plugin interface-segregation + ergonomics suite (ADR-37/38/39/40/43) and the v0.2.0 gate-1 executable evidence; **v0.1.17 completed the internal-structure review + performance tuning (incremental analysis, fast path, allocation cuts) and stood up the release-engineering machinery (ADR-49/50, the `release/x.y.z` gate)**. **v0.1.18 (CI-environment support) is the planned next preview cut before the v0.2.0 evaluation release.** |
 | `v0.2.0` | **First evaluation release.** Publicly announced as the first version intended for real-product trial deployment; opens the evaluation period and invites outside feedback. |
 | `0.2.x` | Evaluation line. Not yet a formal version, but the goal is to bring **every planned feature except the Ractor concurrency track** to high completion / production quality. |
 
 ### Where we stand after v0.1.17
 
-The v0.1.9 "last preview cut" intent has been met (SKILL trio, ADR-22 slice 5, empirical-defaults tightening shipped) and the line has been *extended* through eight additional trial-, architecture-, and performance-driven patch cuts (v0.1.10 – v0.1.17). **The preview line is complete; v0.2.0 is next.**
+The v0.1.9 "last preview cut" intent has been met (SKILL trio, ADR-22 slice 5, empirical-defaults tightening shipped) and the line has been *extended* through eight additional trial-, architecture-, and performance-driven patch cuts (v0.1.10 – v0.1.17). **v0.1.18 (CI-environment support) is the planned next preview cut before the v0.2.0 evaluation release.**
 
 - 99.2% Mastodon FP reduction empirically demonstrated; Redmine 51%, GitLab FOSS ~80% on the surveyed scopes; Redmine memory footprint reduced −86% after the v0.1.16 `rigor-activerecord` memoization fix.
 - All three flow-folding G2 follow-ups (`retry`, intervening call, read-before-write nil) are closed (v0.1.12).
@@ -67,6 +67,46 @@ The v0.2.0 gates have been **reduced from three to one**: the SKILL trio (gate 3
 **v0.1.17 shipped** the internal-structure review + performance-tuning cycle (full record in `CHANGELOG.md` § `[0.1.17]`): ADR-44 allocation de-churn (~−42% allocations on Mastodon), ADR-45 the unchanged-project fast path (~42× on an unchanged GitLab run), ADR-46 incremental analysis (`rigor check --incremental`, ~6–9× on unchanged / leaf-edit, CI-gated by `--verify-incremental`), ADR-47 `flow.unreachable-clause`, the `rigor:v1:conforms-to` directive, the `call.self-undefined-method` rule (`:off`), and ADR-48 `Data.define` value folding.
 
 **The road to v0.2.0 is now formalised in [ADR-50](adr/50-release-engineering-and-stability-strategy.md)** (release-engineering + stability strategy, PHPStan-modelled): **v0.2.0 is a release-engineering *trial*** (the machinery + a minor-non-break pledge as rehearsal) and **v1.0.0 the *hard contract freeze*** — resolving the ADR-25/32-vs-37 freeze-timing split in favour of v1.0.0. It fixes the compatibility surface (public face frozen / engine internals free), keeps diagnostic *output* non-contract while gating a *new required discipline* behind a PHPStan-style inspectable bleeding-edge overlay until graduation (default-on at the next major after a ~4-week soak), commits a `make bench-perf` + CI perf gate, and sets the support line (latest + previous minor → PHPStan `1.x`-default-branch post-1.0). **The machinery shipped in v0.1.17** — the `release/x.y.z` branch trigger on `ci.yml` + the advisory `release-gate.yml` (perf bench + gem build + OSS sweep) + `make bench-perf`; **v0.1.17 was the first cut on it** (which caught + fixed a real config-crash bug mid-cut). The remaining v0.2.0 work is **calibrating the gate baselines (`bench/baseline.json`, the OSS-sweep thresholds) + hardening the release gate advisory → required + the ADR-50 staged implementation** (the bleeding-edge overlay + `rigor show-bleedingedge`, the enumerated public-surface doc, the support-line model, a `rigor upgrade` migration command). See § "Performance / scalability — caching + incremental analysis" below and `docs/CURRENT_WORK.md` § "Next-session entry point".
+
+### v0.1.18 — CI-environment support (planned)
+
+A planned preview cut before v0.2.0. One headline goal is **first-class
+support for running Rigor in users' CI environments** — GitHub Actions,
+GitLab CI, and others — building on the distribution / CI channel of
+[ADR-27](adr/27-tool-distribution-model.md). (Distinct from Rigor's *own*
+`ci.yml` / `release-gate.yml`, which test Rigor itself; this goal is about
+users running Rigor in *their* pipelines.)
+
+Concrete surface — scope to settle when the cycle opens:
+
+- **Setup templates (the onboarding half).** Ship the copy-pasteable
+  standalone CI templates [ADR-27 § WD3](adr/27-tool-distribution-model.md)
+  designed but left queued: a `.github/workflows/rigor.yml` (Rigor in its
+  own isolated job — `ruby/setup-ruby` for 4.0 + install + `rigor check`,
+  with the Dependabot-pinning forms ADR-27 spells out), a `.gitlab-ci.yml`
+  equivalent, and a generic recipe for other runners. The published
+  container image (ADR-27, shipped) is the zero-Ruby fallback they
+  reference.
+- **CI-native diagnostic output (the integration half).** Emit the formats
+  CI platforms render inline, so diagnostics surface in the PR / MR rather
+  than only in the job log: GitHub Actions workflow commands
+  (`::error file=…,line=…::`) and / or **SARIF** for code-scanning; a GitLab
+  **Code Quality** JSON report for the MR widget. SARIF is the
+  cross-platform option worth weighing as the primary target. (`rigor check
+  --format json` already gives tools a machine-readable stream; these are
+  the platform-native renderings layered on it.)
+- **CI-friendly primitives already in place** these build on: stable exit
+  codes, `--format json`, the baseline mechanism
+  ([ADR-22](adr/22-baseline-and-project-onboarding.md)) for adopt-and-gate,
+  severity profiles ([ADR-8](adr/8-steep-inspired-improvements.md)), and
+  `--no-cache` for gate determinism.
+
+**Open (decide when the cycle opens):** whether the output-format work is an
+ADR-27 amendment or its own ADR — a new diagnostic-output-format surface is
+a public contract under [ADR-50](adr/50-release-engineering-and-stability-strategy.md)
+WD1, so it wants ADR-level treatment; which formats are v0.1.18 vs deferred;
+and the GitLab Code Quality vs SARIF priority. CI support is *one* v0.1.18
+goal — the standing backlog (§ "Future cycles") may also contribute.
 
 ### v0.2.0 — first evaluation release
 

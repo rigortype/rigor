@@ -4,7 +4,7 @@ A transient bookmark for the next implementer: the immediate next-session entry 
 
 ## Status
 
-**v0.1.17 released (2026-06-06).** The v0.1.x preview line is complete; the focus is now the road to v0.2.0.
+**v0.1.17 released (2026-06-06).** The focus is the road to v0.2.0, with one more themed preview cut planned first — **v0.1.18 (CI-environment support)** (see [`ROADMAP.md`](ROADMAP.md) § "v0.1.18 — CI-environment support").
 
 The v0.1.17 cycle (internal-structure review + performance tuning) shipped: incremental analysis (`rigor check --incremental`, [ADR-46](adr/46-incremental-dependency-graph.md)), the unchanged-project fast path ([ADR-45](adr/45-unchanged-project-fast-path.md)), large allocation reductions ([ADR-44](adr/44-dispatch-allocation-churn.md)), Elixir-v1.20-inspired narrowing (`Array` non-empty + `Hash` key-presence) + `flow.unreachable-clause` ([ADR-47](adr/47-narrowing-driven-clause-reachability.md)), the `rigor:v1:conforms-to` directive, the `call.self-undefined-method` rule (shipped `:off`, [ADR-24](adr/24-self-method-call-resolution.md) slice 4), and `Data.define` value folding ([ADR-48](adr/48-data-struct-value-folding.md)). Full record in `CHANGELOG.md` § `[0.1.17]`; do not re-summarise it here.
 
@@ -24,7 +24,8 @@ The 6 remaining Mastodon errors are unrelated to engine precision: 5 nil-receive
 
 > **The focus is the road to v0.2.0, governed by [ADR-50](adr/50-release-engineering-and-stability-strategy.md).** The machinery shipped in v0.1.17; what remains is **calibrating + hardening it**, the ADR-50 staged implementation, and the standing engine backlog. `make verify` is clean.
 >
-> **(A) Release engineering — operationalise ADR-50 (the headline track):**
+> **(A) Release engineering + CI — operationalise ADR-50, and ship v0.1.18 CI-environment support (the headline tracks):**
+> 0. **v0.1.18 — CI-environment support** (planned themed cut before v0.2.0; full surface in [`ROADMAP.md`](ROADMAP.md) § "v0.1.18 — CI-environment support"): the copy-paste CI setup templates ADR-27 § WD3 left queued (`.github/workflows/rigor.yml` + a `.gitlab-ci.yml` equivalent + a generic recipe) and CI-native diagnostic output (GitHub Actions workflow commands / SARIF / GitLab Code Quality). Output formats are a public-contract surface under ADR-50 WD1 → likely an ADR-27 amendment or a new ADR; decide format priority (SARIF as the cross-platform target) when the cycle opens.
 > 1. **Calibrate the perf gate.** `bench/baseline.json` ships **uncalibrated** (so `make bench-perf` / the release gate pass and emit a suggestion). Commit a CI-measured Linux baseline — from a `release-gate.yml` `bench-baseline-*` artifact, or `make bench-perf` on Linux — as `{ "calibrated": true, "targets": {…} }`, then harden `release-gate.yml` from advisory → required. (ADR-50 WD4/WD6.)
 > 2. **Calibrate the OSS sweep.** `data/oss-sweep/mastodon-thresholds.json` is uncalibrated (`max_diagnostics: 999999`). The `source_inference: false` crash that had kept the weekly sweep red is **fixed (v0.1.17)**, so the sweep now runs — refresh thresholds against the ~6 Mastodon baseline (delete + recalibrate, or commit the workflow artifact).
 > 3. **ADR-50 staged implementation** (each its own slice; ADR-50 stays Proposed → ratified at v1.0.0): the **bleeding-edge overlay** + `rigor show-bleedingedge` diff command + granular `bleeding_edge:` config (WD2); the **enumerated public-surface document** (WD1, drafted at v0.2.0); the **support-line model** (latest + previous minor pre-1.0 → PHPStan `1.x`-default-branch post-1.0, WD5); a **`rigor upgrade`** migration-assist command (WD7, deferred until the first concrete BC gives it a target).

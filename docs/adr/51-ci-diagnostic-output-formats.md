@@ -36,7 +36,7 @@ is the v0.1.18 cycle's headline (ROADMAP § "v0.1.18 — CI-environment
 support"): without a platform-native rendering, Rigor's CI value stops at
 the exit code.
 
-The three formats that cover the field:
+The formats that cover the field:
 
 - **SARIF 2.1.0** — the OASIS interchange standard. GitHub's
   `upload-sarif` ingests it for the PR diff and Security tab; many other
@@ -62,9 +62,9 @@ a CHANGELOG line — the format shapes are something we commit to.
 
 ## Decision
 
-Add the three formats as `--format` values, dispatched from the existing
+Add the formats as `--format` values, dispatched from the existing
 `write_result` case in [`lib/rigor/cli.rb`](../../lib/rigor/cli.rb) (~L864)
-to small per-format renderer classes. The discriminating **criterion** for
+to small per-format renderer classes (`lib/rigor/cli/diagnostic_formats.rb`). The discriminating **criterion** for
 what belongs here: *a format earns a `--format` value when a CI platform
 renders the diagnostic stream inline from it.* That is the boundary — a
 format consumed by a platform's PR/MR surface is in scope; a format that is
@@ -81,7 +81,7 @@ a project that never sets `--format` sees no change.
 
 ## Working decisions
 
-### WD1 — Five formats; SARIF is the anchor, the rest are reach
+### WD1 — Six formats; SARIF is the anchor, the rest are reach
 
 The format set is chosen by the criterion above plus *reach per unit cost*:
 
@@ -115,10 +115,14 @@ The format set is chosen by the criterion above plus *reach per unit cost*:
   reach reviewdog's whole reporter matrix without writing reviewdog's
   native `rdjson` — which would only add code-suggestion payloads Rigor
   does not produce.
+- **`teamcity`** (TeamCity inspection service messages) is the other
+  stdout-native format, added so TeamCity is a genuine first-class platform
+  for CI auto-detection (WD7) rather than a hollow tier — it is auto-emitted
+  under a detected TeamCity build just as `github` is under GitHub Actions.
 
 Comparator: PHPStan ships `github` / `gitlab` / `checkstyle` / `junit` /
-`teamcity` and **no SARIF**; Rigor leads with SARIF (PHPStan's gap) and
-adds the same broad-reach pair, leaving `teamcity` demand-gated.
+`teamcity` and **no SARIF**; Rigor leads with SARIF (PHPStan's gap) and adds
+the same broad-reach set (`checkstyle` / `junit` / `teamcity`).
 
 ### WD2 — Severity + identifier mapping (the contract table)
 

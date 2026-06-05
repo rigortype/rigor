@@ -68,78 +68,67 @@ The v0.2.0 gates have been **reduced from three to one**: the SKILL trio (gate 3
 
 **The road to v0.2.0 is now formalised in [ADR-50](adr/50-release-engineering-and-stability-strategy.md)** (release-engineering + stability strategy, PHPStan-modelled): **v0.2.0 is a release-engineering *trial*** (the machinery + a minor-non-break pledge as rehearsal) and **v1.0.0 the *hard contract freeze*** — resolving the ADR-25/32-vs-37 freeze-timing split in favour of v1.0.0. It fixes the compatibility surface (public face frozen / engine internals free), keeps diagnostic *output* non-contract while gating a *new required discipline* behind a PHPStan-style inspectable bleeding-edge overlay until graduation (default-on at the next major after a ~4-week soak), commits a `make bench-perf` + CI perf gate, and sets the support line (latest + previous minor → PHPStan `1.x`-default-branch post-1.0). **The machinery shipped in v0.1.17** — the `release/x.y.z` branch trigger on `ci.yml` + the advisory `release-gate.yml` (perf bench + gem build + OSS sweep) + `make bench-perf`; **v0.1.17 was the first cut on it** (which caught + fixed a real config-crash bug mid-cut). The remaining v0.2.0 work is **calibrating the gate baselines (`bench/baseline.json`, the OSS-sweep thresholds) + hardening the release gate advisory → required + the ADR-50 staged implementation** (the bleeding-edge overlay + `rigor show-bleedingedge`, the enumerated public-surface doc, the support-line model, a `rigor upgrade` migration command). See § "Performance / scalability — caching + incremental analysis" below and `docs/CURRENT_WORK.md` § "Next-session entry point".
 
-### v0.1.18 — CI-environment support (planned)
+### v0.1.18 — CI-environment support (largely landed; cut pending)
 
-A planned preview cut before v0.2.0. One headline goal is **first-class
-support for running Rigor in users' CI environments** — GitHub Actions,
-GitLab CI, and others — building on the distribution / CI channel of
+The next preview cut before v0.2.0. Headline goal: **first-class support
+for running Rigor in users' CI environments** — GitHub Actions, GitLab CI,
+and others — building on the distribution / CI channel of
 [ADR-27](adr/27-tool-distribution-model.md). (Distinct from Rigor's *own*
-`ci.yml` / `release-gate.yml`, which test Rigor itself; this goal is about
-users running Rigor in *their* pipelines.)
+`ci.yml` / `release-gate.yml`, which test Rigor itself; this is about users
+running Rigor in *their* pipelines.) The bulk of the cycle has **landed**;
+what remains is the release cut itself plus demand-gated follow-ups.
 
-**Landed (the CI diagnostic-output + templates + skill half — [ADR-51](adr/51-ci-diagnostic-output-formats.md)):**
-the integration half shipped. `rigor check --format` gained six CI-native
-renderings of the diagnostic stream — `sarif` (SARIF 2.1.0, the
-cross-platform anchor), `github` (GitHub Actions workflow commands → inline
-PR annotations), `gitlab` (GitLab Code Quality → the MR widget), `checkstyle`
-(Checkstyle XML → reviewdog `-f=checkstyle` posts to *any* reviewdog reporter
-+ Jenkins), `junit` (JUnit XML → test-report CIs), and `teamcity` (TeamCity
-inspection messages) — each a pure presentation layer over the `--format
-json` fields (`lib/rigor/cli/diagnostic_formats.rb`). On top, **runtime CI
-auto-detection** (`lib/rigor/cli/ci_detector.rb`, PHPStan-modelled) makes the
-default `text` output emit the native form automatically: first-class CIs
-(GitHub Actions → `github`, TeamCity → `teamcity`) augment the log with
-annotations, GitLab + second-class CIs (CircleCI/Jenkins/…) get a one-line
-reviewdog/format hint; opt-out `--no-ci-detect` / `RIGOR_CI_DETECT=0`. The
-copy-paste CI setup templates
-ADR-27 § WD3 left queued shipped under `docs/manual/ci-templates/`
-(SARIF + annotations + reviewdog `.github/workflows/rigor.yml`, `.gitlab-ci.yml`,
-generic recipe), plus the bundled `rigor-ci-setup` skill (`rigor skill`),
-documented in `docs/manual/11-ci.md`. The open scoping decisions were
-resolved: a **new ADR** (ADR-51, not an ADR-27 amendment), **all five formats**
-(SARIF the recommended default; `checkstyle` + `junit` added for reviewdog /
-Jenkins / test-report reach — the comparator is PHPStan, which ships
-github/gitlab/checkstyle/junit/teamcity but no SARIF). Demand-gated
-follow-ups recorded in ADR-51: `--output FILE`, reviewdog native `rdjson`,
-TeamCity, richer SARIF rule metadata.
+**Landed — [ADR-51](adr/51-ci-diagnostic-output-formats.md) (the core of the cycle):**
 
-Concrete surface — original scope (the onboarding half below is partly
-absorbed; remaining items stand):
+- **Six `rigor check --format` CI-native renderings** of the diagnostic
+  stream (`lib/rigor/cli/diagnostic_formats.rb`), each a pure presentation
+  layer over the `--format json` fields — no new analysis: `sarif` (SARIF
+  2.1.0, the cross-platform anchor + reviewdog `-f=sarif`), `github` (GitHub
+  Actions workflow commands → inline PR annotations), `gitlab` (Code Quality
+  → the MR widget), `checkstyle` (→ reviewdog `-f=checkstyle` → *any*
+  reviewdog reporter + Jenkins), `junit` (test-report CIs), `teamcity`
+  (TeamCity inspections). WD2 fixes the per-format severity/identifier
+  contract table.
+- **Runtime CI auto-detection** (WD7, `lib/rigor/cli/ci_detector.rb`,
+  PHPStan `CiDetectedErrorFormatter`-modelled): on the default `text` output,
+  a detected **first-class** CI auto-emits its native form (GitHub Actions →
+  `github`, TeamCity → `teamcity`, on top of the human log); GitLab hints
+  `--format gitlab`; **second-class** CIs (CircleCI/Jenkins/Travis/Azure/
+  Bitbucket/Buildkite/Drone/…) hint the reviewdog / `junit` path. Augments
+  text only (explicit `--format` untouched), opt-out `--no-ci-detect` /
+  `RIGOR_CI_DETECT=0`.
+- **The onboarding half** ([ADR-27 § WD3](adr/27-tool-distribution-model.md)'s
+  queued templates): copy-paste CI setup templates under
+  `docs/manual/ci-templates/` (SARIF / annotations / reviewdog
+  `.github/workflows/rigor.yml`, `.gitlab-ci.yml`, generic recipe), the
+  bundled **`rigor-ci-setup`** skill (`rigor skill` — Phase 0 platform
+  detection + per-platform reviewdog reporter routing), and the rewritten CI
+  manual chapter `docs/manual/11-ci.md`.
 
-- **Setup templates (the onboarding half).** Ship the copy-pasteable
-  standalone CI templates [ADR-27 § WD3](adr/27-tool-distribution-model.md)
-  designed but left queued: a `.github/workflows/rigor.yml` (Rigor in its
-  own isolated job — `ruby/setup-ruby` for 4.0 + install + `rigor check`,
-  with the Dependabot-pinning forms ADR-27 spells out), a `.gitlab-ci.yml`
-  equivalent, and a generic recipe for other runners. The published
-  container image (ADR-27, shipped) is the zero-Ruby fallback they
-  reference.
-- **CI-native diagnostic output (the integration half).** Emit the formats
-  CI platforms render inline, so diagnostics surface in the PR / MR rather
-  than only in the job log: GitHub Actions workflow commands
-  (`::error file=…,line=…::`) and / or **SARIF** for code-scanning; a GitLab
-  **Code Quality** JSON report for the MR widget. SARIF is the
-  cross-platform option worth weighing as the primary target. (`rigor check
-  --format json` already gives tools a machine-readable stream; these are
-  the platform-native renderings layered on it.)
-- **CI-friendly primitives already in place** these build on: stable exit
-  codes, `--format json`, the baseline mechanism
-  ([ADR-22](adr/22-baseline-and-project-onboarding.md)) for adopt-and-gate,
-  severity profiles ([ADR-8](adr/8-steep-inspired-improvements.md)), and
-  `--no-cache` for gate determinism.
+**Scoping decisions resolved this cycle:** a **new ADR** (ADR-51, not an
+ADR-27 amendment — distribution vs output are distinct public-contract
+surfaces under [ADR-50](adr/50-release-engineering-and-stability-strategy.md)
+WD1); **all six formats** shipped (SARIF the cross-platform anchor;
+`checkstyle`/`junit`/`teamcity` for reviewdog / Jenkins / test-report reach —
+comparator PHPStan ships github/gitlab/checkstyle/junit/teamcity but **no
+SARIF**); the **GitHub default surface is `github` annotations, not SARIF**
+(SARIF upload needs code scanning = GitHub Advanced Security on private
+repos); **first-class (native, PHPStan-supported) vs second-class (reviewdog)**
+is the runtime split (WD7). Built on the CI-friendly primitives already in
+place: stable exit codes, `--format json`, the baseline mechanism
+([ADR-22](adr/22-baseline-and-project-onboarding.md)), severity profiles
+([ADR-8](adr/8-steep-inspired-improvements.md)), `--no-cache`.
 
-**Resolved (v0.1.18 cycle):** the output-format work got its own ADR
-([ADR-51](adr/51-ci-diagnostic-output-formats.md), not an ADR-27 amendment —
-distribution vs output are distinct public-contract surfaces under
-[ADR-50](adr/50-release-engineering-and-stability-strategy.md) WD1); all
-three formats shipped together with SARIF as the recommended cross-platform
-default (it satisfies the inline-rendering criterion for more than one
-platform; the other two are each their platform's zero-friction path, so
-none is redundant). **Still open / standing backlog:** the GitHub Actions
-`setup-ruby` prebuilt-4.0 timing caveat ADR-27 § WD3 flags; the `--output
-FILE` ergonomic + JUnit XML if demand surfaces (ADR-51 carry-over). CI
-support is *one* v0.1.18 goal — the standing backlog (§ "Future cycles")
-may also contribute.
+**Remaining for the cut:**
+
+- **The release cut itself** — version bump + CHANGELOG finalise via the
+  `rigor-release-prep` skill (gated on user authorisation). The `[Unreleased]`
+  CHANGELOG entries are written release-style already.
+- **Demand-gated follow-ups** (recorded in ADR-51, none gating the cut):
+  `--output FILE`, reviewdog native `rdjson`, richer SARIF rule metadata.
+- **The ADR-27 § WD3 `setup-ruby` prebuilt-Ruby-4.0 timing caveat** to verify
+  for the templates. CI support is *one* v0.1.18 goal — the standing backlog
+  (§ "Future cycles") may also contribute before the cut.
 
 ### v0.2.0 — first evaluation release
 

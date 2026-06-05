@@ -77,7 +77,7 @@ module Rigor
         return new([]) if data.nil?
         raise ArgumentError, "dependencies: must be a Hash, got #{data.inspect}" unless data.is_a?(Hash)
 
-        raw_entries = Array(data["source_inference"]).map { |raw| coerce_entry(raw) }
+        raw_entries = coerce_source_inference(data["source_inference"])
         entries, warnings = dedupe_entries(raw_entries)
         budget = coerce_budget_per_gem(data.fetch("budget_per_gem", DEFAULT_BUDGET_PER_GEM))
         strategy = coerce_budget_overrun_strategy(
@@ -157,6 +157,23 @@ module Rigor
         end
 
         private
+
+        # `source_inference:` is a list of per-gem entries, or `false` /
+        # omitted to disable it (the default). Guard the Ruby
+        # `Array(false) == [false]` quirk that would otherwise feed `false`
+        # straight into coerce_entry and crash the whole run on a perfectly
+        # reasonable "off" config (`dependencies: { source_inference: false }`).
+        def coerce_source_inference(value)
+          return [] if value.nil? || value == false
+
+          unless value.is_a?(Array)
+            raise ArgumentError,
+                  "dependencies.source_inference: must be a list of entries " \
+                  "(or false / omitted to disable), got #{value.inspect}"
+          end
+
+          value.map { |raw| coerce_entry(raw) }
+        end
 
         def coerce_entry(raw)
           unless raw.is_a?(Hash)
